@@ -21,8 +21,8 @@ export function rootCompletionRefusal({ questions, blockers, requests, incomingR
   // `workers` still lists each worker.
   const fit = (full: string, general: string) => full.length <= WAIT_MESSAGE_MAX ? full : general;
   if (questions.length) {
-    return { code: 'worker_questions', message: fit(`Your workers asked questions you have not answered. Answer each (${questions.map(q => `\`message reply ${q.workerId} '<answer>' --id <new-UUID> --request-id ${q.messageId}\``).join(', ')}), then call cezar_done again.`,
-      `Your workers asked ${questions.length} questions you have not answered; \`workers\` lists the workers and \`message inbox\` shows each question. Answer each (\`message reply <worker-id> '<answer>' --id <new-UUID> --request-id <question-id>\`), then call cezar_done again.`),
+    return { code: 'worker_questions', message: fit(`Your workers asked questions you have not answered. Answer each (${questions.map(q => `\`cez message reply ${q.workerId} '<answer>' --id <new-UUID> --request-id ${q.messageId}\``).join(', ')}), then call cezar_done again.`,
+      `Your workers asked ${questions.length} questions you have not answered; \`workers\` lists the workers and \`cez message inbox\` shows each question. Answer each (\`cez message reply <worker-id> '<answer>' --id <new-UUID> --request-id <question-id>\`), then call cezar_done again.`),
     workers: questions.map(q => ({ worker_id: q.workerId, reason: 'question' })), liveWorkerIds: [] };
   }
   const live = blockers.filter(b => b.reason === 'outstanding').map(b => b.workerId);

@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import { basename, join, resolve } from 'node:path';
 import { afterEach, test } from 'node:test';
 import { parsePid, readPid, requirePid, writePidSource } from '../../src/pid-file.testkit.ts';
+import { readTestEnvDescriptor, readTestEnvInputs, testEnvInputsMismatch } from '../../../../.ai/scripts/test-env-inputs.mjs';
 
 // The scripts under test are the REPO's, not this package's: `.ai/` is agent-pipeline tooling
 // that spans every workspace, so it stays at the root.
@@ -49,6 +50,17 @@ function fixtureGit(root: string, ...args: string[]): void {
   assert.doesNotMatch(result.stderr, /\b(?:maintenance run|gc) --auto\b/);
 }
 
+/** The release the fixture's agent-browser reports, and the one its inputs pin. */
+const FIXTURE_BROWSER = '9.9.9';
+
+/** The fixture's tracked inputs: the repo's own file with the given settings changed. */
+function writeInputs(root: string, change: { agentBrowserVersion?: string; serverEnv?: string[] }): void {
+  const inputs = JSON.parse(readFileSync(join(repoRoot, '.ai/scripts/test-env.inputs.json'), 'utf8'));
+  if (change.agentBrowserVersion) inputs.browser.agentBrowserVersion = change.agentBrowserVersion;
+  if (change.serverEnv) inputs.server.env = change.serverEnv;
+  writeFileSync(join(root, '.ai/scripts/test-env.inputs.json'), JSON.stringify(inputs, null, 2) + '\n');
+}
+
 function makeFixture(withSetsid: boolean): { root: string; path: string } {
   const root = mkdtempSync(join(tmpdir(), 'cez-test-env-launcher-'));
   fixtures.push(root);
@@ -59,6 +71,8 @@ function makeFixture(withSetsid: boolean): { root: string; path: string } {
   copyFileSync(join(repoRoot, '.ai/scripts/test-env-down.sh'), join(root, '.ai/scripts/test-env-down.sh'));
   copyFileSync(join(repoRoot, '.ai/scripts/e2e.sh'), join(root, '.ai/scripts/e2e.sh'));
   copyFileSync(join(repoRoot, '.ai/scripts/test-env-lease.mjs'), join(root, '.ai/scripts/test-env-lease.mjs'));
+  copyFileSync(join(repoRoot, '.ai/scripts/test-env-inputs.mjs'), join(root, '.ai/scripts/test-env-inputs.mjs'));
+  writeInputs(root, { agentBrowserVersion: FIXTURE_BROWSER });
   // The lease imports the process-group helper from source; the marker makes it an ES module.
   mkdirSync(join(root, 'packages/cezar/src'), { recursive: true });
   copyFileSync(join(repoRoot, 'packages/cezar/src/detached-process.ts'), join(root, 'packages/cezar/src/detached-process.ts'));
@@ -158,7 +172,7 @@ while [ "$#" -gt 0 ]; do
     --args|--namespace|--session) shift 2 ;;
     --json|--offline|--quick) shift ;;
     doctor) printf '{"success":true,"checks":[{"id":"chrome.installed","status":"pass"}]}\\n'; exit 0 ;;
-    --version) printf 'test-browser 1\\n'; exit 0 ;;
+    --version) printf 'agent-browser ${FIXTURE_BROWSER}\\n'; exit 0 ;;
     open) printf '{"success":true,"data":{}}\\n'; exit 0 ;;
     close) printf '{"success":true,"data":{}}\\n'; exit 0 ;;
     *) shift ;;
@@ -381,8 +395,11 @@ function descriptor(root: string): {
   servedRoot: string;
   app: { pid: number; startCommand: string };
   startedAt: string;
+  inputs: { file: string; sha256: string };
   browser: {
     installed: boolean;
+    command: string;
+    version: string;
     notes: string;
     launchArgs?: string[];
     runtimeEnv?: Record<string, string>;
@@ -394,8 +411,11 @@ function descriptor(root: string): {
     servedRoot: string;
     app: { pid: number; startCommand: string };
     startedAt: string;
+    inputs: { file: string; sha256: string };
     browser: {
       installed: boolean;
+      command: string;
+      version: string;
       notes: string;
       launchArgs?: string[];
       runtimeEnv?: Record<string, string>;
@@ -516,6 +536,151 @@ test('ambient CEZ_* never reaches the shared server; --server-env does and keys 
     assert.equal(refused.status, 2, bad.join(' '));
     assert.match(refused.stderr, /invalid --server-env/);
   }
+  spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 20_000 });
+});
+
+// hearsay-tools/cezarion#1977: Squeal ignores the descriptor for browser specs (`runtimeFiles`), so a
+// boot or a stop may change only runtime state there. The settings that change a result are the
+// tracked inputs file: the env records its digest, and a changed input never reuses the old env.
+test('a restart keeps the inputs digest; a changed input refuses reuse and boots from it', () => {
+  const fixture = makeFixture(false);
+  const env = { ...fixtureEnv, PATH: fixture.path, E2E_PREBUILT_ASSETS: '1' };
+  prebuildE2e(fixture, env);
+  const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
+  const down = () => spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 20_000 });
+  const boot = () => {
+    const result = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
+    assert.equal(result.status, 0, result.stderr);
+    launchedPids.add(descriptor(fixture.root).app.pid);
+    return result;
+  };
+  const inputsFile = join(fixture.root, '.ai/scripts/test-env.inputs.json');
+  const committed = readFileSync(inputsFile, 'utf8');
+
+  boot();
+  const first = descriptor(fixture.root);
+  assert.deepEqual(first.inputs, { file: '.ai/scripts/test-env.inputs.json', sha256: readTestEnvInputs(fixture.root).sha256 });
+  assert.equal((readTestEnvDescriptor(fixture.root) as { baseUrl: string }).baseUrl, first.baseUrl);
+
+  // An explicit stop and a cold boot change the runtime state, never the inputs or their digest.
+  assert.equal(down().status, 0);
+  assert.equal(testEnvInputsMismatch(fixture.root, descriptor(fixture.root)), undefined);
+  boot();
+  const second = descriptor(fixture.root);
+  assert.notEqual(second.app.pid, first.app.pid);
+  assert.deepEqual(second.inputs, first.inputs);
+  assert.equal(readFileSync(inputsFile, 'utf8'), committed);
+
+  // A changed input: the seam refuses the running env, and the next bootstrap replaces it.
+  writeInputs(fixture.root, { serverEnv: ['CEZ_FOLLOWUPS=1'] });
+  assert.throws(() => readTestEnvDescriptor(fixture.root), /booted from other settings than \.ai\/scripts\/test-env\.inputs\.json/);
+  const changed = boot();
+  assert.match(changed.stdout, /TEST_ENV_REUSED=0/);
+  assert.match(changed.stderr, /not reusing: the env was booted from other settings/);
+  assert.deepEqual(readFileSync(join(fixture.root, '.ai/app-cez-env'), 'utf8').split('\n').filter((line) => !line.startsWith('CEZ_HOME=')),
+    ['CEZ_DRY_RUN=1', 'CEZ_FOLLOWUPS=1']);
+  assert.equal(JSON.parse(readFileSync(join(fixture.root, '.ai/qa/test-env.json'), 'utf8')).environment.serverEnv, 'CEZ_FOLLOWUPS=1');
+  assert.equal(testEnvInputsMismatch(fixture.root, descriptor(fixture.root)), undefined);
+  // The default is given as --server-env is, so a flag cannot set the same name to another value.
+  const twice = spawnSync('/bin/sh', [up, '--server-env=CEZ_FOLLOWUPS=0'], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(twice.status, 2);
+  assert.match(twice.stderr, /CEZ_FOLLOWUPS is given twice/);
+  down();
+});
+
+test('a malformed inputs file is refused before anything boots', () => {
+  const fixture = makeFixture(false);
+  const env = { ...fixtureEnv, PATH: fixture.path, E2E_PREBUILT_ASSETS: '1' };
+  writeInputs(fixture.root, { serverEnv: ['CEZ_DRY_RUN=0'] });
+  const result = spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-up.sh')], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /test-env\.inputs\.json: server\.env: "CEZ_DRY_RUN=0"/);
+  assert.equal(existsSync(join(fixture.root, '.ai/app-argv')), false);
+});
+
+/** Replaces the fixture's curl: a GitHub download writes a fake agent-browser reporting `reports`
+ *  and logs its URL; every other call (the health probes) goes to the real curl. */
+function fakeDownloads(root: string, reports: string): () => string[] {
+  const browser = readFileSync(join(root, 'bin/agent-browser'), 'utf8').replace(`agent-browser ${FIXTURE_BROWSER}`, `agent-browser ${reports}`);
+  writeFileSync(join(root, 'bin/curl.download'), browser);
+  const real = commandPath('curl');
+  rmSync(join(root, 'bin/curl'));
+  writeFileSync(join(root, 'bin/curl'), `#!/bin/sh
+for arg do url=$arg; done
+case "$url" in
+  https://github.com/*)
+    printf '%s\\n' "$url" >> "$0.urls"
+    out=; prev=
+    for arg do [ "$prev" != -o ] || out=$arg; prev=$arg; done
+    cat "$0.download" > "$out"
+    exit 0 ;;
+esac
+exec ${real} "$@"
+`, { mode: 0o755 });
+  return () => readFileSync(join(root, 'bin/curl.urls'), 'utf8').trim().split('\n');
+}
+
+test('only the pinned agent-browser release runs the specs', () => {
+  const pinned = '9.9.8';
+  const fixture = makeFixture(false);
+  const cache = join(fixture.root, 'cache');
+  const env = { ...fixtureEnv, PATH: fixture.path, E2E_PREBUILT_ASSETS: '1', XDG_CACHE_HOME: cache };
+  prebuildE2e(fixture, env);
+  writeInputs(fixture.root, { agentBrowserVersion: pinned });
+  const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
+  const boot = () => {
+    const result = spawnSync('/bin/sh', [up, '--force'], { encoding: 'utf8', env, timeout: 20_000 });
+    assert.equal(result.status, 0, result.stderr);
+    launchedPids.add(descriptor(fixture.root).app.pid);
+    return result;
+  };
+
+  // agent-browser on PATH is another release: the pinned one is downloaded into its own cache.
+  const urls = fakeDownloads(fixture.root, pinned);
+  const pinnedBoot = boot();
+  assert.match(pinnedBoot.stderr, new RegExp(`agent-browser on PATH is ${FIXTURE_BROWSER.replaceAll('.', '\\.')}, not the pinned 9\\.9\\.8`));
+  assert.match(urls()[0]!, /^https:\/\/github\.com\/vercel-labs\/agent-browser\/releases\/download\/v9\.9\.8\/agent-browser-/);
+  const first = descriptor(fixture.root);
+  assert.equal(first.browser.installed, true, first.browser.notes);
+  assert.ok(first.browser.command.startsWith(join(cache, 'agent-tools/agent-browser/9.9.8/')), first.browser.command);
+  assert.match(first.browser.version, /9\.9\.8/);
+
+  // A release that reports another version never runs the specs: the env records why.
+  rmSync(cache, { recursive: true, force: true });
+  fakeDownloads(fixture.root, '9.9.7');
+  boot();
+  const wrong = descriptor(fixture.root);
+  assert.equal(wrong.browser.installed, false);
+  assert.match(wrong.browser.notes, /is 9\.9\.7, not the pinned 9\.9\.8 \(\.ai\/scripts\/test-env\.inputs\.json\)/);
+  spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 20_000 });
+});
+
+test('a healthy env whose agent-browser is no longer the pinned release is not reused', () => {
+  const fixture = makeFixture(false);
+  const cache = join(fixture.root, 'cache');
+  const env = { ...fixtureEnv, PATH: fixture.path, E2E_PREBUILT_ASSETS: '1', XDG_CACHE_HOME: cache };
+  prebuildE2e(fixture, env);
+  const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
+  const boot = () => {
+    const result = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
+    assert.equal(result.status, 0, result.stderr);
+    launchedPids.add(descriptor(fixture.root).app.pid);
+    return result;
+  };
+  boot();
+  const onPath = join(fixture.root, 'bin/agent-browser');
+  assert.equal(descriptor(fixture.root).browser.command, onPath);
+  assert.match(boot().stdout, /TEST_ENV_REUSED=1/);
+
+  // The executable the env recorded is replaced by another release while the server stays healthy.
+  fakeDownloads(fixture.root, FIXTURE_BROWSER);
+  writeFileSync(onPath, readFileSync(onPath, 'utf8').replace(`agent-browser ${FIXTURE_BROWSER}`, 'agent-browser 9.9.7'));
+  const replaced = boot();
+  assert.match(replaced.stdout, /TEST_ENV_REUSED=0/);
+  assert.match(replaced.stderr, new RegExp(`not reusing: agent-browser at ${onPath} is 9\\.9\\.7, not the pinned 9\\.9\\.9`));
+  const rebooted = descriptor(fixture.root);
+  assert.equal(rebooted.browser.installed, true, rebooted.browser.notes);
+  assert.ok(rebooted.browser.command.startsWith(join(cache, 'agent-tools/agent-browser/9.9.9/')), rebooted.browser.command);
   spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 20_000 });
 });
 
@@ -860,7 +1025,7 @@ while [ "$#" -gt 0 ]; do
       printf '{"success":false,"checks":[{"id":"chrome.installed","status":"pass"},{"id":"launch.launch","status":"fail","message":"No usable sandbox"}]}\\n'
       exit 1
       ;;
-    --version) printf 'test-browser 1\\n'; exit 0 ;;
+    --version) printf 'agent-browser ${FIXTURE_BROWSER}\\n'; exit 0 ;;
     open) printf '{"success":true,"data":{}}\\n'; exit 0 ;;
     close) printf '{"success":true,"data":{}}\\n'; exit 0 ;;
     *) shift ;;
@@ -913,7 +1078,7 @@ while [ "$#" -gt 0 ]; do
       printf '{"success":false,"checks":[{"id":"chrome.installed","status":"pass"},{"id":"launch.launch","status":"fail","message":"Socket path too long"}]}\\n'
       exit 1
       ;;
-    --version) printf 'test-browser 1\\n'; exit 0 ;;
+    --version) printf 'agent-browser ${FIXTURE_BROWSER}\\n'; exit 0 ;;
     open)
       printf '{"success":false,"error":"Socket path too long"}\\n'
       exit 1
@@ -1026,6 +1191,8 @@ test('an idle server with no lease holder exits and its descriptor reads stopped
   // A later teardown must never signal the freed pid.
   assert.equal(stopped.app.pid, undefined);
   assert.match(watchLog(root), new RegExp(`stopping cezar pid ${pid}: idle`));
+  // Runtime state only (hearsay-tools/cezarion#1977): the settings it was booted from are unchanged.
+  assert.equal(testEnvInputsMismatch(root, stopped), undefined);
 });
 
 test('a live lease keeps the server; a SIGKILLed holder no longer does', async () => {

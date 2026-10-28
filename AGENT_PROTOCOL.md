@@ -157,7 +157,7 @@ real exit (or a failed spawn). After exit, inherited stdout gets a bounded
 250ms drain; remaining pipe handles are closed. Neither a timeout nor sending
 a signal can fabricate an exit or free a still-live session's capacity.
 
-`cez task send` is human input. When `CEZ_TASK_ID` is nonempty, it exits 64 before contacting the cockpit, including with `--resume` or `--notify`. Agent-to-task messaging is not available yet; `CEZ_DELEGATION=1` and the `cez message` family are the planned path.
+`cez task send` is human input. When `CEZ_TASK_ID` is nonempty, it exits 64 before contacting the cockpit, including with `--resume` or `--notify`. Use `cez message progress <task-id> '<text>' --id <message-UUID> (needs CEZ_DELEGATION=1)` for agent-to-task messaging.
 
 **Non-human input (owned workers, 2026-09-06; immediate delivery, hearsay-tools/cezarion#505).** `sendAgentMessage`
 must never resolve a native question or a portable marker ask. False means the caller
@@ -249,6 +249,19 @@ While that exact opening answer is executing, it does not block registering a
 worker or request wait. A newer question still does. Wait refusals explain the
 condition and remedy; registration releases capacity only when the turn ends.
 
+Task messages use `cez message request`, `progress`, `follow-up`, `reply`, `conversation`,
+`inbox`, `cancel-request`, `wait --request`, and `cancel-wait` over the private delegation
+routes (hearsay-tools/cezarion#1991). The verb selects the kind; no `--kind` flag is needed.
+`conversation <task-id> --before <cursor>` reads older history. `tasks [--all] [--offset <n>]`
+lists same-project peer root tasks, excluding the caller and workers, with shared attention
+and `accepts` fields, at most 32 per page. Archived peers need `--all`. Workers cannot discover
+peers. `accepts: false` names why only the human can continue that peer.
+
+Worker control stays under `cez worker`. `resume <worker-id> '<instruction>' --id <UUID>`
+resumes a settled owned worker with a request. Removed worker message verbs, including
+`wait --request`, exit 64 and name the message command. `cez message request --resume`
+exits 64 and points to worker resume. There are no compatibility aliases.
+
 Parent/worker conversations use the same `sendAgentInput` seam in both directions.
 The root's durable conversation ledger is authoritative; `conversation-message`
 `{message, delivery, deliveredAt?}` and `request-outcome` `{outcome}` events are replayable projections in
@@ -339,14 +352,14 @@ Continue remains available. No schema migration or new stored field is needed.
 Messages are bounded to 100,000 characters, 32 undelivered inputs per recipient,
 1,024 messages per family, and 32 pending obligations. Requests and waits expire
 in 600 seconds by default (1–1,800 seconds accepted). Requests sent with
-`--resume` accept `--timeout-seconds 1–86400` (24 hours maximum); their default
+`cez worker resume` accepts `--timeout-seconds 1–86400` (24 hours maximum); their default
 remains 600 seconds. Set the request bound explicitly for a long review round:
 a worker wait has its own deadline and does not extend the request. Several waits can be open at once (workers, CI, timers); a message wakes the run and closes none.
 Ordinary sends to review/terminal recipients return `not-delivered` with an
 actionable `message.instruction`; `continuation-required` means no input was
 queued. The CLI exits 1 for these receipts. An active owning parent can explicitly
-send a new request or progress instruction with `resume: true` (`worker send
---resume`). A settled done/review/failed worker is continued through the existing
+send a new request with `cez worker resume <worker-id> '<instruction>' --id <UUID>`
+(the send route carries `resume: true`). A settled done/review/failed worker is continued through the existing
 capacity scheduler with its accepted identity and a new execution revision.
 Acceptance atomically records the ledger, input and continuation checkpoint.
 Exact retries return the existing receipt without another continuation; retrying

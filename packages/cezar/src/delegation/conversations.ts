@@ -148,7 +148,7 @@ export function notDeliveredInstruction(pair: { relationship: 'family' | 'peer';
   }
   if (pair.relationship === 'peer') return `Not delivered: task is ${recipient.stopping ? 'stopping' : finishing(recipient) ? 'finishing' : recipient.status}. Only its human can continue it.`;
   return sender.id === root.id
-    ? `Not delivered: worker is ${recipient.status}. To resume it with a new instruction, run worker send ${recipient.id} "<instruction>" --kind request --resume --id <new-message-UUID>; use a new message ID. Retrying this rejected ID will not deliver it.`
+    ? `Not delivered: worker is ${recipient.status}. To resume it with a new instruction, run worker resume ${recipient.id} "<instruction>" --id <new-message-UUID>; use a new message ID. Retrying this rejected ID will not deliver it.`
     : `Not delivered: parent is ${recipient.status}. A worker cannot resume its parent; the parent must be continued by its owner.`;
 }
 

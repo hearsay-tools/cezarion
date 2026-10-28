@@ -66,6 +66,8 @@
       "package.json",
       "pnpm-workspace.yaml",
       ".ai/scripts/test-env-up.sh",
+      ".ai/scripts/test-env.inputs.json",
+      ".ai/scripts/test-env-inputs.mjs",
       ".ai/scripts/build-e2e.sh",
       ".ai/scripts/e2e-served-repo.mjs",
       ".ai/scripts/e2e-lanes.mjs",
@@ -191,6 +193,13 @@
       "name": "root:test:unit",
       "argv": ["--import", "./scripts/test-git-env.mjs"],
       "include": [".github/scripts/*.test.cjs", "scripts/*.test.mjs", ".ai/skills/*/scripts/*.test.mjs"]
+    }
+  ],
+  "runtimeFiles": [
+    {
+      "project": "e2e",
+      "tests": ["packages/web/e2e/*.e2e.ts"],
+      "paths": [".ai/qa/test-env.json"]
     }
   ],
   "slow": {
