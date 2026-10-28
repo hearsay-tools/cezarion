@@ -1,70 +1,19 @@
 import type { ScheduleTaskAnswer, ScheduleTaskRequest, ScheduledTasksAnswer, ScheduledTasksRequest } from '@open-mercato/cezar-contract/scheduled-tasks';
-import type { HumanWaitEntry } from '@open-mercato/cezar-contract/waits';
-import type { AgentSession, ContentBlock, RunnerId, ToolGrant } from '../../core/agent-runner.ts';
-import type { AskMarkerParseResult, AskRequest } from '../../core/ask.ts';
+import type { ContentBlock, RunnerId, ToolGrant } from '../../core/agent-runner.ts';
 import type { CiToolSession } from '../../ci-wait/controller.ts';
 import type { loadConfig } from '../../config.ts';
 import type { WorkerAccountBinding } from '../../delegation/execution-identity.ts';
 import type { DelegationSession } from '../../delegation/provision.ts';
 import type { RunRecord } from '../../runs/store.ts';
-import type { UiEventSink } from '../../runs/ui-event-sink.ts';
 import type { ActiveRun } from '../active-run.ts';
-import type { CompletionRefusal } from '../completion-policy.ts';
 import type { PastedContent, PersistedAttachment } from '../pasted-content.ts';
-import type { TurnEndDecision, TurnEndOutcome } from '../turn-end.ts';
 import type { WorkflowDef, WorkflowStepDef } from '../types.ts';
 
 export type { FileBlock, PastedContent, PersistedAttachment } from '../pasted-content.ts';
 
 export type TurnTail = 'none' | 'visible' | 'silent';
 
-/** What a turn's active `CEZ:ASK` declaration resolves to: the card to raise, and
- * the notes to persist alongside it. */
-export type AskTurnOutcome = {
-  ask: AskRequest | null;
-  /** Emitted in order by the caller, which owns how a note is persisted. */
-  notes: Array<{ message: string; tone?: 'danger' }>;
-};
-
-/** A turn's markers, as `classifyTurnEnd` reads them: each channel's ask line, and its done and
- *  monitoring lines. */
-export type TurnMarkers = { v1Ask: AskMarkerParseResult; v2Ask: AskMarkerParseResult; doneLine: boolean; monitoringLine: boolean };
-
-/** How a turn end reads its turn (`classifyTurnEnd`). */
-export type TurnEndRead = AskTurnOutcome & { done: boolean; monitoring: boolean; humanGate: boolean; waitCard: boolean };
-
 export type DelegationExecutionSettings = { cwd: string; runner: RunnerId; model?: string | undefined; modelIdentity?: string | undefined; effort?: string | undefined; agentProfile: string; accountBinding?: WorkerAccountBinding | undefined; systemPrompt?: string | undefined; allowedTools?: string[] | undefined; bashAllowlist?: string[] | undefined };
-
-/** What a turn end said, as the entry that settles it reads it (hearsay-tools/cezarion#1525). The
- *  turn end reads it from the turn; a later entry from what `parkAfterAck` kept (`boundaryTurn`). */
-export type SettledTurn = {
-  stepId: string | undefined;
-  monitoring: boolean;
-  humanGate: boolean;
-  /** This turn's ask, which the turn end surfaces as a card; a later entry has none. */
-  ask: AskRequest | null;
-  /** The ask line's autonomous nudge went instead of the question. */
-  askNudged: boolean;
-  humanWait?: HumanWaitEntry | undefined;
-  sink?: UiEventSink;
-  done: boolean;
-  doneRequest?: ActiveRun['doneRequested'];
-  /** The turn answered the no-wait nudge. The completion cause's flag is `completionNudgeAnswered`. */
-  nudgedLastTurn: boolean;
-  scheduleWakeup?: number | null | undefined;
-};
-
-/** What `carryOutTurnEnd` hands the method for a decision kind. `session` is the session as the
- *  decision found it. */
-export type TurnEndCarry = {
-  runId: string; state: ActiveRun; session: AgentSession | undefined; stepId: string | undefined;
-  refused: CompletionRefusal | undefined; noteRefusal: () => void;
-  /** The refusal settles this turn end, so Cezar's own human waits are already withdrawn. */
-  settlesRefusal: boolean;
-};
-
-/** One method per decision kind of `decideTurnEnd` (`RunManager.turnEndCarriers`). */
-export type TurnEndCarriers = { [K in TurnEndDecision['kind']]: (carry: TurnEndCarry, decision: Extract<TurnEndDecision, { kind: K }>) => TurnEndOutcome };
 
 export interface StartRunInput {
   task: string;
@@ -121,13 +70,6 @@ export interface PendingContinuation {
   /** When this continuation joined the line (epoch ms). A queued continuation is a wake of a run
    *  already in progress, so it goes ahead of unstarted runs, oldest first (`nextLineEntry`). */
   lineJoinedAt: number;
-}
-
-/** What re-reading a message's persisted attachments yields: viewable blocks for the images, and
- *  a path for every attachment including the files that have no block. */
-export interface PersistedAttachments {
-  blocks: ContentBlock[];
-  attachments: PersistedAttachment[];
 }
 
 /** What `execute` writes to its run's event stream. */
@@ -259,6 +201,3 @@ export type AutomationToolService = {
   scheduleTask(request: ScheduleTaskRequest): Promise<ScheduleTaskAnswer>;
   scheduledTasks(request: ScheduledTasksRequest): Promise<ScheduledTasksAnswer>;
 };
-
-/** Only the synchronous delivery of a human answer uses the budget its reset replaced. */
-export type HumanAnswerBudget = { spent: number };

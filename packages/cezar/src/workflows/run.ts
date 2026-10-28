@@ -1,20 +1,16 @@
 import type {
-  TurnTail, AskTurnOutcome, TurnMarkers, TurnEndRead, DelegationExecutionSettings,
-  SettledTurn, TurnEndCarry, TurnEndCarriers, StartRunInput, PendingContinuation,
-  PersistedAttachments, ExecutionEmit, Execution, ExecutionLaunch, StepLoop,
-  SessionTurn, LaunchDelegation, LaunchCiTools, LaunchOpening, StepProfile,
-  StepModel, StepSessionLaunch, WorkerDelegationRecord, ContinuationOpening, OpeningAnswer,
-  ContinuationSettings, ContinuationSkills, ContinuationSessionLaunch, ContinuationClose, WorkerTerminationBlocker,
-  AutomationToolService, HumanAnswerBudget,
+  TurnTail, DelegationExecutionSettings, StartRunInput, PendingContinuation, ExecutionEmit,
+  Execution, ExecutionLaunch, StepLoop, SessionTurn, LaunchDelegation,
+  LaunchCiTools, LaunchOpening, StepProfile, StepModel, StepSessionLaunch,
+  WorkerDelegationRecord, ContinuationOpening, OpeningAnswer, ContinuationSettings, ContinuationSkills,
+  ContinuationSessionLaunch, ContinuationClose, WorkerTerminationBlocker, AutomationToolService,
 } from './run/types.ts';
 export type {
-  TurnTail, AskTurnOutcome, TurnMarkers, TurnEndRead, DelegationExecutionSettings,
-  SettledTurn, TurnEndCarry, TurnEndCarriers, StartRunInput, PendingContinuation,
-  PersistedAttachments, ExecutionEmit, Execution, ExecutionLaunch, StepLoop,
-  SessionTurn, LaunchDelegation, LaunchCiTools, LaunchOpening, StepProfile,
-  StepModel, StepSessionLaunch, WorkerDelegationRecord, ContinuationOpening, OpeningAnswer,
-  ContinuationSettings, ContinuationSkills, ContinuationSessionLaunch, ContinuationClose, WorkerTerminationBlocker,
-  AutomationToolService, HumanAnswerBudget,
+  TurnTail, DelegationExecutionSettings, StartRunInput, PendingContinuation, ExecutionEmit,
+  Execution, ExecutionLaunch, StepLoop, SessionTurn, LaunchDelegation,
+  LaunchCiTools, LaunchOpening, StepProfile, StepModel, StepSessionLaunch,
+  WorkerDelegationRecord, ContinuationOpening, OpeningAnswer, ContinuationSettings, ContinuationSkills,
+  ContinuationSessionLaunch, ContinuationClose, WorkerTerminationBlocker, AutomationToolService,
 } from './run/types.ts';
 import { openCompletionRequests, recordRequestRefusal, repairFailedRootFinish, rootCompletionRefusal, sentRequestInstructions, settledRootFinishPatch, type CompletionRefusal } from './completion-policy.ts';
 import * as continuation from './continuation-admission.ts';
@@ -343,6 +339,13 @@ function askMarkerRecovery(result: AskMarkerParseResult): string | undefined {
     ? 'structured question recovered from an unbalanced CEZ:ASK payload — check the options, and how many you may pick, match what was asked'
     : undefined;
 }
+/** What a turn's active `CEZ:ASK` declaration resolves to: the card to raise, and
+ * the notes to persist alongside it. */
+type AskTurnOutcome = {
+  ask: AskRequest | null;
+  /** Emitted in order by the caller, which owns how a note is persisted. */
+  notes: Array<{ message: string; tone?: 'danger' }>;
+};
 /** Resolve the ask marker for one finished turn. Both turn-end handlers
  * (`runAgentStep` and `runContinuation`) route through this single function:
  * they are hand-duplicated, and `AGENTS.md` warns that a lifecycle change
@@ -382,6 +385,11 @@ function orderedTurnText(v1: string, v2: string): string | undefined {
   if (contains(v1, v2)) return v1;
   return undefined;
 }
+/** A turn's markers, as `classifyTurnEnd` reads them: each channel's ask line, and its done and
+ *  monitoring lines. */
+type TurnMarkers = { v1Ask: AskMarkerParseResult; v2Ask: AskMarkerParseResult; doneLine: boolean; monitoringLine: boolean };
+/** How a turn end reads its turn (`classifyTurnEnd`). */
+type TurnEndRead = AskTurnOutcome & { done: boolean; monitoring: boolean; humanGate: boolean; waitCard: boolean };
 /** Read the turn's markers once from the channel that holds the whole turn, or from each channel
  *  when neither holds the other (`orderedTurnText`). A done line counts only when no channel
  *  carries an ask line. */
@@ -480,6 +488,34 @@ const REPOSITORY_ROOT_LOCK_DISABLED_NOTE =
   'repository-root lock disabled by CEZ_DISABLE_REPO_LOCK=1 (shared checkout is unsafe)';
 
 
+/** What a turn end said, as the entry that settles it reads it (hearsay-tools/cezarion#1525). The
+ *  turn end reads it from the turn; a later entry from what `parkAfterAck` kept (`boundaryTurn`). */
+type SettledTurn = {
+  stepId: string | undefined;
+  monitoring: boolean;
+  humanGate: boolean;
+  /** This turn's ask, which the turn end surfaces as a card; a later entry has none. */
+  ask: AskRequest | null;
+  /** The ask line's autonomous nudge went instead of the question. */
+  askNudged: boolean;
+  humanWait?: HumanWaitEntry | undefined;
+  sink?: UiEventSink;
+  done: boolean;
+  doneRequest?: ActiveRun['doneRequested'];
+  /** The turn answered the no-wait nudge. The completion cause's flag is `completionNudgeAnswered`. */
+  nudgedLastTurn: boolean;
+  scheduleWakeup?: number | null | undefined;
+};
+/** What `carryOutTurnEnd` hands the method for a decision kind. `session` is the session as the
+ *  decision found it. */
+type TurnEndCarry = {
+  runId: string; state: ActiveRun; session: AgentSession | undefined; stepId: string | undefined;
+  refused: CompletionRefusal | undefined; noteRefusal: () => void;
+  /** The refusal settles this turn end, so Cezar's own human waits are already withdrawn. */
+  settlesRefusal: boolean;
+};
+/** One method per decision kind of `decideTurnEnd` (`RunManager.turnEndCarriers`). */
+type TurnEndCarriers = { [K in TurnEndDecision['kind']]: (carry: TurnEndCarry, decision: Extract<TurnEndDecision, { kind: K }>) => TurnEndOutcome };
 
 /** #505: a real steer is read at the harness's next model step; a quiet boundary this long
  * with input still unread means the harness will not read it without help. */
@@ -638,6 +674,12 @@ function withResumeContext(prompt: string, message: RunRecord['continuationMessa
 }
 
 
+/** What re-reading a message's persisted attachments yields: viewable blocks for the images, and
+ *  a path for every attachment including the files that have no block. */
+interface PersistedAttachments {
+  blocks: ContentBlock[];
+  attachments: PersistedAttachment[];
+}
 
 
 /** Only an original workflow that has never executed may return to its queue. */
@@ -658,6 +700,8 @@ function familyOf(run: RunRecord): string {
 }
 
 
+/** Only the synchronous delivery of a human answer uses the budget its reset replaced. */
+type HumanAnswerBudget = { spent: number };
 /**
  * The mini workflow engine: executes a `WorkflowDef` against a repo, one step
  * at a time, persisting every event to the RunStore (which the SSE endpoints
