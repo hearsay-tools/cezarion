@@ -1,23 +1,34 @@
 import { afterEach, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({ calls: 0, failAt: 0, completed: false, legacyFail: false, legacyHeld: false, single: false, released: false, scanCost: 0,
-  unstable: false, failAfterConfirm: false, verifyFailure: false, pending: false, published: [] as unknown[] }));
+  unstable: false, failAfterConfirm: false, verifyFailure: false, pending: false, published: [] as unknown[],
+  exitMode: '' as string, signalled: false, changedDuringExit: false }));
 vi.mock('node:fs', () => ({
   readdirSync: (path: string) => path === '/proc' ? (state.completed ? [] : state.single ? ['101'] : ['101', '102']) : path === `/proc/${process.pid}/task` ? [String(process.pid)]
     : path.endsWith('/task') ? [path.split('/')[2]] : [],
   opendirSync: (path: string) => {
+    if (state.signalled && state.exitMode && path === '/proc/101/fd') throw Object.assign(new Error('denied'), { code: 'EACCES' });
     const names = path === '/proc' ? (state.completed ? [] : state.single ? ['101'] : ['101', '102']) : path === `/proc/${process.pid}/task` ? [String(process.pid)] : [path.split('/')[2]];
     let index = 0;
     return { readSync: () => index < names.length ? { name: names[index++] } : null, closeSync: () => {} };
   },
-  readlinkSync: () => '/unrelated', lstatSync: () => ({}), readFileSync: () => 'invalid',
+  readlinkSync: (path: string) => {
+    if (state.signalled && state.exitMode && path === '/proc/101/cwd') throw Object.assign(new Error('denied'), { code: 'EACCES' });
+    return '/unrelated';
+  }, lstatSync: () => { if (state.completed) throw Object.assign(new Error('gone'), { code: 'ENOENT' }); return {}; },
+  readFileSync: () => '101 (task) Z 0',
 }));
-vi.mock('../detached-process.ts', () => ({ linuxBootId: () => 'boot', parseProcStat: () => undefined, exitedStat: () => false,
-  processStartToken: (pid: number) => state.completed ? undefined : 'boot:' + pid }));
+vi.mock('../detached-process.ts', () => ({ linuxBootId: () => 'boot', parseProcStat: () => state.exitMode === 'invalid' ? undefined : {},
+  exitedStat: () => {
+    if (state.signalled && state.exitMode === 'changed') state.changedDuringExit = true;
+    return state.signalled && (state.exitMode === 'zombie' || state.exitMode === 'changed');
+  },
+  processStartToken: (pid: number) => state.completed || (state.signalled && state.exitMode === 'missing') ? undefined
+    : state.changedDuringExit || (state.signalled && state.exitMode === 'new') ? 'boot:other' : 'boot:' + pid }));
 vi.mock('./mount-boundary.ts', () => ({ canonicalResourceRoot: (path: string) => path }));
 vi.mock('./linux-mapped-holders.ts', () => ({ mappedHolder: (_pid: number, _roots: string[], budget?: { spend(n: number): void }) => {
   if (state.legacyFail) budget?.spend(200_001);
-  return state.legacyHeld ? 'held' : 'clear';
+  return state.signalled && state.exitMode ? 'unreadable' : state.legacyHeld ? 'held' : 'clear';
 } }));
 vi.mock('./linux-alias-scan.ts', async () => {
   const { AliasBudgetExceeded } = await import('./linux-alias-model.ts');
@@ -88,6 +99,18 @@ import { AliasWorkBudget } from './linux-alias-model.ts';
 import { AliasMappingScope } from './linux-alias-scope.ts';
 
 afterEach(() => vi.restoreAllMocks());
+
+it.each(['zombie', 'live', 'invalid', 'changed', 'missing', 'new'])('fences scoped unreadable evidence after signal: %s', async mode => {
+  state.calls = 0; state.failAt = 0; state.completed = false; state.legacyFail = false; state.single = true; state.released = false;
+  state.exitMode = mode; state.signalled = false; state.changedDuringExit = false;
+  const kill = vi.spyOn(process, 'kill').mockImplementation(() => { state.signalled = true; state.released = true; return true; });
+  try {
+    const result = reapDestroyHolders(['/owned'], () => {}, 3000, { resourceId: 'test', read: () => undefined, write: () => {} });
+    if (mode === 'zombie' || mode === 'new') await expect(result).resolves.toBeUndefined();
+    else await expect(result).rejects.toThrow('Cannot read evidence');
+    expect(kill).toHaveBeenCalledTimes(1);
+  } finally { state.exitMode = ''; state.signalled = false; state.changedDuringExit = false; state.released = false; }
+});
 
 it('refuses deletion when a reopened pending marker has no visible candidate', async () => {
   state.calls = 0; state.failAt = 0; state.completed = false; state.legacyFail = false;

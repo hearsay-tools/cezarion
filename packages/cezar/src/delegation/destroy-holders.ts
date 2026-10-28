@@ -54,9 +54,15 @@ function scanAndRetain(pid: number, token: string | undefined, aliases: AliasCon
 function checkScopedHolders(scoped: Map<number, string>, live: { pid: number; token: string }[], roots: string[], budget?: AliasWorkBudget): void {
   for (const [pid, token] of scoped) {
     if (live.some(holder => holder.pid === pid)) continue;
-    if (processStartToken(pid) !== token) { scoped.delete(pid); continue; }
+    const current = processStartToken(pid);
+    if (current && current !== token) { scoped.delete(pid); continue; }
+    if (!current) {
+      if (processAbsent(pid) && !processStartToken(pid)) { scoped.delete(pid); continue; }
+      throw new Error(`Cannot read evidence for destroy holder ${pid}`);
+    }
     const mapped = mappedHolder(pid, roots, budget);
     if (mapped === 'unreadable' || unreadableHolderEvidence(pid, budget)) {
+      if (verifiedExitedIncarnation(pid, token)) { scoped.delete(pid); continue; }
       throw new Error(`Cannot read evidence for destroy holder ${pid}`);
     }
     scoped.delete(pid);
@@ -98,10 +104,13 @@ function unreadableHolderEvidence(pid: number, budget?: AliasWorkBudget): boolea
 }
 
 /** A vanished mapping belongs to an exited process; denied evidence must retain it. */
-function readableMapping(pid: number, roots: readonly string[], budget?: AliasWorkBudget): boolean {
+function readableMapping(pid: number, token: string, roots: readonly string[], budget?: AliasWorkBudget): boolean {
   if (process.platform !== 'linux') return true;
   const mapped = mappedHolder(pid, roots, budget);
-  if (mapped === 'unreadable') throw new Error(`Cannot read evidence for destroy holder ${pid}`);
+  if (mapped === 'unreadable') {
+    if (verifiedExitedIncarnation(pid, token)) return false;
+    throw new Error(`Cannot read evidence for destroy holder ${pid}`);
+  }
   return mapped !== 'gone';
 }
 
@@ -196,6 +205,16 @@ function processGone(pid: number): boolean {
   } catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT'; }
 }
 
+function processAbsent(pid: number): boolean {
+  try { lstatSync(`/proc/${pid}`); return false; }
+  catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT'; }
+}
+
+/** A missing referent is not exit proof; fence the independent stat observation. */
+function verifiedExitedIncarnation(pid: number, token: string): boolean {
+  return processStartToken(pid) === token && processGone(pid) && processStartToken(pid) === token;
+}
+
 function findHolders(roots: readonly string[], preselected?: readonly number[], budget?: AliasWorkBudget): { pid: number; token: string }[] {
   if (process.platform === 'darwin') return findDarwinHolders(roots).flatMap(pid => {
     const token = processStartToken(pid);
@@ -244,7 +263,7 @@ async function signalHolder(pid: number, initialToken: string, roots: readonly s
   await assertCurrent();
   const token = processStartToken(pid);
   if (token && token !== initialToken) return;
-  if (token && !readableMapping(pid, roots, aliases?.attempt.budget)) return;
+  if (token && !readableMapping(pid, token, roots, aliases?.attempt.budget)) return;
   // A process can exit between the scan and this read. Only a holder that
   // still has scoped evidence needs a readable incarnation before signalling.
   if (!token) {
