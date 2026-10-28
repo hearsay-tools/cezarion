@@ -282,6 +282,20 @@ describe('TaskPreviewLayout', () => {
       expect(pane()?.hidden).toBe(false)
     })
 
+    it('a chooser opened while the worktree is gone forgets the old server once the worktree is back', async () => {
+      state.runs.r1 = { id: 'r1', worktreePath: undefined, previewServers: [server] }
+      rememberPreview('r1', { open: true, target: { port: 5173 } }, 1)
+      const first = renderAt('/tasks/r1')
+      fireEvent.click(screen.getByRole('button', { name: 'toggle' }))
+      await screen.findByRole('button', { name: 'pane' })
+      first.unmount()
+      state.runs.r1 = { id: 'r1', worktreePath: '/w', previewServers: [server] }
+      state.requests = []
+      renderAt('/tasks/r1')
+      await screen.findByRole('button', { name: 'pane' })
+      expect(state.requests.at(-1)).toEqual({ restored: true })
+    })
+
     it('does not bring the pane back on a task whose worktree is gone, and keeps what was saved', () => {
       state.runs.r1 = { id: 'r1', worktreePath: undefined, previewServers: [server] }
       rememberPreview('r1', { open: true, target: { port: 5173 } }, 1)

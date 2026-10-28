@@ -28,26 +28,29 @@ export function TaskPreviewLayout() {
   // One pane per task: another task starts from its own saved pane (hearsay-tools/cezarion#2077),
   // else closed. Only the pane state resets, so moving between tasks never remounts the tab (the
   // run header keeps its per-run state across it).
-  const pane = usePreviewPaneState(id)
+  const removed = run.data ? worktreeRemoved(run.data) : false
+  const pane = usePreviewPaneState(id, removed)
   if (!enabled) return <Outlet />
   return (
-    <PreviewProvider id={id} run={run.data} pane={pane}>
+    <PreviewProvider id={id} run={run.data} pane={pane} removed={removed}>
       <Outlet />
     </PreviewProvider>
   )
 }
 
 /** Only with the feature on does the task view read its events for the agent's page. */
-function PreviewProvider({ id, run, pane, children }: { id: string | undefined; run: ApiRun | undefined; pane: PreviewPaneState; children: ReactNode }) {
-  const removed = run ? worktreeRemoved(run) : false
+function PreviewProvider({ id, run, pane, removed, children }: {
+  id: string | undefined
+  run: ApiRun | undefined
+  pane: PreviewPaneState
+  removed: boolean
+  children: ReactNode
+}) {
   const agentLive = useAgentPageLive(id)
-  // A saved pane does not come back on a task whose worktree is gone; the saved state stays, for a
-  // Continue that restores the worktree. The toggle still opens the pane on purpose.
-  const shown = useMemo(() => (removed && pane.request?.restored ? { ...pane, open: false } : pane), [pane, removed])
-  const value = useMemo(() => ({ ...shown, worktreeRemoved: removed, agentLive }), [shown, removed, agentLive])
+  const value = useMemo(() => ({ ...pane, worktreeRemoved: removed, agentLive }), [pane, removed, agentLive])
   return (
     <PreviewPaneContext.Provider value={value}>
-      <PreviewSplit run={run} state={shown}>
+      <PreviewSplit run={run} state={pane}>
         {children}
       </PreviewSplit>
     </PreviewPaneContext.Provider>

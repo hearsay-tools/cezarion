@@ -165,10 +165,10 @@ function restore(scope: string | undefined): PaneSnapshot {
 
 /**
  * The task view's pane state. The pane (a separate component) reads and drives it. A new `scope`
- * (another task) starts from that task's saved pane, else closed. Only this state resets: the
+ * (another task) starts from that task's saved pane, else closed; `worktreeGone` keeps it closed. Only this state resets: the
  * task's tabs stay mounted. Each owner action saves the task's pane as it is now.
  */
-export function usePreviewPaneState(scope?: string): PreviewPaneState {
+export function usePreviewPaneState(scope?: string, worktreeGone = false): PreviewPaneState {
   const [initial] = useState(() => restore(scope))
   const [open, setOpen] = useState(initial.open)
   const [live, setLive] = useState(false)
@@ -188,6 +188,15 @@ export function usePreviewPaneState(scope?: string): PreviewPaneState {
     setSession(next.session)
     setRequest(next.request)
     setPercentState(next.percent)
+  }
+  // A saved pane does not come back on a task whose worktree is gone (the run can load after the
+  // first render). It closes here, not only on screen, so the toggle then opens from closed; the
+  // saved state stays, for a Continue that restores the worktree.
+  if (worktreeGone && open && request?.restored) {
+    setOpen(false)
+    setTargetState(undefined)
+    setRequest(undefined)
+    setSession(false)
   }
   const save = useCallback(
     (change: Parameters<typeof rememberPreview>[1]) => {
