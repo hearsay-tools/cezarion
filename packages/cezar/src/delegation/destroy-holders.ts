@@ -23,6 +23,26 @@ export interface DestroyAliasRetention {
 type AliasContext = { attempt: AliasScanAttempt; scope: AliasMappingScope;
   publish: (entries: ReturnType<AliasMappingScope['snapshot']>) => void };
 
+function aliasContext(roots: string[], retention: DestroyAliasRetention | undefined, budget: AliasWorkBudget | undefined): AliasContext | undefined {
+  if (!retention || !budget) return undefined;
+  const attempt = prepareAliasScan(roots, budget);
+  const adapter = aliasRetentionAdapter(retention.read(), retention.resourceId, linuxBootId(), attempt,
+    value => retention.write(value), () => verifyAliasScan(attempt));
+  return { attempt, ...adapter };
+}
+
+function checkScopedHolders(scoped: Map<number, string>, live: { pid: number; token: string }[], roots: string[], budget?: AliasWorkBudget): void {
+  for (const [pid, token] of scoped) {
+    if (live.some(holder => holder.pid === pid)) continue;
+    if (processStartToken(pid) !== token) { scoped.delete(pid); continue; }
+    const mapped = mappedHolder(pid, roots, budget);
+    if (mapped === 'unreadable' || unreadableHolderEvidence(pid, budget)) {
+      throw new Error(`Cannot read evidence for destroy holder ${pid}`);
+    }
+    scoped.delete(pid);
+  }
+}
+
 /** Destroy-only evidence. Admission and retention keep their existing liveness policy. */
 function holds(pid: number, paths: readonly string[], budget?: AliasWorkBudget): boolean {
   if (process.platform === 'darwin') return findDarwinHolders(paths, pid).includes(pid);
@@ -73,15 +93,8 @@ export async function reapDestroyHolders(paths: readonly string[], assertCurrent
   const budget = process.platform === 'linux' && retention ? new AliasWorkBudget() : undefined;
   for (;;) {
     await assertCurrent();
-    let aliases: AliasContext | undefined;
-    let candidates: number[] | undefined;
-    if (process.platform === 'linux' && retention) {
-      const attempt = prepareAliasScan(roots, budget!);
-      const adapter = aliasRetentionAdapter(retention.read(), retention.resourceId, linuxBootId(), attempt,
-        value => retention.write(value), () => verifyAliasScan(attempt));
-      aliases = { attempt, ...adapter };
-      candidates = linuxCandidates(budget);
-    }
+    const aliases = aliasContext(roots, retention, budget);
+    const candidates = aliases ? linuxCandidates(budget) : undefined;
     const live = findHolders(roots, candidates, aliases?.attempt.budget);
     if (aliases && candidates) {
       const { attempt, scope, publish } = aliases;
@@ -89,15 +102,7 @@ export async function reapDestroyHolders(paths: readonly string[], assertCurrent
         (pid, token) => scanAliases(pid, token, attempt), processGone, assertCurrent, () => verifyAliasScan(attempt), publish);
       for (const holder of found) if (!live.some(existing => existing.pid === holder.pid)) live.push(holder);
     }
-    if (process.platform === 'linux') for (const [pid, token] of scoped) {
-      if (live.some(holder => holder.pid === pid)) continue;
-      if (processStartToken(pid) !== token) { scoped.delete(pid); continue; }
-      const mapped = mappedHolder(pid, roots, aliases?.attempt.budget);
-      if (mapped === 'unreadable' || unreadableHolderEvidence(pid, aliases?.attempt.budget)) {
-        throw new Error(`Cannot read evidence for destroy holder ${pid}`);
-      }
-      scoped.delete(pid);
-    }
+    if (process.platform === 'linux') checkScopedHolders(scoped, live, roots, budget);
     if (!live.length) return;
     for (const { pid, token } of live) {
       scoped.set(pid, token);
@@ -218,17 +223,21 @@ async function signalHolder(pid: number, initialToken: string, roots: readonly s
   const previous = sent.get(pid);
   const signal = previous?.token === token && Date.now() - previous.at >= 500 ? 'SIGKILL' : previous?.token === token ? undefined : 'SIGTERM';
   if (!signal || processStartToken(pid) !== token) return;
-  let held = holds(pid, roots, aliases?.attempt.budget);
-  if (aliases) {
-    await assertCurrent(); verifyAliasScan(aliases.attempt);
-    // Legacy path text is not enough to signal through an alias: always
-    // authenticate target identity after the final asynchronous authorization.
-    const evidence = scanAliases(pid, token, aliases.attempt);
-    held = assessAliasEvidence(pid, token, evidence, aliases.scope, aliases.attempt.budget, aliases.publish);
-    verifyAliasScan(aliases.attempt);
-  }
+  if (aliases) await assertCurrent();
+  const held = checkedSignalEvidence(pid, token, roots, aliases);
   if (!held || processStartToken(pid) !== token) return;
   try { process.kill(pid, signal); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw new Error(`Cannot stop destroy holder ${pid}: ${String(error)}`); }
   sent.set(pid, { token, at: previous?.token === token ? previous.at : Date.now() });
+}
+
+function checkedSignalEvidence(pid: number, token: string, roots: readonly string[], aliases?: AliasContext): boolean {
+  const held = holds(pid, roots, aliases?.attempt.budget);
+  if (!aliases) return held;
+  verifyAliasScan(aliases.attempt);
+  // Legacy path text is not enough to signal through an alias.
+  const evidence = scanAliases(pid, token, aliases.attempt);
+  const verified = assessAliasEvidence(pid, token, evidence, aliases.scope, aliases.attempt.budget, aliases.publish);
+  verifyAliasScan(aliases.attempt);
+  return verified;
 }

@@ -1,35 +1,17 @@
-import { closeSync, constants, lstatSync, openSync, readSync, readlinkSync, statSync } from 'node:fs';
+import { closeSync, constants, lstatSync, openSync, readlinkSync, statSync } from 'node:fs';
 import { AliasBudgetExceeded, AliasWorkBudget, locateOwnedRoot, mappedAliasCandidates, parseAliasMounts, type MappedAliasCandidate, type OwnedMountRoot } from './linux-alias-model.ts';
 import { linuxDeviceNumber, pinnedAliasIdentity } from './linux-alias-identity.ts';
 import { linkAliasCandidates, readAliasLinks, type ObservedLink } from './linux-alias-links.ts';
 import { processStartToken } from '../detached-process.ts';
-
-const LIMIT = 4 * 1024 * 1024;
+import { readProcEvidence } from './linux-proc-evidence.ts';
 
 /** The owning side changed, so no candidate in the attempt can be trusted. */
 export class AliasScanChanged extends Error {}
 
 function readBounded(path: string, budget: AliasWorkBudget): string {
-  const fd = openSync(path, 'r');
-  try {
-    const chunks: Buffer[] = [];
-    let total = 0;
-    for (;;) {
-      const chunk = Buffer.allocUnsafe(Math.min(65536, LIMIT + 1 - total));
-      const length = readSync(fd, chunk, 0, chunk.length, null);
-      if (!length) break;
-      total += length;
-      budget.spend(Math.ceil(length / 256));
-      if (total > LIMIT) throw new Error('proc evidence exceeds bounds');
-      chunks.push(chunk.subarray(0, length));
-    }
-    const bytes = Buffer.concat(chunks);
-    const decoded = bytes.toString('utf8');
-    if (decoded.includes('\ufffd')) throw new Error('proc evidence is not valid UTF-8');
-    return decoded;
-  } finally {
-    closeSync(fd);
-  }
+  const decoded = readProcEvidence(path, budget).toString('utf8');
+  if (decoded.includes('\ufffd')) throw new Error('proc evidence is not valid UTF-8');
+  return decoded;
 }
 
 function rootIdentity(path: string): string {

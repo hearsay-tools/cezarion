@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """CI-only lifecycle checks for the same namespace probe supervisor."""
 import json
+import errno
 import os
 import pathlib
+import runpy
 import select
 import selectors
 import shutil
@@ -11,6 +13,7 @@ import stat
 import subprocess
 import sys
 import time
+from unittest.mock import patch
 
 PROBE = pathlib.Path(__file__).with_name('linux-mount-alias-probe.py')
 GATES = ('wrapper-before-exec-unshare', 'init-before-mount', 'fork-child-before-chroot')
@@ -25,6 +28,17 @@ def alive(pidfd):
     if any(mask & (select.POLLNVAL | select.POLLERR) or not mask & select.POLLIN for _, mask in events):
         raise RuntimeError('owned pidfd is invalid')
     return not events
+
+
+def remove_after_teardown(fixture, identity, handles, deadline):
+    while waiting := [handle for handle in handles if alive(handle)]:
+        if time.monotonic() >= deadline: raise TimeoutError('owned process teardown not verified')
+        select.select(waiting, [], [], min(0.1, deadline - time.monotonic()))
+    info = os.lstat(fixture)
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o777 != 0o700
+            or identity != (info.st_dev, info.st_ino)):
+        raise RuntimeError('fixture identity or permissions changed')
+    shutil.rmtree(fixture)
 
 
 def run_case(target, signum, action='signal'):
@@ -104,19 +118,12 @@ def run_case(target, signum, action='signal'):
         else:
             signal.pidfd_send_signal(controller, signum)
         proc.wait(timeout=max(0.1, deadline - time.monotonic()))
-        while waiting := [handle for handle in handles if alive(handle)]:
-            if time.monotonic() >= deadline: raise TimeoutError('owned process teardown not verified')
-            select.select(waiting, [], [], min(0.1, deadline - time.monotonic()))
         if action == 'after-release':
             # A descendant can be created after release and before controller
             # death. Its PID was not gated and pinned, so teardown is unknown.
             print(json.dumps({'gate': target, 'action': action, 'result': 'unverified-retained'}), flush=True)
             return
-        info = os.lstat(fixture)
-        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o777 != 0o700
-                or fixture_identity != (info.st_dev, info.st_ino)):
-            raise RuntimeError('fixture identity or permissions changed')
-        shutil.rmtree(fixture)
+        remove_after_teardown(fixture, fixture_identity, handles, deadline)
         fixture = None
         cleaned = True
         print(json.dumps({'gate': target, 'action': action, 'signal': signal.Signals(signum).name,
@@ -143,12 +150,55 @@ def run_case(target, signum, action='signal'):
 
 def main():
     if os.geteuid() != 0: raise RuntimeError('private lifecycle CI fixture requires root')
+    failed_teardown_case()
+    credential_guard_cases()
     invalid_gate_cases()
     for gate in GATES:
         for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGKILL):
             run_case(gate, signum)
         run_case(gate, signal.SIGKILL, 'eof')
         run_case(gate, signal.SIGKILL, 'after-release')
+
+
+def failed_teardown_case():
+    # Pure injected failure: no process, filesystem or signal is involved.
+    global alive
+    previous_alive, previous_remove = alive, shutil.rmtree
+    removed = []
+    try:
+        shutil.rmtree = lambda path: removed.append(path)
+        def invalid(_handle):
+            raise RuntimeError('invalid handle')
+        for check, error in ((lambda _handle: True, TimeoutError), (invalid, RuntimeError)):
+            alive = check
+            try:
+                remove_after_teardown('/not-opened', (1, 2), [123], time.monotonic() - 1)
+            except error:
+                pass
+            else:
+                raise RuntimeError('failed teardown was accepted')
+            if removed: raise RuntimeError('fixture removed after failed teardown')
+        print(json.dumps({'teardown': 'live-or-invalid-handle', 'result': 'retained'}), flush=True)
+    finally:
+        alive, shutil.rmtree = previous_alive, previous_remove
+
+
+def credential_guard_cases():
+    # Inject executable metadata; no process or filesystem is touched.
+    guard = runpy.run_path(str(PROBE), run_name='cez_credential_guard')['credential_safe_executable']
+    absent = OSError()
+    absent.errno = errno.ENODATA
+    with patch('shutil.which', return_value='/fixture/tool'), patch('os.path.realpath', side_effect=lambda value: value):
+        with patch('os.stat', return_value=type('Info', (), {'st_mode': 0o755})()), patch('os.getxattr', side_effect=absent):
+            if guard('tool') != '/fixture/tool': raise RuntimeError('ordinary executable refused')
+        for mode in (0o4755, 0o755):
+            with patch('os.stat', return_value=type('Info', (), {'st_mode': mode})()), patch('os.getxattr', return_value=b'cap'):
+                try:
+                    guard('tool')
+                except RuntimeError:
+                    continue
+                raise RuntimeError('credential-changing executable accepted')
+    print(json.dumps({'executable': 'credential-change', 'result': 'refused'}), flush=True)
 
 
 def invalid_gate_cases():

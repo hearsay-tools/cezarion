@@ -1,6 +1,7 @@
-import { closeSync, openSync, readFileSync, readSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { sep } from 'node:path';
 import { AliasWorkBudget } from './linux-alias-model.ts';
+import { readProcEvidence } from './linux-proc-evidence.ts';
 
 /** /proc maps escapes newlines as \\012 but does not escape literal backslashes.
  * Both interpretations, and both meanings of " (deleted)", must agree before
@@ -37,27 +38,10 @@ export function mappedPathScope(content: string, roots: readonly string[], budge
   return held ? 'held' : 'clear';
 }
 
-function boundedMaps(path: string, budget: AliasWorkBudget): string {
-  const fd = openSync(path, 'r');
-  try {
-    const chunks: Buffer[] = [];
-    let total = 0;
-    for (;;) {
-      const chunk = Buffer.allocUnsafe(65536);
-      const length = readSync(fd, chunk, 0, chunk.length, null);
-      if (!length) break;
-      budget.spend(Math.ceil(length / 256)); total += length;
-      if (total > 4 * 1024 * 1024) throw new Error('Mapped holder evidence exceeds bounds');
-      chunks.push(chunk.subarray(0, length));
-    }
-    return Buffer.concat(chunks).toString('utf8');
-  } finally { closeSync(fd); }
-}
-
 export function mappedHolder(pid: number, roots: readonly string[], budget?: AliasWorkBudget): 'held' | 'clear' | 'unreadable' | 'gone' {
   try {
     const path = `/proc/${pid}/maps`;
-    const scope = mappedPathScope(budget ? boundedMaps(path, budget) : readFileSync(path, 'utf8'), roots, budget);
+    const scope = mappedPathScope(budget ? readProcEvidence(path, budget).toString('utf8') : readFileSync(path, 'utf8'), roots, budget);
     if (scope === 'unknown') throw new Error(`Ambiguous mapping evidence for destroy holder ${pid}`);
     return scope;
   } catch (error) {

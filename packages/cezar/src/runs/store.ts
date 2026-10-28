@@ -1,10 +1,11 @@
 import { workerDeletionProof } from './worker-deletion-proof.ts';
+import { OPEN_RETRY_DELAYS_MS, sleepSync } from './store-open-retry.ts';
 import { listPeerTaskSummaries, parseStoredSummary, type PeerTaskPageOptions } from './run-summary-page.ts';
 export { parseStoredSummary } from './run-summary-page.ts';
 import { defined } from '../core/defined.ts';
 import { autosaveCleanupBlocker, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { EventEmitter } from 'node:events';
-import { workerEvidenceRunIds, workerExecutionSchema, type WorkerAliasRetention, type WorkerExecution } from './worker-execution.ts';
+import { executionWithoutAliasRetention, serializeWorkerExecution, withAliasRetention, workerEvidenceRunIds, workerExecutionSchema, type WorkerAliasRetention, type WorkerExecution } from './worker-execution.ts';
 import { isWindowsWorkerEvidence, readWindowsEvidence, removeWindowsEvidence, windowsEvidencePath, writeWindowsEvidence } from './windows-worker-evidence.ts';
 import { executionEvidenceAbsent, readPrivateWorkerFile, replacePrivateWorkerFile } from './private-worker-file.ts';
 import { agentTmpDirLocations, agentTmpDirMayExist, agentTmpDirOwnershipProven, removeAgentTmpDir } from './agent-tmpdir.ts';
@@ -503,16 +504,6 @@ export type RunRecord = z.infer<typeof runRecordSchema>;
 
 /** One persisted event line; `type` mirrors AgentEvent plus engine lifecycle. */
 export type RunEvent = import('@open-mercato/cezar-contract').RunEvent;
-
-/** The pauses between open attempts while the database is busy, when `open` may wait (a boot):
- *  about 3.5 s in all, with each attempt's own busy timeout. Long enough for another process to
- *  finish importing a large `runs.json`. */
-const OPEN_RETRY_DELAYS_MS = [50, 100, 200, 400, 800, 1600];
-
-/** Block this thread for `ms`. Only `open` does, at boot, when there is nothing else to run. */
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
 
 /** Runs (and conversation roots, one family query each) the open-time facts warm-up enumerates
  *  per event-loop turn (hearsay-tools/cezarion#949), so each slice stays a few milliseconds. */
@@ -3863,21 +3854,14 @@ export class RunStore extends EventEmitter {
   }
 
   private writeWorkerExecution(id: string, proof: WorkerExecution, fresh = false): void {
-    const content = JSON.stringify(workerExecutionSchema.parse(proof));
-    if (Buffer.byteLength(content) > 16384) throw new Error('Worker execution evidence exceeds bounds');
+    const content = serializeWorkerExecution(proof);
     if (isWindowsWorkerEvidence) { writeWindowsEvidence(this.dataDir, id, 'execution', content, fresh); return; }
     replacePrivateWorkerFile(this.executionPath(id), content, fresh);
   }
 
-  /** The caller authenticates resources and performs the release proof. A
-   * missing or invalid checkpoint cannot be treated as an empty retention set. */
+  /** Missing or invalid evidence cannot authorize a retention replacement. */
   commitWorkerAliasRetention(id: string, generation: string, resourceId: string, retention: WorkerAliasRetention | undefined): void {
-    const run = this.peek(id), proof = this.readWorkerExecution(id);
-    if (this.writeRefusal(id) || run?.delegation?.role !== 'worker' || !run.delegation.destroy || run.delegation.workspace.resourceId !== resourceId ||
-        !proof || proof.phase === 'queued' || proof.generation !== generation ||
-        (retention && (retention.generation !== generation || retention.resourceId !== resourceId))) throw new Error('Worker alias retention ownership changed');
-    const { aliasRetention: _previous, ...rest } = proof;
-    this.writeWorkerExecution(id, { ...rest, ...(retention ? { aliasRetention: retention } : {}) });
+    this.writeWorkerExecution(id, withAliasRetention(this.peek(id), this.readWorkerExecution(id), !!this.writeRefusal(id), generation, resourceId, retention));
   }
 
   /** Complete execution is not permission to reuse/delete persistent resources (#738).
@@ -3891,11 +3875,10 @@ export class RunStore extends EventEmitter {
     opts: { admittingQueued?: boolean; cwds?: CwdSource | undefined } = {}): 'safe' | number[] {
     if (autosaveCleanupBlocker(this.dataDir, id)) return [];
     const run = this.peek(id);
-    const proof = this.readWorkerExecution(id);
+    const proof = executionWithoutAliasRetention(this.readWorkerExecution(id));
     if (run?.delegation?.role !== 'worker' || run.delegation.workspace.ownerRunId !== id ||
       run.delegation.workspace.resourceId !== resourceId || proof?.generation !== generation ||
       (proof.phase !== 'complete' && !(opts.admittingQueued && proof.phase === 'queued'))) return [];
-    if (proof.aliasRetention) return [];
     const record = this.readWorkerProcesses(id, generation);
     if (record === 'unknown' || !agentTmpDirOwnershipProven(this.dataDir, id)) return [];
     const paths = [run.delegation.workspace.path, ...agentTmpDirLocations(this.dataDir, id)];
@@ -3925,10 +3908,9 @@ export class RunStore extends EventEmitter {
    * `cwds` is the scratch reprobe tick's shared `/proc` snapshot (hearsay-tools/cezarion#879). */
   workerScratchResourcesSafe(id: string, generation: string, resourceId: string, cwds?: CwdSource): boolean {
     if (autosaveCleanupBlocker(this.dataDir, id)) return false;
-    const run = this.peek(id), proof = this.readWorkerExecution(id);
+    const run = this.peek(id), proof = executionWithoutAliasRetention(this.readWorkerExecution(id));
     if (proof?.phase !== 'complete' || proof.generation !== generation || proof.scratchCleanup?.resourceId !== resourceId ||
       (run && ['queued', 'running', 'waiting'].includes(run.status))) return false;
-    if (proof.aliasRetention) return false;
     if (run?.delegation?.role === 'worker') return run.delegation.workspace.path === proof.scratchCleanup.path &&
       this.workerResourceHolders(id, generation, resourceId, { cwds }) === 'safe';
     // A valid different role contradicts the retained intent. Quarantined/missing metadata

@@ -6,6 +6,10 @@ import type { AliasScanResult } from './linux-alias-scan.ts';
 type Entry = { pid: number; token: string };
 type Snapshot = ReturnType<AliasMappingScope['snapshot']>;
 
+function relevant(pid: number, scope: AliasMappingScope, result: AliasScanResult): boolean {
+  return scope.has(pid) || result.outcome === 'held' || !!result.scoped;
+}
+
 /** No signal is possible until the entire candidate list has been examined. */
 export async function discoverAliasHolders(pids: readonly number[], scope: AliasMappingScope, budget: AliasWorkBudget,
   token: (pid: number) => string | undefined, scan: (pid: number, token: string | undefined) => AliasScanResult,
@@ -18,7 +22,7 @@ export async function discoverAliasHolders(pids: readonly number[], scope: Alias
     seen.add(pid);
     let start = token(pid);
     let result = scan(pid, start);
-    if (scope.has(pid) || result.outcome === 'held' || result.scoped) {
+    if (relevant(pid, scope, result)) {
       // Re-read target evidence after the final asynchronous authorization.
       // A release observed before the yield cannot clear durable retention.
       await current(); verify();
@@ -38,7 +42,7 @@ export async function discoverAliasHolders(pids: readonly number[], scope: Alias
       if (scope.has(pid) || result.scoped) throw new Error(`Cannot verify alias process ${pid}`);
       continue;
     }
-    if (result.outcome === 'held' || result.scoped || scope.has(pid)) {
+    if (relevant(pid, scope, result)) {
       const held = assessAliasEvidence(pid, start, result, scope, budget, publish);
       await current();
       if (held) holders.push({ pid, token: start });

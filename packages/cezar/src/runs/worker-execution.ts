@@ -2,6 +2,7 @@ import { lstatSync, readdirSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { windowsIdentityDirectory } from '../delegation/windows-workspace-identity.ts';
+import type { RunRecord } from './store.ts';
 
 const decimalIdentity = z.string().regex(/^\d{1,20}$/);
 const aliasObjectIdentity = z.object({ dev: z.string().regex(/^\d{1,20}:\d{1,20}$/), ino: decimalIdentity }).strict();
@@ -25,6 +26,27 @@ export const workerExecutionSchema = z.object({
 }).strict().refine(proof => ((!proof.neverMaterialized && !proof.scratchCleanup && !proof.abandoned) || proof.phase === 'complete') &&
   !(proof.abandoned && proof.neverMaterialized) && (!proof.aliasRetention || (!proof.neverMaterialized && proof.aliasRetention.generation === proof.generation)));
 export type WorkerExecution = z.infer<typeof workerExecutionSchema>;
+
+/** Pending alias evidence denies reuse even when execution is complete. */
+export function executionWithoutAliasRetention(proof: WorkerExecution | undefined): WorkerExecution | undefined {
+  return proof?.aliasRetention ? undefined : proof;
+}
+
+export function serializeWorkerExecution(proof: WorkerExecution): string {
+  const content = JSON.stringify(workerExecutionSchema.parse(proof));
+  if (Buffer.byteLength(content) > 16384) throw new Error('Worker execution evidence exceeds bounds');
+  return content;
+}
+
+/** The caller authenticates resources and performs the release proof. */
+export function withAliasRetention(run: RunRecord | undefined, proof: WorkerExecution | undefined, refused: boolean,
+  generation: string, resourceId: string, retention: WorkerAliasRetention | undefined): WorkerExecution {
+  if (refused || run?.delegation?.role !== 'worker' || !run.delegation.destroy || run.delegation.workspace.resourceId !== resourceId ||
+      !proof || proof.phase === 'queued' || proof.generation !== generation ||
+      (retention && (retention.generation !== generation || retention.resourceId !== resourceId))) throw new Error('Worker alias retention ownership changed');
+  const { aliasRetention: _previous, ...rest } = proof;
+  return { ...rest, ...(retention ? { aliasRetention: retention } : {}) };
+}
 
 /** Presence, not parseability, reserves scratch. Unknown evidence must never turn into an
  * orphan merely because runs.json was missing, partly salvaged, or unreadable. Undefined
