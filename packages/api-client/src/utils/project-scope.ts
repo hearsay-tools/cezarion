@@ -7,7 +7,7 @@
  * The version prefix every request carries.
  *
  * The service used to answer on an unversioned `/api/*` as well; that surface was removed once
- * the whole API was reachable under `/api/v1` (BACKWARD_COMPATIBILITY.md §2). Nothing should
+ * the whole API was reachable under `/api/v1` (BACKWARD_COMPATIBILITY.md). Nothing should
  * reintroduce a bare `/api/...` fetch — it will 404.
  */
 export const API_PREFIX = '/api/v1'

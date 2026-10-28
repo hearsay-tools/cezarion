@@ -27,7 +27,6 @@ const docsAllowlisted = [
 // never docs, so changing it runs the full matrix and the test that reads it.
 const testReadDocuments = [
   'AGENT_PROTOCOL.md', // packages/cezar/src/core/harness-parity.test.ts
-  'BACKWARD_COMPATIBILITY.md', // packages/cezar/src/server/bc-route-inventory.test.ts
   '.ai/specs/2026-09-04-harness-parity-matrix.md', // packages/cezar/src/core/harness-parity.test.ts
 ];
 

@@ -27,6 +27,7 @@ import type { AgentEvent, AgentRunSpec, AgentSession } from './agent-runner.js';
 import type { UiEvent } from './ui-events.js';
 import { sessionGroupOf } from './session-process.js';
 import { buildOmpArgs, OMP_BUILTIN_TOOL_NAMES, OMP_SPEC_SUPPORT, OmpRunner, ompTools } from './omp-runner.js';
+import { ompProviderErrorMessage } from './omp-ui-mapper.js';
 import { createRunner } from './runner-factory.js';
 import { allowedToolsForStep, DEFAULT_ALLOWED_TOOLS } from '../workflows/types.js';
 import { readPids } from '../pid-file.testkit.js';
@@ -452,6 +453,164 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     expect(kinds.indexOf('text:after the retry')).toBeLessThan(kinds.indexOf('turn-end'));
     // The failed attempt was recovered before the settle: no error surfaces (#256).
     expect(events.filter(event => event.type === 'error')).toEqual([]);
+  });
+
+  /** A mock whose first prompt runs `turn`, then settles; `setAnswer` answers every `set_` command. */
+  const writeTurnMock = (
+    name: string,
+    turn: string,
+    setAnswer = "send({ id: command.id, type: 'response', command: command.type, success: true });",
+  ): string => {
+    const bin = join(cwd, name);
+    writeFileSync(bin, `#!/usr/bin/env node
+import readline from 'node:readline';
+const send = (v) => process.stdout.write(JSON.stringify(v) + '\\n');
+send({ type: 'ready', protocolVersion: 1, supportedProtocolVersions: [1, 2] });
+let prompts = 0;
+for await (const line of readline.createInterface({ input: process.stdin })) {
+  const command = JSON.parse(line);
+  if (command.type === 'get_state') send({ id: command.id, type: 'response', command: 'get_state', success: true, data: { sessionId: 'pins' } });
+  else if (command.type === 'prompt') {
+    prompts += 1;
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
+${turn}
+  } else if (command.type.startsWith('set_')) ${setAnswer}
+}
+`, { mode: 0o755 });
+    return bin;
+  };
+  /** The mock lines that end the turn: an assistant message_end with `stopReason`, then the settle. */
+  function settleTurn(stopReason = 'stop'): string {
+    return `      send({ type: 'message_end', message: { role: 'assistant', stopReason: '${stopReason}', errorMessage: 'Overloaded', usage: { input: 1, output: 1 } } });
+      send({ type: 'agent_end', messages: [], isTerminal: true, yielded: true });
+      send({ type: 'prompt_result', agentInvoked: true, status: 'completed', sessionSettled: true });
+      send({ type: 'session_settled' });`;
+  }
+
+  // Pins the Pi-family text and tool handling omp shares with pi (hearsay-tools/cezarion#1955).
+  it('completes text blocks without a snapshot or an index, and records only named tool calls', async () => {
+    const bin = writeTurnMock('mock-omp-text-tools.mjs', `    send({ type: 'agent_start' });
+    const update = (event) => send({ type: 'message_update', message: { role: 'assistant' }, assistantMessageEvent: event });
+    update({ type: 'text_delta', contentIndex: 0, delta: 'alpha ' });
+    update({ type: 'text_delta', contentIndex: 0, delta: 'beta' });
+    update({ type: 'text_end', contentIndex: 0 });
+    update({ type: 'text_delta', delta: 'anonymous' });
+    update({ type: 'text_end' });
+    send({ type: 'tool_execution_start', toolCallId: 'call-unnamed' });
+    send({ type: 'tool_execution_start', toolCallId: 'call-1', toolName: 'read', args: { path: 'a.txt' } });
+${settleTurn()}`);
+    const { events, result } = await runSession(spec('pins'), undefined, bin);
+    expect(events.filter(event => event.type === 'text')).toEqual([
+      { type: 'text', text: 'alpha beta' },
+      { type: 'text', text: 'anonymous' },
+    ]);
+    expect(events.filter(event => event.type === 'tool-call')).toEqual([
+      { type: 'tool-call', id: 'call-1', tool: 'read', input: { path: 'a.txt' } },
+    ]);
+    expect(result.toolCalls).toEqual([{ id: 'call-1', name: 'read', input: { path: 'a.txt' } }]);
+  });
+
+  it.each([
+    { stopReason: 'stop', consumed: [['input-1']] },
+    { stopReason: 'error', consumed: [] },
+  ])('a steer acknowledged before a later agent_start is read when that turn settles, unless it failed ($stopReason)', async ({ stopReason, consumed: expected }) => {
+    // The steer gets no user message_start: only the agent_start after its ack carries it.
+    const bin = writeTurnMock('mock-omp-carried.mjs', `    if (prompts === 1) {
+      send({ type: 'agent_start' });
+      send({ type: 'tool_execution_start', toolCallId: 'call-1', toolName: 'read', args: {} });
+    } else {
+      send({ type: 'agent_start' });
+${settleTurn(stopReason)}
+    }`);
+    const consumed: string[][] = [];
+    let acknowledged: Promise<void> | boolean | undefined;
+    let session: AgentSession;
+    const events: AgentEvent[] = [];
+    session = new OmpRunner({ bin }).startSession(
+      spec('carry'),
+      (event) => {
+        events.push(event);
+        if (event.type === 'tool-call') acknowledged = session.sendAgentMessage([{ type: 'text', text: 'worker reply' }], ['input-1']);
+      },
+      { autoEndAfterFirstTurn: true, onAgentInputConsumed: (ids) => consumed.push([...ids]) },
+    );
+    await session.result;
+    await expect(acknowledged).resolves.toBeUndefined();
+    expect(consumed).toEqual(expected);
+    expect(turnEnds(events)).toBe(1);
+  });
+
+  it('notes each refused set_ command, and reports any other failed command as an error', async () => {
+    const bin = writeTurnMock(
+      'mock-omp-refusals.mjs',
+      `    send({ type: 'agent_start' });
+    send({ type: 'response', command: 'compact', success: false, error: 'compact refused' });
+${settleTurn()}`,
+      "send({ id: command.id, type: 'response', command: command.type, success: false, error: 'not supported' });",
+    );
+    const { events } = await runSession(spec('refusals'), undefined, bin);
+    expect(events.filter(event => event.type === 'note' && event.message.endsWith('failed: not supported')).map(event => event.type === 'note' && event.message)).toEqual([
+      'omp: set_steering_mode failed: not supported',
+      'omp: set_subagent_subscription failed: not supported',
+      'omp: set_event_filter failed: not supported',
+    ]);
+    expect(events.filter(event => event.type === 'error')).toEqual([{ type: 'error', message: 'compact refused' }]);
+    expect(turnEnds(events)).toBe(1);
+  });
+
+  it('skips a non-object line, and notes extension errors and notices with their fallbacks', async () => {
+    const bin = writeTurnMock('mock-omp-notes.mjs', `    send({ type: 'agent_start' });
+    process.stdout.write('[1,2]\\n');
+    send({ type: 'extension_error', error: 'extension exploded' });
+    send({ type: 'extension_error', message: 'from the message field' });
+    send({ type: 'extension_error' });
+    send({ type: 'notice', message: 'heads up' });
+    send({ type: 'notice' });
+${settleTurn()}`);
+    const { events } = await runSession(spec('notes'), undefined, bin);
+    const notes = events.filter(event => event.type === 'note').map(event => event.type === 'note' && event.message);
+    expect(notes).toEqual(expect.arrayContaining(['extension exploded', 'from the message field', 'omp extension error', 'omp: heads up']));
+    expect(notes.filter(note => typeof note === 'string' && note.startsWith('omp: ') && !note.includes('failed'))).toEqual(['omp: heads up']);
+    expect(events.filter(event => event.type === 'error')).toEqual([]);
+    expect(turnEnds(events)).toBe(1);
+  });
+
+  it('a local prompt failure whose error is not an object still ends the turn with one v1 error', async () => {
+    const bin = writeTurnMock('mock-omp-local-error.mjs', `    send({ type: 'prompt_result', id: command.id, agentInvoked: false, status: 'error', error: 'plain text', sessionSettled: true });`);
+    const { events } = await runSession(spec('local error'), undefined, bin);
+    expect(events.filter(event => event.type === 'error')).toEqual([
+      { type: 'error', message: ompProviderErrorMessage({ provider: undefined, model: undefined, errorMessage: undefined }) },
+    ]);
+    expect(turnEnds(events)).toBe(1);
+  });
+
+  it('skips a tool result without an id, and reads a non-object result as empty text', async () => {
+    const bin = writeTurnMock('mock-omp-tool-results.mjs', `    send({ type: 'agent_start' });
+    send({ type: 'tool_execution_end', isError: false, result: { content: [{ type: 'text', text: 'orphan' }] } });
+    send({ type: 'tool_execution_end', toolCallId: 'call-2', isError: true, result: 'not a record' });
+${settleTurn()}`);
+    const { events } = await runSession(spec('tool results'), undefined, bin);
+    expect(events.filter(event => event.type === 'tool-result' || event.type === 'image')).toEqual([
+      { type: 'tool-result', toolCallId: 'call-2', result: '', isError: true },
+    ]);
+  });
+
+  it('a human steer read while its turn is open is no longer held when the turn ends', async () => {
+    // The steer's ack marks it read; its user message_start in the open turn drops it.
+    const bin = writeTurnMock('mock-omp-human-steer.mjs', `    if (prompts === 1) {
+      send({ type: 'agent_start' });
+      send({ type: 'tool_execution_start', toolCallId: 'call-1', toolName: 'read', args: {} });
+    } else {
+      send({ type: 'message_start', message: { role: 'user', content: command.message } });
+${settleTurn()}
+    }`);
+    let heldAtTurnEnd: number | undefined;
+    const { events } = await runSession(spec('steer'), (event, session) => {
+      if (event.type === 'tool-call') session.sendMessage([{ type: 'text', text: 'human steer' }]);
+      if (event.type === 'turn-end') heldAtTurnEnd = session.heldHumanInputCount?.();
+    }, bin);
+    expect(turnEnds(events)).toBe(1);
+    expect(heldAtTurnEnd).toBe(0);
   });
 
   it.each(['mock:local-command', 'mock:local-result'])('agentInvoked false ends the turn without session_settled (%s)', async (prompt) => {
@@ -1147,6 +1306,31 @@ await import(${JSON.stringify(MOCK)});
     expect(events.some(event => event.type === 'note' && /terminated by cezar \(SIGKILL\)/.test(event.message))).toBe(true);
     // Two short grace periods plus the auto-end delay: nowhere near the mock's own 12 s backstop.
     expect(Date.now() - started).toBeLessThan(8_000);
+  });
+
+  // The killed-by-signal branch also checks !terminatedByCezar; the teardown branch before it
+  // already takes every signal exit cezar caused (hearsay-tools/cezarion#2002 pin).
+  it('a SIGKILL cezar sent is a teardown note, never an error', async () => {
+    const events: AgentEvent[] = [];
+    const session = new OmpRunner({ bin: MOCK, killGraceMs: 100 }).startSession(
+      spec('mock:linger'), event => events.push(event), { autoEndAfterFirstTurn: true },
+    );
+    await expect(session.result).resolves.toBeDefined();
+    expect(events.filter(event => event.type === 'note' && event.message.includes('terminated by cezar'))).toEqual([
+      { type: 'note', message: 'omp CLI did not exit on its own after close; terminated by cezar (SIGKILL)' },
+    ]);
+    expect(events.filter(event => event.type === 'error')).toEqual([]);
+    expect(events.at(-1)).toEqual({ type: 'done' });
+  });
+
+  it('a non-zero exit with empty stderr fails with the bare exit code and no stderr note', async () => {
+    const bin = join(cwd, 'mock-omp-exit-3.mjs');
+    writeFileSync(bin, '#!/usr/bin/env node\nprocess.exit(3);\n', { mode: 0o755 });
+    const events: AgentEvent[] = [];
+    await expect(new OmpRunner({ bin }).startSession(spec('exit'), event => events.push(event)).result)
+      .rejects.toThrow(/^omp CLI exited with code 3$/);
+    expect(events.filter(event => event.type === 'error')).toEqual([{ type: 'error', message: 'omp CLI exited with code 3' }]);
+    expect(events.some(event => event.type === 'note' && event.message.startsWith('omp CLI stderr'))).toBe(false);
   });
 
   it('ENOENT names omp and omp login', async () => {

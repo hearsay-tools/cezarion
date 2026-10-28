@@ -658,7 +658,7 @@ async function execute(
   }
 }
 
-export const AGENT_TASK_SEND_REMEDY = 'Agent-to-task messaging is not available yet. The planned path is CEZ_DELEGATION=1 and the cez message family.';
+export const AGENT_TASK_SEND_REMEDY = "cez message progress <task-id> '<text>' --id <message-UUID> (needs CEZ_DELEGATION=1)";
 
 function refuseAgentSend(name: string, env: NodeJS.ProcessEnv): void {
   if (name === 'send' && env.CEZ_TASK_ID?.trim()) {

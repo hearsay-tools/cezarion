@@ -17,9 +17,9 @@ const checksGlyphSchema = z.enum(['passing', 'failing', 'pending']).nullable();
 
 /**
  * One issue or pull request, flattened for the cockpit (`ForgeItem` server-side).
- * A protected shape — BACKWARD_COMPATIBILITY.md §2 forbids reshaping it outside a documented
- * deprecation. `body` is in one (hearsay-tools/cezarion#1183): optional, still sent by list
- * routes, and hydrated from `detail.body` on the comments route by new consumers.
+ * A protected shape — changes require an explanation and migration path. The `body` field is
+ * deprecated (hearsay-tools/cezarion#1183): optional, still sent by list routes, and hydrated
+ * from `detail.body` on the comments route by new consumers.
  */
 export const githubItemSchema = z.object({
   kind: z.enum(['issue', 'pr']),

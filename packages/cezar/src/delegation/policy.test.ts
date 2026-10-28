@@ -142,7 +142,7 @@ describe('parent-only delegation policy', () => {
     expect(() => authorizeWorker(caller(), { ...worker(), status }, 'steer', root(), projectId))
       .toThrowError(expect.objectContaining({
         code: 'incompatible_state',
-        message: expect.stringContaining(`worker send ${workerId} "<instruction>" --kind request --resume --id <new-message-UUID>`),
+        message: expect.stringContaining(`worker resume ${workerId} "<instruction>" --id <new-message-UUID>`),
       }));
   });
 

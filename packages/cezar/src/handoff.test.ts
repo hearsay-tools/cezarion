@@ -310,7 +310,7 @@ describe('handoffInstructions', () => {
   it.each([true, false])('steers agents off native cross-session messaging (tools=%s)', tools => {
     const text = handoffInstructions({ tools });
     expect(text).toContain('## Messaging other tasks');
-    expect(text).toContain('Cezar tasks talk to each other only through `cez message`, which needs `CEZ_DELEGATION=1`.');
+    expect(text).toContain('Cezar tasks talk to each other only through `cez message`, which needs `CEZ_DELEGATION=1`; with it, your delegation instructions give the full command and its verbs (`tasks`, `request`, `progress`, `reply`).');
     expect(text).toContain("Never use your runner's native cross-session tools to reach another task or agent session, for example Claude's SendMessage or ListAgents for other sessions.");
     expect(text).toContain('Without `CEZ_DELEGATION=1` no agent channel to another task exists: tell the user instead.');
     expect(text).toContain('`cez task send` is human input and refuses to run inside a task.');

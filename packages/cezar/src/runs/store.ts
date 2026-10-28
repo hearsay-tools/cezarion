@@ -1,3 +1,5 @@
+import { listPeerTaskSummaries, parseStoredSummary, type PeerTaskPageOptions } from './run-summary-page.ts';
+export { parseStoredSummary } from './run-summary-page.ts';
 import { defined } from '../core/defined.ts';
 import { autosaveCleanupBlocker, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { EventEmitter } from 'node:events';
@@ -89,11 +91,10 @@ export type StepStatus =
  * ids the rest of cezar speaks (#547).
  *
  * `claude-cli` is the legacy spelling of `claude` — still a member of
- * `AgentBackend` and still accepted by `createRunner`, and named by
- * `BACKWARD_COMPATIBILITY.md` §3 as an id `runs.json` keeps parseable. The enum
- * here did not accept it, so that promise was false: the loader `safeParse`s the
+ * `AgentBackend` and still accepted by `createRunner`, and accepted in `runs.json`. The enum
+ * here once failed to accept it: the loader `safeParse`s the
  * WHOLE array, so one record carrying it would have dropped every run in the
- * file — the exact failure mode §3 exists to warn about.
+ * file.
  *
  * Parse-and-fold rather than widen: the legacy id is accepted on the way in and
  * collapsed to `claude`, so no consumer, wire type or contract schema ever sees
@@ -1022,7 +1023,7 @@ function importLegacyIndex(db: RunDatabase, dataDir: string): void {
   });
   // Told once, by the import that committed: the marker means no later open reads runs.json again.
   if (commit.skipped || backup === undefined) return;
-  const kept = `Its exact bytes are kept in ${join(dataDir, backup)}; BACKWARD_COMPATIBILITY.md §3 says how to import it after a repair.`;
+  const kept = `Its exact bytes are kept in ${join(dataDir, backup)}; https://github.com/hearsay-tools/cezarion/blob/main/docs/run-history-recovery.md says how to import it after a repair.`;
   if (!parsed) console.warn(`[cez] ${LEGACY_INDEX_FILE} could not be read; no run was imported, and this project starts with an empty history. ${kept}`);
   else if (skipped > 0) console.warn(`[cez] ${skipped} of ${parsed.total} runs in ${LEGACY_INDEX_FILE} could not be read and were not imported. ${kept}`);
 }
@@ -1240,25 +1241,6 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
-/**
- * A stored summary, or undefined when the row holds none (a row seeded without one, or text that
- * is not a summary): the caller then projects the record instead. The column is written only by
- * `encodeRunRow`, from a record the schema accepted, so this checks the shape a list row cannot
- * do without rather than running the full contract schema — on a cockpit's thousand rows that
- * schema costs more than reading them. The cold reader (`run-index.ts`), which reads other
- * projects' databases, still validates in full.
- */
-export function parseStoredSummary(text: string): RunSummary | undefined {
-  try {
-    const raw: unknown = JSON.parse(text);
-    if (!raw || typeof raw !== 'object') return undefined;
-    const row = raw as Record<string, unknown>;
-    return typeof row.id === 'string' && typeof row.title === 'string' && typeof row.status === 'string' &&
-      typeof row.createdAt === 'string' && typeof row.archived === 'boolean' ? raw as RunSummary : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 const WORKER_PROCESS_CAP = 32;
 const recordedProcessSchema = z.object({ pid: z.number().int().positive(), startToken: z.string().min(1).max(128).optional(),
@@ -1887,6 +1869,12 @@ export class RunStore extends EventEmitter {
     }
     for (const [id, run] of this.held) runs.set(id, [run, this.listOrder(run)]);
     return sortNewestFirst(runs.values());
+  }
+
+  /** A bounded page of discoverable peer roots, including the current held overlay. */
+  listPeerTaskSummaries(options: PeerTaskPageOptions) {
+    return listPeerTaskSummaries({ db: this.db, held: this.held, skipped: this.deleted,
+      order: run => this.listOrder(run), cold: id => this.coldSummary(id) }, options);
   }
 
   /**

@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { Writable } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { runWorkerCommand } from './cli.ts';
+import { runWorkerCommand, runMessageCommand } from './cli.ts';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { fixture, seedWorkerWait } from './service.testkit.ts';
 import { createDelegationRoutes } from './routes.ts';
@@ -56,11 +56,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
       expect.objectContaining({ name: 'wait' }),
       expect.objectContaining({ name: 'destroy', positionals: 1 }),
     ]));
-    const send = help.usage.operations.find((op: { name: string }) => op.name === 'send');
-    expect(send.required).toEqual(expect.arrayContaining(['--id', '--kind']));
-    expect(send.optional ?? []).not.toContain('--request-id');
-    expect(help.usage.operations.find((op: { name: string }) => op.name === 'reply').required).toEqual(expect.arrayContaining(['--request-id']));
-    expect(help.usage.operations).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'inbox', positionals: 0 })]));
+    expect(help.usage.operations.map((op: { name: string }) => op.name)).not.toContain('send');
 
   });
   it.each(['-h', '--help'])('prints human family help for %s without a delegation session', async (flag) => {
@@ -76,7 +72,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     expect(help).not.toContain('invalid_input');
   });
   it.each(['spawn', 'inspect', 'steer', 'stop', 'destroy', 'diff', 'collect', 'wait',
-    'cancel-wait', 'send', 'progress', 'follow-up', 'reply', 'conversation', 'inbox', 'wait-requests', 'cancel-request'])(
+    'cancel-wait', 'resume'])(
     'prints human %s help before validating required arguments or accessing transport', async (operation) => {
       for (const flag of ['-h', '--help']) {
         expect(await runWorkerCommand([operation, flag], {})).toBe(0);
@@ -97,16 +93,16 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     await runWorkerCommand(['wait', '--help'], {});
     const waitHelp = String(output.mock.calls.at(-1)?.[0]);
     expect(waitHelp).toContain('<worker-id>');
-    expect(waitHelp).toContain('--request');
+    expect(waitHelp).not.toContain('--request');
     expect(waitHelp).toContain('--mode');
     expect(waitHelp).toContain('--timeout-seconds');
   });
   it('sends a long resume deadline through the HTTP boundary and rejects it for an ordinary request', async () => {
     const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
-    const args = ['send', workerId, 'Fix review', '--id', randomUUID(), '--kind', 'request', '--timeout-seconds', '7200'];
-    expect(await runWorkerCommand(args, env)).toBe(1);
+    const args = ['request', workerId, 'Fix review', '--id', randomUUID(), '--timeout-seconds', '7200'];
+    expect(await runMessageCommand(args, env)).toBe(1);
     expect(json().code).toBe('invalid_input');
-    expect(await runWorkerCommand([...args, '--resume'], env)).toBe(1);
+    expect(await runWorkerCommand(['resume', ...args.slice(1)], env)).toBe(1);
     expect(json().code).toBe('incompatible_state');
     f.manager.cancel(workerId);
     await f.manager.awaitRunTermination(workerId, 10_000);
@@ -114,7 +110,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     const generation = f.store.commitWorkerExecutionStart(workerId);
     f.store.updateRun(workerId, { status: 'done' });
     f.store.commitWorkerExecutionComplete(workerId, generation);
-    expect(await runWorkerCommand([...args, '--resume'], env)).toBe(0);
+    expect(await runWorkerCommand(['resume', ...args.slice(1)], env)).toBe(0);
     const sent = json();
     expect(Date.parse(sent.message.deadline) - Date.parse(sent.message.createdAt)).toBe(7_200_000);
   });
@@ -143,10 +139,10 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     const write = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string, callback?: (error?: Error | null) => void) => {
       calls.push(`stdout:${String(chunk).includes(id)}`); callback?.(); return true;
     }) as typeof process.stdout.write);
-    expect(await runWorkerCommand(['inbox'], env)).toBe(0);
+    expect(await runMessageCommand(['inbox'], env)).toBe(0);
     expect(calls).toEqual(['inbox', 'stdout:true', 'ack']);
     expect(process.stdout.listenerCount('error')).toBe(listeners);
-    expect(await runWorkerCommand(['inbox', f.parent.id], env)).toBe(1);
+    expect(await runMessageCommand(['inbox', f.parent.id], env)).toBe(1);
     expect(json().code).toBe('invalid_input');
     expect(fetchMock).toHaveBeenCalledTimes(2);
     write.mockRestore();
@@ -159,7 +155,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
       return new Response(JSON.stringify(path === 'inbox' ? { messages: [{ id: randomUUID(), senderRunId: randomUUID(), recipientRunId: f.parent.id, kind: 'progress', text: 'Ready', createdAt: new Date().toISOString(), requestHash: 'a'.repeat(64), state: 'accepted' }], outcomes: [], receiptId, expiresAt: new Date(Date.now() + 120_000).toISOString() } : { receiptId, status: 'released' }));
     });
     vi.spyOn(process.stdout, 'write').mockImplementation(((_chunk: string, callback?: (error?: Error | null) => void) => { callback?.(Error('pipe closed')); return false; }) as typeof process.stdout.write);
-    expect(await runWorkerCommand(['inbox'], env)).toBe(1);
+    expect(await runMessageCommand(['inbox'], env)).toBe(1);
     expect(paths).toEqual(['inbox', 'release']);
     expect(JSON.parse(String(stderr.mock.calls.at(-1)?.[0])).code).toBe('unavailable_transport');
   });
@@ -183,7 +179,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     let timeout: NodeJS.Timeout | undefined;
     try {
       const result = await Promise.race([
-        runWorkerCommand(['inbox'], env),
+        runMessageCommand(['inbox'], env),
         new Promise(resolve => { timeout = setTimeout(() => resolve('output error was not handled'), 1_000); }),
       ]);
       expect(result).toBe(1);
@@ -204,7 +200,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     });
     const written: string[] = [];
     vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string, callback?: (error?: Error | null) => void) => { written.push(String(chunk)); callback?.(); return true; }) as typeof process.stdout.write);
-    expect(await runWorkerCommand(['inbox'], env)).toBe(1);
+    expect(await runMessageCommand(['inbox'], env)).toBe(1);
     expect(written.join('')).toContain(id);
     expect(paths[0]).toBe('inbox'); expect(paths.slice(1)).toEqual(['ack', 'ack']);
     expect(json()).toMatchObject({ code: 'unavailable_transport' });
@@ -218,7 +214,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
         : new Response(JSON.stringify({ code: 'incompatible_state', error: 'disk unavailable' }), { status: 409 });
     });
     vi.spyOn(process.stdout, 'write').mockImplementation(((_chunk: string, callback?: (error?: Error | null) => void) => { callback?.(); return true; }) as typeof process.stdout.write);
-    expect(await runWorkerCommand(['inbox'], env)).toBe(1);
+    expect(await runMessageCommand(['inbox'], env)).toBe(1);
     expect(json()).toMatchObject({ code: 'unavailable_transport' });
     expect(json().error).toContain(receiptId);
     expect(json().error).toContain('messages may reappear after expiry');
@@ -231,7 +227,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
         : new Response(JSON.stringify({ code: 'denied_scope', error: 'Worker scope denied' }), { status: 403 });
     });
     vi.spyOn(process.stdout, 'write').mockImplementation(((_chunk: string, callback?: (error?: Error | null) => void) => { callback?.(); return true; }) as typeof process.stdout.write);
-    expect(await runWorkerCommand(['inbox'], env)).toBe(1);
+    expect(await runMessageCommand(['inbox'], env)).toBe(1);
     expect(paths).toEqual(['inbox', 'ack']);
     expect(json().code).toBe('unavailable_transport');
   });
@@ -243,13 +239,13 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     await f.service.send(worker, { id, recipientRunId: f.parent.id, kind: 'progress', text: 'Replay me', timeoutSeconds: 600 });
     const write = vi.spyOn(process.stdout, 'write').mockImplementation(((_chunk: string, callback?: (error?: Error | null) => void) => { callback?.(); return true; }) as typeof process.stdout.write);
     const failedAck = vi.spyOn(f.service, 'ackInbox').mockRejectedValue(Error('disk unavailable'));
-    expect(await runWorkerCommand(['inbox'], env)).toBe(1);
+    expect(await runMessageCommand(['inbox'], env)).toBe(1);
     expect(f.store.getRun(f.parent.id)?.agentInputs?.find(input => input.id === id)?.deliveredAt).toBeUndefined();
     failedAck.mockRestore();
     vi.useFakeTimers({ toFake: ['Date'] });
     try {
       vi.setSystemTime(new Date(Date.now() + 121_000));
-      expect(await runWorkerCommand(['inbox'], env)).toBe(0);
+      expect(await runMessageCommand(['inbox'], env)).toBe(0);
       expect(f.store.getRun(f.parent.id)?.agentInputs?.find(input => input.id === id)?.deliveredAt).toBeTruthy();
     } finally { vi.useRealTimers(); write.mockRestore(); }
   });
@@ -438,7 +434,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
       expect(spawnUsage.optional.indexOf('--runner')).toBe(spawnUsage.optional.indexOf('--backend') - 1);
     });
     // Guard: passes with or without #632. The flag says runner; the persisted output field keeps
-    // its historical name `backend` (BACKWARD_COMPATIBILITY.md §1).
+    // its historical name `backend` (BACKWARD_COMPATIBILITY.md).
     // The fixture binds a claude account only; another runner would need that runner's host login.
     it('keeps the backend field in inspect and collect output', async () => {
       const code = await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--backend', 'claude', 'work'], env);
@@ -485,26 +481,26 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
       const body = JSON.parse(String(init?.body));
       return new Response(JSON.stringify({ message: { ...body, senderRunId: f.parent.id, createdAt: new Date().toISOString(), requestHash: 'a'.repeat(64), state: 'accepted', timeoutSeconds: undefined }, delivery: 'queued' }));
     });
-    for (const [command, kind, extra] of [['send', 'request', ['--kind', 'request']], ['progress', 'progress', []], ['reply', 'reply', ['--request-id', requestId]], ['follow-up', 'follow-up', ['--request-id', requestId]]] as const) {
-      expect(await runWorkerCommand([command, recipientRunId, 'message', '--id', id, ...extra], env), JSON.stringify(json())).toBe(0);
+    for (const [command, kind, extra] of [['request', 'request', []], ['progress', 'progress', []], ['reply', 'reply', ['--request-id', requestId]], ['follow-up', 'follow-up', ['--request-id', requestId]]] as const) {
+      expect(await runMessageCommand([command, recipientRunId, 'message', '--id', id, ...extra], env), JSON.stringify(json())).toBe(0);
       expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toMatchObject({ id, recipientRunId, kind, text: 'message', timeoutSeconds: 600 });
     }
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ messages: [], outcomes: [] })));
-    expect(await runWorkerCommand(['conversation', recipientRunId], env)).toBe(0);
+    expect(await runMessageCommand(['conversation', recipientRunId], env)).toBe(0);
     expect(fetchMock.mock.calls.at(-1)?.[0]).toBe(`${transport.url}/conversation`);
     expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toEqual({ recipientRunId });
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ requestId, status: 'cancelled', observedAt: new Date().toISOString() })));
-    expect(await runWorkerCommand(['cancel-request', requestId], env)).toBe(0);
+    expect(await runMessageCommand(['cancel-request', requestId], env)).toBe(0);
     expect(fetchMock.mock.calls.at(-1)?.[0]).toBe(`${transport.url}/cancel-request`);
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ secret: 'unrecognized' })));
-    expect(await runWorkerCommand(['conversation', recipientRunId], env)).toBe(1);
+    expect(await runMessageCommand(['conversation', recipientRunId], env)).toBe(1);
     expect(json().code).toBe('unavailable_transport');
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ code: 'incompatible_state', error: 'test' }), { status: 409 }));
-    await runWorkerCommand(['wait', '--request', requestId, '--mode', 'one'], env);
+    await runMessageCommand(['wait', '--request', requestId, '--mode', 'one'], env);
     expect(fetchMock.mock.calls.at(-1)?.[0]).toBe(`${transport.url}/wait`);
     expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toMatchObject({ requestIds: [requestId], mode: 'one' });
-    for (const args of [['send', recipientRunId, 'text'], ['reply', recipientRunId, 'text', '--id', id], ['send', recipientRunId, 'text', '--id', id, '--kind', 'request', '--request-id', requestId], ['wait', recipientRunId, '--request', requestId]]) {
-      expect(await runWorkerCommand(args, env)).toBe(1); expect(json().code).toBe('invalid_input');
+    for (const args of [['request', recipientRunId, 'text'], ['reply', recipientRunId, 'text', '--id', id], ['request', recipientRunId, 'text', '--id', id, '--request-id', requestId], ['wait', recipientRunId, '--request', requestId]]) {
+      expect(await runMessageCommand(args, env)).toBe(1); expect(json().code).toBe('invalid_input');
     }
   });
 
@@ -513,18 +509,18 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
       const body = JSON.parse(String(init?.body));
       return new Response(JSON.stringify({ message: { id: body.id, recipientRunId, senderRunId: f.parent.id,
-        kind: 'progress', text: body.text, createdAt: new Date().toISOString(), requestHash: 'a'.repeat(64),
-        state: 'continuation-required', instruction: 'Worker finished; send a new message with --resume' }, delivery: 'not-delivered' }));
+        kind: 'request', text: body.text, createdAt: new Date().toISOString(), requestHash: 'a'.repeat(64),
+        state: 'continuation-required', instruction: 'Worker finished; use cez worker resume' }, delivery: 'not-delivered' }));
     });
-    expect(await runWorkerCommand(['send', recipientRunId, 'Fix the result', '--id', id, '--kind', 'progress', '--resume'], env)).toBe(1);
+    expect(await runWorkerCommand(['resume', recipientRunId, 'Fix the result', '--id', id], env)).toBe(1);
     expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toMatchObject({ resume: true });
-    expect(json().message.instruction).toContain('--resume');
+    expect(json().message.instruction).toContain('worker resume');
   });
   it('routes both request wait forms through the real private wait endpoint', async () => {
     const requestId = randomUUID();
     const waitRequests = vi.spyOn(f.service, 'waitRequests').mockResolvedValue({ wait: { id: randomUUID(), workerIds: [], requestIds: [requestId], phase: 'registered', deadline: new Date(Date.now() + 600_000).toISOString(), outcomes: [] }, instruction: 'End your turn' });
-    for (const args of [['wait', '--request', requestId], ['wait-requests', requestId]]) {
-      expect(await runWorkerCommand(args, env)).toBe(0);
+    for (const args of [['wait', '--request', requestId], ['wait', '--request='+requestId]]) {
+      expect(await runMessageCommand(args, env)).toBe(0);
       expect(json()).toMatchObject({ wait: { requestIds: [requestId] } });
     }
     expect(waitRequests).toHaveBeenCalledTimes(2);

@@ -157,7 +157,7 @@ real exit (or a failed spawn). After exit, inherited stdout gets a bounded
 250ms drain; remaining pipe handles are closed. Neither a timeout nor sending
 a signal can fabricate an exit or free a still-live session's capacity.
 
-`cez task send` is human input. When `CEZ_TASK_ID` is nonempty, it exits 64 before contacting the cockpit, including with `--resume` or `--notify`. Agent-to-task messaging is not available yet; `CEZ_DELEGATION=1` and the `cez message` family are the planned path.
+`cez task send` is human input. When `CEZ_TASK_ID` is nonempty, it exits 64 before contacting the cockpit, including with `--resume` or `--notify`. Use `cez message progress <task-id> '<text>' --id <message-UUID> (needs CEZ_DELEGATION=1)` for agent-to-task messaging.
 
 **Non-human input (owned workers, 2026-09-06; immediate delivery, hearsay-tools/cezarion#505).** `sendAgentMessage`
 must never resolve a native question or a portable marker ask. False means the caller
@@ -249,6 +249,19 @@ While that exact opening answer is executing, it does not block registering a
 worker or request wait. A newer question still does. Wait refusals explain the
 condition and remedy; registration releases capacity only when the turn ends.
 
+Task messages use `cez message request`, `progress`, `follow-up`, `reply`, `conversation`,
+`inbox`, `cancel-request`, `wait --request`, and `cancel-wait` over the private delegation
+routes (hearsay-tools/cezarion#1991). The verb selects the kind; no `--kind` flag is needed.
+`conversation <task-id> --before <cursor>` reads older history. `tasks [--all] [--offset <n>]`
+lists same-project peer root tasks, excluding the caller and workers, with shared attention
+and `accepts` fields, at most 32 per page. Archived peers need `--all`. Workers cannot discover
+peers. `accepts: false` names why only the human can continue that peer.
+
+Worker control stays under `cez worker`. `resume <worker-id> '<instruction>' --id <UUID>`
+resumes a settled owned worker with a request. Removed worker message verbs, including
+`wait --request`, exit 64 and name the message command. `cez message request --resume`
+exits 64 and points to worker resume. There are no compatibility aliases.
+
 Parent/worker conversations use the same `sendAgentInput` seam in both directions.
 The root's durable conversation ledger is authoritative; `conversation-message`
 `{message, delivery, deliveredAt?}` and `request-outcome` `{outcome}` events are replayable projections in
@@ -286,6 +299,15 @@ do. Past the budget a peer message stays queued and wakes nothing, and the parke
 Cezar's `budget` human wait. Rows **U19p** (peer attribution beside a pending question) and
 **U19q** (the wake budget) in `workflows/waits-parity-cells.testkit.ts` run on every
 `RUNNER_IDS` native wire; `delegation/peer-conversations.test.ts` pins the service rules.
+The cockpit thread renders a peer message as a green card with a "Peer" chip, never as a user
+message, so it stays apart from the yellow human message and the blue and purple worker cards,
+including beside an open question. The card names the peer by title and links its thread. It
+reads the peer from the server when the run list does not carry it, and a deleted or unreadable
+peer shows "Deleted task" or "Task unavailable" with no link. The `deleted` outcome reads
+"Recipient deleted" on the request card. A peer request is never batched with a worker request.
+An older cockpit shows a peer message as a worker card with its raw outcome. Older cezar
+versions reject peer inputs, peer messages and `deleted` outcomes because their strict schemas
+do not know the added fields and outcome (hearsay-tools/cezarion#1993).
 
 Kinds are `request`, `progress`, `follow-up`, and `reply`. A request's message ID is
 its obligation ID; follow-ups and replies name `requestId`. Exact message retries
@@ -314,14 +336,14 @@ a reply after expiry as `replied-late` on those native wires (hearsay-tools/ceza
 Messages are bounded to 100,000 characters, 32 undelivered inputs per recipient,
 1,024 messages per family, and 32 pending obligations. Requests and waits expire
 in 600 seconds by default (1–1,800 seconds accepted). Requests sent with
-`--resume` accept `--timeout-seconds 1–86400` (24 hours maximum); their default
+`cez worker resume` accepts `--timeout-seconds 1–86400` (24 hours maximum); their default
 remains 600 seconds. Set the request bound explicitly for a long review round:
 a worker wait has its own deadline and does not extend the request. Several waits can be open at once (workers, CI, timers); a message wakes the run and closes none.
 Ordinary sends to review/terminal recipients return `not-delivered` with an
 actionable `message.instruction`; `continuation-required` means no input was
 queued. The CLI exits 1 for these receipts. An active owning parent can explicitly
-send a new request or progress instruction with `resume: true` (`worker send
---resume`). A settled done/review/failed worker is continued through the existing
+send a new request with `cez worker resume <worker-id> '<instruction>' --id <UUID>`
+(the send route carries `resume: true`). A settled done/review/failed worker is continued through the existing
 capacity scheduler with its accepted identity and a new execution revision.
 Acceptance atomically records the ledger, input and continuation checkpoint.
 Exact retries return the existing receipt without another continuation; retrying
@@ -2442,6 +2464,18 @@ carry `capability-absent` exemptions naming the version inspected, pinned the ot
 round: their default wire carries no cross-session control. The day cezar adds one,
 that exemption must go.
 
+**Compatibility (2026-10-27, deliberate).** The one changed default is Claude's inbound
+refusal. Every Claude launch, with or without `CEZ_DELEGATION=1`, passes the setting, so
+the user's other Claude sessions can no longer send `SendMessage` text into a cezar task.
+That path was never a cezar surface: the text bypassed the cockpit, the ledger and the
+handling of human questions. Human input still reaches a task through the cockpit and
+`cez task send` outside a task. Outbound `SendMessage` and `ListAgents` stay callable at
+shipped defaults, and D1 still denies them. No runner's MCP servers, plugins or tool
+grants change, and the other runners send no new flag. The "Messaging other tasks"
+section is prose, not a marker: an older cezar never parses it. The setting is per launch
+and writes no file, so a revert restores the old behavior on the next launch, and no state
+migrates.
+
 Provisioning supplies the bundled absolute CLI invocation and fresh environment
 credentials for both parent and worker sessions; it never copies the parent's
 credential to a worker. With delegation disabled/unavailable, the intent is absent
@@ -2586,7 +2620,7 @@ these events get persisted as NDJSON), and asserts `toStrictEqual` against the
   error text or credentials.
 - **SSE** — the server replays from NDJSON then streams live, deduped by `seq`.
   Event names: `run-event` (v1) and `ui-event` (v2 dotted types). These names are
-  a protected contract (see `BACKWARD_COMPATIBILITY.md` §2).
+  a protected contract (see `BACKWARD_COMPATIBILITY.md`).
 
 ---
 
@@ -2797,16 +2831,16 @@ values in §3).
 
 ## Compatibility
 
-The agent event protocol is a protected surface: see `BACKWARD_COMPATIBILITY.md`
-§7. In short — v1 `AgentEvent` `type` strings and v2 `UiEvent` dotted types are
+The agent event protocol is a protected surface: see `BACKWARD_COMPATIBILITY.md`.
+V1 `AgentEvent` `type` strings and v2 `UiEvent` dotted types are
 additive-only; removing/renaming one, or breaking the parity requirement, is a
-breaking change requiring the documented deprecation path.
+breaking change requiring an explanation and migration path.
 
 ## Related documents
 
 - `.ai/specs/2026-09-04-harness-parity-matrix.md` — the harness parity matrix's design record (§7).
 - `AGENTS.md` — repo working rules; the "Agent runners / backends" routing row.
-- `BACKWARD_COMPATIBILITY.md` — §7 (this protocol) and §2/§3 (SSE names, NDJSON).
+- `BACKWARD_COMPATIBILITY.md` — the compatibility policy.
 - `.ai/analysis/cockpit-ui-redesign/agent-event-protocols.md` — the deep design record (§7, §7.1).
 - `.ai/specs/2026-07-14-cockpit-ui-redesign.md` — the spec (protocol v2, parity requirement).
 

@@ -114,7 +114,7 @@ test('Markdown under packages/ skips unless a test may read it', t => {
   for (const [path, mode] of [
     ['packages/web/e2e/README.md', 'skip'],
     ['packages/contract/README.md', 'skip'],
-    ['BACKWARD_COMPATIBILITY.md', 'full'],
+    ['BACKWARD_COMPATIBILITY.md', 'skip'],
     ['packages/web/e2e/fixtures/README.md', 'full'],
   ]) {
     put(path, '# Docs\n');
