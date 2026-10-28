@@ -36,6 +36,10 @@ it('does not replace the destroy failure when reporting fails', () => {
   expect(() => {
     try { throw original; } finally { reportAttribution(() => { throw new Error('report failed'); }); }
   }).toThrow(original);
+  const settled = () => {
+    try { return 'incomplete'; } finally { reportAttribution(() => { throw new Error('report failed'); }); }
+  };
+  expect(settled()).toBe('incomplete');
 });
 
 it('keeps subtraction and refusal semantics while recording one evaluation', () => {
