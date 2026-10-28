@@ -66,21 +66,26 @@ export function projectConversationEvents(store: import('../runs/store.ts').RunS
   for (const message of state.messages) {
     for (const runId of [message.senderRunId, message.recipientRunId]) {
       if (!store.getRun(runId)) continue;
-      // The run's indexed projection ids (#880): appendEvent keeps them, so no transcript read.
-      const ids = { has: (id: string) => store.hasProjection(runId, id) };
-      const input = store.getRun(message.recipientRunId)?.agentInputs?.find(input => input.id === message.id);
-      const delivery = input?.consumedAt ? 'consumed' : input?.deliveredAt ? 'delivered' : input ? 'queued' : 'not-delivered';
-      // A read message was delivered first, even when both landed between two projections;
-      // readers that predate `consumed` still see it delivered (#505).
-      for (const step of delivery === 'consumed' ? ['delivered', 'consumed'] as const : [delivery]) {
-        const projectionId = `conversation-message:${message.id}:${step}`;
-        if (ids.has(projectionId)) continue;
-        store.appendEvent(runId, { type: 'conversation-message', projectionId, message, delivery: step,
-          ...(input?.deliveredAt ? { deliveredAt: input.deliveredAt } : {}),
-          ...(step === 'consumed' && input?.consumedAt ? { consumedAt: input.consumedAt } : {}) });
-      }
+      projectDelivery(store, runId, message);
       projectOutcome(store, runId, outcomes.get(message.id));
     }
+  }
+}
+
+/** Project delivery steps for one participant, preserving their order and indexed IDs. */
+function projectDelivery(store: RunStore, runId: string, message: ConversationMessage): void {
+  // The run's indexed projection ids (open-mercato/cezar#880): appendEvent keeps them, so no transcript read.
+  const ids = { has: (id: string) => store.hasProjection(runId, id) };
+  const input = store.getRun(message.recipientRunId)?.agentInputs?.find(input => input.id === message.id);
+  const delivery = input?.consumedAt ? 'consumed' : input?.deliveredAt ? 'delivered' : input ? 'queued' : 'not-delivered';
+  // A read message was delivered first, even when both landed between two projections;
+  // readers that predate `consumed` still see it delivered (hearsay-tools/cezarion#505).
+  for (const step of delivery === 'consumed' ? ['delivered', 'consumed'] as const : [delivery]) {
+    const projectionId = `conversation-message:${message.id}:${step}`;
+    if (ids.has(projectionId)) continue;
+    store.appendEvent(runId, { type: 'conversation-message', projectionId, message, delivery: step,
+      ...(input?.deliveredAt ? { deliveredAt: input.deliveredAt } : {}),
+      ...(step === 'consumed' && input?.consumedAt ? { consumedAt: input.consumedAt } : {}) });
   }
 }
 
