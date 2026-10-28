@@ -512,7 +512,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
         sent.push(content.map(block => block.type === 'text' ? block.text : '').join('\n'));
         return real(content, ...rest);
       }) as AgentSession['sendAgentMessage'];
-      const refusal = `worker reply ${f.w.id} '<answer>' --id <new-UUID> --request-id ${f.questionId}`;
+      const refusal = `message reply ${f.w.id} '<answer>' --id <new-UUID> --request-id ${f.questionId}`;
       const refusedNotes = () => eventsOf(f.p.id, 'note').filter(event => String(event.message).startsWith('Completion blocked: ') && String(event.message).includes(refusal));
       const nudges = () => eventsOf(f.p.id, 'note').filter(event => String(event.message).startsWith(COMPLETION_NUDGE_NOTE));
       const [timer] = store.getRun(f.p.id)?.waits ?? [];

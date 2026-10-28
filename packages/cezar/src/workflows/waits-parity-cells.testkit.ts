@@ -2052,7 +2052,7 @@ function workersCells(runners: RunnerId[]): void {
       const answers = vi.spyOn(manager, 'acceptDone');
       expect(manager.sendMessage(p.id, [{ type: 'text', text: `${toolCall('cezar_done', {})} ${toolCall('cezar_done', {})}` }])).toBe(true);
       await until(() => workerWaits(p.id)[0]?.phase === 'open' && store.getRun(p.id)?.status === 'waiting');
-      expect(workerWaits(p.id)[0]).toMatchObject({ source: 'cezar', via: 'completion', requestIds: [request.id] });
+      expect(workerWaits(p.id)[0]).toMatchObject({ source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion, requestIds: [request.id] });
       expect(answers.mock.results.map(result => result.value)).toEqual([
         expect.objectContaining({ ok: false, code: 'requests_outstanding', message: expect.stringContaining(request.id) }),
         expect.objectContaining({ ok: false, code: 'requests_outstanding' }),
@@ -2080,7 +2080,7 @@ function workersCells(runners: RunnerId[]): void {
       expect(prompted(runner, request.id)).not.toHaveLength(0);
       expect(prompted(runner, 'cez message wait --request')).not.toHaveLength(0);
       expect(prompted(runner, 'cez message cancel-request')).not.toHaveLength(0);
-      expect(entry).toMatchObject({ source: 'cezar', via: 'completion', requestIds: [request.id], phase: 'open' });
+      expect(entry).toMatchObject({ source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion, requestIds: [request.id], phase: WAIT_PHASE.open });
       expect(entry).not.toHaveProperty('deadline');
       expect(entry).not.toHaveProperty('timeoutSeconds');
       const current = store.getRun(p.id)!.delegation;

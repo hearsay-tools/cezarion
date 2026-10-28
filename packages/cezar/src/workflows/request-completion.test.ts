@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { cezarDoneAnswerSchema } from '@open-mercato/cezar-contract/waits';
@@ -8,9 +9,9 @@ import { QUICK_TASK_WORKFLOW } from './types.ts';
 
 function rootTask() {
   const run = store.createRun({ title: 'root', task: 'root', workflow: 'quick-task', workflowDef: QUICK_TASK_WORKFLOW,
-    steps: [{ id: 'task', name: 'Task', kind: 'agent' }] });
+    steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] });
   store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['wait'], receipts: [] } }]);
-  store.updateRun(run.id, { status: 'waiting', currentStepId: 'task' });
+  store.updateRun(run.id, { status: RUN_STATUS.waiting, currentStepId: 'task' });
   return run;
 }
 function obligation(senderRunId: string, recipientRunId: string, kind: 'request' | 'progress' = 'request') {
@@ -27,7 +28,7 @@ describe('root request completion without a live session', () => {
     const sender = rootTask(); const recipient = rootTask();
     const message = obligation(sender.id, recipient.id, kind === 'progress' ? 'progress' : 'request');
     store.commitConversation(sender.id, { messages: [message], outcomes: kind === 'cancelled'
-      ? [{ requestId: message.id, status: 'cancelled', observedAt: new Date().toISOString() }] : [] });
+      ? [{ requestId: message.id, status: RUN_STATUS.cancelled, observedAt: new Date().toISOString() }] : [] });
     expect(gate().completionRefusal(sender.id)).toBeUndefined();
   });
   it('queues a refusal naming the request when done reaches the gate without a session', () => {

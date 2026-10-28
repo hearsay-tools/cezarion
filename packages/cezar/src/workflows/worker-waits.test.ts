@@ -267,7 +267,7 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
     store.commitConversation(p.id, { messages: [request], outcomes: [] });
     const entry = manager.registerWorkerListWait(p.id, { requestIds: [request.id], timeoutSeconds: 600 }, 'cezar_wait');
     expect(entryOf(p.id, entry.id)?.phase).toBe('open');
-    store.commitConversation(p.id, { messages: [request], outcomes: [{ requestId: request.id, status: 'cancelled', observedAt: new Date().toISOString() }] });
+    store.commitConversation(p.id, { messages: [request], outcomes: [{ requestId: request.id, status: RUN_STATUS.cancelled, observedAt: new Date().toISOString() }] });
     expect(await handlers(p.id).finishTurn({}, new AbortController().signal)).toMatchObject({ ok: true, finishes: 'at_turn_end' });
     release();
     await until(() => !manager.isActive(p.id));
