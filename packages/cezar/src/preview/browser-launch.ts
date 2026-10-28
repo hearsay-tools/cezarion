@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { Cdp, CdpConnection } from './cdp.ts';
 import { ChromiumError, launchChromium, resolveChromium } from './chromium.ts';
 
-/** A task's Chromium as the preview host launches it (#781): resolve, launch, attach to its page. Split out of `host.ts`. */
+/** A task's Chromium as the preview host launches it (hearsay-tools/cezarion#781): resolve, launch, attach to its page. Split out of `host.ts`. */
 
 const PROFILE_RELEASE_WAIT_MS = 5_000;
 const STDERR_TAIL_CHARS = 4096;
