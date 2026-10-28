@@ -33,7 +33,7 @@ export const WAIT_CRITERIA = [
   { id: 'U9h', scenario: 'provider-error', name: 'provider failure and clean close with a human wait open leave the run recoverable' },
   { id: 'U6', scenario: 'baseline', name: 'cezar_done is refused with live workers and with settled but uncollected workers, accepted once collected, and open waits are cancelled' },
   { id: 'U7d', scenario: 'baseline', name: 'the done line and cezar_done finish through the same path' },
-  { id: 'U7q', scenario: 'baseline', name: 'a deferred message that answers the question removes its queue entry in the answer\'s commit' },
+  { id: 'U7q', scenario: 'baseline', name: 'live and deferred human answers commit their reset wake counters with the answer and keep the flush budget decisions' },
   { id: 'U6s', scenario: 'baseline', name: 'cezar_done in a workflow step that is not the last completes that step, and the next step runs' },
   // hearsay-tools/cezarion#1234 phase 2b: the turn-end rule.
   { id: 'U5', scenario: 'baseline', name: 'a turn end with no wait gets one nudge, then a second no-wait turn end opens a no-wait human wait and reads needs you' },
