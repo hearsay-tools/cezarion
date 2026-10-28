@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { RUN_STATUS, WAIT_PHASE, makeHumanWait, makeTimerWait } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, WAIT_PHASE, makeHumanWait, makePeerWait, makeTimerWait } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { blank } from '../test-wait-discipline.testkit.ts';
 import {
   AUTOMATIC, RUN_EXITS, RUN_STATES, RUN_TRIGGERS, WAIT_KINDS, stateOf, statusOf, strictRunExits, takeRunExitViolations,
@@ -112,6 +112,8 @@ describe('run states and their exits (hearsay-tools/cezarion#1804)', () => {
     expect(stateOf({ status: waiting, hasPendingPermission: true, waits: [makeHumanWait()] })).toBe('waiting:permission');
     expect(stateOf({ status: waiting, waits: [makeHumanWait()] })).toBe('waiting:human');
     expect(stateOf({ status: waiting, waits: [makeTimerWait()] })).toBe('waiting:timer');
+    // hearsay-tools/cezarion#1995: `computeWaitingOn`'s `peers` is the `waiting:peer` park, below workers and above a timer.
+    expect(stateOf({ status: waiting, waits: [makeTimerWait(), makePeerWait()] })).toBe('waiting:peer');
     expect(stateOf({ status: waiting, autoResumeAt: new Date().toISOString() })).toBe('waiting:usage-limit');
     expect(stateOf({ status: waiting, waits: [makeTimerWait({ phase: WAIT_PHASE.resolved })] })).toBe('waiting:capacity');
     expect(stateOf({ status: waiting })).toBe('waiting:plain');

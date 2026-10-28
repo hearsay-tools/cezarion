@@ -464,6 +464,13 @@ function peerRequestIds(delegation: WaitingOnInput['delegation']): Set<string> {
   return new Set((conversation?.messages ?? []).filter((message) => message.relationship === 'peer' && message.kind === 'request').map((message) => message.id));
 }
 
+/** Whether one of these requests went to a peer task: its wait reads "waiting on replies", never
+ *  "worker replies" (hearsay-tools/cezarion#1995). */
+export function requestsToPeers(delegation: WaitingOnInput['delegation'], requestIds: readonly string[] | undefined): boolean {
+  const toPeers = peerRequestIds(delegation);
+  return !!requestIds?.some((id) => toPeers.has(id));
+}
+
 /** Ids a worker entry has not heard about yet, or requests without an outcome. */
 function workerEntryOwed(wait: WorkerWaitEntry): number {
   if (wait.requestIds) {
@@ -500,8 +507,7 @@ export function computeWaitingOn(run: WaitingOnInput): WaitingOn | undefined {
   if (workers !== undefined) {
     const entries = open.filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker');
     const replies = entries.every((wait) => wait.requestIds !== undefined);
-    const toPeers = peerRequestIds(run.delegation);
-    const peers = replies && entries.some((wait) => wait.requestIds?.some((id) => toPeers.has(id)));
+    const peers = replies && entries.some((wait) => requestsToPeers(run.delegation, wait.requestIds));
     return { kind: 'workers', count: workers, ...(replies ? { replies: true as const } : {}), ...(peers ? { peers: true as const } : {}) };
   }
   const peerWaits = open.filter((wait): wait is PeerWaitEntry => wait.kind === 'peer');

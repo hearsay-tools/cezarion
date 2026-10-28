@@ -81,6 +81,7 @@ const waitOfKind = (id: string, kind: Wait['kind']) => store.getRun(id)?.waits?.
  *  plain reply leaves Cezar's own no-wait wait open (hearsay-tools/cezarion#1234). */
 const agentWaits = (id: string) => (store.getRun(id)?.waits ?? []).filter(wait => wait.source !== 'cezar');
 const settled = (id: string, waitId: string) => store.getRun(id)?.lastWaits?.find(wait => wait.id === waitId);
+const listed = (id: string, waitId: string) => store.getRun(id)?.waits?.find(wait => wait.id === waitId && wait.phase === WAIT_PHASE.open);
 const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?.filter(input => input.id === waitId) ?? [];
 function engine() {
   return manager as unknown as {
@@ -321,7 +322,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       });
 
       it('registers every criterion', () => {
-        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U9h', 'U6', 'U7d', 'U7q', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U3n', 'U3r', 'U3d', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U19p', 'U19q', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U24r', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27']);
+        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U9h', 'U6', 'U7d', 'U7q', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U3n', 'U3r', 'U3d', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U19p', 'U19q', 'U19w', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U24r', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27']);
         for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
       });
 
@@ -1928,6 +1929,25 @@ function workersCells(runners: RunnerId[]): void {
       await until(() => delivered(f.p.id, held) && prompted(runner, 'Peer progress u19q held').length > 0);
       expect(store.getRun(f.p.id)?.automaticWakes ?? 0).toBeLessThan(MAX_AUTO_CONTINUES);
       expect(peerWakeNotes(f.p.id)).toHaveLength(1);
+    });
+
+    // hearsay-tools/cezarion#1995 (R9, R11): the peer wait, the one wait a message closes, and only
+    // a named peer's message.
+    it(`${runner} U19w a peer wait parks a root that reads waiting on 1 task; a family message wakes it and the wait stays open; the named peer's message resolves it and is delivered with its result`, async () => {
+      const f = await conversingParent(runner);
+      const peer = peerOf(f, f.p.id);
+      const wait = manager.registerPeerWait(f.p.id, { peerIds: [peer.id], timeoutSeconds: 600 }, 'cez-message-wait');
+      await until(() => store.getRun(f.p.id)?.status === RUN_STATUS.waiting && listed(f.p.id, wait.id) !== undefined && semaphore.busy() === 0);
+      expect(deriveAttention(store.getRun(f.p.id)!)).toMatchObject({ bucket: 'none', label: 'waiting on 1 task' });
+      const turns = turnEnds(f.p.id);
+      const family = await f.progress('Worker progress u19w');
+      await until(() => delivered(f.p.id, family) && turnEnds(f.p.id) > turns && store.getRun(f.p.id)?.status === RUN_STATUS.waiting);
+      expect(listed(f.p.id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open });
+      const id = await peer.progress('Peer progress u19w');
+      await until(() => delivered(f.p.id, id) && settled(f.p.id, wait.id)?.phase === WAIT_PHASE.delivered);
+      expect(settled(f.p.id, wait.id)).toMatchObject({ result: { reason: 'message', peerRunId: peer.id, messageId: id } });
+      await until(() => prompted(runner, 'Peer progress u19w').length > 0 && prompted(runner, `Peer wait ${wait.id}`).length > 0);
+      expect(prompted(runner, `Peer wait ${wait.id}`)[0]).toContain(`task ${peer.id} sent message ${id}`);
     });
 
     // hearsay-tools/cezarion#1301: a blocked done at the turn end is answered with the refusal
