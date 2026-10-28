@@ -31,8 +31,8 @@ import {
   ompProviderErrorMessage,
   ompTurnStarted,
 } from './omp-ui-mapper.js';
+import { armEndWatchdog, emitPiToolResult, type PiEndWatchdog, PiRpcInput, PiTextBlocks, recordPiToolCall } from './pi-rpc-turn.ts';
 import { summarizeRunnerStderr } from './runner-stderr.ts';
-import { emitPiToolResult, PiRpcInput, PiTextBlocks, recordPiToolCall } from './pi-rpc-turn.ts';
 import { boundOutputDrainAfterExit, DEFAULT_RUN_TIMEOUT_MS, KILL_GRACE_MS } from './runner-runtime.js';
 
 /**
@@ -308,7 +308,7 @@ export class OmpRunner implements AgentRunner {
     let open = true;
     let timedOut = false;
     let terminatedByCezar = false;
-    let killTimer: NodeJS.Timeout | undefined;
+    let killWatchdog: PiEndWatchdog | undefined;
     let interruptKillTimer: NodeJS.Timeout | undefined;
     let ompUi = createOmpUiState();
     const textChunks: string[] = [];
@@ -446,18 +446,7 @@ export class OmpRunner implements AgentRunner {
       rpcInput.rejectAgentAck();
       flushOutbox();
       child.stdin.end();
-      killTimer = setTimeout(() => {
-        if (child.exitCode !== null || child.signalCode !== null) return;
-        terminatedByCezar = true;
-        signalSession(child, 'SIGTERM');
-        // An OMP that ignores SIGTERM would otherwise hold `result` open forever: the deadline's
-        // interrupt() is a no-op once `open` is false.
-        killTimer = setTimeout(() => {
-          if (child.exitCode === null && child.signalCode === null) signalSession(child, 'SIGKILL');
-        }, killGraceMs);
-        killTimer.unref?.();
-      }, killGraceMs);
-      killTimer.unref?.();
+      killWatchdog = armEndWatchdog(() => child, killGraceMs, () => { terminatedByCezar = true; });
     };
     const interrupt = (): void => {
       if (!open) return;
@@ -777,7 +766,7 @@ export class OmpRunner implements AgentRunner {
       } finally {
         if (deadline) clearTimeout(deadline);
         rpcInput.stopAutoEndTimer();
-        if (killTimer) clearTimeout(killTimer);
+        killWatchdog?.clear();
         // A refused spawn may still be respawned: stay open so input accepted meanwhile is kept
         // for the new child instead of being refused in the gap.
         if (!retryPossible()) open = false;

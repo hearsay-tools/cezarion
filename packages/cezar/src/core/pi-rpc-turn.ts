@@ -1,8 +1,10 @@
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { parseAskMarker } from './ask.ts';
 import type { AgentEvent, AgentInputOptions, AgentToolCallRecord, ContentBlock, SessionOptions } from './agent-runner.js';
 import { InputSubmissions } from './input-submissions.ts';
 import { contentText, emitImages, isRecord, string } from './pi-rpc-wire.ts';
 import { AUTO_END_DELAY_MS } from './runner-runtime.js';
+import { signalSession } from './session-process.js';
 import { V1TextCoalescer } from './v1-text-coalescer.js';
 
 /**
@@ -263,4 +265,34 @@ export class PiRpcInput {
     }
     return acknowledged;
   }
+}
+
+/** The `end()` escalation of a Pi-family session, armed once its stdin closes. */
+export interface PiEndWatchdog {
+  /** Stops whichever step is still pending. */
+  clear(): void;
+}
+
+/**
+ * After `end()` closes stdin the CLI should exit on its own. When `child()` is still alive after
+ * `graceMs`, `onTerminate` records that cezar ends it and SIGTERM follows; SIGKILL follows another
+ * `graceMs` later. Closing input makes `interrupt()` a no-op, so this watchdog owns escalation even
+ * when the CLI ignores both EOF and SIGTERM, and `result` cannot stay open forever.
+ */
+export function armEndWatchdog(
+  child: () => ChildProcessWithoutNullStreams,
+  graceMs: number,
+  onTerminate: () => void,
+): PiEndWatchdog {
+  let timer = setTimeout(() => {
+    if (child().exitCode !== null || child().signalCode !== null) return;
+    onTerminate();
+    signalSession(child(), 'SIGTERM');
+    timer = setTimeout(() => {
+      if (child().exitCode === null && child().signalCode === null) signalSession(child(), 'SIGKILL');
+    }, graceMs);
+    timer.unref?.();
+  }, graceMs);
+  timer.unref?.();
+  return { clear: () => clearTimeout(timer) };
 }

@@ -23,7 +23,7 @@ import { cezarToolNames } from '../ci-wait/tools.js';
 import { readNdjson } from './ndjson.js';
 import { isRecord, piMessageText, number, piRpcError as rpcError, string, toPiPrompt, truncate, waitForExit } from './pi-rpc-wire.ts';
 import { createPiUiState, mapPiRpcMessage, piFlushProviderError, piProviderErrorMessage, piTurnStarted } from './pi-ui-mapper.js';
-import { emitPiToolResult, PiRpcInput, PiTextBlocks, recordPiToolCall } from './pi-rpc-turn.ts';
+import { armEndWatchdog, emitPiToolResult, type PiEndWatchdog, PiRpcInput, PiTextBlocks, recordPiToolCall } from './pi-rpc-turn.ts';
 import { boundOutputDrainAfterExit, DEFAULT_RUN_TIMEOUT_MS, KILL_GRACE_MS } from './runner-runtime.js';
 
 export interface PiRunnerOptions {
@@ -111,7 +111,7 @@ export class PiRunner implements AgentRunner {
     let terminatedByCezar = false;
     let explicitEnd = false;
     let automaticCleanupStarted = false;
-    let killTimer: NodeJS.Timeout | undefined;
+    let killWatchdog: PiEndWatchdog | undefined;
     let interruptKillTimer: NodeJS.Timeout | undefined;
     let piUi = createPiUiState();
     const textChunks: string[] = [];
@@ -242,18 +242,7 @@ export class PiRunner implements AgentRunner {
       open = false;
       rpcInput.rejectAgentAck();
       child.stdin.end();
-      killTimer = setTimeout(() => {
-        if (child.exitCode !== null || child.signalCode !== null) return;
-        terminatedByCezar = true;
-        signalSession(child, 'SIGTERM');
-        // Closing input makes interrupt() a no-op; this watchdog must own
-        // escalation even when Pi ignores both EOF and SIGTERM.
-        killTimer = setTimeout(() => {
-          if (child.exitCode === null && child.signalCode === null) signalSession(child, 'SIGKILL');
-        }, KILL_GRACE_MS);
-        killTimer.unref?.();
-      }, KILL_GRACE_MS);
-      killTimer.unref?.();
+      killWatchdog = armEndWatchdog(() => child, KILL_GRACE_MS, () => { terminatedByCezar = true; });
     };
     const interrupt = (): void => {
       if (child.exitCode === null && child.signalCode === null) terminatedByCezar = true;
@@ -448,7 +437,7 @@ export class PiRunner implements AgentRunner {
       emitLatchedProviderError();
       emitLatchedUiProviderError();
       const exitCode = await waitForExit(child);
-      if (killTimer) clearTimeout(killTimer);
+      killWatchdog?.clear();
       if (interruptKillTimer) clearTimeout(interruptKillTimer);
       if (spawnError) throw spawnError;
       if (inputError) throw inputError;
