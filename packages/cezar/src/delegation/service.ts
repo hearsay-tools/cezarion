@@ -844,30 +844,16 @@ export class DelegationService {
       this.observeAttempt(project, workerId, result.state === 'complete' || !explained ? undefined : { key, holders: recordHolders(holders) });
       return result;
     };
-    persist('requested', worker.delegation.destroy?.remaining ?? ['process', 'worktree', 'branch']);
-    try {
-      persist('terminating', ['process', ...resources]);
-      const generation = project.store.readWorkerExecution(workerId)?.generation;
-      project.manager.requestActiveWorkerStop(workerId);
-      commonDir = await this.commonDir(project);
-      assertAttached();
-      assertDestroyIdentity(project, workerId, check(), workspace, requestedAt, generation);
-      key = observe();
-      const reapHolders = await prepareAuthoritativeReaper(project, workerId, workspace, check, assertAttached);
-      await reapHolders?.();
-      project.manager.requestWorkerStop(workerId);
+    const terminationBlocked = (): WorkerDestroyResult => {
+      // #469: name what blocks a crashed generation; other causes keep the generic message.
+      const taken = project.manager.takeWorkerTerminationBlocker(workerId);
+      const failure = terminationFailure(workerId, resources, taken);
+      if (taken?.changed) project.store.appendEvent(workerId, { type: 'lifecycle', message: `destroy blocked: ${failure.reason}` });
+      persist(failure.result.state, failure.result.remaining, failure.result.error);
+      return observed(failure.result, failure.holders, !!taken);
+    };
+    const cleanWorkspace = async (reapHolders: Awaited<ReturnType<typeof prepareAuthoritativeReaper>>): Promise<WorkerDestroyResult> => {
       let result: WorkerDestroyResult;
-      const terminated = await project.manager.awaitRunTermination(workerId, this.terminationTimeoutMs, { reapOrphans: true });
-      assertAttached();
-      key = observe();
-      if (!terminated) {
-        // #469: name what blocks a crashed generation; other causes keep the generic message.
-        const taken = project.manager.takeWorkerTerminationBlocker(workerId);
-        const failure = terminationFailure(workerId, resources, taken);
-        if (taken?.changed) project.store.appendEvent(workerId, { type: 'lifecycle', message: `destroy blocked: ${failure.reason}` });
-        persist(failure.result.state, failure.result.remaining, failure.result.error);
-        return observed(failure.result, failure.holders, !!taken);
-      }
       persist('cleaning', resources);
       const snapshot = structuredClone(check());
       const proof = project.store.readWorkerExecution(workerId);
@@ -944,7 +930,8 @@ export class DelegationService {
       }, evidence.diffSnapshot);
       project.manager.reconcileWorkerWaits(evidence.result.parentRunId);
       return observed(result, holders, explained);
-    } catch (error) {
+    };
+    const recordFailure = (error: unknown): WorkerDestroyResult | undefined => {
       // hearsay-tools/cezarion#879: an attempt that throws says why, instead of leaving an
       // in-progress phase with no error, as long as this is still the same pending destroy. A
       // throw explains nothing a tick could see clear, so the next tick attempts in full.
@@ -958,7 +945,29 @@ export class DelegationService {
           return observed({ workerId, state: 'incomplete', remaining, error: reason }, [], false);
         }
       } catch { /* the attempt's own error is the one to report */ }
+    };
+    persist('requested', worker.delegation.destroy?.remaining ?? ['process', 'worktree', 'branch']);
+    try {
+      persist('terminating', ['process', ...resources]);
+      const generation = project.store.readWorkerExecution(workerId)?.generation;
+      project.manager.requestActiveWorkerStop(workerId);
+      commonDir = await this.commonDir(project);
+      assertAttached();
+      assertDestroyIdentity(project, workerId, check(), workspace, requestedAt, generation);
+      key = observe();
+      const reapHolders = await prepareAuthoritativeReaper(project, workerId, workspace, check, assertAttached);
+      await reapHolders?.();
+      project.manager.requestWorkerStop(workerId);
+      const terminated = await project.manager.awaitRunTermination(workerId, this.terminationTimeoutMs, { reapOrphans: true });
+      assertAttached();
+      key = observe();
+      if (!terminated) return terminationBlocked();
+      return await cleanWorkspace(reapHolders);
+    } catch (error) {
+      const result = recordFailure(error);
+      if (result) return result;
       throw error;
     }
+
   }
 }
