@@ -768,6 +768,7 @@ cez message follow-up <recipient-run-id> 'Include empty input' --id <message-UUI
 cez message reply <recipient-run-id> 'Checked; empty input is covered' --id <message-UUID> --request-id <request-UUID>
 cez message conversation <recipient-run-id>
 cez message wait --request <request-UUID> --request <another-request-UUID> --mode all
+cez message wait --peer <task-id> --timeout-seconds 1800   # Wake on that peer task's next message, or when it settles
 cez message inbox
 cez message tasks --all
 cez message cancel-wait <wait-id>

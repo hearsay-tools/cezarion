@@ -65,13 +65,13 @@ describe('cezar-ci MCP server instructions', () => {
     try {
       const wait = (await client.listTools()).tools.find(tool => tool.name === 'cezar_wait')!;
       const properties = wait.inputSchema.properties as Record<string, any>;
-      expect(properties.kind.enum).toEqual(['pr', 'worker', 'timer', 'process']);
-      for (const key of ['worker_ids', 'request_ids']) {
-        expect(properties[key]).toMatchObject({ type: 'array', minItems: 1, maxItems: 32 });
-        expect(properties[key].description).toMatch(/^kind "worker":/);
+      expect(properties.kind.enum).toEqual(['pr', 'worker', 'request', 'peer', 'timer', 'process']);
+      for (const [key, kind] of [['worker_ids', 'worker'], ['request_ids', 'request'], ['peer_ids', 'peer']]) {
+        expect(properties[key!]).toMatchObject({ type: 'array', minItems: 1, maxItems: 32 });
+        expect(properties[key!].description).toMatch(new RegExp(`^kind "${kind}":`));
       }
       expect(properties.mode.enum).toEqual(['one', 'any', 'all']);
-      expect(properties.timeout_seconds.description).toMatch(/kind "worker": 1–1800, default 600/);
+      expect(properties.timeout_seconds.description).toMatch(/kind "worker", "request" or "peer": 1–1800, default 600/);
       expect(wait.description).toMatch(/worker/);
       expect((await client.listTools()).tools.find(tool => tool.name === 'cezar_cancel_wait')!.description).toMatch(/worker/);
     } finally { await close(); }

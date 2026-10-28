@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { askContextSchema, askRequestSchema } from './ask-schema.ts';
 import { ciPrIdentitySchema, ciPrUrlSchema, ciWaitErrorCodeSchema, ciWaitRequestSchema, ciWaitResultSchema, prWaitUntilSchema } from './ci-wait.ts';
-import { workerIdsSchema, workerOutcomeSchema, workerWaitModeSchema } from './delegation.ts';
-import type { DelegationState, RunDelegationSummary, WorkerCompletionWait, WorkerWait } from './delegation.ts';
-import { requestOutcomeSchema } from './conversations.ts';
+import { peerWaitResultSchema, refinePeerWaitResult, workerIdsSchema, workerOutcomeSchema, workerWaitModeSchema } from './delegation.ts';
+import type { DelegationState, PeerWaitView, RunDelegationSummary, WorkerCompletionWait, WorkerWait } from './delegation.ts';
+import { requestOutcomeSchema, type ConversationMessage } from './conversations.ts';
 import type { RunRecord } from './runs.ts';
 
 /**
@@ -18,6 +18,8 @@ import type { RunRecord } from './runs.ts';
  * replies to requests and has a deadline. Phase 3b (hearsay-tools/cezarion#1301) moves the
  * completion gate's own wait into the list as a `source: 'cezar'`, `via: 'completion'` worker
  * entry with no deadline, so the list is all `computeWaitingOn` reads.
+ * hearsay-tools/cezarion#1995 adds `peer` (spec `2026-10-27-task-communication-protocol` § 7): a root
+ * task waits for named peer root tasks to write or to settle, with a deadline.
  */
 
 export const WAIT_LIMIT = 16;
@@ -29,6 +31,9 @@ const NOTE_MAX = 512;
 export const PROCESS_TIMEOUT_DEFAULT_SECONDS = 1800;
 export const PROCESS_TIMEOUT_MAX_SECONDS = 7200;
 export const PROCESS_EXIT_FILE_MAX = 4096;
+/** A peer wait's deadline, and a request or worker wait's (hearsay-tools/cezarion#1995). */
+export const PEER_WAIT_DEFAULT_SECONDS = 600;
+export const PEER_WAIT_MAX_SECONDS = 1800;
 const pidSchema = z.number().int().min(2);
 
 /** `open` → `resolved` (its event fired or its deadline passed) → `delivered`, or `cancelled`. */
@@ -38,11 +43,13 @@ export type WaitPhase = z.infer<typeof waitPhaseSchema>;
  *  `no-wait` is the human wait cezar opens when a nudged turn still ends without one; `budget`
  *  is the one it opens when the automatic-wake budget is spent; `cez-worker-wait` is
  *  `cez worker wait`, the alias that opens a `worker` wait; `completion` is the worker wait
- *  cezar opens for a root whose done is refused twice (hearsay-tools/cezarion#1301). */
+ *  cezar opens for a root whose done is refused twice (hearsay-tools/cezarion#1301).
+ *  `cez-message-wait` is `cez message wait --peer` (hearsay-tools/cezarion#1995); a request wait
+ *  from `cez message wait --request` keeps `cez-worker-wait`. */
 export const waitViaSchema = z.enum([
   // `cezar_wait_for_ci` is kept for stored rows only: the tool was removed (hearsay-tools/cezarion#1236).
   'cezar_wait', 'cezar_wait_for_ci', 'cezar_ask', 'monitoring-line', 'schedule-wakeup', 'ask-line', 'native-ask', 'no-wait', 'budget',
-  'cez-worker-wait', 'completion',
+  'cez-worker-wait', 'completion', 'cez-message-wait',
 ]);
 export type WaitVia = z.infer<typeof waitViaSchema>;
 
@@ -184,29 +191,63 @@ export type WorkerWaitEntry = z.infer<typeof workerWaitEntrySchema>;
 export type DeadlinedWorkerWaitEntry = WorkerWaitEntry & { deadline: string };
 export const hasWorkerDeadline = (entry: WorkerWaitEntry): entry is DeadlinedWorkerWaitEntry => entry.deadline !== undefined;
 
-export const waitSchema = z.discriminatedUnion('kind', [prWaitEntrySchema, timerWaitEntrySchema, humanWaitEntrySchema, workerWaitEntrySchema, processWaitEntrySchema]);
+/** Why a peer wait resolved (hearsay-tools/cezarion#1995): `delegation.ts` defines the union, which
+ *  the CLI view shares. */
+export { peerWaitResultSchema, type PeerWaitResult } from './delegation.ts';
+
+/**
+ * Named peer root tasks (hearsay-tools/cezarion#1995, spec `2026-10-27-task-communication-protocol`
+ * § 7). It is the one wait a message closes, and only a message from a peer it names; human and
+ * family messages wake the run and leave it open. It always has a deadline, its liveness bound.
+ */
+export const peerWaitEntrySchema = z.object({
+  ...waitBaseShape,
+  kind: z.literal('peer'),
+  deadline: z.iso.datetime(),
+  timeoutSeconds: z.number().int().min(1).max(PEER_WAIT_MAX_SECONDS),
+  peerIds: workerIdsSchema,
+  result: peerWaitResultSchema.optional(),
+}).strict().superRefine(refinePeerWaitResult);
+export type PeerWaitEntry = z.infer<typeof peerWaitEntrySchema>;
+
+/** A peer wait as `cez message wait --peer` and `cez message cancel-wait` answer it. */
+export function peerWaitView(entry: PeerWaitEntry): PeerWaitView {
+  return { id: entry.id, peerIds: entry.peerIds, deadline: entry.deadline, phase: entry.phase, ...(entry.result ? { result: entry.result } : {}) };
+}
+
+export const waitSchema = z.discriminatedUnion('kind', [prWaitEntrySchema, timerWaitEntrySchema, humanWaitEntrySchema, workerWaitEntrySchema, processWaitEntrySchema, peerWaitEntrySchema]);
 export type Wait = z.infer<typeof waitSchema>;
 
 // ---- the tools ----------------------------------------------------------------------------
 
+const oneModeTakesOneId = (ids: readonly string[], mode: string | undefined, ctx: z.RefinementCtx) => {
+  if (mode === 'one' && ids.length !== 1) ctx.addIssue({ code: 'custom', message: 'one mode requires exactly one id', path: ['mode'] });
+};
+const waitTimeoutSeconds = z.number().int().min(1).max(PEER_WAIT_MAX_SECONDS).default(PEER_WAIT_DEFAULT_SECONDS);
+
 /** `cezar_wait`. The `pr` branch keeps the removed `cezar_wait_for_ci`'s bounds and default;
- *  it replaced kind `ci` (hearsay-tools/cezarion#1425). */
+ *  it replaced kind `ci` (hearsay-tools/cezarion#1425). Kind `request` took `request_ids` from kind
+ *  `worker`, and kind `peer` is new (hearsay-tools/cezarion#1995); a request wait is still stored
+ *  as a `worker` entry with `requestIds`. */
 export const cezarWaitRequestSchema = z.discriminatedUnion('kind', [
   ciWaitRequestSchema.extend({ kind: z.literal('pr') }).strict(),
   z.object({
     kind: z.literal('worker'),
-    worker_ids: workerIdsSchema.optional(),
-    request_ids: workerIdsSchema.optional(),
+    worker_ids: workerIdsSchema,
     mode: workerWaitModeSchema.optional(),
-    timeout_seconds: z.number().int().min(1).max(1800).default(600),
-  }).strict().superRefine((request, ctx) => {
-    const ids = request.worker_ids ?? request.request_ids;
-    if ((request.worker_ids === undefined) === (request.request_ids === undefined)) {
-      ctx.addIssue({ code: 'custom', message: 'name worker_ids or request_ids, exactly one', path: ['worker_ids'] });
-    } else if (request.mode === 'one' && ids?.length !== 1) {
-      ctx.addIssue({ code: 'custom', message: 'one mode requires exactly one id', path: ['mode'] });
-    }
-  }),
+    timeout_seconds: waitTimeoutSeconds,
+  }).strict().superRefine((request, ctx) => oneModeTakesOneId(request.worker_ids, request.mode, ctx)),
+  z.object({
+    kind: z.literal('request'),
+    request_ids: workerIdsSchema,
+    mode: workerWaitModeSchema.optional(),
+    timeout_seconds: waitTimeoutSeconds,
+  }).strict().superRefine((request, ctx) => oneModeTakesOneId(request.request_ids, request.mode, ctx)),
+  z.object({
+    kind: z.literal('peer'),
+    peer_ids: workerIdsSchema,
+    timeout_seconds: waitTimeoutSeconds,
+  }).strict(),
   z.object({
     kind: z.literal('timer'),
     seconds: z.number().int().min(TIMER_MIN_SECONDS).max(TIMER_MAX_SECONDS),
@@ -227,11 +268,11 @@ export type CezarWaitRequestInput = z.input<typeof cezarWaitRequestSchema>;
 export const cezarCancelWaitRequestSchema = z.object({ wait_id: z.uuid() }).strict();
 export type CezarCancelWaitRequest = z.infer<typeof cezarCancelWaitRequestSchema>;
 
-/** One still-open wait as both tools list it back to the agent. A PR, timer, worker or process wait
- *  carries its deadline; a human wait has none. */
+/** One still-open wait as both tools list it back to the agent. A PR, timer, worker, process or
+ *  peer wait carries its deadline; a human wait has none. */
 const openWaitFields = { wait_id: z.uuid(), summary: z.string().max(256) };
 export const openWaitSchema = z.discriminatedUnion('kind', [
-  z.object({ ...openWaitFields, kind: z.enum(['pr', 'timer', 'worker', 'process']), deadline: z.iso.datetime() }).strict(),
+  z.object({ ...openWaitFields, kind: z.enum(['pr', 'timer', 'worker', 'process', 'peer']), deadline: z.iso.datetime() }).strict(),
   z.object({ ...openWaitFields, kind: z.literal('human') }).strict(),
 ]);
 export type OpenWait = z.infer<typeof openWaitSchema>;
@@ -248,7 +289,8 @@ export const cezarWaitAnswerSchema = z.discriminatedUnion('ok', [
   z.object({
     ok: z.literal(true),
     wait_id: z.uuid(),
-    kind: z.enum(['pr', 'timer', 'worker', 'process']),
+    /** The kind the call asked for: a `request` wait is stored as a `worker` entry. */
+    kind: z.enum(['pr', 'timer', 'worker', 'request', 'process', 'peer']),
     deadline: z.iso.datetime(),
     open_waits: z.array(openWaitSchema).max(WAIT_LIMIT),
   }).strict(),
@@ -352,8 +394,8 @@ export type CezarDoneAnswer = z.infer<typeof cezarDoneAnswerSchema>;
 // ---- what the run is waiting on -----------------------------------------------------------
 
 /**
- * The run's top open wait, by the spec's order: human > usage limit > workers > PR > process > timer.
- * A summary field: lists and `deriveAttention` read it instead of the wait list.
+ * The run's top open wait, by the spec's order: human > usage limit > workers > peers > PR > process
+ * > timer. A summary field: lists and `deriveAttention` read it instead of the wait list.
  */
 const waitingOnUnionSchema = z.discriminatedUnion('kind', [
   /** `shown` once the user sees the question (its `askSeq`): attention reads that as Needs you at
@@ -363,8 +405,11 @@ const waitingOnUnionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('usage-limit'), at: z.string() }),
   /** The workers still owed an outcome, or the replies awaited; 0 when the row cannot count.
    *  `replies` when every open worker entry waits on request replies, so a summary, which carries
-   *  no `waits`, can still say so (hearsay-tools/cezarion#1235). */
-  z.object({ kind: z.literal('workers'), count: z.number().int().nonnegative(), replies: z.literal(true).optional() }),
+   *  no `waits`, can still say so (hearsay-tools/cezarion#1235). `peers` when one of those
+   *  requests went to a peer task (hearsay-tools/cezarion#1995). */
+  z.object({ kind: z.literal('workers'), count: z.number().int().nonnegative(), replies: z.literal(true).optional(), peers: z.literal(true).optional() }),
+  /** The peer tasks the open peer waits name, counted once each (hearsay-tools/cezarion#1995). */
+  z.object({ kind: z.literal('peers'), count: z.number().int().nonnegative() }),
   z.object({
     kind: z.literal('pr'),
     until: prWaitUntilSchema,
@@ -404,6 +449,33 @@ export function isUsageLimitHold<T extends Partial<Pick<RunRecord, 'status' | 'a
   return run.status === 'waiting' && run.autoResumeAt !== undefined;
 }
 
+/** The requests a root sent to peer tasks, read from its own ledger: a request wait on one of them
+ *  is not a wait on workers (hearsay-tools/cezarion#1995). A summary's slim delegation has none. */
+function peerRequestIds(delegation: WaitingOnInput['delegation']): Set<string> {
+  const conversation = delegation?.role === 'root' && 'conversation' in delegation ? delegation.conversation : undefined;
+  // `toRunSummary` passes an unparsed ledger: a malformed one marks nothing and never throws.
+  const messages: unknown[] = Array.isArray(conversation?.messages) ? conversation.messages : [];
+  return new Set(messages.flatMap((message) => {
+    const entry = message && typeof message === 'object' ? message as Partial<ConversationMessage> : undefined;
+    return entry?.relationship === 'peer' && entry.kind === 'request' && typeof entry.id === 'string' ? [entry.id] : [];
+  }));
+}
+
+/** A summary's slim root delegation with the root's own ledger, which the slim one drops, so
+ *  `computeWaitingOn` still marks a wait on a peer's reply (hearsay-tools/cezarion#1995). The ledger
+ *  is unparsed; `peerRequestIds` reads it defensively. */
+export function withRootLedger(slim: RunDelegationSummary | undefined, raw: unknown): WaitingOnInput['delegation'] {
+  const ledger = raw && typeof raw === 'object' ? raw as { role?: unknown; conversation?: unknown } : undefined;
+  return slim?.role === 'root' && ledger?.role === 'root' ? { ...slim, conversation: ledger.conversation } as WaitingOnInput['delegation'] : slim;
+}
+
+/** Whether one of these requests went to a peer task: its wait reads "waiting on replies", never
+ *  "worker replies" (hearsay-tools/cezarion#1995). */
+export function requestsToPeers(delegation: WaitingOnInput['delegation'], requestIds: readonly string[] | undefined): boolean {
+  const toPeers = peerRequestIds(delegation);
+  return !!requestIds?.some((id) => toPeers.has(id));
+}
+
 /** Ids a worker entry has not heard about yet, or requests without an outcome. */
 function workerEntryOwed(wait: WorkerWaitEntry): number {
   if (wait.requestIds) {
@@ -440,8 +512,11 @@ export function computeWaitingOn(run: WaitingOnInput): WaitingOn | undefined {
   if (workers !== undefined) {
     const entries = open.filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker');
     const replies = entries.every((wait) => wait.requestIds !== undefined);
-    return { kind: 'workers', count: workers, ...(replies ? { replies: true as const } : {}) };
+    const peers = replies && entries.some((wait) => requestsToPeers(run.delegation, wait.requestIds));
+    return { kind: 'workers', count: workers, ...(replies ? { replies: true as const } : {}), ...(peers ? { peers: true as const } : {}) };
   }
+  const peerWaits = open.filter((wait): wait is PeerWaitEntry => wait.kind === 'peer');
+  if (peerWaits.length) return { kind: 'peers', count: new Set(peerWaits.flatMap((wait) => wait.peerIds)).size };
   const pr = earliest(open.filter((wait): wait is PrWaitEntry => wait.kind === 'pr'));
   if (pr) {
     return { kind: 'pr', until: pr.until, waitId: pr.id, prUrl: pr.prUrl, repository: pr.repository, prNumber: pr.prNumber, deadline: pr.deadline };

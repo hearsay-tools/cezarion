@@ -4,8 +4,8 @@ import { isHttpUrl } from '@/lib/utils'
 import type { TaskReference } from '@/lib/tasks-table'
 
 /**
- * The run's wait details (spec 2026-10-17-unified-waits): every open CI, timer, worker and process
- * wait, then the last settled CI observation or the retained recovery error, and the last settled
+ * The run's wait details (spec 2026-10-17-unified-waits): every open CI, timer, worker, process and
+ * peer wait, then the last settled CI observation or the retained recovery error, and the last settled
  * process wait's outcome. Snapshot-only status: none
  * of it starts a browser watcher. Lived in the run header until hearsay-tools/cezarion#1333 moved
  * it into the Session activity card's first row.
@@ -14,17 +14,18 @@ type CiWait = Extract<Wait, { kind: 'pr' }>
 type TimerWait = Extract<Wait, { kind: 'timer' }>
 type WorkerWait = Extract<Wait, { kind: 'worker' }>
 type ProcessWait = Extract<Wait, { kind: 'process' }>
-type ListedWait = CiWait | TimerWait | WorkerWait | ProcessWait
+type PeerWait = Extract<Wait, { kind: 'peer' }>
+type ListedWait = CiWait | TimerWait | WorkerWait | ProcessWait | PeerWait
 
 /** Only these statuses can have a wait in flight; a finished run's leftovers are history. */
 const IN_FLIGHT_STATUSES: readonly ApiRun['status'][] = ['running', 'queued', 'waiting']
 
-/** The kinds listed here: CI, timer, worker and process waits. Streamed records were only checked
- *  for `id`. A human wait shows as Needs you and its question card, through the pill, never in
- *  this list. A worker wait shows only while open: its result is not owed in a line of its own. */
+/** The kinds listed here: CI, timer, worker, process and peer waits. Streamed records were only
+ *  checked for `id`. A human wait shows as Needs you and its question card, through the pill, never
+ *  in this list. A worker or peer wait shows only while open: its result is not owed in a line of its own. */
 function renderableWaits(value: unknown): ListedWait[] {
   return Array.isArray(value)
-    ? value.filter((wait): wait is ListedWait => wait?.kind === 'pr' || wait?.kind === 'timer' || wait?.kind === 'worker' || wait?.kind === 'process')
+    ? value.filter((wait): wait is ListedWait => wait?.kind === 'pr' || wait?.kind === 'timer' || wait?.kind === 'worker' || wait?.kind === 'process' || wait?.kind === 'peer')
     : []
 }
 
@@ -47,7 +48,7 @@ function owedLabel(prefix: string, run: ApiRun) {
 function waitView(run: ApiRun) {
   const listed = renderableWaits(run.waits)
   const open = IN_FLIGHT_STATUSES.includes(run.status)
-    ? listed.filter(wait => wait.kind === 'worker' ? wait.phase === 'open' : wait.phase === 'open' || wait.phase === 'resolved')
+    ? listed.filter(wait => wait.kind === 'worker' || wait.kind === 'peer' ? wait.phase === 'open' : wait.phase === 'open' || wait.phase === 'resolved')
     : []
   const ciOpen = open.some(wait => wait.kind === 'pr')
   // `lastWaits` is newest last; a settled entry still in `waits` is newer than all of them.
@@ -83,7 +84,9 @@ export function RunWaitDetails({ run }: { run: ApiRun }) {
           ? <WorkerWaitStatus key={wait.id} wait={wait} />
           : wait.kind === 'process'
             ? <ProcessWaitStatus key={wait.id} run={run} wait={wait} />
-            : <TimerWaitStatus key={wait.id} run={run} wait={wait} />)}
+            : wait.kind === 'peer'
+              ? <PeerWaitStatus key={wait.id} wait={wait} />
+              : <TimerWaitStatus key={wait.id} run={run} wait={wait} />)}
       {error ? (
         <div data-slot="ci-wait-status" role="status" aria-live="polite" aria-atomic="true"
           className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
@@ -154,6 +157,19 @@ function WorkerWaitStatus({ wait }: { wait: WorkerWait }) {
       className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
       <p>Waiting on {count} {noun}</p>
       {dateLabel ? <p>Deadline{' '}<time dateTime={wait.deadline}>{dateLabel}</time></p> : <p>Worker wait deadline unavailable</p>}
+    </div>
+  )
+}
+
+/** "Waiting on N tasks": the peer tasks a peer wait names, with its deadline (hearsay-tools/cezarion#1995). */
+function PeerWaitStatus({ wait }: { wait: PeerWait }) {
+  const count = wait.peerIds.length
+  const dateLabel = formatInstant(wait.deadline)
+  return (
+    <div data-slot="peer-wait-status" role="status" aria-live="polite" aria-atomic="true"
+      className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
+      <p>Waiting on {count} {count === 1 ? 'task' : 'tasks'}</p>
+      {dateLabel ? <p>Deadline{' '}<time dateTime={wait.deadline}>{dateLabel}</time></p> : <p>Peer wait deadline unavailable</p>}
     </div>
   )
 }

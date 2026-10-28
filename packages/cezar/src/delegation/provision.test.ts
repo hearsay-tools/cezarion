@@ -56,9 +56,16 @@ describe('session provisioning', () => {
   it('provision text no longer says one active wait', () => {
     const { instructions } = provision()!;
     expect(instructions).not.toMatch(/one active wait|no automatic re-wait/i);
-    expect(instructions).toContain('Several waits can be open at once (workers, CI, timers)');
+    expect(instructions).toContain('Several waits can be open at once (workers, peers, CI, timers)');
     expect(instructions).toContain('Messages wake you and close no wait');
     expect(instructions).toContain('cancel-wait <wait-id> stops one wait');
+  });
+  // hearsay-tools/cezarion#1995: the peer wait and the request kind are taught where the request wait is.
+  it('teaches the peer wait and cezar_wait kinds request and peer', () => {
+    const { instructions } = provision()!;
+    expect(instructions).toMatch(/wait --peer <task-id> \[--peer <another-task-id>\] --timeout-seconds <1-1800> \(or cezar_wait with kind "peer"\)/);
+    expect(instructions).toContain('(or cezar_wait with kind "request") to register a request wait');
+    expect(instructions).toContain("except a named peer's message to a peer wait");
   });
   it('provisions no ordinary-run metadata while off and never promotes invalid/worker records to roots', async () => {
     const ordinary = f.store.createRun({ title: 'ordinary', task: 'ordinary', workflow: 'quick-task', steps: [] });

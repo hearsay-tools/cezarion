@@ -250,8 +250,8 @@ worker or request wait. A newer question still does. Wait refusals explain the
 condition and remedy; registration releases capacity only when the turn ends.
 
 Task messages use `cez message request`, `progress`, `follow-up`, `reply`, `conversation`,
-`inbox`, `cancel-request`, `wait --request`, and `cancel-wait` over the private delegation
-routes (hearsay-tools/cezarion#1991). The verb selects the kind; no `--kind` flag is needed.
+`inbox`, `cancel-request`, `wait --request`, `wait --peer` (hearsay-tools/cezarion#1995, § Waits),
+and `cancel-wait` over the private delegation routes (hearsay-tools/cezarion#1991). The verb selects the kind; no `--kind` flag is needed.
 `conversation <task-id> --before <cursor>` reads older history. `tasks [--all] [--offset <n>]`
 lists same-project peer root tasks, excluding the caller and workers, with shared attention
 and `accepts` fields, at most 32 per page. Archived peers need `--all`. Workers cannot discover
@@ -918,9 +918,10 @@ runner DOES — is §7, and a new backend has to satisfy both.
 
 A run's waits live in one list on its record (`waits`, settled ones in `lastWaits`),
 typed by `packages/contract/src/waits.ts`; spec `.ai/specs/2026-10-17-unified-waits.md`.
-There are four agent kinds: `pr`, `timer`, `human` (since phase 2) and `process`
-(hearsay-tools/cezarion#1446); Cezar also opens `worker` waits. The agent opens `pr`, `timer`
-and `process` waits with `cezar_wait` and a human wait with `cezar_ask`. A wait is an observation the agent asked for;
+There are five agent kinds: `pr`, `timer`, `human` (since phase 2), `process`
+(hearsay-tools/cezarion#1446) and `peer` (hearsay-tools/cezarion#1995); Cezar also opens `worker`
+waits. The agent opens `pr`, `timer`, `process`, `worker` and `peer` waits with `cezar_wait`
+and a human wait with `cezar_ask`. A wait is an observation the agent asked for;
 it never grants merge, review acceptance, or task-completion authority. There is no
 wait marker and no delegation prerequisite. `claude-cli` uses the Claude adapter.
 
@@ -947,6 +948,45 @@ another user's process is `process_not_owned`. A process wait keeps its slot and
 against the automatic-wake budget, like a timer. The tool advertises one flat object schema, because the Anthropic
 tool API refuses a top-level union; the server validates the discriminated union. Every
 answer carries the wait id, its kind, its absolute deadline and `open_waits`.
+
+`cezar_wait({ kind: 'worker', worker_ids, mode?, timeout_seconds? })` waits on owned workers, and
+`cezar_wait({ kind: 'request', request_ids, mode?, timeout_seconds? })` on the replies to requests
+the run sent, to a worker, its parent or a peer task (hearsay-tools/cezarion#1995). Kind `worker`
+takes `worker_ids` only: `request_ids` there is `invalid_request`, whose message names kind
+`request`. A request wait is still stored as a `worker` entry with `requestIds`; the answer's
+`kind` is `request`, and the footer and `open_waits` call it a `request wait`.
+`cezar_wait({ kind: 'peer', peer_ids, timeout_seconds? })`, or
+`cez message wait --peer <task-id> [--peer <task-id> …] [--timeout-seconds <1-1800>]`
+(`via: 'cez-message-wait'`), waits for named peer root tasks (hearsay-tools/cezarion#1995, spec
+`2026-10-27-task-communication-protocol` § 7). It names 1–32 peers; each must pass the
+relationship resolver as a peer, so an unknown task, the run itself, a worker, or a family
+deleting its history is `denied_scope`, and a worker cannot register one. The deadline is
+1–1,800 s, default 600, and there is no "any peer" form. The first of these resolves it: a
+message of any kind from a named peer that the run has not received (`result.reason: 'message'`,
+with `peerRunId` and `messageId`), a named peer reaching `review`, `done`, `failed` or
+`cancelled` or being deleted (`settled`, with `peerRunId`), or the deadline (`timeout`). A message
+comes before a settlement, so a peer that wrote and then finished reports what it wrote. A peer whose record the store cannot read is not settled: it may still be live, so the wait stays open. A
+matching message or settlement already there at registration resolves it at once, and recovery
+re-reads it the same way. It is the one wait a message closes: a human message, a message from
+the run's parent or workers, a peer it does not name, and any other wait resolving wake the run
+and leave it open. The same peers in any order return the open wait. A park whose top wait is a
+peer wait (`waiting:peer`) holds no slot, arms the idle timer, and reads **waiting on N tasks**
+(`waitingOn: { kind: 'peers', count }`, bucket `none`, never Needs you); the order is human >
+usage limit > workers > peers > PR > process > timer. A resolution that opens a wake turn spends
+one unit of the automatic-wake budget, as a peer message does; with the budget spent it is
+cancelled with the note `automatic peer wake-up cap reached`, and Cezar's `budget` human wait
+opens. A root's request wait on a request to a peer task reads **waiting on replies**, not
+**waiting on worker replies** (`waitingOn.peers`). `cez message cancel-wait` and
+`cezar_cancel_wait` cancel it through the list. Tests: `workflows/peer-waits.test.ts` drives each
+`waiting:peer` row of `workflows/run-states.ts`, and parity row **U19w** in
+`workflows/waits-parity-cells.testkit.ts` runs it on every `RUNNER_IDS` native wire.
+
+An older cezar reads a stored peer wait as an unreadable entry: its strict wait union has no
+`peer` arm, so the store drops that entry, keeps the run and its other waits, and sets
+`lastWaitsError`. A run parked only on a peer wait then reads as a plain park: Needs you. A
+stored summary whose `waitingOn` is `peers` fails the older
+summary schema, so its run index reads the full record instead. `runs/peer-wait-downgrade.test.ts`
+pins this read (hearsay-tools/cezarion#1993).
 
 `cezar_ask({ context, questions })` waits for the user (hearsay-tools/cezarion#1234). Both are
 required. `context` is 1–20,000 characters of Markdown that the cockpit shows above the card.
@@ -1037,7 +1077,7 @@ card opens an `ask-line` human wait with its questions, and a native ask (Codex,
 Cursor ACP) a `native-ask` one. A session started without cezar tools (the controller is
 unavailable) is taught the marker lines instead of the tools, and its monitoring wake keeps
 the marker wording. `cez worker wait` is an alias too (hearsay-tools/cezarion#1235 phase 3a):
-it opens the same `worker` entry as `cezar_wait({ kind: 'worker' })`, with
+it opens the same `worker` entry as `cezar_wait({ kind: 'worker' })` (or kind `request`), with
 `via: 'cez-worker-wait'`, and answers the legacy `WorkerWait` shape; the same workers (or
 requests) and mode return the open entry, and `cez worker cancel-wait` cancels through the list
 as `cezar_cancel_wait` does. A worker wait sits beside CI, timer and human waits and cancels

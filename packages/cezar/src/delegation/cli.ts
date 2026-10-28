@@ -20,7 +20,7 @@ import {
   workerListResultSchema,
   workerCollectedResultSchema,
   workerCancelWaitRequestSchema,
-  workerCancelWaitResultSchema,
+  delegationCancelWaitResultSchema,
   workerOperationSchema,
   workerParamsSchema,
   workerSpawnRequestSchema,
@@ -33,6 +33,8 @@ import {
   workerDestroyResultSchema,
   workerDiffSchema,
   workerWaitResultSchema,
+  delegationWaitResultSchema,
+  peerWaitRequestSchema,
   delegationErrorResponseSchema,
 } from '@open-mercato/cezar-contract/delegation';
 import { discoveryRequestSchema, discoveredTasksSchema } from '@open-mercato/cezar-contract/discovery';
@@ -51,12 +53,12 @@ export function delegationEndpoint(value: string | undefined): URL {
 
 const conversationOperationSchema = z.enum(['list', 'send', 'progress', 'follow-up', 'reply', 'conversation', 'inbox', 'cancel-request', 'wait-requests']);
 const responseSchemas = { tasks: discoveredTasksSchema, list: workerListResultSchema, send: conversationSendResultSchema, progress: conversationSendResultSchema, 'follow-up': conversationSendResultSchema, reply: conversationSendResultSchema, conversation: conversationInspectResultSchema, 'cancel-request': requestOutcomeSchema, 'wait-requests': workerWaitResultSchema, collect: workerCollectedResultSchema, spawn: workerSpawnResultSchema, inspect: workerInspectionSchema, steer: workerSteerResultSchema,
-  stop: workerStopResultSchema, destroy: workerDestroyResultSchema, diff: workerDiffSchema, wait: workerWaitResultSchema, 'cancel-wait': workerCancelWaitResultSchema };
+  stop: workerStopResultSchema, destroy: workerDestroyResultSchema, diff: workerDiffSchema, wait: delegationWaitResultSchema, 'cancel-wait': delegationCancelWaitResultSchema };
 const RESPONSE_BYTES = 3_145_728;
 const CLI_FLAG: Record<string, string> = {
   requestId: '--request-id', baseline: '--baseline', backend: '--runner', model: '--model', effort: '--effort', workflow: '--workflow', skill: '--skill',
   timeoutSeconds: '--timeout-seconds', mode: '--mode', kind: '--kind', id: '--id', context: '--context',
-  requestIds: '--request', workerIds: 'worker-id', workerId: 'worker-id', waitId: 'wait-id', recipientRunId: 'recipient-run-id',
+  requestIds: '--request', peerIds: '--peer', workerIds: 'worker-id', workerId: 'worker-id', waitId: 'wait-id', recipientRunId: 'recipient-run-id',
   task: 'task', text: 'text',
 };
 /** Generic zod message for a refine that sets none; any other message is the schema's own words. */
@@ -306,6 +308,7 @@ export async function runWorkerCommand(argv: string[], env: NodeJS.ProcessEnv): 
   const flags = optionArguments(argv);
   if (replacement) return usageFailure(`Use cez message ${replacement}; cez worker ${argv[0]} was removed.`);
   if (argv[0] === 'wait' && flags.some(arg => arg === '--request' || arg.startsWith('--request='))) return usageFailure('Use cez message wait --request <UUID>.');
+  if (argv[0] === 'wait' && flags.some(arg => arg === '--peer' || arg.startsWith('--peer='))) return usageFailure('Use cez message wait --peer <task-id>.');
   if (argv[0] === 'resume') {
     if (argv.length === 2 && (argv[1] === '--help' || argv[1] === '-h')) { console.log(workerHelp('resume')); return 0; }
     if (flags.some(arg => /^--(?:kind|resume|request-id)(?:=|$)/.test(arg))) return usageFailure('Use cez worker resume <worker-id> "<instruction>" --id <UUID> [--timeout-seconds <1-86400>].');
@@ -320,7 +323,7 @@ const MESSAGE_HELP: Record<string, string> = {
   'follow-up': '<task-id> "<text>" --id <UUID> --request-id <UUID>',
   reply: '<task-id> "<text>" --id <UUID> --request-id <UUID>',
   conversation: '<task-id> [--before <cursor>]', inbox: '', 'cancel-request': '<UUID>',
-  wait: '--request <UUID> [--request <UUID>...] [--mode one|any|all] [--timeout-seconds <1-1800>]',
+  wait: '--request <UUID> [--request <UUID>...] [--mode one|any|all] [--timeout-seconds <1-1800>] | --peer <task-id> [--peer <task-id>...] [--timeout-seconds <1-1800>]',
   'cancel-wait': '<wait-id>', tasks: '[--all] [--offset <n>]',
 };
 function messageHelp(operation?: string): string {
@@ -344,7 +347,7 @@ export async function runMessageCommand(argv: string[], env: NodeJS.ProcessEnv):
     const internal = operation === 'request' ? 'send' : operation;
     return runDelegationCommand([internal, ...argv.slice(1)], env, () => messageHelp(operation));
   }
-  if (operation === 'wait' && !flags.some(arg => arg === '--request' || arg.startsWith('--request='))) return usageFailure('Use cez message wait --request <UUID>.');
+  if (operation === 'wait' && !flags.some(arg => /^--(?:request|peer)(?:=|$)/.test(arg))) return usageFailure('Use cez message wait --request <UUID>, or cez message wait --peer <task-id>.');
   const args = operation === 'request' ? ['send', '--kind', 'request', ...argv.slice(1)] : argv;
   return runDelegationCommand(args, env, () => messageHelp(operation));
 }
@@ -409,7 +412,7 @@ type CliValues = Record<string, string | boolean | string[] | undefined>;
 const stringFlag = { type: 'string' } as const;
 const repeatedFlag = { type: 'string', multiple: true } as const;
 const messageOptions = { id: stringFlag, kind: stringFlag, 'request-id': stringFlag, 'timeout-seconds': stringFlag };
-const waitOptions = { request: repeatedFlag, 'timeout-seconds': stringFlag, mode: stringFlag };
+const waitOptions = { request: repeatedFlag, peer: repeatedFlag, 'timeout-seconds': stringFlag, mode: stringFlag };
 const COMMAND_OPTIONS: Record<string, NonNullable<Parameters<typeof parseArgs>[0]>['options']> = {
   spawn: { baseline: stringFlag, 'request-id': stringFlag, workflow: stringFlag, skill: stringFlag, runner: stringFlag, backend: stringFlag,
     model: stringFlag, effort: stringFlag, context: stringFlag, 'context-file': stringFlag, attach: repeatedFlag },
@@ -447,6 +450,13 @@ async function spawnPayload(values: CliValues, positionals: string[], argv: stri
   return parsed.data;
 }
 function waitPayload(operation: string, values: CliValues, positionals: string[]) {
+  // `cez message wait --peer` (hearsay-tools/cezarion#1995): named peer tasks, never with requests or a mode.
+  if (values.peer !== undefined) {
+    if (positionals.length > 0) throw new WorkerCliError(`${operation} has extra argument`);
+    if (values.request !== undefined) throw new WorkerCliError(`${operation} has extra argument --request`);
+    if (values.mode !== undefined) throw new WorkerCliError(`${operation} has extra argument --mode`);
+    return peerWaitRequestSchema.parse({ peerIds: values.peer, timeoutSeconds: cliInteger(operation, 'timeout-seconds', values['timeout-seconds']) });
+  }
   const requests = values.request;
   if (requests !== undefined && positionals.length > 0) throw new WorkerCliError(`${operation} has extra argument`);
   const requestWait = requests !== undefined || operation === 'wait-requests';

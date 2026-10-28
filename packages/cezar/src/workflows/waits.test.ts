@@ -127,13 +127,14 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     const byWorker: WorkerWaitEntry = { ...base, workerIds: [w, x], revisions: [], outcomes: [] };
     const byRequest: WorkerWaitEntry = { ...base, id: '77777777-7777-4777-8777-777777777778', requestIds: [w], requestOutcomes: [] };
     expect(openWaitsFooter([byWorker])).toBe(`Still open: worker wait ${byWorker.id} on 2 workers, deadline ${base.deadline}. Call cezar_cancel_wait for any you no longer need.`);
-    expect(openWaitsFooter([byRequest])).toContain(`worker wait ${byRequest.id} on 1 request reply, deadline`);
+    // hearsay-tools/cezarion#1995: a wait on replies never says "worker".
+    expect(openWaitsFooter([byRequest])).toContain(`request wait ${byRequest.id} on 1 reply, deadline`);
     // The cezar_wait answer's open_waits summary reads the same.
-    expect(openWaitList([byWorker, byRequest]).map(open => open.summary)).toEqual(['worker wait on 2 workers', 'worker wait on 1 request reply']);
+    expect(openWaitList([byWorker, byRequest]).map(open => open.summary)).toEqual(['worker wait on 2 workers', 'request wait on 1 reply']);
     // Beside a question, the cancel guidance covers worker waits too.
     const human: HumanWaitEntry = { id: '55555555-5555-4555-8555-555555555555', kind: 'human', source: 'agent', via: 'cezar_ask',
       registeredAt: '2026-10-17T10:00:00.000Z', phase: 'open', turnId: 'turn-1', askSeq: 4 };
-    expect(openWaitsFooter([human, byWorker])).toContain('call cezar_cancel_wait for any CI wait, worker wait, process wait or timer you no longer need.');
+    expect(openWaitsFooter([human, byWorker])).toContain('call cezar_cancel_wait for any CI, worker, request, peer or process wait or timer you no longer need.');
     // Cezar's completion wait has no deadline (hearsay-tools/cezarion#1301).
     const { deadline: _deadline, timeoutSeconds: _timeout, ...undated } = byWorker;
     const completion: WorkerWaitEntry = { ...undated, source: 'cezar', via: 'completion', mode: 'all' };
@@ -148,7 +149,7 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     expect(openWaitsFooter([human])).toBe(`Still open: your question ${human.id} to the user. The user's reply answers it.`);
     expect(openWaitsFooter([human, ci()])).toBe(
       `Still open: your question ${human.id} to the user; CI wait ${ci().id} for Acme/Repo#12, deadline ${ci().deadline}. ` +
-      `The user's reply answers your question; call cezar_cancel_wait for any CI wait, worker wait, process wait or timer you no longer need.`);
+      `The user's reply answers your question; call cezar_cancel_wait for any CI, worker, request, peer or process wait or timer you no longer need.`);
   });
 
   // Cezar's own wait stands in for a wait the agent never registered (hearsay-tools/cezarion#1234):

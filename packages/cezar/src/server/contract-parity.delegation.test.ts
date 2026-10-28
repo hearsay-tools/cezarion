@@ -4,7 +4,7 @@ import type { z } from 'zod';
 import { describe, expect, it } from 'vitest';
 import type { DelegationApp } from '../delegation/transport.ts';
 import type { AppType } from './app-type.ts';
-import type { workerListPageSchema, workerListQuerySchema, discoveryRequestSchema, discoveryResponseSchema, conversationSendRequestSchema, conversationSendResultSchema, conversationInspectRequestSchema, conversationInspectResultSchema, conversationCancelRequestSchema, inboxReserveResultSchema, inboxReceiptRequestSchema, inboxReceiptResultSchema, requestOutcomeSchema, requestWaitRequestSchema, workerCollectedResultSchema, workerCancelWaitRequestSchema, workerCancelWaitResultSchema, runRelationshipsSchema, runIdParamSchema, workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema, workerDiffSchema, workerWaitResultSchema, workerSpawnRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerSteerRequestSchema, workerEmptyRequestSchema } from '@open-mercato/cezar-contract';
+import type { workerListPageSchema, workerListQuerySchema, discoveryRequestSchema, discoveryResponseSchema, conversationSendRequestSchema, conversationSendResultSchema, conversationInspectRequestSchema, conversationInspectResultSchema, conversationCancelRequestSchema, inboxReserveResultSchema, inboxReceiptRequestSchema, inboxReceiptResultSchema, requestOutcomeSchema, requestWaitRequestSchema, workerCollectedResultSchema, workerCancelWaitRequestSchema, delegationCancelWaitResultSchema, runRelationshipsSchema, runIdParamSchema, workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema, workerDiffSchema, delegationWaitResultSchema, peerWaitRequestSchema, workerSpawnRequestSchema, workerWaitRequestSchema, workerParamsSchema, workerSteerRequestSchema, workerEmptyRequestSchema } from '@open-mercato/cezar-contract';
 
 describe('delegation contract and chained type surface', () => {
   const client = hc<DelegationApp>('http://127.0.0.1');
@@ -48,12 +48,12 @@ describe('delegation contract and chained type surface', () => {
     Assert<Mutual<z.infer<typeof workerStopResultSchema>, InferResponseType<typeof family[':workerId']['stop']['$post'], 200>>>,
     Assert<Mutual<z.infer<typeof workerDestroyResultSchema>, InferResponseType<typeof family[':workerId']['destroy']['$post'], 200>>>,
     Assert<Mutual<z.infer<typeof workerDiffSchema>, InferResponseType<typeof family[':workerId']['diff']['$get'], 200>>>,
-    Assert<Mutual<z.infer<typeof workerCancelWaitResultSchema>, InferResponseType<typeof family['cancel-wait']['$post'], 200>>>,
+    Assert<Mutual<z.infer<typeof delegationCancelWaitResultSchema>, InferResponseType<typeof family['cancel-wait']['$post'], 200>>>,
     Assert<Mutual<z.input<typeof workerCancelWaitRequestSchema>, Schema['/api/v1/delegation/cancel-wait']['$post']['input']['json']>>,
-    Assert<Mutual<z.infer<typeof workerWaitResultSchema>, InferResponseType<typeof family.wait.$post, 200>>>,
+    Assert<Mutual<z.infer<typeof delegationWaitResultSchema>, InferResponseType<typeof family.wait.$post, 200>>>,
     Assert<Mutual<z.infer<typeof workerDestroyResultSchema>, InferResponseType<typeof human.api.v1.runs[':id']['worker-destroy']['$post'], 200>>>,
     Assert<Mutual<z.input<typeof workerSpawnRequestSchema>, Schema['/api/v1/delegation/spawn']['$post']['input']['json']>>,
-    Assert<Mutual<z.input<typeof workerWaitRequestSchema> | z.input<typeof requestWaitRequestSchema>, Schema['/api/v1/delegation/wait']['$post']['input']['json']>>,
+    Assert<Mutual<z.input<typeof workerWaitRequestSchema> | z.input<typeof requestWaitRequestSchema> | z.input<typeof peerWaitRequestSchema>, Schema['/api/v1/delegation/wait']['$post']['input']['json']>>,
     Assert<Mutual<z.input<typeof workerSteerRequestSchema>, Schema['/api/v1/delegation/:workerId/steer']['$post']['input']['json']>>,
     Assert<Mutual<z.input<typeof workerEmptyRequestSchema>, Schema['/api/v1/delegation/:workerId/stop']['$post']['input']['json']>>,
     Assert<Mutual<z.input<typeof workerEmptyRequestSchema>, Schema['/api/v1/delegation/:workerId/destroy']['$post']['input']['json']>>,
