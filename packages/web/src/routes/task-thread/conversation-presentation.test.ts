@@ -55,6 +55,11 @@ describe('conversation presentation titles', () => {
     expect(conversationOutcomeLabel('pending')).toBe('Pending')
   })
 
+  it('names a request whose peer recipient was deleted (hearsay-tools/cezarion#1992)', () => {
+    expect(conversationOutcomeLabel('deleted')).toBe('Recipient deleted')
+    expect(conversationStatusLabel({ messageKind: 'request', delivery: 'queued', outcome: { status: 'deleted' } })).toBe('Recipient deleted')
+  })
+
   it('falls back to the terminal delivery only for a request that can never settle', () => {
     expect(conversationStatusLabel({ messageKind: 'request', delivery: 'queued', outcome: { status: 'pending' } })).toBe('Pending')
     expect(conversationStatusLabel({ messageKind: 'request', delivery: 'not-delivered', outcome: { status: 'sender-closed' } })).toBe('Sender closed')

@@ -36,6 +36,11 @@ export function conversationDirection(
   return message.senderRunId === viewerRunId ? 'outbound' : 'inbound'
 }
 
+/** A message between two root tasks of one project. An absent field reads as `family`. */
+export function isPeerMessage(message: Pick<ThreadConversationMessage, 'relationship'>): boolean {
+  return message.relationship === 'peer'
+}
+
 export function conversationKindLabel(kind: ThreadConversationMessage['messageKind']): string {
   switch (kind) {
     case 'request':
@@ -73,6 +78,8 @@ export function conversationOutcomeLabel(status: NonNullable<ThreadConversationM
       return 'Sender closed'
     case 'human-fallback':
       return 'Sent to a human'
+    case 'deleted':
+      return 'Recipient deleted'
     default:
       return status
   }

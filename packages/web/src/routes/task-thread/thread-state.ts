@@ -37,7 +37,7 @@ export interface ThreadNote {
 
 export type ThreadConversationDelivery = 'queued' | 'delivered' | 'consumed' | 'not-delivered'
 
-/** A parent/worker conversation envelope, with its request outcome folded onto the request. */
+/** A parent/worker or peer conversation envelope, with its request outcome folded onto the request. */
 export interface ThreadConversationMessage {
   kind: 'conversation'
   id: string
@@ -47,6 +47,8 @@ export interface ThreadConversationMessage {
   recipientRunId: string
   messageKind: ConversationMessage['kind']
   requestId?: string | undefined
+  /** `peer` for a message between two root tasks of one project; absent reads as `family`. */
+  relationship?: ConversationMessage['relationship'] | undefined
   delivery: ThreadConversationDelivery
   deliveredAt?: string | undefined
   /** When the recipient's harness reported the model read it (#505). */

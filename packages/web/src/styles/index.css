@@ -135,6 +135,10 @@
   --message-inbound-bg: var(--surface-raised);
   --message-inbound-border: var(--border-subtle);
   --message-inbound-accent: oklch(0.78270926 0.12895489 299.255507);
+  /* Peer tasks: green, apart from the worker blue and purple and the yellow human message. Never red: that reads as a failure. */
+  --message-peer-bg: var(--surface-raised);
+  --message-peer-border: var(--border-subtle);
+  --message-peer-accent: oklch(0.80000000 0.13000000 150.000000);
 
   /* Existing semantic names remain the compatibility layer for every screen. */
   --background: var(--surface-base);
@@ -271,6 +275,9 @@
   --message-inbound-bg: oklch(0.96914273 0.01605913 293.755758);
   --message-inbound-border: oklch(0.87235115 0.07096328 296.583128);
   --message-inbound-accent: oklch(0.49901048 0.18982318 295.993991);
+  --message-peer-bg: oklch(0.97000000 0.01800000 150.000000);
+  --message-peer-border: oklch(0.86000000 0.07000000 150.000000);
+  --message-peer-accent: oklch(0.45000000 0.12000000 150.000000);
 
   --control-border: var(--text-muted);
 
@@ -419,6 +426,9 @@
   --color-message-inbound-bg: var(--message-inbound-bg);
   --color-message-inbound-border: var(--message-inbound-border);
   --color-message-inbound-accent: var(--message-inbound-accent);
+  --color-message-peer-bg: var(--message-peer-bg);
+  --color-message-peer-border: var(--message-peer-border);
+  --color-message-peer-accent: var(--message-peer-accent);
 
   --color-diff-add: var(--diff-add-bg);
   --color-diff-add-strong: var(--diff-add-strong);
