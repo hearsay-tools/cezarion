@@ -237,6 +237,13 @@ leader) and `process_not_owned` (the process belongs to another user). A process
 answers `timers_disabled` and `wake_budget_spent`, as a timer does. Each `open_waits`
 entry's `kind` gains `process`.
 
+Root request completion (hearsay-tools/cezarion#1996) adds `requests_outstanding` and
+`requests_unanswered` to `DoneErrorCode`. Sent requests now block agent done: one refusal,
+then a Cezar request wait (`source: cezar`, `via: completion`) without its own deadline.
+Incoming requests cause one refusal; repeating done completes without reply. Human Finish
+remains available with open requests and closes sent requests as `sender-closed`, including
+at review. No schema migration or new stored field is needed. Worker completion is unchanged.
+
 Additive for hearsay-tools/cezarion#1234 (unified waits, phase 2): `POST /api/v1/tools/ask` joins
 the private family, behind the same bearer capability and a 16 KiB body limit. Middleware
 validates the strict `CezarAskRequest` (`{ questions }`, the ask card: 1–4 questions, each with a

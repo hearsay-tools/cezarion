@@ -22,11 +22,18 @@ export function reconcileConversationState(root: RunRecord, lookup: (id: string)
     const recipient = lookup(request.recipientRunId);
     const status = request.relationship === 'peer' ? peerRecipientSettlement(recipient, isSettled, unreadable(request.recipientRunId)) : familyRecipientSettlement(root, request, recipient, isSettled);
     const closed = (run: RunRecord | undefined) => run && ['done', 'failed', 'cancelled'].includes(run.status) && isSettled(run);
-    const settled = status ?? (closed(root) || closed(lookup(request.senderRunId)) ? 'sender-closed'
+    const sender = lookup(request.senderRunId);
+    const humanFinished = finishedByHuman(sender);
+    const settled = (humanFinished ? 'sender-closed' : status) ?? (closed(root) || closed(lookup(request.senderRunId)) ? 'sender-closed'
       : request.deadline && request.deadline <= now ? 'timed-out' : undefined);
     if (settled) outcomes.push({ requestId: request.id, status: settled, observedAt: now });
   }
   return outcomes.length === state.outcomes.length ? state : { ...state, outcomes };
+}
+
+/** Finish closes the sender's obligations, including when its result rests at review. */
+function finishedByHuman(sender: RunRecord | undefined): boolean {
+  return sender?.delegation?.role === 'root' && !!sender.delegation.finishRequestedAt;
 }
 
 /** A peer recipient settles the request when it is deleted, rests at `review` (no peer can resume
