@@ -88,7 +88,7 @@ cp .ai/cezar/todos.json ./cezar-followups-export.json
 ```
 Old Inbox URLs show this guidance. Create an ordinary task with **New task**, or use
 an issue-authoring skill to record work in your tracker. Task **Notes**, the rolling
-handoff journal, **Continue**, live follow-up messages, and `cez worker inbox` remain
+handoff journal, **Continue**, live follow-up messages, and `cez message inbox` remain
 available.
 ## What Cezarion does best 🏆
 
@@ -761,20 +761,22 @@ cez worker wait <worker-id> --mode one --timeout-seconds 600
 cez worker wait <first-id> <second-id> --mode any --timeout-seconds 600
 cez worker wait <first-id> <second-id> --mode all --timeout-seconds 600
 cez worker cancel-wait <wait-id>
-cez worker send <recipient-run-id> 'Please check this decision' --id <message-UUID> --kind request
-cez worker send <worker-id> 'Correct the returned result' --id <new-message-UUID> --kind request --resume
-cez worker progress <recipient-run-id> 'Parser tests pass' --id <message-UUID>
-cez worker follow-up <recipient-run-id> 'Include empty input' --id <message-UUID> --request-id <request-UUID>
-cez worker reply <recipient-run-id> 'Checked; empty input is covered' --id <message-UUID> --request-id <request-UUID>
-cez worker conversation <recipient-run-id>
-cez worker wait --request <request-UUID> --request <another-request-UUID> --mode all
-cez worker wait-requests <request-UUID> --mode one
-cez worker cancel-request <request-UUID>
+cez message request <recipient-run-id> 'Please check this decision' --id <message-UUID>
+cez worker resume <worker-id> 'Correct the returned result' --id <new-message-UUID>
+cez message progress <recipient-run-id> 'Parser tests pass' --id <message-UUID>
+cez message follow-up <recipient-run-id> 'Include empty input' --id <message-UUID> --request-id <request-UUID>
+cez message reply <recipient-run-id> 'Checked; empty input is covered' --id <message-UUID> --request-id <request-UUID>
+cez message conversation <recipient-run-id>
+cez message wait --request <request-UUID> --request <another-request-UUID> --mode all
+cez message inbox
+cez message tasks --all
+cez message cancel-wait <wait-id>
+cez message cancel-request <request-UUID>
 cez worker stop <worker-id>
 cez worker destroy <worker-id>
 ```
 
-Use `cez worker --help` to list operations and flags, or `cez worker <operation> --help` for one operation. Explicit help prints human-readable text and exits successfully without an active delegation session. Commands otherwise return bounded JSON and a nonzero exit on failure or incomplete cleanup. Spawn requires a committed baseline (`parent-head` or an explicit ref) and pins its SHA at acceptance; dirty parent edits are excluded. Optional `--context '<text>'` or `--context-file <UTF-8-file>` supplies selected context, not the parent's conversation. The two flags are mutually exclusive, and combined task/context text is limited to 100,000 characters. The API also accepts up to 32 pinned-baseline file or parent-attachment references, with at most 8 MiB of copied attachments. Inspect reports worker-local input locations. Reuse a request ID only with the same task, baseline, context, runner, model, effort and workflow when retrying a lost response. `--runner` and its alias `--backend` count as the same field, so a retry may switch spelling. A parent holds at most 32 outstanding workers: accepted, live, or not yet verifiably destroyed. A verified destroy (`cez worker destroy`, or **Clean up** on a finished worker in the cockpit's Workers list) frees a slot; incomplete cleanup keeps its slot until a retry completes. A parent can create at most 1,024 workers in total; past that, start a new task. These limits bound disk resources and runaway spawning, not spending: a worker can be resumed with Continue, and destroying it does not undo charges already made. Cost stays bounded by `maxParallel` and by stopping the parent. There are at most 32 undelivered steering messages per worker.
+Use `cez message --help` for messaging commands. Use `cez worker --help` to list worker operations and flags, or `cez worker <operation> --help` for one operation. Explicit help prints human-readable text and exits successfully without an active delegation session. Commands otherwise return bounded JSON and a nonzero exit on failure or incomplete cleanup. Spawn requires a committed baseline (`parent-head` or an explicit ref) and pins its SHA at acceptance; dirty parent edits are excluded. Optional `--context '<text>'` or `--context-file <UTF-8-file>` supplies selected context, not the parent's conversation. The two flags are mutually exclusive, and combined task/context text is limited to 100,000 characters. The API also accepts up to 32 pinned-baseline file or parent-attachment references, with at most 8 MiB of copied attachments. Inspect reports worker-local input locations. Reuse a request ID only with the same task, baseline, context, runner, model, effort and workflow when retrying a lost response. `--runner` and its alias `--backend` count as the same field, so a retry may switch spelling. A parent holds at most 32 outstanding workers: accepted, live, or not yet verifiably destroyed. A verified destroy (`cez worker destroy`, or **Clean up** on a finished worker in the cockpit's Workers list) frees a slot; incomplete cleanup keeps its slot until a retry completes. A parent can create at most 1,024 workers in total; past that, start a new task. These limits bound disk resources and runaway spawning, not spending: a worker can be resumed with Continue, and destroying it does not undo charges already made. Cost stays bounded by `maxParallel` and by stopping the parent. There are at most 32 undelivered steering messages per worker.
 
 An incomplete destroy reports the remaining resources and a reason. Cezarion retries that recorded request after a delay, including after the project's context recovers on server restart. It removes the owned checkout only after process termination and ownership are verified. If the reason persists, inspect the worker process, Git worktree lock and ownership receipt; correct the blocker and use `cez worker destroy <worker-id>` or the cockpit Destroy action to retry immediately. Cezarion leaves ambiguous or replaced resources in place for operator review.
 
@@ -792,7 +794,7 @@ Messages allow 100,000 characters each, with at most 32 undelivered inputs per r
 
 Messages reach a live recipient as soon as they are accepted, including mid-turn: Claude, Codex, Pi, OMP and OpenCode steer them into the running turn, and the model reads them at its next step. Cursor delivers at the turn boundary, because a second prompt would cancel its running turn. Pending conversations go together, in order, up to 32 messages and 100,000 formatted characters per batch; a single valid message is never split. Every message keeps its ID, sender, delivery receipt and request outcome; receipts show queued, delivered and read (when the agent's harness can tell) separately. A pending human question holds messages until it is answered, then they follow right behind the answer. The thread's Details distinguish creation, delivery confirmation and event-recording times.
 
-Sending to a review or terminal participant without `--resume` reports `not-delivered` and `continuation-required`, with the reason and next command; the CLI exits 1. An active parent can use `worker send --resume` (request or progress) to continue its settled done/review/failed worker with that message as the new instruction. No human Continue is needed for this parent-controlled action. A retry with the same payload and ID never creates another continuation; changing a rejected send to use `--resume` requires a new ID. Stopped or destroyed workers need a new worker. Workers cannot resume parents, and conversation never answers a pending human question. Durable IDs deduplicate accepted queue entries and event replay, but a crash between provider acceptance and its durable delivery checkpoint can leave transport delivery ambiguous; this is not an exactly-once execution guarantee.
+Sending a message to a review or terminal participant reports `not-delivered` and `continuation-required`, with the reason and next command; the CLI exits 1. An active parent can use `cez worker resume` to continue its settled done/review/failed worker with that message as the new instruction. No human Continue is needed for this parent-controlled action. A retry with the same payload and ID never creates another continuation; resuming after a rejected message requires a new ID. Stopped or destroyed workers need a new worker. Workers cannot resume parents, and conversation never answers a pending human question. Durable IDs deduplicate accepted queue entries and event replay, but a crash between provider acceptance and its durable delivery checkpoint can leave transport delivery ambiguous; this is not an exactly-once execution guarantee.
 
 Collect returns the worker's execution revision, status/outcome, `settled` and `partial` flags, and typed availability for assistant summary, HEAD, bounded diff and artifact descriptors. Missing evidence is explicit; running output is partial. An available `diff.path` points to a **JSON result file** containing `{ result, diffSnapshot }`; its `diffSnapshot` field holds the patch. Read and review that field before applying any changes. The latest collected result is stored under the parent and survives restart. Collection acknowledges observation, not Git integration or successful work. Review desired worker commits and deliberately integrate them into the parent before destroying their worktrees/branches; there is no automatic merge.
 

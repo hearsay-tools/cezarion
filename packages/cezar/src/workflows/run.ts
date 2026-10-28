@@ -2059,8 +2059,8 @@ export class RunManager {
     const fit = (full: string, general: string) => full.length <= WAIT_MESSAGE_MAX ? full : general;
     const questions = this.unansweredQuestions(runId);
     if (questions.length) {
-      return { code: 'worker_questions', message: fit(`Your workers asked questions you have not answered. Answer each (${questions.map(q => `\`worker reply ${q.workerId} '<answer>' --id <new-UUID> --request-id ${q.messageId}\``).join(', ')}), then call cezar_done again.`,
-        `Your workers asked ${questions.length} questions you have not answered; \`workers\` lists the workers and \`worker inbox\` shows each question. Answer each (\`worker reply <worker-id> '<answer>' --id <new-UUID> --request-id <question-id>\`), then call cezar_done again.`),
+      return { code: 'worker_questions', message: fit(`Your workers asked questions you have not answered. Answer each (${questions.map(q => `\`cez message reply ${q.workerId} '<answer>' --id <new-UUID> --request-id ${q.messageId}\``).join(', ')}), then call cezar_done again.`,
+        `Your workers asked ${questions.length} questions you have not answered; \`workers\` lists the workers and \`cez message inbox\` shows each question. Answer each (\`cez message reply <worker-id> '<answer>' --id <new-UUID> --request-id <question-id>\`), then call cezar_done again.`),
       workers: questions.map(q => ({ worker_id: q.workerId, reason: 'question' })), liveWorkerIds: [] };
     }
     const blockers = this.parentCompletionBlockers(runId);
@@ -5134,7 +5134,7 @@ export class RunManager {
   }
 
   /** Both roles can select their own requests without acquiring worker-management authority.
-   *  `cez worker wait --request`: an alias into the wait list (hearsay-tools/cezarion#1235). */
+   *  `cez message wait --request`: an alias into the wait list (hearsay-tools/cezarion#1235). */
   registerRequestWait(runId: string, request: RequestWaitRequest): WorkerWait {
     const parsed = requestWaitRequestSchema.parse(request);
     return workerWaitEntryToLegacy(this.registerWorkerListWait(runId, parsed, 'cez-worker-wait'));

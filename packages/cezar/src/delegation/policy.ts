@@ -46,7 +46,7 @@ export function authorizeWorker(caller: Caller, target: RunRecord | undefined, o
   }
   if (operation === 'steer' && (parsed.data.destroy || !['queued', 'running', 'waiting'].includes(target.status))) {
     const instruction = !parsed.data.destroy && !target.stopping && ['review', 'done', 'failed'].includes(target.status)
-      ? ` To resume it with a new instruction, run worker send ${target.id} "<instruction>" --kind request --resume --id <new-message-UUID>; use a new message ID.`
+      ? ` To resume it with a new instruction, run worker resume ${target.id} "<instruction>" --id <new-message-UUID>; use a new message ID.`
       : '';
     throw new DelegationPolicyError('incompatible_state', `Worker no longer accepts steering.${instruction}`);
   }
