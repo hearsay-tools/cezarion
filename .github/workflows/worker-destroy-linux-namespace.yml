@@ -60,8 +60,9 @@ jobs:
           copy="$RUNNER_TEMP/capacity-attribution-copy"
           staged="$RUNNER_TEMP/capacity-attribution-staged.json"
           pnpm exec tsx packages/cezar/test/e2e/capacity-attribution-stage-cli.ts "$GITHUB_WORKSPACE" "$staged"
+          python3 .github/scripts/capacity-attribution-archive-check.py HEAD
           mkdir "$copy"
-          git archive HEAD -- package.json pnpm-lock.yaml pnpm-workspace.yaml vitest.config.ts packages .github/scripts .github/test-durations.json | tar -x -C "$copy"
+          git archive HEAD -- package.json pnpm-lock.yaml pnpm-workspace.yaml vitest.config.ts scripts/test-sandbox.mjs packages .github/scripts .github/test-durations.json | tar -x -C "$copy"
           pnpm exec tsx packages/cezar/test/e2e/capacity-attribution-apply-cli.ts "$copy" "$staged"
           cd "$copy"
           pnpm install --frozen-lockfile
