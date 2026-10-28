@@ -55,18 +55,26 @@ export async function prepareAuthoritativeReaper(project: DelegationProject, wor
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     rootPresent = false;
   }
-  const rootCurrent = rootPresent ? await prepareDestroyAccess(project.root, workspace) : () => {
+  if (!agentTmpDirOwnershipProven(dataDir, workerId)) throw new Error('Worker scratch ownership cannot be verified');
+  const generation = project.store.readWorkerExecution(workerId)?.generation;
+  const initial = check();
+  const requestedAt = initial.delegation?.role === 'worker' ? initial.delegation.destroy?.requestedAt : undefined;
+  if (!requestedAt) throw new Error('Worker destroy intent is missing');
+  const assertDestroyCurrent = () => {
+    assertAttached();
+    assertLinuxMountBoundary(initialPaths); assertDarwinMountBoundary(initialPaths);
+    if (process.platform === 'win32') windowsAssertMountBoundary(initialPaths);
+    const run = check();
+    if (run.delegation?.role !== 'worker' || run.delegation.destroy?.requestedAt !== requestedAt || JSON.stringify(run.delegation.workspace) !== JSON.stringify(workspace) ||
+        !agentTmpDirOwnershipProven(dataDir, workerId) || project.store.readWorkerExecution(workerId)?.generation !== generation) throw new Error('Worker resource ownership changed');
+  };
+  const rootCurrent = rootPresent ? await prepareDestroyAccess(project.root, workspace, assertDestroyCurrent) : () => {
     try { lstatSync(workspace.path); } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
       throw error;
     }
     throw new Error('Worker workspace appeared during scratch cleanup');
   };
-  if (!agentTmpDirOwnershipProven(dataDir, workerId)) throw new Error('Worker scratch ownership cannot be verified');
-  const generation = project.store.readWorkerExecution(workerId)?.generation;
-  const initial = check();
-  const requestedAt = initial.delegation?.role === 'worker' ? initial.delegation.destroy?.requestedAt : undefined;
-  if (!requestedAt) throw new Error('Worker destroy intent is missing');
   const current = async () => {
     assertLinuxMountBoundary([workspace.path, ...agentTmpDirLocations(dataDir, workerId)]);
     assertDarwinMountBoundary([workspace.path, ...agentTmpDirLocations(dataDir, workerId)]);
@@ -86,4 +94,3 @@ export async function prepareAuthoritativeReaper(project: DelegationProject, wor
     await reapDestroyHolders(paths, current);
   };
 }
-

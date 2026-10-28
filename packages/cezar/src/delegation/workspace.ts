@@ -1,3 +1,4 @@
+import { darwinDestroyChmod } from './darwin-destroy-chmod.ts';
 import { inspectGeneration } from './process-liveness.ts';
 import { assertDarwinMountBoundary, assertLinuxMountBoundary, MountBoundaryError } from './mount-boundary.ts';
 import { waitForTestAppWatcher, withIdleTestApp } from './idle-test-app.ts';
@@ -118,12 +119,13 @@ async function exists(path: string): Promise<boolean> {
 }
 
 /** Restore owner access only on real directories; do not chmod symlinks or their targets. */
-async function makeDirectoryWritable(path: string, expected?: { dev: number; ino: number }): Promise<void> {
+async function makeDirectoryWritable(path: string, expected?: { dev: number; ino: number }, explicitDestroy = false): Promise<void> {
   assertLinuxMountBoundary([path]);
   assertDarwinMountBoundary([path]);
   const info = await lstat(path);
   if (!info.isDirectory() || info.isSymbolicLink() || await realpath(path) !== path ||
       (expected && (info.dev !== expected.dev || info.ino !== expected.ino))) throw new Error(`Unsafe directory: ${path}`);
+  if (process.platform === 'darwin' && explicitDestroy) { await darwinDestroyChmod(path, expected); return; }
   if (process.platform !== 'win32') {
     // Linux O_PATH pins a directory even with mode 000; chmod the pinned inode
     // through procfs because fchmod on an O_PATH descriptor fails with EBADF.
@@ -145,10 +147,12 @@ async function makeDirectoryWritable(path: string, expected?: { dev: number; ino
 }
 
 /** Windows directory mode bits do not control deletion; reparse points are never traversed. */
-async function makeDirectoriesWritable(path: string): Promise<void> {
-  await makeDirectoryWritable(path);
+async function makeDirectoriesWritable(path: string, explicitDestroy = false, verify?: () => Promise<void>): Promise<void> {
+  await verify?.();
+  await makeDirectoryWritable(path, undefined, explicitDestroy);
+  await verify?.();
   for (const entry of await readdir(path, { withFileTypes: true })) {
-    if (entry.isDirectory()) await makeDirectoriesWritable(join(path, entry.name));
+    if (entry.isDirectory()) await makeDirectoriesWritable(join(path, entry.name), explicitDestroy, verify);
   }
 }
 
@@ -315,7 +319,7 @@ export async function verifyOwnedWorkspace(repoRoot: string, run: RunRecord): Pr
 }
 
 /** Authenticate the owned root before an explicit destroy can inspect or signal its holders. */
-export async function prepareDestroyAccess(repoRoot: string, value: WorkerWorkspace): Promise<() => Promise<void>> {
+export async function prepareDestroyAccess(repoRoot: string, value: WorkerWorkspace, assertDestroyCurrent: () => void): Promise<() => Promise<void>> {
   return withWorktreeMutation(repoRoot, async () => {
     const workspace = await validateIntent(repoRoot, value);
     const path = await receiptLocation(repoRoot, workspace);
@@ -338,11 +342,13 @@ export async function prepareDestroyAccess(repoRoot: string, value: WorkerWorksp
     } else if (checkpoint?.phase !== 'prepared' || await exists(receipt.gitDir)) {
       throw new Error('Owned workspace is not an authenticated prepared leftover');
     }
-    // Repair only the authenticated root before Git and evidence reads. The opened
-    // descriptor is checked against the captured inode before chmod.
-    await makeDirectoryWritable(workspace.path, root);
+    // Repair only the authenticated root before Git and evidence reads. On macOS the
+    // pinned parent bounds chmod; a final-name replacement is detected afterward.
+    assertDestroyCurrent();
+    await makeDirectoryWritable(workspace.path, root, true);
+    assertDestroyCurrent();
     if (registered && await liveGitDir(repoRoot, workspace) !== receipt.gitDir) throw new Error('Owned workspace Git identity changed');
-    return async () => {
+    const ensureCurrent = async () => {
       await validateIntent(repoRoot, value);
       if (!same(await readReceipt(path), receipt)) throw new Error('Owned workspace receipt changed');
       const currentCheckpoint = await exists(checkpointPath) ? cleanupSchema.parse(JSON.parse(await readIdentityFile(checkpointPath, RECEIPT_CAP))) : undefined;
@@ -359,6 +365,9 @@ export async function prepareDestroyAccess(repoRoot: string, value: WorkerWorksp
       const current = lstatSync(workspace.path);
       if (!current.isDirectory() || current.isSymbolicLink() || current.dev !== root.dev || current.ino !== root.ino) throw new Error('Owned workspace root changed');
     };
+    await ensureCurrent();
+    assertDestroyCurrent();
+    return ensureCurrent;
   }, { waitMs: 1_000 });
 }
 
@@ -412,7 +421,7 @@ export class WorkspaceHeldError extends Error {
 export type RemovalReport = { held?: (pids: readonly number[]) => void; unexplained?: () => void };
 export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorkspace, assertCurrent?: () => void,
   beforeRemove?: () => Promise<void>, assertUnheld?: () => void, report?: RemovalReport,
-  reapHolders?: () => Promise<void>): Promise<WorkerDestroyResult> {
+  reapHolders?: () => Promise<void>, explicitDestroy = false): Promise<WorkerDestroyResult> {
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false; let lockBusy = false; let heldBy: readonly number[] = [];
   const held = (pids: readonly number[]) => { heldBy = pids; report?.held?.(pids); };
@@ -521,7 +530,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         if (reapHolders) {
           await reapHolders();
           if (!await preparePresentWorktree(receipt)) return false;
-          await makeDirectoriesWritable(workspace.path);
+          await makeDirectoriesWritable(workspace.path, explicitDestroy, async () => { assertCurrent?.(); if (!await preparePresentWorktree(receipt)) throw new Error('Owned workspace changed during permission repair'); });
           if (!await preparePresentWorktree(receipt)) return false;
           await reapHolders();
         }
@@ -581,7 +590,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
           return current.dev === original.dev && current.ino === original.ino;
         };
         const removeFiles = async () => {
-          try { await makeDirectoriesWritable(workspace.path); }
+          try { await makeDirectoriesWritable(workspace.path, explicitDestroy, async () => { assertCurrent?.(); if (!await stillOwned() || !unheld()) throw new Error('Owned workspace changed during permission repair'); }); }
           catch (error) { return failedRemoval(error); }
           // Permission repair yields: a new checkout or holder can arrive while it runs.
           if (!await stillOwned()) { report?.unexplained?.(); return false; }
@@ -610,7 +619,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
           for (const component of components) {
             if (!await stillOwned() || !unheld()) return false;
             if (!await exists(component)) break;
-            try { await makeDirectoryWritable(component, component === workspace.path ? original : undefined); }
+            try { await makeDirectoryWritable(component, component === workspace.path ? original : undefined, explicitDestroy); }
             catch (error) { return failedRemoval(error); }
             if (!await stillOwned() || !unheld()) return false;
           }

@@ -1160,14 +1160,13 @@ export class RunManager {
     void task.catch(() => undefined).finally(() => turns?.delete(task));
   }
 
-  /** Stop only a session owned by this manager; no session means no state change. */
+  /** Stop only a session or startup owned by this manager; otherwise leave state unchanged. */
   requestActiveWorkerStop(runId: string): void {
     if (this.store.getRun(runId)?.delegation?.role !== 'worker') throw new Error('Worker not found');
-    if (!this.active.has(runId)) return;
+    if (!this.active.has(runId) && !this.starting.has(runId)) return;
     if (this.store.writeRefusal(runId)) throw new Error('Worker control is owned by another process');
     this.cancel(runId);
   }
-
   requestWorkerStop(runId: string): WorkerStopResult {
     if (this.store.getRun(runId)?.delegation?.role !== 'worker') throw new Error('Worker not found');
     if (!this.executions.has(runId) && !this.isActive(runId) && ['done', 'failed', 'cancelled', 'review'].includes(this.store.getRun(runId)!.status) && this.store.readWorkerExecution(runId)?.phase === 'complete') return { workerId: runId, state: 'terminated' };
@@ -6789,8 +6788,9 @@ export class RunManager {
     return { ok: true };
   }
 
-  /** A Continue whose engine threw: the run fails and leaves the active set (exit `fail-crash`). */
+  /** A Continue whose engine threw: settle a recorded stop or fail and leave the active set. */
   private failCrashedContinuation(runId: string, err: unknown): void {
+    if (this.settleStoppedContinuation(runId)) return;
     const message = err instanceof Error ? err.message : String(err);
     this.move(runId, 'fail-crash', {
       error: `continue crashed: ${message}`,
@@ -6799,7 +6799,6 @@ export class RunManager {
     this.starting.delete(runId);
     this.dropActive(runId);
   }
-
   private async runContinuation(
     runId: string,
     stepId: string,
@@ -6987,6 +6986,7 @@ export class RunManager {
         parentCwd: this.store.getRun(delegation.parentRunId)?.worktreePath ?? this.repoRoot });
       return cwd;
     } catch (error) {
+      if (this.settleStoppedContinuation(runId)) return undefined;
       const message = `owned workspace unavailable: ${error instanceof Error ? error.message : String(error)}`;
       const finishedAt = new Date().toISOString();
       this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt });

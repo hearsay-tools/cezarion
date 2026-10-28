@@ -1625,6 +1625,12 @@ an autonomous scratch cleanup tick must retain the scratch marker. No runner exe
 No resource holder is reaped before authentication; receipt and detach guards cover
 the refusal boundaries.
 
+**R127** (hearsay-tools/cezarion#954), in `workflows/worker-start-destroy-parity.test.ts`,
+uses every `RUNNER_IDS` native mock. Destroy cancels a manager-owned starting
+continuation before a failed resource preflight, whether workspace resolution succeeds
+or rejects. No new session starts; the worktree, scratch marker and branch remain.
+A rejection without a recorded stop remains a failure. No runner exemptions.
+
 **S21** (hearsay-tools/cezarion#832) detects unexpected restored history through
 OMP's startup `get_state.messageCount`. A fresh step emits one v1 note and one
 non-fatal `session.error`, and still completes normally. Other native wires have

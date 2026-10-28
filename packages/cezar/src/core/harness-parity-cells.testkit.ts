@@ -692,6 +692,8 @@ const CONTROL_CRITERIA = [
   { id: 'R47', scenario: 'baseline' },
   // worker-restart-parity.test.ts: active owned session stops despite rejected resource preflight.
   { id: 'R126', scenario: 'hold' },
+  // worker-start-destroy-parity.test.ts: cancellation while continuation workspace is pending.
+  { id: 'R127', scenario: 'done' },
   // worker-restart-parity.test.ts: cold terminal starting-proof facts readiness.
   { id: 'R60', scenario: 'baseline' },
   // #779: Continue on a run only runs.db holds, through both ActiveRun construction sites.

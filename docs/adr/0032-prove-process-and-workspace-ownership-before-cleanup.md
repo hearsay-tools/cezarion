@@ -45,6 +45,14 @@ after a scan, and a token check and POSIX signal are not atomic. This policy doe
 claim hard isolation or that every future same-user process can be prevented.
 Destroy remains incomplete until owned worktree, branch and scratch are gone.
 
+For explicit worker destruction on macOS, the owner accepts a narrow permission-repair
+race. Pin the no-follow parent, verify the target directory identity, add owner access
+without clearing existing mode bits, then reopen through that parent and compare its
+identity. A final-name replacement can have its permissions changed before the mismatch
+is detected. A mismatch or failed check retains the resources and never authorizes
+deletion. Recheck destroy intent, ownership, mount boundaries and holders at the existing
+mutation boundaries. Ordinary run cleanup does not use this exception.
+
 Implementation: [session-process.ts](../../packages/cezar/src/core/session-process.ts), [process-liveness.ts](../../packages/cezar/src/delegation/process-liveness.ts), [workspace.ts](../../packages/cezar/src/delegation/workspace.ts).
 
 Coverage: [session-process.test.ts](../../packages/cezar/src/core/session-process.test.ts), [process-liveness.test.ts](../../packages/cezar/src/delegation/process-liveness.test.ts), [workspace.test.ts](../../packages/cezar/src/delegation/workspace.test.ts).

@@ -586,7 +586,7 @@ exec "${realGit}" "$@"
     await writeFile(join(locked, 'file'), 'data');
     await chmod(locked, 0);
     try {
-      const result = await removeOwnedWorkspace(root, workspace);
+      const result = await removeOwnedWorkspace(root, workspace, undefined, undefined, undefined, undefined, undefined, true);
       expect(result, JSON.stringify(result)).toMatchObject({ state: 'complete', remaining: [] });
     } finally { if (existsSync(locked)) await chmod(locked, 0o700); }
   });
@@ -597,7 +597,7 @@ exec "${realGit}" "$@"
     if (part === '.ai') await mkdir(locked);
     await chmod(locked, 0);
     try {
-      expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });
+      expect(await removeOwnedWorkspace(root, workspace, undefined, undefined, undefined, undefined, undefined, true)).toMatchObject({ state: 'complete', remaining: [] });
     } finally { if (existsSync(locked)) await chmod(locked, 0o700); }
   });
 

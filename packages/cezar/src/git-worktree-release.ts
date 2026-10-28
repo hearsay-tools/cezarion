@@ -41,5 +41,5 @@ export async function releaseThenRemoveOwnedWorkspace(
 ): Promise<WorkerDestroyResult> {
   return removeOwnedWorkspace(repoRoot, workspace, assertCurrent, async () => {
     await deps.previewHost?.release(workspace.ownerRunId).catch(() => undefined);
-  }, assertUnheld, report, reapHolders);
+  }, assertUnheld, report, reapHolders, true);
 }

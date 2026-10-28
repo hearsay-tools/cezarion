@@ -11,6 +11,7 @@ import { DelegationPolicyError } from './policy.ts';
 import { workerWorkflowHash } from './execution-identity.ts';
 import { QUICK_TASK_WORKFLOW, skillTaskSteps } from '../workflows/types.ts';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
@@ -761,6 +762,33 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
         app.kill('SIGKILL'); await exited;
       }
     }, 120_000);
+
+  it.runIf(process.platform === 'darwin')('retains the workspace and branch when .ai is replaced during repair', async () => {
+    const { workerId, workspace } = await settled(false);
+    const ai = join(workspace.path, '.ai'), saved = join(workspace.path, '.ai-saved');
+    mkdirSync(ai, { recursive: true }); chmodSync(ai, 0);
+    const fixtureScript = join(f.root, 'destroy-race-fixture.js');
+    const source = readFileSync(fileURLToPath(new URL('../../scripts/darwin-destroy-chmod.js', import.meta.url)), 'utf8');
+    const binding = "ObjC.bindFunction('renameat', ['int', ['int', 'char *', 'int', 'char *']]);\nObjC.bindFunction('mkdirat', ['int', ['int', 'char *', 'int']]);\n";
+    const hook = "if ($.renameat(fd, name, fd, $('.ai-saved').UTF8String) !== 0 || $.mkdirat(fd, name, 0) !== 0) throw Error('fixture swap');\n    ";
+    writeFileSync(fixtureScript, source.replace('function run(args) {', binding + 'function run(args) {').replace('if ($.fchmodat(fd, name,', hook + 'if ($.fchmodat(fd, name,'));
+    const exec = childProcess.execFile;
+    const spy = vi.spyOn(childProcess, 'execFile').mockImplementation(((...args: unknown[]) => {
+      const argv = args[1] as string[];
+      if (args[0] === '/usr/bin/osascript' && argv?.[3] === workspace.path && argv?.[4] === '.ai') args[1] = [...argv.slice(0, 2), fixtureScript, ...argv.slice(3)];
+      return Reflect.apply(exec, childProcess, args);
+    }) as typeof exec);
+    syncBuiltinESMExports();
+    try {
+      const result = await f.service.destroy(f.caller, { workerId });
+      expect(result).toMatchObject({ state: 'incomplete', error: expect.stringContaining('directory identity mismatch') });
+      expect(existsSync(workspace.path)).toBe(true);
+      expect(existsSync(saved)).toBe(true);
+      expect(fs.lstatSync(saved).mode & 0o777).toBe(0);
+      expect(fs.lstatSync(ai).mode & 0o777).toBe(0o700);
+      expect(execFileSync('git', ['branch', '--list', workspace.branch], { cwd: f.root, encoding: 'utf8' })).toContain(workspace.branch);
+    } finally { spy.mockRestore(); syncBuiltinESMExports(); if (existsSync(saved)) chmodSync(saved, 0o700); if (existsSync(ai)) chmodSync(ai, 0o700); }
+  }, 120_000);
 
   it.runIf(process.platform === 'win32')('authoritative destroy stops a cwd and open-file holder', async () => {
     const started = Date.now();
