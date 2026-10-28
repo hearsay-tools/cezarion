@@ -909,7 +909,9 @@ export class DelegationService {
         result = await releaseThenRemoveOwnedWorkspace({ previewHost: project.manager.previewHost }, project.root, workspace,
           assertCurrent, assertSafe, { held: pids => { holders = pids; }, unexplained: () => { explained = false; } }, reapHolders);
         if (result.state === 'complete') {
-          assertCurrent();
+          // Retention may have changed during the awaited workspace removal.
+          // Recheck it before removing the independently owned scratch directory.
+          assertSafe();
           const scratchFailure = removeWorkerScratch(project.root, workerId);
           if (scratchFailure) {
             explained = false;

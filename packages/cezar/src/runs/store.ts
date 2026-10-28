@@ -4,7 +4,7 @@ export { parseStoredSummary } from './run-summary-page.ts';
 import { defined } from '../core/defined.ts';
 import { autosaveCleanupBlocker, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { EventEmitter } from 'node:events';
-import { workerEvidenceRunIds, workerExecutionSchema, type WorkerExecution } from './worker-execution.ts';
+import { workerEvidenceRunIds, workerExecutionSchema, type WorkerAliasRetention, type WorkerExecution } from './worker-execution.ts';
 import { isWindowsWorkerEvidence, readWindowsEvidence, removeWindowsEvidence, windowsEvidencePath, writeWindowsEvidence } from './windows-worker-evidence.ts';
 import { executionEvidenceAbsent, readPrivateWorkerFile, replacePrivateWorkerFile } from './private-worker-file.ts';
 import { agentTmpDirLocations, agentTmpDirMayExist, agentTmpDirOwnershipProven, removeAgentTmpDir } from './agent-tmpdir.ts';
@@ -3863,8 +3863,21 @@ export class RunStore extends EventEmitter {
   }
 
   private writeWorkerExecution(id: string, proof: WorkerExecution, fresh = false): void {
-    if (isWindowsWorkerEvidence) { writeWindowsEvidence(this.dataDir, id, 'execution', JSON.stringify(proof), fresh); return; }
-    replacePrivateWorkerFile(this.executionPath(id), JSON.stringify(proof), fresh);
+    const content = JSON.stringify(workerExecutionSchema.parse(proof));
+    if (Buffer.byteLength(content) > 16384) throw new Error('Worker execution evidence exceeds bounds');
+    if (isWindowsWorkerEvidence) { writeWindowsEvidence(this.dataDir, id, 'execution', content, fresh); return; }
+    replacePrivateWorkerFile(this.executionPath(id), content, fresh);
+  }
+
+  /** The caller authenticates resources and performs the release proof. A
+   * missing or invalid checkpoint cannot be treated as an empty retention set. */
+  commitWorkerAliasRetention(id: string, generation: string, resourceId: string, retention: WorkerAliasRetention | undefined): void {
+    const run = this.peek(id), proof = this.readWorkerExecution(id);
+    if (this.writeRefusal(id) || run?.delegation?.role !== 'worker' || !run.delegation.destroy || run.delegation.workspace.resourceId !== resourceId ||
+        !proof || proof.phase === 'queued' || proof.generation !== generation ||
+        (retention && (retention.generation !== generation || retention.resourceId !== resourceId))) throw new Error('Worker alias retention ownership changed');
+    const { aliasRetention: _previous, ...rest } = proof;
+    this.writeWorkerExecution(id, { ...rest, ...(retention ? { aliasRetention: retention } : {}) });
   }
 
   /** Complete execution is not permission to reuse/delete persistent resources (#738).
@@ -3882,6 +3895,7 @@ export class RunStore extends EventEmitter {
     if (run?.delegation?.role !== 'worker' || run.delegation.workspace.ownerRunId !== id ||
       run.delegation.workspace.resourceId !== resourceId || proof?.generation !== generation ||
       (proof.phase !== 'complete' && !(opts.admittingQueued && proof.phase === 'queued'))) return [];
+    if (proof.aliasRetention) return [];
     const record = this.readWorkerProcesses(id, generation);
     if (record === 'unknown' || !agentTmpDirOwnershipProven(this.dataDir, id)) return [];
     const paths = [run.delegation.workspace.path, ...agentTmpDirLocations(this.dataDir, id)];
@@ -3914,6 +3928,7 @@ export class RunStore extends EventEmitter {
     const run = this.peek(id), proof = this.readWorkerExecution(id);
     if (proof?.phase !== 'complete' || proof.generation !== generation || proof.scratchCleanup?.resourceId !== resourceId ||
       (run && ['queued', 'running', 'waiting'].includes(run.status))) return false;
+    if (proof.aliasRetention) return false;
     if (run?.delegation?.role === 'worker') return run.delegation.workspace.path === proof.scratchCleanup.path &&
       this.workerResourceHolders(id, generation, resourceId, { cwds }) === 'safe';
     // A valid different role contradicts the retained intent. Quarantined/missing metadata
@@ -3989,10 +4004,12 @@ export class RunStore extends EventEmitter {
       const run = this.peek(id);
       if (run?.delegation?.role !== 'worker') return false;
       this.commitIndex(new Map([[id, run]]));
-      if (this.readWorkerExecution(id)?.generation !== generation) return false;
+      const latest = this.readWorkerExecution(id);
+      if (latest?.generation !== generation) return false;
       this.writeWorkerExecution(id, { generation, phase: 'complete',
         // Nothing abandons an execution any more (hearsay-tools/cezarion#889); keep a checkpoint that already was.
         ...(proof.abandoned ? { abandoned: true as const } : {}),
+        ...(latest.aliasRetention ? { aliasRetention: latest.aliasRetention } : {}),
         ...(proof.phase === 'queued' || proof.neverMaterialized ? { neverMaterialized: true as const } : {}),
         ...(!['queued', 'running', 'waiting'].includes(run.status) ? { scratchCleanup: {
           resourceId: run.delegation.workspace.resourceId, path: run.delegation.workspace.path } } : {}) });

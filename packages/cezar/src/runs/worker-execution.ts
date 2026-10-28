@@ -3,6 +3,17 @@ import { isAbsolute, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { windowsIdentityDirectory } from '../delegation/windows-workspace-identity.ts';
 
+const decimalIdentity = z.string().regex(/^\d{1,20}$/);
+const aliasObjectIdentity = z.object({ dev: z.string().regex(/^\d{1,20}:\d{1,20}$/), ino: decimalIdentity }).strict();
+/** Retention only. This evidence never permits a signal. */
+export const workerAliasRetentionSchema = z.object({
+  generation: z.string().uuid(), resourceId: z.string().uuid(), bootId: z.string().uuid(),
+  roots: z.array(z.object({ path: z.string().max(4096).refine(isAbsolute), identity: aliasObjectIdentity.nullable() }).strict()).min(1).max(16),
+  processes: z.array(z.object({ pid: z.number().int().positive(), start: decimalIdentity,
+    identities: z.array(aliasObjectIdentity).min(1).max(64) }).strict()).min(1).max(64),
+}).strict();
+export type WorkerAliasRetention = z.infer<typeof workerAliasRetentionSchema>;
+
 /** Terminal task intent survives loss/quarantine of the public run index. Starting a new
  * generation replaces this entire checkpoint, so an old cleanup cannot authorize reuse. */
 export const workerExecutionSchema = z.object({
@@ -10,8 +21,9 @@ export const workerExecutionSchema = z.object({
   // Settlement after a same-boot crash with unverified holders is not exit proof (hearsay-tools/cezarion#839).
   abandoned: z.literal(true).optional(),
   scratchCleanup: z.object({ resourceId: z.string().uuid(), path: z.string().refine(isAbsolute) }).strict().optional(),
+  aliasRetention: workerAliasRetentionSchema.optional(),
 }).strict().refine(proof => ((!proof.neverMaterialized && !proof.scratchCleanup && !proof.abandoned) || proof.phase === 'complete') &&
-  !(proof.abandoned && proof.neverMaterialized));
+  !(proof.abandoned && proof.neverMaterialized) && (!proof.aliasRetention || (!proof.neverMaterialized && proof.aliasRetention.generation === proof.generation)));
 export type WorkerExecution = z.infer<typeof workerExecutionSchema>;
 
 /** Presence, not parseability, reserves scratch. Unknown evidence must never turn into an

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { once } from 'node:events';
 import { syncBuiltinESMExports } from 'node:module';
-import { fixtureProcessEnumeration } from '../../src/delegation/process-enumeration.testkit.ts';
+import { fixtureProcessDirectory, fixtureProcessEnumeration } from '../../src/delegation/process-enumeration.testkit.ts';
 import { readPersistedRuns } from '../../src/runs/run-store.testkit.ts';
 import { execFile as execFileCallback, spawn as spawnProcess } from 'node:child_process';
 import { access, cp, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
@@ -68,9 +68,11 @@ test('built worker CLI runs without cez on PATH; headless provision stays local 
 // fixture; installed code, process identities, cwd reads and cleanup remain real.
 test('installed CLI completes owned-worker lifecycle with lost spawn reply and one slot', { timeout: 120_000 }, async t => {
   if (process.platform === 'linux') {
-    const enumeration = t.mock.method(fs, 'readdirSync', fixtureProcessEnumeration());
+    const enumerate = fixtureProcessEnumeration();
+    const enumeration = t.mock.method(fs, 'readdirSync', enumerate);
+    const directory = t.mock.method(fs, 'opendirSync', fixtureProcessDirectory(enumerate));
     syncBuiltinESMExports();
-    t.after(() => { enumeration.mock.restore(); syncBuiltinESMExports(); });
+    t.after(() => { directory.mock.restore(); enumeration.mock.restore(); syncBuiltinESMExports(); });
   }
   const root = await mkdtemp(join(tmpdir(), "cez-installed-workers-"));
   const saved = { ...process.env };

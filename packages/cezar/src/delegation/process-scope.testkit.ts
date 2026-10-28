@@ -3,7 +3,7 @@ import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { promisify } from 'node:util';
 import { vi } from 'vitest';
-import { fixtureProcessEnumeration } from './process-enumeration.testkit.ts';
+import { fixtureProcessDirectory, fixtureProcessEnumeration } from './process-enumeration.testkit.ts';
 
 /** Enumerate the fixture's process tree, including observed children subsequently orphaned.
  * Host daemons and parallel test workers are outside this fixture. Tokens/cwd/permissions are
@@ -12,9 +12,11 @@ export function scopeFixtureProcesses(platform: NodeJS.Platform = process.platfo
   if (platform === 'darwin') return scopeDarwinProcesses();
   if (platform !== 'linux') return () => {};
   const enumerate = fixtureProcessEnumeration();
+  const openDirectory = fixtureProcessDirectory(enumerate);
   const scope = vi.spyOn(fs, 'readdirSync').mockImplementation(enumerate);
+  const directory = vi.spyOn(fs, 'opendirSync').mockImplementation(openDirectory);
   syncBuiltinESMExports();
-  return () => { scope.mockRestore(); syncBuiltinESMExports(); };
+  return () => { directory.mockRestore(); scope.mockRestore(); syncBuiltinESMExports(); };
 }
 
 /** Scope enumeration commands; individual PID/token reads stay real.

@@ -88,6 +88,14 @@ export async function prepareAuthoritativeReaper(project: DelegationProject, wor
   return async () => {
     await current();
     const paths = [...(rootPresent ? [workspace.path] : []), ...agentTmpDirLocations(dataDir, workerId)];
-    await reapDestroyHolders(paths, current);
+    const retention = process.platform === 'linux' ? {
+      resourceId: workspace.resourceId,
+      read: () => project.store.readWorkerExecution(workerId),
+      write: (value: import('../runs/worker-execution.ts').WorkerAliasRetention | undefined) => {
+        if (!generation) throw new Error('Worker execution checkpoint unavailable');
+        project.store.commitWorkerAliasRetention(workerId, generation, workspace.resourceId, value);
+      },
+    } : undefined;
+    await reapDestroyHolders(paths, current, undefined, retention);
   };
 }

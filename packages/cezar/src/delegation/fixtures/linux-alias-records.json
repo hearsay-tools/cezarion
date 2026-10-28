@@ -1,0 +1,36 @@
+[
+  {
+    "case": "private-bind-closed-fd",
+    "maps": [
+      "7fa45887c000-7fa45887d000 r--p 00000000 08:01 9178533                    /fixture/alias/mapped"
+    ],
+    "root": "/",
+    "mountinfo": [
+      "417 95 8:1 /fixture/owned /fixture/alias rw,relatime - ext4 /dev/root rw,discard,journal_async_commit,nobarrier,errors=remount-ro,commit=30,data=writeback"
+    ]
+  },
+  {
+    "case": "nested-overmount",
+    "maps": [
+      "7fa45887b000-7fa45887c000 r--p 00000000 08:01 9178535                    /fixture/alias/nested/mapped-nested",
+      "7fa45887c000-7fa45887d000 r--p 00000000 08:01 9178533                    /fixture/alias/mapped"
+    ],
+    "root": "/",
+    "mountinfo": [
+      "417 95 8:1 /fixture/owned /fixture/alias rw,relatime - ext4 /dev/root rw,discard,journal_async_commit,nobarrier,errors=remount-ro,commit=30,data=writeback",
+      "418 417 8:1 /fixture/other/nested /fixture/alias/nested rw,relatime - ext4 /dev/root rw,discard,journal_async_commit,nobarrier,errors=remount-ro,commit=30,data=writeback"
+    ]
+  },
+  {
+    "case": "changed-root",
+    "maps": [
+      "7fa45887b000-7fa45887c000 r--p 00000000 08:01 9178535                    /fixture/alias/nested/mapped-nested",
+      "7fa45887c000-7fa45887d000 r--p 00000000 08:01 9178533                    /fixture/alias/mapped"
+    ],
+    "root": "/fixture",
+    "mountinfo": [
+      "417 95 8:1 /fixture/owned /alias rw,relatime - ext4 /dev/root rw,discard,journal_async_commit,nobarrier,errors=remount-ro,commit=30,data=writeback",
+      "418 417 8:1 /fixture/other/nested /alias/nested rw,relatime - ext4 /dev/root rw,discard,journal_async_commit,nobarrier,errors=remount-ro,commit=30,data=writeback"
+    ]
+  }
+]

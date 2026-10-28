@@ -27,6 +27,8 @@ import { readableHolder } from './non-dumpable.testkit.ts';
 import { workerDestroyView } from '../runs/delegation-state.ts';
 import { agentTmpDir, agentTmpEnv } from '../runs/agent-tmpdir.ts';
 
+const unscopedReadDirectory = fs.readdirSync;
+
 describe('delegation service durable authority', () => {
   let f: ReturnType<typeof fixture>;
   beforeEach(() => { scopeFixtureProcesses(); vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
@@ -1003,6 +1005,28 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     execFileSync('git', ['worktree', 'lock', workspace.path], { cwd: f.root });
     expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'complete', remaining: [] });
     expect(existsSync(workspace.path)).toBe(false);
+  });
+
+  it('retains scratch when resource safety is lost after worktree removal', async () => {
+    const { workerId, workspace } = await settled(false);
+    const scratch = agentTmpEnv(join(f.root, '.ai/cezar'), workerId, { ...process.env, CEZ_AGENT_TMPDIR: '1' }).TMPDIR!;
+    // The fixture has no child holders. Do not enumerate host processes.
+    vi.spyOn(fs, 'readdirSync').mockImplementation(((path, options) => String(path) === '/proc'
+      ? [] : Reflect.apply(unscopedReadDirectory, fs, [path, options])) as typeof fs.readdirSync);
+    vi.spyOn(fs, 'opendirSync').mockImplementation(((path) => {
+      const name = String(path);
+      if (name !== '/proc' && name !== `/proc/${process.pid}/task`) throw new Error(`Unexpected directory ${name}`);
+      const names = name === '/proc' ? [] : [String(process.pid)];
+      return { readSync: () => names.length ? { name: names.shift()! } : null, closeSync: () => {} } as fs.Dir;
+    }) as typeof fs.opendirSync);
+    syncBuiltinESMExports();
+    const check = f.store.workerResourceHolders.bind(f.store);
+    vi.spyOn(f.store, 'workerResourceHolders').mockImplementation((...args) =>
+      existsSync(workspace.path) ? check(...args) : []);
+    const result = await f.service.destroy(f.caller, { workerId });
+    expect(result.state).toBe('incomplete');
+    expect(existsSync(workspace.path), JSON.stringify(result)).toBe(false);
+    expect(existsSync(scratch)).toBe(true);
   });
 
   it('a holder check that names no process is retried in full once its evidence is repaired, never skipped', async () => {

@@ -4,6 +4,9 @@ on:
     paths:
       - '.github/workflows/worker-destroy-linux-namespace.yml'
       - '.github/scripts/linux-mount-alias-probe.py'
+      - '.github/scripts/linux-mount-alias-lifecycle.py'
+      - '.github/scripts/linux-mount-alias-observer.mjs'
+      - 'packages/cezar/src/delegation/linux-alias-*'
       - 'packages/cezar/src/delegation/linux-mapped-holders*'
       - 'packages/cezar/src/delegation/destroy-holders*'
   workflow_dispatch: {}
@@ -17,5 +20,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.21.0'
       - name: Observe private mount namespace aliases
-        run: sudo -n -- python3 .github/scripts/linux-mount-alias-probe.py
+        run: sudo -n -- python3 .github/scripts/linux-mount-alias-probe.py --observer "$(command -v node)"
+      - name: Verify gated probe teardown
+        run: sudo -n -- python3 .github/scripts/linux-mount-alias-lifecycle.py

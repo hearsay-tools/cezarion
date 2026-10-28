@@ -95,10 +95,11 @@ export function recordHolders(pids: readonly number[]): RecordedProcess[] {
  * holder, only recorded processes reach this, and liveness decides.
  */
 export function holdersStillHold({ store, dataDir, workerId, holders }: { store: RunStore; dataDir: string; workerId: string; holders: readonly RecordedProcess[] }): boolean {
-  if (!holders.length) return true;
   const run = store.getRun(workerId);
   if (run?.delegation?.role !== 'worker') return false;
   const execution = store.readWorkerExecution(workerId);
+  if (!execution || execution.aliasRetention) return false;
+  if (!holders.length) return true;
   const record = execution ? store.readWorkerProcesses(workerId, execution.generation) : 'absent';
   const recorded = typeof record === 'string' ? [] : [record.controller, ...record.processes];
   const paths = [run.delegation.workspace.path, ...agentTmpDirLocations(dataDir, workerId)];
