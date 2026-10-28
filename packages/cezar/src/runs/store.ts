@@ -55,11 +55,13 @@ import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartT
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { archivePullRequests, pullRequestKey, mergePullRequests } from './pull-requests.ts';
-import { extractTaskRefs, MAX_REF } from './task-refs.ts';
+import { extractTaskRefs, isRepoScopedRef, MAX_REF, promptNamesRepo, refUrlRepo } from './task-refs.ts';
 // Type-only module (zod + nothing else), so this cannot cycle back into the store.
 import { workflowDefSchema } from '../workflows/types.ts';
 import { waitInputId } from '../workflows/waits.ts';
 import { applyOutcomes, type OutcomeDependencies, type RunOutcome } from './outcome-commit.ts';
+import { assertConversationIdFree, type ConversationIdentity } from './conversation-identity.ts';
+export { ConversationIdInUseError } from './conversation-identity.ts';
 
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import {
@@ -536,38 +538,6 @@ const MAX_PR_CANDIDATES = 8;
 /** The repository a project IS, as `resolveRepoHandle` reports it. `null`/absent means "unknown",
  *  which is a real and common state (no `gh`, no remote, a non-git root) — never an error. */
 export type RepoHandle = { owner: string; name: string };
-
-/** `https://github.com/open-mercato/cezar/pull/402` → `open-mercato/cezar`, lowercased.
- *  Undefined for anything that is not a `<host>/<owner>/<repo>/<kind>/<n>` forge URL. */
-function refUrlRepo(url: string): string | undefined {
-  const parts = url.split('/');
-  const owner = parts[parts.length - 4];
-  const name = parts[parts.length - 3];
-  return owner && name ? `${owner}/${name}`.toLowerCase() : undefined;
-}
-
-/**
- * A foreign referenced URL needs task-prompt corroboration of its repository. Unknown project
- * handles preserve the degraded rule. This check vets the resolved winner, not the candidate
- * list.
- */
-function isRepoScopedRef(url: string, task: string, handle?: RepoHandle | null): boolean {
-  if (!handle) return true;
-  const repo = refUrlRepo(url);
-  if (!repo) return true;
-  if (repo === `${handle.owner}/${handle.name}`.toLowerCase()) return true;
-  return promptNamesRepo(url, task);
-}
-
-/** Positive scope evidence for permanent declarations; legacy discovery still fails open. */
-function promptNamesRepo(url: string, task: string): boolean {
-  const repo = refUrlRepo(url);
-  if (!repo) return false;
-  // Match whole owner/repository segments: naming acme/service2 must not corroborate
-  // acme/service. Slashes remain valid boundaries for full URLs and their /pull or /issues path.
-  const escapedRepo = repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(?<![a-z0-9_.-])${escapedRepo}(?![a-z0-9_.-])`, 'i').test(task);
-}
 
 /**
  * Every scannable string of one persisted event: the v1 top-level fields plus
@@ -2224,15 +2194,15 @@ export class RunStore extends EventEmitter {
     return found;
   }
 
-  /** The id of every root whose delegation carries a conversation, held or stored: recovery's
-   *  full reconcile pass (#661). The stored summary names the role, so only roots' records are
-   *  read, in SQLite. */
-  listConversationRootIds(): string[] {
-    const where = "json_extract(summary, '$.delegation.role') = 'root' AND json_extract(data, '$.delegation.conversation') IS NOT NULL";
-    const ids = new Set((this.db?.listKeysWhere(where) ?? []).map((key) => key.id));
+  /** The id of every root whose delegation carries a conversation, held or stored: recovery's full
+   *  reconcile pass (#661). Only roots' records are read, in SQLite. `naming` keeps the ledgers whose
+   *  messages name that run id, filtered there too, so a deleted peer decodes no other root. */
+  listConversationRootIds(naming?: string): string[] {
+    const where = `json_extract(summary, '$.delegation.role') = 'root' AND json_extract(data, '$.delegation.conversation') IS NOT NULL${naming ? " AND instr(json_extract(data, '$.delegation.conversation.messages'), ?) > 0" : ''}`;
+    const ids = new Set((this.db?.listKeysWhere(where, naming ? [naming] : []) ?? []).map((key) => key.id));
     for (const id of this.deleted) ids.delete(id);
     for (const [id, run] of this.held) {
-      if (run.delegation?.role === 'root' && run.delegation.conversation) ids.add(id);
+      if (run.delegation?.role === 'root' && run.delegation.conversation && (!naming || run.delegation.conversation.messages.some(message => [message.senderRunId, message.recipientRunId].includes(naming)))) ids.add(id);
       else ids.delete(id);
     }
     return [...ids];
@@ -2389,10 +2359,14 @@ export class RunStore extends EventEmitter {
     return run;
   }
 
-  /** Accept the family ledger and its recipient queue in a single durable index replacement. */
-  commitConversation(rootId: string, conversation: ConversationState, delivery?: { recipientRunId: string; input: AgentInput }): void {
+  /** Accept the family ledger and its recipient queue in a single durable index replacement. A new
+   *  message (`message`, or the delivered input) whose ID is in use writes nothing; `recipientDelegation`
+   *  makes a peer recipient with no delegation record a root task in the same write. */
+  commitConversation(rootId: string, conversation: ConversationState, delivery?: { recipientRunId: string; input: AgentInput; recipientDelegation?: DelegationState },
+    message?: ConversationIdentity): void {
     const root = this.peek(rootId);
     if (root?.delegation?.role !== 'root') throw new Error('missing conversation root');
+    assertConversationIdFree(root, message ?? delivery?.input, id => this.peek(id), (runId, id) => this.hasProjection(runId, id));
     const staged = new Map<string, RunRecord>();
     staged.set(rootId, { ...root, delegation: delegationStateSchema.parse({ ...root.delegation, conversation: { ...conversation,
       messages: conversation.messages.map(message => ({ ...message, text: this.redactText(message.text) })),
@@ -2401,7 +2375,8 @@ export class RunStore extends EventEmitter {
       const recipient = staged.get(delivery.recipientRunId) ?? this.peek(delivery.recipientRunId);
       if (!recipient) throw new Error('missing conversation recipient');
       const input = agentInputSchema.parse({ ...delivery.input, text: this.redactText(delivery.input.text) });
-      staged.set(recipient.id, { ...recipient, agentInputs: [...(recipient.agentInputs ?? []), input] });
+      const delegation = !recipient.delegation && delivery.recipientDelegation ? { delegation: delegationStateSchema.parse(delivery.recipientDelegation) } : {};
+      staged.set(recipient.id, { ...recipient, ...delegation, agentInputs: [...(recipient.agentInputs ?? []), input] });
     }
     this.commitIndex(staged);
   }

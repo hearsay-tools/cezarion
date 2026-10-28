@@ -16,7 +16,7 @@ import { nextLineEntry } from './line-order.ts';
 import { accountHeldFor, formatWakeInstant, resumeInFlight, runAccountKey, queuedRecoveryInput, queuedStartAt, sessionlessWakePrompt } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
 import { executionAccount } from './execution-account.ts';
-import { chargesBudget, ciWatchRequest, hasPrWait, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitInputId, waitResultText } from './waits.ts';
+import { chargesBudget, chargesBudgetMessage, ciWatchRequest, hasPrWait, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitInputId, waitResultText } from './waits.ts';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
 import { previewCdpSession, previewRunContext, previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
@@ -27,7 +27,7 @@ import { workerContextHash, workerWorkflowHash, workerStepIdentity, captureWorke
 import { buildChildEnv } from '../core/agent-env.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import {
   parseAskMarkerResult,
@@ -82,11 +82,9 @@ import {
   type RequestWaitRequest,
   requestWaitRequestSchema,
 } from '@open-mercato/cezar-contract/conversations';
-import {
-  attachmentExtension,
-  isImageAttachmentName,
-  isImageMediaType,
-} from '@open-mercato/cezar-contract/attachments';
+import { attachmentExtension, isImageAttachmentName } from '@open-mercato/cezar-contract/attachments';
+import { contentBlocksOf, highestImageSeq, mediaTypeFor, pastedAttachmentsNote, pastedAttachmentsText, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from './pasted-content.ts';
+export { contentBlocksOf, highestImageSeq, mediaTypeFor, pastedAttachmentsNote, pastedAttachmentsText, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from './pasted-content.ts';
 import { askPayloadOf, askRequestOf } from '@open-mercato/cezar-contract/pending-ask';
 import type { AgentEvent, ContentBlock, ToolGrant } from '../core/agent-runner.ts';
 import { inputDeliveryOf } from '../core/agent-runner.ts';
@@ -122,11 +120,11 @@ import { enqueueAgentInput, agentInputBatch, hasLiveInboxClaim } from '../delega
 import { parseDelegationEffort } from '../delegation/effort.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { reconcileWorkerEntry } from '../delegation/wait.ts';
-import { reconcileConversationState, projectConversationEvents } from '../delegation/conversations.ts';
+import { commitNewMessage, inboxSlotsUsed, reconcileConversationState, projectConversationEvents, rootsAwaitingPeer, settledRunFamilies } from '../delegation/conversations.ts';
 import { parentReadiness } from '../delegation/readiness.ts';
-import { answersQuestion, openQuestions, questionMessage } from '../delegation/questions.ts';
+import { answersQuestion, questionMessage, reservedReplies } from '../delegation/questions.ts';
 import { workerQuestionFallback } from './question-routing.ts';
-import { messagedParentSince, parkNoticeMessage, parkNoticeWait, parkingTurn } from '../delegation/park-notice.ts';
+import { messagedParentSince, parkNoticeIdInUse, parkNoticeMessage, parkNoticeWait, parkingTurn } from '../delegation/park-notice.ts';
 import { workerOutcome } from '../runs/delegation-state.ts';
 import { loadWorkflows } from './load.ts';
 import { applyOutcomes, type RunOutcome } from '../runs/outcome-commit.ts';
@@ -692,101 +690,6 @@ export function composeSystemPrompt(...parts: Array<string | undefined>): string
  */
 export function agentDirectories(runsDir: string, env: Record<string, string>): string[] {
   return env.TMPDIR ? [runsDir, env.TMPDIR] : [runsDir];
-}
-
-/**
- * Materialized pasted attachment: the on-disk name/serving-URL pair the
- * transcript already used, plus the absolute path that lets the agent
- * operate on the file itself — save it, `cp` it, attach it to a GitHub
- * issue/PR (#357). `path` is only ever an absolute path under
- * `.ai/cezar/runs/<runId>-images/` (see `RunManager.persistAttachment`).
- */
-/** Inverse of `attachmentExtension` (#472) — a persisted attachment is re-encoded from disk at
- *  dequeue and needs its media type back. Only ever asked about IMAGE names (a file reaches the
- *  agent as a path, never as a block), so an unknown extension still answers `image/png`: that is
- *  the pre-existing fallback for the `.img` an SVG or a BMP paste lands as. */
-export function mediaTypeFor(name: string): string {
-  const ext = name.split('.').pop()?.toLowerCase();
-  return ext === 'jpg' ? 'image/jpeg'
-    : ext === 'webp' ? 'image/webp'
-    : ext === 'gif' ? 'image/gif'
-    : 'image/png';
-}
-
-/** Highest `<prefix>-<n>.<ext>` suffix already present in a run's image dir (#472).
- *  `screenshot-*` and `pasted-*` share one numbering space, so this scans both and
- *  returns 0 for a missing/empty directory. */
-export function highestImageSeq(dir: string): number {
-  try {
-    return readdirSync(dir).reduce((max, name) => {
-      const m = /^(?:screenshot|pasted)-(\d+)\./.exec(name);
-      return m ? Math.max(max, Number(m[1])) : max;
-    }, 0);
-  } catch {
-    return 0;
-  }
-}
-
-export interface PersistedAttachment {
-  name: string;
-  url: string;
-  path: string;
-}
-
-/**
- * A user attachment that is NOT an image (#950) — a PDF, a `.txt`, a `.md`.
- *
- * Deliberately not a `ContentBlock` variant: `ContentBlock` is the runner protocol
- * (`AGENT_PROTOCOL.md`), and a file has nothing a model can look at. The RunManager
- * converts these into files on disk plus a path in the prompt before anything is
- * handed to a session, so a `file` block can never reach a backend.
- */
-export interface FileBlock {
-  type: 'file';
-  mediaType: string;
-  data: string;
-}
-
-/** What the routes hand the engine: image/text blocks the session will see, plus file blocks it
- *  will never see. Every RunManager entry point accepts this wider type. */
-export type PastedContent = ContentBlock | FileBlock;
-
-/** One wire attachment (`{mediaType, data}`) as the engine wants it: an image the model can view,
- *  or a file it will only ever be given the path of. The single mapping the four attachment-
- *  carrying routes share, so none of them can invent a different one. */
-export function toPastedContent(attachment: { mediaType: string; data: string }): PastedContent {
-  return isImageMediaType(attachment.mediaType)
-    ? { type: 'image', source: { type: 'base64', media_type: attachment.mediaType, data: attachment.data } }
-    : { type: 'file', mediaType: attachment.mediaType, data: attachment.data };
-}
-
-/** The image blocks of a mixed list — what may be delivered to a session. */
-export function contentBlocksOf(content: readonly PastedContent[]): ContentBlock[] {
-  return content.filter((b): b is ContentBlock => b.type !== 'file');
-}
-
-/**
- * Plain-text note listing the absolute paths of pasted attachments, appended
- * to the message that carries them (#357). The base64 image blocks stay in
- * the message for the model to *view*; this note is what lets it *use* the
- * files as files — and the only usable reference on backends (codex,
- * opencode) whose `textOf()` drops image blocks before reaching the model.
- */
-export function pastedAttachmentsText(attachments: PersistedAttachment[]): string {
-  const list = attachments.map((a) => `- ${a.path}`).join('\n');
-  return (
-    `The user attached ${attachments.length} pasted file${attachments.length > 1 ? 's' : ''}, ` +
-    `also saved on disk at:\n${list}\n` +
-    `When the task involves saving, uploading, attaching, or transforming the pasted content ` +
-    `(e.g. attaching to a GitHub issue/PR, copying into the repo), operate on these files — do ` +
-    `not attempt to reconstruct them from the conversation.`
-  );
-}
-
-/** Same note as `pastedAttachmentsText`, wrapped as a trailing `ContentBlock`
- *  ready to append to a message's content array. */
-export function pastedAttachmentsNote(attachments: PersistedAttachment[]): ContentBlock {
-  return { type: 'text', text: pastedAttachmentsText(attachments) };
 }
 
 const RESTART_CONTINUATION_PROMPT =
@@ -1426,7 +1329,7 @@ export class RunManager {
     // A destroy retry changes nothing the family reconcile reads (#880).
     if (source === 'delegation-destroy-progress') return;
     if (run.delegation && run.delegation.role !== 'invalid' && !['queued', 'running', 'waiting'].includes(run.status)) {
-      this.reconcileWorkerWaits(run.delegation.role === 'root' ? run.id : run.delegation.parentRunId);
+      for (const id of settledRunFamilies(this.store, run)) this.reconcileWorkerWaits(id);
     }
   };
   private readonly pendingJobs = new Map<string, { workflow: WorkflowDef; input: StartRunInput; startAt?: number | undefined }>();
@@ -2924,9 +2827,24 @@ export class RunManager {
     const owed = new Set(resolvedWaits(run).map(waitInputId));
     const named = waitNamedInputIds(run);
     const answer = this.routedAnswer(run.id);
-    return (run.agentInputs ?? []).filter(input => (input.conversation || (input.source === 'lifecycle' && !named.has(input.id))) &&
-      !input.deliveredAt && !hasLiveInboxClaim(input) &&
-      !owed.has(input.id) && input.id !== answer?.id && !this.providerOwnsInboxInput(run.id, input.id));
+    // Past the automatic-wake budget a peer message wakes nothing: it stays queued for the next
+    // turn (spec 2026-10-27-task-communication-protocol § 8, `holdPeerWakesAtCap`).
+    const spent = this.automaticWakes(run.id) >= MAX_AUTO_CONTINUES;
+    return (run.agentInputs ?? []).filter(input => { return (!!input.conversation || (input.source === 'lifecycle' && !named.has(input.id))) &&
+      !input.deliveredAt && !hasLiveInboxClaim(input) && !(spent && chargesBudgetMessage(input)) &&
+      !owed.has(input.id) && input.id !== answer?.id && !this.providerOwnsInboxInput(run.id, input.id); });
+  }
+
+  /** Peer messages the spent budget keeps from waking the run (spec § 8). A turn in progress takes
+   *  them as steering, which charges nothing. A parked run waits on the user instead: Cezar's
+   *  `budget` human wait opens and is shown, and a human message resets the budget. */
+  private holdPeerWakesAtCap(runId: string): void {
+    const run = this.store.getRun(runId);
+    if (!run || this.automaticWakes(runId) < MAX_AUTO_CONTINUES ||
+      !run.agentInputs?.some(input => !input.deliveredAt && !hasLiveInboxClaim(input) && chargesBudgetMessage(input))) return;
+    const state = this.active.get(runId);
+    if (state?.session?.open && state.atTurnBoundary !== state.session) { if (!this.recoveringRun(runId)) this.flushAgentInputs(runId); return; }
+    if (run.status === 'waiting') this.surfaceHumanWait(runId, state, this.openHumanAlias(runId, state, 'budget'));
   }
 
   /** The parent's reply that answers a worker's pending routed question, still undelivered. */
@@ -3006,7 +2924,13 @@ export class RunManager {
   }
 
   /** A deleted run's row is gone with its waits; only what they armed in memory is left. */
-  private readonly onRunDeleted = (runId: string): void => { this.disarmRunWaits(runId); };
+  private readonly onRunDeleted = (runId: string): void => {
+    this.disarmRunWaits(runId);
+    // A peer's open requests to the deleted run settle `deleted` (spec 2026-10-27 § 5): each ledger
+    // that holds one is reconciled, live or settled.
+    if (this.disposed || process.env.CEZ_DELEGATION !== '1') return;
+    try { for (const id of rootsAwaitingPeer(this.store, runId)) this.reconcileWorkerWaits(id); } catch { /* the next reconcile settles them */ }
+  };
 
   /** Snapshot of the actual active session, never guessed from partial run settings. */
   delegationExecutionSettings(runId: string): DelegationExecutionSettings {
@@ -4065,8 +3989,8 @@ export class RunManager {
     // the live set with it, so it is reconciled by name first.
     const settled = this.store.getRun(runId);
     if (settled?.delegation) {
-      const familyRoot = settled.delegation.role === 'root' ? settled.id : settled.delegation.role === 'worker' ? settled.delegation.parentRunId : undefined;
-      if (familyRoot !== undefined) this.reconcileWorkerWaits(familyRoot);
+      for (const id of settledRunFamilies(this.store, settled)) this.reconcileWorkerWaits(id);
+      // Then every other family still in memory (hearsay-tools/cezarion#779).
       this.reconcileWorkerWaits();
     }
     this.releaseSlot();
@@ -5313,7 +5237,7 @@ export class RunManager {
     // through the wait list's admission, beside every open wait and a pending question, and ends
     // none of them. A turn in progress takes it at once, as steering.
     const current = this.store.getRun(runId);
-    if (!current || !this.pendingConversationWakes(current).length) return;
+    if (!current || !this.pendingConversationWakes(current).length) { this.holdPeerWakesAtCap(runId); return; }
     const state = this.active.get(runId);
     if (current.status === 'waiting' && (!state || state.atTurnBoundary === state.session)) this.queueWaitWake(runId);
     else if (!this.recoveringRun(runId)) this.flushAgentInputs(runId);
@@ -5346,7 +5270,7 @@ export class RunManager {
     const { state } = routing;
     const input = { id: message.id, source: 'agent' as const, parentRunId: parentId, text: message.text, createdAt: now,
       conversation: { senderRunId: workerId, recipientRunId: parentId, kind: 'request' as const } };
-    this.store.commitConversation(parentId, { ...state, messages: [...state.messages, message] }, { recipientRunId: parentId, input });
+    if (!commitNewMessage(this.store, parentId, { ...state, messages: [...state.messages, message] }, { recipientRunId: parentId, input }, () => fallback('its message ID is already in use in the parent conversation'))) return;
     projectConversationEvents(this.store, this.store.getRun(parentId)!);
     this.store.appendEvent(workerId, { type: 'worker-question-routed', askSeq: ask.seq, messageId: message.id, parentRunId: parentId });
     this.deliverConversationInput(parentId);
@@ -5377,7 +5301,7 @@ export class RunManager {
       ...(turn.text === undefined ? {} : { lastText: turn.text }), now, redact: text => this.store.redactText(text) });
     const input = { id: message.id, source: 'agent' as const, parentRunId: parentId, text: message.text, createdAt: now,
       conversation: { senderRunId: workerId, recipientRunId: parentId, kind: 'progress' as const } };
-    this.store.commitConversation(parentId, { ...state, messages: [...state.messages, message] }, { recipientRunId: parentId, input });
+    if (!commitNewMessage(this.store, parentId, { ...state, messages: [...state.messages, message] }, { recipientRunId: parentId, input }, () => parkNoticeIdInUse(this.store, workerId, wait.id))) return;
     projectConversationEvents(this.store, this.store.getRun(parentId)!);
     this.deliverConversationInput(parentId);
   }
@@ -5395,7 +5319,7 @@ export class RunManager {
   /** The ledger and the parent's inbox keep room as `service.send` counts it, beside open
    *  questions' replies. When either is full, the worker's log says so once per wait. */
   private parkNoticeAtCapacity(workerId: string, waitId: string, root: RunRecord, state: ConversationState): boolean {
-    if (state.messages.length + openQuestions(state).length < 1024 && (root.agentInputs ?? []).filter(input => !input.deliveredAt).length < 32) return false;
+    if (state.messages.length + reservedReplies(state) < 1024 && inboxSlotsUsed(root) < 32) return false;
     const projectionId = `park-notice-skipped:${waitId}`;
     if (!this.store.hasProjection(workerId, projectionId)) {
       this.store.appendEvent(workerId, { type: 'note', tone: 'warning', projectionId, message: 'Parked, but the parent conversation is at capacity: no park notice was sent.' });
@@ -5622,7 +5546,7 @@ export class RunManager {
     for (const root of family) {
       if (root.delegation?.role !== 'root' || !root.delegation.conversation) continue;
       const next = reconcileConversationState(root, (id) => this.store.getRun(id), now, run =>
-        run.delegation?.role === 'worker' ? this.store.readWorkerExecution(run.id)?.phase === 'complete' : !this.isActive(run.id));
+        run.delegation?.role === 'worker' ? this.store.readWorkerExecution(run.id)?.phase === 'complete' : !this.isActive(run.id), id => this.store.isUnreadable(id));
       if (next && next !== root.delegation.conversation) this.store.commitConversation(root.id, next);
       projectConversationEvents(this.store, this.store.getRun(root.id)!);
       this.retireSettledQuestions(root.id);
@@ -6214,8 +6138,7 @@ export class RunManager {
     // A batch with timer results is an automatic wake: it reserves one unit of the budget now, so a
     // timer that comes due before this acknowledgement counts it, and gives it back if the batch is
     // refused or its acknowledgement rejects (hearsay-tools/cezarion#1233).
-    const timerResults = resolvedWaits(this.store.getRun(runId) ?? {}).filter(wait => chargesBudget(wait) && inputIds.includes(wait.id));
-    if (timerResults.length) flight.wakeReserved = true;
+    if (this.reservesAutomaticWake(runId, flight, inputIds)) flight.wakeReserved = true;
     const refund = (): void => { flight.wakeReserved = false; };
     state.agentInputFlight = flight;
     const current = (): boolean => !this.disposed && this.active.get(runId) === state && state.session === session &&
@@ -6284,13 +6207,24 @@ export class RunManager {
     return true;
   }
 
+  /** A batch with timer results is an automatic wake, and so is an admitted wake turn a peer message
+   *  opens (spec 2026-10-27-task-communication-protocol § 8). Past the budget a peer message opens
+   *  no turn (`pendingConversationWakes`), so one carried by another wake is free. */
+  private reservesAutomaticWake(runId: string, flight: NonNullable<ActiveRun['agentInputFlight']>, inputIds: readonly string[]): boolean {
+    const run = this.store.getRun(runId);
+    if (resolvedWaits(run ?? {}).some(wait => chargesBudget(wait) && inputIds.includes(wait.id))) return true;
+    return !!flight.admittedWake && this.automaticWakes(runId) < MAX_AUTO_CONTINUES &&
+      !!run?.agentInputs?.some(input => inputIds.includes(input.id) && chargesBudgetMessage(input));
+  }
+
   /** Apply the acknowledgement's effects only after its outcome commit succeeds. */
   private applyAcknowledgedInput(runId: string, state: ActiveRun, flight: NonNullable<ActiveRun['agentInputFlight']>, batch: AcknowledgedInput, refusal: boolean): void {
-    const { accepted, resolvedIds, early, spent, observable, timers, resumes, owedBefore } = batch;
+    const { accepted, resolvedIds, early, spent, observable, timers, peers, resumes, owedBefore } = batch;
     const { session } = flight;
     if (spent !== undefined) {
       flight.wakeReserved = false;
-      this.store.appendEvent(runId, { type: 'note', message: `automatic ${timers.some(isMonitoringTimer) ? 'monitoring' : timers.some(wait => wait.kind === 'timer') ? 'timer' : 'process'} wake-up (${spent}/${MAX_AUTO_CONTINUES})` });
+      const kind = !timers.length && peers.length ? 'peer message' : timers.some(isMonitoringTimer) ? 'monitoring' : timers.some(wait => wait.kind === 'timer') ? 'timer' : 'process';
+      this.store.appendEvent(runId, { type: 'note', message: `automatic ${kind} wake-up (${spent}/${MAX_AUTO_CONTINUES})` });
     }
     // A wake of results always spends its admission; a wake of messages alone, only one it holds.
     if (resumes && (this.waitWakeAdmitted.delete(runId) || resolvedIds.length > 0)) {

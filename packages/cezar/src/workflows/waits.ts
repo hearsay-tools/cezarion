@@ -1,4 +1,4 @@
-import type { CezarWaitRequestInput, CiWait, OpenWait, PrWaitEntry, ProcessWaitEntry, RunRecord, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
+import type { AgentInput, CezarWaitRequestInput, CiWait, OpenWait, PrWaitEntry, ProcessWaitEntry, RunRecord, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 
 /**
  * Pure wait-list readers and agent-facing text. RunManager owns registration, resolution and
@@ -39,6 +39,15 @@ export function isMonitoringTimer(wait: Wait): boolean {
  */
 export function chargesBudget(wait: Wait): boolean {
   return wait.kind === 'timer' || wait.kind === 'process';
+}
+
+/**
+ * A peer message counts against the same budget when it starts a turn: two root tasks have no
+ * parent to stop a loop between them. Family messages never count (spec
+ * 2026-10-27-task-communication-protocol § 8).
+ */
+export function chargesBudgetMessage(input: Pick<AgentInput, 'conversation'>): boolean {
+  return input.conversation?.relationship === 'peer';
 }
 
 /** Cezar's own human wait (`no-wait`, `budget`): it stands in for a wait the agent never registered

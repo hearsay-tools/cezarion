@@ -294,6 +294,10 @@ export const agentInputSchema = z.object({
    * delivery is the nudge's turn, bounded by the nudge's reply bound, and a session that closes
    * before it is a failed delivery. Absent on every other input and on records written before. */
   purpose: z.literal('completion-refusal').optional(),
+  /** A peer message's own hash and request deadline (hearsay-tools/cezarion#1990): the sender's
+   *  ledger can be deleted before the recipient reads it. Absent on family and lifecycle inputs. */
+  requestHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  deadline: z.iso.datetime().optional(),
 }).strict();
 export type AgentInput = z.infer<typeof agentInputSchema>;
 
