@@ -4041,6 +4041,10 @@ export class RunStore extends EventEmitter {
     if (child?.delegation?.role !== 'worker' || child.delegation.workspace.ownerRunId !== id ||
       child.delegation.destroy?.phase !== 'complete' || child.delegation.destroy.remaining.length ||
       !['review', 'done', 'failed', 'cancelled'].includes(child.status)) return false;
+    return this.workerDeletionResult(id, child as RunRecord & { delegation: Extract<DelegationState, { role: 'worker' }> });
+  }
+
+  private workerDeletionResult(id: string, child: RunRecord & { delegation: Extract<DelegationState, { role: 'worker' }> }): boolean {
     const parent = this.peek(child.delegation.parentRunId);
     if (parent?.delegation?.role !== 'root' || parent.delegation.historyDeletion) return false;
     const receipt = parent.delegation.receipts.find(entry => entry.workerId === id);
@@ -4049,14 +4053,23 @@ export class RunStore extends EventEmitter {
       result.revision !== (child.delegation.executionRevision ?? 0)) return false;
     const { state: _state, ...workspace } = result.workspace;
     if (JSON.stringify(workspace) !== JSON.stringify(child.delegation.workspace)) return false;
+    return this.workerDeletionProof(id, receipt.deletion, result.revision, workspace.resourceId);
+  }
+
+  private workerDeletionProof(
+    id: string,
+    deletion: NonNullable<Extract<DelegationState, { role: 'root' }>['receipts'][number]>['deletion'],
+    revision: number,
+    resourceId: string,
+  ): boolean {
     const proof = this.readWorkerExecution(id);
     // Retain process evidence until scratch is safely removed. A prior pending deletion may
     // already have removed those files; it never authorizes deleting newly appeared scratch.
-    if (proof && !this.workerResourcesSafe(id, proof.generation, workspace.resourceId)) return false;
+    if (proof && !this.workerResourcesSafe(id, proof.generation, resourceId)) return false;
     if (!proof && agentTmpDirMayExist(this.dataDir, id)) return false;
-    if (receipt.deletion) return receipt.deletion.revision === result.revision &&
-      receipt.deletion.resourceId === workspace.resourceId && receipt.deletion.phase === 'pending' &&
-      (proof ? proof.phase === 'complete' && proof.generation === receipt.deletion.generation : !existsSync(this.executionPath(id)));
+    if (deletion) return deletion.revision === revision &&
+      deletion.resourceId === resourceId && deletion.phase === 'pending' &&
+      (proof ? proof.phase === 'complete' && proof.generation === deletion.generation : !existsSync(this.executionPath(id)));
     return proof?.phase === 'complete';
   }
 
