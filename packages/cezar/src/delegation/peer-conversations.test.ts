@@ -11,7 +11,7 @@ import {
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { RunRecord } from '../runs/store.ts';
-import { RunStore } from '../runs/store.ts';
+import { RunStore, RunWriteRefusedError } from '../runs/store.ts';
 import { fixture } from './service.testkit.ts';
 import { projectConversationEvents } from './conversations.ts';
 
@@ -157,6 +157,43 @@ describe('peer conversations', () => {
     expect(history.messages.map(entry => entry.id)).toContain(unprojected.id);
     expect({ a: projections(f.parent.id), b: projections(b.id) }).toEqual(before);
     expect(projections(b.id).some(id => id.includes(unprojected.id))).toBe(false);
+  });
+
+  it('R8 an open request holds ledger room for its reply: at 1,022 messages a request and its reply fit, at 1,023 a request is refused', async () => {
+    const b = peer();
+    const filler = (count: number): ConversationMessage[] => Array.from({ length: count }, (_, n) => ({ id: randomUUID(), senderRunId: f.parent.id, recipientRunId: b.id,
+      kind: 'progress', relationship: 'peer', text: `m${n}`, createdAt: new Date().toISOString(), requestHash: 'a'.repeat(64), state: 'accepted' }));
+    f.store.commitConversation(f.parent.id, { messages: filler(1022), outcomes: [] });
+    const request = await f.service.send(f.caller, message(b.id));
+    const reply = await f.service.reply(b.caller, message(f.parent.id, 'reply', { requestId: request.message.id }));
+    expect(reply.outcome).toMatchObject({ status: 'replied' });
+    expect(ledger(f.parent.id)?.messages).toHaveLength(1024);
+    f.store.commitConversation(f.parent.id, { messages: filler(1023), outcomes: [] });
+    await expect(f.service.send(f.caller, message(b.id))).rejects.toMatchObject({ code: 'capacity_limit' });
+    expect((await f.service.send(f.caller, message(b.id, 'progress'))).message.state).toBe('accepted');
+  });
+
+  it('R15 a peer row this store cannot decode is not deleted: its request stays open while a deleted peer\'s settles', async () => {
+    const b = peer(); const c = peer();
+    const toB = await f.service.send(f.caller, message(b.id));
+    const toC = await f.service.send(f.caller, message(c.id));
+    const read = f.store.getRun.bind(f.store);
+    vi.spyOn(f.store, 'getRun').mockImplementation(id => id === b.id ? undefined : read(id));
+    vi.spyOn(f.store, 'isUnreadable').mockImplementation(id => id === b.id);
+    expect(f.store.deleteRun(c.id)).toBe(true);
+    const { outcomes } = await f.service.conversation(f.caller, { recipientRunId: c.id });
+    expect(outcomes).toEqual([expect.objectContaining({ requestId: toC.message.id, status: 'deleted' })]);
+    expect(ledger(f.parent.id)?.outcomes.some(outcome => outcome.requestId === toB.message.id)).toBe(false);
+  });
+
+  it('R8 a recipient another cezar process controls is refused with a clear reason, and nothing is written', async () => {
+    const b = peer();
+    const commit = vi.spyOn(f.store, 'commitConversation').mockImplementation(() => { throw new RunWriteRefusedError(b.id, 'foreign'); });
+    await expect(f.service.send(f.caller, message(b.id, 'progress'))).rejects.toMatchObject({ code: 'incompatible_state',
+      message: `Not delivered: run ${b.id} is controlled by another cezar process. Messages reach only tasks this cezar process runs.` });
+    commit.mockRestore();
+    expect(ledger(f.parent.id)).toBeUndefined();
+    expect(f.store.getRun(b.id)?.agentInputs ?? []).toEqual([]);
   });
 
   it.each(['B first', 'C first', 'concurrent'] as const)('R14 two peers sending one message ID to one recipient: the second is refused and writes nothing (%s)', async order => {
