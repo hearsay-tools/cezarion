@@ -8,6 +8,7 @@ import { ConnectionBanner } from './preview-states'
 import { PageDialog } from './page-dialog'
 import { PreviewInput } from './preview-input'
 import { PreviewStage } from './preview-stage'
+import type { PreviewTarget } from './preview-memory'
 import type { PreviewOpenRequest } from './preview-state'
 import type { ThreadPreviewServer } from '../thread-state'
 import { PreviewToolbar } from './preview-toolbar'
@@ -27,8 +28,8 @@ export interface PreviewPaneProps {
   request?: PreviewOpenRequest | undefined
   /** Set where the pane replaces the transcript (below 1180 px): the way back to the conversation. */
   onSession?: (() => void) | undefined
-  /** The server the pane shows changed (`undefined` for a typed URL). */
-  onPort?: (port: number | undefined) => void
+  /** What the pane shows changed: a server, the agent's page or a typed URL (hearsay-tools/cezarion#2077). */
+  onTarget?: (target: PreviewTarget | undefined) => void
   /** Frames are flowing (the header toggle's green dot). */
   onLive?: (live: boolean) => void
   onClose: () => void

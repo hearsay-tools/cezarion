@@ -4,6 +4,7 @@ import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties, type K
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 
 import { PreviewErrorBoundary } from './preview-error-boundary'
+import { clampPanePercent as clamp, MAX_PANE_PERCENT as MAX_PERCENT, MIN_PANE_PERCENT as MIN_PERCENT } from './preview-memory'
 import type { PreviewPaneState } from './preview-state'
 import { PREVIEW_DOCK_QUERY, PREVIEW_PHONE_QUERY, useMediaQuery } from './use-media-query'
 
@@ -20,22 +21,7 @@ import { PREVIEW_DOCK_QUERY, PREVIEW_PHONE_QUERY, useMediaQuery } from './use-me
  *  menus) is a chunk only an owner who opens it pays for. */
 const PreviewPane = lazy(() => import('./preview-pane-connected').then(module => ({ default: module.ConnectedPreviewPane })))
 
-const STORAGE_KEY = 'cez.preview.pane-width'
-const DEFAULT_PERCENT = 58
-const MIN_PERCENT = 30
-const MAX_PERCENT = 75
 const KEY_STEP = 2
-
-const clamp = (percent: number): number => Math.min(MAX_PERCENT, Math.max(MIN_PERCENT, Math.round(percent)))
-
-function loadPercent(): number {
-  try {
-    const stored = Number(window.localStorage.getItem(STORAGE_KEY))
-    return stored > 0 ? clamp(stored) : DEFAULT_PERCENT
-  } catch {
-    return DEFAULT_PERCENT
-  }
-}
 
 /** The height of the shell's scrolling main: the pane sticks to it while the transcript scrolls. */
 function useScrollerHeight(element: { current: HTMLElement | null }): number | undefined {
@@ -58,15 +44,8 @@ export function PreviewSplit({ run, state, children }: { run: ApiRun | undefined
   const phone = useMediaQuery(PREVIEW_PHONE_QUERY, false)
   const wrapper = useRef<HTMLDivElement>(null)
   const scrollerHeight = useScrollerHeight(wrapper)
-  const [percent, setPercent] = useState(loadPercent)
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, String(percent))
-    } catch {
-      /* a private window keeps the width for this visit only */
-    }
-  }, [percent])
+  // Each task keeps its own width (hearsay-tools/cezarion#2077); the state saves every change.
+  const { percent, setPercent } = state
 
   const showPane = state.open && run !== undefined
   const takeover = showPane && !docked
@@ -87,8 +66,8 @@ export function PreviewSplit({ run, state, children }: { run: ApiRun | undefined
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) dragTo(event.clientX)
   }
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === 'ArrowLeft') setPercent(value => clamp(value + KEY_STEP))
-    else if (event.key === 'ArrowRight') setPercent(value => clamp(value - KEY_STEP))
+    if (event.key === 'ArrowLeft') setPercent(clamp(percent + KEY_STEP))
+    else if (event.key === 'ArrowRight') setPercent(clamp(percent - KEY_STEP))
     else return
     event.preventDefault()
   }
@@ -141,7 +120,7 @@ export function PreviewSplit({ run, state, children }: { run: ApiRun | undefined
                   servers={run.previewServers ?? []}
                   request={state.request}
                   onSession={paneInFront ? state.showSession : undefined}
-                  onPort={state.setPort}
+                  onTarget={state.setTarget}
                   onLive={state.setLive}
                   onClose={state.closePane}
                 />

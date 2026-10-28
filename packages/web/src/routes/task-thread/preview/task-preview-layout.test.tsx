@@ -8,6 +8,7 @@ const state = vi.hoisted(() => ({
   agentLive: false,
   agentReads: [] as Array<string | undefined>,
   runs: {} as Record<string, Record<string, unknown>>,
+  requests: [] as unknown[],
 }))
 
 vi.mock('@/api/queries', () => ({
@@ -24,13 +25,35 @@ vi.mock('./use-agent-page-live', () => ({
 }))
 
 vi.mock('./preview-pane', () => ({
-  PreviewPane: ({ onClose }: { onClose: () => void }) => <button type="button" onClick={onClose}>pane</button>,
+  PreviewPane: ({ onClose, onTarget, request }: { onClose: () => void; onTarget?: (target: unknown) => void; request?: unknown }) => {
+    state.requests.push(request)
+    return (
+      <>
+        <button type="button" onClick={onClose}>pane</button>
+        <button type="button" onClick={() => onTarget?.({ url: 'http://localhost:3000/docs' })}>show url</button>
+      </>
+    )
+  },
 }))
 
 import { TaskPreviewLayout } from './task-preview-layout'
 import { usePreviewPane } from './preview-state'
+import { PANE_WIDTH_STORAGE_KEY, PREVIEW_MEMORY_STORAGE_KEY, readPreviewMemory, rememberPreview } from './preview-memory'
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  localStorage.clear()
+  vi.unstubAllGlobals()
+})
+
+/** Below 1180 px the dock query fails: the pane takes the main area. */
+function setDocked(docked: boolean) {
+  vi.stubGlobal('matchMedia', (query: string) => ({
+    matches: query.includes('min-width: 1180px') ? docked : false,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  }))
+}
 
 const mounts = vi.fn()
 
@@ -42,6 +65,7 @@ function Tab({ name }: { name: string }) {
     <div>
       <span data-testid="tab">{name}</span>
       {pane ? <button type="button" onClick={() => pane.openPane({})}>toggle</button> : <span>no pane</span>}
+      {pane ? <button type="button" onClick={() => pane.openPane({ port: 5173 })}>open 5173</button> : null}
       {pane ? <span data-testid="removed">{String(pane.worktreeRemoved)}</span> : null}
       {pane ? <span data-testid="open">{String(pane.open)}</span> : null}
       {pane ? <span data-testid="agent">{String(pane.agentLive)}</span> : null}
@@ -69,6 +93,7 @@ describe('TaskPreviewLayout', () => {
     state.runs = {}
     state.agentLive = false
     state.agentReads = []
+    state.requests = []
     mounts.mockClear()
   })
 
@@ -133,5 +158,101 @@ describe('TaskPreviewLayout', () => {
     expect(screen.getByTestId('tab').textContent).toBe('session')
     expect(document.querySelector('[data-slot="task-split"]')).toBeNull()
     expect(document.querySelector('[data-slot="task-main"]')).toBeNull()
+  })
+
+  describe('remembers the pane per task (hearsay-tools/cezarion#2077)', () => {
+    const server = { port: 5173, command: 'npm run dev', label: 'web', registeredAt: '2026-10-28T10:00:00.000Z', answeredAtRegistration: true }
+    const divider = () => document.querySelector('[data-slot="preview-divider"]')
+    const pane = () => document.querySelector<HTMLElement>('[data-slot="preview-pane"]')
+
+    beforeEach(() => {
+      state.preview = true
+      state.runs.r1 = { id: 'r1', worktreePath: '/w', previewServers: [server] }
+    })
+
+    it('reopens the pane on the server it showed, after a reload, without asking to run it', async () => {
+      const first = renderAt('/tasks/r1')
+      fireEvent.click(screen.getByRole('button', { name: 'open 5173' }))
+      await screen.findByRole('button', { name: 'pane' })
+      first.unmount()
+      state.requests = []
+      renderAt('/tasks/r1')
+      expect(screen.getByTestId('open').textContent).toBe('true')
+      await screen.findByRole('button', { name: 'pane' })
+      expect(state.requests.at(-1)).toEqual({ port: 5173, restored: true })
+    })
+
+    it('reopens a typed URL the pane reported', async () => {
+      const first = renderAt('/tasks/r1')
+      fireEvent.click(screen.getByRole('button', { name: 'toggle' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'show url' }))
+      first.unmount()
+      renderAt('/tasks/r1')
+      await screen.findByRole('button', { name: 'pane' })
+      expect(state.requests.at(-1)).toEqual({ url: 'http://localhost:3000/docs', restored: true })
+    })
+
+    it('stays closed after a reload when the owner closed it', async () => {
+      const first = renderAt('/tasks/r1')
+      fireEvent.click(screen.getByRole('button', { name: 'open 5173' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'pane' }))
+      first.unmount()
+      renderAt('/tasks/r1')
+      expect(screen.getByTestId('open').textContent).toBe('false')
+      expect(pane()).toBeNull()
+    })
+
+    it("keeps each task's pane apart", async () => {
+      rememberPreview('r2', { open: false, target: { agent: true }, percent: 40 }, 1)
+      renderAt('/tasks/r1')
+      fireEvent.click(screen.getByRole('button', { name: 'open 5173' }))
+      await screen.findByRole('button', { name: 'pane' })
+      fireEvent.keyDown(divider()!, { key: 'ArrowLeft' })
+      fireEvent.click(screen.getByRole('button', { name: 'other task' }))
+      expect(screen.getByTestId('open').textContent).toBe('false')
+      expect(readPreviewMemory('r2')).toEqual({ open: false, target: { agent: true }, percent: 40 })
+      expect(readPreviewMemory('r1')).toEqual({ open: true, target: { port: 5173 }, percent: 60 })
+    })
+
+    it('opens a task on its own width, and a task with none on the last width set', async () => {
+      localStorage.setItem(PANE_WIDTH_STORAGE_KEY, '44')
+      rememberPreview('r1', { open: true, target: { port: 5173 }, percent: 66 }, 1)
+      const first = renderAt('/tasks/r1')
+      await screen.findByRole('button', { name: 'pane' })
+      expect(divider()?.getAttribute('aria-valuenow')).toBe('66')
+      first.unmount()
+      state.runs.r3 = { id: 'r3', worktreePath: '/w', previewServers: [server] }
+      renderAt('/tasks/r3')
+      fireEvent.click(screen.getByRole('button', { name: 'toggle' }))
+      await screen.findByRole('button', { name: 'pane' })
+      expect(divider()?.getAttribute('aria-valuenow')).toBe('44')
+    })
+
+    it('clamps a saved width outside the limits', async () => {
+      localStorage.setItem(PREVIEW_MEMORY_STORAGE_KEY, JSON.stringify({ r1: { open: true, target: { port: 5173 }, percent: 99, at: 1 } }))
+      renderAt('/tasks/r1')
+      await screen.findByRole('button', { name: 'pane' })
+      expect(divider()?.getAttribute('aria-valuenow')).toBe('75')
+    })
+
+    it('on a smaller screen brings the task back first, with the pane one toggle away', async () => {
+      setDocked(false)
+      rememberPreview('r1', { open: true, target: { port: 5173 } }, 1)
+      renderAt('/tasks/r1')
+      await screen.findByRole('button', { name: 'pane', hidden: true })
+      expect(pane()?.hidden).toBe(true)
+      expect(document.querySelector<HTMLElement>('[data-slot="task-main"]')?.hidden).toBe(false)
+      fireEvent.click(screen.getByRole('button', { name: 'toggle' }))
+      expect(pane()?.hidden).toBe(false)
+    })
+
+    it('does not bring the pane back on a task whose worktree is gone, and keeps what was saved', () => {
+      state.runs.r1 = { id: 'r1', worktreePath: undefined, previewServers: [server] }
+      rememberPreview('r1', { open: true, target: { port: 5173 } }, 1)
+      renderAt('/tasks/r1')
+      expect(screen.getByTestId('open').textContent).toBe('false')
+      expect(pane()).toBeNull()
+      expect(readPreviewMemory('r1')).toEqual({ open: true, target: { port: 5173 } })
+    })
   })
 })

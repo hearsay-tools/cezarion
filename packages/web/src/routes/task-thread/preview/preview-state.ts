@@ -5,6 +5,8 @@ import type { StatusDotTone } from '@/components/status-dot'
 import { shortAge } from '@/lib/format'
 
 import type { ThreadPreviewServer } from '../thread-state'
+import { readPanePercent, readPreviewMemory, rememberPanePercent, rememberPreview, type PreviewTarget } from './preview-memory'
+import { PREVIEW_DOCK_QUERY } from './use-media-query'
 
 /**
  * Where the task view and the preview pane meet (#781). The header toggle, the server cards and
@@ -19,8 +21,12 @@ export interface PreviewOpenRequest {
   port?: number | undefined
   /** Show the page the agent drives, as it is, with no navigation (hearsay-tools/cezarion#784). */
   agent?: true | undefined
+  /** A URL the owner typed, reopened from the task's saved pane (hearsay-tools/cezarion#2077). */
+  url?: string | undefined
   /** The owner pressed Run and open or Start again: the pane may send `run` for `port`. */
   run?: boolean
+  /** Restored from the task's saved pane, not asked for now: a server no longer registered opens the empty state. */
+  restored?: true | undefined
 }
 
 export interface PreviewPane {
@@ -114,47 +120,115 @@ export interface PreviewPaneState extends PreviewPane {
   request: PreviewOpenRequest | undefined
   /** Below 1180 px the pane replaces the transcript; this is the owner stepping back to read it. */
   session: boolean
+  /** What the pane shows now, as it reports it. */
+  target: PreviewTarget | undefined
+  /** The pane's share of the split, in percent. */
+  percent: number
   closePane(): void
   showSession(): void
   setLive(live: boolean): void
-  setPort(port: number | undefined): void
+  setTarget(target: PreviewTarget | undefined): void
+  setPercent(percent: number): void
+}
+
+interface PaneSnapshot {
+  open: boolean
+  target: PreviewTarget | undefined
+  request: PreviewOpenRequest | undefined
+  session: boolean
+  percent: number
+}
+
+const targetPort = (target: PreviewTarget | undefined): number | undefined => (target && 'port' in target ? target.port : undefined)
+
+function docked(): boolean {
+  return typeof window.matchMedia !== 'function' || window.matchMedia(PREVIEW_DOCK_QUERY).matches
+}
+
+/**
+ * The pane as the owner left it on this task (hearsay-tools/cezarion#2077). A restored pane only
+ * shows the page again: it never carries `run`, so nothing starts without the owner's approval.
+ * Below 1180 px it comes back behind the transcript, so the task is what the owner sees first.
+ */
+function restore(scope: string | undefined): PaneSnapshot {
+  const memory = scope === undefined ? undefined : readPreviewMemory(scope)
+  const open = memory?.open === true
+  const target = open ? memory.target : undefined
+  return {
+    open,
+    target,
+    request: open ? { ...target, restored: true } : undefined,
+    session: open && !docked(),
+    percent: readPanePercent(scope),
+  }
 }
 
 /**
  * The task view's pane state. The pane (a separate component) reads and drives it. A new `scope`
- * (another task) starts with the pane closed. Only this state resets: the task's tabs stay mounted.
+ * (another task) starts from that task's saved pane, else closed. Only this state resets: the
+ * task's tabs stay mounted. Each owner action saves the task's pane as it is now.
  */
 export function usePreviewPaneState(scope?: string): PreviewPaneState {
-  const [open, setOpen] = useState(false)
+  const [initial] = useState(() => restore(scope))
+  const [open, setOpen] = useState(initial.open)
   const [live, setLive] = useState(false)
-  const [port, setPort] = useState<number | undefined>(undefined)
-  const [session, setSession] = useState(false)
-  const [request, setRequest] = useState<PreviewOpenRequest | undefined>(undefined)
+  const [target, setTargetState] = useState<PreviewTarget | undefined>(initial.target)
+  const [session, setSession] = useState(initial.session)
+  const [request, setRequest] = useState<PreviewOpenRequest | undefined>(initial.request)
+  const [percent, setPercentState] = useState(initial.percent)
   const [current, setCurrent] = useState(scope)
   if (current !== scope) {
+    const next = restore(scope)
     setCurrent(scope)
-    setOpen(false)
+    setOpen(next.open)
     setLive(false)
-    setPort(undefined)
-    setSession(false)
-    setRequest(undefined)
+    setTargetState(next.target)
+    setSession(next.session)
+    setRequest(next.request)
+    setPercentState(next.percent)
   }
-  const openPane = useCallback((next: PreviewOpenRequest) => {
-    setRequest({ ...next })
-    if (next.port !== undefined) setPort(next.port)
-    else if (next.agent) setPort(undefined)
-    setSession(false)
-    setOpen(true)
-  }, [])
+  const save = useCallback(
+    (change: Parameters<typeof rememberPreview>[1]) => {
+      if (scope !== undefined) rememberPreview(scope, change)
+    },
+    [scope],
+  )
+  const openPane = useCallback(
+    (next: PreviewOpenRequest) => {
+      setRequest({ ...next })
+      const shown: PreviewTarget | undefined = next.port !== undefined ? { port: next.port } : next.agent ? { agent: true } : undefined
+      if (shown) setTargetState(shown)
+      setSession(false)
+      setOpen(true)
+      save(shown ? { open: true, target: shown } : { open: true })
+    },
+    [save],
+  )
   const closePane = useCallback(() => {
     setOpen(false)
     setLive(false)
     setSession(false)
-    setPort(undefined)
-  }, [])
+    setTargetState(undefined)
+    save({ open: false })
+  }, [save])
+  const setTarget = useCallback(
+    (next: PreviewTarget | undefined) => {
+      setTargetState(next)
+      save({ target: next })
+    },
+    [save],
+  )
+  const setPercent = useCallback(
+    (next: number) => {
+      setPercentState(next)
+      rememberPanePercent(scope, next)
+    },
+    [scope],
+  )
   const showSession = useCallback(() => setSession(true), [])
+  const port = targetPort(target)
   return useMemo(
-    () => ({ open, live, port, request, session, openPane, closePane, showSession, setLive, setPort }),
-    [open, live, port, request, session, openPane, closePane, showSession],
+    () => ({ open, live, port, target, percent, request, session, openPane, closePane, showSession, setLive, setTarget, setPercent }),
+    [open, live, port, target, percent, request, session, openPane, closePane, showSession, setTarget, setPercent],
   )
 }

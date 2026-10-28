@@ -11,6 +11,7 @@ import { PREVIEW_PHONE_QUERY, useMediaQuery } from './use-media-query'
 import type { PreviewStateActions } from './preview-states'
 import type { PreviewStageHandle, StageSize } from './preview-stage'
 import { readStoredPreviewQuality, writeStoredPreviewQuality } from './preview-quality'
+import type { PreviewTarget } from './preview-memory'
 import type { PreviewOpenRequest } from './preview-state'
 import type { PreviewStatsValue, PreviewViewport } from './preview-toolbar'
 import { resolveAddress } from './preview-url'
@@ -52,12 +53,20 @@ export function copyText(text: string): void {
 const serverUrl = (server: PreviewServer): string => `http://localhost:${server.port}${server.path && server.path !== '/' ? server.path : ''}`
 
 /** The owner asked for a server or the agent's page, whose open is on its way. */
-function awaitsTarget(request: PreviewOpenRequest | undefined): boolean {
-  return request?.port !== undefined || request?.agent === true
+function awaitsTarget(request: PreviewOpenRequest | undefined, servers: readonly PreviewServer[]): boolean {
+  if (request?.port !== undefined) return request.restored !== true || servers.some(server => server.port === request.port)
+  return request?.agent === true || request?.url !== undefined
+}
+
+/** The pane's target as the layout saves it: a registered server, the agent's page or a typed URL. */
+function shownTarget(next: Target): PreviewTarget {
+  if ('port' in next) return { port: next.port }
+  if ('agent' in next) return { agent: true }
+  return { url: next.url }
 }
 
 /** One mounted pane owns the socket, its target refs and every transport effect. */
-export function usePreviewPaneTransport({ run, servers, request, onPort, onLive, onClose }: PreviewPaneProps) {
+export function usePreviewPaneTransport({ run, servers, request, onTarget, onLive, onClose }: PreviewPaneProps) {
   const pageActive = usePageActive()
   const viewerId = useRef(crypto.randomUUID())
   const opened = useRef(false)
@@ -73,6 +82,8 @@ export function usePreviewPaneTransport({ run, servers, request, onPort, onLive,
   const [port, setPort] = useState<number | undefined>(undefined)
   /** The pane shows the agent's page (or asked for it and got `agent-idle`). */
   const [agent, setAgent] = useState(false)
+  /** What the pane shows, for its owner to save; `undefined` until the first target. */
+  const [shown, setShown] = useState<PreviewTarget | undefined>(undefined)
   const [hasTarget, setHasTarget] = useState(false)
   const [hasFrame, setHasFrame] = useState(false)
   const [cursor, setCursor] = useState<string | undefined>(undefined)
@@ -228,9 +239,10 @@ export function usePreviewPaneTransport({ run, servers, request, onPort, onLive,
     return () => onLive?.(false)
   }, [streaming, onLive])
 
+  // Reported only once there is a target: the empty state of a fresh mount must not wipe a saved one.
   useEffect(() => {
-    onPort?.(port)
-  }, [port, onPort])
+    if (shown) onTarget?.(shown)
+  }, [shown, onTarget])
 
   const openTarget = useCallback(
     (next: Target, shownUrl: string, approved = false) => {
@@ -243,6 +255,7 @@ export function usePreviewPaneTransport({ run, servers, request, onPort, onLive,
       setUrl(shownUrl)
       setPort('port' in next ? next.port : undefined)
       setAgent('agent' in next)
+      setShown(shownTarget(next))
       send({ t: 'open', target: next, viewerId: viewerId.current, quality: qualityRef.current })
       opened.current = socketOpen.current
     },
@@ -269,7 +282,16 @@ export function usePreviewPaneTransport({ run, servers, request, onPort, onLive,
       openAgent()
       return
     }
+    if (request?.url !== undefined) {
+      // A saved address is checked again, as if typed: a hand-edited one never reaches the browser.
+      const address = resolveAddress(request.url, servers)
+      if (address.kind === 'server') openServer(address.port)
+      else if (address.kind === 'url') openTarget({ url: address.url }, address.url)
+      return
+    }
     if (request?.port === undefined) return
+    // A saved server that is no longer registered leaves the pane on its empty state, to pick another.
+    if (request.restored && !servers.some(server => server.port === request.port)) return
     const showing = latest.current.port === request.port && latest.current.stage?.stage === 'streaming'
     if (showing && request.run !== true) return
     openServer(request.port, request.run === true)
@@ -279,7 +301,7 @@ export function usePreviewPaneTransport({ run, servers, request, onPort, onLive,
   const empty = !hasTarget && !takenOver && transport.state !== 'blocked'
   // The empty state invites typing. A pane opened for a server is not empty, even in the commit
   // before its target lands: focusing then would hide the page URL and pop a phone's keyboard.
-  const awaitingRequest = awaitsTarget(request)
+  const awaitingRequest = awaitsTarget(request, servers)
   useEffect(() => {
     if (empty && !awaitingRequest) urlInput.current?.focus()
   }, [empty, awaitingRequest])
@@ -295,6 +317,7 @@ export function usePreviewPaneTransport({ run, servers, request, onPort, onLive,
       target.current = { url: address.url }
       autoRun.current = undefined
       setPort(undefined)
+      setShown({ url: address.url })
       setAddressError(undefined)
       setUrl(address.url)
       return send({ t: 'nav', url: address.url })

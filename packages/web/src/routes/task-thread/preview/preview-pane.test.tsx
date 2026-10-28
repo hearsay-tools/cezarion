@@ -269,18 +269,66 @@ describe('PreviewPane', () => {
   })
 
   it('a URL typed while streaming becomes the target a reconnect reopens, and no server stays current', () => {
-    const onPort = vi.fn()
-    render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onPort={onPort} onClose={() => undefined} />)
+    const onTarget = vi.fn()
+    render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onTarget={onTarget} onClose={() => undefined} />)
     transport('open')
     message({ t: 'state', stage: 'streaming', adopted: false })
     const field = screen.getByRole('textbox', { name: 'Page address' })
     fireEvent.change(field, { target: { value: 'example.com/docs' } })
     fireEvent.keyDown(field, { key: 'Enter' })
     expect(sent()).toContainEqual({ t: 'nav', url: 'http://example.com/docs' })
-    expect(onPort).toHaveBeenLastCalledWith(undefined)
+    expect(onTarget).toHaveBeenLastCalledWith({ url: 'http://example.com/docs' })
     transport('reconnecting', 1)
     transport('open')
     expect(sent().filter(m => m.t === 'open').at(-1)).toEqual(expect.objectContaining({ t: 'open', target: { url: 'http://example.com/docs' } }))
+  })
+
+  describe('a pane restored from the task (hearsay-tools/cezarion#2077)', () => {
+    it('reopens a saved server that is still registered, without sending run', () => {
+      render(<PreviewPane run={run} servers={[web]} request={{ port: 5173, restored: true }} onClose={() => undefined} />)
+      transport('open')
+      expect(sent()).toContainEqual(expect.objectContaining({ t: 'open', target: { port: 5173 } }))
+      message({ t: 'state', stage: 'needs-approval', server: web, wasRunning: false })
+      expect(sent().some(m => m.t === 'run')).toBe(false)
+    })
+
+    it('opens the empty state when the saved server is gone, and the address field takes focus', () => {
+      render(<PreviewPane run={run} servers={[web]} request={{ port: 4000, restored: true }} onClose={() => undefined} />)
+      transport('open')
+      expect(sent().some(m => m.t === 'open')).toBe(false)
+      expect(screen.getByText("Open a page in this task's browser")).toBeTruthy()
+      expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Page address' }))
+    })
+
+    it('reopens a saved typed URL and reports it as the target', () => {
+      const onTarget = vi.fn()
+      render(<PreviewPane run={run} servers={[web]} request={{ url: 'http://example.com/docs', restored: true }} onTarget={onTarget} onClose={() => undefined} />)
+      transport('open')
+      expect(sent()).toContainEqual(expect.objectContaining({ t: 'open', target: { url: 'http://example.com/docs' } }))
+      expect(onTarget).toHaveBeenLastCalledWith({ url: 'http://example.com/docs' })
+    })
+
+    it('checks a saved URL again and never opens one the browser must not open', () => {
+      render(<PreviewPane run={run} servers={[web]} request={{ url: 'javascript:void(0)', restored: true }} onClose={() => undefined} />)
+      transport('open')
+      expect(sent().some(m => m.t === 'open')).toBe(false)
+      expect(screen.getByText("Open a page in this task's browser")).toBeTruthy()
+    })
+
+    it("reports the agent's page as its own target", () => {
+      const onTarget = vi.fn()
+      render(<PreviewPane run={run} servers={[web]} request={{ agent: true, restored: true }} onTarget={onTarget} onClose={() => undefined} />)
+      transport('open')
+      expect(sent()).toContainEqual(expect.objectContaining({ t: 'open', target: { agent: true } }))
+      expect(onTarget).toHaveBeenLastCalledWith({ agent: true })
+    })
+
+    it('reports nothing before it shows a target, so a fresh empty pane never wipes a saved one', () => {
+      const onTarget = vi.fn()
+      render(<PreviewPane run={run} servers={[web]} onTarget={onTarget} onClose={() => undefined} />)
+      transport('open')
+      expect(onTarget).not.toHaveBeenCalled()
+    })
   })
 
   it('a typed registered port opens that server instead of a bare URL', () => {
@@ -303,11 +351,11 @@ describe('PreviewPane', () => {
   })
 
   it('reports the shown server and liveness to its owner', () => {
-    const onPort = vi.fn()
+    const onTarget = vi.fn()
     const onLive = vi.fn()
-    render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onPort={onPort} onLive={onLive} onClose={() => undefined} />)
+    render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onTarget={onTarget} onLive={onLive} onClose={() => undefined} />)
     transport('open')
-    expect(onPort).toHaveBeenCalledWith(5173)
+    expect(onTarget).toHaveBeenCalledWith({ port: 5173 })
     message({ t: 'state', stage: 'streaming', adopted: true })
     expect(onLive).toHaveBeenLastCalledWith(true)
     transport('reconnecting', 1)
