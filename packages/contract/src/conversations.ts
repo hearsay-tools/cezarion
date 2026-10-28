@@ -1,9 +1,15 @@
 import { z } from 'zod';
 import { askRequestSchema } from './ask-schema.ts';
 
+/** Who may talk: a root and its owned worker (`family`), or two root tasks of one project (`peer`,
+ *  spec 2026-10-27-task-communication-protocol § 2). Cezar writes it on peer messages only; an
+ *  absent field reads as `family`, so family records stay as older versions wrote them. */
+export const conversationRelationshipSchema = z.enum(['family', 'peer']);
+export type ConversationRelationship = z.infer<typeof conversationRelationshipSchema>;
 export const conversationAttributionSchema = z.object({
   senderRunId: z.uuid(), recipientRunId: z.uuid(),
   kind: z.enum(['request', 'progress', 'follow-up', 'reply']), requestId: z.uuid().optional(),
+  relationship: conversationRelationshipSchema.optional(),
 }).strict();
 export const conversationMessageSchema = conversationAttributionSchema.extend({
   id: z.uuid(), text: z.string().min(1).max(100_000), createdAt: z.iso.datetime(), deadline: z.iso.datetime().optional(),
@@ -17,13 +23,27 @@ export const conversationMessageSchema = conversationAttributionSchema.extend({
 });
 export type ConversationMessage = z.infer<typeof conversationMessageSchema>;
 export const requestOutcomeSchema = z.object({
-  requestId: z.uuid(), status: z.enum(['replied', 'replied-late', 'completed-without-reply', 'failed', 'cancelled', 'destroyed', 'timed-out', 'sender-closed', 'human-fallback']),
+  requestId: z.uuid(), /** `deleted`: a peer recipient's record was deleted while the request was open. */
+  status: z.enum(['replied', 'replied-late', 'completed-without-reply', 'failed', 'cancelled', 'destroyed', 'timed-out', 'sender-closed', 'human-fallback', 'deleted']),
   observedAt: z.iso.datetime(), replyId: z.uuid().optional(),
 }).strict();
 export type RequestOutcome = z.infer<typeof requestOutcomeSchema>;
 export const conversationStateSchema = z.object({ messages: z.array(conversationMessageSchema).max(1024), outcomes: z.array(requestOutcomeSchema).max(1024) }).strict();
 export type ConversationState = z.infer<typeof conversationStateSchema>;
-export const conversationInspectResultSchema = conversationStateSchema.extend({ hint: z.string().optional() });
+/** A history page boundary in the merged `(createdAt, id)` order: opaque to agents, one rule here. */
+const CURSOR = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)~([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+export const conversationCursorSchema = z.string().max(128).regex(CURSOR, 'Not a history cursor; pass nextBefore from an earlier page');
+export function encodeConversationCursor(message: { createdAt: string; id: string }): string { return `${message.createdAt}~${message.id}`; }
+export function decodeConversationCursor(cursor: string): { createdAt: string; id: string } {
+  const match = CURSOR.exec(cursor);
+  if (!match) throw new Error('Not a history cursor');
+  return { createdAt: match[1]!, id: match[2]! };
+}
+/** The merged history page bound: the newest 1,024 messages of a pair, which may span two ledgers. */
+export const CONVERSATION_PAGE_MESSAGES = 1024;
+export const conversationInspectResultSchema = conversationStateSchema.extend({ hint: z.string().optional(),
+  /** Present when older messages exist: pass it as `before` to read the page before this one. */
+  nextBefore: conversationCursorSchema.optional() });
 export type ConversationInspectResult = z.infer<typeof conversationInspectResultSchema>;
 
 export const inboxReserveResultSchema = z.object({
@@ -55,7 +75,7 @@ export type ConversationSendRequest = z.infer<typeof conversationSendRequestSche
 /** `consumed`: the recipient's harness reported the model read it (#505). */
 export const conversationSendResultSchema = z.object({ message: conversationMessageSchema, delivery: z.enum(['queued', 'delivered', 'consumed', 'not-delivered']), outcome: requestOutcomeSchema.optional() }).strict();
 export type ConversationSendResult = z.infer<typeof conversationSendResultSchema>;
-export const conversationInspectRequestSchema = z.object({ recipientRunId: z.uuid() }).strict();
+export const conversationInspectRequestSchema = z.object({ recipientRunId: z.uuid(), before: conversationCursorSchema.optional() }).strict();
 export type ConversationInspectRequest = z.infer<typeof conversationInspectRequestSchema>;
 export const conversationCancelRequestSchema = z.object({ requestId: z.uuid() }).strict();
 export type ConversationCancelRequest = z.infer<typeof conversationCancelRequestSchema>;

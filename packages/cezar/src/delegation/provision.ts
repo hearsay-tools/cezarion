@@ -1,9 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { workerOperationSchema } from '@open-mercato/cezar-contract/delegation';
 import type { RunStore } from '../runs/store.ts';
 import { CredentialRegistry } from './credentials.ts';
-import { DelegationService, delegationEnabled, type DelegationProject } from './service.ts';
+import { DelegationService, delegationEnabled, rootDelegation, type DelegationProject } from './service.ts';
 import { createDelegationRoutes } from './routes.ts';
 import { createDelegationApp, startDelegationTransport } from './transport.ts';
 import { delegationEndpoint } from './cli.ts';
@@ -43,7 +42,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
   ].join(' ');
 
   // No metadata on ordinary off/unavailable paths. Root authority is durable before a token exists.
-  if (!run.delegation) options.store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: [...workerOperationSchema.options], receipts: [] } }]);
+  if (!run.delegation) options.store.commitDelegation([{ id: run.id, delegation: rootDelegation() }]);
   const generation = randomUUID();
   const token = options.credentials.issue(options.projectId, run.id, generation);
   options.store.registerSessionSecret(token);

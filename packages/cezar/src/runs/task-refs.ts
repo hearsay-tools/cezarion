@@ -79,3 +79,35 @@ export function refineTaskRefs(refs: TaskRefs, skillName?: string): TaskRefs {
   }
   return refs;
 }
+
+/** `https://github.com/open-mercato/cezar/pull/402` → `open-mercato/cezar`, lowercased.
+ *  Undefined for anything that is not a `<host>/<owner>/<repo>/<kind>/<n>` forge URL. */
+export function refUrlRepo(url: string): string | undefined {
+  const parts = url.split('/');
+  const owner = parts[parts.length - 4];
+  const name = parts[parts.length - 3];
+  return owner && name ? `${owner}/${name}`.toLowerCase() : undefined;
+}
+
+/**
+ * A foreign referenced URL needs task-prompt corroboration of its repository. Unknown project
+ * handles preserve the degraded rule. This check vets the resolved winner, not the candidate
+ * list.
+ */
+export function isRepoScopedRef(url: string, task: string, handle?: { owner: string; name: string } | null): boolean {
+  if (!handle) return true;
+  const repo = refUrlRepo(url);
+  if (!repo) return true;
+  if (repo === `${handle.owner}/${handle.name}`.toLowerCase()) return true;
+  return promptNamesRepo(url, task);
+}
+
+/** Positive scope evidence for permanent declarations; legacy discovery still fails open. */
+export function promptNamesRepo(url: string, task: string): boolean {
+  const repo = refUrlRepo(url);
+  if (!repo) return false;
+  // Match whole owner/repository segments: naming acme/service2 must not corroborate
+  // acme/service. Slashes remain valid boundaries for full URLs and their /pull or /issues path.
+  const escapedRepo = repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![a-z0-9_.-])${escapedRepo}(?![a-z0-9_.-])`, 'i').test(task);
+}
