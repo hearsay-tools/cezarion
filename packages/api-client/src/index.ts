@@ -18,7 +18,7 @@
  *     `packages/cezar/src/server/contract-parity.*.test.ts` checks each schema against the route
  *     it describes in both directions.
  *   - `protocol/*` — the agent event vocabulary the server emits over SSE and the cockpit
- *     renders (a frozen surface, BACKWARD_COMPATIBILITY.md §2).
+ *     renders (a frozen surface, BACKWARD_COMPATIBILITY.md).
  *   - `utils/*` — pure helpers both sides need, notably the version prefixing and the
  *     `/api/v1` ↔ `/api/v1/p/:projectId` scope prefixing.
  *

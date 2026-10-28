@@ -174,7 +174,7 @@ describe('GET /api/v1/workspace/events', () => {
     });
 
     const body = await legacy.readUntil(`"id":"${bootRun.id}"`);
-    // Byte-identical regression (BACKWARD_COMPATIBILITY §2): the data line is
+    // Byte-identical regression (BACKWARD_COMPATIBILITY.md): the data line is
     // EXACTLY the run record — no `project` stamp, nothing reordered.
     expect(body).toContain(`event: run\ndata: ${JSON.stringify(bootRun)}\n`);
     expect(body).not.toContain('"project"');
