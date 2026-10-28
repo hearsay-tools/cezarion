@@ -5,7 +5,7 @@ import type { Duplex } from 'node:stream';
  * The HTTP server's one `upgrade` listener (#781, spec 2026-10-02-live-preview-v1 "WebSocket").
  * Each WebSocket endpoint is a route; the first whose `match` returns params handles the upgrade,
  * and an unmatched path is destroyed. Upgrade-only endpoints never reach Hono, so each one is
- * inventoried by hand in BACKWARD_COMPATIBILITY.md §2.
+ * covered by their own endpoint tests.
  */
 
 export interface UpgradeRoute {

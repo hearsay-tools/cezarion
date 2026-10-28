@@ -14,7 +14,7 @@ import { AgentBrowser, readTestEnv, servedRoot } from './agent-browser'
  * assert on the generated `href`, which is exactly what a user would drag to their bar.
  *
  * The `/new?skill=&auto=&key=&ref=` grammar these links bake is a PROTECTED contract
- * (BACKWARD_COMPATIBILITY.md §1): promoting the generator to its own subpage must not
+ * (BACKWARD_COMPATIBILITY.md): promoting the generator to its own subpage must not
  * change a single character of it, and the legacy `/settings/skills?skill=__bm` entry point
  * must keep working. Both are pinned below.
  *
@@ -114,7 +114,7 @@ describe('settings → bookmarklets against the live dry-run server', () => {
     waitForGeneratedHref(linkIn('bm-generic'))
     const generic = hrefOf(linkIn('bm-generic'))
 
-    // The protected deep-link grammar (BACKWARD_COMPATIBILITY.md §1), baked with the real key,
+    // The protected deep-link grammar (BACKWARD_COMPATIBILITY.md), baked with the real key,
     // now under this project's own URL prefix (multi-project spec, step 3.6). The whole target
     // is asserted — origin AND scope — because the generated code opens it as one absolute URL.
     expect(generic).toContain(`open('${baseUrl}/p/${bootProject}/new?'+q,'_blank')`)
@@ -181,7 +181,7 @@ describe('settings → bookmarklets against the live dry-run server', () => {
  * the legacy URL, exactly as `open()` from github.com performs it), not just in the router unit
  * tests, because the redirect also depends on the server serving index.html for `/p/*`.
  */
-describe('legacy flat bookmarklet URLs keep landing (BACKWARD_COMPATIBILITY.md §1)', () => {
+describe('legacy flat bookmarklet URLs keep landing (BACKWARD_COMPATIBILITY.md)', () => {
   it("the generated key is the server's own — the target scope will accept it", async () => {
     const scoped = (await (
       await fetch(`${baseUrl}/api/v1/p/${encodeURIComponent(bootProject)}/launch-key`)

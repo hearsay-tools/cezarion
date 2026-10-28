@@ -20,7 +20,7 @@ export interface ForgeAvailability {
 }
 
 /** One issue or pull request, flattened for the cockpit. `/api/github` serves
- *  exactly this shape (BACKWARD_COMPATIBILITY.md §2 — do not reshape). */
+ *  exactly this shape (BACKWARD_COMPATIBILITY.md — do not reshape). */
 export type ForgeItem = import('@open-mercato/cezar-contract').GithubItem;
 
 /** One comment (or PR review summary) in an issue/PR conversation thread (#499). Served by the
@@ -108,7 +108,7 @@ export interface ForgeCommentsData {
   truncated?: boolean;
   /** Timeline events (#525) — additive and optional; absent when the timeline fetch degraded to
    *  the legacy comments-only call. Capped independently of `comments`, which keeps its exact
-   *  pre-#525 shape, contents and cap (BACKWARD_COMPATIBILITY.md §2). */
+   *  pre-#525 shape, contents and cap (BACKWARD_COMPATIBILITY.md). */
   events?: ForgeTimelineEvent[];
   /** The item's own body (and a PR's diffstat), fetched with the thread
    *  (hearsay-tools/cezarion#1183). Absent when that lookup failed. */

@@ -91,11 +91,10 @@ export type StepStatus =
  * ids the rest of cezar speaks (#547).
  *
  * `claude-cli` is the legacy spelling of `claude` — still a member of
- * `AgentBackend` and still accepted by `createRunner`, and named by
- * `BACKWARD_COMPATIBILITY.md` §3 as an id `runs.json` keeps parseable. The enum
- * here did not accept it, so that promise was false: the loader `safeParse`s the
+ * `AgentBackend` and still accepted by `createRunner`, and accepted in `runs.json`. The enum
+ * here once failed to accept it: the loader `safeParse`s the
  * WHOLE array, so one record carrying it would have dropped every run in the
- * file — the exact failure mode §3 exists to warn about.
+ * file.
  *
  * Parse-and-fold rather than widen: the legacy id is accepted on the way in and
  * collapsed to `claude`, so no consumer, wire type or contract schema ever sees
@@ -1024,7 +1023,7 @@ function importLegacyIndex(db: RunDatabase, dataDir: string): void {
   });
   // Told once, by the import that committed: the marker means no later open reads runs.json again.
   if (commit.skipped || backup === undefined) return;
-  const kept = `Its exact bytes are kept in ${join(dataDir, backup)}; BACKWARD_COMPATIBILITY.md §3 says how to import it after a repair.`;
+  const kept = `Its exact bytes are kept in ${join(dataDir, backup)}; https://github.com/hearsay-tools/cezarion/blob/main/docs/run-history-recovery.md says how to import it after a repair.`;
   if (!parsed) console.warn(`[cez] ${LEGACY_INDEX_FILE} could not be read; no run was imported, and this project starts with an empty history. ${kept}`);
   else if (skipped > 0) console.warn(`[cez] ${skipped} of ${parsed.total} runs in ${LEGACY_INDEX_FILE} could not be read and were not imported. ${kept}`);
 }

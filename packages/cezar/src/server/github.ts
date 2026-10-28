@@ -2,7 +2,7 @@
  * Thin delegate — the gh-CLI listing logic moved behind the forge-driver seam
  * (`src/server/forge/github.ts`, cockpit-ui redesign spec §"Forge-driver
  * seam"). Kept so existing imports and the protected `/api/github` response
- * shape (BACKWARD_COMPATIBILITY.md §2) stay exactly as they were.
+ * shape (BACKWARD_COMPATIBILITY.md) stay exactly as they were.
  */
 export {
   fetchGithub,
