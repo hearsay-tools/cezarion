@@ -128,12 +128,10 @@ describe('peer conversation cards (hearsay-tools/cezarion#1992)', () => {
     expect(card!.textContent).not.toContain('owned worker')
   })
 
-  it('names the current resume verb in the worker fallback, not the removed --resume flag', () => {
+  it('keeps the parent-worker resume guidance on a worker card', () => {
     renderThread([{ type: 'conversation-message', message: { ...peerRequest, relationship: undefined, recipientRunId: worker, state: 'continuation-required' }, delivery: 'not-delivered' }],
       { [self]: 'Coordinator', [worker]: 'Worker' })
-    const text = cards()[0]!.textContent ?? ''
-    expect(text).toContain('cez worker resume')
-    expect(text).not.toContain('--resume')
+    expect(cards()[0]!.textContent).toContain('A parent can resume its owned worker')
   })
 
   it('keeps the instruction the server sent for an undelivered peer message', () => {

@@ -113,7 +113,7 @@ describe('conversation delivery explanations (hearsay-tools/cezarion#1992)', () 
   })
 
   it('words an undelivered message by relationship: a parent can resume a worker, nobody resumes a peer', () => {
-    expect(conversationDeliveryExplanation({ delivery: 'not-delivered', state: 'continuation-required' }, undefined)).toContain('cez worker resume')
+    expect(conversationDeliveryExplanation({ delivery: 'not-delivered', state: 'continuation-required' }, undefined)).toContain('with --resume')
     const peer = conversationDeliveryExplanation({ delivery: 'not-delivered', state: 'continuation-required', relationship: 'peer' }, undefined)
     expect(peer).toContain('Only its human can continue it')
     expect(peer).not.toContain('resume')

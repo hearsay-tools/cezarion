@@ -137,7 +137,7 @@ export function conversationDeliveryExplanation(
   if (message.state === 'continuation-required') {
     return isPeerMessage(message)
       ? 'Not delivered. The recipient is not running. Only its human can continue it.'
-      : 'Not delivered. The recipient needs a new instruction to resume. A parent can resume its owned worker with `cez worker resume`; workers cannot resume parents.'
+      : 'Not delivered. The recipient needs a new instruction to resume. A parent can resume its owned worker with --resume; workers cannot resume parents.'
   }
   return message.state === 'destroyed' ? 'Not delivered. This worker was destroyed.' : undefined
 }
