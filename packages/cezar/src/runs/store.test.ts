@@ -2482,7 +2482,7 @@ describe('RunStore — the legacy `claude-cli` runner id (#547)', () => {
   it('does not let one `claude-cli` record evict the rest of runs.json', () => {
     // The regression this guards: the loader `safeParse`s the WHOLE array, so before #547 a
     // single record carrying the legacy id took every other run in the file down with it —
-    // the exact failure mode BACKWARD_COMPATIBILITY.md §3 warns about. The import of a legacy
+    // the legacy import failure mode. The import of a legacy
     // `runs.json` still parses it as one array (#779), so this keeps seeding that file.
     writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([
       { ...LEGACY_RUN, id: 'legacy-cli', runner: 'claude-cli' },
@@ -2570,7 +2570,7 @@ describe('RunStore — pinned tasks (#935)', () => {
   });
 
   it('unpinning DELETES both keys rather than writing pinned:false', () => {
-    // The compatibility promise (BACKWARD_COMPATIBILITY.md §3): an unpinned record is
+    // The compatibility promise (BACKWARD_COMPATIBILITY.md): an unpinned record is
     // byte-identical to one written by a cezar that never heard of pins.
     const store = RunStore.open(dataDir);
     const id = newRun(store);

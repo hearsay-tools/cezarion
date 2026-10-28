@@ -20,7 +20,7 @@ module.exports = [
 
   // Markdown a test reads: changing it must run that test.
   { path: 'AGENT_PROTOCOL.md', docs: false },
-  { path: 'BACKWARD_COMPATIBILITY.md', docs: false },
+  { path: 'BACKWARD_COMPATIBILITY.md', docs: true },
   { path: '.ai/specs/2026-09-04-harness-parity-matrix.md', docs: false },
   // Markdown in a fixture or snapshot directory may be test data.
   { path: 'packages/web/e2e/fixtures/README.md', docs: false },

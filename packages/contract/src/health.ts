@@ -86,7 +86,7 @@ export const capabilitiesSchema = z.object({
 export type Capabilities = z.infer<typeof capabilitiesSchema>;
 
 /**
- * `GET /api/v1/health` — the CORS-open discovery endpoint (BACKWARD_COMPATIBILITY.md §2).
+ * `GET /api/v1/health` — the CORS-open discovery endpoint (BACKWARD_COMPATIBILITY.md).
  *
  * Additive fields only: this is the most externally-depended-on JSON in the app.
  */

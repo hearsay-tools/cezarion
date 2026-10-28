@@ -630,7 +630,7 @@ function stripHostPort(host: string): string {
  * ## Precedence — flag, then Accept, then the route's own default
  *
  * 1. **The query flag wins whenever the request carries it.** `?structured=1` and `?raw=1` are the
- *    live wire and a protected surface (BACKWARD_COMPATIBILITY.md §2); `Accept` is ADDITIVE and
+ *    live wire and a protected surface (BACKWARD_COMPATIBILITY.md); `Accept` is ADDITIVE and
  *    may never override a caller that said what it wanted in the URL. The flag counts as "carried"
  *    when the key is PRESENT, so `?raw=0` is an explicit opt-out of the raw representation and not
  *    an invitation to re-decide from a header.
@@ -1171,7 +1171,7 @@ export function createApp(deps: ServerDeps) {
       workspaceSummary(),
     ]);
     // Additive fields only below — the pre-forge shape is the most
-    // externally-depended-on JSON in the app (BACKWARD_COMPATIBILITY.md §2).
+    // externally-depended-on JSON in the app (BACKWARD_COMPATIBILITY.md).
     const forge = resolveForge(repo);
     const caps = capabilities();
     return {
@@ -1188,10 +1188,9 @@ export function createApp(deps: ServerDeps) {
       // so any site/host that reads it would learn the developer's absolute
       // checkout path and username (#431). Local mode keeps the full path (the
       // protected bookmarklet shape); hosted/remote mode trims it to a basename.
-      // NB this narrows the VALUE of a field named in BACKWARD_COMPATIBILITY.md
-      // §2: the field is always present and a string, but under CEZ_REMOTE it is
-      // no longer an absolute path. Deliberate — a hosted cockpit's paths are on
-      // a machine the reader does not have anyway. See §2's `repoRoot` note.
+      // The field is always present and a string, but under CEZ_REMOTE it is
+      // no longer an absolute path. A hosted cockpit's paths are on a machine
+      // the reader does not have anyway.
       repoRoot: caps.localHandoff ? bootRoot : basename(bootRoot),
       repo,
       checks,
@@ -1228,8 +1227,7 @@ export function createApp(deps: ServerDeps) {
   // subscriber, and then nothing refreshes the cache at all: the next `GET
   // /api/health`, an hour later, would answer with the boot pre-warm's payload
   // and only the request AFTER it would see the truth. That endpoint is the
-  // bookmarklet contract (BACKWARD_COMPATIBILITY.md §2, "the most
-  // externally-depended-on JSON in the app") and `repo.branch` going stale is
+  // bookmarklet contract (BACKWARD_COMPATIBILITY.md) and `repo.branch` going stale is
   // literally #369, so past this age correctness beats the latency win and the
   // read waits for the compute. `refreshHealth` dedupes, so waiting costs one.
   const HEALTH_MAX_STALE_MS = 60_000;
@@ -2922,7 +2920,7 @@ export function createApp(deps: ServerDeps) {
 
     .put('/ui-state', jsonZodValidator(uiStateBody), async (c) => {
       const { root: repoRoot, dataDir } = c.get('project');
-      // `.passthrough()` keeps unknown prefs (BACKWARD_COMPATIBILITY §3), but a
+      // `.passthrough()` keeps unknown prefs (BACKWARD_COMPATIBILITY.md), but a
       // single request may not stuff an unbounded key set (#429) — the shared
       // schema+cap half of both ui-state routes lives in `uiStateBody`.
       const parsed = { data: c.req.valid('json') };
@@ -4871,7 +4869,7 @@ export function createApp(deps: ServerDeps) {
     // One commit's message + stat + patch — the Repo view expands it inline.
     // `?structured=1` is the ADDITIVE sibling (R5 Step 1.7): the new repo view's commit-diff
     // shape `{sha, subject, author, when, files, stat}` with 409 + reason on failure. The
-    // legacy text answer below is a protected surface (BACKWARD_COMPATIBILITY.md §2) — its
+    // legacy text answer below is a protected surface (BACKWARD_COMPATIBILITY.md) — its
     // shape, including the in-band failure sentences, stays exactly as it was.
     //
     // `Accept: application/json` reaches the same structured answer without the flag, and
@@ -5147,7 +5145,7 @@ export function createApp(deps: ServerDeps) {
   // ---- assemble the chained families --------------------------------------
   // Every chained family is registered ONCE and mounted into the versioned table. There is no
   // second, unversioned spelling: `/api/*` was removed once the whole API was reachable under
-  // `/api/v1` (BACKWARD_COMPATIBILITY.md §2). One surface means one thing to keep working, and
+  // `/api/v1` (BACKWARD_COMPATIBILITY.md). One surface means one thing to keep working, and
   // it is the one the typed client describes.
   //
   // ---- chained family: voice mode (project-scoped, gated on CEZ_VOICE) ----

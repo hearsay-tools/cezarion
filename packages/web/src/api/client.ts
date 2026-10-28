@@ -855,7 +855,7 @@ export async function getRepoChanges(opts?: ReadOptions): Promise<ChangesPayload
  *  additive, the text-blob answer stays for the legacy UI. 409 + reason for unknown shas. */
 /*  NOT on the typed client, and it is the route that cannot be: the same handler answers the
  *  legacy `text/plain` blob when `?structured=1` is absent (a protected surface —
- *  BACKWARD_COMPATIBILITY.md §2), so `hc` infers a text member alongside the JSON one — one path,
+ *  BACKWARD_COMPATIBILITY.md), so `hc` infers a text member alongside the JSON one — one path,
  *  two formats. `unwrap` reads the JSON branch; `OkJson` is what stops that from also silently
  *  accepting a route that has no JSON branch at all. */
 export async function getRepoCommit(sha: string, opts?: ReadOptions): Promise<RepoCommitPayload> {
