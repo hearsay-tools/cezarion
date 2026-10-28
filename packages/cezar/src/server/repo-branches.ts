@@ -399,13 +399,14 @@ function pickPr(prs: ForgePr[], tip: string): ForgePr | null {
   return [...prs].sort((a, b) => rank(b) - rank(a) || b.number - a.number)[0] ?? null;
 }
 
-/** Three-dot diff stats by repository, base sha and tip sha. The diff pins every option a
- *  repository's config could change (rename detection, the algorithm, external and textconv
- *  drivers), so a stat depends on the two commits alone and an entry never goes stale; the root in
- *  the key keeps one checkout's answer out of another's all the same. Bounded, oldest first out. */
+/** Three-dot diff stats by repository, base sha and tip sha. The diff pins the options a
+ *  checkout's config can change for a commit-to-commit stat (rename detection and its limit, at
+ *  git's default of 1000, the algorithm, external and textconv drivers), so checkouts of one
+ *  repository agree. The root in the key keeps what no flag pins, such as a checkout's own
+ *  attributes, inside that checkout. Bounded, oldest first out. */
 const DIFF_STAT_CACHE_MAX = 5_000;
 const diffStatCache = new Map<string, NonNullable<RepoBranchEntry['diffStat']>>();
-const DIFF_STAT_ARGS = ['diff', '--shortstat', '--find-renames', '--diff-algorithm=myers', '--no-ext-diff', '--no-textconv'];
+const DIFF_STAT_ARGS = ['diff', '--shortstat', '--find-renames', '-l1000', '--diff-algorithm=myers', '--no-ext-diff', '--no-textconv'];
 
 async function diffStat(root: string, baseSha: string, tip: string): Promise<RepoBranchEntry['diffStat']> {
   const key = `${root}\0${baseSha}\0${tip}`;

@@ -425,31 +425,39 @@ describe('the branch classifier (issue 08 §A)', () => {
   });
 
   it('reads the same diff stat for a commit pair in every checkout, whatever its diff config (hearsay-tools/cezarion#2029)', async () => {
-    // A rename with one added line: 1 insertion with rename detection, 51/50 without.
-    writeFileSync(join(root, 'a.txt'), `${Array.from({ length: 50 }, (_, i) => i + 1).join('\n')}\n`);
+    // Two renames with one added line each: 2 insertions with rename detection, 102/100 without.
+    const lines = (from: number, n: number) => `${Array.from({ length: n }, (_, i) => from + i).join('\n')}\n`;
+    writeFileSync(join(root, 'a.txt'), lines(1, 50));
+    writeFileSync(join(root, 'c.txt'), lines(101, 50));
     await git(root, 'add', '-A');
-    await git(root, 'commit', '-q', '-m', 'fifty lines');
+    await git(root, 'commit', '-q', '-m', 'fifty lines twice');
     await git(root, 'checkout', '-q', '-b', 'cez/rename01');
     await git(root, 'mv', 'a.txt', 'b.txt');
-    writeFileSync(join(root, 'b.txt'), `${Array.from({ length: 51 }, (_, i) => i + 1).join('\n')}\n`);
-    await git(root, 'commit', '-q', '-am', 'rename and add one');
+    await git(root, 'mv', 'c.txt', 'd.txt');
+    writeFileSync(join(root, 'b.txt'), lines(1, 51));
+    writeFileSync(join(root, 'd.txt'), lines(101, 51));
+    await git(root, 'commit', '-q', '-am', 'rename both and add one line each');
     await git(root, 'checkout', '-q', 'main');
-    const other = mkdtempSync(join(tmpdir(), 'cez-branches-clone-'));
+    const clones: string[] = [];
     try {
-      await git(other, 'clone', '-q', root, '.');
-      await git(other, 'branch', 'cez/rename01', 'origin/cez/rename01');
-      // Without the remote-tracking copy, the branch's commit is its own: not landed, not empty.
-      await git(other, 'update-ref', '-d', 'refs/remotes/origin/cez/rename01');
-      await git(other, 'config', 'diff.renames', 'false');
+      // One checkout turns rename detection off, another limits it below the two renames.
+      for (const [key, value] of [['diff.renames', 'false'], ['diff.renameLimit', '1']] as const) {
+        const clone = mkdtempSync(join(tmpdir(), 'cez-branches-clone-'));
+        clones.push(clone);
+        await git(clone, 'clone', '-q', root, '.');
+        await git(clone, 'branch', 'cez/rename01', 'origin/cez/rename01');
+        // Without the remote-tracking copy, the branch's commit is its own: not landed, not empty.
+        await git(clone, 'update-ref', '-d', 'refs/remotes/origin/cez/rename01');
+        await git(clone, 'config', key, value);
+      }
       const runs = [runRecord('rename01-1', 'done')];
       const statOf = async (at: string) =>
         (await classifyBranches({ ...input({ runs }), root: at, hasRemote: false })).payload.branches.find((b) => b.name === 'cez/rename01')?.diffStat;
-      // The checkout with rename detection off is read first, so a cache keyed on the commits alone
-      // would hand its answer to the other one.
-      expect(await statOf(other)).toEqual({ additions: 1, deletions: 0 });
-      expect(await statOf(root)).toEqual({ additions: 1, deletions: 0 });
+      // The configured checkouts are read first, so a cache keyed on the commits alone would hand
+      // their answer to the original one.
+      for (const at of [...clones, root]) expect(await statOf(at), at).toEqual({ additions: 2, deletions: 0 });
     } finally {
-      rmSync(other, { recursive: true, force: true });
+      for (const clone of clones) rmSync(clone, { recursive: true, force: true });
     }
   });
 
