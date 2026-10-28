@@ -2779,7 +2779,7 @@ function entriesCells(runners: RunnerId[]): void {
         const accepted = vi.spyOn(manager, 'acceptDone').mockImplementation((...args) => {
           const answer = accept(...args);
           // A concurrent worker resume after tool acceptance, before the native turn ends.
-          if (args[0] === p.id && answer.ok) fixtureUpdateRun(w.id, { status: 'queued' });
+          if (args[0] === p.id && answer.ok) fixtureUpdateRun(w.id, { status: RUN_STATUS.queued });
           return answer;
         });
         const before = turnEnds(p.id), summary = 'held done summary shipped';
