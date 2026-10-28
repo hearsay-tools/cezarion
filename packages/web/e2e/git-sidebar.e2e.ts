@@ -270,7 +270,16 @@ describe('Git desktop sidebar (issue 06 §3)', () => {
     browser.click(`${SIDEBAR} a[data-git-section="branches"]`)
     expect(browser.waitForValue(locationJs, (value) => value === scoped('/git/branches'))).toBe(scoped('/git/branches'))
     browser.waitForFunction(has('[data-slot="repo-branch-list"]'))
-    expect(browser.count('[data-slot="branch-row"]')).toBe(5)
+    // The list draws `/repo`'s names first and the `cez/*` ones once `GET /repo/branches` answers.
+    // The sidebar used to warm that query; since hearsay-tools/cezarion#2029 it reads only
+    // `/repo/branches/counts`, so the list now fetches it itself, and a one-shot count raced it.
+    // Evidence: git-sidebar failed with "expected 2 to be 5" (bundle
+    // .ai/qa/failures/git-sidebar/All-branches-lists-the-branches-and-the-uncommitted-line-opens-the-main-tree-s-c-1/:
+    // probe.json error "expected 2 to be 5", snapshot.txt already lists the `cez/nl-task` row;
+    // recorded in the provenance comment on the pull request for hearsay-tools/cezarion#2029).
+    // Reproduce with `npm run test:e2e -- git-sidebar.e2e.ts` — 1 of 1 failed before,
+    // 3 of 3 passed after.
+    expect(browser.waitForValue(`document.querySelectorAll('[data-slot="branch-row"]').length`, (value) => value === 5)).toBe(5)
     expect(browser.evaluate(litJs)).toEqual(['branches'])
 
     browser.click(`${CHECKOUT} [data-slot="git-uncommitted"]`)

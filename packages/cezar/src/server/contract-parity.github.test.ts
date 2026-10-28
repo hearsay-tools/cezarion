@@ -18,6 +18,7 @@ import type {
   reclaimWorktreesResponseSchema,
   repoBranchResponseSchema,
   repoBranchesResponseSchema,
+  repoBranchCountsResponseSchema,
   deleteBranchesResponseSchema,
   deleteBranchesErrorSchema,
   reclaimWorktreeResponseSchema,
@@ -118,6 +119,7 @@ describe('src/contract github + repo schemas match the routes exactly', () => {
   type ReclaimWorktrees200 = InferResponseType<typeof client.api.v1.worktrees.reclaim.$post, 200>;
   type ReclaimWorktree200 = InferResponseType<(typeof client.api.v1.worktrees)[':runId']['reclaim']['$post'], 200>;
   type RepoBranches200 = InferResponseType<typeof client.api.v1.repo.branches.$get, 200>;
+  type RepoBranchCounts200 = InferResponseType<typeof client.api.v1.repo.branches.counts.$get, 200>;
   type DeleteBranches200 = InferResponseType<typeof client.api.v1.repo.branches.delete.$post, 200>;
   type DeleteBranches409 = InferResponseType<typeof client.api.v1.repo.branches.delete.$post, 409>;
 
@@ -147,6 +149,7 @@ describe('src/contract github + repo schemas match the routes exactly', () => {
     Assert<Exact<z.infer<typeof reclaimWorktreesResponseSchema>, ReclaimWorktrees200>>,
     Assert<Exact<z.infer<typeof reclaimWorktreeResponseSchema>, ReclaimWorktree200>>,
     Assert<Exact<z.infer<typeof repoBranchesResponseSchema>, RepoBranches200>>,
+    Assert<Exact<z.infer<typeof repoBranchCountsResponseSchema>, RepoBranchCounts200>>,
     Assert<Exact<z.infer<typeof deleteBranchesResponseSchema>, DeleteBranches200>>,
     Assert<Exact<z.infer<typeof deleteBranchesErrorSchema>, DeleteBranches409>>,
   ];

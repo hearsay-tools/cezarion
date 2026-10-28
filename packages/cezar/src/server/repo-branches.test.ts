@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BranchClass } from '@open-mercato/cezar-contract';
 import { createOwnedWorkspace } from '../delegation/workspace.ts';
 import { branchOwnerOf, type RunRecord, type RunStatus } from '../runs/store.ts';
@@ -13,6 +13,8 @@ import {
   attributeLog,
   classifyBranches,
   deleteBranches,
+  forgetRepoBranches,
+  forkPoints,
   type BranchForge,
   type ClassifyInput,
   type ForgePr,
@@ -401,6 +403,103 @@ describe('the branch classifier (issue 08 §A)', () => {
     expect((await git(root, 'log', '-g', '--format=%H', 'refs/heads/cez/aaaaaaaa')).split('\n')).toEqual([tip]);
     const { cls } = await classesOf({ runs: [runRecord('aaaaaaaa-1', 'done', { baseBranch: 'main' })] });
     expect(cls['cez/aaaaaaaa']).toBe('not-landed');
+  });
+
+  it('reads fork points in one pass, and a chunk naming a vanished branch one branch at a time (hearsay-tools/cezarion#2029)', async () => {
+    const base = await git(root, 'rev-parse', 'HEAD');
+    await git(root, 'branch', 'cez/fresh0001');
+    await taskBranch(root, 'cez/worked01', 2);
+    const run = (id: string, extra: Partial<RunRecord> = {}) => owners([runRecord(id, 'done', extra)])[0]!;
+    const forks = await forkPoints(root, [
+      { run: run('fresh0001-1'), branch: 'cez/fresh0001' },
+      { run: run('worked01-1'), branch: 'cez/worked01' },
+      { run: run('gone0001-1'), branch: 'cez/gone0001' },
+      { run: run('pinned01-1', { baseBranch: 'a'.repeat(40) }), branch: 'cez/pinned01' },
+    ]);
+    // Each fork point is the commit the branch was created at, never a later task commit.
+    expect(Object.fromEntries(forks)).toEqual({
+      'cez/fresh0001': base,
+      'cez/worked01': base,
+      'cez/gone0001': null,
+      'cez/pinned01': 'a'.repeat(40),
+    });
+  });
+
+  it('reads the same diff stat for a commit pair in every checkout, whatever its diff config (hearsay-tools/cezarion#2029)', async () => {
+    // Two renames with one added line each: 2 insertions with rename detection, 102/100 without.
+    const lines = (from: number, n: number) => `${Array.from({ length: n }, (_, i) => from + i).join('\n')}\n`;
+    writeFileSync(join(root, 'a.txt'), lines(1, 50));
+    writeFileSync(join(root, 'c.txt'), lines(101, 50));
+    await git(root, 'add', '-A');
+    await git(root, 'commit', '-q', '-m', 'fifty lines twice');
+    await git(root, 'checkout', '-q', '-b', 'cez/rename01');
+    await git(root, 'mv', 'a.txt', 'b.txt');
+    await git(root, 'mv', 'c.txt', 'd.txt');
+    writeFileSync(join(root, 'b.txt'), lines(1, 51));
+    writeFileSync(join(root, 'd.txt'), lines(101, 51));
+    await git(root, 'commit', '-q', '-am', 'rename both and add one line each');
+    await git(root, 'checkout', '-q', 'main');
+    const clones: string[] = [];
+    try {
+      // One checkout turns rename detection off, another limits it below the two renames.
+      for (const [key, value] of [['diff.renames', 'false'], ['diff.renameLimit', '1']] as const) {
+        const clone = mkdtempSync(join(tmpdir(), 'cez-branches-clone-'));
+        clones.push(clone);
+        await git(clone, 'clone', '-q', root, '.');
+        await git(clone, 'branch', 'cez/rename01', 'origin/cez/rename01');
+        // Without the remote-tracking copy, the branch's commit is its own: not landed, not empty.
+        await git(clone, 'update-ref', '-d', 'refs/remotes/origin/cez/rename01');
+        await git(clone, 'config', key, value);
+      }
+      const runs = [runRecord('rename01-1', 'done')];
+      const statOf = async (at: string) =>
+        (await classifyBranches({ ...input({ runs }), root: at, hasRemote: false })).payload.branches.find((b) => b.name === 'cez/rename01')?.diffStat;
+      // The configured checkouts are read first, so a cache keyed on the commits alone would hand
+      // their answer to the original one.
+      for (const at of [...clones, root]) expect(await statOf(at), at).toEqual({ additions: 2, deletions: 0 });
+    } finally {
+      for (const clone of clones) rmSync(clone, { recursive: true, force: true });
+    }
+  });
+
+  it('reads a fresh diff stat once the checkout\'s attributes change, the entry expires, or the repository is mutated (hearsay-tools/cezarion#2029)', async () => {
+    // The task's one-line file sits under nested/, so a nested/.gitattributes in the main
+    // checkout applies to it without being one of the attribute files the key reads.
+    await git(root, 'checkout', '-q', '-b', 'cez/attrs001');
+    mkdirSync(join(root, 'nested'));
+    await commit(root, 'nested/work.txt', 'work');
+    await git(root, 'checkout', '-q', 'main');
+    mkdirSync(join(root, 'nested'), { recursive: true });
+    const runs = [runRecord('attrs001-1', 'done')];
+    const stat = async () => (await classifyBranches(input({ runs }))).payload.branches.find((b) => b.name === 'cez/attrs001')?.diffStat;
+    const text = { additions: 1, deletions: 0 };
+    const binary = { additions: 0, deletions: 0 };
+    expect(await stat()).toEqual(text);
+
+    // `info/attributes` is part of the key: marking every path binary reads a fresh stat at once.
+    const infoAttributes = join(root, '.git', 'info', 'attributes');
+    mkdirSync(join(root, '.git', 'info'), { recursive: true });
+    writeFileSync(infoAttributes, '* -diff\n');
+    expect(await stat()).toEqual(binary);
+    writeFileSync(infoAttributes, '');
+    expect(await stat()).toEqual(text);
+
+    // A nested .gitattributes is not in the key, so the entry's expiry bounds how long it is missed.
+    writeFileSync(join(root, 'nested', '.gitattributes'), '* -diff\n');
+    expect(await stat()).toEqual(text);
+    const start = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start + 5 * 60_000);
+    try {
+      expect(await stat()).toEqual(binary);
+    } finally {
+      clock.mockRestore();
+    }
+
+    // A mutation this server makes forgets the repository's entries as well.
+    writeFileSync(join(root, 'nested', '.gitattributes'), '');
+    expect(await stat()).toEqual(binary);
+    forgetRepoBranches(root);
+    expect(await stat()).toEqual(text);
   });
 
   describe('deleteBranches', () => {

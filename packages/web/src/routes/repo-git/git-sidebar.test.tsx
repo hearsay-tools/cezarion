@@ -71,6 +71,7 @@ function stub(overrides: Record<string, () => Response | Promise<Response>> = {}
     if (override) return override()
     if (method !== 'GET') return json({})
     if (/\/worktrees$/.test(path)) return json(WORKTREES)
+    if (/\/repo\/branches\/counts$/.test(path)) return json({ base: BRANCHES.base, prStateKnown: BRANCHES.prStateKnown, counts: BRANCHES.counts, allBranches: 2 })
     if (/\/repo\/branches$/.test(path)) return json(BRANCHES)
     if (/\/repo$/.test(path)) return json(REPO)
     if (/\/repo\/changes$/.test(path)) return json({ files: [], stat: { adds: 0, dels: 0, files: 0 } })
@@ -155,6 +156,14 @@ describe('GitSidebar', () => {
     expect(q('a[data-git-section="cleanup"]')?.className).toContain('h-[32px]')
   })
 
+  it('reads only the branch counts, never the full classification (hearsay-tools/cezarion#2029)', async () => {
+    const sent = stub()
+    renderSidebar()
+    await waitFor(() => expect(sectionRows()[1]?.count).toBe('3'))
+    expect(sent.some((request) => request.path === '/api/v1/repo/branches/counts')).toBe(true)
+    expect(sent.some((request) => request.path === '/api/v1/repo/branches')).toBe(false)
+  })
+
   it('lists no task worktrees and never links a row to a task', async () => {
     stub()
     renderSidebar()
@@ -213,7 +222,7 @@ describe('GitSidebar', () => {
   })
 
   it('draws no Not landed count for a known zero', async () => {
-    stub({ 'GET /api/v1/repo/branches': () => json({ ...BRANCHES, counts: { notLanded: 0, cleanup: 0 } }) })
+    stub({ 'GET /api/v1/repo/branches/counts': () => json({ base: 'main', prStateKnown: true, counts: { notLanded: 0, cleanup: 0 }, allBranches: 2 }) })
     renderSidebar()
     await waitFor(() => expect(sectionRows()[2]?.count).toBe('4.2 GB'))
     expect(sectionRows()[1]?.count).toBeNull()
@@ -262,8 +271,8 @@ describe('GitSidebar', () => {
     await waitFor(() => expect(q('[data-slot="git-checkout"]')).not.toBeNull())
     expect(sent.some((request) => request.path === '/api/v1/p/beta/repo')).toBe(true)
     expect(sent.some((request) => request.path === '/api/v1/p/beta/worktrees')).toBe(true)
-    await waitFor(() => expect(sent.some((request) => request.path === '/api/v1/p/beta/repo/branches')).toBe(true))
-    expect(sent.some((request) => request.path === '/api/v1/repo/branches')).toBe(false)
+    await waitFor(() => expect(sent.some((request) => request.path === '/api/v1/p/beta/repo/branches/counts')).toBe(true))
+    expect(sent.some((request) => request.path.startsWith('/api/v1/repo/branches'))).toBe(false)
     fireEvent.click(q('[data-action="repo-pull"]')!)
     await waitFor(() => expect(document.body.textContent).toContain('Already up to date.'))
     expect(sent.filter((request) => request.method === 'POST').map((request) => [request.path, request.body])).toEqual([
