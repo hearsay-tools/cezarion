@@ -785,7 +785,7 @@ describe('peer waits', () => {
   it('marks a request wait on a peer request, read from the root ledger', () => {
     const wait = workerBase({ requestIds: [R1], requestOutcomes: [] }) as never;
     const message = { id: R1, senderRunId: W1, recipientRunId: W2, kind: 'request', text: 'q', createdAt: '2026-10-19T10:00:00.000Z', requestHash: 'a'.repeat(64), state: 'accepted' };
-    const root = (relationship?: 'peer') => ({ role: 'root', receipts: [], permissions: [], conversation: { messages: [{ ...message, ...(relationship ? { relationship } : {}) }], outcomes: [] } }) as never;
+    const root = (relationship?: 'peer') => { return { role: 'root', receipts: [], permissions: [], conversation: { messages: [{ ...message, ...(relationship ? { relationship } : {}) }], outcomes: [] } } as never; };
     expect(computeWaitingOn({ waits: [wait], delegation: root('peer') })).toEqual({ kind: 'workers', count: 1, replies: true, peers: true });
     expect(computeWaitingOn({ waits: [wait], delegation: root() })).toEqual({ kind: 'workers', count: 1, replies: true });
   });
