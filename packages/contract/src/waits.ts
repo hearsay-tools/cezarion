@@ -365,7 +365,7 @@ export type CezarDoneRequest = z.infer<typeof cezarDoneRequestSchema>;
 // `not_final_step` is kept the same way: every agent step accepts a done since
 // hearsay-tools/cezarion#1620.
 export const doneErrorCodeSchema = z.enum([
-  'workers_outstanding', 'workers_uncollected', 'worker_questions', 'human_question_pending', 'worker_wait_pending',
+  'workers_outstanding', 'workers_uncollected', 'worker_questions', 'requests_outstanding', 'requests_unanswered', 'human_question_pending', 'worker_wait_pending',
   'root_finish_pending', 'not_final_step', 'manager_disposed', 'capability_revoked', 'run_missing', 'run_not_running', 'run_stopping',
   'session_replaced', 'session_closed', 'run_cancelled', 'finish_requested', 'generation_mismatch', 'invalid_request',
   'unavailable',
