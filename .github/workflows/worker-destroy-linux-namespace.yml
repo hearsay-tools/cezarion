@@ -69,9 +69,14 @@ jobs:
           set +e
           sudo -n -- python3 .github/scripts/linux-mount-alias-probe.py --production "$(command -v node)" 2>&1 | cat > "$RUNNER_TEMP/capacity-attribution-raw.log"
           diagnostic_status=$?
-          set -e
           python3 .github/scripts/capacity-attribution-extract.py "$RUNNER_TEMP/capacity-attribution-raw.log" "$RUNNER_TEMP/capacity-attribution.json"
-          exit "$diagnostic_status"
+          extraction_status=$?
+          python3 .github/scripts/capacity-attribution-evidence.py "$RUNNER_TEMP/capacity-attribution-raw.log" "$RUNNER_TEMP/capacity-attribution-evidence.log" "$RUNNER_TEMP/capacity-attribution-evidence.json" "$diagnostic_status" "$extraction_status"
+          evidence_status=$?
+          set -e
+          if (( diagnostic_status != 0 )); then exit "$diagnostic_status"; fi
+          if (( extraction_status != 0 )); then exit "$extraction_status"; fi
+          exit "$evidence_status"
       - name: Save native evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -86,6 +91,15 @@ jobs:
         with:
           name: worker-destroy-linux-capacity-attribution
           path: ${{ runner.temp }}/capacity-attribution.json
+          if-no-files-found: warn
+      - name: Save bounded raw capacity diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: worker-destroy-linux-capacity-raw-evidence
+          path: |
+            ${{ runner.temp }}/capacity-attribution-evidence.log
+            ${{ runner.temp }}/capacity-attribution-evidence.json
           if-no-files-found: warn
   regression-proof:
     runs-on: ubuntu-latest
