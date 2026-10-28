@@ -31,8 +31,11 @@ const envelope = { requestHash: 'a'.repeat(64), state: 'accepted', createdAt: '2
 const peerRequest = { ...envelope, id: requestId, senderRunId: self, recipientRunId: peer, kind: 'request', relationship: 'peer', text: 'Is the schema frozen?' }
 const peerReply = { ...envelope, id: replyId, senderRunId: peer, recipientRunId: self, kind: 'reply', relationship: 'peer', requestId, text: 'Frozen since Monday.', createdAt: '2026-10-28T12:01:00.000Z' }
 
-const asEvents = (events: object[]): RunEvent[] =>
-  events.map((event, index) => ({ seq: index + 1, ts: '2026-10-28T12:00:00.000Z', ...event }) as RunEvent)
+function asEvents(events: object[]): RunEvent[] {
+  return events.map((event, index) => {
+    return { seq: index + 1, ts: '2026-10-28T12:00:00.000Z', ...event } as RunEvent
+  })
+}
 
 function renderThread(events: object[], taskTitles: Record<string, string> = { [self]: 'Coordinator', [peer]: 'Schema task' }) {
   const entries = reduceThread(asEvents(events)).turns.flatMap((turn) => turn.items)
