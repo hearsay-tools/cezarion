@@ -111,7 +111,12 @@ export class WorkerScratchCleanup {
     // shared snapshot is this synchronous tick's: it never outlives a yield.
     try {
       if (generation && resourceId && execution?.generation === generation && !this.busy(id) &&
-        this.store.workerScratchResourcesSafe(id, generation, resourceId, cwds)) removeAgentTmpDir(this.dataDir, id);
+        this.store.workerScratchResourcesSafe(id, generation, resourceId, cwds)) {
+        // A durable destroy owns scratch cleanup until its authenticated removal succeeds.
+        // Read after the holder proof so a timer queued before the request also defers.
+        const run = this.store.getRun(id);
+        if (run?.delegation?.role !== 'worker' || !run.delegation.destroy) removeAgentTmpDir(this.dataDir, id);
+      }
     } catch { /* Transient evidence/read failures retain the durable intent for another wake. */ }
     // Uncertainty has no age limit or force-delete exit; it backs off instead.
     this.arm(id, attempts + 1, retryDelayMs(attempts, this.backoff, noJitter), now);

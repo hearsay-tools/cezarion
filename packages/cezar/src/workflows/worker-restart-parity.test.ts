@@ -39,6 +39,9 @@ describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker s
     if (!native) throw Error('native process was not live before destroy');
     const workspace = w.delegation?.role === 'worker' ? w.delegation.workspace : undefined;
     if (!workspace) throw Error('missing workspace');
+    const scratch = agentTmpDir(join(root, '.ai/cezar'), w.id);
+    mkdirSync(scratch, { recursive: true }); writeFileSync(join(scratch, 'keep'), 'scratch marker');
+    const scratchProbe = vi.spyOn(store, 'workerScratchResourcesSafe');
     const read = fs.readFileSync;
     vi.spyOn(fs, 'readFileSync').mockImplementation(((...args: unknown[]) => String(args[0]) === '/proc/self/mountinfo'
       ? '' : Reflect.apply(read, fs, args)) as typeof fs.readFileSync);
@@ -51,6 +54,9 @@ describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker s
       expect(existsSync(workspace.path)).toBe(true);
       expect(store.getRun(w.id)?.delegation).toMatchObject({ destroy: { phase: 'incomplete' } });
       await vi.waitFor(() => expect(recordedProcessLive(native)).toBe(false), { timeout: 2_000, interval: 20 });
+      await vi.waitFor(() => expect(store.readWorkerExecution(w.id)?.phase).toBe('complete'), { timeout: 10_000 });
+      await vi.waitFor(() => expect(scratchProbe).toHaveBeenCalled(), { timeout: 10_000 });
+      expect(readFileSync(join(scratch, 'keep'), 'utf8')).toBe('scratch marker');
     } finally { detach(); }
   });
   it('interrupts the active worker but preserves resources when its receipt is corrupt', async () => {

@@ -39,6 +39,34 @@ describe('durable scratch cleanup evidence', () => {
     return { run, generation, dataDir, scratch };
   }
 
+  it.each(['queued tick', 'recovery'] as const)('defers %s while durable destroy is pending', async entry => {
+    const { run, generation, dataDir, scratch } = await completed();
+    const cleanup = new WorkerScratchCleanup(store, dataDir, () => false);
+    const probe = vi.spyOn(store, 'workerScratchResourcesSafe');
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      if (entry === 'queued tick') cleanup.schedule(run.id);
+      const current = store.getRun(run.id)!;
+      if (current.delegation?.role !== 'worker') throw Error('missing worker');
+      store.commitDelegation([{ id: run.id, delegation: { ...current.delegation, destroy: {
+        requestedAt: new Date().toISOString(), phase: 'incomplete', remaining: ['process', 'worktree', 'branch'],
+      } } }]);
+      if (entry === 'recovery') cleanup.recover();
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(probe).toHaveBeenCalled();
+      expect(readFileSync(join(scratch, 'keep'), 'utf8')).toBe('durable');
+      expect(store.readWorkerExecution(run.id)).toMatchObject({ generation, phase: 'complete', scratchCleanup: { resourceId: current.delegation.workspace.resourceId } });
+    } finally { cleanup.pause(); vi.useRealTimers(); }
+  });
+
+  it('removes terminal scratch normally when no destroy is pending', async () => {
+    const { run, dataDir, scratch } = await completed();
+    const cleanup = new WorkerScratchCleanup(store, dataDir, () => false);
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try { cleanup.schedule(run.id); await vi.advanceTimersByTimeAsync(0); expect(existsSync(scratch)).toBe(false); }
+    finally { cleanup.pause(); vi.useRealTimers(); }
+  });
+
   it.runIf(process.platform === 'linux' && process.getuid?.() !== 0)('retains an unreadable old fallback owner and its pointer until ownership and the real holder clear', async () => {
     const priorTmpdir = process.env.TMPDIR;
     const oldRoot = mkdtempSync('/tmp/cez-old-');
