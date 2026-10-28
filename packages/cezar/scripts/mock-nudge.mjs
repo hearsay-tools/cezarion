@@ -24,7 +24,7 @@ export function silentNudge(prompt) {
 
 /** Every completion refusal ends with this, whichever check refused it. */
 const COMPLETION_REFUSAL = 'then call cezar_done again.';
-const completionReply = (prompt) => process.env.CEZ_MOCK_COMPLETION_REPLY && prompt.includes(COMPLETION_REFUSAL) ? process.env.CEZ_MOCK_COMPLETION_REPLY : undefined;
+const completionReply = (prompt) => process.env.CEZ_MOCK_COMPLETION_REPLY && [COMPLETION_REFUSAL, 'Requests are still open:', 'Requests are unanswered:'].some(text => prompt.includes(text)) ? process.env.CEZ_MOCK_COMPLETION_REPLY : undefined;
 
 export function answerNudge(prompt) {
   if (typeof prompt !== 'string') return prompt;
