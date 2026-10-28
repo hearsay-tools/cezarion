@@ -469,6 +469,14 @@ function peerRequestIds(delegation: WaitingOnInput['delegation']): Set<string> {
   }));
 }
 
+/** A summary's slim root delegation with the root's own ledger, which the slim one drops, so
+ *  `computeWaitingOn` still marks a wait on a peer's reply (hearsay-tools/cezarion#1995). The ledger
+ *  is unparsed; `peerRequestIds` reads it defensively. */
+export function withRootLedger(slim: RunDelegationSummary | undefined, raw: unknown): WaitingOnInput['delegation'] {
+  const ledger = raw && typeof raw === 'object' ? raw as { role?: unknown; conversation?: unknown } : undefined;
+  return slim?.role === 'root' && ledger?.role === 'root' ? { ...slim, conversation: ledger.conversation } as WaitingOnInput['delegation'] : slim;
+}
+
 /** Whether one of these requests went to a peer task: its wait reads "waiting on replies", never
  *  "worker replies" (hearsay-tools/cezarion#1995). */
 export function requestsToPeers(delegation: WaitingOnInput['delegation'], requestIds: readonly string[] | undefined): boolean {
