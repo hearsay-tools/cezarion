@@ -128,13 +128,18 @@ export function assertFamilySender(sender: RunRecord, root: RunRecord, send: boo
     (sender.delegation?.role === 'worker' && sender.delegation.destroy)) throw new DelegationPolicyError('incompatible_state', 'Sender session is not active');
 }
 
+/** A root whose human pressed Finish, which has not settled yet. */
+export function finishing(run: RunRecord): boolean {
+  return run.delegation?.role === 'root' && !!run.delegation.finishRequestedAt;
+}
+
 /** Why a send to a run that cannot take it now was not delivered, and the next step. */
 export function notDeliveredInstruction(pair: { relationship: 'family' | 'peer'; sender: RunRecord; recipient: RunRecord }, root: RunRecord): string {
   const { sender, recipient } = pair;
   if (recipient.delegation?.role === 'worker' && (recipient.status === 'cancelled' || recipient.stopping || recipient.delegation.destroy)) {
     return 'Not delivered: this worker was stopped or is being destroyed. Spawn a new worker for further work.';
   }
-  if (pair.relationship === 'peer') return `Not delivered: task is ${recipient.stopping ? 'stopping' : recipient.status}. Only its human can continue it.`;
+  if (pair.relationship === 'peer') return `Not delivered: task is ${recipient.stopping ? 'stopping' : finishing(recipient) ? 'finishing' : recipient.status}. Only its human can continue it.`;
   return sender.id === root.id
     ? `Not delivered: worker is ${recipient.status}. To resume it with a new instruction, run worker send ${recipient.id} "<instruction>" --kind request --resume --id <new-message-UUID>; use a new message ID. Retrying this rejected ID will not deliver it.`
     : `Not delivered: parent is ${recipient.status}. A worker cannot resume its parent; the parent must be continued by its owner.`;

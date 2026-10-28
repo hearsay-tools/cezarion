@@ -121,6 +121,17 @@ describe('peer conversations', () => {
     await expect(f.service.send(f.caller, message(b.id, 'request', { resume: true }))).rejects.toMatchObject({ code: 'denied_scope' });
   });
 
+  it('R8 a peer whose Finish is pending is not delivered: the request is not accepted and nothing is queued', async () => {
+    const b = peer(RUN_STATUS.waiting);
+    // Finish committed its intent and has not settled yet (its diff inspection is still running).
+    f.store.commitDelegation([{ id: b.id, delegation: { role: 'root', permissions: [...permissions], receipts: [], finishRequestedAt: new Date().toISOString() } }]);
+    const sent = await f.service.send(f.caller, message(b.id));
+    expect(sent).toMatchObject({ delivery: 'not-delivered', message: { state: 'continuation-required', instruction: 'Not delivered: task is finishing. Only its human can continue it.' } });
+    expect(sent.message).not.toHaveProperty('deadline');
+    expect(f.store.getRun(b.id)?.agentInputs ?? []).toEqual([]);
+    expect((await f.service.conversation(f.caller, { recipientRunId: b.id })).outcomes).toEqual([]);
+  });
+
   it.each([['review', 'completed-without-reply'], ['done', 'completed-without-reply'], ['failed', 'failed'], ['cancelled', 'cancelled']] as const)(
     'R8 R17 an open request to a peer that settles at %s settles %s at once', async (status, outcome) => {
       const b = peer();

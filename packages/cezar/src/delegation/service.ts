@@ -1,6 +1,6 @@
 import { discoveredRunners, missingModelChoices, type HostDiscovery } from '../discovery/catalog.ts';
 import { assertConversationCapacity, assertFamilySender, byCreatedAtAndId, commitAccepted, familyPair, inboxEntryIn, isRootTask, notDeliveredInstruction,
-  orphanedPeerMessage, peerPair, takesPart, projectConversationEvents, reconcileConversationState, replyOutcomes, type InboxEntry } from './conversations.ts';
+  finishing, orphanedPeerMessage, peerPair, takesPart, projectConversationEvents, reconcileConversationState, replyOutcomes, type InboxEntry } from './conversations.ts';
 export { rootDelegation } from './conversations.ts';
 import { collectWorkerEvidence, revalidateRetainedWorkerResult, workerRevision } from './results.ts';
 import { join } from 'node:path';
@@ -386,7 +386,8 @@ export class DelegationService {
       if (request.kind === 'reply' && settled && original?.question) throw new DelegationPolicyError('incompatible_state', 'This question was already answered');
       const now = new Date().toISOString();
       const destroyed = recipient.delegation?.role === 'worker' && recipient.delegation.destroy?.phase === 'complete';
-      const resumable = !['queued', 'running', 'waiting'].includes(recipient.status) || !!recipient.stopping || (recipient.delegation?.role === 'worker' && !!recipient.delegation.destroy);
+      // A peer whose Finish is pending takes nothing more: Finish would settle it unread (spec § 5).
+      const resumable = !['queued', 'running', 'waiting'].includes(recipient.status) || !!recipient.stopping || (recipient.delegation?.role === 'worker' && !!recipient.delegation.destroy) || (peer && finishing(recipient));
       const resume = !!request.resume && resumable;
       // The extended bound belongs to a new continuation, not merely the flag.
       // Exact retries have already returned above, even if that continuation is now active.
