@@ -38,7 +38,7 @@ import {
   type TimerWaitEntry,
   type WorkerWaitEntry,
 } from './waits.ts';
-import { workerCompletionWaitSchema, workerInspectionSchema, workerWaitSchema } from './delegation.ts';
+import { peerWaitViewSchema, workerCompletionWaitSchema, workerInspectionSchema, workerWaitSchema } from './delegation.ts';
 import { makeRunRecord, RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from './test-factories.testkit.ts';
 import { toRunSummary } from './runs.ts';
 import { deriveAttention } from './attention.ts';
@@ -774,6 +774,22 @@ describe('peer waits', () => {
     expect(peerWaitEntrySchema.safeParse(peerBase({ result: { reason: 'outcome' } })).success).toBe(false);
   });
 
+  it('refuses a result that does not fit its reason, and a phase that does not fit its result', () => {
+    const resolved = (result: unknown) => peerBase({ phase: WAIT_PHASE.resolved, resolvedAt: '2026-10-19T10:05:00.000Z', result });
+    for (const result of [{ reason: 'message' }, { reason: 'message', peerRunId: P1 }, { reason: 'settled' }, { reason: 'timeout', peerRunId: P1 }, { reason: 'timeout', messageId: R1 }]) {
+      expect(peerWaitEntrySchema.safeParse(resolved(result)).success).toBe(false);
+    }
+    // Resolved and delivered carry their result; open has none; cancelled may keep one it had.
+    expect(peerWaitEntrySchema.safeParse(peerBase({ phase: WAIT_PHASE.resolved, resolvedAt: '2026-10-19T10:05:00.000Z' })).success).toBe(false);
+    expect(peerWaitEntrySchema.safeParse(peerBase({ result: { reason: 'timeout' } })).success).toBe(false);
+    expect(peerWaitEntrySchema.safeParse(peerBase({ phase: WAIT_PHASE.cancelled, cancelledAt: '2026-10-19T10:05:00.000Z' })).success).toBe(true);
+    const view = { id: WORKER_WAIT_ID, peerIds: [P1], deadline: '2026-10-19T10:10:00.000Z' };
+    expect(peerWaitViewSchema.safeParse({ ...view, phase: WAIT_PHASE.resolved }).success).toBe(false);
+    expect(peerWaitViewSchema.safeParse({ ...view, phase: WAIT_PHASE.open, result: { reason: 'timeout' } }).success).toBe(false);
+    expect(peerWaitViewSchema.safeParse({ ...view, phase: WAIT_PHASE.delivered, result: { reason: 'message', peerRunId: P1 } }).success).toBe(false);
+    expect(peerWaitViewSchema.safeParse({ ...view, phase: WAIT_PHASE.delivered, result: { reason: 'settled', peerRunId: P1 } }).success).toBe(true);
+  });
+
   it('reads as waiting on peers, counted once each, below workers and above a PR', () => {
     const peers = peerBase({ peerIds: [P1, P2] }) as never;
     const again = peerBase({ id: WAKE_INPUT, peerIds: [P2] }) as never;
@@ -809,7 +825,7 @@ describe('peer waits', () => {
 
   it('answers cez message wait --peer with its phase and result', () => {
     const entry = peerWaitEntrySchema.parse(peerBase({ phase: WAIT_PHASE.resolved, resolvedAt: '2026-10-19T10:05:00.000Z', result: { reason: 'message', peerRunId: P1, messageId: R1 } }));
-    expect(peerWaitView(entry)).toEqual({ id: WORKER_WAIT_ID, peerIds: [P1], deadline: '2026-10-19T10:10:00.000Z', phase: WAIT_PHASE.resolved, reason: 'message', peerRunId: P1, messageId: R1 });
+    expect(peerWaitView(entry)).toEqual({ id: WORKER_WAIT_ID, peerIds: [P1], deadline: '2026-10-19T10:10:00.000Z', phase: WAIT_PHASE.resolved, result: { reason: 'message', peerRunId: P1, messageId: R1 } });
   });
 
   it('lists an open peer wait with its deadline and answers its registration', () => {

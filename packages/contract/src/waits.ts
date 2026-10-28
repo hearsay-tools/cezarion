@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { askContextSchema, askRequestSchema } from './ask-schema.ts';
 import { ciPrIdentitySchema, ciPrUrlSchema, ciWaitErrorCodeSchema, ciWaitRequestSchema, ciWaitResultSchema, prWaitUntilSchema } from './ci-wait.ts';
-import { workerIdsSchema, workerOutcomeSchema, workerWaitModeSchema } from './delegation.ts';
+import { peerWaitResultSchema, refinePeerWaitResult, workerIdsSchema, workerOutcomeSchema, workerWaitModeSchema } from './delegation.ts';
 import type { DelegationState, PeerWaitView, RunDelegationSummary, WorkerCompletionWait, WorkerWait } from './delegation.ts';
 import { requestOutcomeSchema, type ConversationMessage } from './conversations.ts';
 import type { RunRecord } from './runs.ts';
@@ -191,17 +191,9 @@ export type WorkerWaitEntry = z.infer<typeof workerWaitEntrySchema>;
 export type DeadlinedWorkerWaitEntry = WorkerWaitEntry & { deadline: string };
 export const hasWorkerDeadline = (entry: WorkerWaitEntry): entry is DeadlinedWorkerWaitEntry => entry.deadline !== undefined;
 
-/**
- * Why a peer wait resolved (hearsay-tools/cezarion#1995): a message of any kind from a named peer
- * (`peerRunId`, `messageId`), a named peer that settled (`review`, `done`, `failed`, `cancelled`) or
- * was deleted (`peerRunId`), or the deadline.
- */
-export const peerWaitResultSchema = z.object({
-  reason: z.enum(['message', 'settled', 'timeout']),
-  peerRunId: z.uuid().optional(),
-  messageId: z.uuid().optional(),
-}).strict();
-export type PeerWaitResult = z.infer<typeof peerWaitResultSchema>;
+/** Why a peer wait resolved (hearsay-tools/cezarion#1995): `delegation.ts` defines the union, which
+ *  the CLI view shares. */
+export { peerWaitResultSchema, type PeerWaitResult } from './delegation.ts';
 
 /**
  * Named peer root tasks (hearsay-tools/cezarion#1995, spec `2026-10-27-task-communication-protocol`
@@ -215,12 +207,12 @@ export const peerWaitEntrySchema = z.object({
   timeoutSeconds: z.number().int().min(1).max(PEER_WAIT_MAX_SECONDS),
   peerIds: workerIdsSchema,
   result: peerWaitResultSchema.optional(),
-}).strict();
+}).strict().superRefine(refinePeerWaitResult);
 export type PeerWaitEntry = z.infer<typeof peerWaitEntrySchema>;
 
 /** A peer wait as `cez message wait --peer` and `cez message cancel-wait` answer it. */
 export function peerWaitView(entry: PeerWaitEntry): PeerWaitView {
-  return { id: entry.id, peerIds: entry.peerIds, deadline: entry.deadline, phase: entry.phase, ...entry.result };
+  return { id: entry.id, peerIds: entry.peerIds, deadline: entry.deadline, phase: entry.phase, ...(entry.result ? { result: entry.result } : {}) };
 }
 
 export const waitSchema = z.discriminatedUnion('kind', [prWaitEntrySchema, timerWaitEntrySchema, humanWaitEntrySchema, workerWaitEntrySchema, processWaitEntrySchema, peerWaitEntrySchema]);
