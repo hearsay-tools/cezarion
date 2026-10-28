@@ -224,6 +224,17 @@ describe('peer conversations', () => {
     await expect(f.service.conversation(f.caller, { recipientRunId: randomUUID() })).rejects.toMatchObject({ code: 'denied_scope' });
   });
 
+  it('R15 a requester resting at review, out of memory, settles its request deleted when the peer is deleted, with no read', async () => {
+    const b = peer();
+    const open = await f.service.send(f.caller, message(b.id));
+    f.store.updateRun(f.parent.id, { status: RUN_STATUS.review });
+    // The requester has left the live set the run manager's global pass reads.
+    vi.spyOn(f.store, 'listRuns').mockReturnValue([]);
+    expect(f.store.deleteRun(b.id)).toBe(true);
+    expect(ledger(f.parent.id)?.outcomes).toEqual([expect.objectContaining({ requestId: open.message.id, status: 'deleted' })]);
+    expect(projections(f.parent.id)).toContain(`request-outcome:${open.message.id}`);
+  });
+
   it('R15 a sender deleted before the first inbox reserve, or between reserve and acknowledge, leaves the recipient\'s batch whole', async () => {
     const b = peer(); const c = peer();
     const fromB = await f.service.send(b.caller, message(f.parent.id, 'progress', { text: 'from B' }));

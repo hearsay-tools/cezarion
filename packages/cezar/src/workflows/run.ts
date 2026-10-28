@@ -120,7 +120,7 @@ import { enqueueAgentInput, agentInputBatch, hasLiveInboxClaim } from '../delega
 import { parseDelegationEffort } from '../delegation/effort.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { reconcileWorkerEntry } from '../delegation/wait.ts';
-import { commitNewMessage, reconcileConversationState, projectConversationEvents } from '../delegation/conversations.ts';
+import { commitNewMessage, reconcileConversationState, projectConversationEvents, rootsAwaitingPeer } from '../delegation/conversations.ts';
 import { parentReadiness } from '../delegation/readiness.ts';
 import { answersQuestion, openQuestions, questionMessage } from '../delegation/questions.ts';
 import { workerQuestionFallback } from './question-routing.ts';
@@ -2927,10 +2927,10 @@ export class RunManager {
   /** A deleted run's row is gone with its waits; only what they armed in memory is left. */
   private readonly onRunDeleted = (runId: string): void => {
     this.disarmRunWaits(runId);
-    // A peer's open requests to the deleted run settle `deleted` (spec 2026-10-27 § 5): the live
-    // families' ledgers are reconciled, as a settled run's are.
+    // A peer's open requests to the deleted run settle `deleted` (spec 2026-10-27 § 5): each ledger
+    // that holds one is reconciled, live or settled.
     if (this.disposed || process.env.CEZ_DELEGATION !== '1') return;
-    try { this.reconcileWorkerWaits(); } catch { /* the next reconcile settles them */ }
+    try { for (const id of rootsAwaitingPeer(this.store, runId)) this.reconcileWorkerWaits(id); } catch { /* the next reconcile settles them */ }
   };
 
   /** Snapshot of the actual active session, never guessed from partial run settings. */

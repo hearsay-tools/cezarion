@@ -211,3 +211,14 @@ export function takesPart(self: RunRecord, other: RunRecord | undefined, otherId
   return ledger(self).some(between) || ledger(other).some(between) ||
     !!self.agentInputs?.some(input => input.conversation?.relationship === 'peer' && input.conversation.senderRunId === otherId);
 }
+
+/** Every conversation root, live or settled, with an open peer request to `runId`: the peer's
+ *  deletion settles each `deleted` (spec § 5). Roots another process owns are its own to settle. */
+export function rootsAwaitingPeer(store: Pick<RunStore, 'listConversationRootIds' | 'getRun' | 'writeRefusal'>, runId: string): string[] {
+  return store.listConversationRootIds().filter(id => {
+    const root = store.writeRefusal(id) ? undefined : store.getRun(id);
+    const state = root?.delegation?.role === 'root' ? root.delegation.conversation : undefined;
+    return !!state?.messages.some(message => message.relationship === 'peer' && message.kind === 'request' && message.state === 'accepted' &&
+      message.recipientRunId === runId && !state.outcomes.some(outcome => outcome.requestId === message.id));
+  });
+}
