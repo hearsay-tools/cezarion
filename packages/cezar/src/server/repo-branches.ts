@@ -714,22 +714,16 @@ export interface DeleteBranchesResult {
 
 const DROPPED_CAP = 100;
 
-/**
- * Delete from fresh classification under mutation and cleanup claims. Verify base and tip
- * atomically; recheck checkout/receipt protection. Retention refs must be outside this request.
- * Unlanded work requires a single exact-name confirmation. Never throw.
- */
-export async function deleteBranches(
-  input: ClassifyInput,
-  requested: string[],
-  confirm?: string,
-): Promise<DeleteBranchesResult> {
-  const names = [...new Set(requested)];
-  const { payload, tips, baseSha, baseFullRef } = await classifyBranches(input, { diffStats: false });
+type DeleteCandidate = { name: string; tip: string; drops: boolean; keptElsewhere?: true };
+
+function deletionVerdicts(
+  names: string[], payload: Awaited<ReturnType<typeof classifyBranches>>['payload'],
+  tips: Awaited<ReturnType<typeof classifyBranches>>['tips'], confirm?: string,
+): { candidates: DeleteCandidate[]; refused: DeleteBranchesResult['refused'] } {
   const byName = new Map(payload.branches.map((b) => [b.name, b]));
   const alone = names.length === 1;
   const refused: DeleteBranchesResult['refused'] = [];
-  const candidates: Array<{ name: string; tip: string; drops: boolean; keptElsewhere?: true }> = [];
+  const candidates: DeleteCandidate[] = [];
   for (const name of names) {
     const entry = byName.get(name);
     const tip = tips.get(name);
@@ -759,8 +753,12 @@ export async function deleteBranches(
         break;
     }
   }
-  const deleted: string[] = [];
-  let dropped: DeleteBranchesResult['dropped'];
+  return { candidates, refused };
+}
+
+function claimDeletionRuns(
+  input: ClassifyInput, candidates: DeleteCandidate[], refused: DeleteBranchesResult['refused'],
+): Array<() => void> {
   // Claimed before the lock and held through the ref transaction, so no Continue is admitted
   // between the verdict and the delete.
   const releases: Array<() => void> = [];
@@ -775,6 +773,25 @@ export async function deleteBranches(
     candidates.splice(candidates.indexOf(candidate), 1);
     refused.push({ name: candidate.name, reason: 'its task is running or being continued — try again once it settles' });
   }
+  return releases;
+}
+
+/**
+ * Delete from fresh classification under mutation and cleanup claims. Verify base and tip
+ * atomically; recheck checkout/receipt protection. Retention refs must be outside this request.
+ * Unlanded work requires a single exact-name confirmation. Never throw.
+ */
+export async function deleteBranches(
+  input: ClassifyInput,
+  requested: string[],
+  confirm?: string,
+): Promise<DeleteBranchesResult> {
+  const names = [...new Set(requested)];
+  const { payload, tips, baseSha, baseFullRef } = await classifyBranches(input, { diffStats: false });
+  const { candidates, refused } = deletionVerdicts(names, payload, tips, confirm);
+  const deleted: string[] = [];
+  let dropped: DeleteBranchesResult['dropped'];
+  const releases = claimDeletionRuns(input, candidates, refused);
   if (candidates.length > 0) {
     try {
       await withWorktreeMutation(input.root, async (lockedGit) => {
