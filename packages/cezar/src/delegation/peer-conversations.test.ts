@@ -235,6 +235,23 @@ describe('peer conversations', () => {
     expect(projections(f.parent.id)).toContain(`request-outcome:${open.message.id}`);
   });
 
+  it('R15 a deletion reads only the ledgers that name the deleted peer', async () => {
+    const b = peer(); const c = peer(); const d = peer();
+    const open = await f.service.send(f.caller, message(b.id));
+    // C's and D's ledgers hold conversations that never name B. C has left memory; D is held.
+    await f.service.send(c.caller, message(d.id, 'progress'));
+    await f.service.send(d.caller, message(c.id, 'progress'));
+    f.store.updateRun(c.id, { status: RUN_STATUS.done });
+    f.store.flush();
+    expect(f.store.heldIds()).not.toContain(c.id);
+    expect(f.store.listConversationRootIds(b.id)).toEqual([f.parent.id]);
+    const read = vi.spyOn(f.store, 'getRun');
+    expect(f.store.deleteRun(b.id)).toBe(true);
+    expect(read.mock.calls.map(([id]) => id)).not.toContain(c.id);
+    expect(ledger(f.parent.id)?.outcomes).toEqual([expect.objectContaining({ requestId: open.message.id, status: 'deleted' })]);
+    expect(f.store.listConversationRootIds()).toEqual(expect.arrayContaining([f.parent.id, c.id, d.id]));
+  });
+
   it('R15 a sender deleted before the first inbox reserve, or between reserve and acknowledge, leaves the recipient\'s batch whole', async () => {
     const b = peer(); const c = peer();
     const fromB = await f.service.send(b.caller, message(f.parent.id, 'progress', { text: 'from B' }));

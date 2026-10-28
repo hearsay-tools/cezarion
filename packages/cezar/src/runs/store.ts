@@ -2192,15 +2192,15 @@ export class RunStore extends EventEmitter {
     return found;
   }
 
-  /** The id of every root whose delegation carries a conversation, held or stored: recovery's
-   *  full reconcile pass (#661). The stored summary names the role, so only roots' records are
-   *  read, in SQLite. */
-  listConversationRootIds(): string[] {
-    const where = "json_extract(summary, '$.delegation.role') = 'root' AND json_extract(data, '$.delegation.conversation') IS NOT NULL";
-    const ids = new Set((this.db?.listKeysWhere(where) ?? []).map((key) => key.id));
+  /** The id of every root whose delegation carries a conversation, held or stored: recovery's full
+   *  reconcile pass (#661). Only roots' records are read, in SQLite. `naming` keeps the ledgers whose
+   *  messages name that run id, filtered there too, so a deleted peer decodes no other root. */
+  listConversationRootIds(naming?: string): string[] {
+    const where = `json_extract(summary, '$.delegation.role') = 'root' AND json_extract(data, '$.delegation.conversation') IS NOT NULL${naming ? " AND instr(json_extract(data, '$.delegation.conversation.messages'), ?) > 0" : ''}`;
+    const ids = new Set((this.db?.listKeysWhere(where, naming ? [naming] : []) ?? []).map((key) => key.id));
     for (const id of this.deleted) ids.delete(id);
     for (const [id, run] of this.held) {
-      if (run.delegation?.role === 'root' && run.delegation.conversation) ids.add(id);
+      if (run.delegation?.role === 'root' && run.delegation.conversation && (!naming || run.delegation.conversation.messages.some(message => [message.senderRunId, message.recipientRunId].includes(naming)))) ids.add(id);
       else ids.delete(id);
     }
     return [...ids];
