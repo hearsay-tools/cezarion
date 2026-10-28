@@ -5512,7 +5512,6 @@ export class RunManager {
   private async settleRequestedRootFinish(runId: string): Promise<void> {
     try {
       const status = this.store.getRun(runId)?.status;
-      if (status === 'failed') { this.store.updateRun(runId, settledRootFinishPatch(this.store, runId)); return; }
       if (status === 'review') { this.finish(runId); return; }
       if (status === 'running') this.move(runId, 'park');
       this.reconcileWorkerWaits(runId);
@@ -5629,6 +5628,7 @@ export class RunManager {
       this.reconcileConversations(family);
       for (const parent of family) {
         if (!parent.delegation || parent.delegation.role === 'invalid' || this.historyDeletionPending(parent.id)) continue;
+        if (parent.status === 'failed' && parent.delegation.role === 'root' && parent.delegation.finishRequestedAt) this.store.updateRun(parent.id, settledRootFinishPatch(this.store, parent.id));
         if (parent.status === 'cancelled' && parent.delegation.role === 'root' && parent.delegation.finishRequestedAt) {
           transitionVia('cancel', () => this.store.getRun(parent.id), () => this.store.commitRootFinishCancellation(parent.id));
         }
