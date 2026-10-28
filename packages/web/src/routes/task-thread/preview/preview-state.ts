@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react'
 
 import type { ApiRun, PreviewServer } from '@open-mercato/cezar-api-client'
 import type { StatusDotTone } from '@/components/status-dot'
@@ -177,6 +177,8 @@ export function usePreviewPaneState(scope?: string): PreviewPaneState {
   const [request, setRequest] = useState<PreviewOpenRequest | undefined>(initial.request)
   const [percent, setPercentState] = useState(initial.percent)
   const [current, setCurrent] = useState(scope)
+  const openRef = useRef(open)
+  openRef.current = open
   if (current !== scope) {
     const next = restore(scope)
     setCurrent(scope)
@@ -197,10 +199,19 @@ export function usePreviewPaneState(scope?: string): PreviewPaneState {
     (next: PreviewOpenRequest) => {
       setRequest({ ...next })
       const shown: PreviewTarget | undefined = next.port !== undefined ? { port: next.port } : next.agent ? { agent: true } : undefined
-      if (shown) setTargetState(shown)
       setSession(false)
       setOpen(true)
-      save(shown ? { open: true, target: shown } : { open: true })
+      if (shown) {
+        setTargetState(shown)
+        save({ open: true, target: shown })
+      } else if (!openRef.current) {
+        // A closed pane opens on its chooser: the target saved before the close no longer holds.
+        setTargetState(undefined)
+        save({ open: true, target: undefined })
+      } else {
+        // Already open, the pane keeps what it shows, and so does the saved state.
+        save({ open: true })
+      }
     },
     [save],
   )

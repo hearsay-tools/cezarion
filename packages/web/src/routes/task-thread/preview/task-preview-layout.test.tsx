@@ -9,6 +9,7 @@ const state = vi.hoisted(() => ({
   agentReads: [] as Array<string | undefined>,
   runs: {} as Record<string, Record<string, unknown>>,
   requests: [] as unknown[],
+  paneMounts: [] as string[],
 }))
 
 vi.mock('@/api/queries', () => ({
@@ -25,8 +26,9 @@ vi.mock('./use-agent-page-live', () => ({
 }))
 
 vi.mock('./preview-pane', () => ({
-  PreviewPane: ({ onClose, onTarget, request }: { onClose: () => void; onTarget?: (target: unknown) => void; request?: unknown }) => {
+  PreviewPane: ({ run, onClose, onTarget, request }: { run: { id: string }; onClose: () => void; onTarget?: (target: unknown) => void; request?: unknown }) => {
     state.requests.push(request)
+    useEffect(() => void state.paneMounts.push(run.id), [])
     return (
       <>
         <button type="button" onClick={onClose}>pane</button>
@@ -94,6 +96,7 @@ describe('TaskPreviewLayout', () => {
     state.agentLive = false
     state.agentReads = []
     state.requests = []
+    state.paneMounts = []
     mounts.mockClear()
   })
 
@@ -190,6 +193,39 @@ describe('TaskPreviewLayout', () => {
       renderAt('/tasks/r1')
       await screen.findByRole('button', { name: 'pane' })
       expect(state.requests.at(-1)).toEqual({ url: 'http://localhost:3000/docs', restored: true })
+    })
+
+    it('reopened on the chooser after a close, a reload comes back to the chooser, not the old server', async () => {
+      rememberPreview('r1', { open: false, target: { port: 5173 } }, 1)
+      const first = renderAt('/tasks/r1')
+      fireEvent.click(screen.getByRole('button', { name: 'toggle' }))
+      await screen.findByRole('button', { name: 'pane' })
+      first.unmount()
+      state.requests = []
+      renderAt('/tasks/r1')
+      await screen.findByRole('button', { name: 'pane' })
+      expect(state.requests.at(-1)).toEqual({ restored: true })
+    })
+
+    it('asked for the chooser while it shows a server, it keeps that server saved', async () => {
+      renderAt('/tasks/r1')
+      fireEvent.click(screen.getByRole('button', { name: 'open 5173' }))
+      await screen.findByRole('button', { name: 'pane' })
+      fireEvent.click(screen.getByRole('button', { name: 'toggle' }))
+      expect(readPreviewMemory('r1')).toEqual({ open: true, target: { port: 5173 } })
+    })
+
+    it("moving between two tasks with open panes gives the second its own pane, never the first one's target", async () => {
+      state.runs.r2 = { id: 'r2', worktreePath: '/w', previewServers: [server] }
+      rememberPreview('r2', { open: true }, 1)
+      renderAt('/tasks/r1')
+      fireEvent.click(screen.getByRole('button', { name: 'open 5173' }))
+      await screen.findByRole('button', { name: 'pane' })
+      fireEvent.click(screen.getByRole('button', { name: 'other task' }))
+      await screen.findByRole('button', { name: 'pane' })
+      expect(state.paneMounts).toEqual(['r1', 'r2'])
+      expect(state.requests.at(-1)).toEqual({ restored: true })
+      expect(readPreviewMemory('r2')).toEqual({ open: true })
     })
 
     it('stays closed after a reload when the owner closed it', async () => {
