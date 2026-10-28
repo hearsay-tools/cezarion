@@ -1445,7 +1445,7 @@ itself remains selectable.
 
 Run data (`runs.db` and its `-wal`/`-shm` files, the `runs.json.pre-sqlite*.bak`
 backups, NDJSON event logs, worktrees, `todos.json`) is git-ignored
-automatically; your workflows and skills stay committable.
+automatically; your workflows and skills stay committable. See [run history recovery](https://github.com/hearsay-tools/cezarion/blob/main/docs/run-history-recovery.md) for backup and repair steps.
 
 Settings that belong to *you* rather than to a repo — the parallel cap
 (`maxParallel`, default **2**), the per-task memory ceiling and the checkout

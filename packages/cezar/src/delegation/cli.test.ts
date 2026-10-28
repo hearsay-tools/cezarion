@@ -438,7 +438,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
       expect(spawnUsage.optional.indexOf('--runner')).toBe(spawnUsage.optional.indexOf('--backend') - 1);
     });
     // Guard: passes with or without #632. The flag says runner; the persisted output field keeps
-    // its historical name `backend` (BACKWARD_COMPATIBILITY.md §1).
+    // its historical name `backend` (BACKWARD_COMPATIBILITY.md).
     // The fixture binds a claude account only; another runner would need that runner's host login.
     it('keeps the backend field in inspect and collect output', async () => {
       const code = await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--backend', 'claude', 'work'], env);
