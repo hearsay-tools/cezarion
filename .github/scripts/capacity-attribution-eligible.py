@@ -20,6 +20,9 @@ def terminal_traceback(lines):
         text = [line.decode('utf-8') for line in lines]
     except UnicodeDecodeError:
         return False
+    if any('capacityOutput' in line or 'capacity result:' in line or
+           re.match(r'^\s*(?:[\[{"\-0-9]|true\b|false\b|null\b)', line) for line in text):
+        return False
     frames = [FRAME.fullmatch(text[i]) for i in (1, 3, 5)]
     if any(frame is None for frame in frames):
         return False
