@@ -129,6 +129,23 @@ describe('buildClaudeArgs governed native messaging', () => {
     });
   });
 
+  // hearsay-tools/cezarion#1994: other Claude sessions must not inject untracked text into a
+  // task, at shipped defaults and under D1 alike. Outbound SendMessage stays at defaults
+  // because it also follows up the session's own subagents.
+  describe.each([false, true])('restrictNativeDelegation=%s', restrictNativeDelegation => {
+    it.each(TOOL_GRANT_CASES)('refuses inbound cross-session messages for $id', entry => {
+      const args = buildClaudeArgs({ ...spec, toolGrant: entry.grant('claude'), restrictNativeDelegation }, {});
+      const index = args.indexOf('--settings');
+      expect(index).toBeGreaterThanOrEqual(0);
+      expect(JSON.parse(args[index + 1]!)).toEqual({ crossSessionInbound: 'refuse' });
+      expect(args.filter(arg => arg === '--settings')).toHaveLength(1);
+    });
+  });
+
+  it('keeps outbound SendMessage and ListAgents available at shipped defaults', () => {
+    expect(buildClaudeArgs({ ...spec, toolGrant: UNSET_TOOL_GRANT }, {})).not.toContain('--disallowedTools');
+  });
+
   it('keeps the native messaging deny when an explicit grant names both tools', () => {
     const args = buildClaudeArgs({ ...spec, restrictNativeDelegation: true,
       toolGrant: { kind: 'explicit', tools: ['Read', 'SendMessage', 'ListAgents'] },

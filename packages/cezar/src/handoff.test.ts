@@ -305,6 +305,18 @@ describe('handoffInstructions', () => {
     expect(text).not.toContain('CEZ_TODOS_FILE');
   });
 
+  // hearsay-tools/cezarion#1994: at shipped defaults, native cross-session tools stay callable
+  // on some runners, so every session learns that tasks talk only through `cez message`.
+  it.each([true, false])('steers agents off native cross-session messaging (tools=%s)', tools => {
+    const text = handoffInstructions({ tools });
+    expect(text).toContain('## Messaging other tasks');
+    expect(text).toContain('Cezar tasks talk to each other only through `cez message`, which needs `CEZ_DELEGATION=1`.');
+    expect(text).toContain("Never use your runner's native cross-session tools to reach another task or agent session, for example Claude's SendMessage or ListAgents for other sessions.");
+    expect(text).toContain('Without `CEZ_DELEGATION=1` no agent channel to another task exists: tell the user instead.');
+    expect(text).toContain('`cez task send` is human input and refuses to run inside a task.');
+    expect(text).toContain('Native subagents inside your own session are not tasks.');
+  });
+
   it('the marker variant is unchanged', () => {
     expect(handoffInstructions({ tools: false })).toBe(HANDOFF_ONLY_INSTRUCTIONS);
   });

@@ -647,6 +647,24 @@ rule" and "Phase 2b decisions".
   question still open on a finished run, as before this change. Stop appends nothing and keeps
   the question.
 
+## Native cross-session messaging at shipped defaults (hearsay-tools/cezarion#1994) — deliberate, 2026-10-27
+
+Spec `.ai/specs/2026-10-27-task-communication-protocol.md` § 11. Cezar tasks talk through
+`cez message`; runner-native cross-session messages are untracked.
+
+- **Changed default (Claude only).** Every Claude launch, with or without `CEZ_DELEGATION=1`,
+  passes `--settings {"crossSessionInbound":"refuse"}`. The user's other Claude sessions can no
+  longer send `SendMessage` text into a cezar task. That path was never a cezar surface: the text
+  bypassed the cockpit, the ledger and human-question handling. Human input still reaches a task
+  through the cockpit and `cez task send`.
+- **Unchanged.** Outbound `SendMessage` and `ListAgents` stay callable at shipped defaults; D1
+  still denies them. No runner's MCP servers, plugins or tool grants change. The other runners
+  send no new flag (AGENT_PROTOCOL.md, D3).
+- **Additive.** Every session's instructions gain a "Messaging other tasks" section. It is prose,
+  not a marker, and an older cezar never parses it.
+- **No compatibility window.** The setting is per launch and writes no file. Reverting the flag
+  restores the old behavior on the next launch; no state migrates.
+
 ## When in doubt
 
 If a change might break any surface above, say so in the PR description, label the PR `risk-high`, and route it through the review + QA gates in `SDLC.md`. A silent break found in review is a blocker per `CODE_REVIEW.md`.
