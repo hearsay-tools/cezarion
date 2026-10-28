@@ -120,7 +120,7 @@ import { enqueueAgentInput, agentInputBatch, hasLiveInboxClaim } from '../delega
 import { parseDelegationEffort } from '../delegation/effort.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { reconcileWorkerEntry } from '../delegation/wait.ts';
-import { commitNewMessage, reconcileConversationState, projectConversationEvents, rootsAwaitingPeer } from '../delegation/conversations.ts';
+import { commitNewMessage, reconcileConversationState, projectConversationEvents, rootsAwaitingPeer, settledRunFamilies } from '../delegation/conversations.ts';
 import { parentReadiness } from '../delegation/readiness.ts';
 import { answersQuestion, questionMessage, reservedReplies } from '../delegation/questions.ts';
 import { workerQuestionFallback } from './question-routing.ts';
@@ -1330,7 +1330,7 @@ export class RunManager {
     // A destroy retry changes nothing the family reconcile reads (#880).
     if (source === 'delegation-destroy-progress') return;
     if (run.delegation && run.delegation.role !== 'invalid' && !['queued', 'running', 'waiting'].includes(run.status)) {
-      for (const id of run.delegation.role === 'root' ? [run.id, ...rootsAwaitingPeer(this.store, run.id)] : [run.delegation.parentRunId]) this.reconcileWorkerWaits(id);
+      for (const id of settledRunFamilies(this.store, run)) this.reconcileWorkerWaits(id);
     }
   };
   private readonly pendingJobs = new Map<string, { workflow: WorkflowDef; input: StartRunInput; startAt?: number | undefined }>();
@@ -3990,8 +3990,8 @@ export class RunManager {
     // the live set with it, so it is reconciled by name first.
     const settled = this.store.getRun(runId);
     if (settled?.delegation) {
-      const familyRoot = settled.delegation.role === 'root' ? settled.id : settled.delegation.role === 'worker' ? settled.delegation.parentRunId : undefined;
-      for (const id of familyRoot === undefined ? [] : [familyRoot, ...(familyRoot === settled.id ? rootsAwaitingPeer(this.store, settled.id) : [])]) this.reconcileWorkerWaits(id);
+      for (const id of settledRunFamilies(this.store, settled)) this.reconcileWorkerWaits(id);
+      // Then every other family still in memory (#779).
       this.reconcileWorkerWaits();
     }
     this.releaseSlot();

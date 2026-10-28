@@ -228,3 +228,10 @@ export function rootsAwaitingPeer(store: Pick<RunStore, 'listConversationRootIds
       message.recipientRunId === runId && !state.outcomes.some(outcome => outcome.requestId === message.id));
   });
 }
+
+/** The families a settled run's reconcile covers: a worker's parent, or a root's own family and
+ *  every root that awaits it as a peer (`rootsAwaitingPeer`). */
+export function settledRunFamilies(store: Pick<RunStore, 'listConversationRootIds' | 'getRun' | 'writeRefusal'>, run: RunRecord): string[] {
+  if (run.delegation?.role === 'worker') return [run.delegation.parentRunId];
+  return run.delegation?.role === 'root' ? [run.id, ...rootsAwaitingPeer(store, run.id)] : [];
+}
