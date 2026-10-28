@@ -85,3 +85,9 @@ export function settledRootFinishPatch(store: RunStore, runId: string): Partial<
   return { delegation };
 }
 
+/** Recovery of a failed Finish keeps the error and releases its stale continuation gate. */
+export function repairFailedRootFinish(store: RunStore, run: RunRecord): void {
+  if (run.status !== 'failed') return;
+  const patch = settledRootFinishPatch(store, run.id);
+  if (patch.delegation) store.updateRun(run.id, patch);
+}

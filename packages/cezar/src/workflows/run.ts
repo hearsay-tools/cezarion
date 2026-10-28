@@ -1,4 +1,4 @@
-import { openCompletionRequests, recordRequestRefusal, rootCompletionRefusal, sentRequestInstructions, settledRootFinishPatch, type CompletionRefusal } from './completion-policy.ts';
+import { openCompletionRequests, recordRequestRefusal, repairFailedRootFinish, rootCompletionRefusal, sentRequestInstructions, settledRootFinishPatch, type CompletionRefusal } from './completion-policy.ts';
 import * as continuation from './continuation-admission.ts';
 import type { ContinueRunOptions } from './continuation-admission.ts';
 import { defined } from '../core/defined.ts';
@@ -5628,7 +5628,7 @@ export class RunManager {
       this.reconcileConversations(family);
       for (const parent of family) {
         if (!parent.delegation || parent.delegation.role === 'invalid' || this.historyDeletionPending(parent.id)) continue;
-        if (parent.status === 'failed' && parent.delegation.role === 'root' && parent.delegation.finishRequestedAt) this.store.updateRun(parent.id, settledRootFinishPatch(this.store, parent.id));
+        repairFailedRootFinish(this.store, parent);
         if (parent.status === 'cancelled' && parent.delegation.role === 'root' && parent.delegation.finishRequestedAt) {
           transitionVia('cancel', () => this.store.getRun(parent.id), () => this.store.commitRootFinishCancellation(parent.id));
         }
