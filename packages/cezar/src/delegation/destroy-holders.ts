@@ -208,6 +208,10 @@ function findDarwinHolders(roots: readonly string[], pid?: number): number[] {
   return [...holders];
 }
 
+function nextSignal(previous: { token: string; at: number } | undefined, token: string): 'SIGTERM' | 'SIGKILL' | undefined {
+  return previous?.token === token && Date.now() - previous.at >= 500 ? 'SIGKILL' : previous?.token === token ? undefined : 'SIGTERM';
+}
+
 async function signalHolder(pid: number, initialToken: string, roots: readonly string[], sent: Map<number, { token: string; at: number }>,
   assertCurrent: () => void | Promise<void>, aliases?: AliasContext): Promise<void> {
   await assertCurrent();
@@ -221,7 +225,7 @@ async function signalHolder(pid: number, initialToken: string, roots: readonly s
     throw new Error(`Cannot verify destroy holder ${pid}`);
   }
   const previous = sent.get(pid);
-  const signal = previous?.token === token && Date.now() - previous.at >= 500 ? 'SIGKILL' : previous?.token === token ? undefined : 'SIGTERM';
+  const signal = nextSignal(previous, token);
   if (!signal || processStartToken(pid) !== token) return;
   if (aliases) await assertCurrent();
   const held = checkedSignalEvidence(pid, token, roots, aliases);
