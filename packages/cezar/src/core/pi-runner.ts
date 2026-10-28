@@ -2,8 +2,17 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEffort } from '@open-mercato/cezar-contract/effort';
-import { isRecord, piMessageText, number, piRpcError as rpcError, string, toPiPrompt, truncate, waitForExit } from './pi-rpc-wire.ts';
-import { armEndWatchdog, emitPiToolResult, type PiEndWatchdog, PiRpcInput, PiTextBlocks, recordPiToolCall } from './pi-rpc-turn.ts';
+import { isRecord, number, piRpcError as rpcError, string, toPiPrompt, truncate, waitForExit } from './pi-rpc-wire.ts';
+import {
+  adoptRpcSessionId,
+  armEndWatchdog,
+  dispatchPiTurnMessage,
+  type PiEndWatchdog,
+  PiRpcInput,
+  PiTextBlocks,
+  type PiTurnMessages,
+  settlePiFamilyExit,
+} from './pi-rpc-turn.ts';
 import { summarizeRunnerStderr } from './runner-stderr.ts';
 import type {
   AgentEvent,
@@ -18,7 +27,7 @@ import type {
   SessionOptions,
   ToolGrant,
 } from './agent-runner.js';
-import { isSignalTerminationExit, unknownToolGrant } from './agent-runner.js';
+import { unknownToolGrant } from './agent-runner.js';
 import { signalSession, spawnSessionLeader, waitForEofExit } from './session-process.js';
 import { buildChildEnv } from './agent-env.js';
 import { cezarToolNames } from '../ci-wait/tools.js';
@@ -120,12 +129,6 @@ export class PiRunner implements AgentRunner {
     const toolCalls: AgentToolCallRecord[] = [];
     let sessionId = spec.sessionId;
     let tokensUsed = 0;
-    let latchedProviderError: string | undefined;
-    const emitLatchedProviderError = (): void => {
-      if (!latchedProviderError) return;
-      onEvent?.({ type: 'error', message: latchedProviderError });
-      latchedProviderError = undefined;
-    };
     let inputError: Error | undefined;
     let spawnError: Error | null = null;
     const stderr: string[] = [];
@@ -174,7 +177,6 @@ export class PiRunner implements AgentRunner {
       humanAcksPending: () => humanPromptAcks > 0,
       end: () => end(),
       flushText,
-      emitLatchedProviderError,
     });
     // Each human prompt stays held from its write until a normalized turn has it, because an
     // ack is not a turn boundary (hearsay-tools/cezarion#1112). Exits: its user message_start
@@ -304,6 +306,32 @@ export class PiRunner implements AgentRunner {
       }
     };
 
+    const countUsage = (message: Record<string, unknown>): void => {
+      const usage = usageValues(message.usage);
+      if (usage) {
+        tokensUsed += usage.weighted;
+        onEvent?.({ type: 'token-usage', tokensUsed });
+        if (usage.cost !== undefined) onEvent?.({ type: 'cost', usd: usage.cost });
+      }
+    };
+    // A user message pi read with no normalized turn open (a late steer's own run): the run is
+    // not reported yet, so the prompt stays held until that turn.started.
+    const settleHumanPromptRead = (text: string): void => {
+      const human = humanHeld.findIndex(entry => entry.text === text);
+      if (human >= 0 && piUi.turnId) humanHeld.splice(human, 1);
+      else if (human >= 0) humanHeld[human]!.acked = true;
+    };
+    const turnMessages: PiTurnMessages = {
+      input: rpcInput,
+      textBlocks,
+      toolCalls,
+      onEvent,
+      flushText,
+      assistantMessageEnded: countUsage,
+      providerErrorMessage: piProviderErrorMessage,
+      humanPromptRead: settleHumanPromptRead,
+    };
+
     const result = (async (): Promise<AgentRunResult> => {
       try {
         for await (const line of readNdjson(child.stdout)) {
@@ -341,11 +369,7 @@ export class PiRunner implements AgentRunner {
           if (!isRecord(value)) continue;
 
           if (value.type === 'response' && value.command === 'get_state' && value.success === true && isRecord(value.data)) {
-            const discovered = string(value.data.sessionId);
-            if (discovered && discovered !== sessionId) {
-              sessionId = discovered;
-              onEvent?.({ type: 'session', sessionId: discovered });
-            }
+            adoptRpcSessionId(value.data, sessionId, (id) => { sessionId = id; }, onEvent);
           } else if (value.type === 'response' && value.command === 'set_steering_mode') {
             if (value.success !== true) {
               onEvent?.({ type: 'note', message: `pi: set_steering_mode failed: ${rpcError(value)}` });
@@ -371,45 +395,12 @@ export class PiRunner implements AgentRunner {
             rpcInput.readyAfterAck();
           } else if (value.type === 'response' && value.success === false) {
             onEvent?.({ type: 'error', message: rpcError(value) });
-          } else if (value.type === 'message_update' && isRecord(value.assistantMessageEvent)) {
-            textBlocks.update(value.assistantMessageEvent);
-          } else if (value.type === 'message_end' && isRecord(value.message) && value.message.role === 'assistant') {
-            flushText();
-            const usage = usageValues(value.message.usage);
-            if (usage) {
-              tokensUsed += usage.weighted;
-              onEvent?.({ type: 'token-usage', tokensUsed });
-              if (usage.cost !== undefined) onEvent?.({ type: 'cost', usd: usage.cost });
-            }
-            if (string(value.message.stopReason) === 'error') {
-              rpcInput.failTurn();
-              latchedProviderError = piProviderErrorMessage(value.message);
-            } else {
-              latchedProviderError = undefined;
-            }
-          } else if (value.type === 'agent_start') {
-            rpcInput.startTurn();
-          } else if (value.type === 'message_start' && isRecord(value.message) && value.message.role === 'user') {
-            // The model received this prompt now (#505).
-            const text = piMessageText(value.message);
-            const ids = rpcInput.submissions.consumeOldestByText(text);
-            if (ids.length) opts.onAgentInputConsumed?.(ids);
-            else {
-              // Read with no normalized turn open (a late steer's own run): the run is not
-              // reported yet, so it stays held until that turn.started.
-              const human = humanHeld.findIndex(entry => entry.text === text);
-              if (human >= 0 && piUi.turnId) humanHeld.splice(human, 1);
-              else if (human >= 0) humanHeld[human]!.acked = true;
-            }
-          } else if (value.type === 'tool_execution_start') {
-            flushText();
-            recordPiToolCall(value, toolCalls, onEvent);
-          } else if (value.type === 'tool_execution_end') {
-            emitPiToolResult(value, onEvent);
           } else if (value.type === 'agent_settled') {
             rpcInput.settleTurn();
           } else if (value.type === 'extension_error') {
             onEvent?.({ type: 'note', message: string(value.error) ?? 'pi extension error' });
+          } else {
+            dispatchPiTurnMessage(value, turnMessages);
           }
         }
       } catch (error) {
@@ -434,42 +425,30 @@ export class PiRunner implements AgentRunner {
       await cleanupAfterEof();
 
       flushText();
-      emitLatchedProviderError();
+      rpcInput.emitLatchedProviderError();
       emitLatchedUiProviderError();
       const exitCode = await waitForExit(child);
       killWatchdog?.clear();
       if (interruptKillTimer) clearTimeout(interruptKillTimer);
       if (spawnError) throw spawnError;
       if (inputError) throw inputError;
-      if (timedOut) {
-        const message = `pi CLI timed out after ${Math.round((limitMs / 60_000) * 10) / 10}m and was killed`;
-        onEvent?.({ type: 'error', message });
-        onEvent?.({ type: 'done' });
-        return { text: textChunks.join('\n').trim(), toolCalls, tokensUsed, sessionId };
-      }
-      // A signal we sent is teardown, not a second agent failure (#73).
-      if (terminatedByCezar && (isSignalTerminationExit(exitCode) || (exitCode === null && child.signalCode !== null))) {
-        onEvent?.({
-          type: 'note',
-          message: `pi CLI did not exit on its own after close; terminated by cezar (${exitCode === null ? child.signalCode : `code ${exitCode}`})`,
-        });
-      } else if (exitCode === null && child.signalCode !== null) {
-        const message = `pi CLI was killed by signal ${child.signalCode}`;
-        onEvent?.({ type: 'error', message });
-        throw new Error(message);
-      } else if (exitCode !== 0 && exitCode !== null) {
-        const diagnostic = stderr.join('');
-        if (diagnostic.trim()) onEvent?.({ type: 'note', message: `pi CLI stderr:\n${diagnostic}` });
-        const detail = summarizeRunnerStderr(diagnostic);
-        const message = `pi CLI exited with code ${exitCode}${detail ? ` — ${detail}` : ''}`;
-        onEvent?.({ type: 'error', message });
-        throw new Error(message);
-      }
-      if (piUi.turnId) onEvent?.({ type: 'note', message: 'pi RPC session ended before agent_settled' });
-      if (tokensUsed === 0) onEvent?.({ type: 'note', message: 'token usage not reported by pi CLI' });
-      opts.onUiEvent?.({ type: 'session.ended', reason: piUi.stopReason });
-      onEvent?.({ type: 'done' });
-      return { text: textChunks.join('\n').trim(), toolCalls, tokensUsed, sessionId };
+      return settlePiFamilyExit({
+        cli: 'pi',
+        settleEvent: 'agent_settled',
+        exitCode,
+        signalCode: child.signalCode,
+        terminatedByCezar,
+        timedOut,
+        limitMs,
+        stderr,
+        stderrDetail: summarizeRunnerStderr,
+        turnOpen: Boolean(piUi.turnId),
+        tokensUsed,
+        stopReason: piUi.stopReason,
+        emitUi: (event) => opts.onUiEvent?.(event),
+        onEvent,
+        result: () => ({ text: textChunks.join('\n').trim(), toolCalls, tokensUsed, sessionId }),
+      });
     })();
 
     const session: AgentSession = {
