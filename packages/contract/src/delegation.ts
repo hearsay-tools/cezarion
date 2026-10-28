@@ -416,3 +416,43 @@ export const workerCancelWaitRequestSchema = z.object({ waitId: z.uuid() }).stri
 export type WorkerCancelWaitRequest = z.infer<typeof workerCancelWaitRequestSchema>;
 export const workerCancelWaitResultSchema = z.object({ wait: workerWaitSchema }).strict();
 export type WorkerCancelWaitResult = z.infer<typeof workerCancelWaitResultSchema>;
+
+/**
+ * `cez message wait --peer` (hearsay-tools/cezarion#1995): a root task waits on 1–32 named peer
+ * root tasks, with a deadline of 1–1,800 s (default 600). The wait answers as its list entry does:
+ * its phase, and once it resolved, why and from which peer.
+ */
+export const peerWaitRequestSchema = z.object({
+  peerIds: workerIdsSchema,
+  timeoutSeconds: z.number().int().min(1).max(1800).default(600),
+}).strict();
+export type PeerWaitRequest = z.infer<typeof peerWaitRequestSchema>;
+/**
+ * Why a peer wait resolved: a message of any kind from a named peer, with both ids; a named peer that
+ * settled (`review`, `done`, `failed`, `cancelled`) or was deleted, with its id; or the deadline.
+ */
+export const peerWaitResultSchema = z.discriminatedUnion('reason', [
+  z.object({ reason: z.literal('message'), peerRunId: z.uuid(), messageId: z.uuid() }).strict(),
+  z.object({ reason: z.literal('settled'), peerRunId: z.uuid() }).strict(),
+  z.object({ reason: z.literal('timeout') }).strict(),
+]);
+export type PeerWaitResult = z.infer<typeof peerWaitResultSchema>;
+/** A resolved or delivered peer wait carries its result, an open one none; a cancelled one keeps
+ *  the result it had, if it had one. The entry and its CLI view share the rule. */
+export function refinePeerWaitResult(wait: { phase: string; result?: PeerWaitResult | undefined }, ctx: z.RefinementCtx): void {
+  if ((wait.phase === 'resolved' || wait.phase === 'delivered') && !wait.result) ctx.addIssue({ code: 'custom', message: `a ${wait.phase} peer wait has a result`, path: ['result'] });
+  if (wait.phase === 'open' && wait.result) ctx.addIssue({ code: 'custom', message: 'an open peer wait has no result', path: ['result'] });
+}
+export const peerWaitViewSchema = z.object({
+  id: z.uuid(),
+  peerIds: workerIdsSchema,
+  deadline: z.iso.datetime(),
+  phase: z.enum(['open', 'resolved', 'delivered', 'cancelled']),
+  result: peerWaitResultSchema.optional(),
+}).strict().superRefine(refinePeerWaitResult);
+export type PeerWaitView = z.infer<typeof peerWaitViewSchema>;
+export const peerWaitRegisteredSchema = z.object({ wait: peerWaitViewSchema, instruction: z.string().min(1).max(1_000) }).strict();
+export const peerCancelWaitResultSchema = z.object({ wait: peerWaitViewSchema }).strict();
+/** What `POST /delegation/wait` and `/cancel-wait` answer: a worker or request wait, or a peer wait. */
+export const delegationWaitResultSchema = z.union([workerWaitResultSchema, peerWaitRegisteredSchema]);
+export const delegationCancelWaitResultSchema = z.union([workerCancelWaitResultSchema, peerCancelWaitResultSchema]);

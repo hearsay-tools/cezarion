@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { computeWaitingOn, type WaitingOnInput, type WorkerWaitEntry } from './waits.ts';
 import { ATTENTION_RANK, ATTENTION_RUNGS, DEFAULT_WEBHOOK_TRIGGERS, deriveAttention, deriveWebhookState, WEBHOOK_TRIGGERS, workerWaitLabel, type Attention, type AttentionInput, type AttentionRung } from './attention.ts';
 import type { RunStatus } from './runs.ts';
+import { makePeerWait, RUN_STATUS } from './test-factories.testkit.ts';
 
 /**
  * The attention ladder, pinned where it now lives (#553/#609). The cockpit's
@@ -129,6 +130,10 @@ describe('rung ids', () => {
     ['waiting-on-workers', 'waiting on workers', { status: 'waiting', waitingOn: { kind: 'workers', count: 0 } }],
     ['waiting-on-workers', 'waiting on worker replies', { status: 'waiting', waitingOn: { kind: 'workers', count: 1, replies: true } }],
     ['waiting-on-workers', 'waiting on parent reply', { status: 'waiting', delegation: { role: 'worker' }, waitingOn: { kind: 'workers', count: 1 } } as AttentionInput],
+    // hearsay-tools/cezarion#1995: a peer request's reply, and named peer tasks.
+    ['waiting-on-workers', 'waiting on replies', { status: RUN_STATUS.waiting, waitingOn: { kind: 'workers', count: 1, replies: true, peers: true } }],
+    ['waiting-on-workers', 'waiting on 2 tasks', { status: RUN_STATUS.waiting, waitingOn: { kind: 'peers', count: 2 } }],
+    ['waiting-on-workers', 'waiting on 1 task', { status: RUN_STATUS.waiting, waits: [makePeerWait()] }],
     ['waiting-for-ci', 'waiting for CI', { status: 'waiting', waitingOn: pr('checks') }],
     ['waiting-for-merge', 'waiting for merge', { status: 'waiting', waitingOn: pr('merge') }],
     ['waiting-for-command', 'waiting for a command', { status: 'waiting', waitingOn: { kind: 'process', waitId: '77777777-7777-4777-8777-777777777777', pid: 4242, deadline: '2026-10-17T15:30:00.000Z' } }],
@@ -227,6 +232,13 @@ describe('delegation rungs', () => {
     expect(workerWaitLabel('root', { workerIds: ['a', 'b'], outcomes: [outcome('a'), outcome('b')] })).toBe('waiting on workers');
     expect(workerWaitLabel('root', { requestIds: ['r'], workerIds: [], outcomes: [] })).toBe('waiting on worker replies');
     expect(workerWaitLabel('worker', { requestIds: ['r'], workerIds: [], outcomes: [] })).toBe('waiting on parent reply');
+    expect(workerWaitLabel('root', { requestIds: ['r'], workerIds: [], outcomes: [] }, true)).toBe('waiting on replies');
+  });
+
+  // hearsay-tools/cezarion#1995: a run parked on named peers is never Needs you.
+  it('a run parked on a peer wait waits outside itself, in no bucket', () => {
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [makePeerWait({ peerIds: ['cccccccc-cccc-4ccc-8ccc-ccccccccccc1', 'cccccccc-cccc-4ccc-8ccc-ccccccccccc2'] })] }))
+      .toMatchObject({ rung: 'waiting-on-workers', bucket: 'none', shape: 'ring', label: 'waiting on 2 tasks' });
   });
 
   it('an invalid delegation never hides a waiting run', () => {
@@ -448,6 +460,7 @@ describe('deriveWebhookState', () => {
     ['a root on its workers', { status: 'waiting', delegation: { role: 'root' }, waitingOn: { kind: 'workers', count: 2 } } as AttentionInput, 'waiting-workers'],
     ['a worker on its parent\'s reply', { status: 'waiting', delegation: { role: 'worker' }, waitingOn: { kind: 'workers', count: 1, replies: true } } as AttentionInput, 'waiting-workers'],
     ['a CI wait', { status: 'waiting', waitingOn: ci }, 'waiting-ci'],
+    ['a root on named peer tasks', { status: RUN_STATUS.waiting, waitingOn: { kind: 'peers', count: 1 } }, 'waiting-other'],
     ['a timer wait', { status: 'waiting', waitingOn: timer }, 'waiting-timer'],
     // hearsay-tools/cezarion#1446: no option of its own, so the catch-all.
     ['a process wait', { status: 'waiting', waitingOn: { kind: 'process', waitId: '77777777-7777-4777-8777-777777777777', pid: 4242, deadline: '2026-10-17T15:30:00.000Z' } }, 'waiting-other'],

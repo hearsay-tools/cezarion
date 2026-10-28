@@ -28,6 +28,8 @@ import {
   workerWaitEntrySchema,
   workerWaitEntryToLegacy,
   openWaitSchema,
+  peerWaitEntrySchema,
+  peerWaitView,
   waitViaSchema,
   type PrWaitEntry,
   type DeadlinedWorkerWaitEntry,
@@ -36,7 +38,10 @@ import {
   type TimerWaitEntry,
   type WorkerWaitEntry,
 } from './waits.ts';
-import { workerCompletionWaitSchema, workerInspectionSchema, workerWaitSchema } from './delegation.ts';
+import { peerWaitViewSchema, workerCompletionWaitSchema, workerInspectionSchema, workerWaitSchema } from './delegation.ts';
+import { makeRunRecord, RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from './test-factories.testkit.ts';
+import { toRunSummary } from './runs.ts';
+import { deriveAttention } from './attention.ts';
 
 /**
  * The wait list (spec 2026-10-17-unified-waits, phase 1: hearsay-tools/cezarion#1233). The
@@ -480,15 +485,36 @@ describe('worker wait entry', () => {
 describe('cezar_wait worker request', () => {
   it('cezar_wait worker request: mode one needs one id; timeout defaults to 600; 1801 refused', () => {
     expect(cezarWaitRequestSchema.parse({ kind: 'worker', worker_ids: [W1] })).toEqual({ kind: 'worker', worker_ids: [W1], timeout_seconds: 600 });
-    expect(cezarWaitRequestSchema.parse({ kind: 'worker', request_ids: [R1, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2'], mode: 'all', timeout_seconds: 1800 }))
+    expect(cezarWaitRequestSchema.parse({ kind: 'request', request_ids: [R1, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2'], mode: 'all', timeout_seconds: 1800 }))
       .toMatchObject({ mode: 'all', timeout_seconds: 1800 });
     expect(cezarWaitRequestSchema.safeParse({ kind: 'worker', worker_ids: [W1], timeout_seconds: 1801 }).success).toBe(false);
     expect(cezarWaitRequestSchema.safeParse({ kind: 'worker', worker_ids: [W1], timeout_seconds: 0 }).success).toBe(false);
-    // mode one: exactly one id, of either list.
+    // mode one: exactly one id, of either kind.
     expect(cezarWaitRequestSchema.safeParse({ kind: 'worker', worker_ids: [W1], mode: 'one' }).success).toBe(true);
     expect(cezarWaitRequestSchema.safeParse({ kind: 'worker', worker_ids: [W1, W2], mode: 'one' }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: 'worker', request_ids: [R1, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2'], mode: 'one' }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: 'worker', request_ids: [R1], mode: 'one' }).success).toBe(true);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'request', request_ids: [R1, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2'], mode: 'one' }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'request', request_ids: [R1], mode: 'one' }).success).toBe(true);
+  });
+
+  // hearsay-tools/cezarion#1995: request ids moved to their own kind, so "worker" never names a reply.
+  it('kind worker takes worker_ids only, and kind request takes request_ids only', () => {
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'worker', request_ids: [R1] }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'request', worker_ids: [W1] }).success).toBe(false);
+    expect(cezarWaitRequestSchema.parse({ kind: 'request', request_ids: [R1] })).toEqual({ kind: 'request', request_ids: [R1], timeout_seconds: 600 });
+  });
+
+  it('kind peer names 1 to 32 unique peers, with a deadline of 1 to 1800 seconds, default 600', () => {
+    expect(cezarWaitRequestSchema.parse({ kind: WAIT_KIND.peer, peer_ids: [W1] })).toEqual({ kind: WAIT_KIND.peer, peer_ids: [W1], timeout_seconds: 600 });
+    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: [] }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: [W1, W1] }).success).toBe(false);
+    const ids = Array.from({ length: 33 }, (_, i) => `99999999-9999-4999-8999-${String(i).padStart(12, '0')}`);
+    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: ids.slice(0, 32) }).success).toBe(true);
+    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: ids }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: [W1], timeout_seconds: 1801 }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: [W1], timeout_seconds: 0 }).success).toBe(false);
+    // No "any peer" form, and no mode: every named peer ends it.
+    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.peer, peer_ids: [W1], mode: 'all' }).success).toBe(false);
   });
 
   it('takes exactly one id list, unique, 1 to 32, and nothing else', () => {
@@ -724,5 +750,89 @@ describe('PR waits', () => {
   it('reads a stored ci waitingOn as a pr checks wait', () => {
     expect(waitingOnSchema.parse({ kind: 'ci', waitId: CI_ID, prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:40:00.000Z' }))
       .toEqual({ kind: 'pr', until: 'checks', waitId: CI_ID, prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:40:00.000Z' });
+  });
+});
+
+// hearsay-tools/cezarion#1995, spec 2026-10-27-task-communication-protocol § 7.
+describe('peer waits', () => {
+  const P1 = 'cccccccc-cccc-4ccc-8ccc-ccccccccccc1';
+  const P2 = 'cccccccc-cccc-4ccc-8ccc-ccccccccccc2';
+  const peerBase = (over: Record<string, unknown> = {}) => ({
+    kind: WAIT_KIND.peer, id: WORKER_WAIT_ID, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait, registeredAt: '2026-10-19T10:00:00.000Z',
+    deadline: '2026-10-19T10:10:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1', timeoutSeconds: 600, peerIds: [P1], ...over,
+  });
+
+  it('stores 1 to 32 named peers with a required deadline of 1 to 1800 seconds and a reason once resolved', () => {
+    expect(waitSchema.safeParse(peerBase()).success).toBe(true);
+    expect(waitSchema.safeParse(peerBase({ via: WAIT_VIA['cez-message-wait'] })).success).toBe(true);
+    expect(waitSchema.safeParse(peerBase({ deadline: undefined })).success).toBe(false);
+    expect(waitSchema.safeParse(peerBase({ peerIds: [] })).success).toBe(false);
+    expect(waitSchema.safeParse(peerBase({ timeoutSeconds: 1801 })).success).toBe(false);
+    for (const result of [{ reason: 'message', peerRunId: P1, messageId: R1 }, { reason: 'settled', peerRunId: P1 }, { reason: 'timeout' }]) {
+      expect(peerWaitEntrySchema.safeParse(peerBase({ phase: WAIT_PHASE.resolved, resolvedAt: '2026-10-19T10:05:00.000Z', result })).success).toBe(true);
+    }
+    expect(peerWaitEntrySchema.safeParse(peerBase({ result: { reason: 'outcome' } })).success).toBe(false);
+  });
+
+  it('refuses a result that does not fit its reason, and a phase that does not fit its result', () => {
+    const resolved = (result: unknown) => peerBase({ phase: WAIT_PHASE.resolved, resolvedAt: '2026-10-19T10:05:00.000Z', result });
+    for (const result of [{ reason: 'message' }, { reason: 'message', peerRunId: P1 }, { reason: 'settled' }, { reason: 'timeout', peerRunId: P1 }, { reason: 'timeout', messageId: R1 }]) {
+      expect(peerWaitEntrySchema.safeParse(resolved(result)).success).toBe(false);
+    }
+    // Resolved and delivered carry their result; open has none; cancelled may keep one it had.
+    expect(peerWaitEntrySchema.safeParse(peerBase({ phase: WAIT_PHASE.resolved, resolvedAt: '2026-10-19T10:05:00.000Z' })).success).toBe(false);
+    expect(peerWaitEntrySchema.safeParse(peerBase({ result: { reason: 'timeout' } })).success).toBe(false);
+    expect(peerWaitEntrySchema.safeParse(peerBase({ phase: WAIT_PHASE.cancelled, cancelledAt: '2026-10-19T10:05:00.000Z' })).success).toBe(true);
+    const view = { id: WORKER_WAIT_ID, peerIds: [P1], deadline: '2026-10-19T10:10:00.000Z' };
+    expect(peerWaitViewSchema.safeParse({ ...view, phase: WAIT_PHASE.resolved }).success).toBe(false);
+    expect(peerWaitViewSchema.safeParse({ ...view, phase: WAIT_PHASE.open, result: { reason: 'timeout' } }).success).toBe(false);
+    expect(peerWaitViewSchema.safeParse({ ...view, phase: WAIT_PHASE.delivered, result: { reason: 'message', peerRunId: P1 } }).success).toBe(false);
+    expect(peerWaitViewSchema.safeParse({ ...view, phase: WAIT_PHASE.delivered, result: { reason: 'settled', peerRunId: P1 } }).success).toBe(true);
+  });
+
+  it('reads as waiting on peers, counted once each, below workers and above a PR', () => {
+    const peers = peerBase({ peerIds: [P1, P2] }) as never;
+    const again = peerBase({ id: WAKE_INPUT, peerIds: [P2] }) as never;
+    expect(computeWaitingOn({ waits: [peers, again] })).toEqual({ kind: 'peers', count: 2 });
+    expect(computeWaitingOn({ waits: [openCi(), openTimer(), peers] })?.kind).toBe('peers');
+    expect(computeWaitingOn({ waits: [peers, ...completionWaits()] })?.kind).toBe('workers');
+    expect(computeWaitingOn({ waits: [peers, openHuman()] })?.kind).toBe('human');
+    expect(waitingOnSchema.parse({ kind: 'peers', count: 1 })).toEqual({ kind: 'peers', count: 1 });
+  });
+
+  it('marks a request wait on a peer request, read from the root ledger', () => {
+    const wait = workerBase({ requestIds: [R1], requestOutcomes: [] }) as never;
+    const message = { id: R1, senderRunId: W1, recipientRunId: W2, kind: 'request', text: 'q', createdAt: '2026-10-19T10:00:00.000Z', requestHash: 'a'.repeat(64), state: 'accepted' };
+    const root = (relationship?: 'peer') => { return { role: 'root', receipts: [], permissions: [], conversation: { messages: [{ ...message, ...(relationship ? { relationship } : {}) }], outcomes: [] } } as never; };
+    expect(computeWaitingOn({ waits: [wait], delegation: root('peer') })).toEqual({ kind: 'workers', count: 1, replies: true, peers: true });
+    expect(computeWaitingOn({ waits: [wait], delegation: root() })).toEqual({ kind: 'workers', count: 1, replies: true });
+  });
+
+  // A list row reads the summary, whose slim delegation carries no ledger: the projection keeps
+  // the peer marker it read from the full record.
+  it('keeps the peer marker and its label through toRunSummary, and reads a malformed ledger as none', () => {
+    const wait = workerBase({ requestIds: [R1], requestOutcomes: [] }) as never;
+    const message = { id: R1, senderRunId: W1, recipientRunId: W2, kind: 'request', relationship: 'peer', text: 'q', createdAt: '2026-10-19T10:00:00.000Z', requestHash: 'a'.repeat(64), state: 'accepted' };
+    const record = (conversation: unknown) => makeRunRecord({ status: RUN_STATUS.waiting, waits: [wait],
+      delegation: { role: 'root', receipts: [], permissions: [], conversation } as never });
+    const summary = toRunSummary(record({ messages: [message], outcomes: [] }));
+    expect(summary.waitingOn).toEqual({ kind: 'workers', count: 1, replies: true, peers: true });
+    expect(deriveAttention(summary).label).toBe('waiting on replies');
+    for (const malformed of [{ messages: [null, 7] }, { messages: 'none' }, 'ledger']) {
+      expect(toRunSummary(record(malformed)).waitingOn).toEqual({ kind: 'workers', count: 1, replies: true });
+    }
+  });
+
+  it('answers cez message wait --peer with its phase and result', () => {
+    const entry = peerWaitEntrySchema.parse(peerBase({ phase: WAIT_PHASE.resolved, resolvedAt: '2026-10-19T10:05:00.000Z', result: { reason: 'message', peerRunId: P1, messageId: R1 } }));
+    expect(peerWaitView(entry)).toEqual({ id: WORKER_WAIT_ID, peerIds: [P1], deadline: '2026-10-19T10:10:00.000Z', phase: WAIT_PHASE.resolved, result: { reason: 'message', peerRunId: P1, messageId: R1 } });
+  });
+
+  it('lists an open peer wait with its deadline and answers its registration', () => {
+    const open = { wait_id: WORKER_WAIT_ID, kind: WAIT_KIND.peer, deadline: '2026-10-19T10:10:00.000Z', summary: 'peer wait on 1 task' };
+    expect(openWaitSchema.parse(open)).toEqual(open);
+    for (const kind of [WAIT_KIND.peer, 'request'] as const) {
+      expect(cezarWaitAnswerSchema.parse({ ok: true, wait_id: WORKER_WAIT_ID, kind, deadline: open.deadline, open_waits: [open] }).ok).toBe(true);
+    }
   });
 });

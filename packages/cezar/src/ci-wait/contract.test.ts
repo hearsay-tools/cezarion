@@ -176,19 +176,22 @@ describe('private preview-serve route', () => {
   });
 });
 
-it('cezar_wait advertises worker fields with their bounds', () => {
+it('cezar_wait advertises worker, request and peer fields with their bounds', () => {
   const schema = waitToolDefinition.inputSchema as { properties: Record<string, any> };
-  expect(schema.properties.kind.enum).toEqual(['pr', 'worker', 'timer', 'process']);
+  expect(schema.properties.kind.enum).toEqual(['pr', 'worker', 'request', 'peer', 'timer', 'process']);
   expect(schema.properties.kind.description).toMatch(/worker/);
-  for (const key of ['worker_ids', 'request_ids']) {
-    expect(schema.properties[key]).toMatchObject({ type: 'array', minItems: 1, maxItems: 32 });
-    expect(schema.properties[key].description).toMatch(/^kind "worker":/);
+  // hearsay-tools/cezarion#1995: each id list belongs to one kind.
+  for (const [key, kind] of [['worker_ids', 'worker'], ['request_ids', 'request'], ['peer_ids', 'peer']]) {
+    expect(schema.properties[key!]).toMatchObject({ type: 'array', minItems: 1, maxItems: 32 });
+    expect(schema.properties[key!].description).toMatch(new RegExp(`^kind "${kind}":`));
   }
   expect(schema.properties.mode.enum).toEqual(['one', 'any', 'all']);
-  expect(schema.properties.mode.description).toMatch(/^kind "worker":/);
-  // One flat field serves both kinds: it advertises ci's bounds and names the worker's in the description.
+  expect(schema.properties.mode.description).toMatch(/^kind "worker" or "request":/);
+  // One flat field serves every kind: it advertises ci's bounds and names the others in the description.
   expect(schema.properties.timeout_seconds).toMatchObject({ minimum: 1, maximum: 7200 });
-  expect(schema.properties.timeout_seconds.description).toMatch(/kind "worker".*1800.*600/);
+  expect(schema.properties.timeout_seconds.description).toMatch(/kind "worker", "request" or "peer".*1800.*600/);
+  expect(waitToolDefinition.description).toMatch(/kind "request"/);
+  expect(waitToolDefinition.description).toMatch(/kind "peer"/);
   expect(waitToolDefinition.description).toMatch(/worker/);
   expect(cezarTools().find(tool => tool.definition.name === 'cezar_cancel_wait')!.definition.description).toMatch(/worker/);
 });
@@ -208,7 +211,7 @@ it('cezar_wait advertises the process fields and tells the agent how to write th
   expect(description).toContain('Use a new exit file name for each command: a file that already exists resolves the wait at once.');
   expect(description).toContain('The job outlives this session and Cezar does not stop it.');
   const refused = cezarWaitRequestSchema.safeParse({ kind: 'human' });
-  expect(waitInvalidInput(refused.success ? undefined : refused.error)).toBe('`kind` must be "pr", "worker", "timer" or "process" (kind "ci" was replaced by kind "pr"); ask the user with cezar_ask.');
+  expect(waitInvalidInput(refused.success ? undefined : refused.error)).toBe('`kind` must be "pr", "worker", "request", "peer", "timer" or "process" (kind "ci" was replaced by kind "pr"); ask the user with cezar_ask.');
   const pid = cezarWaitRequestSchema.safeParse({ kind: 'process', pid: 1 });
   expect(waitInvalidInput(pid.success ? undefined : pid.error)).toBe('`pid` must be an integer of at least 2: the PID that `echo $!` printed (kind "process").');
 });

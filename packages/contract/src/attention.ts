@@ -104,9 +104,10 @@ export type AttentionInput = Pick<RunRecord, 'status' | 'autoResumeAt' | 'hasPen
 
 /** Dependency wording for a worker wait in the legacy `WorkerWait` shape, which the run's
  * relationship details show (#375). A worker can only wait on requests to its parent; only roots
- * can wait for worker completion. */
-export function workerWaitLabel(role: 'root' | 'worker', wait: Pick<WorkerWait, 'requestIds' | 'outcomes' | 'workerIds'>): string {
-  if (wait.requestIds?.length) return role === 'worker' ? 'waiting on parent reply' : 'waiting on worker replies';
+ * can wait for worker completion. A root's wait on a request to a peer task says "replies"
+ * (hearsay-tools/cezarion#1995): `peers` is true when the caller found one in the root's ledger. */
+export function workerWaitLabel(role: 'root' | 'worker', wait: Pick<WorkerWait, 'requestIds' | 'outcomes' | 'workerIds'>, peers = false): string {
+  if (wait.requestIds?.length) return role === 'worker' ? 'waiting on parent reply' : peers ? 'waiting on replies' : 'waiting on worker replies';
   // The count is the workers still OWED an outcome (#617: "waiting on 2 workers"): a wait-for-all
   // stays open after one of two has reported, and "waiting on 2" would then overstate it. None
   // left says no number.
@@ -151,9 +152,16 @@ function owesWorkerWake(run: AttentionInput): boolean {
 function workerAttention(run: AttentionInput, waitingOn: Extract<WaitingOn, { kind: 'workers' }>): Attention {
   const attention = attentionOfRung('waiting-on-workers');
   if (run.delegation?.role === 'worker') return { ...attention, shape: 'ring', label: 'waiting on parent reply' };
-  if (waitingOn.replies) return { ...attention, label: 'waiting on worker replies' };
+  if (waitingOn.replies) return { ...attention, label: waitingOn.peers ? 'waiting on replies' : 'waiting on worker replies' };
   const count = waitingOn.count;
   return { ...attention, label: count ? `waiting on ${count} worker${count === 1 ? '' : 's'}` : attention.label };
+}
+
+/** A root waits on named peer tasks (hearsay-tools/cezarion#1995): the workers rung, never Needs
+ *  you, with the ring a run waiting outside itself shows. */
+function peerAttention(waitingOn: Extract<WaitingOn, { kind: 'peers' }>): Attention {
+  const count = waitingOn.count;
+  return { ...attentionOfRung('waiting-on-workers'), shape: 'ring', label: count ? `waiting on ${count} task${count === 1 ? '' : 's'}` : 'waiting on tasks' };
 }
 
 /** The parked portion of the ladder, after human, review and running attention. */
@@ -166,7 +174,8 @@ function parkedRung(run: AttentionInput, waitingOn: WaitingOn | undefined): Atte
   if (run.delegation?.role !== 'invalid' && owesWorkerWake(run)) return 'waiting-for-capacity';
   if (run.status !== 'waiting') return undefined;
   switch (waitingOn?.kind) {
-    case 'workers': return 'waiting-on-workers';
+    case 'workers':
+    case 'peers': return 'waiting-on-workers';
     case 'pr': return waitingOn.until === 'merge' ? 'waiting-for-merge' : 'waiting-for-ci';
     case 'process': return 'waiting-for-command';
     case 'timer': return 'monitoring';
@@ -212,6 +221,7 @@ export function deriveAttention(run: AttentionInput): Attention {
   const waitingOn = live ? resolveWaitingOn(run) : undefined;
   const rung = attentionRung(run, waitingOn);
   if (rung === 'waiting-on-workers' && waitingOn?.kind === 'workers') return workerAttention(run, waitingOn);
+  if (rung === 'waiting-on-workers' && waitingOn?.kind === 'peers') return peerAttention(waitingOn);
   return attentionOfRung(rung);
 }
 
@@ -272,6 +282,8 @@ const WEBHOOK_STATE_OF_RUNG: Record<AttentionRung, WebhookTrigger | undefined> =
  */
 export function deriveWebhookState(run: AttentionInput): WebhookTrigger | undefined {
   const { rung } = deriveAttention(run);
+  // A peer wait shares the workers rung but has no option of its own (hearsay-tools/cezarion#1995).
+  if (rung === 'waiting-on-workers' && run.status === 'waiting' && resolveWaitingOn(run)?.kind === 'peers') return 'waiting-other';
   if (rung === 'needs-you' && run.status === 'waiting') {
     const kind = resolveWaitingOn(run)?.kind;
     return kind === undefined || kind === 'human' ? 'needs-you' : 'waiting-other';
