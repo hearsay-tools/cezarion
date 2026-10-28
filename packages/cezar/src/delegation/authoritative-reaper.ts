@@ -78,11 +78,8 @@ export async function prepareAuthoritativeReaper(project: DelegationProject, wor
   const current = async () => {
     assertLinuxMountBoundary([workspace.path, ...agentTmpDirLocations(dataDir, workerId)]);
     assertDarwinMountBoundary([workspace.path, ...agentTmpDirLocations(dataDir, workerId)]);
-    assertAttached(); await rootCurrent(); assertAttached();
-    const run = check();
-    if (run.delegation?.role !== 'worker' || run.delegation.destroy?.requestedAt !== requestedAt || JSON.stringify(run.delegation.workspace) !== JSON.stringify(workspace) ||
-        !agentTmpDirOwnershipProven(dataDir, workerId) ||
-        project.store.readWorkerExecution(workerId)?.generation !== generation) throw new Error('Worker resource ownership changed');
+    assertAttached(); await rootCurrent();
+    assertDestroyCurrent();
   };
   const snapshot = structuredClone(check());
   const evidence = await collectWorkerEvidence(project.root, project.store, snapshot);

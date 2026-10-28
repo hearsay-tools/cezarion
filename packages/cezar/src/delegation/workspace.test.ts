@@ -438,6 +438,23 @@ describe('removeOwnedWorkspace verified retryable destruction', { timeout: WORKS
     mounted = false;
     expect(await removeOwnedWorkspace(root, workspace, undefined, undefined, undefined, undefined, async () => {})).toMatchObject({ state: 'complete' });
   });
+  it.runIf(process.platform === 'linux')('names a registered directory permission repair failure and retains resources', async () => {
+    const { root, first } = await fixture();
+    const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    const marker = join(workspace.path, 'repair-marker'); await writeFile(marker, 'keep');
+    const original = fsPromises.chmod;
+    const spy = vi.spyOn(fsPromises, 'chmod').mockImplementation(async (path, mode) => {
+      if (String(path).startsWith('/proc/self/fd/') && await fsPromises.readlink(path) === workspace.path) throw new Error('fixture chmod denied');
+      return original(path, mode);
+    });
+    syncBuiltinESMExports();
+    try {
+      const result = await removeOwnedWorkspace(root, workspace, undefined, undefined, undefined, undefined, async () => {}, true);
+      expect(result).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'], error: expect.stringContaining(`Cannot repair ${workspace.path}: fixture chmod denied`) });
+      expect(await readFile(marker, 'utf8')).toBe('keep');
+      expect(git(root, 'branch', '--list', workspace.branch)).toContain(workspace.branch);
+    } finally { spy.mockRestore(); syncBuiltinESMExports(); }
+  });
   it.skipIf(process.platform === 'win32')('retries a partially failed Git removal with read-only directories (hearsay-tools/cezarion#954)', async () => {
     const { root, first } = await fixture();
     const workspace = await createOwnedWorkspace(root, randomUUID(), first);

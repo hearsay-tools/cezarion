@@ -118,6 +118,12 @@ async function exists(path: string): Promise<boolean> {
   });
 }
 
+class PermissionRepairError extends Error {
+  constructor(path: string, cause: unknown) {
+    super(`Cannot repair ${path}: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
+}
+
 /** Restore owner access only on real directories; do not chmod symlinks or their targets. */
 async function makeDirectoryWritable(path: string, expected?: { dev: number; ino: number }, explicitDestroy = false): Promise<void> {
   assertLinuxMountBoundary([path]);
@@ -125,25 +131,27 @@ async function makeDirectoryWritable(path: string, expected?: { dev: number; ino
   const info = await lstat(path);
   if (!info.isDirectory() || info.isSymbolicLink() || await realpath(path) !== path ||
       (expected && (info.dev !== expected.dev || info.ino !== expected.ino))) throw new Error(`Unsafe directory: ${path}`);
-  if (process.platform === 'darwin' && explicitDestroy) { await darwinDestroyChmod(path, expected); return; }
-  if (process.platform !== 'win32') {
-    // Linux O_PATH pins a directory even with mode 000; chmod the pinned inode
-    // through procfs because fchmod on an O_PATH descriptor fails with EBADF.
-    const linuxPath = process.platform === 'linux';
-    // Darwin O_EVTONLY opens an event descriptor without requesting read access;
-    // O_NOFOLLOW_ANY rejects a symlink in any component. Native CI must verify
-    // both opening mode-000 directories and fchmod on this descriptor.
-    const flags = linuxPath ? 0x200000 : process.platform === 'darwin' ? 0x00008000 | 0x20000000 : constants.O_RDONLY;
-    // Darwin rejects O_NOFOLLOW combined with O_NOFOLLOW_ANY. The latter
-    // already refuses a symlink in the final component as well as ancestors.
-    const directory = await open(path, flags | (process.platform === 'darwin' ? 0 : constants.O_NOFOLLOW));
-    try {
-      const opened = await directory.stat();
-      if (!opened.isDirectory() || opened.dev !== info.dev || opened.ino !== info.ino) throw new Error(`Directory changed: ${path}`);
-      if (linuxPath) await chmod(`/proc/self/fd/${directory.fd}`, opened.mode | 0o700);
-      else await directory.chmod(opened.mode | 0o700);
-    } finally { await directory.close(); }
-  }
+  try {
+    if (process.platform === 'darwin' && explicitDestroy) { await darwinDestroyChmod(path, expected); return; }
+    if (process.platform !== 'win32') {
+      // Linux O_PATH pins a directory even with mode 000; chmod the pinned inode
+      // through procfs because fchmod on an O_PATH descriptor fails with EBADF.
+      const linuxPath = process.platform === 'linux';
+      // Darwin O_EVTONLY opens an event descriptor without requesting read access;
+      // O_NOFOLLOW_ANY rejects a symlink in any component. Native CI must verify
+      // both opening mode-000 directories and fchmod on this descriptor.
+      const flags = linuxPath ? 0x200000 : process.platform === 'darwin' ? 0x00008000 | 0x20000000 : constants.O_RDONLY;
+      // Darwin rejects O_NOFOLLOW combined with O_NOFOLLOW_ANY. The latter
+      // already refuses a symlink in the final component as well as ancestors.
+      const directory = await open(path, flags | (process.platform === 'darwin' ? 0 : constants.O_NOFOLLOW));
+      try {
+        const opened = await directory.stat();
+        if (!opened.isDirectory() || opened.dev !== info.dev || opened.ino !== info.ino) throw new Error(`Directory changed: ${path}`);
+        if (linuxPath) await chmod(`/proc/self/fd/${directory.fd}`, opened.mode | 0o700);
+        else await directory.chmod(opened.mode | 0o700);
+      } finally { await directory.close(); }
+    }
+  } catch (error) { throw new PermissionRepairError(path, error); }
 }
 
 /** Windows directory mode bits do not control deletion; reparse points are never traversed. */
@@ -425,11 +433,12 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false; let lockBusy = false; let heldBy: readonly number[] = [];
   const held = (pids: readonly number[]) => { heldBy = pids; report?.held?.(pids); };
-  let stranded: string | undefined; let leftoverError: string | undefined; let mountError: string | undefined;
+  let stranded: string | undefined; let leftoverError: string | undefined; let mountError: string | undefined; let repairError: string | undefined;
   const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
     ...(remaining.length ? { error: lockBusy ? WORKTREE_LOCK_BUSY_ERROR
       : heldBy.length ? `Owned resources retained: processes ${heldBy.join(', ')} may still hold the worker worktree or scratch; retry destroy after they exit`
       : mountError ? mountError
+      : repairError ? repairError
       : stranded ? `Owned branch ${value.branch} ${stranded}; keep what you need, delete the branch, then retry destroy`
       : leftoverError ? `Git no longer registers owned worktree ${value.path}; cleanup failed: ${leftoverError}`
       : 'Owned resources remain: resource identity or Git cleanup could not be verified. Check the worker worktree, Git lock and ownership receipt, then retry destroy after correcting the blocker' } : {}),
@@ -703,6 +712,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
   } catch (error) {
     // Ambiguous ownership and every failed Git/filesystem operation fail closed.
     if (error instanceof MountBoundaryError) mountError = error.message;
+    if (error instanceof PermissionRepairError) repairError = error.message;
     lockBusy = error instanceof WorktreeMutationLockTimeout;
     if (error instanceof WorkspaceHeldError && error.pids.length) held(error.pids);
     else report?.unexplained?.();
