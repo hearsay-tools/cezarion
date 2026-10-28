@@ -66,3 +66,52 @@ it('keeps subtraction and refusal semantics while recording one evaluation', () 
   useOptional(undefined);
   expect(evaluated).toBe(2);
 });
+
+it('partitions every literal site including zero refusals and resets the partition', () => {
+  resetAttribution();
+  const sites = ['linePrecharge', 'variantExpansion', 'finalMembership', 'caughtProbe'] as const;
+  for (const site of sites) {
+    recordCharge('literalMapped', 2, 1, site);
+    recordCharge('literalMapped', 3, -1, site);
+    recordCharge('literalMapped', 0, -1, site);
+  }
+  const report = attributionSnapshot();
+  expect(report.invalid).toBe(false);
+  for (const site of sites) expect(report.literalMappedSites[site]).toEqual({ attemptedUnits: 5, successfulChargeUnits: 2, refusedChargeUnits: 3, attemptedCalls: 3 });
+  expect(report.counts.literalMapped).toEqual({ attemptedUnits: 20, successfulChargeUnits: 8, refusedChargeUnits: 12 });
+  expect(report.firstExhaustion).toMatchObject({ category: 'literalMapped', amount: 3, remaining: -1 });
+  resetAttribution();
+  expect(attributionSnapshot().literalMappedSites.linePrecharge.attemptedCalls).toBe(0);
+});
+
+it('marks missing, unknown and wrong-category sites invalid without throwing', () => {
+  for (const run of [
+    () => recordCharge('literalMapped', 1, 1),
+    () => recordCharge('literalMapped', 1, 1, 'bad' as never),
+    () => recordCharge('filter', 1, 1, 'linePrecharge'),
+  ]) {
+    resetAttribution();
+    expect(run).not.toThrow();
+    expect(attributionSnapshot().invalid).toBe(true);
+  }
+});
+
+it('reports site saturation separately', () => {
+  resetAttribution();
+  recordCharge('literalMapped', 2_147_483_647, 1, 'linePrecharge');
+  recordCharge('literalMapped', 1, 1, 'linePrecharge');
+  expect(attributionSnapshot().sitesSaturated).toBe(true);
+});
+
+it('marks a partial recorder failure invalid and preserves the original refusal', () => {
+  resetAttribution();
+  const clone = globalThis.structuredClone;
+  try {
+    globalThis.structuredClone = (() => { throw new Error('recorder failure'); }) as typeof structuredClone;
+    expect(() => {
+      recordCharge('literalMapped', 1, -1, 'linePrecharge');
+      throw new Error('original refusal');
+    }).toThrow('original refusal');
+  } finally { globalThis.structuredClone = clone; }
+  expect(attributionSnapshot().invalid).toBe(true);
+});

@@ -14,6 +14,11 @@ it('validates the exact source inventory before any instrumentation', () => {
   expect(staged['linux-alias-model.ts']).toContain("chargePaths(budget, 'filter', path)");
   expect(staged['linux-alias-model.ts']).toContain('budget.spend(components, tag)');
   expect(staged['linux-alias-model.ts']).toContain('return refuseReservation()');
+  const mapped = staged['linux-mapped-holders.ts']!;
+  for (const site of ['linePrecharge', 'variantExpansion', 'finalMembership', 'caughtProbe']) {
+    expect(mapped.split(`'${site}'`)).toHaveLength(2);
+  }
+  expect(mapped).toContain("budget?.spend(1 + roots.length, 'literalMapped', 'linePrecharge')");
   expect(staged['linux-proc-evidence.ts']).toContain("budget.spend(Math.ceil(length / 256), 'procRead')");
   expect(() => validateAttributionSources({ ...sources, 'linux-alias-model.ts': sources['linux-alias-model.ts'] + '\n' })).toThrow('hash changed');
   expect(() => validateAttributionSources({ ...sources, 'unexpected.ts': '' })).toThrow('inventory changed');
@@ -51,12 +56,14 @@ it('runs the staged production budget and indexed lookup with shared tagged char
   expect(report.counts.candidateConstruct.successfulChargeUnits).toBeGreaterThan(0);
   expect(() => budget.reserve(1)).toThrow('does not support reservations');
   diagnostic.resetAttribution();
-  const limited = new implementation.AliasWorkBudget(2) as unknown as { spend: (amount: number, category: string) => void };
-  limited.spend(1, 'filter');
+  const limited = new implementation.AliasWorkBudget(2) as unknown as { spend: (amount: number, category: string, site?: string) => void };
+  limited.spend(1, 'literalMapped', 'linePrecharge');
   expect(() => limited.spend(2, 'ancestorLookup')).toThrow('work exceeds');
   const first = diagnostic.attributionSnapshot().firstExhaustion;
   expect(() => limited.spend(0, 'evidenceRecheck')).toThrow('work exceeds');
   const after = diagnostic.attributionSnapshot();
+  expect(after.literalMappedSites.linePrecharge).toEqual({ attemptedUnits: 1, successfulChargeUnits: 1, refusedChargeUnits: 0, attemptedCalls: 1 });
+  expect(after.invalid).toBe(false);
   expect(after.firstExhaustion).toEqual(first);
   expect(after.counts.ancestorLookup).toEqual({ attemptedUnits: 2, successfulChargeUnits: 0, refusedChargeUnits: 2 });
 });

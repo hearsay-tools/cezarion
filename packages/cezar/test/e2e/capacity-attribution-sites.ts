@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { Category } from './capacity-attribution-ledger.ts';
+import type { Category, LiteralSite } from './capacity-attribution-ledger.ts';
 
 /** Exact source inventory at fa11. A line shift or source change refuses instrumentation. */
 const inventory: Record<string, { hash: string; sites: Record<number, Category> }> = {
@@ -36,7 +36,7 @@ export function validateAttributionSources(sources: Readonly<Record<string, stri
   }
 }
 
-function taggedCall(line: string, category: Category | 'tag'): string {
+function taggedCall(line: string, category: Category | 'tag', site?: LiteralSite): string {
   const marker = '.spend(';
   const start = line.indexOf(marker);
   if (start < 0 || line.indexOf(marker, start + marker.length) >= 0) throw new Error('attribution call marker changed');
@@ -46,7 +46,7 @@ function taggedCall(line: string, category: Category | 'tag'): string {
     if (line[i] === '(') depth++;
     if (line[i] === ')' && --depth === 0) {
       const argument = line.slice(opening + 1, i);
-      return line.slice(0, opening + 1) + (argument || '1') + ', ' + (category === 'tag' ? 'tag' : `'${category}'`) + line.slice(i);
+      return line.slice(0, opening + 1) + (argument || '1') + ', ' + (category === 'tag' ? 'tag' : `'${category}'`) + (site ? `, '${site}'` : '') + line.slice(i);
     }
   }
   throw new Error('attribution call is not balanced');
@@ -63,7 +63,12 @@ export function instrumentAttributionSources(sources: Readonly<Record<string, st
   const result: Record<string, string> = {};
   for (const [file, spec] of Object.entries(inventory)) {
     const lines = sources[file]!.split('\n');
-    for (const [number, category] of Object.entries(spec.sites)) lines[Number(number) - 1] = taggedCall(lines[Number(number) - 1]!, category);
+    const literalSites: Record<number, LiteralSite> = { 12: 'linePrecharge', 27: 'variantExpansion', 33: 'finalMembership', 48: 'caughtProbe' };
+    for (const [number, category] of Object.entries(spec.sites)) {
+      const site = file === 'linux-mapped-holders.ts' ? literalSites[Number(number)] : undefined;
+      if ((category === 'literalMapped') !== (site !== undefined)) throw new Error('literal attribution inventory changed');
+      lines[Number(number) - 1] = taggedCall(lines[Number(number) - 1]!, category, site);
+    }
     if (file === 'linux-alias-model.ts') {
       lines[108] = taggedCall(lines[108]!, 'tag');
       lines[111] = taggedCall(lines[111]!, 'tag');
@@ -72,9 +77,9 @@ export function instrumentAttributionSources(sources: Readonly<Record<string, st
       for (const [number, tag] of Object.entries(pathSites)) lines[Number(number) - 1] = once(lines[Number(number) - 1]!, 'chargePaths(budget, ', `chargePaths(budget, '${tag}', `);
       let source = lines.join('\n');
       source = once(source, 'function chargePaths(budget: AliasWorkBudget, ...paths: string[]): void {', 'function chargePaths(budget: AliasWorkBudget, tag: Category, ...paths: string[]): void {');
-      source = once(source, 'spend(amount = 1): void {\n    this.remaining -= amount;', "spend(amount = 1, tag: Category = 'unclassified'): void {\n    this.remaining -= amount;\n    recordCharge(tag, amount, this.remaining);");
+      source = once(source, 'spend(amount = 1): void {\n    this.remaining -= amount;', "spend(amount = 1, tag: Category = 'unclassified', site?: LiteralSite): void {\n    this.remaining -= amount;\n    recordCharge(tag, amount, this.remaining, site);");
       source = once(source, 'reserve(amount: number): { budget: AliasWorkBudget; close: () => void } {', "reserve(amount: number): { budget: AliasWorkBudget; close: () => void } {\n    return refuseReservation();");
-      result[file] = "import { recordCharge, refuseReservation, type Category } from '../../test/e2e/capacity-attribution-ledger.ts';\n" + source;
+      result[file] = "import { recordCharge, refuseReservation, type Category, type LiteralSite } from '../../test/e2e/capacity-attribution-ledger.ts';\n" + source;
     } else result[file] = lines.join('\n');
   }
   return result;

@@ -6,6 +6,7 @@ NAMES = ('procRead', 'mountParse', 'ownedRootLocate', 'mapParseAndVariants', 'li
          'intersectionBuild', 'filter', 'ancestorLookup', 'candidateConstruct', 'sort',
          'identityPrecharge', 'evidenceRecheck', 'sweepAndLinks', 'reservation', 'unclassified')
 FIELDS = ('attemptedUnits', 'successfulChargeUnits', 'refusedChargeUnits')
+SITES = ('linePrecharge', 'variantExpansion', 'finalMembership', 'caughtProbe')
 
 
 def counts(value):
@@ -19,11 +20,26 @@ def counts(value):
 
 
 def validate(value):
-    if not isinstance(value, dict) or set(value) != {'counts', 'saturated', 'invalid', 'firstExhaustion'}:
+    if not isinstance(value, dict) or set(value) != {'version', 'counts', 'saturated', 'invalid', 'sitesSaturated', 'literalMappedSites', 'firstExhaustion'}:
         raise ValueError('invalid report schema')
     if type(value['saturated']) is not bool or type(value['invalid']) is not bool or value['invalid']:
         raise ValueError('invalid report flags')
+    if type(value['version']) is not int or value['version'] != 2 or type(value['sitesSaturated']) is not bool:
+        raise ValueError('invalid report version or site flag')
     counts(value['counts'])
+    sites = value['literalMappedSites']
+    if not isinstance(sites, dict) or set(sites) != set(SITES):
+        raise ValueError('invalid site schema')
+    for row in sites.values():
+        if not isinstance(row, dict) or set(row) != set(FIELDS + ('attemptedCalls',)):
+            raise ValueError('invalid site counts')
+        if any(type(n) is not int or n < 0 or n > 2147483647 for n in row.values()):
+            raise ValueError('invalid site count')
+    if not value['saturated'] and not value['sitesSaturated']:
+        if any(row['attemptedUnits'] != row['successfulChargeUnits'] + row['refusedChargeUnits'] for row in sites.values()):
+            raise ValueError('invalid site accounting')
+        if any(sum(row[field] for row in sites.values()) != value['counts']['literalMapped'][field] for field in FIELDS):
+            raise ValueError('invalid site partition')
     first = value['firstExhaustion']
     if first is not None:
         if not isinstance(first, dict) or set(first) != {'category', 'amount', 'remaining', 'snapshot'}:
