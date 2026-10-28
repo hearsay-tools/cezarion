@@ -9,10 +9,20 @@ import { expect, it, vi } from 'vitest';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { reapDestroyHolders } from './destroy-holders.ts';
 
-const readFault = vi.hoisted(() => ({ pids: [] as number[], enabled: false, count: 0 }));
+const readFault = vi.hoisted(() => ({ pids: [] as number[], enabled: false, maps: false, tokenPid: 0, tokenFlip: false, count: 0 }));
+vi.mock('../detached-process.ts', async importOriginal => {
+  const actual = await importOriginal<typeof import('../detached-process.ts')>();
+  return { ...actual, processStartToken: (pid: number) =>
+    readFault.tokenFlip && readFault.tokenPid === pid ? 'replacement-incarnation' : actual.processStartToken(pid) };
+});
 vi.mock('node:fs', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs')>();
-  return { ...actual, readdirSync: ((...args: unknown[]) => Reflect.apply(fs.readdirSync, fs, args)) as typeof fs.readdirSync, readlinkSync: ((path: fs.PathLike, ...args: unknown[]) => {
+  return { ...actual, readFileSync: ((path: fs.PathOrFileDescriptor, ...args: unknown[]) => {
+    if (readFault.enabled && readFault.maps && readFault.pids.some(pid => String(path) === `/proc/${pid}/maps`)) {
+      readFault.count++; throw Object.assign(new Error('denied'), { code: 'EACCES' });
+    }
+    return Reflect.apply(actual.readFileSync, actual, [path, ...args]);
+  }) as typeof fs.readFileSync, readdirSync: ((...args: unknown[]) => Reflect.apply(fs.readdirSync, fs, args)) as typeof fs.readdirSync, readlinkSync: ((path: fs.PathLike, ...args: unknown[]) => {
     if (readFault.enabled && readFault.pids.some(pid => String(path) === `/proc/${pid}/cwd`)) {
       readFault.count++; throw Object.assign(new Error('denied'), { code: 'EACCES' });
     }
@@ -113,3 +123,66 @@ it.runIf(process.platform === 'linux')('keeps cleanup incomplete when a known ho
     unscope(); await rm(root, { recursive: true, force: true });
   }
 }, 30_000);
+
+it.runIf(process.platform === 'linux' && spawnSync('cc', ['--version'], { stdio: 'ignore' }).status === 0)(
+  'stops a closed-descriptor mapped holder and leaves an unrelated mapping alive', async () => {
+    const unscope = scopeFixtureProcesses();
+    const root = await mkdtemp(join(tmpdir(), 'cez-mapped-holder-'));
+    const owned = join(root, 'owned'); const other = join(root, 'other');
+    const { mkdir } = await import('node:fs/promises');
+    await mkdir(owned); await mkdir(other);
+    const binary = join(root, 'holder');
+    const fixture = new URL('./fixtures/mmap-holder.c', import.meta.url).pathname;
+    expect(spawnSync('cc', [fixture, '-o', binary]).status).toBe(0);
+    const children = [];
+    try {
+      for (const dir of [owned, other]) {
+        const file = join(dir, 'mapped file'); const ready = join(dir, 'ready');
+        await writeFile(file, Buffer.alloc(4096));
+        children.push(spawn(binary, [file, ready], { cwd: tmpdir(), stdio: 'ignore' }));
+        await vi.waitFor(async () => expect(Number(await readFile(ready, 'utf8'))).toBeGreaterThan(1), { timeout: 10_000 });
+      }
+      const [holder, unrelated] = children;
+      const exited = once(holder!, 'exit');
+      await reapDestroyHolders([owned], () => {});
+      expect((await exited)[1]).toBe('SIGTERM');
+      expect(unrelated!.exitCode).toBeNull(); expect(unrelated!.signalCode).toBeNull();
+    } finally {
+      for (const child of children) if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      unscope(); await rm(root, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+it.runIf(process.platform === 'linux' && spawnSync('cc', ['--version'], { stdio: 'ignore' }).status === 0).each(['released', 'unreadable', 'replaced'] as const)(
+  'rechecks a mapped holder that becomes %s before signalling', async change => {
+    const unscope = scopeFixtureProcesses();
+    const root = await mkdtemp(join(tmpdir(), 'cez-mapped-race-'));
+    const owned = join(root, 'owned'); const binary = join(root, 'holder'); const ready = join(root, 'ready');
+    const { mkdir } = await import('node:fs/promises'); await mkdir(owned);
+    const file = join(owned, 'mapped'); await writeFile(file, Buffer.alloc(4096));
+    expect(spawnSync('cc', [new URL('./fixtures/mmap-holder.c', import.meta.url).pathname, '-o', binary]).status).toBe(0);
+    const child = spawn(binary, [file, ready], { cwd: tmpdir(), stdio: 'ignore' });
+    const exited = once(child, 'exit');
+    try {
+      await vi.waitFor(async () => expect(Number(await readFile(ready, 'utf8'))).toBe(child.pid), { timeout: 10_000 });
+      let calls = 0;
+      const outcome = reapDestroyHolders([owned], async () => {
+        calls++;
+        if (change === 'replaced' && calls === 3) throw new Error('stop after replacement');
+        if (calls !== 2) return;
+        if (change === 'unreadable') { readFault.pids = [child.pid!]; readFault.maps = true; readFault.enabled = true; }
+        else if (change === 'replaced') { readFault.tokenPid = child.pid!; readFault.tokenFlip = true; }
+        else {
+          child.kill('SIGUSR1');
+          await vi.waitFor(async () => expect(await readFile(`/proc/${child.pid}/maps`, 'utf8')).not.toContain(file), { timeout: 10_000 });
+        }
+      });
+      if (change === 'unreadable') await expect(outcome).rejects.toThrow('Cannot read evidence');
+      else if (change === 'replaced') await expect(outcome).rejects.toThrow('stop after replacement');
+      else await expect(outcome).resolves.toBeUndefined();
+      expect(child.exitCode).toBeNull(); expect(child.signalCode).toBeNull();
+    } finally {
+      readFault.enabled = false; readFault.maps = false; readFault.tokenFlip = false; child.kill('SIGKILL'); await exited;
+      unscope(); await rm(root, { recursive: true, force: true });
+    }
+  }, 30_000);

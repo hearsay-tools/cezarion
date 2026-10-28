@@ -689,6 +689,43 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   /** One `/proc` listing is one full holder scan; the fixture's process scope spies the listing. */
   const listings = () => vi.mocked(fs.readdirSync).mock.calls.filter(([path]) => path === '/proc').length;
 
+  it.runIf(linux).each(['worktree', 'scratch'] as const)('retains %s and retries when a mapped holder refuses a signal', async kind => {
+    cadence();
+    const { workerId, workspace } = await settled(false);
+    const scratch = agentTmpEnv(join(f.root, '.ai/cezar'), workerId, { ...process.env, CEZ_AGENT_TMPDIR: '1' }).TMPDIR!;
+    const dir = kind === 'worktree' ? workspace.path : scratch;
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, 'mapped file'); const ready = join(f.root, `mapped-${kind}.ready`);
+    const binary = join(f.root, `mmap-${kind}`);
+    execFileSync('cc', [new URL('./fixtures/mmap-holder.c', import.meta.url).pathname, '-o', binary]);
+    writeFileSync(file, Buffer.alloc(4096));
+    const release = join(f.root, `mapped-${kind}.release`);
+    const launcher = spawn(binary, [file, ready, release], { cwd: f.root, stdio: 'ignore' });
+    const launcherExit = once(launcher, 'exit');
+    let holderPid = 0;
+    let refuse = true;
+    const kill = process.kill.bind(process);
+    vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+      if (pid === holderPid && signal === 'SIGTERM' && refuse) throw Object.assign(new Error('fixture mapped signal failure'), { code: 'EPERM' });
+      return kill(pid, signal);
+    }) as typeof process.kill);
+    try {
+      await vi.waitFor(() => expect(existsSync(ready)).toBe(true), { timeout: 10_000 });
+      holderPid = Number(readFileSync(ready, 'utf8')); expect(holderPid).toBeGreaterThan(1);
+      readdirSync('/proc'); // fixture enumeration records the child before its launcher exits
+      writeFileSync(release, 'release'); await launcherExit;
+      expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', error: expect.stringContaining('Cannot stop destroy holder') });
+      expect(() => kill(holderPid, 0)).not.toThrow(); expect(existsSync(dir)).toBe(true);
+      refuse = false;
+      await vi.waitFor(() => expect(destroyOf(workerId)?.phase).toBe('complete'), { timeout: 15_000 });
+      expect(existsSync(workspace.path)).toBe(false); expect(existsSync(scratch)).toBe(false);
+    } finally {
+      if (holderPid) { try { kill(holderPid, 'SIGKILL'); } catch { /* already exited */ } }
+      if (launcher.exitCode === null && launcher.signalCode === null) launcher.kill('SIGKILL');
+      await launcherExit;
+    }
+  }, 30_000);
+
   it.runIf(linux)('reaps a scratch holder after an earlier worktree removal', async () => {
     const { workerId, workspace } = await settled(false);
     expect(await removeOwnedWorkspace(f.root, workspace)).toMatchObject({ state: 'complete' });

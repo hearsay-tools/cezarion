@@ -5,6 +5,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { processStartToken } from '../detached-process.ts';
 import { windowsDestroyHolders, windowsStopDestroyHolder } from './windows-workspace-identity.ts';
 import { canonicalResourceRoot } from './mount-boundary.ts';
+import { mappedHolder } from './linux-mapped-holders.ts';
 
 /** Destroy-only evidence. Admission and retention keep their existing liveness policy. */
 function holds(pid: number, paths: readonly string[]): boolean {
@@ -13,13 +14,14 @@ function holds(pid: number, paths: readonly string[]): boolean {
     const path = value.replace(/ \(deleted\)$/, '');
     return paths.some(root => path === root || path.startsWith(root + sep));
   };
+  const mapped = process.platform === 'linux' ? mappedHolder(pid, paths) : 'clear';
   try { if (under(readlinkSync(`/proc/${pid}/cwd`))) return true; } catch { /* not cwd evidence */ }
   try {
     for (const fd of readdirSync(`/proc/${pid}/fd`)) {
       try { if (under(readlinkSync(`/proc/${pid}/fd/${fd}`))) return true; } catch { /* closed while scanning */ }
     }
   } catch { /* no readable fd evidence */ }
-  return false;
+  return mapped === 'held';
 }
 
 /** Do not turn loss of access to a previously scoped Linux process into proof
@@ -32,6 +34,14 @@ function unreadableHolderEvidence(pid: number): boolean {
   return false;
 }
 
+/** A vanished mapping belongs to an exited process; denied evidence must retain it. */
+function readableMapping(pid: number, roots: readonly string[]): boolean {
+  if (process.platform !== 'linux') return true;
+  const mapped = mappedHolder(pid, roots);
+  if (mapped === 'unreadable') throw new Error(`Cannot read evidence for destroy holder ${pid}`);
+  return mapped !== 'gone';
+}
+
 /** Signal only a live incarnation that still holds an authenticated resource. */
 export async function reapDestroyHolders(paths: readonly string[], assertCurrent: () => void | Promise<void>, timeoutMs = 3_000): Promise<void> {
   const roots = paths.map(canonicalResourceRoot);
@@ -39,17 +49,25 @@ export async function reapDestroyHolders(paths: readonly string[], assertCurrent
   if (process.platform !== 'linux' && process.platform !== 'darwin') throw new Error(`Destroy holder scan is unavailable on ${process.platform}`);
   const deadline = Date.now() + timeoutMs;
   const sent = new Map<number, { token: string; at: number }>();
+  const scoped = new Map<number, { token: string; mapped: boolean }>();
   for (;;) {
     await assertCurrent();
     const live = findHolders(roots);
-    if (process.platform === 'linux') for (const [pid, previous] of sent) {
-      if (!live.includes(pid) && processStartToken(pid) === previous.token && unreadableHolderEvidence(pid)) {
+    if (process.platform === 'linux') for (const [pid, evidence] of scoped) {
+      if (live.some(holder => holder.pid === pid)) continue;
+      if (processStartToken(pid) !== evidence.token) { scoped.delete(pid); continue; }
+      const mapped = mappedHolder(pid, roots);
+      if (mapped === 'unreadable' || (!evidence.mapped && unreadableHolderEvidence(pid))) {
         throw new Error(`Cannot read evidence for destroy holder ${pid}`);
       }
+      scoped.delete(pid);
     }
     if (!live.length) return;
-    for (const pid of live) await signalHolder(pid, roots, sent, assertCurrent);
-    if (Date.now() >= deadline) throw new Error(`Destroy holders remain: ${live.join(', ')}`);
+    for (const { pid, token } of live) {
+      scoped.set(pid, { token, mapped: process.platform === 'linux' && mappedHolder(pid, roots) === 'held' });
+      await signalHolder(pid, token, roots, sent, assertCurrent);
+    }
+    if (Date.now() >= deadline) throw new Error(`Destroy holders remain: ${live.map(holder => holder.pid).join(', ')}`);
     await delay(50);
   }
 }
@@ -76,8 +94,12 @@ async function reapWindowsHolders(paths: readonly string[], assertCurrent: () =>
   }
 }
 
-function findHolders(roots: readonly string[]): number[] {
-  if (process.platform === 'darwin') return findDarwinHolders(roots);
+function findHolders(roots: readonly string[]): { pid: number; token: string }[] {
+  if (process.platform === 'darwin') return findDarwinHolders(roots).flatMap(pid => {
+    const token = processStartToken(pid);
+    if (!token) { if (holds(pid, roots)) throw new Error(`Cannot verify destroy holder ${pid}`); return []; }
+    return [{ pid, token }];
+  });
   try {
     const own = new Set(readdirSync(`/proc/${process.pid}/task`).map(Number));
     const candidates = new Set<number>();
@@ -86,7 +108,13 @@ function findHolders(roots: readonly string[]): number[] {
       candidates.add(pid);
       try { for (const tid of readdirSync(`/proc/${pid}/task`)) candidates.add(Number(tid)); } catch { /* exited or unreadable */ }
     }
-    return [...candidates].filter(pid => pid > 1 && !own.has(pid) && holds(pid, roots));
+    return [...candidates].flatMap(pid => {
+      if (pid <= 1 || own.has(pid)) return [];
+      const token = processStartToken(pid);
+      if (!token) { if (holds(pid, roots)) throw new Error(`Cannot verify destroy holder ${pid}`); return []; }
+      if (!holds(pid, roots) || processStartToken(pid) !== token) return [];
+      return [{ pid, token }];
+    });
   }
   catch (error) { throw new Error(`Cannot scan destroy holders: ${String(error)}`); }
 }
@@ -112,9 +140,11 @@ function findDarwinHolders(roots: readonly string[], pid?: number): number[] {
   return [...holders];
 }
 
-async function signalHolder(pid: number, roots: readonly string[], sent: Map<number, { token: string; at: number }>, assertCurrent: () => void | Promise<void>): Promise<void> {
+async function signalHolder(pid: number, initialToken: string, roots: readonly string[], sent: Map<number, { token: string; at: number }>, assertCurrent: () => void | Promise<void>): Promise<void> {
   await assertCurrent();
   const token = processStartToken(pid);
+  if (token && token !== initialToken) return;
+  if (token && !readableMapping(pid, roots)) return;
   // A process can exit between the scan and this read. Only a holder that
   // still has scoped evidence needs a readable incarnation before signalling.
   if (!token) {
