@@ -4,6 +4,9 @@
  * confirmation. Forge failure leaves ancestry evidence with unknown PR state.
  */
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { join as joinPath, resolve as resolvePath } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { z } from 'zod';
@@ -399,26 +402,51 @@ function pickPr(prs: ForgePr[], tip: string): ForgePr | null {
   return [...prs].sort((a, b) => rank(b) - rank(a) || b.number - a.number)[0] ?? null;
 }
 
-/** Three-dot diff stats by repository, base sha and tip sha. The diff pins the options a
- *  checkout's config can change for a commit-to-commit stat (rename detection and its limit, at
- *  git's default of 1000, the algorithm, external and textconv drivers), so checkouts of one
- *  repository agree. The root in the key keeps what no flag pins, such as a checkout's own
- *  attributes, inside that checkout. Bounded, oldest first out. */
+/** Three-dot diff stats by repository, attribute state, base sha and tip sha. The diff pins the
+ *  options a checkout's config can change for a commit-to-commit stat (rename detection and its
+ *  limit, at git's default of 1000, the algorithm, external and textconv drivers). The attribute
+ *  files git reads (`info/attributes`, the root `.gitattributes`, the global attributes file) are
+ *  part of the key, and an entry expires after `DIFF_STAT_TTL_MS`, which bounds what no key part
+ *  sees, such as a nested `.gitattributes`. Bounded, oldest first out. */
 const DIFF_STAT_CACHE_MAX = 5_000;
-const diffStatCache = new Map<string, NonNullable<RepoBranchEntry['diffStat']>>();
+const DIFF_STAT_TTL_MS = 5 * 60_000;
+const diffStatCache = new Map<string, { at: number; value: NonNullable<RepoBranchEntry['diffStat']> }>();
 const DIFF_STAT_ARGS = ['diff', '--shortstat', '--find-renames', '-l1000', '--diff-algorithm=myers', '--no-ext-diff', '--no-textconv'];
 
-async function diffStat(root: string, baseSha: string, tip: string): Promise<RepoBranchEntry['diffStat']> {
-  const key = `${root}\0${baseSha}\0${tip}`;
-  const hit = diffStatCache.get(key);
-  if (hit) return hit;
-  const res = await git(root, [...DIFF_STAT_ARGS, `${baseSha}...${tip}`]);
-  if (!res.ok) return null;
-  const stat = parseShortstat(res.stdout);
-  const value = { additions: stat.adds, deletions: stat.dels };
-  diffStatCache.set(key, value);
-  if (diffStatCache.size > DIFF_STAT_CACHE_MAX) diffStatCache.delete(diffStatCache.keys().next().value as string);
-  return value;
+/** A hash of the attribute files that decide how a path diffs in this checkout. */
+async function attributeState(root: string): Promise<string> {
+  const [local, global] = await Promise.all([
+    git(root, ['rev-parse', '--git-path', 'info/attributes']),
+    git(root, ['config', '--path', '--get', 'core.attributesFile']),
+  ]);
+  const files = [
+    local.ok ? resolvePath(root, local.stdout.trim()) : '',
+    joinPath(root, '.gitattributes'),
+    global.ok ? global.stdout.trim() : joinPath(process.env.XDG_CONFIG_HOME || joinPath(homedir(), '.config'), 'git', 'attributes'),
+  ];
+  const contents = await Promise.all(files.map((file) => readFile(file, 'utf8').catch(() => '')));
+  return createHash('sha256').update(JSON.stringify(contents)).digest('hex');
+}
+
+/** The diff stat of `<baseSha>...<tip>` in `root`. The attribute state is read once per reader,
+ *  that is once per scan, and only when a stat is asked for. */
+function diffStatReader(root: string, baseSha: string | null): (tip: string) => Promise<RepoBranchEntry['diffStat']> {
+  let state: Promise<string> | undefined;
+  return async (tip) => {
+    if (!baseSha) return null;
+    state ??= attributeState(root);
+    const key = `${root}\0${await state}\0${baseSha}\0${tip}`;
+    const hit = diffStatCache.get(key);
+    if (hit && Date.now() - hit.at < DIFF_STAT_TTL_MS) return hit.value;
+    const res = await git(root, [...DIFF_STAT_ARGS, `${baseSha}...${tip}`]);
+    if (!res.ok) return null;
+    const stat = parseShortstat(res.stdout);
+    const value = { additions: stat.adds, deletions: stat.dels };
+    diffStatCache.delete(key);
+    diffStatCache.set(key, { at: Date.now(), value });
+    if (diffStatCache.size > DIFF_STAT_CACHE_MAX) diffStatCache.delete(diffStatCache.keys().next().value as string);
+    return value;
+  };
 }
 
 export interface ClassifyOptions {
@@ -547,11 +575,12 @@ export async function classifyBranches(input: ClassifyInput, options?: ClassifyO
     else d.cls = d.run ? 'not-landed' : 'orphan';
   }
 
+  const statOf = diffStatReader(root, baseSha);
   const branches: RepoBranchEntry[] = await Promise.all(
     drafts.map(async (d) => {
       const cls = d.cls as BranchClass;
-      const stat = options?.diffStats !== false && (cls === 'not-landed' || cls === 'orphan') && baseSha
-        ? await diffStat(root, baseSha, d.head.sha)
+      const stat = options?.diffStats !== false && (cls === 'not-landed' || cls === 'orphan')
+        ? await statOf(d.head.sha)
         : null;
       return {
         name: d.head.name,
@@ -663,6 +692,7 @@ export async function readRepoBranchCounts(input: ClassifyInput): Promise<RepoBr
 /** Drop the cached classification — after any mutation this server makes. */
 export function forgetRepoBranches(root: string): void {
   branchesCache.delete(root);
+  for (const key of diffStatCache.keys()) if (key.startsWith(`${root}\0`)) diffStatCache.delete(key);
 }
 
 // ---- deletion ------------------------------------------------------------------------------

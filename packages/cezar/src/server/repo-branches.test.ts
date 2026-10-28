@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BranchClass } from '@open-mercato/cezar-contract';
 import { createOwnedWorkspace } from '../delegation/workspace.ts';
 import { branchOwnerOf, type RunRecord, type RunStatus } from '../runs/store.ts';
@@ -13,6 +13,7 @@ import {
   attributeLog,
   classifyBranches,
   deleteBranches,
+  forgetRepoBranches,
   forkPoints,
   type BranchForge,
   type ClassifyInput,
@@ -459,6 +460,46 @@ describe('the branch classifier (issue 08 §A)', () => {
     } finally {
       for (const clone of clones) rmSync(clone, { recursive: true, force: true });
     }
+  });
+
+  it('reads a fresh diff stat once the checkout\'s attributes change, the entry expires, or the repository is mutated (hearsay-tools/cezarion#2029)', async () => {
+    // The task's one-line file sits under nested/, so a nested/.gitattributes in the main
+    // checkout applies to it without being one of the attribute files the key reads.
+    await git(root, 'checkout', '-q', '-b', 'cez/attrs001');
+    mkdirSync(join(root, 'nested'));
+    await commit(root, 'nested/work.txt', 'work');
+    await git(root, 'checkout', '-q', 'main');
+    mkdirSync(join(root, 'nested'), { recursive: true });
+    const runs = [runRecord('attrs001-1', 'done')];
+    const stat = async () => (await classifyBranches(input({ runs }))).payload.branches.find((b) => b.name === 'cez/attrs001')?.diffStat;
+    const text = { additions: 1, deletions: 0 };
+    const binary = { additions: 0, deletions: 0 };
+    expect(await stat()).toEqual(text);
+
+    // `info/attributes` is part of the key: marking every path binary reads a fresh stat at once.
+    const infoAttributes = join(root, '.git', 'info', 'attributes');
+    mkdirSync(join(root, '.git', 'info'), { recursive: true });
+    writeFileSync(infoAttributes, '* -diff\n');
+    expect(await stat()).toEqual(binary);
+    writeFileSync(infoAttributes, '');
+    expect(await stat()).toEqual(text);
+
+    // A nested .gitattributes is not in the key, so the entry's expiry bounds how long it is missed.
+    writeFileSync(join(root, 'nested', '.gitattributes'), '* -diff\n');
+    expect(await stat()).toEqual(text);
+    const start = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(start + 5 * 60_000);
+    try {
+      expect(await stat()).toEqual(binary);
+    } finally {
+      clock.mockRestore();
+    }
+
+    // A mutation this server makes forgets the repository's entries as well.
+    writeFileSync(join(root, 'nested', '.gitattributes'), '');
+    expect(await stat()).toEqual(binary);
+    forgetRepoBranches(root);
+    expect(await stat()).toEqual(text);
   });
 
   describe('deleteBranches', () => {
