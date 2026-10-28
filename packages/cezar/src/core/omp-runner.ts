@@ -1,8 +1,9 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { parseEffort } from '@open-mercato/cezar-contract/effort';
-import { fileURLToPath } from 'node:url';
 import { dirname, resolve as resolvePath } from 'node:path';
-import { parseAskMarker } from './ask.ts';
+import { fileURLToPath } from 'node:url';
+import { parseEffort } from '@open-mercato/cezar-contract/effort';
+import { isRecord, parseRpcLine, piMessageText, ompRpcError as rpcError, string, toPiPrompt, truncate, waitForExit } from './pi-rpc-wire.ts';
+import { armEndWatchdog, emitPiToolResult, type PiEndWatchdog, PiRpcInput, PiTextBlocks, recordPiToolCall } from './pi-rpc-turn.ts';
 import type {
   AgentEvent,
   AgentRunResult,
@@ -32,9 +33,7 @@ import {
   ompTurnStarted,
 } from './omp-ui-mapper.js';
 import { summarizeRunnerStderr } from './runner-stderr.ts';
-import { V1TextCoalescer } from './v1-text-coalescer.js';
-import { InputSubmissions } from './input-submissions.ts';
-import { boundOutputDrainAfterExit, AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS, KILL_GRACE_MS } from './runner-runtime.js';
+import { boundOutputDrainAfterExit, DEFAULT_RUN_TIMEOUT_MS, KILL_GRACE_MS } from './runner-runtime.js';
 
 /**
  * OMP's built-in tool names at the pinned version (`src/tools/builtin-names.ts`, oh-my-pi
@@ -309,32 +308,12 @@ export class OmpRunner implements AgentRunner {
     let open = true;
     let timedOut = false;
     let terminatedByCezar = false;
-    let autoEndTimer: NodeJS.Timeout | undefined;
-    let killTimer: NodeJS.Timeout | undefined;
+    let killWatchdog: PiEndWatchdog | undefined;
     let interruptKillTimer: NodeJS.Timeout | undefined;
     let ompUi = createOmpUiState();
     const textChunks: string[] = [];
-    /** One v1 `text` per complete block, never per token (pi-runner.ts, #902 / #2). */
-    const textCoalescer = new V1TextCoalescer((text) => {
-      textChunks.push(text);
-      onEvent?.({ type: 'text', text });
-    });
-    /** `contentIndex` restarts at 0 on every assistant message (as Pi's); see pi-runner.ts. */
-    let textBlockSeq = 0;
-    const openTextBlockKeys = new Map<number, string>();
-    const textBlockKey = (contentIndex: unknown): string | undefined => {
-      if (typeof contentIndex !== 'number') return undefined;
-      let key = openTextBlockKeys.get(contentIndex);
-      if (!key) {
-        key = `omp-text-${++textBlockSeq}`;
-        openTextBlockKeys.set(contentIndex, key);
-      }
-      return key;
-    };
-    const flushText = (): void => {
-      textCoalescer.flush();
-      openTextBlockKeys.clear();
-    };
+    const textBlocks = new PiTextBlocks('omp-text', textChunks, onEvent);
+    const flushText = (): void => textBlocks.flush();
     const toolCalls: AgentToolCallRecord[] = [];
     let sessionId = spec.sessionId;
     let startupStateChecked = false;
@@ -380,7 +359,7 @@ export class OmpRunner implements AgentRunner {
       inputError = new Error(`omp input stream failed: ${error.message}`);
       open = false;
       outbox.length = 0;
-      rejectAgentAck(inputError);
+      rpcInput.rejectAgentAck(inputError);
       onEvent?.({ type: 'error', message: inputError.message });
       emitUiEvent({ type: 'session.error', message: inputError.message, fatal: true });
       // The output loop owns bounded process cleanup. Retain the error even if the child
@@ -398,12 +377,24 @@ export class OmpRunner implements AgentRunner {
       }
       return writeNow(command);
     };
-    let agentInputReady = false;
-    let promptSerial = 0;
     let humanSerial = 0;
     // Every prompt carries an id: a local completion or failure ends the turn only when it
     // answers the prompt that opened it, never a steer (the mapper gates on this id).
     const humanAcks = new Set<string>();
+    // Agent input readiness, the pending agent receipt, carried input, the turn-end step and
+    // auto-end live in the shared Pi-family core.
+    const rpcInput = new PiRpcInput({
+      cli: 'omp',
+      opts,
+      onEvent,
+      textChunks,
+      isOpen: () => open,
+      turnId: () => ompUi.turnId,
+      humanAcksPending: () => humanAcks.size > 0,
+      end: () => end(),
+      flushText,
+      emitLatchedProviderError,
+    });
     // Each human prompt stays held from its write until a normalized turn has it, because an
     // ack is not a turn boundary (hearsay-tools/cezarion#1112). Exits: its user message_start,
     // its ack while the turn it opened is still open, the first turn.started after its ack,
@@ -416,59 +407,14 @@ export class OmpRunner implements AgentRunner {
     function releaseHeldIntoTurn(): void {
       for (const [id, held] of humanHeld) if (held.acked) humanHeld.delete(id);
     }
-    let agentAck: { id: string; resolve: () => void; reject: (error: Error) => void } | undefined;
-    const rejectAgentAck = (error = new Error('omp closed before prompt acknowledgement')) => {
-      const pending = agentAck; agentAck = undefined;
-      pending?.reject(error);
-    };
-    const scheduleAutoEnd = () => {
-      if (!opts.autoEndAfterFirstTurn || !open || autoEndTimer || agentAck || humanAcks.size) return;
-      autoEndTimer = setTimeout(() => {
-        autoEndTimer = undefined;
-        if (opts.shouldAutoEnd?.() !== false) end();
-      }, AUTO_END_DELAY_MS);
-      autoEndTimer.unref?.();
-    };
-    // Same readiness rules as pi-runner.ts (#505): a refusal caused only by an outstanding
-    // acknowledgement gets one readiness hint when it lands, even mid-turn.
-    let refusedForAck = false;
-    const readyAfterAck = () => {
-      if (open && agentInputReady && !ompUi.turnId && !agentAck && !humanAcks.size) {
-        refusedForAck = false;
-        opts.onAgentInputReady?.(); scheduleAutoEnd();
-      } else if (refusedForAck && open && !agentAck && !humanAcks.size && !pendingMarkerAsk) {
-        refusedForAck = false;
-        opts.onAgentInputReady?.();
-      } else if (open && !ompUi.turnId && !agentAck && !humanAcks.size && !pendingMarkerAsk) {
-        // #486: a human ack drained with no turn open — re-settle the idle boundary.
-        refusedForAck = false;
-        opts.onAgentInputReady?.();
-      }
-    };
-    let pendingMarkerAsk = false;
-    let turnTextStart = 0;
-    // Accepted agent prompts not yet seen as a user message_start (#505).
-    const submissions = new InputSubmissions();
-    // Submissions already queued when a turn began: that turn reads them. OMP reports an
-    // admitted steer at the next terminal agent_end (rpc-prompt-results.ts), never drops it.
-    let carried = new Set<string>();
-    const acked = new Set<string>();
-    let turnFailed = false;
     const sendMessage = (content: ContentBlock[], requestId?: string, inputIds: readonly string[] = []): boolean => {
       if (!open) return false;
       // A steer joins the running turn; only an idle prompt opens one (#505).
       const opensTurn = !ompUi.turnId;
-      agentInputReady = false;
-      if (opensTurn) {
-        pendingMarkerAsk = false;
-        turnTextStart = textChunks.length;
-      }
-      const { message, images } = toOmpPrompt(content);
+      rpcInput.beginPrompt(opensTurn);
+      const { message, images } = toPiPrompt(content);
       const id = requestId ?? `cezar-prompt-${++humanSerial}`;
-      if (autoEndTimer) {
-        clearTimeout(autoEndTimer);
-        autoEndTimer = undefined;
-      }
+      rpcInput.cancelAutoEnd();
       if (
         !write({
           type: 'prompt',
@@ -480,7 +426,7 @@ export class OmpRunner implements AgentRunner {
       ) {
         return false;
       }
-      if (requestId) submissions.accept(requestId, inputIds, message);
+      if (requestId) rpcInput.submissions.accept(requestId, inputIds, message);
       if (!ompUi.turnId) {
         const mapped = ompTurnStarted(ompUi, id);
         ompUi = mapped.state;
@@ -497,28 +443,17 @@ export class OmpRunner implements AgentRunner {
       if (!open) return;
       open = false;
       closedByCaller = true;
-      rejectAgentAck();
+      rpcInput.rejectAgentAck();
       flushOutbox();
       child.stdin.end();
-      killTimer = setTimeout(() => {
-        if (child.exitCode !== null || child.signalCode !== null) return;
-        terminatedByCezar = true;
-        signalSession(child, 'SIGTERM');
-        // An OMP that ignores SIGTERM would otherwise hold `result` open forever: the deadline's
-        // interrupt() is a no-op once `open` is false.
-        killTimer = setTimeout(() => {
-          if (child.exitCode === null && child.signalCode === null) signalSession(child, 'SIGKILL');
-        }, killGraceMs);
-        killTimer.unref?.();
-      }, killGraceMs);
-      killTimer.unref?.();
+      killWatchdog = armEndWatchdog(() => child, killGraceMs, () => { terminatedByCezar = true; });
     };
     const interrupt = (): void => {
       if (!open) return;
       if (sawFrame) writeNow({ type: 'abort' });
       open = false;
       closedByCaller = true;
-      rejectAgentAck();
+      rpcInput.rejectAgentAck();
       terminatedByCezar = true;
       signalSession(child, 'SIGTERM');
       interruptKillTimer = setTimeout(() => {
@@ -566,196 +501,253 @@ export class OmpRunner implements AgentRunner {
     // deadline ended the session; a spawn with nothing to drop has `uiHold` null.
     const retryPossible = (): boolean =>
       !sawFrame && !(toolsRetried && flagsRetried) && !timedOut && !terminatedByCezar && !closedByCaller && uiHold !== null;
+    const releaseFirstFrame = (): void => {
+      if (sawFrame) return;
+      sawFrame = true;
+      releaseUiHold();
+      flushOutbox();
+    };
+    const reportUsage = (value: unknown): void => {
+      const usageReport = ompMessageUsage(value);
+      if (!usageReport) return;
+      const { input, output, cacheRead = 0, cacheWrite = 0 } = usageReport.usage;
+      // v1 keeps its historical per-message weighted token convention; v2 exposes
+      // the raw components of these same parent and child reports.
+      tokensUsed += Math.round(input + output + cacheRead * 0.1 + cacheWrite * 1.25);
+      onEvent?.({ type: 'token-usage', tokensUsed });
+      if (usageReport.costUsd !== undefined) onEvent?.({ type: 'cost', usd: usageReport.costUsd });
+    };
+    const adoptState = (value: Record<string, unknown>, data: Record<string, unknown>): void => {
+      const discovered = string(data.sessionId);
+      if (discovered && discovered !== sessionId) {
+        sessionId = discovered;
+        onEvent?.({ type: 'session', sessionId: discovered });
+      }
+      // OMP v18.6.1 still has no fresh persistent-session flag. Its autoResume
+      // setting can restore history without --resume (hearsay-tools/cezarion#832).
+      // Only the startup query is evidence: later reads include our own messages.
+      if (value.id !== 'cezar-state' || startupStateChecked) return;
+      startupStateChecked = true;
+      const count = data.messageCount;
+      if (!spec.resume && typeof count === 'number' && count > 0) {
+        const message = `omp: unexpectedly restored a session with ${count} messages for a fresh step. Previous conversation context is active; check OMP's autoResume setting.`;
+        onEvent?.({ type: 'note', message });
+        emitUiEvent({ type: 'session.error', message, fatal: false });
+      }
+    };
+    /** A failure that ends the turn is its error; otherwise the turn keeps running and it is a note. */
+    const reportPromptFailure = (message: string, endsTurn: boolean): void => {
+      if (endsTurn) {
+        onEvent?.({ type: 'error', message });
+        rpcInput.failTurn();
+      } else {
+        onEvent?.({ type: 'note', message });
+      }
+    };
+    const settleHumanAck = (value: Record<string, unknown>, id: string): void => {
+      // `agentInvoked: false` is a prompt OMP finished itself: no agent run follows.
+      const runsAgent = !(isRecord(value.data) && value.data.agentInvoked === false);
+      const held = humanHeld.get(id);
+      if (humanAcks.delete(id) && held) {
+        if (value.success === true && runsAgent && (!held.turnId || held.turnId !== ompUi.turnId)) held.acked = true;
+        else humanHeld.delete(id);
+      }
+    };
+    const settlePromptResponse = (value: Record<string, unknown>, endsTurn: boolean): void => {
+      // The turn-opening prompt rejected before admission gets no `prompt_result`, so it
+      // is the turn's error here (Ruling 10). A failure after admission is reported by the
+      // `prompt_result` that follows it (rpc-prompt-results.ts `fail`), and a steer's
+      // failure leaves the turn running: both are only a note.
+      if (value.success === false) reportPromptFailure(`omp: prompt failed: ${rpcError(value)}`, endsTurn);
+      const id = string(value.id);
+      const pending = rpcInput.takeAgentAck(id);
+      if (pending) {
+        if (value.success === true) rpcInput.acceptAgentAck(pending);
+        else pending.reject(new Error(rpcError(value)));
+      } else if (id) {
+        settleHumanAck(value, id);
+      }
+      rpcInput.readyAfterAck();
+    };
+    // A failed get_state has no branch of its own: it is reported like any other failed command.
+    const handleResponse = (value: Record<string, unknown>, endsTurn: boolean): void => {
+      if (value.command === 'get_state' && value.success === true && isRecord(value.data)) {
+        adoptState(value, value.data);
+      } else if (string(value.command)?.startsWith('set_')) {
+        if (value.success !== true) {
+          onEvent?.({ type: 'note', message: `omp: ${string(value.command)} failed: ${rpcError(value)}` });
+        }
+      } else if (value.command === 'prompt') {
+        settlePromptResponse(value, endsTurn);
+      } else if (value.success === false) {
+        onEvent?.({ type: 'error', message: rpcError(value) });
+      }
+    };
+    /** The prompt failed before the agent ran: no settle follows, so the turn ends here when it
+     *  opened the turn. A steer failing mid-turn leaves it running; v2 reports it as a session
+     *  error whether or not a turn is open. Any other prompt_result is reported by the settle. */
+    const handlePromptResult = (value: Record<string, unknown>, endsTurn: boolean): void => {
+      if (value.agentInvoked !== false || value.status !== 'error') return;
+      const error = isRecord(value.error) ? value.error : {};
+      reportPromptFailure(ompProviderErrorMessage({ provider: error.provider, model: error.model, errorMessage: error.message }), endsTurn);
+    };
+    const handleAssistantMessageEnd = (value: Record<string, unknown>): void => {
+      if (!isRecord(value.message) || value.message.role !== 'assistant') return;
+      flushText();
+      // Latched until the turn ends, cleared by a later success: OMP retries past
+      // provider flakes and a recovered retry must stay silent (#256, #316).
+      if (string(value.message.stopReason) === 'error') {
+        rpcInput.failTurn();
+        latchedProviderError = ompProviderErrorMessage(value.message);
+      } else {
+        latchedProviderError = undefined;
+      }
+    };
+    const handleUserMessageStart = (value: Record<string, unknown>): void => {
+      if (!isRecord(value.message) || value.message.role !== 'user') return;
+      // The model received this prompt now (hearsay-tools/cezarion#505).
+      const text = piMessageText(value.message);
+      const ids = rpcInput.submissions.consumeOldestByText(text);
+      if (ids.length) opts.onAgentInputConsumed?.(ids);
+      else for (const [id, held] of humanHeld) {
+        if (held.text !== text) continue;
+        // Read with no normalized turn open: held until that turn.started (as pi-runner.ts).
+        if (ompUi.turnId) humanHeld.delete(id);
+        else held.acked = true;
+        break;
+      }
+    };
+    // Each type has one case. A message its handler's guard refuses ends there, as it did
+    // when this was one if/else chain: no later case reads the same type.
+    const dispatchNative = (value: Record<string, unknown>, endsTurn: boolean): void => {
+      switch (value.type) {
+        case 'response': handleResponse(value, endsTurn); break;
+        case 'prompt_result': handlePromptResult(value, endsTurn); break;
+        case 'message_update': if (isRecord(value.assistantMessageEvent)) textBlocks.update(value.assistantMessageEvent); break;
+        case 'message_end': handleAssistantMessageEnd(value); break;
+        case 'agent_start': rpcInput.startTurn(); break;
+        case 'message_start': handleUserMessageStart(value); break;
+        case 'tool_execution_start': flushText(); recordPiToolCall(value, toolCalls, onEvent); break;
+        case 'tool_execution_end': emitPiToolResult(value, onEvent); break;
+        case 'extension_error':
+          onEvent?.({ type: 'note', message: string(value.error) ?? string(value.message) ?? 'omp extension error' });
+          break;
+        case 'notice': {
+          const message = string(value.message);
+          if (message) onEvent?.({ type: 'note', message: `omp: ${message}` });
+          break;
+        }
+      }
+    };
+    const handleOutputLine = (line: string): void => {
+      releaseFirstFrame();
+      const value = parseRpcLine(line);
+      if (value === undefined) {
+        onEvent?.({ type: 'note', message: `omp: skipped unparseable RPC line: ${truncate(line)}` });
+        return;
+      }
+      opts.onActivity?.();
+      // Flush before message/tool/turn boundaries so v2 events never overtake a pending
+      // block; never on prompt acks, which can land between text_deltas (pi-runner.ts).
+      if (isRecord(value) && OMP_TEXT_BOUNDARY_TYPES.has(value.type)) flushText();
+      // A boundary only ends a turn that is open: OMP never settles an idle session, and a
+      // second boundary for the same prompt must not end the next one.
+      const turnOpen = ompUi.turnId !== null;
+      emitUi(value);
+      reportUsage(value);
+      // The mapper closed its turn on this frame: v1 ends the turn with it.
+      const endsTurn = turnOpen && ompUi.turnId === null;
+      if (!isRecord(value)) return;
+      if (value.type === 'prompt_result') humanHeld.delete(string(value.id) ?? '');
+      dispatchNative(value, endsTurn);
+      if (endsTurn) rpcInput.settleTurn();
+    };
+
+    /** Notes the Ruling 13/20/22 refusal and returns the argv for one respawn, or null when the
+     *  exit is not a refusal that may still be retried. */
+    const retryArgsAfterRefusal = (exitCode: number | null): string[] | null => {
+      // Ruling 13: exit 2 before any frame, naming tools the user's OMP settings disabled. Respawn
+      // once without them: the list only narrows, so this never widens what the step granted.
+      // Ruling 20 widens the same respawn to MCP names OMP did not register (a Claude spelling
+      // it cannot match, or a server slower than OMP's discovery window).
+      const canRetry = exitCode === 2 && !spawnError && retryPossible();
+      // Ruling 22: OMP rejects unknown flags while parsing, before it validates --tools, so this
+      // refusal comes first and a tool refusal may still follow on the respawn.
+      const droppedDirs = canRetry && !flagsRetried ? refusedOmpAddDir(stderr.join(''), spawnArgs) : null;
+      const refusal = canRetry && !droppedDirs && !toolsRetried
+        ? refusedOmpTools(stderr.join(''), ompToolList(spawnArgs))
+        : null;
+      if (!droppedDirs && !refusal) return null;
+      stderr.length = 0;
+      if (droppedDirs) {
+        flagsRetried = true;
+        omitAddDir = true;
+        onEvent?.({
+          type: 'note',
+          message: `omp: this omp CLI does not accept --add-dir (update OMP); ran without the additional directories: ${droppedDirs.join(', ')}`,
+        });
+      }
+      if (refusal) {
+        toolsRetried = true;
+        refusedTools = [...refusal.disabled, ...refusal.mcp];
+        const dropped = [
+          ...(refusal.disabled.length > 0 ? [`tools disabled by your OMP settings were dropped: ${refusal.disabled.join(', ')}`] : []),
+          ...(refusal.mcp.length > 0 ? [`MCP tools OMP has not registered were dropped: ${refusal.mcp.join(', ')}`] : []),
+        ];
+        onEvent?.({ type: 'note', message: `omp: ${dropped.join('; ')}` });
+      }
+      // Session state (mapper, held v2 events, ack sets) follows what was accepted, not the
+      // child, and the outbox still holds every command accepted so far: the new child is
+      // sent exactly those, once, when it speaks.
+      return buildOmpArgs(spec, refusedTools, { omitAddDir });
+    };
+    const runResult = (): AgentRunResult => ({ text: textChunks.join('\n').trim(), toolCalls, tokensUsed, sessionId });
+    const exitFailure = (exitCode: number): Error => {
+      const diagnostic = stderr.join('');
+      if (diagnostic.trim()) onEvent?.({ type: 'note', message: `omp CLI stderr:\n${diagnostic}` });
+      const detail = ompStderrDetail(diagnostic);
+      const message = `omp CLI exited with code ${exitCode}${detail ? ` — ${detail}` : ''}`;
+      onEvent?.({ type: 'error', message });
+      return new Error(message);
+    };
+    const reportExit = (exitCode: number | null): void => {
+      // A signal we sent is teardown, not a second agent failure (#73).
+      if (terminatedByCezar && (isSignalTerminationExit(exitCode) || (exitCode === null && child.signalCode !== null))) {
+        onEvent?.({
+          type: 'note',
+          message: `omp CLI did not exit on its own after close; terminated by cezar (${exitCode === null ? child.signalCode : `code ${exitCode}`})`,
+        });
+      } else if (exitCode === null && child.signalCode !== null && !terminatedByCezar) {
+        // Killed from outside (OOM killer, a stray kill): a truncated run, never a success.
+        const message = `omp CLI was killed by signal ${child.signalCode}`;
+        onEvent?.({ type: 'error', message });
+        throw new Error(message);
+      } else if (exitCode !== 0 && exitCode !== null) {
+        throw exitFailure(exitCode);
+      }
+    };
+    const settleExit = (exitCode: number | null): AgentRunResult => {
+      open = false;
+      releaseUiHold();
+      if (spawnError) throw spawnError;
+      if (inputError) throw inputError;
+      if (timedOut) {
+        const message = `omp CLI timed out after ${Math.round((limitMs / 60_000) * 10) / 10}m and was killed`;
+        onEvent?.({ type: 'error', message });
+        onEvent?.({ type: 'done' });
+        return runResult();
+      }
+      reportExit(exitCode);
+      if (ompUi.turnId) onEvent?.({ type: 'note', message: 'omp RPC session ended before session_settled' });
+      if (tokensUsed === 0) onEvent?.({ type: 'note', message: 'token usage not reported by omp CLI' });
+      emitUiEvent({ type: 'session.ended', reason: ompUi.stopReason });
+      onEvent?.({ type: 'done' });
+      return runResult();
+    };
+
     const result = (async function runOmp(): Promise<AgentRunResult> {
       try {
-        for await (const line of readNdjson(child.stdout)) {
-          if (!sawFrame) {
-            sawFrame = true;
-            releaseUiHold();
-            flushOutbox();
-          }
-          let value: unknown;
-          try {
-            value = JSON.parse(line);
-          } catch {
-            onEvent?.({ type: 'note', message: `omp: skipped unparseable RPC line: ${truncate(line)}` });
-            continue;
-          }
-          opts.onActivity?.();
-          // Flush before message/tool/turn boundaries so v2 events never overtake a pending
-          // block; never on prompt acks, which can land between text_deltas (pi-runner.ts).
-          if (
-            isRecord(value) &&
-            (value.type === 'tool_execution_start' ||
-              value.type === 'message_end' ||
-              value.type === 'session_settled' ||
-              value.type === 'prompt_result' ||
-              value.type === 'turn_end' ||
-              value.type === 'agent_end')
-          ) {
-            flushText();
-          }
-          // A boundary only ends a turn that is open: OMP never settles an idle session, and a
-          // second boundary for the same prompt must not end the next one.
-          const turnOpen = ompUi.turnId !== null;
-          emitUi(value);
-          const usageReport = ompMessageUsage(value);
-          if (usageReport) {
-            const { input, output, cacheRead = 0, cacheWrite = 0 } = usageReport.usage;
-            // v1 keeps its historical per-message weighted token convention; v2 exposes
-            // the raw components of these same parent and child reports.
-            tokensUsed += Math.round(input + output + cacheRead * 0.1 + cacheWrite * 1.25);
-            onEvent?.({ type: 'token-usage', tokensUsed });
-            if (usageReport.costUsd !== undefined) onEvent?.({ type: 'cost', usd: usageReport.costUsd });
-          }
-          // The mapper closed its turn on this frame: v1 ends the turn with it.
-          const endsTurn = turnOpen && ompUi.turnId === null;
-          if (!isRecord(value)) continue;
-          if (value.type === 'prompt_result') humanHeld.delete(string(value.id) ?? '');
-
-          if (value.type === 'response' && value.command === 'get_state' && value.success === true && isRecord(value.data)) {
-            const discovered = string(value.data.sessionId);
-            if (discovered && discovered !== sessionId) {
-              sessionId = discovered;
-              onEvent?.({ type: 'session', sessionId: discovered });
-            }
-            // OMP v18.6.1 still has no fresh persistent-session flag. Its autoResume
-            // setting can restore history without --resume (hearsay-tools/cezarion#832).
-            // Only the startup query is evidence: later reads include our own messages.
-            if (value.id === 'cezar-state' && !startupStateChecked) {
-              startupStateChecked = true;
-              const count = value.data.messageCount;
-              if (!spec.resume && typeof count === 'number' && count > 0) {
-                const message = `omp: unexpectedly restored a session with ${count} messages for a fresh step. Previous conversation context is active; check OMP's autoResume setting.`;
-                onEvent?.({ type: 'note', message });
-                emitUiEvent({ type: 'session.error', message, fatal: false });
-              }
-            }
-          } else if (value.type === 'response' && string(value.command)?.startsWith('set_')) {
-            if (value.success !== true) {
-              onEvent?.({ type: 'note', message: `omp: ${string(value.command)} failed: ${rpcError(value)}` });
-            }
-          } else if (value.type === 'response' && value.command === 'prompt') {
-            if (value.success === false) {
-              // The turn-opening prompt rejected before admission gets no `prompt_result`, so it
-              // is the turn's error here (Ruling 10). A failure after admission is reported by the
-              // `prompt_result` that follows it (rpc-prompt-results.ts `fail`), and a steer's
-              // failure leaves the turn running: both are only a note.
-              const message = `omp: prompt failed: ${rpcError(value)}`;
-              if (endsTurn) {
-                onEvent?.({ type: 'error', message });
-                turnFailed = true;
-              } else {
-                onEvent?.({ type: 'note', message });
-              }
-            }
-            const pending = agentAck;
-            const id = string(value.id);
-            if (pending && id === pending.id) {
-              agentAck = undefined;
-              if (value.success === true) { acked.add(pending.id); pending.resolve(); }
-              else pending.reject(new Error(rpcError(value)));
-            } else if (id) {
-              // `agentInvoked: false` is a prompt OMP finished itself: no agent run follows.
-              const runsAgent = !(isRecord(value.data) && value.data.agentInvoked === false);
-              const held = humanHeld.get(id);
-              if (humanAcks.delete(id) && held) {
-                if (value.success === true && runsAgent && (!held.turnId || held.turnId !== ompUi.turnId)) held.acked = true;
-                else humanHeld.delete(id);
-              }
-            }
-            readyAfterAck();
-          } else if (value.type === 'response' && value.success === false) {
-            onEvent?.({ type: 'error', message: rpcError(value) });
-          } else if (value.type === 'prompt_result' && value.agentInvoked === false && value.status === 'error') {
-            // The prompt failed before the agent ran: no settle follows, so the turn ends here
-            // when it opened the turn. A steer failing mid-turn leaves it running.
-            const error = isRecord(value.error) ? value.error : {};
-            const message = ompProviderErrorMessage({ provider: error.provider, model: error.model, errorMessage: error.message });
-            if (endsTurn) {
-              onEvent?.({ type: 'error', message });
-              turnFailed = true;
-            } else {
-              // v2 reports it as a session error whether or not a turn is open.
-              onEvent?.({ type: 'note', message });
-            }
-          } else if (value.type === 'message_update' && isRecord(value.assistantMessageEvent)) {
-            const update = value.assistantMessageEvent;
-            const contentKey = textBlockKey(update.contentIndex);
-            if (update.type === 'text_delta' && typeof update.delta === 'string') {
-              textCoalescer.append(contentKey, update.delta);
-            } else if (update.type === 'text_end') {
-              const snapshot = typeof update.content === 'string' ? update.content : undefined;
-              textCoalescer.complete(contentKey, snapshot);
-              if (typeof update.contentIndex === 'number') openTextBlockKeys.delete(update.contentIndex);
-            }
-          } else if (value.type === 'message_end' && isRecord(value.message) && value.message.role === 'assistant') {
-            flushText();
-            // Latched until the turn ends, cleared by a later success: OMP retries past
-            // provider flakes and a recovered retry must stay silent (#256, #316).
-            if (string(value.message.stopReason) === 'error') {
-              turnFailed = true;
-              latchedProviderError = ompProviderErrorMessage(value.message);
-            } else {
-              latchedProviderError = undefined;
-            }
-          } else if (value.type === 'agent_start') {
-            // Only a prompt OMP acknowledged before this agent_start can be in its turn (#505).
-            carried = new Set(submissions.pendingIds().filter(id => acked.has(id)));
-            turnFailed = false;
-          } else if (value.type === 'message_start' && isRecord(value.message) && value.message.role === 'user') {
-            // The model received this prompt now (#505).
-            const text = ompMessageText(value.message);
-            const ids = submissions.consumeOldestByText(text);
-            if (ids.length) opts.onAgentInputConsumed?.(ids);
-            else for (const [id, held] of humanHeld) {
-              if (held.text !== text) continue;
-              // Read with no normalized turn open: held until that turn.started (as pi-runner.ts).
-              if (ompUi.turnId) humanHeld.delete(id);
-              else held.acked = true;
-              break;
-            }
-          } else if (value.type === 'tool_execution_start') {
-            flushText();
-            const id = string(value.toolCallId);
-            const name = string(value.toolName);
-            if (id && name) {
-              toolCalls.push({ id, name, input: value.args });
-              onEvent?.({ type: 'tool-call', id, tool: name, input: value.args });
-            }
-          } else if (value.type === 'tool_execution_end') {
-            const id = string(value.toolCallId);
-            if (id) {
-              onEvent?.({
-                type: 'tool-result',
-                toolCallId: id,
-                result: contentText(isRecord(value.result) ? value.result.content : undefined) ?? '',
-                isError: value.isError === true,
-              });
-              emitImages(isRecord(value.result) ? value.result.content : undefined, onEvent);
-            }
-          } else if (value.type === 'extension_error') {
-            onEvent?.({ type: 'note', message: string(value.error) ?? string(value.message) ?? 'omp extension error' });
-          } else if (value.type === 'notice') {
-            const message = string(value.message);
-            if (message) onEvent?.({ type: 'note', message: `omp: ${message}` });
-          }
-
-          if (endsTurn) {
-            flushText();
-            emitLatchedProviderError();
-            pendingMarkerAsk = parseAskMarker(textChunks.slice(turnTextStart).join('\n')) !== null;
-            agentInputReady = true;
-            // Input queued before this turn began was processed by it, even without a user
-            // message_start (#505) — unless the turn failed and may never have reached the model.
-            const read = turnFailed ? [] : [...carried].flatMap(id => submissions.consume(id));
-            turnFailed = false;
-            carried = new Set();
-            if (read.length) opts.onAgentInputConsumed?.(read);
-            onEvent?.({ type: 'turn-end' });
-            scheduleAutoEnd();
-          }
-        }
+        for await (const line of readNdjson(child.stdout)) handleOutputLine(line);
       } catch (error) {
         if (child.exitCode === null && child.signalCode === null) {
           // A live child whose stream failed is not a refusal: no respawn follows, so nothing
@@ -773,12 +765,12 @@ export class OmpRunner implements AgentRunner {
         }
       } finally {
         if (deadline) clearTimeout(deadline);
-        if (autoEndTimer) clearTimeout(autoEndTimer);
-        if (killTimer) clearTimeout(killTimer);
+        rpcInput.stopAutoEndTimer();
+        killWatchdog?.clear();
         // A refused spawn may still be respawned: stay open so input accepted meanwhile is kept
         // for the new child instead of being refused in the gap.
         if (!retryPossible()) open = false;
-        rejectAgentAck();
+        rpcInput.rejectAgentAck();
       }
 
       flushText();
@@ -786,97 +778,23 @@ export class OmpRunner implements AgentRunner {
       emitLatchedUiProviderError();
       const exitCode = await waitForExit(child);
       if (interruptKillTimer) clearTimeout(interruptKillTimer);
-      // Ruling 13: exit 2 before any frame, naming tools the user's OMP settings disabled. Respawn
-      // once without them: the list only narrows, so this never widens what the step granted.
-      // Ruling 20 widens the same respawn to MCP names OMP did not register (a Claude spelling
-      // it cannot match, or a server slower than OMP's discovery window).
-      const canRetry = exitCode === 2 && !spawnError && retryPossible();
-      // Ruling 22: OMP rejects unknown flags while parsing, before it validates --tools, so this
-      // refusal comes first and a tool refusal may still follow on the respawn.
-      const droppedDirs = canRetry && !flagsRetried ? refusedOmpAddDir(stderr.join(''), spawnArgs) : null;
-      const refusal = canRetry && !droppedDirs && !toolsRetried
-        ? refusedOmpTools(stderr.join(''), ompToolList(spawnArgs))
-        : null;
-      if (droppedDirs || refusal) {
-        stderr.length = 0;
-        if (droppedDirs) {
-          flagsRetried = true;
-          omitAddDir = true;
-          onEvent?.({
-            type: 'note',
-            message: `omp: this omp CLI does not accept --add-dir (update OMP); ran without the additional directories: ${droppedDirs.join(', ')}`,
-          });
-        }
-        if (refusal) {
-          toolsRetried = true;
-          refusedTools = [...refusal.disabled, ...refusal.mcp];
-          const dropped = [
-            ...(refusal.disabled.length > 0 ? [`tools disabled by your OMP settings were dropped: ${refusal.disabled.join(', ')}`] : []),
-            ...(refusal.mcp.length > 0 ? [`MCP tools OMP has not registered were dropped: ${refusal.mcp.join(', ')}`] : []),
-          ];
-          onEvent?.({ type: 'note', message: `omp: ${dropped.join('; ')}` });
-        }
-        // Session state (mapper, held v2 events, ack sets) follows what was accepted, not the
-        // child, and the outbox still holds every command accepted so far: the new child is
-        // sent exactly those, once, when it speaks.
-        spawnArgs = buildOmpArgs(spec, refusedTools, { omitAddDir });
+      const respawnArgs = retryArgsAfterRefusal(exitCode);
+      if (respawnArgs) {
+        spawnArgs = respawnArgs;
         child = spawnOmp(spawnArgs);
         if (child.pid !== undefined) opts.onPidChange?.(child.pid);
         deadline = armDeadline();
         return runOmp();
       }
-      open = false;
-      releaseUiHold();
-      if (spawnError) throw spawnError;
-      if (inputError) throw inputError;
-      if (timedOut) {
-        const message = `omp CLI timed out after ${Math.round((limitMs / 60_000) * 10) / 10}m and was killed`;
-        onEvent?.({ type: 'error', message });
-        onEvent?.({ type: 'done' });
-        return { text: textChunks.join('\n').trim(), toolCalls, tokensUsed, sessionId };
-      }
-      // A signal we sent is teardown, not a second agent failure (#73).
-      if (terminatedByCezar && (isSignalTerminationExit(exitCode) || (exitCode === null && child.signalCode !== null))) {
-        onEvent?.({
-          type: 'note',
-          message: `omp CLI did not exit on its own after close; terminated by cezar (${exitCode === null ? child.signalCode : `code ${exitCode}`})`,
-        });
-      } else if (exitCode === null && child.signalCode !== null && !terminatedByCezar) {
-        // Killed from outside (OOM killer, a stray kill): a truncated run, never a success.
-        const message = `omp CLI was killed by signal ${child.signalCode}`;
-        onEvent?.({ type: 'error', message });
-        throw new Error(message);
-      } else if (exitCode !== 0 && exitCode !== null) {
-        const diagnostic = stderr.join('');
-        if (diagnostic.trim()) onEvent?.({ type: 'note', message: `omp CLI stderr:\n${diagnostic}` });
-        const detail = ompStderrDetail(diagnostic);
-        const message = `omp CLI exited with code ${exitCode}${detail ? ` — ${detail}` : ''}`;
-        onEvent?.({ type: 'error', message });
-        throw new Error(message);
-      }
-      if (ompUi.turnId) onEvent?.({ type: 'note', message: 'omp RPC session ended before session_settled' });
-      if (tokensUsed === 0) onEvent?.({ type: 'note', message: 'token usage not reported by omp CLI' });
-      emitUiEvent({ type: 'session.ended', reason: ompUi.stopReason });
-      onEvent?.({ type: 'done' });
-      return { text: textChunks.join('\n').trim(), toolCalls, tokensUsed, sessionId };
+      return settleExit(exitCode);
     })();
 
     const session: AgentSession = {
       result,
       sendMessage,
-      sendAgentMessage: (content, inputIds = [], options) => {
-        // #505: a running turn is steered; only a pending CEZ:ASK (unless the caller delivers
-        // beside it) or an unacknowledged prompt refuses.
-        const askRefuses = pendingMarkerAsk && !options?.besideQuestion;
-        if (open && !askRefuses && (agentAck || humanAcks.size)) { refusedForAck = true; return false; }
-        if (!open || askRefuses) return false;
-        const id = `cezar-agent-${++promptSerial}`;
-        let resolve!: () => void, reject!: (error: Error) => void;
-        const acknowledged = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
-        agentAck = { id, resolve, reject };
-        if (!sendMessage(content, id, inputIds)) { agentAck = undefined; return false; }
-        return acknowledged;
-      },
+      // A failed write returns no receipt.
+      sendAgentMessage: (content, inputIds = [], options) =>
+        rpcInput.sendAgentMessage(content, inputIds, options, sendMessage, () => false),
       // A written prompt cannot be unwritten; only stop reporting an acknowledged one as held.
       discardQueuedMessages: () => { humanHeld.clear(); },
       holdsHumanInput: () => humanHeld.size > 0,
@@ -895,6 +813,11 @@ export class OmpRunner implements AgentRunner {
     return session;
   }
 }
+
+/** Native message types that end a text block; a prompt or response ack is not one. */
+const OMP_TEXT_BOUNDARY_TYPES: ReadonlySet<unknown> = new Set([
+  'tool_execution_start', 'message_end', 'session_settled', 'prompt_result', 'turn_end', 'agent_end',
+]);
 
 /**
  * The stderr line an exit error carries. OMP's "no usable model" exit prints its reason first
@@ -947,62 +870,6 @@ function refusedOmpAddDir(stderr: string, args: readonly string[]): string[] | n
   return dirs.length > 0 ? dirs : null;
 }
 
-/** Same as pi-runner.ts `toPiPrompt`. */
-function toOmpPrompt(content: ContentBlock[]): {
-  message: string;
-  images: Array<{ type: 'image'; data: string; mimeType: string }>;
-} {
-  const text: string[] = [];
-  const images: Array<{ type: 'image'; data: string; mimeType: string }> = [];
-  for (const block of content) {
-    if (block.type === 'text') text.push(block.text);
-    else images.push({ type: 'image', data: block.source.data, mimeType: block.source.media_type });
-  }
-  return { message: text.join('\n'), images };
-}
-
-/** Same as pi-runner.ts `emitImages`. */
-function emitImages(value: unknown, onEvent?: (event: AgentEvent) => void): void {
-  if (!Array.isArray(value)) return;
-  for (const part of value) {
-    if (isRecord(part) && part.type === 'image') {
-      const data = string(part.data);
-      const mediaType = string(part.mimeType);
-      if (data && mediaType) onEvent?.({ type: 'image', data, mediaType });
-    }
-  }
-}
-
-/** Same as pi-runner.ts `piMessageText`. */
-function ompMessageText(message: Record<string, unknown>): string {
-  if (typeof message.content === 'string') return message.content;
-  return Array.isArray(message.content)
-    ? message.content.flatMap(part => isRecord(part) && part.type === 'text' && typeof part.text === 'string' ? [part.text] : []).join('\n')
-    : '';
-}
-
-/** Same as pi-runner.ts `contentText`. */
-function contentText(value: unknown): string | undefined {
-  if (typeof value === 'string') return value;
-  if (!Array.isArray(value)) return undefined;
-  const text = value
-    .map((part) => (isRecord(part) && part.type === 'text' ? string(part.text) : undefined))
-    .filter((part): part is string => part !== undefined);
-  return text.length > 0 ? text.join('\n') : undefined;
-}
-
-/** OMP's failure response carries `error` as a string (rpc-mode.ts, v18.4.11). */
-function rpcError(value: Record<string, unknown>): string {
-  if (typeof value.error === 'string') return value.error;
-  const error = isRecord(value.error) ? value.error : undefined;
-  return string(error?.message) ?? string(value.message) ?? `omp RPC command ${string(value.command) ?? 'unknown'} failed`;
-}
-
-function waitForExit(child: ChildProcessWithoutNullStreams): Promise<number | null> {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(child.exitCode);
-  return new Promise((resolve) => child.once('close', resolve));
-}
-
 function wrapSpawnError(error: NodeJS.ErrnoException, bin: string): Error {
   if (error.code === 'ENOENT') {
     return new Error(`\`${bin}\` not found on PATH: install OMP (https://omp.sh) and run \`omp login\``);
@@ -1017,14 +884,3 @@ function mockOmpPath(): string {
   return resolvePath(here, '..', '..', 'scripts', 'mock-omp-rpc.mjs');
 }
 
-function truncate(value: string, max = 200): string {
-  return value.length > max ? `${value.slice(0, max)}…` : value;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function string(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
-}
