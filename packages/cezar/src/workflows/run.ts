@@ -20,8 +20,10 @@ import { createActiveRun, type ActiveRun } from './active-run.ts';
 import { claudeScheduleWakeupDelay, isRunnerActivity, appendTurnText, appendCompletedAssistantText, trackTurnTail, stripDoneMarker, stripMonitoringMarker, emitAskRequested, askCardFields, humanWaitCard, classifyTurnEnd, discardQueuedMessagesOnAsk, type TurnEndRead } from './run/turn-markers.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
 import { canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested } from './run/run-guards.ts';
+import { beginUsageInvocation, recordReportedCost, recordUsageUiEvent, recordUsagePeaks } from './run/usage-accounting.ts';
 import { releaseActiveResources } from './run/drop-active.ts';
 import { agentDirectories, applyTemplate, composeSystemPrompt, expandRegistrySlashSkill, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt, withResumeContext } from './run/prompts.ts';
+import { delegationExecutionSettings, selectDelegationExecutionSettings } from '../delegation/execution-settings.ts';
 import { settlesAsDone, stepLabel, stepScope } from './run/steps.ts';
 import { makeRunTitle } from '../runs/run-title.ts';
 export { agentDirectories, composeSystemPrompt, expandRegistrySlashSkill, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt } from './run/prompts.ts';
@@ -29,12 +31,15 @@ export { stepLabel } from './run/steps.ts';
 export { makeRunTitle } from '../runs/run-title.ts';
 import { pendingConversationBatch, reservesAutomaticWake, formatAgentInput, agentInputOutcomeText } from './run/input-batch.ts';
 import { clearUnreadInputTimer, clearHeldHumanInputTimer, harnessOwesInput, harnessHoldsHumanInput, clearNoWaitNudgeReplyTimer, clearIdleTimer, clearAutosaveTimer } from './run/input-timers.ts';
+import * as wakeLedger from './run/wake-ledger.ts';
+import * as pendingAskFacts from './run/pending-ask-facts.ts';
+import * as workflowPosition from './run/workflow-position.ts';
 import { RUN_EXITS, transition, transitionVia, type RunExitId } from './run-states.ts';
 import { nextLineEntry } from './line-order.ts';
 import { accountHeldFor, formatWakeInstant, resumeInFlight, runAccountKey, queuedRecoveryInput, queuedStartAt, sessionlessWakePrompt } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
 import { executionAccount } from './execution-account.ts';
-import { CANCEL_MESSAGES, chargesBudget, chargesBudgetMessage, ciWatchRequest, hasPrWait, holdsOwedResults, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitAnswerKind, waitInputId, waitNamedInputIds, waitResultText } from './waits.ts';
+import { CANCEL_MESSAGES, chargesBudget, chargesBudgetMessage, ciWatchRequest, hasPrWait, holdsOwedResults, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitAnswerKind, waitInputId, waitResultText } from './waits.ts';
 import { assertOwnedWorkerWaitScope, assertRequestWaitScope, delegationWaitRefusal, isDelegationWait, peerWaitEntry, peerWaitOf, peerWaitResult, runsAwaitingPeer, workerListTarget, workerWaitTarget } from './wait-scope.ts';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
 import { previewCdpSession, previewRunContext, previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
@@ -42,7 +47,7 @@ import { acquireCiResources } from '../ci-wait/resources.ts';
 import { artifactInstructions, provisionArtifactDirectory } from '../artifacts/lifecycle.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import type { CezarToolHandlers } from '../ci-wait/controller.ts';
-import { workerContextHash, workerWorkflowHash, workerStepIdentity, captureWorkerAccount, boundWorkerAccountEnv, WorkerIdentityError, type WorkerAccountBinding, type WorkerExecutionIdentity, type WorkerStepIdentity } from '../delegation/execution-identity.ts';
+import { workerIdentity, continuationDefStep, ownedWorkflow, workerStepIdentity, captureWorkerAccount, boundWorkerAccountEnv, WorkerIdentityError, type WorkerAccountBinding, type WorkerStepIdentity } from '../delegation/execution-identity.ts';
 import { buildChildEnv } from '../core/agent-env.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { randomUUID } from 'node:crypto';
@@ -53,7 +58,7 @@ import {
   type AskRequest,
 } from '../core/ask.ts';
 import { type AgentSession } from '../core/claude-cli-runner.ts';
-import { hasRegisteredRunProcess, onUsage, registerRunProcess, replaceRunProcess, unregisterRunProcess, type ProcessUsage } from '../core/process-usage.ts';
+import { hasRegisteredRunProcess, onUsage, registerRunProcess, replaceRunProcess, type ProcessUsage } from '../core/process-usage.ts';
 import { isSessionLeader, processGroupAlive, processGroupOf, sessionGroupOf, signalProcessGroup } from '../core/session-process.ts';
 import { ProcessWaitSupervisor, probeProcessWait } from '../process-wait/supervisor.ts';
 import { confineExitFile, type ExitFileRoots } from '../process-wait/exit-file.ts';
@@ -64,7 +69,6 @@ import { parseUsageLimit } from '../core/usage-limit.ts';
 import { startManagedSession } from '../core/managed-session.ts';
 import { createRunner } from '../core/runner-factory.ts';
 import type { RunnerId } from '../core/agent-runner.ts';
-import { modelConflictsWithRunner } from '../core/model-presets.ts';
 import { AGENT_MODELS_LOCKED_ERROR, agentModelsLocked } from '../core/agent-model-policy.ts';
 import {
   ModelIdentityError,
@@ -145,7 +149,7 @@ import { workerQuestionFallback } from './question-routing.ts';
 import { messagedParentSince, parkNoticeIdInUse, parkNoticeMessage, parkNoticeWait, parkingTurn } from '../delegation/park-notice.ts';
 import { workerOutcome } from '../runs/delegation-state.ts';
 import { loadWorkflows } from './load.ts';
-import { applyOutcomes, type RunOutcome } from '../runs/outcome-commit.ts';
+import type { RunOutcome } from '../runs/outcome-commit.ts';
 import { acknowledgedBatch, answerOutcomes, chargedIf, retryDeliveryCheckpoint } from './outcome-batches.ts';
 import { analyseAcknowledgedInput, type AcknowledgedInput } from './input-acknowledgement.ts';
 import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
@@ -1078,85 +1082,13 @@ export class RunManager {
     };
   }
 
-  /**
-   * Resolve this step’s account environment from agent-accounts.json and record its id. Ordinary
-   * steps prefer the recorded account, then a matching run override, then project selection and
-   * default. Keep account and session ids paired; owned workers use pinned identity.
-   */
-  /**
-   * Ordinary runs retain mutable discovery; owned runs require explicit durable evidence. With a
-   * `stepId`, the step's own pinned entry is checked too (#452): its account must still be
-   * available and its model/effort must clear the lock, exactly as the run-level fields must.
-   */
-  private workerIdentity(runId: string, stepId?: string) {
-    const run = this.store.getRun(runId);
-    if (run?.delegation?.role !== 'worker') return undefined;
-    const identity = this.store.readWorkerIdentity(runId);
-    if (!identity) throw new WorkerIdentityError('Worker execution identity evidence is unavailable');
-    if (identity.kind === 'internal') return undefined;
-    if (identity.contextHash !== undefined && (!run.delegation.context || workerContextHash(run.delegation.context) !== identity.contextHash)) {
-      throw new WorkerIdentityError('Accepted worker context recipe is unavailable or changed');
-    }
-    this.ownedWorkflow(run, identity);
-    if (agentModelsLocked(this.repoRoot) && (identity.model !== undefined || identity.effort !== undefined)) {
-      throw new WorkerIdentityError(`Accepted worker settings cannot run: ${AGENT_MODELS_LOCKED_ERROR}`);
-    }
-    if (run.runner !== identity.account.provider || run.agentProfile !== identity.account.profileId ||
-        run.model !== identity.model || run.effort !== identity.effort) {
-      throw new WorkerIdentityError('Accepted worker execution identity does not match its run');
-    }
-    // Availability is checked for the account about to be USED: the selected step's entry when
-    // there is one, and the single run-level account only for a legacy identity that has no
-    // per-step list. A per-step identity checked without a step (the evidence-only calls in
-    // `execute`, `runContinuation` and `ownedJob`) binds nothing here — the launch resolves its
-    // step and binds that account — so a first-step login removed after its step finished never
-    // stops a later step, a Continue or a recovery whose own account is intact (#465).
-    const step = stepId === undefined ? undefined : workerStepIdentity(identity, stepId);
-    if (step && agentModelsLocked(this.repoRoot) && (step.model !== undefined || step.effort !== undefined)) {
-      throw new WorkerIdentityError(`Accepted worker settings cannot run: ${AGENT_MODELS_LOCKED_ERROR}`);
-    }
-    const account = step?.account ?? (identity.steps === undefined ? identity.account : undefined);
-    if (account) boundWorkerAccountEnv(account, buildChildEnv({ backend: account.provider }));
-    return identity;
-  }
-
   /** The pinned identity one agent step of an owned worker runs under; undefined for ordinary and internal runs. */
   private workerStep(runId: string, stepId: string | undefined): WorkerStepIdentity | undefined {
-    const identity = this.workerIdentity(runId, stepId);
+    const identity = workerIdentity(this.store, this.repoRoot, runId, stepId);
     if (!identity) return undefined;
     return stepId === undefined
       ? { account: identity.account, grants: identity.grants, ...(identity.model === undefined ? {} : { model: identity.model }), ...(identity.effort === undefined ? {} : { effort: identity.effort }) }
       : workerStepIdentity(identity, stepId);
-  }
-
-  /**
-   * The steps a continuation may extend. An accepted worker's public `workflowDef` is authority
-   * only while its identity binds it: a catalog chain through `ownedWorkflow`, and the default
-   * quick-task from the built-in constant, exactly the definition `ownedJob` launches — a salvaged
-   * or edited public record never picks which pinned identity a turn runs under.
-   */
-  private continuationDefSteps(record: RunRecord | undefined): WorkflowStepDef[] | undefined {
-    if (record?.delegation?.role === 'worker') {
-      const identity = this.store.readWorkerIdentity(record.id);
-      if (identity?.kind === 'accepted') return (this.ownedWorkflow(record, identity) ?? QUICK_TASK_WORKFLOW).steps;
-    }
-    return record?.workflowDef?.steps;
-  }
-
-  /**
-   * The definition step a continuation extends: the one owning the resumed session, else the
-   * chain's last agent step — a synthetic `continue-N` owner and a fresh-session continuation
-   * both extend the run's tail. Shared by `continueRun` (which identity to hold the override
-   * against) and `runContinuation` (which tools, model, effort and account the turn gets).
-   */
-  private continuationDefStep(record: RunRecord | undefined, sessionId: string | undefined): WorkflowStepDef | undefined {
-    const defSteps = this.continuationDefSteps(record);
-    if (defSteps === undefined) return undefined;
-    const owningStep = sessionId === undefined ? undefined : record?.steps.find((s) => s.sessionId === sessionId);
-    if (sessionId !== undefined && owningStep === undefined) return undefined;
-    const ciSource = defSteps.find(step => step.id === record?.workflowResumeStepId && stepKind(step) === 'agent');
-    if (ciSource && record?.steps.find(step => step.id === ciSource.id)?.status === 'failed') return ciSource;
-    return defSteps.find((s) => s.id === owningStep?.id) ?? [...defSteps].reverse().find((s) => stepKind(s) === 'agent');
   }
 
   private async agentEnvForStep(
@@ -2062,12 +1994,8 @@ export class RunManager {
     return 'park';
   }
 
-  /** The closing session leaves something undelivered: a resolved wait, or a wake of messages
-   *  alone (`owesWake`), which reopens the run as a resolved wait does and so counts against the
-   *  same bound (hearsay-tools/cezarion#1235). */
   private owesDelivery(runId: string): boolean {
-    const run = this.store.getRun(runId);
-    return !!run && (resolvedWaits(run).length > 0 || this.owesWake(run));
+    return wakeLedger.owesDelivery(this.store, runId, run => this.owesWake(run));
   }
 
   /** A delivery, a human or a terminal path ends a run of failed deliveries and its backoff. */
@@ -2097,22 +2025,8 @@ export class RunManager {
     this.move(runId, 'resume');
   }
 
-  /** `outcomes`, clearing the failure count when they deliver a wait result (`cleared`) or leave one
-   *  of `ids` a message the agent received (hearsay-tools/cezarion#1235). The opening prompt of a wake
-   *  continuation is not one: a session that reads it and fails has delivered nothing it owed, nor
-   *  has a read reported for a message whose submission was never acknowledged. */
   private withFailuresCleared(runId: string, outcomes: RunOutcome[], ids: readonly string[], cleared = false): RunOutcome[] {
-    const run = this.store.getRun(runId);
-    const next = run && applyOutcomes(run, outcomes).next;
-    const received = !!next?.agentInputs?.some(input => ids.includes(input.id) && !!input.deliveredAt && !input.awaitingRead && (!!input.conversation || this.isUnnamedLifecycleInput(next, input)));
-    return cleared || received ? [...outcomes, { kind: 'counted', waitDeliveryFailures: undefined }] : outcomes;
-  }
-
-  /** A lifecycle input no wait names is a wake of its own, a queued refusal among them
-   *  (hearsay-tools/cezarion#1301): `owesDelivery` counts it as owed, so its delivery ends the run
-   *  of failed deliveries, as a message's does. */
-  private isUnnamedLifecycleInput(run: RunRecord, input: AgentInput): boolean {
-    return input.source === 'lifecycle' && !waitNamedInputIds(run).has(input.id);
+    return wakeLedger.withFailuresCleared(this.store, runId, outcomes, ids, cleared);
   }
 
   /** The failure count is on the run record, so a restart keeps it (hearsay-tools/cezarion#1234). */
@@ -2120,15 +2034,8 @@ export class RunManager {
     this.store.commitOutcome(runId, { kind: 'counted', waitDeliveryFailures: undefined }, {}, { bestEffort: true });
   }
 
-  /**
-   * Automatic wakes spent since the user last wrote: timer wakes and autonomous nudges, against
-   * one budget of `MAX_AUTO_CONTINUES` (hearsay-tools/cezarion#1234). The count is on the run
-   * record, so a restart, a scheduler continuation and a usage-limit resume keep it. A timer batch
-   * still awaiting its acknowledgement counts the unit it reserved.
-   */
   private automaticWakes(runId: string, beforeHumanReset?: HumanAnswerBudget): number {
-    const reserved = this.active.get(runId)?.agentInputFlight?.wakeReserved ? 1 : 0;
-    return (beforeHumanReset?.spent ?? this.store.getRun(runId)?.automaticWakes ?? 0) + reserved;
+    return wakeLedger.automaticWakes(this.store, this.active, runId, beforeHumanReset);
   }
 
   /** Spend one automatic wake on the record; returns the count after it. */
@@ -2297,27 +2204,8 @@ export class RunManager {
     }
   }
 
-  /**
-   * Messages are not waits (hearsay-tools/cezarion#1235): every conversation input the run has not
-   * received is an owed wake in its own right, beside its waits and beside a pending question. Not
-   * one claimed by an inbox read, one a provider flight or opening already carries, one a resolved
-   * wait carries as its wake, or the parent's answer to a routed question, which goes through the
-   * answer seam (`answerRoutedQuestion`). A lifecycle input no wait carries any more counts as one:
-   * the wake a legacy cancelled worker wait queued before the upgrade, which the wait list keeps as
-   * a cancelled entry and delivers as ordinary input, and a refusal queued for a closed session
-   * (hearsay-tools/cezarion#1301). One a listed wait or a delivered one names is that wait's, never
-   * owed again.
-   */
   private pendingConversationWakes(run: RunRecord, beforeHumanReset?: HumanAnswerBudget): AgentInput[] {
-    const owed = new Set(resolvedWaits(run).map(waitInputId));
-    const named = waitNamedInputIds(run);
-    const answer = this.routedAnswer(run.id);
-    // Past the automatic-wake budget a peer message wakes nothing: it stays queued for the next
-    // turn (spec 2026-10-27-task-communication-protocol § 8, `holdPeerWakesAtCap`).
-    const spent = this.automaticWakes(run.id, beforeHumanReset) >= MAX_AUTO_CONTINUES;
-    return (run.agentInputs ?? []).filter(input => { return (!!input.conversation || (input.source === 'lifecycle' && !named.has(input.id))) &&
-      !input.deliveredAt && !hasLiveInboxClaim(input) && !(spent && chargesBudgetMessage(input)) &&
-      !owed.has(input.id) && input.id !== answer?.id && !this.providerOwnsInboxInput(run.id, input.id); });
+    return wakeLedger.pendingConversationWakes(run, { routedAnswer: id => this.routedAnswer(id), countAutomaticWakes: (id, budget) => this.automaticWakes(id, budget), providerOwnsInboxInput: (id, inputId) => this.providerOwnsInboxInput(id, inputId) }, MAX_AUTO_CONTINUES, beforeHumanReset);
   }
 
   /** Peer messages the spent budget keeps from waking the run (spec § 8). A turn in progress takes
@@ -2338,20 +2226,12 @@ export class RunManager {
     return routed && this.store.getRun(runId)?.agentInputs?.find(input => !input.deliveredAt && answersQuestion(routed.message, input));
   }
 
-  /** A wake is owed: a resolved wait, a message, or a parent's answer the run has not received. */
   private owesWake(run: RunRecord, beforeHumanReset?: HumanAnswerBudget): boolean {
-    // A pending native question takes nothing but its answer: results and messages wait for the
-    // answer's turn end, and a run with no session is not reopened for them, where its provider
-    // would ask again (hearsay-tools/cezarion#1235, parent spec § Wakes beside questions).
-    if (openWaits(run).some(wait => wait.kind === 'human' && wait.via === 'native-ask')) return this.routedAnswer(run.id) !== undefined;
-    if (resolvedWaits(run).length) return true;
-    return this.pendingConversationWakes(run, beforeHumanReset).length > 0 || this.routedAnswer(run.id) !== undefined;
+    return wakeLedger.owesWake(run, { routedAnswer: id => this.routedAnswer(id), pendingConversationWakes: (record, budget) => this.pendingConversationWakes(record, budget) }, beforeHumanReset);
   }
 
-  /** A live session takes a wake at its turn boundary. A native question is mid-turn and takes one
-   *  input there: the parent's answer to it, through the answer seam (#505). */
   private takesWake(runId: string, state: ActiveRun): boolean {
-    return state.atTurnBoundary === state.session || (!!state.pendingHumanAsk && this.routedAnswer(runId) !== undefined);
+    return wakeLedger.takesWake(runId, state, id => this.routedAnswer(id));
   }
 
   /** An admitted wake goes to the agent: a parent's answer through the answer seam, everything
@@ -2420,9 +2300,7 @@ export class RunManager {
 
   /** Snapshot of the actual active session, never guessed from partial run settings. */
   delegationExecutionSettings(runId: string): DelegationExecutionSettings {
-    const state = this.active.get(runId);
-    if (!state?.session?.open || !state.delegationSettings) throw new DelegationPolicyError('incompatible_state', 'Parent session settings unavailable');
-    return structuredClone(state.delegationSettings);
+    return delegationExecutionSettings(this.active.get(runId));
   }
 
   /**
@@ -2434,40 +2312,7 @@ export class RunManager {
    * running on another login is a billing boundary crossed without anyone choosing it.
    */
   async selectDelegationExecutionSettings(runId: string, selection: { backend?: RunnerId | undefined; model?: string | undefined; effort?: string | undefined; agentProfile?: string }, validateModel?: (settings: DelegationExecutionSettings) => Promise<void>): Promise<DelegationExecutionSettings> {
-    const parent = this.delegationExecutionSettings(runId);
-    const runner = selection.backend ?? parent.runner;
-    const sameBackend = runner === parent.runner;
-    try {
-      const effortPin = parseDelegationEffort(selection.effort);
-      const locked = agentModelsLocked(this.repoRoot);
-      if (locked && (selection.model !== undefined || effortPin !== undefined || (sameBackend && (parent.model !== undefined || parent.effort !== undefined)))) {
-        throw new Error(AGENT_MODELS_LOCKED_ERROR);
-      }
-      let accountBinding = parent.accountBinding;
-      let env = buildChildEnv({ backend: runner });
-      if (!sameBackend || selection.agentProfile !== undefined) {
-        const resolved = await resolveProfileEnvForRoot(this.repoRoot, runner, selection.agentProfile);
-        if (selection.agentProfile !== undefined && resolved.profile.id !== selection.agentProfile) {
-          throw new Error(`Unknown ${runner} account "${selection.agentProfile}"`);
-        }
-        env = buildChildEnv({ backend: runner, extraEnv: resolved.env });
-        accountBinding = captureWorkerAccount(resolved.profile, env);
-      }
-      if (!accountBinding || accountBinding.provider !== runner) throw new Error('Accepted worker account identity is unavailable');
-      env = { ...env, ...boundWorkerAccountEnv(accountBinding, env) };
-      const native = await readAgentModelSettings(runner, this.repoRoot, env);
-      const chosen = selection.model ?? (sameBackend ? parent.model : locked ? undefined : native.model);
-      const normalized = normalizeModelForBackend(runner, chosen, { configuredProvider: native.provider });
-      const settings = { ...parent, runner, model: normalized?.backendModel, modelIdentity: normalized ? formatModelIdentity(normalized.identity) : undefined, effort: effortPin ?? (sameBackend ? parent.effort : undefined),
-        agentProfile: accountBinding.profileId, accountBinding };
-      // A populated catalog gives a useful choice list before the legacy preset fallback rejects.
-      await validateModel?.(settings);
-      if (chosen && modelConflictsWithRunner(chosen, runner)) throw new Error('Model is incompatible with the selected backend');
-      return settings;
-    } catch (error) {
-      if (error instanceof DelegationPolicyError) throw error;
-      throw new DelegationPolicyError('invalid_input', error instanceof Error ? error.message : 'Worker execution selection is unavailable');
-    }
+    return selectDelegationExecutionSettings(this.repoRoot, this.delegationExecutionSettings(runId), selection, validateModel);
   }
 
   /**
@@ -2583,10 +2428,10 @@ export class RunManager {
     }
     // Accepted permissions are private immutable evidence. Only explicit internal
     // primitive records retain the public-definition compatibility path.
-    const grants = this.workerIdentity(run.id)?.grants
+    const grants = workerIdentity(this.store, this.repoRoot, run.id)?.grants
       ?? run.workflowDef?.steps.find(step => step.id === QUICK_TASK_WORKFLOW.steps[0]!.id);
     return {
-      workflow: this.ownedWorkflow(run, this.store.readWorkerIdentity(run.id)) ?? { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!,
+      workflow: ownedWorkflow(run, this.store.readWorkerIdentity(run.id)) ?? { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!,
         ...(grants?.allowedTools === undefined ? {} : { allowedTools: [...grants.allowedTools] }),
         ...(grants?.bashAllowlist === undefined ? {} : { bashAllowlist: [...grants.bashAllowlist] }),
       }] },
@@ -2596,20 +2441,6 @@ export class RunManager {
         autonomous: run.autonomous, worktree: true,
       },
     };
-  }
-
-  /**
-   * The catalog chain an owned worker runs (#451), or undefined for the built-in quick-task.
-   * The public `workflowDef` is mutable state, so it is authority only while the private
-   * identity's hash binds it — the same shape as the context recipe. A tampered or lost
-   * definition refuses execution instead of quietly running quick-task or the edit.
-   */
-  private ownedWorkflow(run: RunRecord, identity: WorkerExecutionIdentity | undefined): WorkflowDef | undefined {
-    if (identity?.workflowHash === undefined) return undefined;
-    if (!run.workflowDef || workerWorkflowHash(run.workflowDef) !== identity.workflowHash) {
-      throw new WorkerIdentityError('Accepted worker workflow definition is unavailable or changed');
-    }
-    return run.workflowDef;
   }
 
   /**
@@ -2974,7 +2805,7 @@ export class RunManager {
     // first-step fields — those would re-queue a claude review's Continue as a codex turn with
     // no session to resume. Broken identity evidence is left for the launch to report.
     let resumeIdentity: WorkerStepIdentity | undefined;
-    try { resumeIdentity = this.workerStep(run.id, this.continuationDefStep(run, sessionStep.sessionId)?.id); }
+    try { resumeIdentity = this.workerStep(run.id, continuationDefStep(this.store, run, sessionStep.sessionId)?.id); }
     catch (error) { if (!(error instanceof WorkerIdentityError)) throw error; }
     const backend = resumeIdentity?.account.provider ?? run.runner ?? 'claude';
     const sessionBackend = sessionStep.backend ?? backend;
@@ -4576,13 +4407,8 @@ export class RunManager {
     }
   }
 
-  /** An answer already executing in this generation is not an unanswered question.
-   * Keep the durable checkpoint at turn-end for crash recovery, and match its exact
-   * sequence so it can never hide a newer question. */
   private hasUnansweredHumanAsk(runId: string): boolean {
-    const seq = this.pendingHumanAskSeq(runId);
-    const state = this.active.get(runId);
-    return seq !== undefined && !(state?.session?.open && !state.cancelled && state.openingAnswerAskSeq === seq);
+    return pendingAskFacts.hasUnansweredHumanAsk(runId, this.active, id => this.pendingHumanAskSeq(id));
   }
 
   /** Both roles can select their own requests without acquiring worker-management authority.
@@ -5276,12 +5102,8 @@ export class RunManager {
     return this.store.getRun(runId)?.agentInputs?.find(entry => entry.id === input.id)?.deliveredAt ? 'delivered' : 'queued';
   }
 
-  /** Transcript bubbles include refused sends. Only a successful delivery
-   * checkpoint can answer the specific ask observed before that send. */
   private pendingHumanAskSeq(runId: string): number | undefined {
-    // Fallback human gates use the same exact successful-delivery receipt as asks,
-    // without inventing a structured question card or changing its summary. Indexed (#880).
-    return this.store.transcriptFacts(runId).pendingGateSeq;
+    return pendingAskFacts.pendingHumanAskSeq(this.store, runId);
   }
 
   /** An unanswered `ask.requested` with no open human wait (a row written before every ask opened
@@ -5321,7 +5143,7 @@ export class RunManager {
   }
 
   private hasPendingHumanAsk(runId: string): boolean {
-    return this.pendingHumanAskSeq(runId) !== undefined;
+    return pendingAskFacts.hasPendingHumanAsk(runId, id => this.pendingHumanAskSeq(id));
   }
 
   /** Accepted input may be temporarily refused while a backend HTTP ack is
@@ -5983,19 +5805,8 @@ export class RunManager {
     if (askSeq !== undefined) this.store.appendEvent(runId, { type: 'human-ask-closed', askSeq, reason: 'finish' });
   }
 
-  /** A synthetic continuation can settle only the resumed agent turn. If the
-   * original workflow still has steps after the waiting one, that would skip
-   * those steps rather than resume the workflow engine. */
   private waitingBeforeFinalWorkflowStep(run: RunRecord): boolean {
-    const steps = run.workflowDef?.steps ?? run.steps.filter(step => !isSyntheticContinuation(run, step));
-    if (!steps.length || !run.currentStepId) return true;
-    const currentStep = run.steps.find(step => step.id === run.currentStepId);
-    if (currentStep && isSyntheticContinuation(run, currentStep)) {
-      const waiting = this.waitingWorkflowStepIndex(run);
-      return waiting >= 0 && waiting < steps.length - 1;
-    }
-    const current = steps.findIndex((step) => step.id === run.currentStepId);
-    return current < 0 || current < steps.length - 1;
+    return workflowPosition.waitingBeforeFinalWorkflowStep(run, isSyntheticContinuation, record => this.waitingWorkflowStepIndex(record));
   }
 
   /** A clean process exit cannot complete a workflow still blocked on a question.
@@ -6009,27 +5820,8 @@ export class RunManager {
       this.waitingBeforeFinalWorkflowStep(run);
   }
 
-  /** Locate the original workflow step whose closed session a synthetic Continue is resuming. */
   private waitingWorkflowStepIndex(run: RunRecord): number {
-    const steps = run.workflowDef?.steps ?? run.steps.filter(step => !isSyntheticContinuation(run, step));
-    if (!steps.length) return -1;
-    // CI recovery can resume a failed attempt. Its cursor must survive both the
-    // synthetic continuation replacing currentStepId and wait delivery retiring the wait.
-    const ciSource = this.ciWorkflowResumeStepIndex(run);
-    if (ciSource >= 0) return ciSource;
-    const interrupted = steps.findIndex((step) => {
-      const persisted = run.steps.find((candidate) => candidate.id === step.id);
-      return stepKind(step) === 'agent' && persisted?.status === 'failed' && persisted.error === 'interrupted — cezar process exited during the run';
-    });
-    if (interrupted >= 0) return interrupted;
-    for (let index = steps.length - 1; index >= 0; index--) {
-      const persisted = run.steps.find((step) => step.id === steps[index]!.id);
-      // Startup recovery records an interrupted live step as failed before it
-      // constructs the synthetic continuation. Later workflow steps are still
-      // pending, so that failed step remains the continuation's source.
-      if (persisted?.status === 'waiting' || persisted?.status === 'running') return index;
-    }
-    return -1;
+    return workflowPosition.waitingWorkflowStepIndex(run, isSyntheticContinuation, record => this.ciWorkflowResumeStepIndex(record));
   }
 
   /** The workflow step after the one a continuation resumes, when that one is not the last: the
@@ -6052,41 +5844,15 @@ export class RunManager {
   }
 
   private continuationNextStep(runId: string): WorkflowStepDef | undefined {
-    const run = this.store.getRun(runId);
-    const index = run?.workflowDef ? this.waitingWorkflowStepIndex(run) : -1;
-    return index >= 0 ? run!.workflowDef!.steps[index + 1] : undefined;
+    return workflowPosition.continuationNextStep(this.store, runId, record => this.waitingWorkflowStepIndex(record));
   }
 
   private ciWorkflowResumeStepIndex(run: RunRecord): number {
-    if (!run.workflowResumeStepId) return -1;
-    return run.workflowDef?.steps.findIndex(step => step.id === run.workflowResumeStepId &&
-      stepKind(step) === 'agent' && run.steps.find(persisted => persisted.id === step.id)?.status === 'failed') ?? -1;
+    return workflowPosition.ciWorkflowResumeStepIndex(run);
   }
 
-  /**
-   * Session ids Cursor will accept on `session/load`. A launch UUID written
-   * before `session.started` is only for the step rail (#583).
-   */
   private resumableSessionId(runId: string, sessionStep: StepState | undefined): string | undefined {
-    if (!sessionStep?.sessionId) return undefined;
-    if ((sessionStep.backend ?? this.store.getRun(runId)?.runner) === 'cursor') {
-      const run = this.store.getRun(runId);
-      const sessionStepIndex = run?.steps.findIndex((step) => step.id === sessionStep.id) ?? -1;
-      // A Continue records the existing ID before the resumed process emits its
-      // own session event. After a crash, its original owning step still holds
-      // the print-session proof; later steps cannot establish that proof.
-      const printEvidenceSteps = new Set(run?.steps.slice(0, sessionStepIndex + 1)
-        .filter((step) => step.sessionId === sessionStep.sessionId && step.sessionTransport === 'cursor-print')
-        .map((step) => step.id));
-      const confirmed = this.store.readEvents(runId).some(
-        (event) => event.type === 'session' && event.sessionId === sessionStep.sessionId &&
-          (sessionStep.sessionTransport !== 'cursor-print' ||
-            (event.stepId !== undefined && printEvidenceSteps.has(event.stepId) &&
-              event.sessionTransport === 'cursor-print')),
-      );
-      if (!confirmed) return undefined;
-    }
-    return sessionStep.sessionId;
+    return workflowPosition.resumableSessionId(this.store, runId, sessionStep);
   }
 
   /**
@@ -6135,7 +5901,7 @@ export class RunManager {
       historyDeletionPending: () => this.historyDeletionPending(runId),
       parentInReview: parentId => this.store.getRun(parentId)?.status === 'review',
       answersFallback: () => this.answersFallenBackAsk(runId, opts, deferForCapacity),
-      identity: (run, session) => this.workerStep(runId, this.continuationDefStep(run, session)?.id),
+      identity: (run, session) => this.workerStep(runId, continuationDefStep(this.store, run, session)?.id),
       beforeFinalStep: run => this.waitingBeforeFinalWorkflowStep(run),
       waitingStepIndex: run => this.waitingWorkflowStepIndex(run),
       pendingFallback: () => this.pendingWorkerFallback(runId),
@@ -6299,7 +6065,7 @@ export class RunManager {
     // repoRoot fallback; owned workers must never adopt/recreate an unverified resource.
     if (this.workerExecutionStopped(runId)) { this.starting.delete(runId); return; }
     if (this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() })) return;
-    this.workerIdentity(runId);
+    workerIdentity(this.store, this.repoRoot, runId);
     const record = this.store.getRun(runId);
     const workspace = await this.continuationWorkspace(runId, stepId, record);
     if (!workspace) return;
@@ -6353,7 +6119,7 @@ export class RunManager {
         this.noteNoWaitNudgeContent(runId, state, event);
       }
       this.store.appendEvent(runId, { ...event, stepId });
-      if (event.type === 'cost') this.recordReportedCost(runId, stepId, state, backend, event.usd);
+      if (event.type === 'cost') recordReportedCost(this.store, runId, stepId, state, backend, event.usd);
       if (event.type === 'error') { this.recordSessionFault(state, turn, event.message); return; }
       if (turn.sessionError || state.agentInputError) return;
       if (event.type === 'session') {
@@ -6677,7 +6443,7 @@ export class RunManager {
       ? undefined
       : record?.steps.find((s) => s.sessionId === sessionId);
     // An owned worker's turn runs under the identity pinned for the step it extends (#452).
-    const toolsStep = this.continuationDefStep(record, sessionId);
+    const toolsStep = continuationDefStep(this.store, record, sessionId);
     const stepIdentity = this.workerStep(runId, toolsStep?.id);
     // The owning step also names the session's tools: resolve `allowedTools`/`bashAllowlist`
     // from the persisted `workflowDef` exactly as the first spawn did (`runAgentStep`).
@@ -7224,7 +6990,7 @@ export class RunManager {
 
   private async execute(runId: string, workflow: WorkflowDef, input: StartRunInput, startAt = 0): Promise<void> {
     if (this.workerExecutionStopped(runId)) { this.starting.delete(runId); return; }
-    this.workerIdentity(runId);
+    workerIdentity(this.store, this.repoRoot, runId);
     const state = createActiveRun({
       cwd: this.repoRoot,
       pendingHumanAsk: this.hasPendingHumanAsk(runId),
@@ -7845,7 +7611,7 @@ export class RunManager {
         this.noteNoWaitNudgeContent(runId, state, event);
       }
       emit({ ...event, stepId: step.id });
-      if (event.type === 'cost') this.recordReportedCost(runId, step.id, state, backend, event.usd);
+      if (event.type === 'cost') recordReportedCost(this.store, runId, step.id, state, backend, event.usd);
       if (event.type === 'error') { this.recordSessionFault(state, turn, event.message); return; }
       if (turn.sessionError || state.agentInputError) return;
       if (event.type === 'session') {
@@ -8454,7 +8220,7 @@ export class RunManager {
    * so the cockpit shows attention and the run releases its workspace slot. */
   private handleRunnerUiEvent(runId: string, state: ActiveRun, sink: UiEventSink, event: UiEvent): void {
     if (this.isDisposedDelegatedRun(runId)) return;
-    this.recordUsageUiEvent(runId, state, event);
+    recordUsageUiEvent(this.store, runId, state, event);
     sink.handle(event);
     if (state.cancelled) return;
     this.noteNoWaitNudgeContent(runId, state, event);
@@ -8530,135 +8296,7 @@ export class RunManager {
   /** Persist the invocation checkpoint before launching a runner. A throw or
    * process exit before `turn.started` therefore leaves a durable mismatch. */
   private beginUsageInvocation(runId: string, state: ActiveRun, stepId: string): void {
-    const step = this.store.getRun(runId)?.steps.find((candidate) => candidate.id === stepId);
-    if (!step) return;
-    const epoch = (step.usageInvocationEpoch ?? 0) + 1;
-    this.persistUsageCheckpoint(runId, stepId, {
-      usageInvocationEpoch: epoch,
-      usageInvocationsStarted: (step.usageInvocationsStarted ?? 0) + 1,
-    });
-    state.usageInvocation = {
-      stepId,
-      epoch,
-      observed: false,
-      startedTurns: new Set(),
-      recordedTurns: new Set(),
-    };
-  }
-
-  /** Claude's `total_cost_usd` is cumulative for the conversation, including
-   * turns in Continue steps. Other runners emit per-message cost deltas. */
-  private recordReportedCost(runId: string, stepId: string, state: ActiveRun, backend: RunnerId, reportedUsd: number): void {
-    if (!Number.isFinite(reportedUsd) || reportedUsd < 0) return;
-    const run = this.store.getRun(runId);
-    const step = run?.steps.find((candidate) => candidate.id === stepId);
-    if (!run || !step) return;
-    let delta = reportedUsd;
-    if (backend === 'claude') {
-      const sessionKey = step.sessionId ?? step.id;
-      state.reportedClaudeCost ??= new Map();
-      let previous = state.reportedClaudeCost.get(sessionKey);
-      if (previous === undefined) {
-        // The current cost event was appended immediately before this call. Rebuild
-        // the checkpoint from raw reports, since older records summed cumulative
-        // reports into costUsd and cannot be used as the baseline on Continue.
-        const events = this.store.readEvents(runId);
-        let currentReportIndex = -1;
-        for (let index = events.length - 1; index >= 0; index--) {
-          const event = events[index]!;
-          if (event.type === 'cost' && event.stepId === stepId && event.usd === reportedUsd) {
-            currentReportIndex = index;
-            break;
-          }
-        }
-        const sessionStepIds = new Set(run.steps.filter((candidate) =>
-          (candidate.backend === 'claude' || candidate.backend === undefined) && (step.sessionId
-            ? candidate.sessionId === step.sessionId
-            : candidate.id === step.id)).map((candidate) => candidate.id));
-        previous = 0;
-        const priorCostByStep = new Map<string, number>();
-        for (let index = 0; index < events.length; index++) {
-          if (index === currentReportIndex) continue;
-          const event = events[index]!;
-          if (event.type === 'cost' && event.stepId && sessionStepIds.has(event.stepId) &&
-              typeof event.usd === 'number' && Number.isFinite(event.usd) && event.usd >= 0) {
-            priorCostByStep.set(event.stepId,
-              (priorCostByStep.get(event.stepId) ?? 0) + Math.max(0, event.usd - previous));
-            previous = Math.max(previous, event.usd);
-          }
-        }
-        // The event log is appended before the step total. A process exit between
-        // those writes leaves a report whose USD never reached the run record.
-        // Restore missing amounts, while preserving older inflated totals rather
-        // than silently migrating historical run state.
-        for (const [priorStepId, expectedCost] of priorCostByStep) {
-          const priorStep = run.steps.find((candidate) => candidate.id === priorStepId);
-          if (priorStep && (priorStep.costUsd === undefined || priorStep.costUsd < expectedCost)) {
-            this.store.updateStep(runId, priorStepId, { costUsd: expectedCost });
-          }
-        }
-      }
-      delta = Math.max(0, reportedUsd - previous);
-      state.reportedClaudeCost.set(sessionKey, Math.max(previous, reportedUsd));
-    }
-    this.store.updateStep(runId, stepId, { costUsd: (step.costUsd ?? 0) + delta });
-  }
-
-  /** Fold backend-neutral completed-turn usage into the current step exactly
-   * once. Invocation/turn counters are written before the event reaches the
-   * NDJSON sink so crashes cannot preserve a falsely complete subtotal. */
-  private recordUsageUiEvent(runId: string, state: ActiveRun, event: UiEvent): void {
-    const invocation = state.usageInvocation;
-    if (!invocation) return;
-    const step = this.store.getRun(runId)?.steps.find((candidate) => candidate.id === invocation.stepId);
-    if (!step) return;
-
-    if (event.type === 'turn.started') {
-      if (invocation.startedTurns.has(event.turnId)) return;
-      invocation.startedTurns.add(event.turnId);
-      const firstObservedTurn = !invocation.observed;
-      invocation.observed = true;
-      this.persistUsageCheckpoint(runId, invocation.stepId, {
-        usageTurnsStarted: (step.usageTurnsStarted ?? 0) + 1,
-        ...(firstObservedTurn
-          ? { usageInvocationsObserved: (step.usageInvocationsObserved ?? 0) + 1 }
-          : {}),
-      });
-      return;
-    }
-
-    if (event.type !== 'turn.completed') return;
-    if (!invocation.startedTurns.has(event.turnId) || invocation.recordedTurns.has(event.turnId)) return;
-    const input = event.usage?.input;
-    const output = event.usage?.output;
-    if (
-      typeof input !== 'number' ||
-      !Number.isFinite(input) ||
-      input < 0 ||
-      typeof output !== 'number' ||
-      !Number.isFinite(output) ||
-      output < 0
-    ) {
-      return;
-    }
-    invocation.recordedTurns.add(event.turnId);
-    this.persistUsageCheckpoint(runId, invocation.stepId, {
-      inputTokens: (step.inputTokens ?? 0) + input,
-      outputTokens: (step.outputTokens ?? 0) + output,
-      usageTurnsRecorded: (step.usageTurnsRecorded ?? 0) + 1,
-    });
-  }
-
-  /** Usage completeness is a crash boundary, unlike high-frequency token
-   * snapshots: the checkpoint must reach `runs.json` before the runner starts
-   * or the matching UI event is persisted and forwarded. */
-  private persistUsageCheckpoint(
-    runId: string,
-    stepId: string,
-    patch: Partial<Omit<StepState, 'id'>>,
-  ): void {
-    this.store.updateStep(runId, stepId, patch);
-    this.store.flush();
+    beginUsageInvocation(this.store, runId, state, stepId);
   }
 
   /**
@@ -8799,20 +8437,8 @@ export class RunManager {
     void this.autoNameRun(runId, skillName, run.task, { turnText, diffStat: statText });
   }
 
-  /**
-   * End-of-session telemetry (#348): stop sampling the run's process tree and
-   * fold the session's peaks into the run record. `max` with existing values —
-   * a run can hold several sessions (multiple agent steps, Continue) and the
-   * record keeps the highest water mark across all of them.
-   */
   private recordUsagePeaks(runId: string): void {
-    const peaks = unregisterRunProcess(runId);
-    if (!peaks || this.isDisposedDelegatedRun(runId)) return;
-    const run = this.store.getRun(runId);
-    this.store.updateRun(runId, {
-      peakRssBytes: Math.max(run?.peakRssBytes ?? 0, peaks.peakRssBytes),
-      peakProcCount: Math.max(run?.peakProcCount ?? 0, peaks.peakProcCount),
-    });
+    recordUsagePeaks(this.store, { isDisposedDelegatedRun: id => this.isDisposedDelegatedRun(id) }, runId);
   }
 
   /**

@@ -29,7 +29,12 @@ test('cockpit ownership rejects live duplicates, recovers after death, and isola
     // `repo` after the first cockpit died took its lock, and both restarted contenders refused in
     // favour of `other`. This test is about boot-time ownership and reclaiming a dead owner's lock;
     // warm-up's own skip-the-owned-project rule is covered by project-context-warm.test.ts.
-    const child = spawn(process.execPath, ['--import', 'tsx', cli, '--repo', directory, '--port', '0', '--no-open'], {
+    // Node 24.21.0 can deadlock in process.exit() while joining V8 compilation workers
+    // (https://github.com/nodejs/node/issues/64274). Keep this ownership fixture's
+    // children single-threaded; refusal, exit-code and recovery assertions stay intact.
+    // Allocation-pressure red/green proof (1 fails / 1 passes):
+    // https://github.com/hearsay-tools/cezarion/issues/2048#issuecomment-6479171131
+    const child = spawn(process.execPath, ['--single-threaded', '--import', 'tsx', cli, '--repo', directory, '--port', '0', '--no-open'], {
       cwd: packageRoot,
       env: { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_AUTONAME: '0', CEZ_REMOTE: '0', CEZ_PROJECT_WARMUP: '0' },
       stdio: ['ignore', 'pipe', 'pipe'],
