@@ -4,7 +4,9 @@ import { describe, expect, it } from 'vitest'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 
 import {
+  conversationDeliveryExplanation,
   conversationDirection,
+  counterpartTitle,
   conversationKindLabel,
   conversationOutcomeLabel,
   conversationStatusLabel,
@@ -55,6 +57,11 @@ describe('conversation presentation titles', () => {
     expect(conversationOutcomeLabel('pending')).toBe('Pending')
   })
 
+  it('names a request whose peer recipient was deleted (hearsay-tools/cezarion#1992)', () => {
+    expect(conversationOutcomeLabel('deleted')).toBe('Recipient deleted')
+    expect(conversationStatusLabel({ messageKind: 'request', delivery: 'queued', outcome: { status: 'deleted' } })).toBe('Recipient deleted')
+  })
+
   it('falls back to the terminal delivery only for a request that can never settle', () => {
     expect(conversationStatusLabel({ messageKind: 'request', delivery: 'queued', outcome: { status: 'pending' } })).toBe('Pending')
     expect(conversationStatusLabel({ messageKind: 'request', delivery: 'not-delivered', outcome: { status: 'sender-closed' } })).toBe('Sender closed')
@@ -89,5 +96,38 @@ describe('worker question outcome labels (#505)', () => {
   it('names a question the parent could not receive', async () => {
     const { conversationOutcomeLabel } = await import('./conversation-presentation')
     expect(conversationOutcomeLabel('human-fallback')).toBe('Sent to a human')
+  })
+})
+
+describe('conversation delivery explanations (hearsay-tools/cezarion#1992)', () => {
+  it('prefers the server instruction over every derived text', () => {
+    expect(conversationDeliveryExplanation({ instruction: 'Not delivered: task is done.', delivery: 'queued', state: 'accepted' }, 'cursor')).toBe('Not delivered: task is done.')
+  })
+
+  it.each([
+    ['cursor', 'If Cursor is in a turn, delivery waits for that turn to end.'],
+    ['claude', 'This agent can receive messages during its current turn.'],
+    [undefined, 'Timing depends on the recipient agent.'],
+  ] as const)('explains a queued message by its recipient backend (%s)', (backend, text) => {
+    expect(conversationDeliveryExplanation({ delivery: 'queued' }, backend)).toContain(text)
+  })
+
+  it('words an undelivered message by relationship: a parent can resume a worker, nobody resumes a peer', () => {
+    expect(conversationDeliveryExplanation({ delivery: 'not-delivered', state: 'continuation-required' }, undefined)).toContain('with --resume')
+    const peer = conversationDeliveryExplanation({ delivery: 'not-delivered', state: 'continuation-required', relationship: 'peer' }, undefined)
+    expect(peer).toContain('Only its human can continue it')
+    expect(peer).not.toContain('resume')
+  })
+
+  it('names a destroyed worker and says nothing for a delivered message', () => {
+    expect(conversationDeliveryExplanation({ delivery: 'not-delivered', state: 'destroyed' }, undefined)).toBe('Not delivered. This worker was destroyed.')
+    expect(conversationDeliveryExplanation({ delivery: 'delivered', state: 'accepted' }, undefined)).toBeUndefined()
+  })
+
+  it('names a counterpart: a worker falls back to "Task", a peer the run list lacks stays "peer task"', () => {
+    expect(counterpartTitle('alpha', false, { alpha: 'Alpha' })).toBe('Alpha')
+    expect(counterpartTitle('missing', false, {})).toBe('Task')
+    expect(counterpartTitle('missing', true, {})).toBe('peer task')
+    expect(counterpartTitle('alpha', true, { alpha: 'Alpha' })).toBe('Alpha')
   })
 })

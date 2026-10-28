@@ -1234,6 +1234,65 @@ describe('reduceThread — parent/worker conversation', () => {
   })
 })
 
+describe('reduceThread — peer conversation (hearsay-tools/cezarion#1992)', () => {
+  const self = '11111111-1111-4111-8111-111111111111'
+  const peer = '22222222-2222-4222-8222-222222222222'
+  const requestId = '33333333-3333-4333-8333-333333333333'
+  const replyId = '44444444-4444-4444-8444-444444444444'
+  const base = { requestHash: 'a'.repeat(64), state: 'accepted' as const, relationship: 'peer' as const }
+  const request = { ...base, id: requestId, senderRunId: self, recipientRunId: peer, kind: 'request' as const, text: 'Is the schema frozen?', createdAt: '2026-10-28T12:00:00.000Z' }
+  const reply = { ...base, id: replyId, senderRunId: peer, recipientRunId: self, kind: 'reply' as const, requestId, text: 'Frozen.', createdAt: '2026-10-28T12:01:00.000Z' }
+  const conversation = (items: ThreadEntry[]) => items.filter((entry) => entry.kind === 'conversation')
+  // An `AgentInput` event. Its `source` is the input's origin, not a wait source.
+  const agentInput = (seq: number, id: string, text: string, parentRunId: string, createdAt: string, conversation: object) => line(seq, 'agent-input', { input: {
+    id, text, parentRunId, createdAt, conversation,
+    // ast-grep-ignore: test-enum-literal
+    source: 'agent',
+  } })
+
+  it('keeps the peer relationship on a request, a reply and an agent-input replay', () => {
+    const { turns } = reduceThread([
+      line(1, 'conversation-message', { message: request, delivery: 'queued' }),
+      line(2, 'conversation-message', { message: reply, delivery: 'delivered' }),
+      agentInput(3, replyId, reply.text, peer, reply.createdAt, { senderRunId: peer, recipientRunId: self, kind: 'reply', requestId, relationship: 'peer' }),
+    ])
+    const entries = conversation(turns.flatMap((turn) => turn.items))
+    expect(entries.map((entry) => entry.kind === 'conversation' && [entry.messageKind, entry.relationship])).toEqual([['request', 'peer'], ['reply', 'peer']])
+  })
+
+  it('fills the relationship from an agent-input that arrives first', () => {
+    const { turns } = reduceThread([
+      agentInput(1, requestId, request.text, self, request.createdAt, { senderRunId: self, recipientRunId: peer, kind: 'request', relationship: 'peer' }),
+    ])
+    expect(conversation(turns.flatMap((turn) => turn.items))[0]).toMatchObject({ relationship: 'peer' })
+  })
+
+  it('leaves a family message without a relationship', () => {
+    const { turns } = reduceThread([line(1, 'conversation-message', { message: { ...request, relationship: undefined }, delivery: 'queued' })])
+    expect(conversation(turns.flatMap((turn) => turn.items))[0]).not.toHaveProperty('relationship')
+  })
+
+  it('folds the deleted outcome onto the request card', () => {
+    const { turns } = reduceThread([
+      line(1, 'conversation-message', { message: request, delivery: 'queued' }),
+      line(2, 'request-outcome', { outcome: { requestId, status: 'deleted', observedAt: '2026-10-28T12:05:00.000Z' } }),
+    ])
+    expect(conversation(turns.flatMap((turn) => turn.items))[0]).toMatchObject({ outcome: { status: 'deleted' } })
+  })
+
+  it('R1: a peer message beside an open question stays a peer card and leaves the ask answerable', () => {
+    const { turns } = reduceThread([
+      line(1, 'ask.requested', { requestId: 'ask_1', questions: [{ header: 'Proceed?', question: 'Proceed?', options: [] }] }),
+      agentInput(2, requestId, 'Wave 2 is merged.', peer, request.createdAt, { senderRunId: peer, recipientRunId: self, kind: 'progress', relationship: 'peer' }),
+    ])
+    const items = turns.flatMap((turn) => turn.items)
+    expect(items.find((entry) => entry.kind === 'ask')).toMatchObject({ resolved: false })
+    expect(items.filter((entry) => entry.kind === 'message' && entry.role === 'user')).toHaveLength(0)
+    expect(turns.some((turn) => turn.userMessage !== undefined)).toBe(false)
+    expect(conversation(items)).toHaveLength(1)
+  })
+})
+
 /**
  * Per-turn timestamps (#941). The reducer only THREADS the stamps that were already on the
  * wire — no new persisted field, no new API — so what these pin is that it threads exactly the

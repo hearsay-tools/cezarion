@@ -331,6 +331,7 @@ describe('groupThreadItems — worker conversation', () => {
     messageKind: extra.messageKind ?? 'request',
     delivery: extra.delivery ?? 'delivered',
     ...(extra.requestId !== undefined ? { requestId: extra.requestId } : {}),
+    ...(extra.relationship !== undefined ? { relationship: extra.relationship } : {}),
     ...(extra.outcome !== undefined ? { outcome: extra.outcome } : {}),
   })
 
@@ -369,6 +370,16 @@ describe('groupThreadItems — worker conversation', () => {
     expect(blocks.filter(block => block.kind === 'worker-conversation').map(block =>
       block.batches.flatMap(batch => batch.messages.map(message => message.messageId)),
     )).toEqual([['req-a', 'req-b'], ['req-again'], ['progress'], ['later']])
+  })
+
+  it('never batches a peer request with a worker request, so each card keeps one relationship (hearsay-tools/cezarion#1992)', () => {
+    const toWorker = conversation('to-worker', { recipientRunId: alpha })
+    const toPeer = conversation('to-peer', { recipientRunId: bravo, relationship: 'peer' })
+    const toPeerToo = conversation('to-peer-too', { recipientRunId: parent, relationship: 'peer' })
+    const blocks = groupThreadItems([toWorker, toPeer, toPeerToo])
+    expect(blocks.filter(block => block.kind === 'worker-conversation').map(block =>
+      block.batches.flatMap(batch => batch.messages.map(message => message.messageId)),
+    )).toEqual([['to-worker'], ['to-peer', 'to-peer-too']])
   })
 
   it('does not collapse follow-ups and replies to an unloaded request or reorder them after new requests', () => {

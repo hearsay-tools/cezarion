@@ -299,6 +299,12 @@ do. Past the budget a peer message stays queued and wakes nothing, and the parke
 Cezar's `budget` human wait. Rows **U19p** (peer attribution beside a pending question) and
 **U19q** (the wake budget) in `workflows/waits-parity-cells.testkit.ts` run on every
 `RUNNER_IDS` native wire; `delegation/peer-conversations.test.ts` pins the service rules.
+The cockpit thread renders a peer message as a green card with a "Peer" chip, never as a user
+message, so it stays apart from the yellow human message and the blue and purple worker cards,
+including beside an open question. The card names the peer by title and links its thread. It
+reads the peer from the server when the run list does not carry it, and a deleted or unreadable
+peer shows "Deleted task" or "Task unavailable" with no link. The `deleted` outcome reads
+"Recipient deleted" on the request card. A peer request is never batched with a worker request.
 
 Kinds are `request`, `progress`, `follow-up`, and `reply`. A request's message ID is
 its obligation ID; follow-ups and replies name `requestId`. Exact message retries
