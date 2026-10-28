@@ -8,11 +8,8 @@ import { DelegationPolicyError } from './policy.ts';
 export function discoverTasks(store: RunStore, callerId: string, request: Extract<DiscoveryRequest, { kind: 'tasks' }>): DiscoveredTasks {
   const caller = store.getRun(callerId);
   if (caller?.delegation?.role !== 'root' || caller.delegation.historyDeletion) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
-  const candidates = store.listRunSummaries().runs.filter(run => run.id !== callerId &&
-    (run.delegation === undefined || run.delegation.role === 'root') && (request.all || !run.archived));
-  const offset = request.offset ?? 0;
-  const page = candidates.slice(offset, offset + 32);
-  const tasks = page.flatMap(run => {
+  const page = store.listPeerTaskSummaries({ callerId, ...request });
+  const tasks = page.runs.flatMap(run => {
     const current = store.getRun(run.id);
     if (!isRootTask(current) || (current.delegation?.role === 'root' && current.delegation.historyDeletion)) return [];
     const attention = deriveAttention(run);
@@ -22,5 +19,5 @@ export function discoverTasks(store: RunStore, callerId: string, request: Extrac
       status: run.status, attention: attention.bucket, attentionLabel: attention.label, accepts,
       ...(accepts ? {} : { reason: `${state}: only its human can continue it` }) }];
   });
-  return { tasks, ...(offset + 32 < candidates.length ? { nextOffset: offset + 32 } : {}) };
+  return { tasks, ...(page.nextOffset === undefined ? {} : { nextOffset: page.nextOffset }) };
 }

@@ -1,3 +1,4 @@
+import { readPeerSummaryPage, toSummaryRow, type PeerSummaryPageQuery } from './run-database-peer-page.ts';
 import { accessSync, closeSync, constants, existsSync, openSync, readSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
@@ -504,15 +505,6 @@ export const ARCHIVED_ROOT = 'archived = 1 AND parent_run_id IS NULL';
 
 type SqlRow = Record<string, unknown>;
 
-function toSummaryRow(row: SqlRow): RunSummaryRow {
-  return {
-    seq: row.seq as number,
-    id: row.id as string,
-    createdAt: row.created_at as string,
-    revision: row.revision as number,
-    summary: row.summary as string,
-  };
-}
 
 function toRunRow(row: SqlRow): RunRow {
   return {
@@ -735,6 +727,11 @@ export class RunDatabase {
   listSummaries(options: { limit?: number } = {}): RunSummaryRow[] {
     const limit = options.limit ?? -1;
     return this.run(() => this.statements.listSummaries.all(limit)).map(toSummaryRow);
+  }
+
+  /** A bounded root-only page, with exclusions applied before SQL offset/limit. */
+  listPeerSummaries(options: PeerSummaryPageQuery): RunSummaryRow[] {
+    return this.run(() => readPeerSummaryPage(this.db, options));
   }
 
   /**
