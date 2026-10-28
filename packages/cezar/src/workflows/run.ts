@@ -17,7 +17,7 @@ import { accountHeldFor, formatWakeInstant, resumeInFlight, runAccountKey, queue
 export { runAccountKey } from './run-scheduling.ts';
 import { executionAccount } from './execution-account.ts';
 import { CANCEL_MESSAGES, chargesBudget, chargesBudgetMessage, ciWatchRequest, hasPrWait, holdsOwedResults, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitAnswerKind, waitInputId, waitNamedInputIds, waitResultText } from './waits.ts';
-import { assertOwnedWorkerWaitScope, assertRequestWaitScope, peerWaitEntry, peerWaitOf, peerWaitResult, runsAwaitingPeer, workerWaitTarget } from './wait-scope.ts';
+import { assertOwnedWorkerWaitScope, assertRequestWaitScope, delegationWaitRefusal, isDelegationWait, peerWaitEntry, peerWaitOf, peerWaitResult, runsAwaitingPeer, workerListTarget, workerWaitTarget } from './wait-scope.ts';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
 import { previewCdpSession, previewRunContext, previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
@@ -1318,7 +1318,7 @@ export class RunManager {
     if (run.delegation && run.delegation.role !== 'invalid' && !['queued', 'running', 'waiting'].includes(run.status)) {
       for (const id of settledRunFamilies(this.store, run)) this.reconcileWorkerWaits(id);
     }
-    if (!['queued', 'running', 'waiting'].includes(run.status)) this.resolvePeerWaits(runsAwaitingPeer(this.store.listRuns(), run.id)); // never in recovery: an interrupted peer fails, then continues
+    this.resolvePeerWaits(runsAwaitingPeer(run, () => this.store.listRuns())); // never in recovery: an interrupted peer fails, then continues
   };
   private readonly pendingJobs = new Map<string, { workflow: WorkflowDef; input: StartRunInput; startAt?: number | undefined }>();
   /** Interrupted agent turns recovered after a process restart. Unlike an
@@ -2205,17 +2205,12 @@ export class RunManager {
     const { state: active, run } = assertCanRegister();
     // hearsay-tools/cezarion#1235, hearsay-tools/cezarion#1995: as `cez worker wait` and `cez message wait`, under the
     // tool's own codes. It answers its own repeat, so it is checked before the capacity below.
-    if (parsed.kind === 'worker' || parsed.kind === 'request' || parsed.kind === 'peer') {
+    if (isDelegationWait(parsed)) {
       if (!run.delegation || run.delegation.role === 'invalid') refuse('denied_scope');
       try {
-        if (parsed.kind === 'peer') return this.registerPeerWait(runId, { peerIds: parsed.peer_ids, timeoutSeconds: parsed.timeout_seconds }, 'cezar_wait');
-        return this.registerWorkerListWait(runId, { ...(parsed.kind === 'worker' ? { workerIds: parsed.worker_ids } : { requestIds: parsed.request_ids }),
-          ...(parsed.mode === undefined ? {} : { mode: parsed.mode }), timeoutSeconds: parsed.timeout_seconds }, 'cezar_wait');
-      } catch (error) {
-        if (!(error instanceof DelegationPolicyError)) throw error;
-        return refuse(error.code === 'denied_scope' ? 'denied_scope' : error.code === 'capacity_limit' ? 'capacity'
-          : this.executionBlockedByRootFinish(run) ? 'root_finish_pending' : 'unavailable');
-      }
+        return parsed.kind === 'peer' ? this.registerPeerWait(runId, { peerIds: parsed.peer_ids, timeoutSeconds: parsed.timeout_seconds }, 'cezar_wait')
+          : this.registerWorkerListWait(runId, workerListTarget(parsed), 'cezar_wait');
+      } catch (error) { return refuse(delegationWaitRefusal(error, () => this.executionBlockedByRootFinish(run))); }
     }
     const turnId = active.ciTurnId ??= randomUUID();
     if (parsed.kind === 'process') return this.registerProcessWait(runId, active, run, parsed, via, turnId);
@@ -2919,7 +2914,7 @@ export class RunManager {
   /** A deleted run's row is gone with its waits; only what they armed in memory is left. */
   private readonly onRunDeleted = (runId: string): void => {
     this.disarmRunWaits(runId);
-    if (!this.disposed) this.resolvePeerWaits(runsAwaitingPeer(this.store.listRuns(), runId));
+    if (!this.disposed) this.resolvePeerWaits(runsAwaitingPeer(runId, () => this.store.listRuns()));
     // A peer's open requests to the deleted run settle `deleted` (spec 2026-10-27 § 5): each ledger
     // that holds one is reconciled, live or settled.
     if (this.disposed || process.env.CEZ_DELEGATION !== '1') return;

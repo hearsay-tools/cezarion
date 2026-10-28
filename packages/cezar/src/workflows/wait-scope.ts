@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { AgentInput, PeerWaitEntry, PeerWaitResult, RunRecord, Wait } from '@open-mercato/cezar-contract';
+import type { AgentInput, CezarWaitRequest, PeerWaitEntry, PeerWaitResult, RunRecord, Wait, WaitErrorCode } from '@open-mercato/cezar-contract';
 import { WAIT_LIMIT } from '@open-mercato/cezar-contract/waits';
 import { peerPair } from '../delegation/conversations.ts';
 import { hasLiveInboxClaim } from '../delegation/input.ts';
@@ -84,8 +84,32 @@ export function peerWaitResult(run: RunRecord, wait: PeerWaitEntry, getRun: GetR
   return settled ? { reason: 'settled', peerRunId: settled } : undefined;
 }
 
-/** The runs whose open peer wait names `peerId`. */
-export function runsAwaitingPeer(runs: readonly RunRecord[], peerId: string): string[] {
+/** The runs whose open peer wait names this peer, once it has settled; a deleted peer is its id.
+ *  A live peer settles nobody's wait, so the live set is read only for a settled one. */
+export function runsAwaitingPeer(peer: RunRecord | string, runs: () => readonly RunRecord[]): string[] {
+  if (typeof peer !== 'string' && LIVE.includes(peer.status)) return [];
+  const peerId = typeof peer === 'string' ? peer : peer.id;
   const names = (wait: Wait) => wait.kind === 'peer' && wait.peerIds.includes(peerId);
-  return runs.filter(run => openWaits(run).some(names)).map(run => run.id);
+  return runs().filter(run => openWaits(run).some(names)).map(run => run.id);
+}
+
+type DelegationWait = Extract<CezarWaitRequest, { kind: 'worker' | 'request' | 'peer' }>;
+/** The `cezar_wait` kinds the delegation registration serves, under the tool's own codes. */
+export function isDelegationWait(request: CezarWaitRequest): request is DelegationWait {
+  return request.kind === 'worker' || request.kind === 'request' || request.kind === 'peer';
+}
+
+/** `cezar_wait` kinds `worker` and `request` as the worker entry's target (hearsay-tools/cezarion#1995). */
+export function workerListTarget(request: Extract<CezarWaitRequest, { kind: 'worker' | 'request' }>) {
+  return { ...(request.kind === 'worker' ? { workerIds: request.worker_ids } : { requestIds: request.request_ids }),
+    ...(request.mode === undefined ? {} : { mode: request.mode }), timeoutSeconds: request.timeout_seconds };
+}
+
+/** A delegation wait's refusal under `cezar_wait`'s own codes. Anything but a policy refusal is
+ *  rethrown, for the tool server to answer `unavailable`. */
+export function delegationWaitRefusal(error: unknown, finishing: () => boolean): WaitErrorCode {
+  if (!(error instanceof DelegationPolicyError)) throw error;
+  if (error.code === 'denied_scope') return 'denied_scope';
+  if (error.code === 'capacity_limit') return 'capacity';
+  return finishing() ? 'root_finish_pending' : 'unavailable';
 }

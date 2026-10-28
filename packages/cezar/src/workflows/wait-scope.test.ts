@@ -1,9 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { AgentInput, RunRecord } from '@open-mercato/cezar-contract';
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { WAIT_LIMIT } from '@open-mercato/cezar-contract/waits';
 import { makePeerWait, makeRunRecord, makeTimerWait, RUN_STATUS, WAIT_PHASE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { peerWaitEntry, peerWaitOf, peerWaitResult, runsAwaitingPeer } from './wait-scope.ts';
+import { DelegationPolicyError } from '../delegation/policy.ts';
+import { delegationWaitRefusal, peerWaitEntry, peerWaitOf, peerWaitResult, runsAwaitingPeer, workerListTarget } from './wait-scope.ts';
 
 // The peer wait's pure rules (hearsay-tools/cezarion#1995, spec 2026-10-27-task-communication-protocol § 7).
 const root = (over: Partial<RunRecord> = {}): RunRecord => makeRunRecord({ id: randomUUID(), status: RUN_STATUS.running,
@@ -11,7 +13,7 @@ const root = (over: Partial<RunRecord> = {}): RunRecord => makeRunRecord({ id: r
 const lookup = (...runs: RunRecord[]) => (id: string) => runs.find(run => run.id === id);
 const request = (peerIds: string[]) => ({ peerIds, timeoutSeconds: 600 });
 const turn = () => 'turn-1';
-const peerInput = (senderRunId: string, over: Partial<AgentInput> = {}): AgentInput => ({ id: randomUUID(), source: 'agent', parentRunId: senderRunId,
+const peerInput = (senderRunId: string, over: Partial<AgentInput> = {}): AgentInput => ({ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: senderRunId,
   text: 'hello', createdAt: new Date().toISOString(), conversation: { senderRunId, recipientRunId: 'self', kind: 'progress', relationship: 'peer' }, ...over });
 
 describe('peerWaitEntry', () => {
@@ -66,13 +68,31 @@ describe('peerWaitResult', () => {
   });
 });
 
+describe('cezar_wait kinds worker and request', () => {
+  it('map onto the worker entry target, and policy refusals onto the tool codes', () => {
+    const [w, r] = [randomUUID(), randomUUID()];
+    expect(workerListTarget({ kind: 'worker', worker_ids: [w], timeout_seconds: 600 })).toEqual({ workerIds: [w], timeoutSeconds: 600 });
+    expect(workerListTarget({ kind: 'request', request_ids: [r], mode: 'all', timeout_seconds: 60 })).toEqual({ requestIds: [r], mode: 'all', timeoutSeconds: 60 });
+    const policy = (code: ConstructorParameters<typeof DelegationPolicyError>[0]) => new DelegationPolicyError(code, 'x');
+    expect(delegationWaitRefusal(policy('denied_scope'), () => true)).toBe('denied_scope');
+    expect(delegationWaitRefusal(policy('capacity_limit'), () => true)).toBe('capacity');
+    expect(delegationWaitRefusal(policy('incompatible_state'), () => true)).toBe('root_finish_pending');
+    expect(delegationWaitRefusal(policy('incompatible_state'), () => false)).toBe('unavailable');
+    expect(() => delegationWaitRefusal(new Error('disk'), () => false)).toThrow('disk');
+  });
+});
+
 describe('the runs that wait on a peer', () => {
   it('lists runs whose open peer wait names it, and finds a settled wait by id', () => {
     const peer = randomUUID();
     const open = makePeerWait({ peerIds: [peer] });
     const settled = makePeerWait({ peerIds: [peer], phase: WAIT_PHASE.cancelled });
     const waiting = root({ waits: [open] });
-    expect(runsAwaitingPeer([waiting, root({ lastWaits: [settled] }), root()], peer)).toEqual([waiting.id]);
+    const runs = () => [waiting, root({ lastWaits: [settled] }), root()];
+    expect(runsAwaitingPeer(peer, runs)).toEqual([waiting.id]);
+    expect(runsAwaitingPeer(root({ id: peer, status: RUN_STATUS.done }), runs)).toEqual([waiting.id]);
+    // A live peer settles no wait, and the live set is not read for it.
+    expect(runsAwaitingPeer(root({ id: peer }), () => { throw new Error('read'); })).toEqual([]);
     expect(peerWaitOf(root({ lastWaits: [settled] }), settled.id)).toBe(settled);
     expect(() => peerWaitOf(waiting, randomUUID())).toThrow(expect.objectContaining({ code: 'denied_scope' }));
   });
