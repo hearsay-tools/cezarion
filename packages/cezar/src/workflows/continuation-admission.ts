@@ -4,7 +4,7 @@ import { modelConflictsWithRunner } from '../core/model-presets.ts';
 import type { WorkerStepIdentity } from '../delegation/execution-identity.ts';
 import type { QueuedMessage, RunRecord, RunStore, StepState } from '../runs/store.ts';
 import { DEFAULT_AGENT_ACCOUNT_ID } from '../workspace/agent-accounts.ts';
-import type { PastedContent } from './run.ts';
+import type { PastedContent } from './run/types.ts';
 import { hasRegisteredRunProcess } from '../core/process-usage.ts';
 import { WorkerIdentityError } from '../delegation/execution-identity.ts';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';

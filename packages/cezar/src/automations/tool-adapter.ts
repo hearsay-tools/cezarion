@@ -13,7 +13,7 @@ import {
   type ScheduledTasksAnswer,
   type ScheduledTasksRequest,
 } from '@open-mercato/cezar-contract/scheduled-tasks';
-import type { AutomationToolService } from '../workflows/run.ts';
+import type { AutomationToolService } from '../workflows/run/types.ts';
 import { onceStatus, type AutomationService, type AutomationServiceProject } from './service.ts';
 import { isOnceSchedule, type AutomationDefinition } from './types.ts';
 
