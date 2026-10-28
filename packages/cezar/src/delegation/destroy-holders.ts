@@ -7,6 +7,7 @@ import type { WorkerAliasRetention, WorkerExecution } from '../runs/worker-execu
 import { windowsDestroyHolders, windowsStopDestroyHolder } from './windows-workspace-identity.ts';
 import { canonicalResourceRoot } from './mount-boundary.ts';
 import { mappedHolder } from './linux-mapped-holders.ts';
+import { readProcEvidence } from './linux-proc-evidence.ts';
 import { AliasBudgetExceeded, AliasWorkBudget } from './linux-alias-model.ts';
 import { prepareAliasScan, scanAliases, verifyAliasScan, type AliasScanAttempt } from './linux-alias-scan.ts';
 import { aliasRetentionAdapter } from './linux-alias-retention.ts';
@@ -62,7 +63,7 @@ function checkScopedHolders(scoped: Map<number, string>, live: { pid: number; to
     }
     const mapped = mappedHolder(pid, roots, budget);
     if (mapped === 'unreadable' || unreadableHolderEvidence(pid, budget)) {
-      if (verifiedExitedIncarnation(pid, token)) { scoped.delete(pid); continue; }
+      if (verifiedExitedIncarnation(pid, token, budget)) { scoped.delete(pid); continue; }
       throw new Error(`Cannot read evidence for destroy holder ${pid}`);
     }
     scoped.delete(pid);
@@ -108,7 +109,7 @@ function readableMapping(pid: number, token: string, roots: readonly string[], b
   if (process.platform !== 'linux') return true;
   const mapped = mappedHolder(pid, roots, budget);
   if (mapped === 'unreadable') {
-    if (verifiedExitedIncarnation(pid, token)) return false;
+    if (verifiedExitedIncarnation(pid, token, budget)) return false;
     throw new Error(`Cannot read evidence for destroy holder ${pid}`);
   }
   return mapped !== 'gone';
@@ -211,8 +212,13 @@ function processAbsent(pid: number): boolean {
 }
 
 /** A missing referent is not exit proof; fence the independent stat observation. */
-function verifiedExitedIncarnation(pid: number, token: string): boolean {
-  return processStartToken(pid) === token && processGone(pid) && processStartToken(pid) === token;
+function verifiedExitedIncarnation(pid: number, token: string, budget?: AliasWorkBudget): boolean {
+  if (processStartToken(pid) !== token) return false;
+  try {
+    const stat = readProcEvidence(`/proc/${pid}/stat`, budget ?? new AliasWorkBudget()).toString('utf8');
+    return !!parseProcStat(stat) && exitedStat(stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/))
+      && processStartToken(pid) === token;
+  } catch (error) { budget?.spend(0); if (error instanceof AliasBudgetExceeded) throw error; return false; }
 }
 
 function findHolders(roots: readonly string[], preselected?: readonly number[], budget?: AliasWorkBudget): { pid: number; token: string }[] {
