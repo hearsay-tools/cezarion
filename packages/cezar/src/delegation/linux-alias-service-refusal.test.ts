@@ -10,7 +10,7 @@ const f = vi.hoisted(() => {
   const mounts = Array.from({ length: 10000 }, (_, i) => `${i + 2} 1 8:1 /other /mount${i} rw - ext4 /dev/root rw`).join('\n') + '\n';
   return { workerId, parentId, generation, resourceId, boot, repo, path, sha, common, gitDir, workspace, receipt, marker, mounts,
     rootMount: '1 0 8:1 / / rw - ext4 /dev/root rw\n', files: new Map<number, { data: Buffer; offset: number }>(), nextFd: 10,
-    removed: [] as string[], gitMutations: [] as string[], budgetFailure: '' };
+    removed: [] as string[], gitMutations: [] as string[], keeperCalls: [] as { cwd: string; args: string[] }[], budgetFailure: '' };
 });
 const missing = () => Object.assign(new Error('missing'), { code: 'ENOENT' });
 vi.mock('node:fs', async original => {
@@ -60,14 +60,28 @@ vi.mock('node:child_process', async original => {
 });
 // The mutation keeper is a process boundary; this fake supplies its Git IPC response.
 vi.mock('../git-worktree-lock.ts', async original => ({ ...await original<typeof import('../git-worktree-lock.ts')>(),
-  withWorktreeMutation: async (_root: string, operation: (git: () => Promise<unknown>) => Promise<unknown>) => operation(async () => ({ ok: true, stdout: '', stderr: '' })) }));
+  withWorktreeMutation: async (_root: string, operation: (git: (cwd: string, args: string[]) => Promise<unknown>) => Promise<unknown>) => operation(async (cwd, args) => {
+    f.keeperCalls.push({ cwd, args: [...args] });
+    f.gitMutations.push(`${cwd}: ${args.join(' ')}`);
+    throw new Error('unexpected keeper Git invocation');
+  }) }));
 vi.mock('../detached-process.ts', async original => ({ ...await original<typeof import('../detached-process.ts')>(), linuxBootId: () => f.boot, processStartToken: () => `${f.boot}:100` }));
 
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { DelegationService } from './service.ts';
 import { AliasWorkBudget } from './linux-alias-model.ts';
 import { agentTmpDirLocations } from '../runs/agent-tmpdir.ts';
+import { withWorktreeMutation } from '../git-worktree-lock.ts';
 import type { WorkerAliasRetention } from '../runs/worker-execution.ts';
+
+it('records and refuses both keeper deletion commands', async () => {
+  for (const args of [['worktree', 'remove', f.path], ['update-ref', '-d', `refs/heads/${f.workspace.branch}`]]) {
+    await expect(withWorktreeMutation(f.repo, git => git(f.repo, args))).rejects.toThrow('unexpected keeper Git invocation');
+    expect(f.keeperCalls.at(-1)).toEqual({ cwd: f.repo, args });
+    expect(f.gitMutations.at(-1)).toBe(`${f.repo}: ${args.join(' ')}`);
+  }
+  f.keeperCalls.length = 0; f.gitMutations.length = 0;
+});
 
 it('retains service resources and prior pending when real preprocessing exhausts', async () => {
   const roots = [f.path, ...agentTmpDirLocations(`${f.repo}/.ai/cezar`, f.workerId)];
@@ -93,7 +107,7 @@ it('retains service resources and prior pending when real preprocessing exhausts
     const result = await internal.destroyAttempt(project, f.workerId, () => worker, 'manual');
     expect(result.error).toContain('alias scan work exceeds bounds');
     expect(result).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
-    expect(kill).not.toHaveBeenCalled(); expect(f.removed).toEqual([]); expect(f.gitMutations).toEqual([]);
+    expect(kill).not.toHaveBeenCalled(); expect(f.removed).toEqual([]); expect(f.gitMutations).toEqual([]); expect(f.keeperCalls).toEqual([]);
     expect(pending?.pending).toEqual([{ pid: 101, start: '100' }]); expect(manager.requestWorkerStop).not.toHaveBeenCalled();
     expect(exhaustedAt).toContain('indexAliasMounts');
     const reopened = new DelegationService() as unknown as typeof internal;
@@ -101,6 +115,6 @@ it('retains service resources and prior pending when real preprocessing exhausts
     const retry = await reopened.destroyAttempt(project, f.workerId, () => worker, 'manual');
     expect(retry).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
     expect(pending?.pending).toEqual([{ pid: 101, start: '100' }]);
-    expect(kill).not.toHaveBeenCalled(); expect(f.removed).toEqual([]); expect(f.gitMutations).toEqual([]);
+    expect(kill).not.toHaveBeenCalled(); expect(f.removed).toEqual([]); expect(f.gitMutations).toEqual([]); expect(f.keeperCalls).toEqual([]);
   } finally { charge.mockRestore(); kill.mockRestore(); }
 });

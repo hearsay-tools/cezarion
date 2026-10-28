@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { AliasWorkBudget, aliasCandidates, linkedAliasCandidates, mappedAliasCandidates, type AliasMount, type OwnedMountRoot } from './linux-alias-model.ts';
+import { AliasWorkBudget, aliasCandidates, indexAliasMounts, linkedAliasCandidates, mappedAliasCandidates, type AliasMount, type OwnedMountRoot } from './linux-alias-model.ts';
 
 // Independent variant expansion delegates only the old exhaustive mount/root loop to production.
 function exhaustive(raw: string, mounts: AliasMount[], roots: OwnedMountRoot[], newline: boolean) {
@@ -32,10 +32,12 @@ it.each(cases)('preserves mapped variants and callbacks: $name', ({ raw, mounts 
   else expect(run()).toEqual((old.values[0] ?? []).map(path => ({ path, dev: '8:1', ino: 42n })));
   expect(events).toEqual(old.events);
 });
-it.each(cases.filter(row => !row.raw.includes('\\012')))('preserves link variants and callbacks: $name', ({ raw, mounts }) => {
+it.each(cases)('preserves link variants and callbacks: $name', ({ raw, mounts }) => {
   const old = exhaustive(raw, mounts, owned, false);
   const events: string[] = [];
-  const run = () => linkedAliasCandidates(raw, '/', '08:01', 42n, mounts, owned, new AliasWorkBudget(), () => events.push('candidate'));
+  const budget = new AliasWorkBudget();
+  const index = indexAliasMounts(mounts, budget, '/', owned);
+  const run = () => linkedAliasCandidates(raw, '/', '08:01', 42n, mounts, owned, budget, () => events.push('candidate'), index);
   if (old.ambiguous) expect(run).toThrow('ambiguous link path');
   else expect(run()).toEqual((old.values[0] ?? []).map(path => ({ path, dev: '8:1', ino: 42n })));
   expect(events).toEqual(old.events);
