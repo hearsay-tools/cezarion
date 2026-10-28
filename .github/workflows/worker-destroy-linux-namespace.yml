@@ -50,6 +50,27 @@ jobs:
         run: |
           set -o pipefail
           sudo -n -- python3 .github/scripts/linux-mount-alias-probe.py --production "$(command -v node)" 2>&1 | tee "$RUNNER_TEMP/candidate-native.log"
+      - name: Attribute failed capacity scan in a disposable copy
+        if: failure()
+        run: |
+          set -eu
+          if ! test -f "$RUNNER_TEMP/candidate-native.log" || ! grep -q 'capacity result:.*alias scan work exceeds bounds' "$RUNNER_TEMP/candidate-native.log"; then
+            exit 0
+          fi
+          copy="$RUNNER_TEMP/capacity-attribution-copy"
+          staged="$RUNNER_TEMP/capacity-attribution-staged.json"
+          pnpm exec tsx packages/cezar/test/e2e/capacity-attribution-stage-cli.ts "$GITHUB_WORKSPACE" "$staged"
+          mkdir "$copy"
+          git archive HEAD -- package.json pnpm-lock.yaml pnpm-workspace.yaml vitest.config.ts packages .github/scripts .github/test-durations.json | tar -x -C "$copy"
+          pnpm exec tsx packages/cezar/test/e2e/capacity-attribution-apply-cli.ts "$copy" "$staged"
+          cd "$copy"
+          pnpm install --frozen-lockfile
+          set +e
+          sudo -n -- python3 .github/scripts/linux-mount-alias-probe.py --production "$(command -v node)" > "$RUNNER_TEMP/capacity-attribution-raw.log" 2>&1
+          diagnostic_status=$?
+          set -e
+          python3 .github/scripts/capacity-attribution-extract.py "$RUNNER_TEMP/capacity-attribution-raw.log" "$RUNNER_TEMP/capacity-attribution.json"
+          exit "$diagnostic_status"
       - name: Save native evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -57,6 +78,13 @@ jobs:
           name: worker-destroy-linux-native-evidence
           path: |
             ${{ runner.temp }}/candidate-native.log
+          if-no-files-found: warn
+      - name: Save capacity attribution
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: worker-destroy-linux-capacity-attribution
+          path: ${{ runner.temp }}/capacity-attribution.json
           if-no-files-found: warn
   regression-proof:
     runs-on: ubuntu-latest
