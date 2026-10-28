@@ -5,11 +5,13 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import type { PeerWaitEntry, Wait } from '@open-mercato/cezar-contract/waits';
-import { RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, STEP_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { RunRecord } from '../runs/store.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
+import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { MAX_AUTO_CONTINUES } from './run.ts';
+import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { stateOf } from './run-states.ts';
 import { controlledWire, fixtureUpdateRun, manager, parent, restart, root, semaphore, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
 
@@ -199,6 +201,23 @@ describe('peer waits (R9)', { timeout: 45_000 }, () => {
     await restart();
     await until(() => anyOf(a, entry.id)?.phase !== WAIT_PHASE.open);
     expect(anyOf(a, entry.id)).toMatchObject({ result: { reason: 'message', peerRunId: b, messageId: id } });
+  });
+
+  // Recovery records an interrupted peer failed and then continues it: that is not a settlement.
+  it('a restart that recovers an interrupted named peer leaves the wait open', async () => {
+    const { run, release } = await heldParent();
+    const b = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'peer task', runner: 'claude' });
+    const entry = await waitOnPeers(run.id, [b.id]);
+    release();
+    // The waiter parks and frees the slot; the peer runs a turn of its own.
+    await until(() => !!store.getRun(b.id)?.steps.some(step => step.sessionId) && store.getRun(b.id)?.status === RUN_STATUS.waiting);
+    // The controller dies while the peer is mid-turn: recovery fails it as interrupted, then continues it.
+    const midTurn = (row: RunRecord): RunRecord => ({ ...row, status: RUN_STATUS.running, waits: undefined, steps: row.steps.map(step => ({ ...step, status: STEP_STATUS.running })) });
+    const disk = (readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[]).map(row => row.id === b.id ? midTurn(row) : row);
+    await restart(false, disk);
+    await until(() => /interrupted/.test(store.getRun(b.id)?.error ?? '') || store.readEvents(b.id).some(event => String(event.message ?? '').includes('cezar restarted')));
+    expect(store.getRun(b.id)?.status).not.toBe(RUN_STATUS.failed);
+    expect(entryOf(run.id, entry.id)).toMatchObject({ phase: WAIT_PHASE.open });
   });
 
   it('a restart past the deadline resolves the wait as timeout', async () => {

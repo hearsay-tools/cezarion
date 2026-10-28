@@ -1309,7 +1309,6 @@ export class RunManager {
     if (source === 'live-release') return;
     if (!this.disposed && source === undefined) this.reapTerminalScratch(run.id);
     if (!this.disposed && !['queued', 'running', 'waiting'].includes(run.status) && !holdsOwedResults(run)) this.cancelOpenWaits(run.id);
-    if (!this.disposed && !['queued', 'running', 'waiting'].includes(run.status)) this.resolvePeerWaits(runsAwaitingPeer(this.store.listRuns(), run.id));
     if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.active.get(run.id)?.revokeDelegation?.();
     // Cleanup checkpoints emit terminal records too. With delegation disabled,
     // these observations must not replay the project's conversation histories.
@@ -1319,6 +1318,7 @@ export class RunManager {
     if (run.delegation && run.delegation.role !== 'invalid' && !['queued', 'running', 'waiting'].includes(run.status)) {
       for (const id of settledRunFamilies(this.store, run)) this.reconcileWorkerWaits(id);
     }
+    if (!['queued', 'running', 'waiting'].includes(run.status)) this.resolvePeerWaits(runsAwaitingPeer(this.store.listRuns(), run.id)); // never in recovery: an interrupted peer fails, then continues
   };
   private readonly pendingJobs = new Map<string, { workflow: WorkflowDef; input: StartRunInput; startAt?: number | undefined }>();
   /** Interrupted agent turns recovered after a process restart. Unlike an
