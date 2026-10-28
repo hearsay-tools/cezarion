@@ -1,3 +1,11 @@
+import type {
+  TurnTail, DelegationExecutionSettings, StartRunInput, PendingContinuation, ExecutionEmit,
+  Execution, ExecutionLaunch, StepLoop, SessionTurn, LaunchDelegation,
+  LaunchCiTools, LaunchOpening, StepProfile, StepModel, StepSessionLaunch,
+  WorkerDelegationRecord, ContinuationOpening, OpeningAnswer, ContinuationSettings, ContinuationSkills,
+  ContinuationSessionLaunch, ContinuationClose, WorkerTerminationBlocker, AutomationToolService,
+} from './run/types.ts';
+export type { TurnTail, DelegationExecutionSettings, StartRunInput, WorkerTerminationBlocker, AutomationToolService } from './run/types.ts';
 import { openCompletionRequests, recordRequestRefusal, repairFailedRootFinish, rootCompletionRefusal, sentRequestInstructions, settledRootFinishPatch, type CompletionRefusal } from './completion-policy.ts';
 import * as continuation from './continuation-admission.ts';
 import type { ContinueRunOptions } from './continuation-admission.ts';
@@ -6,13 +14,12 @@ import { uiAskQuestions } from '../core/ask.ts';
 import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { askErrorMessage, doneErrorMessage, scheduleRefusal, waitErrorMessage } from '../ci-wait/errors.ts';
-import type { ScheduleTaskAnswer, ScheduleTaskRequest, ScheduledTasksAnswer, ScheduledTasksRequest } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type CezarWaitRequestInput, type DoneErrorCode, type PeerWaitEntry, type PeerWaitResult, type PrWaitEntry, type ProcessWaitEntry, type ProcessWaitResult, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, isUsageLimitHold, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT } from '@open-mercato/cezar-contract/waits';
 import { ciWaitResultSchema, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { AUTONOMOUS_NUDGE, decideTurnEnd, stepScopedNudge, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
-import { releaseActiveResources } from './drop-active.ts';
+import { releaseActiveResources } from './run/drop-active.ts';
 import { RUN_EXITS, transition, transitionVia, type RunExitId } from './run-states.ts';
 import { nextLineEntry } from './line-order.ts';
 import { accountHeldFor, formatWakeInstant, resumeInFlight, runAccountKey, queuedRecoveryInput, queuedStartAt, sessionlessWakePrompt } from './run-scheduling.ts';
@@ -120,7 +127,7 @@ import { getHeadCommit, getRepoInfo } from '../server/git.ts';
 import { ensureOwnedWorkspace, verifyOwnedWorkspace } from '../delegation/workspace.ts';
 import { placeWorkerAttachments, verifyWorkerContext } from '../delegation/context.ts';
 import { enqueueAgentInput, agentInputBatch, hasLiveInboxClaim } from '../delegation/input.ts';
-import { resolvedWaitInputBatch } from './resolved-wait-input-batch.ts';
+import { resolvedWaitInputBatch } from './run/resolved-wait-input-batch.ts';
 import { parseDelegationEffort } from '../delegation/effort.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { reconcileWorkerEntry } from '../delegation/wait.ts';
@@ -173,6 +180,7 @@ async function configuredModelProvider(
 }
 /** An interactive session that hears nothing from the user closes itself. */
 export const IDLE_TIMEOUT_MS = 15 * 60_000;
+import { PROSE_HUMAN_GATE, workerOutcomeKey } from '../runs/transcript-facts.ts';
 /**
  * Task-completion marker from the agent contract (HANDOFF_ONLY_INSTRUCTIONS):
  * an active `CEZ:DONE` declaration means "goal achieved, nothing to ask" —
@@ -180,7 +188,6 @@ export const IDLE_TIMEOUT_MS = 15 * 60_000;
  * Detection runs on the accumulated turn text so delta-streaming backends
  * (codex, opencode) can't split the marker across text events.
  */
-import { PROSE_HUMAN_GATE, workerOutcomeKey } from '../runs/transcript-facts.ts';
 /** Find the turn's active markers: quoted/indented examples and fenced code declare
  * nothing. A standalone monitoring line belongs to this turn even when a later
  * assistant block acknowledges a new instruction. The prose itself is never read
@@ -266,7 +273,6 @@ function appendCompletedAssistantText(current: string, event: UiEvent): string {
   }
   return appendTurnText(current, event.item.text);
 }
-export type TurnTail = 'none' | 'visible' | 'silent';
 /** Last top-level completed item: a non-empty assistant message is a visible tail; reasoning or a tool is silent even after earlier visible text (#544). An empty turn stays `none` and never nudges. */
 export function trackTurnTail(tail: TurnTail, event: UiEvent): TurnTail {
   if (event.type !== 'item.completed' || event.item.parentItemId !== undefined) return tail;
@@ -475,7 +481,6 @@ export function repositoryRootLockDisabled(env: NodeJS.ProcessEnv = process.env)
 const REPOSITORY_ROOT_LOCK_DISABLED_NOTE =
   'repository-root lock disabled by CEZ_DISABLE_REPO_LOCK=1 (shared checkout is unsafe)';
 
-export type DelegationExecutionSettings = { cwd: string; runner: RunnerId; model?: string | undefined; modelIdentity?: string | undefined; effort?: string | undefined; agentProfile: string; accountBinding?: WorkerAccountBinding | undefined; systemPrompt?: string | undefined; allowedTools?: string[] | undefined; bashAllowlist?: string[] | undefined };
 
 /** What a turn end said, as the entry that settles it reads it (hearsay-tools/cezarion#1525). The
  *  turn end reads it from the turn; a later entry from what `parkAfterAck` kept (`boundaryTurn`). */
@@ -601,49 +606,6 @@ const AUTO_RESUME_PROMPT =
 /** How long a schedule tool call waits for the server to attach the service after recovery (#1465). */
 const AUTOMATION_TOOLS_READY_MS = 30_000;
 
-export interface StartRunInput {
-  task: string;
-  model?: string | undefined;
-  /** Reasoning-effort pin (#45). Canonical `low`/`medium`/`high`/`xhigh`/`max`.
-   *  Unset = harness default. Same class of override as `model`. */
-  effort?: string | undefined;
-  /** Agent backend chosen for this task (GUI). Unset = the config default. */
-  runner?: RunnerId | undefined;
-  /** Agent account for this task (spec 2026-07-29-agent-profiles), applying to steps that run
-   *  on `runner`. Unset = the project's own selection. Persisted on the record so the choice
-   *  survives into resume and Continue, and so the thread can say which account did the work. */
-  agentProfile?: string | undefined;
-  /** Attachments pasted into the new-task form — persisted when the run is created and
-   *  delivered once, with the first agent step's opening message. Images ride along as blocks the
-   *  model can view; a file (#950) only ever reaches the agent as the path it was written to. */
-  images?: PastedContent[] | undefined;
-  /** Per-run system-prompt override (`POST /api/runs`, programmatic callers).
-   *  Replaces the `config.json` default for this run — see
-   *  `resolveExtraSystemPrompt` for the precedence contract. */
-  systemPrompt?: string | undefined;
-  /** Composer opt-out (#worktree-toggle): `false` runs the task in the repo
-   *  working tree instead of an isolated worktree. Undefined/`true` keeps the
-   *  default per-task worktree. */
-  worktree?: boolean | undefined;
-  /** Autonomous mode (#autonomous): eligible turn ends auto-continue until done
-   *  or the safety cap. Native asks, input delivery and lifecycle waits still apply. */
-  autonomous?: boolean | undefined;
-  archiveWhenDone?: boolean | undefined;
-  autoMergePr?: boolean | undefined;
-  /** Task webhook opt-in (#589). Persisted on the record at creation; read from there after. */
-  notify?: boolean | undefined;
-  /** Attachments from the queued prompt stack (#472), re-encoded from disk by
-   *  `hydrateQueuedInput` at dequeue. Kept separate from `images` because those
-   *  are persisted into `taskImages` by `startRun()` — folding
-   *  the stack's (already-persisted) files in there would write duplicate files
-   *  and make the task bubble render the stack's images as its own. In-memory
-   *  only: rebuilt from the record on every hydration, never persisted. */
-  stackedImages?: ContentBlock[] | undefined;
-  /** Automation provenance (hearsay-tools/cezarion#1465). Written by `createRun` in the row that
-   *  creates the run, so a receipt never points at nothing after a crash. */
-  automation?: RunRecord['automation'];
-  automationTrigger?: RunRecord['automationTrigger'];
-}
 
 /**
  * The effective "extra" system prompt for a run (spec §protocol v2, R2 2.3):
@@ -705,18 +667,6 @@ function withResumeContext(prompt: string, message: RunRecord['continuationMessa
   return `${parts.join(' ')}\n${prompt}`;
 }
 
-interface PendingContinuation {
-  stepId: string;
-  sessionId: string | undefined;
-  backend: RunnerId;
-  prompt: string;
-  /** Attachments the user pasted into the follow-up composer — images to view, files (#950) to
-   *  be given the path of. Persisted when the continuation actually opens, not here. */
-  images: PastedContent[];
-  /** When this continuation joined the line (epoch ms). A queued continuation is a wake of a run
-   *  already in progress, so it goes ahead of unstarted runs, oldest first (`nextLineEntry`). */
-  lineJoinedAt: number;
-}
 
 /** What re-reading a message's persisted attachments yields: viewable blocks for the images, and
  *  a path for every attachment including the files that have no block. */
@@ -725,109 +675,6 @@ interface PersistedAttachments {
   attachments: PersistedAttachment[];
 }
 
-/** What `execute` writes to its run's event stream. */
-type ExecutionEmit = (event: { type: string; stepId?: string; [k: string]: unknown }) => void;
-/** One `execute` call: what its phases share. */
-type Execution = { runId: string; workflow: WorkflowDef; input: StartRunInput; startAt: number; state: ActiveRun; emit: ExecutionEmit };
-/** What `startExecution` resolved before the first step. */
-type ExecutionLaunch = {
-  config: Awaited<ReturnType<typeof loadConfig>>;
-  taskBackend: RunnerId;
-  extraSystemPrompt: string | undefined;
-  /** The run record as it was before `startExecution` recorded the start. */
-  ownedRun: RunRecord | undefined;
-  /** An owned worker's workspace. */
-  owned: Extract<NonNullable<RunRecord['delegation']>, { role: 'worker' }>['workspace'] | undefined;
-};
-/** The state of `execute`'s step loop, which `settleExecution` reads once the loop ended. */
-type StepLoop = {
-  /** A failed check's output, handed to the agent step its retry loops back to. */
-  checkFailure: string | null;
-  runError: string | null;
-  deliveryCapped: boolean;
-  /** An earlier step whose session closed without a done (hearsay-tools/cezarion#1620). */
-  incompleteStepId?: string;
-};
-/** What a launched session's callbacks share (hearsay-tools/cezarion#1632): the turn in progress
- *  and the session's first fault. */
-type SessionTurn = {
-  text: string;
-  completedText: string;
-  tail: TurnTail;
-  /** The delay a Claude ScheduleWakeup call asked for in this turn. */
-  scheduleWakeup: number | null | undefined;
-  /** The fault that ended the session; an agent input error recorded before it wins. */
-  sessionError: string | undefined;
-};
-/** The delegation capability and the CI tools one launch provisioned. */
-type LaunchDelegation = ReturnType<RunManager['provisionSession']>;
-type LaunchCiTools = Awaited<ReturnType<RunManager['provisionCiSession']>>;
-/** A launch's opening message, and whether its session-start context carries the handoff. */
-type LaunchOpening = { userPrompt: string; handoffInjected: boolean };
-/** The account a step's session runs under: its profile, environment and account binding. */
-type StepProfile = Awaited<ReturnType<RunManager['agentEnvForStep']>>;
-/** The model and effort a fresh step's session runs with. */
-type StepModel = { backendModel: string | undefined; effectiveEffort: string | undefined };
-/** What `runAgentStep` resolved before it starts the step's session. */
-type StepSessionLaunch = {
-  step: WorkflowStepDef;
-  sessionId: string;
-  images: ContentBlock[] | undefined;
-  opening: LaunchOpening;
-  skillPrompt: string | undefined;
-  extraSystemPrompt: string | undefined;
-  toolGrant: ToolGrant;
-  profile: StepProfile;
-  model: StepModel;
-  delegation: LaunchDelegation;
-  webhooksPart: string | undefined;
-  ciTools: LaunchCiTools;
-};
-/** An owned worker's delegation record. */
-type WorkerDelegationRecord = Extract<NonNullable<RunRecord['delegation']>, { role: 'worker' }>;
-/** A Continue's opening message and what it carries: the checkpoint it replays, whether it is a
- *  parent's answer to a routed question (#505), and the images and attachments it hands over. */
-type ContinuationOpening = {
-  prompt: string;
-  checkpoint: RunRecord['continuationMessage'];
-  parentAnswer: boolean;
-  openingImages: ContentBlock[];
-  attachments: PersistedAttachment[];
-};
-/** The human ask a Continue's opening message answers, and the human waits that answer settles
- *  when the opening turn ends. The turn end clears `askSeq`. */
-type OpeningAnswer = { askSeq: number | undefined; waits: string[]; parentAnswer: boolean };
-/** What a Continue resolved before its pre-spawn checks: the step that owns its session, the
- *  workflow step it extends, and its tool grant, model, effort and account. */
-type ContinuationSettings = {
-  owningStep: RunRecord['steps'][number] | undefined;
-  toolsStep: WorkflowStepDef | undefined;
-  toolGrant: ToolGrant;
-  backendModel: string | undefined;
-  effort: string | undefined;
-  profile: StepProfile;
-  /** The run's extra system prompt, which workers inherit. */
-  extraSystemPrompt: string | undefined;
-};
-/** The continued step's skill playbook, for the system prompt or for the fallback system prompt of
- *  an in-thread resume, and the skill files the opening message names. */
-type ContinuationSkills = { skillPrompt: string | undefined; fallbackSkillPrompt: string | undefined; files: Map<string, string> };
-/** What `runContinuation` resolved before it starts the Continue's session. */
-type ContinuationSessionLaunch = {
-  stepId: string;
-  sessionId: string | undefined;
-  prompt: string;
-  setupNote: string | undefined;
-  opening: ContinuationOpening;
-  skills: ContinuationSkills;
-  skipSkillOnResume: boolean;
-  settings: ContinuationSettings;
-  delegation: LaunchDelegation;
-  webhooksPart: string | undefined;
-  ciTools: LaunchCiTools;
-};
-/** The workflow remainder a successful Continue queues once its session is released. */
-type ContinuationClose = { resumeWorkflow?: { workflow: WorkflowDef; input: StartRunInput; startAt: number } | undefined };
 
 /** Only an original workflow that has never executed may return to its queue. */
 export function isUntouchedCancelledRun(run: RunRecord): boolean {
@@ -837,8 +684,6 @@ export function isUntouchedCancelledRun(run: RunRecord): boolean {
 
 /** #469: how long a non-gone orphan probe stands before the next scan. */
 const ORPHAN_PROBE_CACHE_MS = 2_000;
-/** #469: why destroy could not prove a crashed generation's termination. */
-export type WorkerTerminationBlocker = { kind: 'unreadable' } | { kind: 'controller'; pid: number } | { kind: 'processes'; pids: number[] };
 /** #469: admission refused because a process of the previous generation still runs. */
 class WorkerOrphanAliveError extends Error {}
 const admissionError = (error: unknown, fallback: string) => error instanceof WorkerOrphanAliveError ? error.message : fallback;
@@ -848,11 +693,6 @@ function familyOf(run: RunRecord): string {
   return run.delegation?.role === 'worker' ? run.delegation.parentRunId : run.id;
 }
 
-/** hearsay-tools/cezarion#1465: what `startServer` hands a manager for the schedule tools. */
-export type AutomationToolService = {
-  scheduleTask(request: ScheduleTaskRequest): Promise<ScheduleTaskAnswer>;
-  scheduledTasks(request: ScheduledTasksRequest): Promise<ScheduledTasksAnswer>;
-};
 
 /** Only the synchronous delivery of a human answer uses the budget its reset replaced. */
 type HumanAnswerBudget = { spent: number };
@@ -4459,12 +4299,6 @@ export class RunManager {
   }
 
   /**
-   * Claim every run that owns a branch about to be deleted (issue 08 §B3), or null when any is in
-   * use: live, queued, at the review gate, or already claimed. The classification that allowed the
-   * delete read liveness before awaiting git and GitHub; this re-reads it and holds Continue off —
-   * its re-materialization would otherwise recreate the branch from the base under the delete.
-   */
-  /**
    * Claim a settled run while its draft PR is published (`POST /runs/:id/pr`), or null when it is
    * live or already claimed. Publishing may first re-materialize a reclaimed checkout, which
    * clears the reclaim stamp and makes the run reclaimable again; held, the claim keeps reclaim,
@@ -4475,6 +4309,12 @@ export class RunManager {
     return this.holdForMaintenance([runId]);
   }
 
+  /**
+   * Claim every run that owns a branch about to be deleted (issue 08 §B3), or null when any is in
+   * use: live, queued, at the review gate, or already claimed. The classification that allowed the
+   * delete read liveness before awaiting git and GitHub; this re-reads it and holds Continue off —
+   * its re-materialization would otherwise recreate the branch from the base under the delete.
+   */
   claimForBranchCleanup(runIds: readonly string[]): (() => void) | null {
     const unfinished = (id: string) => !['done', 'failed', 'cancelled'].includes(this.store.getRun(id)?.status ?? 'done');
     if (runIds.some((id) => this.reclaiming.has(id) || !!this.autosaveCleanupBlocker(id) || this.isActive(id) || unfinished(id) || this.store.writeRefusal(id))) return null;
@@ -9190,21 +9030,6 @@ export class RunManager {
   }
 
   /**
-   * Turn-end bookkeeping (#389), shared by `runAgentStep` and
-   * `runContinuation` — called (fire-and-forget) from every `turn-end` event:
-   *
-   *  - `titleSummary`: derived from the turn's text, set ONCE — only while the
-   *    record has none. A user's inline edit also lands in `titleSummary`
-   *    (see `PATCH /api/runs/:id`), so an edit is never overwritten either.
-   *  - `diffStat`: cheap `git diff --shortstat` vs the base, refreshed every
-   *    turn. Async and best-effort — a git failure becomes at most a `note`
-   *    event, NEVER a run failure. `updateRun` fans the record out over SSE,
-   *    so the list views pick both up with no extra wiring.
-   *
-   * Not `private` so the integration tests can drive a turn-end directly —
-   * a real agent session is the only other way to reach this path.
-   */
-  /**
    * The namer's apply path (task auto-naming spec). Fire-and-forget: called
    * without await from `startRun` (creation) and `recordTurnEnd` (live
    * refresh). A user-owned title (`titleOrigin: 'user'`) is never overwritten;
@@ -9247,6 +9072,21 @@ export class RunManager {
     }
   }
 
+  /**
+   * Turn-end bookkeeping (#389), shared by `runAgentStep` and
+   * `runContinuation` — called (fire-and-forget) from every `turn-end` event:
+   *
+   *  - `titleSummary`: derived from the turn's text, set ONCE — only while the
+   *    record has none. A user's inline edit also lands in `titleSummary`
+   *    (see `PATCH /api/runs/:id`), so an edit is never overwritten either.
+   *  - `diffStat`: cheap `git diff --shortstat` vs the base, refreshed every
+   *    turn. Async and best-effort — a git failure becomes at most a `note`
+   *    event, NEVER a run failure. `updateRun` fans the record out over SSE,
+   *    so the list views pick both up with no extra wiring.
+   *
+   * Not `private` so the integration tests can drive a turn-end directly —
+   * a real agent session is the only other way to reach this path.
+   */
   async recordTurnEnd(runId: string, turnText: string): Promise<void> {
     if (this.isDisposedDelegatedRun(runId)) return;
     try {
