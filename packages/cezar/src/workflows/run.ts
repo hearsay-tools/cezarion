@@ -5547,7 +5547,7 @@ export class RunManager {
     for (const root of family) {
       if (root.delegation?.role !== 'root' || !root.delegation.conversation) continue;
       const next = reconcileConversationState(root, (id) => this.store.getRun(id), now, run =>
-        run.delegation?.role === 'worker' ? this.store.readWorkerExecution(run.id)?.phase === 'complete' : !this.isActive(run.id));
+        run.delegation?.role === 'worker' ? this.store.readWorkerExecution(run.id)?.phase === 'complete' : !this.isActive(run.id), id => this.store.isUnreadable(id));
       if (next && next !== root.delegation.conversation) this.store.commitConversation(root.id, next);
       projectConversationEvents(this.store, this.store.getRun(root.id)!);
       this.retireSettledQuestions(root.id);

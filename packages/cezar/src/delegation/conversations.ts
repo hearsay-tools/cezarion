@@ -12,14 +12,15 @@ import { reservedReplies } from './questions.ts';
  * one settles `deleted` (spec 2026-10-27-task-communication-protocol § 5, § 7). Lookup only the
  * named sender/recipient runs.
  */
-export function reconcileConversationState(root: RunRecord, lookup: (id: string) => RunRecord | undefined, now: string, isSettled: (run: RunRecord) => boolean): ConversationState | undefined {
+export function reconcileConversationState(root: RunRecord, lookup: (id: string) => RunRecord | undefined, now: string, isSettled: (run: RunRecord) => boolean,
+  unreadable: (id: string) => boolean = () => false): ConversationState | undefined {
   if (root.delegation?.role !== 'root' || !root.delegation.conversation) return undefined;
   const state = root.delegation.conversation;
   const outcomes = [...state.outcomes];
   for (const request of state.messages) {
     if (request.kind !== 'request' || request.state !== 'accepted' || outcomes.some(outcome => outcome.requestId === request.id)) continue;
     const recipient = lookup(request.recipientRunId);
-    const status = request.relationship === 'peer' ? peerRecipientSettlement(recipient, isSettled) : familyRecipientSettlement(root, request, recipient, isSettled);
+    const status = request.relationship === 'peer' ? peerRecipientSettlement(recipient, isSettled, unreadable(request.recipientRunId)) : familyRecipientSettlement(root, request, recipient, isSettled);
     const closed = (run: RunRecord | undefined) => run && ['done', 'failed', 'cancelled'].includes(run.status) && isSettled(run);
     const settled = status ?? (closed(root) || closed(lookup(request.senderRunId)) ? 'sender-closed'
       : request.deadline && request.deadline <= now ? 'timed-out' : undefined);
@@ -29,9 +30,10 @@ export function reconcileConversationState(root: RunRecord, lookup: (id: string)
 }
 
 /** A peer recipient settles the request when it is deleted, rests at `review` (no peer can resume
- *  it), or ends `done`, `failed` or `cancelled`. */
-function peerRecipientSettlement(recipient: RunRecord | undefined, isSettled: (run: RunRecord) => boolean): RequestOutcome['status'] | undefined {
-  if (!recipient) return 'deleted';
+ *  it), or ends `done`, `failed` or `cancelled`. A row this store cannot decode is not a deleted
+ *  one: its request stays open (hearsay-tools/cezarion#1990 review). */
+function peerRecipientSettlement(recipient: RunRecord | undefined, isSettled: (run: RunRecord) => boolean, unreadable: boolean): RequestOutcome['status'] | undefined {
+  if (!recipient) return unreadable ? undefined : 'deleted';
   if (!['review', 'done', 'failed', 'cancelled'].includes(recipient.status) || !isSettled(recipient)) return undefined;
   return recipient.status === 'review' || recipient.status === 'done' ? 'completed-without-reply' : recipient.status as 'failed' | 'cancelled';
 }

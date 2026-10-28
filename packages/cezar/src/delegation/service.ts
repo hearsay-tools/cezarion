@@ -343,7 +343,7 @@ export class DelegationService {
     // A ledger whose history is being deleted is read as it stands: reconciliation would write to it.
     if (root.delegation?.role === 'root' && root.delegation.historyDeletion) return root.delegation.conversation ?? { messages: [], outcomes: [] };
     const state = reconcileConversationState(root, (id) => project.store.getRun(id), new Date().toISOString(), run => run.delegation?.role === 'worker'
-      ? project.store.readWorkerExecution(run.id)?.phase === 'complete' : !project.manager.isActive(run.id));
+      ? project.store.readWorkerExecution(run.id)?.phase === 'complete' : !project.manager.isActive(run.id), id => project.store.isUnreadable(id));
     if (root.delegation?.role === 'root' && state && state !== root.delegation.conversation) project.store.commitConversation(root.id, state);
     return state ?? { messages: [], outcomes: [] };
   }
