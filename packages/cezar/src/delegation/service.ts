@@ -43,6 +43,8 @@ import {
   workerSpawnRequestSchema,
   workerSteerRequestSchema,
   workerWaitRequestSchema,
+  peerWaitRequestSchema,
+  type PeerWaitRequest,
   workerParamsSchema,
   workerCancelWaitRequestSchema,
   type WorkerCancelWaitRequest,
@@ -60,7 +62,7 @@ import {
   type WorkerWaitRequest,
 } from '@open-mercato/cezar-contract/delegation';
 import type { AgentInput } from '@open-mercato/cezar-contract';
-import { completionWaitEntry, hasWorkerDeadline, workerCompletionWaitProjection, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
+import { completionWaitEntry, hasWorkerDeadline, peerWaitView, workerCompletionWaitProjection, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import type { RunStore, RunRecord } from '../runs/store.ts';
 import { assertConversationIdFree, ConversationIdInUseError } from '../runs/conversation-identity.ts';
 import { workerDestroyView, workerOutcome } from '../runs/delegation-state.ts';
@@ -590,6 +592,14 @@ export class DelegationService {
     const wait = project.manager.registerRequestWait(caller.runId, request);
     return { wait, instruction: `Wait ${wait.id} registered until ${wait.deadline}. End your turn now to release capacity. Cezar resumes you when ${wait.mode === 'all' ? 'every selected request settles' : 'a selected request settles'} or at the deadline. Messages also wake you and keep this wait open; end your turn to keep waiting. Your other waits stay open beside it.` };
   }
+  /** `cez message wait --peer` (hearsay-tools/cezarion#1995): the manager checks each peer through
+   *  the relationship resolver, so a worker or a non-peer is `denied_scope`. */
+  async waitPeers(caller: Caller, value: PeerWaitRequest) {
+    const request = peerWaitRequestSchema.parse(value);
+    const project = this.context(caller);
+    const wait = project.manager.registerPeerWait(caller.runId, request, 'cez-message-wait');
+    return { wait: peerWaitView(wait), instruction: `Wait ${wait.id} registered until ${wait.deadline}. End your turn now to release capacity. Cezar resumes you when a selected task messages you or settles, or at the deadline. Human and worker messages also wake you and keep this wait open; end your turn to keep waiting. Your other waits stay open beside it.` };
+  }
   async spawn(caller: Caller, value: WorkerSpawnRequest) {
     const request = workerSpawnRequestSchema.parse(value);
     const initial = this.context(caller);
@@ -775,7 +785,13 @@ export class DelegationService {
       const wait = [...sender.waits ?? [], ...sender.lastWaits ?? []].find(entry => entry.id === waitId && entry.kind === 'worker');
       if (wait?.kind !== 'worker' || !wait.requestIds?.length) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
       for (const requestId of wait.requestIds) this.ownRequest(caller, requestId);
-    } else authorizeCancelWait(caller, sender, project.id);
+    } else {
+      authorizeCancelWait(caller, sender, project.id);
+      // A peer wait is cancelled through the list too (hearsay-tools/cezarion#1995).
+      if ([...sender?.waits ?? [], ...sender?.lastWaits ?? []].some(entry => entry.id === waitId && entry.kind === 'peer')) {
+        return { wait: peerWaitView(project.manager.cancelPeerWait(caller.runId, waitId)) };
+      }
+    }
     return { wait: project.manager.cancelWorkerWait(caller.runId, waitId) };
   }
   async destroy(caller: Caller, params: WorkerParams) {

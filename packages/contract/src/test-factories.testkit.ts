@@ -4,6 +4,7 @@ import { runStatusSchema, stepStateSchema, stepStatusSchema } from './runs.ts';
 import type { RunRecord, StepState } from './runs.ts';
 import {
   humanWaitEntrySchema,
+  peerWaitEntrySchema,
   prWaitEntrySchema,
   processWaitEntrySchema,
   timerWaitEntrySchema,
@@ -11,7 +12,7 @@ import {
   waitViaSchema,
   workerWaitEntrySchema,
 } from './waits.ts';
-import type { HumanWaitEntry, PrWaitEntry, ProcessWaitEntry, TimerWaitEntry, WorkerWaitEntry } from './waits.ts';
+import type { HumanWaitEntry, PeerWaitEntry, PrWaitEntry, ProcessWaitEntry, TimerWaitEntry, WorkerWaitEntry } from './waits.ts';
 
 /**
  * Typed test data for run records, waits and events (hearsay-tools/cezarion#1812). A test builds its
@@ -48,6 +49,7 @@ export const WAIT_KIND = {
   human: humanWaitEntrySchema.shape.kind.value,
   worker: workerWaitEntrySchema.shape.kind.value,
   process: processWaitEntrySchema.shape.kind.value,
+  peer: peerWaitEntrySchema.shape.kind.value,
 } as const;
 
 // ---- shared defaults ----------------------------------------------------------------------
@@ -182,6 +184,19 @@ export function makeProcessWait(over: Partial<ProcessWaitEntry> = {}): ProcessWa
     deadline: LATER,
     timeoutSeconds: 1800,
     pid: 4242,
+    ...over,
+  };
+}
+
+/** The agent's open wait on one named peer task (hearsay-tools/cezarion#1995). */
+export function makePeerWait(over: Partial<PeerWaitEntry> = {}): PeerWaitEntry {
+  return {
+    ...waitBase(),
+    kind: WAIT_KIND.peer,
+    via: WAIT_VIA.cezar_wait,
+    deadline: LATER,
+    timeoutSeconds: 600,
+    peerIds: [uuid()],
     ...over,
   };
 }

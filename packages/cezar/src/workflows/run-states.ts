@@ -16,14 +16,15 @@
 import type { RunRecord, RunStatus, Wait, WaitPhase } from '@open-mercato/cezar-contract';
 import { computeWaitingOn } from '@open-mercato/cezar-contract/waits';
 
-/** Who or what fires a trigger. */
+/** Who or what fires a trigger. `peer` is another root task of the project (hearsay-tools/cezarion#1995). */
 export type FiredBy = 'human' | 'parent' | 'agent' | 'runner' | 'timer' | 'scheduler' | 'watcher'
-  | 'worker' | 'recovery' | 'engine';
+  | 'worker' | 'peer' | 'recovery' | 'engine';
 /** The actors that fire with no person and no restart behind them. */
-export const AUTOMATIC: ReadonlySet<FiredBy> = new Set(['runner', 'timer', 'scheduler', 'watcher', 'worker', 'engine']);
+export const AUTOMATIC: ReadonlySet<FiredBy> = new Set(['runner', 'timer', 'scheduler', 'watcher', 'worker', 'peer', 'engine']);
 
-/** What a `waiting` run waits on: `computeWaitingOn`'s kinds, plus three cases it leaves out. */
-export type Park = 'permission' | 'human' | 'usage-limit' | 'workers' | 'pr' | 'process' | 'timer'
+/** What a `waiting` run waits on: `computeWaitingOn`'s kinds (its `peers` is `peer` here), plus
+ *  three cases it leaves out. */
+export type Park = 'permission' | 'human' | 'usage-limit' | 'workers' | 'peer' | 'pr' | 'process' | 'timer'
   | 'capacity' | 'plain';
 export type RunState = Exclude<RunStatus, 'waiting'> | `waiting:${Park}`;
 
@@ -48,6 +49,7 @@ export const RUN_STATES: { readonly [S in RunState]: RunStateSpec } = {
   },
   'waiting:usage-limit': { final: false, note: 'A usage-limit hold: no session and no slot until the resume time.' },
   'waiting:workers': { final: false, note: 'No slot; the idle timer is armed.' },
+  'waiting:peer': { final: false, note: 'Named peer root tasks (hearsay-tools/cezarion#1995). No slot; the idle timer is armed. The deadline (1 to 1,800 s) is its automatic exit.' },
   'waiting:pr': { final: false, note: 'Keeps a slot in the monitoring pool.' },
   'waiting:process': { final: false, note: 'Keeps a slot in the monitoring pool.' },
   'waiting:timer': { final: false, note: 'Keeps a slot in the monitoring pool.' },
@@ -118,7 +120,7 @@ export type TriggerRow = {
   pinnedBy?: { file: string; test: string };
 };
 
-const PARKS = ['waiting:permission', 'waiting:human', 'waiting:usage-limit', 'waiting:workers', 'waiting:pr',
+const PARKS = ['waiting:permission', 'waiting:human', 'waiting:usage-limit', 'waiting:workers', 'waiting:peer', 'waiting:pr',
   'waiting:process', 'waiting:timer', 'waiting:capacity', 'waiting:plain'] as const satisfies readonly RunState[];
 const parksBut = (...left: RunState[]): RunState[] => PARKS.filter((park) => !left.includes(park));
 const MONITORING = ['waiting:pr', 'waiting:process', 'waiting:timer'] as const satisfies readonly RunState[];
@@ -138,6 +140,7 @@ export const RUN_TRIGGERS: readonly TriggerRow[] = [
   // running
   { id: 'running.park-monitoring', states: ['running'], trigger: 'The turn ends with an open pr, process or timer wait', firedBy: 'runner', behavior: 'waiting; keeps a slot in the monitoring pool', exit: 'park', to: MONITORING, via: ['carryOutPark', 'parkOnWaits'] },
   { id: 'running.park-workers', states: ['running'], trigger: 'The turn ends with an open worker wait', firedBy: 'runner', behavior: 'waiting; the slot is freed and the idle timer armed', exit: 'park', to: ['waiting:workers'], via: ['carryOutPark', 'parkOnWaits'], pinnedBy: { file: 'workflows/waits-parity-cells.testkit.ts', test: 'U3w a worker message during a worker wait wakes the parent and the worker wait stays open' } },
+  { id: 'running.park-peer', states: ['running'], trigger: 'The turn ends with an open peer wait as the top wait', firedBy: 'runner', behavior: 'waiting; the slot is freed and the idle timer armed', exit: 'park', to: ['waiting:peer'], via: ['carryOutPark', 'parkOnWaits'], pinnedBy: { file: 'workflows/peer-waits.test.ts', test: 'running → waiting:peer: the turn end parks on the peer wait with no slot' } },
   { id: 'running.ask', states: ['running'], trigger: 'The turn ends on a shown question or one of Cezar\'s human waits', firedBy: 'runner', behavior: 'waiting, Needs you; the idle timer armed', exit: 'park', to: ['waiting:human'], via: ['parkOnWaits', 'parkForUser'] },
   { id: 'running.no-wait-nudge', states: ['running'], trigger: 'The turn ends with no wait and no done, the first time', firedBy: 'runner', behavior: 'A nudge is sent; stays running; the reply bound is armed', exit: null, to: 'same', via: ['carryOutNoWaitNudge'] },
   { id: 'running.no-wait-human', states: ['running'], trigger: 'The nudge\'s reply turn ends with no wait again', firedBy: 'runner', behavior: 'Cezar\'s no-wait human wait: waiting, Needs you (a worker asks its parent)', exit: 'park', to: ['waiting:human'], via: ['carryOutHumanWait', 'openTurnEndHumanWait', 'parkForUser'] },
@@ -163,7 +166,7 @@ export const RUN_TRIGGERS: readonly TriggerRow[] = [
   { id: 'running.check-retry', states: ['running'], trigger: 'A check step fails with retries left', firedBy: 'engine', when: 'a workflow check step', behavior: 'queued for the retry, then running in the same execution', exit: 'requeue', to: ['queued'], via: ['settleCheckStep'], pinnedBy: { file: 'workflows/run.test.ts', test: 'keeps a check retry budget bounded across a recovered workflow remainder' } },
   { id: 'running.workflow-rest', states: ['running'], trigger: 'A Continue finishes the workflow step it resumed, with steps left', firedBy: 'runner', when: 'a resumed workflow', behavior: 'queued for the rest of the workflow', exit: 'requeue', to: ['queued'], via: ['settleResumedWorkflowStep'], pinnedBy: { file: 'workflows/run.test.ts', test: 'resumes the remaining workflow after an inactive delegated root answers a non-final ask' } },
   { id: 'running.held', states: ['running'], trigger: 'Before the spawn, the account went into a usage-limit hold, or a parent finish is pending', firedBy: 'engine', when: 'a hold or a pending parent finish', behavior: 'queued, untouched', exit: 'requeue', to: ['queued'], via: ['requeueWhileHeld', 'holdContinuationForRootFinish'], pinnedBy: { file: 'workflows/auto-resume.test.ts', test: 'holds in-place runs too, which dequeue long before they spawn' } },
-  { id: 'running.wakes-owed', states: ['running'], trigger: 'The provider fails or the session closes with waits open or results owed, under the delivery bound', firedBy: 'runner', behavior: 'waiting; the next wake reopens it; a failed delivery retries after 15 s, then 30 s', exit: 'park', to: [...MONITORING, 'waiting:workers', 'waiting:capacity'], via: ['settleAgentStepWakes', 'settleClosingWakes', 'settleFailedContinuation'], pinnedBy: { file: 'workflows/waits-parity-cells.testkit.ts', test: 'U9w provider failure with a worker wait open leaves the run recoverable and the next resolution delivers' } },
+  { id: 'running.wakes-owed', states: ['running'], trigger: 'The provider fails or the session closes with waits open or results owed, under the delivery bound', firedBy: 'runner', behavior: 'waiting; the next wake reopens it; a failed delivery retries after 15 s, then 30 s', exit: 'park', to: [...MONITORING, 'waiting:workers', 'waiting:peer', 'waiting:capacity'], via: ['settleAgentStepWakes', 'settleClosingWakes', 'settleFailedContinuation'], pinnedBy: { file: 'workflows/waits-parity-cells.testkit.ts', test: 'U9w provider failure with a worker wait open leaves the run recoverable and the next resolution delivers' } },
   { id: 'running.delivery-cap', states: ['running'], trigger: 'The third failed delivery', firedBy: 'runner', behavior: 'failed; results kept; a cap note', exit: 'fail', to: ['failed'], via: ['settleClosingWakes', 'settleAgentStepWakes', 'settleFailedRun'], pinnedBy: { file: 'workflows/waits-parity-cells.testkit.ts', test: 'U14 a wait-wake continuation that fails persistently stops at the delivery bound' } },
   { id: 'running.fail', states: ['running'], trigger: 'The provider fails, or a check fails with no retry left, and nothing is owed', firedBy: 'runner', behavior: 'failed; any accepted root Finish intent retires with the failure write so Continue remains available', exit: 'fail', to: ['failed'], via: ['settleExecution', 'settleFailedRun'], pinnedBy: { file: 'workflows/pi-teardown.test.ts', test: 'execute and Continue keep the provider error after teardown exit' } },
   // The failed Continue's own write, with its own exit: what running.fail, running.delivery-cap,
@@ -189,10 +192,10 @@ export const RUN_TRIGGERS: readonly TriggerRow[] = [
   { id: 'waiting.stop', states: parksBut('waiting:usage-limit'), trigger: 'Stop', firedBy: 'human', behavior: 'Waits cancelled; cancelled. A question stays pending', exit: 'cancel', to: ['cancelled'], via: ['cancel'] },
   { id: 'waiting.stop-root-finish', states: parksBut('waiting:usage-limit'), trigger: 'Stop during a root\'s pending Finish', firedBy: 'human', when: 'a root with Finish pending', behavior: 'cancelled', exit: 'cancel', to: ['cancelled'], via: ['cancel', 'reconcileWorkerFamily'], pinnedBy: { file: 'workflows/worker-wait-capacity.test.ts', test: 'cancellation retires pending Finish after' } },
   { id: 'waiting.finish', states: PARKS, trigger: 'Finish', firedBy: 'human', behavior: 'Waits cancelled, the question closed; done. Sent requests settle sender-closed; requests do not block Finish. A root\'s Finish is refused while workers are live or uncollected, or a question is open', exit: 'succeed', to: ['done'], via: ['finish', 'closeQuestionOnFinish', 'settleSuccess'] },
-  { id: 'waiting.idle', states: ['waiting:human', 'waiting:workers', 'waiting:plain'], trigger: '15 minutes idle in a park without a slot', firedBy: 'timer', behavior: 'The session closes; a root stays waiting; a wake reopens it. Cezar\'s own question does not stay (human.idle-cezar-question)', exit: null, to: 'same', via: ['armIdleTimer'] },
+  { id: 'waiting.idle', states: ['waiting:human', 'waiting:workers', 'waiting:peer', 'waiting:plain'], trigger: '15 minutes idle in a park without a slot', firedBy: 'timer', behavior: 'The session closes; a root stays waiting; a wake reopens it. Cezar\'s own question does not stay (human.idle-cezar-question)', exit: null, to: 'same', via: ['armIdleTimer'] },
   { id: 'human.idle-cezar-question', states: ['waiting:human'], trigger: '15 minutes idle on Cezar\'s no-wait question', firedBy: 'timer', when: 'Cezar asked, not the agent', behavior: 'The session closes and Cezar\'s question ends with it (hearsay-tools/cezarion#1234): waiting on nothing until a person sends Continue', exit: null, to: ['waiting:plain'], via: ['armIdleTimer', 'withdrawCezarHumanWaits'] },
   { id: 'waiting.restart', states: parksBut('waiting:usage-limit', 'waiting:permission', 'waiting:human'), trigger: 'Restart', firedBy: 'recovery', behavior: 'Parked again with its waits re-armed; owed wakes go through the continuation', exit: 'park', to: 'same', via: ['parkRecoveredRun', 'parkOnOpenWaits'] },
-  { id: 'waiting.wake-no-session', states: [...MONITORING, 'waiting:workers'], trigger: 'A wait resolves with no session', firedBy: 'watcher', when: 'the session closed', behavior: 'The scheduler continuation: queued, then running', exit: 'continue-line', to: ['queued'], via: ['queueWaitWake', 'continueRun'] },
+  { id: 'waiting.wake-no-session', states: [...MONITORING, 'waiting:workers', 'waiting:peer'], trigger: 'A wait resolves with no session', firedBy: 'watcher', when: 'the session closed', behavior: 'The scheduler continuation: queued, then running', exit: 'continue-line', to: ['queued'], via: ['queueWaitWake', 'continueRun'] },
   // Continue, every state a person can continue
   { id: 'continue.now', states: CONTINUABLE, trigger: 'A human message or Continue, no session; Send back from review', firedBy: 'human', behavior: 'A continuation: running at once', exit: 'continue-now', to: ['running'], via: ['continueRun', 'admitContinuation'] },
   { id: 'continue.line', states: CONTINUABLE, trigger: 'A human message or Continue, no session, or a parent\'s message to a settled owned worker', firedBy: 'human', when: 'no slot is free, or the account is held', behavior: 'queued, as a wake in the line', exit: 'continue-line', to: ['queued'], via: ['continueRun', 'admitContinuation'] },
@@ -204,6 +207,13 @@ export const RUN_TRIGGERS: readonly TriggerRow[] = [
   // waiting:workers
   { id: 'workers.settle', states: ['waiting:workers'], trigger: 'The awaited workers settle, or the named requests get replies', firedBy: 'worker', behavior: 'Resolves; the wake joins the line for a regular slot: running', exit: 'resume', to: ['running'], via: ['reconcileWorkerFamily', 'resolveWait', 'queueWaitWake'], pinnedBy: { file: 'workflows/waits-parity-cells.testkit.ts', test: 'U2w ci and worker open: the worker resolving wakes the agent with ci still open' } },
   { id: 'workers.deadline', states: ['waiting:workers'], trigger: 'An agent worker wait\'s deadline passes (Cezar\'s completion wait has none)', firedBy: 'timer', when: 'the agent set the wait', behavior: 'Resolves timeout; wakes as workers.settle', exit: 'resume', to: ['running'], via: ['armWait', 'resolveWait'] },
+  // waiting:peer (hearsay-tools/cezarion#1995). A human message (waiting.message), a family message
+  // (waiting.worker-wake), Stop (waiting.stop) and restart (waiting.restart) leave the wait open.
+  { id: 'peer.message', states: ['waiting:peer'], trigger: 'A named peer sends a message of any kind', firedBy: 'peer', behavior: 'Resolves message; the wake joins the line for a regular slot: running', exit: 'resume', to: ['running'], via: ['deliverConversationInput', 'resolvePeerWaits', 'resolvePeerWait', 'resolveWait', 'queueWaitWake'], pinnedBy: { file: 'workflows/waits-parity-cells.testkit.ts', test: 'U19w a peer wait parks a root that reads waiting on 1 task' } },
+  { id: 'peer.settled', states: ['waiting:peer'], trigger: 'A named peer reaches review, done, failed or cancelled, or is deleted', firedBy: 'watcher', behavior: 'Resolves settled; wakes as peer.message', exit: 'resume', to: ['running'], via: ['resolvePeerWaits', 'resolvePeerWait', 'resolveWait', 'queueWaitWake'], pinnedBy: { file: 'workflows/peer-waits.test.ts', test: 'resolves the wait as settled' } },
+  { id: 'peer.deadline', states: ['waiting:peer'], trigger: 'The deadline passes', firedBy: 'timer', behavior: 'Resolves timeout; wakes as peer.message', exit: 'resume', to: ['running'], via: ['armWait', 'resolveWait', 'queueWaitWake'], pinnedBy: { file: 'workflows/peer-waits.test.ts', test: 'the deadline resolves the wait as timeout' } },
+  { id: 'peer.beside', states: ['waiting:peer'], trigger: 'Another wait beside it resolves', firedBy: 'watcher', when: 'another wait is open beside it', behavior: 'Wakes with that result: running; the peer wait stays open and the turn end parks on it again', exit: 'resume', to: ['running'], via: ['resolveWait', 'queueWaitWake'], pinnedBy: { file: 'workflows/peer-waits.test.ts', test: 'another wait resolving beside it wakes the run and the peer wait stays open' } },
+  { id: 'peer.budget', states: ['waiting:peer'], trigger: 'A resolution arrives with the wake budget spent', firedBy: 'peer', when: 'the wake budget is spent', behavior: 'Not admitted: the wait is cancelled with the cap note, and Cezar\'s budget human wait opens: Needs you', exit: null, to: ['waiting:human'], via: ['resolveWait', 'cancelAutomaticAtCap', 'reparkWithoutWaits'], pinnedBy: { file: 'workflows/peer-waits.test.ts', test: 'a resolution with the wake budget spent is not admitted' } },
   // waiting:usage-limit
   { id: 'hold.fires', states: ['waiting:usage-limit'], trigger: 'The resume time passes', firedBy: 'timer', behavior: 'The continuation joins the line: queued', exit: 'continue-line', to: ['queued'], via: ['fireAutoResume', 'continueRun', 'admitContinuation'], pinnedBy: { file: 'workflows/auto-resume.test.ts', test: 'schedules the next window when the resumed turn hits the limit again, and counts up' } },
   { id: 'hold.withdrawn', states: ['waiting:usage-limit'], trigger: 'Auto-resume is off, the window was missed by a day, the cap (12) is reached, or the run is unreadable or refused at fire time', firedBy: 'engine', when: 'the resume cannot run', behavior: 'failed with the kept error and a note', exit: 'withdraw-hold', to: ['failed'], via: ['reconcileAutoResumes', 'fireAutoResume', 'withdrawAutoResume'], pinnedBy: { file: 'workflows/auto-resume.test.ts', test: 'stops scheduling once the consecutive-resume cap is spent, and says why' } },
@@ -277,6 +287,11 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindSpec } = {
   process: { deadline: 'required', keepsSlot: true, cancels: [...ENDS_WAITS, 'the process is not signalled'], resolves: [
     { trigger: 'the exit file, the process gone, the deadline (up to 7,200 s) or a probe error, polled every 5 s', firedBy: 'watcher' },
   ] },
+  peer: { deadline: 'required', keepsSlot: false, cancels: [...ENDS_WAITS, 'the wake budget is spent at its resolution'], resolves: [
+    { trigger: 'a message of any kind from a named peer', firedBy: 'peer' },
+    { trigger: 'a named peer settles or is deleted', firedBy: 'watcher' },
+    { trigger: 'the deadline (1 to 1,800 s, default 600)', firedBy: 'timer' },
+  ] },
   worker: { deadline: 'agent-only', keepsSlot: false, cancels: [...ENDS_WAITS, 'the parent settles'], resolves: [
     { trigger: 'the workers report outcomes or the requests get replies, as its mode says', firedBy: 'worker' },
     { trigger: 'the deadline of an agent wait; Cezar\'s completion wait has none', firedBy: 'timer' },
@@ -289,7 +304,7 @@ export const WAIT_KINDS: { readonly [K in Wait['kind']]: WaitKindSpec } = {
 /** The phases a wait entry moves through. Their writes go through RunStore.commitOutcome (hearsay-tools/cezarion#1805). */
 export const WAIT_PHASES: { readonly [P in WaitPhase]: readonly { to: WaitPhase; firedBy: readonly FiredBy[] }[] } = {
   open: [
-    { to: 'resolved', firedBy: ['watcher', 'timer', 'worker', 'human', 'parent'] },
+    { to: 'resolved', firedBy: ['watcher', 'timer', 'worker', 'peer', 'human', 'parent'] },
     { to: 'cancelled', firedBy: ['agent', 'human', 'engine'] },
   ],
   resolved: [
@@ -308,7 +323,7 @@ export function stateOf(run: StateInput): RunState {
   if (run.status !== 'waiting') return run.status;
   if (run.hasPendingPermission) return 'waiting:permission';
   const top = computeWaitingOn(run);
-  if (top) return `waiting:${top.kind}`;
+  if (top) return top.kind === 'peers' ? 'waiting:peer' : `waiting:${top.kind}`;
   if (run.waits?.some((wait) => wait.phase === 'resolved') || run.agentInputs?.some((input) => !input.deliveredAt)) return 'waiting:capacity';
   return 'waiting:plain';
 }

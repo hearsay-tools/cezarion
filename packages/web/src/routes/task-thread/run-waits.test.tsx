@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { ApiRun, RunStatus, StepState } from '@open-mercato/cezar-api-client'
 
+import { makePeerWait, RUN_STATUS, WAIT_PHASE } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { RunWaitDetails, hasWaitDetails } from './run-waits'
 
 /** The run's wait details, which moved from the run header into the Session activity card's
@@ -134,6 +135,17 @@ describe('RunWaitDetails', () => {
     renderWaits(run('waiting', { waits: [partialWorkers, partialRequests, resolved] }))
     const items = [...document.querySelectorAll<HTMLElement>('[data-slot="worker-wait-status"]')]
     expect(items.map(item => item.querySelector('p')?.textContent)).toEqual(['Waiting on 2 workers', 'Waiting on 1 request reply'])
+  })
+
+  // hearsay-tools/cezarion#1995: a peer wait lists its peer tasks while it is open.
+  it('lists an open peer wait with its task count and deadline, and hides it once resolved', () => {
+    const peerIds = ['00000000-0000-4000-8000-000000000081', '00000000-0000-4000-8000-000000000082']
+    const open = makePeerWait({ peerIds, deadline: '2026-09-22T12:10:00.000Z' })
+    const resolved = makePeerWait({ phase: WAIT_PHASE.resolved, resolvedAt: '2026-09-22T12:01:00.000Z', result: { reason: 'timeout' } })
+    renderWaits(run(RUN_STATUS.waiting, { waits: [open, resolved] }))
+    const items = [...document.querySelectorAll<HTMLElement>('[data-slot="peer-wait-status"]')]
+    expect(items.map(item => item.querySelector('p')?.textContent)).toEqual(['Waiting on 2 tasks'])
+    expect(items[0]?.querySelector('time')?.getAttribute('datetime')).toBe('2026-09-22T12:10:00.000Z')
   })
 
   it('reads a run with only a timer open as monitoring, without a note line when there is none', () => {

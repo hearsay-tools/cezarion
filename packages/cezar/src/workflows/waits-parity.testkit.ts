@@ -61,6 +61,8 @@ export const WAIT_CRITERIA = [
   // hearsay-tools/cezarion#1990: messages between root tasks (spec 2026-10-27-task-communication-protocol R1, R10, R11).
   { id: 'U19p', scenario: 'turn-messages', name: 'a peer message beside a pending portable question is delivered with its peer attribution and the question stays answerable' },
   { id: 'U19q', scenario: 'baseline', name: 'a peer message that wakes a parked run spends one unit of the automatic-wake budget, a family message spends none, and past the budget a peer message stays queued until a human message' },
+  // hearsay-tools/cezarion#1995: the peer wait (spec 2026-10-27-task-communication-protocol R9, R11).
+  { id: 'U19w', scenario: 'baseline', name: 'a peer wait parks a root that reads waiting on 1 task; a family message wakes it and the wait stays open; the named peer\'s message resolves it and is delivered with its result' },
   // hearsay-tools/cezarion#1301 phase 3b: a blocked done at the turn end.
   { id: 'U20', scenario: 'baseline', name: 'a done blocked by live workers at the turn end gets one refusal nudge with the will-wait sentence and opens no wait' },
   { id: 'U20u', scenario: 'baseline', name: 'a done blocked by a settled, uncollected worker gets the uncollected refusal nudge without the will-wait sentence' },

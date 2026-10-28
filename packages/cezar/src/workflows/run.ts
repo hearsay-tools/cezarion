@@ -7,7 +7,7 @@ import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } f
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { askErrorMessage, doneErrorMessage, scheduleRefusal, waitErrorMessage } from '../ci-wait/errors.ts';
 import type { ScheduleTaskAnswer, ScheduleTaskRequest, ScheduledTasksAnswer, ScheduledTasksRequest } from '@open-mercato/cezar-contract/scheduled-tasks';
-import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type CezarWaitRequestInput, type DoneErrorCode, type PrWaitEntry, type ProcessWaitEntry, type ProcessWaitResult, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, isUsageLimitHold, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT } from '@open-mercato/cezar-contract/waits';
+import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type CezarWaitRequestInput, type DoneErrorCode, type PeerWaitEntry, type PeerWaitResult, type PrWaitEntry, type ProcessWaitEntry, type ProcessWaitResult, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, isUsageLimitHold, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT } from '@open-mercato/cezar-contract/waits';
 import { ciWaitResultSchema, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { AUTONOMOUS_NUDGE, decideTurnEnd, stepScopedNudge, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
@@ -17,7 +17,8 @@ import { nextLineEntry } from './line-order.ts';
 import { accountHeldFor, formatWakeInstant, resumeInFlight, runAccountKey, queuedRecoveryInput, queuedStartAt, sessionlessWakePrompt } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
 import { executionAccount } from './execution-account.ts';
-import { chargesBudget, chargesBudgetMessage, ciWatchRequest, hasPrWait, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitInputId, waitResultText } from './waits.ts';
+import { CANCEL_MESSAGES, chargesBudget, chargesBudgetMessage, ciWatchRequest, hasPrWait, holdsOwedResults, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitAnswerKind, waitInputId, waitNamedInputIds, waitResultText } from './waits.ts';
+import { assertOwnedWorkerWaitScope, assertRequestWaitScope, delegationWaitRefusal, isDelegationWait, peerWaitEntry, peerWaitOf, peerWaitResult, runsAwaitingPeer, workerListTarget, workerWaitTarget } from './wait-scope.ts';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
 import { previewCdpSession, previewRunContext, previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
@@ -540,12 +541,6 @@ export const MAX_AUTO_CONTINUES = 40;
 /** Claude's `ScheduleWakeup` accepts at most an hour (hearsay-tools/cezarion#1233). */
 const SCHEDULE_WAKEUP_MAX_SECONDS = 3600;
 export { AUTONOMOUS_NUDGE };
-/** `cezar_cancel_wait` answers that cancel nothing (hearsay-tools/cezarion#1233). */
-const CANCEL_MESSAGES = {
-  not_found: 'No open wait has this wait_id. open_waits lists the waits still open.',
-  already_resolved: 'This wait already resolved; its result arrives with your next wake. Cancelling it changed nothing.',
-  human_question: 'The user already sees this question, so only their answer closes it. End your turn to wait for the answer.',
-} as const;
 
 /**
  * Auto-resume after a provider usage limit (spec 2026-08-03-auto-resume-after-usage-limit).
@@ -580,9 +575,6 @@ export const WAITS_DISCARDED_NOTE = 'Stop discarded the waits this task held and
 /** Stop on a failed run that only owed a completion refusal (hearsay-tools/cezarion#1301). */
 export const REFUSAL_DISCARDED_NOTE = 'Stop discarded the completion refusal this task still owed; the task stays failed';
 
-/** A run that failed while it still owed wait results keeps them, and its open waits, until a human
- *  acts: Continue delivers them, Stop discards them (hearsay-tools/cezarion#1233). */
-const holdsOwedResults = (run: RunRecord): boolean => run.status === 'failed' && resolvedWaits(run).length > 0;
 /**
  * How long a missed deadline stays worth acting on. The promise is "we pick this up when the
  * window reopens" — kept across a restart or an overnight close, which is the case the feature
@@ -841,12 +833,6 @@ const admissionError = (error: unknown, fallback: string) => error instanceof Wo
 /** The delegation family a run belongs to, by its root's id: a worker's parent, else itself. */
 function familyOf(run: RunRecord): string {
   return run.delegation?.role === 'worker' ? run.delegation.parentRunId : run.id;
-}
-
-/** The inputs a listed wait, or a delivered one, names: that wait's own, never a wake of their own
- *  (hearsay-tools/cezarion#1301). */
-function waitNamedInputIds(run: RunRecord): Set<string> {
-  return new Set([...run.waits ?? [], ...(run.lastWaits ?? []).filter(wait => wait.phase === 'delivered')].flatMap(wait => [wait.id, waitInputId(wait)]));
 }
 
 /** hearsay-tools/cezarion#1465: what `startServer` hands a manager for the schedule tools. */
@@ -1330,6 +1316,7 @@ export class RunManager {
     if (run.delegation && run.delegation.role !== 'invalid' && !['queued', 'running', 'waiting'].includes(run.status)) {
       for (const id of settledRunFamilies(this.store, run)) this.reconcileWorkerWaits(id);
     }
+    this.resolvePeerWaits(runsAwaitingPeer(run, () => this.store.listRuns())); // never in recovery: an interrupted peer fails, then continues
   };
   private readonly pendingJobs = new Map<string, { workflow: WorkflowDef; input: StartRunInput; startAt?: number | undefined }>();
   /** Interrupted agent turns recovered after a process restart. Unlike an
@@ -1955,7 +1942,7 @@ export class RunManager {
           const wait = await this.registerWait(runId, request, via, generation, signal);
           // The tools only open agent waits, which always carry a deadline.
           if (wait.deadline === undefined) throw new Error('registered wait has no deadline');
-          return { answer: { ok: true, wait_id: wait.id, kind: wait.kind, deadline: wait.deadline, open_waits: listOpen() }, wait };
+          return { answer: { ok: true, wait_id: wait.id, kind: waitAnswerKind(wait), deadline: wait.deadline, open_waits: listOpen() }, wait };
         } catch (error) {
           const code = waitErrorCodeSchema.safeParse(thrownCode(error));
           if (!code.success) throw error;
@@ -2183,22 +2170,18 @@ export class RunManager {
    * `{ code }`. An identical registration (same PR; or same seconds and note in the same turn)
    * returns the open wait it repeats.
    */
-  async registerWait(runId: string, request: CezarWaitRequestInput, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry> {
+  async registerWait(runId: string, request: CezarWaitRequestInput, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry | PeerWaitEntry> {
     const parsed = cezarWaitRequestSchema.parse(request);
     const { refuse, assertCanRegister } = this.registrationGate(runId, generation, capabilitySignal);
     const { state: active, run } = assertCanRegister();
-    // hearsay-tools/cezarion#1235: the same registration as `cez worker wait`, under the tool's
-    // own codes. It answers its own repeat, so it is checked before the capacity below.
-    if (parsed.kind === 'worker') {
+    // hearsay-tools/cezarion#1235, hearsay-tools/cezarion#1995: as `cez worker wait` and `cez message wait`, under the
+    // tool's own codes. It answers its own repeat, so it is checked before the capacity below.
+    if (isDelegationWait(parsed)) {
       if (!run.delegation || run.delegation.role === 'invalid') refuse('denied_scope');
       try {
-        return this.registerWorkerListWait(runId, { ...(parsed.worker_ids ? { workerIds: parsed.worker_ids } : { requestIds: parsed.request_ids }),
-          ...(parsed.mode === undefined ? {} : { mode: parsed.mode }), timeoutSeconds: parsed.timeout_seconds }, 'cezar_wait');
-      } catch (error) {
-        if (!(error instanceof DelegationPolicyError)) throw error;
-        return refuse(error.code === 'denied_scope' ? 'denied_scope' : error.code === 'capacity_limit' ? 'capacity'
-          : this.executionBlockedByRootFinish(run) ? 'root_finish_pending' : 'unavailable');
-      }
+        return parsed.kind === 'peer' ? this.registerPeerWait(runId, { peerIds: parsed.peer_ids, timeoutSeconds: parsed.timeout_seconds }, 'cezar_wait')
+          : this.registerWorkerListWait(runId, workerListTarget(parsed), 'cezar_wait');
+      } catch (error) { return refuse(delegationWaitRefusal(error, () => this.executionBlockedByRootFinish(run))); }
     }
     const turnId = active.ciTurnId ??= randomUUID();
     if (parsed.kind === 'process') return this.registerProcessWait(runId, active, run, parsed, via, turnId);
@@ -2332,6 +2315,8 @@ export class RunManager {
     if (wait.kind === 'human') return;
     if (this.waitTimers.has(wait.id)) return;
     if (wait.kind === 'worker') { this.armWorkerDeadline(runId, wait); return; }
+    // A peer that already wrote or settled resolves it first, at registration and recovery alike.
+    if (wait.kind === 'peer' && this.resolvePeerWait(runId, wait)) return;
     // A stopping, stopped or finishing run takes no self-generated wake: the timer stays open
     // for that transition to cancel, as the monitoring timer did before it was a wait.
     const fire = () => {
@@ -2434,7 +2419,7 @@ export class RunManager {
 
   /** `resolveWait`, retried while its durable checkpoint is unavailable: a failed write may not
    *  drop the accepted intent or publish a false result. */
-  private settleWait(runId: string, waitId: string, result?: CiWaitResult | ProcessWaitResult): void {
+  private settleWait(runId: string, waitId: string, result?: CiWaitResult | ProcessWaitResult | PeerWaitResult): void {
     if (this.disposed) return;
     try { this.resolveWait(runId, waitId, result); }
     catch {
@@ -2449,7 +2434,7 @@ export class RunManager {
    *  upgraded worker wait's `wakeInputId`), then queue the run's wake. A worker wait passes the
    *  entry as reconciled, with its outcomes and `result`. Throws when the checkpoint fails; a wait
    *  no longer open is ignored. */
-  private resolveWait(runId: string, waitId: string, result?: CiWaitResult | ProcessWaitResult, observed?: WorkerWaitEntry): void {
+  private resolveWait(runId: string, waitId: string, result?: CiWaitResult | ProcessWaitResult | PeerWaitResult, observed?: WorkerWaitEntry): void {
     const latest = this.store.getRun(runId)?.waits?.find(wait => wait.id === waitId);
     if (!latest || latest.phase !== 'open') return;
     const state = this.active.get(runId);
@@ -2467,6 +2452,8 @@ export class RunManager {
         ? { ...latest, phase: 'resolved', resolvedAt, result: (result as ProcessWaitResult | undefined) ?? { outcome: 'deadline', observedAt: resolvedAt } }
       : latest.kind === 'worker'
         ? { ...observed ?? latest, phase: 'resolved', resolvedAt, result: observed?.result ?? { reason: 'timeout' } }
+      : latest.kind === 'peer'
+        ? { ...latest, phase: 'resolved', resolvedAt, result: (result as PeerWaitResult | undefined) ?? { reason: 'timeout' } }
         : { ...latest, phase: 'resolved', resolvedAt };
     const input: AgentInput = { id: waitInputId(settled), parentRunId: runId, source: 'lifecycle', createdAt: resolvedAt,
       text: waitResultText(settled, { tools: !state?.toolless, workerStatus: this.workerStatus }) };
@@ -2478,16 +2465,16 @@ export class RunManager {
   /** A worker's current status, as a worker wait's result names it. */
   private readonly workerStatus = (workerId: string): string => this.store.getRun(workerId)?.status ?? 'unavailable';
 
-  /** A timer or process wait due, or still owed, once the automatic-wake budget is spent wakes
-   *  nothing: it is cancelled with the cap note, and the run keeps whatever else it waits on
-   *  (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1446). */
+  /** A timer, process or peer wait due, or still owed, once the automatic-wake budget is spent
+   *  wakes nothing: it is cancelled with the cap note, and the run keeps whatever else it waits on
+   *  (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1446, hearsay-tools/cezarion#1995). */
   private cancelAutomaticAtCap(runId: string, waits: readonly Wait[]): void {
     if (!waits.length) return;
     this.store.commitOutcome(runId, { kind: 'cancelled', waitIds: waits.map(wait => wait.id) });
     for (const wait of waits) {
       this.disarmWait(wait.id);
-      this.store.appendEvent(runId, { type: 'note', message: wait.kind === 'process'
-        ? `automatic process wake-up cap reached (${MAX_AUTO_CONTINUES}); process wait ${wait.id} cancelled`
+      this.store.appendEvent(runId, { type: 'note', message: wait.kind === 'process' || wait.kind === 'peer'
+        ? `automatic ${wait.kind} wake-up cap reached (${MAX_AUTO_CONTINUES}); ${wait.kind} wait ${wait.id} cancelled`
         : `automatic ${isMonitoringTimer(wait) ? 'monitoring' : 'timer'} wake-up cap reached (${MAX_AUTO_CONTINUES}); timer ${wait.id} cancelled` });
     }
   }
@@ -2658,17 +2645,17 @@ export class RunManager {
     } else transitionVia('park', () => this.store.getRun(runId), () => this.store.commitParked(runId, state.currentStepId));
     this.waiting.add(runId);
     if (keepsSlot) this.monitoring.add(runId); else this.leaveMonitoringPool(runId);
-    if (top === 'workers') this.armIdleTimer(runId, state);
+    if (top === 'workers' || top === 'peers') this.armIdleTimer(runId, state);
     this.queueWaitWake(runId);
     this.releaseSlot();
     return true;
   }
 
-  /** Parked on the wait list with `workers` as its top wait (hearsay-tools/cezarion#1235): the park
-   *  holds no slot, so runner activity resumes it as it resumes a monitoring park. */
+  /** Parked with `workers` or `peers` as its top wait (hearsay-tools/cezarion#1235, hearsay-tools/cezarion#1995): the
+   *  park holds no slot, so runner activity resumes it as it resumes a monitoring park. */
   private parkedOnWorkers(runId: string): boolean {
     const run = this.store.getRun(runId);
-    return !!run && run.status === 'waiting' && computeWaitingOn(run)?.kind === 'workers';
+    return run?.status === 'waiting' && ['workers', 'peers'].includes(computeWaitingOn(run)?.kind ?? '');
   }
 
   /** Leave the monitoring pool. Only a turn end or a terminal path does; a member's slot
@@ -2893,6 +2880,7 @@ export class RunManager {
   /** A deleted run's row is gone with its waits; only what they armed in memory is left. */
   private readonly onRunDeleted = (runId: string): void => {
     this.disarmRunWaits(runId);
+    if (!this.disposed) this.resolvePeerWaits(runsAwaitingPeer(runId, () => this.store.listRuns()));
     // A peer's open requests to the deleted run settle `deleted` (spec 2026-10-27 § 5): each ledger
     // that holds one is reconciled, live or settled.
     if (this.disposed || process.env.CEZ_DELEGATION !== '1') return;
@@ -5006,13 +4994,14 @@ export class RunManager {
     const run = this.store.getRun(runId)!;
     const state = this.active.get(runId)!;
     if (!run.delegation || run.delegation.role === 'invalid') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
-    if (request.workerIds) this.assertOwnedWorkerWaitScope(runId, run.delegation, request.workerIds);
-    else this.assertRequestWaitScope(runId, run, run.delegation, request.requestIds ?? []);
+    const getRun = (id: string) => this.store.getRun(id);
+    if (request.workerIds) assertOwnedWorkerWaitScope(runId, run.delegation, request.workerIds, getRun);
+    else assertRequestWaitScope(run, run.delegation, request.requestIds ?? [], getRun);
     const repeated = identicalWorkerWait(run.waits ?? [], request);
     if (repeated && hasWorkerDeadline(repeated)) return repeated;
     if (openWaits(run).length >= WAIT_LIMIT) throw new DelegationPolicyError('capacity_limit', `This run already has ${WAIT_LIMIT} open waits; cancel one first`);
     const now = Date.now();
-    const target = this.workerWaitTarget(request);
+    const target = workerWaitTarget(request, getRun);
     const entry: DeadlinedWorkerWaitEntry = { id: randomUUID(), kind: 'worker', source: 'agent', via, registeredAt: new Date(now).toISOString(),
       deadline: new Date(now + request.timeoutSeconds * 1000).toISOString(), timeoutSeconds: request.timeoutSeconds,
       turnId: state.ciTurnId ??= randomUUID(), phase: 'open', ...(request.mode === undefined ? {} : { mode: request.mode }), ...target };
@@ -5027,37 +5016,6 @@ export class RunManager {
     return this.recordedWorkerWait(runId, entry.id) ?? entry;
   }
 
-  /** Scope of a wait on workers: only a parent holding `wait` may select, and only workers it owns. */
-  private assertOwnedWorkerWaitScope(runId: string, delegation: Exclude<NonNullable<RunRecord['delegation']>, { role: 'invalid' }>, workerIds: string[]): void {
-    if (delegation.role !== 'root' || !delegation.permissions.includes('wait')) throw new DelegationPolicyError('denied_scope', 'Only a parent may wait for owned workers');
-    for (const id of workerIds) {
-      const worker = this.store.getRun(id);
-      if (worker?.delegation?.role !== 'worker' || worker.delegation.parentRunId !== runId ||
-        worker.delegation.workspace.ownerRunId !== id) throw new DelegationPolicyError('denied_scope', 'not an owned worker');
-    }
-  }
-
-  /** Scope of a wait on replies: the caller's own accepted requests, read from its family root's conversation. */
-  private assertRequestWaitScope(runId: string, run: RunRecord, delegation: Exclude<NonNullable<RunRecord['delegation']>, { role: 'invalid' }>, requestIds: string[]): void {
-    const root = delegation.role === 'root' ? run : this.store.getRun(delegation.parentRunId);
-    if (root?.delegation?.role !== 'root' || (delegation.role === 'root' && !delegation.permissions.includes('wait'))) {
-      throw new DelegationPolicyError('denied_scope', 'Request wait scope denied');
-    }
-    for (const id of requestIds) {
-      if (!root.delegation.conversation?.messages.some(message => message.id === id && message.kind === 'request' &&
-        message.state === 'accepted' && message.senderRunId === runId)) throw new DelegationPolicyError('denied_scope', 'Request wait scope denied');
-    }
-  }
-
-  /** The entry's target fields: each worker's revision at registration, or the requests with no outcome yet. */
-  private workerWaitTarget(request: { workerIds?: string[]; requestIds?: string[] | undefined }) {
-    if (!request.workerIds) return { requestIds: request.requestIds!, requestOutcomes: [] };
-    return { workerIds: request.workerIds, outcomes: [], revisions: request.workerIds.map(workerId => {
-      const metadata = this.store.getRun(workerId)!.delegation;
-      return { workerId, revision: metadata?.role === 'worker' ? metadata.executionRevision ?? 0 : 0 };
-    }) };
-  }
-
   /** The wait as the store now holds it, open or already delivered, with its deadline. */
   private recordedWorkerWait(runId: string, id: string): DeadlinedWorkerWaitEntry | undefined {
     const latest = this.store.getRun(runId);
@@ -5070,7 +5028,7 @@ export class RunManager {
     const ids = workerIds.filter(id => { const worker = this.store.getRun(id)?.delegation; return worker?.role === 'worker' && worker.parentRunId === runId; });
     const entry: WorkerWaitEntry = { id: randomUUID(), kind: 'worker', source: 'cezar', via: 'completion', registeredAt: new Date().toISOString(),
       turnId: state.ciTurnId ??= randomUUID(), phase: 'open', mode: 'all',
-      ...this.workerWaitTarget(requestIds?.length ? { requestIds } : { workerIds: ids }) };
+      ...workerWaitTarget(requestIds?.length ? { requestIds } : { workerIds: ids }, id => this.store.getRun(id)) };
     this.store.commitWait(runId, entry);
     this.reconcileWorkerWaits(familyOf(this.store.getRun(runId)!));
     this.noticeParkedWorkers(runId);
@@ -5105,6 +5063,42 @@ export class RunManager {
   registerRequestWait(runId: string, request: RequestWaitRequest): WorkerWait {
     const parsed = requestWaitRequestSchema.parse(request);
     return workerWaitEntryToLegacy(this.registerWorkerListWait(runId, parsed, 'cez-worker-wait'));
+  }
+
+  /** `cezar_wait` kind `peer` and `cez message wait --peer` (hearsay-tools/cezarion#1995): checked
+   *  and built by `peerWaitEntry`; a peer that already wrote or settled resolves it at once (`armWait`). */
+  registerPeerWait(runId: string, request: { peerIds: string[]; timeoutSeconds: number }, via: 'cezar_wait' | 'cez-message-wait'): PeerWaitEntry {
+    this.assertCanRegisterWorkerWait(runId);
+    const state = this.active.get(runId)!;
+    const entry = peerWaitEntry(this.store.getRun(runId)!, request, via, () => state.ciTurnId ??= randomUUID(), id => this.store.getRun(id));
+    return this.store.getRun(runId)?.waits?.some(wait => wait.id === entry.id) ? entry : this.openWait(runId, state, entry);
+  }
+
+  /** `cez message cancel-wait` on a peer wait, through the list, as `cancelWorkerWait`; a settled one comes back as it is. */
+  cancelPeerWait(runId: string, waitId: string): PeerWaitEntry {
+    const run = this.store.getRun(runId)!;
+    if (peerWaitOf(run, waitId).phase !== 'open') return peerWaitOf(run, waitId);
+    if (this.disposed || !['queued', 'running', 'waiting'].includes(run.status) || this.rootFinishRequested(runId) || this.historyDeletionPending(runId)) {
+      throw new DelegationPolicyError('incompatible_state', 'Parent cannot cancel a peer wait');
+    }
+    this.store.commitOutcome(runId, { kind: 'cancelled', waitIds: [waitId] });
+    this.disarmWait(waitId);
+    return peerWaitOf(this.store.getRun(runId), waitId);
+  }
+
+  /** The open peer waits of these runs whose named peer already wrote, settled or was deleted resolve now. */
+  private resolvePeerWaits(runIds: readonly string[]): void {
+    for (const id of runIds) for (const wait of openWaits(this.store.getRun(id) ?? {})) if (wait.kind === 'peer') this.resolvePeerWait(id, wait);
+  }
+
+  /** Like a timer, the wake is the agent's own arrangement: a stopping or finishing run takes none,
+   *  and the wait stays for that transition to cancel. True when the wait is no longer open. */
+  private resolvePeerWait(runId: string, wait: PeerWaitEntry): boolean {
+    const run = this.store.getRun(runId);
+    if (this.disposed || !run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return false;
+    const result = peerWaitResult(run, wait, this.store);
+    if (result) this.settleWait(runId, wait.id, result);
+    return !!result && this.store.getRun(runId)?.waits?.find(entry => entry.id === wait.id)?.phase !== 'open';
   }
 
   /** A wait wake is only a pointer. Only provider submission/opening prompts own delivery. */
@@ -5201,6 +5195,7 @@ export class RunManager {
     // Only the parent's reply to a routed question answers it (#505), through the answer seam.
     // An answer already executing keeps its checkpoint until turn-end but holds no input (#935).
     if (this.hasUnansweredHumanAsk(runId)) this.answerRoutedQuestion(runId);
+    this.resolvePeerWaits([runId]); // The one exception: a named peer's message ends a peer wait (hearsay-tools/cezarion#1995).
     // Messages are not waits (hearsay-tools/cezarion#1235): one the run has not received wakes it
     // through the wait list's admission, beside every open wait and a pending question, and ends
     // none of them. A turn in progress takes it at once, as steering.
@@ -6195,7 +6190,7 @@ export class RunManager {
     const { session } = flight;
     if (spent !== undefined) {
       flight.wakeReserved = false;
-      const kind = !timers.length && peers.length ? 'peer message' : timers.some(isMonitoringTimer) ? 'monitoring' : timers.some(wait => wait.kind === 'timer') ? 'timer' : 'process';
+      const kind = !timers.length && peers.length ? 'peer message' : timers.some(isMonitoringTimer) ? 'monitoring' : (['timer', 'process', 'peer'] as const).find(k => timers.some(wait => wait.kind === k));
       this.store.appendEvent(runId, { type: 'note', message: `automatic ${kind} wake-up (${spent}/${MAX_AUTO_CONTINUES})` });
     }
     // A wake of results always spends its admission; a wake of messages alone, only one it holds.
