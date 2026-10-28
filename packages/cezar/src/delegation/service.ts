@@ -363,82 +363,124 @@ export class DelegationService {
     const request = conversationSendRequestSchema.parse(value);
     const initial = this.conversationPair(caller, request.recipientRunId, true);
     return this.serialized(`conversation:${initial.project.id}:${this.ledgerFor(initial, request.kind).id}`, async () => {
-      const pair = this.conversationPair(caller, request.recipientRunId, true);
-      const { project, sender, recipient, relationship } = pair;
-      const root = this.ledgerFor(pair, request.kind);
-      const peer = relationship === 'peer';
-      if (request.resume && (peer || sender.id !== root.id || recipient.delegation?.role !== 'worker')) {
-        throw new DelegationPolicyError('denied_scope', 'Only an active parent may use --resume for its owned worker');
-      }
-      if (project.store.containsSessionSecret(JSON.stringify(request))) throw new DelegationPolicyError('invalid_input', 'Credentials cannot be included in delegated input');
-      const requestHash = createHash('sha256').update(JSON.stringify({ senderRunId: sender.id, ...request })).digest('hex');
-      const state = this.currentConversation(project, root);
-      const existing = state.messages.find(message => message.id === request.id);
-      if (existing) {
-        if (existing.requestHash !== requestHash) throw new DelegationPolicyError('invalid_input', 'Message ID payload conflict');
-        projectConversationEvents(project.store, project.store.getRun(root.id)!);
-        project.manager.reconcileWorkerWaits();
-        if (recipient.agentInputs?.some(input => input.id === existing.id && !input.deliveredAt)) project.manager.deliverConversationInput(recipient.id);
-        return this.conversationReceipt(project, root.id, existing);
-      }
-      const original = request.requestId ? state.messages.find(message => message.id === request.requestId && message.kind === 'request' && message.state === 'accepted') : undefined;
-      if (request.requestId && (!original || (request.kind === 'reply'
-        ? original.recipientRunId !== sender.id || original.senderRunId !== recipient.id
-        : original.senderRunId !== sender.id || original.recipientRunId !== recipient.id))) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
-      const settled = state.outcomes.find(outcome => outcome.requestId === request.requestId);
-      // A worker's question has exactly one answer (#505): a second reply is refused, not recorded late.
-      if (request.kind === 'reply' && settled && original?.question) throw new DelegationPolicyError('incompatible_state', 'This question was already answered');
-      const now = new Date().toISOString();
-      const destroyed = recipient.delegation?.role === 'worker' && recipient.delegation.destroy?.phase === 'complete';
-      // A peer whose Finish is pending takes nothing more: Finish would settle it unread (spec § 5).
-      const resumable = !['queued', 'running', 'waiting'].includes(recipient.status) || !!recipient.stopping || (recipient.delegation?.role === 'worker' && !!recipient.delegation.destroy) || (peer && finishing(recipient));
-      const resume = !!request.resume && resumable;
-      // The extended bound belongs to a new continuation, not merely the flag.
-      // Exact retries have already returned above, even if that continuation is now active.
-      if (request.timeoutSeconds > MAX_CONVERSATION_REQUEST_SECONDS && !resume) {
-        throw new DelegationPolicyError('incompatible_state', 'Extended request deadlines require resuming a settled worker; active workers accept at most 1800 seconds');
-      }
-      if (resume && (destroyed || recipient.delegation?.role !== 'worker' || recipient.delegation.destroy ||
-        recipient.status === 'cancelled' || recipient.stopping)) throw new DelegationPolicyError('incompatible_state',
-          `Worker is ${destroyed ? 'destroyed' : 'stopped or being destroyed'}; --resume cannot restart it. Spawn a new worker with the follow-up instruction`);
-      const instruction = destroyed ? 'Not delivered: this worker was destroyed. Spawn a new worker for further work.'
-        : resumable && !resume ? notDeliveredInstruction(pair, root) : undefined;
-      const message: ConversationSendResult['message'] = { id: request.id, senderRunId: sender.id, recipientRunId: recipient.id,
-        kind: request.kind, ...(request.requestId ? { requestId: request.requestId } : {}), ...(peer ? { relationship } : {}),
-        text: project.store.redactText(request.text), createdAt: now, requestHash,
-        ...(request.kind === 'request' && !destroyed && (!resumable || resume) ? { deadline: new Date(Date.parse(now) + request.timeoutSeconds * 1000).toISOString() } : {}),
-        ...(resume ? { resumed: true as const } : {}), ...(instruction ? { instruction } : {}),
-        state: request.kind === 'reply' && settled ? 'late' : destroyed ? 'destroyed' : resumable && !resume ? 'continuation-required' : 'accepted' };
-      const enqueue = !destroyed && (!resumable || resume);
-      // Open worker questions reserve ledger room for their replies (#505); the reply spends its
-      // own. The reply is also always admitted to the worker's inbox, one past its soft 32-input
-      // bound: while the question is pending nothing else there can drain, and a worker has at
-      // most one pending question, so this admits at most one extra input.
-      const answering = request.kind === 'reply' && !settled && !!original?.question;
-      // An answer the worker can no longer receive (stopping, stopped, destroyed) would record
-      // the question as replied while nothing delivers it; the human answers it instead.
-      if (answering && !enqueue) throw new DelegationPolicyError('incompatible_state', 'The worker can no longer receive this answer; its question goes back to the human');
-      assertConversationCapacity(state, pair, request.kind, enqueue, request.kind === 'reply' && !settled, answering);
-      const outcomes = replyOutcomes(state, request, settled, now);
-      // `parentRunId` keeps its name and holds the ledger owner (spec § 2, Message identity).
-      const input = { id: message.id, source: 'agent' as const, parentRunId: root.id, text: message.text, createdAt: now,
-        conversation: { senderRunId: sender.id, recipientRunId: recipient.id, kind: message.kind, ...(message.requestId ? { requestId: message.requestId } : {}), ...(peer ? { relationship } : {}) },
-        // A peer input outlives its sender's ledger: it keeps the message's identity for the recipient's inbox.
-        ...(peer ? { requestHash, ...(message.deadline ? { deadline: message.deadline } : {}) } : {}) };
-      const next = { messages: [...state.messages, message], outcomes };
-      if (resume) {
-        try { assertConversationIdFree(root, input, id => project.store.getRun(id), (runId, id) => project.store.hasProjection(runId, id)); }
-        catch (error) { if (error instanceof ConversationIdInUseError) throw new DelegationPolicyError('invalid_input', error.message); throw error; }
-        const result = project.manager.continueRun(recipient.id, {
-          text: `Your parent resumed this worker with a new instruction.\nAgent conversation ${JSON.stringify({ id: input.id, ...input.conversation })}\n${input.text}`,
-        }, true, { rootId: root.id, state: next, input });
-        if (!result.ok) throw new DelegationPolicyError('incompatible_state', `Worker was not resumed: ${result.error}. No message was accepted; resolve this condition and retry the same command`);
-      } else commitAccepted(project.store, root.id, next, enqueue ? input : undefined, peer && !recipient.delegation);
-      projectConversationEvents(project.store, project.store.getRun(root.id)!);
-      project.manager.reconcileWorkerWaits();
-      if (enqueue) project.manager.deliverConversationInput(recipient.id);
-      return this.conversationReceipt(project, root.id, message);
+      return this.sendLocked(caller, request);
     });
+  }
+  /** Runs entirely under the ledger lock; mutable records are read at the queue head. */
+  private sendLocked(caller: Caller, request: ConversationSendRequest): ConversationSendResult {
+    const pair = this.conversationPair(caller, request.recipientRunId, true);
+    const { project, sender, recipient } = pair;
+    const root = this.ledgerFor(pair, request.kind);
+    this.assertSendScope(pair, root, request);
+    const requestHash = createHash('sha256').update(JSON.stringify({ senderRunId: sender.id, ...request })).digest('hex');
+    const state = this.currentConversation(project, root);
+    const existing = state.messages.find(message => message.id === request.id);
+    if (existing) return this.retrySend(pair, root, existing, requestHash);
+    const { original, settled } = this.sendRequestContext(state, request, sender, recipient);
+    const now = new Date().toISOString();
+    const { destroyed, resumable, resume, instruction } = this.sendAdmission(pair, root, request);
+    const message = this.sendMessage(pair, request, requestHash, now, settled, { destroyed, resumable, resume, instruction });
+    const enqueue = !destroyed && (!resumable || resume);
+    // Open worker questions reserve ledger room for their replies (hearsay-tools/cezarion#505); the reply spends its
+    // own. The reply is also always admitted to the worker's inbox, one past its soft 32-input
+    // bound: while the question is pending nothing else there can drain, and a worker has at
+    // most one pending question, so this admits at most one extra input.
+    const answering = request.kind === 'reply' && !settled && !!original?.question;
+    // An answer the worker can no longer receive (stopping, stopped, destroyed) would record
+    // the question as replied while nothing delivers it; the human answers it instead.
+    if (answering && !enqueue) throw new DelegationPolicyError('incompatible_state', 'The worker can no longer receive this answer; its question goes back to the human');
+    assertConversationCapacity(state, pair, request.kind, enqueue, request.kind === 'reply' && !settled, answering);
+    const outcomes = replyOutcomes(state, request, settled, now);
+    const input = this.sendInput(pair, root, message, requestHash, now);
+    const next = { messages: [...state.messages, message], outcomes };
+    this.commitSend(pair, root, next, input, resume, enqueue);
+    projectConversationEvents(project.store, project.store.getRun(root.id)!);
+    project.manager.reconcileWorkerWaits();
+    if (enqueue) project.manager.deliverConversationInput(recipient.id);
+    return this.conversationReceipt(project, root.id, message);
+  }
+  private assertSendScope(pair: ConversationPair, root: RunRecord, request: ConversationSendRequest): void {
+    const { project, sender, recipient, relationship } = pair;
+    const peer = relationship === 'peer';
+    if (request.resume && (peer || sender.id !== root.id || recipient.delegation?.role !== 'worker')) {
+      throw new DelegationPolicyError('denied_scope', 'Only an active parent may use --resume for its owned worker');
+    }
+    if (project.store.containsSessionSecret(JSON.stringify(request))) throw new DelegationPolicyError('invalid_input', 'Credentials cannot be included in delegated input');
+  }
+  private retrySend(pair: ConversationPair, root: RunRecord, existing: ConversationMessage, requestHash: string): ConversationSendResult {
+    const { project, recipient } = pair;
+    if (existing.requestHash !== requestHash) throw new DelegationPolicyError('invalid_input', 'Message ID payload conflict');
+    projectConversationEvents(project.store, project.store.getRun(root.id)!);
+    project.manager.reconcileWorkerWaits();
+    if (recipient.agentInputs?.some(input => input.id === existing.id && !input.deliveredAt)) project.manager.deliverConversationInput(recipient.id);
+    return this.conversationReceipt(project, root.id, existing);
+  }
+  private sendRequestContext(state: ConversationState, request: ConversationSendRequest, sender: RunRecord, recipient: RunRecord) {
+    const original = request.requestId ? state.messages.find(message => message.id === request.requestId && message.kind === 'request' && message.state === 'accepted') : undefined;
+    if (request.requestId && (!original || (request.kind === 'reply'
+      ? original.recipientRunId !== sender.id || original.senderRunId !== recipient.id
+      : original.senderRunId !== sender.id || original.recipientRunId !== recipient.id))) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+    const settled = state.outcomes.find(outcome => outcome.requestId === request.requestId);
+    // A worker's question has exactly one answer (hearsay-tools/cezarion#505): a second reply is refused, not recorded late.
+    if (request.kind === 'reply' && settled && original?.question) throw new DelegationPolicyError('incompatible_state', 'This question was already answered');
+    return { original, settled };
+  }
+  private sendAdmission(pair: ConversationPair, root: RunRecord, request: ConversationSendRequest) {
+    const { recipient, relationship } = pair;
+    const peer = relationship === 'peer';
+    const destroyed = recipient.delegation?.role === 'worker' && recipient.delegation.destroy?.phase === 'complete';
+    // A peer whose Finish is pending takes nothing more: Finish would settle it unread (spec § 5).
+    const resumable = !['queued', 'running', 'waiting'].includes(recipient.status) || !!recipient.stopping || (recipient.delegation?.role === 'worker' && !!recipient.delegation.destroy) || (peer && finishing(recipient));
+    const resume = !!request.resume && resumable;
+    // The extended bound belongs to a new continuation, not merely the flag.
+    // Exact retries have already returned above, even if that continuation is now active.
+    if (request.timeoutSeconds > MAX_CONVERSATION_REQUEST_SECONDS && !resume) {
+      throw new DelegationPolicyError('incompatible_state', 'Extended request deadlines require resuming a settled worker; active workers accept at most 1800 seconds');
+    }
+    this.assertSendResume(recipient, resume, destroyed);
+    const instruction = destroyed ? 'Not delivered: this worker was destroyed. Spawn a new worker for further work.'
+      : resumable && !resume ? notDeliveredInstruction(pair, root) : undefined;
+    return { destroyed, resumable, resume, instruction };
+  }
+  private assertSendResume(recipient: RunRecord, resume: boolean, destroyed: boolean): void {
+    if (resume && (destroyed || recipient.delegation?.role !== 'worker' || recipient.delegation.destroy ||
+      recipient.status === 'cancelled' || recipient.stopping)) throw new DelegationPolicyError('incompatible_state',
+        `Worker is ${destroyed ? 'destroyed' : 'stopped or being destroyed'}; --resume cannot restart it. Spawn a new worker with the follow-up instruction`);
+  }
+  private sendMessage(pair: ConversationPair, request: ConversationSendRequest, requestHash: string, now: string,
+    settled: RequestOutcome | undefined, admission: { destroyed: boolean; resumable: boolean; resume: boolean; instruction: string | undefined }): ConversationMessage {
+    const { project, sender, recipient, relationship } = pair;
+    const peer = relationship === 'peer';
+    const { destroyed, resumable, resume, instruction } = admission;
+    const message: ConversationSendResult['message'] = { id: request.id, senderRunId: sender.id, recipientRunId: recipient.id,
+      kind: request.kind, ...(request.requestId ? { requestId: request.requestId } : {}), ...(peer ? { relationship } : {}),
+      text: project.store.redactText(request.text), createdAt: now, requestHash,
+      ...(request.kind === 'request' && !destroyed && (!resumable || resume) ? { deadline: new Date(Date.parse(now) + request.timeoutSeconds * 1000).toISOString() } : {}),
+      ...(resume ? { resumed: true as const } : {}), ...(instruction ? { instruction } : {}),
+      state: request.kind === 'reply' && settled ? 'late' : destroyed ? 'destroyed' : resumable && !resume ? 'continuation-required' : 'accepted' };
+    return message;
+  }
+  private sendInput(pair: ConversationPair, root: RunRecord, message: ConversationMessage, requestHash: string, now: string): AgentInput {
+    const { sender, recipient, relationship } = pair;
+    const peer = relationship === 'peer';
+    // `parentRunId` keeps its name and holds the ledger owner (spec § 2, Message identity).
+    const input = { id: message.id, source: 'agent' as const, parentRunId: root.id, text: message.text, createdAt: now,
+      conversation: { senderRunId: sender.id, recipientRunId: recipient.id, kind: message.kind, ...(message.requestId ? { requestId: message.requestId } : {}), ...(peer ? { relationship } : {}) },
+      // A peer input outlives its sender's ledger: it keeps the message's identity for the recipient's inbox.
+      ...(peer ? { requestHash, ...(message.deadline ? { deadline: message.deadline } : {}) } : {}) };
+    return input;
+  }
+  private commitSend(pair: ConversationPair, root: RunRecord, next: ConversationState, input: AgentInput, resume: boolean, enqueue: boolean): void {
+    const { project, recipient, relationship } = pair;
+    const peer = relationship === 'peer';
+    if (resume) {
+      try { assertConversationIdFree(root, input, id => project.store.getRun(id), (runId, id) => project.store.hasProjection(runId, id)); }
+      catch (error) { if (error instanceof ConversationIdInUseError) throw new DelegationPolicyError('invalid_input', error.message); throw error; }
+      const result = project.manager.continueRun(recipient.id, {
+        text: `Your parent resumed this worker with a new instruction.\nAgent conversation ${JSON.stringify({ id: input.id, ...input.conversation })}\n${input.text}`,
+      }, true, { rootId: root.id, state: next, input });
+      if (!result.ok) throw new DelegationPolicyError('incompatible_state', `Worker was not resumed: ${result.error}. No message was accepted; resolve this condition and retry the same command`);
+    } else commitAccepted(project.store, root.id, next, enqueue ? input : undefined, peer && !recipient.delegation);
   }
   async followUp(caller: Caller, value: ConversationSendRequest): Promise<ConversationSendResult> {
     if (value.kind !== 'follow-up') throw new DelegationPolicyError('invalid_input', 'Expected follow-up');
