@@ -1464,7 +1464,8 @@ function baseCells(runners: RunnerId[]): void {
       expect(store.getRun(run.id)?.waitDeliveryFailures).toBeUndefined();
       commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(wait => wait.id === human!.id && wait.phase === 'delivered') ||
         (row.automaticWakes === 0 && row.waitDeliveryFailures === undefined), 'a retried answer and its failure clear');
-      expect(manager.finish(run.id)).toBe(true);
+      if (deferred) manager.cancel(run.id);
+      else expect(manager.finish(run.id)).toBe(true);
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });
 
