@@ -5827,6 +5827,11 @@ export class RunManager {
     state.unreadInputTimer = timer;
   }
 
+  // Keep both launch paths' session-event handlers unchanged until Phase 3's
+  // run/session-events.ts merges them (epic hearsay-tools/cezarion#2051).
+  private clearUnreadInputTimer(state: ActiveRun): void { clearUnreadInputTimer(state); }
+  private clearHeldHumanInputTimer(state: ActiveRun, resetClock = true): void { clearHeldHumanInputTimer(state, resetClock); }
+
   /** #486: a turn-end deferred close/park only because the harness still held a human follow-up. */
   private armHeldHumanInputTimer(runId: string, state: ActiveRun): void {
     clearHeldHumanInputTimer(state, false);
@@ -6648,8 +6653,8 @@ export class RunManager {
         return;
       }
       if (event.type === 'text') {
-        clearUnreadInputTimer(state); // real content: the harness is working
-        clearHeldHumanInputTimer(state);
+        this.clearUnreadInputTimer(state); // real content: the harness is working
+        this.clearHeldHumanInputTimer(state);
         this.noteNoWaitNudgeContent(runId, state, event);
         turn.text = appendTurnText(turn.text, event.text);
         const text = stripAskMarker(stripTaskMarkers(stripMonitoringMarker(stripDoneMarker(event.text))), false);
@@ -6658,8 +6663,8 @@ export class RunManager {
       }
       if (event.type === 'input-unconsumed') { this.retireUnreadInputs(runId, state, event.inputIds, true); return; }
       if (event.type === 'tool-call' || event.type === 'tool-result') {
-        clearUnreadInputTimer(state);
-        clearHeldHumanInputTimer(state);
+        this.clearUnreadInputTimer(state);
+        this.clearHeldHumanInputTimer(state);
         this.noteNoWaitNudgeContent(runId, state, event);
       }
       this.store.appendEvent(runId, { ...event, stepId });
@@ -8140,8 +8145,8 @@ export class RunManager {
         return;
       }
       if (event.type === 'text') {
-        clearUnreadInputTimer(state); // real content: the harness is working
-        clearHeldHumanInputTimer(state);
+        this.clearUnreadInputTimer(state); // real content: the harness is working
+        this.clearHeldHumanInputTimer(state);
         this.noteNoWaitNudgeContent(runId, state, event);
         turn.text = appendTurnText(turn.text, event.text);
         const text = stripAskMarker(stripTaskMarkers(stripMonitoringMarker(stripDoneMarker(event.text))), false);
@@ -8150,8 +8155,8 @@ export class RunManager {
       }
       if (event.type === 'input-unconsumed') { this.retireUnreadInputs(runId, state, event.inputIds, true); return; }
       if (event.type === 'tool-call' || event.type === 'tool-result') {
-        clearUnreadInputTimer(state);
-        clearHeldHumanInputTimer(state);
+        this.clearUnreadInputTimer(state);
+        this.clearHeldHumanInputTimer(state);
         this.noteNoWaitNudgeContent(runId, state, event);
       }
       emit({ ...event, stepId: step.id });
