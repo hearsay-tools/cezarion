@@ -2358,13 +2358,13 @@ export class RunStore extends EventEmitter {
   }
 
   /** Accept the family ledger and its recipient queue in a single durable index replacement. A new
-   *  `message` whose ID is in use writes nothing (`assertConversationIdFree`); `recipientDelegation`
+   *  message (`message`, or the delivered input) whose ID is in use writes nothing; `recipientDelegation`
    *  makes a peer recipient with no delegation record a root task in the same write. */
   commitConversation(rootId: string, conversation: ConversationState, delivery?: { recipientRunId: string; input: AgentInput; recipientDelegation?: DelegationState },
     message?: ConversationIdentity): void {
     const root = this.peek(rootId);
     if (root?.delegation?.role !== 'root') throw new Error('missing conversation root');
-    if (message) assertConversationIdFree(root, message, id => this.peek(id), (runId, id) => this.hasProjection(runId, id));
+    assertConversationIdFree(root, message ?? delivery?.input, id => this.peek(id), (runId, id) => this.hasProjection(runId, id));
     const staged = new Map<string, RunRecord>();
     staged.set(rootId, { ...root, delegation: delegationStateSchema.parse({ ...root.delegation, conversation: { ...conversation,
       messages: conversation.messages.map(message => ({ ...message, text: this.redactText(message.text) })),

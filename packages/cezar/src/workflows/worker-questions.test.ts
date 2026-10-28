@@ -9,6 +9,7 @@ import { inspectGeneration } from '../delegation/process-liveness.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { DelegationService } from '../delegation/service.ts';
+import { uuidFrom } from '../delegation/questions.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, WORKER_FALLBACK_HEADER, WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_REPLY_NOTE } from './run.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
@@ -51,6 +52,29 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     expect(message?.deadline).toBeUndefined();
     expect(store.getRun(p.id)?.agentInputs?.some(input => input.id === message!.id)).toBe(true);
     await until(() => store.getRun(w.id)?.status === 'waiting');
+  });
+
+  // hearsay-tools/cezarion#1990 review: a peer that sends first under the question's deterministic ID
+  // leaves the question with the human; the peer message keeps its ID and its sender.
+  it('leaves the question with the human when a peer message took its ID first', async () => {
+    const { p, service, callerFor } = await delegatingParent({ permissions: ['spawn', 'wait', 'steer'] });
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    const routing = manager as unknown as { routeWorkerQuestion(id: string): void };
+    const route = vi.spyOn(routing, 'routeWorkerQuestion').mockImplementation(() => {});
+    const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
+    await until(() => eventsOf(w.id, 'ask.requested').length === 1);
+    const askSeq = eventsOf(w.id, 'ask.requested')[0]!.seq;
+    const id = uuidFrom(`worker-question:${w.id}:${askSeq}`);
+    const peer = store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [] });
+    store.updateRun(peer.id, { status: RUN_STATUS.running, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    await service.send(callerFor(peer.id), { id, recipientRunId: p.id, kind: 'progress', text: 'Peer progress first', timeoutSeconds: 600 });
+    route.mockRestore();
+    routing.routeWorkerQuestion(w.id);
+    expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
+    expect(eventsOf(w.id, 'worker-question-fallback')).toEqual([expect.objectContaining({ askSeq, reason: expect.stringContaining('already in use') })]);
+    expect(conversationOf(p.id)?.messages.some(message => message.question) ?? false).toBe(false);
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === id)).toEqual([
+      expect.objectContaining({ text: 'Peer progress first', conversation: expect.objectContaining({ senderRunId: peer.id, relationship: 'peer' }) })]);
   });
 
   it('leaves the question with the human when the parent cannot take another message', async () => {

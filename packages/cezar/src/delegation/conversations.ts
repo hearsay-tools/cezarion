@@ -188,3 +188,11 @@ export function orphanedPeerMessage(input: AgentInput): ConversationMessage | un
   const requestHash = createHash('sha256').update(JSON.stringify({ ...input.conversation, text: input.text })).digest('hex');
   return { id: input.id, ...input.conversation, text: input.text, createdAt: input.createdAt, requestHash, state: 'accepted' };
 }
+
+/** A Cezar-written message (a routed question, a park notice) whose deterministic ID a peer
+ *  already took: nothing is written, and `onConflict` says what happens instead. */
+export function commitNewMessage(store: Pick<RunStore, 'commitConversation'>,
+  rootId: string, conversation: ConversationState, delivery: { recipientRunId: string; input: AgentInput }, onConflict: () => void): boolean {
+  try { store.commitConversation(rootId, conversation, delivery); return true; }
+  catch (error) { if (!(error instanceof ConversationIdInUseError)) throw error; onConflict(); return false; }
+}

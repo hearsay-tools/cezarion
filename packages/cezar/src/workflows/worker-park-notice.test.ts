@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConversationMessage } from '@open-mercato/cezar-contract';
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { parkNoticeId } from '../delegation/park-notice.ts';
 import { messagesPrompt } from './monitoring-turn.testkit.ts';
 import { delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, register, restart, root, spendWorkerBudget, store, timeline, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
@@ -106,6 +107,26 @@ describe('a parked worker tells its waiting parent why (hearsay-tools/cezarion#1
     expect(more).toEqual([]);
     expect(notice).toMatchObject({ id: parkNoticeId(w.id, wait.id) });
     expect(notice!.text).toContain('Its last message:\nTook the request; still blocked.');
+  });
+
+  // hearsay-tools/cezarion#1990 review: a peer that sends first under the notice's deterministic ID.
+  it('a peer message that took the notice ID first sends no notice and notes it on the worker once', async () => {
+    const { p, service, callerOf } = await family();
+    const noticing = manager as unknown as { noticeParkedWorker(id: string): void };
+    const notify = vi.spyOn(noticing, 'noticeParkedWorker').mockImplementation(() => {});
+    const w = await parkedWorker(p.id, 'Parked behind a peer.');
+    const wait = register(p.id, [w.id]);
+    const id = parkNoticeId(w.id, wait.id);
+    const peer = store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [] });
+    store.updateRun(peer.id, { status: RUN_STATUS.running, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    await service.send(callerOf(peer.id), { id, recipientRunId: p.id, kind: 'progress', text: 'Peer progress first', timeoutSeconds: 600 });
+    notify.mockRestore();
+    noticing.noticeParkedWorker(w.id);
+    noticing.noticeParkedWorker(w.id);
+    expect(notices(p.id, w.id)).toEqual([]);
+    expect(store.readEvents(w.id).filter(event => event.type === 'note' && String(event.message).includes('park notice ID is already in use'))).toHaveLength(1);
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === id)).toEqual([
+      expect.objectContaining({ text: 'Peer progress first', conversation: expect.objectContaining({ senderRunId: peer.id, relationship: 'peer' }) })]);
   });
 
   it('a full parent inbox sends no notice and notes it on the worker once', async () => {
