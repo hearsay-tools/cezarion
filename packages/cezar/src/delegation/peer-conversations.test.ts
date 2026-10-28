@@ -233,7 +233,7 @@ describe('peer conversations', () => {
     const b = peer();
     const progress = await f.service.send(f.caller, message(b.id, 'progress'));
     const open = await f.service.send(f.caller, message(b.id));
-    f.store.updateRun(b.id, { status: RUN_STATUS.done });
+    // Deleted while it runs: a peer that settled first would settle the request first (R17).
     expect(f.store.deleteRun(b.id)).toBe(true);
     // The deletion itself reconciles the live ledgers: no read is needed to settle it.
     expect(ledger(f.parent.id)?.outcomes).toEqual([expect.objectContaining({ requestId: open.message.id, status: 'deleted' })]);
@@ -259,6 +259,16 @@ describe('peer conversations', () => {
     // B's ledger went with it; A's own input from B still makes A a participant.
     expect(await f.service.conversation(f.caller, { recipientRunId: b.id })).toMatchObject({ messages: [], outcomes: [] });
     await expect(f.service.conversation(f.caller, { recipientRunId: randomUUID() })).rejects.toMatchObject({ code: 'denied_scope' });
+  });
+
+  it('R17 a requester resting at review, out of memory, settles its request when the peer rests at review, with no read', async () => {
+    const b = peer();
+    const open = await f.service.send(f.caller, message(b.id));
+    f.store.updateRun(f.parent.id, { status: RUN_STATUS.review });
+    vi.spyOn(f.store, 'listRuns').mockReturnValue([]);
+    f.store.updateRun(b.id, { status: RUN_STATUS.review });
+    expect(ledger(f.parent.id)?.outcomes).toEqual([expect.objectContaining({ requestId: open.message.id, status: 'completed-without-reply' })]);
+    expect(projections(f.parent.id)).toContain(`request-outcome:${open.message.id}`);
   });
 
   it('R15 a requester resting at review, out of memory, settles its request deleted when the peer is deleted, with no read', async () => {

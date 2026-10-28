@@ -217,7 +217,8 @@ export function takesPart(self: RunRecord, other: RunRecord | undefined, otherId
 }
 
 /** Every conversation root, live or settled, with an open peer request to `runId`: the peer's
- *  deletion settles each `deleted` (spec § 5). Roots another process owns are its own to settle. */
+ *  settlement or deletion settles each at once (spec § 5, R17). Roots another process owns are its
+ *  own to settle. */
 export function rootsAwaitingPeer(store: Pick<RunStore, 'listConversationRootIds' | 'getRun' | 'writeRefusal'>, runId: string): string[] {
   // Only ledgers that name the run are read: the store narrows the candidates before decoding any.
   return store.listConversationRootIds(runId).filter(id => {

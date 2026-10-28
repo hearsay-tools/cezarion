@@ -1330,7 +1330,7 @@ export class RunManager {
     // A destroy retry changes nothing the family reconcile reads (#880).
     if (source === 'delegation-destroy-progress') return;
     if (run.delegation && run.delegation.role !== 'invalid' && !['queued', 'running', 'waiting'].includes(run.status)) {
-      this.reconcileWorkerWaits(run.delegation.role === 'root' ? run.id : run.delegation.parentRunId);
+      for (const id of run.delegation.role === 'root' ? [run.id, ...rootsAwaitingPeer(this.store, run.id)] : [run.delegation.parentRunId]) this.reconcileWorkerWaits(id);
     }
   };
   private readonly pendingJobs = new Map<string, { workflow: WorkflowDef; input: StartRunInput; startAt?: number | undefined }>();
@@ -3991,7 +3991,7 @@ export class RunManager {
     const settled = this.store.getRun(runId);
     if (settled?.delegation) {
       const familyRoot = settled.delegation.role === 'root' ? settled.id : settled.delegation.role === 'worker' ? settled.delegation.parentRunId : undefined;
-      if (familyRoot !== undefined) this.reconcileWorkerWaits(familyRoot);
+      for (const id of familyRoot === undefined ? [] : [familyRoot, ...(familyRoot === settled.id ? rootsAwaitingPeer(this.store, settled.id) : [])]) this.reconcileWorkerWaits(id);
       this.reconcileWorkerWaits();
     }
     this.releaseSlot();
