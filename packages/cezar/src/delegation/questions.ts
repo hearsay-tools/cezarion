@@ -30,7 +30,7 @@ export function formatQuestionText(workerRunId: string, messageId: string, reque
   });
   const format = request.questions.map(question => `${question.header}: ${question.options ? '<option>' : '<your answer>'}`).join('\n');
   lines.push(`Answer with one line per question, exactly as the worker reads a human answer:\n${format}`);
-  lines.push(`Send it with: worker reply ${workerRunId} '<answer>' --id <new-message-UUID> --request-id ${messageId}`);
+  lines.push(`Send it with: message reply ${workerRunId} '<answer>' --id <new-message-UUID> --request-id ${messageId}`);
   lines.push('If you cannot decide, ask the human with your own question, then reply with their answer.');
   return lines.join('\n');
 }

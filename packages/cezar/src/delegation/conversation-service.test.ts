@@ -15,7 +15,7 @@ import {
 import { inboxClaimSchema } from '@open-mercato/cezar-contract/delegation';
 import { readPersistedText } from '../runs/run-store.testkit.ts';
 
-describe('worker inbox contract', () => {
+describe('message inbox contract', () => {
   const at = '2026-09-06T12:00:00.000Z';
   const message = { id: randomUUID(), senderRunId: randomUUID(), recipientRunId: randomUUID(), kind: 'request',
     text: 'Need a decision', createdAt: at, requestHash: 'a'.repeat(64), state: 'accepted' };
@@ -52,7 +52,7 @@ describe('worker inbox contract', () => {
       expect(inboxReceiptResultSchema.parse({ receiptId, status })).toEqual({ receiptId, status });
     }
     expect(inboxReceiptResultSchema.safeParse({ receiptId, status: 'pending' }).success).toBe(false);
-    const inspection = { messages: [message], outcomes: [outcome], hint: 'Run worker inbox' };
+    const inspection = { messages: [message], outcomes: [outcome], hint: 'Run message inbox' };
     expect(conversationInspectResultSchema.parse(inspection)).toEqual(inspection);
     expect(conversationStateSchema.safeParse(inspection).success).toBe(false);
   });
@@ -239,8 +239,8 @@ describe('durable conversations', () => {
     const w = await completedWorker();
     const request = { id: randomUUID(), recipientRunId: w.id, kind: 'progress' as const, text: 'Correct this', timeoutSeconds: 600 };
     const rejected = await f.service.send(f.caller, request);
-    expect(rejected).toMatchObject({ delivery: 'not-delivered', message: { instruction: expect.stringContaining(`worker send ${w.id}`) } });
-    expect(rejected.message.instruction).toMatch(/--resume.*new.*ID/i);
+    expect(rejected).toMatchObject({ delivery: 'not-delivered', message: { instruction: expect.stringContaining(`worker resume ${w.id}`) } });
+    expect(rejected.message.instruction).toMatch(/worker resume.*new.*ID/i);
     await expect(f.service.send(f.caller, { ...request, resume: true })).rejects.toMatchObject({ code: 'invalid_input' });
     await f.service.send(f.caller, { ...request, id: randomUUID(), resume: true });
     expect(await f.service.send(f.caller, request)).toEqual(rejected);
@@ -357,7 +357,7 @@ describe('durable conversations', () => {
     expect(f.store.getRun(w.id)?.agentInputs).toHaveLength(32);
   });
 
-  it('records a late worker reply after parent Finish without waking the terminal parent', async () => {
+  it('records a late message reply after parent Finish without waking the terminal parent', async () => {
     const w = await worker();
     const sent = await f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'request', text: 'question', timeoutSeconds: 600 });
     const parent = f.store.getRun(f.parent.id)!;

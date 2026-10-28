@@ -63,6 +63,7 @@ Usage:
                              projects tag <id> [<tag>…])
   cez discover              list host runners, models, and advertised effort levels
   cez worker                manage owned workers (see: worker --help)
+  cez message               message tasks (see: message --help)
   cez task                  start/watch/steer cockpit tasks from the terminal (see: task --help)
   cez automation            create and manage automations from a task (see: automation --help)
   cez webhook               list and send to the project webhooks open to agents (see: webhook --help)

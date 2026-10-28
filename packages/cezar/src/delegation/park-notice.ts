@@ -63,7 +63,7 @@ export function formatParkNoticeText(input: { workerRunId: string; waitId: strin
     `Cezar notice: your worker ${input.workerRunId} parked before finishing. Your wait ${input.waitId} stays open; this message closes no wait.`,
     open.length ? `It waits on: ${open.map(describeWait).join('; ')}.` : 'It has no open wait: it waits for a message from you.',
     ...(excerpt === undefined ? [] : ['Its last message:', excerpt]),
-    `Check it with worker inspect ${input.workerRunId}, or instruct it with worker send ${input.workerRunId} '<instruction>' --id <new-message-UUID>.`,
+    `Check it with worker inspect ${input.workerRunId}, or instruct it with message request ${input.workerRunId} '<instruction>' --id <new-message-UUID>.`,
   ].join('\n');
 }
 

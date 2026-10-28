@@ -6,7 +6,7 @@
 
 export type SubcommandRunner = (argv: string[], env: NodeJS.ProcessEnv) => Promise<number>;
 
-export const SUBCOMMAND_NAMES = ['discover', 'artifact', 'task', 'automation', 'webhook', 'worker'] as const;
+export const SUBCOMMAND_NAMES = ['discover', 'artifact', 'task', 'automation', 'webhook', 'worker', 'message'] as const;
 
 /** The runner for `name`, or nothing when `name` is not a subcommand. */
 export async function loadSubcommand(name: string | undefined): Promise<SubcommandRunner | undefined> {
@@ -16,6 +16,7 @@ export async function loadSubcommand(name: string | undefined): Promise<Subcomma
     case 'task': return (await import('./task-cli/cli.ts')).runTaskCommand;
     case 'automation': return (await import('./automations/automation-cli.ts')).runAutomationCommand;
     case 'webhook': return (await import('./webhooks/cli.ts')).runWebhookCommand;
+    case 'message': return (await import('./delegation/cli.ts')).runMessageCommand;
     case 'worker': return (await import('./delegation/cli.ts')).runWorkerCommand;
     default: return undefined;
   }

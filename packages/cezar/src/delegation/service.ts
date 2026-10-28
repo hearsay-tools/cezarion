@@ -1,3 +1,4 @@
+import { discoverTasks } from './task-discovery.ts';
 import { discoveredRunners, missingModelChoices, type HostDiscovery } from '../discovery/catalog.ts';
 import { assertConversationCapacity, assertFamilySender, byCreatedAtAndId, commitAccepted, familyPair, inboxEntryIn, isRootTask, notDeliveredInstruction,
   finishing, orphanedPeerMessage, peerPair, takesPart, projectConversationEvents, reconcileConversationState, replyOutcomes, type InboxEntry } from './conversations.ts';
@@ -150,9 +151,10 @@ export class DelegationService {
   setDiscovery(discovery: HostDiscovery): void { this.discovery = discovery; }
   async discover(caller: Caller, value: DiscoveryRequest): Promise<DiscoveryResponse> {
     const project = this.context(caller);
+    const request = discoveryRequestSchema.parse(value);
+    if (request.kind === 'tasks') return discoverTasks(project.store, caller.runId, request);
     // Discovery accompanies spawn authority, including roots persisted before this command existed.
     authorizeSpawnReplay(caller, project.store.getRun(caller.runId), project.id);
-    const request = discoveryRequestSchema.parse(value);
     if (!this.discovery) throw new DelegationPolicyError('unavailable_transport', 'Host discovery is unavailable');
     return request.kind === 'models' ? this.discovery.models.get(request.runner) : discoveredRunners(await this.discovery.providers());
   }
@@ -469,7 +471,7 @@ export class DelegationService {
       inputs.some(input => input.id === message.id && !input.deliveredAt));
     return { messages, outcomes,
       ...(merged.length > messages.length ? { nextBefore: encodeConversationCursor(messages[0]!) } : {}),
-      ...(unread ? { hint: 'This history includes unread messages. Run worker inbox to receive and mark them delivered. Inbox will show them again intentionally; after acknowledgement, Cezar will not queue them again for normal end-of-turn delivery.' } : {}) };
+      ...(unread ? { hint: 'This history includes unread messages. Run message inbox to receive and mark them delivered. Inbox will show them again intentionally; after acknowledgement, Cezar will not queue them again for normal end-of-turn delivery.' } : {}) };
   }
   /** The ledgers a history read covers: the family's one, or each peer root's own while it exists.
    *  A peer whose history is being deleted, or is deleted, stays readable to a participant (spec § 2). */

@@ -35,7 +35,7 @@ describe('session provisioning', () => {
     expect(session.instructions).toContain('Messages reach the recipient\'s live session as soon as they are accepted, including mid-turn');
     expect(session.instructions).not.toContain('next safe turn boundary');
     expect(session.instructions).toContain('receipts report queued, delivered and consumed separately');
-    expect(session.instructions).toContain('conversation <recipient-run-id> for history or investigation; it does not acknowledge messages');
+    expect(session.instructions).toContain('conversation <recipient-run-id> [--before <cursor>] for history or investigation; it does not acknowledge messages');
     const env = buildChildEnv({ backend, source: { CEZ_AGENT_ENV_FULL: '1', CEZ_DELEGATION_TOKEN: 'parent-token', CEZ_DELEGATION_URL: 'http://evil' }, extraEnv: session.env });
     expect(env.CEZ_DELEGATION_TOKEN).toBe(session.env.CEZ_DELEGATION_TOKEN); expect(env.CEZ_DELEGATION_URL).toBe('http://127.0.0.1:12345/api/v1/delegation');
   });
@@ -66,7 +66,7 @@ describe('session provisioning', () => {
     vi.stubEnv('CEZ_DELEGATION', '1'); f.store.updateRun(ordinary.id, { delegation: { role: 'invalid' } });
     expect(provision(ordinary.id)).toBeUndefined();
     const { workerId } = await f.service.spawn(f.caller, { task: 'worker', baseline: 'HEAD', requestId: randomUUID() });
-    const worker = provision(workerId)!; expect(worker.instructions).toContain('cannot delegate'); expect(worker.instructions).toContain('wait --request'); expect(worker.instructions).toContain(f.parent.id); expect(worker.instructions).toContain('worker reply');
+    const worker = provision(workerId)!; expect(worker.instructions).toContain('cannot delegate'); expect(worker.instructions).toContain('wait --request'); expect(worker.instructions).toContain(f.parent.id); expect(worker.instructions).toContain('message reply');
     // #505: a worker's questions go to its parent, which replies or asks the human.
     expect(worker.instructions).toContain('Your questions — cezar_ask, or a native question — go to your parent');
     expect(worker.instructions).not.toContain('only a human can answer');
