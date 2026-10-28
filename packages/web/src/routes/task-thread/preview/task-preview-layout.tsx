@@ -25,20 +25,27 @@ export function TaskPreviewLayout() {
   const { id } = useParams<{ id: string }>()
   const run = useRun(id)
   const enabled = useHealth().data?.capabilities?.preview === true
-  // One pane per task: another task starts with it closed. Only the pane state resets, so moving
-  // between tasks never remounts the tab (the run header keeps its per-run state across it).
-  const pane = usePreviewPaneState(id)
+  // One pane per task: another task starts from its own saved pane (hearsay-tools/cezarion#2077),
+  // else closed. Only the pane state resets, so moving between tasks never remounts the tab (the
+  // run header keeps its per-run state across it).
+  const removed = run.data ? worktreeRemoved(run.data) : false
+  const pane = usePreviewPaneState(id, removed)
   if (!enabled) return <Outlet />
   return (
-    <PreviewProvider id={id} run={run.data} pane={pane}>
+    <PreviewProvider id={id} run={run.data} pane={pane} removed={removed}>
       <Outlet />
     </PreviewProvider>
   )
 }
 
 /** Only with the feature on does the task view read its events for the agent's page. */
-function PreviewProvider({ id, run, pane, children }: { id: string | undefined; run: ApiRun | undefined; pane: PreviewPaneState; children: ReactNode }) {
-  const removed = run ? worktreeRemoved(run) : false
+function PreviewProvider({ id, run, pane, removed, children }: {
+  id: string | undefined
+  run: ApiRun | undefined
+  pane: PreviewPaneState
+  removed: boolean
+  children: ReactNode
+}) {
   const agentLive = useAgentPageLive(id)
   const value = useMemo(() => ({ ...pane, worktreeRemoved: removed, agentLive }), [pane, removed, agentLive])
   return (
