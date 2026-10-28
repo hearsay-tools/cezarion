@@ -20,6 +20,7 @@ import { createActiveRun, type ActiveRun } from './active-run.ts';
 import { claudeScheduleWakeupDelay, isRunnerActivity, appendTurnText, appendCompletedAssistantText, trackTurnTail, stripDoneMarker, stripMonitoringMarker, emitAskRequested, askCardFields, humanWaitCard, classifyTurnEnd, discardQueuedMessagesOnAsk, type TurnEndRead } from './run/turn-markers.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
 import { canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested } from './run/run-guards.ts';
+import { beginUsageInvocation, recordReportedCost, recordUsageUiEvent, recordUsagePeaks } from './run/usage-accounting.ts';
 import { releaseActiveResources } from './run/drop-active.ts';
 import { agentDirectories, applyTemplate, composeSystemPrompt, expandRegistrySlashSkill, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt, withResumeContext } from './run/prompts.ts';
 import { delegationExecutionSettings, selectDelegationExecutionSettings } from '../delegation/execution-settings.ts';
@@ -54,7 +55,7 @@ import {
   type AskRequest,
 } from '../core/ask.ts';
 import { type AgentSession } from '../core/claude-cli-runner.ts';
-import { hasRegisteredRunProcess, onUsage, registerRunProcess, replaceRunProcess, unregisterRunProcess, type ProcessUsage } from '../core/process-usage.ts';
+import { hasRegisteredRunProcess, onUsage, registerRunProcess, replaceRunProcess, type ProcessUsage } from '../core/process-usage.ts';
 import { isSessionLeader, processGroupAlive, processGroupOf, sessionGroupOf, signalProcessGroup } from '../core/session-process.ts';
 import { ProcessWaitSupervisor, probeProcessWait } from '../process-wait/supervisor.ts';
 import { confineExitFile, type ExitFileRoots } from '../process-wait/exit-file.ts';
@@ -6232,7 +6233,7 @@ export class RunManager {
         this.noteNoWaitNudgeContent(runId, state, event);
       }
       this.store.appendEvent(runId, { ...event, stepId });
-      if (event.type === 'cost') this.recordReportedCost(runId, stepId, state, backend, event.usd);
+      if (event.type === 'cost') recordReportedCost(this.store, runId, stepId, state, backend, event.usd);
       if (event.type === 'error') { this.recordSessionFault(state, turn, event.message); return; }
       if (turn.sessionError || state.agentInputError) return;
       if (event.type === 'session') {
@@ -7724,7 +7725,7 @@ export class RunManager {
         this.noteNoWaitNudgeContent(runId, state, event);
       }
       emit({ ...event, stepId: step.id });
-      if (event.type === 'cost') this.recordReportedCost(runId, step.id, state, backend, event.usd);
+      if (event.type === 'cost') recordReportedCost(this.store, runId, step.id, state, backend, event.usd);
       if (event.type === 'error') { this.recordSessionFault(state, turn, event.message); return; }
       if (turn.sessionError || state.agentInputError) return;
       if (event.type === 'session') {
@@ -8333,7 +8334,7 @@ export class RunManager {
    * so the cockpit shows attention and the run releases its workspace slot. */
   private handleRunnerUiEvent(runId: string, state: ActiveRun, sink: UiEventSink, event: UiEvent): void {
     if (this.isDisposedDelegatedRun(runId)) return;
-    this.recordUsageUiEvent(runId, state, event);
+    recordUsageUiEvent(this.store, runId, state, event);
     sink.handle(event);
     if (state.cancelled) return;
     this.noteNoWaitNudgeContent(runId, state, event);
@@ -8409,135 +8410,7 @@ export class RunManager {
   /** Persist the invocation checkpoint before launching a runner. A throw or
    * process exit before `turn.started` therefore leaves a durable mismatch. */
   private beginUsageInvocation(runId: string, state: ActiveRun, stepId: string): void {
-    const step = this.store.getRun(runId)?.steps.find((candidate) => candidate.id === stepId);
-    if (!step) return;
-    const epoch = (step.usageInvocationEpoch ?? 0) + 1;
-    this.persistUsageCheckpoint(runId, stepId, {
-      usageInvocationEpoch: epoch,
-      usageInvocationsStarted: (step.usageInvocationsStarted ?? 0) + 1,
-    });
-    state.usageInvocation = {
-      stepId,
-      epoch,
-      observed: false,
-      startedTurns: new Set(),
-      recordedTurns: new Set(),
-    };
-  }
-
-  /** Claude's `total_cost_usd` is cumulative for the conversation, including
-   * turns in Continue steps. Other runners emit per-message cost deltas. */
-  private recordReportedCost(runId: string, stepId: string, state: ActiveRun, backend: RunnerId, reportedUsd: number): void {
-    if (!Number.isFinite(reportedUsd) || reportedUsd < 0) return;
-    const run = this.store.getRun(runId);
-    const step = run?.steps.find((candidate) => candidate.id === stepId);
-    if (!run || !step) return;
-    let delta = reportedUsd;
-    if (backend === 'claude') {
-      const sessionKey = step.sessionId ?? step.id;
-      state.reportedClaudeCost ??= new Map();
-      let previous = state.reportedClaudeCost.get(sessionKey);
-      if (previous === undefined) {
-        // The current cost event was appended immediately before this call. Rebuild
-        // the checkpoint from raw reports, since older records summed cumulative
-        // reports into costUsd and cannot be used as the baseline on Continue.
-        const events = this.store.readEvents(runId);
-        let currentReportIndex = -1;
-        for (let index = events.length - 1; index >= 0; index--) {
-          const event = events[index]!;
-          if (event.type === 'cost' && event.stepId === stepId && event.usd === reportedUsd) {
-            currentReportIndex = index;
-            break;
-          }
-        }
-        const sessionStepIds = new Set(run.steps.filter((candidate) =>
-          (candidate.backend === 'claude' || candidate.backend === undefined) && (step.sessionId
-            ? candidate.sessionId === step.sessionId
-            : candidate.id === step.id)).map((candidate) => candidate.id));
-        previous = 0;
-        const priorCostByStep = new Map<string, number>();
-        for (let index = 0; index < events.length; index++) {
-          if (index === currentReportIndex) continue;
-          const event = events[index]!;
-          if (event.type === 'cost' && event.stepId && sessionStepIds.has(event.stepId) &&
-              typeof event.usd === 'number' && Number.isFinite(event.usd) && event.usd >= 0) {
-            priorCostByStep.set(event.stepId,
-              (priorCostByStep.get(event.stepId) ?? 0) + Math.max(0, event.usd - previous));
-            previous = Math.max(previous, event.usd);
-          }
-        }
-        // The event log is appended before the step total. A process exit between
-        // those writes leaves a report whose USD never reached the run record.
-        // Restore missing amounts, while preserving older inflated totals rather
-        // than silently migrating historical run state.
-        for (const [priorStepId, expectedCost] of priorCostByStep) {
-          const priorStep = run.steps.find((candidate) => candidate.id === priorStepId);
-          if (priorStep && (priorStep.costUsd === undefined || priorStep.costUsd < expectedCost)) {
-            this.store.updateStep(runId, priorStepId, { costUsd: expectedCost });
-          }
-        }
-      }
-      delta = Math.max(0, reportedUsd - previous);
-      state.reportedClaudeCost.set(sessionKey, Math.max(previous, reportedUsd));
-    }
-    this.store.updateStep(runId, stepId, { costUsd: (step.costUsd ?? 0) + delta });
-  }
-
-  /** Fold backend-neutral completed-turn usage into the current step exactly
-   * once. Invocation/turn counters are written before the event reaches the
-   * NDJSON sink so crashes cannot preserve a falsely complete subtotal. */
-  private recordUsageUiEvent(runId: string, state: ActiveRun, event: UiEvent): void {
-    const invocation = state.usageInvocation;
-    if (!invocation) return;
-    const step = this.store.getRun(runId)?.steps.find((candidate) => candidate.id === invocation.stepId);
-    if (!step) return;
-
-    if (event.type === 'turn.started') {
-      if (invocation.startedTurns.has(event.turnId)) return;
-      invocation.startedTurns.add(event.turnId);
-      const firstObservedTurn = !invocation.observed;
-      invocation.observed = true;
-      this.persistUsageCheckpoint(runId, invocation.stepId, {
-        usageTurnsStarted: (step.usageTurnsStarted ?? 0) + 1,
-        ...(firstObservedTurn
-          ? { usageInvocationsObserved: (step.usageInvocationsObserved ?? 0) + 1 }
-          : {}),
-      });
-      return;
-    }
-
-    if (event.type !== 'turn.completed') return;
-    if (!invocation.startedTurns.has(event.turnId) || invocation.recordedTurns.has(event.turnId)) return;
-    const input = event.usage?.input;
-    const output = event.usage?.output;
-    if (
-      typeof input !== 'number' ||
-      !Number.isFinite(input) ||
-      input < 0 ||
-      typeof output !== 'number' ||
-      !Number.isFinite(output) ||
-      output < 0
-    ) {
-      return;
-    }
-    invocation.recordedTurns.add(event.turnId);
-    this.persistUsageCheckpoint(runId, invocation.stepId, {
-      inputTokens: (step.inputTokens ?? 0) + input,
-      outputTokens: (step.outputTokens ?? 0) + output,
-      usageTurnsRecorded: (step.usageTurnsRecorded ?? 0) + 1,
-    });
-  }
-
-  /** Usage completeness is a crash boundary, unlike high-frequency token
-   * snapshots: the checkpoint must reach `runs.json` before the runner starts
-   * or the matching UI event is persisted and forwarded. */
-  private persistUsageCheckpoint(
-    runId: string,
-    stepId: string,
-    patch: Partial<Omit<StepState, 'id'>>,
-  ): void {
-    this.store.updateStep(runId, stepId, patch);
-    this.store.flush();
+    beginUsageInvocation(this.store, runId, state, stepId);
   }
 
   /**
@@ -8678,20 +8551,8 @@ export class RunManager {
     void this.autoNameRun(runId, skillName, run.task, { turnText, diffStat: statText });
   }
 
-  /**
-   * End-of-session telemetry (#348): stop sampling the run's process tree and
-   * fold the session's peaks into the run record. `max` with existing values —
-   * a run can hold several sessions (multiple agent steps, Continue) and the
-   * record keeps the highest water mark across all of them.
-   */
   private recordUsagePeaks(runId: string): void {
-    const peaks = unregisterRunProcess(runId);
-    if (!peaks || this.isDisposedDelegatedRun(runId)) return;
-    const run = this.store.getRun(runId);
-    this.store.updateRun(runId, {
-      peakRssBytes: Math.max(run?.peakRssBytes ?? 0, peaks.peakRssBytes),
-      peakProcCount: Math.max(run?.peakProcCount ?? 0, peaks.peakProcCount),
-    });
+    recordUsagePeaks(this.store, { isDisposedDelegatedRun: id => this.isDisposedDelegatedRun(id) }, runId);
   }
 
   /**
