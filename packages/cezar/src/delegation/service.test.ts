@@ -771,12 +771,17 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     const source = readFileSync(fileURLToPath(new URL('../../scripts/darwin-destroy-chmod.js', import.meta.url)), 'utf8');
     const binding = "ObjC.bindFunction('renameat', ['int', ['int', 'char *', 'int', 'char *']]);\nObjC.bindFunction('mkdirat', ['int', ['int', 'char *', 'int']]);\n";
     const hook = "if ($.renameat(fd, name, fd, $('.ai-saved').UTF8String) !== 0 || $.mkdirat(fd, name, 0) !== 0) throw Error('fixture swap');\n    ";
+    expect(source.split('if ($.fchmodat(fd, name,')).toHaveLength(2);
     writeFileSync(fixtureScript, source.replace('function run(args) {', binding + 'function run(args) {').replace('if ($.fchmodat(fd, name,', hook + 'if ($.fchmodat(fd, name,'));
     const exec = childProcess.execFile;
+    // The Darwin fixture already spies on execFile to scope process enumeration. Capture its
+    // implementation, not the mutable spy: installing another implementation changes that spy.
+    const scopedExec = vi.mocked(exec).getMockImplementation();
+    if (!scopedExec) throw Error('missing scoped execFile fixture');
     const spy = vi.spyOn(childProcess, 'execFile').mockImplementation(((...args: unknown[]) => {
       const argv = args[1] as string[];
       if (args[0] === '/usr/bin/osascript' && argv?.[3] === workspace.path && argv?.[4] === '.ai') args[1] = [...argv.slice(0, 2), fixtureScript, ...argv.slice(3)];
-      return Reflect.apply(exec, childProcess, args);
+      return Reflect.apply(scopedExec, childProcess, args);
     }) as typeof exec);
     syncBuiltinESMExports();
     try {

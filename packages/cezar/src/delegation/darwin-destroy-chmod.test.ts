@@ -30,14 +30,21 @@ describe.runIf(process.platform === 'darwin')('explicit destroy macOS permission
     const binding = "ObjC.bindFunction('renameat', ['int', ['int', 'char *', 'int', 'char *']]);\nObjC.bindFunction('mkdirat', ['int', ['int', 'char *', 'int']]);\nObjC.bindFunction('symlinkat', ['int', ['char *', 'int', 'char *']]);\n";
     const mutate = kind === 'directory' ? "if ($.mkdirat(fd, name, 0) !== 0) throw Error('fixture mkdir');" : "if ($.symlinkat($('victim').UTF8String, fd, name) !== 0) throw Error('fixture symlink');";
     const hook = `if ($.renameat(fd, name, fd, $('saved').UTF8String) !== 0) throw Error('fixture rename'); ${mutate}\n    `;
-    const script = readFileSync(source, 'utf8').replace('function run(args) {', binding + 'function run(args) {').replace('if ($.fchmodat(fd, name,', hook + 'if ($.fchmodat(fd, name,');
+    const original = readFileSync(source, 'utf8');
+    expect(original.split('if ($.fchmodat(fd, name,')).toHaveLength(2);
+    const script = original.replace('function run(args) {', binding + 'function run(args) {').replace('if ($.fchmodat(fd, name,', hook + 'if ($.fchmodat(fd, name,');
     writeFileSync(fixture, script);
     try {
-      expect(() => execFileSync('/usr/bin/osascript', ['-l', 'JavaScript', fixture, root, 'target', dev.toString('hex'), ino.toString('hex')], { stdio: 'pipe' })).toThrow();
-      expect(existsSync(saved)).toBe(true); expect(lstatSync(saved).mode & 0o777).toBe(0);
+      let stderr = ''; let failure: unknown;
+      try { execFileSync('/usr/bin/osascript', ['-l', 'JavaScript', fixture, root, 'target', dev.toString('hex'), ino.toString('hex')], { stdio: 'pipe' }); }
+      catch (error) { failure = error; stderr = String((error as { stderr?: Buffer }).stderr ?? error); }
+      expect(failure, `osascript unexpectedly succeeded: ${stderr}`).toBeDefined();
+      expect(existsSync(saved), `race hook did not save original; osascript stderr: ${stderr}`).toBe(true);
+      expect(stderr).toContain(kind === 'directory' ? 'directory identity mismatch after chmod' : 'fchmodat');
+      expect(lstatSync(saved).mode & 0o777).toBe(0);
       expect(lstatSync(victim).mode & 0o777).toBe(0o750);
       if (kind === 'directory') expect(lstatSync(target).mode & 0o777).toBe(0o700);
-    } finally { if (existsSync(saved)) chmodSync(saved, 0o700); if (kind === 'directory' && existsSync(target)) chmodSync(target, 0o700); rmSync(root, { recursive: true, force: true }); }
+    } finally { if (existsSync(saved)) chmodSync(saved, 0o700); if (existsSync(target) && lstatSync(target).isDirectory()) chmodSync(target, 0o700); rmSync(root, { recursive: true, force: true }); }
   });
   it('refuses an existing symlink and a symlink ancestor', async () => {
     const root = mkdtempSync(join(realpathSync(tmpdir()), 'cez-mac-link-'));
