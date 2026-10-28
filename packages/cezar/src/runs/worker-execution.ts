@@ -11,8 +11,9 @@ export const workerAliasRetentionSchema = z.object({
   generation: z.string().uuid(), resourceId: z.string().uuid(), bootId: z.string().uuid(),
   roots: z.array(z.object({ path: z.string().max(4096).refine(isAbsolute), identity: aliasObjectIdentity.nullable() }).strict()).min(1).max(16),
   processes: z.array(z.object({ pid: z.number().int().positive(), start: decimalIdentity,
-    identities: z.array(aliasObjectIdentity).min(1).max(64) }).strict()).min(1).max(64),
-}).strict();
+    identities: z.array(aliasObjectIdentity).min(1).max(64) }).strict()).max(64),
+  pending: z.array(z.object({ pid: z.number().int().positive(), start: decimalIdentity }).strict()).max(64).optional(),
+}).strict().refine(value => value.processes.length > 0 || !!value.pending?.length);
 export type WorkerAliasRetention = z.infer<typeof workerAliasRetentionSchema>;
 
 /** Terminal task intent survives loss/quarantine of the public run index. Starting a new

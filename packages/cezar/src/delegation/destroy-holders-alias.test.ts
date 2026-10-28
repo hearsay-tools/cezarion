@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({ calls: 0, failAt: 0, completed: false, legacyFail: false, legacyHeld: false, single: false, released: false, scanCost: 0,
-  unstable: false, failAfterConfirm: false, verifyFailure: false, published: [] as unknown[] }));
+  unstable: false, failAfterConfirm: false, verifyFailure: false, pending: false, published: [] as unknown[] }));
 vi.mock('node:fs', () => ({
   readdirSync: (path: string) => path === '/proc' ? (state.completed ? [] : state.single ? ['101'] : ['101', '102']) : path === `/proc/${process.pid}/task` ? [String(process.pid)]
     : path.endsWith('/task') ? [path.split('/')[2]] : [],
@@ -23,15 +23,17 @@ vi.mock('./linux-alias-scan.ts', async () => {
   const { AliasBudgetExceeded } = await import('./linux-alias-model.ts');
   return {
     prepareAliasScan: (roots: string[], budget: unknown) => ({ roots, budget }),
-    verifyAliasScan: (_attempt: unknown, reserved?: { spend(n: number): void }) => {
-      if (reserved && state.verifyFailure) { reserved.spend(2); throw new Error('owning evidence changed'); }
+    verifyAliasScan: () => {
+      if (state.verifyFailure) throw new Error('owning evidence changed');
     },
-    scanAliases: (pid: number, _token: string, attempt: { budget: { spend(n: number): void } }, confirmed?: (candidate: unknown) => void) => {
+    scanAliases: (pid: number, _token: string, attempt: { budget: { spend(n: number): void } }, confirmed?: (candidate: unknown) => void, candidate?: () => void) => {
       attempt.budget.spend(state.scanCost);
       if (++state.calls === state.failAt) throw new AliasBudgetExceeded();
       if (state.unstable) {
+        candidate?.();
         confirmed?.({ path: '/owned/file', dev: '8:1', ino: BigInt(pid) });
         if (state.failAfterConfirm) throw new AliasBudgetExceeded();
+        if (state.verifyFailure) return { outcome: 'held', mappings: [{ path: '/owned/file', dev: '8:1', ino: BigInt(pid) }], links: [] };
         return { outcome: 'unknown', scoped: true, mappings: [], links: [] };
       }
       if (state.released) return { outcome: 'clear', mappings: [], links: [], maps: '', observedLinks: [] };
@@ -52,13 +54,16 @@ it('retains a positive inode when work exhausts immediately after confirmation',
   } finally { state.unstable = false; state.failAfterConfirm = false; }
 });
 
-it('refuses before target scanning when verification reserve does not fit', async () => {
+it('refuses before target confirmation when scan work exceeds the budget', async () => {
   state.calls = 0; state.failAt = 0; state.completed = false; state.legacyFail = false; state.single = true; state.released = false;
   const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
-  await expect(reapDestroyHolders(['/owned'], () => {}, 3000,
-    { resourceId: 'test', read: () => undefined, write: () => {} }, new AliasWorkBudget(100))).rejects.toThrow('work exceeds');
-  expect(state.calls).toBe(0);
-  expect(kill).not.toHaveBeenCalled();
+  state.scanCost = 200;
+  try {
+    await expect(reapDestroyHolders(['/owned'], () => {}, 3000,
+      { resourceId: 'test', read: () => undefined, write: () => {} }, new AliasWorkBudget(100))).rejects.toThrow('work exceeds');
+    expect(state.calls).toBe(0);
+    expect(kill).not.toHaveBeenCalled();
+  } finally { state.scanCost = 0; }
 });
 
 it('retains published inode evidence when owning snapshot verification fails', async () => {
@@ -74,7 +79,8 @@ it('retains published inode evidence when owning snapshot verification fails', a
 });
 vi.mock('./linux-alias-retention.ts', async () => {
   const { AliasMappingScope } = await import('./linux-alias-scope.ts');
-  return { aliasRetentionAdapter: () => ({ scope: new AliasMappingScope(), publish: (entries: unknown) => { state.published.push(entries); } }) };
+  return { aliasRetentionAdapter: () => ({ scope: new AliasMappingScope(), publish: (entries: unknown) => { state.published.push(entries); },
+    begin: () => true, finish: () => {}, reconcile: () => state.pending }) };
 });
 
 import { reapDestroyHolders } from './destroy-holders.ts';
@@ -82,6 +88,17 @@ import { AliasWorkBudget } from './linux-alias-model.ts';
 import { AliasMappingScope } from './linux-alias-scope.ts';
 
 afterEach(() => vi.restoreAllMocks());
+
+it('refuses deletion when a reopened pending marker has no visible candidate', async () => {
+  state.calls = 0; state.failAt = 0; state.completed = false; state.legacyFail = false;
+  state.single = true; state.released = true; state.pending = true;
+  const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+  try {
+    await expect(reapDestroyHolders(['/owned'], () => {}, 3000,
+      { resourceId: 'test', read: () => undefined, write: () => {} })).rejects.toThrow('Pending alias scan');
+    expect(kill).not.toHaveBeenCalled();
+  } finally { state.pending = false; state.released = false; }
+});
 
 it.each([[2, []], [6, [101]]] as const)('stops after budget failure at scan %i', async (failAt, expected) => {
   state.calls = 0; state.failAt = failAt; state.completed = false; state.legacyFail = false; state.single = false; state.released = false;

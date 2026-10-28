@@ -10,6 +10,13 @@ const records = JSON.parse(readFileSync(new URL('./fixtures/linux-alias-records.
 const own = locateOwnedRoot('/fixture/owned', parseAliasMounts('1 0 8:1 / / rw - ext4 /dev/root rw\n'));
 
 describe('mount alias candidates', () => {
+  it('notifies before a later candidate exhausts translation work', () => {
+    const mount = { dev: '8:1', root: '/fixture/owned', point: '/alias' };
+    const notifications: string[] = [];
+    expect(() => aliasCandidates('/alias/file', '/', '08:01', [mount], [own, own], new AliasWorkBudget(2), undefined,
+      () => { notifications.push('candidate'); })).toThrow();
+    expect(notifications).toEqual(['candidate']);
+  });
   it.each(records)('replays the $case observation without discarding older ancestor mounts', record => {
     const mounts = parseAliasMounts(record.mountinfo.join('\n'));
     const mapped = mappedAliasCandidates(record.maps.join('\n'), record.root, mounts, [own]);

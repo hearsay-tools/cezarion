@@ -34,3 +34,18 @@ it('publishes an authenticated inode before an unstable target snapshot returns 
   expect(result.outcome).toBe('unknown');
   expect(confirmed).toHaveBeenCalledWith({ path: '/owned/file', dev: '8:1', ino: 42n });
 });
+
+it('publishes the pending marker at translation before inode confirmation', () => {
+  state.links = 0;
+  const events: string[] = [];
+  const attempt = { roots: ['/owned'], rootIdentities: ['2049:123'],
+    owned: [{ path: '/owned', dev: '8:1', fsPath: '/fixture/owned' }], selfMounts: '', selfNamespace: 'mnt',
+    budget: new AliasWorkBudget() };
+  scanAliases(101, 'boot:101', attempt, () => { events.push('confirmed'); }, () => { events.push('pending'); });
+  expect(events).toEqual(['pending', 'confirmed']);
+  state.links = 0;
+  const confirmed = vi.fn();
+  expect(() => scanAliases(101, 'boot:101', { ...attempt, budget: new AliasWorkBudget() }, confirmed,
+    () => { throw new Error('write failed'); })).toThrow('Cannot persist pending alias scan');
+  expect(confirmed).not.toHaveBeenCalled();
+});

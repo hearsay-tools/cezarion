@@ -25,10 +25,12 @@ it('retains private alias evidence through completion and refuses resource reuse
     const resourceId = run.delegation.workspace.resourceId;
     const retention: WorkerAliasRetention = { generation, resourceId, bootId: randomUUID(),
       roots: [{ path: run.delegation.workspace.path, identity: { dev: '8:1', ino: '123' } }],
-      processes: [{ pid: 42, start: '123', identities: [{ dev: '8:1', ino: '456' }] }] };
+      processes: [{ pid: 42, start: '123', identities: [{ dev: '8:1', ino: '456' }] }], pending: [{ pid: 42, start: '123' }] };
     f.store.commitWorkerAliasRetention(workerId, generation, resourceId, retention);
     expect(f.store.readWorkerExecution(workerId)?.aliasRetention).toEqual(retention);
     expect(f.store.commitWorkerExecutionComplete(workerId, generation)).toBe(true);
+    expect(JSON.parse(readFileSync(path, 'utf8')).aliasRetention).toEqual(retention);
+    f.store.retainWorkerScratchCleanup(workerId);
     expect(JSON.parse(readFileSync(path, 'utf8')).aliasRetention).toEqual(retention);
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     try { expect(reopened.readWorkerExecution(workerId)?.aliasRetention).toEqual(retention); }

@@ -43,16 +43,13 @@ export function evaluateAliasCandidates(candidates: readonly MappedAliasCandidat
     budget.spend(257 + roots.length);
     const root = roots.find(item => candidate.path === item.path || candidate.path.startsWith(item.path + '/'));
     if (!root) return 'unknown';
-    try {
-      const info = inspect(root.path, candidate.path);
-      if (linuxDeviceNumber(info.dev) !== candidate.dev || info.ino !== candidate.ino) return 'unknown';
-      const key = candidate.dev + ':' + candidate.ino;
-      const paths = matches.get(key) ?? new Set<string>();
-      paths.add(candidate.path); matches.set(key, paths);
-    } catch {
-      return 'unknown';
-    }
+    let info: ReturnType<typeof pinnedAliasIdentity>;
+    try { info = inspect(root.path, candidate.path); } catch { return 'unknown'; }
+    if (linuxDeviceNumber(info.dev) !== candidate.dev || info.ino !== candidate.ino) return 'unknown';
     onMatch?.(candidate);
+    const key = candidate.dev + ':' + candidate.ino;
+    const paths = matches.get(key) ?? new Set<string>();
+    paths.add(candidate.path); matches.set(key, paths);
   }
   return [...matches.values()].some(paths => paths.size > 1) ? 'unknown' : matches.size ? 'held' : 'clear';
 }
@@ -94,14 +91,18 @@ export function verifyAliasScan(attempt: AliasScanAttempt, budget = attempt.budg
   } catch (error) { budget.spend(0); if (error instanceof AliasBudgetExceeded) throw error; throw new AliasScanChanged('owned alias evidence changed or became unavailable'); }
 }
 
+function changedToken(pid: number, token: string | undefined): boolean {
+  return !!token && processStartToken(pid) !== token;
+}
+
 export function scanAliases(pid: number, token: string | undefined, attempt: AliasScanAttempt,
-  onConfirmed?: (candidate: MappedAliasCandidate) => void): AliasScanResult {
+  onConfirmed?: (candidate: MappedAliasCandidate) => void, onCandidate?: () => void): AliasScanResult {
   let scoped = false;
   const unknown = (): AliasScanResult => ({ outcome: 'unknown', scoped, mappings: [], links: [] });
   const { owned, budget } = attempt;
   let procFd: number | undefined;
   try {
-    if (token && processStartToken(pid) !== token) return unknown();
+    if (changedToken(pid, token)) return unknown();
     procFd = openSync('/proc/' + pid, 0x200000 | constants.O_DIRECTORY);
     const prefix = '/proc/self/fd/' + procFd;
     const namespace = readlinkSync(prefix + '/ns/mnt');
@@ -112,7 +113,13 @@ export function scanAliases(pid: number, token: string | undefined, attempt: Ali
     const targetMounts = readBounded(prefix + '/mountinfo', budget);
     const maps = readBounded(prefix + '/maps', budget);
     const mounts = parseAliasMounts(targetMounts, budget);
-    const noteCandidate = () => { scoped = true; };
+    const noteCandidate = () => {
+      if (!scoped) {
+        if (!token || processStartToken(pid) !== token) throw new AliasPublicationError('Alias incarnation unavailable');
+        try { onCandidate?.(); } catch (error) { throw new AliasPublicationError('Cannot persist pending alias scan', { cause: error }); }
+      }
+      scoped = true;
+    };
     const candidates = mappedAliasCandidates(maps, rootPath, mounts, owned, budget, noteCandidate);
     const observedLinks = readAliasLinks(procFd, budget);
     const links = linkAliasCandidates(observedLinks, rootPath, mounts, owned, budget, noteCandidate);
@@ -122,7 +129,6 @@ export function scanAliases(pid: number, token: string | undefined, attempt: Ali
       return pinnedAliasIdentity(root, path, expected);
     };
     const outcome = evaluateAliasCandidates([...candidates, ...links.map(item => item.candidate)], owned, inspect, budget, candidate => {
-      budget.spend();
       if (!token || processStartToken(pid) !== token) throw new Error('alias process changed');
       try { onConfirmed?.(candidate); } catch (error) { throw new AliasPublicationError('Cannot persist alias evidence', { cause: error }); }
     });

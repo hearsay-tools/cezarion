@@ -45,6 +45,16 @@ after a scan, and a token check and POSIX signal are not atomic. This policy doe
 claim hard isolation or that every future same-user process can be prevented.
 Destroy remains incomplete until owned worktree, branch and scratch are gone.
 
+On Linux, translated mount aliases need an independently matched owned inode before
+they can authorize a signal. A bounded private execution checkpoint records confirmed
+identities and a pending scan marker as soon as translation finds a potential owned
+candidate. A failed or interrupted scan retains that marker. After restart, an
+unresolved marker retains resources until verified process exit, a new incarnation,
+or a verified new boot. A complete scan in the same uninterrupted attempt may clear
+its own marker after publishing all matches. The marker itself never authorizes a
+signal. A detached alias that was never observed or translated remains a discovery
+limit; it is not proof that no holder exists.
+
 For explicit worker destruction on macOS, the owner accepts a narrow permission-repair
 race. Pin the no-follow parent, verify the target directory identity, add owner access
 without clearing existing mode bits, then reopen through that parent and compare its

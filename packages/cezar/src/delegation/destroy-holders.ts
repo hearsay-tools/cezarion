@@ -21,7 +21,9 @@ export interface DestroyAliasRetention {
 }
 
 type AliasContext = { attempt: AliasScanAttempt; scope: AliasMappingScope;
-  publish: (entries: ReturnType<AliasMappingScope['snapshot']>) => void };
+  publish: (entries: ReturnType<AliasMappingScope['snapshot']>) => void;
+  begin: (pid: number, token: string) => boolean; finish: (pid: number, token: string) => void;
+  reconcile: (token: (pid: number) => string | undefined, gone: (pid: number) => boolean) => boolean };
 
 function aliasContext(roots: string[], retention: DestroyAliasRetention | undefined, budget: AliasWorkBudget | undefined): AliasContext | undefined {
   if (!retention || !budget) return undefined;
@@ -31,22 +33,22 @@ function aliasContext(roots: string[], retention: DestroyAliasRetention | undefi
   return { attempt, ...adapter };
 }
 
-/** Reserve the maximum bounded owning snapshot read, then return unused work. */
 function scanAndRetain(pid: number, token: string | undefined, aliases: AliasContext) {
-  const { attempt, scope, publish } = aliases;
-  const reservation = attempt.budget.reserve(16_385 + 1 + attempt.roots.length);
-  let confirmed = false;
-  try {
-    return scanAliases(pid, token, attempt, candidate => {
+  const { attempt, scope, publish, begin, finish } = aliases;
+  let ownMarker = false;
+  const result = scanAliases(pid, token, attempt, candidate => {
       if (!token) throw new Error('Alias incarnation unavailable');
       scope.remember(pid, token, [candidate]);
-      confirmed = true;
       publish(scope.snapshot());
+    }, () => {
+      if (!token) throw new Error('Alias incarnation unavailable');
+      ownMarker = begin(pid, token);
     });
-  } finally {
-    try { if (confirmed) verifyAliasScan(attempt, reservation.budget); }
-    finally { reservation.close(); }
+  if (ownMarker && token && result.outcome !== 'unknown') {
+    verifyAliasScan(attempt);
+    finish(pid, token);
   }
+  return result;
 }
 
 function checkScopedHolders(scoped: Map<number, string>, live: { pid: number; token: string }[], roots: string[], budget?: AliasWorkBudget): void {
@@ -121,7 +123,10 @@ export async function reapDestroyHolders(paths: readonly string[], assertCurrent
       for (const holder of found) if (!live.some(existing => existing.pid === holder.pid)) live.push(holder);
     }
     if (process.platform === 'linux') checkScopedHolders(scoped, live, roots, budget);
-    if (!live.length) return;
+    if (!live.length) {
+      if (aliases?.reconcile(processStartToken, processGone)) throw new Error('Pending alias scan cannot be verified');
+      return;
+    }
     for (const { pid, token } of live) {
       scoped.set(pid, token);
       await signalHolder(pid, token, roots, sent, assertCurrent, aliases);

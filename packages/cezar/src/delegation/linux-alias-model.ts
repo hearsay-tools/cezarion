@@ -111,7 +111,8 @@ export function indexAliasMounts(mounts: readonly AliasMount[], budget: AliasWor
 /** Return candidate paths only. A caller must independently compare pinned inode/device
  * and recheck root, mount, namespace and process identity before signalling. */
 export function aliasCandidates(path: string, targetRoot: string, deviceHex: string,
-  targetMounts: readonly AliasMount[], owned: readonly OwnedMountRoot[], budget = new AliasWorkBudget(), index?: ReadonlyMap<string, readonly AliasMount[]>): string[] {
+  targetMounts: readonly AliasMount[], owned: readonly OwnedMountRoot[], budget = new AliasWorkBudget(), index?: ReadonlyMap<string, readonly AliasMount[]>,
+  onCandidate?: () => void): string[] {
   if (!pathValid(path) || !pathValid(targetRoot)) throw new Error('ambiguous reader or target path');
   const device = devKey(deviceHex, 16);
   const candidates = new Set<string>();
@@ -129,6 +130,7 @@ export function aliasCandidates(path: string, targetRoot: string, deviceHex: str
       if (relativeOwned === undefined) continue;
       const candidate = posix.join(root.path, relativeOwned);
       if (!pathValid(candidate)) throw new Error('invalid candidate');
+      onCandidate?.();
       candidates.add(candidate);
       if (candidates.size > MAX_CANDIDATES) throw new Error('too many alias candidates');
     }
@@ -145,8 +147,7 @@ export function linkedAliasCandidates(path: string, targetRoot: string, deviceHe
   index?: ReadonlyMap<string, readonly AliasMount[]>): MappedAliasCandidate[] {
   const forms = path.endsWith(' (deleted)') ? [path, path.slice(0, -10)] : [path];
   const lists = forms.map(form => {
-    const candidates = aliasCandidates(form, targetRoot, deviceHex, mounts, owned, budget, index);
-    if (candidates.length) onCandidate?.();
+    const candidates = aliasCandidates(form, targetRoot, deviceHex, mounts, owned, budget, index, onCandidate);
     return candidates;
   });
   if (lists.some(list => JSON.stringify(list) !== JSON.stringify(lists[0]))) throw new Error('ambiguous link path');
@@ -200,8 +201,7 @@ export function mappedAliasCandidates(content: string, targetRoot: string,
       return paths;
     });
     const lists = variants.map(path => {
-      const candidates = aliasCandidates(path, targetRoot, match[1]!, targetMounts, owned, budget, index);
-      if (candidates.length) onCandidate?.();
+      const candidates = aliasCandidates(path, targetRoot, match[1]!, targetMounts, owned, budget, index, onCandidate);
       return candidates;
     });
     if (lists.some(list => JSON.stringify(list) !== JSON.stringify(lists[0]))) throw new Error('ambiguous mapped path');
