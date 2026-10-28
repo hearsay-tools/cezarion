@@ -780,6 +780,36 @@ function baseCells(runners: RunnerId[]): void {
       await withHeldAck(runner as 'codex' | 'opencode' | 'pi' | 'omp' | 'cursor', exercise);
     });
 
+    it(`${runner} U12 a human answer resets the budget while a timer acknowledgement keeps its reserved charge`, async () => {
+      if (exemptionFor('U12', runner)) {
+        expect(exemptionFor('U12', runner)?.kind).toBe('capability-absent');
+        return;
+      }
+      await withHeldAck(runner as 'codex' | 'opencode' | 'pi' | 'omp' | 'cursor', async release => {
+        const { run, timer, askSeq } = await timerBesideQuestion(runner, 'mock:agent-echo delay-owned-ack');
+        store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES - 1 });
+        fireTimer(timer.id);
+        await until(() => prompted(runner, `Timer ${timer.id} fired`).length > 0);
+        expect(settled(run.id, timer.id)).toBeUndefined();
+        const human = humanOpen(run.id)[0]!;
+        store.updateRun(run.id, { waitDeliveryFailures: 2 });
+        const commits = recordCommits(join(root, '.ai/cezar'));
+        expect(manager.sendMessage(run.id, [{ type: 'text', text: answerOf(run.id) }])).toBe(true);
+        commits.stop();
+        expect(store.getRun(run.id)?.automaticWakes).toBe(0);
+        expect(store.getRun(run.id)?.waitDeliveryFailures).toBeUndefined();
+        commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(wait => wait.id === human.id && wait.phase === 'delivered') ||
+          (row.automaticWakes === 0 && row.waitDeliveryFailures === undefined), 'an answer beside an in-flight timer and its reset wake budget');
+        release();
+        await until(() => settled(run.id, timer.id)?.phase === 'delivered' && answered(run.id, askSeq));
+        expect(store.getRun(run.id)?.automaticWakes).toBe(1);
+        expect(store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith('automatic timer wake-up (')).map(event => event.message))
+          .toEqual(['automatic timer wake-up (1/40)']);
+        expect(manager.finish(run.id)).toBe(true);
+        await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+      });
+    });
+
     it(`${runner} U13 a wait result beside a pending portable question whose acknowledgement is rejected stays resolved, is retried, and the question stays answerable`, async () => {
       if (exemptionFor('U13', runner)) {
         expect(exemptionFor('U13', runner)?.kind).toBe('capability-absent');
@@ -1396,6 +1426,43 @@ function baseCells(runners: RunnerId[]): void {
       expect(engine().deferredMessages.has(run.id)).toBe(false);
       commits.expectEveryCommit(run.id, row => !!row.lastWaits?.some(entry => entry.id === wait!.id && entry.phase === 'delivered') === !row.queuedMessages?.some(entry => entry.id === message.id),
         'a deferred answer and its queue entry');
+      expect(manager.finish(run.id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+    });
+
+    // hearsay-tools/cezarion#1906: the answer resets its accounting atomically, but its immediate
+    // flush must still cancel an owed timer at the old cap. This guard passes on the old order too.
+    it(`${runner} U7q a live answer at the cap keeps the flush decisions, final counters and notes`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
+      await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined && store.getRun(run.id)?.status === 'waiting');
+      const [human] = humanOpen(run.id);
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const registered = await tools.registerWait({ kind: 'timer', seconds: 60, note: 'answer cap guard' }, 'cezar_wait', new AbortController().signal);
+      if (!('wait' in registered) || registered.wait.kind !== 'timer') throw Error('registration refused');
+      // A result already resolved below the cap may still be owed when the budget reaches it.
+      // Hold it at the parked boundary, without asking the scheduler to send it before the answer.
+      const timer = { ...registered.wait, phase: 'resolved' as const, resolvedAt: new Date().toISOString() };
+      store.commitWait(run.id, timer, { id: timer.id, parentRunId: run.id, source: 'lifecycle', createdAt: timer.resolvedAt, text: 'answer cap guard' });
+      const admitted = (manager as unknown as { waitWakeAdmitted: Set<string> }).waitWakeAdmitted;
+      admitted.add(run.id);
+      store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES, waitDeliveryFailures: 2 });
+      const notesBefore = store.readEvents(run.id).filter(event => event.type === 'note').length;
+      const commits = recordCommits(join(root, '.ai/cezar'));
+      expect(manager.sendMessage(run.id, [{ type: 'text', text: answerOf(run.id) }])).toBe(true);
+      commits.stop();
+      // Pin the live outcome separately from the crash invariant: both the old order and the fix
+      // cancel this timer, erase the old counters, and retain the same cap note.
+      expect(settled(run.id, timer.id)?.phase).toBe('cancelled');
+      expect(inputsFor(run.id, timer.id)).toEqual([]);
+      expect(store.getRun(run.id)).toMatchObject({ automaticWakes: 0 });
+      expect(store.getRun(run.id)?.waitDeliveryFailures).toBeUndefined();
+      expect(store.readEvents(run.id).filter(event => event.type === 'note').slice(notesBefore).map(event => event.message))
+        .toEqual([`automatic timer wake-up cap reached (${MAX_AUTO_CONTINUES}); timer ${timer.id} cancelled`,
+          `automatic-wake budget spent (${MAX_AUTO_CONTINUES}); waiting for you`]);
+      commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(wait => wait.id === human!.id && wait.phase === 'delivered') ||
+        (row.automaticWakes === 0 && row.waitDeliveryFailures === undefined), 'a live answer and its reset wake budget');
+      await until(() => answered(run.id, human!.askSeq!));
       expect(manager.finish(run.id)).toBe(true);
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });

@@ -24,7 +24,8 @@ export function acknowledgedBatch(batch: { accepted: readonly string[]; resolved
   ];
 }
 
-/** A human message: the human waits it answers, and a deferred message's queue entry. */
-export function answerOutcomes(messageId: string | undefined): RunOutcome[] {
-  return [{ kind: 'answered' }, ...(messageId ? [{ kind: 'message-delivered' as const, messageId }] : [])];
+/** A human message: its answered waits, deferred queue entry and restarted wake accounting. */
+export function answerOutcomes(messageId: string | undefined, automaticWakes: number | undefined): RunOutcome[] {
+  return [{ kind: 'answered' }, ...(messageId ? [{ kind: 'message-delivered' as const, messageId }] : []),
+    ...chargedIf(automaticWakes ? 0 : undefined), { kind: 'counted', waitDeliveryFailures: undefined }];
 }
