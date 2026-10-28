@@ -1893,10 +1893,10 @@ export class RunManager {
     return request;
   }
 
-  /** The boundary a turn end closes on when it is DONE, and what declared it. */
-  private recordDoneAtBoundary(state: ActiveRun, done: boolean, request: ActiveRun['doneRequested']): void {
+  /** The DONE boundary and close metadata; a refused DONE may retain metadata for readiness. */
+  private recordDoneAtBoundary(state: ActiveRun, done: boolean, request: ActiveRun['doneRequested'], keepClose = done): void {
     state.doneAtBoundary = done ? state.session : undefined;
-    state.doneClose = done ? { via: request ? 'cezar_done' : 'done-line', ...(request?.summary === undefined ? {} : { summary: request.summary }) } : undefined;
+    state.doneClose = keepClose ? { via: request ? 'cezar_done' : 'done-line', ...(request?.summary === undefined ? {} : { summary: request.summary }) } : undefined;
   }
 
   /** Goal achieved (agent contract, #347): the summary `cezar_done` gave as a note, the closing
@@ -9650,7 +9650,7 @@ export class RunManager {
   private keepSettledDone(state: ActiveRun, entry: 'turn-end' | 'ack' | 'ready' | 'gate', turn: SettledTurn,
     refused: CompletionRefusal | undefined, decision: TurnEndDecision): void {
     const keepDone = turn.done && (!refused || (decision.kind === 'defer' && !!decision.keepDone));
-    if (entry === 'turn-end') this.recordDoneAtBoundary(state, keepDone, turn.doneRequest);
+    if (entry === 'turn-end') this.recordDoneAtBoundary(state, keepDone, turn.doneRequest, turn.done);
     else if (entry === 'ack' && turn.done && !keepDone) state.doneAtBoundary = undefined;
   }
 
@@ -9761,12 +9761,12 @@ export class RunManager {
     return this.parkedOutcome(runId);
   }
 
-  /** The completion cause's nudge: the refusal message, which names the worker wait when live
-   *  workers block the done. A nudge that cannot go parks for the user. */
+  /** Send the refusal nudge, or park retaining DONE for transport readiness when permitted. */
   private carryOutCompletionNudge({ runId, state, session, stepId, refused, noteRefusal }: TurnEndCarry): TurnEndOutcome {
     const text = refused!.liveWorkerIds.length ? `${refused!.message} ${COMPLETION_WILL_WAIT}` : refused!.message;
     state.noWaitNudgeSawContent = false;
     if (!session || !this.canAutoContinue(runId, state) || !this.submitAgentInput(runId, state, [{ type: 'text', text }])) {
+      if (session && this.canAutoContinue(runId, state)) state.doneAtBoundary = session;
       noteRefusal();
       this.parkForUser(runId, state, stepId);
       return this.parkedOutcome(runId);
