@@ -1872,6 +1872,12 @@ export class RunStore extends EventEmitter {
     return sortNewestFirst(runs.values());
   }
 
+  /** A bounded page of discoverable peer roots, including the current held overlay. */
+  listPeerTaskSummaries(options: PeerTaskPageOptions) {
+    return listPeerTaskSummaries({ db: this.db, held: this.held, skipped: new Set([...this.deleted, ...this.unreadable]),
+      order: run => this.listOrder(run), cold: id => this.coldSummary(id) }, options);
+  }
+
   /**
    * Every run as its list row, newest first: the stored `summary` column, with each held run's
    * own projection laid over it — a debounced save keeps memory up to 300 ms ahead of the row,
@@ -1909,12 +1915,6 @@ export class RunStore extends EventEmitter {
     let archived = 0;
     const kept = runs.filter((run) => !run.archived || ++archived <= archivedWindow);
     return { runs: kept, truncated: archived > archivedWindow };
-  }
-
-  /** A bounded page of discoverable peer roots, including the current held overlay. */
-  listPeerTaskSummaries(options: PeerTaskPageOptions) {
-    return listPeerTaskSummaries({ db: this.db, held: this.held, skipped: new Set([...this.deleted, ...this.unreadable]),
-      order: run => this.listOrder(run), cold: id => this.coldSummary(id) }, options);
   }
 
   /**
