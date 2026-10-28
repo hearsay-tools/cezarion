@@ -20,3 +20,12 @@ it('propagates exhausted work instead of classifying the candidate as unrelated'
   expect(() => evaluateAliasCandidates([mapping], roots, () => ({ dev: 0x801n, ino: 123n }), new AliasWorkBudget(1)))
     .toThrow(AliasBudgetExceeded);
 });
+
+it('publishes each inode match before later candidate inspection can exhaust work', () => {
+  const roots = [{ path: '/owned', dev: '8:1', fsPath: '/owned' }];
+  const first = { path: '/owned/file', dev: '8:1', ino: 123n };
+  const saved: typeof first[] = [];
+  expect(() => evaluateAliasCandidates([first, { ...first, path: '/owned/second' }], roots,
+    () => ({ dev: 0x801n, ino: 123n }), new AliasWorkBudget(259), candidate => saved.push(candidate))).toThrow(AliasBudgetExceeded);
+  expect(saved).toEqual([first]);
+});

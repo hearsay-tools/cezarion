@@ -7,6 +7,7 @@ import { readProcEvidence } from './linux-proc-evidence.ts';
 
 /** The owning side changed, so no candidate in the attempt can be trusted. */
 export class AliasScanChanged extends Error {}
+export class AliasPublicationError extends Error {}
 
 function readBounded(path: string, budget: AliasWorkBudget): string {
   const decoded = readProcEvidence(path, budget).toString('utf8');
@@ -36,7 +37,7 @@ function ownedRootIdentity(path: string): string {
 }
 
 export function evaluateAliasCandidates(candidates: readonly MappedAliasCandidate[], roots: readonly OwnedMountRoot[],
-  inspect: typeof pinnedAliasIdentity, budget = new AliasWorkBudget()): 'held' | 'clear' | 'unknown' {
+  inspect: typeof pinnedAliasIdentity, budget = new AliasWorkBudget(), onMatch?: (candidate: MappedAliasCandidate) => void): 'held' | 'clear' | 'unknown' {
   const matches = new Map<string, Set<string>>();
   for (const candidate of candidates) {
     budget.spend(257 + roots.length);
@@ -51,6 +52,7 @@ export function evaluateAliasCandidates(candidates: readonly MappedAliasCandidat
     } catch {
       return 'unknown';
     }
+    onMatch?.(candidate);
   }
   return [...matches.values()].some(paths => paths.size > 1) ? 'unknown' : matches.size ? 'held' : 'clear';
 }
@@ -84,14 +86,16 @@ export function prepareAliasScan(roots: readonly string[], budget: AliasWorkBudg
 }
 
 /** Call after the complete PID sweep and before signalling or clearing it. */
-export function verifyAliasScan(attempt: AliasScanAttempt): void {
+export function verifyAliasScan(attempt: AliasScanAttempt, budget = attempt.budget): void {
   try {
-    if (attempt.selfNamespace !== readlinkSync('/proc/self/ns/mnt') || attempt.selfMounts !== readBounded('/proc/self/mountinfo', attempt.budget) ||
+    budget.spend(1 + attempt.roots.length);
+    if (attempt.selfNamespace !== readlinkSync('/proc/self/ns/mnt') || attempt.selfMounts !== readBounded('/proc/self/mountinfo', budget) ||
         attempt.rootIdentities.some((identity, index) => identity !== ownedRootIdentity(attempt.roots[index]!))) throw new Error('changed');
-  } catch (error) { attempt.budget.spend(0); if (error instanceof AliasBudgetExceeded) throw error; throw new AliasScanChanged('owned alias evidence changed or became unavailable'); }
+  } catch (error) { budget.spend(0); if (error instanceof AliasBudgetExceeded) throw error; throw new AliasScanChanged('owned alias evidence changed or became unavailable'); }
 }
 
-export function scanAliases(pid: number, token: string | undefined, attempt: AliasScanAttempt): AliasScanResult {
+export function scanAliases(pid: number, token: string | undefined, attempt: AliasScanAttempt,
+  onConfirmed?: (candidate: MappedAliasCandidate) => void): AliasScanResult {
   let scoped = false;
   const unknown = (): AliasScanResult => ({ outcome: 'unknown', scoped, mappings: [], links: [] });
   const { owned, budget } = attempt;
@@ -112,7 +116,16 @@ export function scanAliases(pid: number, token: string | undefined, attempt: Ali
     const candidates = mappedAliasCandidates(maps, rootPath, mounts, owned, budget, noteCandidate);
     const observedLinks = readAliasLinks(procFd, budget);
     const links = linkAliasCandidates(observedLinks, rootPath, mounts, owned, budget, noteCandidate);
-    const outcome = evaluateAliasCandidates([...candidates, ...links.map(item => item.candidate)], owned, pinnedAliasIdentity, budget);
+    const inspect: typeof pinnedAliasIdentity = (root, path) => {
+      const expected = attempt.rootIdentities[attempt.roots.indexOf(root)];
+      if (!expected || expected === 'absent') throw new Error('owned alias root unavailable');
+      return pinnedAliasIdentity(root, path, expected);
+    };
+    const outcome = evaluateAliasCandidates([...candidates, ...links.map(item => item.candidate)], owned, inspect, budget, candidate => {
+      budget.spend();
+      if (!token || processStartToken(pid) !== token) throw new Error('alias process changed');
+      try { onConfirmed?.(candidate); } catch (error) { throw new AliasPublicationError('Cannot persist alias evidence', { cause: error }); }
+    });
     const secondLinks = readAliasLinks(procFd, budget);
     const sameLinks = observedLinks.length === secondLinks.length && observedLinks.every((link, index) => {
       const other = secondLinks[index];
@@ -124,7 +137,7 @@ export function scanAliases(pid: number, token: string | undefined, attempt: Ali
     return { outcome, scoped: candidates.length > 0 || links.length > 0, mappings: candidates, links: links.map(item => item.link), maps, observedLinks };
   } catch (error) {
     budget.spend(0);
-    if (error instanceof AliasBudgetExceeded || error instanceof AliasScanChanged) throw error;
+    if (error instanceof AliasBudgetExceeded || error instanceof AliasScanChanged || error instanceof AliasPublicationError) throw error;
     // ENOENT for one proc entry can mean lost evidence, not process exit.
     return unknown();
   } finally {

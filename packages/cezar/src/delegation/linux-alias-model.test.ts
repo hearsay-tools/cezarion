@@ -84,6 +84,30 @@ describe('mount alias candidates', () => {
     expect(() => linkedAliasCandidates('/alias/file', '/', '08:01', 42n, mounts, [own], budget)).toThrow('work exceeds');
   });
 
+  it('reserves verification work and refunds only its unused portion once', () => {
+    const budget = new AliasWorkBudget(10);
+    const reserved = budget.reserve(6);
+    reserved.budget.spend(2);
+    expect(() => budget.spend(5)).toThrow('work exceeds');
+    reserved.close(); reserved.close();
+    budget.spend(2);
+    expect(() => budget.spend(2)).toThrow('work exceeds');
+  });
+
+  it('refuses a scan before work when its verification reservation does not fit', () => {
+    expect(() => new AliasWorkBudget(5).reserve(6)).toThrow('work exceeds');
+  });
+
+  it('returns only unused reserved work after verification throws', () => {
+    const budget = new AliasWorkBudget(10);
+    const reserved = budget.reserve(6);
+    try { reserved.budget.spend(2); throw new Error('changed'); }
+    catch { /* verification failed */ }
+    finally { reserved.close(); reserved.close(); }
+    budget.spend(8);
+    expect(() => budget.spend()).toThrow('work exceeds');
+  });
+
   it('handles many unrelated mappings with a shared bounded budget', () => {
     const mounts = parseAliasMounts(['1 0 8:1 / / rw - ext4 /dev/root rw',
       ...Array.from({ length: 149 }, (_, i) => `${i + 2} 1 0:${i + 1} / /pseudo${i} rw - tmpfs tmpfs rw`)].join('\n'));

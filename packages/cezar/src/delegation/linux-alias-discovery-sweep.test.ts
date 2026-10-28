@@ -46,3 +46,10 @@ it('refreshes scoped release evidence after the asynchronous authorization', asy
   expect(scope.has(101)).toBe(true);
   expect(published).not.toContainEqual([]);
 });
+
+it('refuses when provisionally scoped evidence becomes unscoped unknown', async () => {
+  let scans = 0;
+  await expect(discoverAliasHolders([101], new AliasMappingScope(), new AliasWorkBudget(), () => 'boot:100', () => ({
+    outcome: 'unknown', scoped: ++scans === 1, mappings: [], links: [],
+  }), () => false, () => {}, () => {}, () => {})).rejects.toThrow('Cannot verify alias evidence');
+});

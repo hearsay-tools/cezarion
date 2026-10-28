@@ -15,7 +15,7 @@ export function linuxDeviceNumber(dev: bigint): string {
 
 /** Pin every directory while descending. O_PATH|O_NOFOLLOW can itself open a
  * symlink, so each opened object is checked before it can be used. */
-export function pinnedAliasIdentity(root: string, candidate: string): LinuxFileIdentity {
+export function pinnedAliasIdentity(root: string, candidate: string, expectedRoot?: string): LinuxFileIdentity {
   const tail = relative(root, candidate);
   const parts = tail ? tail.split(sep) : [];
   if (parts.length > 256 || parts.some(part => !part || part === '.' || part === '..') || tail.startsWith('..' + sep)) {
@@ -27,6 +27,7 @@ export function pinnedAliasIdentity(root: string, candidate: string): LinuxFileI
     held.push(fd);
     let stat = fstatSync(fd, { bigint: true });
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('alias root is not a directory');
+    if (expectedRoot && `${stat.dev}:${stat.ino}` !== expectedRoot) throw new Error('alias root identity changed');
     for (const [index, part] of parts.entries()) {
       fd = openSync('/proc/self/fd/' + fd + '/' + part, O_PATH | constants.O_NOFOLLOW);
       held.push(fd);

@@ -28,6 +28,19 @@ export class AliasWorkBudget {
     this.remaining -= amount;
     if (this.remaining < 0) throw new AliasBudgetExceeded();
   }
+
+  /** Reserve from the same cap. Only unspent units return, once. */
+  reserve(amount: number): { budget: AliasWorkBudget; close: () => void } {
+    if (!Number.isSafeInteger(amount) || amount < 0) throw new Error('invalid work reservation');
+    this.spend(amount);
+    const budget = new AliasWorkBudget(amount);
+    let closed = false;
+    return { budget, close: () => {
+      if (closed) return;
+      closed = true;
+      this.remaining += Math.max(0, budget.remaining);
+    } };
+  }
 }
 
 function pathValid(value: string): boolean {

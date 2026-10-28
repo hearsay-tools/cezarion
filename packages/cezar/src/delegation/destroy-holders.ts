@@ -31,6 +31,24 @@ function aliasContext(roots: string[], retention: DestroyAliasRetention | undefi
   return { attempt, ...adapter };
 }
 
+/** Reserve the maximum bounded owning snapshot read, then return unused work. */
+function scanAndRetain(pid: number, token: string | undefined, aliases: AliasContext) {
+  const { attempt, scope, publish } = aliases;
+  const reservation = attempt.budget.reserve(16_385 + 1 + attempt.roots.length);
+  let confirmed = false;
+  try {
+    return scanAliases(pid, token, attempt, candidate => {
+      if (!token) throw new Error('Alias incarnation unavailable');
+      scope.remember(pid, token, [candidate]);
+      confirmed = true;
+      publish(scope.snapshot());
+    });
+  } finally {
+    try { if (confirmed) verifyAliasScan(attempt, reservation.budget); }
+    finally { reservation.close(); }
+  }
+}
+
 function checkScopedHolders(scoped: Map<number, string>, live: { pid: number; token: string }[], roots: string[], budget?: AliasWorkBudget): void {
   for (const [pid, token] of scoped) {
     if (live.some(holder => holder.pid === pid)) continue;
@@ -99,7 +117,7 @@ export async function reapDestroyHolders(paths: readonly string[], assertCurrent
     if (aliases && candidates) {
       const { attempt, scope, publish } = aliases;
       const found = await discoverAliasHolders(candidates, scope, attempt.budget, processStartToken,
-        (pid, token) => scanAliases(pid, token, attempt), processGone, assertCurrent, () => verifyAliasScan(attempt), publish);
+        (pid, token) => scanAndRetain(pid, token, aliases), processGone, assertCurrent, () => verifyAliasScan(attempt), publish);
       for (const holder of found) if (!live.some(existing => existing.pid === holder.pid)) live.push(holder);
     }
     if (process.platform === 'linux') checkScopedHolders(scoped, live, roots, budget);
@@ -240,7 +258,7 @@ function checkedSignalEvidence(pid: number, token: string, roots: readonly strin
   if (!aliases) return held;
   verifyAliasScan(aliases.attempt);
   // Legacy path text is not enough to signal through an alias.
-  const evidence = scanAliases(pid, token, aliases.attempt);
+  const evidence = scanAndRetain(pid, token, aliases);
   const verified = assessAliasEvidence(pid, token, evidence, aliases.scope, aliases.attempt.budget, aliases.publish);
   verifyAliasScan(aliases.attempt);
   return verified;

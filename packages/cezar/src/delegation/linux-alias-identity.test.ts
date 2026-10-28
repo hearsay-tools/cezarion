@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it } from 'vitest';
@@ -11,6 +11,9 @@ it.runIf(process.platform === 'linux')('pins fixture objects and refuses redirec
     writeFileSync(join(root, 'dir', 'file'), 'fixture');
     symlinkSync('dir', join(root, 'link'));
     expect(pinnedAliasIdentity(root, join(root, 'dir', 'file')).ino).toBeGreaterThan(0n);
+    const identity = statSync(root, { bigint: true });
+    expect(pinnedAliasIdentity(root, join(root, 'dir', 'file'), `${identity.dev}:${identity.ino}`).ino).toBeGreaterThan(0n);
+    expect(() => pinnedAliasIdentity(root, join(root, 'dir', 'file'), `${identity.dev}:${identity.ino + 1n}`)).toThrow('identity changed');
     expect(() => pinnedAliasIdentity(root, join(root, 'link', 'file'))).toThrow();
     expect(() => pinnedAliasIdentity(root, join(root, 'dir', 'file', 'child'))).toThrow();
     expect(() => pinnedAliasIdentity(root, join(root, '..', 'outside'))).toThrow();

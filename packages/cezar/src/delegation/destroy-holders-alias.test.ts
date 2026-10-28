@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 
-const state = vi.hoisted(() => ({ calls: 0, failAt: 0, completed: false, legacyFail: false, legacyHeld: false, single: false, released: false, scanCost: 0 }));
+const state = vi.hoisted(() => ({ calls: 0, failAt: 0, completed: false, legacyFail: false, legacyHeld: false, single: false, released: false, scanCost: 0,
+  unstable: false, failAfterConfirm: false, verifyFailure: false, published: [] as unknown[] }));
 vi.mock('node:fs', () => ({
   readdirSync: (path: string) => path === '/proc' ? (state.completed ? [] : state.single ? ['101'] : ['101', '102']) : path === `/proc/${process.pid}/task` ? [String(process.pid)]
     : path.endsWith('/task') ? [path.split('/')[2]] : [],
@@ -21,22 +22,64 @@ vi.mock('./linux-mapped-holders.ts', () => ({ mappedHolder: (_pid: number, _root
 vi.mock('./linux-alias-scan.ts', async () => {
   const { AliasBudgetExceeded } = await import('./linux-alias-model.ts');
   return {
-    prepareAliasScan: (_roots: string[], budget: unknown) => ({ budget }), verifyAliasScan: () => {},
-    scanAliases: (pid: number, _token: string, attempt: { budget: { spend(n: number): void } }) => {
+    prepareAliasScan: (roots: string[], budget: unknown) => ({ roots, budget }),
+    verifyAliasScan: (_attempt: unknown, reserved?: { spend(n: number): void }) => {
+      if (reserved && state.verifyFailure) { reserved.spend(2); throw new Error('owning evidence changed'); }
+    },
+    scanAliases: (pid: number, _token: string, attempt: { budget: { spend(n: number): void } }, confirmed?: (candidate: unknown) => void) => {
       attempt.budget.spend(state.scanCost);
       if (++state.calls === state.failAt) throw new AliasBudgetExceeded();
+      if (state.unstable) {
+        confirmed?.({ path: '/owned/file', dev: '8:1', ino: BigInt(pid) });
+        if (state.failAfterConfirm) throw new AliasBudgetExceeded();
+        return { outcome: 'unknown', scoped: true, mappings: [], links: [] };
+      }
       if (state.released) return { outcome: 'clear', mappings: [], links: [], maps: '', observedLinks: [] };
       return { outcome: 'held', mappings: [{ path: '/owned/' + pid, dev: '8:1', ino: BigInt(pid) }], links: [] };
     },
   };
 });
+
+it('retains a positive inode when work exhausts immediately after confirmation', async () => {
+  state.calls = 0; state.failAt = 0; state.completed = false; state.legacyFail = false; state.single = true; state.released = false;
+  state.unstable = true; state.failAfterConfirm = true; state.published = [];
+  const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+  try {
+    await expect(reapDestroyHolders(['/owned'], () => {}, 3000,
+      { resourceId: 'test', read: () => undefined, write: () => {} })).rejects.toThrow('work exceeds');
+    expect(kill).not.toHaveBeenCalled();
+    expect((state.published[0] as ReturnType<AliasMappingScope['snapshot']>)[0]?.identities).toEqual([{ dev: '8:1', ino: '101' }]);
+  } finally { state.unstable = false; state.failAfterConfirm = false; }
+});
+
+it('refuses before target scanning when verification reserve does not fit', async () => {
+  state.calls = 0; state.failAt = 0; state.completed = false; state.legacyFail = false; state.single = true; state.released = false;
+  const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+  await expect(reapDestroyHolders(['/owned'], () => {}, 3000,
+    { resourceId: 'test', read: () => undefined, write: () => {} }, new AliasWorkBudget(100))).rejects.toThrow('work exceeds');
+  expect(state.calls).toBe(0);
+  expect(kill).not.toHaveBeenCalled();
+});
+
+it('retains published inode evidence when owning snapshot verification fails', async () => {
+  state.calls = 0; state.failAt = 0; state.completed = false; state.legacyFail = false; state.single = true; state.released = false;
+  state.unstable = true; state.verifyFailure = true; state.published = [];
+  const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+  try {
+    await expect(reapDestroyHolders(['/owned'], () => {}, 3000,
+      { resourceId: 'test', read: () => undefined, write: () => {} })).rejects.toThrow('owning evidence changed');
+    expect(kill).not.toHaveBeenCalled();
+    expect((state.published[0] as ReturnType<AliasMappingScope['snapshot']>)[0]?.identities).toEqual([{ dev: '8:1', ino: '101' }]);
+  } finally { state.unstable = false; state.verifyFailure = false; }
+});
 vi.mock('./linux-alias-retention.ts', async () => {
   const { AliasMappingScope } = await import('./linux-alias-scope.ts');
-  return { aliasRetentionAdapter: () => ({ scope: new AliasMappingScope(), publish: () => {} }) };
+  return { aliasRetentionAdapter: () => ({ scope: new AliasMappingScope(), publish: (entries: unknown) => { state.published.push(entries); } }) };
 });
 
 import { reapDestroyHolders } from './destroy-holders.ts';
 import { AliasWorkBudget } from './linux-alias-model.ts';
+import { AliasMappingScope } from './linux-alias-scope.ts';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -119,4 +162,20 @@ it('shares one destroy budget across separate reaper calls', async () => {
     await expect(reapDestroyHolders(['/owned'], () => {}, 3000, retention, budget)).rejects.toThrow('work exceeds');
     expect(kill).toHaveBeenCalledTimes(1);
   } finally { state.scanCost = 0; }
+});
+
+it('durably retains a confirmed inode when its later target snapshot is unstable', async () => {
+  state.calls = 0; state.failAt = 0; state.completed = false; state.legacyFail = false; state.single = true; state.released = false;
+  state.unstable = true; state.published = [];
+  const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+  try {
+    await expect(reapDestroyHolders(['/owned'], () => {}, 3000,
+      { resourceId: 'test', read: () => undefined, write: () => {} })).rejects.toThrow('Cannot verify');
+    expect(kill).not.toHaveBeenCalled();
+    const entries = state.published[0] as ReturnType<AliasMappingScope['snapshot']>;
+    expect(entries[0]?.identities).toEqual([{ dev: '8:1', ino: '101' }]);
+    const restarted = new AliasMappingScope();
+    restarted.remember(entries[0]!.pid, entries[0]!.token, entries[0]!.identities.map(item => ({ dev: item.dev, ino: BigInt(item.ino) })));
+    expect(restarted.recheck(101, 'boot:101', '1-2 r--p 0 08:01 101 /detached/file (deleted)\n', false, [])).toBe('unknown');
+  } finally { state.unstable = false; }
 });
