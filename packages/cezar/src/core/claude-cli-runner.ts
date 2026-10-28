@@ -733,16 +733,6 @@ export function claudeHelpFeatures(bin: string): ClaudeHelpFeatures {
   return features;
 }
 
-/**
- * Flag-layer settings for every launch, at shipped defaults and under D1
- * (hearsay-tools/cezarion#1994). `crossSessionInbound: refuse` stops the user's other
- * Claude sessions from sending untracked `SendMessage` text into a task; tasks talk
- * through `cez message`. Claude 2.1.311 accepts the key; an unknown value is ignored
- * silently, so a renamed key fails open. Outbound `SendMessage` stays at defaults: it
- * also follows up the session's own subagents. D1 denies it in `claudeToolArgs`.
- */
-const CLAUDE_SESSION_SETTINGS = JSON.stringify({ crossSessionInbound: 'refuse' });
-
 export function buildClaudeArgs(
   spec: AgentRunSpec,
   env: NodeJS.ProcessEnv = process.env,
@@ -760,7 +750,8 @@ export function buildClaudeArgs(
   // Every hook's lifecycle, so the transcript can show what hooks told the agent (#961).
   if (features.includeHookEvents) args.push('--include-hook-events');
   args.push(...claudePermissionArgs(env));
-  args.push('--settings', CLAUDE_SESSION_SETTINGS);
+  // Refuse other Claude sessions' SendMessage on every launch; fails open (AGENT_PROTOCOL.md D3).
+  args.push('--settings', JSON.stringify({ crossSessionInbound: 'refuse' }));
   const settingSources = env.CEZ_CLAUDE_SETTING_SOURCES;
   if (settingSources) {
     args.push('--setting-sources', settingSources);
