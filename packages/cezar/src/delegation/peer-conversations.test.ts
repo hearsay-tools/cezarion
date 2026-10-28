@@ -9,7 +9,7 @@ import {
   type ConversationSendRequest,
 } from '@open-mercato/cezar-contract/conversations';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
-import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, STEP_KIND, STEP_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { RunRecord } from '../runs/store.ts';
 import { RunStore, RunWriteRefusedError } from '../runs/store.ts';
 import { fixture } from './service.testkit.ts';
@@ -272,14 +272,64 @@ describe('peer conversations', () => {
     await expect(f.service.conversation(f.caller, { recipientRunId: randomUUID() })).rejects.toMatchObject({ code: 'denied_scope' });
   });
 
-  it('R17 a requester resting at review, out of memory, settles its request when the peer rests at review, with no read', async () => {
+  it.each([['review', 'completed-without-reply'], ['done', 'completed-without-reply'], ['failed', 'failed'], ['cancelled', 'cancelled']] as const)(
+    'R17 a requester resting at review, out of memory, settles its request when the peer reaches %s, with no read', async (status, outcome) => {
+      const b = peer();
+      const open = await f.service.send(f.caller, message(b.id));
+      f.store.updateRun(f.parent.id, { status: RUN_STATUS.review });
+      vi.spyOn(f.store, 'listRuns').mockReturnValue([]);
+      f.store.updateRun(b.id, { status: RUN_STATUS[status] });
+      expect(ledger(f.parent.id)?.outcomes).toEqual([expect.objectContaining({ requestId: open.message.id, status: outcome })]);
+      expect(projections(f.parent.id)).toContain(`request-outcome:${open.message.id}`);
+    });
+
+  it('§ 5 a parked peer with no live session: a message opens a scheduler continuation; past the budget it opens the budget human wait instead', async () => {
+    // A parked task as a closed session leaves it: its one agent step ran and kept its session.
+    const parked = () => {
+      const run = f.store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [{ id: 'task', kind: STEP_KIND.agent, name: 'Task' }] });
+      f.store.updateStep(run.id, 'task', { status: STEP_STATUS.running, sessionId: 'previous-session', backend: 'claude' });
+      f.store.updateRun(run.id, { status: RUN_STATUS.waiting, currentStepId: 'task', delegation: { role: 'root', permissions: [...permissions], receipts: [] } });
+      return run;
+    };
+    const b = parked();
+    const woken = await f.service.send(f.caller, message(b.id, 'progress', { text: 'wake up' }));
+    expect(f.store.getRun(b.id)).toMatchObject({ status: RUN_STATUS.queued, continuationMessage: expect.objectContaining({ text: expect.stringContaining('queued messages') }) });
+    expect(f.store.getRun(b.id)?.agentInputs?.find(input => input.id === woken.message.id)?.deliveredAt).toBeUndefined();
+    const c = parked();
+    f.store.updateRun(c.id, { automaticWakes: 40 });
+    const held = await f.service.send(f.caller, message(c.id, 'progress', { text: 'held' }));
+    expect(f.store.getRun(c.id)?.status).toBe(RUN_STATUS.waiting);
+    expect(f.store.getRun(c.id)?.continuationMessage).toBeUndefined();
+    expect(f.store.getRun(c.id)?.waits).toEqual([expect.objectContaining({ kind: WAIT_KIND.human, via: WAIT_VIA.budget, phase: WAIT_PHASE.open })]);
+    expect(f.store.getRun(c.id)?.agentInputs?.find(input => input.id === held.message.id)?.deliveredAt).toBeUndefined();
+  });
+
+  it('R8 a stopping peer is not delivered, and says it is stopping', async () => {
+    const b = peer(RUN_STATUS.running);
+    f.store.updateRun(b.id, { stopping: true });
+    const sent = await f.service.send(f.caller, message(b.id));
+    expect(sent).toMatchObject({ delivery: 'not-delivered', message: { state: 'continuation-required', instruction: 'Not delivered: task is stopping. Only its human can continue it.' } });
+    expect(f.store.getRun(b.id)?.agentInputs ?? []).toEqual([]);
+  });
+
+  it('§ 5 a sender with a pending Finish, or with its history being deleted, sends nothing', async () => {
+    const b = peer();
+    const delegation = f.store.getRun(f.parent.id)!.delegation!;
+    if (delegation.role !== 'root') throw Error('missing root');
+    f.store.commitDelegation([{ id: f.parent.id, delegation: { ...delegation, finishRequestedAt: new Date().toISOString() } }]);
+    await expect(f.service.send(f.caller, message(b.id, 'progress'))).rejects.toMatchObject({ code: 'incompatible_state', message: 'Sender session is not active' });
+    f.store.commitDelegation([{ id: f.parent.id, delegation: { ...delegation, historyDeletion: 'pending' } }]);
+    await expect(f.service.send(f.caller, message(b.id, 'progress'))).rejects.toMatchObject({ code: 'denied_scope' });
+    expect(f.store.getRun(b.id)?.agentInputs ?? []).toEqual([]);
+  });
+
+  it.each(['done', 'failed', 'cancelled'] as const)('§ 5 a sender that ends %s settles its open peer request sender-closed', async status => {
     const b = peer();
     const open = await f.service.send(f.caller, message(b.id));
-    f.store.updateRun(f.parent.id, { status: RUN_STATUS.review });
-    vi.spyOn(f.store, 'listRuns').mockReturnValue([]);
-    f.store.updateRun(b.id, { status: RUN_STATUS.review });
-    expect(ledger(f.parent.id)?.outcomes).toEqual([expect.objectContaining({ requestId: open.message.id, status: 'completed-without-reply' })]);
-    expect(projections(f.parent.id)).toContain(`request-outcome:${open.message.id}`);
+    f.store.updateRun(f.parent.id, { status: RUN_STATUS[status] });
+    expect(ledger(f.parent.id)?.outcomes).toEqual([expect.objectContaining({ requestId: open.message.id, status: 'sender-closed' })]);
+    // The peer's late reply is recorded and reopens nothing.
+    expect((await f.service.reply(b.caller, message(f.parent.id, 'reply', { requestId: open.message.id }))).outcome).toMatchObject({ status: 'sender-closed' });
   });
 
   it('R15 a requester resting at review, out of memory, settles its request deleted when the peer is deleted, with no read', async () => {
