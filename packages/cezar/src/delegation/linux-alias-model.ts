@@ -102,6 +102,8 @@ type IndexedPair = { root: OwnedMountRoot; mountOrder: number; rootOrder: number
 type DeviceIndex = { points: Map<string, IndexedPair[]>; first: Set<string>; hasRoot: boolean };
 export type AliasMountIndex = Map<string, DeviceIndex>;
 
+function trailingPoint(point: string): boolean { return point !== '/' && point.endsWith('/'); }
+
 /** Charge byte and component-dependent work before path construction or insertion. */
 function chargePaths(budget: AliasWorkBudget, ...paths: string[]): void {
   budget.spend(1 + paths.reduce((total, path) => total + Math.ceil(path.length / 64), 0));
@@ -128,7 +130,7 @@ export function indexAliasMounts(mounts: readonly AliasMount[], budget: AliasWor
       chargePaths(budget, targetRoot, mount.point);
       const point = posix.join(targetRoot, mount.point);
       // suffix() accepts the exact trailing-slash point, but no valid descendant.
-      const trailing = point !== '/' && point.endsWith('/');
+      const trailing = trailingPoint(point);
       if (trailing && belowOwned === undefined) continue;
       chargePaths(budget, point, belowMount ?? '', root.path, belowOwned ?? '');
       const prefix = trailing ? point : belowMount !== undefined ? posix.join(point, belowMount) : point;
