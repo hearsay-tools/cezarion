@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { AgentInput, RunRecord } from '@open-mercato/cezar-contract';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { WAIT_LIMIT } from '@open-mercato/cezar-contract/waits';
-import { makePeerWait, makeRunRecord, makeTimerWait, RUN_STATUS, WAIT_PHASE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { makePeerWait, makeRunRecord, makeTimerWait, RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { delegationWaitRefusal, peerWaitEntry, peerWaitOf, peerWaitResult, runsAwaitingPeer, workerListTarget } from './wait-scope.ts';
 
@@ -71,7 +71,7 @@ describe('peerWaitResult', () => {
 describe('cezar_wait kinds worker and request', () => {
   it('map onto the worker entry target, and policy refusals onto the tool codes', () => {
     const [w, r] = [randomUUID(), randomUUID()];
-    expect(workerListTarget({ kind: 'worker', worker_ids: [w], timeout_seconds: 600 })).toEqual({ workerIds: [w], timeoutSeconds: 600 });
+    expect(workerListTarget({ kind: WAIT_KIND.worker, worker_ids: [w], timeout_seconds: 600 })).toEqual({ workerIds: [w], timeoutSeconds: 600 });
     expect(workerListTarget({ kind: 'request', request_ids: [r], mode: 'all', timeout_seconds: 60 })).toEqual({ requestIds: [r], mode: 'all', timeoutSeconds: 60 });
     const policy = (code: ConstructorParameters<typeof DelegationPolicyError>[0]) => new DelegationPolicyError(code, 'x');
     expect(delegationWaitRefusal(policy('denied_scope'), () => true)).toBe('denied_scope');
