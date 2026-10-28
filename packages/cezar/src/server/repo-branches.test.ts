@@ -13,6 +13,7 @@ import {
   attributeLog,
   classifyBranches,
   deleteBranches,
+  forkPoints,
   type BranchForge,
   type ClassifyInput,
   type ForgePr,
@@ -401,6 +402,26 @@ describe('the branch classifier (issue 08 §A)', () => {
     expect((await git(root, 'log', '-g', '--format=%H', 'refs/heads/cez/aaaaaaaa')).split('\n')).toEqual([tip]);
     const { cls } = await classesOf({ runs: [runRecord('aaaaaaaa-1', 'done', { baseBranch: 'main' })] });
     expect(cls['cez/aaaaaaaa']).toBe('not-landed');
+  });
+
+  it('reads fork points in one pass, and a chunk naming a vanished branch one branch at a time (hearsay-tools/cezarion#2029)', async () => {
+    const base = await git(root, 'rev-parse', 'HEAD');
+    await git(root, 'branch', 'cez/fresh0001');
+    await taskBranch(root, 'cez/worked01', 2);
+    const run = (id: string, extra: Partial<RunRecord> = {}) => owners([runRecord(id, 'done', extra)])[0]!;
+    const forks = await forkPoints(root, [
+      { run: run('fresh0001-1'), branch: 'cez/fresh0001' },
+      { run: run('worked01-1'), branch: 'cez/worked01' },
+      { run: run('gone0001-1'), branch: 'cez/gone0001' },
+      { run: run('pinned01-1', { baseBranch: 'a'.repeat(40) }), branch: 'cez/pinned01' },
+    ]);
+    // Each fork point is the commit the branch was created at, never a later task commit.
+    expect(Object.fromEntries(forks)).toEqual({
+      'cez/fresh0001': base,
+      'cez/worked01': base,
+      'cez/gone0001': null,
+      'cez/pinned01': 'a'.repeat(40),
+    });
   });
 
   describe('deleteBranches', () => {

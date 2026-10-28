@@ -253,17 +253,6 @@ function isFinished(run: BranchOwner): boolean {
   return FINISHED.has(run.status) || run.archived === true;
 }
 
-/** Where the run forked: a pinned sha, or the branch's creation entry in its reflog. Only an entry
- *  git wrote as a creation counts: once older entries expire, the oldest SURVIVING one can be a
- *  task commit, and reading that as the fork point would call committed work "empty". */
-async function forkPoint(root: string, run: BranchOwner, branch: string): Promise<string | null> {
-  if (run.baseBranch && FULL_SHA.test(run.baseBranch)) return run.baseBranch;
-  const res = await git(root, ['log', '-g', '--format=%H%x1f%gs', `refs/heads/${branch}`]);
-  const oldest = res.ok ? res.stdout.trim().split('\n').filter(Boolean).at(-1) : undefined;
-  const [sha = '', subject = ''] = oldest?.split('\x1f') ?? [];
-  return creationSha(sha, subject);
-}
-
 function creationSha(sha: string, subject: string): string | null {
   return sha && /^branch: Created from /.test(subject) ? sha : null;
 }
@@ -272,13 +261,21 @@ function creationSha(sha: string, subject: string): string | null {
 const REFLOG_CHUNK = 256;
 
 /**
- * `forkPoint` for many branches in one `git log -g` per chunk instead of one per branch
- * (hearsay-tools/cezarion#2029). git walks every named reflog and prints each entry once, in date
- * order, so entries are matched by their `refs/heads/<name>@{n}` selector, and the oldest is the
- * highest `n`. A ref with no reflog prints nothing: no fork point, as `forkPoint` answers. A chunk
- * that fails (a branch deleted since it was listed) falls back to one read per branch.
+ * Where each run forked: a pinned sha, or the branch's creation entry in its reflog. Only an entry
+ * git wrote as a creation counts: once older entries expire, the oldest SURVIVING one can be a task
+ * commit, and reading that as the fork point would call committed work "empty".
+ *
+ * One `git log -g` per chunk of branches, never one per branch (hearsay-tools/cezarion#2029). git
+ * walks every named reflog and prints each entry once, in date order, so entries are matched by
+ * their `refs/heads/<name>@{n}` selector, and the oldest is the highest `n`. A ref with no reflog
+ * prints nothing: no fork point. A chunk that fails (a branch deleted since it was listed) is read
+ * again one branch at a time, and a single branch that still fails has no fork point.
  */
-async function forkPoints(root: string, wanted: ReadonlyArray<{ run: BranchOwner; branch: string }>): Promise<Map<string, string | null>> {
+export async function forkPoints(
+  root: string,
+  wanted: ReadonlyArray<{ run: BranchOwner; branch: string }>,
+  chunkSize = REFLOG_CHUNK,
+): Promise<Map<string, string | null>> {
   const out = new Map<string, string | null>();
   const walk: Array<{ run: BranchOwner; branch: string }> = [];
   for (const item of wanted) {
@@ -286,11 +283,11 @@ async function forkPoints(root: string, wanted: ReadonlyArray<{ run: BranchOwner
     else walk.push(item);
   }
   const chunks: Array<typeof walk> = [];
-  for (let i = 0; i < walk.length; i += REFLOG_CHUNK) chunks.push(walk.slice(i, i + REFLOG_CHUNK));
+  for (let i = 0; i < walk.length; i += chunkSize) chunks.push(walk.slice(i, i + chunkSize));
   await Promise.all(chunks.map(async (chunk) => {
     const res = await git(root, ['log', '-g', '--format=%gD%x1f%H%x1f%gs', ...chunk.map((item) => `refs/heads/${item.branch}`), '--']);
-    if (!res.ok) {
-      await Promise.all(chunk.map(async (item) => out.set(item.branch, await forkPoint(root, item.run, item.branch))));
+    if (!res.ok && chunk.length > 1) {
+      for (const [branch, fork] of await forkPoints(root, chunk, 1)) out.set(branch, fork);
       return;
     }
     const oldest = new Map<string, { n: number; sha: string; subject: string }>();
@@ -395,12 +392,12 @@ async function diffStat(root: string, baseSha: string, tip: string): Promise<Rep
 }
 
 export interface ClassifyOptions {
-  /** Compute each not-landed row's diff stat. Off for the counts and for a delete, which read none. */
+  /** Compute each not-landed row's diff stat (the default). Off for the counts and for a delete,
+   *  which read none. */
   diffStats?: boolean;
 }
 
-export async function classifyBranches(input: ClassifyInput, options: ClassifyOptions = {}): Promise<Classification> {
-  const withDiffStats = options.diffStats ?? true;
+export async function classifyBranches(input: ClassifyInput, options?: ClassifyOptions): Promise<Classification> {
   const { root } = input;
   const base = input.configuredBase ?? input.currentBranch;
   const { ref: baseRef, fullRef: baseFullRef, sha: baseSha } = await resolveBase(root, base);
@@ -523,7 +520,7 @@ export async function classifyBranches(input: ClassifyInput, options: ClassifyOp
   const branches: RepoBranchEntry[] = await Promise.all(
     drafts.map(async (d) => {
       const cls = d.cls as BranchClass;
-      const stat = withDiffStats && (cls === 'not-landed' || cls === 'orphan') && baseSha
+      const stat = options?.diffStats !== false && (cls === 'not-landed' || cls === 'orphan') && baseSha
         ? await diffStat(root, baseSha, d.head.sha)
         : null;
       return {
