@@ -1325,10 +1325,14 @@ function baseCells(runners: RunnerId[]): void {
       engine().active.get(run.id)!.session.end();
       await until(() => !manager.isActive(run.id));
       rmSync(answers, { force: true });
+      store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES, waitDeliveryFailures: 2 });
       // What a crash after any commit would leave (hearsay-tools/cezarion#1805): every committed row.
       const commits = recordCommits(join(root, '.ai/cezar'));
       const answer = toolCall('cezar_done', { summary: 'answered and shipped' });
       expect(manager.continueRun(run.id, { text: answer }).ok).toBe(true);
+      commits.stop();
+      commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(entry => entry.id === wait!.id && entry.phase === 'delivered') ||
+        (row.automaticWakes === 0 && row.waitDeliveryFailures === undefined), 'an answered wait and its reset wake budget');
       // The wait is never delivered in a row that lost the answer it was delivered with: until the
       // Continue's step starts, a row with the wait delivered holds the answer.
       commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(entry => entry.id === wait!.id && entry.phase === 'delivered') ||
@@ -1380,8 +1384,13 @@ function baseCells(runners: RunnerId[]): void {
       const message = { id: randomUUID(), text: answerOf(run.id), createdAt: new Date().toISOString() };
       store.commitHumanMessageBesideWaits(run.id, message);
       engine().deferredMessages.set(run.id, [{ content: [{ type: 'text', text: message.text }], messageId: message.id }]);
+      store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES, waitDeliveryFailures: 2 });
       const commits = recordCommits(join(root, '.ai/cezar'));
       engine().flushDeferred(run.id);
+      commits.stop();
+      commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(entry => entry.id === wait!.id && entry.phase === 'delivered') ||
+        (row.automaticWakes === 0 && row.waitDeliveryFailures === undefined), 'a deferred answer and its reset wake budget');
+      expect(commits.rows(run.id).some(row => row?.lastWaits?.some(entry => entry.id === wait!.id && entry.phase === 'delivered'))).toBe(true);
       await until(() => settled(run.id, wait!.id)?.phase === 'delivered' && answered(run.id, wait!.askSeq!));
       expect(store.getRun(run.id)?.queuedMessages ?? []).toEqual([]);
       expect(engine().deferredMessages.has(run.id)).toBe(false);
