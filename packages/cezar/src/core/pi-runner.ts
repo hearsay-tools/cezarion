@@ -22,6 +22,7 @@ import { signalSession, spawnSessionLeader, waitForEofExit } from './session-pro
 import { buildChildEnv } from './agent-env.js';
 import { cezarToolNames } from '../ci-wait/tools.js';
 import { readNdjson } from './ndjson.js';
+import { contentText, emitImages, isRecord, piMessageText, number, piRpcError as rpcError, string, toPiPrompt, truncate, waitForExit } from './pi-rpc-wire.ts';
 import { createPiUiState, mapPiRpcMessage, piFlushProviderError, piProviderErrorMessage, piTurnStarted } from './pi-ui-mapper.js';
 import { V1TextCoalescer } from './v1-text-coalescer.js';
 import { InputSubmissions } from './input-submissions.ts';
@@ -717,19 +718,6 @@ function piTools(tools: readonly string[], bashAllowlist: readonly string[] | un
   ];
 }
 
-function toPiPrompt(content: ContentBlock[]): {
-  message: string;
-  images: Array<{ type: 'image'; data: string; mimeType: string }>;
-} {
-  const text: string[] = [];
-  const images: Array<{ type: 'image'; data: string; mimeType: string }> = [];
-  for (const block of content) {
-    if (block.type === 'text') text.push(block.text);
-    else images.push({ type: 'image', data: block.source.data, mimeType: block.source.media_type });
-  }
-  return { message: text.join('\n'), images };
-}
-
 function usageValues(value: unknown): { weighted: number; cost?: number } | undefined {
   if (!isRecord(value)) return undefined;
   const input = number(value.input) ?? 0;
@@ -741,44 +729,6 @@ function usageValues(value: unknown): { weighted: number; cost?: number } | unde
     weighted: Math.round(input + output + cacheRead * 0.1 + cacheWrite * 1.25),
     ...(cost !== undefined && cost >= 0 ? { cost } : {}),
   };
-}
-
-function emitImages(value: unknown, onEvent?: (event: AgentEvent) => void): void {
-  if (!Array.isArray(value)) return;
-  for (const part of value) {
-    if (isRecord(part) && part.type === 'image') {
-      const data = string(part.data);
-      const mediaType = string(part.mimeType);
-      if (data && mediaType) onEvent?.({ type: 'image', data, mediaType });
-    }
-  }
-}
-
-/** A pi message's text: a plain string, or its text parts joined like toPiPrompt. */
-function piMessageText(message: Record<string, unknown>): string {
-  if (typeof message.content === 'string') return message.content;
-  return Array.isArray(message.content)
-    ? message.content.flatMap(part => isRecord(part) && part.type === 'text' && typeof part.text === 'string' ? [part.text] : []).join('\n')
-    : '';
-}
-
-function contentText(value: unknown): string | undefined {
-  if (typeof value === 'string') return value;
-  if (!Array.isArray(value)) return undefined;
-  const text = value
-    .map((part) => (isRecord(part) && part.type === 'text' ? string(part.text) : undefined))
-    .filter((part): part is string => part !== undefined);
-  return text.length > 0 ? text.join('\n') : undefined;
-}
-
-function rpcError(value: Record<string, unknown>): string {
-  const error = isRecord(value.error) ? value.error : undefined;
-  return string(error?.message) ?? string(value.message) ?? `pi RPC command ${string(value.command) ?? 'unknown'} failed`;
-}
-
-function waitForExit(child: ChildProcessWithoutNullStreams): Promise<number | null> {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(child.exitCode);
-  return new Promise((resolve) => child.once('close', resolve));
 }
 
 function wrapSpawnError(error: NodeJS.ErrnoException, bin: string): Error {
@@ -795,20 +745,4 @@ function mockPiPath(): string {
   const here = dirname(fileURLToPath(import.meta.url));
   // here = <pkg>/dist/core (built) or <pkg>/src/core (tsx dev).
   return resolvePath(here, '..', '..', 'scripts', 'mock-pi-rpc.mjs');
-}
-
-function truncate(value: string, max = 200): string {
-  return value.length > max ? `${value.slice(0, max)}…` : value;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function string(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
-}
-
-function number(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }

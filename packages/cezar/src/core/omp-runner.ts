@@ -23,6 +23,7 @@ import { buildChildEnv } from './agent-env.js';
 import type { UiEvent } from './ui-events.js';
 import { cezarToolNames } from '../ci-wait/tools.js';
 import { readNdjson } from './ndjson.js';
+import { contentText, emitImages, isRecord, piMessageText, ompRpcError as rpcError, string, toPiPrompt, truncate, waitForExit } from './pi-rpc-wire.ts';
 import {
   createOmpUiState,
   mapOmpRpcMessage,
@@ -463,7 +464,7 @@ export class OmpRunner implements AgentRunner {
         pendingMarkerAsk = false;
         turnTextStart = textChunks.length;
       }
-      const { message, images } = toOmpPrompt(content);
+      const { message, images } = toPiPrompt(content);
       const id = requestId ?? `cezar-prompt-${++humanSerial}`;
       if (autoEndTimer) {
         clearTimeout(autoEndTimer);
@@ -705,7 +706,7 @@ export class OmpRunner implements AgentRunner {
             turnFailed = false;
           } else if (value.type === 'message_start' && isRecord(value.message) && value.message.role === 'user') {
             // The model received this prompt now (#505).
-            const text = ompMessageText(value.message);
+            const text = piMessageText(value.message);
             const ids = submissions.consumeOldestByText(text);
             if (ids.length) opts.onAgentInputConsumed?.(ids);
             else for (const [id, held] of humanHeld) {
@@ -947,62 +948,6 @@ function refusedOmpAddDir(stderr: string, args: readonly string[]): string[] | n
   return dirs.length > 0 ? dirs : null;
 }
 
-/** Same as pi-runner.ts `toPiPrompt`. */
-function toOmpPrompt(content: ContentBlock[]): {
-  message: string;
-  images: Array<{ type: 'image'; data: string; mimeType: string }>;
-} {
-  const text: string[] = [];
-  const images: Array<{ type: 'image'; data: string; mimeType: string }> = [];
-  for (const block of content) {
-    if (block.type === 'text') text.push(block.text);
-    else images.push({ type: 'image', data: block.source.data, mimeType: block.source.media_type });
-  }
-  return { message: text.join('\n'), images };
-}
-
-/** Same as pi-runner.ts `emitImages`. */
-function emitImages(value: unknown, onEvent?: (event: AgentEvent) => void): void {
-  if (!Array.isArray(value)) return;
-  for (const part of value) {
-    if (isRecord(part) && part.type === 'image') {
-      const data = string(part.data);
-      const mediaType = string(part.mimeType);
-      if (data && mediaType) onEvent?.({ type: 'image', data, mediaType });
-    }
-  }
-}
-
-/** Same as pi-runner.ts `piMessageText`. */
-function ompMessageText(message: Record<string, unknown>): string {
-  if (typeof message.content === 'string') return message.content;
-  return Array.isArray(message.content)
-    ? message.content.flatMap(part => isRecord(part) && part.type === 'text' && typeof part.text === 'string' ? [part.text] : []).join('\n')
-    : '';
-}
-
-/** Same as pi-runner.ts `contentText`. */
-function contentText(value: unknown): string | undefined {
-  if (typeof value === 'string') return value;
-  if (!Array.isArray(value)) return undefined;
-  const text = value
-    .map((part) => (isRecord(part) && part.type === 'text' ? string(part.text) : undefined))
-    .filter((part): part is string => part !== undefined);
-  return text.length > 0 ? text.join('\n') : undefined;
-}
-
-/** OMP's failure response carries `error` as a string (rpc-mode.ts, v18.4.11). */
-function rpcError(value: Record<string, unknown>): string {
-  if (typeof value.error === 'string') return value.error;
-  const error = isRecord(value.error) ? value.error : undefined;
-  return string(error?.message) ?? string(value.message) ?? `omp RPC command ${string(value.command) ?? 'unknown'} failed`;
-}
-
-function waitForExit(child: ChildProcessWithoutNullStreams): Promise<number | null> {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve(child.exitCode);
-  return new Promise((resolve) => child.once('close', resolve));
-}
-
 function wrapSpawnError(error: NodeJS.ErrnoException, bin: string): Error {
   if (error.code === 'ENOENT') {
     return new Error(`\`${bin}\` not found on PATH: install OMP (https://omp.sh) and run \`omp login\``);
@@ -1017,14 +962,3 @@ function mockOmpPath(): string {
   return resolvePath(here, '..', '..', 'scripts', 'mock-omp-rpc.mjs');
 }
 
-function truncate(value: string, max = 200): string {
-  return value.length > max ? `${value.slice(0, max)}…` : value;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function string(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
-}
