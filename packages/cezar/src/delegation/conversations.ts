@@ -201,3 +201,13 @@ export function commitNewMessage(store: Pick<RunStore, 'commitConversation'>,
   try { store.commitConversation(rootId, conversation, delivery); return true; }
   catch (error) { if (!(error instanceof ConversationIdInUseError)) throw error; onConflict(); return false; }
 }
+
+/** The caller took part in a peer conversation with `otherId`: a peer message between them in
+ *  either ledger while it exists, or, after the peer's deletion, a peer input from it that the
+ *  caller still holds (spec 2026-10-27-task-communication-protocol § 2, records level). */
+export function takesPart(self: RunRecord, other: RunRecord | undefined, otherId: string): boolean {
+  const between = (message: ConversationMessage) => { return message.relationship === 'peer' && [message.senderRunId, message.recipientRunId].includes(otherId) && [message.senderRunId, message.recipientRunId].includes(self.id); };
+  const ledger = (run: RunRecord | undefined) => { return run?.delegation?.role === 'root' ? run.delegation.conversation?.messages ?? [] : []; };
+  return ledger(self).some(between) || ledger(other).some(between) ||
+    !!self.agentInputs?.some(input => input.conversation?.relationship === 'peer' && input.conversation.senderRunId === otherId);
+}

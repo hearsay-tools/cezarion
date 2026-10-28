@@ -210,6 +210,20 @@ describe('peer conversations', () => {
     await expect(f.service.send(f.caller, message(b.id, 'progress'))).rejects.toMatchObject({ code: 'denied_scope' });
   });
 
+  it('R15 a conversation held only in the peer\'s ledger stays readable while its history deletion is pending and after it', async () => {
+    const b = peer();
+    const sent = await f.service.send(b.caller, message(f.parent.id, 'progress', { text: 'from B only' }));
+    expect(ledger(f.parent.id)).toBeUndefined();
+    const delegation = f.store.getRun(b.id)!.delegation!;
+    if (delegation.role !== 'root') throw Error('missing root');
+    f.store.commitDelegation([{ id: b.id, delegation: { ...delegation, historyDeletion: 'pending' } }]);
+    expect((await f.service.conversation(f.caller, { recipientRunId: b.id })).messages.map(entry => entry.id)).toEqual([sent.message.id]);
+    expect(f.store.deleteRun(b.id)).toBe(true);
+    // B's ledger went with it; A's own input from B still makes A a participant.
+    expect(await f.service.conversation(f.caller, { recipientRunId: b.id })).toMatchObject({ messages: [], outcomes: [] });
+    await expect(f.service.conversation(f.caller, { recipientRunId: randomUUID() })).rejects.toMatchObject({ code: 'denied_scope' });
+  });
+
   it('R15 a sender deleted before the first inbox reserve, or between reserve and acknowledge, leaves the recipient\'s batch whole', async () => {
     const b = peer(); const c = peer();
     const fromB = await f.service.send(b.caller, message(f.parent.id, 'progress', { text: 'from B' }));

@@ -1,6 +1,6 @@
 import { discoveredRunners, missingModelChoices, type HostDiscovery } from '../discovery/catalog.ts';
 import { assertConversationCapacity, assertFamilySender, byCreatedAtAndId, commitAccepted, familyPair, inboxEntryIn, isRootTask, notDeliveredInstruction,
-  orphanedPeerMessage, peerPair, projectConversationEvents, reconcileConversationState, replyOutcomes, type InboxEntry } from './conversations.ts';
+  orphanedPeerMessage, peerPair, takesPart, projectConversationEvents, reconcileConversationState, replyOutcomes, type InboxEntry } from './conversations.ts';
 export { rootDelegation } from './conversations.ts';
 import { collectWorkerEvidence, revalidateRetainedWorkerResult, workerRevision } from './results.ts';
 import { join } from 'node:path';
@@ -468,8 +468,8 @@ export class DelegationService {
       ...(merged.length > messages.length ? { nextBefore: encodeConversationCursor(messages[0]!) } : {}),
       ...(unread ? { hint: 'This history includes unread messages. Run worker inbox to receive and mark them delivered. Inbox will show them again intentionally; after acknowledgement, Cezar will not queue them again for normal end-of-turn delivery.' } : {}) };
   }
-  /** The ledgers a history read covers: the family's one, or each live peer root's own. A peer the
-   *  caller's ledger names stays readable after its record is deleted or while its history is. */
+  /** The ledgers a history read covers: the family's one, or each peer root's own while it exists.
+   *  A peer whose history is being deleted, or is deleted, stays readable to a participant (spec § 2). */
   private historyLedgers(caller: Caller, otherId: string): { project: DelegationProject; ledgers: RunRecord[]; self: string; other: string } {
     let pair: ConversationPair | undefined;
     try { pair = this.conversationPair(caller, otherId); } catch (error) {
@@ -478,9 +478,7 @@ export class DelegationService {
     if (pair?.relationship === 'family') return { project: pair.project, ledgers: [pair.root], self: caller.runId, other: otherId };
     const { project, self } = this.peerRecords(caller);
     const other = project.store.getRun(otherId);
-    const named = self.delegation?.role === 'root' && !!self.delegation.conversation?.messages.some(message => message.relationship === 'peer' &&
-      (message.senderRunId === otherId || message.recipientRunId === otherId));
-    if (!pair && !named) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+    if (!pair && !takesPart(self, other, otherId)) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
     return { project, ledgers: [self, ...(other?.delegation?.role === 'root' ? [other] : [])], self: self.id, other: otherId };
   }
   async inbox(caller: Caller): Promise<InboxReserveResult> {
