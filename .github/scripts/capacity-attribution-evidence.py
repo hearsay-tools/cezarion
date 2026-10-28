@@ -11,7 +11,7 @@ extract = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(extract)
 
 
-def summarize(source, diagnostic_status, extraction_status):
+def summarize(source, diagnostic_status, sink_status, extraction_status):
     source.seek(0, 2)
     size = source.tell()
     source.seek(0)
@@ -43,6 +43,10 @@ def summarize(source, diagnostic_status, extraction_status):
         workload |= 'capacity workload:' in output
         result |= 'capacity result:' in output
         for item in output.splitlines():
+            if item == 'CAPACITY_ATTRIBUTION_INVALID':
+                markers += 1
+                invalid = True
+                continue
             if not item.startswith('CAPACITY_ATTRIBUTION '):
                 continue
             markers += 1
@@ -57,16 +61,16 @@ def summarize(source, diagnostic_status, extraction_status):
         boundary = 'no-capacity-record'
     elif capacity != 1 or markers > 1:
         boundary = 'multiple-reports'
-    elif markers == 0:
-        boundary = 'capacity-without-marker'
     elif invalid:
         boundary = 'invalid-report'
+    elif markers == 0:
+        boundary = 'capacity-without-marker'
     elif valid == 1:
         boundary = 'valid-report'
     else:
         boundary = 'unknown'
     child_exit = child_exits[0] if capacity == 1 and len(child_exits) == 1 and not truncated and not errors and markers <= 1 else None
-    return {'schemaVersion': 1, 'supervisorExit': diagnostic_status, 'extractorExit': extraction_status,
+    return {'schemaVersion': 1, 'supervisorExit': diagnostic_status, 'outputSinkExit': sink_status, 'extractorExit': extraction_status,
             'rawBytes': size, 'inputTruncated': truncated, 'parseErrorCount': errors,
             'productionRowRecordCount': rows, 'capacityRecordCount': capacity, 'attributionMarkerCount': markers,
             'validReportCount': valid, 'invalidMarkerSeen': invalid, 'workloadMarkerSeen': workload,
@@ -95,16 +99,16 @@ def retain(source, output):
 
 
 def main(args):
-    if len(args) != 5:
-        raise ValueError('expected input, output, metadata and two exit codes')
-    source, output, metadata, supervisor, extractor = args
-    statuses = [int(supervisor), int(extractor)]
+    if len(args) != 6:
+        raise ValueError('expected input, output, metadata and three exit codes')
+    source, output, metadata, supervisor, sink, extractor = args
+    statuses = [int(supervisor), int(sink), int(extractor)]
     if any(status < 0 or status > 255 for status in statuses):
         raise ValueError('invalid exit status')
     with open(source, 'rb') as reader:
         result = summarize(reader, *statuses)
         result['rawSnapshot'] = None
-        if statuses[1] != 0:
+        if statuses[2] != 0:
             with open(output, 'xb') as writer:
                 result['rawSnapshot'] = retain(reader, writer)
     with open(metadata, 'x', encoding='utf8') as writer:

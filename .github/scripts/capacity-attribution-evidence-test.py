@@ -1,6 +1,7 @@
 import importlib.util
 import io
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -35,7 +36,7 @@ class EvidenceTest(unittest.TestCase):
             (root / 'raw').write_bytes(b'report')
             (root / 'metadata').write_text('existing')
             with self.assertRaises(FileExistsError):
-                evidence.main([str(root / 'raw'), str(root / 'bounded'), str(root / 'metadata'), '0', '1'])
+                evidence.main([str(root / 'raw'), str(root / 'bounded'), str(root / 'metadata'), '0', '0', '1'])
 
     def test_observed_boundaries_and_all_markers(self):
         counts = {name: {field: 0 for field in evidence.extract.FIELDS} for name in evidence.extract.NAMES}
@@ -47,33 +48,56 @@ class EvidenceTest(unittest.TestCase):
             (row('capacity workload: 1\n'), 'capacity-without-marker', 0, 0),
             (row('CAPACITY_ATTRIBUTION broken\n'), 'invalid-report', 1, 0),
             (row('CAPACITY_ATTRIBUTION ' + report + '\n'), 'valid-report', 1, 1),
+            (row('CAPACITY_ATTRIBUTION_INVALID\n'), 'invalid-report', 1, 0),
+            (row('CAPACITY_ATTRIBUTION ' + report + '\nCAPACITY_ATTRIBUTION_INVALID\n'), 'multiple-reports', 2, 1),
+            (row('CAPACITY_ATTRIBUTION_INVALID\n' * 2), 'multiple-reports', 2, 0),
             (row(('CAPACITY_ATTRIBUTION ' + report + '\n') * 2), 'multiple-reports', 2, 2),
             (b'stderr startup failure\n', 'malformed-input', 0, 0)):
             with self.subTest(boundary=boundary):
-                summary = evidence.summarize(io.BytesIO(raw), 7, 1)
+                summary = evidence.summarize(io.BytesIO(raw), 7, 2, 1)
                 self.assertEqual(summary['observedBoundary'], boundary)
                 self.assertEqual(summary['attributionMarkerCount'], marker_count)
                 self.assertEqual(summary['validReportCount'], valid)
                 self.assertEqual(summary['supervisorExit'], 7)
+                self.assertEqual(summary['outputSinkExit'], 2)
+                if b'CAPACITY_ATTRIBUTION_INVALID' in raw:
+                    self.assertTrue(summary['invalidMarkerSeen'])
                 if boundary in ('multiple-reports', 'malformed-input'):
                     self.assertIsNone(summary['capacityChildExit'])
-        self.assertTrue(evidence.summarize(io.BytesIO(b'x' * (evidence.LIMIT + 1)), 1, 1)['inputTruncated'])
+        self.assertTrue(evidence.summarize(io.BytesIO(b'x' * (evidence.LIMIT + 1)), 1, 0, 1)['inputTruncated'])
 
     def test_snapshot_only_on_extraction_failure(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / 'raw').write_bytes(b'{}\n')
-            evidence.main([str(root / 'raw'), str(root / 'bounded'), str(root / 'metadata'), '7', '0'])
+            evidence.main([str(root / 'raw'), str(root / 'bounded'), str(root / 'metadata'), '7', '0', '0'])
             self.assertFalse((root / 'bounded').exists())
             self.assertIsNone(json.loads((root / 'metadata').read_text())['rawSnapshot'])
 
     def test_workflow_preserves_exit_precedence(self):
         workflow = (Path(__file__).parents[1] / 'workflows/worker-destroy-linux-namespace.yml').read_text()
         supervisor = workflow.index('if (( diagnostic_status != 0 )); then exit "$diagnostic_status"; fi')
+        sink = workflow.index('if (( sink_status != 0 )); then exit "$sink_status"; fi')
         extractor = workflow.index('if (( extraction_status != 0 )); then exit "$extraction_status"; fi')
         evidence_exit = workflow.index('exit "$evidence_status"')
-        self.assertLess(supervisor, extractor)
+        self.assertLess(supervisor, sink)
+        self.assertLess(sink, extractor)
         self.assertLess(extractor, evidence_exit)
+
+    def test_real_pipeline_status_capture(self):
+        workflow = (Path(__file__).parents[1] / 'workflows/worker-destroy-linux-namespace.yml').read_text()
+        capture = workflow.split('pipeline_status=("${PIPESTATUS[@]}")', 1)[1].split('          python3 ', 1)[0]
+        assertions = workflow.split('if (( diagnostic_status != 0 ));', 1)[1].split('          exit "$evidence_status"', 1)[0]
+        for producer, sink in ((0, 0), (7, 0), (0, 1), (7, 1)):
+            script = ('set -o pipefail\nset +e\n'
+                      'bash -c "exit $1" | bash -c "exit $2"\n'
+                      'pipeline_status=("${PIPESTATUS[@]}")\n' + capture +
+                      'printf "%s %s\\n" "$diagnostic_status" "$sink_status"\n'
+                      'extraction_status=0\nevidence_status=0\n'
+                      'if (( diagnostic_status != 0 ));' + assertions + 'exit "$evidence_status"\n')
+            result = subprocess.run(['bash', '-c', script, '--', str(producer), str(sink)], capture_output=True, text=True, check=False)
+            self.assertEqual(result.stdout.strip(), f'{producer} {sink}', result.stderr)
+            self.assertEqual(result.returncode, producer or sink, result.stderr)
 
 
 if __name__ == '__main__':

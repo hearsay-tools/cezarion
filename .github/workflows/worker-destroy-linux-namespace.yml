@@ -68,13 +68,16 @@ jobs:
           pnpm install --frozen-lockfile
           set +e
           sudo -n -- python3 .github/scripts/linux-mount-alias-probe.py --production "$(command -v node)" 2>&1 | cat > "$RUNNER_TEMP/capacity-attribution-raw.log"
-          diagnostic_status=$?
+          pipeline_status=("${PIPESTATUS[@]}")
+          diagnostic_status=${pipeline_status[0]}
+          sink_status=${pipeline_status[1]}
           python3 .github/scripts/capacity-attribution-extract.py "$RUNNER_TEMP/capacity-attribution-raw.log" "$RUNNER_TEMP/capacity-attribution.json"
           extraction_status=$?
-          python3 .github/scripts/capacity-attribution-evidence.py "$RUNNER_TEMP/capacity-attribution-raw.log" "$RUNNER_TEMP/capacity-attribution-evidence.log" "$RUNNER_TEMP/capacity-attribution-evidence.json" "$diagnostic_status" "$extraction_status"
+          python3 .github/scripts/capacity-attribution-evidence.py "$RUNNER_TEMP/capacity-attribution-raw.log" "$RUNNER_TEMP/capacity-attribution-evidence.log" "$RUNNER_TEMP/capacity-attribution-evidence.json" "$diagnostic_status" "$sink_status" "$extraction_status"
           evidence_status=$?
           set -e
           if (( diagnostic_status != 0 )); then exit "$diagnostic_status"; fi
+          if (( sink_status != 0 )); then exit "$sink_status"; fi
           if (( extraction_status != 0 )); then exit "$extraction_status"; fi
           exit "$evidence_status"
       - name: Save native evidence
