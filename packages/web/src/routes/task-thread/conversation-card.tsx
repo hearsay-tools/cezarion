@@ -1,5 +1,5 @@
 import { ChevronRightIcon } from '@/components/design-icons'
-import { useContext, useState } from 'react'
+import { useContext, useState, type ReactNode } from 'react'
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { Link } from '@/lib/project-router'
@@ -7,12 +7,13 @@ import { cn } from '@/lib/utils'
 
 import { ConversationNavigation } from './conversation-navigation'
 import {
+  conversationDeliveryExplanation,
   conversationDeliveryLabel,
   conversationDirection,
   conversationKindLabel,
   conversationStatusLabel,
   isPeerMessage,
-  taskTitleFor,
+  counterpartTitle,
   type RecipientBackendMap,
   type TaskTitleMap,
 } from './conversation-presentation'
@@ -78,16 +79,15 @@ function WorkerConversationBatchCard({
 }) {
   const direction = conversationDirection(batch.messages[0] ?? { senderRunId: batch.senderRunId }, runId)
   // `groupWorkerConversation` never mixes relationships in one batch, so the first decides.
-  const peer = batch.messages[0] !== undefined && isPeerMessage(batch.messages[0])
+  const peer = isPeerMessage(batch.messages[0])
   const surface = CONVERSATION_SURFACE[peer ? 'peer' : direction]
   const counterpartIds = uniqueIds(
     batch.messages.map((message) => (direction === 'outbound' ? message.recipientRunId : message.senderRunId)),
   )
   const headingPrefix = direction === 'outbound' ? 'SENT to' : 'RECEIVED from'
-  const heading = `${headingPrefix} ${counterpartIds.map((id) => peer ? taskTitles?.[id] ?? 'peer task' : taskTitleFor(id, taskTitles)).join(', ')}`
+  const heading = `${headingPrefix} ${counterpartIds.map((id) => counterpartTitle(id, peer, taskTitles)).join(', ')}`
   const soleMessage = batch.messages[0]
   const sentAt = soleMessage?.createdAt ?? soleMessage?.recordedAt
-  const soleStatus = soleMessage ? conversationStatusLabel(soleMessage) : undefined
   return (
     <article
       data-slot="worker-conversation-card"
@@ -117,66 +117,71 @@ function WorkerConversationBatchCard({
           <span data-slot="conversation-kind" className="rounded-full bg-background/60 px-2 py-0.5 text-[11px] font-semibold tracking-[0.05em] text-foreground uppercase">
             {conversationKindLabel(batch.kind)}
           </span>
-          {batch.messages.length === 1 && soleStatus ? (
-            <span data-slot="conversation-outcome" className="text-xs font-medium text-muted-foreground">
-              {soleStatus}
-            </span>
-          ) : null}
-          {batch.messages.length === 1 && soleMessage && (batch.kind === 'request' || batch.kind === 'reply') && conversationDeliveryLabel(soleMessage.delivery) !== soleStatus ? (
-            <span data-slot="conversation-delivery" className="text-xs text-muted-foreground">
-              {conversationDeliveryLabel(soleMessage.delivery)}
-            </span>
-          ) : null}
+          {batch.messages.length === 1 && soleMessage ? <SoleMessageStatus message={soleMessage} /> : null}
         </div>
-        {sentAt !== undefined && clockLabel(sentAt) !== undefined ? (
-          <span className="flex shrink-0 items-center justify-self-end gap-1 whitespace-nowrap text-[11px] text-soft-foreground">
-            {batch.messages.length > 1 ? 'First sent' : null}
-            <MessageTime ts={sentAt} />
-          </span>
-        ) : null}
+        <SentTime at={sentAt} className="flex shrink-0 items-center justify-self-end gap-1 whitespace-nowrap text-[11px] text-soft-foreground">
+          {batch.messages.length > 1 ? 'First sent' : null}
+        </SentTime>
       </div>
       <ConversationBody key={`${runId}:${soleMessage?.messageId ?? batch.id}`} batch={batch} />
-      {[...new Set(batch.messages.map(message =>
-        message.instruction ?? (message.delivery === 'queued'
-          ? `${recipientBackends?.[message.recipientRunId] === 'cursor'
-            ? 'Queued for delivery. If Cursor is in a turn, delivery waits for that turn to end.'
-            : recipientBackends?.[message.recipientRunId]
-              ? 'Queued for delivery. This agent can receive messages during its current turn.'
-              : 'Queued for delivery. Timing depends on the recipient agent.'} Pending messages are batched within the size limit; human questions and scheduler capacity can delay delivery.`
-          : message.state === 'continuation-required' && isPeerMessage(message)
-            ? 'Not delivered. The recipient is not running. Only its human can continue it.'
-          : message.state === 'continuation-required'
-            ? 'Not delivered. The recipient needs a new instruction to resume. A parent can resume its owned worker with `cez worker resume`; workers cannot resume parents.'
-            : message.state === 'destroyed' ? 'Not delivered. This worker was destroyed.' : undefined)
-      ))].map(explanation => explanation ? <p key={explanation} data-slot="conversation-delivery-explanation" className="min-w-0 text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">{explanation}</p> : null)}
+      {[...new Set(batch.messages.map(message => conversationDeliveryExplanation(message, recipientBackends?.[message.recipientRunId])))].map(explanation => explanation ? <p key={explanation} data-slot="conversation-delivery-explanation" className="min-w-0 text-xs leading-relaxed text-muted-foreground [overflow-wrap:anywhere]">{explanation}</p> : null)}
       {batch.kind === 'request' && batch.messages.length > 1 ? (
-        <ul className="grid min-w-0 gap-1 text-xs text-muted-foreground">
-          {batch.messages.map((message) => {
-            const status = conversationStatusLabel(message)
-            const sentAt = message.createdAt ?? message.recordedAt
-            return (
-              <li key={message.id} className="flex min-h-11 min-w-0 flex-wrap items-center gap-2">
-                <Counterpart id={message.recipientRunId} peer={peer} taskTitles={taskTitles}>
-                  {view => <CounterpartLink view={view} to={`/tasks/${message.recipientRunId}`} label={`${view.title}${status ? ` — ${status}` : ''}`} />}
-                </Counterpart>
-                {status ? <span data-slot="conversation-outcome">{status}</span> : null}
-                {conversationDeliveryLabel(message.delivery) !== status ? (
-                  <span data-slot="conversation-delivery">{conversationDeliveryLabel(message.delivery)}</span>
-                ) : null}
-                <ConversationReference message={message} runId={runId} taskTitles={taskTitles} />
-                {sentAt !== undefined && clockLabel(sentAt) !== undefined ? (
-                  <span className="ml-auto whitespace-nowrap"><MessageTime ts={sentAt} /></span>
-                ) : null}
-              </li>
-            )
-          })}
-        </ul>
+        <BatchRecipients messages={batch.messages} peer={peer} runId={runId} taskTitles={taskTitles} />
       ) : null}
       {batch.messages.length === 1 && soleMessage ? (
         <ConversationReference message={soleMessage} runId={runId} taskTitles={taskTitles} />
       ) : null}
       <ConversationInspectDetails batch={batch} heading={heading} />
     </article>
+  )
+}
+
+/** The send time, when the message carries one the clock can show. */
+function SentTime({ at, className, children }: { at: string | undefined; className: string; children?: ReactNode }) {
+  if (at === undefined || clockLabel(at) === undefined) return null
+  return <span className={className}>{children}<MessageTime ts={at} /></span>
+}
+
+/** The outcome and delivery chips of a card that holds one message. A batch lists them per recipient. */
+function SoleMessageStatus({ message }: { message: ThreadConversationMessage }) {
+  const status = conversationStatusLabel(message)
+  const delivery = conversationDeliveryLabel(message.delivery)
+  const showsDelivery = (message.messageKind === 'request' || message.messageKind === 'reply') && delivery !== status
+  return (
+    <>
+      {status ? <span data-slot="conversation-outcome" className="text-xs font-medium text-muted-foreground">{status}</span> : null}
+      {showsDelivery ? <span data-slot="conversation-delivery" className="text-xs text-muted-foreground">{delivery}</span> : null}
+    </>
+  )
+}
+
+/** The recipients of one request sent to several tasks, each with its own outcome and delivery. */
+function BatchRecipients({ messages, peer, runId, taskTitles }: {
+  messages: readonly ThreadConversationMessage[]
+  peer: boolean
+  runId: string
+  taskTitles?: TaskTitleMap | undefined
+}) {
+  return (
+    <ul className="grid min-w-0 gap-1 text-xs text-muted-foreground">
+      {messages.map((message) => {
+        const status = conversationStatusLabel(message)
+        const sentAt = message.createdAt ?? message.recordedAt
+        return (
+          <li key={message.id} className="flex min-h-11 min-w-0 flex-wrap items-center gap-2">
+            <Counterpart id={message.recipientRunId} peer={peer} taskTitles={taskTitles}>
+              {view => <CounterpartLink view={view} to={`/tasks/${message.recipientRunId}`} label={`${view.title}${status ? ` — ${status}` : ''}`} />}
+            </Counterpart>
+            {status ? <span data-slot="conversation-outcome">{status}</span> : null}
+            {conversationDeliveryLabel(message.delivery) !== status ? (
+              <span data-slot="conversation-delivery">{conversationDeliveryLabel(message.delivery)}</span>
+            ) : null}
+            <ConversationReference message={message} runId={runId} taskTitles={taskTitles} />
+            <SentTime at={sentAt} className="ml-auto whitespace-nowrap" />
+          </li>
+        )
+      })}
+    </ul>
   )
 }
 

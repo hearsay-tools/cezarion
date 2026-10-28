@@ -29,6 +29,11 @@ export function taskTitleFor(runId: string, titles: TaskTitleMap | undefined): s
   return titles?.[runId] ?? 'Task'
 }
 
+/** The title text a card can know without a server read: a peer the run list lacks stays unnamed. */
+export function counterpartTitle(runId: string, peer: boolean, titles: TaskTitleMap | undefined): string {
+  return peer ? titles?.[runId] ?? 'peer task' : taskTitleFor(runId, titles)
+}
+
 export function conversationDirection(
   message: Pick<ThreadConversationMessage, 'senderRunId'>,
   viewerRunId: string,
@@ -37,8 +42,8 @@ export function conversationDirection(
 }
 
 /** A message between two root tasks of one project. An absent field reads as `family`. */
-export function isPeerMessage(message: Pick<ThreadConversationMessage, 'relationship'>): boolean {
-  return message.relationship === 'peer'
+export function isPeerMessage(message: Pick<ThreadConversationMessage, 'relationship'> | undefined): boolean {
+  return message?.relationship === 'peer'
 }
 
 export function conversationKindLabel(kind: ThreadConversationMessage['messageKind']): string {
@@ -111,4 +116,28 @@ export function conversationDeliveryLabel(delivery: ThreadConversationMessage['d
     default:
       return delivery
   }
+}
+
+/** Why a message is waiting or was not delivered, and what comes next. The server's own
+ *  `instruction` wins. Otherwise the text follows the message's state and, for a queued one, the
+ *  recipient's backend, since it decides whether delivery waits for a turn to end. */
+export function conversationDeliveryExplanation(
+  message: Pick<ThreadConversationMessage, 'instruction' | 'delivery' | 'state' | 'relationship'>,
+  recipientBackend: Runner | undefined,
+): string | undefined {
+  if (message.instruction !== undefined) return message.instruction
+  if (message.delivery === 'queued') {
+    const timing = recipientBackend === 'cursor'
+      ? 'Queued for delivery. If Cursor is in a turn, delivery waits for that turn to end.'
+      : recipientBackend
+        ? 'Queued for delivery. This agent can receive messages during its current turn.'
+        : 'Queued for delivery. Timing depends on the recipient agent.'
+    return `${timing} Pending messages are batched within the size limit; human questions and scheduler capacity can delay delivery.`
+  }
+  if (message.state === 'continuation-required') {
+    return isPeerMessage(message)
+      ? 'Not delivered. The recipient is not running. Only its human can continue it.'
+      : 'Not delivered. The recipient needs a new instruction to resume. A parent can resume its owned worker with `cez worker resume`; workers cannot resume parents.'
+  }
+  return message.state === 'destroyed' ? 'Not delivered. This worker was destroyed.' : undefined
 }
