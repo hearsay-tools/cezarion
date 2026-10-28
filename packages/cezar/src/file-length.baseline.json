@@ -19,7 +19,6 @@
     "packages/web/src/components/composer/composer.tsx": 1095,
     "packages/web/src/routes/github/github.tsx": 1244,
     "packages/web/src/routes/global-tasks.tsx": 1139,
-    "packages/web/src/routes/task-thread/thread-items.tsx": 1248,
     "packages/web/src/routes/tasks-overview.tsx": 1651,
     "packages/web/src/routes/workflows/workflows.tsx": 1175
   }

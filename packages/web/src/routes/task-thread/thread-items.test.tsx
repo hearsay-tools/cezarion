@@ -32,8 +32,8 @@ import {
   ToolCard,
   ToolStreak,
   UserBubble,
-  WorkerConversationGroup,
 } from './thread-items'
+import { WorkerConversationGroup } from './conversation-card'
 import { reduceThread } from './thread-state'
 import { SessionTranscript } from './session-transcript'
 
@@ -957,6 +957,54 @@ describe('message color tokens', () => {
       expect(sendG).toBeGreaterThan(sendR)
       expect(receiveB).toBeGreaterThan(receiveR)
       expect(receiveR).toBeGreaterThan(receiveG)
+    }
+  })
+})
+
+describe('peer message color tokens (hearsay-tools/cezarion#1992)', () => {
+  const css = readFileSync(
+    path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../styles/index.css'),
+    'utf8',
+  )
+  const rootBlock = css.slice(css.indexOf(':root {'), css.indexOf('.light {'))
+  const lightBlock = css.slice(css.indexOf('.light {'), css.indexOf('@theme'))
+  const value = (block: string, token: string) => block.match(new RegExp(`--${token}: ([^;]+);`))![1]!
+  const luminance = (hex: string) => {
+    const [r, g, b] = [1, 3, 5].map(at => Number.parseInt(hex.slice(at, at + 2), 16) / 255)
+      .map(c => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4))
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!
+  }
+  const ratio = (a: string, b: string) => {
+    const [hi, lo] = [luminance(paletteHex(a)), luminance(paletteHex(b))].sort((x, y) => y - x)
+    return (hi! + 0.05) / (lo! + 0.05)
+  }
+
+  it('defines the peer tokens for light and dark, and maps them to Tailwind colors', () => {
+    for (const token of ['message-peer-bg', 'message-peer-border', 'message-peer-accent']) {
+      expect(rootBlock).toContain(`--${token}:`)
+      expect(lightBlock).toContain(`--${token}:`)
+      expect(css).toContain(`--color-${token}: var(--${token})`)
+    }
+    expect(rootBlock).toContain('--message-peer-bg: var(--surface-raised)')
+  })
+
+  it('keeps AA contrast for the label and body text on the peer surface in both themes', () => {
+    // Dark: the accent label sits on the raised surface. Light: on the tinted card.
+    expect(ratio(value(rootBlock, 'message-peer-accent'), value(rootBlock, 'surface-raised'))).toBeGreaterThanOrEqual(4.5)
+    expect(ratio(value(lightBlock, 'message-peer-accent'), value(lightBlock, 'message-peer-bg'))).toBeGreaterThanOrEqual(4.5)
+    expect(ratio(value(lightBlock, 'text-primary'), value(lightBlock, 'message-peer-bg'))).toBeGreaterThanOrEqual(4.5)
+    expect(ratio(value(lightBlock, 'text-muted'), value(lightBlock, 'message-peer-bg'))).toBeGreaterThanOrEqual(4.5)
+  })
+
+  it('keeps the peer hue clear of the worker, human and agent accents, beside its label', () => {
+    const hue = (block: string, role: string) => Number(value(block, `message-${role}-accent`).match(/oklch\([\d.]+ [\d.]+ ([\d.]+)\)/)![1])
+    for (const block of [rootBlock, lightBlock]) {
+      const peer = hue(block, 'peer')
+      for (const other of ['user', 'agent', 'outbound', 'inbound']) {
+        if (!/oklch\(/.test(value(block, `message-${other}-accent`))) continue
+        const apart = Math.abs(peer - hue(block, other))
+        expect(Math.min(apart, 360 - apart)).toBeGreaterThanOrEqual(30)
+      }
     }
   })
 })
