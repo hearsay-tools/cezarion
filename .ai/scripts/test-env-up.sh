@@ -33,6 +33,9 @@
 #   2026-10-25 record the app's start identity (app.start) and stop its whole process group
 #             through test-env-lease.mjs stop-app, which never signals a reused pid
 #             (hearsay-tools/cezarion#1717).
+#   2026-10-27 boot from the tracked .ai/scripts/test-env.inputs.json (hearsay-tools/cezarion#1977):
+#             its default server env and pinned agent-browser release, with its digest in the
+#             descriptor as a reuse key. The descriptor is runtime state Squeal ignores.
 set -eu
 
 # ---- project-specific parameters -------------------------------------------
@@ -88,6 +91,10 @@ if ! node -e 'const s=process.argv[1]; process.exit(s === "" || (/^\d+(\.\d+)?$/
 fi
 TEST_ENV_CACHE_TTL_SECONDS=${TEST_ENV_CACHE_TTL_SECONDS:-600}
 
+# The settings that can change a test result, read before anything boots (test-env-inputs.mjs).
+INPUTS_SCRIPT="$SCRIPT_DIR/test-env-inputs.mjs"
+INPUTS=$(node "$INPUTS_SCRIPT" describe "$REPO_ROOT") || exit 2
+
 # The preparation chain: install workspace links/dependencies, then build-e2e.sh — server
 # `tsc` → .ai/qa/build/cezar/dist/ and `vite build` → .ai/qa/build/cezar/web/dist/, in a
 # mirror of the server package that links back to its scripts and node_modules. All are
@@ -129,6 +136,10 @@ FORCE_REBUILD=0
 # The explicit opt-ins, sorted and space-joined: what the server boots with on top of the two
 # pins above, and the reuse key (a running env booted with other flags is not this env).
 SERVER_ENV=
+# The inputs' default server env is given first, as if passed with --server-env.
+set -f
+set -- $(printf '%s' "$INPUTS" | node -e 'for (const a of JSON.parse(require("fs").readFileSync(0, "utf8")).serverEnv) console.log("--server-env=" + a)') "$@"
+set +f
 for arg in "$@"; do
   case "$arg" in
     --force) FORCE=1 ;;
@@ -210,6 +221,9 @@ json_get() { node -e '
   } catch { /* absent or corrupt descriptor → empty, caller treats as stale */ }
 ' "$1" "$2" 2>/dev/null; }
 
+INPUTS_SHA=$(printf '%s' "$INPUTS" | json_get - sha256)
+BROWSER_PIN=$(printf '%s' "$INPUTS" | json_get - agentBrowserVersion)
+
 # ---- 2. lock — one bootstrap at a time --------------------------------------
 # The outer test-env lease protects the full invocation. This inner lock serializes
 # nested bootstraps belonging to the SAME invocation. Released after bootstrap:
@@ -270,6 +284,7 @@ try_reuse() {
   pid=$(json_get "$ENV_DESCRIPTOR" app.pid)
   url=$(json_get "$ENV_DESCRIPTOR" baseUrl)
   started=$(json_get "$ENV_DESCRIPTOR" startedAt)
+  [ "$(json_get "$ENV_DESCRIPTOR" inputs.sha256)" = "$INPUTS_SHA" ] || { log "not reusing: the env was booted from other settings than .ai/scripts/test-env.inputs.json"; return 1; }
   [ "$(json_get "$ENV_DESCRIPTOR" environment.serverEnv)" = "$SERVER_ENV_KEY" ] || { log "not reusing: the requested --server-env set changed (now: $SERVER_ENV_KEY)"; return 1; }
   [ "$(json_get "$ENV_DESCRIPTOR" environment.serverUserProfile)" = .ai/qa/server-home ] || { log "not reusing: Windows server home isolation changed"; return 1; }
   [ "$(json_get "$ENV_DESCRIPTOR" environment.serverHome)" = .ai/qa/server-home ] || { log "not reusing: server HOME isolation changed"; return 1; }
@@ -322,8 +337,14 @@ try_reuse() {
     }
   fi
 
-  BASE_URL=$url
   BROWSER_INSTALLED=$(json_get "$ENV_DESCRIPTOR" browser.installed)
+  if [ "$BROWSER_INSTALLED" = true ]; then
+    # The recorded executable can be replaced after boot: only the pinned release is reused.
+    recorded=$(json_get "$ENV_DESCRIPTOR" browser.command)
+    found=$( [ -x "$recorded" ] && browser_version "$recorded" || true)
+    [ "$found" = "$BROWSER_PIN" ] || { log "not reusing: agent-browser at $recorded is ${found:-missing or of no known version}, not the pinned $BROWSER_PIN"; return 1; }
+  fi
+  BASE_URL=$url
   [ "$BROWSER_INSTALLED" = true ] && BROWSER_INSTALLED=1 || BROWSER_INSTALLED=0
   return 0
 }
@@ -486,13 +507,23 @@ probe_browser() {
   printf '%s' "$out" | browser_json_success
 }
 
+browser_version() { "$1" --version 2>/dev/null | node "$INPUTS_SCRIPT" version-of; }
+
 ensure_browser() {
   resolve_browser_launch
+  # Only the pinned release runs the specs: one on PATH is used when it is that release.
   if command -v agent-browser >/dev/null 2>&1; then
-    BROWSER_COMMAND=$(command -v agent-browser)
-  else
+    on_path=$(command -v agent-browser)
+    found=$(browser_version "$on_path")
+    if [ "$found" = "$BROWSER_PIN" ]; then
+      BROWSER_COMMAND=$on_path
+    else
+      log "agent-browser on PATH is ${found:-of no known version}, not the pinned $BROWSER_PIN; using the pinned release"
+    fi
+  fi
+  if [ -z "$BROWSER_COMMAND" ]; then
     CACHE_ROOT=${XDG_CACHE_HOME:-"$HOME/.cache"}
-    TOOL_DIR="$CACHE_ROOT/agent-tools/agent-browser"
+    TOOL_DIR="$CACHE_ROOT/agent-tools/agent-browser/$BROWSER_PIN"
     mkdir -p "$TOOL_DIR"
     OS=$(uname -s 2>/dev/null || echo unknown)
     ARCH=$(uname -m 2>/dev/null || echo unknown)
@@ -515,7 +546,7 @@ ensure_browser() {
     esac
     BROWSER_COMMAND="$TOOL_DIR/$ASSET"
     if [ ! -x "$BROWSER_COMMAND" ]; then
-      URL="https://github.com/vercel-labs/agent-browser/releases/latest/download/$ASSET"
+      URL="https://github.com/vercel-labs/agent-browser/releases/download/v$BROWSER_PIN/$ASSET"
       TMP="$BROWSER_COMMAND.tmp.$$"
       log "installing agent-browser ($ASSET)"
       if command -v curl >/dev/null 2>&1; then
@@ -529,6 +560,12 @@ ensure_browser() {
       chmod 755 "$TMP"
       mv "$TMP" "$BROWSER_COMMAND"
     fi
+  fi
+  found=$(browser_version "$BROWSER_COMMAND")
+  if [ "$found" != "$BROWSER_PIN" ]; then
+    BROWSER_NOTES="agent-browser at $BROWSER_COMMAND is ${found:-of no known version}, not the pinned $BROWSER_PIN (.ai/scripts/test-env.inputs.json)"
+    persist_browser_launch
+    return 0
   fi
 
   "$BROWSER_COMMAND" install >/dev/null 2>&1 || true
@@ -642,7 +679,7 @@ write_descriptor() {
   [ "${CEZ_SINGLE_PROJECT:-}" = 1 ] && SINGLE_PROJECT=true
   node -e '
     const fs = require("fs");
-    const [out, baseUrl, port, pid, start, cmd, bInstalled, bCmd, bVer, bNotes, desc, singleProject, platform, launchPath, servedRoot, serverEnv, watch] = process.argv.slice(1);
+    const [out, baseUrl, port, pid, start, cmd, bInstalled, bCmd, bVer, bNotes, desc, singleProject, platform, launchPath, servedRoot, serverEnv, watch, inputsSha] = process.argv.slice(1);
     let launch = {};
     try { launch = JSON.parse(fs.readFileSync(launchPath, "utf8")); } catch { /* resolver absent */ }
     const browser = {
@@ -670,6 +707,7 @@ write_descriptor() {
       services: [],
       credentials: [],
       environment: { singleProject: singleProject === "true", serverEnv, watch, serverHome: ".ai/qa/server-home", serverUserProfile: ".ai/qa/server-home" },
+      inputs: { file: ".ai/scripts/test-env.inputs.json", sha256: inputsSha },
       browser,
       testRunner: { name: "other", config: "packages/web/e2e/vitest.config.ts" },
       platform,
@@ -680,7 +718,7 @@ write_descriptor() {
     "${SERVER_ENV:+$SERVER_ENV }CEZ_DRY_RUN=1 CEZ_HOME=.ai/qa/cez-home HOME=.ai/qa/server-home USERPROFILE=.ai/qa/server-home node $E2E_BUILD_ROOT/dist/index.js --port $PORT --no-open --repo $SERVED_ROOT" \
     "$BROWSER_INSTALLED" "$BROWSER_COMMAND" "$BROWSER_VERSION" "$BROWSER_NOTES" "$BROWSER_DESCRIPTOR" \
     "$SINGLE_PROJECT" "$(uname -s 2>/dev/null | grep -qi Linux && { grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null && echo wsl2 || echo linux; } || echo darwin)" \
-    "$BROWSER_LAUNCH_JSON" "$SERVED_ROOT" "$SERVER_ENV_KEY" "$WATCH_KEY"
+    "$BROWSER_LAUNCH_JSON" "$SERVED_ROOT" "$SERVER_ENV_KEY" "$WATCH_KEY" "$INPUTS_SHA"
 }
 
 # ---- main -------------------------------------------------------------------

@@ -13,7 +13,7 @@
     "packages/cezar/src/server/server.ts": 5890,
     "packages/cezar/src/workflows/run.ts": 10660,
     "packages/contract/src/runs.ts": 1014,
-    "packages/web/e2e/agent-browser.ts": 1288,
+    "packages/web/e2e/agent-browser.ts": 1282,
     "packages/web/src/api/client.ts": 2366,
     "packages/web/src/api/queries.ts": 2470,
     "packages/web/src/components/composer/composer.tsx": 1095,
