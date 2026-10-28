@@ -3991,7 +3991,7 @@ export class RunManager {
     const settled = this.store.getRun(runId);
     if (settled?.delegation) {
       for (const id of settledRunFamilies(this.store, settled)) this.reconcileWorkerWaits(id);
-      // Then every other family still in memory (#779).
+      // Then every other family still in memory (hearsay-tools/cezarion#779).
       this.reconcileWorkerWaits();
     }
     this.releaseSlot();
