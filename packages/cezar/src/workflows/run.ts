@@ -176,9 +176,7 @@ import {
   type WorkflowDef,
   type WorkflowStepDef,
 } from './types.ts';
-
 const CHECK_OUTPUT_CAP = 20_000;
-
 async function configuredModelProvider(
   backend: RunnerId,
   repoRoot: string,
@@ -200,9 +198,7 @@ function isSyntheticContinuation(run: RunRecord, step: StepState): boolean {
 }
 /** Periodic "cezar autosave" commit in the task worktree (spec 006). */
 export const AUTOSAVE_INTERVAL_MS = 90_000;
-
 export { CHECK_KILL_GRACE_MS, CHECK_TERMINATION_CONFIRM_MS } from './grouped-command.ts';
-
 /**
  * Periodic saves are opt-in. Turn-end, finalization and pre-PR flushes remain enabled; only
  * pre-PR follows a repointed HEAD. Coalesce timer-save evidence in the handoff.
@@ -210,7 +206,6 @@ export { CHECK_KILL_GRACE_MS, CHECK_TERMINATION_CONFIRM_MS } from './grouped-com
 export function periodicAutosaveEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.CEZ_AUTOSAVE === '1';
 }
-
 /** The handoff block's autosave record and cockpit note for a save that committed or left work
  *  behind (hearsay-tools/cezarion#1004): a resumed session reads this, not `git log`. */
 function autosaveReportLine(reason: AutosaveReason, outcome: AutosaveOutcome, taskBranch: string | undefined): string {
@@ -223,7 +218,6 @@ function autosaveReportLine(reason: AutosaveReason, outcome: AutosaveOutcome, ta
   return `${reason}: ${outcome.changedPaths} changed path(s) left uncommitted on ${where}; ` +
     `cezar does not autosave on a branch other than the task branch ${taskBranch ?? '(unrecorded)'}`;
 }
-
 /**
  * Explicitly opt out of the repository-root lease for runs that execute in the
  * current checkout. This covers explicit worktree opt-out, non-Git degradation,
@@ -234,10 +228,8 @@ function autosaveReportLine(reason: AutosaveReason, outcome: AutosaveOutcome, ta
 export function repositoryRootLockDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.CEZ_DISABLE_REPO_LOCK === '1';
 }
-
 const REPOSITORY_ROOT_LOCK_DISABLED_NOTE =
   'repository-root lock disabled by CEZ_DISABLE_REPO_LOCK=1 (shared checkout is unsafe)';
-
 
 /** What a turn end said, as the entry that settles it reads it (hearsay-tools/cezarion#1525). The
  *  turn end reads it from the turn; a later entry from what `parkAfterAck` kept (`boundaryTurn`). */

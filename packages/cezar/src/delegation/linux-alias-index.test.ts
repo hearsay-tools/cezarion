@@ -173,7 +173,7 @@ it('filters only proven first-component misses and preserves root fallback', () 
   const mounts = [{ dev: '8:1', root: '/fs', point: '/alias' }, { dev: '8:1', root: '/fs', point: '/' }];
   for (const selected of [mounts.slice(0, 1), mounts]) {
     const index = indexAliasMounts(selected, new AliasWorkBudget(), '/', roots);
-    for (const path of ['/', '/alias', '/alias/file', '/alias-other/file', '/other/file', '/long' + 'x'.repeat(300)]) {
+    for (const path of ['/', '/alias', '/alias/file', '/alias-other/file', '/other/file', '/é\nlong', '/long' + 'x'.repeat(300)]) {
       for (const device of ['08:01', '08:02']) {
         const old: string[] = [], next: string[] = [];
         expect(aliasCandidates(path, '/', device, selected, roots, new AliasWorkBudget(), index, () => next.push('candidate')))
@@ -186,6 +186,19 @@ it('filters only proven first-component misses and preserves root fallback', () 
   expect(() => aliasCandidates('/bad/../path', '/', '08:01', mounts, roots, new AliasWorkBudget(), index)).toThrow();
   expect(() => aliasCandidates('/unrelated', '/', 'bad-device', mounts, roots, new AliasWorkBudget(), index)).toThrow();
   expect(() => indexAliasMounts(mounts, new AliasWorkBudget(), '/', undefined as never)).toThrow('owned roots required');
+});
+
+it('refuses exhausted filter extraction, bucket access, and index insertion', () => {
+  const roots = [{ path: '/owned', dev: '8:1', fsPath: '/fs' }];
+  const mounts = [{ dev: '8:1', root: '/fs', point: '/alias' }];
+  class Meter extends AliasWorkBudget { used = 0; override spend(n = 1) { this.used += n; super.spend(n); } }
+  const building = new Meter();
+  const index = indexAliasMounts(mounts, building, '/', roots);
+  expect(() => indexAliasMounts(mounts, new AliasWorkBudget(building.used - 1), '/', roots)).toThrow('work exceeds');
+  const reading = new Meter();
+  expect(aliasCandidates('/unrelated', '/', '08:01', mounts, roots, reading, index)).toEqual([]);
+  expect(() => aliasCandidates('/unrelated', '/', '08:01', mounts, roots, new AliasWorkBudget(0), index)).toThrow('work exceeds');
+  expect(() => aliasCandidates('/unrelated', '/', '08:01', mounts, roots, new AliasWorkBudget(reading.used - 1), index)).toThrow('work exceeds');
 });
 
 it('still visits a later interpretation after a first-component miss', () => {
