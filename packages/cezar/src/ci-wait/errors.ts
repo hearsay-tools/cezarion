@@ -128,7 +128,7 @@ export function askInvalidInput(error?: z.ZodError): string {
 
 // hearsay-tools/cezarion#1234: `cezar_done` refusals that name no worker. The worker refusals list
 // their workers and the commands that clear them, so the run manager writes those.
-const doneMessages: Record<Exclude<DoneErrorCode, 'workers_outstanding' | 'workers_uncollected' | 'worker_questions'>, string> = {
+const doneMessages: Record<Exclude<DoneErrorCode, 'workers_outstanding' | 'workers_uncollected' | 'worker_questions' | 'requests_outstanding' | 'requests_unanswered'>, string> = {
   human_question_pending: 'Your question to the user is still unanswered. End your turn to wait for the answer; call cezar_done after it if the task is then complete.',
   worker_wait_pending: 'A worker wait is still pending, including any result awaiting delivery. End your turn to receive its result, then call cezar_done again.',
   // Never returned since hearsay-tools/cezarion#1620: every agent step accepts cezar_done.
