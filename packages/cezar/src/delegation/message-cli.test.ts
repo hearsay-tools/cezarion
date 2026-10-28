@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runSubcommand } from '../subcommands.ts';
@@ -72,14 +73,14 @@ describe('task message command family', () => {
   it('pages peer discovery, hides caller, workers and archives, and reports shared attention', async () => {
     const workers = await f.service.spawn(f.caller, { task: 'worker', baseline: 'parent-head', requestId: randomUUID() });
     const archived = peer(); f.store.updateRun(archived.id, { archived: true });
-    const review = peer(); f.store.updateRun(review.id, { status: 'review' });
+    const review = peer(); f.store.updateRun(review.id, { status: RUN_STATUS.review });
     for (let index = 0; index < 32; index++) peer();
     expect(await message(['tasks'])).toBe(0);
     expect(json().tasks).toHaveLength(32); expect(json().nextOffset).toBe(32);
     expect(json().tasks.map((task: { id: string }) => task.id)).not.toContain(f.parent.id);
     expect(json().tasks.map((task: { id: string }) => task.id)).not.toContain(workers.workerId);
     expect(await message(['tasks', '--offset', '32'])).toBe(0);
-    expect(json().tasks).toEqual([expect.objectContaining({ id: review.id, status: 'review', attention: 'waiting', attentionLabel: 'needs review', accepts: false, reason: 'review: only its human can continue it' })]);
+    expect(json().tasks).toEqual([expect.objectContaining({ id: review.id, status: RUN_STATUS.review, attention: 'waiting', attentionLabel: 'needs review', accepts: false, reason: 'review: only its human can continue it' })]);
     expect(await message(['tasks', '--all', '--offset', '32'])).toBe(0);
     expect(json().tasks.map((task: { id: string }) => task.id)).toContain(archived.id);
     expect(await message(['tasks', '--offset', '-1'])).toBe(1);
