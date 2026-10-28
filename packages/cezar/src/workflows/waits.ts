@@ -1,4 +1,4 @@
-import type { AgentInput, CezarWaitRequestInput, CiWait, OpenWait, PrWaitEntry, ProcessWaitEntry, RunRecord, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
+import type { AgentInput, CezarWaitRequestInput, CiWait, OpenWait, PeerWaitEntry, PrWaitEntry, ProcessWaitEntry, RunRecord, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 
 /**
  * Pure wait-list readers and agent-facing text. RunManager owns registration, resolution and
@@ -15,6 +15,30 @@ export const MONITORING_WAKE_NUDGE_MARKERS =
   'Re-check the downstream work you were monitoring. Continue toward the task goal. When the watched work is finished and the task goal is complete, end your final message with CEZ:DONE. If the watched work is still pending, end with CEZ:MONITORING. Never yield markerless for a monitoring wrap-up. If you genuinely need user input, follow the normal question path instead.';
 
 const SUMMARY_MAX = 256;
+
+/** `cezar_cancel_wait` answers that cancel nothing (hearsay-tools/cezarion#1233). */
+export const CANCEL_MESSAGES = {
+  not_found: 'No open wait has this wait_id. open_waits lists the waits still open.',
+  already_resolved: 'This wait already resolved; its result arrives with your next wake. Cancelling it changed nothing.',
+  human_question: 'The user already sees this question, so only their answer closes it. End your turn to wait for the answer.',
+} as const;
+
+/** A run that failed while it still owed wait results keeps them, and its open waits, until a human
+ *  acts: Continue delivers them, Stop discards them (hearsay-tools/cezarion#1233). */
+export const holdsOwedResults = (run: RunRecord): boolean => run.status === 'failed' && resolvedWaits(run).length > 0;
+
+/** The inputs a listed wait, or a delivered one, names: that wait's own, never a wake of their own
+ *  (hearsay-tools/cezarion#1301). */
+export function waitNamedInputIds(run: RunRecord): Set<string> {
+  return new Set([...run.waits ?? [], ...(run.lastWaits ?? []).filter(wait => wait.phase === 'delivered')].flatMap(wait => [wait.id, waitInputId(wait)]));
+}
+
+/** The kind a `cezar_wait` answer names: the kind the call asked for. A request wait is stored as a
+ *  `worker` entry with `requestIds` (hearsay-tools/cezarion#1995). */
+export function waitAnswerKind(wait: Wait): Exclude<Wait['kind'], 'human'> | 'request' {
+  if (wait.kind === 'human') throw new Error('a human wait is not a cezar_wait answer');
+  return wait.kind === 'worker' && wait.requestIds ? 'request' : wait.kind;
+}
 
 /** Waits still waiting for their event, in list order. */
 export function openWaits(run: Pick<RunRecord, 'waits'>): Wait[] {
@@ -35,10 +59,11 @@ export function isMonitoringTimer(wait: Wait): boolean {
 
 /**
  * Timer and process waits count against the automatic-wake budget, including a process used as a
- * delayed timer.
+ * delayed timer. So does a peer wait: two root tasks have no parent to stop a loop between them
+ * (spec 2026-10-27-task-communication-protocol § 8, hearsay-tools/cezarion#1995).
  */
 export function chargesBudget(wait: Wait): boolean {
-  return wait.kind === 'timer' || wait.kind === 'process';
+  return wait.kind === 'timer' || wait.kind === 'process' || wait.kind === 'peer';
 }
 
 /**
@@ -72,7 +97,8 @@ function summary(wait: Wait): string {
     const first = wait.questions?.[0]?.question;
     return first === undefined ? 'human question' : clip(`human: ${first}`);
   }
-  if (wait.kind === 'worker') return clip(`worker wait on ${workerTargetPhrase(wait)}`);
+  if (wait.kind === 'worker') return clip(`${wait.requestIds ? 'request' : 'worker'} wait on ${workerTargetPhrase(wait)}`);
+  if (wait.kind === 'peer') return clip(`peer wait on ${peerTargetPhrase(wait)}`);
   if (wait.kind === 'process') return clip(wait.note === undefined ? `process ${wait.pid}` : `process ${wait.pid}: ${wait.note}`);
   return clip(wait.note === undefined ? 'timer' : `timer: ${wait.note}`);
 }
@@ -95,7 +121,8 @@ export function openWaitList(waits: readonly Wait[]): OpenWait[] {
 export function identicalWait(waits: readonly Wait[], request: CezarWaitRequestInput, turnId: string,
   context: { startToken?: string; exitFile?: string } = {}): PrWaitEntry | TimerWaitEntry | ProcessWaitEntry | undefined {
   return waits.find((wait): wait is PrWaitEntry | TimerWaitEntry | ProcessWaitEntry => {
-    if (wait.phase !== 'open' || request.kind === 'worker') return false; // worker waits: `identicalWorkerWait`
+    // Worker and request waits: `identicalWorkerWait`; peer waits: `identicalPeerWait`.
+    if (wait.phase !== 'open' || request.kind === 'worker' || request.kind === 'request' || request.kind === 'peer') return false;
     if (request.kind === 'pr') return wait.kind === 'pr' && normalizePrUrl(wait.prUrl) === normalizePrUrl(request.pr)
       && wait.until === (request.until ?? 'checks') && wait.wakeOnConflict === (request.wake_on_conflict ?? true);
     if (request.kind === 'process') {
@@ -113,6 +140,13 @@ export function identicalWorkerWait(waits: readonly Wait[], target: { workerIds?
   const key = (ids: readonly string[] | undefined) => ids ? [...ids].sort().join(',') : undefined;
   return waits.find((wait): wait is WorkerWaitEntry => wait.kind === 'worker' && wait.phase === 'open' &&
     key(wait.workerIds) === key(target.workerIds) && key(wait.requestIds) === key(target.requestIds) && (wait.mode ?? 'any') === (target.mode ?? 'any'));
+}
+
+/** The open peer wait a registration repeats (hearsay-tools/cezarion#1995): the same peers in any
+ *  order, whatever its timeout. */
+export function identicalPeerWait(waits: readonly Wait[], peerIds: readonly string[]): PeerWaitEntry | undefined {
+  const key = (ids: readonly string[]) => [...ids].sort().join(',');
+  return waits.find((wait): wait is PeerWaitEntry => wait.kind === 'peer' && wait.phase === 'open' && key(wait.peerIds) === key(peerIds));
 }
 
 /** The agent input that delivers a resolved wait's result: the wait's own id, or for an upgraded
@@ -139,6 +173,7 @@ export function waitResultText(wait: Wait, { tools, workerStatus = () => 'unavai
   if (wait.kind === 'human') return `Human wait ${wait.id} ended.`;
   if (wait.kind === 'worker') return workerWaitResultText(wait, workerStatus);
   if (wait.kind === 'process') return processWaitResultText(wait);
+  if (wait.kind === 'peer') return peerWaitResultText(wait);
   const fired = `Timer ${wait.id} fired${wait.note === undefined ? '' : `: ${wait.note}`}.`;
   // A session without cezar tools cannot register another wait; it was taught the marker.
   return tools
@@ -175,9 +210,24 @@ function processWaitResultText(wait: ProcessWaitEntry): string {
   return `${head}: still running at the deadline. Register another wait if you still need it.`;
 }
 
+/** A peer wait's result (hearsay-tools/cezarion#1995). The message itself arrives as its own
+ *  input in the same wake; this names only why the wait ended. */
+function peerWaitResultText(wait: PeerWaitEntry): string {
+  const result = wait.result;
+  const head = `Peer wait ${wait.id} on ${peerTargetPhrase(wait)}`;
+  if (result?.reason === 'message') return `${head}: task ${result.peerRunId ?? 'unknown'} sent message ${result.messageId ?? 'unknown'}, delivered with this wake. Register another peer wait if you still wait on it.`;
+  if (result?.reason === 'settled') return `${head}: task ${result.peerRunId ?? 'unknown'} settled or was deleted; it will not write again until its human continues it. Read its status with cez message tasks.`;
+  return `${head}: deadline reached with no message. Register another peer wait if you still wait on it.`;
+}
+
+function peerTargetPhrase(wait: PeerWaitEntry): string {
+  const n = wait.peerIds.length;
+  return n === 1 ? `task ${wait.peerIds[0]}` : `${n} tasks`;
+}
+
 function workerTargetPhrase(wait: WorkerWaitEntry): string {
   const n = (wait.requestIds ?? wait.workerIds)?.length ?? 0;
-  return wait.requestIds ? `${n} request ${n === 1 ? 'reply' : 'replies'}` : `${n} ${n === 1 ? 'worker' : 'workers'}`;
+  return wait.requestIds ? `${n} ${n === 1 ? 'reply' : 'replies'}` : `${n} ${n === 1 ? 'worker' : 'workers'}`;
 }
 
 /** One wait as the footer names it. A worker's park notice names its waits the same way
@@ -186,14 +236,15 @@ export function describeWait(wait: Wait): string {
   if (wait.kind === 'pr') return `${wait.until === 'merge' ? 'merge' : 'CI'} wait ${wait.id} for ${wait.repository}#${wait.prNumber}, deadline ${wait.deadline}`;
   if (wait.kind === 'human') return `your question ${wait.id} to the user`;
   // Cezar's completion wait has no deadline (hearsay-tools/cezarion#1301).
-  if (wait.kind === 'worker') return `worker wait ${wait.id} on ${workerTargetPhrase(wait)}, ${wait.deadline === undefined ? 'no deadline' : `deadline ${wait.deadline}`}`;
+  if (wait.kind === 'worker') return `${wait.requestIds ? 'request' : 'worker'} wait ${wait.id} on ${workerTargetPhrase(wait)}, ${wait.deadline === undefined ? 'no deadline' : `deadline ${wait.deadline}`}`;
+  if (wait.kind === 'peer') return `peer wait ${wait.id} on ${peerTargetPhrase(wait)}, deadline ${wait.deadline}`;
   if (wait.kind === 'process') return `process wait ${wait.id} on PID ${wait.pid}${wait.note === undefined ? '' : ` (${wait.note})`}, deadline ${wait.deadline}`;
   return `timer ${wait.id} at ${wait.deadline}${wait.note === undefined ? '' : ` (${wait.note})`}`;
 }
 
 /** The footer a delivered turn ends with: every wait still open, or undefined when none is. The
  *  user's reply settles a question and a question the user saw cannot be cancelled, so cancel is
- *  offered only for CI, worker and process waits and timers (hearsay-tools/cezarion#1234), and only
+ *  offered only for CI, worker, request, peer and process waits and timers (hearsay-tools/cezarion#1234), and only
  *  when the session has cezar tools (hearsay-tools/cezarion#1270). */
 export function openWaitsFooter(waits: readonly Wait[], { tools }: { tools: boolean } = { tools: true }): string | undefined {
   const open = waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait));
@@ -203,7 +254,7 @@ export function openWaitsFooter(waits: readonly Wait[], { tools }: { tools: bool
   const cancellable = open.some((wait) => wait.kind !== 'human');
   if (!tools) return `Still open: ${items.join('; ')}.${asked ? " The user's reply answers it." : ''}`;
   const close = !asked ? 'Call cezar_cancel_wait for any you no longer need.'
-    : cancellable ? "The user's reply answers your question; call cezar_cancel_wait for any CI wait, worker wait, process wait or timer you no longer need."
+    : cancellable ? "The user's reply answers your question; call cezar_cancel_wait for any CI, worker, request, peer or process wait or timer you no longer need."
     : "The user's reply answers it.";
   return `Still open: ${items.join('; ')}. ${close}`;
 }

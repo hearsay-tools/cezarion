@@ -1,4 +1,4 @@
-import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runSubcommand } from '../subcommands.ts';
@@ -60,6 +60,30 @@ describe('task message command family', () => {
     const target = peer();
     expect(await message(['request', '--id', randomUUID(), '--', target.id, '--help'])).toBe(0);
     expect(json().message).toMatchObject({ text: '--help', kind: 'request' });
+  });
+  // hearsay-tools/cezarion#1995: `cez message wait --peer` and the peer wait's cancel answer.
+  it('sends wait --peer through the HTTP boundary and prints the peer wait', async () => {
+    const [b, c] = [peer(), peer()];
+    const view = { id: randomUUID(), peerIds: [b.id, c.id], deadline: new Date(Date.now() + 900_000).toISOString(), phase: WAIT_PHASE.open };
+    const waitPeers = vi.spyOn(f.service, 'waitPeers').mockResolvedValue({ wait: view, instruction: 'End your turn now.' });
+    expect(await message(['wait', '--peer', b.id, '--peer', c.id, '--timeout-seconds', '900'])).toBe(0);
+    expect(waitPeers).toHaveBeenCalledWith(expect.anything(), { peerIds: [b.id, c.id], timeoutSeconds: 900 });
+    expect(json()).toEqual({ wait: view, instruction: 'End your turn now.' });
+    vi.spyOn(f.service, 'cancelWait').mockResolvedValue({ wait: { ...view, phase: WAIT_PHASE.cancelled } });
+    expect(await message(['cancel-wait', view.id])).toBe(0);
+    expect(json().wait).toMatchObject({ id: view.id, phase: WAIT_PHASE.cancelled });
+  });
+  it('refuses wait --peer with --request, --mode or a positional, and a worker wait --peer', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch');
+    for (const extra of [['--request', randomUUID()], ['--mode', 'all'], [randomUUID()]]) {
+      expect(await message(['wait', '--peer', randomUUID(), ...extra])).toBe(1);
+      expect(json().code).toBe('invalid_input');
+    }
+    expect(await message(['wait'])).toBe(64);
+    expect(json().error).toContain('cez message wait --peer <task-id>');
+    expect(await runWorkerCommand(['wait', '--peer', randomUUID()], {})).toBe(64);
+    expect(json().error).toBe('Use cez message wait --peer <task-id>.');
+    expect(fetch).not.toHaveBeenCalled();
   });
   it('passes conversation before cursors through the HTTP boundary', async () => {
     const target = peer();

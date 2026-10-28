@@ -4889,7 +4889,7 @@
       "file": "packages/contract/src/waits.test.ts",
       "rule": "test-enum-literal",
       "site": "kind: 'worker'",
-      "count": 20
+      "count": 18
     },
     {
       "file": "packages/contract/src/waits.test.ts",

@@ -9,7 +9,7 @@ import { ARCHIVED_RUNS_PAGE_MAX } from './run-limits.ts';
 // The chain shapes belong to the workflows family; the run record embeds one, so this file
 // consumes them rather than redeclaring. One-way on purpose — see the header of `./workflows.ts`.
 import { workflowDefSchema, workflowStepDefSchema } from './workflows.ts';
-import { computeWaitingOn, hasResolvedWait, waitingOnSchema, waitSchema } from './waits.ts';
+import { computeWaitingOn, hasResolvedWait, waitingOnSchema, waitSchema, withRootLedger } from './waits.ts';
 import { handoffRecordsSchema } from './handoff.ts';
 
 /**
@@ -608,7 +608,7 @@ export function toRunSummary(run: RunRecord & { usage?: ProcessUsage | undefined
     summary.delegation = delegation.success ? delegation.data : { role: 'invalid' };
   }
   // The parsed slim delegation, not the raw one: a malformed record must not throw here either.
-  const waitingOn = computeWaitingOn({ ...run, delegation: summary.delegation as RunSummary['delegation'] });
+  const waitingOn = computeWaitingOn({ ...run, delegation: withRootLedger(summary.delegation as RunSummary['delegation'], run.delegation) });
   if (waitingOn) summary.waitingOn = waitingOn;
   if (hasResolvedWait(run)) summary.waitWakePending = true;
   if (run.usage) summary.usage = run.usage;

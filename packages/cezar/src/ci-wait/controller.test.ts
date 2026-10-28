@@ -295,7 +295,7 @@ describe('private wait routes', () => {
     expect(await callCezarAsk({ kind: 'human', ...card }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `Unknown field "kind". ${askTail}` });
     expect(JSON.parse((await raw(session.env, '{', undefined, 'ask')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
     expect(JSON.parse((await raw(session.env, ' '.repeat(262_145), undefined, 'ask')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
-    expect(await callCezarWait({ kind: 'human', ...card }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: '`kind` must be "pr", "worker", "timer" or "process" (kind "ci" was replaced by kind "pr"); ask the user with cezar_ask.' });
+    expect(await callCezarWait({ kind: 'human', ...card }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: '`kind` must be "pr", "worker", "request", "peer", "timer" or "process" (kind "ci" was replaced by kind "pr"); ask the user with cezar_ask.' });
     expect(ask).not.toHaveBeenCalled();
     expect(register).not.toHaveBeenCalled();
     expect((await raw(session.env, JSON.stringify(card), 'invalid', 'ask')).status).toBe(401);
