@@ -3,7 +3,7 @@ import type { AgentInput, ConversationMessage, ConversationSendRequest, Conversa
 import { workerOperationSchema } from '@open-mercato/cezar-contract/delegation';
 import { ConversationIdInUseError, type RunRecord, type RunStore } from '../runs/store.ts';
 import { DelegationPolicyError } from './policy.ts';
-import { openQuestions } from './questions.ts';
+import { reservedReplies } from './questions.ts';
 
 /**
  * First durable request settlement wins, with the defined late-reply timeout amendment handled
@@ -138,11 +138,11 @@ export function notDeliveredInstruction(pair: { relationship: 'family' | 'peer';
     : `Not delivered: parent is ${recipient.status}. A worker cannot resume its parent; the parent must be continued by its owner.`;
 }
 
-/** The ledger's 1,024 messages (open questions reserve their replies), its 32 open requests, and
- *  the recipient's 32 undelivered inputs (an answer to a question may pass that last bound,
- *  hearsay-tools/cezarion#505). */
-export function assertConversationCapacity(state: ConversationState, recipient: RunRecord, kind: ConversationSendRequest['kind'], enqueue: boolean, answering: boolean): void {
-  const reservedMessages = openQuestions(state).length - (answering ? 1 : 0);
+/** The ledger's 1,024 messages, where every open request holds room for its reply and a new
+ *  request needs room for its own, its 32 open requests, and the recipient's 32 undelivered inputs
+ *  (an answer to a question may pass that last bound, hearsay-tools/cezarion#505). */
+export function assertConversationCapacity(state: ConversationState, recipient: RunRecord, kind: ConversationSendRequest['kind'], enqueue: boolean, answering: boolean, replying: boolean): void {
+  const reservedMessages = reservedReplies(state) - (replying ? 1 : 0) + (enqueue && kind === 'request' ? 1 : 0);
   const openRequests = () => state.messages.filter(message => message.kind === 'request' && message.state === 'accepted' && !state.outcomes.some(outcome => outcome.requestId === message.id)).length;
   const undelivered = () => { return (recipient.agentInputs ?? []).filter(input => !input.deliveredAt).length; };
   if (state.messages.length + reservedMessages >= 1024 || (enqueue && kind === 'request' && openRequests() >= 32) ||

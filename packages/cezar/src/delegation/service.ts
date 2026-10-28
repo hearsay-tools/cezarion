@@ -413,7 +413,7 @@ export class DelegationService {
       // An answer the worker can no longer receive (stopping, stopped, destroyed) would record
       // the question as replied while nothing delivers it; the human answers it instead.
       if (answering && !enqueue) throw new DelegationPolicyError('incompatible_state', 'The worker can no longer receive this answer; its question goes back to the human');
-      assertConversationCapacity(state, recipient, request.kind, enqueue, answering);
+      assertConversationCapacity(state, recipient, request.kind, enqueue, answering, request.kind === 'reply' && !settled);
       const outcomes = replyOutcomes(state, request, settled, now);
       // `parentRunId` keeps its name and holds the ledger owner (spec § 2, Message identity).
       const input = { id: message.id, source: 'agent' as const, parentRunId: root.id, text: message.text, createdAt: now,
