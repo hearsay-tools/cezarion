@@ -119,6 +119,7 @@ import { getHeadCommit, getRepoInfo } from '../server/git.ts';
 import { ensureOwnedWorkspace, verifyOwnedWorkspace } from '../delegation/workspace.ts';
 import { placeWorkerAttachments, verifyWorkerContext } from '../delegation/context.ts';
 import { enqueueAgentInput, agentInputBatch, hasLiveInboxClaim } from '../delegation/input.ts';
+import { resolvedWaitInputBatch } from './resolved-wait-input-batch.ts';
 import { parseDelegationEffort } from '../delegation/effort.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { reconcileWorkerEntry } from '../delegation/wait.ts';
@@ -6217,6 +6218,16 @@ export class RunManager {
     if (!state?.session?.open || state.cancelled || state.agentInputError || state.agentInputFlight || !run ||
       !['queued', 'running', 'waiting'].includes(run.status) || this.executionBlockedByRootFinish(run) ||
       (run.delegation?.role === 'worker' && run.delegation.destroy)) return false;
+    run = this.supersedeFallbackBeforeFlush(runId, state, run, beforeHumanReset);
+    // A question pending at a turn boundary still takes an admitted wake of resolved-wait results
+    // and messages; one pending mid-turn (a native ask) takes nothing until its turn ends.
+    const askPending = state.pendingHumanAsk || this.hasUnansweredHumanAsk(runId);
+    if (askPending && state.atTurnBoundary !== state.session) return false;
+    run = this.cancelCappedTimersBeforeFlush(runId, state, run, beforeHumanReset);
+    return this.flushAgentInputBatch(runId, state, run, askPending, beforeHumanReset);
+  }
+
+  private supersedeFallbackBeforeFlush(runId: string, state: ActiveRun, run: RunRecord, beforeHumanReset?: HumanAnswerBudget): RunRecord {
     // A parent's input to a worker supersedes Cezar's fallback question, charged as its reply would
     // be (hearsay-tools/cezarion#1301); the parent's reply to it goes through the answer seam.
     const answer = this.routedAnswer(runId)?.id;
@@ -6227,10 +6238,10 @@ export class RunManager {
       this.chargeWorkerFallbackReply(runId, beforeHumanReset);
       run = this.store.getRun(runId)!;
     }
-    // A question pending at a turn boundary still takes an admitted wake of resolved-wait results
-    // and messages; one pending mid-turn (a native ask) takes nothing until its turn ends.
-    const askPending = state.pendingHumanAsk || this.hasUnansweredHumanAsk(runId);
-    if (askPending && state.atTurnBoundary !== state.session) return false;
+    return run;
+  }
+
+  private cancelCappedTimersBeforeFlush(runId: string, state: ActiveRun, run: RunRecord, beforeHumanReset?: HumanAnswerBudget): RunRecord {
     // A timer result still owed when the budget is spent is cancelled before its batch is sent; the
     // CI results beside it are delivered.
     if (this.automaticWakes(runId, beforeHumanReset) >= MAX_AUTO_CONTINUES && this.waitWakeAdmitted.has(runId) && state.atTurnBoundary === state.session) {
@@ -6242,6 +6253,10 @@ export class RunManager {
         if (!resolvedWaits(run).length) { this.waitWakeAdmitted.delete(runId); this.reparkWithoutWaits(runId, state); }
       }
     }
+    return run;
+  }
+
+  private flushAgentInputBatch(runId: string, state: ActiveRun, run: RunRecord, askPending: boolean, beforeHumanReset?: HumanAnswerBudget): boolean {
     // The opening prompt already carries its own input; later input steers the
     // opening turn instead of waiting for it to end (#505).
     const resolved = resolvedWaits(run);
@@ -6256,24 +6271,9 @@ export class RunManager {
       (!askPending || beside.has(input.id)) && (boundary || input.purpose !== 'completion-refusal'));
     const admitted = this.waitWakeAdmitted.has(runId) && state.atTurnBoundary === state.session;
     if (resolved.length && admitted) {
-      // One wake turn delivers every resolved wait, oldest first, then the conversation input
-      // that would lead the next batch (hearsay-tools/cezarion#1233).
-      // Each result speaks the lifecycle of the session that receives it: a wake resolved with no
-      // session, or delivered by a continuation without cezar tools, keeps that session's wording.
-      const results = resolved.flatMap(wait => {
-        const input = run.agentInputs?.find(entry => entry.id === waitInputId(wait) && !entry.deliveredAt);
-        if (!input) return [];
-        const result = waitResultText(wait, { tools: !state.toolless, workerStatus: this.workerStatus });
-        // An upgraded wait whose wake is a queued message (`wakeInputId`) delivers that message
-        // with its receipt; only a lifecycle input is replaced by the result.
-        return [{ id: input.id, text: input.source === 'lifecycle' ? this.formatAgentInput({ ...input, text: result })
-          : `${this.formatAgentInput(input)}\n\n${result}` }];
-      });
-      if (!results.length) return false;
-      const conversation = agentInputBatch(queue, input => this.formatAgentInput(input));
-      const following = conversation?.inputs.every(input => input.conversation) ? conversation.inputs : [];
-      const text = [...results.map(result => result.text), ...following.map(input => this.formatAgentInput(input))].join('\n\n');
-      return this.submitAgentInput(runId, state, [{ type: 'text', text }], [...results, ...following].map(input => input.id), beforeHumanReset);
+      const batch = resolvedWaitInputBatch(run, resolved, queue, input => this.formatAgentInput(input), { tools: !state.toolless, workerStatus: this.workerStatus });
+      if (!batch) return false;
+      return this.submitAgentInput(runId, state, [{ type: 'text', text: batch.text }], batch.inputIds, beforeHumanReset);
     }
     // Messages beside a pending question go only with an admitted wake (hearsay-tools/cezarion#1235).
     if (askPending && !admitted) return false;
