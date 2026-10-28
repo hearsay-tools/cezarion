@@ -772,7 +772,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     const fixtureScript = join(f.root, 'destroy-race-fixture.js');
     const source = readFileSync(fileURLToPath(new URL('../../scripts/darwin-destroy-chmod.js', import.meta.url)), 'utf8');
     const binding = "ObjC.bindFunction('renameat', ['int', ['int', 'char *', 'int', 'char *']]);\nObjC.bindFunction('mkdirat', ['int', ['int', 'char *', 'int']]);\n";
-    const hook = "if ($.renameat(fd, name, fd, $('.ai-saved').UTF8String) !== 0 || $.mkdirat(fd, name, 0) !== 0) throw Error('fixture swap');\n    ";
+    const hook = "if ($.renameat(fd, name, fd, $('.ai-saved').UTF8String) !== 0) failure('fixture renameat'); if ($.mkdirat(fd, name, 0) !== 0) failure('fixture mkdirat');\n    ";
     expect(source.split('if ($.fchmodat(fd, name,')).toHaveLength(2);
     writeFileSync(fixtureScript, source.replace('function run(args) {', binding + 'function run(args) {').replace('if ($.fchmodat(fd, name,', hook + 'if ($.fchmodat(fd, name,'));
     const exec = childProcess.execFile;

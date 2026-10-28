@@ -337,6 +337,13 @@ def row_case(root, node, outer_proc, outer_pid_ns, outer_mount_ns, case, resourc
                 for key in ('handle', 'control', 'ready'): os.close(child[key])
 
 
+def assert_capacity_launch(root, capacity, env):
+    if (os.path.realpath(root) != str(root) or os.path.realpath(capacity) != str(capacity) or
+            capacity != root / 'capacity' or env.get('TMPDIR') != str(capacity) or
+            env.get('CZR_TEST_CAPACITY_DIR') != str(capacity)):
+        raise RuntimeError('capacity launch environment changed')
+
+
 def capacity_case(root, node, outer_proc, gate=None, gate_fds=()):
     capacity = root / 'capacity'
     capacity.mkdir(mode=0o700)
@@ -353,6 +360,7 @@ def capacity_case(root, node, outer_proc, gate=None, gate_fds=()):
         env = {**os.environ, 'PATH': node_bin + os.pathsep + os.environ.get('PATH', ''),
                'TMPDIR': str(capacity), 'CZR_TEST_CAPACITY_DIR': str(capacity),
                'NODE_OPTIONS': '--import ' + str(checkout / 'packages/cezar/scripts/test-fallback-sandbox.mjs')}
+        assert_capacity_launch(root, capacity, env)
         code, stdout, stderr = bounded_output([npm, 'test', '--',
             'packages/cezar/src/delegation/authoritative-capacity-ci.test.ts', '--reporter=dot'], b'', 0, 0, 120, env,
             (lambda: gate('capacity-runner-before-exec', outer_proc)) if gate else None, gate_fds)

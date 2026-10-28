@@ -71,6 +71,22 @@ class ProtocolTest(unittest.TestCase):
                                        'stderr': stderr[:4096].decode(),
                                        'stdoutBytes': len(stdout), 'stderrBytes': len(stderr)})
 
+    def test_capacity_launch_environment_is_exact_and_canonical(self):
+        check = fixture['assert_capacity_launch']
+        root = pathlib.Path('/private')
+        capacity = root / 'capacity'
+        valid = {'TMPDIR': str(capacity), 'CZR_TEST_CAPACITY_DIR': str(capacity)}
+        with patch.object(fixture['os'].path, 'realpath', side_effect=lambda path: str(path)):
+            check(root, capacity, valid)
+            for env in ({**valid, 'TMPDIR': '/wrong'}, {**valid, 'CZR_TEST_CAPACITY_DIR': '/wrong'}, {}):
+                with self.assertRaisesRegex(RuntimeError, 'capacity launch'):
+                    check(root, capacity, env)
+            with self.assertRaisesRegex(RuntimeError, 'capacity launch'):
+                check(root, root / 'other', valid)
+        with patch.object(fixture['os'].path, 'realpath', return_value='/elsewhere'):
+            with self.assertRaisesRegex(RuntimeError, 'capacity launch'):
+                check(root, capacity, valid)
+
     def test_restricted_owner_and_reader_access_fail_closed(self):
         owner = fixture['restricted_owner']
         self.assertEqual(owner(SimpleNamespace(st_mode=stat.S_IFREG, st_uid=1000, st_gid=100)), (1000, 100))

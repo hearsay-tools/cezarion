@@ -28,8 +28,8 @@ describe.runIf(process.platform === 'darwin')('explicit destroy macOS permission
     dev.writeUInt32LE(Number(BigInt.asUintN(32, info.dev))); ino.writeBigUInt64LE(info.ino);
     const fixture = join(root, 'fixture.js');
     const binding = "ObjC.bindFunction('renameat', ['int', ['int', 'char *', 'int', 'char *']]);\nObjC.bindFunction('mkdirat', ['int', ['int', 'char *', 'int']]);\nObjC.bindFunction('symlinkat', ['int', ['char *', 'int', 'char *']]);\n";
-    const mutate = kind === 'directory' ? "if ($.mkdirat(fd, name, 0) !== 0) throw Error('fixture mkdir');" : "if ($.symlinkat($('victim').UTF8String, fd, name) !== 0) throw Error('fixture symlink');";
-    const hook = `if ($.renameat(fd, name, fd, $('saved').UTF8String) !== 0) throw Error('fixture rename'); ${mutate}\n    `;
+    const mutate = kind === 'directory' ? "if ($.mkdirat(fd, name, 0) !== 0) failure('fixture mkdirat');" : "if ($.symlinkat($('victim').UTF8String, fd, name) !== 0) failure('fixture symlinkat');";
+    const hook = `if ($.renameat(fd, name, fd, $('saved').UTF8String) !== 0) failure('fixture renameat'); ${mutate}\n    `;
     const original = readFileSync(source, 'utf8');
     expect(original.split('if ($.fchmodat(fd, name,')).toHaveLength(2);
     const script = original.replace('function run(args) {', binding + 'function run(args) {').replace('if ($.fchmodat(fd, name,', hook + 'if ($.fchmodat(fd, name,');
@@ -66,7 +66,7 @@ describe.runIf(process.platform === 'darwin')('explicit destroy macOS permission
     dev.writeUInt32LE(Number(BigInt.asUintN(32, info.dev))); ino.writeBigUInt64LE(info.ino);
     const fixture = join(root, 'fixture.js');
     const binding = "ObjC.bindFunction('renameat', ['int', ['int', 'char *', 'int', 'char *']]);\nObjC.bindFunction('mkdirat', ['int', ['int', 'char *', 'int']]);\n";
-    const hook = "if ($.renameat(fd, name, fd, $('saved').UTF8String) !== 0 || $.mkdirat(fd, name, 448) !== 0) throw Error('fixture swap');\n    ";
+    const hook = "if ($.renameat(fd, name, fd, $('saved').UTF8String) !== 0) failure('fixture renameat'); if ($.mkdirat(fd, name, 448) !== 0) failure('fixture mkdirat');\n    ";
     const script = readFileSync(source, 'utf8').replace('function run(args) {', binding + 'function run(args) {').replace('child = $.openat(fd, name,', hook + 'child = $.openat(fd, name,');
     writeFileSync(fixture, script);
     try {
@@ -82,7 +82,7 @@ describe.runIf(process.platform === 'darwin')('explicit destroy macOS permission
     const info = lstatSync(join(parent, name), { bigint: true });
     const fixture = join(base, 'fixture.js');
     const binding = "ObjC.bindFunction('rename', ['int', ['char *', 'char *']]);\nObjC.bindFunction('mkdir', ['int', ['char *', 'int']]);\nObjC.bindFunction('mkdirat', ['int', ['int', 'char *', 'int']]);\n";
-    const hook = `if ($.rename($(args[0]).UTF8String, $(${JSON.stringify(saved)}).UTF8String) !== 0) throw Error('fixture parent rename'); if ($.mkdir($(args[0]).UTF8String, 448) !== 0) throw Error('fixture parent mkdir'); const other = $.open($(args[0]).UTF8String, 0x60100000, 0); if (other < 0 || $.mkdirat(other, name, 0) !== 0) throw Error('fixture child mkdir'); $.close(other);\n    `;
+    const hook = `if ($.rename($(args[0]).UTF8String, $(${JSON.stringify(saved)}).UTF8String) !== 0) failure('fixture parent rename'); if ($.mkdir($(args[0]).UTF8String, 448) !== 0) failure('fixture parent mkdir'); const other = $.open($(args[0]).UTF8String, 0x60100000, 0); if (other < 0) failure('fixture parent open'); if ($.mkdirat(other, name, 0) !== 0) failure('fixture child mkdirat'); $.close(other);\n    `;
     const script = readFileSync(source, 'utf8').replace('function run(args) {', binding + 'function run(args) {').replace('if ($.fchmodat(fd, name,', hook + 'if ($.fchmodat(fd, name,');
     writeFileSync(fixture, script);
     const exec = childProcess.execFile;
