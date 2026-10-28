@@ -1255,7 +1255,7 @@ describe('TasksOverviewRoute — wired to the app', () => {
       act(() => vi.advanceTimersByTime(250))
       expect(navigator.replace).toHaveBeenCalledTimes(2)
       expect(navigator.replace.mock.calls[1]![0].search).toBe('?archived=1')
-      // An external link still wins, including text that this input previously wrote.
+      // An external link still wins over the cleared input.
       rerender(tree({ pathname: '/', search: '?archived=1&q=Haystack', key: 'external' }))
       expect(box.value).toBe('Haystack')
     } finally {
