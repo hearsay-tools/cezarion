@@ -73,14 +73,16 @@ export function peerWaitOf(run: RunRecord | undefined, waitId: string): PeerWait
 
 /**
  * Why an open peer wait resolves now, if it does: a message from a named peer that the run has not
- * received (`message`), else a named peer that settled or was deleted (`settled`). The message comes
+ * received (`message`), else a named peer that settled or was deleted (`settled`), never one whose
+ * row the store cannot read. The message comes
  * first, so a peer that wrote and then finished reports what it wrote. The deadline is the timer's.
  */
-export function peerWaitResult(run: RunRecord, wait: PeerWaitEntry, getRun: GetRun): PeerWaitResult | undefined {
+export function peerWaitResult(run: RunRecord, wait: PeerWaitEntry, peers: { getRun: GetRun; isUnreadable(id: string): boolean }): PeerWaitResult | undefined {
   const message = run.agentInputs?.find((input: AgentInput) => !input.deliveredAt && !hasLiveInboxClaim(input) &&
     input.conversation?.relationship === 'peer' && wait.peerIds.includes(input.conversation.senderRunId));
   if (message) return { reason: 'message', peerRunId: message.conversation!.senderRunId, messageId: message.id };
-  const settled = wait.peerIds.find(id => { const peer = getRun(id); return !peer || !LIVE.includes(peer.status); });
+  // The store reads an unreadable row as no record too: that peer is not known to be gone.
+  const settled = wait.peerIds.find(id => { const peer = peers.getRun(id); return peer ? !LIVE.includes(peer.status) : !peers.isUnreadable(id); });
   return settled ? { reason: 'settled', peerRunId: settled } : undefined;
 }
 

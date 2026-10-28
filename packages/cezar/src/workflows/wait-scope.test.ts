@@ -11,6 +11,8 @@ import { delegationWaitRefusal, peerWaitEntry, peerWaitOf, peerWaitResult, runsA
 const root = (over: Partial<RunRecord> = {}): RunRecord => makeRunRecord({ id: randomUUID(), status: RUN_STATUS.running,
   delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] }, ...over });
 const lookup = (...runs: RunRecord[]) => (id: string) => runs.find(run => run.id === id);
+/** The store's two reads `peerWaitResult` needs: a record, and whether a missing one is unreadable. */
+const peers = (unreadable: string[], ...runs: RunRecord[]) => ({ getRun: lookup(...runs), isUnreadable: (id: string) => unreadable.includes(id) });
 const request = (peerIds: string[]) => ({ peerIds, timeoutSeconds: 600 });
 const turn = () => 'turn-1';
 const peerInput = (senderRunId: string, over: Partial<AgentInput> = {}): AgentInput => ({ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: senderRunId,
@@ -49,8 +51,8 @@ describe('peerWaitResult', () => {
     const b = root({ status: RUN_STATUS.done });
     const input = peerInput(b.id);
     const wait = makePeerWait({ peerIds: [b.id] });
-    expect(peerWaitResult(root({ agentInputs: [input] }), wait, lookup(b))).toEqual({ reason: 'message', peerRunId: b.id, messageId: input.id });
-    expect(peerWaitResult(root(), wait, lookup(b))).toEqual({ reason: 'settled', peerRunId: b.id });
+    expect(peerWaitResult(root({ agentInputs: [input] }), wait, peers([], b))).toEqual({ reason: 'message', peerRunId: b.id, messageId: input.id });
+    expect(peerWaitResult(root(), wait, peers([], b))).toEqual({ reason: 'settled', peerRunId: b.id });
   });
 
   it('ignores a received message, one an inbox read holds, a family message and another peer\'s message', () => {
@@ -59,12 +61,14 @@ describe('peerWaitResult', () => {
     const claim = { receiptId: randomUUID(), generation: 'g', expiresAt: new Date(Date.now() + 60_000).toISOString() };
     const inputs = [peerInput(b.id, { deliveredAt: new Date().toISOString() }), peerInput(b.id, { inboxClaim: claim }), peerInput(other.id),
       peerInput(b.id, { conversation: { senderRunId: b.id, recipientRunId: 'self', kind: 'progress' } })];
-    expect(peerWaitResult(root({ agentInputs: inputs }), wait, lookup(b, other))).toBeUndefined();
+    expect(peerWaitResult(root({ agentInputs: inputs }), wait, peers([], b, other))).toBeUndefined();
   });
 
-  it('a deleted peer is settled', () => {
+  it('a deleted peer is settled, and a peer whose row is unreadable is not', () => {
     const gone = randomUUID();
-    expect(peerWaitResult(root(), makePeerWait({ peerIds: [gone] }), lookup())).toEqual({ reason: 'settled', peerRunId: gone });
+    expect(peerWaitResult(root(), makePeerWait({ peerIds: [gone] }), peers([]))).toEqual({ reason: 'settled', peerRunId: gone });
+    // The store reads an unreadable row as no record too; that peer may still be live.
+    expect(peerWaitResult(root(), makePeerWait({ peerIds: [gone] }), peers([gone]))).toBeUndefined();
   });
 });
 

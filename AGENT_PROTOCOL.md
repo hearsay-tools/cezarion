@@ -945,7 +945,7 @@ deleting its history is `denied_scope`, and a worker cannot register one. The de
 message of any kind from a named peer that the run has not received (`result.reason: 'message'`,
 with `peerRunId` and `messageId`), a named peer reaching `review`, `done`, `failed` or
 `cancelled` or being deleted (`settled`, with `peerRunId`), or the deadline (`timeout`). A message
-comes before a settlement, so a peer that wrote and then finished reports what it wrote. A
+comes before a settlement, so a peer that wrote and then finished reports what it wrote. A peer whose record the store cannot read is not settled: it may still be live, so the wait stays open. A
 matching message or settlement already there at registration resolves it at once, and recovery
 re-reads it the same way. It is the one wait a message closes: a human message, a message from
 the run's parent or workers, a peer it does not name, and any other wait resolving wake the run

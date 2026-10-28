@@ -5100,7 +5100,7 @@ export class RunManager {
   private resolvePeerWait(runId: string, wait: PeerWaitEntry): boolean {
     const run = this.store.getRun(runId);
     if (this.disposed || !run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return false;
-    const result = peerWaitResult(run, wait, id => this.store.getRun(id));
+    const result = peerWaitResult(run, wait, this.store);
     if (result) this.settleWait(runId, wait.id, result);
     return !!result && this.store.getRun(runId)?.waits?.find(entry => entry.id === wait.id)?.phase !== 'open';
   }

@@ -220,6 +220,16 @@ describe('peer waits (R9)', { timeout: 45_000 }, () => {
     expect(entryOf(run.id, entry.id)).toMatchObject({ phase: WAIT_PHASE.open });
   });
 
+  // The store reads an unreadable row as no record, as it reads a deleted one: that is not a settlement.
+  it('a restart that cannot read the named peer\'s row leaves the wait open', async () => {
+    const { a, b, entry } = await parkedOnPeer();
+    const disk = (readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[]).map(row => row.id === b ? { ...row, status: 'unknown-status' } : row);
+    await restart(false, disk);
+    expect(store.isUnreadable(b)).toBe(true);
+    expect(store.getRun(b)).toBeUndefined();
+    expect(entryOf(a, entry.id)).toMatchObject({ phase: WAIT_PHASE.open });
+  });
+
   it('a restart past the deadline resolves the wait as timeout', async () => {
     const { a, entry } = await parkedOnPeer();
     store.commitWait(a, { ...(entryOf(a, entry.id) as PeerWaitEntry), deadline: new Date(Date.now() - 1_000).toISOString() });
