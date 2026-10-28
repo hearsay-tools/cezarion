@@ -1,6 +1,6 @@
 import type { ActiveRun } from './active-run.ts';
 import type { RunRecord, RunStore } from '../runs/store.ts';
-import { chargesBudget, resolvedWaits, waitInputId } from './waits.ts';
+import { chargesBudget, chargesBudgetMessage, resolvedWaits, waitInputId } from './waits.ts';
 
 /** Facts read when the harness acknowledges its current flight, before its single commit.
  *  Retired markers are cleared here in the same order as the original acknowledgement path. */
@@ -29,14 +29,17 @@ export function analyseAcknowledgedInput(runId: string, state: ActiveRun,
   // spends the one unit it reserved, however many it carries. CI wakes are external events
   // and do not count.
   const timers = batch.filter(chargesBudget);
-  const spent = timers.length && flight.wakeReserved ? (store.getRun(runId)?.automaticWakes ?? 0) + 1 : undefined;
+  // A peer message that opens an admitted wake turn spends the unit it reserved the same way
+  // (spec 2026-10-27-task-communication-protocol § 8); taken mid-turn, as steering, it reserved none.
+  const peers = flight.admittedWake ? queue.filter(input => inputIds.includes(input.id) && chargesBudgetMessage(input)) : [];
+  const spent = (timers.length || peers.length) && flight.wakeReserved ? (store.getRun(runId)?.automaticWakes ?? 0) + 1 : undefined;
   // A wake of messages alone (hearsay-tools/cezarion#1235) spends its admission the same way;
   // what it still owes is read before its messages are delivered.
   const messageWake = !resolvedIds.length && !!flight.admittedWake && admitted.has(runId);
   const owedBefore = messageWake && owesWake(store.getRun(runId)!);
   const at = new Date().toISOString();
   const resumes = resolvedIds.length > 0 || messageWake;
-  return { accepted, resolvedIds, early, spent, observable, at, timers, resumes, owedBefore };
+  return { accepted, resolvedIds, early, spent, observable, at, timers, peers, resumes, owedBefore };
 }
 
 export type AcknowledgedInput = NonNullable<ReturnType<typeof analyseAcknowledgedInput>>;
