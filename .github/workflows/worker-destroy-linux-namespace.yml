@@ -1,0 +1,21 @@
+name: Linux worker destroy namespace diagnostic
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/worker-destroy-linux-namespace.yml'
+      - '.github/scripts/linux-mount-alias-probe.py'
+      - 'packages/cezar/src/delegation/linux-mapped-holders*'
+      - 'packages/cezar/src/delegation/destroy-holders*'
+  workflow_dispatch: {}
+permissions:
+  contents: read
+jobs:
+  namespace-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Observe private mount namespace aliases
+        run: python3 .github/scripts/linux-mount-alias-probe.py
