@@ -26,7 +26,7 @@ class ProtocolTest(unittest.TestCase):
                 'sibling': self.fake_identity(11, 101, 0)}
 
     def call(self, output):
-        with patch.dict(invoke.__globals__, {'identity': self.fake_identity, 'bounded_output': lambda *_: output}):
+        with patch.dict(invoke.__globals__, {'identity': self.fake_identity, 'bounded_output': lambda *_, **__: output}):
             return invoke('/node', self.row, 'stop', self.target, self.sibling, 0, 0)
 
     def test_accepts_exact_one_line_and_identity(self):

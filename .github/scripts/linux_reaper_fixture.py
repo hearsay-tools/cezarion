@@ -91,8 +91,9 @@ def mapped(path):
     return libc, address
 
 
-def child_process(kind, case, row, uid, gid, outer_proc, control, ready):
+def child_process(kind, case, row, uid, gid, outer_proc, control, ready, gate=None):
     try:
+        if gate: gate()
         drop(uid, gid)
         handle = None; mapping = None
         alias = row / 'alias'
@@ -122,12 +123,12 @@ def child_process(kind, case, row, uid, gid, outer_proc, control, ready):
         os._exit(125)
 
 
-def spawn_child(kind, case, row, uid, gid, outer_proc):
+def spawn_child(kind, case, row, uid, gid, outer_proc, gate=None):
     control_r, control_w = os.pipe(); ready_r, ready_w = os.pipe()
     pid = os.fork()
     if not pid:
         os.close(control_w); os.close(ready_r)
-        child_process(kind, case, row, uid, gid, outer_proc, control_r, ready_w)
+        child_process(kind, case, row, uid, gid, outer_proc, control_r, ready_w, gate)
     os.close(control_r); os.close(ready_w)
     handle = os.pidfd_open(pid)
     report = bounded_line(ready_r)
@@ -145,10 +146,13 @@ def finish(child):
     for key in ('handle', 'control', 'ready'): os.close(child[key])
 
 
-def bounded_output(command_line, data, uid, gid, timeout, env=None):
+def bounded_output(command_line, data, uid, gid, timeout, env=None, gate=None, gate_fds=()):
+    def prepare():
+        if gate: gate()
+        if uid: drop(uid, gid)
     proc = subprocess.Popen(command_line, stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            preexec_fn=(lambda: drop(uid, gid)) if uid else None, env=env)
+                            preexec_fn=prepare if uid or gate else None, env=env, pass_fds=gate_fds)
     selector = selectors.DefaultSelector()
     output = {'stdout': bytearray(), 'stderr': bytearray()}
     deadline = time.monotonic() + timeout
@@ -174,12 +178,12 @@ def bounded_output(command_line, data, uid, gid, timeout, env=None):
         proc.stdout.close(); proc.stderr.close()
 
 
-def invoke(node, row, action, target, sibling, uid, gid, proof=False):
+def invoke(node, row, action, target, sibling, uid, gid, proof=False, gate=None, gate_fds=()):
     request = {**row, 'action': action, 'target': identity(target['pid'], target['outer'], uid),
                'sibling': identity(sibling['pid'], sibling['outer'], uid)}
     data = (json.dumps(request) + '\n').encode()
     if len(data) > LIMIT: raise RuntimeError('row exceeds bound')
-    code, stdout, stderr = bounded_output([node, '--experimental-transform-types', str(DRIVER)], data, uid, gid, 15)
+    code, stdout, stderr = bounded_output([node, '--experimental-transform-types', str(DRIVER)], data, uid, gid, 15, gate=gate, gate_fds=gate_fds)
     if not stdout.endswith(b'\n') or stdout.count(b'\n') != 1:
         raise RuntimeError('invalid reaper output framing')
     if code == 42 and action == 'stop':
@@ -206,7 +210,7 @@ def invoke(node, row, action, target, sibling, uid, gid, proof=False):
     return response
 
 
-def row_case(root, node, outer_proc, outer_pid_ns, outer_mount_ns, case, resource_kind, uid, gid, proof=False):
+def row_case(root, node, outer_proc, outer_pid_ns, outer_mount_ns, case, resource_kind, uid, gid, proof=False, gate=None, gate_fds=()):
     row = root / (case + '-' + resource_kind)
     row.mkdir(mode=0o700)
     resource = row / ('owned' if resource_kind == 'worktree' else 'scratch')
@@ -227,8 +231,8 @@ def row_case(root, node, outer_proc, outer_pid_ns, outer_mount_ns, case, resourc
     target = sibling = None
     detached = False; nested = False
     try:
-        target = spawn_child('target', case, row, uid, gid, outer_proc)
-        sibling = spawn_child('sibling', case, row, uid, gid, outer_proc)
+        target = spawn_child('target', case, row, uid, gid, outer_proc, (lambda: gate('production-target-before-setup', outer_proc)) if gate else None)
+        sibling = spawn_child('sibling', case, row, uid, gid, outer_proc, (lambda: gate('production-sibling-before-setup', outer_proc)) if gate else None)
         if case == 'nested-overmount':
             command('mount', '--bind', str(other / 'nested'), str(alias / 'nested')); nested = True
         request = {'version': 1, 'case': case, 'resourceKind': resource_kind, 'fixtureRoot': str(row),
@@ -243,7 +247,8 @@ def row_case(root, node, outer_proc, outer_pid_ns, outer_mount_ns, case, resourc
                 os.write(target['control'], b'r')
                 if bounded_line(target['ready']).get('released') is not True: raise RuntimeError('release unverified')
             target_token, sibling_token = token(target['pid']), token(sibling['pid'])
-            response = invoke(node, request, action, target, sibling, uid, gid, proof)
+            response = invoke(node, request, action, target, sibling, uid, gid, proof,
+                              (lambda: gate('production-reader-before-exec', outer_proc)) if gate else None, gate_fds)
             if not alive(sibling['handle']): raise RuntimeError('unrelated sibling exited')
             target_alive = alive(target['handle'])
             if proof:
@@ -279,14 +284,15 @@ def row_case(root, node, outer_proc, outer_pid_ns, outer_mount_ns, case, resourc
                 for key in ('handle', 'control', 'ready'): os.close(child[key])
 
 
-def capacity_case(root, node, outer_proc):
+def capacity_case(root, node, outer_proc, gate=None, gate_fds=()):
     capacity = root / 'capacity'
     capacity.mkdir(mode=0o700)
     original = os.lstat(capacity)
     children = []
     try:
-        for _ in range(20):
-            children.append(spawn_child('sibling', 'capacity', capacity, 0, 0, outer_proc))
+        for index in range(20):
+            children.append(spawn_child('sibling', 'capacity', capacity, 0, 0, outer_proc,
+                (lambda: gate(f'capacity-child-{index}-before-setup', outer_proc)) if gate else None))
         node_bin = str(pathlib.Path(node).parent)
         npm = shutil.which('npm', path=node_bin + os.pathsep + os.environ.get('PATH', ''))
         if not npm: raise RuntimeError('npm unavailable for capacity case')
@@ -295,7 +301,8 @@ def capacity_case(root, node, outer_proc):
                'TMPDIR': str(capacity), 'CZR_TEST_CAPACITY_DIR': str(capacity),
                'NODE_OPTIONS': '--import ' + str(checkout / 'packages/cezar/scripts/test-fallback-sandbox.mjs')}
         code, stdout, stderr = bounded_output([npm, 'test', '--',
-            'packages/cezar/src/delegation/authoritative-capacity-ci.test.ts', '--reporter=dot'], b'', 0, 0, 120, env)
+            'packages/cezar/src/delegation/authoritative-capacity-ci.test.ts', '--reporter=dot'], b'', 0, 0, 120, env,
+            (lambda: gate('capacity-runner-before-exec', outer_proc)) if gate else None, gate_fds)
         print(json.dumps({'capacityOutput': stdout.decode(errors='replace'), 'stderr': stderr.decode(errors='replace'),
                           'exit': code, 'idleChildren': len(children)}), flush=True)
         if code or any(not alive(child['handle']) for child in children):
@@ -314,7 +321,7 @@ def capacity_case(root, node, outer_proc):
             for key in ('handle', 'control', 'ready'): os.close(child[key])
 
 
-def production_rows(root, node, outer_pid_ns, outer_mount_ns, proof=False):
+def production_rows(root, node, outer_pid_ns, outer_mount_ns, proof=False, gate=None, capacity_gate=False, gate_fds=()):
     outer_proc = os.open('/proc', os.O_RDONLY | os.O_DIRECTORY)
     try:
         command('mount', '--make-rprivate', '/')
@@ -325,7 +332,8 @@ def production_rows(root, node, outer_pid_ns, outer_mount_ns, proof=False):
         mounts = pathlib.Path('/proc/self/mountinfo').read_text().splitlines()
         if any(any(field.startswith(('shared:', 'master:')) for field in line.split(' - ', 1)[0].split()) for line in mounts):
             raise RuntimeError('mount namespace propagation is not private')
-        for case in (('private-bind-closed-fd',) if proof else CASES):
+        gate_fds = (*gate_fds, outer_proc) if gate else ()
+        for case in (() if capacity_gate else (('private-bind-closed-fd',) if proof else CASES)):
             uid = gid = 0
             if case == 'restricted-user':
                 account = pwd.getpwnam('nobody'); uid, gid = account.pw_uid, account.pw_gid
@@ -333,9 +341,9 @@ def production_rows(root, node, outer_pid_ns, outer_mount_ns, proof=False):
                 os.chown(root, uid, gid)
             try:
                 for resource_kind in ('worktree', 'scratch'):
-                    row_case(root, node, outer_proc, outer_pid_ns, outer_mount_ns, case, resource_kind, uid, gid, proof)
+                    row_case(root, node, outer_proc, outer_pid_ns, outer_mount_ns, case, resource_kind, uid, gid, proof, gate, gate_fds)
             finally:
                 if uid: os.chown(root, 0, 0)
-        if not proof: capacity_case(root, node, outer_proc)
+        if not proof: capacity_case(root, node, outer_proc, gate, gate_fds)
         print(json.dumps({'productionComplete': True}), flush=True)
     finally: os.close(outer_proc)

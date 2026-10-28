@@ -18,6 +18,10 @@ from unittest.mock import patch
 PROBE = pathlib.Path(__file__).with_name('linux-mount-alias-probe.py')
 GATES = ('wrapper-before-exec-unshare', 'init-before-mount', 'fork-child-before-chroot')
 ORDER = ('controller-start', *GATES)
+PRODUCTION = ('controller-start', 'wrapper-before-exec-unshare', 'init-before-mount',
+              'production-target-before-setup', 'production-sibling-before-setup', 'production-reader-before-exec')
+CAPACITY = ('controller-start', 'wrapper-before-exec-unshare', 'init-before-mount',
+            *(f'capacity-child-{index}-before-setup' for index in range(20)), 'capacity-runner-before-exec')
 LIMIT = 4 * 1024 * 1024
 
 
@@ -41,7 +45,7 @@ def remove_after_teardown(fixture, identity, handles, deadline):
     shutil.rmtree(fixture)
 
 
-def run_case(target, signum, action='signal'):
+def run_case(target, signum, action='signal', mode=None, node=None):
     notify_read, notify_write = os.pipe()
     release_read, release_write = os.pipe()
     proc = None
@@ -56,7 +60,12 @@ def run_case(target, signum, action='signal'):
     seen = []
     deadline = time.monotonic() + 45
     try:
-        proc = subprocess.Popen([sys.executable, str(PROBE), '--gated', str(notify_write), str(release_read)],
+        order = PRODUCTION if mode == 'row' else CAPACITY if mode == 'capacity' else ORDER
+        args = [sys.executable, str(PROBE), '--gated', str(notify_write), str(release_read)]
+        if mode:
+            if not node: raise RuntimeError('Node unavailable for production lifecycle')
+            args = [sys.executable, str(PROBE), '--gated-production', str(notify_write), str(release_read), node, mode]
+        proc = subprocess.Popen(args,
                                 pass_fds=(notify_write, release_read), stdin=subprocess.DEVNULL,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         controller = os.pidfd_open(proc.pid)
@@ -94,7 +103,7 @@ def run_case(target, signum, action='signal'):
                             fixture_identity = (info.st_dev, info.st_ino)
                         continue
                     label, pid = record.get('gate'), record.get('pid')
-                    if len(seen) >= len(ORDER) or label != ORDER[len(seen)] or not isinstance(pid, int) or pid <= 1:
+                    if len(seen) >= len(order) or label != order[len(seen)] or not isinstance(pid, int) or pid <= 1:
                         raise RuntimeError('invalid gate identity')
                     if label == 'controller-start':
                         if pid != proc.pid or not alive(controller): raise RuntimeError('controller identity changed')
@@ -150,6 +159,8 @@ def run_case(target, signum, action='signal'):
 
 def main():
     if os.geteuid() != 0: raise RuntimeError('private lifecycle CI fixture requires root')
+    if len(sys.argv) != 2: raise RuntimeError('expected Node executable')
+    node = sys.argv[1]
     failed_teardown_case()
     credential_guard_cases()
     invalid_gate_cases()
@@ -158,6 +169,13 @@ def main():
             run_case(gate, signum)
         run_case(gate, signal.SIGKILL, 'eof')
         run_case(gate, signal.SIGKILL, 'after-release')
+    for mode, order in (('row', PRODUCTION), ('capacity', CAPACITY)):
+        targets = order[3:] if mode == 'row' else (order[3], order[-1])
+        for gate in targets:
+            for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGKILL):
+                run_case(gate, signum, mode=mode, node=node)
+            run_case(gate, signal.SIGKILL, 'eof', mode, node)
+            run_case(gate, signal.SIGKILL, 'after-release', mode, node)
 
 
 def failed_teardown_case():

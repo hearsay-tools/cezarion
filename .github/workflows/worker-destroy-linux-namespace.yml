@@ -42,7 +42,7 @@ jobs:
       - name: Observe private mount namespace aliases
         run: sudo -n -- python3 .github/scripts/linux-mount-alias-probe.py --observer "$(command -v node)"
       - name: Verify gated probe teardown
-        run: sudo -n -- python3 .github/scripts/linux-mount-alias-lifecycle.py
+        run: sudo -n -- python3 .github/scripts/linux-mount-alias-lifecycle.py "$(command -v node)"
       - name: Exercise production reaper in private namespaces
         run: |
           set -o pipefail

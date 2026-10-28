@@ -113,7 +113,7 @@ def verify_private_fixture(fixture, parent_mount_ns):
     return root
 
 
-def gate(label, notify_fd, release_fd):
+def gate(label, notify_fd, release_fd, outer_proc=None):
     if notify_fd < 0 or release_fd < 0:
         if notify_fd != -1 or release_fd != -1:
             raise RuntimeError('invalid gate handles')
@@ -126,7 +126,7 @@ def gate(label, notify_fd, release_fd):
             or fcntl.fcntl(notify_fd, fcntl.F_GETFL) & os.O_ACCMODE != os.O_WRONLY
             or fcntl.fcntl(release_fd, fcntl.F_GETFL) & os.O_ACCMODE != os.O_RDONLY):
         raise RuntimeError('invalid gate handles')
-    status = read_bounded('/proc/self/status')
+    status = read_bounded('self/status', outer_proc) if outer_proc is not None else read_bounded('/proc/self/status')
     if not isinstance(status, str):
         raise RuntimeError('gate identity unavailable')
     host_pid = int(next(line for line in status.splitlines() if line.startswith('NSpid:')).split()[1])
@@ -169,7 +169,9 @@ def child(fixture, lifeline, parent_mount_ns, notify_fd, release_fd, production_
     gate('init-before-mount', notify_fd, release_fd)
     if production_node:
         from linux_reaper_fixture import production_rows
-        production_rows(root, production_node, parent_pid_ns, parent_mount_ns, proof == '--proof')
+        production_rows(root, production_node, parent_pid_ns, parent_mount_ns, proof == '--proof',
+                        (lambda label, outer: gate(label, notify_fd, release_fd, outer)) if notify_fd >= 0 else None,
+                        proof == '--capacity-gate', (notify_fd, release_fd) if notify_fd >= 0 else ())
         return
     owned, alias, other = (root / name for name in ('owned', 'alias', 'other'))
     for path in (owned, alias, other, owned / 'nested', other / 'nested'):
@@ -258,7 +260,7 @@ def credential_safe_executable(name):
     return path
 
 
-def run_probe(fixture, notify_fd=-1, release_fd=-1, observer=None, production_node=None, proof=False):
+def run_probe(fixture, notify_fd=-1, release_fd=-1, observer=None, production_node=None, proof=False, capacity_gate=False):
     credential_safe_executable(sys.executable)
     if observer: observer = credential_safe_executable(observer)
     if production_node: production_node = credential_safe_executable(production_node)
@@ -271,6 +273,7 @@ def run_probe(fixture, notify_fd=-1, release_fd=-1, observer=None, production_no
     if production_node:
         command += [production_node, parent_pid_ns]
         if proof: command.append('--proof')
+        if capacity_gate: command.append('--capacity-gate')
     print(json.dumps({'command': command, 'scope': 'existing user namespace; disposable mount and PID namespaces'}), flush=True)
     parent_pid = os.getpid()
     gate_fds = (notify_fd, release_fd) if notify_fd >= 0 and release_fd >= 0 else ()
@@ -366,18 +369,19 @@ def main():
         child(sys.argv[2], int(sys.argv[3]), sys.argv[4], int(sys.argv[5]), int(sys.argv[6]),
               *sys.argv[7:]); return
     observer = sys.argv[2] if len(sys.argv) == 3 and sys.argv[1] == '--observer' else None
-    production_node = sys.argv[2] if len(sys.argv) == 3 and sys.argv[1] in ('--production', '--production-proof') else None
+    gated_production = len(sys.argv) == 6 and sys.argv[1] == '--gated-production' and sys.argv[5] in ('row', 'capacity')
+    production_node = sys.argv[4] if gated_production else (sys.argv[2] if len(sys.argv) == 3 and sys.argv[1] in ('--production', '--production-proof') else None)
     proof = len(sys.argv) == 3 and sys.argv[1] == '--production-proof'
     if (len(sys.argv) not in (1, 4) and observer is None and production_node is None) or (len(sys.argv) == 4 and sys.argv[1] != '--gated'):
         raise RuntimeError('invalid probe arguments')
-    notify_fd, release_fd = (int(sys.argv[2]), int(sys.argv[3])) if len(sys.argv) == 4 else (-1, -1)
+    notify_fd, release_fd = (int(sys.argv[2]), int(sys.argv[3])) if len(sys.argv) == 4 or gated_production else (-1, -1)
     if (notify_fd < 0) != (release_fd < 0):
         raise RuntimeError('invalid gate handles')
     gate('controller-start', notify_fd, release_fd)
     fixture = tempfile.mkdtemp(prefix='cez-mount-probe-')
     print(json.dumps({'fixture': fixture}), flush=True)
     try:
-        run_probe(fixture, notify_fd, release_fd, observer, production_node, proof)
+        run_probe(fixture, notify_fd, release_fd, observer, production_node, proof, gated_production and sys.argv[5] == 'capacity')
     except BaseException:
         print(json.dumps({'fixture_retained': fixture}), flush=True)
         raise
