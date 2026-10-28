@@ -2435,6 +2435,63 @@ runners carry `scenario-unconstructible` exemptions naming the version inspected
 none starts a native subagent from skill or command frontmatter outside its D1
 control.
 
+### Native cross-session messaging at shipped defaults (D3)
+
+Spec `.ai/specs/2026-10-27-task-communication-protocol.md` § 11 and
+hearsay-tools/cezarion#1994. A runner's native cross-session messages bypass cezar's
+recorded conversations: they carry no ledger, cockpit attribution, receipt or deadline,
+and no protection for human questions. Cezar tasks talk through `cez message` with
+`CEZ_DELEGATION=1`. Every session's instructions (`handoffInstructions` in
+`packages/cezar/src/handoff.ts`, "Messaging other tasks") say so at shipped defaults
+and under D1. The table records each runner's entry points, as inspected on the
+installed versions on 2026-10-27.
+
+| Runner (inspected version) | Native cross-session entry points | Shipped default (`CEZ_DELEGATION` unset) | Under D1 |
+| --- | --- | --- | --- |
+| Claude Code 2.1.311 | Outbound: `SendMessage` and `ListAgents`. They reach other local sessions, cloud and Remote Control sessions, and also the session's own subagents, background agents and teammates. Inbound: other sessions' `SendMessage`, governed by the `crossSessionInbound` setting (`accept`, `hold`, `refuse`; unset delivers when the sender's permission-mode class matches). | Inbound refused: every launch passes `--settings {"crossSessionInbound":"refuse"}`. Outbound tools stay callable, because a deny would also stop follow-ups to the session's own subagents and teammates, and break plugin agents and skills that call `SendMessage`. | Inbound refused, as at defaults. Outbound denied by `--disallowedTools Agent,Task,Workflow,SendMessage,ListAgents` (hearsay-tools/cezarion#1975). |
+| Codex 0.164.0 | None at defaults. The `multi_agent` tools (`spawn_agent`, `send_input`, `wait`) reach only agents of the same session. The cross-thread `agent_message_board` feature is "under development" and off by default. | No control: cezar sends no flag for an unstable feature key. | `features.multi_agent` and `features.multi_agent_v2` off (D1). |
+| OpenCode 1.19.4 | No messaging tool and no inbound channel. The `task` tool with `task_id` resumes any session by ID without checking its parent. | No control. The `task` permission pattern matches only `subagent_type`, so no session rule blocks a foreign `task_id`, and a deny on `task` removes native subagents. Only the shell finds another session's ID, and the shell reaches that session directly (`opencode run --session <id>`); the same-user shell is outside hard isolation (spec § Out of scope). Blocking `task_id` alone would need a new OpenCode plugin and would not close the shell path. | `task` denied (D1). |
+| pi 1.4.0 | None built in. An extension may add a messaging tool. | No control: an extension's name cannot be discovered as messaging. | `subagent` excluded (D1). |
+| Cursor 2026.10.22-27dcf5f | The agent protocol defines `send_message` (to cloud agents); the CLI never sets `sendMessageEnabled` and has no handler. | Unreachable; no control needed. | `task_tool_call` left out of `--allowed-tools` (D1). |
+| OMP 18.13.1 | None in the default set (`get_state.dumpTools`: read, bash, edit, eval, glob, grep, find, task, wait, todo, web_search, write). `vibe_*` and `irc` are opt-in in the user's own config. | No control. | `task`, `wait` and `eval` removed (D1). |
+
+**Verification limits.** A bounded Claude Code 2.1.311 probe on 2026-10-27 sent only
+`/reload-plugins` as a stream-json user message (no model turn) with
+`--settings '{"crossSessionInbound":"refuse"}'` and got a normal init. This verifies
+that Claude accepts the flag. It does not verify the cross-session effect: that needs a
+model-driven `SendMessage` between two live sessions, which no probe here made. Claude
+ignores an unknown value of this setting without a warning (the same probe with
+`"bogus"` also started normally), so a renamed key or value fails open: other
+sessions' messages would reach the task again, and only the session instructions would
+remain.
+
+**User setup.** No row changes a user's MCP servers, plugins or tool settings. MCP
+tools are named `mcp__<server>__<tool>`, and the Claude flag is one setting in the
+`--settings` layer, which Claude merges with the user, project and local settings.
+The only behavior a user loses at shipped defaults is sending messages from their own
+other Claude sessions into a cezar task; human input reaches a task through the cockpit
+or `cez task send`.
+
+**D3** (hearsay-tools/cezarion#1994), in the per-runner `core/harness-*-parity.test.ts`
+files, drives each runner's `baseline` scenario on start and Continue with no
+`restrictNativeDelegation`. Claude's row is live: the argv carries the
+`crossSessionInbound: refuse` settings and no `--disallowedTools`. The other runners
+carry `capability-absent` exemptions naming the version inspected, pinned the other way
+round: their default wire carries no cross-session control. The day cezar adds one,
+that exemption must go.
+
+**Compatibility (2026-10-27, deliberate).** The one changed default is Claude's inbound
+refusal. Every Claude launch, with or without `CEZ_DELEGATION=1`, passes the setting, so
+the user's other Claude sessions can no longer send `SendMessage` text into a cezar task.
+That path was never a cezar surface: the text bypassed the cockpit, the ledger and the
+handling of human questions. Human input still reaches a task through the cockpit and
+`cez task send` outside a task. Outbound `SendMessage` and `ListAgents` stay callable at
+shipped defaults, and D1 still denies them. No runner's MCP servers, plugins or tool
+grants change, and the other runners send no new flag. The "Messaging other tasks"
+section is prose, not a marker: an older cezar never parses it. The setting is per launch
+and writes no file, so a revert restores the old behavior on the next launch, and no state
+migrates.
+
 Provisioning supplies the bundled absolute CLI invocation and fresh environment
 credentials for both parent and worker sessions; it never copies the parent's
 credential to a worker. With delegation disabled/unavailable, the intent is absent
