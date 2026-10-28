@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { existsSync, lstatSync, readFileSync, readlinkSync, readdirSync, realpathSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join, sep } from 'node:path';
@@ -39,7 +40,7 @@ it.skipIf(!directory)('measures a complete authoritative destroy in the private 
     const { workerId } = await f.service.spawn(f.caller, { task: 'capacity', baseline: 'parent-head', requestId: randomUUID() });
     const generation = f.store.commitWorkerExecutionStart(workerId);
     const workspace = await ensureOwnedWorkspace(f.root, f.store.getRun(workerId)!);
-    f.store.updateRun(workerId, { status: 'review', worktreePath: workspace.path, branch: workspace.branch });
+    f.store.updateRun(workerId, { status: RUN_STATUS.review, worktreePath: workspace.path, branch: workspace.branch });
     expect(f.store.commitWorkerExecutionComplete(workerId, generation)).toBe(true);
     const calls = vi.spyOn(reaper, 'reapDestroyHolders');
     const pids = readdirSync('/proc').filter(name => /^\d+$/.test(name));

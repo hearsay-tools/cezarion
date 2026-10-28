@@ -86,8 +86,11 @@ describe('mount alias candidates', () => {
 
   it('shares the work limit across mapping and link translations', () => {
     const mounts = parseAliasMounts('2 1 8:1 /fixture/owned /alias rw - ext4 /dev/root rw\n');
-    const budget = new AliasWorkBudget(12);
-    mappedAliasCandidates('1-2 r--p 0 08:01 42 /alias/file\n', '/', mounts, [own], budget);
+    class Meter extends AliasWorkBudget { used = 0; override spend(amount = 1) { this.used += amount; super.spend(amount); } }
+    const evidence = '1-2 r--p 0 08:01 42 /alias/file\n';
+    const meter = new Meter(); mappedAliasCandidates(evidence, '/', mounts, [own], meter);
+    const budget = new AliasWorkBudget(meter.used + 1);
+    mappedAliasCandidates(evidence, '/', mounts, [own], budget);
     expect(() => linkedAliasCandidates('/alias/file', '/', '08:01', 42n, mounts, [own], budget)).toThrow('work exceeds');
   });
 

@@ -99,30 +99,51 @@ export function locateOwnedRoot(path: string, mounts: readonly AliasMount[], bud
 }
 
 type IndexedPair = { root: OwnedMountRoot; mountOrder: number; rootOrder: number; base: string };
-export type AliasMountIndex = Map<string, Map<string, IndexedPair[]>>;
+type DeviceIndex = { points: Map<string, IndexedPair[]>; first: Set<string>; hasRoot: boolean };
+export type AliasMountIndex = Map<string, DeviceIndex>;
+
+/** Charge byte and component-dependent work before path construction or insertion. */
+function chargePaths(budget: AliasWorkBudget, ...paths: string[]): void {
+  budget.spend(1 + paths.reduce((total, path) => total + Math.ceil(path.length / 64), 0));
+  let components = 0;
+  for (const path of paths) for (const ch of path) if (ch === '/') components++;
+  budget.spend(components);
+}
 
 /** Build only intersections. Every source pair remains separate and ordered. */
-export function indexAliasMounts(mounts: readonly AliasMount[], budget: AliasWorkBudget, targetRoot = '/',
-  owned: readonly OwnedMountRoot[] = []): AliasMountIndex {
+export function indexAliasMounts(mounts: readonly AliasMount[], budget: AliasWorkBudget, targetRoot: string,
+  owned: readonly OwnedMountRoot[]): AliasMountIndex {
   if (!pathValid(targetRoot)) throw new Error('ambiguous reader or target path');
+  if (!Array.isArray(owned)) throw new Error('owned roots required');
   const result: AliasMountIndex = new Map();
   for (const [mountOrder, mount] of mounts.entries()) {
     for (const [rootOrder, root] of owned.entries()) {
       budget.spend();
       if (mount.dev !== root.dev) continue;
+      chargePaths(budget, mount.root, root.fsPath);
       const belowMount = suffix(root.fsPath, mount.root);
       const belowOwned = suffix(mount.root, root.fsPath);
       if (belowMount === undefined && belowOwned === undefined) continue;
       budget.spend(2);
+      chargePaths(budget, targetRoot, mount.point);
       const point = posix.join(targetRoot, mount.point);
-      // A trailing slash cannot match any valid observed path under suffix().
-      if (point !== '/' && point.endsWith('/')) continue;
-      const prefix = belowMount !== undefined ? posix.join(point, belowMount) : point;
-      const base = belowMount !== undefined ? root.path : posix.join(root.path, belowOwned!);
-      const points = result.get(mount.dev) ?? new Map();
-      const entries = points.get(prefix) ?? [];
+      // suffix() accepts the exact trailing-slash point, but no valid descendant.
+      const trailing = point !== '/' && point.endsWith('/');
+      if (trailing && belowOwned === undefined) continue;
+      chargePaths(budget, point, belowMount ?? '', root.path, belowOwned ?? '');
+      const prefix = trailing ? point : belowMount !== undefined ? posix.join(point, belowMount) : point;
+      const base = trailing ? posix.join(root.path, belowOwned!) : belowMount !== undefined ? root.path : posix.join(root.path, belowOwned!);
+      chargePaths(budget, prefix, base);
+      chargePaths(budget, prefix);
+      const end = prefix.indexOf('/', 1);
+      const first = prefix.slice(1, end === -1 ? undefined : end);
+      budget.spend();
+      const device = result.get(mount.dev) ?? { points: new Map(), first: new Set(), hasRoot: false };
+      const entries = device.points.get(prefix) ?? [];
       entries.push({ root, mountOrder, rootOrder, base });
-      points.set(prefix, entries); result.set(mount.dev, points);
+      device.points.set(prefix, entries);
+      if (prefix === '/') device.hasRoot = true; else device.first.add(first);
+      result.set(mount.dev, device);
     }
   }
   return result;
@@ -130,24 +151,33 @@ export function indexAliasMounts(mounts: readonly AliasMount[], budget: AliasWor
 
 function indexedCandidates(path: string, device: string, index: AliasMountIndex, budget: AliasWorkBudget,
   notify?: () => void): string[] {
-  const points = index.get(device), found: { pair: IndexedPair; prefix: string }[] = [];
+  chargePaths(budget, path);
+  const end = path.indexOf('/', 1);
+  const first = path.slice(1, end === -1 ? undefined : end);
+  budget.spend();
+  const bucket = index.get(device);
+  if (!bucket || (!bucket.hasRoot && !bucket.first.has(first))) return [];
+  const points = bucket.points, found: { pair: IndexedPair; prefix: string }[] = [];
   let current = path, provisional = false;
   for (;;) {
     budget.spend();
-    for (const pair of points?.get(current) ?? []) {
+    for (const pair of points.get(current) ?? []) {
       budget.spend();
       if (!provisional) { notify?.(); provisional = true; }
       budget.spend();
       found.push({ pair, prefix: current });
     }
     if (current === '/') break;
+    chargePaths(budget, current);
     current = posix.dirname(current);
   }
   found.sort((a, b) => { budget.spend(); return a.pair.mountOrder - b.pair.mountOrder || a.pair.rootOrder - b.pair.rootOrder; });
   const candidates = new Set<string>();
   for (const { pair, prefix } of found) {
     budget.spend();
+    chargePaths(budget, pair.base, path, prefix);
     const candidate = posix.join(pair.base, suffix(path, prefix)!);
+    chargePaths(budget, candidate);
     if (!pathValid(candidate)) throw new Error('invalid candidate');
     if (provisional) provisional = false;
     else notify?.();

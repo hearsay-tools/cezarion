@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -19,7 +20,7 @@ it('retains private alias evidence through completion and refuses resource reuse
     const path = join(f.root, '.ai/cezar/runs', workerId + '.execution.json');
     // Simulate a starting execution without launching any process.
     writeFileSync(path, JSON.stringify({ generation, phase: 'starting' }));
-    f.store.updateRun(workerId, { status: 'cancelled' });
+    f.store.updateRun(workerId, { status: RUN_STATUS.cancelled });
     f.store.commitDelegation([{ id: workerId, delegation: { ...run.delegation,
       destroy: { requestedAt: new Date().toISOString(), phase: 'incomplete', remaining: ['worktree'] } } as never }]);
     const resourceId = run.delegation.workspace.resourceId;

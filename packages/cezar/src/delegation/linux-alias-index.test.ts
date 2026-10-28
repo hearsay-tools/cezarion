@@ -55,7 +55,7 @@ it('preserves ambiguous forms and publication before later exhaustion', () => {
   }
   const index = indexAliasMounts(mounts, new AliasWorkBudget(), '/', [owned[0]!, owned[0]!]);
   const events: string[] = [];
-  expect(() => linkedAliasCandidates('/alias/file', '/', '08:01', 12n, mounts, [owned[0]!, owned[0]!], new AliasWorkBudget(6), () => events.push('candidate'), index)).toThrow('work exceeds');
+  expect(() => linkedAliasCandidates('/alias/file', '/', '08:01', 12n, mounts, [owned[0]!, owned[0]!], new AliasWorkBudget(20), () => events.push('candidate'), index)).toThrow('work exceeds');
   expect(events).toEqual(['candidate']);
 });
 
@@ -137,4 +137,62 @@ it('keeps invalid input and candidate limits in both translators', () => {
   expect(() => aliasCandidates('/alias/x', '/', '08:01', mounts, longRoot, new AliasWorkBudget(), longIndex, () => { published = true; })).toThrow('invalid candidate');
   expect(published).toBe(true);
   expect(() => aliasCandidates('/alias/x', '/', '08:01', mounts, longRoot)).toThrow('invalid candidate');
+});
+
+it('keeps exact trailing reader points without accepting descendants', () => {
+  const mounts = [{ dev: '8:1', root: '/fs', point: '/' }, { dev: '8:1', root: '/fs', point: '/nested/' }];
+  const roots = [{ path: '/owned', dev: '8:1', fsPath: '/fs' }];
+  const index = indexAliasMounts(mounts, new AliasWorkBudget(), '/chroot', roots);
+  for (const path of ['/chroot/', '/chroot/child', '/chroot/nested/', '/chroot/nested/child']) {
+    const before: string[] = [], after: string[] = [];
+    const expected = aliasCandidates(path, '/chroot', '08:01', mounts, roots, new AliasWorkBudget(), undefined, () => before.push('candidate'));
+    const actual = aliasCandidates(path, '/chroot', '08:01', mounts, roots, new AliasWorkBudget(), index, () => after.push('candidate'));
+    expect(actual, path).toEqual(expected); expect(after, path).toEqual(before);
+  }
+});
+
+it('charges more for deep paths during index construction', () => {
+  class Meter extends AliasWorkBudget { used = 0; override spend(amount = 1) { this.used += amount; super.spend(amount); } }
+  const measure = (path: string) => {
+    const meter = new Meter();
+    indexAliasMounts([{ dev: '8:1', root: '/', point: path }], meter, '/', [{ path: '/owned', dev: '8:1', fsPath: '/fs' }]);
+    return meter.used;
+  };
+  expect(measure('/a/b/c/d/e/f/g/h/i/j')).toBeGreaterThan(measure('/a'));
+});
+
+it('bounds dense long-prefix preprocessing before accepting a partial index', () => {
+  const deep = '/' + Array.from({ length: 100 }, () => 'part').join('/');
+  const mounts = Array.from({ length: 50 }, () => ({ dev: '8:1', root: '/', point: deep }));
+  const roots = Array.from({ length: 30 }, (_, i) => ({ path: `/owned${i}`, dev: '8:1', fsPath: `/fs${i}` }));
+  expect(() => indexAliasMounts(mounts, new AliasWorkBudget(1000), '/', roots)).toThrow('work exceeds');
+});
+
+it('filters only proven first-component misses and preserves root fallback', () => {
+  const roots = [{ path: '/owned', dev: '8:1', fsPath: '/fs' }];
+  const mounts = [{ dev: '8:1', root: '/fs', point: '/alias' }, { dev: '8:1', root: '/fs', point: '/' }];
+  for (const selected of [mounts.slice(0, 1), mounts]) {
+    const index = indexAliasMounts(selected, new AliasWorkBudget(), '/', roots);
+    for (const path of ['/', '/alias', '/alias/file', '/alias-other/file', '/other/file', '/long' + 'x'.repeat(300)]) {
+      for (const device of ['08:01', '08:02']) {
+        const old: string[] = [], next: string[] = [];
+        expect(aliasCandidates(path, '/', device, selected, roots, new AliasWorkBudget(), index, () => next.push('candidate')))
+          .toEqual(aliasCandidates(path, '/', device, selected, roots, new AliasWorkBudget(), undefined, () => old.push('candidate')));
+        expect(next).toEqual(old);
+      }
+    }
+  }
+  const index = indexAliasMounts(mounts, new AliasWorkBudget(), '/', roots);
+  expect(() => aliasCandidates('/bad/../path', '/', '08:01', mounts, roots, new AliasWorkBudget(), index)).toThrow();
+  expect(() => aliasCandidates('/unrelated', '/', 'bad-device', mounts, roots, new AliasWorkBudget(), index)).toThrow();
+  expect(() => indexAliasMounts(mounts, new AliasWorkBudget(), '/', undefined as never)).toThrow('owned roots required');
+});
+
+it('still visits a later interpretation after a first-component miss', () => {
+  const roots = [{ path: '/owned', dev: '8:1', fsPath: '/fs' }];
+  const mounts = [{ dev: '8:1', root: '/fs', point: '/alias' }];
+  let calls = 0;
+  expect(() => mappedAliasCandidates('1-2 r--p 0 08:01 42 /alias (deleted)\n', '/', mounts, roots,
+    new AliasWorkBudget(), () => { calls++; })).toThrow('ambiguous mapped path');
+  expect(calls).toBe(1);
 });
