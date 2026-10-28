@@ -1308,6 +1308,31 @@ await import(${JSON.stringify(MOCK)});
     expect(Date.now() - started).toBeLessThan(8_000);
   });
 
+  // The killed-by-signal branch also checks !terminatedByCezar; the teardown branch before it
+  // already takes every signal exit cezar caused (hearsay-tools/cezarion#2002 pin).
+  it('a SIGKILL cezar sent is a teardown note, never an error', async () => {
+    const events: AgentEvent[] = [];
+    const session = new OmpRunner({ bin: MOCK, killGraceMs: 100 }).startSession(
+      spec('mock:linger'), event => events.push(event), { autoEndAfterFirstTurn: true },
+    );
+    await expect(session.result).resolves.toBeDefined();
+    expect(events.filter(event => event.type === 'note' && event.message.includes('terminated by cezar'))).toEqual([
+      { type: 'note', message: 'omp CLI did not exit on its own after close; terminated by cezar (SIGKILL)' },
+    ]);
+    expect(events.filter(event => event.type === 'error')).toEqual([]);
+    expect(events.at(-1)).toEqual({ type: 'done' });
+  });
+
+  it('a non-zero exit with empty stderr fails with the bare exit code and no stderr note', async () => {
+    const bin = join(cwd, 'mock-omp-exit-3.mjs');
+    writeFileSync(bin, '#!/usr/bin/env node\nprocess.exit(3);\n', { mode: 0o755 });
+    const events: AgentEvent[] = [];
+    await expect(new OmpRunner({ bin }).startSession(spec('exit'), event => events.push(event)).result)
+      .rejects.toThrow(/^omp CLI exited with code 3$/);
+    expect(events.filter(event => event.type === 'error')).toEqual([{ type: 'error', message: 'omp CLI exited with code 3' }]);
+    expect(events.some(event => event.type === 'note' && event.message.startsWith('omp CLI stderr'))).toBe(false);
+  });
+
   it('ENOENT names omp and omp login', async () => {
     await expect(new OmpRunner({ bin: join(cwd, 'omp-does-not-exist') }).run(spec('x')))
       .rejects.toThrow(/omp-does-not-exist` not found on PATH: install OMP .* and run `omp login`/);
