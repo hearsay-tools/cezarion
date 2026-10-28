@@ -14,7 +14,13 @@ if (!token) throw Error('target incarnation unavailable');
 const old = mappedHolder(pid, [root], budget);
 const result = scanAliases(pid, token, attempt);
 verifyAliasScan(attempt);
-console.log(JSON.stringify({ case: name, oldMapped: old, current: result.outcome, scoped: !!result.scoped }));
+if (processStartToken(pid) !== token) throw Error('target incarnation changed during observation');
+// This legacy probe keeps its first mapping live through later rows. Do not
+// present cwd/fd or nested observations as independent regression coverage.
+// linux-reaper-regression.mjs provides independent fixtures and actual stops.
+console.log(JSON.stringify({ case: name, pid, startToken: token, readerUid: process.geteuid(),
+  coverage: 'selector-only', independentMappingFixture: name === 'private-bind-closed-fd',
+  oldMapped: old, current: result.outcome, scoped: !!result.scoped }));
 if (name === 'private-bind-closed-fd' && (old !== 'clear' || result.outcome !== 'held')) {
   throw Error('mapping-only production observation did not establish old miss and new hold');
 }
