@@ -416,3 +416,29 @@ export const workerCancelWaitRequestSchema = z.object({ waitId: z.uuid() }).stri
 export type WorkerCancelWaitRequest = z.infer<typeof workerCancelWaitRequestSchema>;
 export const workerCancelWaitResultSchema = z.object({ wait: workerWaitSchema }).strict();
 export type WorkerCancelWaitResult = z.infer<typeof workerCancelWaitResultSchema>;
+
+/**
+ * `cez message wait --peer` (hearsay-tools/cezarion#1995): a root task waits on 1–32 named peer
+ * root tasks, with a deadline of 1–1,800 s (default 600). The wait answers as its list entry does:
+ * its phase, and once it resolved, why and from which peer.
+ */
+export const peerWaitRequestSchema = z.object({
+  peerIds: workerIdsSchema,
+  timeoutSeconds: z.number().int().min(1).max(1800).default(600),
+}).strict();
+export type PeerWaitRequest = z.infer<typeof peerWaitRequestSchema>;
+export const peerWaitViewSchema = z.object({
+  id: z.uuid(),
+  peerIds: workerIdsSchema,
+  deadline: z.iso.datetime(),
+  phase: z.enum(['open', 'resolved', 'delivered', 'cancelled']),
+  reason: z.enum(['message', 'settled', 'timeout']).optional(),
+  peerRunId: z.uuid().optional(),
+  messageId: z.uuid().optional(),
+}).strict();
+export type PeerWaitView = z.infer<typeof peerWaitViewSchema>;
+export const peerWaitRegisteredSchema = z.object({ wait: peerWaitViewSchema, instruction: z.string().min(1).max(1_000) }).strict();
+export const peerCancelWaitResultSchema = z.object({ wait: peerWaitViewSchema }).strict();
+/** What `POST /delegation/wait` and `/cancel-wait` answer: a worker or request wait, or a peer wait. */
+export const delegationWaitResultSchema = z.union([workerWaitResultSchema, peerWaitRegisteredSchema]);
+export const delegationCancelWaitResultSchema = z.union([workerCancelWaitResultSchema, peerCancelWaitResultSchema]);
