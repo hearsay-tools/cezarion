@@ -1477,6 +1477,35 @@ function baseCells(runners: RunnerId[]): void {
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });
 
+    for (const spent of [0, MAX_AUTO_CONTINUES]) it(`${runner} U7q a persistently refused deferred answer at budget ${spent} keeps its replay ID and open question`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
+      await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined && store.getRun(run.id)?.status === RUN_STATUS.waiting);
+      const [human] = humanOpen(run.id);
+      const message = { id: randomUUID(), text: answerOf(run.id), createdAt: new Date().toISOString() };
+      store.commitHumanMessageBesideWaits(run.id, message);
+      store.updateRun(run.id, { automaticWakes: spent, waitDeliveryFailures: 2 });
+      engine().deferredMessages.set(run.id, [{ content: [{ type: 'text', text: message.text }], messageId: message.id }]);
+      const commit = store.commitOutcome.bind(store);
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.spyOn(store, 'commitOutcome').mockImplementation((id, outcomes, deps, options) => {
+        if (!(Array.isArray(outcomes) ? outcomes : [outcomes]).some(outcome => outcome.kind === 'answered')) return commit(id, outcomes, deps, options);
+        const unblock = blockRunWrites(join(root, '.ai/cezar'));
+        try { return commit(id, outcomes, deps, options); } finally { unblock(); }
+      });
+      const commits = recordCommits(join(root, '.ai/cezar'));
+      engine().flushDeferred(run.id);
+      commits.stop();
+      expect(store.getRun(run.id)?.queuedMessages?.some(entry => entry.id === message.id)).toBe(true);
+      expect(humanOpen(run.id).some(wait => wait.id === human!.id)).toBe(true);
+      expect(store.getRun(run.id)?.automaticWakes).toBe(0);
+      expect(store.getRun(run.id)?.waitDeliveryFailures).toBeUndefined();
+      commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(wait => wait.id === human!.id) &&
+        !!row.queuedMessages?.some(entry => entry.id === message.id), 'a persistently refused answer keeps its replay dependency');
+      manager.cancel(run.id);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+    });
+
     // hearsay-tools/cezarion#1906: the answer resets its accounting atomically, but its immediate
     // flush must still cancel an owed timer at the old cap. This guard passes on the old order too.
     it(`${runner} U7q a live answer at the cap keeps the flush decisions, final counters and notes`, async () => {

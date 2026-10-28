@@ -1,4 +1,5 @@
 import type { RunOutcome } from '../runs/outcome-commit.ts';
+import type { RunStore } from '../runs/store.ts';
 
 /**
  * The outcome lists `workflows/run.ts` commits through `RunStore.commitOutcome`
@@ -38,4 +39,22 @@ export function retryDeliveryOutcomes(outcomes: readonly RunOutcome[]): readonly
   const accounting = outcomes.filter(outcome => outcome.kind === 'counted');
   if (!accounting.length) return undefined;
   return outcomes.some(outcome => outcome.kind === 'message-delivered') ? accounting : outcomes;
+}
+
+/** Deferred delivery must commit before its queue entry disappears from memory. If the second
+ * write also fails, keep the question and replay ID and restart only the wake accounting.
+ * Other deliveries retain their existing best-effort recovery after the transport accepted them. */
+export function retryDeliveryCheckpoint(store: Pick<RunStore, 'commitOutcome'>, runId: string, outcomes: readonly RunOutcome[]):
+  { outcomes?: readonly RunOutcome[]; committed: boolean } {
+  const retry = retryDeliveryOutcomes(outcomes);
+  if (!retry) return { committed: false };
+  try {
+    const bestEffort = !retry.some(outcome => outcome.kind === 'message-delivered');
+    const { committed } = store.commitOutcome(runId, retry, {}, { bestEffort });
+    return { outcomes: retry, committed };
+  } catch {
+    const accounting = retry.filter(outcome => outcome.kind === 'charged' || outcome.kind === 'counted');
+    store.commitOutcome(runId, accounting, {}, { bestEffort: true });
+    return { committed: false };
+  }
 }
