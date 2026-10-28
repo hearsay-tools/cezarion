@@ -67,7 +67,7 @@ jobs:
           cd "$copy"
           pnpm install --frozen-lockfile
           set +e
-          sudo -n -- python3 .github/scripts/linux-mount-alias-probe.py --production "$(command -v node)" > "$RUNNER_TEMP/capacity-attribution-raw.log" 2>&1
+          sudo -n -- python3 .github/scripts/linux-mount-alias-probe.py --production "$(command -v node)" 2>&1 | cat > "$RUNNER_TEMP/capacity-attribution-raw.log"
           diagnostic_status=$?
           set -e
           python3 .github/scripts/capacity-attribution-extract.py "$RUNNER_TEMP/capacity-attribution-raw.log" "$RUNNER_TEMP/capacity-attribution.json"
