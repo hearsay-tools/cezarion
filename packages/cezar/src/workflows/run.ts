@@ -2087,10 +2087,10 @@ export class RunManager {
     return request;
   }
 
-  /** The boundary a turn end closes on when it is DONE, and what declared it. */
-  private recordDoneAtBoundary(state: ActiveRun, done: boolean, request: ActiveRun['doneRequested']): void {
+  /** The DONE boundary and close metadata; a refused DONE may retain metadata for readiness. */
+  private recordDoneAtBoundary(state: ActiveRun, done: boolean, request: ActiveRun['doneRequested'], keepClose = done): void {
     state.doneAtBoundary = done ? state.session : undefined;
-    state.doneClose = done ? { via: request ? 'cezar_done' : 'done-line', ...(request?.summary === undefined ? {} : { summary: request.summary }) } : undefined;
+    state.doneClose = keepClose ? { via: request ? 'cezar_done' : 'done-line', ...(request?.summary === undefined ? {} : { summary: request.summary }) } : undefined;
   }
 
   /** Goal achieved (agent contract, #347): the summary `cezar_done` gave as a note, the closing
@@ -9881,7 +9881,7 @@ export class RunManager {
   private keepSettledDone(state: ActiveRun, entry: 'turn-end' | 'ack' | 'ready' | 'gate', turn: SettledTurn,
     refused: CompletionRefusal | undefined, decision: TurnEndDecision): void {
     const keepDone = turn.done && (!refused || (decision.kind === 'defer' && !!decision.keepDone));
-    if (entry === 'turn-end') this.recordDoneAtBoundary(state, keepDone, turn.doneRequest);
+    if (entry === 'turn-end') this.recordDoneAtBoundary(state, keepDone, turn.doneRequest, turn.done);
     else if (entry === 'ack' && turn.done && !keepDone) state.doneAtBoundary = undefined;
   }
 
