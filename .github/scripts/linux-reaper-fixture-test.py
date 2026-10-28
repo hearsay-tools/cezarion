@@ -1,6 +1,8 @@
 """Pure protocol checks; this file starts no processes and reads no proc files."""
 import json
 import pathlib
+import stat
+from types import SimpleNamespace
 import runpy
 import unittest
 from unittest.mock import patch
@@ -51,6 +53,17 @@ class ProtocolTest(unittest.TestCase):
             self.assertEqual(details, {'exit': 13, 'stdout': stdout[:4096].decode(),
                                        'stderr': stderr[:4096].decode(),
                                        'stdoutBytes': len(stdout), 'stderrBytes': len(stderr)})
+
+    def test_restricted_owner_and_reader_access_fail_closed(self):
+        owner = fixture['restricted_owner']
+        self.assertEqual(owner(SimpleNamespace(st_mode=stat.S_IFREG, st_uid=1000, st_gid=100)), (1000, 100))
+        for mode, uid in ((stat.S_IFREG, 0), (stat.S_IFDIR, 1000)):
+            with self.assertRaisesRegex(RuntimeError, 'owner unavailable'):
+                owner(SimpleNamespace(st_mode=mode, st_uid=uid, st_gid=100))
+        check = fixture['check_reader_access']
+        for access in ((True, False), (False,)):
+            with patch.object(fixture['os'], 'access', side_effect=access), self.assertRaisesRegex(RuntimeError, 'cannot access'):
+                check('/node')
 
 
 if __name__ == '__main__':

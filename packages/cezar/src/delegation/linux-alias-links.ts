@@ -1,5 +1,5 @@
 import { closeSync, fstatSync, openSync, opendirSync, readlinkSync } from 'node:fs';
-import { AliasWorkBudget, indexAliasMounts, linkedAliasCandidates, type AliasMount, type MappedAliasCandidate, type OwnedMountRoot } from './linux-alias-model.ts';
+import { AliasWorkBudget, indexAliasMounts, linkedAliasCandidates, type AliasMount, type AliasMountIndex, type MappedAliasCandidate, type OwnedMountRoot } from './linux-alias-model.ts';
 import { linuxDeviceNumber } from './linux-alias-identity.ts';
 import type { ScopedLink } from './linux-alias-scope.ts';
 
@@ -24,10 +24,10 @@ function descriptorNames(path: string, budget: AliasWorkBudget): string[] {
 export interface ObservedLink extends ScopedLink { path: string }
 
 export function linkAliasCandidates(links: readonly ObservedLink[], targetRoot: string, mounts: readonly AliasMount[],
-  roots: readonly OwnedMountRoot[], budget: AliasWorkBudget, onCandidate?: () => void): { link: ObservedLink; candidate: MappedAliasCandidate }[] {
+  roots: readonly OwnedMountRoot[], budget: AliasWorkBudget, onCandidate?: () => void,
+  index: AliasMountIndex = indexAliasMounts(mounts, budget, targetRoot)): { link: ObservedLink; candidate: MappedAliasCandidate }[] {
   const result: { link: ObservedLink; candidate: MappedAliasCandidate }[] = [];
   if (links.length > MAX_LINKS) throw new Error('descriptor evidence exceeds bounds');
-  const index = indexAliasMounts(mounts, budget);
   for (const link of links) {
     budget.spend();
     if (!link.path.startsWith('/')) continue;

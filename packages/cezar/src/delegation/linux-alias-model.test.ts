@@ -86,7 +86,7 @@ describe('mount alias candidates', () => {
 
   it('shares the work limit across mapping and link translations', () => {
     const mounts = parseAliasMounts('2 1 8:1 /fixture/owned /alias rw - ext4 /dev/root rw\n');
-    const budget = new AliasWorkBudget(5);
+    const budget = new AliasWorkBudget(9);
     mappedAliasCandidates('1-2 r--p 0 08:01 42 /alias/file\n', '/', mounts, [own], budget);
     expect(() => linkedAliasCandidates('/alias/file', '/', '08:01', 42n, mounts, [own], budget)).toThrow('work exceeds');
   });

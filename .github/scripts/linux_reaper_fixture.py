@@ -3,7 +3,6 @@ import ctypes
 import json
 import os
 import pathlib
-import pwd
 import select
 import selectors
 import shutil
@@ -78,6 +77,16 @@ def drop(uid, gid):
         status = pathlib.Path('/proc/self/status').read_text()
         caps = next(line for line in status.splitlines() if line.startswith('CapEff:')).split()[1]
         if int(caps, 16): raise RuntimeError('restricted process retains capabilities')
+
+
+def restricted_owner(info):
+    if not stat.S_ISREG(info.st_mode) or not info.st_uid: raise RuntimeError('restricted driver owner unavailable')
+    return info.st_uid, info.st_gid
+
+
+def check_reader_access(node):
+    if not os.access(node, os.X_OK, effective_ids=True) or not os.access(DRIVER, os.R_OK, effective_ids=True):
+        raise RuntimeError('restricted reader cannot access node or driver')
 
 
 def mapped(path):
@@ -171,7 +180,9 @@ def verify_detached_target(target, alias, resource, resource_id, expected, origi
 def bounded_output(command_line, data, uid, gid, timeout, env=None, gate=None, gate_fds=()):
     def prepare():
         if gate: gate()
-        if uid: drop(uid, gid)
+        if uid:
+            drop(uid, gid)
+            check_reader_access(command_line[0])
     proc = subprocess.Popen(command_line, stdin=subprocess.PIPE,
                             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             preexec_fn=prepare if uid or gate else None, env=env, pass_fds=gate_fds)
@@ -373,8 +384,7 @@ def production_rows(root, node, outer_pid_ns, outer_mount_ns, proof=False, gate=
         for case in (() if capacity_gate else (('private-bind-closed-fd',) if proof else CASES)):
             uid = gid = 0
             if case == 'restricted-user':
-                account = pwd.getpwnam('nobody'); uid, gid = account.pw_uid, account.pw_gid
-                if not uid: raise RuntimeError('restricted UID unavailable')
+                uid, gid = restricted_owner(os.stat(DRIVER))
                 os.chown(root, uid, gid)
             try:
                 for resource_kind in ('worktree', 'scratch'):

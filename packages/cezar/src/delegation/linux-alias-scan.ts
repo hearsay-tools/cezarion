@@ -1,5 +1,5 @@
 import { closeSync, constants, lstatSync, openSync, readlinkSync, statSync } from 'node:fs';
-import { AliasBudgetExceeded, AliasWorkBudget, locateOwnedRoot, mappedAliasCandidates, parseAliasMounts, type MappedAliasCandidate, type OwnedMountRoot } from './linux-alias-model.ts';
+import { AliasBudgetExceeded, AliasWorkBudget, indexAliasMounts, locateOwnedRoot, mappedAliasCandidates, parseAliasMounts, type MappedAliasCandidate, type OwnedMountRoot } from './linux-alias-model.ts';
 import { linuxDeviceNumber, pinnedAliasIdentity } from './linux-alias-identity.ts';
 import { linkAliasCandidates, readAliasLinks, type ObservedLink } from './linux-alias-links.ts';
 import { processStartToken } from '../detached-process.ts';
@@ -120,9 +120,10 @@ export function scanAliases(pid: number, token: string | undefined, attempt: Ali
       }
       scoped = true;
     };
-    const candidates = mappedAliasCandidates(maps, rootPath, mounts, owned, budget, noteCandidate);
+    const index = indexAliasMounts(mounts, budget, rootPath);
+    const candidates = mappedAliasCandidates(maps, rootPath, mounts, owned, budget, noteCandidate, index);
     const observedLinks = readAliasLinks(procFd, budget);
-    const links = linkAliasCandidates(observedLinks, rootPath, mounts, owned, budget, noteCandidate);
+    const links = linkAliasCandidates(observedLinks, rootPath, mounts, owned, budget, noteCandidate, index);
     const inspect: typeof pinnedAliasIdentity = (root, path) => {
       const expected = attempt.rootIdentities[attempt.roots.indexOf(root)];
       if (!expected || expected === 'absent') throw new Error('owned alias root unavailable');

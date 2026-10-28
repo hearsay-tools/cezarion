@@ -98,25 +98,43 @@ export function locateOwnedRoot(path: string, mounts: readonly AliasMount[], bud
   return { path, dev: mount.dev, fsPath: posix.join(mount.root, suffix(path, mount.point)!) };
 }
 
-export function indexAliasMounts(mounts: readonly AliasMount[], budget: AliasWorkBudget): Map<string, AliasMount[]> {
-  const result = new Map<string, AliasMount[]>();
-  for (const mount of mounts) {
+export type AliasMountIndex = Map<string, Map<string, { mount: AliasMount; order: number }[]>>;
+
+export function indexAliasMounts(mounts: readonly AliasMount[], budget: AliasWorkBudget, targetRoot = '/'): AliasMountIndex {
+  if (!pathValid(targetRoot)) throw new Error('ambiguous reader or target path');
+  const result: AliasMountIndex = new Map();
+  for (const [order, mount] of mounts.entries()) {
     budget.spend();
-    const entries = result.get(mount.dev) ?? [];
-    entries.push(mount); result.set(mount.dev, entries);
+    const points = result.get(mount.dev) ?? new Map();
+    const point = posix.join(targetRoot, mount.point);
+    const entries = points.get(point) ?? [];
+    entries.push({ mount, order }); points.set(point, entries); result.set(mount.dev, points);
   }
   return result;
+}
+
+function indexedMounts(path: string, device: string, index: AliasMountIndex, budget: AliasWorkBudget): AliasMount[] {
+  const points = index.get(device), found: { mount: AliasMount; order: number }[] = [];
+  let current = path;
+  for (;;) {
+    budget.spend();
+    for (const entry of points?.get(current) ?? []) { budget.spend(); found.push(entry); }
+    if (current === '/') break;
+    current = posix.dirname(current);
+  }
+  found.sort((a, b) => { budget.spend(); return a.order - b.order; });
+  return found.map(entry => entry.mount);
 }
 
 /** Return candidate paths only. A caller must independently compare pinned inode/device
  * and recheck root, mount, namespace and process identity before signalling. */
 export function aliasCandidates(path: string, targetRoot: string, deviceHex: string,
-  targetMounts: readonly AliasMount[], owned: readonly OwnedMountRoot[], budget = new AliasWorkBudget(), index?: ReadonlyMap<string, readonly AliasMount[]>,
+  targetMounts: readonly AliasMount[], owned: readonly OwnedMountRoot[], budget = new AliasWorkBudget(), index?: AliasMountIndex,
   onCandidate?: () => void): string[] {
   if (!pathValid(path) || !pathValid(targetRoot)) throw new Error('ambiguous reader or target path');
   const device = devKey(deviceHex, 16);
   const candidates = new Set<string>();
-  for (const mount of index?.get(device) ?? (index ? [] : targetMounts)) {
+  for (const mount of index ? indexedMounts(path, device, index, budget) : targetMounts) {
     budget.spend();
     if (mount.dev !== device) continue;
     const readerPoint = posix.join(targetRoot, mount.point);
@@ -144,7 +162,7 @@ export interface MappedAliasCandidate { path: string; dev: string; ino: bigint }
  * filename. A caller separately checks the link's stat and its stability. */
 export function linkedAliasCandidates(path: string, targetRoot: string, deviceHex: string, ino: bigint,
   mounts: readonly AliasMount[], owned: readonly OwnedMountRoot[], budget = new AliasWorkBudget(), onCandidate?: () => void,
-  index?: ReadonlyMap<string, readonly AliasMount[]>): MappedAliasCandidate[] {
+  index?: AliasMountIndex): MappedAliasCandidate[] {
   const forms = path.endsWith(' (deleted)') ? [path, path.slice(0, -10)] : [path];
   const lists = forms.map(form => {
     const candidates = aliasCandidates(form, targetRoot, deviceHex, mounts, owned, budget, index, onCandidate);
@@ -175,12 +193,12 @@ export function scopedMappingStillPresent(content: string, identities: readonly 
 /** Parse exact map identities. Unknown paths remain unknown: an escaped newline
  * or deleted suffix has multiple interpretations in Linux maps. */
 export function mappedAliasCandidates(content: string, targetRoot: string,
-  targetMounts: readonly AliasMount[], owned: readonly OwnedMountRoot[], budget = new AliasWorkBudget(), onCandidate?: () => void): MappedAliasCandidate[] {
+  targetMounts: readonly AliasMount[], owned: readonly OwnedMountRoot[], budget = new AliasWorkBudget(), onCandidate?: () => void,
+  index = indexAliasMounts(targetMounts, budget, targetRoot)): MappedAliasCandidate[] {
   if (Buffer.byteLength(content) > MAX_BYTES) throw new Error('maps evidence exceeds bounds');
   const lines = content.split('\n');
   if (lines.length > 65_536) throw new Error('maps evidence exceeds bounds');
   const result: MappedAliasCandidate[] = [];
-  const index = indexAliasMounts(targetMounts, budget);
   for (const line of lines) {
     budget.spend();
     if (!line) continue;
