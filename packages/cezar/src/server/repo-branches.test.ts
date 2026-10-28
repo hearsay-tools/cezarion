@@ -424,6 +424,35 @@ describe('the branch classifier (issue 08 §A)', () => {
     });
   });
 
+  it('reads the same diff stat for a commit pair in every checkout, whatever its diff config (hearsay-tools/cezarion#2029)', async () => {
+    // A rename with one added line: 1 insertion with rename detection, 51/50 without.
+    writeFileSync(join(root, 'a.txt'), `${Array.from({ length: 50 }, (_, i) => i + 1).join('\n')}\n`);
+    await git(root, 'add', '-A');
+    await git(root, 'commit', '-q', '-m', 'fifty lines');
+    await git(root, 'checkout', '-q', '-b', 'cez/rename01');
+    await git(root, 'mv', 'a.txt', 'b.txt');
+    writeFileSync(join(root, 'b.txt'), `${Array.from({ length: 51 }, (_, i) => i + 1).join('\n')}\n`);
+    await git(root, 'commit', '-q', '-am', 'rename and add one');
+    await git(root, 'checkout', '-q', 'main');
+    const other = mkdtempSync(join(tmpdir(), 'cez-branches-clone-'));
+    try {
+      await git(other, 'clone', '-q', root, '.');
+      await git(other, 'branch', 'cez/rename01', 'origin/cez/rename01');
+      // Without the remote-tracking copy, the branch's commit is its own: not landed, not empty.
+      await git(other, 'update-ref', '-d', 'refs/remotes/origin/cez/rename01');
+      await git(other, 'config', 'diff.renames', 'false');
+      const runs = [runRecord('rename01-1', 'done')];
+      const statOf = async (at: string) =>
+        (await classifyBranches({ ...input({ runs }), root: at, hasRemote: false })).payload.branches.find((b) => b.name === 'cez/rename01')?.diffStat;
+      // The checkout with rename detection off is read first, so a cache keyed on the commits alone
+      // would hand its answer to the other one.
+      expect(await statOf(other)).toEqual({ additions: 1, deletions: 0 });
+      expect(await statOf(root)).toEqual({ additions: 1, deletions: 0 });
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
   describe('deleteBranches', () => {
     it('never lets two empty branches vouch for each other in one bulk delete', async () => {
       // Both fork from an unmerged topic tip with no commits of their own; then the topic goes.
