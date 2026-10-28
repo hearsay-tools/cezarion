@@ -70,13 +70,16 @@ export function projectConversationEvents(store: import('../runs/store.ts').RunS
           ...(input?.deliveredAt ? { deliveredAt: input.deliveredAt } : {}),
           ...(step === 'consumed' && input?.consumedAt ? { consumedAt: input.consumedAt } : {}) });
       }
-      const outcome = outcomes.get(message.id);
-      const outcomeProjectionId = outcome && `request-outcome:${outcome.requestId}${outcome.status === 'replied-late' ? ':replied-late' : ''}`;
-      if (outcome && outcomeProjectionId && !ids.has(outcomeProjectionId)) {
-        store.appendEvent(runId, { type: 'request-outcome', projectionId: outcomeProjectionId, outcome });
-      }
+      projectOutcome(store, runId, outcomes.get(message.id));
     }
   }
+}
+
+/** A request's outcome on one participant's transcript, once; a late reply gets its own projection. */
+function projectOutcome(store: Pick<import('../runs/store.ts').RunStore, 'appendEvent' | 'hasProjection'>, runId: string, outcome: RequestOutcome | undefined): void {
+  if (!outcome) return;
+  const projectionId = `request-outcome:${outcome.requestId}${outcome.status === 'replied-late' ? ':replied-late' : ''}`;
+  if (!store.hasProjection(runId, projectionId)) store.appendEvent(runId, { type: 'request-outcome', projectionId, outcome });
 }
 
 /** The record that makes a run a root task: every worker operation, no receipts yet. */
