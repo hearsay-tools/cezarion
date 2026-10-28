@@ -7075,7 +7075,7 @@ export class RunManager {
   ): Promise<void> {
     ciTools?.revoke(); state.revokeCiTools = undefined;
     delegation?.revoke(); state.revokeDelegation = undefined;
-    recordUsagePeaks(this.store, { isDisposedDelegatedRun: id => this.isDisposedDelegatedRun(id) }, runId);
+    this.recordUsagePeaks(runId);
     this.clearIdleTimer(state);
     this.clearAutosaveTimer(state);
     await this.saveWorktree(runId, state, 'turn end');
@@ -8142,7 +8142,7 @@ export class RunManager {
   private releaseStepSession(runId: string, state: ActiveRun, delegation: LaunchDelegation, ciTools: LaunchCiTools): void {
     ciTools?.revoke(); state.revokeCiTools = undefined;
     delegation?.revoke(); state.revokeDelegation = undefined;
-    recordUsagePeaks(this.store, { isDisposedDelegatedRun: id => this.isDisposedDelegatedRun(id) }, runId);
+    this.recordUsagePeaks(runId);
     this.clearIdleTimer(state);
     this.monitoring.delete(runId);
     this.waiting.delete(runId);
@@ -8549,6 +8549,10 @@ export class RunManager {
     const workflow = await this.reviveWorkflow(run);
     const skillName = workflow?.steps.find((s) => stepKind(s) === 'agent' && s.skill)?.skill?.trim();
     void this.autoNameRun(runId, skillName, run.task, { turnText, diffStat: statText });
+  }
+
+  private recordUsagePeaks(runId: string): void {
+    recordUsagePeaks(this.store, { isDisposedDelegatedRun: id => this.isDisposedDelegatedRun(id) }, runId);
   }
 
   /**
