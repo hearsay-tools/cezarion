@@ -2796,6 +2796,21 @@ function entriesCells(runners: RunnerId[]): void {
         expectOneNudge(p.id, refusal);
       });
 
+      // hearsay-tools/cezarion#2022: a human POST can finish its SSE turn before its HTTP
+      // acknowledgement. U27's named wire exemptions also apply to this ordering.
+      it(`${runner} U27 ${row} a human acknowledgement after its turn end still gets one refusal nudge`, async () => {
+        await lateAck(async release => {
+          const { p, w } = await parentWithWorker(runner);
+          const refusal = await blocked(w);
+          const before = turnEnds(p.id);
+          expect(manager.sendMessage(p.id, [{ type: 'text', text: `${done} delay-human-ack` }])).toBe(true);
+          await until(() => turnEnds(p.id) > before, () => timeline(p.id));
+          release();
+          await until(() => prompted(runner, refusal).length > 0 && nudgeNotes(p.id).length === 1 && store.getRun(p.id)?.status === 'waiting', () => timeline(p.id));
+          expectOneNudge(p.id, refusal);
+        }, 'delay-human-ack');
+      });
+
       it(`${runner} U27 ${row} a Continue's refused done gets one refusal nudge`, async () => {
         const { p, w } = await parentWithWorker(runner);
         const refusal = await blocked(w);

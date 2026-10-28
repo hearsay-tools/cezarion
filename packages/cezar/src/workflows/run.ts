@@ -9997,7 +9997,11 @@ export class RunManager {
   private carryOutCompletionNudge({ runId, state, session, stepId, refused, noteRefusal }: TurnEndCarry): TurnEndOutcome {
     const text = refused!.liveWorkerIds.length ? `${refused!.message} ${COMPLETION_WILL_WAIT}` : refused!.message;
     state.noWaitNudgeSawContent = false;
-    if (!session || !this.canAutoContinue(runId, state) || !this.submitAgentInput(runId, state, [{ type: 'text', text }])) {
+    const canNudge = session && this.canAutoContinue(runId, state);
+    if (!canNudge || !this.submitAgentInput(runId, state, [{ type: 'text', text }])) {
+      // A human prompt's HTTP acknowledgement may trail its SSE turn end. Keep DONE at
+      // this boundary so transport readiness retries the refused nudge, without a new turn.
+      if (canNudge && !state.agentInputError) state.doneAtBoundary = session;
       noteRefusal();
       this.parkForUser(runId, state, stepId);
       return this.parkedOutcome(runId);
