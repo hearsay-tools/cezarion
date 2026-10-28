@@ -118,7 +118,7 @@ describe('createCezarClient<AppType>', () => {
 
   it('does not offer the legacy surface', () => {
     // Only `/api/v1/*` is typed: the legacy paths stay frozen for existing callers
-    // (BACKWARD_COMPATIBILITY.md §2) rather than being advertised to new ones.
+    // (BACKWARD_COMPATIBILITY.md) rather than being advertised to new ones.
     // @ts-expect-error — `client.api['agent-config']` is not part of the typed contract.
     expect(() => client.api['agent-config']).toBeDefined();
   });

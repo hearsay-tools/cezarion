@@ -25,7 +25,7 @@ export function uiStatePath(repoRoot: string): string {
  * value verbatim, so a `Record<string, unknown>` here made the route name no key at all and the
  * per-route parity guard vacuous — the same defect `healthSnapshot` had. `UiState` is a
  * `z.looseObject`, so the index signature (and with it the round-trip promise of
- * BACKWARD_COMPATIBILITY.md §3) survives; what it adds is the NAMES of the keys the server knows.
+ * BACKWARD_COMPATIBILITY.md) survives; what it adds is the NAMES of the keys the server knows.
  *
  * Only sidebarLimits is normalized field by field through its contract schema. Unrelated
  * preferences retain their existing open-bag behavior. The file is user-editable JSON and is
