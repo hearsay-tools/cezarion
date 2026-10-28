@@ -5902,7 +5902,7 @@ export class RunManager {
 
   /** Bundled messages rode the answer's own write: delivered now, read when that turn ends. The
    *  answer's own outcomes (`with`: the human waits it answers, its charge) commit with them. A
-   *  refused write that carries a charge retries the whole batch best effort: the session has the
+   *  refused write that carries wake accounting retries the whole batch best effort: the session has the
    *  reply, and the charge never saves apart from it (hearsay-tools/cezarion#1805). Returns why the
    *  first write was refused. */
   private commitBundledDelivery(runId: string, state: ActiveRun, ids: readonly string[], also: readonly RunOutcome[] = []): string | undefined {
@@ -5913,7 +5913,7 @@ export class RunManager {
     try { this.store.commitOutcome(runId, outcomes); } catch (error) {
       refused = error instanceof Error ? error.message : String(error);
       console.warn(`[cez] bundled delivery checkpoint failed: ${refused}`);
-      if (!also.some(outcome => outcome.kind === 'charged')) return refused;
+      if (!also.some(outcome => outcome.kind === 'charged' || outcome.kind === 'counted')) return refused;
       this.store.commitOutcome(runId, outcomes, {}, { bestEffort: true });
     }
     if (ids.length) state.bundledInputIds = [...(state.bundledInputIds ?? []), ...ids];

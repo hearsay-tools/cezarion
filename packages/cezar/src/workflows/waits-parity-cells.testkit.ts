@@ -1431,6 +1431,35 @@ function baseCells(runners: RunnerId[]): void {
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });
 
+    it(`${runner} U7q a refused answer checkpoint still clears failures when the budget is zero`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
+      await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined && store.getRun(run.id)?.status === 'waiting');
+      const [human] = humanOpen(run.id);
+      store.updateRun(run.id, { automaticWakes: 0, waitDeliveryFailures: 2 });
+      const commit = store.commitOutcome.bind(store);
+      let refused = false;
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.spyOn(store, 'commitOutcome').mockImplementation((id, outcomes, deps, options) => {
+        const batch = Array.isArray(outcomes) ? outcomes : [outcomes];
+        if (id === run.id && !refused && batch.some(outcome => outcome.kind === 'answered')) {
+          refused = true;
+          throw Error('injected answer checkpoint failure');
+        }
+        return commit(id, outcomes, deps, options);
+      });
+      const commits = recordCommits(join(root, '.ai/cezar'));
+      expect(manager.sendMessage(run.id, [{ type: 'text', text: answerOf(run.id) }])).toBe(true);
+      commits.stop();
+      expect(refused).toBe(true);
+      expect(settled(run.id, human!.id)?.phase).toBe('delivered');
+      expect(store.getRun(run.id)?.waitDeliveryFailures).toBeUndefined();
+      commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(wait => wait.id === human!.id && wait.phase === 'delivered') ||
+        (row.automaticWakes === 0 && row.waitDeliveryFailures === undefined), 'a retried answer and its failure clear');
+      expect(manager.finish(run.id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+    });
+
     // hearsay-tools/cezarion#1906: the answer resets its accounting atomically, but its immediate
     // flush must still cancel an owed timer at the old cap. This guard passes on the old order too.
     it(`${runner} U7q a live answer at the cap keeps the flush decisions, final counters and notes`, async () => {
