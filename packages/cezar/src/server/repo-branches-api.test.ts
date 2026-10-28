@@ -153,6 +153,15 @@ describe('the repo branches API', () => {
     expect((await branches()).branches.map((b) => b.name)).toContain('mine'); // refs moved: recomputed
   });
 
+  it('GET /repo/branches/counts answers the same counts without the rows (hearsay-tools/cezarion#2029)', async () => {
+    await finishedTask(2);
+    await finishedTask(0);
+    const res = await apiRequest(app, '/api/v1/repo/branches/counts');
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ base: 'main', prStateKnown: true, counts: { notLanded: 1, cleanup: 1 }, allBranches: (await branches()).branches.length });
+    expect((await branches()).counts).toEqual({ notLanded: 1, cleanup: 1 });
+  });
+
   it('holds Continue off while a confirmed delete removes its task\'s branch', async () => {
     process.env.CEZ_DRY_RUN = '1';
     const { id, branch } = await finishedTask(1);

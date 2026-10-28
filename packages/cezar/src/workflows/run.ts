@@ -6086,14 +6086,7 @@ export class RunManager {
   private submitAgentInput(runId: string, state: ActiveRun, content: ContentBlock[], inputIds: readonly string[] = [], beforeHumanReset?: HumanAnswerBudget): boolean {
     const session = state.session;
     if (!session?.open || state.agentInputFlight || state.cancelled || state.finishRequested || state.agentInputError) return false;
-    // A pending question admits only a wake made of resolved-wait results and messages, at a turn
-    // boundary: it stays answerable, and nothing else is delivered until it is answered
-    // (hearsay-tools/cezarion#1233, #1235).
-    if (state.pendingHumanAsk) {
-      const run = this.store.getRun(runId);
-      const owed = new Set(run ? [...resolvedWaits(run).map(waitInputId), ...this.pendingConversationWakes(run, beforeHumanReset).map(input => input.id)] : []);
-      if (state.atTurnBoundary !== session || !inputIds.length || !inputIds.every(id => owed.has(id))) return false;
-    }
+    if (!this.admitsAgentInput(runId, state, session, inputIds, beforeHumanReset)) return false;
     // Every delivered turn ends with the waits still open.
     const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? [], { tools: !state.toolless });
     if (footer) content = [...content, { type: 'text', text: `\n\n${footer}` }];
@@ -6101,12 +6094,36 @@ export class RunManager {
     const refusal = !!this.store.getRun(runId)?.agentInputs?.some(input => input.purpose === 'completion-refusal' && inputIds.includes(input.id));
     const flight: NonNullable<ActiveRun['agentInputFlight']> = { session, inputIds,
       ...(this.waitWakeAdmitted.has(runId) && state.atTurnBoundary === session ? { admittedWake: true } : {}) };
-    // A batch with timer results is an automatic wake: it reserves one unit of the budget now, so a
-    // timer that comes due before this acknowledgement counts it, and gives it back if the batch is
-    // refused or its acknowledgement rejects (hearsay-tools/cezarion#1233).
+    // A batch with timer results is an automatic wake: it reserves one unit of the budget now, so a timer that comes due before this acknowledgement counts it, and gives it back if the batch is refused or its acknowledgement rejects (hearsay-tools/cezarion#1233).
     if (this.reservesAutomaticWake(runId, flight, inputIds, beforeHumanReset)) flight.wakeReserved = true;
-    const refund = (): void => { flight.wakeReserved = false; };
     state.agentInputFlight = flight;
+    const settled = this.sendAgentInput(runId, state, flight, content, refusal);
+    if (!settled) return false;
+    const deliveries = this.executions.get(runId)?.deliveries; deliveries?.add(settled);
+    void settled.then(() => deliveries?.delete(settled));
+    this.resumeParkedRun(runId, state, beforeHumanReset);
+    this.recordAgentInputTurn(runId, state, flight, refusal);
+    return true;
+  }
+  private recordAgentInputTurn(runId: string, state: ActiveRun, flight: NonNullable<ActiveRun['agentInputFlight']>, refusal: boolean): void {
+    const { session, inputIds } = flight;
+    if (flight.admittedWake || resolvedWaits(this.store.getRun(runId) ?? {}).some(wait => inputIds.includes(waitInputId(wait)))) state.waitWakeTurn = session;
+    // A refusal queued while the session was gone makes this the nudge's turn; any other input is a wake, which starts a fresh cycle (hearsay-tools/cezarion#1301). A live nudge carries no input.
+    if (refusal) this.awaitCompletionNudgeReply(runId, state, session);
+    else if (inputIds.length) this.startCompletionCycle(state);
+  }
+  private admitsAgentInput(runId: string, state: ActiveRun, session: NonNullable<ActiveRun['session']>, inputIds: readonly string[], beforeHumanReset?: HumanAnswerBudget): boolean {
+    // A pending question admits only a wake made of resolved-wait results and messages, at a turn boundary: it stays answerable, and nothing else is delivered until it is answered (hearsay-tools/cezarion#1233, #1235).
+    if (state.pendingHumanAsk) {
+      const run = this.store.getRun(runId);
+      const owed = new Set(run ? [...resolvedWaits(run).map(waitInputId), ...this.pendingConversationWakes(run, beforeHumanReset).map(input => input.id)] : []);
+      if (state.atTurnBoundary !== session || !inputIds.length || !inputIds.every(id => owed.has(id))) return false;
+    }
+    return true;
+  }
+  private sendAgentInput(runId: string, state: ActiveRun, flight: NonNullable<ActiveRun['agentInputFlight']>, content: ContentBlock[], refusal: boolean): Promise<void> | false {
+    const { session, inputIds } = flight;
+    const refund = (): void => { flight.wakeReserved = false; };
     const current = (): boolean => !this.disposed && this.active.get(runId) === state && state.session === session &&
       state.agentInputFlight === flight && !state.cancelled && !state.finishRequested && !this.workerExecutionStopped(runId) &&
       !!this.store.getRun(runId) && !this.executionBlockedByRootFinish(this.store.getRun(runId)!);
@@ -6115,10 +6132,7 @@ export class RunManager {
       this.latchAgentInputError(runId, state, session, `${checkpoint ? 'agent input delivery checkpoint failed' : 'agent input delivery failed'}: ${error instanceof Error ? error.message : String(error)}`);
     };
     let acknowledgement: false | Promise<void>;
-    // A wake beside a pending question tells the runner so: native wires refuse agent input while
-    // a portable CEZ:ASK is pending, and this input is not its answer. The question stays Cezar's
-    // and its card stays answerable; the provider's acknowledgement is still the checkpoint, and a
-    // rejected one fails the session like any other, leaving the waits resolved for a continuation.
+    // A wake beside a pending question tells the runner so: native wires refuse agent input while a portable CEZ:ASK is pending, and this input is not its answer. The question stays Cezar's and its card stays answerable; the provider's acknowledgement is still the checkpoint, and a rejected one fails the session like any other, leaving the waits resolved for a continuation.
     const besideQuestion = !!state.pendingHumanAsk;
     try {
       acknowledgement = besideQuestion ? session.sendAgentMessage(content, inputIds, { besideQuestion })
@@ -6128,18 +6142,14 @@ export class RunManager {
     if (!acknowledgement) { refund(); state.agentInputFlight = undefined; return false; }
     // Attach rejection handling before any persistence/capacity work can throw.
     flight.settled = acknowledgement.then(() => {
-      // A positive command ACK can precede a provider-close frame in the same
-      // read batch. Closing the transport afterwards does not revoke that ACK;
-      // explicit stop/disposal/replacement still revoke authority via current().
+      // A positive command ACK can precede a provider-close frame in the same read batch. Closing the transport afterwards does not revoke that ACK; explicit stop/disposal/replacement still revoke authority via current().
       if (!current()) return;
       try {
         if (inputIds.length) {
           const batch = analyseAcknowledgedInput(runId, state, flight, inputIds, this.store, this.waitWakeAdmitted, run => this.owesWake(run));
           if (!batch) return;
           const { accepted, resolvedIds, early, spent, observable, at, resumes } = batch;
-          // One commit (hearsay-tools/cezarion#1805): the messages, then each wait's delivery (a message
-          // a wait carries keeps its read receipt), the charge, the early reads, the cleared failure
-          // count and the resume (hearsay-tools/cezarion#1235).
+          // One commit (hearsay-tools/cezarion#1805): the messages, then each wait's delivery (a message a wait carries keeps its read receipt), the charge, the early reads, the cleared failure count and the resume (hearsay-tools/cezarion#1235).
           this.store.commitOutcome(runId, this.withFailuresCleared(runId, acknowledgedBatch({ accepted, resolvedIds, early, spent, observable, at }), accepted, resolvedIds.length > 0),
             resumes ? { patch: { status: transition('resume', () => this.store.getRun(runId)) }, resumeStepId: resolvedIds.length ? state.currentStepId : undefined } : {});
           this.applyAcknowledgedInput(runId, state, flight, batch, refusal);
@@ -6150,8 +6160,7 @@ export class RunManager {
       const authorized = current();
       state.agentInputFlight = undefined;
       if (!authorized || !session.open || state.agentSessionError || state.agentInputError) return;
-      // A liveness resubmission gets its own quiet window, and so does input acknowledged
-      // after its turn already ended: no later turn-end would arm one (#505 review).
+      // A liveness resubmission gets its own quiet window, and so does input acknowledged after its turn already ended: no later turn-end would arm one (#505 review).
       if (inputIds.some(id => state.unreadRetried?.has(id)) || state.atTurnBoundary === session) this.armUnreadInputTimer(runId, state);
       if (this.flushAgentInputs(runId)) return;
       this.settleIdleBoundary(runId, state, session);
@@ -6160,18 +6169,9 @@ export class RunManager {
       if (state.agentInputFlight === undefined) state.agentInputFlight = flight;
       try { fail(error, true); } finally { if (state.agentInputFlight === flight) state.agentInputFlight = undefined; }
     });
-    const deliveries = this.executions.get(runId)?.deliveries;
-    deliveries?.add(flight.settled);
-    void flight.settled.then(() => deliveries?.delete(flight.settled!));
-    this.resumeParkedRun(runId, state, beforeHumanReset);
-    if (flight.admittedWake || resolvedWaits(this.store.getRun(runId) ?? {}).some(wait => inputIds.includes(waitInputId(wait)))) state.waitWakeTurn = session;
-    // A refusal queued while the session was gone makes this the nudge's turn; any other input is a
-    // wake, which starts a fresh cycle (hearsay-tools/cezarion#1301). A live nudge carries no input.
-    if (refusal) {
-      this.awaitCompletionNudgeReply(runId, state, session);
-    } else if (inputIds.length) this.startCompletionCycle(state);
-    return true;
+    return flight.settled;
   }
+
 
   /** A batch with timer results is an automatic wake, and so is an admitted wake turn a peer message
    *  opens (spec 2026-10-27-task-communication-protocol § 8). Past the budget a peer message opens

@@ -144,6 +144,15 @@ export const repoBranchesResponseSchema = z.object({
 });
 export type RepoBranchesResponse = z.infer<typeof repoBranchesResponseSchema>;
 
+/** `GET /api/v1/repo/branches/counts` — the same classification's counts, without the rows and
+ *  without a diff stat per branch: what the always-mounted Git sidebar reads
+ *  (hearsay-tools/cezarion#2029). `allBranches` counts what the All branches list shows: every
+ *  name `GET /repo` lists plus every local branch, so the `cez/*` ones too. */
+export const repoBranchCountsResponseSchema = repoBranchesResponseSchema
+  .pick({ base: true, prStateKnown: true, counts: true })
+  .extend({ allBranches: z.number() });
+export type RepoBranchCountsResponse = z.infer<typeof repoBranchCountsResponseSchema>;
+
 /** `POST /api/v1/repo/branches/delete`. `confirm` must equal the branch name to delete a
  *  `not-landed` or `orphan` branch, which is only ever deleted alone. */
 export const deleteBranchesInputSchema = z.object({

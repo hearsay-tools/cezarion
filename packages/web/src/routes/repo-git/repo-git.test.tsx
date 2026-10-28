@@ -132,6 +132,19 @@ interface SentRequest {
 const jsonResponse = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
+/** What the stub answers to a GET with no override, by path. */
+const GET_FIXTURES = new Map<string, () => unknown>([
+  ['/api/v1/repo', () => REPO],
+  ['/api/v1/repo/branches', () => BRANCHES],
+  ['/api/v1/repo/branches/counts', () => ({ base: BRANCHES.base, prStateKnown: BRANCHES.prStateKnown, counts: BRANCHES.counts, allBranches: BRANCHES.branches.length })],
+  ['/api/v1/run-summaries', () => []],
+  ['/api/v1/repo/pull', () => ({ branches: ['feature', 'main'] })],
+  ['/api/v1/repo/changes', () => CHANGES],
+  ['/api/v1/repo/commit/abc1234?structured=1', () => COMMIT],
+  ['/api/v1/health', () => HEALTH],
+  ['/api/v1/github?limit=20', () => GITHUB],
+])
+
 /** Fetch stub in the house style (task-changes.test.tsx): records requests, serves the repo
  *  fixtures, and lets a test override specific `METHOD path` keys. */
 function stubFetch(overrides: Record<string, () => Response | Promise<Response>> = {}): SentRequest[] {
@@ -144,15 +157,8 @@ function stubFetch(overrides: Record<string, () => Response | Promise<Response>>
       sent.push({ path, method, body: typeof init.body === 'string' ? JSON.parse(init.body) : undefined })
       const override = overrides[`${method} ${path}`]
       if (override) return override()
-      if (method === 'GET' && path === '/api/v1/repo') return jsonResponse(REPO)
-      if (method === 'GET' && path === '/api/v1/repo/branches') return jsonResponse(BRANCHES)
-      if (method === 'GET' && path === '/api/v1/run-summaries') return jsonResponse([])
-      if (method === 'GET' && path === '/api/v1/repo/pull') return jsonResponse({ branches: ['feature', 'main'] })
-      if (method === 'GET' && path === '/api/v1/repo/changes') return jsonResponse(CHANGES)
-      if (method === 'GET' && path === '/api/v1/repo/commit/abc1234?structured=1') return jsonResponse(COMMIT)
-      if (method === 'GET' && path === '/api/v1/health') return jsonResponse(HEALTH)
-      if (method === 'GET' && path === '/api/v1/github?limit=20') return jsonResponse(GITHUB)
-      return jsonResponse({})
+      const fixture = method === 'GET' ? GET_FIXTURES.get(path) : undefined
+      return jsonResponse(fixture ? fixture() : {})
     }),
   )
   return sent
