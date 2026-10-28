@@ -1,4 +1,5 @@
 import type { RunOutcome } from '../runs/outcome-commit.ts';
+import type { RunStore } from '../runs/store.ts';
 
 /**
  * The outcome lists `workflows/run.ts` commits through `RunStore.commitOutcome`
@@ -24,7 +25,36 @@ export function acknowledgedBatch(batch: { accepted: readonly string[]; resolved
   ];
 }
 
-/** A human message: the human waits it answers, and a deferred message's queue entry. */
-export function answerOutcomes(messageId: string | undefined): RunOutcome[] {
-  return [{ kind: 'answered' }, ...(messageId ? [{ kind: 'message-delivered' as const, messageId }] : [])];
+/** A human message: its answered waits, deferred queue entry and restarted wake accounting. */
+export function answerOutcomes(messageId: string | undefined, automaticWakes: number | undefined): RunOutcome[] {
+  return [{ kind: 'answered' }, ...(messageId ? [{ kind: 'message-delivered' as const, messageId }] : []),
+    ...chargedIf(automaticWakes ? 0 : undefined), { kind: 'counted', waitDeliveryFailures: undefined }];
+}
+
+/** A refused charged delivery retries atomically. Without an old charge, a deferred answer
+ * keeps its replay ID and open question: only its failure clear retries. Live answers can
+ * retry the whole batch because no queue entry needs conservative recovery. */
+export function retryDeliveryOutcomes(outcomes: readonly RunOutcome[]): readonly RunOutcome[] | undefined {
+  if (outcomes.some(outcome => outcome.kind === 'charged')) return outcomes;
+  const accounting = outcomes.filter(outcome => outcome.kind === 'counted');
+  if (!accounting.length) return undefined;
+  return outcomes.some(outcome => outcome.kind === 'message-delivered') ? accounting : outcomes;
+}
+
+/** Deferred delivery must commit before its queue entry disappears from memory. If the second
+ * write also fails, keep the question and replay ID and restart only the wake accounting.
+ * Other deliveries retain their existing best-effort recovery after the transport accepted them. */
+export function retryDeliveryCheckpoint(store: Pick<RunStore, 'commitOutcome'>, runId: string, outcomes: readonly RunOutcome[]):
+  { outcomes?: readonly RunOutcome[]; committed: boolean } {
+  const retry = retryDeliveryOutcomes(outcomes);
+  if (!retry) return { committed: false };
+  try {
+    const bestEffort = !retry.some(outcome => outcome.kind === 'message-delivered');
+    const { committed } = store.commitOutcome(runId, retry, {}, { bestEffort });
+    return { outcomes: retry, committed };
+  } catch {
+    const accounting = retry.filter(outcome => outcome.kind === 'charged' || outcome.kind === 'counted');
+    store.commitOutcome(runId, accounting, {}, { bestEffort: true });
+    return { committed: false };
+  }
 }
