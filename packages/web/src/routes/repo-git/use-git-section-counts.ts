@@ -1,6 +1,7 @@
 import type { RepoResponse } from '@open-mercato/cezar-api-client'
 
-import { useProjectRepoBranchCounts, useProjectWorktrees } from '@/api/queries'
+import { useProjectWorktrees } from '@/api/queries'
+import { useProjectRepoBranchCounts } from '@/api/repo-branch-counts'
 import { formatMem } from '@/lib/tasks-table'
 
 import type { GitListSection } from './git-section-list'

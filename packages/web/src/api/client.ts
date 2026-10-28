@@ -47,7 +47,6 @@ import type {
   ReclaimWorktreeResponse,
   ReclaimWorktreesResponse,
   RemoveWorktreeResponse,
-  RepoBranchCountsResponse,
   RepoBranchesResponse,
   WorktreesResponse,
   ContinueResponse,
@@ -278,7 +277,7 @@ function errorFor(status: number, statusText: string, body: string): ApiError {
  * `Record<string, unknown>`) infers a weaker response than the DTO it replaces, so those wait
  * until the server tightens its own return types.
  */
-const cez = createCezarClient<AppType>({
+export const cez = createCezarClient<AppType>({
   // The base URL is resolved per request, not baked in at construction: this module is imported
   // before `main.tsx` configures it, and a `<meta>`-configured deployment must still take
   // effect. `hc` builds a root-relative URL, so prefixing here is the whole job.
@@ -330,7 +329,7 @@ function unscoped(url: string): string {
  * value — whose type the caller gets from the route, not from a hand-written declaration.
  */
 /** The per-request options `hc` takes, from this module's `ReadOptions`. */
-const init = (opts?: ReadOptions) => ({ init: { ...defined({ signal: opts?.signal }) } })
+export const init = (opts?: ReadOptions) => ({ init: { ...defined({ signal: opts?.signal }) } })
 
 /**
  * Accepts a route that answers more than one FORMAT — `/repo/commit/:sha` serves a structured
@@ -339,7 +338,7 @@ const init = (opts?: ReadOptions) => ({ init: { ...defined({ signal: opts?.signa
  * resolves to a branded error type rather than to `never`, which would have been assignable to
  * every caller's declared return type and failed only at runtime.
  */
-async function unwrap<R extends ClientResponse<unknown, number, ResponseFormat>>(
+export async function unwrap<R extends ClientResponse<unknown, number, ResponseFormat>>(
   res: R,
   label: string,
 ): Promise<OkJson<R>> {
@@ -730,15 +729,6 @@ export async function getRepoBranches(opts?: ReadOptions, projectId?: string): P
   return unwrap(
     await cez.api.v1.p[':projectId'].repo.branches.$get({ param: { projectId: projectId ?? queryScope() } }, init(opts)),
     '/repo/branches',
-  )
-}
-
-/** The branch classification's counts alone (hearsay-tools/cezarion#2029): what the Git sidebar
- *  reads, without the rows or a diff stat per branch. */
-export async function getRepoBranchCounts(opts?: ReadOptions, projectId?: string): Promise<RepoBranchCountsResponse> {
-  return unwrap(
-    await cez.api.v1.p[':projectId'].repo.branches.counts.$get({ param: { projectId: projectId ?? queryScope() } }, init(opts)),
-    '/repo/branches/counts',
   )
 }
 

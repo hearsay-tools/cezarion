@@ -43,7 +43,6 @@ import {
   getProjects,
   getRunnerModels,
   getRepo,
-  getRepoBranchCounts,
   getRepoBranches,
   getRunCommit,
   getRunCommits,
@@ -1361,17 +1360,6 @@ export function useProjectRepoBranches(scope: string) {
   return useQuery({
     queryKey: [scope, 'repo', 'branches'] as const,
     queryFn: ({ signal }) => getRepoBranches({ signal }, scope),
-  })
-}
-
-/** The branch classification's counts alone (`GET /repo/branches/counts`,
- *  hearsay-tools/cezarion#2029) for an EXPLICIT scope: the always-mounted Git sidebar reads these,
- *  so it never asks for a diff stat per branch. The key sits under `queryKeys.repoBranches`, so
- *  every invalidation of the full list reaches it too. */
-export function useProjectRepoBranchCounts(scope: string) {
-  return useQuery({
-    queryKey: [scope, 'repo', 'branches', 'counts'] as const,
-    queryFn: ({ signal }) => getRepoBranchCounts({ signal }, scope),
   })
 }
 

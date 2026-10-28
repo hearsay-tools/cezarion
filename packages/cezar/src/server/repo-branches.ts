@@ -11,9 +11,11 @@ import type { BranchClass, BranchPrState, RepoBranchCountsResponse, RepoBranchEn
 import { isSafeGitRef } from '../git-refs.ts';
 import { withWorktreeMutation } from '../git-worktree-lock.ts';
 import { ownedCleanupProtection, parseShortstat } from '../git-worktree.ts';
-import type { BranchOwner, RunStatus } from '../runs/store.ts';
+import { loadConfig } from '../config.ts';
+import type { BranchOwner, RunStatus, RunStore } from '../runs/store.ts';
+import type { RunManager } from '../workflows/run.ts';
 import { fetchGithubRefStatus, GH_REF_STATUS_MAX, refNumberFromUrl, type ReferenceStatus } from './github.ts';
-import { getBranches, type LogEntryWithParents } from './git.ts';
+import { getBranches, getRepoInfo, type LogEntryWithParents } from './git.ts';
 
 const exec = promisify(execFile);
 
@@ -173,6 +175,30 @@ export interface ClassifyInput {
   /** Claims the runs owning a branch for the length of its delete, or returns null when one is in
    *  use (`RunManager.claimForBranchCleanup`). Absent, a delete trusts the classification alone. */
   claimRuns?: (runIds: readonly string[]) => (() => void) | null;
+}
+
+/** The project a classification reads: its root, its runs and the run manager's liveness. */
+export interface ClassifyProject {
+  root: string;
+  store: Pick<RunStore, 'listBranchOwners'>;
+  manager: Pick<RunManager, 'isActive' | 'claimForBranchCleanup'>;
+}
+
+/** What the branch classifier reads for one project, or null outside a repository. */
+export async function classifyInputFor(project: ClassifyProject, forge: BranchForge): Promise<ClassifyInput | null> {
+  const info = await getRepoInfo(project.root);
+  if (!info) return null;
+  const config = await loadConfig(project.root);
+  return {
+    root: info.root,
+    runs: project.store.listBranchOwners(),
+    isActive: (id) => project.manager.isActive(id),
+    configuredBase: config.baseBranch,
+    currentBranch: info.branch,
+    hasRemote: Boolean(info.remote),
+    forge,
+    claimRuns: (ids) => project.manager.claimForBranchCleanup(ids),
+  };
 }
 
 export interface Classification {
