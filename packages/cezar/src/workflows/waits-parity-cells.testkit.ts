@@ -3041,6 +3041,46 @@ function entriesCells(runners: RunnerId[]): void {
       });
     });
 
+    it(`${runner} U27 accepted done retains its summary when a worker resumes before turn end and clears before human acknowledgement`, async () => {
+      await lateAck(async release => {
+        const { p, w } = await parentWithWorker(runner);
+        manager.requestWorkerStop(w.id);
+        expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
+        await collect(w.id);
+        const accept = manager.acceptDone.bind(manager);
+        const accepted = vi.spyOn(manager, 'acceptDone').mockImplementation((...args) => {
+          const answer = accept(...args);
+          // A concurrent worker resume after tool acceptance, before the native turn ends.
+          if (args[0] === p.id && answer.ok) fixtureUpdateRun(w.id, { status: RUN_STATUS.queued });
+          return answer;
+        });
+        const before = turnEnds(p.id), summary = 'held done summary shipped';
+        const text = `${toolCall('cezar_done', { summary })} delay-human-ack`;
+        expect(manager.sendMessage(p.id, [{ type: 'text', text }])).toBe(true);
+        const refused = () => store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).startsWith('Completion blocked:'));
+        await until(() => turnEnds(p.id) > before && (refused() || nudgeNotes(p.id).length === 1), () => timeline(p.id));
+        expect(accepted.mock.results.some(result => result.type === 'return' && result.value.ok)).toBe(true);
+        // Codex/Pi tool activity confirms the input before its held transport ACK: their
+        // executable wire gap sends the nudge already, rather than retaining a DONE boundary.
+        if (!refused()) {
+          expect(['codex', 'pi']).toContain(runner);
+          expect(nudgeNotes(p.id)).toHaveLength(1);
+          release();
+          expect(store.readEvents(p.id).filter(event => event.type === 'note' && event.message === summary)).toEqual([]);
+          expect(manager.isActive(p.id)).toBe(true);
+          return;
+        }
+        manager.requestWorkerStop(w.id);
+        expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
+        await collect(w.id);
+        release();
+        await until(() => !manager.isActive(p.id) && terminal.includes(store.getRun(p.id)?.status ?? ''), () => timeline(p.id));
+        expect(store.readEvents(p.id).filter(event => event.type === 'note' && event.message === summary)).toHaveLength(1);
+        expect(store.readEvents(p.id).filter(event => event.type === 'lifecycle' && event.message === 'goal achieved — session closed'))
+          .toEqual([expect.objectContaining({ via: 'cezar_done' })]);
+      }, 'delay-human-ack');
+    });
+
     // One refusal nudge and no wait: the nudge's own word.
     for (const settledWorker of [false, true]) {
       const row = settledWorker ? 'U20u' : 'U20';
@@ -3066,6 +3106,21 @@ function entriesCells(runners: RunnerId[]): void {
         expect(manager.sendMessage(p.id, [{ type: 'text', text: done }])).toBe(true);
         await until(() => prompted(runner, refusal).length > 0 && nudgeNotes(p.id).length === 1 && store.getRun(p.id)?.status === 'waiting');
         expectOneNudge(p.id, refusal);
+      });
+
+      // hearsay-tools/cezarion#2022: a human POST can finish its SSE turn before its HTTP
+      // acknowledgement. U27's named wire exemptions also apply to this ordering.
+      it(`${runner} U27 ${row} a human acknowledgement after its turn end still gets one refusal nudge`, async () => {
+        await lateAck(async release => {
+          const { p, w } = await parentWithWorker(runner);
+          const refusal = await blocked(w);
+          const before = turnEnds(p.id);
+          expect(manager.sendMessage(p.id, [{ type: 'text', text: `${done} delay-human-ack` }])).toBe(true);
+          await until(() => turnEnds(p.id) > before, () => timeline(p.id));
+          release();
+          await until(() => prompted(runner, refusal).length > 0 && nudgeNotes(p.id).length === 1 && store.getRun(p.id)?.status === 'waiting', () => timeline(p.id));
+          expectOneNudge(p.id, refusal);
+        }, 'delay-human-ack');
       });
 
       it(`${runner} U27 ${row} a Continue's refused done gets one refusal nudge`, async () => {
