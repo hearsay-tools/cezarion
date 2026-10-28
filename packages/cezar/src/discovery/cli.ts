@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { delegationErrorResponseSchema } from '@open-mercato/cezar-contract/delegation';
 import {
   discoveredRunnersSchema,
-  discoveryRequestSchema,
+  hostDiscoveryRequestSchema as discoveryRequestSchema,
 } from '@open-mercato/cezar-contract/discovery';
 import {
   providerStatusResponseSchema,

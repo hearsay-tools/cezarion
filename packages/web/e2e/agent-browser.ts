@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { visualSampleExpression } from './visual-ready'
 import { tmpdirExceedsSocketBudget } from '../../../.ai/scripts/resolve-browser-launch.mjs'
+import { readTestEnvDescriptor } from '../../../.ai/scripts/test-env-inputs.mjs'
 
 /**
  * The agent-browser provider seam. Every e2e spec drives the app through this module and
@@ -369,17 +370,10 @@ export function browserSpawnPlan(
 }
 
 /** The shared descriptor written by .ai/scripts/test-env-up.sh — QA and e2e attach to the
- *  exact same instance rather than each booting their own. */
+ *  exact same instance rather than each booting their own. It throws for an environment booted
+ *  from other settings than the tracked test-env.inputs.json (hearsay-tools/cezarion#1977). */
 export function readTestEnv(): EnvDescriptor {
-  try {
-    return JSON.parse(readFileSync(descriptorPath, 'utf8')) as EnvDescriptor
-  } catch (cause) {
-    throw new Error(
-      `cezar e2e: cannot read ${descriptorPath}. Run \`npm run test:e2e\`, which boots the env first; ` +
-        'if it did, the boot failed — see .ai/qa/test-env-app.log and .ai/qa/test-env-build.log.',
-      { cause },
-    )
-  }
+  return readTestEnvDescriptor(repoRoot) as EnvDescriptor
 }
 
 /**
