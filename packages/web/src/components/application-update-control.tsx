@@ -20,21 +20,33 @@ export type ApplicationUpdateControlProps = {
   offline?: boolean | undefined
 }
 
-/** The same compact control is rendered in the desktop sidebar and mobile drawer. */
-export function ApplicationUpdateControl({ version, latestVersion, state, onApplyUpdate, onRestart, error, busy = false, offline = false }: ApplicationUpdateControlProps) {
-  const [confirmOpen, setConfirmOpen] = React.useState(false)
-  const [tooltipOpen, setTooltipOpen] = React.useState(false)
-  const restartTrigger = React.useRef<HTMLButtonElement>(null)
-  const pending = React.useRef(false)
+function updateAvailability({ version, latestVersion, state, onApplyUpdate, onRestart }: ApplicationUpdateControlProps) {
   const ready = state?.status === 'ready'
   const preparing = state?.status === 'preparing'
   const restarting = state?.status === 'restarting'
   const available = Boolean(version && latestVersion && isNewerVersion(latestVersion, version))
   const canRestart = state?.supported && ready && Boolean(onRestart)
   const canApply = state?.supported && available && Boolean(onApplyUpdate)
+  return { preparing, restarting, canRestart, canApply, ready }
+}
+
+function updateActionState(props: ApplicationUpdateControlProps) {
+  const { version, latestVersion, state, busy = false } = props
+  const { preparing, restarting, canRestart, canApply, ready } = updateAvailability(props)
   const action = !state?.supported ? null : ready || restarting ? 'restart' : preparing || canApply ? 'update' : null
   const actionBusy = busy || preparing || restarting
   const tooltip = action === 'restart' ? 'Restart required' : preparing ? 'Preparing update' : `Update from v${version} to v${latestVersion}`
+
+  return { preparing, restarting, canRestart, canApply, action, actionBusy, tooltip }
+}
+
+/** The same compact control is rendered in the desktop sidebar and mobile drawer. */
+export function ApplicationUpdateControl({ version, latestVersion, state, onApplyUpdate, onRestart, error, busy = false, offline = false }: ApplicationUpdateControlProps) {
+  const [confirmOpen, setConfirmOpen] = React.useState(false)
+  const [tooltipOpen, setTooltipOpen] = React.useState(false)
+  const restartTrigger = React.useRef<HTMLButtonElement>(null)
+  const pending = React.useRef(false)
+  const { preparing, restarting, canRestart, canApply, action, actionBusy, tooltip } = updateActionState({ version, latestVersion, state, onApplyUpdate, onRestart, busy })
 
   const apply = () => {
     if (!canApply || actionBusy || offline || pending.current) return
