@@ -104,6 +104,17 @@ describe('root request completion without a live session', () => {
       expect.objectContaining({ requestId: request.id, status: 'sender-closed' }),
     ]);
   });
+  it('failure retires an accepted Finish intent with no peer or conversation', () => {
+    const run = rootTask();
+    const delegation = store.getRun(run.id)!.delegation;
+    if (delegation?.role !== 'root') throw Error('missing root');
+    store.commitDelegation([{ id: run.id, delegation: { ...delegation, finishRequestedAt: new Date().toISOString() } }]);
+    (manager as unknown as { settleFailedRun(id: string, error: string, capped: boolean): void })
+      .settleFailedRun(run.id, 'provider failed', false);
+    expect(store.getRun(run.id)).toMatchObject({ status: RUN_STATUS.failed, error: 'provider failed' });
+    expect(store.getRun(run.id)?.delegation).not.toHaveProperty('finishRequestedAt');
+    expect(store.getRun(run.id)?.delegation).not.toHaveProperty('conversation');
+  });
   it('recovery retires an old failed Finish intent without changing the failure', async () => {
     const run = rootTask();
     store.updateRun(run.id, { status: RUN_STATUS.failed, error: 'provider failed' });
