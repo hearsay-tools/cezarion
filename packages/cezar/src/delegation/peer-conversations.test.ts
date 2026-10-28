@@ -143,6 +143,22 @@ describe('peer conversations', () => {
     expect(history.outcomes).toEqual([]);
   });
 
+  it('R8 a history read projects nothing from a peer ledger whose history deletion is pending', async () => {
+    const b = peer();
+    await f.service.send(f.caller, message(b.id, 'progress'));
+    // A message in B's ledger that no projection has reached yet, as a crash can leave one.
+    const unprojected: ConversationMessage = { id: randomUUID(), senderRunId: b.id, recipientRunId: f.parent.id, kind: 'progress', relationship: 'peer',
+      text: 'never projected', createdAt: new Date().toISOString(), requestHash: 'a'.repeat(64), state: 'accepted' };
+    f.store.commitConversation(b.id, { messages: [unprojected], outcomes: [] });
+    // B's deletion stopped after it marked the family and removed B's events.
+    f.store.commitDelegation([{ id: b.id, delegation: { role: 'root', permissions: [...permissions], receipts: [], conversation: { messages: [unprojected], outcomes: [] }, historyDeletion: 'pending' } }]);
+    const before = { a: projections(f.parent.id), b: projections(b.id) };
+    const history = await f.service.conversation(f.caller, { recipientRunId: b.id });
+    expect(history.messages.map(entry => entry.id)).toContain(unprojected.id);
+    expect({ a: projections(f.parent.id), b: projections(b.id) }).toEqual(before);
+    expect(projections(b.id).some(id => id.includes(unprojected.id))).toBe(false);
+  });
+
   it.each(['B first', 'C first', 'concurrent'] as const)('R14 two peers sending one message ID to one recipient: the second is refused and writes nothing (%s)', async order => {
     const b = peer(); const c = peer();
     const id = randomUUID();

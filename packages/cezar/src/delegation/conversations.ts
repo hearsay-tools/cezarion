@@ -47,9 +47,11 @@ function familyRecipientSettlement(root: RunRecord, request: ConversationMessage
   return recipient.status === 'done' ? 'completed-without-reply' : recipient.status as 'failed' | 'cancelled';
 }
 
-/** Repair observation only; replay never inserts agent inputs or starts execution. */
+/** Repair observation only; replay never inserts agent inputs or starts execution. A ledger whose
+ *  history is being deleted projects nothing: its events would recreate deleted transcripts
+ *  (hearsay-tools/cezarion#1990 review). */
 export function projectConversationEvents(store: import('../runs/store.ts').RunStore, root: RunRecord): void {
-  if (root.delegation?.role !== 'root' || !root.delegation.conversation) return;
+  if (root.delegation?.role !== 'root' || !root.delegation.conversation || root.delegation.historyDeletion) return;
   const state = root.delegation.conversation;
   const outcomes = new Map(state.outcomes.map(outcome => [outcome.requestId, outcome]));
   for (const message of state.messages) {
