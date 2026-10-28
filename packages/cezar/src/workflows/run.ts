@@ -19,6 +19,7 @@ import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_
 import { createActiveRun, type ActiveRun } from './active-run.ts';
 import { claudeScheduleWakeupDelay, isRunnerActivity, appendTurnText, appendCompletedAssistantText, trackTurnTail, stripDoneMarker, stripMonitoringMarker, emitAskRequested, askCardFields, humanWaitCard, classifyTurnEnd, discardQueuedMessagesOnAsk, type TurnEndRead } from './run/turn-markers.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
+import { canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested } from './run/run-guards.ts';
 import { releaseActiveResources } from './run/drop-active.ts';
 import { agentDirectories, applyTemplate, composeSystemPrompt, expandRegistrySlashSkill, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt, withResumeContext } from './run/prompts.ts';
 import { settlesAsDone, stepLabel, stepScope } from './run/steps.ts';
@@ -734,11 +735,8 @@ export class RunManager {
     return !this.executions.has(runId) && this.store.readWorkerExecution(runId)?.phase === 'complete';
   }
 
-  /** Irreversible history removal is an execution tombstone, including for legacy children. */
   private historyDeletionPending(runId: string): boolean {
-    const run = this.store.getRun(runId);
-    const parent = run?.delegation?.role === 'worker' ? this.store.getRun(run.delegation.parentRunId) : run;
-    return parent?.delegation?.role === 'root' && parent.delegation.historyDeletion === 'pending';
+    return historyDeletionPending(this.store, runId);
   }
 
   private workerExecutionStopped(runId: string): boolean {
@@ -1855,7 +1853,7 @@ export class RunManager {
     // for that transition to cancel, as the monitoring timer did before it was a wait.
     const fire = () => {
       const run = this.store.getRun(runId);
-      if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
+      if (!this.canProceedWithRun(runId, run)) return;
       this.settleWait(runId, wait.id);
     };
     const due = Date.parse(wait.deadline) - Date.now();
@@ -1922,7 +1920,7 @@ export class RunManager {
       if (this.disposed || abort.signal.aborted || this.processWatches.get(wait.id) !== watch) return;
       this.processWatches.delete(wait.id);
       const run = this.store.getRun(runId);
-      if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
+      if (!this.canProceedWithRun(runId, run)) return;
       this.settleWait(runId, wait.id, result);
     };
     const request = { pid: wait.pid, deadline: wait.deadline, roots: this.exitFileRoots(runId),
@@ -2241,8 +2239,7 @@ export class RunManager {
     // A run on a usage-limit hold is woken by its resume only, which delivers what resolved
     // meanwhile (hearsay-tools/cezarion#1236).
     if (this.disposed || this.recoveringRun(run) || !run || isUsageLimitHold(run) || !this.owesWake(run) ||
-      !['running', 'waiting', 'queued'].includes(run.status) || run.stopping ||
-      this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return false;
+      !['running', 'waiting', 'queued'].includes(run.status) || !this.canProceedWithRun(runId, run)) return false;
     // A failed delivery waits out its backoff; the backoff's own timer queues this wake again.
     if (this.wakeBackoffs.has(runId)) return false;
     return true;
@@ -4161,7 +4158,7 @@ export class RunManager {
   enqueueMessage(runId: string, content: PastedContent[]): QueuedMessage | null {
     if (!this.isQueued(runId)) return null;
     const run = this.store.getRun(runId);
-    if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return null;
+    if (!this.canProceedWithRun(runId, run)) return null;
     const message = this.toQueuedMessage(runId, content);
     // Human input cancels no wait in the list (hearsay-tools/cezarion#1233, #1235): beside a wait
     // the message is accepted durably and opens the wake's continuation.
@@ -4277,7 +4274,7 @@ export class RunManager {
    */
   deferMessage(runId: string, content: PastedContent[]): boolean {
     const run = this.store.getRun(runId);
-    if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return false;
+    if (!this.canProceedWithRun(runId, run)) return false;
     // The window spans two sub-states: `starting` (no `ActiveRun` yet) and the
     // longer stretch where the `ActiveRun` exists but the backend is still being
     // spawned. `execute()` deletes the run from `starting` as soon as it builds
@@ -4625,7 +4622,7 @@ export class RunManager {
    *  and the wait stays for that transition to cancel. True when the wait is no longer open. */
   private resolvePeerWait(runId: string, wait: PeerWaitEntry): boolean {
     const run = this.store.getRun(runId);
-    if (this.disposed || !run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return false;
+    if (this.disposed || !this.canProceedWithRun(runId, run)) return false;
     const result = peerWaitResult(run, wait, this.store);
     if (result) this.settleWait(runId, wait.id, result);
     return !!result && this.store.getRun(runId)?.waits?.find(entry => entry.id === wait.id)?.phase !== 'open';
@@ -5006,12 +5003,15 @@ export class RunManager {
   }
 
   private rootFinishRequested(runId: string): boolean {
-    const delegation = this.store.getRun(runId)?.delegation;
-    return delegation?.role === 'root' && !!delegation.finishRequestedAt;
+    return rootFinishRequested(this.store, runId);
   }
 
   private executionBlockedByRootFinish(run: RunRecord): boolean {
-    return this.rootFinishRequested(run.delegation?.role === 'worker' ? run.delegation.parentRunId : run.id);
+    return executionBlockedByRootFinish(this.store, run);
+  }
+
+  private canProceedWithRun(runId: string, run: RunRecord | undefined): run is RunRecord {
+    return canProceedWithRun(run, () => this.workerExecutionStopped(runId), run => this.executionBlockedByRootFinish(run));
   }
 
   /** Finish can arrive during continuation preflight. Retain its accepted
@@ -5806,8 +5806,7 @@ export class RunManager {
   respondPermission(runId: string, requestId: string, optionId: string): boolean {
     const state = this.active.get(runId);
     const run = this.store.getRun(runId);
-    if (this.disposed || !state?.session?.open || state.cancelled || state.finishRequested || !run || run.stopping ||
-        this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run) ||
+    if (this.disposed || !state?.session?.open || state.cancelled || state.finishRequested || !this.canProceedWithRun(runId, run) ||
         !state.pendingPermissions?.has(requestId)) return false;
     return state.session.respondPermission?.(requestId, optionId) ?? false;
   }
@@ -5840,7 +5839,7 @@ export class RunManager {
     const state = this.active.get(runId);
     if (!state?.session?.open || state.cancelled || state.pendingPermissions?.size) return false;
     const run = this.store.getRun(runId);
-    if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return false;
+    if (!this.canProceedWithRun(runId, run)) return false;
 
     if (userAuthored && this.routedAsk(runId)) {
       this.store.appendEvent(runId, { type: 'note', tone: 'warning', message: ROUTED_QUESTION_REFUSAL });
@@ -9702,7 +9701,7 @@ export class RunManager {
    */
   private openTimerAlias(runId: string, state: ActiveRun, scheduleWakeup: number | null | undefined): void {
     const run = this.store.getRun(runId);
-    if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
+    if (!this.canProceedWithRun(runId, run)) return;
     if (state.autonomous && this.automaticWakes(runId) < MAX_AUTO_CONTINUES && this.canAutoContinue(runId, state)) return;
     const via: WaitVia = scheduleWakeup === undefined ? 'monitoring-line' : 'schedule-wakeup';
     const open = openWaits(run);
