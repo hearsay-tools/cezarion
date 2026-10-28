@@ -41,6 +41,17 @@ class ProtocolTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'different process identity'):
             self.call((0, (json.dumps(response) + '\n').encode(), b''))
 
+    def test_malformed_framing_reports_bounded_driver_output(self):
+        for stdout, stderr in ((b'', b'node failed'), (b'partial', b'bad'), (b'one\ntwo\n', b'x' * 5000)):
+            with self.subTest(stdout=stdout), self.assertRaises(RuntimeError) as caught:
+                self.call((13, stdout, stderr))
+            prefix = 'invalid reaper output framing: '
+            self.assertTrue(str(caught.exception).startswith(prefix))
+            details = json.loads(str(caught.exception)[len(prefix):])
+            self.assertEqual(details, {'exit': 13, 'stdout': stdout[:4096].decode(),
+                                       'stderr': stderr[:4096].decode(),
+                                       'stdoutBytes': len(stdout), 'stderrBytes': len(stderr)})
+
 
 if __name__ == '__main__':
     unittest.main()

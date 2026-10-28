@@ -207,7 +207,10 @@ def invoke(node, row, action, target, sibling, uid, gid, proof=False, gate=None,
     if len(data) > LIMIT: raise RuntimeError('row exceeds bound')
     code, stdout, stderr = bounded_output([node, '--experimental-transform-types', str(DRIVER)], data, uid, gid, 15, gate=gate, gate_fds=gate_fds)
     if not stdout.endswith(b'\n') or stdout.count(b'\n') != 1:
-        raise RuntimeError('invalid reaper output framing')
+        details = {'exit': code, 'stdout': stdout[:4096].decode(errors='replace'),
+                   'stderr': stderr[:4096].decode(errors='replace'),
+                   'stdoutBytes': len(stdout), 'stderrBytes': len(stderr)}
+        raise RuntimeError('invalid reaper output framing: ' + json.dumps(details))
     if code == 42 and action == 'stop':
         response = json.loads(stdout)
         if (response.get('version') == 1 and response.get('status') == 'regression'
