@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -16,10 +17,10 @@ describe.runIf(process.platform === 'linux')('destroy during continuation startu
     process.env.CEZ_DELEGATION = '1'; process.env.CEZ_DRY_RUN = '0';
     const adapter = HARNESS_ADAPTERS[runner]; process.env[adapter.binEnv] = adapter.mockBin;
     const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-    store.updateRun(p.id, { status: 'waiting', delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
+    store.updateRun(p.id, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
     const w = await worker(p.id, adapter.scenarios.done!, runner);
     manager.enqueueOwnedRun(w.id);
-    await until(() => ['done', 'review'].includes(store.getRun(w.id)?.status ?? '') && store.readWorkerExecution(w.id)?.phase === 'complete');
+    await until(() => ([RUN_STATUS.done, RUN_STATUS.review] as readonly string[]).includes(store.getRun(w.id)?.status ?? '') && store.readWorkerExecution(w.id)?.phase === 'complete');
     if (w.delegation?.role !== 'worker') throw Error('missing workspace');
     const workspace = w.delegation.workspace;
     const scratch = agentTmpDir(join(root, '.ai/cezar'), w.id);
@@ -45,7 +46,7 @@ describe.runIf(process.platform === 'linux')('destroy during continuation startu
       if (outcome === 'rejects') { const last = executions.length - 1; executions[last] = executions[last]!.catch(() => undefined); }
       release();
       await until(() => store.readWorkerExecution(w.id)?.phase === 'complete');
-      expect(store.getRun(w.id)?.status).toBe('cancelled');
+      expect(store.getRun(w.id)?.status).toBe(RUN_STATUS.cancelled);
       expect(store.readEvents(w.id).slice(priorEvents).some(event => event.type === 'session')).toBe(false);
     } finally { release(); detach(); vi.restoreAllMocks(); syncBuiltinESMExports(); }
   });
@@ -53,15 +54,15 @@ describe.runIf(process.platform === 'linux')('destroy during continuation startu
     process.env.CEZ_DELEGATION = '1'; process.env.CEZ_DRY_RUN = '0';
     const adapter = HARNESS_ADAPTERS.claude; process.env[adapter.binEnv] = adapter.mockBin;
     const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-    store.updateRun(p.id, { status: 'waiting', delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
+    store.updateRun(p.id, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
     const w = await worker(p.id, adapter.scenarios.done!); manager.enqueueOwnedRun(w.id);
-    await until(() => ['done', 'review'].includes(store.getRun(w.id)?.status ?? '') && store.readWorkerExecution(w.id)?.phase === 'complete');
+    await until(() => ([RUN_STATUS.done, RUN_STATUS.review] as readonly string[]).includes(store.getRun(w.id)?.status ?? '') && store.readWorkerExecution(w.id)?.phase === 'complete');
     const engine = manager as unknown as { continuationWorkspace: (...args: unknown[]) => Promise<unknown> };
     engine.continuationWorkspace = async () => { throw Error('unexpected fixture workspace failure'); };
     expect(manager.continueRun(w.id, { text: 'continue' })).toMatchObject({ ok: true });
     const last = executions.length - 1; executions[last] = executions[last]!.catch(() => undefined);
     await until(() => store.readWorkerExecution(w.id)?.phase === 'complete');
-    expect(store.getRun(w.id)).toMatchObject({ status: 'failed', error: expect.stringContaining('unexpected fixture workspace failure') });
+    expect(store.getRun(w.id)).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('unexpected fixture workspace failure') });
   });
 
 });
