@@ -886,6 +886,23 @@ ${assistantEnd()}`,
     expect(guarded.events).toEqual(plain.events);
   });
 
+  it('a non-zero exit with empty stderr fails with the bare exit code and no stderr note', async () => {
+    const bin = join(cwd, 'mock-pi-exit-3.mjs');
+    writeFileSync(bin, `#!/usr/bin/env node
+import readline from 'node:readline';
+for await (const line of readline.createInterface({ input: process.stdin })) {
+  if (JSON.parse(line).type === 'prompt') process.exit(3);
+}
+`, { mode: 0o755 });
+    const events: AgentEvent[] = [];
+    await expect(new PiRunner({ bin }).startSession(
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'go', cwd, timeoutMs: 10_000 },
+      event => events.push(event),
+    ).result).rejects.toThrow(/^pi CLI exited with code 3$/);
+    expect(events.filter((e) => e.type === 'error')).toEqual([{ type: 'error', message: 'pi CLI exited with code 3' }]);
+    expect(events.some((e) => e.type === 'note' && e.message.startsWith('pi CLI stderr'))).toBe(false);
+  });
+
   it('rejects with an install hint when the pi binary is missing', async () => {
     const bin = join(cwd, 'pi-does-not-exist');
     await expect(new PiRunner({ bin }).startSession(

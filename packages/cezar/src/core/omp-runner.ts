@@ -2,8 +2,17 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEffort } from '@open-mercato/cezar-contract/effort';
-import { isRecord, parseRpcLine, piMessageText, ompRpcError as rpcError, string, toPiPrompt, truncate, waitForExit } from './pi-rpc-wire.ts';
-import { armEndWatchdog, emitPiToolResult, type PiEndWatchdog, PiRpcInput, PiTextBlocks, recordPiToolCall } from './pi-rpc-turn.ts';
+import { isRecord, parseRpcLine, ompRpcError as rpcError, string, toPiPrompt, truncate, waitForExit } from './pi-rpc-wire.ts';
+import {
+  adoptRpcSessionId,
+  armEndWatchdog,
+  dispatchPiTurnMessage,
+  type PiEndWatchdog,
+  PiRpcInput,
+  PiTextBlocks,
+  type PiTurnMessages,
+  settlePiFamilyExit,
+} from './pi-rpc-turn.ts';
 import type {
   AgentEvent,
   AgentRunResult,
@@ -17,7 +26,6 @@ import type {
   SessionOptions,
   ToolGrant,
 } from './agent-runner.js';
-import { isSignalTerminationExit } from './agent-runner.js';
 import { ompRequestedTools } from './runner-tool-grants.ts';
 import { signalSession, spawnSessionLeader } from './session-process.js';
 import { buildChildEnv } from './agent-env.js';
@@ -318,12 +326,6 @@ export class OmpRunner implements AgentRunner {
     let sessionId = spec.sessionId;
     let startupStateChecked = false;
     let tokensUsed = 0;
-    let latchedProviderError: string | undefined;
-    const emitLatchedProviderError = (): void => {
-      if (!latchedProviderError) return;
-      onEvent?.({ type: 'error', message: latchedProviderError });
-      latchedProviderError = undefined;
-    };
 
     const emitUi = (value: unknown): void => {
       const mapped = mapOmpRpcMessage(value, ompUi);
@@ -393,7 +395,6 @@ export class OmpRunner implements AgentRunner {
       humanAcksPending: () => humanAcks.size > 0,
       end: () => end(),
       flushText,
-      emitLatchedProviderError,
     });
     // Each human prompt stays held from its write until a normalized turn has it, because an
     // ack is not a turn boundary (hearsay-tools/cezarion#1112). Exits: its user message_start,
@@ -518,11 +519,7 @@ export class OmpRunner implements AgentRunner {
       if (usageReport.costUsd !== undefined) onEvent?.({ type: 'cost', usd: usageReport.costUsd });
     };
     const adoptState = (value: Record<string, unknown>, data: Record<string, unknown>): void => {
-      const discovered = string(data.sessionId);
-      if (discovered && discovered !== sessionId) {
-        sessionId = discovered;
-        onEvent?.({ type: 'session', sessionId: discovered });
-      }
+      adoptRpcSessionId(data, sessionId, (id) => { sessionId = id; }, onEvent);
       // OMP v18.6.1 still has no fresh persistent-session flag. Its autoResume
       // setting can restore history without --resume (hearsay-tools/cezarion#832).
       // Only the startup query is evidence: later reads include our own messages.
@@ -591,25 +588,8 @@ export class OmpRunner implements AgentRunner {
       const error = isRecord(value.error) ? value.error : {};
       reportPromptFailure(ompProviderErrorMessage({ provider: error.provider, model: error.model, errorMessage: error.message }), endsTurn);
     };
-    const handleAssistantMessageEnd = (value: Record<string, unknown>): void => {
-      if (!isRecord(value.message) || value.message.role !== 'assistant') return;
-      flushText();
-      // Latched until the turn ends, cleared by a later success: OMP retries past
-      // provider flakes and a recovered retry must stay silent (#256, #316).
-      if (string(value.message.stopReason) === 'error') {
-        rpcInput.failTurn();
-        latchedProviderError = ompProviderErrorMessage(value.message);
-      } else {
-        latchedProviderError = undefined;
-      }
-    };
-    const handleUserMessageStart = (value: Record<string, unknown>): void => {
-      if (!isRecord(value.message) || value.message.role !== 'user') return;
-      // The model received this prompt now (hearsay-tools/cezarion#505).
-      const text = piMessageText(value.message);
-      const ids = rpcInput.submissions.consumeOldestByText(text);
-      if (ids.length) opts.onAgentInputConsumed?.(ids);
-      else for (const [id, held] of humanHeld) {
+    const settleHumanPromptRead = (text: string): void => {
+      for (const [id, held] of humanHeld) {
         if (held.text !== text) continue;
         // Read with no normalized turn open: held until that turn.started (as pi-runner.ts).
         if (ompUi.turnId) humanHeld.delete(id);
@@ -617,18 +597,21 @@ export class OmpRunner implements AgentRunner {
         break;
       }
     };
+    const turnMessages: PiTurnMessages = {
+      input: rpcInput,
+      textBlocks,
+      toolCalls,
+      onEvent,
+      flushText,
+      providerErrorMessage: ompProviderErrorMessage,
+      humanPromptRead: settleHumanPromptRead,
+    };
     // Each type has one case. A message its handler's guard refuses ends there, as it did
     // when this was one if/else chain: no later case reads the same type.
     const dispatchNative = (value: Record<string, unknown>, endsTurn: boolean): void => {
       switch (value.type) {
         case 'response': handleResponse(value, endsTurn); break;
         case 'prompt_result': handlePromptResult(value, endsTurn); break;
-        case 'message_update': if (isRecord(value.assistantMessageEvent)) textBlocks.update(value.assistantMessageEvent); break;
-        case 'message_end': handleAssistantMessageEnd(value); break;
-        case 'agent_start': rpcInput.startTurn(); break;
-        case 'message_start': handleUserMessageStart(value); break;
-        case 'tool_execution_start': flushText(); recordPiToolCall(value, toolCalls, onEvent); break;
-        case 'tool_execution_end': emitPiToolResult(value, onEvent); break;
         case 'extension_error':
           onEvent?.({ type: 'note', message: string(value.error) ?? string(value.message) ?? 'omp extension error' });
           break;
@@ -637,6 +620,7 @@ export class OmpRunner implements AgentRunner {
           if (message) onEvent?.({ type: 'note', message: `omp: ${message}` });
           break;
         }
+        default: dispatchPiTurnMessage(value, turnMessages);
       }
     };
     const handleOutputLine = (line: string): void => {
@@ -701,48 +685,28 @@ export class OmpRunner implements AgentRunner {
       // sent exactly those, once, when it speaks.
       return buildOmpArgs(spec, refusedTools, { omitAddDir });
     };
-    const runResult = (): AgentRunResult => ({ text: textChunks.join('\n').trim(), toolCalls, tokensUsed, sessionId });
-    const exitFailure = (exitCode: number): Error => {
-      const diagnostic = stderr.join('');
-      if (diagnostic.trim()) onEvent?.({ type: 'note', message: `omp CLI stderr:\n${diagnostic}` });
-      const detail = ompStderrDetail(diagnostic);
-      const message = `omp CLI exited with code ${exitCode}${detail ? ` — ${detail}` : ''}`;
-      onEvent?.({ type: 'error', message });
-      return new Error(message);
-    };
-    const reportExit = (exitCode: number | null): void => {
-      // A signal we sent is teardown, not a second agent failure (#73).
-      if (terminatedByCezar && (isSignalTerminationExit(exitCode) || (exitCode === null && child.signalCode !== null))) {
-        onEvent?.({
-          type: 'note',
-          message: `omp CLI did not exit on its own after close; terminated by cezar (${exitCode === null ? child.signalCode : `code ${exitCode}`})`,
-        });
-      } else if (exitCode === null && child.signalCode !== null && !terminatedByCezar) {
-        // Killed from outside (OOM killer, a stray kill): a truncated run, never a success.
-        const message = `omp CLI was killed by signal ${child.signalCode}`;
-        onEvent?.({ type: 'error', message });
-        throw new Error(message);
-      } else if (exitCode !== 0 && exitCode !== null) {
-        throw exitFailure(exitCode);
-      }
-    };
     const settleExit = (exitCode: number | null): AgentRunResult => {
       open = false;
       releaseUiHold();
       if (spawnError) throw spawnError;
       if (inputError) throw inputError;
-      if (timedOut) {
-        const message = `omp CLI timed out after ${Math.round((limitMs / 60_000) * 10) / 10}m and was killed`;
-        onEvent?.({ type: 'error', message });
-        onEvent?.({ type: 'done' });
-        return runResult();
-      }
-      reportExit(exitCode);
-      if (ompUi.turnId) onEvent?.({ type: 'note', message: 'omp RPC session ended before session_settled' });
-      if (tokensUsed === 0) onEvent?.({ type: 'note', message: 'token usage not reported by omp CLI' });
-      emitUiEvent({ type: 'session.ended', reason: ompUi.stopReason });
-      onEvent?.({ type: 'done' });
-      return runResult();
+      return settlePiFamilyExit({
+        cli: 'omp',
+        settleEvent: 'session_settled',
+        exitCode,
+        signalCode: child.signalCode,
+        terminatedByCezar,
+        timedOut,
+        limitMs,
+        stderr,
+        stderrDetail: ompStderrDetail,
+        turnOpen: Boolean(ompUi.turnId),
+        tokensUsed,
+        stopReason: ompUi.stopReason,
+        emitUi: emitUiEvent,
+        onEvent,
+        result: () => ({ text: textChunks.join('\n').trim(), toolCalls, tokensUsed, sessionId }),
+      });
     };
 
     const result = (async function runOmp(): Promise<AgentRunResult> {
@@ -774,7 +738,7 @@ export class OmpRunner implements AgentRunner {
       }
 
       flushText();
-      emitLatchedProviderError();
+      rpcInput.emitLatchedProviderError();
       emitLatchedUiProviderError();
       const exitCode = await waitForExit(child);
       if (interruptKillTimer) clearTimeout(interruptKillTimer);
