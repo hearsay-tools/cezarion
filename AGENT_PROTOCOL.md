@@ -279,7 +279,7 @@ the new outcome `deleted` when the peer's record is deleted. History, request wa
 cancellation need only the caller's own records, so a deleted peer does not block them, and an
 inbox batch is checked against the caller's own record: a sender deleted before or after the
 reserve leaves the batch whole. History of a peer pair merges both ledgers in `(createdAt, id)`
-order and returns the newest 1,024 messages; `nextBefore` names the oldest one returned, and
+order and returns the newest 1,024 messages. Every open request holds ledger room for its reply, and each open peer request also holds one of its sender's 32 inbox slots: a new peer request needs a free slot, and its reply always fits; `nextBefore` names the oldest one returned, and
 `before` reads the page before it. A peer message that opens a wake turn spends one unit of the
 automatic-wake budget; one taken mid-turn, as steering, spends none, and family messages never
 do. Past the budget a peer message stays queued and wakes nothing, and the parked run opens

@@ -146,15 +146,29 @@ export function notDeliveredInstruction(pair: { relationship: 'family' | 'peer';
 }
 
 /** The ledger's 1,024 messages, where every open request holds room for its reply and a new
- *  request needs room for its own, its 32 open requests, and the recipient's 32 undelivered inputs.
- *  A first reply to an open request passes that last bound, as an answer to a question always did
- *  (hearsay-tools/cezarion#505): at most 32 requests are open, so at most 32 replies pass it. */
-export function assertConversationCapacity(state: ConversationState, recipient: RunRecord, kind: ConversationSendRequest['kind'], enqueue: boolean, replying: boolean): void {
+ *  request needs room for its own; its 32 open requests; and 32 inbox slots per run, which hold its
+ *  undelivered inputs and one slot for each open peer request it sent (`inboxSlotsUsed`). A new
+ *  peer request needs a free slot in its sender's inbox; its reply then spends that slot, so it is
+ *  always admitted and no inbox passes 32. An answer to a worker question passes the inbox bound,
+ *  as it always did (hearsay-tools/cezarion#505). */
+export function assertConversationCapacity(state: ConversationState, pair: { relationship: 'family' | 'peer'; sender: RunRecord; recipient: RunRecord }, kind: ConversationSendRequest['kind'],
+  enqueue: boolean, replying: boolean, answering: boolean): void {
   const reservedMessages = reservedReplies(state) - (replying ? 1 : 0) + (enqueue && kind === 'request' ? 1 : 0);
   const openRequests = () => state.messages.filter(message => message.kind === 'request' && message.state === 'accepted' && !state.outcomes.some(outcome => outcome.requestId === message.id)).length;
-  const undelivered = () => { return (recipient.agentInputs ?? []).filter(input => !input.deliveredAt).length; };
-  if (state.messages.length + reservedMessages >= 1024 || (enqueue && kind === 'request' && openRequests() >= 32) ||
-    (enqueue && !replying && undelivered() >= 32)) throw new DelegationPolicyError('capacity_limit', 'Conversation capacity limit reached');
+  const peer = pair.relationship === 'peer';
+  const inboxFull = enqueue && !answering && !(peer && replying) && inboxSlotsUsed(pair.recipient) >= 32;
+  if (state.messages.length + reservedMessages >= 1024 || (enqueue && kind === 'request' && openRequests() >= 32) || inboxFull ||
+    (enqueue && peer && kind === 'request' && inboxSlotsUsed(pair.sender) >= 32)) throw new DelegationPolicyError('capacity_limit', 'Conversation capacity limit reached');
+}
+
+/** A run's inbox slots in use: its undelivered inputs, and one for each open peer request it sent,
+ *  which its reply will fill. */
+export function inboxSlotsUsed(run: RunRecord): number {
+  const undelivered = (run.agentInputs ?? []).filter(input => !input.deliveredAt).length;
+  const state = run.delegation?.role === 'root' ? run.delegation.conversation : undefined;
+  const reserved = state?.messages.filter(message => message.relationship === 'peer' && message.kind === 'request' && message.state === 'accepted' &&
+    message.senderRunId === run.id && !state.outcomes.some(outcome => outcome.requestId === message.id)).length ?? 0;
+  return undelivered + reserved;
 }
 
 /** A reply settles its request, or amends a deadline expiry to `replied-late`. Cancellation,

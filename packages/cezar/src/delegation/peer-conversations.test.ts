@@ -384,15 +384,26 @@ describe('peer conversations', () => {
     expect(batch.messages[0]).toMatchObject({ requestHash: request.message.requestHash, deadline: request.message.deadline });
   });
 
-  it('R8 a reply to an open request reaches a requester whose inbox holds 32 undelivered inputs; other messages are refused', async () => {
+  it('R8 an open peer request holds a slot in its sender\'s inbox: its reply is always admitted, and no inbox passes 32 across repeated batches', async () => {
     const b = peer();
-    const request = await f.service.send(f.caller, message(b.id));
     const now = new Date().toISOString();
-    f.store.updateRun(f.parent.id, { agentInputs: Array.from({ length: 32 }, () => ({ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: f.parent.id, text: 'queued', createdAt: now })) });
-    await expect(f.service.send(b.caller, message(f.parent.id, 'progress'))).rejects.toMatchObject({ code: 'capacity_limit' });
-    const reply = await f.service.reply(b.caller, message(f.parent.id, 'reply', { requestId: request.message.id }));
-    expect(reply).toMatchObject({ delivery: 'queued', outcome: { status: 'replied' } });
-    expect(f.store.getRun(f.parent.id)?.agentInputs?.filter(input => !input.deliveredAt)).toHaveLength(33);
+    const undelivered = () => f.store.getRun(f.parent.id)?.agentInputs?.filter(input => !input.deliveredAt).length ?? 0;
+    // 30 undelivered inputs: room for two open requests.
+    f.store.updateRun(f.parent.id, { agentInputs: Array.from({ length: 30 }, () => ({ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: f.parent.id, text: 'queued', createdAt: now })) });
+    for (let batch = 0; batch < 3; batch++) {
+      const requests = [];
+      while (true) {
+        try { requests.push(await f.service.send(f.caller, message(b.id))); }
+        catch (error) { expect(error).toMatchObject({ code: 'capacity_limit' }); break; }
+      }
+      // Every slot is held: other messages to A are refused, and the replies are admitted.
+      await expect(f.service.send(b.caller, message(f.parent.id, 'progress'))).rejects.toMatchObject({ code: 'capacity_limit' });
+      for (const request of requests) {
+        expect(await f.service.reply(b.caller, message(f.parent.id, 'reply', { requestId: request.message.id }))).toMatchObject({ delivery: 'queued', outcome: { status: 'replied' } });
+      }
+      expect(undelivered()).toBeLessThanOrEqual(32);
+    }
+    expect(undelivered()).toBe(32);
   });
 
   it('R15 a reply to a deleted sender\'s request is refused', async () => {
