@@ -3,7 +3,7 @@ export const categories = ['procRead', 'mountParse', 'ownedRootLocate', 'mapPars
   'intersectionBuild', 'filter', 'ancestorLookup', 'candidateConstruct', 'sort', 'identityPrecharge',
   'evidenceRecheck', 'sweepAndLinks', 'reservation', 'unclassified'] as const;
 export type Category = typeof categories[number];
-export const literalSites = ['linePrecharge', 'variantExpansion', 'finalMembership', 'caughtProbe'] as const;
+export const literalSites = ['linePrecharge', 'rootRelevance', 'variantExpansion', 'finalMembership', 'caughtProbe'] as const;
 export type LiteralSite = typeof literalSites[number];
 type Counts = { attemptedUnits: number; successfulChargeUnits: number; refusedChargeUnits: number };
 const limit = 2_147_483_647;
@@ -50,7 +50,7 @@ export function recordCharge(category: Category, amount: number, remaining: numb
   }
   } catch { invalid = true; }
 }
-export function attributionSnapshot() { return { version: 2, counts: structuredClone(counts), saturated, invalid, sitesSaturated, literalMappedSites: structuredClone(literalMappedSites), firstExhaustion: structuredClone(firstExhaustion ?? null) }; }
+export function attributionSnapshot() { return { version: 3, counts: structuredClone(counts), saturated, invalid, sitesSaturated, literalMappedSites: structuredClone(literalMappedSites), firstExhaustion: structuredClone(firstExhaustion ?? null) }; }
 export function reportAttribution(write: (text: string) => unknown): void {
   try { write('CAPACITY_ATTRIBUTION ' + JSON.stringify(attributionSnapshot()) + '\n'); }
   catch { try { write('CAPACITY_ATTRIBUTION_INVALID\n'); } catch { /* preserve destroy outcome */ } }

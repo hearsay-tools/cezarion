@@ -13,7 +13,7 @@ const inventory: Record<string, { hash: string; sites: Record<number, Category> 
   'linux-alias-discovery-sweep.ts': { hash: '0cb619fac906f03ed109e92e28fc199da555f1d4c90ab3dc22d18e62c271a41d', sites: { 27: 'sweepAndLinks', 62: 'sweepAndLinks' } },
   'linux-alias-sweep.ts': { hash: '6641a0bf45b6eeb35a21714ffc0fcbd59f5dc5e11d266e5ab120acc41ab988f5', sites: { 10: 'sweepAndLinks' } },
   'linux-alias-scope.ts': { hash: '625c290370350dccd4fbe6b9c0bb9edbc48b7681e81e0a2fab86993565ee797b', sites: { 52: 'evidenceRecheck', 55: 'evidenceRecheck' } },
-  'linux-mapped-holders.ts': { hash: 'e682a4416ca92e32ea0e439cd58bfb0b7f3b26b6f510fe5b1bea3b09c9932ba5', sites: { 12: 'literalMapped', 27: 'literalMapped', 33: 'literalMapped', 48: 'literalMapped' } },
+  'linux-mapped-holders.ts': { hash: 'eb05da0a11ed8114ee1cf1b6ffb52643059f4e74a7e0764ea4c8241959dfae32', sites: { 12: 'literalMapped', 18: 'literalMapped', 28: 'literalMapped', 34: 'literalMapped', 49: 'literalMapped' } },
   'linux-proc-evidence.ts': { hash: '5aab43b8280c17bf9ed70f5a7e2c1fff194533be3dc7bd26722f7e571bc8bb8d', sites: { 16: 'procRead' } },
   'destroy-holders.ts': { hash: '6190e16577dd08bcae06d01cc861cb92c8819cec479b0e43e17a31af742b3360', sites: { 85: 'sweepAndLinks', 89: 'sweepAndLinks', 92: 'sweepAndLinks', 100: 'sweepAndLinks', 102: 'sweepAndLinks', 182: 'sweepAndLinks', 195: 'sweepAndLinks', 221: 'evidenceRecheck', 232: 'sweepAndLinks' } },
 };
@@ -63,7 +63,7 @@ export function instrumentAttributionSources(sources: Readonly<Record<string, st
   const result: Record<string, string> = {};
   for (const [file, spec] of Object.entries(inventory)) {
     const lines = sources[file]!.split('\n');
-    const literalSites: Record<number, LiteralSite> = { 12: 'linePrecharge', 27: 'variantExpansion', 33: 'finalMembership', 48: 'caughtProbe' };
+    const literalSites: Record<number, LiteralSite> = { 12: 'linePrecharge', 18: 'rootRelevance', 28: 'variantExpansion', 34: 'finalMembership', 49: 'caughtProbe' };
     for (const [number, category] of Object.entries(spec.sites)) {
       const site = file === 'linux-mapped-holders.ts' ? literalSites[Number(number)] : undefined;
       if ((category === 'literalMapped') !== (site !== undefined)) throw new Error('literal attribution inventory changed');

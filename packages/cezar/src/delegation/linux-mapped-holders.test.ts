@@ -12,3 +12,14 @@ it('interprets spaces, deleted names and ambiguous newline escapes conservativel
   expect(mappedPathScope(line('[heap]'), ['/owned'])).toBe('clear');
   expect(mappedPathScope('bad record\n', ['/owned'])).toBe('unknown');
 });
+
+it('charges every line and reserves roots only before absolute path filtering', () => {
+  const calls: number[] = [];
+  const budget = { spend: (amount = 1) => { calls.push(amount); } } as unknown as import('./linux-alias-model.ts').AliasWorkBudget;
+  expect(mappedPathScope(line('[heap]') + line('/else/file'), ['/a', '/b'], budget)).toBe('clear');
+  expect(calls).toEqual([1, 1, 2, 1]);
+  calls.length = 0;
+  expect(mappedPathScope(line('/else/file'), [], budget)).toBe('clear');
+  expect(calls).toEqual([1, 0, 1]);
+  expect(mappedPathScope(line('/owned/file') + 'bad', ['/owned'])).toBe('unknown');
+});

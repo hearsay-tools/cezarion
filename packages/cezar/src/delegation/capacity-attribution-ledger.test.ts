@@ -69,7 +69,7 @@ it('keeps subtraction and refusal semantics while recording one evaluation', () 
 
 it('partitions every literal site including zero refusals and resets the partition', () => {
   resetAttribution();
-  const sites = ['linePrecharge', 'variantExpansion', 'finalMembership', 'caughtProbe'] as const;
+  const sites = ['linePrecharge', 'rootRelevance', 'variantExpansion', 'finalMembership', 'caughtProbe'] as const;
   for (const site of sites) {
     recordCharge('literalMapped', 2, 1, site);
     recordCharge('literalMapped', 3, -1, site);
@@ -78,7 +78,7 @@ it('partitions every literal site including zero refusals and resets the partiti
   const report = attributionSnapshot();
   expect(report.invalid).toBe(false);
   for (const site of sites) expect(report.literalMappedSites[site]).toEqual({ attemptedUnits: 5, successfulChargeUnits: 2, refusedChargeUnits: 3, attemptedCalls: 3 });
-  expect(report.counts.literalMapped).toEqual({ attemptedUnits: 20, successfulChargeUnits: 8, refusedChargeUnits: 12 });
+  expect(report.counts.literalMapped).toEqual({ attemptedUnits: 25, successfulChargeUnits: 10, refusedChargeUnits: 15 });
   expect(report.firstExhaustion).toMatchObject({ category: 'literalMapped', amount: 3, remaining: -1 });
   resetAttribution();
   expect(attributionSnapshot().literalMappedSites.linePrecharge.attemptedCalls).toBe(0);

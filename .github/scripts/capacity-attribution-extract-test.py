@@ -15,9 +15,9 @@ spec.loader.exec_module(extract)
 class AttributionReportTest(unittest.TestCase):
     def test_fixed_numeric_schema(self):
         counts = {name: {field: 0 for field in extract.FIELDS} for name in extract.NAMES}
-        report = {'version': 2, 'counts': counts, 'saturated': False, 'invalid': False, 'sitesSaturated': False, 'literalMappedSites': {name: {field: 0 for field in extract.FIELDS + ('attemptedCalls',)} for name in extract.SITES}, 'firstExhaustion': None}
+        report = {'version': 3, 'counts': counts, 'saturated': False, 'invalid': False, 'sitesSaturated': False, 'literalMappedSites': {name: {field: 0 for field in extract.FIELDS + ('attemptedCalls',)} for name in extract.SITES}, 'firstExhaustion': None}
         self.assertEqual(extract.validate(report), report)
-        for altered in ({**report, 'path': '/private'}, {**report, 'invalid': True},
+        for altered in ({**report, 'version': 2}, {**report, 'path': '/private'}, {**report, 'invalid': True},
                         {**report, 'counts': {'/private': {}}}):
             with self.assertRaises(ValueError):
                 extract.validate(altered)
@@ -25,7 +25,7 @@ class AttributionReportTest(unittest.TestCase):
     def test_site_partition_is_strict(self):
         counts = {name: {field: 0 for field in extract.FIELDS} for name in extract.NAMES}
         sites = {name: {field: 0 for field in extract.FIELDS + ('attemptedCalls',)} for name in extract.SITES}
-        report = {'version': 2, 'counts': counts, 'saturated': False, 'invalid': False,
+        report = {'version': 3, 'counts': counts, 'saturated': False, 'invalid': False,
                   'sitesSaturated': False, 'literalMappedSites': sites, 'firstExhaustion': None}
         for value in (-1, 2147483648, 1.5, True):
             bad = copy.deepcopy(report)
@@ -43,7 +43,7 @@ class AttributionReportTest(unittest.TestCase):
 
     def test_report_framing_and_output_failure(self):
         counts = {name: {field: 0 for field in extract.FIELDS} for name in extract.NAMES}
-        report = json.dumps({'version': 2, 'counts': counts, 'saturated': False, 'invalid': False, 'sitesSaturated': False, 'literalMappedSites': {name: {field: 0 for field in extract.FIELDS + ('attemptedCalls',)} for name in extract.SITES}, 'firstExhaustion': None})
+        report = json.dumps({'version': 3, 'counts': counts, 'saturated': False, 'invalid': False, 'sitesSaturated': False, 'literalMappedSites': {name: {field: 0 for field in extract.FIELDS + ('attemptedCalls',)} for name in extract.SITES}, 'firstExhaustion': None})
         with tempfile.TemporaryDirectory() as temp:
             source, output = Path(temp) / 'raw', Path(temp) / 'out'
             def run(content):

@@ -69,7 +69,7 @@ vi.mock('../detached-process.ts', async original => ({ ...await original<typeof 
 
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { DelegationService } from './service.ts';
-import { AliasWorkBudget } from './linux-alias-model.ts';
+import { AliasBudgetExceeded, AliasWorkBudget } from './linux-alias-model.ts';
 import { agentTmpDirLocations } from '../runs/agent-tmpdir.ts';
 import { withWorktreeMutation } from '../git-worktree-lock.ts';
 import type { WorkerAliasRetention } from '../runs/worker-execution.ts';
@@ -83,7 +83,9 @@ it('records and refuses both keeper deletion commands', async () => {
   f.keeperCalls.length = 0; f.gitMutations.length = 0;
 });
 
-it('retains service resources and prior pending when real preprocessing exhausts', async () => {
+it.each(['indexAliasMounts', 'mappedPathScope'])('retains service resources and prior pending when %s exhausts', async target => {
+  const savedMounts = f.mounts;
+  if (target === 'mappedPathScope') f.mounts = f.rootMount;
   const roots = [f.path, ...agentTmpDirLocations(`${f.repo}/.ai/cezar`, f.workerId)];
   let pending: WorkerAliasRetention | undefined = { generation: f.generation, resourceId: f.resourceId, bootId: f.boot,
     roots: roots.map((path, i) => ({ path, identity: i ? null : { dev: '8:1', ino: '123' } })), processes: [], pending: [{ pid: 101, start: '100' }] };
@@ -101,7 +103,10 @@ it('retains service resources and prior pending when real preprocessing exhausts
   const spend = AliasWorkBudget.prototype.spend;
   let exhaustedAt = '';
   const charge = vi.spyOn(AliasWorkBudget.prototype, 'spend').mockImplementation(function (this: AliasWorkBudget, amount = 1) {
-    try { return spend.call(this, amount); } catch (error) { exhaustedAt ||= new Error().stack ?? ''; throw error; }
+    try {
+      if (target === 'mappedPathScope' && amount > 1 && (new Error().stack ?? '').includes('mappedPathScope')) throw new AliasBudgetExceeded();
+      return spend.call(this, amount);
+    } catch (error) { exhaustedAt ||= new Error().stack ?? ''; throw error; }
   });
   try {
     const result = await internal.destroyAttempt(project, f.workerId, () => worker, 'manual');
@@ -109,12 +114,12 @@ it('retains service resources and prior pending when real preprocessing exhausts
     expect(result).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
     expect(kill).not.toHaveBeenCalled(); expect(f.removed).toEqual([]); expect(f.gitMutations).toEqual([]); expect(f.keeperCalls).toEqual([]);
     expect(pending?.pending).toEqual([{ pid: 101, start: '100' }]); expect(manager.requestWorkerStop).not.toHaveBeenCalled();
-    expect(exhaustedAt).toContain('indexAliasMounts');
+    expect(exhaustedAt).toContain(target);
     const reopened = new DelegationService() as unknown as typeof internal;
     reopened.projects.set(project.id, project); reopened.commonDirs.set(project.id, Promise.resolve(f.common));
     const retry = await reopened.destroyAttempt(project, f.workerId, () => worker, 'manual');
     expect(retry).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
     expect(pending?.pending).toEqual([{ pid: 101, start: '100' }]);
     expect(kill).not.toHaveBeenCalled(); expect(f.removed).toEqual([]); expect(f.gitMutations).toEqual([]); expect(f.keeperCalls).toEqual([]);
-  } finally { charge.mockRestore(); kill.mockRestore(); }
+  } finally { f.mounts = savedMounts; charge.mockRestore(); kill.mockRestore(); }
 });

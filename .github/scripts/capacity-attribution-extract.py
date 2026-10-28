@@ -6,7 +6,7 @@ NAMES = ('procRead', 'mountParse', 'ownedRootLocate', 'mapParseAndVariants', 'li
          'intersectionBuild', 'filter', 'ancestorLookup', 'candidateConstruct', 'sort',
          'identityPrecharge', 'evidenceRecheck', 'sweepAndLinks', 'reservation', 'unclassified')
 FIELDS = ('attemptedUnits', 'successfulChargeUnits', 'refusedChargeUnits')
-SITES = ('linePrecharge', 'variantExpansion', 'finalMembership', 'caughtProbe')
+SITES = ('linePrecharge', 'rootRelevance', 'variantExpansion', 'finalMembership', 'caughtProbe')
 
 
 def counts(value):
@@ -24,7 +24,7 @@ def validate(value):
         raise ValueError('invalid report schema')
     if type(value['saturated']) is not bool or type(value['invalid']) is not bool or value['invalid']:
         raise ValueError('invalid report flags')
-    if type(value['version']) is not int or value['version'] != 2 or type(value['sitesSaturated']) is not bool:
+    if type(value['version']) is not int or value['version'] != 3 or type(value['sitesSaturated']) is not bool:
         raise ValueError('invalid report version or site flag')
     counts(value['counts'])
     sites = value['literalMappedSites']

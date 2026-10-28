@@ -9,12 +9,13 @@ import { readProcEvidence } from './linux-proc-evidence.ts';
 export function mappedPathScope(content: string, roots: readonly string[], budget?: AliasWorkBudget): 'held' | 'clear' | 'unknown' {
   let held = false;
   for (const line of content.split('\n')) {
-    budget?.spend(1 + roots.length);
+    budget?.spend(1);
     if (!line) continue;
     const match = /^[0-9a-f]+-[0-9a-f]+\s+\S+\s+[0-9a-f]+\s+[0-9a-f]+:[0-9a-f]+\s+\d+(?:\s+(.*))?$/.exec(line);
     if (!match) return 'unknown';
     const raw = match[1];
     if (!raw || !raw.startsWith('/')) continue;
+    budget?.spend(roots.length);
     const prefix = raw.split('\\012', 1)[0]!;
     if (!roots.some(root => root.startsWith(prefix) || prefix.startsWith(root))) continue;
     if (raw.includes('\ufffd')) return 'unknown';

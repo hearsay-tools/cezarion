@@ -40,7 +40,7 @@ class EvidenceTest(unittest.TestCase):
 
     def test_observed_boundaries_and_all_markers(self):
         counts = {name: {field: 0 for field in evidence.extract.FIELDS} for name in evidence.extract.NAMES}
-        report = json.dumps({'version': 2, 'counts': counts, 'saturated': False, 'invalid': False, 'sitesSaturated': False, 'literalMappedSites': {name: {field: 0 for field in evidence.extract.FIELDS + ('attemptedCalls',)} for name in evidence.extract.SITES}, 'firstExhaustion': None})
+        report = json.dumps({'version': 3, 'counts': counts, 'saturated': False, 'invalid': False, 'sitesSaturated': False, 'literalMappedSites': {name: {field: 0 for field in evidence.extract.FIELDS + ('attemptedCalls',)} for name in evidence.extract.SITES}, 'firstExhaustion': None})
         def row(output):
             return (json.dumps({'capacityOutput': output, 'exit': 1}) + '\n').encode()
         for raw, boundary, marker_count, valid in (

@@ -15,10 +15,12 @@ it('validates the exact source inventory before any instrumentation', () => {
   expect(staged['linux-alias-model.ts']).toContain('budget.spend(components, tag)');
   expect(staged['linux-alias-model.ts']).toContain('return refuseReservation()');
   const mapped = staged['linux-mapped-holders.ts']!;
-  for (const site of ['linePrecharge', 'variantExpansion', 'finalMembership', 'caughtProbe']) {
+  for (const site of ['linePrecharge', 'rootRelevance', 'variantExpansion', 'finalMembership', 'caughtProbe']) {
     expect(mapped.split(`'${site}'`)).toHaveLength(2);
   }
-  expect(mapped).toContain("budget?.spend(1 + roots.length, 'literalMapped', 'linePrecharge')");
+  expect(mapped).toContain("budget?.spend(1, 'literalMapped', 'linePrecharge')");
+  expect(mapped).toContain("budget?.spend(roots.length, 'literalMapped', 'rootRelevance')");
+  expect(mapped.indexOf("'rootRelevance'")).toBeLessThan(mapped.indexOf("raw.split("));
   expect(staged['linux-proc-evidence.ts']).toContain("budget.spend(Math.ceil(length / 256), 'procRead')");
   expect(() => validateAttributionSources({ ...sources, 'linux-alias-model.ts': sources['linux-alias-model.ts'] + '\n' })).toThrow('hash changed');
   expect(() => validateAttributionSources({ ...sources, 'unexpected.ts': '' })).toThrow('inventory changed');
