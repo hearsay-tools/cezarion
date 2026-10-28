@@ -76,7 +76,7 @@ import { releaseThenRemoveOwnedWorkspace } from '../git-worktree-release.ts';
 import { gitCommonDir, planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline, WORKTREE_LOCK_BUSY_ERROR, WorkspaceHeldError } from './workspace.ts';
 import { WorktreeMutationLockTimeout } from '../git-worktree-lock.ts';
 import { observeDestroy, recordHolders, type DestroyObservation } from './destroy-observation.ts';
-import { assertRecordedProcessesStopped, prepareAuthoritativeReaper, terminationFailure } from './authoritative-reaper.ts';
+import { assertDestroyIdentity, assertRecordedProcessesStopped, prepareAuthoritativeReaper, terminationFailure } from './authoritative-reaper.ts';
 import { DESTROY_ATTENTION_ATTEMPTS, DESTROY_BACKOFF, retryDelayMs, type Backoff } from './retry-backoff.ts';
 
 export type DelegationProject = { id: string; root: string; store: RunStore; manager: RunManager };
@@ -849,11 +849,7 @@ export class DelegationService {
       project.manager.requestActiveWorkerStop(workerId);
       commonDir = await this.commonDir(project);
       assertAttached();
-      const beforeReaper = check();
-      if (beforeReaper.delegation?.role !== 'worker' || JSON.stringify(beforeReaper.delegation.workspace) !== JSON.stringify(workspace) ||
-          beforeReaper.delegation.destroy?.requestedAt !== requestedAt || project.store.readWorkerExecution(workerId)?.generation !== generation) {
-        throw new Error('Worker resource ownership changed');
-      }
+      assertDestroyIdentity(project, workerId, check(), workspace, requestedAt, generation);
       key = observe();
       const reapHolders = await prepareAuthoritativeReaper(project, workerId, workspace, check, assertAttached);
       await reapHolders?.();

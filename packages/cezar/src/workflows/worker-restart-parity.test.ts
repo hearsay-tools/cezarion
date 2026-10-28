@@ -5,6 +5,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
@@ -26,7 +27,7 @@ describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker s
     process.env.CEZ_DELEGATION = '1'; process.env.CEZ_DRY_RUN = '0';
     const adapter = HARNESS_ADAPTERS[runner]; process.env[adapter.binEnv] = adapter.mockBin;
     const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-    store.updateRun(p.id, { status: 'waiting', delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
+    store.updateRun(p.id, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
     const w = await worker(p.id, adapter.scenarios.hold!);
     store.updateRun(w.id, { runner }); manager.enqueueOwnedRun(w.id);
     await until(() => { const proof = store.readWorkerExecution(w.id); const record = proof && store.readWorkerProcesses(w.id, proof.generation); return !!record && typeof record !== 'string' && record.processes.some(recordedProcessLive); });
@@ -53,7 +54,7 @@ describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker s
       expect(active?.cancelled).toBe(true);
       expect(existsSync(workspace.path)).toBe(true);
       expect(store.getRun(w.id)?.delegation).toMatchObject({ destroy: { phase: 'incomplete' } });
-      await vi.waitFor(() => expect(recordedProcessLive(native)).toBe(false), { timeout: 2_000, interval: 20 });
+      await until(() => !recordedProcessLive(native));
       await vi.waitFor(() => expect(store.readWorkerExecution(w.id)?.phase).toBe('complete'), { timeout: 10_000 });
       await vi.waitFor(() => expect(scratchProbe).toHaveBeenCalled(), { timeout: 10_000 });
       expect(readFileSync(join(scratch, 'keep'), 'utf8')).toBe('scratch marker');
@@ -63,7 +64,7 @@ describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker s
     process.env.CEZ_DELEGATION = '1'; process.env.CEZ_DRY_RUN = '0';
     const adapter = HARNESS_ADAPTERS.claude; process.env[adapter.binEnv] = adapter.mockBin;
     const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-    store.updateRun(p.id, { status: 'waiting', delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
+    store.updateRun(p.id, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
     const w = await worker(p.id, adapter.scenarios.hold!); manager.enqueueOwnedRun(w.id);
     await until(() => { const proof = store.readWorkerExecution(w.id); const record = proof && store.readWorkerProcesses(w.id, proof.generation); return !!record && typeof record !== 'string' && record.processes.some(recordedProcessLive); });
     if (w.delegation?.role !== 'worker') throw Error('missing workspace');

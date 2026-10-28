@@ -515,10 +515,12 @@ describe('delegation service durable authority', () => {
     f.store.updateRun(workerId, { worktreePath: workspace.path, branch: workspace.branch });
     let release!: (value: string | undefined) => void;
     const held = new Promise<string | undefined>(resolve => { release = resolve; });
-    const lookup = vi.spyOn(f.service as unknown as { commonDir: () => Promise<string | undefined> }, 'commonDir').mockReturnValue(held);
+    let entered!: () => void;
+    const lookupEntered = new Promise<void>(resolve => { entered = resolve; });
+    vi.spyOn(f.service as unknown as { commonDir: () => Promise<string | undefined> }, 'commonDir').mockImplementation(() => { entered(); return held; });
     const destroying = f.service.destroy(f.caller, { workerId });
     void destroying.catch(() => {});
-    await vi.waitFor(() => expect(lookup).toHaveBeenCalledOnce());
+    await lookupEntered;
     const replacementManager = createFixtureManager(f.store, f.root);
     const detach = f.service.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
     const writes = vi.spyOn(f.store, 'commitDelegation');

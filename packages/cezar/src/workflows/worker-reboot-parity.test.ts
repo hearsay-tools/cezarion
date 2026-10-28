@@ -73,6 +73,7 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (#738
     const caller = credentials.authenticate(credentials.issue('project', p.id, 'test'))!;
     let service = new DelegationService(); let detach = service.registerProject({ id: 'project', root, store, manager });
     let holderClosed = false;
+    let releasePreflight = () => {};
     try {
       expect(await service.collect(caller, { workerId: twin.id })).toMatchObject({ settled: true, status: 'done' });
       expect(manager.finishBlockedReason(p.id)).toContain(orphan.id);
@@ -108,12 +109,30 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (#738
       detach(); manager.dispose(); store.flush(); reopenRuntime();
       await manager.recover();
       service = new DelegationService(); detach = service.registerProject({ id: 'project', root, store, manager });
+      let lookup: ReturnType<typeof vi.spyOn> | undefined;
+      let attempt: ReturnType<typeof vi.spyOn> | undefined;
+      if (settleVia === 'destroy') {
+        const target = service as unknown as { commonDir: (...args: never[]) => Promise<string | undefined> };
+        const original = target.commonDir.bind(service);
+        const held = new Promise<void>(resolve => { releasePreflight = resolve; });
+        lookup = vi.spyOn(target, 'commonDir').mockImplementation(async (...args) => { await held; return original(...args); });
+        attempt = vi.spyOn(service as unknown as { destroyAttempt: (...args: never[]) => Promise<unknown> }, 'destroyAttempt');
+      }
       service.armDestroyRetries('project');
       await vi.advanceTimersByTimeAsync(60_000);
-      expect(existsSync(scratch)).toBe(false);
       if (settleVia === 'collect') {
+        expect(existsSync(scratch)).toBe(false);
         expect(existsSync(workspace.path)).toBe(true); // collection never requests worktree removal
         expect(await service.destroyForHuman('project', orphan.id)).toMatchObject({ state: 'complete', remaining: [] });
+      } else {
+        expect(lookup).toHaveBeenCalledOnce(); expect(attempt).toHaveBeenCalledOnce();
+        expect(store.getRun(orphan.id)?.delegation).toMatchObject({ destroy: { phase: 'terminating' } });
+        expect(existsSync(scratch)).toBe(true);
+        releasePreflight();
+        vi.useRealTimers();
+        const result = await attempt!.mock.results[0]!.value;
+        expect(result, JSON.stringify(result)).toMatchObject({ state: 'complete', remaining: [] });
+        expect(existsSync(scratch)).toBe(false);
       }
       vi.useRealTimers();
       await until(() => !existsSync(workspace.path) && !existsSync(scratch));
@@ -144,7 +163,7 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (#738
         expect(unreadable.running).toBe(true);
       } finally { await unreadable.close(); }
       expect(existsSync(scratch)).toBe(false);
-    } finally { detach(); credentials.close(); if (!holderClosed) await holder.close(); vi.useRealTimers(); }
+    } finally { releasePreflight(); detach(); credentials.close(); if (!holderClosed) await holder.close(); vi.useRealTimers(); }
   });
   it.each(RUNNER_IDS)('%s refuses reuse until the real holder exits and a stale cleanup wake preserves the next native execution', async runner => {
     process.env.CEZ_DELEGATION = '1';

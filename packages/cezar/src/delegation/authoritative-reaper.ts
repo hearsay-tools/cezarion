@@ -14,6 +14,14 @@ import { prepareDestroyAccess } from './workspace.ts';
 
 type TerminationBlocker = NonNullable<ReturnType<RunManager['takeWorkerTerminationBlocker']>>;
 
+export function assertDestroyIdentity(project: DelegationProject, workerId: string, worker: RunRecord,
+  workspace: Extract<NonNullable<RunRecord['delegation']>, { role: 'worker' }>['workspace'], requestedAt: string, generation: string | undefined): void {
+  if (worker.delegation?.role !== 'worker' || JSON.stringify(worker.delegation.workspace) !== JSON.stringify(workspace) ||
+      worker.delegation.destroy?.requestedAt !== requestedAt || project.store.readWorkerExecution(workerId)?.generation !== generation) {
+    throw new Error('Worker resource ownership changed');
+  }
+}
+
 export function terminationFailure(workerId: string, resources: ('worktree' | 'branch')[], taken: TerminationBlocker | undefined) {
   const blocker = taken?.blocker;
   const reason = !blocker ? undefined : blocker.kind === 'unreadable' ? 'worker process record is unreadable; termination cannot be proven'
