@@ -88,7 +88,7 @@ function joinedWithResumeTime(code: string, at: { start: number; end: number }):
   return back !== undefined && joined(before.slice(back.index + back[0].length));
 }
 
-function scanRunFacts(file: string, source: string): Site[] {
+function scanRunFacts(file: string, source: string, readers = RESUME_TIME_READERS): Site[] {
   const code = blank(source);
   const lines = source.split('\n');
   const lineAt = (offset: number) => code.slice(0, offset).split('\n').length;
@@ -104,7 +104,7 @@ function scanRunFacts(file: string, source: string): Site[] {
       if (joinedWithResumeTime(code, at)) sites.push(site('restated-hold', at.start));
     }
   }
-  if (!isTest(file) && !(file in RESUME_TIME_READERS)) {
+  if (!isTest(file) && !(file in readers)) {
     const first = code.search(/\??\.autoResumeAt\b/);
     if (first >= 0) sites.push(site('resume-time-read', first));
   }
@@ -187,6 +187,13 @@ describe('run facts are read from the contract (hearsay-tools/cezarion#1496)', (
 
     it('finds a resume time read in an unlisted source file, once per file', () => {
       expect(rules('const a = run.autoResumeAt; const b = run?.autoResumeAt')).toEqual(['resume-time-read']);
+    });
+
+    it('accepts an explicitly listed run module, but not another module', () => {
+      const readers = { 'packages/cezar/src/workflows/run/timer.ts': 'owns the timer' };
+      const source = 'const time = run.autoResumeAt';
+      expect(scanRunFacts('packages/cezar/src/workflows/run/timer.ts', source, readers)).toEqual([]);
+      expect(scanRunFacts('packages/cezar/src/workflows/run/other.ts', source, readers).map((s) => s.rule)).toEqual(['resume-time-read']);
     });
 
     it('passes a resume time in a listed file, a test, a fixture key and a comment', () => {

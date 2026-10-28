@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fakeCdp, fakeViewer } from './preview.testkit.ts';
+import type { PreviewQuality } from '@open-mercato/cezar-contract';
 import { PreviewSession } from './session.ts';
 
 const frame = (text: string, sessionId: number) => ({ data: Buffer.from(text).toString('base64'), sessionId });
@@ -54,6 +55,101 @@ describe('PreviewSession', () => {
     session.attach(fakeViewer());
     await flush();
     expect(sent('Page.startScreencast').map(call => [call.params.maxWidth, call.params.maxHeight])).toEqual([[1280, 800], [646, 787], [646, 787]]);
+  });
+
+  describe('stream quality (hearsay-tools/cezarion#2066)', () => {
+    afterEach(() => vi.useRealTimers());
+
+    const qualities = (sent: ReturnType<typeof fakeCdp>['sent']) => sent('Page.startScreencast').map(call => call.params.quality);
+
+    it('streams Normal at JPEG quality 60 when nobody chose a mode', async () => {
+      const { cdp, sent } = fakeCdp();
+      const session = await PreviewSession.create(cdp);
+      session.attach(fakeViewer());
+      await flush();
+      expect(sent('Page.startScreencast')[0]?.params).toEqual({ format: 'jpeg', quality: 60, maxWidth: 1280, maxHeight: 800, everyNthFrame: 1 });
+    });
+
+    it('streams High at JPEG quality 100, at the same size and with the same device scale factor', async () => {
+      const { cdp, sent } = fakeCdp();
+      const session = await PreviewSession.create(cdp, { quality: () => 'high' });
+      session.attach(fakeViewer());
+      await flush();
+      expect(sent('Page.startScreencast')[0]?.params).toEqual({ format: 'jpeg', quality: 100, maxWidth: 1280, maxHeight: 800, everyNthFrame: 1 });
+      expect(sent('Emulation.setDeviceMetricsOverride')[0]?.params).toMatchObject({ deviceScaleFactor: 1 });
+    });
+
+    it('a mode change restarts only the screencast: no navigation, no reload, no new viewport', async () => {
+      let quality: PreviewQuality = 'normal';
+      const { cdp, sent, calls } = fakeCdp();
+      const session = await PreviewSession.create(cdp, { quality: () => quality });
+      session.attach(fakeViewer());
+      await session.handle({ t: 'resize', w: 646, h: 787 });
+      await flush();
+      const before = calls.length;
+
+      quality = 'high';
+      await session.refreshQuality();
+      const after = calls.slice(before).map(call => call.method);
+      expect(after).toEqual(['Page.stopScreencast', 'Page.startScreencast']);
+      expect(sent('Page.startScreencast').at(-1)?.params).toEqual({ format: 'jpeg', quality: 100, maxWidth: 646, maxHeight: 787, everyNthFrame: 1 });
+
+      // The same mode again restarts nothing.
+      await session.refreshQuality();
+      expect(calls.length).toBe(before + 2);
+
+      quality = 'normal';
+      await session.refreshQuality();
+      expect(qualities(sent).at(-1)).toBe(60);
+    });
+
+    it('drops the frame in flight on a mode change, so the next frame reaches the viewer', async () => {
+      let quality: PreviewQuality = 'normal';
+      const { cdp, emit } = fakeCdp();
+      const session = await PreviewSession.create(cdp, { quality: () => quality });
+      const viewer = fakeViewer();
+      session.attach(viewer);
+      await flush();
+      emit('Page.screencastFrame', frame('normal', 1));
+      quality = 'high';
+      await session.refreshQuality();
+      emit('Page.screencastFrame', frame('high', 1));
+      expect(viewer.frames).toEqual(['normal', 'high']);
+    });
+
+    it('keeps the chosen mode through a resize, a watchdog restart, page activity and a new viewer', async () => {
+      vi.useFakeTimers();
+      const { cdp, sent, emit } = fakeCdp();
+      const session = await PreviewSession.create(cdp, { quality: () => 'high' });
+      const first = fakeViewer();
+      session.attach(first);
+      await vi.advanceTimersByTimeAsync(0);
+      await session.handle({ t: 'resize', w: 646, h: 787 });
+      // No frame: the first-frame watchdog restarts the stream.
+      await vi.advanceTimersByTimeAsync(500);
+      emit('Page.screencastFrame', frame('A', 1));
+      await session.handle({ t: 'ack' });
+      // A click with no frame after it restarts the stream too.
+      await session.handle({ t: 'mouse', type: 'mousePressed', x: 1, y: 1, button: 'left', clickCount: 1 });
+      await vi.advanceTimersByTimeAsync(1000);
+      session.detach(first);
+      session.attach(fakeViewer());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(sent('Page.startScreencast').length).toBeGreaterThanOrEqual(5);
+      expect(new Set(qualities(sent))).toEqual(new Set([100]));
+    });
+
+    it('a mode change with no viewer starts nothing; the next viewer gets the mode', async () => {
+      let quality: PreviewQuality = 'normal';
+      const { cdp, sent } = fakeCdp();
+      const session = await PreviewSession.create(cdp, { quality: () => quality });
+      quality = 'high';
+      await session.refreshQuality();
+      expect(sent('Page.startScreencast')).toHaveLength(0);
+      session.attach(fakeViewer());
+      await flush();
+      expect(qualities(sent)).toEqual([100]);
+    });
   });
 
   describe('first-frame watchdog', () => {

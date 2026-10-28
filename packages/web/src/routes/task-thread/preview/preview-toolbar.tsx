@@ -6,6 +6,7 @@ import {
   ChevronLeftIcon,
   CircleStopIcon,
   EllipsisIcon,
+  GaugeIcon,
   GlobeIcon,
   Link2Icon,
   LinkIcon,
@@ -21,7 +22,7 @@ import {
 } from 'lucide-react'
 import { useEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from 'react'
 
-import type { PreviewServer } from '@open-mercato/cezar-api-client'
+import type { PreviewQuality, PreviewServer } from '@open-mercato/cezar-api-client'
 import { StatusDot, type StatusDotTone } from '@/components/status-dot'
 import { Button } from '@/components/ui/button'
 import {
@@ -29,12 +30,15 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 
 import { ExperimentalBadge } from './experimental-badge'
+import { PREVIEW_QUALITIES, qualityLabel } from './preview-quality'
 import { entryFor, serverStatus } from './preview-state'
 import { displayUrl } from './preview-url'
 import type { ThreadPreviewServer } from '../thread-state'
@@ -43,7 +47,8 @@ import type { ThreadPreviewServer } from '../thread-state'
  * The pane's toolbar (design 04, 4.1 to 4.3 and the mobile frame). Order: Session (only where the
  * pane replaces the transcript), back, forward, reload, server switcher (two or more entries: the
  * registered servers and, while an agent drives the browser, the agent's page),
- * address, viewport, stats, Experimental badge, More, close.
+ * address, viewport, stream quality, stats, Experimental badge, More, close. On a phone the
+ * quality choice moves into More, next to close.
  *
  * Room rule: the switcher or the adopted label take space from the address, so the stats shrink
  * to their dot (the numbers move into More) and the badge to its icon.
@@ -81,6 +86,8 @@ export interface PreviewToolbarProps {
   /** The page comes from a server cezar did not start (5.18). */
   adopted: boolean
   viewport: PreviewViewport
+  /** The stream's JPEG quality (hearsay-tools/cezarion#2066). */
+  quality: PreviewQuality
   /** A phone: two rows, no viewport menu, no stats, close inside More. */
   compact?: boolean
   /** A page is streaming, so back, forward and reload mean something. */
@@ -105,6 +112,7 @@ export interface PreviewToolbarProps {
   onPickServer: (port: number) => void
   onPickAgent?: (() => void) | undefined
   onViewport: (viewport: PreviewViewport) => void
+  onQuality: (quality: PreviewQuality) => void
   onCopyUrl: () => void
   onStop: (port: number) => void
   onClose: () => void
@@ -400,6 +408,42 @@ function ToolbarViewport({ props }: { props: PreviewToolbarProps }) {
   )
 }
 
+/** Normal and High as one radio group, for the toolbar menu and the phone's More. */
+function QualityOptions({ quality, onQuality, compact }: { quality: PreviewQuality; onQuality: (quality: PreviewQuality) => void; compact: boolean }) {
+  return (
+    <DropdownMenuRadioGroup value={quality} onValueChange={value => onQuality(value === 'high' ? 'high' : 'normal')}>
+      {PREVIEW_QUALITIES.map(option => (
+        <DropdownMenuRadioItem key={option.value} value={option.value} className={cn('items-start', compact && 'min-h-11')}>
+          <span className="flex flex-col gap-0.5">
+            <span>{option.label}</span>
+            <span className="text-xs whitespace-normal text-muted-foreground">{option.detail}</span>
+          </span>
+        </DropdownMenuRadioItem>
+      ))}
+    </DropdownMenuRadioGroup>
+  )
+}
+
+function ToolbarQuality({ props }: { props: PreviewToolbarProps }) {
+  const { quality } = props
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm" className="shrink-0 gap-1.5" aria-label={`Stream quality: ${qualityLabel(quality)}`}>
+          <GaugeIcon aria-hidden="true" />
+          {/* After the viewport's label: the narrower pane drops this one first. */}
+          <span className="hidden @min-[560px]:inline">{qualityLabel(quality)}</span>
+          <ChevronDownIcon className="size-3.5 text-muted-foreground" aria-hidden="true" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-64">
+        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Stream quality</DropdownMenuLabel>
+        <QualityOptions quality={quality} onQuality={props.onQuality} compact={false} />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 function ToolbarReadout({ stats, status, crowded }: Pick<PreviewToolbarProps, 'stats' | 'status'> & { crowded: boolean }) {
   return stats ? (
     <Stats stats={stats} shrunk={crowded} />
@@ -453,6 +497,9 @@ function ToolbarMore({ props, compact, crowded }: { props: PreviewToolbarProps; 
         ) : null}
         {compact ? (
           <>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Stream quality</DropdownMenuLabel>
+            <QualityOptions quality={props.quality} onQuality={props.onQuality} compact />
             <DropdownMenuSeparator />
             <DropdownMenuItem className="min-h-11 gap-2.5" onSelect={props.onClose}>
               <XIcon aria-hidden="true" />
@@ -511,6 +558,7 @@ function DesktopToolbar({ props, elements, switcher, crowded, input, focusUrlAft
       {switcher ? <ToolbarSwitcher props={props} input={input} focusUrlAfterMenu={focusUrlAfterMenu} /> : null}
       {address}
       <ToolbarViewport props={props} />
+      <ToolbarQuality props={props} />
       <ToolbarReadout stats={stats} status={status} crowded={crowded} />
       {badge ? <ExperimentalBadge iconOnly={crowded} responsive={!crowded} /> : null}
       <span aria-hidden="true" className="mx-0.5 h-5 w-px shrink-0 bg-border" />

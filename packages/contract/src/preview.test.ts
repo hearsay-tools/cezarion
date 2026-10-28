@@ -85,6 +85,9 @@ describe('previewClientMessageSchema', () => {
   it.each([
     [{ t: 'open', target: { port: 5173 } }],
     [{ t: 'open', target: { url: 'http://localhost:5173/x' } }],
+    [{ t: 'open', target: { port: 5173 }, quality: 'high' }],
+    [{ t: 'quality', quality: 'normal' }],
+    [{ t: 'quality', quality: 'high' }],
     [{ t: 'run', port: 5173 }],
     [{ t: 'stop', port: 5173 }],
     [{ t: 'keepWaiting', port: 5173 }],
@@ -110,6 +113,9 @@ describe('previewClientMessageSchema', () => {
 
   it.each([
     ['an unknown message type', { t: 'eval', expression: '1' }],
+    ['an unknown quality', { t: 'quality', quality: 'lossless' }],
+    ['a quality message without a mode', { t: 'quality' }],
+    ['an open with an unknown quality', { t: 'open', target: { port: 5173 }, quality: 'max' }],
     ['an unknown mouse type', { t: 'mouse', type: 'mouseTeleport', x: 1, y: 1 }],
     ['an unknown key type', { t: 'key', type: 'char', key: 'a' }],
     ['an unknown mouse button', { t: 'mouse', type: 'mousePressed', x: 1, y: 1, button: 'back' }],

@@ -81,7 +81,7 @@ function PreviewPaneBody(props: PreviewPaneProps) {
   const transportState = usePreviewPaneTransport(props)
   const {
     compact, transport, everOpened, takenOver, stage, url, port, agent, hasFrame,
-    stats, viewport, setViewport, addressError,
+    stats, viewport, setViewport, quality, chooseQuality, addressError,
     urlInput, send, streaming, openServer, openAgent, empty,
     navigate, actions,
   } = transportState
@@ -105,6 +105,7 @@ function PreviewPaneBody(props: PreviewPaneProps) {
         agentShown={agent}
         adopted={adopted}
         viewport={compact ? 'fit' : viewport}
+        quality={quality}
         compact={compact}
         navEnabled={streaming}
         loading={stage?.stage === 'loading'}
@@ -119,6 +120,7 @@ function PreviewPaneBody(props: PreviewPaneProps) {
         onPickServer={serverPort => openServer(serverPort)}
         onPickAgent={openAgent}
         onViewport={setViewport}
+        onQuality={chooseQuality}
         onCopyUrl={() => copyText(url)}
         onStop={serverPort => send({ t: 'stop', port: serverPort })}
         onClose={onClose}

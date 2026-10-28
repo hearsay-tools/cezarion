@@ -7,6 +7,7 @@ message: >-
   (skills-write-outside-load-run-skills).
 files:
   - packages/cezar/src/workflows/run.ts
+  - packages/cezar/src/workflows/run/**
 utils:
   # The ways run.ts reaches an ActiveRun: the `state` and `active` parameters, `execution.state`, and
   # a direct lookup in the live map, `this.active.get(runId)`, bare or with a `!`. Not every

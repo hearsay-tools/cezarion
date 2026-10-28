@@ -1,7 +1,7 @@
 import type { RunnerId } from '../core/agent-runner.ts';
 import type { RunRecord } from '../runs/store.ts';
 import type { AccountHolds } from '../workspace/semaphore.ts';
-import type { StartRunInput } from './run.ts';
+import type { StartRunInput } from './run/types.ts';
 import type { WorkflowDef } from './types.ts';
 import type { resolvedWaits } from './waits.ts';
 

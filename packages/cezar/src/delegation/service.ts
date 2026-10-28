@@ -66,7 +66,8 @@ import { completionWaitEntry, hasWorkerDeadline, peerWaitView, workerCompletionW
 import type { RunStore, RunRecord } from '../runs/store.ts';
 import { assertConversationIdFree, ConversationIdInUseError } from '../runs/conversation-identity.ts';
 import { workerDestroyView, workerOutcome } from '../runs/delegation-state.ts';
-import type { DelegationExecutionSettings, RunManager } from '../workflows/run.ts';
+import type { RunManager } from '../workflows/run.ts';
+import type { DelegationExecutionSettings } from '../workflows/run/types.ts';
 import { QUICK_TASK_WORKFLOW, skillTaskSteps, plannedWorkflow, allowedToolsForStep, stepKind, type WorkflowDef, type WorkflowStepDef } from '../workflows/types.ts';
 import { discoverSkills } from '../skills.ts';
 import { findWorkflow } from '../workflows/load.ts';

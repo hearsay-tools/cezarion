@@ -1,6 +1,6 @@
 import type { AgentSession, InputDelivery } from '../core/agent-runner.ts';
 import type { Skill } from '../skills.ts';
-import type { DelegationExecutionSettings } from './run.ts';
+import type { DelegationExecutionSettings } from './run/types.ts';
 
 /**
  * The in-memory state of a run this manager is executing, and the one place it is built

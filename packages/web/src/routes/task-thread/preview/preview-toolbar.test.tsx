@@ -33,6 +33,7 @@ function props(extra: Partial<PreviewToolbarProps> = {}): PreviewToolbarProps {
     current: web,
     adopted: false,
     viewport: 'fit',
+    quality: 'normal',
     navEnabled: true,
     stats: { fps: 24, kbps: 180, rttMs: 38, lastFrameAt: Date.now() },
     onNavigate: vi.fn(),
@@ -41,6 +42,7 @@ function props(extra: Partial<PreviewToolbarProps> = {}): PreviewToolbarProps {
     onReload: vi.fn(),
     onPickServer: vi.fn(),
     onViewport: vi.fn(),
+    onQuality: vi.fn(),
     onCopyUrl: vi.fn(),
     onStop: vi.fn(),
     onClose: vi.fn(),
@@ -52,12 +54,12 @@ function props(extra: Partial<PreviewToolbarProps> = {}): PreviewToolbarProps {
 const openMenu = (trigger: HTMLElement) => fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' })
 
 describe('PreviewToolbar', () => {
-  it('orders its controls: back, forward, reload, URL, viewport, stats, badge, More, close', () => {
+  it('orders its controls: back, forward, reload, URL, viewport, quality, stats, badge, More, close', () => {
     render(<PreviewToolbar {...props()} />)
     const order = [...document.querySelectorAll<HTMLElement>('[data-slot="preview-toolbar"] button, [data-slot="preview-toolbar"] input')].map(
       el => el.getAttribute('aria-label') ?? el.textContent,
     )
-    expect(order).toEqual(['Back', 'Forward', 'Reload', 'Page address', 'Viewport size: Fit', 'More', 'Close preview'])
+    expect(order).toEqual(['Back', 'Forward', 'Reload', 'Page address', 'Viewport size: Fit', 'Stream quality: Normal', 'More', 'Close preview'])
     expect(screen.getByText('24 fps · 180 KB/s · 38 ms')).toBeTruthy()
     expect(screen.getByText('Experimental')).toBeTruthy()
   })
@@ -223,6 +225,39 @@ describe('PreviewToolbar', () => {
     expect(screen.getAllByRole('menuitem').map(i => i.textContent)).toEqual(['Fitpane size', '390 × 844', '820 × 1180', '1440 × 900'])
     fireEvent.click(screen.getByRole('menuitem', { name: '1440 × 900' }))
     expect(onViewport).toHaveBeenCalledWith({ w: 1440, h: 900 })
+  })
+
+  it('the quality menu offers Normal and High, marks the current one and explains the cost of High (hearsay-tools/cezarion#2066)', () => {
+    const onQuality = vi.fn()
+    render(<PreviewToolbar {...props({ onQuality })} />)
+    openMenu(screen.getByRole('button', { name: 'Stream quality: Normal' }))
+    const options = screen.getAllByRole('menuitemradio')
+    expect(options.map(option => option.textContent)).toEqual([
+      'NormalThe default. Lighter on CPU and network.',
+      'HighSharper text and fine detail. Uses more CPU and network.',
+    ])
+    expect(options.map(option => option.getAttribute('aria-checked'))).toEqual(['true', 'false'])
+    fireEvent.click(options[1]!)
+    expect(onQuality).toHaveBeenCalledWith('high')
+  })
+
+  it('names High on the trigger, with its label hidden first in a narrow pane', () => {
+    render(<PreviewToolbar {...props({ quality: 'high' })} />)
+    const trigger = screen.getByRole('button', { name: 'Stream quality: High' })
+    expect(within(trigger).getByText('High').className).toContain('hidden @min-[560px]:inline')
+  })
+
+  it('moves the quality choice into More on phones', () => {
+    const onQuality = vi.fn()
+    render(<PreviewToolbar {...props({ compact: true, quality: 'high', onQuality })} />)
+    expect(screen.queryByRole('button', { name: /^Stream quality/ })).toBeNull()
+    openMenu(screen.getByRole('button', { name: 'More' }))
+    expect(screen.getByText('Stream quality')).toBeTruthy()
+    const options = screen.getAllByRole('menuitemradio')
+    expect(options.map(option => option.getAttribute('aria-checked'))).toEqual(['false', 'true'])
+    expect(options.every(option => option.className.includes('min-h-11'))).toBe(true)
+    fireEvent.click(options[0]!)
+    expect(onQuality).toHaveBeenCalledWith('normal')
   })
 
   it('hides the viewport menu on phones and moves close into More', () => {

@@ -90,6 +90,45 @@ describe('PreviewPane', () => {
     expect(sent().filter(m => m.t === 'open')).toHaveLength(2)
   })
 
+  describe('stream quality (hearsay-tools/cezarion#2066)', () => {
+    afterEach(() => localStorage.clear())
+    const openRadix = (trigger: HTMLElement) => fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' })
+
+    it('opens at Normal by default and says so in the toolbar', () => {
+      render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onClose={() => undefined} />)
+      transport('open')
+      expect(sent().find(m => m.t === 'open')).toEqual(expect.objectContaining({ quality: 'normal' }))
+      expect(screen.getByRole('button', { name: 'Stream quality: Normal' })).toBeTruthy()
+    })
+
+    it('a switch sends only the mode, no open or navigation, and every later open carries it', () => {
+      render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onClose={() => undefined} />)
+      transport('open')
+      message({ t: 'state', stage: 'streaming', adopted: false })
+      const before = sent().length
+      openRadix(screen.getByRole('button', { name: 'Stream quality: Normal' }))
+      fireEvent.click(screen.getByRole('menuitemradio', { name: /^High/ }))
+      expect(sent().slice(before).filter(m => m.t !== 'resize')).toEqual([{ t: 'quality', quality: 'high' }])
+      expect(screen.getByRole('button', { name: 'Stream quality: High' })).toBeTruthy()
+
+      transport('reconnecting', 1)
+      transport('open')
+      expect(sent().filter(m => m.t === 'open').at(-1)).toEqual(expect.objectContaining({ target: { port: 5173 }, resume: true, quality: 'high' }))
+    })
+
+    it('remembers the mode for the next pane in this browser', () => {
+      const { unmount } = render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onClose={() => undefined} />)
+      transport('open')
+      openRadix(screen.getByRole('button', { name: 'Stream quality: Normal' }))
+      fireEvent.click(screen.getByRole('menuitemradio', { name: /^High/ }))
+      unmount()
+      render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onClose={() => undefined} />)
+      transport('open')
+      expect(sent().find(m => m.t === 'open')).toEqual(expect.objectContaining({ quality: 'high' }))
+      expect(screen.getByRole('button', { name: 'Stream quality: High' })).toBeTruthy()
+    })
+  })
+
   it('never sends run for a plain open; Run and open sends it once', () => {
     render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onClose={() => undefined} />)
     transport('open')

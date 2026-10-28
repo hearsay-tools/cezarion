@@ -709,6 +709,61 @@ describe('PreviewHost', () => {
     expect(again.frames).toHaveLength(1);
   });
 
+  describe('stream quality (hearsay-tools/cezarion#2066)', () => {
+    const qualities = (browser: { cdpFake: ReturnType<typeof fakeCdp> }) => browser.cdpFake.sent('Page.startScreencast').map(call => call.params.quality);
+
+    it('streams the mode the open asked for, and an older open without one streams Normal', async () => {
+      const { host, ctx, answering, browsers } = make();
+      answering.add(5173);
+      await host.handle(ctx, fakeViewer(), { t: 'open', target: { port: 5173 }, quality: 'high' });
+      await flush();
+      expect(qualities(browsers[0]!)).toEqual([100]);
+      await host.handle(ctx, fakeViewer(), { t: 'open', target: { port: 5173 } });
+      await flush();
+      expect(qualities(browsers[0]!).at(-1)).toBe(60);
+    });
+
+    it('a switch restarts the stream on the same page: no navigation, the URL stays', async () => {
+      const { host, ctx, answering, browsers } = make();
+      answering.add(5173);
+      const viewer = fakeViewer();
+      await host.handle(ctx, viewer, { t: 'open', target: { port: 5173 } });
+      await flush();
+      browsers[0]!.cdpFake.emit('Page.frameNavigated', { frame: { id: 'main', url: 'http://localhost:5173/form' } });
+      await host.handle(ctx, viewer, { t: 'quality', quality: 'high' });
+      await flush();
+      expect(qualities(browsers[0]!)).toEqual([60, 100]);
+      expect(navigations(browsers[0]!)).toEqual(['http://localhost:5173/']);
+      expect(browsers[0]!.cdpFake.sent('Page.reload')).toHaveLength(0);
+    });
+
+    it('a reconnect at High resumes the live page at High', async () => {
+      const { host, ctx, answering, browsers } = make();
+      answering.add(5173);
+      const first = fakeViewer();
+      await host.handle(ctx, first, { t: 'open', target: { port: 5173 }, viewerId: 'pane', quality: 'high' });
+      browsers[0]!.cdpFake.emit('Page.frameNavigated', { frame: { id: 'main', url: 'http://localhost:5173/cart' } });
+      host.detach(ctx.runId, first);
+      const again = fakeViewer();
+      await host.handle(ctx, again, { t: 'open', target: { port: 5173 }, viewerId: 'pane', resume: true, quality: 'high' });
+      await flush();
+      expect(again.closed).toEqual([]);
+      expect(navigations(browsers[0]!)).toEqual(['http://localhost:5173/']);
+      expect(qualities(browsers[0]!).length).toBeGreaterThanOrEqual(2);
+      expect(new Set(qualities(browsers[0]!))).toEqual(new Set([100]));
+    });
+
+    it('a viewer that is not the owner cannot change the mode', async () => {
+      const { host, ctx, answering, browsers } = make();
+      answering.add(5173);
+      await host.handle(ctx, fakeViewer(), { t: 'open', target: { port: 5173 } });
+      await flush();
+      await host.handle(ctx, fakeViewer(), { t: 'quality', quality: 'high' });
+      await flush();
+      expect(qualities(browsers[0]!)).toEqual([60]);
+    });
+  });
+
   it('a reconnect to an adopted server resumes the live page too', async () => {
     const { host, ctx, answering, browsers } = make();
     answering.add(5173);
@@ -1009,6 +1064,15 @@ describe('PreviewHost', () => {
         expect(own.map(r => r.params)).toEqual([{ targetId: 'NEW', flatten: true }]);
         expect(conn.pages.get('S1')!.sent('Page.startScreencast').length).toBeGreaterThan(0);
         expect(urls(viewer).at(-1)).toBe('http://localhost/NEW');
+      });
+
+      it("streams the agent's own tab at the mode the pane chose (hearsay-tools/cezarion#2066)", async () => {
+        const { host, ctx, link, viewer, conn } = await setup();
+        await host.handle(ctx, viewer, { t: 'quality', quality: 'high' });
+        await drive(link, 1, 'Target.createTarget', { url: 'about:blank' });
+        const starts = conn.pages.get('S1')!.sent('Page.startScreencast');
+        expect(starts.length).toBeGreaterThan(0);
+        expect(new Set(starts.map(call => call.params.quality))).toEqual(new Set([100]));
       });
 
       it('ignores a target that is not a page', async () => {
