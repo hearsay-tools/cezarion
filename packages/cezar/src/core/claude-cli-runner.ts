@@ -750,6 +750,8 @@ export function buildClaudeArgs(
   // Every hook's lifecycle, so the transcript can show what hooks told the agent (#961).
   if (features.includeHookEvents) args.push('--include-hook-events');
   args.push(...claudePermissionArgs(env));
+  // Refuse other Claude sessions' SendMessage on every launch; fails open (AGENT_PROTOCOL.md D3).
+  args.push('--settings', JSON.stringify({ crossSessionInbound: 'refuse' }));
   const settingSources = env.CEZ_CLAUDE_SETTING_SOURCES;
   if (settingSources) {
     args.push('--setting-sources', settingSources);
