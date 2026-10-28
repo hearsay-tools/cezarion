@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { aliasRetentionAdapter } from './linux-alias-retention.ts';
 import { assessAliasEvidence } from './linux-alias-discovery.ts';
-import { AliasWorkBudget } from './linux-alias-model.ts';
+import { AliasWorkBudget, aliasCandidates, indexAliasMounts } from './linux-alias-model.ts';
 import type { AliasScanAttempt } from './linux-alias-scan.ts';
 import type { WorkerAliasRetention, WorkerExecution } from '../runs/worker-execution.ts';
 import { serializeWorkerExecution } from '../runs/worker-execution.ts';
@@ -11,6 +11,21 @@ const resource = 'ff04f7e5-25b8-4f57-9050-895fe33fc6e6';
 const boot = 'deffb118-419a-4586-af9e-748667bd30c8';
 const attempt: AliasScanAttempt = { roots: ['/owned'], rootIdentities: ['2049:123'], owned: [],
   selfMounts: '', selfNamespace: '', budget: new AliasWorkBudget() };
+
+it('keeps a marker across detach and reopen when indexed gathering exhausts', () => {
+  const proof: WorkerExecution = { generation, phase: 'complete' };
+  let saved: WorkerAliasRetention | undefined;
+  const adapter = aliasRetentionAdapter(proof, resource, boot, attempt, value => { saved = value; }, () => {});
+  const mounts = Array.from({ length: 100 }, () => ({ dev: '8:1', root: '/owned', point: '/alias' }));
+  const index = indexAliasMounts(mounts, new AliasWorkBudget());
+  expect(() => aliasCandidates('/alias/file', '/', '08:01', mounts, [{ path: '/owned', dev: '8:1', fsPath: '/owned' }],
+    new AliasWorkBudget(50), index, () => { adapter.begin(123, boot + ':100'); })).toThrow('work exceeds');
+  expect(saved?.pending).toEqual([{ pid: 123, start: '100' }]);
+  expect(saved?.processes).toEqual([]);
+  const reopened = aliasRetentionAdapter({ ...proof, aliasRetention: saved! }, resource, boot, attempt, value => { saved = value; }, () => {});
+  expect(reopened.reconcile(() => boot + ':100', () => false)).toBe(true);
+  expect(saved?.pending).toEqual([{ pid: 123, start: '100' }]);
+});
 
 it('restores committed identity after restart and retains a detached mapping', () => {
   let saved: WorkerAliasRetention | undefined;

@@ -113,12 +113,26 @@ export function indexAliasMounts(mounts: readonly AliasMount[], budget: AliasWor
   return result;
 }
 
-function indexedMounts(path: string, device: string, index: AliasMountIndex, budget: AliasWorkBudget): AliasMount[] {
+function indexedMounts(path: string, device: string, index: AliasMountIndex, budget: AliasWorkBudget,
+  owned: readonly OwnedMountRoot[], notify: () => void): AliasMount[] {
   const points = index.get(device), found: { mount: AliasMount; order: number }[] = [];
+  let notified = false;
   let current = path;
   for (;;) {
     budget.spend();
-    for (const entry of points?.get(current) ?? []) { budget.spend(); found.push(entry); }
+    for (const entry of points?.get(current) ?? []) {
+      budget.spend();
+      if (!notified) {
+        const fsPath = posix.join(entry.mount.root, suffix(path, current)!);
+        for (const root of owned) {
+          budget.spend();
+          if (root.dev === device && suffix(fsPath, root.fsPath) !== undefined) {
+            notify(); notified = true; break;
+          }
+        }
+      }
+      found.push(entry);
+    }
     if (current === '/') break;
     current = posix.dirname(current);
   }
@@ -134,7 +148,9 @@ export function aliasCandidates(path: string, targetRoot: string, deviceHex: str
   if (!pathValid(path) || !pathValid(targetRoot)) throw new Error('ambiguous reader or target path');
   const device = devKey(deviceHex, 16);
   const candidates = new Set<string>();
-  for (const mount of index ? indexedMounts(path, device, index, budget) : targetMounts) {
+  let provisional = false;
+  const mounts = index ? indexedMounts(path, device, index, budget, owned, () => { onCandidate?.(); provisional = true; }) : targetMounts;
+  for (const mount of mounts) {
     budget.spend();
     if (mount.dev !== device) continue;
     const readerPoint = posix.join(targetRoot, mount.point);
@@ -148,7 +164,8 @@ export function aliasCandidates(path: string, targetRoot: string, deviceHex: str
       if (relativeOwned === undefined) continue;
       const candidate = posix.join(root.path, relativeOwned);
       if (!pathValid(candidate)) throw new Error('invalid candidate');
-      onCandidate?.();
+      if (provisional) provisional = false;
+      else onCandidate?.();
       candidates.add(candidate);
       if (candidates.size > MAX_CANDIDATES) throw new Error('too many alias candidates');
     }
