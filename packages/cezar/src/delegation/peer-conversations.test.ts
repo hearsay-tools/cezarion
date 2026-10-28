@@ -375,6 +375,26 @@ describe('peer conversations', () => {
     expect(f.store.getRun(f.parent.id)?.agentInputs?.every(input => !!input.deliveredAt)).toBe(true);
   });
 
+  it('R15 an inbox read after the sender\'s deletion returns the accepted request as it was sent', async () => {
+    const b = peer();
+    const request = await f.service.send(b.caller, message(f.parent.id, 'request', { text: 'Which versions?' }));
+    expect(f.store.deleteRun(b.id)).toBe(true);
+    const batch = await f.service.inbox(f.caller);
+    expect(batch.messages).toEqual([request.message]);
+    expect(batch.messages[0]).toMatchObject({ requestHash: request.message.requestHash, deadline: request.message.deadline });
+  });
+
+  it('R8 a reply to an open request reaches a requester whose inbox holds 32 undelivered inputs; other messages are refused', async () => {
+    const b = peer();
+    const request = await f.service.send(f.caller, message(b.id));
+    const now = new Date().toISOString();
+    f.store.updateRun(f.parent.id, { agentInputs: Array.from({ length: 32 }, () => ({ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: f.parent.id, text: 'queued', createdAt: now })) });
+    await expect(f.service.send(b.caller, message(f.parent.id, 'progress'))).rejects.toMatchObject({ code: 'capacity_limit' });
+    const reply = await f.service.reply(b.caller, message(f.parent.id, 'reply', { requestId: request.message.id }));
+    expect(reply).toMatchObject({ delivery: 'queued', outcome: { status: 'replied' } });
+    expect(f.store.getRun(f.parent.id)?.agentInputs?.filter(input => !input.deliveredAt)).toHaveLength(33);
+  });
+
   it('R15 a reply to a deleted sender\'s request is refused', async () => {
     const b = peer();
     const request = await f.service.send(b.caller, message(f.parent.id));

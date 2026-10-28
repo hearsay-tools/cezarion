@@ -200,8 +200,9 @@ export function byCreatedAtAndId(a: { createdAt: string; id: string }, b: { crea
  *  still carries it, so its inbox can return it (spec § 5). */
 export function orphanedPeerMessage(input: AgentInput): ConversationMessage | undefined {
   if (!input.conversation) return undefined;
-  const requestHash = createHash('sha256').update(JSON.stringify({ ...input.conversation, text: input.text })).digest('hex');
-  return { id: input.id, ...input.conversation, text: input.text, createdAt: input.createdAt, requestHash, state: 'accepted' };
+  // The input carries the accepted message's own hash and deadline; inputs written before they did get a stand-in hash.
+  const requestHash = input.requestHash ?? createHash('sha256').update(JSON.stringify({ ...input.conversation, text: input.text })).digest('hex');
+  return { id: input.id, ...input.conversation, text: input.text, createdAt: input.createdAt, ...(input.deadline ? { deadline: input.deadline } : {}), requestHash, state: 'accepted' };
 }
 
 /** A Cezar-written message (a routed question, a park notice) whose deterministic ID a peer

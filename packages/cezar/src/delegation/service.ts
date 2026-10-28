@@ -414,11 +414,13 @@ export class DelegationService {
       // An answer the worker can no longer receive (stopping, stopped, destroyed) would record
       // the question as replied while nothing delivers it; the human answers it instead.
       if (answering && !enqueue) throw new DelegationPolicyError('incompatible_state', 'The worker can no longer receive this answer; its question goes back to the human');
-      assertConversationCapacity(state, recipient, request.kind, enqueue, answering, request.kind === 'reply' && !settled);
+      assertConversationCapacity(state, recipient, request.kind, enqueue, request.kind === 'reply' && !settled);
       const outcomes = replyOutcomes(state, request, settled, now);
       // `parentRunId` keeps its name and holds the ledger owner (spec § 2, Message identity).
       const input = { id: message.id, source: 'agent' as const, parentRunId: root.id, text: message.text, createdAt: now,
-        conversation: { senderRunId: sender.id, recipientRunId: recipient.id, kind: message.kind, ...(message.requestId ? { requestId: message.requestId } : {}), ...(peer ? { relationship } : {}) } };
+        conversation: { senderRunId: sender.id, recipientRunId: recipient.id, kind: message.kind, ...(message.requestId ? { requestId: message.requestId } : {}), ...(peer ? { relationship } : {}) },
+        // A peer input outlives its sender's ledger: it keeps the message's identity for the recipient's inbox.
+        ...(peer ? { requestHash, ...(message.deadline ? { deadline: message.deadline } : {}) } : {}) };
       const next = { messages: [...state.messages, message], outcomes };
       if (resume) {
         try { assertConversationIdFree(root, input, id => project.store.getRun(id), (runId, id) => project.store.hasProjection(runId, id)); }
