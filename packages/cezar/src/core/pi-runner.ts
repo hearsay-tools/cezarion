@@ -1,8 +1,10 @@
-import { summarizeRunnerStderr } from './runner-stderr.ts';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { parseEffort } from '@open-mercato/cezar-contract/effort';
-import { fileURLToPath } from 'node:url';
 import { dirname, resolve as resolvePath } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { parseEffort } from '@open-mercato/cezar-contract/effort';
+import { isRecord, piMessageText, number, piRpcError as rpcError, string, toPiPrompt, truncate, waitForExit } from './pi-rpc-wire.ts';
+import { armEndWatchdog, emitPiToolResult, type PiEndWatchdog, PiRpcInput, PiTextBlocks, recordPiToolCall } from './pi-rpc-turn.ts';
+import { summarizeRunnerStderr } from './runner-stderr.ts';
 import type {
   AgentEvent,
   AgentRunResult,
@@ -21,9 +23,7 @@ import { signalSession, spawnSessionLeader, waitForEofExit } from './session-pro
 import { buildChildEnv } from './agent-env.js';
 import { cezarToolNames } from '../ci-wait/tools.js';
 import { readNdjson } from './ndjson.js';
-import { isRecord, piMessageText, number, piRpcError as rpcError, string, toPiPrompt, truncate, waitForExit } from './pi-rpc-wire.ts';
 import { createPiUiState, mapPiRpcMessage, piFlushProviderError, piProviderErrorMessage, piTurnStarted } from './pi-ui-mapper.js';
-import { armEndWatchdog, emitPiToolResult, type PiEndWatchdog, PiRpcInput, PiTextBlocks, recordPiToolCall } from './pi-rpc-turn.ts';
 import { boundOutputDrainAfterExit, DEFAULT_RUN_TIMEOUT_MS, KILL_GRACE_MS } from './runner-runtime.js';
 
 export interface PiRunnerOptions {
