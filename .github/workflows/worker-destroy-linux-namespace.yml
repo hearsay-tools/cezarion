@@ -53,7 +53,7 @@ jobs:
       - name: Attribute failed capacity scan in a disposable copy
         if: failure()
         run: |
-          set -eu
+          set -euo pipefail
           if ! test -f "$RUNNER_TEMP/candidate-native.log" || ! grep -q 'capacity result:.*alias scan work exceeds bounds' "$RUNNER_TEMP/candidate-native.log"; then
             exit 0
           fi
