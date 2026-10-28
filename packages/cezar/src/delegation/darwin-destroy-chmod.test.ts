@@ -1,4 +1,5 @@
 import { preChmodRaceFixture } from './darwin-race-fixture.testkit.ts';
+import { isSymlinkReopenRefusal } from './darwin-race-error.testkit.ts';
 import childProcess, { execFileSync } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -38,7 +39,6 @@ describe.runIf(process.platform === 'darwin')('explicit destroy macOS permission
       catch (error) { failure = error; stderr = String((error as { stderr?: Buffer }).stderr ?? error); }
       expect(failure, `osascript unexpectedly succeeded: ${stderr}`).toBeDefined();
       expect(existsSync(saved), `race hook did not save original; osascript stderr: ${stderr}`).toBe(true);
-      expect(stderr).toContain(kind === 'directory' ? 'directory identity mismatch after chmod' : 'fchmodat');
       const savedInfo = lstatSync(saved, { bigint: true });
       const replacementInfo = lstatSync(target, { bigint: true });
       const victimAfter = lstatSync(victim, { bigint: true });
@@ -47,6 +47,8 @@ describe.runIf(process.platform === 'darwin')('explicit destroy macOS permission
       expect(victimAfter.dev).toBe(victimInfo.dev); expect(victimAfter.ino).toBe(victimInfo.ino); expect(Number(victimAfter.mode & 0o7777n)).toBe(0o750);
       if (kind === 'directory') expect(Number(replacementInfo.mode & 0o777n)).toBe(0o700);
       else expect(replacementInfo.isSymbolicLink()).toBe(true);
+      if (kind === 'directory') expect(stderr).toContain('directory identity mismatch after chmod');
+      else expect(isSymlinkReopenRefusal(stderr), stderr).toBe(true);
     } finally { if (existsSync(saved)) chmodSync(saved, 0o700); if (existsSync(target) && lstatSync(target).isDirectory()) chmodSync(target, 0o700); rmSync(root, { recursive: true, force: true }); }
   });
   it('refuses an existing symlink and a symlink ancestor', async () => {

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
 import { preChmodRaceFixture } from './darwin-race-fixture.testkit.ts';
+import { isSymlinkReopenRefusal } from './darwin-race-error.testkit.ts';
 
 it('pins the private race fixture sequence and each immediate native failure', () => {
   const source = readFileSync(new URL('../../scripts/darwin-destroy-chmod.js', import.meta.url), 'utf8');
@@ -18,8 +19,25 @@ it('pins the private race fixture sequence and each immediate native failure', (
   const service = readFileSync(new URL('./service.test.ts', import.meta.url), 'utf8');
   const unit = readFileSync(new URL('./darwin-destroy-chmod.test.ts', import.meta.url), 'utf8');
   expect(service).toContain("error: expect.stringContaining('directory identity mismatch')");
-  expect(unit).toContain("'directory identity mismatch after chmod' : 'fchmodat'");
+  expect(unit).toContain("expect(stderr).toContain('directory identity mismatch after chmod')");
+  expect(unit).toContain('expect(isSymlinkReopenRefusal(stderr), stderr).toBe(true)');
+  expect(unit.indexOf('expect(replacementInfo.isSymbolicLink()).toBe(true)')).toBeLessThan(unit.indexOf('expect(isSymlinkReopenRefusal(stderr), stderr).toBe(true)'));
   expect(unit).toContain("failure('fixture symlinkat')");
+  expect(unit).toContain('expect(savedInfo.dev).toBe(info.dev)');
+  expect(unit).toContain('expect(savedInfo.ino).toBe(info.ino)');
+  expect(unit).toContain('expect(Number(savedInfo.mode & 0o7777n)).toBe(0)');
+  expect(unit).toContain('expect(replacementInfo.dev === info.dev && replacementInfo.ino === info.ino).toBe(false)');
+  expect(unit).toContain('expect(victimAfter.dev).toBe(victimInfo.dev)');
   expect(unit).toContain('expect(victimAfter.ino).toBe(victimInfo.ino)');
+  expect(unit).toContain('expect(Number(victimAfter.mode & 0o7777n)).toBe(0o750)');
+  expect(unit).toContain('expect(Number(replacementInfo.mode & 0o777n)).toBe(0o700)');
   expect(unit).toContain('expect(replacementInfo.isSymbolicLink()).toBe(true)');
+});
+
+it('accepts only the recorded symlink reopen error', () => {
+  const prefix = '/tmp/fixture.js: execution error: Error: Error: ';
+  expect(isSymlinkReopenRefusal(prefix + 'reopen errno=62 (-2700)\n')).toBe(true);
+  for (const text of ['fixture reopen errno=62', 'fixture grant fchmodat errno=62', 'reopen errno=13', 'reopen errno=620', 'arbitrary', 'ok']) {
+    expect(isSymlinkReopenRefusal(prefix + text + ' (-2700)')).toBe(false);
+  }
 });
