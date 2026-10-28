@@ -7,24 +7,47 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { z } from 'zod';
-import type { BranchClass, BranchPrState, RepoBranchEntry, RepoBranchesResponse } from '@open-mercato/cezar-contract';
+import type { BranchClass, BranchPrState, RepoBranchCountsResponse, RepoBranchEntry, RepoBranchesResponse } from '@open-mercato/cezar-contract';
 import { isSafeGitRef } from '../git-refs.ts';
 import { withWorktreeMutation } from '../git-worktree-lock.ts';
 import { ownedCleanupProtection, parseShortstat } from '../git-worktree.ts';
 import type { BranchOwner, RunStatus } from '../runs/store.ts';
 import { fetchGithubRefStatus, GH_REF_STATUS_MAX, refNumberFromUrl, type ReferenceStatus } from './github.ts';
-import type { LogEntryWithParents } from './git.ts';
+import { getBranches, type LogEntryWithParents } from './git.ts';
 
 const exec = promisify(execFile);
 
 interface GitResult { ok: boolean; stdout: string; stderr: string }
 
-function git(cwd: string, args: string[]): Promise<GitResult> {
-  return new Promise((resolve) => {
-    execFile('git', args, { cwd, maxBuffer: 32 * 1024 * 1024, encoding: 'utf8' }, (err, stdout, stderr) =>
-      resolve({ ok: !err, stdout: stdout ?? '', stderr: stderr ?? '' }),
-    );
-  });
+/** How many `git` processes this module runs at once, across every repository and request. A
+ *  repository with thousands of branches otherwise gets one process per branch at the same
+ *  moment (hearsay-tools/cezarion#2029). */
+const GIT_CONCURRENCY = 6;
+let gitRunning = 0;
+const gitWaiters: Array<() => void> = [];
+
+async function gitSlot(): Promise<() => void> {
+  if (gitRunning < GIT_CONCURRENCY) gitRunning++;
+  else await new Promise<void>((resolve) => gitWaiters.push(resolve));
+  // A released slot passes straight to the next waiter, so `gitRunning` never drops under it.
+  return () => {
+    const next = gitWaiters.shift();
+    if (next) next();
+    else gitRunning--;
+  };
+}
+
+async function git(cwd: string, args: string[]): Promise<GitResult> {
+  const release = await gitSlot();
+  try {
+    return await new Promise((resolve) => {
+      execFile('git', args, { cwd, maxBuffer: 32 * 1024 * 1024, encoding: 'utf8' }, (err, stdout, stderr) =>
+        resolve({ ok: !err, stdout: stdout ?? '', stderr: stderr ?? '' }),
+      );
+    });
+  } finally {
+    release();
+  }
 }
 
 const TASK_PREFIX = 'cez/';
@@ -238,7 +261,56 @@ async function forkPoint(root: string, run: BranchOwner, branch: string): Promis
   const res = await git(root, ['log', '-g', '--format=%H%x1f%gs', `refs/heads/${branch}`]);
   const oldest = res.ok ? res.stdout.trim().split('\n').filter(Boolean).at(-1) : undefined;
   const [sha = '', subject = ''] = oldest?.split('\x1f') ?? [];
+  return creationSha(sha, subject);
+}
+
+function creationSha(sha: string, subject: string): string | null {
   return sha && /^branch: Created from /.test(subject) ? sha : null;
+}
+
+/** Refs per bulk reflog read: keeps the argument list far under any platform's limit. */
+const REFLOG_CHUNK = 256;
+
+/**
+ * `forkPoint` for many branches in one `git log -g` per chunk instead of one per branch
+ * (hearsay-tools/cezarion#2029). git walks every named reflog and prints each entry once, in date
+ * order, so entries are matched by their `refs/heads/<name>@{n}` selector, and the oldest is the
+ * highest `n`. A ref with no reflog prints nothing: no fork point, as `forkPoint` answers. A chunk
+ * that fails (a branch deleted since it was listed) falls back to one read per branch.
+ */
+async function forkPoints(root: string, wanted: ReadonlyArray<{ run: BranchOwner; branch: string }>): Promise<Map<string, string | null>> {
+  const out = new Map<string, string | null>();
+  const walk: Array<{ run: BranchOwner; branch: string }> = [];
+  for (const item of wanted) {
+    if (item.run.baseBranch && FULL_SHA.test(item.run.baseBranch)) out.set(item.branch, item.run.baseBranch);
+    else walk.push(item);
+  }
+  const chunks: Array<typeof walk> = [];
+  for (let i = 0; i < walk.length; i += REFLOG_CHUNK) chunks.push(walk.slice(i, i + REFLOG_CHUNK));
+  await Promise.all(chunks.map(async (chunk) => {
+    const res = await git(root, ['log', '-g', '--format=%gD%x1f%H%x1f%gs', ...chunk.map((item) => `refs/heads/${item.branch}`), '--']);
+    if (!res.ok) {
+      await Promise.all(chunk.map(async (item) => out.set(item.branch, await forkPoint(root, item.run, item.branch))));
+      return;
+    }
+    const oldest = new Map<string, { n: number; sha: string; subject: string }>();
+    for (const line of res.stdout.split('\n')) {
+      const [selector = '', sha = '', ...rest] = line.split('\x1f');
+      // `@{` cannot appear in a ref name, so the last one starts the selector's index. The index
+      // form is git's default; only an explicit `--date` prints a date there.
+      const at = selector.lastIndexOf('@{');
+      const n = Number(selector.slice(at + 2, -1));
+      if (at < 0 || !selector.startsWith('refs/heads/') || !Number.isInteger(n)) continue;
+      const branch = selector.slice('refs/heads/'.length, at);
+      const seen = oldest.get(branch);
+      if (!seen || n > seen.n) oldest.set(branch, { n, sha, subject: rest.join('\x1f') });
+    }
+    for (const { branch } of chunk) {
+      const entry = oldest.get(branch);
+      out.set(branch, entry ? creationSha(entry.sha, entry.subject) : null);
+    }
+  }));
+  return out;
 }
 
 /**
@@ -304,7 +376,31 @@ function pickPr(prs: ForgePr[], tip: string): ForgePr | null {
   return [...prs].sort((a, b) => rank(b) - rank(a) || b.number - a.number)[0] ?? null;
 }
 
-export async function classifyBranches(input: ClassifyInput): Promise<Classification> {
+/** Three-dot diff stats by `<base sha> <tip sha>`: the stat depends on those two commits alone, so
+ *  an entry never goes stale. Bounded, oldest first out. */
+const DIFF_STAT_CACHE_MAX = 5_000;
+const diffStatCache = new Map<string, NonNullable<RepoBranchEntry['diffStat']>>();
+
+async function diffStat(root: string, baseSha: string, tip: string): Promise<RepoBranchEntry['diffStat']> {
+  const key = `${baseSha} ${tip}`;
+  const hit = diffStatCache.get(key);
+  if (hit) return hit;
+  const res = await git(root, ['diff', '--shortstat', `${baseSha}...${tip}`]);
+  if (!res.ok) return null;
+  const stat = parseShortstat(res.stdout);
+  const value = { additions: stat.adds, deletions: stat.dels };
+  diffStatCache.set(key, value);
+  if (diffStatCache.size > DIFF_STAT_CACHE_MAX) diffStatCache.delete(diffStatCache.keys().next().value as string);
+  return value;
+}
+
+export interface ClassifyOptions {
+  /** Compute each not-landed row's diff stat. Off for the counts and for a delete, which read none. */
+  diffStats?: boolean;
+}
+
+export async function classifyBranches(input: ClassifyInput, options: ClassifyOptions = {}): Promise<Classification> {
+  const withDiffStats = options.diffStats ?? true;
   const { root } = input;
   const base = input.configuredBase ?? input.currentBranch;
   const { ref: baseRef, fullRef: baseFullRef, sha: baseSha } = await resolveBase(root, base);
@@ -346,12 +442,12 @@ export async function classifyBranches(input: ClassifyInput): Promise<Classifica
   });
 
   // Empty before merged: a run whose branch still sits on its fork point never committed.
+  const emptyCandidates = drafts.filter((d) => d.cls === null && d.run);
+  const forks = await forkPoints(root, emptyCandidates.map((d) => ({ run: d.run as BranchOwner, branch: d.head.name })));
   await Promise.all(
-    drafts
-      .filter((d) => d.cls === null && d.run)
+    emptyCandidates
       .map(async (d) => {
-        const fork = await forkPoint(root, d.run as BranchOwner, d.head.name);
-        if (fork !== d.head.sha) return;
+        if (forks.get(d.head.name) !== d.head.sha) return;
         if (d.ahead === 0 || (await retainingRef((args) => git(root, args), d.head.sha, new Set([`refs/heads/${d.head.name}`]))) !== null) d.cls = 'empty';
       }),
   );
@@ -427,14 +523,9 @@ export async function classifyBranches(input: ClassifyInput): Promise<Classifica
   const branches: RepoBranchEntry[] = await Promise.all(
     drafts.map(async (d) => {
       const cls = d.cls as BranchClass;
-      let diffStat: RepoBranchEntry['diffStat'] = null;
-      if ((cls === 'not-landed' || cls === 'orphan') && baseSha) {
-        const res = await git(root, ['diff', '--shortstat', `${baseSha}...${d.head.sha}`]);
-        if (res.ok) {
-          const stat = parseShortstat(res.stdout);
-          diffStat = { additions: stat.adds, deletions: stat.dels };
-        }
-      }
+      const stat = withDiffStats && (cls === 'not-landed' || cls === 'orphan') && baseSha
+        ? await diffStat(root, baseSha, d.head.sha)
+        : null;
       return {
         name: d.head.name,
         class: cls,
@@ -443,7 +534,7 @@ export async function classifyBranches(input: ClassifyInput): Promise<Classifica
         runStatus: d.run?.status ?? null,
         ahead: Number.isFinite(d.ahead) ? d.ahead : 0,
         lastCommit: { sha: d.head.sha, subject: d.head.subject, at: d.head.at },
-        diffStat,
+        diffStat: stat,
         pr: prByBranch.get(d.head.name) ?? null,
       };
     }),
@@ -469,7 +560,13 @@ export async function classifyBranches(input: ClassifyInput): Promise<Classifica
 /** PR state can change with no local ref moving (a merge on GitHub), so the cache also ages out
  *  on the forge's own cadence. */
 const BRANCHES_TTL_MS = 60_000;
-const branchesCache = new Map<string, { key: string; at: number; value: RepoBranchesResponse }>();
+/** The latest scan per repository. `full` carries diff stats; a `counts` scan does not, so it
+ *  answers only the counts route. */
+const branchesCache = new Map<string, { key: string; at: number; full: boolean; value: RepoBranchesResponse }>();
+/** Per repository: the end of the scan queue, so one scan runs at a time. */
+const scanTail = new Map<string, Promise<unknown>>();
+/** Scans running or queued, by repository, kind and state key: an equal request joins one. */
+const scansInFlight = new Map<string, Promise<RepoBranchesResponse>>();
 
 /** What the answer depends on, hashed: every local and remote-tracking ref, the registered
  *  worktrees, the configured base, and the run fields the classes read. */
@@ -486,14 +583,54 @@ async function stateKey(input: ClassifyInput): Promise<string> {
     .digest('hex');
 }
 
-/** `GET /repo/branches`: the classification, cached on the refs state. */
-export async function readRepoBranches(input: ClassifyInput): Promise<RepoBranchesResponse> {
+function cachedScan(root: string, key: string, full: boolean): RepoBranchesResponse | null {
+  const hit = branchesCache.get(root);
+  return hit && hit.key === key && (hit.full || !full) && Date.now() - hit.at < BRANCHES_TTL_MS ? hit.value : null;
+}
+
+/**
+ * The classification for `key`, from the cache, from an equal scan already running or queued, or
+ * from a new scan queued behind the repository's current one. A burst of requests thus runs at
+ * most one scan at a time per repository, and equal requests share it (hearsay-tools/cezarion#2029).
+ */
+async function scan(input: ClassifyInput, full: boolean): Promise<RepoBranchesResponse> {
+  const { root } = input;
   const key = await stateKey(input);
-  const hit = branchesCache.get(input.root);
-  if (hit && hit.key === key && Date.now() - hit.at < BRANCHES_TTL_MS) return hit.value;
-  const { payload } = await classifyBranches(input);
-  branchesCache.set(input.root, { key, at: Date.now(), value: payload });
-  return payload;
+  const cached = cachedScan(root, key, full);
+  if (cached) return cached;
+  const id = (kind: string) => `${root}\0${kind}\0${key}`;
+  const joined = scansInFlight.get(id('full')) ?? (full ? undefined : scansInFlight.get(id('counts')));
+  if (joined) return joined;
+  const run = (scanTail.get(root) ?? Promise.resolve()).then(async () => {
+    // The scan ahead of this one may have answered it.
+    const ready = cachedScan(root, key, full);
+    if (ready) return ready;
+    const { payload } = await classifyBranches(input, { diffStats: full });
+    // A counts scan never replaces a full answer for the same state.
+    if (full || !cachedScan(root, key, true)) branchesCache.set(root, { key, at: Date.now(), full, value: payload });
+    return payload;
+  });
+  const tail = run.catch(() => undefined);
+  scanTail.set(root, tail);
+  scansInFlight.set(id(full ? 'full' : 'counts'), run);
+  void tail.then(() => {
+    scansInFlight.delete(id(full ? 'full' : 'counts'));
+    if (scanTail.get(root) === tail) scanTail.delete(root);
+  });
+  return run;
+}
+
+/** `GET /repo/branches`: the classification, cached on the refs state. */
+export function readRepoBranches(input: ClassifyInput): Promise<RepoBranchesResponse> {
+  return scan(input, true);
+}
+
+/** `GET /repo/branches/counts`: the classification's counts, with no diff stat per branch, and
+ *  the All branches count — `GET /repo`'s names plus every local branch, as the list joins them. */
+export async function readRepoBranchCounts(input: ClassifyInput): Promise<RepoBranchCountsResponse> {
+  const [{ base, prStateKnown, counts, branches }, switchable] = await Promise.all([scan(input, false), getBranches(input.root)]);
+  const names = new Set([...switchable, ...branches.map((entry) => entry.name)]);
+  return { base, prStateKnown, counts, allBranches: names.size };
 }
 
 /** Drop the cached classification — after any mutation this server makes. */
@@ -522,7 +659,7 @@ export async function deleteBranches(
   confirm?: string,
 ): Promise<DeleteBranchesResult> {
   const names = [...new Set(requested)];
-  const { payload, tips, baseSha, baseFullRef } = await classifyBranches(input);
+  const { payload, tips, baseSha, baseFullRef } = await classifyBranches(input, { diffStats: false });
   const byName = new Map(payload.branches.map((b) => [b.name, b]));
   const alone = names.length === 1;
   const refused: DeleteBranchesResult['refused'] = [];

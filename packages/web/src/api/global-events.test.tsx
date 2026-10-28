@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createUsageStore, type UsageStore } from './events'
-import { GlobalEventsProvider, useGlobalEvents, useRunUsage, useUsage } from './global-events'
+import { GlobalEventsProvider, REPO_BRANCHES_COALESCE_MS, useGlobalEvents, useRunUsage, useUsage } from './global-events'
 import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { toRunSummary } from '@open-mercato/cezar-api-client/contract/runs'
 import { createQueryClient } from './query-client'
@@ -1606,14 +1606,30 @@ describe('useGlobalEvents — reconcile doctrine', () => {
   }
 
   it('invalidates the Git view branch classes on run and run-deleted events (issue 08)', () => {
+    vi.useFakeTimers()
     const { source } = mount()
     source.open()
     const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const branchScans = () => invalidatedKeys(invalidate).filter((key) => JSON.stringify(key) === JSON.stringify(queryKeys.repoBranches)).length
     source.emit('run', stampedRun({ ...runRecord('r1'), status: 'done' }))
-    expect(invalidatedKeys(invalidate)).toContainEqual(queryKeys.repoBranches)
-    invalidate.mockClear()
+    act(() => vi.advanceTimersByTime(REPO_BRANCHES_COALESCE_MS))
+    expect(branchScans()).toBe(1)
     source.emit('run-deleted', JSON.stringify({ id: 'r1', project: BOOT }))
-    expect(invalidatedKeys(invalidate)).toContainEqual(queryKeys.repoBranches)
+    act(() => vi.advanceTimersByTime(REPO_BRANCHES_COALESCE_MS))
+    expect(branchScans()).toBe(2)
+  })
+
+  it('coalesces a burst of run events into one branch rescan (hearsay-tools/cezarion#2029)', () => {
+    vi.useFakeTimers()
+    const { source } = mount()
+    source.open()
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const branchScans = () => invalidatedKeys(invalidate).filter((key) => JSON.stringify(key) === JSON.stringify(queryKeys.repoBranches)).length
+    for (let i = 0; i < 20; i++) source.emit('run', stampedRun({ ...runRecord(`r${i}`), status: i % 2 ? 'done' : 'running' }))
+    source.emit('run-deleted', JSON.stringify({ id: 'r1', project: BOOT }))
+    expect(branchScans()).toBe(0)
+    act(() => vi.advanceTimersByTime(REPO_BRANCHES_COALESCE_MS))
+    expect(branchScans()).toBe(1)
   })
 
   it('reconciles background discovery on first open', async () => {

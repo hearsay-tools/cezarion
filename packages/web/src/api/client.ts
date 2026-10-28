@@ -47,6 +47,7 @@ import type {
   ReclaimWorktreeResponse,
   ReclaimWorktreesResponse,
   RemoveWorktreeResponse,
+  RepoBranchCountsResponse,
   RepoBranchesResponse,
   WorktreesResponse,
   ContinueResponse,
@@ -729,6 +730,15 @@ export async function getRepoBranches(opts?: ReadOptions, projectId?: string): P
   return unwrap(
     await cez.api.v1.p[':projectId'].repo.branches.$get({ param: { projectId: projectId ?? queryScope() } }, init(opts)),
     '/repo/branches',
+  )
+}
+
+/** The branch classification's counts alone (hearsay-tools/cezarion#2029): what the Git sidebar
+ *  reads, without the rows or a diff stat per branch. */
+export async function getRepoBranchCounts(opts?: ReadOptions, projectId?: string): Promise<RepoBranchCountsResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].repo.branches.counts.$get({ param: { projectId: projectId ?? queryScope() } }, init(opts)),
+    '/repo/branches/counts',
   )
 }
 
