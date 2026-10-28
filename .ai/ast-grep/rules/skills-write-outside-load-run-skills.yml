@@ -8,6 +8,7 @@ message: >-
   RunManager.enabledSkills (hearsay-tools/cezarion#1806).
 files:
   - packages/cezar/src/workflows/run.ts
+  - packages/cezar/src/workflows/run/**
 utils:
   # The ways run.ts reaches an ActiveRun, as in skills-read-outside-enabled-skills.yml: the `state`
   # and `active` parameters, `execution.state`, and a direct lookup in the live map, bare or with a

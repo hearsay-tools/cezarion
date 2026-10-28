@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RUN_STATUS, WAIT_PHASE, makeHumanWait, makePeerWait, makeTimerWait } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -10,6 +10,12 @@ import {
 
 const src = resolve(import.meta.dirname, '..');
 const blanked = (file: string) => blank(readFileSync(resolve(src, file), 'utf8'));
+const runSources = () => {
+  const dir = resolve(src, 'workflows/run');
+  return ['workflows/run.ts', ...(existsSync(dir)
+    ? readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith('.ts')).map((entry) => `workflows/run/${entry.name}`)
+    : [])];
+};
 
 /** A row that leaves the state with no person, no restart and no condition behind it. */
 const automaticExit = (row: TriggerRow, state: RunState) =>
@@ -63,7 +69,7 @@ describe('run states and their exits (hearsay-tools/cezarion#1804)', () => {
   });
 
   it('names only functions that exist', () => {
-    const files = { run: blanked('workflows/run.ts'), store: blanked('runs/store.ts'), server: blanked('server/server.ts') };
+    const files = { run: runSources().map(blanked).join('\n'), store: blanked('runs/store.ts'), server: blanked('server/server.ts') };
     const missing = [...new Set(RUN_TRIGGERS.flatMap((row) => row.via))].filter((name) => {
       const [file, fn] = name.includes(':') ? name.split(':') as ['store' | 'server', string] : ['run' as const, name];
       const defined = file === 'server'
@@ -74,9 +80,9 @@ describe('run states and their exits (hearsay-tools/cezarion#1804)', () => {
     expect(missing).toEqual([]);
   });
 
-  // Each exit is a write `run.ts` makes, through move(), transition() or transitionVia().
-  it('writes every exit in run.ts', () => {
-    const source = readFileSync(resolve(src, 'workflows/run.ts'), 'utf8');
+  // Each exit is a write the run implementation makes, through move(), transition() or transitionVia().
+  it('writes every exit in the run implementation', () => {
+    const source = runSources().map((file) => readFileSync(resolve(src, file), 'utf8')).join('\n');
     expect(Object.keys(RUN_EXITS).filter((exit) => !source.includes(`'${exit}'`))).toEqual([]);
   });
 
