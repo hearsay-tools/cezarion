@@ -7,6 +7,15 @@ import type { AgentEvent, ContentBlock } from './agent-runner.js';
  * (hearsay-tools/cezarion#2006).
  */
 
+/** One RPC line as JSON, or undefined when it does not parse: JSON.parse never returns undefined. */
+export function parseRpcLine(line: string): unknown {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+}
+
 /** A cezar prompt as the RPC `prompt` command's message text and images. */
 export function toPiPrompt(content: ContentBlock[]): {
   message: string;
