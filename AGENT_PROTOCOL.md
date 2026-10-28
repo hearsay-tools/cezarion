@@ -319,6 +319,8 @@ Incoming requests get one refusal to reply or repeat done. Repeating done permit
 peer requests settle `completed-without-reply` at done or review. Incoming refusal text lists up to
 40 request/sender pairs and gives the omitted count; completion settles every request. Workers keep their existing
 completion policy. Human Finish ignores request blockers and settles sent requests `sender-closed`.
+If the provider then fails, the failure write retires the accepted Finish intent.
+Restart also retires an old failed run's intent; the failure stays available for Continue.
 
 Messages are bounded to 100,000 characters, 32 undelivered inputs per recipient,
 1,024 messages per family, and 32 pending obligations. Requests and waits expire

@@ -2046,6 +2046,31 @@ function workersCells(runners: RunnerId[]): void {
       });
     });
 
+    it(`${runner} R18 Finish followed by a provider error retires its intent before restart`, async () => {
+      const peer = await parentOn(runner);
+      const wire = gatedProviderFailure(root, runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
+      store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['wait'], receipts: [] } }]);
+      await until(wire.held);
+      const request = seedCompletionRequest(run.id, peer.id);
+      // Hold graceful shutdown until the queued native provider error wins.
+      const close = vi.spyOn(engine().active.get(run.id)!.session, 'end').mockImplementationOnce(() => {});
+      expect(manager.finish(run.id)).toBe(true);
+      close.mockRestore();
+      wire.release();
+      await until(() => store.getRun(run.id)?.status === RUN_STATUS.failed && !manager.isActive(run.id));
+      expect(store.getRun(run.id)?.delegation).not.toHaveProperty('finishRequestedAt');
+      const delegation = store.getRun(run.id)?.delegation;
+      expect(delegation?.role === 'root' && delegation.conversation?.outcomes).toEqual([
+        expect.objectContaining({ requestId: request.id, status: 'sender-closed' }),
+      ]);
+      await restart();
+      expect(store.getRun(run.id)?.status).toBe(RUN_STATUS.failed);
+      expect(store.getRun(run.id)?.delegation).not.toHaveProperty('finishRequestedAt');
+      expect(manager.continueRun(run.id, { text: 'Try again.' })).toEqual({ ok: true });
+      await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting);
+    });
+
     it(`${runner} R13 repeated cezar_done tool refusals park on sent requests`, async () => {
       const p = await parentOn(runner); const peer = await parentOn(runner);
       const request = seedCompletionRequest(p.id, peer.id);

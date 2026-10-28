@@ -5509,10 +5509,10 @@ export class RunManager {
     this.starting.delete(runId); this.dropActive(runId);
     return true;
   }
-
   private async settleRequestedRootFinish(runId: string): Promise<void> {
     try {
       const status = this.store.getRun(runId)?.status;
+      if (status === 'failed') { this.store.updateRun(runId, settledRootFinishPatch(this.store, runId)); return; }
       if (status === 'review') { this.finish(runId); return; }
       if (status === 'running') this.move(runId, 'park');
       this.reconcileWorkerWaits(runId);
@@ -5520,7 +5520,6 @@ export class RunManager {
     }
     catch { console.warn('[cez] parent finish checkpoint failed; intent retained for retry'); }
   }
-
   /** Request deadlines share the existing reconciliation timer registry, never a polling loop. */
   private reconcileConversations(family: readonly RunRecord[]): void {
     const now = new Date().toISOString();
@@ -10195,7 +10194,8 @@ export class RunManager {
 
   /** Every run status `run.ts` writes comes from the run state table (hearsay-tools/cezarion#1804). */
   private move(runId: string, exit: RunExitId, patch: Omit<Parameters<RunStore['updateRun']>[1], 'status'> = {}): RunRecord | undefined {
-    return this.store.updateRun(runId, { ...patch, status: transition(exit, () => this.store.getRun(runId)) });
+    const status = transition(exit, () => this.store.getRun(runId));
+    return this.store.updateRun(runId, { ...patch, ...(status === 'failed' ? settledRootFinishPatch(this.store, runId) : {}), status });
   }
 
   private armIdleTimer(runId: string, state: ActiveRun): void {

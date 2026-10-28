@@ -2,7 +2,7 @@ import { RUN_STATUS, STEP_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { cezarDoneAnswerSchema } from '@open-mercato/cezar-contract/waits';
-import { manager, parent, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
+import { manager, parent, restart, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { messagesPrompt } from './monitoring-turn.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
@@ -103,6 +103,16 @@ describe('root request completion without a live session', () => {
     expect(finished?.role === 'root' && finished.conversation?.outcomes).toEqual([
       expect.objectContaining({ requestId: request.id, status: 'sender-closed' }),
     ]);
+  });
+  it('recovery retires an old failed Finish intent without changing the failure', async () => {
+    const run = rootTask();
+    store.updateRun(run.id, { status: RUN_STATUS.failed, error: 'provider failed' });
+    const delegation = store.getRun(run.id)!.delegation;
+    if (delegation?.role !== 'root') throw Error('missing root');
+    store.commitDelegation([{ id: run.id, delegation: { ...delegation, finishRequestedAt: new Date().toISOString() } }]);
+    await restart();
+    expect(store.getRun(run.id)).toMatchObject({ status: RUN_STATUS.failed, error: 'provider failed' });
+    expect(store.getRun(run.id)?.delegation).not.toHaveProperty('finishRequestedAt');
   });
   it('bounds incoming refusal text and settles every request, including omitted names', async () => {
     process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt('claude', ['Finish without replying.\nCEZ:DONE']);

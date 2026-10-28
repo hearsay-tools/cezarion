@@ -93,6 +93,7 @@ export const WAIT_CRITERIA = [
   // hearsay-tools/cezarion#1525: one turn-settlement method for every entry.
   { id: 'U27', scenario: 'baseline', name: 'U5, U6, U11, U20 and U20u settle alike from a fresh step, a Continue and a late acknowledgement, each with its heartbeat word' },
   { id: 'R13', scenario: 'baseline', name: 'open sent requests refuse done and park until settlement' },
+  { id: 'R18', scenario: 'provider-error', name: 'Finish followed by a provider error retires its intent before restart' },
   { id: 'R17', scenario: 'baseline', name: 'incoming requests refuse once then complete without reply' },
 ] as const;
 

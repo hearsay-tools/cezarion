@@ -241,8 +241,9 @@ Root request completion (hearsay-tools/cezarion#1996) adds `requests_outstanding
 `requests_unanswered` to `DoneErrorCode`. Sent requests now block agent done: one refusal,
 then a Cezar request wait (`source: cezar`, `via: completion`) without its own deadline.
 Incoming requests cause one refusal; repeating done completes without reply. Human Finish
-remains available with open requests and closes sent requests as `sender-closed`, including
-at review. No schema migration or new stored field is needed. Worker completion is unchanged.
+remains available with open requests and closes sent requests as `sender-closed`. A provider
+failure after Finish retires the intent with the failure write; restart repairs an old failed
+intent without changing the failure, so Continue remains available. Sent requests also close at review. No schema migration or new stored field is needed. Worker completion is unchanged.
 
 Additive for hearsay-tools/cezarion#1234 (unified waits, phase 2): `POST /api/v1/tools/ask` joins
 the private family, behind the same bearer capability and a 16 KiB body limit. Middleware
