@@ -1431,12 +1431,12 @@ function baseCells(runners: RunnerId[]): void {
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });
 
-    for (const deferred of [false, true]) it(`${runner} U7q a refused ${deferred ? 'deferred' : 'live'} answer checkpoint clears failures at zero budget and keeps its replay policy`, async () => {
+    for (const spent of [0, MAX_AUTO_CONTINUES]) for (const deferred of [false, true]) it(`${runner} U7q a refused ${deferred ? 'deferred' : 'live'} answer checkpoint clears failures at budget ${spent} and keeps its replay policy`, async () => {
       nativeWire(runner);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
       await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined && store.getRun(run.id)?.status === 'waiting');
       const [human] = humanOpen(run.id);
-      store.updateRun(run.id, { automaticWakes: 0, waitDeliveryFailures: 2 });
+      store.updateRun(run.id, { automaticWakes: spent, waitDeliveryFailures: 2 });
       const message = { id: randomUUID(), text: answerOf(run.id), createdAt: new Date().toISOString() };
       if (deferred) {
         store.commitHumanMessageBesideWaits(run.id, message);
@@ -1458,14 +1458,22 @@ function baseCells(runners: RunnerId[]): void {
       else expect(manager.sendMessage(run.id, [{ type: 'text', text: message.text }])).toBe(true);
       commits.stop();
       expect(refused).toBe(true);
-      expect(settled(run.id, human!.id)?.phase).toBe(deferred ? undefined : WAIT_PHASE.delivered);
-      expect(store.getRun(run.id)?.queuedMessages?.some(entry => entry.id === message.id) ?? false).toBe(deferred);
-      if (deferred) expect(humanOpen(run.id).some(wait => wait.id === human!.id)).toBe(true);
+      const retained = deferred && spent === 0;
+      expect(settled(run.id, human!.id)?.phase).toBe(retained ? undefined : WAIT_PHASE.delivered);
+      expect(store.getRun(run.id)?.queuedMessages?.some(entry => entry.id === message.id) ?? false).toBe(retained);
+      if (retained) expect(humanOpen(run.id).some(wait => wait.id === human!.id)).toBe(true);
       expect(store.getRun(run.id)?.waitDeliveryFailures).toBeUndefined();
       commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(wait => wait.id === human!.id && wait.phase === 'delivered') ||
         (row.automaticWakes === 0 && row.waitDeliveryFailures === undefined), 'a retried answer and its failure clear');
-      if (deferred) manager.cancel(run.id);
-      else expect(manager.finish(run.id)).toBe(true);
+      if (retained) manager.cancel(run.id);
+      else {
+        expect(engine().active.get(run.id)?.session.open).toBe(true);
+        await until(() => answered(run.id, human!.askSeq!));
+        expect(store.getRun(run.id)?.error).toBeUndefined();
+        await until(() => prompted(runner, message.text).length > 0);
+        expect(prompted(runner, message.text)).toHaveLength(1);
+        expect(manager.finish(run.id)).toBe(true);
+      }
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });
 

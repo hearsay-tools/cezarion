@@ -5913,7 +5913,7 @@ export class RunManager {
       console.warn(`[cez] bundled delivery checkpoint failed: ${refused}`);
       const retry = retryDeliveryOutcomes(outcomes);
       if (!retry) return refused;
-      this.store.commitOutcome(runId, retry, {}, { bestEffort: true });
+      if (this.store.commitOutcome(runId, retry, {}, { bestEffort: true }).committed && retry === outcomes) refused = undefined;
       if (retry !== outcomes) return refused;
     }
     if (ids.length) state.bundledInputIds = [...(state.bundledInputIds ?? []), ...ids];
