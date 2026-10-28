@@ -3,6 +3,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { RUN_STATUS, makeRunRecord } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { RunRecord } from '../runs/store.ts';
 import { branchOwnerOf } from '../runs/store.ts';
 import { classifyBranches, readRepoBranchCounts, readRepoBranches, type BranchForge, type ClassifyInput } from './repo-branches.ts';
@@ -79,20 +80,11 @@ beforeAll(() => {
   sh(repo, ['update-ref', '--create-reflog', '-m', 'branch: Created from main', '--stdin'], names.map((n) => `create refs/heads/${n} ${base}\n`).join(''));
   sh(repo, ['update-ref', '--create-reflog', '-m', 'commit: work', '--stdin'], names.map((n) => `update refs/heads/${n} ${work} ${base}\n`).join(''));
   // Every branch but the last ten has a finished run; those ten are orphans.
-  runs = names.slice(0, BRANCHES - 10).map((name, i) => {
-    const run = {
-      id: `${name.slice(4)}-0000-4000-8000-${String(i).padStart(12, '0')}`,
-      title: `task ${i}`,
-      workflow: 'quick-task',
-      task: 't',
-      status: 'done',
-      steps: [],
-      createdAt: '2026-09-01T00:00:00.000Z',
-      archived: false,
-      branch: name,
-    };
-    return run as unknown as RunRecord;
-  });
+  runs = names.slice(0, BRANCHES - 10).map((name, i) => makeRunRecord({
+    id: `${name.slice(4)}-0000-4000-8000-${String(i).padStart(12, '0')}`,
+    status: RUN_STATUS.done,
+    branch: name,
+  }));
   writeFileSync(join(shim, 'git'), [
     '#!/bin/sh',
     `m="${shim}/live/$$"`,
