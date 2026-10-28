@@ -33,9 +33,17 @@ import { isSignalTerminationExit, trackChildExit, unknownToolGrant } from './age
 import { signalSession, spawnSessionLeader, waitForEofExit } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { cezarToolEnvNames, cezarToolNames } from '../ci-wait/tools.ts';
-import { costWeightedTokens, type RawUsage } from './usage.ts';
+import { costWeightedTokens } from './usage.ts';
 import { readNdjson } from './ndjson.ts';
 import { InputSubmissions } from './input-submissions.ts';
+import {
+  claudeFrameDidWork,
+  normalizeIntentionalTeardownResult,
+  selectedModelRefusal,
+  zeroClaudeModelUsage,
+  zeroClaudeUsage,
+  type ClaudeStreamMessage,
+} from './claude-stream.ts';
 import {
   claudeTurnStarted,
   createClaudeUiState,
@@ -180,7 +188,7 @@ export class ClaudeCliRunner implements AgentRunner {
     let attemptDidWork = false;
     const sentLines = new Map<string, string>();
     const deferredHuman: { id: string; content: ContentBlock[] }[] = [];
-    let refusalRetry: { uuid: string; line: string; message: string; attempts: number } | undefined;
+    let refusalRetry: RefusalRetry | undefined;
     let refusalTimer: NodeJS.Timeout | undefined;
     const cancelRefusalRetry = () => {
       if (refusalTimer) clearTimeout(refusalTimer);
@@ -351,203 +359,244 @@ export class ClaudeCliRunner implements AgentRunner {
       }
     };
 
-    const result = (async (): Promise<AgentRunResult> => {
-      let outputFailure: { error: unknown } | undefined;
+    // ---- native message dispatch -------------------------------------------
+    // One stdout frame passes these steps in order (hearsay-tools/cezarion#1954).
+
+    // Returns undefined only for an unparseable line: JSON.parse never yields
+    // undefined, so a parsed `null` still reaches the reads below and fails
+    // the output loop as before.
+    const parseStreamLine = (line: string): ClaudeStreamMessage | undefined => {
       try {
-        for await (const line of readNdjson(child.stdout)) {
-          if (timedOut) break;
-          let msg: ClaudeStreamMessage;
-          try {
-            msg = JSON.parse(line) as ClaudeStreamMessage;
-          } catch {
-            onEvent?.({ type: 'note', message: `claude: skipped unparseable stream line: ${truncate(line)}` });
-            continue;
-          }
-
-          // Claude reports `error_during_execution` while reacting to our
-          // teardown signal. Once cezar has signalled the child, that frame
-          // describes the intentional stop rather than an agent failure.
-          // Normalize only this precise wire shape so genuine result errors
-          // (authentication, limits, malformed sessions) stay authoritative.
-          if (queuedTurnPending && (msg.type === 'assistant' || msg.type === 'user' || msg.type === 'result')) {
-            queuedTurnPending = false;
-            emitUi(claudeTurnStarted);
-          }
-          // `--replay-user-messages` echoes a line when the model consumes it (#505).
-          // Presentation-free: it is the user's own text, and it carries no tool_result.
-          if (msg.type === 'user' && msg.isReplay === true) {
-            if (typeof msg.uuid === 'string') humanUnsettled.delete(msg.uuid);
-            const ids = typeof msg.uuid === 'string' ? submissions.consume(msg.uuid) : [];
-            if (ids.length) opts.onAgentInputConsumed?.(ids);
-            continue;
-          }
-          opts.onActivity?.();
-          if (msg.type === 'system' && msg.subtype === 'init') {
-            reportedModel = typeof msg.model === 'string' && msg.model !== '' ? msg.model : undefined;
-            reportedSession = typeof msg.session_id === 'string' && msg.session_id !== '' ? msg.session_id : undefined;
-          }
-          // Background tasks and hooks can start work without assistant content
-          // or token usage. Only init is known to be identity-only metadata.
-          if ((msg.type === 'system' && msg.subtype !== 'init') || msg.type === 'tool_progress') attemptDidWork = true;
-          if (msg.type === 'assistant' || msg.type === 'user') {
-            // A refusal's own visible text is diagnostic, not model work. Any
-            // other output, tool call/result, reasoning or nonzero usage forbids replay.
-            if (msg.message?.usage && !zeroClaudeUsage(msg.message.usage)) attemptDidWork = true;
-            const content = msg.message?.content;
-            if (content !== undefined && !Array.isArray(content)) attemptDidWork = true;
-            for (const block of Array.isArray(content) ? content : []) {
-              if (!block || typeof block !== 'object') { attemptDidWork = true; continue; }
-              const b = block as { type?: string; text?: string };
-              if (b.type !== 'text' || selectedModelRefusal(b.text) !== reportedModel || !reportedModel) attemptDidWork = true;
-            }
-          }
-          const identity = reportedModel && reportedSession ? JSON.stringify([reportedSession, reportedModel]) : undefined;
-          const retryable = !terminatedByCezar && stdinOpen && !attemptDidWork
-            && msg.type === 'result' && msg.is_error === true
-            && identity !== undefined && identity === successfulIdentity
-            && selectedModelRefusal(msg.result) === reportedModel
-            && zeroClaudeUsage(msg.usage)
-            && zeroClaudeModelUsage(msg.modelUsage)
-            && (msg.total_cost_usd === undefined || msg.total_cost_usd === 0)
-            && unsettled.size === 1
-            && (msg.user_message_uuids === undefined || (Array.isArray(msg.user_message_uuids) && msg.user_message_uuids.length === 1
-              && msg.user_message_uuids[0] === [...unsettled][0]));
-          const uuid = [...unsettled][0];
-          const lineToRetry = uuid ? sentLines.get(uuid) : undefined;
-          if (retryable && uuid && lineToRetry && (!refusalRetry || refusalRetry.attempts < 2)) {
-            // Native attempts remain balanced, but a retryable result must not
-            // emit v1 error/turn-end: those would fail or park the workflow.
-            emitUi(state => mapClaudeMessage(msg, state));
-            refusalRetry ??= { uuid, line: lineToRetry, message: msg.result!, attempts: 0 };
-            const retry = refusalRetry;
-            const delay = retry.attempts++ === 0 ? 5000 : 15000;
-            onEvent?.({ type: 'note', message: `Claude model refusal: ${retry.message}; retrying (${retry.attempts}/2) in ${delay / 1000}s` });
-            refusalTimer = setTimeout(() => {
-              refusalTimer = undefined;
-              if (!stdinOpen || hasExited() || refusalRetry !== retry) return;
-              const input = JSON.parse(retry.line) as { message: { content: ContentBlock[] } };
-              // A fresh native UUID, the same logical input IDs, and byte-for-byte
-              // content. Already-observed consumption is never acknowledged twice.
-              const ids = submissions.consume(retry.uuid);
-              const human = humanUnsettled.delete(retry.uuid);
-              unsettled.delete(retry.uuid);
-              sentLines.delete(retry.uuid);
-              if (!sendMessage(input.message.content, error => {
-                if (!error || !stdinOpen) return;
-                cancelRefusalRetry();
-                onEvent?.({ type: 'error', message: retry.message });
-                interrupt();
-              }, ids, human, true)) {
-                cancelRefusalRetry();
-                onEvent?.({ type: 'error', message: retry.message });
-                interrupt();
-                return;
-              }
-              retry.uuid = [...unsettled][0]!;
-              retry.line = sentLines.get(retry.uuid)!;
-            }, delay);
-            refusalTimer.unref?.();
-            continue;
-          }
-          // Keep the original diagnosis on exhaustion, even if the final result
-          // differs. Other errors outside a retry still use their native message.
-          const originalRefusal = msg.type === 'result' && msg.is_error && refusalRetry?.message;
-          const mappedMessage = normalizeIntentionalTeardownResult(
-            originalRefusal ? { ...msg, result: originalRefusal } : msg, terminatedByCezar);
-          emitUi((state) => mapClaudeMessage(mappedMessage, state));
-
-          let delta = 0;
-          try {
-            delta = handleClaudeMessage(mappedMessage, { toolCalls, textChunks, onEvent });
-          } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            onEvent?.({ type: 'note', message: `claude: skipped malformed event (${msg.type ?? 'unknown'}): ${message}` });
-            continue;
-          }
-          if (delta > 0) {
-            sawUsage = true;
-            tokensUsed += delta;
-            onEvent?.({ type: 'token-usage', tokensUsed });
-          }
-
-          if (msg.type === 'result') {
-            if (msg.is_error !== true && msg.subtype === 'success' && costWeightedTokens(msg.usage) > 0) successfulIdentity = identity;
-            const wasRetrying = refusalRetry !== undefined;
-            cancelRefusalRetry();
-            if (typeof msg.total_cost_usd === 'number' && Number.isFinite(msg.total_cost_usd) && msg.total_cost_usd >= 0) {
-              onEvent?.({ type: 'cost', usd: msg.total_cost_usd });
-            }
-            pendingMarkerAsk = parseAskMarker(textChunks.slice(turnTextStart).join('\n')) !== null;
-            // The named lines are exact; `queued_turn_count: 0` is only a fallback, because a
-            // line still in the pipe when the CLI computed this result is not covered by it.
-            const named = Array.isArray(msg.user_message_uuids) ? msg.user_message_uuids.map(String) : null;
-            const settled = named ?? (msg.queued_turn_count === 0 ? [...unsettled] : [...unsettled].slice(0, 1));
-            // A line this result covered was read even if its replay echo was missed.
-            // An error result settles its lines but proves nothing reached the model: they
-            // stay pending, so a closing session returns them to the queue (#505 review).
-            // Fallback settlement must not clear humanUnsettled: a line may still be in the
-            // pipe, and only a named UUID or a replay echo proves the model read it (#486).
-            const covered = settled.flatMap(id => {
-              unsettled.delete(id);
-              sentLines.delete(id);
-              if (named) humanUnsettled.delete(id);
-              return msg.is_error === true ? [] : submissions.consume(id);
-            });
-            if (covered.length) opts.onAgentInputConsumed?.(covered);
-            // A result is not idle if human stdin messages already queued later turns.
-            agentInputReady = unsettled.size === 0;
-            // A line written after this turn's last model call runs as the CLI's next
-            // queued turn; its replay/result reports consumption then (#505). Announce
-            // that turn when its first frame arrives, never speculatively: a line the
-            // CLI never runs must not look like activity. Decided before the turn-end
-            // callback, which may itself submit (and announce) the next prompt.
-            queuedTurnPending = unsettled.size > 0;
-            // Remaining inputs belong to the next turn. Clear the completed
-            // turn's work before any queued frame (including system activity)
-            // arrives; resetting at its first assistant frame would erase work.
-            if (queuedTurnPending) attemptDidWork = false;
-            onEvent?.({ type: 'turn-end' });
-            // Drain later human input only after a successful logical turn.
-            // Failed turns retain the hold until the workflow tears down.
-            if (wasRetrying && msg.is_error !== true && stdinOpen) {
-              for (const input of deferredHuman.splice(0)) {
-                humanUnsettled.delete(input.id);
-                sendMessage(input.content, undefined, [], true);
-              }
-              opts.onAgentInputReady?.();
-            }
-            scheduleAutoEnd();
-          }
-        }
-      } catch (err) {
-        // Timeout teardown can close stdout. Any other live-child read failure
-        // must stop the agent before result releases its execution capacity.
-        if (!timedOut && !hasExited()) {
-          outputFailure = { error: err };
-          interrupt();
-        }
-      } finally {
-        if (deadline) clearTimeout(deadline);
-        if (autoEndTimer) clearTimeout(autoEndTimer);
-        if (refusalRetry && stdinOpen && !terminatedByCezar && !timedOut) {
-          onEvent?.({ type: 'error', message: refusalRetry.message });
-        }
-        stdinOpen = false;
-        cancelRefusalRetry();
+        return JSON.parse(line) as ClaudeStreamMessage;
+      } catch {
+        onEvent?.({ type: 'note', message: `claude: skipped unparseable stream line: ${truncate(line)}` });
+        return undefined;
       }
+    };
 
-      await cleanupAfterEof();
+    const announceQueuedTurn = (msg: ClaudeStreamMessage): void => {
+      if (queuedTurnPending && (msg.type === 'assistant' || msg.type === 'user' || msg.type === 'result')) {
+        queuedTurnPending = false;
+        emitUi(claudeTurnStarted);
+      }
+    };
 
-      const exitCode = await waitForExit(child);
-      // Draining/destroying stdout is not process exit. Keep timeout escalation
-      // armed until the child has actually settled.
+    // `--replay-user-messages` echoes a line when the model consumes it (#505).
+    // Presentation-free: it is the user's own text, and it carries no tool_result.
+    const consumeReplay = (msg: ClaudeStreamMessage): boolean => {
+      if (msg.type !== 'user' || msg.isReplay !== true) return false;
+      if (typeof msg.uuid === 'string') humanUnsettled.delete(msg.uuid);
+      const ids = typeof msg.uuid === 'string' ? submissions.consume(msg.uuid) : [];
+      if (ids.length) opts.onAgentInputConsumed?.(ids);
+      return true;
+    };
+
+    /** Record the reported model and session, mark attempt work, and return the identity. */
+    const observeFrame = (msg: ClaudeStreamMessage): string | undefined => {
+      if (msg.type === 'system' && msg.subtype === 'init') {
+        reportedModel = typeof msg.model === 'string' && msg.model !== '' ? msg.model : undefined;
+        reportedSession = typeof msg.session_id === 'string' && msg.session_id !== '' ? msg.session_id : undefined;
+      }
+      if (claudeFrameDidWork(msg, reportedModel)) attemptDidWork = true;
+      return reportedModel && reportedSession ? JSON.stringify([reportedSession, reportedModel]) : undefined;
+    };
+
+    const retryableRefusal = (msg: ClaudeStreamMessage, identity: string | undefined): boolean =>
+      !terminatedByCezar && stdinOpen && !attemptDidWork
+        && msg.type === 'result' && msg.is_error === true
+        && identity !== undefined && identity === successfulIdentity
+        && selectedModelRefusal(msg.result) === reportedModel
+        && zeroClaudeUsage(msg.usage)
+        && zeroClaudeModelUsage(msg.modelUsage)
+        && (msg.total_cost_usd === undefined || msg.total_cost_usd === 0)
+        && unsettled.size === 1
+        && (msg.user_message_uuids === undefined || (Array.isArray(msg.user_message_uuids) && msg.user_message_uuids.length === 1
+          && msg.user_message_uuids[0] === [...unsettled][0]));
+
+    const abandonRefusalRetry = (message: string): void => {
+      cancelRefusalRetry();
+      onEvent?.({ type: 'error', message });
+      interrupt();
+    };
+
+    const replayRefusedInput = (retry: RefusalRetry): void => {
+      refusalTimer = undefined;
+      if (!stdinOpen || hasExited() || refusalRetry !== retry) return;
+      const input = JSON.parse(retry.line) as { message: { content: ContentBlock[] } };
+      // A fresh native UUID, the same logical input IDs, and byte-for-byte
+      // content. Already-observed consumption is never acknowledged twice.
+      const ids = submissions.consume(retry.uuid);
+      const human = humanUnsettled.delete(retry.uuid);
+      unsettled.delete(retry.uuid);
+      sentLines.delete(retry.uuid);
+      if (!sendMessage(input.message.content, error => {
+        if (!error || !stdinOpen) return;
+        abandonRefusalRetry(retry.message);
+      }, ids, human, true)) {
+        abandonRefusalRetry(retry.message);
+        return;
+      }
+      retry.uuid = [...unsettled][0]!;
+      retry.line = sentLines.get(retry.uuid)!;
+    };
+
+    /** Hold a retryable model refusal and arm its replay; true when the frame is consumed. */
+    const scheduleRefusalRetry = (msg: ClaudeStreamMessage, identity: string | undefined): boolean => {
+      const retryable = retryableRefusal(msg, identity);
+      const uuid = [...unsettled][0];
+      const lineToRetry = uuid ? sentLines.get(uuid) : undefined;
+      if (!(retryable && uuid && lineToRetry && (!refusalRetry || refusalRetry.attempts < 2))) return false;
+      // Native attempts remain balanced, but a retryable result must not
+      // emit v1 error/turn-end: those would fail or park the workflow.
+      emitUi(state => mapClaudeMessage(msg, state));
+      refusalRetry ??= { uuid, line: lineToRetry, message: msg.result!, attempts: 0 };
+      const retry = refusalRetry;
+      const delay = retry.attempts++ === 0 ? 5000 : 15000;
+      onEvent?.({ type: 'note', message: `Claude model refusal: ${retry.message}; retrying (${retry.attempts}/2) in ${delay / 1000}s` });
+      refusalTimer = setTimeout(() => replayRefusedInput(retry), delay);
+      refusalTimer.unref?.();
+      return true;
+    };
+
+    /** Emit the frame's v1 and v2 events and count its usage; false for a malformed frame. */
+    const deliverFrame = (msg: ClaudeStreamMessage): boolean => {
+      // Keep the original diagnosis on exhaustion, even if the final result
+      // differs. Other errors outside a retry still use their native message.
+      const originalRefusal = msg.type === 'result' && msg.is_error && refusalRetry?.message;
+      // Claude reports `error_during_execution` while reacting to our
+      // teardown signal. Once cezar has signalled the child, that frame
+      // describes the intentional stop rather than an agent failure.
+      // Normalize only this precise wire shape so genuine result errors
+      // (authentication, limits, malformed sessions) stay authoritative.
+      const mappedMessage = normalizeIntentionalTeardownResult(
+        originalRefusal ? { ...msg, result: originalRefusal } : msg, terminatedByCezar);
+      emitUi((state) => mapClaudeMessage(mappedMessage, state));
+
+      let delta = 0;
+      try {
+        delta = handleClaudeMessage(mappedMessage, { toolCalls, textChunks, onEvent });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        onEvent?.({ type: 'note', message: `claude: skipped malformed event (${msg.type ?? 'unknown'}): ${message}` });
+        return false;
+      }
+      if (delta > 0) {
+        sawUsage = true;
+        tokensUsed += delta;
+        onEvent?.({ type: 'token-usage', tokensUsed });
+      }
+      return true;
+    };
+
+    // ---- output settlement ---------------------------------------------------
+
+    const settleResultInputs = (msg: ClaudeStreamMessage): void => {
+      // The named lines are exact; `queued_turn_count: 0` is only a fallback, because a
+      // line still in the pipe when the CLI computed this result is not covered by it.
+      const named = Array.isArray(msg.user_message_uuids) ? msg.user_message_uuids.map(String) : null;
+      const settled = named ?? (msg.queued_turn_count === 0 ? [...unsettled] : [...unsettled].slice(0, 1));
+      // A line this result covered was read even if its replay echo was missed.
+      // An error result settles its lines but proves nothing reached the model: they
+      // stay pending, so a closing session returns them to the queue (#505 review).
+      // Fallback settlement must not clear humanUnsettled: a line may still be in the
+      // pipe, and only a named UUID or a replay echo proves the model read it (#486).
+      const covered = settled.flatMap(id => {
+        unsettled.delete(id);
+        sentLines.delete(id);
+        if (named) humanUnsettled.delete(id);
+        return msg.is_error === true ? [] : submissions.consume(id);
+      });
+      if (covered.length) opts.onAgentInputConsumed?.(covered);
+    };
+
+    // Drain later human input only after a successful logical turn.
+    // Failed turns retain the hold until the workflow tears down.
+    const drainDeferredHumanInput = (): void => {
+      for (const input of deferredHuman.splice(0)) {
+        humanUnsettled.delete(input.id);
+        sendMessage(input.content, undefined, [], true);
+      }
+      opts.onAgentInputReady?.();
+    };
+
+    const settleResult = (msg: ClaudeStreamMessage, identity: string | undefined): void => {
+      if (msg.is_error !== true && msg.subtype === 'success' && costWeightedTokens(msg.usage) > 0) successfulIdentity = identity;
+      const wasRetrying = refusalRetry !== undefined;
+      cancelRefusalRetry();
+      if (typeof msg.total_cost_usd === 'number' && Number.isFinite(msg.total_cost_usd) && msg.total_cost_usd >= 0) {
+        onEvent?.({ type: 'cost', usd: msg.total_cost_usd });
+      }
+      pendingMarkerAsk = parseAskMarker(textChunks.slice(turnTextStart).join('\n')) !== null;
+      settleResultInputs(msg);
+      // A result is not idle if human stdin messages already queued later turns.
+      agentInputReady = unsettled.size === 0;
+      // A line written after this turn's last model call runs as the CLI's next
+      // queued turn; its replay/result reports consumption then (#505). Announce
+      // that turn when its first frame arrives, never speculatively: a line the
+      // CLI never runs must not look like activity. Decided before the turn-end
+      // callback, which may itself submit (and announce) the next prompt.
+      queuedTurnPending = unsettled.size > 0;
+      // Remaining inputs belong to the next turn. Clear the completed
+      // turn's work before any queued frame (including system activity)
+      // arrives; resetting at its first assistant frame would erase work.
+      if (queuedTurnPending) attemptDidWork = false;
+      onEvent?.({ type: 'turn-end' });
+      if (wasRetrying && msg.is_error !== true && stdinOpen) drainDeferredHumanInput();
+      scheduleAutoEnd();
+    };
+
+    const handleStreamLine = (line: string): void => {
+      const msg = parseStreamLine(line);
+      if (msg === undefined) return;
+      announceQueuedTurn(msg);
+      if (consumeReplay(msg)) return;
+      opts.onActivity?.();
+      const identity = observeFrame(msg);
+      if (scheduleRefusalRetry(msg, identity)) return;
+      if (!deliverFrame(msg)) return;
+      if (msg.type === 'result') settleResult(msg, identity);
+    };
+
+    // ---- process cleanup -----------------------------------------------------
+
+    const closeOutput = (): void => {
+      if (deadline) clearTimeout(deadline);
+      if (autoEndTimer) clearTimeout(autoEndTimer);
+      if (refusalRetry && stdinOpen && !terminatedByCezar && !timedOut) {
+        onEvent?.({ type: 'error', message: refusalRetry.message });
+      }
+      stdinOpen = false;
+      cancelRefusalRetry();
+    };
+
+    // Draining/destroying stdout is not process exit. Keep timeout escalation
+    // armed until the child has actually settled.
+    const clearExitTimers = (): void => {
       if (killTimer) clearTimeout(killTimer);
       if (eofTermTimer) clearTimeout(eofTermTimer);
       if (eofKillTimer) clearTimeout(eofKillTimer);
+    };
 
-      if (outputFailure) throw outputFailure.error;
-      if (spawnFailed) throw spawnFailed;
+    /** An exit cezar did not cause: an outside signal or a non-zero code fails the run. */
+    const failAbnormalExit = (exitCode: number | null): void => {
+      if (exitCode === null && child.signalCode !== null) {
+        const message = `claude CLI was killed by signal ${child.signalCode}`;
+        onEvent?.({ type: 'error', message });
+        throw new Error(message);
+      }
 
+      if (exitCode !== 0 && exitCode !== null) {
+        const stderr = stderrChunks.join('');
+        if (stderr.trim()) onEvent?.({ type: 'note', message: `claude CLI stderr:\n${stderr}` });
+        const summary = summarizeRunnerStderr(stderr);
+        const detail = summary ? ` — ${summary}` : '';
+        const msg = `claude CLI exited with code ${exitCode}${detail}`;
+        onEvent?.({ type: 'error', message: msg });
+        throw new Error(msg);
+      }
+    };
+
+    const settleExit = (exitCode: number | null): AgentRunResult => {
       const text = textChunks.join('\n').trim();
 
       if (timedOut) {
@@ -569,21 +618,7 @@ export class ClaudeCliRunner implements AgentRunner {
         return { text, toolCalls, tokensUsed, sessionId: spec.sessionId };
       }
 
-      if (exitCode === null && child.signalCode !== null) {
-        const message = `claude CLI was killed by signal ${child.signalCode}`;
-        onEvent?.({ type: 'error', message });
-        throw new Error(message);
-      }
-
-      if (exitCode !== 0 && exitCode !== null) {
-        const stderr = stderrChunks.join('');
-        if (stderr.trim()) onEvent?.({ type: 'note', message: `claude CLI stderr:\n${stderr}` });
-        const summary = summarizeRunnerStderr(stderr);
-        const detail = summary ? ` — ${summary}` : '';
-        const msg = `claude CLI exited with code ${exitCode}${detail}`;
-        onEvent?.({ type: 'error', message: msg });
-        throw new Error(msg);
-      }
+      failAbnormalExit(exitCode);
 
       if (!sawUsage) {
         onEvent?.({ type: 'note', message: 'token usage not reported by claude CLI' });
@@ -591,6 +626,35 @@ export class ClaudeCliRunner implements AgentRunner {
 
       onEvent?.({ type: 'done' });
       return { text, toolCalls, tokensUsed, sessionId: spec.sessionId };
+    };
+
+    const result = (async (): Promise<AgentRunResult> => {
+      let outputFailure: { error: unknown } | undefined;
+      try {
+        for await (const line of readNdjson(child.stdout)) {
+          if (timedOut) break;
+          handleStreamLine(line);
+        }
+      } catch (err) {
+        // Timeout teardown can close stdout. Any other live-child read failure
+        // must stop the agent before result releases its execution capacity.
+        if (!timedOut && !hasExited()) {
+          outputFailure = { error: err };
+          interrupt();
+        }
+      } finally {
+        closeOutput();
+      }
+
+      await cleanupAfterEof();
+
+      const exitCode = await waitForExit(child);
+      clearExitTimers();
+
+      if (outputFailure) throw outputFailure.error;
+      if (spawnFailed) throw spawnFailed;
+
+      return settleExit(exitCode);
     })();
 
     const session: AgentSession = {
@@ -822,76 +886,12 @@ function mockClaudePath(): string {
 
 // ---- stream-json event handling -------------------------------------------
 
-interface ClaudeStreamMessage {
-  type?: string;
-  subtype?: string;
-  model?: string;
-  session_id?: string;
-  parent_tool_use_id?: string | null;
-  message?: {
-    role?: string;
-    content?: unknown[];
-    usage?: RawUsage;
-  };
-  // `result` messages carry these at the top level.
-  result?: string;
-  usage?: RawUsage;
-  is_error?: boolean;
-  total_cost_usd?: number;
-  modelUsage?: unknown;
-  /** #505: stdin echo at consumption (`--replay-user-messages`) and result coverage. */
-  uuid?: string;
-  isReplay?: boolean;
-  user_message_uuids?: unknown[];
-  queued_turn_count?: number;
-}
-
-/** Fail closed on absent/partial/invalid usage; include cache and nested counters. */
-function zeroClaudeUsage(usage: unknown): boolean {
-  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) return false;
-  const record = usage as Record<string, unknown>;
-  if (record.input_tokens !== 0 || record.output_tokens !== 0) return false;
-  const zero = (value: unknown): boolean => typeof value === 'number' ? value === 0
-    : value !== null && typeof value === 'object' && !Array.isArray(value) && Object.values(value).every(zero);
-  return Object.entries(record).every(([key, value]) =>
-    // Claude includes this non-accounting metadata in some usage envelopes.
-    (key === 'service_tier' && typeof value === 'string') || zero(value));
-}
-
-/** Per-model accounting must agree with the aggregate before replay is safe. */
-function zeroClaudeModelUsage(usage: unknown): boolean {
-  if (usage === undefined) return true;
-  if (!usage || typeof usage !== 'object' || Array.isArray(usage)) return false;
-  return Object.values(usage).every(model => {
-    if (!model || typeof model !== 'object' || Array.isArray(model)) return false;
-    const record = model as Record<string, unknown>;
-    if (record.inputTokens !== 0 || record.outputTokens !== 0) return false;
-    return Object.entries(record).every(([key, value]) =>
-      key === 'contextWindow' || key === 'maxOutputTokens'
-        ? typeof value === 'number' && Number.isFinite(value) && value >= 0
-        : value === 0);
-  });
-}
-
-function selectedModelRefusal(text: unknown): string | undefined {
-  return typeof text === 'string'
-    ? /^There's an issue with the selected model \(([^()]+)\)\. It may not exist or you may not have access to it\. Run --model to pick a different model\.$/.exec(text.trim())?.[1]
-    : undefined;
-}
-
-function normalizeIntentionalTeardownResult(
-  msg: ClaudeStreamMessage,
-  terminatedByCezar: boolean,
-): ClaudeStreamMessage {
-  if (
-    terminatedByCezar
-    && msg.type === 'result'
-    && msg.is_error === true
-    && msg.subtype === 'error_during_execution'
-  ) {
-    return { ...msg, subtype: 'success', is_error: false };
-  }
-  return msg;
+/** A model refusal held for replay (hearsay-tools/cezarion#1351). */
+interface RefusalRetry {
+  uuid: string;
+  line: string;
+  message: string;
+  attempts: number;
 }
 
 function handleClaudeMessage(

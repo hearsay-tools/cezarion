@@ -4,7 +4,7 @@
   "files": {
     "packages/cezar/scripts/mock-claude.mjs": 1065,
     "packages/cezar/scripts/mock-opencode-serve.mjs": 1230,
-    "packages/cezar/src/core/codex-app-server-runner.ts": 1278,
+    "packages/cezar/src/core/codex-app-server-runner.ts": 1271,
     "packages/cezar/src/core/omp-runner.ts": 1030,
     "packages/cezar/src/core/omp-ui-mapper.ts": 1023,
     "packages/cezar/src/core/opencode-server-runner.ts": 1743,
