@@ -337,8 +337,14 @@ try_reuse() {
     }
   fi
 
-  BASE_URL=$url
   BROWSER_INSTALLED=$(json_get "$ENV_DESCRIPTOR" browser.installed)
+  if [ "$BROWSER_INSTALLED" = true ]; then
+    # The recorded executable can be replaced after boot: only the pinned release is reused.
+    recorded=$(json_get "$ENV_DESCRIPTOR" browser.command)
+    found=$( [ -x "$recorded" ] && browser_version "$recorded" || true)
+    [ "$found" = "$BROWSER_PIN" ] || { log "not reusing: agent-browser at $recorded is ${found:-missing or of no known version}, not the pinned $BROWSER_PIN"; return 1; }
+  fi
+  BASE_URL=$url
   [ "$BROWSER_INSTALLED" = true ] && BROWSER_INSTALLED=1 || BROWSER_INSTALLED=0
   return 0
 }

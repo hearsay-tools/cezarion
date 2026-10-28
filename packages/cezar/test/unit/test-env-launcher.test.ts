@@ -655,6 +655,35 @@ test('only the pinned agent-browser release runs the specs', () => {
   spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 20_000 });
 });
 
+test('a healthy env whose agent-browser is no longer the pinned release is not reused', () => {
+  const fixture = makeFixture(false);
+  const cache = join(fixture.root, 'cache');
+  const env = { ...fixtureEnv, PATH: fixture.path, E2E_PREBUILT_ASSETS: '1', XDG_CACHE_HOME: cache };
+  prebuildE2e(fixture, env);
+  const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
+  const boot = () => {
+    const result = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
+    assert.equal(result.status, 0, result.stderr);
+    launchedPids.add(descriptor(fixture.root).app.pid);
+    return result;
+  };
+  boot();
+  const onPath = join(fixture.root, 'bin/agent-browser');
+  assert.equal(descriptor(fixture.root).browser.command, onPath);
+  assert.match(boot().stdout, /TEST_ENV_REUSED=1/);
+
+  // The executable the env recorded is replaced by another release while the server stays healthy.
+  fakeDownloads(fixture.root, FIXTURE_BROWSER);
+  writeFileSync(onPath, readFileSync(onPath, 'utf8').replace(`agent-browser ${FIXTURE_BROWSER}`, 'agent-browser 9.9.7'));
+  const replaced = boot();
+  assert.match(replaced.stdout, /TEST_ENV_REUSED=0/);
+  assert.match(replaced.stderr, new RegExp(`not reusing: agent-browser at ${onPath} is 9\\.9\\.7, not the pinned 9\\.9\\.9`));
+  const rebooted = descriptor(fixture.root);
+  assert.equal(rebooted.browser.installed, true, rebooted.browser.notes);
+  assert.ok(rebooted.browser.command.startsWith(join(cache, 'agent-tools/agent-browser/9.9.9/')), rebooted.browser.command);
+  spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 20_000 });
+});
+
 test('the served clone never replaces a directory it did not create', () => {
   const fixture = makeFixture(false);
   const env = { ...fixtureEnv, PATH: fixture.path, E2E_PREBUILT_ASSETS: '1' };
