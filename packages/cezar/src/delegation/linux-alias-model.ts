@@ -153,12 +153,13 @@ export function indexAliasMounts(mounts: readonly AliasMount[], budget: AliasWor
 
 function indexedCandidates(path: string, device: string, index: AliasMountIndex, budget: AliasWorkBudget,
   notify?: () => void): string[] {
+  budget.spend();
+  const bucket = index.get(device);
+  if (!bucket) return [];
   chargePaths(budget, path);
   const end = path.indexOf('/', 1);
   const first = path.slice(1, end === -1 ? undefined : end);
-  budget.spend();
-  const bucket = index.get(device);
-  if (!bucket || (!bucket.hasRoot && !bucket.first.has(first))) return [];
+  if (!bucket.hasRoot && !bucket.first.has(first)) return [];
   const points = bucket.points, found: { pair: IndexedPair; prefix: string }[] = [];
   let current = path, provisional = false;
   for (;;) {

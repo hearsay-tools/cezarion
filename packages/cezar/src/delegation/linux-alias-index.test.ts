@@ -23,7 +23,7 @@ it('publishes during gathering before lookup or sort exhaustion', () => {
   expect(beforeSort).toBe(true);
   let unrelated = 0;
   expect(() => aliasCandidates('/other/file', '/', '08:01', mounts.map(m => ({ ...m, root: '/elsewhere' })), roots,
-    new AliasWorkBudget(1), indexAliasMounts(mounts.map(m => ({ ...m, root: '/elsewhere' })), new AliasWorkBudget(), '/', roots), () => unrelated++)).toThrow('work exceeds');
+    new AliasWorkBudget(0), indexAliasMounts(mounts.map(m => ({ ...m, root: '/elsewhere' })), new AliasWorkBudget(), '/', roots), () => unrelated++)).toThrow('work exceeds');
   expect(unrelated).toBe(0);
 });
 
@@ -208,4 +208,29 @@ it('still visits a later interpretation after a first-component miss', () => {
   expect(() => mappedAliasCandidates('1-2 r--p 0 08:01 42 /alias (deleted)\n', '/', mounts, roots,
     new AliasWorkBudget(), () => { calls++; })).toThrow('ambiguous mapped path');
   expect(calls).toBe(1);
+});
+
+it('charges only the device lookup for an absent indexed device', () => {
+  const roots = [{ path: '/owned', dev: '8:1', fsPath: '/owned' }];
+  const mounts = [{ dev: '8:1', root: '/owned', point: '/alias' }];
+  const index = indexAliasMounts(mounts, new AliasWorkBudget(), '/', roots);
+  const path = '/unrelated/' + 'long'.repeat(40);
+  const shared = new AliasWorkBudget(2);
+  let calls = 0;
+  for (let i = 0; i < 2; i++) expect(aliasCandidates(path, '/', '08:02', mounts, roots, shared, index, () => calls++)).toEqual([]);
+  expect(calls).toBe(0);
+  expect(() => aliasCandidates(path, '/', '08:02', mounts, roots, shared, index)).toThrow('work exceeds');
+  expect(() => aliasCandidates('/invalid/../path', '/', '08:02', mounts, roots, new AliasWorkBudget(1), index)).toThrow('ambiguous');
+  expect(() => aliasCandidates(path, '/', 'invalid', mounts, roots, new AliasWorkBudget(1), index)).toThrow('invalid device');
+});
+
+it('retains both path charges when the device bucket exists', () => {
+  const roots = [{ path: '/owned', dev: '8:1', fsPath: '/owned' }];
+  const mounts = [{ dev: '8:1', root: '/owned', point: '/alias' }];
+  const index = indexAliasMounts(mounts, new AliasWorkBudget(), '/', roots);
+  for (const units of [0, 1, 2, 3, 4]) {
+    expect(() => aliasCandidates('/other/x', '/', '08:01', mounts, roots, new AliasWorkBudget(units), index)).toThrow('work exceeds');
+  }
+  expect(aliasCandidates('/other/x', '/', '08:01', mounts, roots, new AliasWorkBudget(5), index)).toEqual([]);
+  expect(aliasCandidates('/alias/x', '/', '08:01', mounts, roots, new AliasWorkBudget(), index)).toEqual(['/owned/x']);
 });

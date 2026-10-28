@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
 import type { Category, LiteralSite } from './capacity-attribution-ledger.ts';
 
-/** Exact source inventory at fa11. A line shift or source change refuses instrumentation. */
+/** Exact source inventory for the current model. A line shift or source change refuses instrumentation. */
 const inventory: Record<string, { hash: string; sites: Record<number, Category> }> = {
-  'linux-alias-model.ts': { hash: '654d309c27c13f24113d56c5bddc4bf64d5e641b8b409318ea9055bd704f6cb7', sites: {
+  'linux-alias-model.ts': { hash: '047b2f203bc2980740ee41eee122ef3fb62541a74dec72307080c6726fcfe058', sites: {
     78: 'mountParse', 92: 'ownedRootLocate', 123: 'intersectionBuild', 129: 'intersectionBuild', 142: 'intersectionBuild',
-    159: 'filter', 165: 'ancestorLookup', 167: 'ancestorLookup', 169: 'ancestorLookup', 176: 'sort', 179: 'candidateConstruct',
-    202: 'unclassified', 209: 'unclassified', 248: 'evidenceRecheck', 267: 'mapParseAndVariants', 279: 'mapParseAndVariants',
+    156: 'filter', 166: 'ancestorLookup', 168: 'ancestorLookup', 170: 'ancestorLookup', 177: 'sort', 180: 'candidateConstruct',
+    203: 'unclassified', 210: 'unclassified', 249: 'evidenceRecheck', 268: 'mapParseAndVariants', 280: 'mapParseAndVariants',
   } },
   'linux-alias-links.ts': { hash: '9704a232ebc44476f5a8dde37efed71d578d9a6e9f7ab941807b900e38974fc8', sites: { 16: 'sweepAndLinks', 32: 'sweepAndLinks', 51: 'sweepAndLinks' } },
   'linux-alias-scan.ts': { hash: '5a2442aee7788c4183ef14b5958a186f872ea3b8691b805a5c47ec6823f7dfcd', sites: { 43: 'identityPrecharge', 88: 'evidenceRecheck', 91: 'evidenceRecheck', 146: 'evidenceRecheck' } },
@@ -73,7 +73,7 @@ export function instrumentAttributionSources(sources: Readonly<Record<string, st
       lines[108] = taggedCall(lines[108]!, 'tag');
       lines[111] = taggedCall(lines[111]!, 'tag');
       const pathSites: Record<number, Category> = { 125: 'intersectionBuild', 130: 'intersectionBuild', 135: 'intersectionBuild',
-        138: 'intersectionBuild', 139: 'intersectionBuild', 156: 'filter', 173: 'ancestorLookup', 180: 'candidateConstruct', 182: 'candidateConstruct' };
+        138: 'intersectionBuild', 139: 'intersectionBuild', 159: 'filter', 174: 'ancestorLookup', 181: 'candidateConstruct', 183: 'candidateConstruct' };
       for (const [number, tag] of Object.entries(pathSites)) lines[Number(number) - 1] = once(lines[Number(number) - 1]!, 'chargePaths(budget, ', `chargePaths(budget, '${tag}', `);
       let source = lines.join('\n');
       source = once(source, 'function chargePaths(budget: AliasWorkBudget, ...paths: string[]): void {', 'function chargePaths(budget: AliasWorkBudget, tag: Category, ...paths: string[]): void {');
