@@ -1,4 +1,4 @@
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { discoverAliasHolders } from './linux-alias-discovery-sweep.ts';
 import { AliasBudgetExceeded, AliasWorkBudget } from './linux-alias-model.ts';
 import { AliasMappingScope } from './linux-alias-scope.ts';
@@ -52,4 +52,14 @@ it('refuses when provisionally scoped evidence becomes unscoped unknown', async 
   await expect(discoverAliasHolders([101], new AliasMappingScope(), new AliasWorkBudget(), () => 'boot:100', () => ({
     outcome: 'unknown', scoped: ++scans === 1, mappings: [], links: [],
   }), () => false, () => {}, () => {}, () => {})).rejects.toThrow('Cannot verify alias evidence');
+});
+
+it('refuses when provisionally scoped uncertainty becomes an unscoped clear', async () => {
+  let scans = 0;
+  const publish = vi.fn();
+  await expect(discoverAliasHolders([101], new AliasMappingScope(), new AliasWorkBudget(), () => 'boot:100', () =>
+    ++scans === 1 ? { outcome: 'unknown', scoped: true, mappings: [], links: [] }
+      : { outcome: 'clear', scoped: false, mappings: [], links: [], maps: '', observedLinks: [] },
+  () => false, () => {}, () => {}, publish)).rejects.toThrow('Cannot verify alias evidence');
+  expect(publish).not.toHaveBeenCalled();
 });

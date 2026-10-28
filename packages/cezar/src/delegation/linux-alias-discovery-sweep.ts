@@ -23,6 +23,7 @@ export async function discoverAliasHolders(pids: readonly number[], scope: Alias
     let start = token(pid);
     let result = scan(pid, start);
     const provisional = relevant(pid, scope, result);
+    const uncertain = result.outcome === 'unknown' && !!result.scoped;
     if (provisional) {
       // Re-read target evidence after the final asynchronous authorization.
       // A release observed before the yield cannot clear durable retention.
@@ -38,7 +39,9 @@ export async function discoverAliasHolders(pids: readonly number[], scope: Alias
       }
       result = scan(pid, start);
       verify();
-      if (result.outcome === 'unknown' && !relevant(pid, scope, result)) throw new Error(`Cannot verify alias evidence for destroy holder ${pid}`);
+      if ((uncertain && result.outcome !== 'held') || (result.outcome === 'unknown' && !relevant(pid, scope, result))) {
+        throw new Error(`Cannot verify alias evidence for destroy holder ${pid}`);
+      }
     }
     if (!start) {
       if (scope.has(pid) || result.scoped) throw new Error(`Cannot verify alias process ${pid}`);
