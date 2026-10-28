@@ -22,6 +22,58 @@ import { manager, store, root, worker, until, executions, bookkeeping, reopenRun
 describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker settlement (hearsay-tools/cezarion#839, hearsay-tools/cezarion#889)', { timeout: 30_000 }, () => {
   useWorkerWaitFixture({ processScope: false });
   afterEach(() => { vi.restoreAllMocks(); syncBuiltinESMExports(); });
+  it.each(RUNNER_IDS)('%s R126 interrupts its active native session when mount evidence blocks destroy', async runner => {
+    process.env.CEZ_DELEGATION = '1'; process.env.CEZ_DRY_RUN = '0';
+    const adapter = HARNESS_ADAPTERS[runner]; process.env[adapter.binEnv] = adapter.mockBin;
+    const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
+    store.updateRun(p.id, { status: 'waiting', delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
+    const w = await worker(p.id, adapter.scenarios.hold!);
+    store.updateRun(w.id, { runner }); manager.enqueueOwnedRun(w.id);
+    await until(() => { const proof = store.readWorkerExecution(w.id); const record = proof && store.readWorkerProcesses(w.id, proof.generation); return !!record && typeof record !== 'string' && record.processes.some(recordedProcessLive); });
+    const active = (manager as unknown as { active: Map<string, { cancelled: boolean }> }).active.get(w.id);
+    expect(active?.cancelled).toBe(false);
+    const proof = store.readWorkerExecution(w.id)!;
+    const record = store.readWorkerProcesses(w.id, proof.generation);
+    if (typeof record === 'string' || !record.processes.length) throw Error('missing native process');
+    const native = record.processes.find(recordedProcessLive);
+    if (!native) throw Error('native process was not live before destroy');
+    const workspace = w.delegation?.role === 'worker' ? w.delegation.workspace : undefined;
+    if (!workspace) throw Error('missing workspace');
+    const read = fs.readFileSync;
+    vi.spyOn(fs, 'readFileSync').mockImplementation(((...args: unknown[]) => String(args[0]) === '/proc/self/mountinfo'
+      ? '' : Reflect.apply(read, fs, args)) as typeof fs.readFileSync);
+    syncBuiltinESMExports();
+    const service = new DelegationService(); const detach = service.registerProject({ id: 'mount', root, store, manager });
+    try {
+      const result = await service.destroyForHuman('mount', w.id);
+      expect(result).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'], error: expect.stringContaining('Mount boundary') });
+      expect(active?.cancelled).toBe(true);
+      expect(existsSync(workspace.path)).toBe(true);
+      expect(store.getRun(w.id)?.delegation).toMatchObject({ destroy: { phase: 'incomplete' } });
+      await vi.waitFor(() => expect(recordedProcessLive(native)).toBe(false), { timeout: 2_000, interval: 20 });
+    } finally { detach(); }
+  });
+  it('interrupts the active worker but preserves resources when its receipt is corrupt', async () => {
+    process.env.CEZ_DELEGATION = '1'; process.env.CEZ_DRY_RUN = '0';
+    const adapter = HARNESS_ADAPTERS.claude; process.env[adapter.binEnv] = adapter.mockBin;
+    const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
+    store.updateRun(p.id, { status: 'waiting', delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
+    const w = await worker(p.id, adapter.scenarios.hold!); manager.enqueueOwnedRun(w.id);
+    await until(() => { const proof = store.readWorkerExecution(w.id); const record = proof && store.readWorkerProcesses(w.id, proof.generation); return !!record && typeof record !== 'string' && record.processes.some(recordedProcessLive); });
+    if (w.delegation?.role !== 'worker') throw Error('missing workspace');
+    const workspace = w.delegation.workspace;
+    const receipt = join(root, '.git', 'cezar-owned-workspaces', `${workspace.resourceId}.json`);
+    const original = readFileSync(receipt); writeFileSync(receipt, '{');
+    const active = (manager as unknown as { active: Map<string, { cancelled: boolean }> }).active.get(w.id);
+    const service = new DelegationService(); const detach = service.registerProject({ id: 'bad-receipt', root, store, manager });
+    try {
+      const result = await service.destroyForHuman('bad-receipt', w.id);
+      expect(result).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
+      expect(result.error).toBeTruthy(); expect(active?.cancelled).toBe(true);
+      expect(existsSync(workspace.path)).toBe(true); expect(readFileSync(receipt, 'utf8')).toBe('{');
+      expect(execFileSync('git', ['branch', '--list', '--format=%(refname:short)', workspace.branch], { cwd: root, encoding: 'utf8' }).trim()).toBe(workspace.branch);
+    } finally { writeFileSync(receipt, original); detach(); }
+  });
   it.each(RUNNER_IDS)('%s R60 cold terminal starting-proof recovery repairs execution without a synchronous facts join', async runner => {
     // Explicit opt-in: this recovery fixture seeds an inactive parent and registers the rebuilt runtime.
     process.env.CEZ_DELEGATION = '1'; process.env.CEZ_DRY_RUN = '0';

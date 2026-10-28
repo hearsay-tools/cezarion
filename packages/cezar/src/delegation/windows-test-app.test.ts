@@ -8,6 +8,7 @@ import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { syncBuiltinESMExports } from 'node:module';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { releaseFixtureLease } from './fixture-lease-release.testkit.ts';
 import { windowsStartToken, windowsTestAppHolds, windowsTestAppOwned } from './windows-test-app.ts';
 import { createOwnedWorkspace, removeOwnedWorkspace } from './workspace.ts';
 
@@ -83,7 +84,7 @@ it.runIf(process.platform === 'win32')('stops the owned app only after its live 
     db.prepare('INSERT INTO holders VALUES (?, ?, ?, ?, NULL)').run('live', 'live', process.pid, windowsStartToken(process.pid)!);
     expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete' });
     expect(app.exitCode).toBeNull(); expect(other.exitCode).toBeNull();
-    db.exec('DELETE FROM holders'); db.close(); db = undefined;
+    releaseFixtureLease(db, 'live', 'live'); db.close(); db = undefined;
     await writeFile(join(qa, 'test-env.json'), descriptor(other.pid!));
     expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete' });
     expect(other.exitCode).toBeNull();

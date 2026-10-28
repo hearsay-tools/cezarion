@@ -816,15 +816,12 @@ export class DelegationService {
     if (parent?.delegation?.role === 'root' && parent.delegation.receipts.some(receipt => receipt.workerId === workerId && receipt.deletion)) {
       throw new DelegationPolicyError('incompatible_state', 'Worker history deletion has begun; retry history deletion');
     }
-    const commonDir = await this.commonDir(project);
-    assertAttached();
-    worker = check();
-    if (worker.delegation?.role !== 'worker') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+    let commonDir: string | undefined;
     // What this attempt decided on (hearsay-tools/cezarion#879): a later tick that would see the same skips its
     // work. Retaken where the attempt decides (after termination, at each holder proof), so its own writes up
     // to there (stopping the worker, the removal's checkpoint) are not a change, and anything later is.
     const observe = () => observeDestroy({ store: project.store, dataDir: join(project.root, '.ai/cezar'), commonDir, workerId });
-    let key = observe();
+    let key = '';
     const workspace = worker.delegation.workspace;
     const requestedAt = worker.delegation.destroy?.requestedAt ?? new Date().toISOString();
     const resources = (worker.delegation.destroy?.remaining ?? ['worktree', 'branch']).filter((resource): resource is 'worktree' | 'branch' => resource !== 'process');
@@ -848,6 +845,16 @@ export class DelegationService {
     persist('requested', worker.delegation.destroy?.remaining ?? ['process', 'worktree', 'branch']);
     try {
       persist('terminating', ['process', ...resources]);
+      const generation = project.store.readWorkerExecution(workerId)?.generation;
+      project.manager.requestActiveWorkerStop(workerId);
+      commonDir = await this.commonDir(project);
+      assertAttached();
+      const beforeReaper = check();
+      if (beforeReaper.delegation?.role !== 'worker' || JSON.stringify(beforeReaper.delegation.workspace) !== JSON.stringify(workspace) ||
+          beforeReaper.delegation.destroy?.requestedAt !== requestedAt || project.store.readWorkerExecution(workerId)?.generation !== generation) {
+        throw new Error('Worker resource ownership changed');
+      }
+      key = observe();
       const reapHolders = await prepareAuthoritativeReaper(project, workerId, workspace, check, assertAttached);
       await reapHolders?.();
       project.manager.requestWorkerStop(workerId);

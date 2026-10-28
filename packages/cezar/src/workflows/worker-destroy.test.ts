@@ -82,6 +82,15 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     store.commitDelegation([{ id: run.id, delegation: { ...run.delegation, destroy: { requestedAt: new Date().toISOString(), phase: 'requested', remaining: ['process', 'worktree', 'branch'] } } }]);
   }
 
+  it('active-only stop leaves a queued worker and its execution untouched', async () => {
+    const w = await worker();
+    const before = structuredClone(store.getRun(w.id));
+    const proof = structuredClone(store.readWorkerExecution(w.id));
+    manager.requestActiveWorkerStop(w.id);
+    expect(store.getRun(w.id)).toEqual(before);
+    expect(store.readWorkerExecution(w.id)).toEqual(proof);
+  });
+
   it('queued never-started stop is durable, idempotent, private and proven across reopen', async () => {
     const w = await worker();
     expect(manager.requestWorkerStop(w.id)).toEqual({ workerId: w.id, state: 'terminated' });

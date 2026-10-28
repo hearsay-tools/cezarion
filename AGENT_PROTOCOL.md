@@ -1528,6 +1528,12 @@ never enter the synchronous facts join, and complete the private generation with
 one correctly sequenced lifecycle repair. No runner exemptions. Selected-readiness
 guards also pin disposal, failure, changed ownership and completed-proof rechecks.
 
+**R126** (hearsay-tools/cezarion#954), in `workflows/worker-restart-parity.test.ts`,
+uses every `RUNNER_IDS` native mock with a held session. When mount evidence refuses
+cleanup, destroy requests the owned session's cancellation and leaves resources in a
+named incomplete state. No runner exemptions. No resource holder is reaped before
+authentication; receipt and detach guards cover the refusal boundaries.
+
 **S21** (hearsay-tools/cezarion#832) detects unexpected restored history through
 OMP's startup `get_state.messageCount`. A fresh step emits one v1 note and one
 non-fatal `session.error`, and still completes normally. Other native wires have

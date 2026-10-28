@@ -417,3 +417,15 @@ function curateEnv(
     return false;
   }
 }
+
+/**
+ * The directories a spawned agent may reach outside its worktree: the run-state
+ * folder that holds its handoff file, plus its own temp directory when this run
+ * got one (hearsay-tools/cezarion#785). Handing an agent a `TMPDIR` its file tools are not allowed to
+ * write would trade one silent failure for another, so the two travel together;
+ * under `CEZ_AGENT_TMPDIR=0` there is no per-run directory and the list is
+ * exactly what it always was.
+ */
+export function agentDirectories(runsDir: string, env: Record<string, string>): string[] {
+  return env.TMPDIR ? [runsDir, env.TMPDIR] : [runsDir];
+}

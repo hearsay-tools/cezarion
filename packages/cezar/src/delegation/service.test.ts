@@ -508,6 +508,29 @@ describe('delegation service durable authority', () => {
       replacementManager?.dispose();
     }
   });
+  it('revokes cleanup when the project changes during common directory lookup', async () => {
+    const { workerId } = await f.service.spawn(f.caller, input());
+    const worker = f.store.getRun(workerId)!;
+    const workspace = await ensureOwnedWorkspace(f.root, worker);
+    f.store.updateRun(workerId, { worktreePath: workspace.path, branch: workspace.branch });
+    let release!: (value: string | undefined) => void;
+    const held = new Promise<string | undefined>(resolve => { release = resolve; });
+    const lookup = vi.spyOn(f.service as unknown as { commonDir: () => Promise<string | undefined> }, 'commonDir').mockReturnValue(held);
+    const destroying = f.service.destroy(f.caller, { workerId });
+    void destroying.catch(() => {});
+    await vi.waitFor(() => expect(lookup).toHaveBeenCalledOnce());
+    const replacementManager = createFixtureManager(f.store, f.root);
+    const detach = f.service.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
+    const writes = vi.spyOn(f.store, 'commitDelegation');
+    const results = vi.spyOn(f.store, 'commitWorkerResult');
+    const stop = vi.spyOn(f.manager, 'requestWorkerStop');
+    try {
+      release(undefined);
+      await expect(destroying).rejects.toMatchObject({ code: 'denied_scope' });
+      expect(writes).not.toHaveBeenCalled(); expect(results).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled();
+      expect(existsSync(workspace.path)).toBe(true);
+    } finally { release(undefined); detach(); replacementManager.dispose(); }
+  });
   it('retains already-cleaned resources across an incomplete termination retry', async () => {
     const { workerId } = await f.service.spawn(f.caller, input());
     const worker = f.store.getRun(workerId)!;
@@ -982,6 +1005,16 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', error: 'transcript unreadable' });
     expect(destroyOf(workerId)).toMatchObject({ phase: 'incomplete', remaining: ['process', 'worktree', 'branch'], error: 'transcript unreadable' });
     // Nothing a tick can observe explains a throw, so it is never skipped: the next tick completes.
+    await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
+  });
+
+  it('retains resources after an active stop error and retries the attempt', async () => {
+    cadence();
+    const { workerId, workspace } = await settled(false);
+    vi.spyOn(f.manager, 'requestActiveWorkerStop').mockImplementationOnce(() => { throw Error('session interrupt failed'); });
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', error: 'session interrupt failed' });
+    expect(destroyOf(workerId)).toMatchObject({ phase: 'incomplete', remaining: ['process', 'worktree', 'branch'], error: 'session interrupt failed' });
+    expect(existsSync(workspace.path)).toBe(true);
     await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
   });
 

@@ -24,7 +24,8 @@ import { artifactInstructions, provisionArtifactDirectory } from '../artifacts/l
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import type { CezarToolHandlers } from '../ci-wait/controller.ts';
 import { workerContextHash, workerWorkflowHash, workerStepIdentity, captureWorkerAccount, boundWorkerAccountEnv, WorkerIdentityError, type WorkerAccountBinding, type WorkerExecutionIdentity, type WorkerStepIdentity } from '../delegation/execution-identity.ts';
-import { buildChildEnv } from '../core/agent-env.ts';
+import { agentDirectories, buildChildEnv } from '../core/agent-env.ts';
+export { agentDirectories } from '../core/agent-env.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -680,18 +681,6 @@ export function composeSystemPrompt(...parts: Array<string | undefined>): string
     .join('\n\n---\n\n');
 }
 
-/**
- * The directories a spawned agent may reach outside its worktree: the run-state
- * folder that holds its handoff file, plus its own temp directory when this run
- * got one (#785). Handing an agent a `TMPDIR` its file tools are not allowed to
- * write would trade one silent failure for another, so the two travel together;
- * under `CEZ_AGENT_TMPDIR=0` there is no per-run directory and the list is
- * exactly what it always was.
- */
-export function agentDirectories(runsDir: string, env: Record<string, string>): string[] {
-  return env.TMPDIR ? [runsDir, env.TMPDIR] : [runsDir];
-}
-
 const RESTART_CONTINUATION_PROMPT =
   'The cezar process restarted while you were working on this task. Read the handoff file (CEZ_HANDOFF_FILE) to recover context, then continue the task from where you left off.';
 
@@ -1181,6 +1170,14 @@ export class RunManager {
     const turns = this.executions.get(runId)?.turns;
     turns?.add(task);
     void task.catch(() => undefined).finally(() => turns?.delete(task));
+  }
+
+  /** Stop only a session owned by this manager; no session means no state change. */
+  requestActiveWorkerStop(runId: string): void {
+    if (this.store.getRun(runId)?.delegation?.role !== 'worker') throw new Error('Worker not found');
+    if (!this.active.has(runId)) return;
+    if (this.store.writeRefusal(runId)) throw new Error('Worker control is owned by another process');
+    this.cancel(runId);
   }
 
   requestWorkerStop(runId: string): WorkerStopResult {

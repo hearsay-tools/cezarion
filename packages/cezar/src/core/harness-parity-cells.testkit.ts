@@ -688,6 +688,8 @@ const CONTROL_CRITERIA = [
   { id: 'R43', scenario: 'baseline' },
   // workflows/worker-restart-parity.test.ts: same-boot exit proof, mixed-holder polling and bounded cleanup locks.
   { id: 'R47', scenario: 'baseline' },
+  // worker-restart-parity.test.ts: active owned session stops despite rejected resource preflight.
+  { id: 'R126', scenario: 'hold' },
   // worker-restart-parity.test.ts: cold terminal starting-proof facts readiness.
   { id: 'R60', scenario: 'baseline' },
   // #779: Continue on a run only runs.db holds, through both ActiveRun construction sites.
