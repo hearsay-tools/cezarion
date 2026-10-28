@@ -24,7 +24,7 @@ describe('parent-routed worker questions (#505)', () => {
     expect(text).toContain('Which database?');
     expect(text).toContain('Postgres');
     expect(text).toContain('Managed');
-    expect(text).toContain(`message reply ${W} '<answer>' --id <new-message-UUID> --request-id ${id}`);
+    expect(text).toContain(`cez message reply ${W} '<answer>' --id <new-message-UUID> --request-id ${id}`);
     expect(text).toContain('ask the human with your own question');
     // The reply reaches the worker verbatim, so it asks for the lines a native answer parses.
     for (const question of request.questions) expect(text).toContain(`\n${question.header}: <option>`);

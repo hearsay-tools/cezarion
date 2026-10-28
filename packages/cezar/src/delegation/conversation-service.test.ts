@@ -76,7 +76,7 @@ describe('durable conversations', () => {
     const reply = await f.service.reply(a.caller, { id: randomUUID(), recipientRunId: f.parent.id, kind: 'reply', requestId: request.message.id, text: 'Answer', timeoutSeconds: 600 });
     const update = await f.service.send(b.caller, { id: randomUUID(), recipientRunId: f.parent.id, kind: 'progress', text: 'Update', timeoutSeconds: 600 });
     const inspected = await f.service.conversation(f.caller, { recipientRunId: a.id });
-    expect(conversationInspectResultSchema.parse(inspected).hint).toContain('Inbox will show them again intentionally');
+    expect(conversationInspectResultSchema.parse(inspected).hint).toContain('Run cez message inbox');
     expect(f.store.getRun(f.parent.id)?.agentInputs?.find(input => input.id === reply.message.id)?.deliveredAt).toBeUndefined();
     const batch = inboxReserveResultSchema.parse(await f.service.inbox(f.caller));
     expect(batch.messages.map(message => [message.id, message.senderRunId])).toEqual([[reply.message.id, a.id], [update.message.id, b.id]]);
