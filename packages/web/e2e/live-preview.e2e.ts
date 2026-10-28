@@ -27,10 +27,42 @@ const fixtureApp = resolve(import.meta.dirname, 'fixtures/preview-app.mjs')
  *  clicks, a point in its plain padding (no label glyphs) is where it reads colour. */
 const BUTTON = { x: 140, y: 140 }
 const BUTTON_FILL = { x: 60, y: 110 }
+/** The stream-quality comparison fixture in page pixels (hearsay-tools/cezarion#2066): small black
+ *  text on white, and a band of alternating 1px black and white stripes. */
+const TEXT = { x: 40, y: 220, w: 360, h: 60 }
+const STRIPES = { x: 40, y: 300, w: 200, h: 40 }
 
 const card = '[data-slot="preview-server-card"]'
 const address = 'input[aria-label="Page address"]'
 const canvas = '[data-slot="preview-surface"] canvas'
+const qualityTrigger = 'button[aria-label^="Stream quality:"]'
+
+/**
+ * What JPEG compression does to the fixture, read off the canvas. `ring` is the mean distance from
+ * pure white of the text block's light pixels: compression rings around glyphs, a lossless frame
+ * reads 0. `contrast` is the mean step between neighbouring stripe pixels: 255 when every 1px
+ * stripe survives, lower as compression flattens them.
+ */
+const QUALITY_PROBE = `(() => {
+  const c = document.querySelector('${canvas}');
+  if (!c || c.width < ${TEXT.x + TEXT.w} || c.height < ${STRIPES.y + STRIPES.h}) return null;
+  const context = c.getContext('2d');
+  const text = context.getImageData(${TEXT.x}, ${TEXT.y}, ${TEXT.w}, ${TEXT.h}).data;
+  let ring = 0, light = 0;
+  for (let i = 0; i < text.length; i += 4) {
+    const v = (text[i] + text[i + 1] + text[i + 2]) / 3;
+    if (v >= 200) { ring += 255 - v; light += 1; }
+  }
+  const band = context.getImageData(${STRIPES.x}, ${STRIPES.y}, ${STRIPES.w}, ${STRIPES.h}).data;
+  let contrast = 0, steps = 0;
+  for (let y = 0; y < ${STRIPES.h}; y++) for (let x = 0; x + 1 < ${STRIPES.w}; x++) {
+    const i = (y * ${STRIPES.w} + x) * 4;
+    contrast += Math.abs(band[i] - band[i + 4]);
+    steps += 1;
+  }
+  return { ring: light ? ring / light : 255, contrast: contrast / steps, label: document.querySelector('${qualityTrigger}')?.getAttribute('aria-label') ?? '' };
+})()`
+type QualityReading = { ring: number; contrast: number; label: string }
 
 function freePort(): Promise<number> {
   return new Promise((done, fail) => {
@@ -225,9 +257,40 @@ describe('live preview', () => {
     browser.tapAt(ready.x, ready.y)
     const shown = browser.waitForValue(
       `(() => { const input = document.querySelector('${address}'); return input ? input.value : null })()`,
-      value => typeof value === 'string' && value.endsWith('#clicked'),
+      value => typeof value === 'string' && value.endsWith('#clicked-1'),
     ) as string
     expect(shown).toContain(`localhost:${appPort}`)
+
+    // Stream quality (hearsay-tools/cezarion#2066). The pane opens at Normal. The reading is held
+    // steady so it is one settled frame, not one mid-repaint after the click.
+    const normal = browser.waitForStable(QUALITY_PROBE, {
+      holdMs: 500,
+      matcher: value => !!value && (value as QualityReading).label === 'Stream quality: Normal',
+    }) as QualityReading
+    browser.screenshot(resolve(artifactsDir, 'quality-normal.png'), { viewport: true })
+    writeFileSync(resolve(artifactsDir, 'quality.json'), JSON.stringify({ normal }, null, 2))
+    browser.click(qualityTrigger)
+    browser.click('[data-slot="dropdown-menu-radio-item"]:last-child')
+    // The switch restarts only the stream: the next frame arrives at quality 100, so the wait ends
+    // on the first frame that shows it.
+    const high = browser.waitForValue(
+      QUALITY_PROBE,
+      value => !!value && (value as QualityReading).label === 'Stream quality: High' && (value as QualityReading).ring < normal.ring * 0.75,
+    ) as QualityReading
+    browser.screenshot(resolve(artifactsDir, 'quality-high.png'), { viewport: true })
+    writeFileSync(resolve(artifactsDir, 'quality.json'), JSON.stringify({ normal, high }, null, 2))
+    // Locally: Normal ring 2.07, contrast 252.8; High ring 0.77, contrast 255. The text is where
+    // quality 60 shows; the 1px stripes already survive it almost whole.
+    expect(high.contrast).toBeGreaterThanOrEqual(normal.contrast)
+    // The page was not reloaded or navigated: it keeps its URL and its click count, and input
+    // still lands on the button.
+    const kept = browser.waitForValue(`document.querySelector('${address}')?.value ?? null`, value => typeof value === 'string') as string
+    expect(kept.endsWith('#clicked-1')).toBe(true)
+    browser.tapAt(ready.x, ready.y)
+    browser.waitForValue(
+      `(() => { const input = document.querySelector('${address}'); return input ? input.value : null })()`,
+      value => typeof value === 'string' && value.endsWith('#clicked-2'),
+    )
 
     // Native tab visibility releases preview transport; restoring an old viewer must not
     // steal the page from the tab that explicitly opened it in the meantime.
@@ -273,6 +336,12 @@ describe('live preview', () => {
         await pollFor(async () => await evaluate(firstSession, '!document.querySelector("[data-slot=preview-state]") && !!document.querySelector("[data-slot=preview-surface] canvas")?.width') ? true : undefined,
           () => 'explicit preview claim failed', { timeoutMs: 30_000, tries: 120 })
         observations.push({ phase: 'explicit reclaim', canvasWidth: await evaluate(firstSession, 'document.querySelector("[data-slot=preview-surface] canvas")?.width') })
+        // The reclaimed stream opens at the mode this browser remembers (hearsay-tools/cezarion#2066).
+        const reclaimed = await pollFor(async () => {
+          const reading = await evaluate(firstSession, QUALITY_PROBE) as QualityReading | null
+          return reading && reading.label === 'Stream quality: High' && reading.ring < normal.ring * 0.75 ? reading : undefined
+        }, () => 'the reclaimed preview did not stream at High', { timeoutMs: 30_000, tries: 120 })
+        observations.push({ phase: 'reclaimed quality', ...reclaimed })
         writeFileSync(resolve(artifactsDir, 'tab-lifecycle.json'), JSON.stringify(observations, null, 2))
       } finally { off(); await request('Target.closeTarget', { targetId: second.targetId }); await request('Target.activateTarget', { targetId: first.targetId }) }
     })
