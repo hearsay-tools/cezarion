@@ -2,7 +2,6 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { parseEffort } from '@open-mercato/cezar-contract/effort';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve as resolvePath } from 'node:path';
-import { parseAskMarker } from './ask.ts';
 import type {
   AgentEvent,
   AgentRunResult,
@@ -23,7 +22,7 @@ import { buildChildEnv } from './agent-env.js';
 import type { UiEvent } from './ui-events.js';
 import { cezarToolNames } from '../ci-wait/tools.js';
 import { readNdjson } from './ndjson.js';
-import { contentText, emitImages, isRecord, piMessageText, ompRpcError as rpcError, string, toPiPrompt, truncate, waitForExit } from './pi-rpc-wire.ts';
+import { isRecord, piMessageText, ompRpcError as rpcError, string, toPiPrompt, truncate, waitForExit } from './pi-rpc-wire.ts';
 import {
   createOmpUiState,
   mapOmpRpcMessage,
@@ -33,9 +32,8 @@ import {
   ompTurnStarted,
 } from './omp-ui-mapper.js';
 import { summarizeRunnerStderr } from './runner-stderr.ts';
-import { V1TextCoalescer } from './v1-text-coalescer.js';
-import { InputSubmissions } from './input-submissions.ts';
-import { boundOutputDrainAfterExit, AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS, KILL_GRACE_MS } from './runner-runtime.js';
+import { emitPiToolResult, PiRpcInput, PiTextBlocks, recordPiToolCall } from './pi-rpc-turn.ts';
+import { boundOutputDrainAfterExit, DEFAULT_RUN_TIMEOUT_MS, KILL_GRACE_MS } from './runner-runtime.js';
 
 /**
  * OMP's built-in tool names at the pinned version (`src/tools/builtin-names.ts`, oh-my-pi
@@ -310,32 +308,12 @@ export class OmpRunner implements AgentRunner {
     let open = true;
     let timedOut = false;
     let terminatedByCezar = false;
-    let autoEndTimer: NodeJS.Timeout | undefined;
     let killTimer: NodeJS.Timeout | undefined;
     let interruptKillTimer: NodeJS.Timeout | undefined;
     let ompUi = createOmpUiState();
     const textChunks: string[] = [];
-    /** One v1 `text` per complete block, never per token (pi-runner.ts, #902 / #2). */
-    const textCoalescer = new V1TextCoalescer((text) => {
-      textChunks.push(text);
-      onEvent?.({ type: 'text', text });
-    });
-    /** `contentIndex` restarts at 0 on every assistant message (as Pi's); see pi-runner.ts. */
-    let textBlockSeq = 0;
-    const openTextBlockKeys = new Map<number, string>();
-    const textBlockKey = (contentIndex: unknown): string | undefined => {
-      if (typeof contentIndex !== 'number') return undefined;
-      let key = openTextBlockKeys.get(contentIndex);
-      if (!key) {
-        key = `omp-text-${++textBlockSeq}`;
-        openTextBlockKeys.set(contentIndex, key);
-      }
-      return key;
-    };
-    const flushText = (): void => {
-      textCoalescer.flush();
-      openTextBlockKeys.clear();
-    };
+    const textBlocks = new PiTextBlocks('omp-text', textChunks, onEvent);
+    const flushText = (): void => textBlocks.flush();
     const toolCalls: AgentToolCallRecord[] = [];
     let sessionId = spec.sessionId;
     let startupStateChecked = false;
@@ -381,7 +359,7 @@ export class OmpRunner implements AgentRunner {
       inputError = new Error(`omp input stream failed: ${error.message}`);
       open = false;
       outbox.length = 0;
-      rejectAgentAck(inputError);
+      rpcInput.rejectAgentAck(inputError);
       onEvent?.({ type: 'error', message: inputError.message });
       emitUiEvent({ type: 'session.error', message: inputError.message, fatal: true });
       // The output loop owns bounded process cleanup. Retain the error even if the child
@@ -399,12 +377,24 @@ export class OmpRunner implements AgentRunner {
       }
       return writeNow(command);
     };
-    let agentInputReady = false;
-    let promptSerial = 0;
     let humanSerial = 0;
     // Every prompt carries an id: a local completion or failure ends the turn only when it
     // answers the prompt that opened it, never a steer (the mapper gates on this id).
     const humanAcks = new Set<string>();
+    // Agent input readiness, the pending agent receipt, carried input, the turn-end step and
+    // auto-end live in the shared Pi-family core.
+    const rpcInput = new PiRpcInput({
+      cli: 'omp',
+      opts,
+      onEvent,
+      textChunks,
+      isOpen: () => open,
+      turnId: () => ompUi.turnId,
+      humanAcksPending: () => humanAcks.size > 0,
+      end: () => end(),
+      flushText,
+      emitLatchedProviderError,
+    });
     // Each human prompt stays held from its write until a normalized turn has it, because an
     // ack is not a turn boundary (hearsay-tools/cezarion#1112). Exits: its user message_start,
     // its ack while the turn it opened is still open, the first turn.started after its ack,
@@ -417,59 +407,14 @@ export class OmpRunner implements AgentRunner {
     function releaseHeldIntoTurn(): void {
       for (const [id, held] of humanHeld) if (held.acked) humanHeld.delete(id);
     }
-    let agentAck: { id: string; resolve: () => void; reject: (error: Error) => void } | undefined;
-    const rejectAgentAck = (error = new Error('omp closed before prompt acknowledgement')) => {
-      const pending = agentAck; agentAck = undefined;
-      pending?.reject(error);
-    };
-    const scheduleAutoEnd = () => {
-      if (!opts.autoEndAfterFirstTurn || !open || autoEndTimer || agentAck || humanAcks.size) return;
-      autoEndTimer = setTimeout(() => {
-        autoEndTimer = undefined;
-        if (opts.shouldAutoEnd?.() !== false) end();
-      }, AUTO_END_DELAY_MS);
-      autoEndTimer.unref?.();
-    };
-    // Same readiness rules as pi-runner.ts (#505): a refusal caused only by an outstanding
-    // acknowledgement gets one readiness hint when it lands, even mid-turn.
-    let refusedForAck = false;
-    const readyAfterAck = () => {
-      if (open && agentInputReady && !ompUi.turnId && !agentAck && !humanAcks.size) {
-        refusedForAck = false;
-        opts.onAgentInputReady?.(); scheduleAutoEnd();
-      } else if (refusedForAck && open && !agentAck && !humanAcks.size && !pendingMarkerAsk) {
-        refusedForAck = false;
-        opts.onAgentInputReady?.();
-      } else if (open && !ompUi.turnId && !agentAck && !humanAcks.size && !pendingMarkerAsk) {
-        // #486: a human ack drained with no turn open — re-settle the idle boundary.
-        refusedForAck = false;
-        opts.onAgentInputReady?.();
-      }
-    };
-    let pendingMarkerAsk = false;
-    let turnTextStart = 0;
-    // Accepted agent prompts not yet seen as a user message_start (#505).
-    const submissions = new InputSubmissions();
-    // Submissions already queued when a turn began: that turn reads them. OMP reports an
-    // admitted steer at the next terminal agent_end (rpc-prompt-results.ts), never drops it.
-    let carried = new Set<string>();
-    const acked = new Set<string>();
-    let turnFailed = false;
     const sendMessage = (content: ContentBlock[], requestId?: string, inputIds: readonly string[] = []): boolean => {
       if (!open) return false;
       // A steer joins the running turn; only an idle prompt opens one (#505).
       const opensTurn = !ompUi.turnId;
-      agentInputReady = false;
-      if (opensTurn) {
-        pendingMarkerAsk = false;
-        turnTextStart = textChunks.length;
-      }
+      rpcInput.beginPrompt(opensTurn);
       const { message, images } = toPiPrompt(content);
       const id = requestId ?? `cezar-prompt-${++humanSerial}`;
-      if (autoEndTimer) {
-        clearTimeout(autoEndTimer);
-        autoEndTimer = undefined;
-      }
+      rpcInput.cancelAutoEnd();
       if (
         !write({
           type: 'prompt',
@@ -481,7 +426,7 @@ export class OmpRunner implements AgentRunner {
       ) {
         return false;
       }
-      if (requestId) submissions.accept(requestId, inputIds, message);
+      if (requestId) rpcInput.submissions.accept(requestId, inputIds, message);
       if (!ompUi.turnId) {
         const mapped = ompTurnStarted(ompUi, id);
         ompUi = mapped.state;
@@ -498,7 +443,7 @@ export class OmpRunner implements AgentRunner {
       if (!open) return;
       open = false;
       closedByCaller = true;
-      rejectAgentAck();
+      rpcInput.rejectAgentAck();
       flushOutbox();
       child.stdin.end();
       killTimer = setTimeout(() => {
@@ -519,7 +464,7 @@ export class OmpRunner implements AgentRunner {
       if (sawFrame) writeNow({ type: 'abort' });
       open = false;
       closedByCaller = true;
-      rejectAgentAck();
+      rpcInput.rejectAgentAck();
       terminatedByCezar = true;
       signalSession(child, 'SIGTERM');
       interruptKillTimer = setTimeout(() => {
@@ -645,16 +590,15 @@ export class OmpRunner implements AgentRunner {
               const message = `omp: prompt failed: ${rpcError(value)}`;
               if (endsTurn) {
                 onEvent?.({ type: 'error', message });
-                turnFailed = true;
+                rpcInput.failTurn();
               } else {
                 onEvent?.({ type: 'note', message });
               }
             }
-            const pending = agentAck;
             const id = string(value.id);
-            if (pending && id === pending.id) {
-              agentAck = undefined;
-              if (value.success === true) { acked.add(pending.id); pending.resolve(); }
+            const pending = rpcInput.takeAgentAck(id);
+            if (pending) {
+              if (value.success === true) rpcInput.acceptAgentAck(pending);
               else pending.reject(new Error(rpcError(value)));
             } else if (id) {
               // `agentInvoked: false` is a prompt OMP finished itself: no agent run follows.
@@ -665,7 +609,7 @@ export class OmpRunner implements AgentRunner {
                 else humanHeld.delete(id);
               }
             }
-            readyAfterAck();
+            rpcInput.readyAfterAck();
           } else if (value.type === 'response' && value.success === false) {
             onEvent?.({ type: 'error', message: rpcError(value) });
           } else if (value.type === 'prompt_result' && value.agentInvoked === false && value.status === 'error') {
@@ -675,39 +619,29 @@ export class OmpRunner implements AgentRunner {
             const message = ompProviderErrorMessage({ provider: error.provider, model: error.model, errorMessage: error.message });
             if (endsTurn) {
               onEvent?.({ type: 'error', message });
-              turnFailed = true;
+              rpcInput.failTurn();
             } else {
               // v2 reports it as a session error whether or not a turn is open.
               onEvent?.({ type: 'note', message });
             }
           } else if (value.type === 'message_update' && isRecord(value.assistantMessageEvent)) {
-            const update = value.assistantMessageEvent;
-            const contentKey = textBlockKey(update.contentIndex);
-            if (update.type === 'text_delta' && typeof update.delta === 'string') {
-              textCoalescer.append(contentKey, update.delta);
-            } else if (update.type === 'text_end') {
-              const snapshot = typeof update.content === 'string' ? update.content : undefined;
-              textCoalescer.complete(contentKey, snapshot);
-              if (typeof update.contentIndex === 'number') openTextBlockKeys.delete(update.contentIndex);
-            }
+            textBlocks.update(value.assistantMessageEvent);
           } else if (value.type === 'message_end' && isRecord(value.message) && value.message.role === 'assistant') {
             flushText();
             // Latched until the turn ends, cleared by a later success: OMP retries past
             // provider flakes and a recovered retry must stay silent (#256, #316).
             if (string(value.message.stopReason) === 'error') {
-              turnFailed = true;
+              rpcInput.failTurn();
               latchedProviderError = ompProviderErrorMessage(value.message);
             } else {
               latchedProviderError = undefined;
             }
           } else if (value.type === 'agent_start') {
-            // Only a prompt OMP acknowledged before this agent_start can be in its turn (#505).
-            carried = new Set(submissions.pendingIds().filter(id => acked.has(id)));
-            turnFailed = false;
+            rpcInput.startTurn();
           } else if (value.type === 'message_start' && isRecord(value.message) && value.message.role === 'user') {
             // The model received this prompt now (#505).
             const text = piMessageText(value.message);
-            const ids = submissions.consumeOldestByText(text);
+            const ids = rpcInput.submissions.consumeOldestByText(text);
             if (ids.length) opts.onAgentInputConsumed?.(ids);
             else for (const [id, held] of humanHeld) {
               if (held.text !== text) continue;
@@ -718,23 +652,9 @@ export class OmpRunner implements AgentRunner {
             }
           } else if (value.type === 'tool_execution_start') {
             flushText();
-            const id = string(value.toolCallId);
-            const name = string(value.toolName);
-            if (id && name) {
-              toolCalls.push({ id, name, input: value.args });
-              onEvent?.({ type: 'tool-call', id, tool: name, input: value.args });
-            }
+            recordPiToolCall(value, toolCalls, onEvent);
           } else if (value.type === 'tool_execution_end') {
-            const id = string(value.toolCallId);
-            if (id) {
-              onEvent?.({
-                type: 'tool-result',
-                toolCallId: id,
-                result: contentText(isRecord(value.result) ? value.result.content : undefined) ?? '',
-                isError: value.isError === true,
-              });
-              emitImages(isRecord(value.result) ? value.result.content : undefined, onEvent);
-            }
+            emitPiToolResult(value, onEvent);
           } else if (value.type === 'extension_error') {
             onEvent?.({ type: 'note', message: string(value.error) ?? string(value.message) ?? 'omp extension error' });
           } else if (value.type === 'notice') {
@@ -742,20 +662,7 @@ export class OmpRunner implements AgentRunner {
             if (message) onEvent?.({ type: 'note', message: `omp: ${message}` });
           }
 
-          if (endsTurn) {
-            flushText();
-            emitLatchedProviderError();
-            pendingMarkerAsk = parseAskMarker(textChunks.slice(turnTextStart).join('\n')) !== null;
-            agentInputReady = true;
-            // Input queued before this turn began was processed by it, even without a user
-            // message_start (#505) — unless the turn failed and may never have reached the model.
-            const read = turnFailed ? [] : [...carried].flatMap(id => submissions.consume(id));
-            turnFailed = false;
-            carried = new Set();
-            if (read.length) opts.onAgentInputConsumed?.(read);
-            onEvent?.({ type: 'turn-end' });
-            scheduleAutoEnd();
-          }
+          if (endsTurn) rpcInput.settleTurn();
         }
       } catch (error) {
         if (child.exitCode === null && child.signalCode === null) {
@@ -774,12 +681,12 @@ export class OmpRunner implements AgentRunner {
         }
       } finally {
         if (deadline) clearTimeout(deadline);
-        if (autoEndTimer) clearTimeout(autoEndTimer);
+        rpcInput.stopAutoEndTimer();
         if (killTimer) clearTimeout(killTimer);
         // A refused spawn may still be respawned: stay open so input accepted meanwhile is kept
         // for the new child instead of being refused in the gap.
         if (!retryPossible()) open = false;
-        rejectAgentAck();
+        rpcInput.rejectAgentAck();
       }
 
       flushText();
@@ -865,19 +772,9 @@ export class OmpRunner implements AgentRunner {
     const session: AgentSession = {
       result,
       sendMessage,
-      sendAgentMessage: (content, inputIds = [], options) => {
-        // #505: a running turn is steered; only a pending CEZ:ASK (unless the caller delivers
-        // beside it) or an unacknowledged prompt refuses.
-        const askRefuses = pendingMarkerAsk && !options?.besideQuestion;
-        if (open && !askRefuses && (agentAck || humanAcks.size)) { refusedForAck = true; return false; }
-        if (!open || askRefuses) return false;
-        const id = `cezar-agent-${++promptSerial}`;
-        let resolve!: () => void, reject!: (error: Error) => void;
-        const acknowledged = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
-        agentAck = { id, resolve, reject };
-        if (!sendMessage(content, id, inputIds)) { agentAck = undefined; return false; }
-        return acknowledged;
-      },
+      // A failed write returns no receipt.
+      sendAgentMessage: (content, inputIds = [], options) =>
+        rpcInput.sendAgentMessage(content, inputIds, options, sendMessage, () => false),
       // A written prompt cannot be unwritten; only stop reporting an acknowledged one as held.
       discardQueuedMessages: () => { humanHeld.clear(); },
       holdsHumanInput: () => humanHeld.size > 0,
