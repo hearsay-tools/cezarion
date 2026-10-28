@@ -29,8 +29,13 @@ const events = [
   projection(reply),
   { type: 'request-outcome', outcome: { requestId: request.id, status: 'replied', replyId: reply.id, observedAt: reply.createdAt } },
   { type: 'ask.requested', requestId: 'ask_1', questions: [{ header: 'Proceed?', question: 'Proceed with the migration?', options: [] }] },
-  { type: 'agent-input', input: { id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', text: 'Wave 2 is merged.', source: 'agent', parentRunId: schemaPeer, createdAt: '2026-10-28T12:03:00Z',
-    conversation: { senderRunId: schemaPeer, recipientRunId: self, kind: 'progress', relationship: 'peer' } } },
+  { type: 'agent-input', input: {
+    id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', text: 'Wave 2 is merged.', parentRunId: schemaPeer, createdAt: '2026-10-28T12:03:00Z',
+    conversation: { senderRunId: schemaPeer, recipientRunId: self, kind: 'progress', relationship: 'peer' },
+    // An `AgentInput` origin, not a wait source.
+    // ast-grep-ignore: test-enum-literal
+    source: 'agent',
+  } },
   projection(toDeleted),
   { type: 'request-outcome', outcome: { requestId: toDeleted.id, status: 'deleted', observedAt: '2026-10-28T12:05:00Z' } },
 ]

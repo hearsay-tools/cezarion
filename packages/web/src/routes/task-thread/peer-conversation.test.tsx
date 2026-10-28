@@ -156,7 +156,13 @@ describe('peer conversation cards (hearsay-tools/cezarion#1992)', () => {
   it('R1: a peer message beside an open question is a peer card, never a user message', () => {
     renderThread([
       { type: 'ask.requested', requestId: 'ask_1', questions: [{ header: 'Proceed?', question: 'Proceed?', options: [] }] },
-      { type: 'agent-input', input: { id: replyId, text: 'Wave 2 is merged.', source: 'agent', parentRunId: peer, createdAt: peerReply.createdAt, conversation: { senderRunId: peer, recipientRunId: self, kind: 'progress', relationship: 'peer' } } },
+      { type: 'agent-input', input: {
+        id: replyId, text: 'Wave 2 is merged.', parentRunId: peer, createdAt: peerReply.createdAt,
+        conversation: { senderRunId: peer, recipientRunId: self, kind: 'progress', relationship: 'peer' },
+        // An `AgentInput` origin, not a wait source.
+        // ast-grep-ignore: test-enum-literal-tsx
+        source: 'agent',
+      } },
     ])
     expect(document.querySelector('[data-slot="user-bubble"]')).toBeNull()
     const [card] = cards()
