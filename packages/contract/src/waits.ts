@@ -3,7 +3,7 @@ import { askContextSchema, askRequestSchema } from './ask-schema.ts';
 import { ciPrIdentitySchema, ciPrUrlSchema, ciWaitErrorCodeSchema, ciWaitRequestSchema, ciWaitResultSchema, prWaitUntilSchema } from './ci-wait.ts';
 import { workerIdsSchema, workerOutcomeSchema, workerWaitModeSchema } from './delegation.ts';
 import type { DelegationState, PeerWaitView, RunDelegationSummary, WorkerCompletionWait, WorkerWait } from './delegation.ts';
-import { requestOutcomeSchema } from './conversations.ts';
+import { requestOutcomeSchema, type ConversationMessage } from './conversations.ts';
 import type { RunRecord } from './runs.ts';
 
 /**
@@ -461,7 +461,12 @@ export function isUsageLimitHold<T extends Partial<Pick<RunRecord, 'status' | 'a
  *  is not a wait on workers (hearsay-tools/cezarion#1995). A summary's slim delegation has none. */
 function peerRequestIds(delegation: WaitingOnInput['delegation']): Set<string> {
   const conversation = delegation?.role === 'root' && 'conversation' in delegation ? delegation.conversation : undefined;
-  return new Set((conversation?.messages ?? []).filter((message) => message.relationship === 'peer' && message.kind === 'request').map((message) => message.id));
+  // `toRunSummary` passes an unparsed ledger: a malformed one marks nothing and never throws.
+  const messages: unknown[] = Array.isArray(conversation?.messages) ? conversation.messages : [];
+  return new Set(messages.flatMap((message) => {
+    const entry = message && typeof message === 'object' ? message as Partial<ConversationMessage> : undefined;
+    return entry?.relationship === 'peer' && entry.kind === 'request' && typeof entry.id === 'string' ? [entry.id] : [];
+  }));
 }
 
 /** Whether one of these requests went to a peer task: its wait reads "waiting on replies", never

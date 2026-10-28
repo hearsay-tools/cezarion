@@ -39,7 +39,9 @@ import {
   type WorkerWaitEntry,
 } from './waits.ts';
 import { workerCompletionWaitSchema, workerInspectionSchema, workerWaitSchema } from './delegation.ts';
-import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from './test-factories.testkit.ts';
+import { makeRunRecord, RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from './test-factories.testkit.ts';
+import { toRunSummary } from './runs.ts';
+import { deriveAttention } from './attention.ts';
 
 /**
  * The wait list (spec 2026-10-17-unified-waits, phase 1: hearsay-tools/cezarion#1233). The
@@ -788,6 +790,21 @@ describe('peer waits', () => {
     const root = (relationship?: 'peer') => { return { role: 'root', receipts: [], permissions: [], conversation: { messages: [{ ...message, ...(relationship ? { relationship } : {}) }], outcomes: [] } } as never; };
     expect(computeWaitingOn({ waits: [wait], delegation: root('peer') })).toEqual({ kind: 'workers', count: 1, replies: true, peers: true });
     expect(computeWaitingOn({ waits: [wait], delegation: root() })).toEqual({ kind: 'workers', count: 1, replies: true });
+  });
+
+  // A list row reads the summary, whose slim delegation carries no ledger: the projection keeps
+  // the peer marker it read from the full record.
+  it('keeps the peer marker and its label through toRunSummary, and reads a malformed ledger as none', () => {
+    const wait = workerBase({ requestIds: [R1], requestOutcomes: [] }) as never;
+    const message = { id: R1, senderRunId: W1, recipientRunId: W2, kind: 'request', relationship: 'peer', text: 'q', createdAt: '2026-10-19T10:00:00.000Z', requestHash: 'a'.repeat(64), state: 'accepted' };
+    const record = (conversation: unknown) => makeRunRecord({ status: RUN_STATUS.waiting, waits: [wait],
+      delegation: { role: 'root', receipts: [], permissions: [], conversation } as never });
+    const summary = toRunSummary(record({ messages: [message], outcomes: [] }));
+    expect(summary.waitingOn).toEqual({ kind: 'workers', count: 1, replies: true, peers: true });
+    expect(deriveAttention(summary).label).toBe('waiting on replies');
+    for (const malformed of [{ messages: [null, 7] }, { messages: 'none' }, 'ledger']) {
+      expect(toRunSummary(record(malformed)).waitingOn).toEqual({ kind: 'workers', count: 1, replies: true });
+    }
   });
 
   it('answers cez message wait --peer with its phase and result', () => {

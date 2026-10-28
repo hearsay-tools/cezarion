@@ -607,8 +607,13 @@ export function toRunSummary(run: RunRecord & { usage?: ProcessUsage | undefined
     const delegation = runDelegationSummarySchema.safeParse(run.delegation);
     summary.delegation = delegation.success ? delegation.data : { role: 'invalid' };
   }
-  // The parsed slim delegation, not the raw one: a malformed record must not throw here either.
-  const waitingOn = computeWaitingOn({ ...run, delegation: summary.delegation as RunSummary['delegation'] });
+  // The parsed slim delegation, not the raw one: a malformed record must not throw here either. A
+  // root's ledger, which the slim one drops, still marks a wait on a peer's reply
+  // (hearsay-tools/cezarion#1995); `computeWaitingOn` reads it defensively.
+  const slim = summary.delegation as RunSummary['delegation'];
+  const raw = run.delegation as { role?: unknown; conversation?: unknown } | undefined;
+  const ledger = slim?.role === 'root' && raw?.role === 'root' ? { ...slim, conversation: raw.conversation } : slim;
+  const waitingOn = computeWaitingOn({ ...run, delegation: ledger as RunSummary['delegation'] });
   if (waitingOn) summary.waitingOn = waitingOn;
   if (hasResolvedWait(run)) summary.waitWakePending = true;
   if (run.usage) summary.usage = run.usage;
