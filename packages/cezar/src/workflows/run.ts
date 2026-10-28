@@ -5,7 +5,7 @@ import type {
   WorkerDelegationRecord, ContinuationOpening, OpeningAnswer, ContinuationSettings, ContinuationSkills,
   ContinuationSessionLaunch, ContinuationClose, WorkerTerminationBlocker, AutomationToolService,
 } from './run/types.ts';
-export type * from './run/types.ts';
+export type { TurnTail, DelegationExecutionSettings, StartRunInput, WorkerTerminationBlocker, AutomationToolService } from './run/types.ts';
 import { openCompletionRequests, recordRequestRefusal, repairFailedRootFinish, rootCompletionRefusal, sentRequestInstructions, settledRootFinishPatch, type CompletionRefusal } from './completion-policy.ts';
 import * as continuation from './continuation-admission.ts';
 import type { ContinueRunOptions } from './continuation-admission.ts';
