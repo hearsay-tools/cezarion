@@ -167,6 +167,31 @@ function reconcileRunLists(queryClient: QueryClient): Promise<void>[] {
   }).map(query => reconcileBackgroundQuery(queryClient, query.queryKey))
 }
 
+/** How long run events gather before one branch rescan (hearsay-tools/cezarion#2029). */
+export const REPO_BRANCHES_COALESCE_MS = 1_000
+/** Per client: the branch keys run events asked to refresh in the open window, by their JSON. */
+const repoBranchesPending = new WeakMap<QueryClient, Map<string, readonly unknown[]>>()
+
+/** Invalidate the branch classification once per window, however many run events arrive in it: each
+ *  invalidation is a full branch scan on the server, and a burst of task transitions would
+ *  otherwise ask for one per event (hearsay-tools/cezarion#2029). The key is read when the event
+ *  arrives, not when the window closes, so a project switch inside the window still refreshes the
+ *  project the event was for. */
+function invalidateRepoBranchesSoon(queryClient: QueryClient): void {
+  const key = queryKeys.repoBranches
+  const pending = repoBranchesPending.get(queryClient)
+  if (pending) {
+    pending.set(JSON.stringify(key), key)
+    return
+  }
+  repoBranchesPending.set(queryClient, new Map([[JSON.stringify(key), key]]))
+  setTimeout(() => {
+    const keys = repoBranchesPending.get(queryClient)
+    repoBranchesPending.delete(queryClient)
+    for (const queryKey of keys?.values() ?? []) void queryClient.invalidateQueries({ queryKey })
+  }, REPO_BRANCHES_COALESCE_MS)
+}
+
 function reconcile(queryClient: QueryClient, signal?: AbortSignal, periodic = false): Promise<void> {
   if (signal?.aborted) return Promise.resolve()
   // Cancel just this reconciliation's demanded families when the document hides or its
@@ -601,7 +626,7 @@ function applyGlobalEvent(
       // panel live. invalidateQueries only refetches while the panel is actually mounted.
       void queryClient.invalidateQueries({ queryKey: queryKeys.worktrees })
       // A run's state is half of its branch's class (issue 08), so the Git view follows it.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.repoBranches })
+      invalidateRepoBranchesSoon(queryClient)
       return
     }
     case 'run-deleted': {
@@ -626,7 +651,7 @@ function applyGlobalEvent(
       // Its worktree goes with it — refresh the panel (#483).
       void queryClient.invalidateQueries({ queryKey: queryKeys.worktrees })
       // …and its branch becomes an orphan (issue 08).
-      void queryClient.invalidateQueries({ queryKey: queryKeys.repoBranches })
+      invalidateRepoBranchesSoon(queryClient)
       return
     }
     case 'usage':
