@@ -4,7 +4,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
-import { RUN_STATUS, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { toRunSummary } from '@open-mercato/cezar-contract/runs';
 import type { AgentInput, CiWaitResult, ConversationMessage, HumanWaitEntry, ProcessWaitResult, RunRecord, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
@@ -781,6 +781,37 @@ function baseCells(runners: RunnerId[]): void {
       await withHeldAck(runner as 'codex' | 'opencode' | 'pi' | 'omp' | 'cursor', exercise);
     });
 
+    it(`${runner} U12 a human answer resets the budget while a timer acknowledgement keeps its reserved charge`, async () => {
+      if (exemptionFor('U12', runner)) {
+        expect(exemptionFor('U12', runner)?.kind).toBe('capability-absent');
+        return;
+      }
+      await withHeldAck(runner as 'codex' | 'opencode' | 'pi' | 'omp' | 'cursor', async release => {
+        const { run, timer, askSeq } = await timerBesideQuestion(runner, 'mock:agent-echo delay-owned-ack');
+        store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES - 1 });
+        fireTimer(timer.id);
+        await until(() => prompted(runner, `Timer ${timer.id} fired`).length > 0);
+        expect(settled(run.id, timer.id)).toBeUndefined();
+        const human = humanOpen(run.id)[0]!;
+        store.updateRun(run.id, { waitDeliveryFailures: 2 });
+        const commits = recordCommits(join(root, '.ai/cezar'));
+        expect(manager.sendMessage(run.id, [{ type: 'text', text: answerOf(run.id) }])).toBe(true);
+        commits.stop();
+        expect(store.getRun(run.id)?.automaticWakes).toBe(0);
+        expect(store.getRun(run.id)?.waitDeliveryFailures).toBeUndefined();
+        commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(wait => wait.id === human.id && wait.phase === 'delivered') ||
+          (row.automaticWakes === 0 && row.waitDeliveryFailures === undefined), 'an answer beside an in-flight timer and its reset wake budget');
+        release();
+        await until(() => settled(run.id, timer.id)?.phase === 'delivered' && answered(run.id, askSeq));
+        // The timer spends one reserved unit on the restarted budget. The answer's own no-wait
+        // turn may already have spent the next unit on its nudge by the time this ACK is observed.
+        expect(store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith('automatic timer wake-up (')).map(event => event.message))
+          .toEqual(['automatic timer wake-up (1/40)']);
+        expect(manager.finish(run.id)).toBe(true);
+        await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+      });
+    });
+
     it(`${runner} U13 a wait result beside a pending portable question whose acknowledgement is rejected stays resolved, is retried, and the question stays answerable`, async () => {
       if (exemptionFor('U13', runner)) {
         expect(exemptionFor('U13', runner)?.kind).toBe('capability-absent');
@@ -1326,10 +1357,14 @@ function baseCells(runners: RunnerId[]): void {
       engine().active.get(run.id)!.session.end();
       await until(() => !manager.isActive(run.id));
       rmSync(answers, { force: true });
+      store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES, waitDeliveryFailures: 2 });
       // What a crash after any commit would leave (hearsay-tools/cezarion#1805): every committed row.
       const commits = recordCommits(join(root, '.ai/cezar'));
       const answer = toolCall('cezar_done', { summary: 'answered and shipped' });
       expect(manager.continueRun(run.id, { text: answer }).ok).toBe(true);
+      commits.stop();
+      commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(entry => entry.id === wait!.id && entry.phase === 'delivered') ||
+        (row.automaticWakes === 0 && row.waitDeliveryFailures === undefined), 'an answered wait and its reset wake budget');
       // The wait is never delivered in a row that lost the answer it was delivered with: until the
       // Continue's step starts, a row with the wait delivered holds the answer.
       commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(entry => entry.id === wait!.id && entry.phase === 'delivered') ||
@@ -1381,13 +1416,134 @@ function baseCells(runners: RunnerId[]): void {
       const message = { id: randomUUID(), text: answerOf(run.id), createdAt: new Date().toISOString() };
       store.commitHumanMessageBesideWaits(run.id, message);
       engine().deferredMessages.set(run.id, [{ content: [{ type: 'text', text: message.text }], messageId: message.id }]);
+      store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES, waitDeliveryFailures: 2 });
       const commits = recordCommits(join(root, '.ai/cezar'));
       engine().flushDeferred(run.id);
+      commits.stop();
+      commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(entry => entry.id === wait!.id && entry.phase === 'delivered') ||
+        (row.automaticWakes === 0 && row.waitDeliveryFailures === undefined), 'a deferred answer and its reset wake budget');
+      expect(commits.rows(run.id).some(row => row?.lastWaits?.some(entry => entry.id === wait!.id && entry.phase === 'delivered'))).toBe(true);
       await until(() => settled(run.id, wait!.id)?.phase === 'delivered' && answered(run.id, wait!.askSeq!));
       expect(store.getRun(run.id)?.queuedMessages ?? []).toEqual([]);
       expect(engine().deferredMessages.has(run.id)).toBe(false);
       commits.expectEveryCommit(run.id, row => !!row.lastWaits?.some(entry => entry.id === wait!.id && entry.phase === 'delivered') === !row.queuedMessages?.some(entry => entry.id === message.id),
         'a deferred answer and its queue entry');
+      expect(manager.finish(run.id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+    });
+
+    for (const spent of [0, MAX_AUTO_CONTINUES]) for (const deferred of [false, true]) it(`${runner} U7q a refused ${deferred ? 'deferred' : 'live'} answer checkpoint clears failures at budget ${spent} and keeps its replay policy`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
+      await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined && store.getRun(run.id)?.status === 'waiting');
+      const [human] = humanOpen(run.id);
+      store.updateRun(run.id, { automaticWakes: spent, waitDeliveryFailures: 2 });
+      const message = { id: randomUUID(), text: answerOf(run.id), createdAt: new Date().toISOString() };
+      if (deferred) {
+        store.commitHumanMessageBesideWaits(run.id, message);
+        engine().deferredMessages.set(run.id, [{ content: [{ type: 'text', text: message.text }], messageId: message.id }]);
+      }
+      const commit = store.commitOutcome.bind(store);
+      let refused = false;
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.spyOn(store, 'commitOutcome').mockImplementation((id, outcomes, deps, options) => {
+        const batch = Array.isArray(outcomes) ? outcomes : [outcomes];
+        if (id === run.id && !refused && batch.some(outcome => outcome.kind === 'answered')) {
+          refused = true;
+          throw Error('injected answer checkpoint failure');
+        }
+        return commit(id, outcomes, deps, options);
+      });
+      const commits = recordCommits(join(root, '.ai/cezar'));
+      if (deferred) engine().flushDeferred(run.id);
+      else expect(manager.sendMessage(run.id, [{ type: 'text', text: message.text }])).toBe(true);
+      commits.stop();
+      expect(refused).toBe(true);
+      const retained = deferred && spent === 0;
+      expect(settled(run.id, human!.id)?.phase).toBe(retained ? undefined : WAIT_PHASE.delivered);
+      expect(store.getRun(run.id)?.queuedMessages?.some(entry => entry.id === message.id) ?? false).toBe(retained);
+      if (retained) expect(humanOpen(run.id).some(wait => wait.id === human!.id)).toBe(true);
+      expect(store.getRun(run.id)?.waitDeliveryFailures).toBeUndefined();
+      commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(wait => wait.id === human!.id && wait.phase === 'delivered') ||
+        (row.automaticWakes === 0 && row.waitDeliveryFailures === undefined), 'a retried answer and its failure clear');
+      if (retained) manager.cancel(run.id);
+      else {
+        expect(engine().active.get(run.id)?.session.open).toBe(true);
+        await until(() => answered(run.id, human!.askSeq!));
+        expect(store.getRun(run.id)?.error).toBeUndefined();
+        await until(() => prompted(runner, message.text).length > 0);
+        expect(prompted(runner, message.text)).toHaveLength(1);
+        expect(manager.finish(run.id)).toBe(true);
+      }
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+    });
+
+    for (const spent of [0, MAX_AUTO_CONTINUES]) it(`${runner} U7q a persistently refused deferred answer at budget ${spent} keeps its replay ID and open question`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
+      await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined && store.getRun(run.id)?.status === RUN_STATUS.waiting);
+      const [human] = humanOpen(run.id);
+      const message = { id: randomUUID(), text: answerOf(run.id), createdAt: new Date().toISOString() };
+      store.commitHumanMessageBesideWaits(run.id, message);
+      store.updateRun(run.id, { automaticWakes: spent, waitDeliveryFailures: 2 });
+      engine().deferredMessages.set(run.id, [{ content: [{ type: 'text', text: message.text }], messageId: message.id }]);
+      const commit = store.commitOutcome.bind(store);
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      vi.spyOn(store, 'commitOutcome').mockImplementation((id, outcomes, deps, options) => {
+        if (!(Array.isArray(outcomes) ? outcomes : [outcomes]).some(outcome => outcome.kind === 'answered')) return commit(id, outcomes, deps, options);
+        const unblock = blockRunWrites(join(root, '.ai/cezar'));
+        try { return commit(id, outcomes, deps, options); } finally { unblock(); }
+      });
+      const commits = recordCommits(join(root, '.ai/cezar'));
+      engine().flushDeferred(run.id);
+      commits.stop();
+      expect(store.getRun(run.id)?.queuedMessages?.some(entry => entry.id === message.id)).toBe(true);
+      expect(humanOpen(run.id).some(wait => wait.id === human!.id)).toBe(true);
+      expect(store.getRun(run.id)?.automaticWakes).toBe(0);
+      expect(store.getRun(run.id)?.waitDeliveryFailures).toBeUndefined();
+      commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(wait => wait.id === human!.id) &&
+        !!row.queuedMessages?.some(entry => entry.id === message.id), 'a persistently refused answer keeps its replay dependency');
+      manager.cancel(run.id);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+    });
+
+    // hearsay-tools/cezarion#1906: the answer resets its accounting atomically, but its immediate
+    // flush must still cancel an owed timer at the old cap. This guard passes on the old order too.
+    it(`${runner} U7q a live answer at the cap keeps the flush decisions, final counters and notes`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
+      await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined && store.getRun(run.id)?.status === 'waiting');
+      const [human] = humanOpen(run.id);
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const registered = await tools.registerWait({ kind: WAIT_KIND.timer, seconds: 60, note: 'answer cap guard' }, 'cezar_wait', new AbortController().signal);
+      if (!('wait' in registered) || registered.wait.kind !== 'timer') throw Error('registration refused');
+      // A result already resolved below the cap may still be owed when the budget reaches it.
+      // Hold it at the parked boundary, without asking the scheduler to send it before the answer.
+      const timer = { ...registered.wait, phase: WAIT_PHASE.resolved, resolvedAt: new Date().toISOString() };
+      store.commitWait(run.id, timer, { id: timer.id, parentRunId: run.id, source: 'lifecycle', createdAt: timer.resolvedAt, text: 'answer cap guard' });
+      const admitted = (manager as unknown as { waitWakeAdmitted: Set<string> }).waitWakeAdmitted;
+      admitted.add(run.id);
+      store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES, waitDeliveryFailures: 2 });
+      const notesBefore = store.readEvents(run.id).filter(event => event.type === 'note').length;
+      const commits = recordCommits(join(root, '.ai/cezar'));
+      expect(manager.sendMessage(run.id, [{ type: 'text', text: answerOf(run.id) }])).toBe(true);
+      commits.stop();
+      // Pin the live outcome separately from the crash invariant: both the old order and the fix
+      // cancel this timer, erase the old counters, and retain the same cap note.
+      // Claude and the Pi-family wires start the answer's turn synchronously in sendMessage.
+      // Their flush is mid-turn and keeps the timer owed; the other wires still flush at the
+      // parked boundary and cancel it. Pin each native wire's pre-fix behavior.
+      const midTurn = ['claude', 'pi', 'omp'].includes(runner);
+      expect(settled(run.id, timer.id)?.phase).toBe(midTurn ? undefined : 'cancelled');
+      expect(inputsFor(run.id, timer.id).map(input => input.deliveredAt)).toEqual(midTurn ? [undefined] : []);
+      expect(store.getRun(run.id)).toMatchObject({ automaticWakes: 0 });
+      expect(store.getRun(run.id)?.waitDeliveryFailures).toBeUndefined();
+      expect(store.readEvents(run.id).filter(event => event.type === 'note').slice(notesBefore).map(event => event.message))
+        .toEqual(midTurn ? [] : [`automatic timer wake-up cap reached (${MAX_AUTO_CONTINUES}); timer ${timer.id} cancelled`,
+          `automatic-wake budget spent (${MAX_AUTO_CONTINUES}); waiting for you`]);
+      commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(wait => wait.id === human!.id && wait.phase === 'delivered') ||
+        (row.automaticWakes === 0 && row.waitDeliveryFailures === undefined), 'a live answer and its reset wake budget');
+      await until(() => answered(run.id, human!.askSeq!));
       expect(manager.finish(run.id)).toBe(true);
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });
