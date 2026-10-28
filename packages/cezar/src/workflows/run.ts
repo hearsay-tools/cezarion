@@ -128,7 +128,7 @@ import { messagedParentSince, parkNoticeIdInUse, parkNoticeMessage, parkNoticeWa
 import { workerOutcome } from '../runs/delegation-state.ts';
 import { loadWorkflows } from './load.ts';
 import { applyOutcomes, type RunOutcome } from '../runs/outcome-commit.ts';
-import { acknowledgedBatch, answerOutcomes, chargedIf } from './outcome-batches.ts';
+import { acknowledgedBatch, answerOutcomes, chargedIf, retryDeliveryOutcomes } from './outcome-batches.ts';
 import { analyseAcknowledgedInput, type AcknowledgedInput } from './input-acknowledgement.ts';
 import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
 import { isReclaimable, reclaimWorktrees, rematerializeReclaimedWorktree } from '../runs/retention.ts';
@@ -5900,11 +5900,9 @@ export class RunManager {
     return batch?.inputs.every(input => input.conversation) ? batch : undefined;
   }
 
-  /** Bundled messages rode the answer's own write: delivered now, read when that turn ends. The
-   *  answer's own outcomes (`with`: the human waits it answers, its charge) commit with them. A
-   *  refused write that carries wake accounting retries the whole batch best effort: the session has the
-   *  reply, and the charge never saves apart from it (hearsay-tools/cezarion#1805). Returns why the
-   *  first write was refused. */
+  /** Bundled messages and answer outcomes commit together. A refused write retries its
+   *  accounting best effort; `retryDeliveryOutcomes` preserves a deferred message's replay
+   *  policy (hearsay-tools/cezarion#1805). Returns why the first write was refused. */
   private commitBundledDelivery(runId: string, state: ActiveRun, ids: readonly string[], also: readonly RunOutcome[] = []): string | undefined {
     const deliveredAt = new Date().toISOString();
     const awaiting = state.inputDelivery?.consumption === 'observable' ? { awaitingRead: true as const } : {};
@@ -5913,8 +5911,10 @@ export class RunManager {
     try { this.store.commitOutcome(runId, outcomes); } catch (error) {
       refused = error instanceof Error ? error.message : String(error);
       console.warn(`[cez] bundled delivery checkpoint failed: ${refused}`);
-      if (!also.some(outcome => outcome.kind === 'charged' || outcome.kind === 'counted')) return refused;
-      this.store.commitOutcome(runId, outcomes, {}, { bestEffort: true });
+      const retry = retryDeliveryOutcomes(outcomes);
+      if (!retry) return refused;
+      this.store.commitOutcome(runId, retry, {}, { bestEffort: true });
+      if (retry !== outcomes) return refused;
     }
     if (ids.length) state.bundledInputIds = [...(state.bundledInputIds ?? []), ...ids];
     return refused;

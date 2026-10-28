@@ -29,3 +29,13 @@ export function answerOutcomes(messageId: string | undefined, automaticWakes: nu
   return [{ kind: 'answered' }, ...(messageId ? [{ kind: 'message-delivered' as const, messageId }] : []),
     ...chargedIf(automaticWakes ? 0 : undefined), { kind: 'counted', waitDeliveryFailures: undefined }];
 }
+
+/** A refused charged delivery retries atomically. Without an old charge, a deferred answer
+ * keeps its replay ID and open question: only its failure clear retries. Live answers can
+ * retry the whole batch because no queue entry needs conservative recovery. */
+export function retryDeliveryOutcomes(outcomes: readonly RunOutcome[]): readonly RunOutcome[] | undefined {
+  if (outcomes.some(outcome => outcome.kind === 'charged')) return outcomes;
+  const accounting = outcomes.filter(outcome => outcome.kind === 'counted');
+  if (!accounting.length) return undefined;
+  return outcomes.some(outcome => outcome.kind === 'message-delivered') ? accounting : outcomes;
+}

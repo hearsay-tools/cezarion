@@ -1431,12 +1431,17 @@ function baseCells(runners: RunnerId[]): void {
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });
 
-    it(`${runner} U7q a refused answer checkpoint still clears failures when the budget is zero`, async () => {
+    for (const deferred of [false, true]) it(`${runner} U7q a refused ${deferred ? 'deferred' : 'live'} answer checkpoint clears failures at zero budget and keeps its replay policy`, async () => {
       nativeWire(runner);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
       await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined && store.getRun(run.id)?.status === 'waiting');
       const [human] = humanOpen(run.id);
       store.updateRun(run.id, { automaticWakes: 0, waitDeliveryFailures: 2 });
+      const message = { id: randomUUID(), text: answerOf(run.id), createdAt: new Date().toISOString() };
+      if (deferred) {
+        store.commitHumanMessageBesideWaits(run.id, message);
+        engine().deferredMessages.set(run.id, [{ content: [{ type: 'text', text: message.text }], messageId: message.id }]);
+      }
       const commit = store.commitOutcome.bind(store);
       let refused = false;
       vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -1449,10 +1454,13 @@ function baseCells(runners: RunnerId[]): void {
         return commit(id, outcomes, deps, options);
       });
       const commits = recordCommits(join(root, '.ai/cezar'));
-      expect(manager.sendMessage(run.id, [{ type: 'text', text: answerOf(run.id) }])).toBe(true);
+      if (deferred) engine().flushDeferred(run.id);
+      else expect(manager.sendMessage(run.id, [{ type: 'text', text: message.text }])).toBe(true);
       commits.stop();
       expect(refused).toBe(true);
-      expect(settled(run.id, human!.id)?.phase).toBe('delivered');
+      expect(settled(run.id, human!.id)?.phase).toBe(deferred ? undefined : WAIT_PHASE.delivered);
+      expect(store.getRun(run.id)?.queuedMessages?.some(entry => entry.id === message.id) ?? false).toBe(deferred);
+      if (deferred) expect(humanOpen(run.id).some(wait => wait.id === human!.id)).toBe(true);
       expect(store.getRun(run.id)?.waitDeliveryFailures).toBeUndefined();
       commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(wait => wait.id === human!.id && wait.phase === 'delivered') ||
         (row.automaticWakes === 0 && row.waitDeliveryFailures === undefined), 'a retried answer and its failure clear');
