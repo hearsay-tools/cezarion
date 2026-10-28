@@ -1105,7 +1105,7 @@ describe('repo git API routes (R5 Step 1.3 — main working tree)', () => {
   //
   // Precedence is flag → Accept → this route's TEXT default (see `negotiate` in server.ts). The
   // default deliberately stays the legacy blob: it is the answer every pre-Accept caller gets and
-  // a protected surface (BACKWARD_COMPATIBILITY.md §2), so "JSON by default" was not on offer.
+  // a protected surface (BACKWARD_COMPATIBILITY.md), so "JSON by default" was not on offer.
 
   const commit = (suffix: string, accept?: string) =>
     apiRequest(app, `/api/v1/repo/commit/${g(repoRoot, 'rev-parse', 'HEAD').trim()}${suffix}`, {

@@ -36,7 +36,7 @@ type JsonOptions = ErrorOptions & {
 };
 
 /**
- * `{ error }`, the one 400 shape this API answers (BACKWARD_COMPATIBILITY.md §2).
+ * `{ error }`, the one 400 shape this API answers (BACKWARD_COMPATIBILITY.md).
  *
  * Each issue is prefixed with the field path, because zod's own message never names the field:
  * `"Invalid input: expected array, received undefined"` on its own does not tell the cockpit user

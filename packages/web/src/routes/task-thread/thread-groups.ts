@@ -243,6 +243,8 @@ export function groupWorkerConversation(items: readonly ThreadConversationMessag
     const previous = batches.at(-1)
     if (item.messageKind === 'request' && previous?.kind === 'request' &&
       previous.senderRunId === item.senderRunId && previous.text === item.text &&
+      // One card has one relationship: a peer and a worker never share a batch.
+      (previous.messages[0]!.relationship === 'peer') === (item.relationship === 'peer') &&
       !previous.messages.some(message => message.recipientRunId === item.recipientRunId)) {
       previous.messages.push(item)
     } else {

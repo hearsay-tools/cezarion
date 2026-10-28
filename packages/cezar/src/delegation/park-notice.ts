@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ConversationMessage, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
-import type { RunEvent } from '../runs/store.ts';
+import type { RunEvent, RunStore } from '../runs/store.ts';
 import { describeWait, isCezarHumanWait } from '../workflows/waits.ts';
 import { uuidFrom } from './questions.ts';
 import { topLevelAssistantText } from './results.ts';
@@ -76,4 +76,12 @@ export function parkNoticeMessage(input: {
     .digest('hex');
   return { id, senderRunId: input.workerRunId, recipientRunId: input.parentRunId, kind: 'progress',
     text: input.redact(formatParkNoticeText(input)), createdAt: input.now, requestHash, state: 'accepted' };
+}
+
+/** A peer already took the notice's deterministic ID in the parent conversation (hearsay-tools/cezarion#1990
+ *  review): no notice can be sent for this wait, and the worker's log says so once. */
+export function parkNoticeIdInUse(store: Pick<RunStore, 'appendEvent' | 'hasProjection'>, workerId: string, waitId: string): void {
+  const projectionId = `park-notice-id-in-use:${waitId}`;
+  if (store.hasProjection(workerId, projectionId)) return;
+  store.appendEvent(workerId, { type: 'note', tone: 'warning', projectionId, message: 'Parked, but the park notice ID is already in use in the parent conversation: no park notice was sent.' });
 }

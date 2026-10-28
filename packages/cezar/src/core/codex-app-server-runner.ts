@@ -27,6 +27,7 @@ import {
 } from './runner-runtime.ts';
 import { parseAskRequest, type AskQuestion } from './ask.ts';
 import { readNdjson } from './ndjson.ts';
+import { drainsAfterClose, isServerRequest, isStaleTurnOutcome, parseNativeLine, stringField, turnIdOf } from './codex-native-frames.ts';
 import { V1TextCoalescer } from './v1-text-coalescer.ts';
 import { InputSubmissions } from './input-submissions.ts';
 import { codexStreamError } from './codex-stream-error.ts';
@@ -288,43 +289,7 @@ class CodexSession implements AgentSession {
     this.startupTimer.unref?.();
 
     this.ready = this.bootstrap();
-    const reader = (async () => {
-      try {
-        for await (const line of readNdjson(this.child.stdout)) {
-          let msg: CodexAppServerMessage;
-          try { msg = JSON.parse(line) as CodexAppServerMessage; }
-          catch { continue; }
-          // A method+id is a server REQUEST, even if its method happens to name
-          // a lifecycle notification. It must never reach the notification mapper.
-          if (typeof msg.method === 'string' && (typeof msg.id === 'number' || typeof msg.id === 'string')) {
-            if (this.open) this.dispatch(msg);
-            continue;
-          }
-          // Drain the final outcome after natural exit without restoring input authority.
-          const finalOutcome = this.stdinOpen && hasExited() &&
-            (msg.method === 'turn/completed' || msg.method === 'turn/failed');
-          if (!this.open && (msg.id !== undefined || (!PASSIVE_OUTPUT_METHODS.has(msg.method ?? '') && !finalOutcome))) continue;
-          // Child turns do not reach either channel.
-          if (this.isForeignTurnLifecycle(msg)) continue;
-          // The UI mapper must not retire a live approval on an older turn's tail.
-          if ((msg.method === 'turn/completed' || msg.method === 'turn/failed') && this.activeTurnId &&
-              turnIdOf(msg.params ?? {}) && turnIdOf(msg.params ?? {}) !== this.activeTurnId) continue;
-          // Stale/child retry errors must neither fail nor warn on this turn.
-          if (msg.method === 'error' && !this.isCurrentTurn((msg.params ?? {}) as Record<string, unknown>)) continue;
-          this.opts.onActivity?.();
-          this.emitUi((state) => mapCodexNotification(msg, state));
-          this.dispatch(msg);
-        }
-        if (this.stdinOpen && !hasExited()) {
-          if (!this.startupComplete) this.fail(new Error(`Codex startup stdout closed while waiting for ${this.startupPhase}`));
-          else this.end(false);
-        }
-      } catch {
-        if (this.stdinOpen && !hasExited()) {
-          this.fail(new Error(`codex app-server output failed while waiting for ${this.startupPhase}`));
-        }
-      }
-    })();
+    const reader = this.readNativeOutput();
 
     this.result = (async (): Promise<AgentRunResult> => {
       let exitCode: number | null;
@@ -811,6 +776,52 @@ class CodexSession implements AgentSession {
     if (this.turnBoundaryVersion === boundaryVersion) this.activeTurnId = turnIdOf(res) ?? this.activeTurnId;
   }
 
+  /** Native stdout reader. Every stage runs inside this one try, so a stage
+   *  throw ends the read the same way a transport failure does. */
+  private async readNativeOutput(): Promise<void> {
+    try {
+      for await (const line of readNdjson(this.child.stdout)) this.routeNativeLine(line);
+      this.settleNativeEof();
+    } catch {
+      if (this.stdinOpen && !this.hasExited()) {
+        this.fail(new Error(`codex app-server output failed while waiting for ${this.startupPhase}`));
+      }
+    }
+  }
+
+  private routeNativeLine(line: string): void {
+    const msg = parseNativeLine(line);
+    if (msg === undefined) return;
+    // A method+id is a server REQUEST, even if its method happens to name
+    // a lifecycle notification. It must never reach the notification mapper.
+    if (isServerRequest(msg)) {
+      if (this.open) this.dispatch(msg);
+      return;
+    }
+    if (!this.admitsNotification(msg)) return;
+    this.opts.onActivity?.();
+    this.emitUi((state) => mapCodexNotification(msg, state));
+    this.dispatch(msg);
+  }
+
+  /** Lifecycle eligibility, then the current-turn filters, in that order. */
+  private admitsNotification(msg: CodexAppServerMessage): boolean {
+    if (!this.open && !drainsAfterClose(msg, () => this.stdinOpen && this.hasExited())) return false;
+    // Child turns do not reach either channel.
+    if (this.isForeignTurnLifecycle(msg)) return false;
+    // The UI mapper must not retire a live approval on an older turn's tail.
+    if (isStaleTurnOutcome(msg, this.activeTurnId)) return false;
+    // Stale/child retry errors must neither fail nor warn on this turn.
+    return msg.method !== 'error' || this.isCurrentTurn((msg.params ?? {}) as Record<string, unknown>);
+  }
+
+  /** Clean EOF while the process lives: a startup failure, or automatic cleanup. */
+  private settleNativeEof(): void {
+    if (!this.stdinOpen || this.hasExited()) return;
+    if (!this.startupComplete) this.fail(new Error(`Codex startup stdout closed while waiting for ${this.startupPhase}`));
+    else this.end(false);
+  }
+
   private dispatch(msg: CodexAppServerMessage): void {
     if (typeof msg.method === 'string' && (typeof msg.id === 'number' || typeof msg.id === 'string')) {
       if (msg.method === 'item/tool/requestUserInput') this.handleUserInputRequest(msg.id, msg.params ?? {});
@@ -1189,14 +1200,6 @@ const NON_TOOL_ITEMS = new Set(['agentMessage', 'userMessage', 'reasoning', 'pla
  *  dropped so a sub-agent turn can't be mistaken for the parent's (#600). */
 const TURN_LIFECYCLE_METHODS = new Set(['turn/started', 'turn/completed', 'turn/failed']);
 
-/** Notifications that only collect output; never dispatch control after close. */
-const PASSIVE_OUTPUT_METHODS = new Set([
-  'item/started', 'item/updated', 'item/completed', 'item/agentMessage/delta',
-  'item/reasoning/textDelta', 'item/reasoning/summaryDelta', 'item/reasoning/summaryTextDelta',
-  'item/commandExecution/outputDelta', 'thread/tokenUsage/updated', 'turn/plan/updated',
-  'hook/started', 'hook/completed',
-]);
-
 const REASONING_SUMMARIES = new Set(['auto', 'concise', 'detailed', 'none']);
 
 /**
@@ -1246,19 +1249,9 @@ function clean<T extends Record<string, unknown>>(obj: T): Partial<T> {
   return out;
 }
 
-function stringField(obj: Record<string, unknown>, key: string): string | undefined {
-  const v = obj[key];
-  return typeof v === 'string' ? v : undefined;
-}
-
 function threadIdOf(res: Record<string, unknown>): string | undefined {
   const thread = res.thread as { id?: unknown } | undefined;
   return typeof thread?.id === 'string' ? thread.id : stringField(res, 'threadId');
-}
-
-function turnIdOf(obj: Record<string, unknown>): string | undefined {
-  const turn = obj.turn as { id?: unknown } | undefined;
-  return typeof turn?.id === 'string' ? turn.id : stringField(obj, 'turnId');
 }
 
 /** Cumulative tokens from a `thread/tokenUsage/updated` notification:
