@@ -588,6 +588,8 @@ const CONTROL_CRITERIA = [
   { id: 'D1', scenario: 'baseline' },
   // hearsay-tools/cezarion#1284: a forked skill starts no native subagent in a restricted session.
   { id: 'D2', scenario: 'forked-skill' },
+  // hearsay-tools/cezarion#1994: a session at shipped defaults refuses native cross-session messages.
+  { id: 'D3', scenario: 'baseline' },
   { id: 'S5', scenario: 'baseline' },
   { id: 'S6', scenario: 'baseline' },
   { id: 'S11', scenario: 'ask' },
@@ -2341,6 +2343,43 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           expect(rows.filter(row => row.method === 'PATCH')).toEqual([]);
         } finally { rmSync(dir, { recursive: true, force: true }); }
       }, 45000);
+    }
+  });
+
+  // D3 (hearsay-tools/cezarion#1994): at shipped defaults (no D1) a session refuses the
+  // runner's native cross-session messages, which bypass cezar's recorded conversations.
+  // Claude refuses inbound peer messages on every launch. Each other runner is a named
+  // `capability-absent` exemption, pinned the other way round: its default wire carries no
+  // cross-session control, so the day cezar adds one, its exemption must go.
+  describeRunners('harness parity — D3 native cross-session messaging at shipped defaults', () => {
+    for (const backend of runners) {
+      const exempt = exemptionFor('D3', backend);
+      for (const resume of [false, true]) {
+        it(exempt ? `${backend} is exempt from D3 on ${resume ? 'Continue' : 'start'} — ${exempt.reason}` : `${backend} D3 refuses native cross-session messages on ${resume ? 'Continue' : 'start'}`, async () => {
+          const dir = mkdtempSync(join(tmpdir(), 'cez-cross-session-'));
+          const path = join(dir, 'wire.ndjson');
+          try {
+            if (backend === 'opencode' && resume) seedOpencodeMockSession(path);
+            const obs = await driveSeam(backend, 'baseline', { spec: {
+              cwd: dir, resume,
+              env: { CEZ_MOCK_ARGS_FILE: path, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' },
+            } });
+            expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
+            expect(obs.v1.at(-1)?.type).toBe('done');
+            const records = readMockRecords<unknown>(path);
+            if (!exempt) {
+              const args = records[0] as string[];
+              const index = args.indexOf('--settings');
+              expect(index).toBeGreaterThanOrEqual(0);
+              expect(JSON.parse(args[index + 1]!)).toEqual({ crossSessionInbound: 'refuse' });
+              expect(args).not.toContain('--disallowedTools');
+              return;
+            }
+            expect(exempt.kind).toBe('capability-absent');
+            expect(JSON.stringify(records)).not.toMatch(/crossSessionInbound|agent_message_board/);
+          } finally { rmSync(dir, { recursive: true, force: true }); }
+        }, 45_000);
+      }
     }
   });
 
