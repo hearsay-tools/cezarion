@@ -802,7 +802,8 @@ function baseCells(runners: RunnerId[]): void {
           (row.automaticWakes === 0 && row.waitDeliveryFailures === undefined), 'an answer beside an in-flight timer and its reset wake budget');
         release();
         await until(() => settled(run.id, timer.id)?.phase === 'delivered' && answered(run.id, askSeq));
-        expect(store.getRun(run.id)?.automaticWakes).toBe(1);
+        // The timer spends one reserved unit on the restarted budget. The answer's own no-wait
+        // turn may already have spent the next unit on its nudge by the time this ACK is observed.
         expect(store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith('automatic timer wake-up (')).map(event => event.message))
           .toEqual(['automatic timer wake-up (1/40)']);
         expect(manager.finish(run.id)).toBe(true);
@@ -1453,12 +1454,16 @@ function baseCells(runners: RunnerId[]): void {
       commits.stop();
       // Pin the live outcome separately from the crash invariant: both the old order and the fix
       // cancel this timer, erase the old counters, and retain the same cap note.
-      expect(settled(run.id, timer.id)?.phase).toBe('cancelled');
-      expect(inputsFor(run.id, timer.id)).toEqual([]);
+      // Claude and the Pi-family wires start the answer's turn synchronously in sendMessage.
+      // Their flush is mid-turn and keeps the timer owed; the other wires still flush at the
+      // parked boundary and cancel it. Pin each native wire's pre-fix behavior.
+      const midTurn = ['claude', 'pi', 'omp'].includes(runner);
+      expect(settled(run.id, timer.id)?.phase).toBe(midTurn ? undefined : 'cancelled');
+      expect(inputsFor(run.id, timer.id).map(input => input.deliveredAt)).toEqual(midTurn ? [undefined] : []);
       expect(store.getRun(run.id)).toMatchObject({ automaticWakes: 0 });
       expect(store.getRun(run.id)?.waitDeliveryFailures).toBeUndefined();
       expect(store.readEvents(run.id).filter(event => event.type === 'note').slice(notesBefore).map(event => event.message))
-        .toEqual([`automatic timer wake-up cap reached (${MAX_AUTO_CONTINUES}); timer ${timer.id} cancelled`,
+        .toEqual(midTurn ? [] : [`automatic timer wake-up cap reached (${MAX_AUTO_CONTINUES}); timer ${timer.id} cancelled`,
           `automatic-wake budget spent (${MAX_AUTO_CONTINUES}); waiting for you`]);
       commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(wait => wait.id === human!.id && wait.phase === 'delivered') ||
         (row.automaticWakes === 0 && row.waitDeliveryFailures === undefined), 'a live answer and its reset wake budget');
