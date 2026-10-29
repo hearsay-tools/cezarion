@@ -1,3 +1,6 @@
+import type { HumanWaitEntry } from '@open-mercato/cezar-contract/waits';
+import type { AskRequest } from '../../core/ask.ts';
+import type { UiEventSink } from '../../runs/ui-event-sink.ts';
 import type { ScheduleTaskAnswer, ScheduleTaskRequest, ScheduledTasksAnswer, ScheduledTasksRequest } from '@open-mercato/cezar-contract/scheduled-tasks';
 import type { ContentBlock, RunnerId, ToolGrant } from '../../core/agent-runner.ts';
 import type { CiToolSession } from '../../ci-wait/controller.ts';
@@ -210,3 +213,22 @@ export interface RunModuleContext {
   semaphore: import('../../workspace/semaphore.ts').WorkspaceSemaphore;
   disposed(): boolean;
 }
+
+/** What a turn end said, as the entry that settles it reads it (hearsay-tools/cezarion#1525). The
+ *  turn end reads it from the turn; a later entry from what `parkAfterAck` kept (`boundaryTurn`). */
+export type SettledTurn = {
+  stepId: string | undefined;
+  monitoring: boolean;
+  humanGate: boolean;
+  /** This turn's ask, which the turn end surfaces as a card; a later entry has none. */
+  ask: AskRequest | null;
+  /** The ask line's autonomous nudge went instead of the question. */
+  askNudged: boolean;
+  humanWait?: HumanWaitEntry | undefined;
+  sink?: UiEventSink;
+  done: boolean;
+  doneRequest?: ActiveRun['doneRequested'];
+  /** The turn answered the no-wait nudge. The completion cause's flag is `completionNudgeAnswered`. */
+  nudgedLastTurn: boolean;
+  scheduleWakeup?: number | null | undefined;
+};
