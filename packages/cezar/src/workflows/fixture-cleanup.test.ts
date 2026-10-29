@@ -1,3 +1,5 @@
+import { RUN_MODULE_CLASSES, runInternals } from './run-internals.testkit.ts';
+import { TrackedWork } from './run/tracked-work.ts';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -174,4 +176,17 @@ it('propagates removal errors', async () => {
   const { root } = fixture();
   const file = join(root, 'loop'); symlinkSync('loop', file);
   await expect(removeFixtureRepo(join(file, 'child'))).rejects.toThrow();
+});
+
+it('reads every facade module through the typed internals seam', () => {
+  const { manager } = fixture();
+  const internals = runInternals(manager);
+  for (const [name, Module] of Object.entries(RUN_MODULE_CLASSES)) {
+    expect(internals[name as keyof typeof RUN_MODULE_CLASSES], name).toBeInstanceOf(Module);
+  }
+  expect(internals.context.work).toBeInstanceOf(TrackedWork);
+  expect(internals.active).toBeInstanceOf(Map);
+  expect(internals.disposed).toBe(false);
+  manager.dispose();
+  expect(internals.disposed).toBe(true);
 });

@@ -10,7 +10,7 @@ import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import type { RunManager } from './run.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import type { WorkerExecutions } from './run/worker-executions.ts';
+import { runInternals } from './run-internals.testkit.ts';
 
 const captured = vi.hoisted(() => ({ specs: [] as AgentRunSpec[], release: undefined as (() => void) | undefined }));
 vi.mock('../core/runner-factory.ts', () => ({ createRunner: () => ({
@@ -76,7 +76,7 @@ describe('stopped composer engine', { timeout: 15_000 }, () => {
     const { manager, store, data } = fixture();
     const run = manager.startRun(workflow, { task: 'original' });
     manager.cancel(run.id);
-    const executions = (manager as unknown as { workerExecutions: WorkerExecutions }).workerExecutions;
+    const executions = runInternals(manager).workerExecutions;
     vi.spyOn(executions, 'beginWorkerExecution').mockImplementationOnce(() => { throw new Error('checkpoint failed'); });
     expect(manager.continueRun(run.id, { text: 'must remain draft' })).toEqual({
       ok: false, error: 'original execution checkpoint unavailable',

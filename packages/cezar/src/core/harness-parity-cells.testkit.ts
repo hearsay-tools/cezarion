@@ -1,3 +1,4 @@
+import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { createApp } from '../server/server.ts';
 import { apiRequest } from '../server/loopback-request.testkit.ts';
 /**
@@ -1257,12 +1258,13 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
               crashStore(store);
               await drainFixtureManagers(repoRoot);
               const recovered = createFixtureManager(cockpit, repoRoot);
-              const engine = recovered as unknown as Record<'execute' | 'runContinuation', (...args: unknown[]) => Promise<unknown>>;
               let adopting = true;
-              for (const name of ['execute', 'runContinuation'] as const) {
-                const real = engine[name].bind(recovered);
-                engine[name] = (...args) => { (adopting ? startedByAdoption : startedByContinue).push(name); return real(...args); };
-              }
+              const work = runInternals(recovered).context.work;
+              const realTrack = work.track.bind(work);
+              vi.spyOn(work, 'track').mockImplementation((label, promise) => {
+                if (label === 'execute' || label === 'runContinuation') (adopting ? startedByAdoption : startedByContinue).push(label);
+                return realTrack(label, promise);
+              });
               // Recovery dispatches transcript work with setImmediate; keep that signal real.
               vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
               adopted = await recovered.adoptOrphanedRun(runId);
@@ -1313,11 +1315,12 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
               crashStore(store);
               await drainFixtureManagers(repoRoot);
               const recovered = createFixtureManager(cockpit, repoRoot);
-              const engine = recovered as unknown as Record<'execute' | 'runContinuation', (...args: unknown[]) => Promise<unknown>>;
-              for (const name of ['execute', 'runContinuation'] as const) {
-                const real = engine[name].bind(recovered);
-                engine[name] = (...args) => { started.push(name); return real(...args); };
-              }
+              const work = runInternals(recovered).context.work;
+              const realTrack = work.track.bind(work);
+              vi.spyOn(work, 'track').mockImplementation((label, promise) => {
+                if (label === 'execute' || label === 'runContinuation') started.push(label);
+                return realTrack(label, promise);
+              });
               // Recovery dispatches transcript work with setImmediate; keep that signal real.
               vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
               adopted = await recovered.adoptOrphanedRun(runId, { stop: true });

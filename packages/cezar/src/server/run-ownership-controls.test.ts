@@ -1,10 +1,11 @@
+import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { Hono } from 'hono';
 import { delegationErrorResponseSchema } from '@open-mercato/cezar-contract/delegation';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { RUNS_DB_FILE } from '../runs/run-database.ts';
 import { crashStore, readPersistedRuns } from '../runs/run-store.testkit.ts';
@@ -136,11 +137,12 @@ describe('adopting a dead owner\'s run for a control', () => {
     store = RunStore.open(dataDir, { keepLive: true });
     manager = createFixtureManager(store, repoRoot, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 1 } }) });
     started = [];
-    const engine = manager as unknown as Record<'execute' | 'runContinuation', (...args: unknown[]) => Promise<unknown>>;
-    for (const name of ['execute', 'runContinuation'] as const) {
-      const real = engine[name].bind(manager);
-      engine[name] = (...args) => { started.push(name); return real(...args); };
-    }
+    const work = runInternals(manager).context.work;
+    const realTrack = work.track.bind(work);
+    vi.spyOn(work, 'track').mockImplementation((label, promise) => {
+      if (label === 'execute' || label === 'runContinuation') started.push(label);
+      return realTrack(label, promise);
+    });
     app = createApp({ repoRoot, store, manager, version: '0.0.0-test', providerAuth: connectedProviderAuth() });
   });
 

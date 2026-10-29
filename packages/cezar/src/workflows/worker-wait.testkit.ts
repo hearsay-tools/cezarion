@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 /**
  * The delegation fixture the worker-wait suites share: a real `RunManager` over a scratch Git repo
  * and native mocks (`useWorkerWaitFixture`), with builders for parents, workers, waits and restarts.
@@ -101,18 +102,23 @@ export function captureState() { const engine = fixtureEngine(); return { root, 
       pid: state.session?.pid, open: state.session?.open, flight: state.agentInputFlight?.inputIds } : undefined; })(),
     events: formatTimeline(run.id, store.readEvents(run.id).slice(-6)), })),
 }; }
+async function settleTrackedWork(): Promise<void> {
+  const work = runInternals(manager).context.work;
+  while (work.pending.size) await Promise.allSettled([...work.pending.keys()]);
+}
+
 export const bookkeeping: Promise<unknown>[] = [];
 export const executions: Promise<unknown>[] = [];
 export function track() {
-  const engine = manager as unknown as Record<'execute' | 'runContinuation', (...args: unknown[]) => Promise<unknown>>;
-  for (const name of ['execute', 'runContinuation'] as const) {
-    const real = engine[name].bind(manager);
-    engine[name] = (...args) => { const result = real(...args); executions.push(result); return result; };
-  }
-  const internals = manager as unknown as { recordTurnEnd(...args: unknown[]): Promise<unknown> };
-  const real = internals.recordTurnEnd.bind(manager);
-  internals.recordTurnEnd = (...args) => { const result = real(...args); bookkeeping.push(result); return result; };
+  const work = runInternals(manager).context.work;
+  const realTrack = work.track.bind(work);
+  vi.spyOn(work, 'track').mockImplementation((label, promise) => {
+    if (label === 'execute' || label === 'runContinuation') executions.push(promise);
+    if (label === 'recordTurnEnd') bookkeeping.push(promise);
+    return realTrack(label, promise);
+  });
 }
+
 /**
  * `nudgeReply` is how the native mocks answer Cezar's no-wait nudge (hearsay-tools/cezarion#1234).
  * By default they ignore it in plain text: a run then reaches Cezar's no-wait human wait (the gate
@@ -172,6 +178,7 @@ export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply
       for (const pending of [executions, bookkeeping]) {
         for (const result of await Promise.allSettled(pending.splice(0))) if (result.status === 'rejected') errors.push(result.reason);
       }
+      await settleTrackedWork();
       cleanup(() => store.close());
       cleanup(() => rmSync(root, { recursive: true, force: true }));
       process.env = saved;
