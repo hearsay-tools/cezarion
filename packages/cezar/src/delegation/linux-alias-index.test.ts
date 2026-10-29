@@ -224,13 +224,46 @@ it('charges only the device lookup for an absent indexed device', () => {
   expect(() => aliasCandidates(path, '/', 'invalid', mounts, roots, new AliasWorkBudget(1), index)).toThrow('invalid device');
 });
 
-it('retains both path charges when the device bucket exists', () => {
+it('skips slash work for a present-device first-component miss', () => {
+  const roots = [{ path: '/owned', dev: '8:1', fsPath: '/owned' }];
+  const mounts = [{ dev: '8:1', root: '/owned', point: '/alias' }];
+  const index = indexAliasMounts(mounts, new AliasWorkBudget(), '/', roots);
+  let calls = 0;
+  expect(aliasCandidates('/other/x', '/', '08:01', mounts, roots, new AliasWorkBudget(3), index, () => calls++)).toEqual([]);
+  expect(calls).toBe(0);
+  expect(() => aliasCandidates('/other/x', '/', '08:01', mounts, roots, new AliasWorkBudget(2), index, () => calls++)).toThrow('work exceeds');
+  expect(calls).toBe(0);
+  const shared = new AliasWorkBudget(6);
+  for (const path of ['/other/x', '/other/y']) expect(aliasCandidates(path, '/', '08:01', mounts, roots, shared, index)).toEqual([]);
+  expect(() => aliasCandidates('/alias/x', '/', '08:01', mounts, roots, shared, index, () => calls++)).toThrow('work exceeds');
+  expect(calls).toBe(0);
+  class Meter extends AliasWorkBudget { used = 0; override spend(n = 1) { this.used += n; super.spend(n); } }
+  const meter = new Meter();
+  expect(aliasCandidates('/alias/x', '/', '08:01', mounts, roots, meter, index)).toEqual(['/owned/x']);
+  const enough = new AliasWorkBudget(6 + meter.used);
+  for (const path of ['/other/x', '/other/y']) expect(aliasCandidates(path, '/', '08:01', mounts, roots, enough, index)).toEqual([]);
+  expect(aliasCandidates('/alias/x', '/', '08:01', mounts, roots, enough, index, () => calls++)).toEqual(['/owned/x']);
+  expect(calls).toBe(1);
+});
+
+it('retains both path charges when the first component matches', () => {
   const roots = [{ path: '/owned', dev: '8:1', fsPath: '/owned' }];
   const mounts = [{ dev: '8:1', root: '/owned', point: '/alias' }];
   const index = indexAliasMounts(mounts, new AliasWorkBudget(), '/', roots);
   for (const units of [0, 1, 2, 3, 4]) {
-    expect(() => aliasCandidates('/other/x', '/', '08:01', mounts, roots, new AliasWorkBudget(units), index)).toThrow('work exceeds');
+    expect(() => aliasCandidates('/alias/x', '/', '08:01', mounts, roots, new AliasWorkBudget(units), index)).toThrow('work exceeds');
   }
-  expect(aliasCandidates('/other/x', '/', '08:01', mounts, roots, new AliasWorkBudget(5), index)).toEqual([]);
   expect(aliasCandidates('/alias/x', '/', '08:01', mounts, roots, new AliasWorkBudget(), index)).toEqual(['/owned/x']);
+});
+
+it('preserves root and first-component hit work when no ancestor matches', () => {
+  const roots = [{ path: '/owned', dev: '8:1', fsPath: '/owned' }];
+  const nested = [{ dev: '8:1', root: '/owned', point: '/alias/sub' }];
+  const root = [{ dev: '8:1', root: '/owned', point: '/' }];
+  const nestedIndex = indexAliasMounts(nested, new AliasWorkBudget(), '/', roots);
+  const rootIndex = indexAliasMounts(root, new AliasWorkBudget(), '/', roots);
+  expect(() => aliasCandidates('/alias/other', '/', '08:01', nested, roots, new AliasWorkBudget(14), nestedIndex)).toThrow('work exceeds');
+  expect(aliasCandidates('/alias/other', '/', '08:01', nested, roots, new AliasWorkBudget(15), nestedIndex)).toEqual([]);
+  expect(() => aliasCandidates('/other/x', '/', '08:01', root, roots, new AliasWorkBudget(30), rootIndex)).toThrow('work exceeds');
+  expect(aliasCandidates('/other/x', '/', '08:01', root, roots, new AliasWorkBudget(31), rootIndex)).toEqual(['/owned/other/x']);
 });

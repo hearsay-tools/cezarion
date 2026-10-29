@@ -11,7 +11,8 @@ it('validates the exact source inventory before any instrumentation', () => {
   expect(() => validateAttributionSources(sources)).not.toThrow();
   const staged = instrumentAttributionSources(sources);
   for (const source of Object.values(staged)) expect(() => stripTypeScriptTypes(source, { mode: 'transform' })).not.toThrow();
-  expect(staged['linux-alias-model.ts']).toContain("chargePaths(budget, 'filter', path)");
+  expect(staged['linux-alias-model.ts']).toContain("budget.spend(1 + Math.ceil(path.length / 64), 'filter')");
+  expect(staged['linux-alias-model.ts']).toContain("budget.spend(components, 'filter')");
   expect(staged['linux-alias-model.ts']).toContain('budget.spend(components, tag)');
   expect(staged['linux-alias-model.ts']).toContain('return refuseReservation()');
   const mapped = staged['linux-mapped-holders.ts']!;

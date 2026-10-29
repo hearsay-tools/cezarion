@@ -156,10 +156,13 @@ function indexedCandidates(path: string, device: string, index: AliasMountIndex,
   budget.spend();
   const bucket = index.get(device);
   if (!bucket) return [];
-  chargePaths(budget, path);
+  budget.spend(1 + Math.ceil(path.length / 64));
   const end = path.indexOf('/', 1);
   const first = path.slice(1, end === -1 ? undefined : end);
   if (!bucket.hasRoot && !bucket.first.has(first)) return [];
+  let components = 0;
+  for (const ch of path) if (ch === '/') components++;
+  budget.spend(components);
   const points = bucket.points, found: { pair: IndexedPair; prefix: string }[] = [];
   let current = path, provisional = false;
   for (;;) {
