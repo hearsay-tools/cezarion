@@ -80,12 +80,19 @@ export class RunSettlement {
 
   /**
    * Whether a step session closed without its done while a later step waits (hearsay-tools/cezarion#1620).
-   * It reads and clears the done `closeAsDone` recorded. Finish is an explicit stop, settled as before.
+   * It reads the done `closeAsDone` recorded; callers clear the consumed mark. Finish is an explicit stop, settled as before.
    */
   stepLeftOpen(state: ActiveRun, stepId: string, next: WorkflowStepDef | undefined): boolean {
     const completed = state.completedStepId === stepId;
-    state.completedStepId = undefined;
     return !!next && !completed && !state.finishRequested;
+  }
+
+  /** Consume the completion mark only when Continue reaches its completion check. */
+  private continuationLeftOpen(state: ActiveRun, stepId: string, next: WorkflowStepDef | undefined): boolean {
+    if (state.cancelled) return false;
+    const open = this.stepLeftOpen(state, stepId, next);
+    state.completedStepId = undefined;
+    return open;
   }
 
   /** A resumed earlier step that closed without a done stays open: its workflow step, not the Continue's own. */
@@ -115,7 +122,7 @@ export class RunSettlement {
       this.context.store.flush();
     }
     sink.sessionEnded(state.cancelled ? 'cancelled' : 'end_turn');
-    const incomplete = !state.cancelled && this.stepLeftOpen(state, stepId, resumedNext);
+    const incomplete = this.continuationLeftOpen(state, stepId, resumedNext);
     const kind = stepDecisions.continuationCloseKind(state.cancelled, incomplete,
       !state.cancelled && !incomplete && (state.idleClosed || this.supersedeFallbackThenWorkflowAsk(runId, state)));
     if (kind === 'cancelled') {

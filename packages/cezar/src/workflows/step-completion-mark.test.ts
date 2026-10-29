@@ -55,11 +55,17 @@ describe('step completion mark at settlement callers', () => {
     if (cancelled) expect(store.getRun(runId)?.status).toBe(RUN_STATUS.cancelled);
   });
 
+  it.each([step.id, 'other'])('stepLeftOpen leaves the mark intact (%s)', mark => {
+    state.completedStepId = mark;
+    expect(runInternals(manager).runSettlement.stepLeftOpen(state, step.id, next)).toBe(mark !== step.id);
+    expect(state.completedStepId).toBe(mark);
+  });
+
   it.each([true, false])('step loop clears a consumed mark (completed=%s)', completed => {
     state.completedStepId = completed ? step.id : 'other';
     const internal = runInternals(manager);
     internal.active.set(runId, state);
-    const execution: Execution = { runId, state, workflow: { name: 'chain', steps: [step, next] },
+    const execution: Execution = { runId, state, workflow: { name: 'chain', source: 'file', steps: [step, next] },
       input: { task: 'work' }, startAt: 0, emit: vi.fn() };
     const launch = { taskBackend: 'codex' } as ExecutionLaunch;
     const loop: LoopOutcome = { checkFailure: null, runError: null, deliveryCapped: false };

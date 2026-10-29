@@ -396,7 +396,9 @@ export class StepLoop {
     if (this.settleAgentStepWakes(execution, step.id, failure, loop)) return 'handed-off';
     if (failure || loop.deliveryCapped) return 'settle';
     // A session that closed without a done leaves its step resumable; the tail never starts.
-    if (this.runSettlement.stepLeftOpen(state, step.id, attempt.nextStep)) { loop.incompleteStepId = step.id; return 'settle'; }
+    const incomplete = this.runSettlement.stepLeftOpen(state, step.id, attempt.nextStep);
+    state.completedStepId = undefined;
+    if (incomplete) { loop.incompleteStepId = step.id; return 'settle'; }
     if (state.idleClosed || this.runSettlement.supersedeFallbackThenWorkflowAsk(runId, state)) return 'settle';
     this.finishStep(runId, step.id, 'done', undefined, emit);
     // Finish is an explicit stop, not an answer or permission to run checks.
