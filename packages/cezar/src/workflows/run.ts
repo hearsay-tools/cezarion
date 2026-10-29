@@ -203,11 +203,7 @@ export class RunManager {
     flushAgentInputs: id => this.flushAgentInputs(id),
     isCurrentState: (id, state) => this.active.get(id) === state,
   };
-  // Queue + `starting` set (spec 006, janitor's pump() pattern): `starting`
-  // covers the window between shifting a run off the queue and the run
-  // registering in `active`, so parallel-slot counting is never racy.
   private readonly line: RunLine;
-  private get queue() { return this.line.queue; }
   private readonly worktreeAutosave: WorktreeAutosave;
   private readonly workerExecutions: WorkerExecutions;
   private get executions() { return this.workerExecutions.executions; }
@@ -254,23 +250,10 @@ export class RunManager {
       (!!run.delegation.destroy || this.workerExecutions.isStopped(runId)));
   }
 
-  private get starting() { return this.line.starting; }
   /** Runs whose worktree a reclaim, or whose branch a delete, is removing right now
    *  (`claimWorktreeReclaim`, `claimForBranchCleanup`). `continueRun` refuses them. */
   private readonly claims: MaintenanceClaims;
   private get reclaiming(): Set<string> { return this.claims.reclaiming; }
-  // Runs parked at `waiting` (open session, ball in the user's court). They
-  // don't consume a `maxParallel` slot (#347) — an idle claude process costs
-  // memory but no tokens, queued work progressing matters more, and the idle
-  // timeout already bounds how long a session can sit open. Invariant:
-  // `waiting ⊆ active` — always cleared together via dropActive().
-  private get waiting() { return this.line.waiting; }
-  /** Durable monitoring subset. Only the configured number receives the waiting-slot exemption. */
-  private get monitoring() { return this.line.monitoring; }
-  /** A run whose resolved waits wait for a wake (hearsay-tools/cezarion#1233). Separate from
-   *  human waiting: these resumes MUST reacquire scheduler capacity. Keyed by run id. */
-  private get waitWakeQueuedAt() { return this.line.waitWakeQueuedAt; }
-  private get waitWakeAdmitted() { return this.line.waitWakeAdmitted; }
   private readonly wakeAdmission: WakeAdmission;
   private readonly retries: WakeRetries;
   private readonly ciResources: ReturnType<typeof acquireCiResources>;
@@ -319,11 +302,6 @@ export class RunManager {
     }
     this.waitRegistry.resolvePeerWaits(runsAwaitingPeer(run, () => this.store.listRuns())); // never in recovery: an interrupted peer fails, then continues
   };
-  private get pendingJobs() { return this.line.pendingJobs; }
-  /** Interrupted agent turns recovered after a process restart. Unlike an
-   *  explicit user Continue, these are bulk scheduler work and must re-enter
-   *  through `pump()` so both workspace and per-project caps are honored. */
-  private get pendingContinuations() { return this.line.pendingContinuations; }
   private readonly continuationAcceptance: ContinuationAcceptance;
   private readonly turnSettler: TurnSettler;
   private readonly inputDelivery: InputDelivery;
@@ -387,8 +365,8 @@ export class RunManager {
       toQueuedMessage: (id, content) => this.toQueuedMessage(id, content), hydrateQueuedInput: (id, input) => this.hydrateQueuedInput(id, input),
       enqueueJob: (id, job) => this.line.enqueueJob(id, job), enqueueContinuation: (id, continuation) => this.line.enqueueContinuation(id, continuation),
       isSyntheticContinuation: (run, step) => isSyntheticContinuation(run, step), restartContinuationPrompt: RESTART_CONTINUATION_PROMPT,
-      reviveQueuedRun: (run, reason) => this.reviveQueuedRun(run, reason), reviveWorkflow: run => this.reviveWorkflow(run),
-      checkpointRestartContext: (run, step) => this.checkpointRestartContext(run, step),
+      reviveQueuedRun: (run, reason) => this.reviveQueuedRun(run, reason), reviveWorkflow: run => queuedRevival.reviveWorkflow(this.context, this.queuedRevivalHost, run),
+      checkpointRestartContext: (run, step) => queuedRevival.checkpointRestartContext(this.context, this.queuedRevivalHost, run, step),
     };
     this.line = new RunLine(this.context, {
       activeSize: () => this.active.size, activeHas: id => this.active.has(id),
@@ -401,8 +379,8 @@ export class RunManager {
       admissionError: (error, fallback) => admissionError(error, fallback),
       admitQueuedWaitWake: id => this.wakeAdmission.admitQueuedWaitWake(id),
       launchQueuedRun: (id, job, continuation) => this.launchQueuedRun(id, job, continuation),
-      reviveQueuedRun: (run, reason) => this.reviveQueuedRun(run, reason), pump: () => this.pump(),
-      busySlots: () => this.busySlots(),
+      reviveQueuedRun: (run, reason) => this.reviveQueuedRun(run, reason), pump: () => this.line.pump(),
+      busySlots: () => this.line.busySlots(),
     });
     this.workerQuestions = new WorkerQuestions(this.context, {
       active: id => this.active.get(id), deliverConversationInput: id => this.deliverConversationInput(id),
@@ -457,7 +435,7 @@ export class RunManager {
       resumeParkedRun: (...args) => this.resumeParkedRun(...args),
       noteNoWaitNudgeContent: (...args) => this.noteNoWaitNudgeContent(...args),
       parkedOnWorkers: id => this.wakeAdmission.parkedOnWorkers(id),
-      releaseSlot: () => this.releaseSlot(),
+      releaseSlot: () => this.line.releaseSlot(),
       routeWorkerQuestion: id => this.routeWorkerQuestion(id),
     };
     this.turnNudges = new TurnNudges(this.context, this.humanWaits, this.line, this.completionGateHost, {
@@ -472,7 +450,7 @@ export class RunManager {
     }, MAX_AUTO_CONTINUES, COMPLETION_WILL_WAIT);
     this.worktreeAutosave = new WorktreeAutosave(this.context,
       { holdForMaintenance: ids => this.holdForMaintenance(ids),
-        reapTerminalScratch: id => this.reapTerminalScratch(id), releaseSlot: () => this.releaseSlot(),
+        reapTerminalScratch: id => this.reapTerminalScratch(id), releaseSlot: () => this.line.releaseSlot(),
         saveWorktree: (id, state, reason) => this.saveWorktree(id, state, reason),
         trackTurn: (id, task) => this.workerExecutions.trackTurn(id, task) },
     );
@@ -487,7 +465,7 @@ export class RunManager {
         admissionError: message => new WorkerOrphanAliveError(message),
         settleOrphanedWorkerExecution: (id, opts) => this.settleOrphanedWorkerExecution(id, opts),
         reapTerminalScratch: id => this.reapTerminalScratch(id), queueWaitWake: id => this.wakeAdmission.queueWaitWake(id),
-        retryWaitAdmission: id => this.retries.retryWaitAdmission(id), releaseSlot: () => this.releaseSlot() },
+        retryWaitAdmission: id => this.retries.retryWaitAdmission(id), releaseSlot: () => this.line.releaseSlot() },
     );
     this.automationToolsSlot = new AutomationToolsSlot(this.context,
       () => !!this.cockpit,
@@ -515,17 +493,17 @@ export class RunManager {
         reconcileWorkerWaits: () => this.reconcileWorkerWaits(), retireEmptyWake: id => this.wakeAdmission.retireEmptyWake(id),
         deliverConversationInput: id => this.deliverConversationInput(id),
         settleIdleBoundary: (id, state, session) => this.inputDelivery.settleIdleBoundary(id, state, session),
-        releaseSlot: () => this.releaseSlot(), providerOwnsInboxInput: (id, inputId) => this.providerOwnsInboxInput(id, inputId),
+        releaseSlot: () => this.line.releaseSlot(), providerOwnsInboxInput: (id, inputId) => this.providerOwnsInboxInput(id, inputId),
         canClaimInboxInput: (id, inputId) => this.canClaimInboxInput(id, inputId),
         armInboxClaimExpiry: id => this.armInboxClaimExpiry(id) },
     );
     this.repoRootLease = new RepoRootLease(this.context,
       { park: id => { this.line.park(id); }, unpark: id => { this.line.unpark(id); },
-        releaseSlot: () => this.releaseSlot() },
+        releaseSlot: () => this.line.releaseSlot() },
     );
     this.turnBookkeeper = new TurnBookkeeper(this.context,
       { isDisposedDelegatedRun: id => this.isDisposedDelegatedRun(id), discoverSkills: () => this.discoverSkills(),
-        reviveWorkflow: run => this.reviveWorkflow(run), autoNameRun: (id, skill, task, live) => this.autoNameRun(id, skill, task, live) },
+        reviveWorkflow: run => queuedRevival.reviveWorkflow(this.context, this.queuedRevivalHost, run), autoNameRun: (id, skill, task, live) => this.autoNameRun(id, skill, task, live) },
     );
     this.runSkills = new RunSkills(this.context,
       { discoverSkills: () => this.discoverSkills(), workerExecutionStopped: id => this.workerExecutionStopped(id),
@@ -542,7 +520,7 @@ export class RunManager {
     this.runSkills, this.humanWaits, this.inputReceiptHost, this.inputReceiptSteps);
     this.autoResumeScheduler = new AutoResumeScheduler(this.context,
       { move: (id, exit, patch) => this.move(id, exit, patch),
-        continueRun: (id, opts, defer) => this.continueRun(id, opts, defer), pump: () => this.pump() },
+        continueRun: (id, opts, defer) => this.continueRun(id, opts, defer), pump: () => this.line.pump() },
     );
     this.recovery = new RunRecovery(this.context, this.familyReconciler,
       this.workerQuestions, this.autoResumeScheduler, {
@@ -554,8 +532,8 @@ export class RunManager {
         cancel: (...args) => this.cancel(...args),
         continueRun: (...args) => this.continueRun(...args),
         reviveQueuedRun: (...args) => this.reviveQueuedRun(...args),
-        requeueInterruptedRun: (...args) => this.requeueInterruptedRun(...args),
-        checkpointRestartContext: (...args) => this.checkpointRestartContext(...args),
+        requeueInterruptedRun: (...args) => queuedRevival.requeueInterruptedRun(this.context, this.queuedRevivalHost, ...args),
+        checkpointRestartContext: (...args) => queuedRevival.checkpointRestartContext(this.context, this.queuedRevivalHost, ...args),
         deliverConversationInput: (...args) => this.deliverConversationInput(...args),
         answerRoutedQuestion: (...args) => this.answerRoutedQuestion(...args),
         queueWaitWake: (...args) => this.wakeAdmission.queueWaitWake(...args),
@@ -565,7 +543,7 @@ export class RunManager {
         settleRequestedRootFinish: (...args) => this.settleRequestedRootFinish(...args),
         settleSuccess: (...args) => this.settleSuccess(...args),
         reconcileWorkerWaits: (...args) => this.reconcileWorkerWaits(...args),
-        pump: (...args) => this.pump(...args),
+        pump: (...args) => this.line.pump(...args),
         recover: (...args) => this.recover(...args),
         adoptTranscriptAsk: (...args) => this.adoptTranscriptAsk(...args),
         settleAnsweredLegacyAsk: (...args) => this.settleAnsweredLegacyAsk(...args),
@@ -575,7 +553,7 @@ export class RunManager {
       inboxClaims: this.inboxClaims, workerQuestions: this.workerQuestions, humanWaits: this.humanWaits,
       isActive: id => this.isActive(id), move: (id, exit) => this.move(id, exit), recoveringRun: run => this.recoveringRun(run),
       continueRun: (id, opts, defer) => this.continueRun(id, opts, defer), disarmWait: id => this.disarmWait(id),
-      reconcileWorkerWaits: id => this.reconcileWorkerWaits(id), releaseSlot: () => this.releaseSlot(),
+      reconcileWorkerWaits: id => this.reconcileWorkerWaits(id), releaseSlot: () => this.line.releaseSlot(),
       parkForUser: (id, state, step) => this.parkForUser(id, state, step), armIdleTimer: (id, state) => this.armIdleTimer(id, state),
       flushAgentInputs: id => this.flushAgentInputs(id), answerRoutedQuestion: (id, flush) => this.answerRoutedQuestion(id, flush),
       queueWaitWake: id => this.wakeAdmission.queueWaitWake(id), retryWaitAdmission: id => this.retries.retryWaitAdmission(id),
@@ -586,7 +564,7 @@ export class RunManager {
       isActive: id => this.isActive(id), move: (id, exit, patch) => this.move(id, exit, patch),
       ownedJob: run => this.ownedJob(run), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
       finishWorkerExecution: id => this.finishWorkerExecution(id), clearWakeBackoff: id => this.retries.clearWakeBackoff(id),
-      dropActive: id => this.dropActive(id), pump: () => this.pump(),
+      dropActive: id => this.dropActive(id), pump: () => this.line.pump(),
       runContinuation: (...args) => this.runContinuation(...args), workerStep: (id, step) => this.workerStep(id, step),
       isUntouchedCancelledRun: run => isUntouchedCancelledRun(run), admissionError: (error, fallback) => admissionError(error, fallback),
       isSyntheticContinuation: (run, step) => isSyntheticContinuation(run, step),
@@ -604,7 +582,7 @@ export class RunManager {
         closingWakeDecision: (id, holds, cancelled, error) => this.wakeAdmission.closingWakeDecision(id, holds, cancelled, error),
         owesDelivery: id => this.wakeAdmission.owesDelivery(id), preserveRunAfterDisposal: (id, state) => this.preserveRunAfterDisposal(id, state),
         isDisposedDelegatedRun: id => this.isDisposedDelegatedRun(id), queueWaitWake: id => this.wakeAdmission.queueWaitWake(id),
-        reconcileWorkerWaits: id => this.reconcileWorkerWaits(id), releaseSlot: () => this.releaseSlot(),
+        reconcileWorkerWaits: id => this.reconcileWorkerWaits(id), releaseSlot: () => this.line.releaseSlot(),
         enforceRetention: () => this.enforceRetention(), reapTerminalScratch: id => this.reapTerminalScratch(id),
         forgetMemoryPause: id => { this.memoryPausing.delete(id); },
       }, WAKE_SESSION_CLOSED_ERROR, WAKE_DELIVERY_CAP_NOTE);
@@ -614,7 +592,7 @@ export class RunManager {
       beginUsageInvocation: (...args) => this.beginUsageInvocation(...args),
       trackWorkerSessionResult: (...args) => this.trackWorkerSessionResult(...args),
       recordUsagePeaks: id => this.recordUsagePeaks(id),
-      saveWorktree: (...args) => this.saveWorktree(...args), pump: () => this.pump(),
+      saveWorktree: (...args) => this.saveWorktree(...args), pump: () => this.line.pump(),
       makeUiSink: (...args) => this.makeUiSink(...args),
       repositoryRootLockDisabled: () => repositoryRootLockDisabled(),
       prepareWorktree: (...args) => this.prepareWorktree(...args),
@@ -636,7 +614,7 @@ export class RunManager {
     this.turnSettler = new TurnSettler(this.context, {
       humanWaits: this.humanWaits, line: this.line, waitWatches: this.waitWatches, waitRegistry: this.waitRegistry,
       workerQuestions: this.workerQuestions, completionGateHost: this.completionGateHost,
-      move: (id, exit) => this.move(id, exit), releaseSlot: () => this.releaseSlot(), completionGate: id => this.completionGate(id),
+      move: (id, exit) => this.move(id, exit), releaseSlot: () => this.line.releaseSlot(), completionGate: id => this.completionGate(id),
       cancelOpenWaits: id => this.wakeAdmission.cancelOpenWaits(id), countAutomaticWakes: id => this.wakeAdmission.automaticWakes(id),
       workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
       submitAgentInput: (id, state, content) => this.submitAgentInput(id, state, content), flushAgentInputs: id => this.flushAgentInputs(id),
@@ -672,16 +650,16 @@ export class RunManager {
     this.ciResources = acquireCiResources(this.semaphore);
     this.ciSupervisor = this.ciResources.supervisor;
     this.offSemaphore = this.semaphore.register({
-      busySlots: () => this.busySlots(),
-      oldestWakeAt: () => this.oldestWakeAt(),
-      pump: () => this.pump(),
-      oldestQueuedAt: () => this.oldestQueuedAt(),
+      busySlots: () => this.line.busySlots(),
+      oldestWakeAt: () => this.line.oldestWakeAt(),
+      pump: () => this.line.pump(),
+      oldestQueuedAt: () => this.line.oldestQueuedAt(),
       accountHolds: () => this.accountHolds(),
     });
     // Memory guard (#memory-guard): the shared process-tree sampler already ticks ~every 2 s for
     // the runs table; piggyback on it to enforce the per-task memory ceiling.
     this.offUsage = onUsage((snapshot) => void this.enforceMemoryLimit(snapshot));
-    this.queueWatchdog = setInterval(() => void this.rescueStalledQueue(), QUEUE_WATCHDOG_MS);
+    this.queueWatchdog = setInterval(() => void this.line.rescueStalledQueue(), QUEUE_WATCHDOG_MS);
     this.queueWatchdog.unref?.();
     this.store.on('run', this.onDelegationRun);
     this.store.on('deleted', this.wakeAdmission.onRunDeleted);
@@ -1034,7 +1012,7 @@ export class RunManager {
       void this.autoNameRun(run.id, skillHint, input.task);
     } finally {
       this.line.enqueueJob(run.id, { workflow, input: effectiveInput });
-      void this.pump();
+      void this.line.pump();
     }
     return run;
   }
@@ -1046,7 +1024,7 @@ export class RunManager {
     const job = this.ownedJob(run);
     if (this.line.hasQueued(runId) || this.line.hasStarting(runId) || this.active.has(runId)) return;
     this.line.enqueueJob(runId, job);
-    void this.pump();
+    void this.line.pump();
   }
 
   private ownedJob(run: RunRecord): { workflow: WorkflowDef; input: StartRunInput } {
@@ -1068,24 +1046,6 @@ export class RunManager {
     };
   }
 
-  private busySlots(): number { return this.line.busySlots(); }
-  private oldestQueuedAt(): number | null { return this.line.oldestQueuedAt(); }
-  private oldestWakeAt(): number | null { return this.line.oldestWakeAt(); }
-
-  /**
-   * A slot this manager held just came free. Pump the whole WORKSPACE, not
-   * just this manager: `maxParallel` is counted across every project, so the
-   * run that should take the slot is the workspace's oldest queued one — which
-   * usually sits in another project's queue. Pumping only `this` is what left
-   * a queued run in project B stuck at `queued` while project A's runs came
-   * and went. `release()` pumps this manager too, so it replaces the local
-   * `pump()` at every slot-freeing transition.
-   */
-  private releaseSlot(): void {
-    void this.semaphore.release();
-  }
-
-  private async pump(): Promise<void> { return this.line.pump(); }
 
   /** Read and hydrate mutable queued input in the same synchronous tick as dequeue. */
   private launchQueuedRun(runId: string, job: PendingJob | undefined, continuation: PendingContinuation | undefined): void {
@@ -1130,8 +1090,6 @@ export class RunManager {
     }).finally(() => this.finishWorkerExecution(runId));
   }
 
-  private checkpointRestartContext(run: RunRecord, queuedStepId?: string): RunRecord { return queuedRevival.checkpointRestartContext(this.context, this.queuedRevivalHost, run, queuedStepId); }
-
   private async reviveQueuedRun(run: RunRecord, reason: string): Promise<void> { return queuedRevival.reviveQueuedRun(this.context, this.queuedRevivalHost, run, reason); }
 
   /**
@@ -1152,16 +1110,12 @@ export class RunManager {
    */
   async recover(familyRootId?: string): Promise<void> { return this.recovery.recover(familyRootId); }
 
-  private requeueInterruptedRun(run: RunRecord, interruptedStepId: RunRecord['currentStepId']): boolean { return queuedRevival.requeueInterruptedRun(this.context, this.queuedRevivalHost, run, interruptedStepId); }
-
   /**
    * Adopt a dead owner’s family for a control, then recover the settled family without resuming
    * work. Stop cancels its target; only Continue starts work. Serialize adoptions after recovery.
    * False means missing or live-owned.
    */
   adoptOrphanedRun(runId: string, opts: { stop?: boolean } = {}): Promise<boolean> { return this.recovery.adoptOrphanedRun(runId, opts); }
-
-  private async reviveWorkflow(run: RunRecord): Promise<WorkflowDef | null> { return queuedRevival.reviveWorkflow(this.context, this.queuedRevivalHost, run); }
 
   private isDisposedDelegatedRun(runId: string): boolean {
     return isDisposedDelegatedRun(this.store, () => this.disposed, runId);
@@ -1232,8 +1186,6 @@ export class RunManager {
     state?: ActiveRun,
     startAt?: number,
   ): boolean { return this.stepLoop.requeueWhileHeld(runId, workflow, input, runner, state, startAt); }
-
-  async rescueStalledQueue(now = Date.now()): Promise<void> { return this.line.rescueStalledQueue(now); }
 
   accountHolds(now = Date.now()): AccountHolds {
     return deriveAccountHolds(this.store.listRuns(), run => this.wakeAdmission.withExecutionAccount(run), now);
@@ -1407,7 +1359,7 @@ export class RunManager {
       this.clearIdleTimer(state);
       this.line.leavePool(runId); this.line.park(runId);
       if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
-      this.releaseSlot();
+      this.line.releaseSlot();
     }
     return 'held';
   }

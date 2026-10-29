@@ -30,7 +30,7 @@ import { monitoringWakeOf } from './waits.testkit.ts';
 /** Parked on an agent worker wait in the wait list (hearsay-tools/cezarion#1235): the run waits and
  *  its worker entry reads `parked`. */
 const parkedOnWorkers = (runId: string) =>
-  (manager as unknown as { waiting: Set<string> }).waiting.has(runId) && waitOf(store.getRun(runId))?.phase === 'parked';
+  runInternals(manager).line.waiting.has(runId) && waitOf(store.getRun(runId))?.phase === 'parked';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -101,8 +101,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         ] }, { task: 'parent', runner: backend });
         store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
         // hearsay-tools/cezarion#1235: the list's park and admission, not `workerWaiting`/`workerWakeAdmitted`.
-        const engine = manager as unknown as { waitWakeAdmitted: Set<string>;
-          active: Map<string, { sessionEverOpened?: boolean; session?: AgentSession }> };
+        const engine = runInternals(manager);
         await until(() => !!engine.active.get(run.id)?.sessionEverOpened);
         const session = engine.active.get(run.id)!.session!;
         const w = await worker(run.id, 'mock:slow');
@@ -121,7 +120,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           expect(wake).toBeDefined(); expect(wake?.deliveredAt).toBeUndefined();
           expect(waitOf(store.getRun(run.id))?.wakeId).toBe(wake?.id);
           expect(parkedOnWorkers(run.id)).toBe(false);
-          expect(engine.waitWakeAdmitted.has(run.id)).toBe(true);
+          expect(runInternals(manager).line.waitWakeAdmitted.has(run.id)).toBe(true);
           expect(engine.active.get(run.id)?.session).toBe(session); expect(session.open).toBe(true);
           expect(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
           expect(semaphore.busy()).toBe(1);
@@ -252,17 +251,15 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         await until(() => store.getRun(p.id)?.status === 'waiting');
       }
       // hearsay-tools/cezarion#1235: the list's admission, not `workerWakeAdmitted`.
-      const engine = manager as unknown as { waitWakeAdmitted: Set<string>; active: Map<string, {
-        session: { sendAgentMessage(content: unknown[]): false | Promise<void>; sendMessage(content: unknown[]): boolean }
-      }> };
-      const session = engine.active.get(p.id)!.session;
+      const engine = runInternals(manager);
+      const session = engine.active.get(p.id)!.session!;
       const accept = session.sendAgentMessage.bind(session);
       // A backend opening/ack window legitimately refuses non-human input.
       session.sendAgentMessage = () => false;
       const w = await worker(p.id); const wait = register(p.id, [w.id]);
       await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
       fixtureUpdateRun(w.id, { status: 'done' });
-      await until(() => engine.waitWakeAdmitted.has(p.id));
+      await until(() => runInternals(manager).line.waitWakeAdmitted.has(p.id));
       const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
       session.sendMessage([{ type: 'text', text: 'mock:ask' }]);
       await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries);
@@ -434,7 +431,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       const unrelated = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:hold', runner: 'claude' });
       manager.cancel(blocker.id);
       await until(() => store.getRun(unrelated.id)?.status === 'waiting');
-      await manager.rescueStalledQueue();
+      await runInternals(manager).line.rescueStalledQueue();
       expect(store.getRun(queued.id)?.status).toBe('queued');
       expect(store.getRun(queued.id)?.worktreePath).toBeUndefined();
       expect(store.readEvents(queued.id).some(event => event.type === 'session')).toBe(false);
@@ -523,7 +520,6 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => !!monitoringWakeOf(store.getRun(w.id)));
     const engine = manager as unknown as {
       active: Map<string, { session: { sendAgentMessage(...args: unknown[]): false | Promise<void> } }>;
-      monitoring: Set<string>;
       settleSuccess(id: string, durable?: boolean): Promise<void>;
       deliverMessage(id: string, content: { type: 'text'; text: string }[], human: boolean): boolean;
     };
@@ -541,7 +537,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         expect(send).not.toHaveBeenCalled();
         expect(runInternals(manager).wakeAdmission.automaticWakes(w.id)).toBe(0);
         expect({ ...store.getRun(w.id), monitoringWakeAt: monitoringWakeOf(store.getRun(w.id)) }).toMatchObject({ status: 'waiting', monitoringWakeAt: deadline });
-        expect(engine.monitoring.has(w.id)).toBe(true);
+        expect(runInternals(manager).line.monitoring.has(w.id)).toBe(true);
         expect(store.readEvents(w.id).some(event => event.type === 'note' && typeof event.message === 'string' && event.message.includes('automatic monitoring wake-up'))).toBe(false);
         expect(engine.deliverMessage(w.id, [{ type: 'text', text: 'synthetic retry' }], false)).toBe(false);
         expect(send).not.toHaveBeenCalled();
@@ -549,7 +545,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         expect(send).toHaveBeenCalledTimes(1);
         expect(runInternals(manager).wakeAdmission.automaticWakes(w.id)).toBe(1);
         // hearsay-tools/cezarion#1233: the wake turn keeps its pool slot until its own turn end.
-        expect(engine.monitoring.has(w.id)).toBe(true);
+        expect(runInternals(manager).line.monitoring.has(w.id)).toBe(true);
       }
     } finally { vi.useRealTimers(); release(); await completion; }
   });

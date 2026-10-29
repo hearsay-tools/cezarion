@@ -1,3 +1,4 @@
+import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
@@ -73,7 +74,7 @@ describe('autonomous turn-end parity — #426', () => {
               expect(!!state.autonomousNudgePending).toBe(retainedAck);
               if (retainedAck) {
                 expect(store.getRun(runId)?.status).toBe('running');
-                expect(manager['busySlots']()).toBe(1);
+                expect(runInternals(manager).line.busySlots()).toBe(1);
               }
               // Execute the real idle-expiry callback, with only its 15-minute
               // delay accelerated. No normalized event or session result injection.
@@ -84,7 +85,7 @@ describe('autonomous turn-end parity — #426', () => {
               expect(state.idleClosed).toBe(true);
               if (retainedAck) {
                 expect(manager.isActive(runId)).toBe(true);
-                expect(manager['busySlots']()).toBe(1);
+                expect(runInternals(manager).line.busySlots()).toBe(1);
                 expect(store.getRun(runId)?.status).toBe('running');
                 // The mock delays SIGTERM exit: neither end() nor late readiness
                 // may release the slot or resurrect the timed-out boundary.
@@ -92,11 +93,11 @@ describe('autonomous turn-end parity — #426', () => {
                 // bound: observe the real mock's delayed SIGTERM-exit boundary for 50 ms; the active session must retain its busy slot until native exit.
                 await new Promise(resolve => setTimeout(resolve, 50));
                 expect(manager.isActive(runId)).toBe(true);
-                expect(manager['busySlots']()).toBe(1);
+                expect(runInternals(manager).line.busySlots()).toBe(1);
               }
               await waitFor(() => !manager.isActive(runId));
               expect(sent).not.toHaveBeenCalled();
-              expect(manager['busySlots']()).toBe(0);
+              expect(runInternals(manager).line.busySlots()).toBe(0);
               expect(store.getRun(runId)?.status).toBe('waiting');
               expect(store.getRun(runId)?.steps.at(-1)?.status).toBe('waiting');
               if (retainedAck) {

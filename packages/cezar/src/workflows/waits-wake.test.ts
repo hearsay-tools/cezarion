@@ -42,12 +42,6 @@ function nativeWire(runner: RunnerId) {
 const engine = () => manager as unknown as {
   active: Map<string, { session?: AgentSession; ciGeneration: string; idleTimer?: NodeJS.Timeout & { _onTimeout(): void };
     agentInputFlight?: { inputIds: string[] } }>;
-
-  monitoring: Set<string>;
-  pump(): Promise<void>;
-  queue: string[];
-
-
   autoResumeTimers: Map<string, NodeJS.Timeout>;
 };
 async function openWait(id: string, request: CezarWaitRequestInput): Promise<TimedWait> {
@@ -126,7 +120,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     external.settle();
     await until(() => waitById(run.id, ci.id)?.phase === 'resolved');
     // The question holds its turn open: nothing may reach the wire, however often the line is pumped.
-    await engine().pump();
+    await runInternals(manager).line.pump();
     await flushMicrotasks();
     expect(store.getRun(run.id)?.agentInputs?.find(input => input.id === ci.id)?.deliveredAt).toBeUndefined();
     expect(existsSync(join(root, 'args')) && readFileSync(join(root, 'args'), 'utf8').includes(ci.id)).toBe(false);
@@ -206,7 +200,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     // (hearsay-tools/cezarion#1234).
     expect(store.getRun(run.id)?.waits).toMatchObject([{ kind: 'human', via: 'budget', source: 'cezar', phase: 'open' }]);
     expect(label(run.id)).toBe('needs you');
-    expect(engine().monitoring.has(run.id)).toBe(false);
+    expect(runInternals(manager).line.monitoring.has(run.id)).toBe(false);
     expect(semaphore.busy()).toBe(0);
   });
 
@@ -324,7 +318,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     expect((first as NodeJS.Timeout & { _idleTimeout: number })._idleTimeout).toBe(60_000);
     expect(prompted('claude', TIMER_WAKE_OPENING)).toHaveLength(1);
     expect(manager.isActive(run.id)).toBe(false);
-    expect(engine().queue).not.toContain(run.id);
+    expect(runInternals(manager).line.queue).not.toContain(run.id);
     expect(store.getRun(run.id)?.status).toBe('waiting');
     expect(waitById(run.id, timer.id)?.phase).toBe('resolved');
     expect(store.getRun(run.id)?.waitDeliveryFailures).toBe(1);

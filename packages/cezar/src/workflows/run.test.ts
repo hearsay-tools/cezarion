@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import {
@@ -612,14 +613,12 @@ describe('RunManager.continueRun override', () => {
     manager.dispose(); crashStore(store);
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
     manager = createFixtureManager(store, repoRoot);
-    const internals = manager as unknown as {
-      pump(): Promise<void>;
-      pendingContinuations: Map<string, { sessionId?: string; prompt: string }>;
-    };
-    internals.pump = async () => {};
+    const internals = runInternals(manager).line;
+    const pump = vi.spyOn(internals, 'pump').mockResolvedValue();
     await manager.recover();
-    expect(internals.pendingContinuations.get(id)?.prompt).toContain('read this with the chosen account');
-    expect(internals.pendingContinuations.get(id)?.sessionId).toBeUndefined();
+    expect(pump).toHaveBeenCalled();
+    expect(runInternals(manager).line.pendingContinuations.get(id)?.prompt).toContain('read this with the chosen account');
+    expect(runInternals(manager).line.pendingContinuations.get(id)?.sessionId).toBeUndefined();
     expect(store.getRun(id)?.agentProfile).toBe(after);
   });
 
@@ -682,7 +681,7 @@ describe('RunManager.continueRun override', () => {
     expect(store.getRun(id)?.effort).toBe('medium');
     // The stub bypasses startup teardown; simulate its completed lifecycle before
     // accepting a second Continue (terminal status alone never proves termination).
-    (manager as unknown as { starting: Set<string> }).starting.delete(id);
+    runInternals(manager).line.starting.delete(id);
     store.updateRun(id, { status: 'done' });
 
     expect(manager.continueRun(id, { effort: 'xhigh' })).toEqual({ ok: true });
@@ -1404,18 +1403,13 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
 
-    const internals = manager as unknown as {
-      active: Map<string, Record<string, unknown>>;
-      waiting: Set<string>;
-      monitoring: Set<string>;
-      busySlots(): number;
-    };
+    const internals = runInternals(manager);
     const state = internals.active.get(record.id);
     if (!state) throw new Error('active run state missing');
     const originalDeadline = Date.parse(String(monitoringWakeOf(store.getRun(record.id))));
-    expect(internals.waiting.has(record.id)).toBe(true);
-    expect(internals.monitoring.has(record.id)).toBe(true);
-    expect(internals.busySlots()).toBe(0);
+    expect(runInternals(manager).line.waiting.has(record.id)).toBe(true);
+    expect(runInternals(manager).line.monitoring.has(record.id)).toBe(true);
+    expect(runInternals(manager).line.busySlots()).toBe(0);
     expect(semaphore.busy()).toBe(0);
 
     await waitFor(record.id, () => {
@@ -1428,9 +1422,9 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     expect(store.getRun(record.id)).toMatchObject({ status: 'running' });
     expect(Date.parse(String(monitoringWakeOf(store.getRun(record.id))))).toBe(originalDeadline);
     expect(monitoringTimerOf(manager, record.id)).toBeDefined();
-    expect(internals.waiting.has(record.id)).toBe(false);
-    expect(internals.monitoring.has(record.id)).toBe(true);
-    expect(internals.busySlots()).toBe(0);
+    expect(runInternals(manager).line.waiting.has(record.id)).toBe(false);
+    expect(runInternals(manager).line.monitoring.has(record.id)).toBe(true);
+    expect(runInternals(manager).line.busySlots()).toBe(0);
     expect(semaphore.busy()).toBe(0);
     expect((state.session as { open?: boolean } | undefined)?.open).toBe(true);
 
@@ -1452,9 +1446,6 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
 
     const internals = manager as unknown as {
       active: Map<string, Record<string, unknown>>;
-      waiting: Set<string>;
-      monitoring: Set<string>;
-      busySlots(): number;
       makeUiSink(runId: string, stepId: string): { handle(event: UiEvent): void };
       handleRunnerUiEvent(
         runId: string,
@@ -1475,9 +1466,9 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
 
     expect(store.getRun(record.id)?.status).toBe('waiting');
     expect(monitoringTimerOf(manager, record.id)).toBe(wakeTimer);
-    expect(internals.waiting.has(record.id)).toBe(true);
-    expect(internals.monitoring.has(record.id)).toBe(true);
-    expect(internals.busySlots()).toBe(0);
+    expect(runInternals(manager).line.waiting.has(record.id)).toBe(true);
+    expect(runInternals(manager).line.monitoring.has(record.id)).toBe(true);
+    expect(runInternals(manager).line.busySlots()).toBe(0);
     expect(semaphore.busy()).toBe(0);
     await waitFor(record.id, () => {
       const events = readFileSync(join(repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`), 'utf8');
@@ -1502,9 +1493,6 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
 
     const internals = manager as unknown as {
       active: Map<string, Record<string, unknown>>;
-      waiting: Set<string>;
-      monitoring: Set<string>;
-      busySlots(): number;
       makeUiSink(runId: string, stepId: string): { handle(event: UiEvent): void };
       handleRunnerUiEvent(
         runId: string,
@@ -1567,9 +1555,9 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     expect(store.getRun(record.id)).toMatchObject({ status: 'waiting' });
     expect(monitoringWakeOf(store.getRun(record.id))).toBe(deadline);
     expect(monitoringTimerOf(manager, record.id)).toBe(wakeTimer);
-    expect(internals.waiting.has(record.id)).toBe(true);
-    expect(internals.monitoring.has(record.id)).toBe(true);
-    expect(internals.busySlots()).toBe(0);
+    expect(runInternals(manager).line.waiting.has(record.id)).toBe(true);
+    expect(runInternals(manager).line.monitoring.has(record.id)).toBe(true);
+    expect(runInternals(manager).line.busySlots()).toBe(0);
     expect(semaphore.busy()).toBe(0);
 
     await waitFor(record.id, () => {
@@ -1588,9 +1576,6 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
 
     const internals = manager as unknown as {
       active: Map<string, Record<string, unknown>>;
-      waiting: Set<string>;
-      monitoring: Set<string>;
-      busySlots(): number;
       makeUiSink(runId: string, stepId: string): { handle(event: UiEvent): void };
       handleRunnerUiEvent(
         runId: string,
@@ -1613,9 +1598,9 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     expect(store.getRun(record.id)).toMatchObject({ status: 'running' });
     expect(monitoringWakeOf(store.getRun(record.id))).toBeDefined();
     expect(monitoringTimerOf(manager, record.id)).toBeDefined();
-    expect(internals.waiting.has(record.id)).toBe(false);
-    expect(internals.monitoring.has(record.id)).toBe(true);
-    expect(internals.busySlots()).toBe(0);
+    expect(runInternals(manager).line.waiting.has(record.id)).toBe(false);
+    expect(runInternals(manager).line.monitoring.has(record.id)).toBe(true);
+    expect(runInternals(manager).line.busySlots()).toBe(0);
     expect(semaphore.busy()).toBe(0);
   }, 30_000);
 
@@ -2843,15 +2828,11 @@ describe('RunManager queued-stack mutators (#472)', () => {
   /** Seed a run that the engine still holds as queued. */
   const seedQueued = (task = 'ship it') => {
     const record = store.createRun({ title: 't', workflow: 'w', task, steps: [] });
-    (
-      manager as unknown as {
-        pendingJobs: Map<string, { workflow: WorkflowDef; input: { task: string } }>;
-      }
-    ).pendingJobs.set(record.id, { workflow: WORKFLOW, input: { task } });
+    runInternals(manager).line.pendingJobs.set(record.id, { workflow: WORKFLOW, input: { task } });
     return record;
   };
   const dequeue = (id: string) =>
-    (manager as unknown as { pendingJobs: Map<string, unknown> }).pendingJobs.delete(id);
+    runInternals(manager).line.pendingJobs.delete(id);
   const imagesDir = (id: string) => join(repoRoot, '.ai/cezar', 'runs', `${id}-images`);
 
   beforeEach(() => {
@@ -2913,17 +2894,7 @@ describe('RunManager queued-stack mutators (#472)', () => {
     });
     store.updateRun(r.id, { status: 'queued' });
 
-    type PendingContinuation = {
-      stepId: string;
-      sessionId: string | undefined;
-      backend: 'claude';
-      prompt: string;
-      images: ContentBlock[];
-    };
     const internals = manager as unknown as {
-      pendingContinuations: Map<string, PendingContinuation>;
-      queue: string[];
-      pump(): Promise<void>;
       runContinuation(
         runId: string,
         stepId: string,
@@ -2935,14 +2906,15 @@ describe('RunManager queued-stack mutators (#472)', () => {
         persistedAttachments: Array<{ name: string; url: string; path: string }>,
       ): Promise<void>;
     };
-    internals.pendingContinuations.set(r.id, {
+    runInternals(manager).line.pendingContinuations.set(r.id, {
       stepId: 'continue-1',
       sessionId: 'session-interrupted',
       backend: 'claude',
       prompt: 'restart recovery',
       images: [],
+      lineJoinedAt: Date.parse(r.createdAt),
     });
-    internals.queue.push(r.id);
+    runInternals(manager).line.queue.push(r.id);
 
     expect(manager.editTask(r.id, 'amended recovery goal')).toBe(true);
     expect(
@@ -2969,7 +2941,7 @@ describe('RunManager queued-stack mutators (#472)', () => {
     ) => {
       delivered = { prompt, images, persistedImages, persistedAttachments };
     };
-    await internals.pump();
+    await runInternals(manager).line.pump();
 
     expect(delivered?.prompt).toBe(
       'restart recovery\n\nCurrent task and queued updates:\n\n' +
@@ -2986,7 +2958,7 @@ describe('RunManager queued-stack mutators (#472)', () => {
       { name: 'pasted-2.md', url: `/api/v1/runs/${r.id}/images/pasted-2.md`, path: join(imagesDir(r.id), 'pasted-2.md') },
     ]);
     expect(readdirSync(imagesDir(r.id)).sort()).toEqual(['pasted-1.png', 'pasted-2.md']);
-    expect(internals.pendingContinuations.has(r.id)).toBe(false);
+    expect(runInternals(manager).line.pendingContinuations.has(r.id)).toBe(false);
     expect(manager.editTask(r.id, 'too late')).toBe(false);
   });
 
@@ -3087,7 +3059,7 @@ describe('RunManager queued-stack mutators (#472)', () => {
 
   it('defers a message only while the run is starting up', () => {
     const r = seedQueued();
-    const starting = (manager as unknown as { starting: Set<string> }).starting;
+    const starting = runInternals(manager).line.starting;
 
     // Not starting yet → the ladder falls through to 409.
     expect(manager.deferMessage(r.id, text('nope'))).toBe(false);
@@ -3122,7 +3094,7 @@ describe('RunManager queued-stack mutators (#472)', () => {
    */
   it('re-buffers a deferred message the session refuses, instead of dropping it', () => {
     const r = seedQueued();
-    const starting = (manager as unknown as { starting: Set<string> }).starting;
+    const starting = runInternals(manager).line.starting;
     const buffer = (manager as unknown as { deferredMessages: Map<string, ContentBlock[][]> })
       .deferredMessages;
 
@@ -3464,7 +3436,7 @@ describe('recover() carries the queued stack exactly once (#472)', () => {
 
     const expected = 'the original task\n\nthe stacked bit';
     const jobsOf = (m: RunManager) =>
-      (m as unknown as { pendingJobs: Map<string, { input: { task: string } }> }).pendingJobs;
+      runInternals(m).line.pendingJobs;
 
     // Two successive restarts, each re-adopting the same record.
     for (let restart = 0; restart < 2; restart += 1) {

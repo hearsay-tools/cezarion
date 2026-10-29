@@ -1,10 +1,11 @@
+import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkerSpawnRequest } from '@open-mercato/cezar-contract';
 import type { AgentRunResult, AgentRunSpec, AgentSession } from './agent-runner.ts';
 import * as runners from './runner-factory.ts';
@@ -57,8 +58,10 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
     return { worker, delegation: worker.delegation };
   };
   const launch = async () => {
-    (f.manager as unknown as { pump: MockInstance }).pump.mockRestore();
-    await (f.manager as unknown as { pump(): Promise<void> }).pump();
+    const pump = vi.mocked(runInternals(f.manager).line.pump);
+    expect(pump).toHaveBeenCalled();
+    pump.mockRestore();
+    await (runInternals(f.manager).line).pump();
   };
   beforeEach(() => {
     vi.stubEnv('CEZ_DELEGATION', '1'); vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
@@ -156,7 +159,7 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
     f.store.updateStep(workerId, 'second', { status: 'pending', finishedAt: undefined });
     f.store.updateRun(workerId, { status: 'queued', finishedAt: undefined, error: undefined });
     await (f.manager as unknown as { reviveQueuedRun(run: unknown, reason: string): Promise<void> }).reviveQueuedRun(f.store.getRun(workerId), 'cezar restarted');
-    await (f.manager as unknown as { pump(): Promise<void> }).pump();
+    await (runInternals(f.manager).line).pump();
     await until(() => seen.length === 3);
     expect(seen[2]!.files).toEqual({ 'qa/1149/brief.md': undefined, 'qa/evidence.log': ATTACHED['qa/evidence.log'] });
   });

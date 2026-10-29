@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -87,7 +88,7 @@ describe('Stop before the first Codex turn (#493)', { timeout: 15_000 }, () => {
     expect(a.store.getRun(runId)).toMatchObject({ status: 'running', tokensUsed: 0 });
     expect(a.store.readEvents(runId).some(event => ['session', 'turn.started', 'turn-end', 'text'].includes(event.type))).toBe(false);
 
-    const admission = vi.spyOn(b.manager as unknown as { pump(): Promise<void> }, 'pump');
+    const admission = vi.spyOn(runInternals(b.manager).line, 'pump');
     const queued = b.manager.startRun({ name: 'next', source: 'built-in', steps: [{ id: 'check', command: 'true' }] }, { task: 'next project', worktree: false });
     // Observe B's real initial sweep finishing while capacity is unavailable.
     // Otherwise that still-pending sweep could admit B without a release wake,

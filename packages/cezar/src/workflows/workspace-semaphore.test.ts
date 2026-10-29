@@ -1,3 +1,5 @@
+import { createActiveRun } from './active-run.ts';
+import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -116,17 +118,12 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
   it('exempts only the configured number of durable monitoring sessions', () => {
     const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 2, maxMonitoringSessions: 2 } });
     const projectA = project('cez-monitor-cap-', semaphore);
-    const internals = projectA.manager as unknown as {
-      active: Map<string, object>;
-      waiting: Set<string>;
-      monitoring: Set<string>;
-      busySlots(): number;
-    };
-    for (const id of ['ordinary', 'm1', 'm2', 'm3']) internals.active.set(id, {});
-    for (const id of ['ordinary', 'm1', 'm2', 'm3']) internals.waiting.add(id);
-    for (const id of ['m1', 'm2', 'm3']) internals.monitoring.add(id);
+    const internals = runInternals(projectA.manager);
+    for (const id of ['ordinary', 'm1', 'm2', 'm3']) internals.active.set(id, createActiveRun({ cwd: projectA.root, pendingHumanAsk: false, autonomous: false }));
+    for (const id of ['ordinary', 'm1', 'm2', 'm3']) runInternals(projectA.manager).line.waiting.add(id);
+    for (const id of ['m1', 'm2', 'm3']) runInternals(projectA.manager).line.monitoring.add(id);
     // ordinary wait is exempt; two monitors are exempt; monitor #3 back-pressures the active pool.
-    expect(internals.busySlots()).toBe(1);
+    expect(runInternals(projectA.manager).line.busySlots()).toBe(1);
     expect(semaphore.busy()).toBe(1);
   });
 
@@ -510,7 +507,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
 
     expect(semaphore.busy()).toBe(0);
     expect(
-      (manager as unknown as { starting: Set<string> }).starting.has(record.id),
+      runInternals(manager).line.starting.has(record.id),
     ).toBe(false);
   });
 

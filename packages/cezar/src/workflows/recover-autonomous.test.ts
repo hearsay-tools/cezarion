@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -108,9 +109,7 @@ describe('recover() and the autonomous flag (#489)', () => {
       expect(store.getRun(id)?.status).toBe('queued');
       expect(store.readEvents(id).some(event => event.type === 'lifecycle' &&
         typeof event.message === 'string' && event.message.includes('cezar restarted'))).toBe(true);
-      const continuation = (recovered as unknown as {
-        pendingContinuations: Map<string, { stepId: string; sessionId?: string; prompt: string }>;
-      }).pendingContinuations.get(id);
+      const continuation = runInternals(recovered).line.pendingContinuations.get(id);
       expect(continuation).toMatchObject({
         stepId: 'continue-1', sessionId: 'previous-session', prompt: 'Continue setup',
       });

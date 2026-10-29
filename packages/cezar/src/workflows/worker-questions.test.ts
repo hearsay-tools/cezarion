@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -367,7 +368,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       // Routing and recovery can wake the parent. Finish that turn's real Git
       // bookkeeping before testing a one-shot reply into a quiescent worktree.
       // Recovery leaves a monitoring park inactive on its persisted timer (hearsay-tools/cezarion#1233).
-      await until(() => manager['waiting'].has(f.p.id) || (!manager.isActive(f.p.id) && !!monitoringWakeOf(store.getRun(f.p.id))));
+      await until(() => runInternals(manager).line.waiting.has(f.p.id) || (!manager.isActive(f.p.id) && !!monitoringWakeOf(store.getRun(f.p.id))));
       await Promise.all(bookkeeping);
     };
     await parentIdle();

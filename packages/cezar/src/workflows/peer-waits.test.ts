@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
@@ -21,11 +22,7 @@ import { controlledWire, fixtureUpdateRun, manager, parent, restart, root, semap
  * A peer is a root task of the project; it needs no session to send, so it is a record here.
  */
 
-type Internals = {
-  active: Map<string, { ciGeneration?: string; idleTimer?: unknown; session?: { open: boolean } }>;
-  monitoring: Set<string>;
-};
-const internals = () => manager as unknown as Internals;
+const internals = () => runInternals(manager);
 const handlers = (runId: string) => manager.cezarToolHandlers(runId, internals().active.get(runId)!.ciGeneration!);
 const entryOf = (runId: string, waitId: string): Wait | undefined => store.getRun(runId)?.waits?.find(wait => wait.id === waitId);
 const settledOf = (runId: string, waitId: string): Wait | undefined => store.getRun(runId)?.lastWaits?.filter(wait => wait.id === waitId).at(-1);
@@ -97,7 +94,7 @@ describe('peer waits (R9)', { timeout: 45_000 }, () => {
     const run = store.getRun(a)!;
     expect(stateOf(run)).toBe('waiting:peer');
     expect(entry).toMatchObject({ kind: WAIT_KIND.peer, phase: WAIT_PHASE.open, timeoutSeconds: 600 });
-    expect(internals().monitoring.has(a)).toBe(false);
+    expect(runInternals(manager).line.monitoring.has(a)).toBe(false);
     expect(semaphore.busy()).toBe(0);
     expect(internals().active.get(a)?.idleTimer).toBeDefined();
     expect(deriveAttention(run)).toMatchObject({ rung: 'waiting-on-workers', bucket: 'none', label: 'waiting on 1 task' });

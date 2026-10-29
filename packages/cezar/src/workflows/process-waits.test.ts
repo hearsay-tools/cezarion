@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -34,7 +35,7 @@ const waitById = (id: string, waitId: string) => store.getRun(id)?.waits?.find(e
 const settledById = (id: string, waitId: string) => store.getRun(id)?.lastWaits?.find(entry => entry.id === waitId);
 const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?.filter(input => input.id === waitId) ?? [];
 const notes = (id: string, text: string) => store.readEvents(id).filter(event => event.type === 'note' && String(event.message).includes(text));
-const engine = () => manager as unknown as { monitoring: Set<string> };
+const engine = () => runInternals(manager).line;
 
 async function waitingParent() {
   const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
@@ -84,7 +85,7 @@ describe('process waits through RunManager (hearsay-tools/cezarion#1446)', { tim
     expect((await register(run.id, { pid, exit_file: 'build.exit', timeout_seconds: 60 })).id).toBe(wait.id);
     expect(external.watches).toHaveLength(1);
     expect(external.watches[0]!.request).toMatchObject({ pid, startToken: wait.startToken, exitFile: wait.exitFile, deadline: wait.deadline });
-    await until(() => store.getRun(run.id)?.status === 'waiting' && engine().monitoring.has(run.id));
+    await until(() => store.getRun(run.id)?.status === 'waiting' && runInternals(manager).line.monitoring.has(run.id));
     const spentBefore = store.getRun(run.id)?.automaticWakes ?? 0;
     external.settle({ outcome: 'exit_file', exitCode: 0 });
     await until(() => settledById(run.id, wait.id)?.phase === 'delivered');

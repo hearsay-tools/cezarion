@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers, fixtureWorkSettled } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -369,7 +370,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
 
     // While a real appointment is ahead, sitting still is CORRECT and the watchdog must not
     // touch it — otherwise the failsafe becomes the stampede.
-    await manager.rescueStalledQueue();
+    await runInternals(manager).line.rescueStalledQueue();
     // bound: negative window. `rescueStalledQueue` has returned, so a start it triggered would be recorded in the pump it kicked; 500 ms covers that.
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(store.getRun(waiting.id)?.startedAt).toBeUndefined();
@@ -383,7 +384,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     });
     expect(manager.accountHolds().inFlight.size).toBe(1);
 
-    await manager.rescueStalledQueue();
+    await runInternals(manager).line.rescueStalledQueue();
     await expect
       .poll(() => store.getRun(waiting.id)?.startedAt, { timeout: 20_000 })
       .toBeDefined();
@@ -412,7 +413,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     });
     expect(manager.accountHolds().inFlight.size).toBe(1);
 
-    await manager.rescueStalledQueue();
+    await runInternals(manager).line.rescueStalledQueue();
     await expect.poll(() => store.getRun(waiting.id)?.startedAt, { timeout: 20_000 }).toBeDefined();
     // …and it STAYS started. A bounce at the second gate shows up as a return to `queued` with
     // `startedAt` cleared, which is exactly what the first assertion alone would miss.
@@ -469,7 +470,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     store.updateRun(record.id, { status: 'queued', finishedAt: undefined, startedAt: undefined });
 
     manager = createFixtureManager(store, repoRoot); // deliberately NO recover()
-    await manager.rescueStalledQueue();
+    await runInternals(manager).line.rescueStalledQueue();
 
     await expect
       .poll(() => store.getRun(record.id)?.status, { timeout: 20_000 })
@@ -733,7 +734,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     expect(store.getRun(b.id)?.status).toBe('queued');
     expect(store.getRun(b.id)?.continuationMessage?.origin).toBe('human');
     // A real pump that sees A's hold must leave it queued.
-    await (manager as unknown as { pump(): Promise<void> }).pump();
+    await (runInternals(manager).line).pump();
     expect(store.getRun(b.id)?.status).toBe('queued');
 
     manager.cancelAutoResume(a.id);

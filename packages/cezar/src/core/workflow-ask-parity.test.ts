@@ -1,3 +1,4 @@
+import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
@@ -61,7 +62,7 @@ describe('intermediate workflow ASK parity — #427', () => {
           // bound: observe past the real runner's 250 ms auto-end timer before answering its pending ask.
           await new Promise(resolve => setTimeout(resolve, 350));
           if (row.id !== 'Q8') expect(session.open).toBe(true);
-          expect(manager['busySlots']()).toBe(0);
+          expect(runInternals(manager).line.busySlots()).toBe(0);
 
           if (row.id === 'Q5') {
             const repoRoot = manager['repoRoot'];
@@ -136,7 +137,7 @@ describe('intermediate workflow ASK parity — #427', () => {
           }
           expect(run().steps.find(s => s.id === 'verify')?.status).toBe('pending');
           expect(checks()).toEqual([]);
-          expect(manager['busySlots']()).toBe(0);
+          expect(runInternals(manager).line.busySlots()).toBe(0);
         }, { workflowDef, autonomous: row.id === 'Q9' });
     }, 30_000);
   }

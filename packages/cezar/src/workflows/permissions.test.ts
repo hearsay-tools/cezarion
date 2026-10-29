@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -32,7 +33,7 @@ describe('human permission lifecycle', () => {
   it('parks concurrent requests until their exact IDs resolve and blocks all ordinary input', () => {
     request('a'); request('b');
     expect(store.getRun(id)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
-    expect(manager['busySlots']()).toBe(0);
+    expect(runInternals(manager).line.busySlots()).toBe(0);
     expect(manager.sendMessage(id, [{ type: 'text', text: 'accept' }])).toBe(false);
     expect(manager['tryAutonomousNudge'](id, state, 'task', null)).toBe(false);
     expect(session.sendMessage).not.toHaveBeenCalled();
@@ -45,7 +46,7 @@ describe('human permission lifecycle', () => {
     expect(manager.respondPermission(id, 'a', 'deny')).toBe(false);
     expect(manager.respondPermission(id, 'b', 'deny')).toBe(true);
     expect(store.getRun(id)).toMatchObject({ status: 'running', hasPendingPermission: false });
-    expect(manager['busySlots']()).toBe(1);
+    expect(runInternals(manager).line.busySlots()).toBe(1);
   });
 
   it.each(['cancelled', 'stopping', 'closed'] as const)('%s refuses decisions and teardown clears attention', reason => {

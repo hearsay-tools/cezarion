@@ -86,12 +86,6 @@ const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?
 function engine() {
   return manager as unknown as {
     active: Map<string, { session: AgentSession & { end(): void }; ciGeneration: string }>;
-
-    monitoring: Set<string>;
-
-
-
-    queue: string[];
     deferredMessages: Map<string, Array<{ content: Array<{ type: 'text'; text: string }>; messageId?: string }>>;
     flushDeferred(id: string): void;
   };
@@ -600,7 +594,7 @@ function baseCells(runners: RunnerId[]): void {
         try {
           checkpoint(`u8-blocker-started:${blocker.id}`);
           await until(() => store.readEvents(blocker.id).some(event => event.type === 'turn.started'));
-          const queue = (manager as unknown as { queue: string[] }).queue;
+          const queue = runInternals(manager).line.queue;
           const push = vi.spyOn(queue, 'push');
           checkpoint('u8-wake-delivered');
           if (kind === 'pr') external.settle(); else fireTimer(wait.id);
@@ -636,8 +630,8 @@ function baseCells(runners: RunnerId[]): void {
         task = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner });
         expect(store.getRun(task.id)?.status).toBe('queued');
         fireTimer(wait.id);
-        await until(() => engine().queue.includes(parked.id));
-        expect(engine().queue.indexOf(task.id)).toBeLessThan(engine().queue.indexOf(parked.id));
+        await until(() => runInternals(manager).line.queue.includes(parked.id));
+        expect(runInternals(manager).line.queue.indexOf(task.id)).toBeLessThan(runInternals(manager).line.queue.indexOf(parked.id));
       } finally { writeFileSync(release, ''); }
       await until(() => settled(parked.id, wait.id)?.phase === 'delivered');
       const deliveredAt = Date.parse(settled(parked.id, wait.id)!.deliveredAt!);
@@ -655,7 +649,7 @@ function baseCells(runners: RunnerId[]): void {
         const parked = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'pr', pr }), runner });
         await until(() => parkedOn(parked.id, waitOfKind(parked.id, 'pr')));
         const wait = waitOfKind(parked.id, 'pr')!;
-        expect(engine().monitoring.has(parked.id)).toBe(true);
+        expect(runInternals(manager).line.monitoring.has(parked.id)).toBe(true);
         // Another task on the same account waits out a usage limit, or its resume is testing the
         // window (hearsay-tools/cezarion#1236).
         const { agentProfile } = store.getRun(parked.id)!;
@@ -666,7 +660,7 @@ function baseCells(runners: RunnerId[]): void {
         expect([...manager.accountHolds()[hold === 'deadline' ? 'deadline' : 'inFlight']]).toContain(`${runner}:${agentProfile ?? 'default'}`);
         external.settle();
         // The result waits in the line, undelivered, while the account is held.
-        await until(() => store.getRun(parked.id)?.waits?.find(entry => entry.id === wait.id)?.phase === 'resolved' && engine().queue.includes(parked.id));
+        await until(() => store.getRun(parked.id)?.waits?.find(entry => entry.id === wait.id)?.phase === 'resolved' && runInternals(manager).line.queue.includes(parked.id));
         expect(settled(parked.id, wait.id)).toBeUndefined();
         if (hold === 'deadline') manager.cancelAutoResume(holder.id);
         else { store.updateRun(holder.id, { status: 'failed', autoResumeAttempts: undefined }); manager.cancelAutoResume(holder.id); }
@@ -719,7 +713,7 @@ function baseCells(runners: RunnerId[]): void {
       // hearsay-tools/cezarion#1234: the spent budget leaves a cezar human wait, so the run waits on the user.
       expect(store.getRun(run.id)?.waits ?? []).toMatchObject([{ kind: 'human', via: 'budget', source: 'cezar', phase: 'open' }]);
       expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
-      expect(engine().monitoring.has(run.id)).toBe(false);
+      expect(runInternals(manager).line.monitoring.has(run.id)).toBe(false);
     });
 
     it(`${runner} U10 a timer due while a charged batch awaits its acknowledgement is cancelled at the cap, and CI still wakes`, async () => {
@@ -872,7 +866,7 @@ function baseCells(runners: RunnerId[]): void {
     const expectNoWakeFor = (id: string) => {
       expect(store.getRun(id)?.status).toBe('failed');
       expect(manager.isActive(id)).toBe(false);
-      expect(engine().queue).not.toContain(id);
+      expect(runInternals(manager).line.queue).not.toContain(id);
       expect(runInternals(manager).retries.wakeRetries.has(id)).toBe(false);
       expect(runInternals(manager).retries.wakeBackoffs.has(id)).toBe(false);
     };
@@ -1096,7 +1090,7 @@ function baseCells(runners: RunnerId[]): void {
       expect(store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE))).toBe(false);
       expect(prompted(runner, refusal)).toEqual([]);
       // A timer park keeps its slot, and the timer's result wakes the agent.
-      expect(engine().monitoring.has(p.id)).toBe(true);
+      expect(runInternals(manager).line.monitoring.has(p.id)).toBe(true);
       fireTimer(timer.id);
       await until(() => settled(p.id, timer.id)?.phase === 'delivered' && inputsFor(p.id, timer.id).length > 0
         && prompted(runner, inputsFor(p.id, timer.id)[0]!.text).length > 0);
@@ -1530,7 +1524,7 @@ function baseCells(runners: RunnerId[]): void {
       // Hold it at the parked boundary, without asking the scheduler to send it before the answer.
       const timer = { ...registered.wait, phase: WAIT_PHASE.resolved, resolvedAt: new Date().toISOString() };
       store.commitWait(run.id, timer, { id: timer.id, parentRunId: run.id, source: 'lifecycle', createdAt: timer.resolvedAt, text: 'answer cap guard' });
-      const admitted = (manager as unknown as { waitWakeAdmitted: Set<string> }).waitWakeAdmitted;
+      const admitted = runInternals(manager).line.waitWakeAdmitted;
       admitted.add(run.id);
       store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES, waitDeliveryFailures: 2 });
       const notesBefore = store.readEvents(run.id).filter(event => event.type === 'note').length;
@@ -2322,7 +2316,7 @@ function workersCells(runners: RunnerId[]): void {
       expect(entry).not.toHaveProperty('deadline');
       expect(entry).not.toHaveProperty('timeoutSeconds');
       expect(runInternals(manager).waitWatches.waitTimers.has(entry.id)).toBe(false);
-      expect(engine().monitoring.has(p.id)).toBe(false);
+      expect(runInternals(manager).line.monitoring.has(p.id)).toBe(false);
       expect(semaphore.busy()).toBe(0);
       expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');
       expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
@@ -2368,7 +2362,7 @@ function workersCells(runners: RunnerId[]): void {
       await until(() => turnEnds(f.p.id) > turns && parkedOn(f.p.id, workerWaits(f.p.id)[0]));
       expect(store.getRun(f.p.id)?.waits).toEqual([expect.objectContaining({ id: entry.id, via: 'completion', phase: 'open' })]);
       expect(inputsFor(f.p.id, entry.id)).toEqual([]);
-      expect(engine().monitoring.has(f.p.id)).toBe(false);
+      expect(runInternals(manager).line.monitoring.has(f.p.id)).toBe(false);
       // The wait still ends on its own event, once.
       expect(manager.finish(f.w.id)).toBe(true);
       await until(() => settled(f.p.id, entry.id)?.phase === 'delivered' && prompted(runner, workerWake(entry)).length > 0);
@@ -3001,7 +2995,7 @@ function entriesCells(runners: RunnerId[]): void {
       expect(store.getRun(id)?.waits).toEqual([expect.objectContaining({ id: timer.id, phase: 'open' })]);
       expect(nudgeNotes(id)).toEqual([]);
       expect(prompted(runner, refusal)).toEqual([]);
-      expect(engine().monitoring.has(id)).toBe(true);
+      expect(runInternals(manager).line.monitoring.has(id)).toBe(true);
       expect(words(id).slice(-1)).toEqual(['monitoring']);
     };
 
@@ -3165,7 +3159,7 @@ function processCells(runners: RunnerId[]): void {
       const wait = waitOfKind(run.id, 'process')!;
       expect(wait).toMatchObject({ via: 'cezar_wait', source: 'agent', pid, note: 'u1p', startToken: expect.any(String),
         exitFile: join(store.getRun(run.id)!.worktreePath!, 'u1p.exit') });
-      expect(engine().monitoring.has(run.id)).toBe(true);
+      expect(runInternals(manager).line.monitoring.has(run.id)).toBe(true);
       expect(deriveAttention(store.getRun(run.id)!).label).toBe('waiting for a command');
       external.settle({ outcome: 'exit_file', exitCode: 0 });
       await until(() => settled(run.id, wait.id)?.phase === 'delivered' && prompted(runner, processText(wait, ' (u1p): exited with code 0')).length > 0);

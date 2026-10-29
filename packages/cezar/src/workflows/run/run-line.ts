@@ -51,10 +51,24 @@ export class RunLine {
 
   readonly queue: string[] = [];
   readonly pendingJobs = new Map<string, PendingJob>();
+  /** Interrupted agent turns recovered after a process restart. Unlike an
+   *  explicit user Continue, these are bulk scheduler work and must re-enter
+   *  through `pump()` so both workspace and per-project caps are honored. */
   readonly pendingContinuations = new Map<string, PendingContinuation>();
+  // Queue + `starting` set (spec 006, janitor's pump() pattern): `starting`
+  // covers the window between shifting a run off the queue and the run
+  // registering in `active`, so parallel-slot counting is never racy.
   readonly starting = new Set<string>();
+  // Runs parked at `waiting` (open session, ball in the user's court). They
+  // don't consume a `maxParallel` slot (open-mercato/cezar#347) — an idle claude process costs
+  // memory but no tokens, queued work progressing matters more, and the idle
+  // timeout already bounds how long a session can sit open. Invariant:
+  // `waiting ⊆ active` — always cleared together via dropActive().
   readonly waiting = new Set<string>();
+  /** Durable monitoring subset. Only the configured number receives the waiting-slot exemption. */
   readonly monitoring = new Set<string>();
+  /** A run whose resolved waits wait for a wake (hearsay-tools/cezarion#1233). Separate from
+   *  human waiting: these resumes MUST reacquire scheduler capacity. Keyed by run id. */
   readonly waitWakeQueuedAt = new Map<string, number>();
   readonly waitWakeAdmitted = new Set<string>();
   /** The watchdog ignores the usage hold for one pump sweep. */
@@ -152,6 +166,19 @@ export class RunLine {
   }
 
   /**
+   * A slot this manager held just came free. Pump the whole WORKSPACE, not
+   * just this manager: `maxParallel` is counted across every project, so the
+   * run that should take the slot is the workspace's oldest queued one — which
+   * usually sits in another project's queue. Pumping only `this` is what left
+   * a queued run in project B stuck at `queued` while project A's runs came
+   * and went. `release()` pumps this manager too, so it replaces the local
+   * `pump()` at every slot-freeing transition.
+   */
+  releaseSlot(): void {
+    void this.context.semaphore.release();
+  }
+
+  /**
    * Start queued runs while parallel slots are free. A run starts only under
    * BOTH ceilings: the WORKSPACE `resources.maxParallel` (default 2, counted
    * across every manager — spec 2026-07-20, step 2.5) AND this project's own
@@ -160,7 +187,7 @@ export class RunLine {
    * are ignored. A non-git directory degrades to 1 sequential run in the repo
    * root (spec 006 degradation rule), which is always the tighter bound.
    */
-  pump(): Promise<void> {
+  async pump(): Promise<void> {
     return this.context.work.track('pump', this.pumpWork());
   }
 
@@ -268,7 +295,7 @@ export class RunLine {
    * Repair queued records missing executable state. Rescue an idle queue only when no running work
    * or future appointment explains it; start through ordinary caps. Public for direct tests.
    */
-  rescueStalledQueue(now = Date.now()): Promise<void> {
+  async rescueStalledQueue(now = Date.now()): Promise<void> {
     return this.context.work.track('rescueStalledQueue', this.rescueStalledQueueWork(now));
   }
 

@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -92,7 +93,7 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     const before = store.readEvents(a.parentId);
     const recovery = manager.recover(a.parentId);
     try {
-      await manager.rescueStalledQueue();
+      await runInternals(manager).line.rescueStalledQueue();
       expect(store.readEvents(a.parentId)).toEqual(before);
       expect(store.getRun(a.parentId)?.status).toBe('queued');
     } finally {
@@ -157,7 +158,7 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     const recovery = manager.recover();
     const rejection = outcome === 'failure' ? expect(recovery).rejects.toThrow('selected facts failed') : undefined;
     await ready;
-    manager.reconcileWorkerWaits(); await manager.rescueStalledQueue();
+    manager.reconcileWorkerWaits(); await runInternals(manager).line.rescueStalledQueue();
     expect(settlement).not.toHaveBeenCalled();
     expect(store.readWorkerExecution(a.workerId)).toMatchObject({ phase: 'starting', generation });
     if (outcome === 'dispose') manager.dispose();

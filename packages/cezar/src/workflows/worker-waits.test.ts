@@ -531,7 +531,6 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
 
   type Internals = {
     active: Map<string, { session: AgentSession; idleTimer?: unknown; sessionEverOpened?: boolean }>;
-    monitoring: Set<string>;
   };
   const internals = () => manager as unknown as Internals;
   const parkedOn = (runId: string, waitId: string) =>
@@ -543,7 +542,7 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
     const entry = manager.registerWorkerListWait(p.id, { workerIds: [w.id], timeoutSeconds: 600 }, 'cezar_wait');
     release();
     await until(() => parkedOn(p.id, entry.id));
-    expect(internals().monitoring.has(p.id)).toBe(false);
+    expect(runInternals(manager).line.monitoring.has(p.id)).toBe(false);
     expect(semaphore.busy()).toBe(0);
     // The parked parent's idle timer bounds its open session.
     expect(internals().active.get(p.id)?.idleTimer).toBeDefined();
@@ -653,13 +652,13 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
     if (!ci.ok || !workers.ok) throw Error('refused');
     release();
     await until(() => parkedOn(p.id, workers.wait_id));
-    expect(internals().monitoring.has(p.id)).toBe(false);
+    expect(runInternals(manager).line.monitoring.has(p.id)).toBe(false);
     expect(semaphore.busy()).toBe(0);
     expect(internals().active.get(p.id)?.idleTimer).toBeDefined();
     fixtureUpdateRun(w.id, { status: 'done' });
     await until(() => settledOf(p.id, workers.wait_id)?.phase === 'delivered' && store.getRun(p.id)?.status === 'waiting');
     expect(entryOf(p.id, ci.wait_id)?.phase).toBe('open');
-    expect(internals().monitoring.has(p.id)).toBe(true);
+    expect(runInternals(manager).line.monitoring.has(p.id)).toBe(true);
     // A CI park needs no idle timer: its slot is the monitoring pool's.
     expect(internals().active.get(p.id)?.idleTimer).toBeUndefined();
   });

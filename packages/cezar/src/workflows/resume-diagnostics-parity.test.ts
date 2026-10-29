@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { join } from 'node:path';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -95,7 +96,7 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
         failure: { stepId: failed.id, error: failed.error }, restarted: true,
       } });
       held.mockRestore();
-      await (manager as unknown as { pump(): Promise<void> }).pump();
+      await (runInternals(manager).line).pump();
       await until(() => messages().length > before);
       const prompt = messages()[before]!;
       expect(prompt.split('\n')[0]).toContain(failed.error);
@@ -134,7 +135,7 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
       expect(checkpoint.continuationMessage).toMatchObject({ text: 'Continue.', origin: 'lifecycle', resumeContext: { restarted: true } });
       await restart();
       held.mockRestore();
-      await (manager as unknown as { pump(): Promise<void> }).pump();
+      await (runInternals(manager).line).pump();
       await until(() => messages().length > before);
       const prompt = messages()[before]!;
       expect(prompt.match(/cezar process restarted/g)).toHaveLength(1);
@@ -173,7 +174,7 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
         const disk = readPersistedRuns(join(root, '.ai/cezar')).find(run => run.id === id)!;
         expect(disk.continuationMessage).toMatchObject({ text, resumeContext: { restarted: true } });
         held.mockRestore();
-        await (manager as unknown as { pump(): Promise<void> }).pump();
+        await (runInternals(manager).line).pump();
         await until(() => messages().length > before);
         const prompt = messages()[before]!;
         expect(prompt.split('\n')[0]).toContain('cezar process restarted');

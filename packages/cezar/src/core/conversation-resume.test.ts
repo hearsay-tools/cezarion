@@ -1,3 +1,4 @@
+import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CredentialRegistry } from '../delegation/credentials.ts';
@@ -29,10 +30,11 @@ for (const backend of RUNNER_IDS) {
       const request = { id: randomUUID(), recipientRunId: runId, kind: 'request' as const, timeoutSeconds: 600,
         resume: true, text: 'mock:agent-echo Check the corrected result' };
       try {
-        if (mode === 'restart') vi.spyOn(manager as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
+        const pump = mode === 'restart' ? vi.spyOn(runInternals(manager).line, 'pump').mockResolvedValue() : undefined;
         const first = await service.send(caller, request);
         expect(first.message).toMatchObject({ state: 'accepted', resumed: true });
         if (mode === 'restart') {
+          expect(pump).toHaveBeenCalled();
           expect(store.getRun(runId)?.status).toBe('queued');
           store.updateRun(runId, { task: 'Amended task before capacity admission', queuedMessages: [{ id: randomUUID(),
             text: 'Keep the later human context', createdAt: new Date().toISOString() }] });
@@ -47,6 +49,7 @@ for (const backend of RUNNER_IDS) {
         expect(echoed)
           .toEqual([expect.objectContaining({ text: expect.stringContaining(request.id) })]);
         if (mode === 'restart') {
+          expect(pump).toHaveBeenCalled();
           expect(String(echoed[0]!.text)).toContain('Amended task before capacity admission');
           expect(String(echoed[0]!.text)).toContain('Keep the later human context');
         }
