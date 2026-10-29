@@ -28,12 +28,12 @@ it('validates the exact source inventory before any instrumentation', () => {
 
 it('stages reset after metrics and reporting before the original assertion', () => {
   const source = readFileSync(new URL('./authoritative-capacity-ci.test.ts', import.meta.url), 'utf8');
-  const staged = instrumentCapacityFixture(source, 'cf9e4a7a33ddb2b89ccceeb94775eaca48a87d2433f4ea07b15c3b956cbf62f0');
+  const staged = instrumentCapacityFixture(source, '87e57e63900a444c2407b5d4f506ec792e416a86e2740e6a1dd226f07fc21fc8');
   expect(() => stripTypeScriptTypes(staged, { mode: 'transform' })).not.toThrow();
   expect(staged.indexOf('capacity workload:')).toBeLessThan(staged.indexOf('resetAttribution();'));
   expect(staged.indexOf('reportAttribution(text =>')).toBeLessThan(staged.indexOf("expect(result).toMatchObject"));
   expect(staged).toContain('if (complete) await f.close()');
-  expect(() => instrumentCapacityFixture(source + '\n', 'cf9e4a7a33ddb2b89ccceeb94775eaca48a87d2433f4ea07b15c3b956cbf62f0')).toThrow('hash changed');
+  expect(() => instrumentCapacityFixture(source + '\n', '87e57e63900a444c2407b5d4f506ec792e416a86e2740e6a1dd226f07fc21fc8')).toThrow('hash changed');
 });
 
 it('runs the staged production budget and indexed lookup with shared tagged charges', async () => {

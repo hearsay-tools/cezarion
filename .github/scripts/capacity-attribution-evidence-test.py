@@ -12,6 +12,17 @@ spec.loader.exec_module(evidence)
 
 
 class EvidenceTest(unittest.TestCase):
+    def test_observation_does_not_change_ledger_boundary(self):
+        counts = {name: {field: 0 for field in evidence.extract.FIELDS} for name in evidence.extract.NAMES}
+        report = json.dumps({'version': 3, 'counts': counts, 'saturated': False, 'invalid': False, 'sitesSaturated': False, 'literalMappedSites': {name: {field: 0 for field in evidence.extract.FIELDS + ('attemptedCalls',)} for name in evidence.extract.SITES}, 'firstExhaustion': None})
+        output = 'capacity workload: 1\ncapacity result: {}, 2 reaper calls, 1 ms\nCAPACITY_ATTRIBUTION ' + report + '\n'
+        def summary(value):
+            return evidence.summarize(io.BytesIO((json.dumps({'capacityOutput': value, 'exit': 1}) + '\n').encode()), 1, 0, 0)
+        before = summary(output)
+        after = summary(output + 'capacity reapers: total=2 outcomes=fulfilled,budget-rejected omitted=no\n')
+        self.assertGreater(after.pop('rawBytes'), before.pop('rawBytes'))
+        self.assertEqual(before, after)
+
     def test_boundaries_and_raw_failure_shapes(self):
         for data in (b'', b'stderr only\n', b'no capacity row\n', b'CAPACITY_ATTRIBUTION malformed\n',
                      b'CAPACITY_ATTRIBUTION valid\nCAPACITY_ATTRIBUTION duplicate\n',

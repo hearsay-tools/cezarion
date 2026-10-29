@@ -30,6 +30,11 @@ TRACE = (b'Traceback (most recent call last):\n'
 
 
 class EligibilityTest(unittest.TestCase):
+    def test_observation_keeps_full_stream_eligible(self):
+        row = record()
+        row['capacityOutput'] += 'capacity reapers: total=2 outcomes=fulfilled,budget-rejected omitted=no\n'
+        self.assertEqual(eligible.select(encode({'productionRow': 'x'}, row) + TRACE), 'eligible')
+
     def test_incomplete_independent_of_error_and_process(self):
         for row in (record(), record(error='alias scan work exceeds bounds'), record(remaining=['process', 'branch'])):
             self.assertEqual(eligible.select(encode({'productionRow': 'x'}, row)), 'eligible')

@@ -10,6 +10,7 @@ import { ensureOwnedWorkspace } from './workspace.ts';
 import * as reaper from './destroy-holders.ts';
 import { AliasBudgetExceeded, AliasWorkBudget } from './linux-alias-model.ts';
 import { readProcEvidence } from './linux-proc-evidence.ts';
+import { observeReapers } from './capacity-reaper-observation.testkit.ts';
 
 /** This test is enabled only by the CI namespace supervisor. */
 const directory = process.env.CZR_TEST_CAPACITY_DIR;
@@ -55,6 +56,7 @@ it.skipIf(!directory)('measures a complete authoritative destroy in the private 
     const started = Date.now();
     const result = await f.service.destroy(f.caller, { workerId });
     process.stdout.write(`capacity result: ${JSON.stringify(result)}, ${calls.mock.calls.length} reaper calls, ${Date.now() - started} ms\n`);
+    await observeReapers(calls.mock.results, line => { process.stdout.write(line); });
     expect(result).toMatchObject({ state: 'complete', remaining: [] });
     expect(existsSync(workspace.path)).toBe(false);
     expect(calls.mock.calls.length).toBeGreaterThanOrEqual(4);

@@ -17,6 +17,8 @@ archive = subprocess.check_output(['git', 'archive', revision, '--', *arguments]
 with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
     members = {member.name: member for member in tar if member.isfile()}
     names = set(members)
+    if 'packages/cezar/src/delegation/capacity-reaper-observation.testkit.ts' not in names:
+        raise SystemExit('missing archived capacity reaper observation helper')
     files = {name: tar.extractfile(member).read().decode('utf-8')
              for name, member in members.items() if name.endswith(('.ts', '.js', '.mjs', '.cjs'))}
 
