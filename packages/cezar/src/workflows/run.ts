@@ -38,7 +38,7 @@ import { RepoRootLease } from './run/repo-root-lease.ts';
 import { MaintenanceClaims } from './run/maintenance-claims.ts';
 import { WorkerOrphans } from './run/worker-orphans.ts';
 import type {
-  SettledTurn, DelegationExecutionSettings, StartRunInput, PendingContinuation, Execution, StepLoop, WorkerTerminationBlocker, AutomationToolService,
+  DelegationExecutionSettings, StartRunInput, PendingContinuation, Execution, StepLoop, WorkerTerminationBlocker, AutomationToolService,
 } from './run/types.ts';
 export type { TurnTail, DelegationExecutionSettings, StartRunInput, WorkerTerminationBlocker, AutomationToolService } from './run/types.ts';
 import { openCompletionRequests, recordRequestRefusal, repairFailedRootFinish, startCompletionCycle, settledRootFinishPatch, type CompletionRefusal } from './completion-policy.ts';
@@ -221,11 +221,6 @@ export class RunManager {
   private armOrphanReprobe(runId: string): void { this.orphans.armOrphanReprobe(runId); }
   takeWorkerTerminationBlocker(runId: string): { blocker: WorkerTerminationBlocker; changed: boolean } | undefined { return this.orphans.takeWorkerTerminationBlocker(runId); }
   private async terminateFinishedWorkerGroups(runId: string, timeoutMs: number): Promise<void> { return this.orphans.terminateFinishedWorkerGroups(runId, timeoutMs); }
-
-  private trackTurnEnd(runId: string, text: string): void {
-    const task = this.recordTurnEnd(runId, text);
-    this.workerExecutions.trackTurn(runId, task);
-  }
 
   requestWorkerStop(runId: string): WorkerStopResult {
     if (this.store.getRun(runId)?.delegation?.role !== 'worker') throw new Error('Worker not found');
@@ -503,7 +498,7 @@ export class RunManager {
     );
     this.turnBookkeeper = new TurnBookkeeper(this.context,
       { isDisposedDelegatedRun: id => this.isDisposedDelegatedRun(id), discoverSkills: () => this.discoverSkills(),
-        reviveWorkflow: run => queuedRevival.reviveWorkflow(this.context, this.queuedRevivalHost, run), autoNameRun: (id, skill, task, live) => this.autoNameRun(id, skill, task, live) },
+        reviveWorkflow: run => queuedRevival.reviveWorkflow(this.context, this.queuedRevivalHost, run), trackTurn: (id, task) => this.workerExecutions.trackTurn(id, task) },
     );
     this.runSkills = new RunSkills(this.context,
       { discoverSkills: () => this.discoverSkills(), workerExecutionStopped: id => this.workerExecutionStopped(id),
@@ -1009,7 +1004,7 @@ export class RunManager {
       // Fire-and-forget LLM naming (task auto-naming spec): the heuristic title
       // above shows instantly; the namer's short title replaces it when (and if)
       // the model answers. Never awaited, never fails the run.
-      void this.autoNameRun(run.id, skillHint, input.task);
+      void this.turnBookkeeper.autoNameRun(run.id, skillHint, input.task);
     } finally {
       this.line.enqueueJob(run.id, { workflow, input: effectiveInput });
       void this.line.pump();
@@ -1211,7 +1206,6 @@ export class RunManager {
 
   private readonly turnBookkeeper: TurnBookkeeper;
   /** Test seam: the module owns this same map for its whole lifetime. */
-  private get lastNamerKey() { return this.turnBookkeeper.lastNamerKey; }
 
   private async acquireRepoRoot(runId: string, state: ActiveRun): Promise<boolean> {
     return this.repoRootLease.acquireRepoRoot(runId, state);
@@ -1850,7 +1844,7 @@ export class RunManager {
       handleReceiptEvent: (...args) => inputReceipts.handleReceiptEvent(this.context, this.inputReceiptHost, this.inputReceiptSteps, ...args),
       recordSessionFault: (...args) => sessionEvents.recordSessionFault(this.context, this.sessionHelperHost, ...args),
       markTurnBoundary: (...args) => sessionEvents.markTurnBoundary(this.context, this.sessionHelperHost, ...args),
-      trackTurnEnd: (...args) => this.trackTurnEnd(...args),
+      trackTurnEnd: (...args) => this.turnBookkeeper.trackTurnEnd(...args),
       endTurn: (...args) => this.turnSettler.endTurn(...args),
     };
   }
@@ -1872,18 +1866,6 @@ export class RunManager {
    * process exit before `turn.started` therefore leaves a durable mismatch. */
   private beginUsageInvocation(runId: string, state: ActiveRun, stepId: string): void {
     beginUsageInvocation(this.store, runId, state, stepId);
-  }
-
-  private async autoNameRun(runId: string, skillName: string | undefined, task: string, live?: { turnText?: string; diffStat?: string | undefined }): Promise<void> {
-    return this.turnBookkeeper.autoNameRun(runId, skillName, task, live);
-  }
-
-  async recordTurnEnd(runId: string, turnText: string): Promise<void> {
-    return this.turnBookkeeper.recordTurnEnd(runId, turnText);
-  }
-
-  private async maybeRefreshTitle(runId: string, turnText: string): Promise<void> {
-    return this.turnBookkeeper.maybeRefreshTitle(runId, turnText);
   }
 
   private recordUsagePeaks(runId: string): void {

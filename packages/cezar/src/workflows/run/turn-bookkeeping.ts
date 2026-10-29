@@ -13,13 +13,18 @@ interface TurnBookkeeperHost {
   isDisposedDelegatedRun(runId: string): boolean;
   discoverSkills(): Promise<Skill[]>;
   reviveWorkflow(run: RunRecord): Promise<WorkflowDef | null>;
-  autoNameRun(runId: string, skillName: string | undefined, task: string, live?: { turnText?: string; diffStat?: string | undefined }): Promise<void>;
+  trackTurn(runId: string, task: Promise<void>): void;
 }
 
 export class TurnBookkeeper {
   /** Last live-refresh namer inputs per run — unchanged inputs skip the call. */
   readonly lastNamerKey = new Map<string, string>();
   constructor(private readonly context: RunModuleContext, private readonly host: TurnBookkeeperHost) {}
+
+  trackTurnEnd(runId: string, text: string): void {
+    const task = this.recordTurnEnd(runId, text);
+    this.host.trackTurn(runId, task);
+  }
 
   forget(runId: string): void { this.lastNamerKey.delete(runId); }
   clear(): void { this.lastNamerKey.clear(); }
@@ -30,7 +35,7 @@ export class TurnBookkeeper {
    * refresh). A user-owned title (`titleOrigin: 'user'`) is never overwritten;
    * namer-owned titles may be replaced by fresher namer results.
    */
-  autoNameRun(runId: string, skillName: string | undefined, task: string, live?: { turnText?: string; diffStat?: string | undefined }): Promise<void> {
+  async autoNameRun(runId: string, skillName: string | undefined, task: string, live?: { turnText?: string; diffStat?: string | undefined }): Promise<void> {
     return this.context.work.track('autoNameRun', this.autoNameRunWork(runId, skillName, task, live));
   }
 
@@ -86,7 +91,7 @@ export class TurnBookkeeper {
    * Not `private` so the integration tests can drive a turn-end directly —
    * a real agent session is the only other way to reach this path.
    */
-  recordTurnEnd(runId: string, turnText: string): Promise<void> {
+  async recordTurnEnd(runId: string, turnText: string): Promise<void> {
     return this.context.work.track('recordTurnEnd', this.recordTurnEndWork(runId, turnText));
   }
 
@@ -167,7 +172,7 @@ export class TurnBookkeeper {
     this.lastNamerKey.set(runId, key);
     const workflow = await this.host.reviveWorkflow(run);
     const skillName = workflow?.steps.find((s) => stepKind(s) === 'agent' && s.skill)?.skill?.trim();
-    void this.host.autoNameRun(runId, skillName, run.task, { turnText, diffStat: statText });
+    void this.autoNameRun(runId, skillName, run.task, { turnText, diffStat: statText });
   }
 
 }

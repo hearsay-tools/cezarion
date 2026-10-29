@@ -3569,7 +3569,7 @@ export function createApp(deps: ServerDeps) {
     // user edit sets BOTH: `title` (the record's own name — the raw task stops
     // being it the moment the user renames the run) and `titleSummary` (what
     // actually displays). The auto-summarizer only ever fills an *unset*
-    // titleSummary (RunManager.recordTurnEnd), so an edit wins over any past or
+    // titleSummary (TurnBookkeeper.recordTurnEnd), so an edit wins over any past or
     // future auto-summary. Answers the updated record.
     .patch('/runs/:id', jsonZodValidator(patchRunSchema), async (c) => {
       const { store, manager } = c.get('project');

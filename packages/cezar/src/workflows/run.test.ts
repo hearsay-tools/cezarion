@@ -384,7 +384,7 @@ describe('RunManager reported cost accounting', () => {
  * these fixtures — titles are ONLY ever namer-owned or user-owned now, never
  * derived from turn text.
  */
-describe('RunManager.recordTurnEnd', () => {
+describe('TurnBookkeeper.recordTurnEnd', () => {
   const savedAutoname = process.env.CEZ_AUTONAME;
   beforeAll(() => {
     process.env.CEZ_AUTONAME = '0';
@@ -428,7 +428,7 @@ describe('RunManager.recordTurnEnd', () => {
 
   it('computes a real diffStat and never derives a title from turn text', async () => {
     const record = await makeWorktreeRun();
-    await manager.recordTurnEnd(record.id, TURN_TEXT);
+    await runInternals(manager).turnBookkeeper.recordTurnEnd(record.id, TURN_TEXT);
 
     const after = store.getRun(record.id);
     // The agent's words are not a title source (they produced "Reading the
@@ -438,7 +438,7 @@ describe('RunManager.recordTurnEnd', () => {
 
     // Second turn: the diff stat keeps refreshing.
     writeFileSync(join(store.getRun(record.id)!.worktreePath!, 'more.txt'), 'z\n');
-    await manager.recordTurnEnd(record.id, 'Now I rewrote everything from scratch with a different approach.');
+    await runInternals(manager).turnBookkeeper.recordTurnEnd(record.id, 'Now I rewrote everything from scratch with a different approach.');
     const later = store.getRun(record.id);
     expect(later?.titleSummary).toBeUndefined();
     expect(later?.diffStat).toEqual({ adds: 4, dels: 1, files: 3 });
@@ -462,7 +462,7 @@ describe('RunManager.recordTurnEnd', () => {
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'their work'], { cwd: wt });
     writeFileSync(join(wt, 'mine.txt'), 'z\n'); // the 1 line this task produced
 
-    await manager.recordTurnEnd(record.id, TURN_TEXT);
+    await runInternals(manager).turnBookkeeper.recordTurnEnd(record.id, TURN_TEXT);
 
     // 1 uncommitted line, flagged — not the 6 committed ones the foreign branch carries
     // (which, with `a.txt`'s edit and `new.txt`, would have read `+10 −1 / 4 files`).
@@ -478,13 +478,13 @@ describe('RunManager.recordTurnEnd', () => {
     const record = await makeWorktreeRun();
     const wt = record.worktreePath as string;
     await run('git', ['checkout', '-q', '-b', 'a-detour'], { cwd: wt });
-    await manager.recordTurnEnd(record.id, TURN_TEXT);
+    await runInternals(manager).turnBookkeeper.recordTurnEnd(record.id, TURN_TEXT);
     expect(store.getRun(record.id)?.diffStat?.repointed).toBe(true);
 
     // `updateRun` replaces `diffStat` wholesale, so a stale `repointed: true` can
     // never outlive the repoint that caused it.
     await run('git', ['checkout', '-q', record.branch as string], { cwd: wt });
-    await manager.recordTurnEnd(record.id, TURN_TEXT);
+    await runInternals(manager).turnBookkeeper.recordTurnEnd(record.id, TURN_TEXT);
     const after = store.getRun(record.id);
     expect(after?.diffStat).toEqual({ adds: 3, dels: 1, files: 2 });
     expect(after?.diffStat).not.toHaveProperty('repointed');
@@ -494,25 +494,25 @@ describe('RunManager.recordTurnEnd', () => {
     const record = await makeWorktreeRun();
     // What PATCH /api/v1/runs/:id does on a rename:
     store.updateRun(record.id, { title: 'My name', titleSummary: 'My name', titleOrigin: 'user' });
-    await manager.recordTurnEnd(record.id, TURN_TEXT);
+    await runInternals(manager).turnBookkeeper.recordTurnEnd(record.id, TURN_TEXT);
     expect(store.getRun(record.id)?.titleSummary).toBe('My name');
   });
 
   it('skips diffStat for a worktree-less run, and never throws', async () => {
     const record = store.createRun({ title: 't', workflow: 'w', task: 'do the thing', steps: [] });
-    await expect(manager.recordTurnEnd(record.id, TURN_TEXT)).resolves.toBeUndefined();
+    await expect(runInternals(manager).turnBookkeeper.recordTurnEnd(record.id, TURN_TEXT)).resolves.toBeUndefined();
     const after = store.getRun(record.id);
     expect(after?.titleSummary).toBeUndefined();
     expect(after?.diffStat).toBeUndefined();
   });
 
   it('is a quiet no-op for an unknown run', async () => {
-    await expect(manager.recordTurnEnd('nope', TURN_TEXT)).resolves.toBeUndefined();
+    await expect(runInternals(manager).turnBookkeeper.recordTurnEnd('nope', TURN_TEXT)).resolves.toBeUndefined();
   });
 
   it('applies in-band CEZ markers from the turn text (spec 2026-07-18-task-ref-markers)', async () => {
     const record = store.createRun({ title: 't', workflow: 'w', task: 'implement comment threads', steps: [] });
-    await manager.recordTurnEnd(
+    await runInternals(manager).turnBookkeeper.recordTurnEnd(
       record.id,
       'Progress so far.\nCEZ:PR=500\nCEZ:ISSUE=433\nCEZ:TITLE=implementing comment threads\nMore to come.',
     );
@@ -528,7 +528,7 @@ describe('RunManager.recordTurnEnd', () => {
   it('a marker title never overwrites a user rename — but the numbers still land', async () => {
     const record = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     store.updateRun(record.id, { title: 'My name', titleSummary: 'My name', titleOrigin: 'user' });
-    await manager.recordTurnEnd(record.id, 'CEZ:PR=500\nCEZ:TITLE=implementing comment threads');
+    await runInternals(manager).turnBookkeeper.recordTurnEnd(record.id, 'CEZ:PR=500\nCEZ:TITLE=implementing comment threads');
     const after = store.getRun(record.id);
     expect(after?.titleSummary).toBe('My name');
     expect(after?.titleOrigin).toBe('user');
@@ -537,7 +537,7 @@ describe('RunManager.recordTurnEnd', () => {
 
   it('a junk CEZ:TITLE never blanks the title', async () => {
     const record = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
-    await manager.recordTurnEnd(record.id, 'CEZ:PR=500\nCEZ:TITLE=...');
+    await runInternals(manager).turnBookkeeper.recordTurnEnd(record.id, 'CEZ:PR=500\nCEZ:TITLE=...');
     const after = store.getRun(record.id);
     expect(after?.titleSummary).toBeUndefined();
     expect(after?.titleOrigin).toBeUndefined();
@@ -546,7 +546,7 @@ describe('RunManager.recordTurnEnd', () => {
 
   it('prose that merely mentions a marker changes nothing', async () => {
     const record = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
-    await manager.recordTurnEnd(record.id, 'I will emit CEZ:PR=442 once the PR exists.');
+    await runInternals(manager).turnBookkeeper.recordTurnEnd(record.id, 'I will emit CEZ:PR=442 once the PR exists.');
     const after = store.getRun(record.id);
     expect(after?.markerRefs).toBeUndefined();
     expect(after?.prNumber).toBeUndefined();

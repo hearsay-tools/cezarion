@@ -1,3 +1,4 @@
+import { runInternals } from '../workflows/run-internals.testkit.ts';
 /**
  * Shared fixtures for the harness parity matrix (`harness-parity.test.ts`,
  * spec `.ai/specs/2026-09-04-harness-parity-matrix.md`, #68).
@@ -1276,15 +1277,14 @@ function readRunEvents(repoRoot: string, runId: string): Record<string, unknown>
 /** Observe, do not replace, the manager's fire-and-forget Git bookkeeping so
  * test-owned directories outlive every real write. */
 function trackTurnBookkeeping(manager: RunManager): () => Promise<void> {
-  const pending = new Set<Promise<void>>();
-  const record = manager.recordTurnEnd.bind(manager);
-  manager.recordTurnEnd = (runId, text) => {
-    const result = record(runId, text);
-    pending.add(result);
-    void result.finally(() => pending.delete(result));
-    return result;
+  const work = runInternals(manager).context.work;
+  return async () => {
+    for (;;) {
+      const pending = [...work.pending].filter(([, label]) => label === 'recordTurnEnd');
+      if (!pending.length) return;
+      await Promise.all(pending.map(([promise]) => promise));
+    }
   };
-  return async () => { while (pending.size) await Promise.all(pending); };
 }
 
 /** An owned worker, using real disk/Git state and the native wire mocks for `RUNNER_IDS`. */
@@ -1367,7 +1367,7 @@ export async function withOwnedInputRun(
         : [{ id: 'task', name: 'Task', kind: 'agent' }] }, parent.id, randomUUID(), {
       role: 'worker', parentRunId: parent.id, permissions: [], workspace,
     }, 'a'.repeat(64), options.identity ?? { kind: 'internal', ...(workflowDef ? { workflowHash: workerWorkflowHash(workflowDef) } : {}) });
-    manager = new RunManager(store, repoRoot, { ...(options.noWaitNudgeReplyMs === undefined ? {} : { noWaitNudgeReplyMs: options.noWaitNudgeReplyMs }) });
+    manager = new RunManager(store, repoRoot, options);
     drainBookkeeping = trackTurnBookkeeping(manager);
     const adoptContext = async (context: { store: RunStore; manager: RunManager }) => {
       await drainBookkeeping();
@@ -1388,7 +1388,7 @@ export async function withOwnedInputRun(
       seedRuns(join(repoRoot, '.ai/cezar'), index);
       beforeOpen?.(join(repoRoot, '.ai/cezar'));
       store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-      manager = new RunManager(store, repoRoot, { ...(options.noWaitNudgeReplyMs === undefined ? {} : { noWaitNudgeReplyMs: options.noWaitNudgeReplyMs }) });
+      manager = new RunManager(store, repoRoot, options);
       drainBookkeeping = trackTurnBookkeeping(manager);
       await manager.recover();
       return { store, manager };

@@ -140,7 +140,7 @@ export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply
     execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: root });
     semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
     store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
-    manager = new RunManager(store, root, { semaphore, ...(options.noWaitNudgeReplyMs === undefined ? {} : { noWaitNudgeReplyMs: options.noWaitNudgeReplyMs }) }); track();
+    manager = new RunManager(store, root, { semaphore, ...options }); track();
   });
   afterEach(async () => {
     const errors: unknown[] = [];

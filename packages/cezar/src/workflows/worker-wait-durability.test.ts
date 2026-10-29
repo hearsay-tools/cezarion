@@ -640,7 +640,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         await until(() => currentUsage(p.id) !== undefined);
         manager.dispose();
         const snapshot = JSON.stringify(store.getRun(p.id));
-        await manager.recordTurnEnd(p.id, 'CEZ:TITLE=late disposed callback');
+        await runInternals(manager).turnBookkeeper.recordTurnEnd(p.id, 'CEZ:TITLE=late disposed callback');
         if (completion === 'error') state.session.sendMessage([{ type: 'text', text: 'mock:auth-error' }]);
         else state.session.end();
         await Promise.all(executions.splice(0));

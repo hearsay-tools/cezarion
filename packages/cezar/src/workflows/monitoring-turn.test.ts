@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -249,8 +250,8 @@ async function runMonitoringRow(backend: RunnerId, mode: 'fresh' | 'continuation
   // Turn-end bookkeeping (diff stat: `git add -N .`) runs after the run already reads
   // `waiting`. Track it so a row that runs its own git in the worktree can wait it out.
   const turnEnds: TurnEndTracker = { recorded: 0, pending: new Set() };
-  const recordTurnEnd = manager.recordTurnEnd.bind(manager);
-  manager.recordTurnEnd = (id, text) => {
+  const recordTurnEnd = runInternals(manager).turnBookkeeper.recordTurnEnd.bind(runInternals(manager).turnBookkeeper);
+  runInternals(manager).turnBookkeeper.recordTurnEnd = (id, text) => {
     const task = recordTurnEnd(id, text);
     turnEnds.recorded += 1;
     turnEnds.pending.add(task);
