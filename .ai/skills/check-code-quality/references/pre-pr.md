@@ -3,7 +3,54 @@
 Run after implementation and repeat after a source or test change that can affect
 the result. Resolve `<skill>` to the skill directory, then follow all steps below.
 
-## 1. Run the bundled check
+## 1. Select the local evidence
+
+Use current Squeal measurements first when Squeal is validating this worktree.
+Keep the bundled check below as the complete fallback. CI's gates do not change.
+
+Resolve and fetch the PR target branch, then inventory changed functions:
+
+```sh
+node <skill>/scripts/changed-functions.mjs --base <target-ref> > <inventory.json>
+```
+
+The inventory includes committed, staged, unstaged and untracked changes against
+its pinned merge-base. Use that base for comparisons. An empty function inventory
+needs no coverage run; use the bundled check's 0/0 path below to record it.
+
+For a nonempty inventory, wait for the affected tests through Squeal's installed
+instructions, then inspect every changed file with:
+
+```sh
+squeal code <changed-file> --json
+```
+
+Under Codex, use the absolute Squeal launcher from its session message when it is
+not on PATH. Accept Squeal evidence only when all of these hold:
+
+- Every inventoried function matches one measured function by file, location and
+  identity, including nested callbacks and functions already over a limit before
+  this session. If names or locations cannot be matched reliably, use the fallback.
+- The measurements describe the current files and affected tests have current,
+  passing results. Record the Squeal revision and head or uncommitted diff. An edit
+  after inspection invalidates the evidence for affected functions.
+- Every changed function has numeric complexity and CRAP measurements with known
+  outcomes. The limits remain complexity > 20 and CRAP > 30; equality passes.
+  Missing, disabled, unknown, stale or excluded measurements cannot pass.
+- Every finding is resolved under step 2 below, including inherited findings.
+
+Inspect per-path output, not only `--changed`, `--told`, an empty failure list or
+`Known failures: 0`: those do not inventory all changed functions or prove their
+quality. Squeal excludes test functions and can omit large or ignored files. Code
+run only in child processes can lack coverage. Any gap, unavailable Squeal, or
+uncertain freshness requires the complete bundled check for the whole PR; do not
+claim completeness by combining partial Squeal and bundled results.
+
+When Squeal supplies complete evidence, skip local bundled coverage collection
+and go to steps 2 and 3. Otherwise follow the fallback below, including the CI
+coverage option when applicable.
+
+### Bundled fallback
 
 Resolve the PR's target branch from the task or repository bindings. Fetch its
 remote ref. Select the relevant tests and their runner from the repository's
@@ -14,9 +61,20 @@ node <skill>/scripts/check.mjs --base <target-ref> \
   --runner <vitest|node> --test <test-file> --output <report.md>
 ```
 
+Select relevant import-graph tests and pass every changed test file with runtime
+functions, including type-focused tests and browser specs. Type-only imports do
+not exempt runtime `describe` or `it` callbacks from measurement; compile-time
+assertions still require the repository's typecheck. To find tests importing a
+changed testkit, replace the placeholder with its basename and inspect matches:
+
+```sh
+rg -l -F '<testkit basename>' packages --glob '*.test.ts'
+```
+
 Repeat `--test` for multiple files. With Vitest, select every project that runs
 a selected test using repeatable `--project`: a unit test file needs its unit
-project, a `*.e2e.ts` browser spec needs its browser project. Vitest uses the
+project, a `*.e2e.ts` browser spec needs its browser project. Browser specs run and are
+measured through that project; passing them does not ask the check to skip them. Vitest uses the
 repository's own configuration, setup files, aliases and environment. With Node,
 pass repository setup modules through repeatable `--node-import`. For an existing
 current Istanbul report, replace runner and test options with
@@ -227,7 +285,8 @@ Done when the command produced a complete report, or a stated measurement blocke
 
 ## 2. Resolve scores above the limits
 
-Use `thresholds` from the generated report. Flag a function when either score is
+Use `thresholds` from the generated report, or the same limits (complexity 20,
+CRAP 30) for complete Squeal evidence. Flag a function when either score is
 **strictly greater** than its limit. Equality passes. For each flagged function,
 read its diff and baseline source, then choose an action:
 
@@ -264,14 +323,22 @@ For each inherited larger refactor, read [issues.md](issues.md).
 Filing that issue, including creating its label, is part of this check. A filing
 failure remains a blocker with its prepared issue text and exact error.
 
-Rerun the same command after source or test changes. Done when every flagged
+Refresh the selected evidence path after source or test changes; use the bundled
+fallback whenever complete Squeal evidence is no longer available. Done when every flagged
 function has verified scores within the limits, a linked inherited-refactor
 issue, or a stated blocker. Any blocker means the
 pre-PR check is incomplete.
 
 ## 3. Report before opening the PR
 
-Make the report available from the PR's validation section. An ignored path such
+For complete Squeal evidence, put the pinned base, head or uncommitted diff,
+Squeal revision, checked/expected function count, per-function complexity and CRAP
+scores, measurement limits, and each finding's action in the PR's validation
+section. Preserve baseline evidence for inherited findings as step 2 requires.
+No bundled report is required on this path. State that Squeal supplied the local
+quality evidence; do not describe it as a bundled-check pass.
+
+For the bundled fallback, make the report available from the PR's validation section. An ignored path such
 as `.ai/qa/<issue>/code-quality.md` is not a report link a reviewer can open.
 
 - In a Cezar task, publish the generated report with the session-provided

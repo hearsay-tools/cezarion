@@ -14,7 +14,8 @@ absolute path. Choose the path from the current task:
 | Prepare a PR or recheck its changed functions | Read [Before a PR](references/pre-pr.md) |
 
 A measurement request ends with the requested stats and any coverage limits.
-The pre-PR path requires complete coverage and resolved findings. During PR work,
+The pre-PR path accepts complete current Squeal measurements or the bundled
+check, as its reference defines, and requires resolved findings. During PR work,
 a measurement of selected code does not replace that check.
 
 For dependency setup or a tool error, read [Bundled tool](references/tool.md).
