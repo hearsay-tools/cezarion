@@ -1109,17 +1109,14 @@ function deliveryPromptText(body, received) {
 async function acknowledgeSteer(body, res, deliveryText) {
   const text = JSON.parse(body).parts.map(part => part.text ?? '').join('\n');
   const userId = `msg_steer_user_${++steerSerial}`;
-  // #505 review: acknowledge a steer later than the runner's lost-wake window.
   const ackDelay = Number(process.env.CEZ_MOCK_OPENCODE_STEER_ACK_MS ?? 0);
   const ack = () => { res.writeHead(204); res.end(); };
   const acknowledge = () => { if (ackDelay > 0) setTimeout(ack, ackDelay); else ack(); };
-  // hearsay-tools/cezarion#2127: a worker update can arrive in a busy turn too.
-  // Hold only its HTTP ACK; its native consumption and turn end still stream.
+  // Hold busy-input ACKs too; native consumption still streams (hearsay-tools/cezarion#2127).
   if (delivery) delivery.ack(deliveryText, acknowledge); else acknowledge();
   send({ type: 'message.updated', properties: { info: { id: userId, sessionID: SESSION_ID, role: 'user', time: { created: Date.now() } } } });
   send({ type: 'message.part.updated', properties: { part: { id: `prt_${userId}`, messageID: userId, sessionID: SESSION_ID, type: 'text', text } } });
   steers.push({ userId, text });
-  return;
 }
 
 function acknowledgePrompt(res, body, deliveryText) {
