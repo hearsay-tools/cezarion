@@ -1,3 +1,10 @@
+import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
+import { requestWaitRequestSchema, type RequestWaitRequest } from '@open-mercato/cezar-contract/conversations';
+import { hasWorkerDeadline, workerWaitEntryToLegacy } from '@open-mercato/cezar-contract/waits';
+import { DelegationPolicyError } from '../../delegation/policy.ts';
+import { historyDeletionPending, rootFinishRequested, executionBlockedByRootFinish, familyOf } from './run-guards.ts';
+import { assertOwnedWorkerWaitScope, assertRequestWaitScope, peerWaitEntry, peerWaitOf, peerWaitResult, workerWaitTarget } from '../wait-scope.ts';
+import { identicalWorkerWait } from '../waits.ts';
 import { randomUUID } from 'node:crypto';
 import type { RunModuleContext } from './types.ts';
 import type { ActiveRun } from '../active-run.ts';
@@ -23,8 +30,9 @@ interface WaitRegistryHost {
   ciSupervisor(): Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
   isParked(id: string): boolean;
   countAutomaticWakes(id: string): number;
-  registerPeerWait(id: string, request: { peerIds: string[]; timeoutSeconds: number }, via: 'cezar_wait'): PeerWaitEntry;
-  registerWorkerListWait(id: string, request: { workerIds?: string[]; requestIds?: string[] | undefined; mode?: WorkerWaitRequest['mode']; timeoutSeconds: number }, via: 'cezar_wait'): DeadlinedWorkerWaitEntry;
+  reconcileWorkerWaits(family?: string): void;
+  noticeParkedWorkers(id: string): void;
+  canProceedWithRun(id: string, run: RunRecord | undefined): run is RunRecord;
   exitFileRoots(id: string, run: RunRecord): ExitFileRoots;
   disarmWait(id: string): void;
   settleWait(id: string, waitId: string, result?: CiWaitResult | ProcessWaitResult | PeerWaitResult): void;
@@ -45,6 +53,126 @@ export class WaitRegistry {
     for (const task of this.ciRegistrations.values()) task.abort.abort();
     this.ciRegistrations.clear();
   }
+  /** `cez worker wait`: an alias into the wait list, answered in the legacy `WorkerWait` shape
+   *  (hearsay-tools/cezarion#1235). */
+  registerWorkerWait(parentId: string, request: WorkerWaitRequest): WorkerWait {
+    const parsed = workerWaitRequestSchema.parse(request);
+    return workerWaitEntryToLegacy(this.registerWorkerListWait(parentId, parsed, 'cez-worker-wait'));
+  }
+
+  /**
+   * Open a `worker` wait in the list (hearsay-tools/cezarion#1235): on workers the parent owns, or
+   * on replies to requests the run sent. It stands beside CI, timer and human waits, up to
+   * `WAIT_LIMIT` open ones; the same target and mode return the open wait instead. The family is
+   * reconciled at once, so outcomes already in resolve it now, and its deadline is armed.
+   * Refusals throw `DelegationPolicyError`: `incompatible_state`, `denied_scope` or
+   * `capacity_limit`.
+   */
+  registerWorkerListWait(runId: string, request: { workerIds?: string[]; requestIds?: string[] | undefined; mode?: WorkerWaitRequest['mode']; timeoutSeconds: number },
+    via: 'cezar_wait' | 'cez-worker-wait'): DeadlinedWorkerWaitEntry {
+    this.host.reconcileWorkerWaits();
+    this.assertCanRegisterWorkerWait(runId);
+    const run = this.context.store.getRun(runId)!;
+    const state = this.host.active(runId)!;
+    if (!run.delegation || run.delegation.role === 'invalid') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+    const getRun = (id: string) => this.context.store.getRun(id);
+    if (request.workerIds) assertOwnedWorkerWaitScope(runId, run.delegation, request.workerIds, getRun);
+    else assertRequestWaitScope(run, run.delegation, request.requestIds ?? [], getRun);
+    const repeated = identicalWorkerWait(run.waits ?? [], request);
+    if (repeated && hasWorkerDeadline(repeated)) return repeated;
+    if (openWaits(run).length >= WAIT_LIMIT) throw new DelegationPolicyError('capacity_limit', `This run already has ${WAIT_LIMIT} open waits; cancel one first`);
+    const now = Date.now();
+    const target = workerWaitTarget(request, getRun);
+    const entry: DeadlinedWorkerWaitEntry = { id: randomUUID(), kind: 'worker', source: 'agent', via, registeredAt: new Date(now).toISOString(),
+      deadline: new Date(now + request.timeoutSeconds * 1000).toISOString(), timeoutSeconds: request.timeoutSeconds,
+      turnId: state.ciTurnId ??= randomUUID(), phase: 'open', ...(request.mode === undefined ? {} : { mode: request.mode }), ...target };
+    this.host.withdrawCezarHumanWaits(runId);
+    this.context.store.commitWait(runId, entry);
+    // Outcomes already in resolve it now (or, with every worker destroyed, cancel it); the rest arm it.
+    this.host.reconcileWorkerWaits(familyOf(run));
+    // A worker that parked before this wait opened tells the parent now (hearsay-tools/cezarion#1327).
+    this.host.noticeParkedWorkers(familyOf(run));
+    const current = this.context.store.getRun(runId);
+    if (current?.waits?.some(wait => wait.id === entry.id) && (state.atTurnBoundary === state.session || this.host.isParked(runId))) this.host.parkOnWaits(runId, state);
+    return this.recordedWorkerWait(runId, entry.id) ?? entry;
+  }
+
+  /** The wait as the store now holds it, open or already delivered, with its deadline. */
+  private recordedWorkerWait(runId: string, id: string): DeadlinedWorkerWaitEntry | undefined {
+    const latest = this.context.store.getRun(runId);
+    return [...latest?.waits ?? [], ...latest?.lastWaits ?? []].find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === id && wait.kind === 'worker' && hasWorkerDeadline(wait));
+  }
+
+  /** Cezar waits on live workers or open requests without adding a deadline of its own. */
+  registerCompletionWait(runId: string, workerIds: string[], requestIds?: string[]): WorkerWaitEntry {
+    const state = this.host.active(runId)!;
+    const ids = workerIds.filter(id => { const worker = this.context.store.getRun(id)?.delegation; return worker?.role === 'worker' && worker.parentRunId === runId; });
+    const entry: WorkerWaitEntry = { id: randomUUID(), kind: 'worker', source: 'cezar', via: 'completion', registeredAt: new Date().toISOString(),
+      turnId: state.ciTurnId ??= randomUUID(), phase: 'open', mode: 'all',
+      ...workerWaitTarget(requestIds?.length ? { requestIds } : { workerIds: ids }, id => this.context.store.getRun(id)) };
+    this.context.store.commitWait(runId, entry);
+    this.host.reconcileWorkerWaits(familyOf(this.context.store.getRun(runId)!));
+    this.host.noticeParkedWorkers(runId);
+    return entry;
+  }
+
+  /** The states no worker wait registers in: refusals throw `incompatible_state`. Waits stand
+   *  beside CI, timer and human waits and beside each other (hearsay-tools/cezarion#1235). */
+  private assertCanRegisterWorkerWait(runId: string): void {
+    const run = this.context.store.getRun(runId);
+    const state = this.host.active(runId);
+    const refuse = (message: string): never => { throw new DelegationPolicyError('incompatible_state', message); };
+    if (!run?.delegation || run.delegation.role === 'invalid') refuse('Worker waits require an owned worker or parent run');
+    if (historyDeletionPending(this.context.store, runId)) refuse('History deletion is pending; finish deletion before registering a wait');
+    if (executionBlockedByRootFinish(this.context.store, run!)) refuse('Parent finish is pending; a finishing parent cannot register a wait');
+    if (!['running', 'waiting'].includes(run!.status) || !state?.session?.open || state.cancelled) {
+      refuse(`Run is ${run!.status} with no available active session; register a wait from an executing parent or worker`);
+    }
+  }
+
+  /** Both roles can select their own requests without acquiring worker-management authority.
+   *  `cez message wait --request`: an alias into the wait list (hearsay-tools/cezarion#1235). */
+  registerRequestWait(runId: string, request: RequestWaitRequest): WorkerWait {
+    const parsed = requestWaitRequestSchema.parse(request);
+    return workerWaitEntryToLegacy(this.registerWorkerListWait(runId, parsed, 'cez-worker-wait'));
+  }
+
+  /** `cezar_wait` kind `peer` and `cez message wait --peer` (hearsay-tools/cezarion#1995): checked
+   *  and built by `peerWaitEntry`; a peer that already wrote or settled resolves it at once (`armWait`). */
+  registerPeerWait(runId: string, request: { peerIds: string[]; timeoutSeconds: number }, via: 'cezar_wait' | 'cez-message-wait'): PeerWaitEntry {
+    this.assertCanRegisterWorkerWait(runId);
+    const state = this.host.active(runId)!;
+    const entry = peerWaitEntry(this.context.store.getRun(runId)!, request, via, () => state.ciTurnId ??= randomUUID(), id => this.context.store.getRun(id));
+    return this.context.store.getRun(runId)?.waits?.some(wait => wait.id === entry.id) ? entry : this.openWait(runId, state, entry);
+  }
+
+  /** `cez message cancel-wait` on a peer wait, through the list, as `cancelWorkerWait`; a settled one comes back as it is. */
+  cancelPeerWait(runId: string, waitId: string): PeerWaitEntry {
+    const run = this.context.store.getRun(runId)!;
+    if (peerWaitOf(run, waitId).phase !== 'open') return peerWaitOf(run, waitId);
+    if (this.context.disposed() || !['queued', 'running', 'waiting'].includes(run.status) || rootFinishRequested(this.context.store, runId) || historyDeletionPending(this.context.store, runId)) {
+      throw new DelegationPolicyError('incompatible_state', 'Parent cannot cancel a peer wait');
+    }
+    this.context.store.commitOutcome(runId, { kind: 'cancelled', waitIds: [waitId] });
+    this.host.disarmWait(waitId);
+    return peerWaitOf(this.context.store.getRun(runId), waitId);
+  }
+
+  /** The open peer waits of these runs whose named peer already wrote, settled or was deleted resolve now. */
+  resolvePeerWaits(runIds: readonly string[]): void {
+    for (const id of runIds) for (const wait of openWaits(this.context.store.getRun(id) ?? {})) if (wait.kind === 'peer') this.resolvePeerWait(id, wait);
+  }
+
+  /** Like a timer, the wake is the agent's own arrangement: a stopping or finishing run takes none,
+   *  and the wait stays for that transition to cancel. True when the wait is no longer open. */
+  resolvePeerWait(runId: string, wait: PeerWaitEntry): boolean {
+    const run = this.context.store.getRun(runId);
+    if (this.context.disposed() || !this.host.canProceedWithRun(runId, run)) return false;
+    const result = peerWaitResult(run, wait, this.context.store);
+    if (result) this.host.settleWait(runId, wait.id, result);
+    return !!result && this.context.store.getRun(runId)?.waits?.find(entry => entry.id === wait.id)?.phase !== 'open';
+  }
+
   /** The checks every wait registration shares: the session that called is the run's current one,
    *  and no root finish blocks it. Refusals throw `{ code }`. */
   private registrationGate(runId: string, generation: string, capabilitySignal?: AbortSignal) {
@@ -100,8 +228,8 @@ export class WaitRegistry {
     if (isDelegationWait(parsed)) {
       if (!run.delegation || run.delegation.role === 'invalid') refuse('denied_scope');
       try {
-        return parsed.kind === 'peer' ? this.host.registerPeerWait(runId, { peerIds: parsed.peer_ids, timeoutSeconds: parsed.timeout_seconds }, 'cezar_wait')
-          : this.host.registerWorkerListWait(runId, workerListTarget(parsed), 'cezar_wait');
+        return parsed.kind === 'peer' ? this.registerPeerWait(runId, { peerIds: parsed.peer_ids, timeoutSeconds: parsed.timeout_seconds }, 'cezar_wait')
+          : this.registerWorkerListWait(runId, workerListTarget(parsed), 'cezar_wait');
       } catch (error) { return refuse(delegationWaitRefusal(error, () => this.host.executionBlockedByRootFinish(run))); }
     }
     const turnId = active.ciTurnId ??= randomUUID();
