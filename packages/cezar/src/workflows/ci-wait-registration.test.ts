@@ -71,21 +71,20 @@ describe('CI registration guards before and after metadata lookup', { timeout: 3
     expect(ciWaitOf(run.id)).toBeUndefined();
   });
 
-  it.each(['pending', 'unanswered'] as const)('registers CI and a timer while a human question is %s', async kind => {
+  it('registers CI and a timer with an unanswered human question in the record', async () => {
     const gate = join(root, 'end-turn');
     const wire = controlledWire({ firstResultGate: gate });
     const run = await parent(); await until(wire.initialReceived);
-    const engine = manager as unknown as { active: Map<string, Record<string, unknown>>; hasUnansweredHumanAsk(id: string): boolean };
+    const engine = manager as unknown as { active: Map<string, Record<string, unknown>> };
     const state = engine.active.get(run.id)!;
     vi.spyOn(CiWatcherSupervisor.prototype, 'resolve').mockResolvedValue(identity);
     vi.spyOn(CiWatcherSupervisor.prototype, 'watch').mockReturnValue(new Promise(() => {}));
-    if (kind === 'pending') state.pendingHumanAsk = true;
-    else vi.spyOn(engine, 'hasUnansweredHumanAsk').mockReturnValue(true);
+    store.appendEvent(run.id, { type: 'ask.requested', requestId: 'unanswered-question', questions: [{ header: 'Review', question: 'Approve?' }] });
     try {
       const ci = await manager.registerWait(run.id, { kind: 'pr', pr, timeout_seconds: 30 }, 'cezar_wait', state.ciGeneration as string);
       const timer = await manager.registerWait(run.id, { kind: 'timer', seconds: 60 }, 'cezar_wait', state.ciGeneration as string);
       expect(store.getRun(run.id)?.waits?.map(wait => wait.id)).toEqual([ci.id, timer.id]);
-    } finally { state.pendingHumanAsk = false; vi.restoreAllMocks(); writeFileSync(gate, ''); }
+    } finally { vi.restoreAllMocks(); writeFileSync(gate, ''); }
   });
 });
 
