@@ -15,7 +15,18 @@ Native review context is bound to the trusted caller event, workflow, run,
 attempt and live head. It reports heavy tests as pending, not successful.
 Manual review context reads only the newest current-head native run and its
 latest attempt. Missing evidence stays pending; failure/cancellation never
-falls back to an earlier success.
+falls back to an earlier success. When the current attempt proves that review
+failed and all heavy jobs were skipped, it reports heavy verification as not
+started because review blocked it. The failed aggregate remains a merge blocker;
+it does not mean tests ran and failed.
+
+Previously, only test-green heads consumed automated review rounds. Review now
+spends rounds on preflight-green heads whose tests may later fail. The owner
+requested review before tests and accepted that later tests may fail. This can
+exhaust the unchanged cap earlier, so subsequent final-head changes may receive
+no new model review. Final-head model review was already conditional on that cap.
+The provider and review policy are unchanged; both required checks still gate
+merge.
 
 Local typechecking starts with `pnpm install --frozen-lockfile` in the checkout being verified, including
 nested task worktrees. Both `npm run typecheck:web` and

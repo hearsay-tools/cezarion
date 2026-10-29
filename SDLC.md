@@ -160,6 +160,13 @@ The exact infra-only allowlist (#468) is: `.github/workflows/report-workflow-fai
 
 Manual review dispatches bypass the automated-review budget and the docs-only and infra-only review skips; they judge replies without waiting for or running tests. Automated review runs inside the `ci.yml` main pull-request run after cheap preflight and before heavy verification. Findings block heavy work. **Re-run failed jobs** after a flaky test failure retains successful review and test jobs. Docs-only and infra-only PRs skip only the model round; their required build/package verification still runs. Both required checks must pass before merge.
 
+The review-before-tests order spends automated review rounds on preflight-green
+heads whose tests may later fail. Previously, only test-green heads consumed
+rounds. The owner requested this order and accepted later test failures. The
+unchanged cap can be exhausted earlier, so subsequent final-head changes may
+receive no new model review. Final-head model review was already conditional on
+the cap. Provider selection and review policy are unchanged.
+
 ## Amending this process
 
 This document and `.ai/agentic.config.json` describe the same process: change them together, and re-run the `om-setup-agent-pipeline` skill when the toolchain or label taxonomy changes. Per-skill deviations — extra review rules, a different PR body template, an added gate step — belong in a repo-local skill of the same name at `.ai/skills/<skill-name>/SKILL.md`, which takes precedence over the installed skill (and can `@`-import or reference it to extend rather than replace it); local rules win, but a repo-local skill cannot grant what the installed skill's safety rules forbid.

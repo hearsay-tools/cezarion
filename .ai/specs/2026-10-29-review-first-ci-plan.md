@@ -19,6 +19,15 @@ starting heavy work early is deliberately removed. Full verification remains
 mandatory before merge through the unchanged required check names. A review pass
 is a code-review verdict, not a claim that pending tests passed.
 
+The prior ordering also guaranteed that only test-green heads consumed automated
+review rounds. The requested reviewer-before-tests order spends rounds on
+preflight-green heads whose tests may later fail. The cap can therefore be
+exhausted earlier, and subsequent changes on the final head may receive no new
+model review. The owner accepted that tests may break after review; the parent
+judges this earlier spending authorized by that explicit request. The cap,
+provider and review policy are unchanged. Final-head model review was already
+conditional on the cap; this change moves when the existing budget is spent.
+
 Preserve trusted classification, round caps, patch-ID reuse, live-head checks,
 provider-specific generation, immutable provider artifact IDs, trusted posting,
 queue exact-SHA proof/fallback and publication only after verification. Candidate
@@ -33,7 +42,7 @@ For PRs into main:
 - Add a bounded, credential-free `preflight` aggregate. It requires successful
   classification, the event's applicable ratchets, and typecheck/static checks.
 - Move existing workflow lint (pinned actionlint/shellcheck) and citation checking
-  from build/package to typecheck. Fetch two parents for citation checking.
+  from build/package to typecheck. Fetch the merge result and its first parent for citation checking.
 - Call the existing reusable review after preflight, with explicit secrets and
   trusted caller preflight evidence. Keep its provider and cap policies.
 - Make PR `review-result` independent of `verify` and queue admission. It retains
@@ -222,3 +231,44 @@ No live workflow was dispatched and no PR was opened by this worker. The parent
 must run the final-head bare dispatch and the controlled native cases described
 above. Successful local fixture execution does not prove GitHub rerun selection,
 reusable-workflow scheduling or provider authentication on the platform.
+
+### Bounded independent-review fixes
+
+The follow-up uses `proof_base: 610ca4474aa4866bfe8d1350bb1768e42bef37c2`.
+Manual context reports `Heavy verification: not started: blocked by review` only
+when the current attempt has successful preflight, failed review and aggregate,
+and every heavy job is completed/skipped. A skipped matrix must have all expected
+shards or its single unexpanded name. Missing jobs, partial matrices, actual heavy
+failures, timeouts, cancellations, success and active work keep the existing
+verification report. No provenance or workflow gating rule changed.
+
+- Copied the current `review-ci-context.test.cjs` into an ignored temporary
+  directory with `review-ci-context.cjs` and `fetch-ci-results.cjs` from proof_base.
+  Ran `node --import <worktree>/scripts/test-git-env.mjs --test
+  <scratch>/review-ci-context.test.cjs`. Both new blocked-context tests failed on
+  the old source: 31 passed, 2 failed, exit 1. Replaced only the context source
+  with the fix and repeated the command: 33 passed, 0 failed, exit 0. The genuine
+  heavy-outcome guards pass both ways. Logs: `.ai/qa/review-first-fixes/proof-base.log`
+  and `proof-fixed.log`; no stash or watched-source swap was used.
+- Squeal supplied current passing results for the seven selected context, CI,
+  review, typecheck, fetch-results and merge-queue fixture files at revision 4.
+  Selection and verdict: `.ai/qa/review-first-fixes/squeal-targeted.log`.
+- Squeal excludes test functions from code measurements, so the complete bundled
+  quality check measured all 23/23 functions changed since proof_base across two
+  files. It passed, with maximum complexity 10 and maximum CRAP 10. Reproduction
+  command and hashes: `.ai/qa/review-first-fixes/code-quality.md`.
+- Pinned actionlint 1.7.12 with shellcheck 0.11.0 passed over all workflows after
+  the checkout edit; both download checksums matched. Source syntax, citation and
+  whitespace checks passed.
+- Build/package now uses checkout's default depth. Its build, test and pack steps
+  do not read the checkout's first parent; Git-history tests use fixture repos.
+  The first-parent citation reader and its depth-2 fixture remain in typecheck.
+  The stale build/package citation comment was removed with its depth override.
+- The plan, CI docs, CODE_REVIEW.md and SDLC.md now name the earlier review-budget
+  spending and possible absence of a new model review on subsequent final changes.
+  ADR0038 keeps its timing/separation decision and links this plan; it does not
+  promise review-round availability, so its text stays unchanged.
+
+Live retry `caller_attempt` and reusable dependent-job rerun behavior remain
+rollout limitations for the parent to prove. No push, PR, dispatch, settings
+change or full local suite was run for these fixes.

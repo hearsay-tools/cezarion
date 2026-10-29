@@ -86,6 +86,72 @@ test('manual context reports missing current-attempt verification as pending eve
   f.latest = null;
   assert.match(reviewCiContext(f), /status: pending/);
 });
+
+function blockedFixture() {
+  const f = fixture(); f.env.GITHUB_EVENT_NAME = 'workflow_dispatch';
+  f.run.status = 'completed'; f.run.conclusion = 'failure';
+  f.jobs = [
+    { name: 'Review preflight', conclusion: 'success' },
+    { name: 'Automated Code Review', conclusion: 'failure' },
+    { name: 'Unit, build, E2E, and package', conclusion: 'failure' },
+    { name: 'Unit, build, and package', conclusion: 'skipped' },
+    ...[1, 2, 3].map(shard => ({ name: `Vitest shard ${shard}/3`, conclusion: 'skipped' })),
+    ...[1, 2, 3, 4].map(shard => ({ name: `Cockpit browser E2E shard ${shard}/4`, conclusion: 'skipped' })),
+  ].map(job => ({ ...job, status: 'completed' }));
+  return f;
+}
+
+test('manual context distinguishes review-blocked verification from failed tests', () => {
+  const f = blockedFixture();
+  const text = reviewCiContext(f);
+  assert.match(text, /Heavy verification: not started: blocked by review/);
+  assert.match(text, /Verification aggregate: failure/);
+  assert.match(text, /Workflow conclusion: failure/);
+  assert.match(text, /Run: 42\nAttempt: 2/);
+  assert.doesNotMatch(text, /## Failed jobs/);
+});
+
+test('manual context recognizes skipped matrices before shard expansion', () => {
+  const f = blockedFixture();
+  f.jobs = f.jobs.filter(job => !/shard/.test(job.name));
+  f.jobs.push(...['Vitest shard /3', 'Cockpit browser E2E shard /4']
+    .map(name => ({ name, status: 'completed', conclusion: 'skipped' })));
+  assert.match(reviewCiContext(f), /Heavy verification: not started: blocked by review/);
+});
+
+test('manual context never hides actual heavy outcomes behind a failed review', () => {
+  for (const name of ['Unit, build, and package', 'Vitest shard 2/3', 'Cockpit browser E2E shard 3/4']) {
+    for (const conclusion of ['failure', 'timed_out', 'cancelled', 'success', null]) {
+      const f = blockedFixture();
+      Object.assign(f.jobs.find(job => job.name === name), {
+        conclusion, status: conclusion ? 'completed' : 'in_progress',
+      });
+      const text = reviewCiContext(f);
+      assert.doesNotMatch(text, /blocked by review/, `${name}: ${conclusion}`);
+      assert.match(text, /## Failed jobs/);
+      assert.match(text, /conclusion: failure/);
+    }
+  }
+});
+
+test('manual context needs complete review-blocked evidence and rejects cancellation', () => {
+  const original = blockedFixture();
+  for (const name of ['Review preflight', 'Automated Code Review', 'Unit, build, E2E, and package',
+    'Unit, build, and package', 'Vitest shard', 'Cockpit browser E2E shard',
+    'Vitest shard 2/3', 'Cockpit browser E2E shard 3/4']) {
+    const f = blockedFixture();
+    f.jobs = original.jobs.filter(job => !job.name.startsWith(name));
+    assert.doesNotMatch(reviewCiContext(f), /blocked by review/, name);
+  }
+  for (const name of ['Review preflight', 'Automated Code Review', 'Unit, build, E2E, and package']) {
+    const f = blockedFixture();
+    f.jobs.find(job => job.name === name).conclusion = 'cancelled';
+    assert.doesNotMatch(reviewCiContext(f), /blocked by review/, name);
+  }
+  const cancelled = blockedFixture(); cancelled.run.conclusion = 'cancelled';
+  assert.doesNotMatch(reviewCiContext(cancelled), /blocked by review/);
+});
+
 test('manual context fails on incomplete jobs and API failure', () => {
   const f = fixture(); f.env.GITHUB_EVENT_NAME = 'workflow_dispatch'; f.total = 201;
   assert.throws(() => reviewCiContext(f), /Incomplete/);

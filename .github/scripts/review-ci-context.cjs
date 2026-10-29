@@ -94,6 +94,30 @@ function latestNative(gh, repo, head) {
     .sort((a, b) => b.databaseId - a.databaseId)[0];
 }
 
+function skippedMatrix(jobs, prefix, count) {
+  const matches = jobs.filter(job => job.name.startsWith(prefix));
+  const names = new Set(matches.map(job => job.name));
+  const complete = matches.length === count && Array.from({ length: count }, (_, i) => `${prefix}${i + 1}/${count}`)
+    .every(name => names.has(name));
+  // GitHub can skip a matrix before expansion, leaving one unnamed shard.
+  const unexpanded = matches.length === 1 && names.has(`${prefix}/${count}`);
+  return (complete || unexpanded) && matches.every(job => job.status === 'completed' && job.conclusion === 'skipped');
+}
+
+function blockedByReview(run, jobs) {
+  const completedWith = (name, conclusion) => {
+    const matches = jobs.filter(job => job.name === name);
+    return matches.length === 1 && matches[0].status === 'completed' && matches[0].conclusion === conclusion;
+  };
+  return run.status === 'completed' && run.conclusion === 'failure'
+    && completedWith('Review preflight', 'success')
+    && completedWith('Automated Code Review', 'failure')
+    && completedWith('Unit, build, E2E, and package', 'failure')
+    && completedWith('Unit, build, and package', 'skipped')
+    && skippedMatrix(jobs, 'Vitest shard ', 3)
+    && skippedMatrix(jobs, 'Cockpit browser E2E shard ', 4);
+}
+
 function manualContext(gh, env, head, pullNumber) {
   const repo = env.GITHUB_REPOSITORY;
   assertLiveHead(gh, repo, pullNumber, head);
@@ -109,7 +133,10 @@ function manualContext(gh, env, head, pullNumber) {
     throw new Error('Current CI attempt changed while collecting context');
   }
   assertLiveHead(gh, repo, pullNumber, head);
-  return `${renderCiResults(result)}\nHead: ${head}\nRun: ${run.id}\nAttempt: ${run.run_attempt}\nWorkflow status: ${run.status}\nWorkflow conclusion: ${run.conclusion || 'pending'}\nDo not wait for CI or run the test suite. Missing current-attempt verification is pending, never a prior success.\n`;
+  const context = blockedByReview(run, jobs)
+    ? '# CI review context\n\nHeavy verification: not started: blocked by review.\nVerification aggregate: failure because the review gate failed; tests did not run.\n'
+    : renderCiResults(result);
+  return `${context}\nHead: ${head}\nRun: ${run.id}\nAttempt: ${run.run_attempt}\nWorkflow status: ${run.status}\nWorkflow conclusion: ${run.conclusion || 'pending'}\nDo not wait for CI or run the test suite. Missing current-attempt verification is pending, never a prior success.\n`;
 }
 
 function reviewCiContext({ gh, env, event }) {

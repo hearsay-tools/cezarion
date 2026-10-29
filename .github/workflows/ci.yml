@@ -575,9 +575,6 @@ jobs:
           # opt out of checkout's fork protection for this reviewed, read-only gate.
           allow-unsafe-pr-checkout: true
           persist-credentials: false
-          # The merge result and its first parent, the base it merged into, for
-          # the citation check below.
-          fetch-depth: 2
 
       # Select the installer from the checked-out merge result: this trusted-base
       # workflow must support a PR that replaces the npm lockfile with pnpm.

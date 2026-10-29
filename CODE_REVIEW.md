@@ -21,6 +21,13 @@ The `Automated Code Review` check (#603) is red when the review opened any new i
 
 Draft state follows the head (`pr-readiness.yml`). A new commit converts a same-repository PR back to draft. The PR is marked ready only when every required check on the live head passes (`skipped` and `neutral` count as passing) and no review thread of any author is unresolved. The required checks are the ruleset's `required_status_checks` plus `Automated Code Review`. Linked board cards follow the PR: draft means `In progress`, ready means `In review`, and `Done` cards never move back. Board sync uses the release App token with Organization projects access. Without that access it logs and skips, and the draft/ready gate still works. Actions has no event for a thread resolved by hand, so run `PR Readiness` by `workflow_dispatch` with the PR number to re-check. PRs from forks keep their author's draft state.
 
+Previously, only test-green heads consumed automated review rounds. The requested
+review-before-tests order spends rounds on preflight-green heads whose tests may
+later fail. The unchanged cap can be exhausted earlier, so subsequent final-head
+changes may receive no new model review. The owner accepted this ordering and
+later test failures. Final-head model review was already conditional on the cap;
+provider selection and review policy are unchanged.
+
 Manual review dispatches judge code and replies without waiting for tests, and bypass docs-only and infra-only review skips. They do not run the test matrix or satisfy native PR checks. The existing release-bump predicate is a GitHub Actions bot on `release/v*`; it skips Vitest and cockpit browser E2E, while build-and-package and `verify` remain required. The release App's weekly `upstream-scan/*` PR skips automated review only while the App authored it and every changed file is under `.ai/upstream/`. If anyone pushes other files onto that branch, it is reviewed as usual. The review runs inside the `ci.yml` main pull-request run after preflight succeeds. A passing review releases heavy verification. After a flaky test failure, **Re-run failed jobs** retains the successful review and successful test jobs, then reruns failed tests and verification. Rerunning a successful upstream review job can also rerun its dependents; do not use that route for test retries. Docs-only and infra-only PRs still run that review job, which skips the model round.
 
 ## Review priorities (in order)
