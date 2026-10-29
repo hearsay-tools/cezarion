@@ -1,3 +1,4 @@
+import { ContinuationSession } from './run/continuation-session.ts';
 import { StepLoop as WorkflowStepLoop } from './run/step-loop.ts';
 import { RunRecovery } from './run/run-recovery.ts';
 import { TurnSettler } from './run/turn-settler.ts';
@@ -265,6 +266,7 @@ export class RunManager {
   private readonly active = new Map<string, ActiveRun>();
   private readonly inputReceiptContext: RunModuleContext;
   private readonly stepSession: StepSession;
+  private readonly continuationSession: ContinuationSession;
   private readonly stepLoop: WorkflowStepLoop;
   private readonly sessionHelperHost: sessionEvents.SessionHelperHost;
   private readonly completionGateHost: completionGateReads.CompletionGateHost = {
@@ -649,6 +651,9 @@ export class RunManager {
       { discoverSkills: () => this.discoverSkills(), workerExecutionStopped: id => this.workerExecutionStopped(id),
         isCurrentState: (id, state) => this.active.get(id) === state, flushAgentInputs: id => this.flushAgentInputs(id) },
     );
+    this.continuationSession = new ContinuationSession(this.inputReceiptContext, {
+      move: (...args) => this.move(...args), dropActive: id => this.dropActive(id),
+    }, this.line);
     this.stepSession = new StepSession(this.inputReceiptContext, {
       workerExecutionStopped: id => this.workerExecutionStopped(id),
       executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
@@ -2030,9 +2035,9 @@ export class RunManager {
     if (this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() })) return;
     workerIdentity(this.store, this.repoRoot, runId);
     const record = this.store.getRun(runId);
-    const workspace = await this.continuationWorkspace(runId, stepId, record);
+    const workspace = await this.continuationSession.continuationWorkspace(runId, stepId, record);
     if (!workspace) return;
-    if (this.settleStoppedContinuation(runId)) return;
+    if (this.continuationSession.settleStoppedContinuation(runId)) return;
     // Continue and restart recovery build their own ActiveRun: hydrate the durable mode here.
     const state = createActiveRun({
       cwd: workspace.cwd,
@@ -2109,55 +2114,8 @@ export class RunManager {
     return this.awaitContinuationSession(runId, state, session, { stepId, sink, turn, delegation, ciTools });
   }
 
-  /** Where a Continue runs: an owned worker's verified workspace, or the task's worktree, which
-   *  retention may have reclaimed (#483), else the repository root. Returns undefined after an
-   *  unavailable owned workspace failed the run. */
-  private async continuationWorkspace(
-    runId: string,
-    stepId: string,
-    record: RunRecord | undefined,
-  ): Promise<{ cwd: string; rematerialized: boolean } | undefined> {
-    if (record?.delegation?.role === 'worker') {
-      const cwd = await this.ownedContinuationWorkspace(runId, stepId, record, record.delegation);
-      return cwd === undefined ? undefined : { cwd, rematerialized: false };
-    }
-    // Retention (#483) rebuilt a reclaimed directory: a bare checkout that needs setup again (#917).
-    const rematerialized = await rematerializeReclaimedWorktree(this.repoRoot, this.store, runId);
-    const cwd = record?.worktreePath && existsSync(record.worktreePath) ? record.worktreePath : this.repoRoot;
-    return { cwd, rematerialized };
-  }
 
-  /** An owned worker's workspace for a Continue, verified with its parent's context. Returns
-   *  undefined after it failed the run: owned workers never adopt or recreate an unverified resource. */
-  private async ownedContinuationWorkspace(
-    runId: string,
-    stepId: string,
-    record: RunRecord,
-    delegation: WorkerDelegationRecord,
-  ): Promise<string | undefined> {
-    try {
-      return await ownedContinuationWorkspace(this.store, this.repoRoot, this.dataDir, record, delegation);
-    } catch (error) {
-      const message = `owned workspace unavailable: ${error instanceof Error ? error.message : String(error)}`;
-      const finishedAt = new Date().toISOString();
-      this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt });
-      this.move(runId, 'fail-start', { error: message, finishedAt, currentStepId: undefined });
-      this.store.appendEvent(runId, { type: 'lifecycle', message });
-      this.line.unmarkStarting(runId);
-      this.dropActive(runId);
-      return undefined;
-    }
-  }
 
-  /** A Stop that arrived while the Continue resolved its workspace cancels the run before it
-   *  becomes active. */
-  private settleStoppedContinuation(runId: string): boolean {
-    if (!this.store.getRun(runId)?.stopping) return false;
-    this.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
-    this.line.unmarkStarting(runId);
-    this.dropActive(runId);
-    return true;
-  }
 
   /** The repository-root lease of a Continue that runs in the repository root. Returns undefined
    *  when no lease is needed, so that path does not yield, else whether the lease was granted. */
