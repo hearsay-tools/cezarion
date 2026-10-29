@@ -1496,7 +1496,7 @@ answer in flight is not a pending question, so the done is accepted and the run 
 
 Phase 2b (hearsay-tools/cezarion#1234) adds the turn-end rule. `decideTurnEnd`
 (`workflows/turn-end.ts`) is one pure function. Every turn end applies it through one
-`RunManager` method, `settleTurn` (hearsay-tools/cezarion#1525): the fresh step's and the
+`TurnSettler` method, `settleTurn` (hearsay-tools/cezarion#1525): the fresh step's and the
 Continue's turn-end handlers, the boundary an acknowledgement settles late, and input readiness for
 a refused autonomous nudge. Since then it also decides a done the completion gate refused, so both
 nudge causes (no wait and completion) have one table test, and the parity cells read each settled

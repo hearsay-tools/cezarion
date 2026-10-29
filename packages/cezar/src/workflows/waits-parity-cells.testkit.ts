@@ -263,7 +263,7 @@ const noReplyNotes = (id: string) => store.readEvents(id).filter(event => event.
  *  alive without one. The nudge's reply bound is shortened so its no-reply park comes at once.
  *  Call it before the session starts: a mock reads its environment when it is spawned. */
 function silenceRefusals() {
-  (manager as unknown as { noWaitNudgeReplyMs: number }).noWaitNudgeReplyMs = 300;
+  runInternals(manager).turnNudges.noWaitNudgeReplyMs = 300;
   process.env.CEZ_MOCK_COMPLETION_REPLY = 'mock:ack-only';
 }
 

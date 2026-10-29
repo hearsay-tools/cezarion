@@ -204,9 +204,10 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
   it('parked stop waits for process result AND pending turn bookkeeping before allowing destruction', async () => {
     const w = await worker(); const hold = gate(); releases.push(hold.release);
-    const real = manager.recordTurnEnd.bind(manager);
-    manager.recordTurnEnd = async (...args) => { await hold.promise; return real(...args); };
+    const real = runInternals(manager).turnBookkeeper.recordTurnEnd.bind(runInternals(manager).turnBookkeeper);
+    const record = vi.spyOn(runInternals(manager).turnBookkeeper, 'recordTurnEnd').mockImplementation(async (...args) => { await hold.promise; return real(...args); });
     manager.enqueueOwnedRun(w.id); await until(() => store.getRun(w.id)?.status === 'waiting');
+    expect(record).toHaveBeenCalled();
     destroy(w); expect(manager.requestWorkerStop(w.id).state).toBe('stopping');
     expect(await manager.awaitRunTermination(w.id, 30)).toBe(false);
     expect(existsSync(workspace(w).path)).toBe(true);

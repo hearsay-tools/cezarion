@@ -1,4 +1,5 @@
 import { runInternals } from './run-internals.testkit.ts';
+import type { ActiveRun } from './active-run.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,7 +9,7 @@ import type { UiEvent } from '../core/ui-events.ts';
 import { RunStore } from '../runs/store.ts';
 import { RunManager } from './run.ts';
 
-type State = Parameters<RunManager['tryAutonomousNudge']>[1];
+type State = ActiveRun;
 describe('human permission lifecycle', () => {
   let root: string, store: RunStore, manager: RunManager, id: string, state: State, session: AgentSession;
   const emit = (event: UiEvent) => manager['handleRunnerUiEvent'](id, state, manager['makeUiSink'](id, 'task'), event);
@@ -35,7 +36,7 @@ describe('human permission lifecycle', () => {
     expect(store.getRun(id)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
     expect(runInternals(manager).line.busySlots()).toBe(0);
     expect(manager.sendMessage(id, [{ type: 'text', text: 'accept' }])).toBe(false);
-    expect(manager['tryAutonomousNudge'](id, state, 'task', null)).toBe(false);
+    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task', null)).toBe(false);
     expect(session.sendMessage).not.toHaveBeenCalled();
     expect(session.sendAgentMessage).not.toHaveBeenCalled();
     expect(store.readEvents(id).some(event => event.type === 'user-message')).toBe(false);

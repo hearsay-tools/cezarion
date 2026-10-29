@@ -118,7 +118,7 @@ Paths are under `packages/cezar/src/workflows/run/`. A path that starts with ano
 | `launch-context.ts` | 2 | hearsay-tools/cezarion#2104 | `agentEnv`, `agentEnvForStep` (delegator stays), `automationsPart`, `agentWebhooksPart`, `sessionContextFor` | — | 5 | 170 |
 | `run-skills.ts` | 2 | hearsay-tools/cezarion#2106 | `loadRunSkills`, `enabledSkills`, `provisionRunSkills`, `provisionLiveSlashSkill` | — | 6 | 190 |
 | `worktree-autosave.ts` | 2 | hearsay-tools/cezarion#2108 | The autosave body; `saveWorktree` and `autosaveCleanupBlocker` delegators stay | `autosaveTasks` | 8 | 130 |
-| `turn-bookkeeping.ts` | 2 | hearsay-tools/cezarion#2101 | Turn markers, `diffStat`, the namer; `recordTurnEnd` and `autoNameRun` delegators stay | `lastNamerKey` | 5 | 110 |
+| `turn-bookkeeping.ts` | 2 | hearsay-tools/cezarion#2101 | Turn markers, `diffStat`, the namer; Phase 5 removes the bookkeeping delegators (hearsay-tools/cezarion#2235) | `lastNamerKey` | 5 | 110 |
 | `wake-retries.ts` | 2, moved to 4 | hearsay-tools/cezarion#2194 | Moved to Phase 4: see its Phase 4 row | — | — | — |
 | `auto-resume.ts` | 2 | hearsay-tools/cezarion#2109 | Arm, fire, reconcile and withdraw the usage-limit resume; `deriveAccountHolds` | `autoResumeTimers` | 5 | 200 |
 | `inbox-claims.ts` | 2 | hearsay-tools/cezarion#2105 | Claim, acknowledge, release and expire inbox claims | `inboxClaimTimers` | 10 | 90 |
@@ -318,7 +318,7 @@ Each order below is load-bearing: other code reaches a correct state because of 
 | `recover` | Facts, orphan settlement, `reconcileWorkerWaits`, scratch, per-run recovery, family reconcile, the scope clear in `finally`, messages, routed answers, re-armed wakes, `reconcileAutoResumes`, and `pump` last | `run-recovery` |
 | `releaseContinuationSession` | Revoke the CI tools and the delegation, record usage peaks, clear the idle and autosave timers, await `saveWorktree`, check for a late cancel, `dropActive`, queue the workflow remainder, then `pump` | `continuation-session` |
 | Session `onEvent` (both launch paths) | Disposed check, image, text (clear timers, note nudge content, append, strip markers), unconsumed input, tool events, raw event, cost, error (then return), the session-error short-circuit, session id, token usage, `ScheduleWakeup`, turn end. The return points decide what is persisted | `session-events` |
-| `queueCompletionRefusal` | The refusal is enqueued with its charge in one commit, before `queueWaitWake` | facade, later `turn-nudges` (hearsay-tools/cezarion#2195) |
+| `queueCompletionRefusal` | The refusal is enqueued with its charge in one commit, before `queueWaitWake` | `turn-nudges` (hearsay-tools/cezarion#2195) |
 | `finish` | Cancel open waits, persist the root finish request, close the question, set `finishRequested`, clear the idle timer, the lifecycle event, then end the session | facade |
 | `dispose` | `disposed = true` first; orphan state cleared before termination waiters settle; wait records stay for a later manager to re-arm | facade |
 
@@ -376,6 +376,20 @@ until Phase 5. The list was checked against `main` at `97335b352`:
   `resolveWait` uses `.waitRegistry`. Timer and CI-watch reads use `.waitWatches`;
   CI-registration reads use `.waitRegistry`; retry/backoff reads and tuning use `.retries`.
   Each migrated spy asserts that the product path called it.
+
+- Turn seams moved in hearsay-tools/cezarion#2235: `endTurn`, `settleTurn`, `boundaryTurn`,
+  `parkForUser`, `armIdleTimer` and `openTurnEndHumanWait` call `TurnSettler` directly;
+  `clearIdleTimer` uses `input-timers.ts`. Nudge tests use `.turnNudges`, including the
+  `armNoWaitNudgeReplyTimer` spy. Timeout tests pass `noWaitNudgeReplyMs` at construction;
+  waits-parity cells tune `.turnNudges.noWaitNudgeReplyMs` only when they did so before.
+  Bookkeeping calls and `lastNamerKey` reads use `.turnBookkeeper`; `trackTurnEnd` lives there.
+  `recordTurnEnd` and `autoNameRun` stay async tracking wrappers so dropped calls retain their
+  rejection behavior. The harness bookkeeping drain reads only tracked `recordTurnEnd` work.
+  The five remaining HumanWaits one-liners are removed; callers use `.humanWaits`.
+  `settledTurnOutcome` stays on the facade for the prototype spy in `turn-outcomes.testkit.ts`;
+  `parentCompletionBlockers` stays for `human-waits.test.ts`. `completionGate`,
+  `deferParentCompletion`, `completionRefusal`, `finishDecision` and `completionMayPass` wait
+  for hearsay-tools/cezarion#2238.
 
 Function modules have no instance: `launch-context.ts`, `session-events.ts`, `completion-gate.ts`,
 `queued-revival.ts`, `input-receipts.ts`, `usage-accounting.ts`, `run-guards.ts`,
@@ -439,6 +453,11 @@ facade. `registerAsk` has no test caller and its cezar-tools host calls `WaitReg
 `disarmWait` stays on the facade to order watch teardown, family retry removal and process
 watch teardown. `WaitRegistry.abortRegistrations` owns CI-registration abort-then-delete;
 `WakeAdmission.disarmRunWaits` calls it before disarming watches.
+
+Phase 5 (hearsay-tools/cezarion#2235) removes `recordTurnEnd` from the facade; it was a direct
+integration-test drive, while shipped callers named it only in comments. The bookkeeping,
+nudge, settlement and HumanWaits delegators listed in § Test seams are removed too. Public
+agent-tool entry points and spied function-module seams remain.
 
 ## Behavior questions
 

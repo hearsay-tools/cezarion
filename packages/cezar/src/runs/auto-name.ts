@@ -36,7 +36,7 @@ export function autoNamingActive(env: NodeJS.ProcessEnv = process.env): boolean 
  * Live title updates switch (owner decision on PR #479 — deliberately ON by
  * default, deviating from the cost-opt-in house rule; cost is bounded by the
  * cheap `namerModel`, one call per turn end, and the skip conditions in
- * `RunManager.recordTurnEnd`). Precedence: `config.liveTitleUpdates` (the
+ * `TurnBookkeeper.recordTurnEnd`). Precedence: `config.liveTitleUpdates` (the
  * Settings toggle) wins over the `CEZ_TITLE_UPDATES` env default (`'0'` = off)
  * wins over the built-in ON.
  */

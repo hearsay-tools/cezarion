@@ -31,23 +31,32 @@ interface TurnNudgesHost {
   openTurnEndHumanWait(id: string, state: ActiveRun, step: string | undefined, via: 'no-wait' | 'budget', note: string): void;
   settledTurnOutcome(id: string, entry: 'turn-end' | 'ack' | 'ready' | 'gate' | 'reply-timer', outcome: TurnEndOutcome): TurnEndOutcome | undefined;
   queueWaitWake(id: string): void;
-  armNoWaitNudgeReplyTimer(id: string, state: ActiveRun): void;
-  noWaitNudgeReplyMs(): number;
 }
 
 export class TurnNudges {
   constructor(private readonly context: RunModuleContext, private readonly humanWaits: HumanWaits,
     private readonly line: RunLine, private readonly completionGateHost: completionGateReads.CompletionGateHost,
-    private readonly host: TurnNudgesHost, private readonly maxAutoContinues: number, private readonly completionWillWait: string) {}
+    private readonly host: TurnNudgesHost, private readonly maxAutoContinues: number, private readonly completionWillWait: string, public noWaitNudgeReplyMs: number) {}
+  /** The session just took a refusal nudge, live or queued (hearsay-tools/cezarion#1301): its turn is
+   *  the nudge's, and its reply is bounded by the no-wait nudge's reply timer, so a harness that
+   *  reads the refusal and says nothing parks on Cezar's human wait instead of holding the slot. */
   awaitCompletionNudgeReply(runId: string, state: ActiveRun, session: AgentSession): void {
     state.completionNudged = session;
     const refusal = completionGateReads.completionRefusal(this.context, this.completionGateHost, runId);
     if (refusal) recordRequestRefusal(state, refusal);
     state.noWaitNudgeSawContent = false;
     clearIdleTimer(state);
-    this.host.armNoWaitNudgeReplyTimer(runId, state);
+    this.armNoWaitNudgeReplyTimer(runId, state);
   }
 
+  /**
+   * A blocked done found when the session is gone (`settleSuccess` after its async work, a
+   * restart; hearsay-tools/cezarion#1301): the refusal is queued as one lifecycle input, charged as
+   * the live nudge is, and the scheduler continuation reopens the session to deliver it
+   * (`queueWaitWake`); its delivery marks that turn as the nudge's. Open waits come first: they wake
+   * the run, and the refusal is a note. A spent budget opens Cezar's `budget` human wait, and an
+   * input the full inbox refuses leaves the run waiting for the user. Always true.
+   */
   queueCompletionRefusal(runId: string, refusal: CompletionRefusal): boolean {
     const state = this.host.active.get(runId);
     this.context.store.appendEvent(runId, { type: 'note', tone: 'warning', message: `Completion blocked: ${refusal.message}` });
@@ -82,6 +91,8 @@ export class TurnNudges {
     return true;
   }
 
+  /** Stop discards a refusal the run still owes, as it discards its waits: a later Continue must not
+   *  deliver a stale one (hearsay-tools/cezarion#1301). One an inbox read holds is left to it. */
   retireCompletionRefusal(runId: string): boolean {
     const inputs = this.context.store.getRun(runId)?.agentInputs ?? [];
     const kept = inputs.filter(input => input.deliveredAt || input.purpose !== 'completion-refusal' || hasLiveInboxClaim(input));
@@ -94,6 +105,7 @@ export class TurnNudges {
     return true;
   }
 
+  /** Shared stop/input/liveness guards for an automatic continuation. */
   canAutoContinue(runId: string, state: ActiveRun): boolean {
     const run = this.context.store.getRun(runId);
     return !!run && !this.context.disposed() && !run.stopping && !state.cancelled && !state.finishRequested &&
@@ -102,6 +114,19 @@ export class TurnNudges {
       !state.agentInputFlight && !harnessOwesInput(state) && !this.host.hasQueuedAgentInputs(runId);
   }
 
+  /**
+   * Both turn-end paths keep a nudged session running, with no user-wait timer or
+   * released slot. The next turn can finish with DONE, nudge again, or park at the
+   * cap (waiting/monitoring with their existing wake/idle rules). Queued/accepted
+   * input, worker/CI waits and parent completion keep priority. Cancel, Finish,
+   * disposal and memory pause stop nudging; provider errors/exits use normal
+   * teardown. Native mid-turn asks still park for an answer (outside this policy).
+   * A refused ordinary nudge waits for readiness at this exact boundary; the idle
+   * timeout bounds a missing readiness signal. New activity/input invalidates it.
+   * `ask` is this turn's ask line, which an autonomous run does not register before the budget
+   * (hearsay-tools/cezarion#1234). A wire that refuses the nudge registers it after all.
+   */
+  /** `text` is the turn-end rule's nudge; an ask line's nudge scopes the same one itself (hearsay-tools/cezarion#1620). */
   tryAutonomousNudge(runId: string, state: ActiveRun, stepId: string, ask: AskRequest | null,
     text = stepScopedNudge(AUTONOMOUS_NUDGE, !!state.session && state.nextStep?.session === state.session)): boolean {
     const session = state.session;
@@ -146,6 +171,9 @@ export class TurnNudges {
     return true;
   }
 
+  /** The nudge a turn end with no wait or done gets: one automatic turn, charged to the
+   *  automatic-wake budget. The autonomous wording repeats; the no-wait one is sent once and is
+   *  bounded by its reply timer (#544's liveness). */
   sendTurnEndNudge(runId: string, state: ActiveRun, stepId: string | undefined, text: string): boolean {
     if (state.autonomous) return !!stepId && this.tryAutonomousNudge(runId, state, stepId, null, text);
     if (!this.canAutoContinue(runId, state)) return false;
@@ -153,7 +181,7 @@ export class TurnNudges {
     if (!this.host.submitAgentInput(runId, state, [{ type: 'text', text }])) return false;
     state.noWaitNudged = state.session;
     clearIdleTimer(state);
-    this.host.armNoWaitNudgeReplyTimer(runId, state);
+    this.armNoWaitNudgeReplyTimer(runId, state);
     const spent = this.host.chargeAutomaticWake(runId);
     this.context.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}), message: `${NO_WAIT_NUDGE_NOTE} (${spent}/${this.maxAutoContinues})` });
     return true;
@@ -169,6 +197,9 @@ export class TurnNudges {
     return event.item?.parentItemId === undefined;
   }
 
+  /** A reply to the nudge clears its bound. One that arrives after the bound parked the run resumes
+   *  it, as the final-message nudge's did (#544); its turn end then decides, and a run still on
+   *  Cezar's no-wait wait parks on it again. */
   noteNoWaitNudgeContent(runId: string, state: ActiveRun, event: { type: string; item?: { parentItemId?: string } }): void {
     if (!this.isNoWaitNudgeReply(state, event)) return;
     state.noWaitNudgeSawContent = true;
@@ -179,6 +210,9 @@ export class TurnNudges {
     state.noWaitNudgeParked = undefined;
   }
 
+  /** A no-wait nudge the harness acknowledged but never answered (an OpenCode heartbeat keeps the
+   *  session alive without a turn): at the bound Cezar opens the no-wait human wait and the run
+   *  waits for the user. A reply that arrives after it runs, and the run stays on that question. */
   armNoWaitNudgeReplyTimer(runId: string, state: ActiveRun): void {
     clearNoWaitNudgeReplyTimer(state);
     if (state.noWaitNudgeSawContent) return;
@@ -192,7 +226,7 @@ export class TurnNudges {
       // The note names the nudge left unanswered (hearsay-tools/cezarion#1301).
       this.host.openTurnEndHumanWait(runId, state, state.currentStepId, 'no-wait', state.completionNudged === session ? COMPLETION_NO_REPLY_NOTE : NO_WAIT_NO_REPLY_NOTE);
       this.host.settledTurnOutcome(runId, 'reply-timer', { kind: 'park', keepsSlot: false });
-    }, this.host.noWaitNudgeReplyMs());
+    }, this.noWaitNudgeReplyMs);
     timer.unref?.();
     state.noWaitNudgeReplyTimer = timer;
   }
