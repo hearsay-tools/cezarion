@@ -1,3 +1,4 @@
+import { WaitRegistry } from './run/wait-registry.ts';
 import { WaitWatches } from './run/wait-watches.ts';
 import { HumanWaits } from './run/human-waits.ts';
 import { RunLine, type PendingJob } from './run/run-line.ts';
@@ -25,13 +26,13 @@ import { openCompletionRequests, recordRequestRefusal, repairFailedRootFinish, r
 import * as continuation from './continuation-admission.ts';
 import type { ContinueRunOptions } from './continuation-admission.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
-import { askErrorMessage, doneErrorMessage, waitErrorMessage } from '../ci-wait/errors.ts';
-import { cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskRequest, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type CezarWaitRequestInput, type DoneErrorCode, type PeerWaitEntry, type PeerWaitResult, type PrWaitEntry, type ProcessWaitEntry, type ProcessWaitResult, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, isUsageLimitHold, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT } from '@open-mercato/cezar-contract/waits';
+import { doneErrorMessage } from '../ci-wait/errors.ts';
+import { cezarDoneRequestSchema, type CezarAskRequest, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type DoneErrorCode, type PeerWaitEntry, type PeerWaitResult, type PrWaitEntry, type ProcessWaitEntry, type ProcessWaitResult, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, isUsageLimitHold, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT } from '@open-mercato/cezar-contract/waits';
 import { type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { type PreviewStopRequest, type PreviewStopResult, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, decideTurnEnd, stepScopedNudge, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
-import { claudeScheduleWakeupDelay, isRunnerActivity, emitAskRequested, askCardFields, classifyTurnEnd, discardQueuedMessagesOnAsk, type TurnEndRead } from './run/turn-markers.ts';
+import { claudeScheduleWakeupDelay, isRunnerActivity, emitAskRequested, classifyTurnEnd, discardQueuedMessagesOnAsk, type TurnEndRead } from './run/turn-markers.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
 import { familyOf, canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested } from './run/run-guards.ts';
 import { beginUsageInvocation, recordReportedCost, recordUsageUiEvent, recordUsagePeaks } from './run/usage-accounting.ts';
@@ -61,8 +62,8 @@ import { RUN_EXITS, transition, transitionVia, type RunExitId } from './run-stat
 import { accountHeldFor, deriveAccountHolds, queuedRecoveryInput, queuedStartAt, sessionlessWakePrompt } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
 import { executionAccount } from './execution-account.ts';
-import { chargesBudget, chargesBudgetMessage, hasPrWait, holdsOwedResults, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitInputId, waitResultText } from './waits.ts';
-import { assertOwnedWorkerWaitScope, assertRequestWaitScope, delegationWaitRefusal, isDelegationWait, peerWaitEntry, peerWaitOf, peerWaitResult, runsAwaitingPeer, workerListTarget, workerWaitTarget } from './wait-scope.ts';
+import { chargesBudget, chargesBudgetMessage, hasPrWait, holdsOwedResults, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitInputId, waitResultText } from './waits.ts';
+import { assertOwnedWorkerWaitScope, assertRequestWaitScope, peerWaitEntry, peerWaitOf, peerWaitResult, runsAwaitingPeer, workerWaitTarget } from './wait-scope.ts';
 import { previewCdpSession, previewRunContext, type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
 import { artifactInstructions } from '../artifacts/lifecycle.ts';
@@ -76,12 +77,10 @@ import { join } from 'node:path';
 import type { AskRequest } from '../core/ask.ts';
 import { type AgentSession } from '../core/claude-cli-runner.ts';
 import { hasRegisteredRunProcess, onUsage, replaceRunProcess, type ProcessUsage } from '../core/process-usage.ts';
-import { isSessionLeader } from '../core/session-process.ts';
-import { probeProcessWait } from '../process-wait/supervisor.ts';
-import { confineExitFile, type ExitFileRoots } from '../process-wait/exit-file.ts';
+import { type ExitFileRoots } from '../process-wait/exit-file.ts';
 import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
 import { noJitter, ORPHAN_BACKOFF, retryDelayMs, WAKE_RETRY_BACKOFF, type Backoff } from '../delegation/retry-backoff.ts';
-import { processStartToken, recordedProcessLive, type CwdSource } from '../delegation/process-liveness.ts';
+import { type CwdSource } from '../delegation/process-liveness.ts';
 import { parseUsageLimit } from '../core/usage-limit.ts';
 import { startManagedSession } from '../core/managed-session.ts';
 import { createRunner } from '../core/runner-factory.ts';
@@ -328,6 +327,7 @@ export class RunManager {
   private readonly active = new Map<string, ActiveRun>();
   private readonly inputReceiptContext: RunModuleContext;
   private readonly humanWaits: HumanWaits;
+  private readonly waitRegistry: WaitRegistry;
   private readonly waitWatches: WaitWatches;
   private get waitTimers() { return this.waitWatches.waitTimers; }
   private get ciWatches() { return this.waitWatches.ciWatches; }
@@ -416,7 +416,7 @@ export class RunManager {
   private get waitWakeQueuedAt() { return this.line.waitWakeQueuedAt; }
   private get waitWakeAdmitted() { return this.line.waitWakeAdmitted; }
   /** CI lookups in flight, keyed by run id and normalized PR URL: two PRs may register at once. */
-  private readonly ciRegistrations = new Map<string, { runId: string; abort: AbortController; promise: Promise<PrWaitEntry | TimerWaitEntry> }>();
+  private get ciRegistrations() { return this.waitRegistry.ciRegistrations; }
   /** Worker waits whose resolution write failed and is being retried: the warning is said once. */
   private readonly workerResolveRetries = new Set<string>();
   /** A wake that could not be admitted yet, retried by run id. */
@@ -576,6 +576,19 @@ export class RunManager {
       armWorkerDeadline: (id, wait, delay) => this.armWorkerDeadline(id, wait, delay),
       settleWait: (id, waitId, result) => this.settleWait(id, waitId, result), exitFileRoots: id => this.exitFileRoots(id),
     });
+    this.waitRegistry = new WaitRegistry(this.inputReceiptContext, {
+      active: id => this.active.get(id), workerExecutionStopped: id => this.workerExecutionStopped(id),
+      executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run), ciSupervisor: () => this.ciSupervisor,
+      isParked: id => this.line.isParked(id), countAutomaticWakes: id => this.automaticWakes(id),
+      registerPeerWait: (id, request, via) => this.registerPeerWait(id, request, via),
+      registerWorkerListWait: (id, request, via) => this.registerWorkerListWait(id, request, via),
+      exitFileRoots: (id, run) => this.exitFileRoots(id, run), disarmWait: id => this.disarmWait(id),
+      settleWait: (id, waitId, result) => this.settleWait(id, waitId, result),
+      withdrawCezarHumanWaits: id => this.withdrawCezarHumanWaits(id), armWait: (id, wait) => this.armWait(id, wait),
+      parkOnWaits: (id, state) => this.parkOnWaits(id, state), cancelAutomaticAtCap: (id, waits) => this.cancelAutomaticAtCap(id, waits),
+      reparkWithoutWaits: (id, state) => this.reparkWithoutWaits(id, state), waitOnUserWithoutSession: id => this.waitOnUserWithoutSession(id),
+      queueWaitWake: id => this.queueWaitWake(id), retryWaitAdmission: id => this.retryWaitAdmission(id),
+    }, MAX_AUTO_CONTINUES);
     this.humanWaits = new HumanWaits(this.inputReceiptContext, { routeWorkerQuestion: id => this.routeWorkerQuestion(id) }, MAX_AUTO_CONTINUES);
     this.worktreeAutosave = new WorktreeAutosave(
       this.inputReceiptContext,
@@ -686,8 +699,7 @@ export class RunManager {
     this.disposed = true;
     this.workerScratchCleanup.pause();
     this.waitWatches.disposeWatches();
-    for (const task of this.ciRegistrations.values()) task.abort.abort();
-    this.ciRegistrations.clear();
+    this.waitRegistry.dispose();
     this.waitWatches.disposeRetries();
     for (const timer of this.wakeRetries.values()) clearTimeout(timer);
     this.wakeRetries.clear();
@@ -946,224 +958,21 @@ export class RunManager {
     return registerPreviewServer(this.store, this.preview, this.cezarPort, () => this.disposed, runId, request, signal);
   }
 
-  /** The checks every wait registration shares: the session that called is the run's current one,
-   *  and no root finish blocks it. Refusals throw `{ code }`. */
-  private registrationGate(runId: string, generation: string, capabilitySignal?: AbortSignal) {
-    const state = this.active.get(runId);
-    const refuse = (code: WaitErrorCode | AskErrorCode): never => {
-      // Fixed codes only: no tool arguments, credentials or provider diagnostics.
-      console.warn(`[cez] wait registration refused: ${code}`);
-      throw Object.assign(new Error(code === 'autonomous_run' ? askErrorMessage(code) : waitErrorMessage(code)), { code });
-    };
-    const assertCanRegister = () => {
-      const refused = toolSessionRefusal(this.store.getRun(runId), state, this.active.get(runId), generation, capabilitySignal, this.disposed);
-      const run = this.store.getRun(runId);
-      if (refused || !run || !state) return refuse(refused ?? 'run_missing');
-      if (this.workerExecutionStopped(runId)) refuse('worker_execution_stopped');
-      if (this.executionBlockedByRootFinish(run)) refuse('root_finish_pending');
-      return { state, run };
-    };
-    return { refuse, assertCanRegister };
-  }
-
-  /**
-   * `cezar_ask` (hearsay-tools/cezarion#1234): open the run's human wait with its card. A run holds
-   * one: a registration in the turn that opened it replaces its card and keeps its id, and one after
-   * the user saw it returns it unchanged. An autonomous run assumes and continues instead, until
-   * its automatic wakes are spent.
-   */
-  async registerAsk(runId: string, request: CezarAskRequest, generation: string, capabilitySignal?: AbortSignal): Promise<HumanWaitEntry> {
-    const card = askCardFields(cezarAskRequestSchema.parse(request));
-    const { refuse, assertCanRegister } = this.registrationGate(runId, generation, capabilitySignal);
-    const { state: active, run } = assertCanRegister();
-    const turnId = active.ciTurnId ??= randomUUID();
-    if (active.autonomous && this.automaticWakes(runId) < MAX_AUTO_CONTINUES) refuse('autonomous_run');
-    const open = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human' && wait.source !== 'cezar');
-    if (open?.askSeq !== undefined) return open;
-    if (!open && openWaits(run).length >= WAIT_LIMIT) refuse('capacity');
-    const base: HumanWaitEntry = open ?? { id: randomUUID(), kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: new Date().toISOString(), phase: 'open', turnId };
-    const { context: _replaced, ...kept } = base;
-    return this.openWait(runId, active, { ...kept, ...card });
-  }
-
-  /**
-   * Open a CI or timer wait (hearsay-tools/cezarion#1233). Trusted capability callbacks supply run
-   * identity; the model supplies only the PR and deadline, or the seconds and note. Refusals throw
-   * `{ code }`. An identical registration (same PR; or same seconds and note in the same turn)
-   * returns the open wait it repeats.
-   */
-  async registerWait(runId: string, request: CezarWaitRequestInput, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry | PeerWaitEntry> {
-    const parsed = cezarWaitRequestSchema.parse(request);
-    const { refuse, assertCanRegister } = this.registrationGate(runId, generation, capabilitySignal);
-    const { state: active, run } = assertCanRegister();
-    // hearsay-tools/cezarion#1235, hearsay-tools/cezarion#1995: as `cez worker wait` and `cez message wait`, under the
-    // tool's own codes. It answers its own repeat, so it is checked before the capacity below.
-    if (isDelegationWait(parsed)) {
-      if (!run.delegation || run.delegation.role === 'invalid') refuse('denied_scope');
-      try {
-        return parsed.kind === 'peer' ? this.registerPeerWait(runId, { peerIds: parsed.peer_ids, timeoutSeconds: parsed.timeout_seconds }, 'cezar_wait')
-          : this.registerWorkerListWait(runId, workerListTarget(parsed), 'cezar_wait');
-      } catch (error) { return refuse(delegationWaitRefusal(error, () => this.executionBlockedByRootFinish(run))); }
-    }
-    const turnId = active.ciTurnId ??= randomUUID();
-    if (parsed.kind === 'process') return this.registerProcessWait(runId, active, run, parsed, via, turnId);
-    const existing = identicalWait(run.waits ?? [], parsed, turnId);
-    if (existing) return existing;
-    // Counted as the store counts them, so a registration accepted here is never refused there.
-    if (openWaits(run).length >= WAIT_LIMIT) refuse('capacity');
-    if (parsed.kind === 'timer') {
-      if (this.semaphore.monitoringWakeIntervalMinutes() === null) refuse('timers_disabled');
-      if (this.automaticWakes(runId) >= MAX_AUTO_CONTINUES) refuse('wake_budget_spent');
-      const now = Date.now();
-      const wait: TimerWaitEntry = { id: randomUUID(), kind: 'timer', source: 'agent', via, registeredAt: new Date(now).toISOString(),
-        deadline: new Date(now + parsed.seconds * 1000).toISOString(), phase: 'open', turnId, seconds: parsed.seconds,
-        ...(parsed.note === undefined ? {} : { note: parsed.note }) };
-      return this.openWait(runId, active, wait);
-    }
-    const key = `${runId}\n${normalizePrUrl(parsed.pr)}\n${parsed.until}\n${parsed.wake_on_conflict}`;
-    const pending = this.ciRegistrations.get(key);
-    if (pending) return pending.promise;
-    const abort = new AbortController();
-    const signal = capabilitySignal ? AbortSignal.any([abort.signal, capabilitySignal]) : abort.signal;
-    const promise = (async () => {
-      const assertLookupCurrent = () => {
-        assertCanRegister();
-        if (signal.aborted) refuse('registration_aborted');
-        if (active.ciTurnId !== turnId) refuse('turn_changed');
-      };
-      const identity = await this.ciSupervisor.resolve(parsed.pr, signal).catch(error => {
-        assertLookupCurrent();
-        throw error;
-      });
-      assertLookupCurrent();
-      // The same PR may have registered while this lookup was in flight under another spelling.
-      const repeated = identicalWait(this.store.getRun(runId)?.waits ?? [], parsed, turnId);
-      if (repeated && repeated.kind !== 'process') return repeated;
-      if (openWaits(this.store.getRun(runId) ?? {}).length >= WAIT_LIMIT) refuse('capacity');
-      const now = Date.now();
-      const wait: PrWaitEntry = { ...identity, id: randomUUID(), kind: 'pr', source: 'agent', via, generation, turnId,
-        timeoutSeconds: parsed.timeout_seconds, until: parsed.until, wakeOnConflict: parsed.wake_on_conflict, registeredAt: new Date(now).toISOString(),
-        deadline: new Date(now + parsed.timeout_seconds * 1000).toISOString(), phase: 'open' };
-      return this.openWait(runId, active, wait);
-    })();
-    this.ciRegistrations.set(key, { runId, abort, promise });
-    try { return await promise; }
-    finally { if (this.ciRegistrations.get(key)?.abort === abort) this.ciRegistrations.delete(key); }
-  }
-
-  /**
-   * A process wait (hearsay-tools/cezarion#1446, spec § Process wait decisions). Cezar refuses only
-   * what it cannot watch to an end: another user's PID, its own, and an agent session's leader;
-   * the agent's shell can already observe any process of its own, so there is no ownership proof.
-   * A PID already gone is no error: the command was fast, and the wait resolves at once from its
-   * exit file, or as exited.
-   */
-  private registerProcessWait(runId: string, active: ActiveRun, run: RunRecord, request: Extract<CezarWaitRequest, { kind: 'process' }>, via: WaitVia, turnId: string): ProcessWaitEntry {
-    const refuse = (code: WaitErrorCode): never => { throw Object.assign(new Error(waitErrorMessage(code)), { code }); };
-    if (this.semaphore.monitoringWakeIntervalMinutes() === null) refuse('timers_disabled');
-    if (this.automaticWakes(runId) >= MAX_AUTO_CONTINUES) refuse('wake_budget_spent');
-    const roots = this.exitFileRoots(runId, run);
-    let exitFile: string | undefined;
-    if (request.exit_file !== undefined) {
-      const confined = confineExitFile(request.exit_file, roots);
-      if (!confined.ok) return refuse('exit_file_outside');
-      exitFile = confined.path;
-    }
-    if (request.pid === process.pid || isSessionLeader(request.pid)) refuse('process_not_allowed');
-    try { process.kill(request.pid, 0); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === 'EPERM') refuse('process_not_owned'); }
-    const live = recordedProcessLive({ pid: request.pid });
-    const startToken = live ? processStartToken(request.pid) : undefined;
-    const existing = identicalWait(run.waits ?? [], request, turnId, { ...(startToken === undefined ? {} : { startToken }), ...(exitFile === undefined ? {} : { exitFile }) });
-    if (existing?.kind === 'process') return existing;
-    if (openWaits(run).length >= WAIT_LIMIT) refuse('capacity');
-    const now = Date.now();
-    const wait: ProcessWaitEntry = { id: randomUUID(), kind: 'process', source: 'agent', via, registeredAt: new Date(now).toISOString(),
-      deadline: new Date(now + request.timeout_seconds * 1000).toISOString(), phase: 'open', turnId, timeoutSeconds: request.timeout_seconds,
-      pid: request.pid, ...(startToken === undefined ? {} : { startToken }), ...(exitFile === undefined ? {} : { exitFile }),
-      ...(request.note === undefined ? {} : { note: request.note }) };
-    const opened = this.openWait(runId, active, wait);
-    if (!live) {
-      this.disarmWait(wait.id);
-      this.settleWait(runId, wait.id, probeProcessWait({ pid: wait.pid, deadline: wait.deadline, roots, ...(exitFile === undefined ? {} : { exitFile }) }, now));
-    }
-    return opened;
-  }
+  async registerAsk(runId: string, request: CezarAskRequest, generation: string, capabilitySignal?: AbortSignal): Promise<HumanWaitEntry> { return this.waitRegistry.registerAsk(runId, request, generation, capabilitySignal); }
+  async registerWait(runId: string, request: CezarWaitRequestInput, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry | PeerWaitEntry> { return this.waitRegistry.registerWait(runId, request, via, generation, capabilitySignal); }
+  private openWait<W extends Wait>(runId: string, state: ActiveRun, wait: W): W { return this.waitRegistry.openWait(runId, state, wait); }
+  cancelWait(runId: string, waitId: string, generation: string) { return this.waitRegistry.cancelWait(runId, waitId, generation); }
+  private readonly workerStatus = (workerId: string): string => this.waitRegistry.workerStatus(workerId);
+  private resolveWait(runId: string, waitId: string, result?: CiWaitResult | ProcessWaitResult | PeerWaitResult, observed?: WorkerWaitEntry): void { this.waitRegistry.resolveWait(runId, waitId, result, observed); }
 
   private exitFileRoots(runId: string, run = this.store.getRun(runId)): ExitFileRoots {
     return this.waitWatches.exitFileRoots(runId, run);
-  }
-
-  /** Commit, arm and (at a boundary) park on a newly registered wait. */
-  private openWait<W extends Wait>(runId: string, state: ActiveRun, wait: W): W {
-    this.withdrawCezarHumanWaits(runId);
-    try { this.store.commitWait(runId, wait); }
-    catch { throw Object.assign(new Error(waitErrorMessage('persistence')), { code: 'persistence' }); }
-    this.armWait(runId, wait);
-    if (state.atTurnBoundary === state.session || this.line.isParked(runId)) this.parkOnWaits(runId, state);
-    // The store keeps the entry it was given; only its phase can have moved since.
-    return (this.store.getRun(runId)?.waits?.find(entry => entry.id === wait.id) as W | undefined) ?? wait;
-  }
-
-  /**
-   * The agent's `cezar_cancel_wait`. An open wait is cancelled with its watch or timer, and no
-   * result for it is ever delivered. A resolved wait is already owed: cancelling it is a no-op and
-   * its result arrives with the next wake. A settled or unknown id is `not_found`. A human wait the
-   * user already sees is theirs to answer (`human_question`); one from this turn can be withdrawn.
-   */
-  cancelWait(runId: string, waitId: string, generation: string): { cancelled: true } | { cancelled: false; code: 'not_found' | 'already_resolved' | 'human_question' } {
-    const state = this.active.get(runId);
-    if (this.disposed || !state || state.ciGeneration !== generation) {
-      throw Object.assign(new Error(waitErrorMessage('generation_mismatch')), { code: 'generation_mismatch' });
-    }
-    const wait = this.store.getRun(runId)?.waits?.find(entry => entry.id === waitId);
-    if (!wait) return { cancelled: false, code: 'not_found' };
-    if (wait.phase !== 'open') return { cancelled: false, code: 'already_resolved' };
-    if (wait.kind === 'human' && wait.askSeq !== undefined) return { cancelled: false, code: 'human_question' };
-    this.store.commitOutcome(runId, { kind: 'cancelled', waitIds: [waitId] });
-    this.disarmWait(waitId);
-    return { cancelled: true };
   }
 
   private armWait(runId: string, wait: Wait): void { this.waitWatches.armWait(runId, wait); }
   private armWorkerDeadline(runId: string, wait: WorkerWaitEntry, firstDelay?: number): void { this.waitWatches.armWorkerDeadline(runId, wait, firstDelay); }
   private disarmWait(waitId: string): void { this.waitWatches.disarmWait(waitId); this.workerResolveRetries.delete(waitId); this.waitWatches.disarmProcessWatch(waitId); }
   private settleWait(runId: string, waitId: string, result?: CiWaitResult | ProcessWaitResult | PeerWaitResult): void { this.waitWatches.settleWait(runId, waitId, result); }
-
-  /** Commit an open wait as resolved together with its lifecycle input (id = wait id, or an
-   *  upgraded worker wait's `wakeInputId`), then queue the run's wake. A worker wait passes the
-   *  entry as reconciled, with its outcomes and `result`. Throws when the checkpoint fails; a wait
-   *  no longer open is ignored. */
-  private resolveWait(runId: string, waitId: string, result?: CiWaitResult | ProcessWaitResult | PeerWaitResult, observed?: WorkerWaitEntry): void {
-    const latest = this.store.getRun(runId)?.waits?.find(wait => wait.id === waitId);
-    if (!latest || latest.phase !== 'open') return;
-    const state = this.active.get(runId);
-    // The count includes a timer batch still awaiting its acknowledgement.
-    if (chargesBudget(latest) && this.automaticWakes(runId) >= MAX_AUTO_CONTINUES) {
-      this.cancelAutomaticAtCap(runId, [latest]);
-      if (state) this.reparkWithoutWaits(runId, state);
-      else this.waitOnUserWithoutSession(runId);
-      return;
-    }
-    const resolvedAt = new Date().toISOString();
-    const settled: Wait = latest.kind === 'pr'
-      ? { ...latest, phase: 'resolved', resolvedAt, result: (result as CiWaitResult | undefined) ?? { outcome: 'deadline', headSha: latest.headSha, observedAt: resolvedAt, checks: [], totalChecks: 0, truncated: false } }
-      : latest.kind === 'process'
-        ? { ...latest, phase: 'resolved', resolvedAt, result: (result as ProcessWaitResult | undefined) ?? { outcome: 'deadline', observedAt: resolvedAt } }
-      : latest.kind === 'worker'
-        ? { ...observed ?? latest, phase: 'resolved', resolvedAt, result: observed?.result ?? { reason: 'timeout' } }
-      : latest.kind === 'peer'
-        ? { ...latest, phase: 'resolved', resolvedAt, result: (result as PeerWaitResult | undefined) ?? { reason: 'timeout' } }
-        : { ...latest, phase: 'resolved', resolvedAt };
-    const input: AgentInput = { id: waitInputId(settled), parentRunId: runId, source: 'lifecycle', createdAt: resolvedAt,
-      text: waitResultText(settled, { tools: !state?.toolless, workerStatus: this.workerStatus }) };
-    this.store.commitWait(runId, settled, input);
-    try { this.queueWaitWake(runId); }
-    catch { this.retryWaitAdmission(runId); }
-  }
-
-  /** A worker's current status, as a worker wait's result names it. */
-  private readonly workerStatus = (workerId: string): string => this.store.getRun(workerId)?.status ?? 'unavailable';
 
   /** A timer, process or peer wait due, or still owed, once the automatic-wake budget is spent
    *  wakes nothing: it is cancelled with the cap note, and the run keeps whatever else it waits on
