@@ -315,7 +315,7 @@ export class RunSettlement {
    * OFF) AND the run is not autonomous. Autonomous runs — and runs with the gate
    * off — settle straight to `done`, leaving the diff in the worktree untouched.
    */
-  settleSuccess(runId: string, durableRootFinish = false, keepStepId?: string): Promise<void> {
+  async settleSuccess(runId: string, durableRootFinish = false, keepStepId?: string): Promise<void> {
     return this.context.work.track('settleSuccess', this.settleSuccessWork(runId, durableRootFinish, keepStepId));
   }
 

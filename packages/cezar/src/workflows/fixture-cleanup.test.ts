@@ -54,10 +54,13 @@ it.each(['ordinary', 'delegated root'] as const)('drains detached Finish settlem
     boundary.enter(); await boundary.held;
     return result;
   });
-  const engine = manager as unknown as { settleSuccess(id: string): Promise<void>; settleRequestedRootFinish(id: string): Promise<void> };
-  const settlement = vi.spyOn(engine, mode === 'ordinary' ? 'settleSuccess' : 'settleRequestedRootFinish');
+  const engine = manager as unknown as { settleRequestedRootFinish(id: string): Promise<void> };
+  const settlement = mode === 'ordinary'
+    ? vi.spyOn(runInternals(manager).runSettlement, 'settleSuccess')
+    : vi.spyOn(engine, 'settleRequestedRootFinish');
   expect(manager.isActive(run.id)).toBe(false);
   expect(manager.finish(run.id)).toBe(true);
+  expect(settlement).toHaveBeenCalledWith(run.id);
   // Observe the real detached operation, including rejection on the broken helper.
   const finished = Promise.allSettled([settlement.mock.results[0]!.value]);
   await boundary.entered;

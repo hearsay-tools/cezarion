@@ -367,12 +367,12 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       await restart();
       process.env.CEZ_REVIEW_GATE = review ? '1' : '0';
       writeFileSync(join(store.getRun(p.id)!.worktreePath!, 'review-change.txt'), 'review me');
-      const engine = manager as unknown as { settleSuccess(id: string, durable?: boolean): Promise<void> };
-      const real = engine.settleSuccess.bind(manager);
+      const real = runInternals(manager).runSettlement.settleSuccess.bind(runInternals(manager).runSettlement);
       let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
       let completion: Promise<void> | undefined;
-      engine.settleSuccess = (id, durable) => completion = gate.then(() => real(id, durable));
+      runInternals(manager).runSettlement.settleSuccess = (id, durable) => completion = gate.then(() => real(id, durable));
       expect(manager.finish(p.id)).toBe(true);
+      expect(completion).toBeInstanceOf(Promise);
       expect(store.getRun(p.id)?.delegation).toHaveProperty('finishRequestedAt');
       expect(manager.continueRun(p.id, { text: 'too late' }).ok).toBe(false);
       store.flush(); const checkpoint = readPersistedRuns(join(root, '.ai/cezar'));
@@ -420,13 +420,13 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const blocker = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:slow', runner: 'claude' });
     await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(blocker.id)?.sessionEverOpened === true);
     manager.enqueueOwnedRun(queued.id);
-    const engine = manager as unknown as { settleSuccess(id: string, durable?: boolean): Promise<void> };
-    const real = engine.settleSuccess.bind(manager);
+    const real = runInternals(manager).runSettlement.settleSuccess.bind(runInternals(manager).runSettlement);
     let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
     let completion: Promise<void> | undefined;
-    engine.settleSuccess = (id, durable) => id === p.id ? completion = gate.then(() => real(id, durable)) : real(id, durable);
+    runInternals(manager).runSettlement.settleSuccess = (id, durable) => id === p.id ? completion = gate.then(() => real(id, durable)) : real(id, durable);
     try {
-      store.commitRootFinishIntent(p.id); void engine.settleSuccess(p.id, true);
+      store.commitRootFinishIntent(p.id); void runInternals(manager).runSettlement.settleSuccess(p.id, true);
+      expect(completion).toBeInstanceOf(Promise);
       if (mode === 'continued') expect(manager.continueRun(w.id, { text: 'must not start' }).ok).toBe(false);
       const unrelated = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:hold', runner: 'claude' });
       manager.cancel(blocker.id);
@@ -450,20 +450,20 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     }
     const engine = manager as unknown as {
       agentEnvForStep(id: string, ...args: unknown[]): Promise<unknown>;
-      settleSuccess(id: string, durable?: boolean): Promise<void>;
     };
-    const env = engine.agentEnvForStep.bind(manager); const settle = engine.settleSuccess.bind(manager);
+    const env = engine.agentEnvForStep.bind(manager); const settle = runInternals(manager).runSettlement.settleSuccess.bind(runInternals(manager).runSettlement);
     let start!: () => void; let finish!: () => void; let entered = false; let completion: Promise<void> | undefined;
     const startGate = new Promise<void>(resolve => { start = resolve; });
     const finishGate = new Promise<void>(resolve => { finish = resolve; });
     engine.agentEnvForStep = async (id, ...args) => { if (id === w.id) { entered = true; await startGate; } return env(id, ...args); };
-    engine.settleSuccess = (id, durable) => id === p.id ? completion = finishGate.then(() => settle(id, durable)) : settle(id, durable);
+    runInternals(manager).runSettlement.settleSuccess = (id, durable) => id === p.id ? completion = finishGate.then(() => settle(id, durable)) : settle(id, durable);
     const sessions = store.readEvents(w.id).filter(event => event.type === 'session').length;
     try {
       if (mode === 'continuation') expect(manager.continueRun(w.id, { text: 'mock:hold' }).ok).toBe(true);
       else manager.enqueueOwnedRun(w.id);
       await until(() => entered);
-      store.commitRootFinishIntent(p.id); void engine.settleSuccess(p.id, true);
+      store.commitRootFinishIntent(p.id); void runInternals(manager).runSettlement.settleSuccess(p.id, true);
+      expect(completion).toBeInstanceOf(Promise);
       start();
       await until(() => store.getRun(w.id)?.status === 'queued');
       expect(store.readEvents(w.id).filter(event => event.type === 'session')).toHaveLength(sessions);
@@ -520,14 +520,13 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => !!monitoringWakeOf(store.getRun(w.id)));
     const engine = manager as unknown as {
       active: Map<string, { session: { sendAgentMessage(...args: unknown[]): false | Promise<void> } }>;
-      settleSuccess(id: string, durable?: boolean): Promise<void>;
     };
     const state = engine.active.get(w.id)!;
     const send = vi.spyOn(state.session, 'sendAgentMessage');
-    const settle = engine.settleSuccess.bind(manager);
+    const settle = runInternals(manager).runSettlement.settleSuccess.bind(runInternals(manager).runSettlement);
     let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
     let completion: Promise<void> | undefined;
-    engine.settleSuccess = (id, durable) => id === p.id ? completion = gate.then(() => settle(id, durable)) : settle(id, durable);
+    runInternals(manager).runSettlement.settleSuccess = (id, durable) => id === p.id ? completion = gate.then(() => settle(id, durable)) : settle(id, durable);
     const deadline = monitoringWakeOf(store.getRun(w.id))!;
     try {
       if (pending) store.commitRootFinishIntent(p.id);
@@ -546,20 +545,21 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         // hearsay-tools/cezarion#1233: the wake turn keeps its pool slot until its own turn end.
         expect(runInternals(manager).line.monitoring.has(w.id)).toBe(true);
       }
+      if (pending) expect(completion).toBeInstanceOf(Promise);
     } finally { vi.useRealTimers(); release(); await completion; }
   });
 
   it.each(['delayed diff', 'failed diff'])('cancellation retires pending Finish after %s and preserves human Continue across restart', async mode => {
     const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
-    const engine = manager as unknown as { settleSuccess(id: string, durable?: boolean): Promise<void> };
-    const settle = engine.settleSuccess.bind(manager);
+    const settle = runInternals(manager).runSettlement.settleSuccess.bind(runInternals(manager).runSettlement);
     let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
     let completion: Promise<void> | undefined;
-    engine.settleSuccess = (id, durable) => completion = (mode === 'delayed diff' ? gate : Promise.resolve()).then(() => settle(id, durable));
+    runInternals(manager).runSettlement.settleSuccess = (id, durable) => completion = (mode === 'delayed diff' ? gate : Promise.resolve()).then(() => settle(id, durable));
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       if (mode === 'failed diff') store.updateRun(p.id, { baseBranch: 'nonexistent-ref' });
       expect(manager.finish(p.id)).toBe(true);
+      expect(completion).toBeInstanceOf(Promise);
       if (mode === 'failed diff') await until(() => warn.mock.calls.length > 0);
       expect(manager.cancel(p.id)).toBe(true);
       // Read disk without flush: cancellation and retirement are one durable checkpoint.

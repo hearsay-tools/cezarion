@@ -110,7 +110,6 @@ import {
 } from '@open-mercato/cezar-contract/delegation';
 import type { ConversationState, RunEvent } from '@open-mercato/cezar-contract';
 import {
-  type ConversationMessage,
   type RequestWaitRequest,
 } from '@open-mercato/cezar-contract/conversations';
 import { contentBlocksOf, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from './pasted-content.ts';
@@ -208,7 +207,6 @@ export class RunManager {
   private readonly orphans: WorkerOrphans;
   settleOrphanedWorkerExecution(runId: string, opts: { admitting?: boolean; fresh?: boolean; cwds?: CwdSource } = {}): boolean { return this.orphans.settleOrphanedWorkerExecution(runId, opts); }
   takeWorkerTerminationBlocker(runId: string): { blocker: WorkerTerminationBlocker; changed: boolean } | undefined { return this.orphans.takeWorkerTerminationBlocker(runId); }
-  private async terminateFinishedWorkerGroups(runId: string, timeoutMs: number): Promise<void> { return this.orphans.terminateFinishedWorkerGroups(runId, timeoutMs); }
 
   requestWorkerStop(runId: string): WorkerStopResult {
     if (this.store.getRun(runId)?.delegation?.role !== 'worker') throw new Error('Worker not found');
@@ -219,7 +217,7 @@ export class RunManager {
 
   async awaitRunTermination(runId: string, timeoutMs: number, opts: { reapOrphans?: boolean } = {}): Promise<boolean> {
     const terminated = await this.workerExecutions.proveRunTermination(runId, timeoutMs, opts);
-    if (terminated && opts.reapOrphans && !this.disposed) await this.terminateFinishedWorkerGroups(runId, timeoutMs);
+    if (terminated && opts.reapOrphans && !this.disposed) await this.orphans.terminateFinishedWorkerGroups(runId, timeoutMs);
     return terminated;
   }
 
@@ -252,16 +250,6 @@ export class RunManager {
   private readonly recovery: RunRecovery;
   private disposed = false;
 
-  /** Whether any recovery is in progress: one at a time (`recover`), and `pump` waits for it. */
-  private get recovering(): boolean { return this.recovery.recovering; }
-
-  /**
-   * Whether a recovery in progress holds this run, so its wakes, input flushes and delegation
-   * reconciles wait for that recovery's own passes: every run during boot recovery, and only the
-   * adopted family's during a recovery scoped to one. The rest of a running project stays live: a
-   * wake held back for an unrelated family would be lost, since the scoped passes never revisit it.
-   */
-  private recoveringRun(run: RunRecord | string | undefined): boolean { return this.recovery.recoveringRun(run); }
 
   private readonly onDelegationRun = (run: RunRecord, source?: CommitSource): void => {
     // Delegation metadata checkpoints do not change task status.
@@ -272,7 +260,7 @@ export class RunManager {
     if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.active.get(run.id)?.revokeDelegation?.();
     // Cleanup checkpoints emit terminal records too. With delegation disabled,
     // these observations must not replay the project's conversation histories.
-    if (this.disposed || this.recoveringRun(run) || (source === 'delegation-checkpoint' && process.env.CEZ_DELEGATION !== '1')) return;
+    if (this.disposed || this.recovery.recoveringRun(run) || (source === 'delegation-checkpoint' && process.env.CEZ_DELEGATION !== '1')) return;
     // A destroy retry changes nothing the family reconcile reads (#880).
     if (source === 'delegation-destroy-progress') return;
     if (run.delegation && run.delegation.role !== 'invalid' && !['queued', 'running', 'waiting'].includes(run.status)) {
@@ -287,7 +275,6 @@ export class RunManager {
   private readonly attachments: AttachmentWriter;
   private readonly queuedInput: QueuedInput;
   private readonly autoResumeScheduler: AutoResumeScheduler;
-  private get autoResumeTimers() { return this.autoResumeScheduler.autoResumeTimers; }
   private readonly repoRootLease: RepoRootLease;
 
   /** `.ai/cezar` — where the per-task handoff files live. */
@@ -347,8 +334,8 @@ export class RunManager {
       withExecutionAccount: run => this.wakeAdmission.withExecutionAccount(run),
       maintenance: id => this.claims.has(id) || !!this.autosaveCleanupBlocker(id),
       admitted: id => this.workerExecutions.admitted(id), workerExecutionStopped: id => this.workerExecutionStopped(id),
-      recovering: () => this.recovering, recoveringRun: run => this.recoveringRun(run),
-      reconcileAutoResumes: () => this.reconcileAutoResumes(), cancel: id => this.cancel(id),
+      recovering: () => this.recovery.recovering, recoveringRun: run => this.recovery.recoveringRun(run),
+      reconcileAutoResumes: () => this.autoResumeScheduler.reconcileAutoResumes(), cancel: id => this.cancel(id),
       move: (id, patch) => this.move(id, 'fail-start', patch), beginWorkerExecution: id => this.workerExecutions.beginWorkerExecution(id),
       admissionError: (error, fallback) => admissionError(error, fallback),
       admitQueuedWaitWake: id => this.wakeAdmission.admitQueuedWaitWake(id),
@@ -368,11 +355,11 @@ export class RunManager {
       updatePendingHumanAsk: (id, value) => { const state = this.active.get(id); if (state) state.pendingHumanAsk = value; },
     }, MAX_AUTO_CONTINUES);
     this.familyReconciler = new FamilyReconciler(this.context, {
-      active: id => this.active.get(id), isActive: id => this.isActive(id), recoveringRun: run => this.recoveringRun(run),
+      active: id => this.active.get(id), isActive: id => this.isActive(id), recoveringRun: run => this.recovery.recoveringRun(run),
       cancel: id => this.cancel(id), armWait: (id, wait) => this.waitWatches.armWait(id, wait),
       armWorkerDeadline: (id, wait, delay) => this.waitWatches.armWorkerDeadline(id, wait, delay), disarmWait: id => this.disarmWait(id),
       resolveWait: (id, waitId, result, observed) => this.waitRegistry.resolveWait(id, waitId, result, observed),
-      retireSettledQuestions: id => this.retireSettledQuestions(id), fallbackRoutedQuestions: (id, reason) => this.fallbackRoutedQuestions(id, reason),
+      retireSettledQuestions: id => this.workerQuestions.retireSettledQuestions(id), fallbackRoutedQuestions: (id, reason) => this.workerQuestions.fallbackRoutedQuestions(id, reason),
       reconcileWorkerWaits: id => this.reconcileWorkerWaits(id),
     });
     this.waitWatches = new WaitWatches(this.context, {
@@ -387,7 +374,7 @@ export class RunManager {
       active: id => this.active.get(id), workerExecutionStopped: id => this.workerExecutionStopped(id),
       executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run), ciSupervisor: () => this.ciSupervisor,
       isParked: id => this.line.isParked(id), countAutomaticWakes: id => this.wakeAdmission.automaticWakes(id),
-      reconcileWorkerWaits: family => this.reconcileWorkerWaits(family), noticeParkedWorkers: id => this.noticeParkedWorkers(id),
+      reconcileWorkerWaits: family => this.reconcileWorkerWaits(family), noticeParkedWorkers: id => this.workerQuestions.noticeParkedWorkers(id),
       canProceedWithRun: (id, run) => this.canProceedWithRun(id, run),
       exitFileRoots: (id, run) => this.waitWatches.exitFileRoots(id, run), disarmWait: id => this.disarmWait(id),
       settleWait: (id, waitId, result) => this.waitWatches.settleWait(id, waitId, result),
@@ -422,7 +409,7 @@ export class RunManager {
       settledTurnOutcome: (id, entry, outcome) => this.settledTurnOutcome(id, entry, outcome), queueWaitWake: id => this.wakeAdmission.queueWaitWake(id),
     }, MAX_AUTO_CONTINUES, COMPLETION_WILL_WAIT, options.noWaitNudgeReplyMs ?? NO_WAIT_NUDGE_REPLY_MS);
     this.worktreeAutosave = new WorktreeAutosave(this.context,
-      { holdForMaintenance: ids => this.holdForMaintenance(ids),
+      { holdForMaintenance: ids => this.claims.holdForMaintenance(ids),
         reapTerminalScratch: id => this.reapTerminalScratch(id), releaseSlot: () => this.line.releaseSlot(),
         saveWorktree: (id, state, reason) => this.saveWorktree(id, state, reason),
         trackTurn: (id, task) => this.workerExecutions.trackTurn(id, task) },
@@ -445,7 +432,7 @@ export class RunManager {
     this.claims = new MaintenanceClaims(this.context,
       { isActive: id => this.isActive(id), autosaveCleanupBlocker: id => this.autosaveCleanupBlocker(id),
         hasExecution: id => this.workerExecutions.has(id), scheduleScratchCleanup: id => this.workerScratchCleanup.schedule(id),
-        holdForMaintenance: ids => this.holdForMaintenance(ids) },
+        holdForMaintenance: ids => this.claims.holdForMaintenance(ids) },
     );
     this.attachments = new AttachmentWriter(this.context,
       { persistAttachment: (id, mediaType, data, prefix) => this.attachments.persistAttachment(id, mediaType, data, prefix) },
@@ -474,7 +461,7 @@ export class RunManager {
         releaseSlot: () => this.line.releaseSlot() },
     );
     this.turnBookkeeper = new TurnBookkeeper(this.context,
-      { isDisposedDelegatedRun: id => this.isDisposedDelegatedRun(id), discoverSkills: () => this.discoverSkills(),
+      { isDisposedDelegatedRun: id => isDisposedDelegatedRun(this.store, () => this.disposed, id), discoverSkills: () => this.discoverSkills(),
         reviveWorkflow: run => queuedRevival.reviveWorkflow(this.context, this.queuedRevivalHost, run), trackTurn: (id, task) => this.workerExecutions.trackTurn(id, task) },
     );
     this.runSkills = new RunSkills(this.context,
@@ -513,7 +500,7 @@ export class RunManager {
         cancelOpenWaits: (...args) => this.wakeAdmission.cancelOpenWaits(...args),
         settleOrphanedWorkerExecution: (...args) => this.settleOrphanedWorkerExecution(...args),
         settleRequestedRootFinish: (...args) => this.settleRequestedRootFinish(...args),
-        settleSuccess: (...args) => this.settleSuccess(...args),
+        settleSuccess: (...args) => this.runSettlement.settleSuccess(...args),
         reconcileWorkerWaits: (...args) => this.reconcileWorkerWaits(...args),
         pump: (...args) => this.line.pump(...args),
         recover: (...args) => this.recover(...args),
@@ -523,7 +510,7 @@ export class RunManager {
     this.wakeAdmission = new WakeAdmission(this.context, {
       active: this.active, retries: this.retries, line: this.line, waitWatches: this.waitWatches, waitRegistry: this.waitRegistry,
       inboxClaims: this.inboxClaims, workerQuestions: this.workerQuestions, humanWaits: this.humanWaits,
-      isActive: id => this.isActive(id), move: (id, exit) => this.move(id, exit), recoveringRun: run => this.recoveringRun(run),
+      isActive: id => this.isActive(id), move: (id, exit) => this.move(id, exit), recoveringRun: run => this.recovery.recoveringRun(run),
       continueRun: (id, opts, defer) => this.continueRun(id, opts, defer), disarmWait: id => this.disarmWait(id),
       reconcileWorkerWaits: id => this.reconcileWorkerWaits(id), releaseSlot: () => this.line.releaseSlot(),
       parkForUser: (id, state, step) => this.turnSettler.parkForUser(id, state, step), armIdleTimer: (id, state) => this.turnSettler.armIdleTimer(id, state),
@@ -549,11 +536,11 @@ export class RunManager {
         generation: id => this.continuationAcceptance.generation(id), isActive: id => this.isActive(id),
         move: (id, exit, patch) => this.move(id, exit, patch), dropActive: id => this.dropActive(id),
         saveWorktree: (id, state, reason) => this.saveWorktree(id, state, reason),
-        settleSuccess: (id, durable, keep) => this.settleSuccess(id, durable, keep),
+        settleSuccess: (id, durable, keep) => this.runSettlement.settleSuccess(id, durable, keep),
         deferParentCompletion: id => this.deferParentCompletion(id),
         closingWakeDecision: (id, holds, cancelled, error) => this.wakeAdmission.closingWakeDecision(id, holds, cancelled, error),
-        owesDelivery: id => this.wakeAdmission.owesDelivery(id), preserveRunAfterDisposal: (id, state) => this.preserveRunAfterDisposal(id, state),
-        isDisposedDelegatedRun: id => this.isDisposedDelegatedRun(id), queueWaitWake: id => this.wakeAdmission.queueWaitWake(id),
+        owesDelivery: id => this.wakeAdmission.owesDelivery(id), preserveRunAfterDisposal: (id, state) => preserveRunAfterDisposal(this.store, () => this.disposed, id, state),
+        isDisposedDelegatedRun: id => isDisposedDelegatedRun(this.store, () => this.disposed, id), queueWaitWake: id => this.wakeAdmission.queueWaitWake(id),
         reconcileWorkerWaits: id => this.reconcileWorkerWaits(id), releaseSlot: () => this.line.releaseSlot(),
         enforceRetention: () => this.enforceRetention(), reapTerminalScratch: id => this.reapTerminalScratch(id),
         forgetMemoryPause: id => { this.memoryPausing.delete(id); },
@@ -606,7 +593,7 @@ export class RunManager {
       isActive: id => this.isActive(id), move: (id, exit) => this.move(id, exit),
       workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
       hasUnansweredHumanAsk: id => this.hasUnansweredHumanAsk(id), countAutomaticWakes: (id, budget) => this.wakeAdmission.automaticWakes(id, budget),
-      recoveringRun: id => this.recoveringRun(id), continueRun: (id, opts, defer) => this.continueRun(id, opts, defer),
+      recoveringRun: id => this.recovery.recoveringRun(id), continueRun: (id, opts, defer) => this.continueRun(id, opts, defer),
       latchAgentInputError: (id, state, session, message) => this.latchAgentInputError(id, state, session, message),
       parkForUser: (id, state, step) => this.turnSettler.parkForUser(id, state, step), settleTurn: (id, state, entry, turn) => this.turnSettler.settleTurn(id, state, entry, turn),
       boundaryTurn: (id, state, session, done) => this.turnSettler.boundaryTurn(id, state, session, done),
@@ -880,7 +867,7 @@ export class RunManager {
   private disarmWait(waitId: string): void { this.waitWatches.disarmWait(waitId); this.familyReconciler.forgetRetry(waitId); this.waitWatches.disarmProcessWatch(waitId); }
 
   /** Snapshot of the actual active session, never guessed from partial run settings. */
-  private delegationExecutionSettings(runId: string): DelegationExecutionSettings {
+  delegationExecutionSettings(runId: string): DelegationExecutionSettings {
     return delegationExecutionSettings(this.active.get(runId));
   }
 
@@ -1033,7 +1020,7 @@ export class RunManager {
           hydrated.persistedImages,
           hydrated.persistedAttachments,
         ));
-      })().catch((err: unknown) => this.failCrashedContinuation(runId, err))
+      })().catch((err: unknown) => this.continuationAcceptance.failCrashedContinuation(runId, err))
         .finally(() => this.workerExecutions.finishWorkerExecution(runId));
       return;
     }
@@ -1088,15 +1075,6 @@ export class RunManager {
    */
   adoptOrphanedRun(runId: string, opts: { stop?: boolean } = {}): Promise<boolean> { return this.recovery.adoptOrphanedRun(runId, opts); }
 
-  private isDisposedDelegatedRun(runId: string): boolean {
-    return isDisposedDelegatedRun(this.store, () => this.disposed, runId);
-  }
-
-  /** Shutdown is not completion. Explicit terminal controls retain their precedence. */
-  private preserveRunAfterDisposal(runId: string, state: ActiveRun): boolean {
-    return preserveRunAfterDisposal(this.store, () => this.disposed, runId, state);
-  }
-
   /**
    * Register an executing run: the ONE way an `ActiveRun` enters `active`. Both callers of
    * `createActiveRun` (`execute` and `runContinuation`, which serves Continue and restart
@@ -1146,8 +1124,6 @@ export class RunManager {
   }
 
   // ---- usage-limit auto-resume (spec 2026-08-03-auto-resume-after-usage-limit) --------------
-
-  private reconcileAutoResumes(): void { this.autoResumeScheduler.reconcileAutoResumes(); }
 
   private requeueWhileHeld(
     runId: string,
@@ -1266,7 +1242,6 @@ export class RunManager {
   }
 
   claimWorktreeReclaim(runId: string): (() => void) | null { return this.claims.claimWorktreeReclaim(runId); }
-  private holdForMaintenance(runIds: readonly string[]): (() => void) | null { return this.claims.holdForMaintenance(runIds); }
   claimForPublish(runId: string): (() => void) | null { return this.claims.claimForPublish(runId); }
   claimForBranchCleanup(runIds: readonly string[]): (() => void) | null { return this.claims.claimForBranchCleanup(runIds); }
 
@@ -1365,13 +1340,10 @@ export class RunManager {
 
 
 
-  private noticeParkedWorkers(rootId: string): void { return this.workerQuestions.noticeParkedWorkers(rootId); }
 
 
-  private retireSettledQuestions(parentId: string): void { return this.workerQuestions.retireSettledQuestions(parentId); }
 
 
-  private fallbackRoutedQuestions(parentId: string, reason: string): void { return this.workerQuestions.fallbackRoutedQuestions(parentId, reason); }
 
   /**
    * `cez worker cancel-wait`: cancels a worker wait in the list, as `cezar_cancel_wait` does, and
@@ -1432,7 +1404,7 @@ export class RunManager {
       if (status === 'review') { this.finish(runId); return; }
       if (status === 'running') this.move(runId, 'park');
       this.reconcileWorkerWaits(runId);
-      await this.settleSuccess(runId, true);
+      await this.runSettlement.settleSuccess(runId, true);
     }
     catch { console.warn('[cez] parent finish checkpoint failed; intent retained for retry'); }
   }
@@ -1560,7 +1532,7 @@ export class RunManager {
           this.store.updateStep(runId, step.id, { status: 'done', finishedAt });
         }
       }
-      void this.settleSuccess(runId);
+      void this.runSettlement.settleSuccess(runId);
       return true;
     }
     if (decision.action === 'review') {
@@ -1638,7 +1610,6 @@ export class RunManager {
     }
   }
 
-  private failCrashedContinuation(runId: string, err: unknown): void { return this.continuationAcceptance.failCrashedContinuation(runId, err); }
 
   private async runContinuation(
     runId: string,
@@ -1786,22 +1757,8 @@ export class RunManager {
   }
 
   private recordUsagePeaks(runId: string): void {
-    recordUsagePeaks(this.store, { isDisposedDelegatedRun: id => this.isDisposedDelegatedRun(id) }, runId);
+    recordUsagePeaks(this.store, { isDisposedDelegatedRun: id => isDisposedDelegatedRun(this.store, () => this.disposed, id) }, runId);
   }
-
-  /**
-   * Diff-first review gate (spec 009), shared by `execute` and
-   * `runContinuation`: a *successful* run whose worktree holds changes rests
-   * at `review` instead of `done` — the user inspects the diff first, then
-   * sends feedback back, opens a draft PR, or just finishes. Failed/cancelled
-   * runs never enter review; no worktree or an empty diff means plain `done`.
-   *
-   * The gate is opt-in (#489): the review park happens only when it is enabled
-   * (`reviewGateEnabled` — config toggle over the `CEZ_REVIEW_GATE` env, default
-   * OFF) AND the run is not autonomous. Autonomous runs — and runs with the gate
-   * off — settle straight to `done`, leaving the diff in the worktree untouched.
-   */
-  private async settleSuccess(runId: string, durableRootFinish = false, keepStepId?: string): Promise<void> { return this.runSettlement.settleSuccess(runId, durableRootFinish, keepStepId); }
 
 
   /** The outcome a settled turn reached, for the parity cells that prove which path ran

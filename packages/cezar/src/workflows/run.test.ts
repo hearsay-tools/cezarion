@@ -872,7 +872,7 @@ describe('RunManager.continueRun override', () => {
  * (the same method `execute`, `runContinuation`, and `recover`'s waiting-run path
  * all call) against a real fixture worktree.
  */
-describe('RunManager.settleSuccess — optional review gate', () => {
+describe('RunSettlement.settleSuccess — optional review gate', () => {
   const savedGate = process.env.CEZ_REVIEW_GATE;
   const savedAutoname = process.env.CEZ_AUTONAME;
   let repoRoot: string;
@@ -927,7 +927,7 @@ describe('RunManager.settleSuccess — optional review gate', () => {
     return store.getRun(record.id) as RunRecord;
   }
 
-  const settle = (id: string) => (manager as unknown as { settleSuccess(id: string): Promise<void> }).settleSuccess(id);
+  const settle = (id: string) => runInternals(manager).runSettlement.settleSuccess(id);
 
   it('gate off (default) + changes → done, diff left in the worktree', async () => {
     const record = await changedRun();

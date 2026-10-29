@@ -48,10 +48,17 @@ export class RunRecovery {
     private readonly workerQuestions: WorkerQuestions, private readonly autoResumeScheduler: AutoResumeScheduler,
     private readonly host: RunRecoveryHost, private readonly restartContinuationPrompt: string) {}
 
+  /** Whether any recovery is in progress: one at a time (`recover`), and `pump` waits for it. */
   get recovering(): boolean {
     return this.recoveryScope !== undefined;
   }
 
+  /**
+   * Whether a recovery in progress holds this run, so its wakes, input flushes and delegation
+   * reconciles wait for that recovery's own passes: every run during boot recovery, and only the
+   * adopted family's during a recovery scoped to one. The rest of a running project stays live: a
+   * wake held back for an unrelated family would be lost, since the scoped passes never revisit it.
+   */
   recoveringRun(run: RunRecord | string | undefined): boolean {
     const scope = this.recoveryScope;
     if (!scope) return false;

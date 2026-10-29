@@ -126,7 +126,7 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
         await waitFor(() => store.readEvents(runId).some(event => event.type === 'text' && String(event.text).includes('stopped')));
         const internals = runInternals(manager);
         const state = internals.active.get(runId)!;
-        const session = state.session;
+        const session = state.session!;
         const settled = state.agentInputFlight?.settled;
         expect(settled).toBeInstanceOf(Promise);
         try {

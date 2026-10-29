@@ -1,4 +1,3 @@
-import * as executionSettings from './execution-settings.ts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DelegationPolicyError } from './policy.ts';
 import { fixture } from './service.testkit.ts';
@@ -33,7 +32,7 @@ describe('delegation execution settings boundary', () => {
   });
 
   it('refuses a parent with no live session before resolving a selection', async () => {
-    vi.mocked(executionSettings.delegationExecutionSettings).mockRestore();
+    vi.mocked(f.manager.delegationExecutionSettings).mockRestore();
     const validate = vi.fn();
     await expect(f.manager.selectDelegationExecutionSettings(f.parent.id, {}, validate))
       .rejects.toMatchObject({ code: 'incompatible_state', message: 'Parent session settings unavailable' });
