@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -75,12 +76,12 @@ describe('account holds read the execution account', () => {
   it('holds a live session\'s wake by the step it runs, not the task-level runner', () => {
     heldRun();
     const live = store.createRun({ title: 'live', workflow: 'w', task: 't', runner: 'codex', steps: [{ id: 'x', name: 'x', kind: 'agent' }] });
-    const engine = manager as unknown as { active: Map<string, unknown>; wakeHeld(run: unknown): boolean };
+    const engine = manager as unknown as { active: Map<string, unknown> };
     engine.active.set(live.id, { delegationSettings: { cwd: repoRoot, runner: 'claude', agentProfile: 'default' } });
     try {
-      expect(engine.wakeHeld(store.getRun(live.id))).toBe(true);
+      expect(runInternals(manager).wakeAdmission.wakeHeld(store.getRun(live.id)!)).toBe(true);
       engine.active.set(live.id, { delegationSettings: { cwd: repoRoot, runner: 'codex', agentProfile: 'default' } });
-      expect(engine.wakeHeld(store.getRun(live.id))).toBe(false);
+      expect(runInternals(manager).wakeAdmission.wakeHeld(store.getRun(live.id)!)).toBe(false);
     } finally {
       engine.active.delete(live.id);
     }

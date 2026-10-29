@@ -185,7 +185,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
     const wait = await register(run.id);
     const engine = runInternals(manager);
-    const send = vi.spyOn(engine.active.get(run.id)!.session, 'sendAgentMessage').mockReturnValue(false);
+    const send = vi.spyOn(engine.active.get(run.id)!.session!, 'sendAgentMessage').mockReturnValue(false);
     external.settle(success());
     await until(() => send.mock.calls.length >= 2);
     expect(manager.cancel(run.id)).toBe(true);
@@ -308,11 +308,12 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     expect(watched.at(-1)).toMatchObject({ id: receipt.id, until: 'merge', wakeOnConflict: false });
     // The committed row at the wake boundary already holds the result and its input.
     let committed: { waits?: Wait[]; agentInputs?: Array<{ id: string; text: string }> } | undefined;
-    const engine = manager as unknown as { queueWaitWake(id: string): void };
-    const queue = engine.queueWaitWake.bind(manager);
-    vi.spyOn(engine, 'queueWaitWake').mockImplementation(id => { if (id === run.id) committed = readPersistedRuns(join(root, '.ai/cezar')).find(row => row.id === id); queue(id); });
+    const engine = runInternals(manager).wakeAdmission;
+    const queue = engine.queueWaitWake.bind(engine);
+    const wake = vi.spyOn(engine, 'queueWaitWake').mockImplementation(id => { if (id === run.id) committed = readPersistedRuns(join(root, '.ai/cezar')).find(row => row.id === id); queue(id); });
     settle({ outcome: 'merged', headSha: identity.headSha, observedAt: new Date().toISOString(), checks: [], totalChecks: 0, truncated: false, mergedAt: '2026-10-23T09:00:00Z' });
     await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
+    expect(wake).toHaveBeenCalled();
     expect(committed?.waits?.find(wait => wait.id === receipt.id)).toMatchObject({ phase: 'resolved', until: 'merge', result: { outcome: 'merged' } });
     expect(committed?.agentInputs?.find(input => input.id === receipt.id)?.text).toContain('(until merge)');
     expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === receipt.id)).toHaveLength(1);

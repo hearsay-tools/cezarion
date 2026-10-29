@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, fixtureWorkSettled, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { nonDumpableHolder } from '../delegation/non-dumpable.testkit.ts';
 import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
@@ -555,7 +556,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     manager.enqueueOwnedRun(w.id); await until(() => !!monitoringWakeOf(store.getRun(w.id)));
     const deadline = monitoringWakeOf(store.getRun(w.id))!;
     destroy(w); await vi.advanceTimersByTimeAsync(Date.parse(deadline) - Date.now() + 1);
-    expect(manager['automaticWakes'](w.id)).toBe(0);
+    expect(runInternals(manager).wakeAdmission.automaticWakes(w.id)).toBe(0);
     expect(monitoringWakeOf(store.getRun(w.id))).toBe(deadline);
     expect(store.readEvents(w.id).some(event => event.type === 'note' && typeof event.message === 'string' && event.message.includes('automatic monitoring wake-up'))).toBe(false);
     vi.useRealTimers();

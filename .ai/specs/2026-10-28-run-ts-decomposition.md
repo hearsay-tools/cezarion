@@ -248,8 +248,8 @@ the `step-session.ts` instance. Neither callee calls back into a launch path, so
 cycle, and the constructor builds the callees first.
 
 A module imports the Phase 1 pure functions it needs instead of taking the manager's one-line
-wrapper. Tests spy on three wrappers on the manager, so these stay host calls: `automaticWakes`
-(`waits-parity-cells.testkit.ts`, row U7m), `executionBlockedByRootFinish` and
+wrapper. Phase 5 moved the `automaticWakes` spy (row U7m) to `WakeAdmission` in
+hearsay-tools/cezarion#2232. These wrappers still stay host calls: `executionBlockedByRootFinish` and
 `hasUnansweredHumanAsk` (`ci-wait-registration.test.ts`). A module that imports
 `canProceedWithRun` passes it the host's `workerExecutionStopped` and
 `executionBlockedByRootFinish`, which tests also spy on.
@@ -358,10 +358,10 @@ until Phase 5. The list was checked against `main` at `97335b352`:
   `runInternals(manager)` provides the typed module, context, active-map and disposal reads; its
   instance test pins every class-module field. The 12 facade members remain in this PR, while
   cleanup ownership also covers a module calling its own methods.
-- Spied: `awaitRunTermination`, `reconcileWorkerWaits`, `startRun`, `recover`, `queueWaitWake`,
+- Spied: `awaitRunTermination`, `reconcileWorkerWaits`, `startRun`, `recover`,
   `deliverConversationInput`, `continueRun`, `settledTurnOutcome`, `submitAgentInput`,
   `releaseSlot`, `noticeParkedWorker`, `completionGate`, `dropActive`, `reviveQueuedRun`,
-  `retireUnreadParentQuestion`, `armNoWaitNudgeReplyTimer`, `automaticWakes`,
+  `retireUnreadParentQuestion`, `armNoWaitNudgeReplyTimer`,
   `executionBlockedByRootFinish`, `hasUnansweredHumanAsk`, `workerExecutionStopped`, `isActive`,
   `cancel`, `settleSuccess` (`harness-parity-cells.testkit.ts`), `settleOrphanedWorkerExecution`,
   `routeWorkerQuestion`, `unansweredQuestions`, `parentCompletionBlockers`, `acceptDone`,
@@ -370,8 +370,11 @@ until Phase 5. The list was checked against `main` at `97335b352`:
   (`worker-destroy.test.ts`), `recordTurnEnd` (4 files), `pump` and `runContinuation`
   (`run.test.ts`), `settleSuccess` (`worker-wait-capacity.test.ts`), `submitAgentInput`
   (`workflow-step-completion-parity.test.ts`), and the field `ciSupervisor` (Decision 7).
-- Called, not spied: `parkOnWaits` (`worker-wait-durability.test.ts`). It keeps a delegator
-  because the test calls it, but no spy needs the host route.
+- Wait seams moved in hearsay-tools/cezarion#2232: `queueWaitWake`, `automaticWakes`,
+  `owesWake`, `parkOnWaits` and `wakeHeld` use `runInternals(manager).wakeAdmission`;
+  `resolveWait` uses `.waitRegistry`. Timer and CI-watch reads use `.waitWatches`;
+  CI-registration reads use `.waitRegistry`; retry/backoff reads and tuning use `.retries`.
+  Each migrated spy asserts that the product path called it.
 
 Function modules have no instance: `launch-context.ts`, `session-events.ts`, `completion-gate.ts`,
 `queued-revival.ts`, `input-receipts.ts`, `usage-accounting.ts`, `run-guards.ts`,
@@ -419,6 +422,13 @@ to `workflow-position.ts`, `repo-root-lease.ts`, `run-guards.ts` and `worker-orp
 local types move to `run/types.ts`. The facade keeps its existing exports. The 35 uncalled
 private delegators and getters listed in that issue are removed after the reader sweep;
 their module implementations stay, including the `run-states.ts` via targets. No test seam changes.
+
+`registerWait`, `cancelWait` and `registerWorkerListWait` stay public: they are agent-tool
+entry points that tests drive (planner decision, 2026-10-29). Their test sites stay on the
+facade. `registerAsk` has no test caller and its cezar-tools host calls `WaitRegistry` directly.
+`disarmWait` stays on the facade to order watch teardown, family retry removal and process
+watch teardown. `WaitRegistry.abortRegistrations` owns CI-registration abort-then-delete;
+`WakeAdmission.disarmRunWaits` calls it before disarming watches.
 
 ## Behavior questions
 

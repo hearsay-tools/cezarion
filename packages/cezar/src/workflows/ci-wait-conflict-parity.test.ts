@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -63,7 +64,7 @@ describe('native conflict observation durability and wake parity', { timeout: 35
       }
       // Read the committed row at precisely the boundary before queueing a wake.
       // Hold admission so a crash/restart can also exercise an owed saved input.
-      const engine = manager as unknown as { queueWaitWake(id: string): void; resolveWait(id: string, waitId: string, result: unknown): void };
+      const engine = runInternals(manager).wakeAdmission;
       let committed: ReturnType<typeof disk>;
       const wake = vi.spyOn(engine, 'queueWaitWake').mockImplementation(id => {
         if (id === run.id && open(id)?.phase === 'resolved') committed = disk(id);
@@ -94,8 +95,9 @@ describe('native conflict observation durability and wake parity', { timeout: 35
       expect(store.getRun(run.id)?.delegation).toBeUndefined();
       if (mode !== 'recovered') expect(manager.cancelWait(run.id, wait.id, active(run.id)!.ciGeneration)).toEqual({ cancelled: false, code: 'already_resolved' });
       const result = open(run.id)!.result;
-      engine.resolveWait(run.id, wait.id, result); // Duplicate callback cannot enqueue another input.
+      runInternals(manager).waitRegistry.resolveWait(run.id, wait.id, result); // Duplicate callback cannot enqueue another input.
       expect(disk(run.id).agentInputs.filter((input: { id: string }) => input.id === wait.id)).toHaveLength(1);
+      expect(wake).toHaveBeenCalled();
       wake.mockRestore();
       if (mode === 'recovered') {
         // A clean PR on reboot must not reclassify the already committed observation.
@@ -141,8 +143,8 @@ describe('native conflict observation durability and wake parity', { timeout: 35
       await supervisor.watch(request, new AbortController().signal);
       const late = await supervisor.watch(request, new AbortController().signal);
       expect(late).toMatchObject({ outcome: 'conflicting', mergeable: 'CONFLICTING' });
-      const engine = manager as unknown as { resolveWait(id: string, waitId: string, result: unknown): void };
-      engine.resolveWait(run.id, wait.id, late);
+      const engine = runInternals(manager).waitRegistry;
+      runInternals(manager).waitRegistry.resolveWait(run.id, wait.id, late);
       expect(open(run.id)).toBeUndefined();
       expect(store.getRun(run.id)?.agentInputs?.some(input => input.id === wait.id) ?? false).toBe(false);
       expect(ciNativeMessages(runner, root).filter(text => text.includes(`CI wait observation ${wait.id}`))).toHaveLength(0);

@@ -244,7 +244,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     const reserved: (number | undefined)[] = [];
     let refusals = 0;
     vi.spyOn(state.session!, 'sendAgentMessage').mockImplementation((content, ids) => {
-      reserved.push(manager['automaticWakes'](run.id));
+      reserved.push(runInternals(manager).wakeAdmission.automaticWakes(run.id));
       if (refusals++ === 0) return false;
       return send(content, ids);
     });

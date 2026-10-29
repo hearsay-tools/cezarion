@@ -538,10 +538,11 @@ function baseCells(runners: RunnerId[]): void {
         expect(store.getRun(run.id)?.waits).toEqual([wait]);
         expect(humanOpen(run.id)).toEqual([]);
         interval.mockRestore();
-        const budget = vi.spyOn(manager as unknown as { automaticWakes(id: string): number }, 'automaticWakes').mockReturnValue(MAX_AUTO_CONTINUES);
+        const budget = vi.spyOn(runInternals(manager).wakeAdmission, 'automaticWakes').mockReturnValue(MAX_AUTO_CONTINUES);
         await parentTurn(run.id, marker, () => parkedOn(run.id, waitOfKind(run.id, kind)) === true);
         expect(store.getRun(run.id)?.waits).toEqual([wait]);
         expect(humanOpen(run.id)).toEqual([]);
+        expect(budget).toHaveBeenCalled();
         budget.mockRestore();
         if (kind === 'timer') {
           await restart();
@@ -2086,7 +2087,7 @@ function workersCells(runners: RunnerId[]): void {
       fixtureUpdateRun(f.p.id, { automaticWakes: MAX_AUTO_CONTINUES });
       const held = await peer.progress('Peer progress u19q held');
       expect(delivered(f.p.id, held)).toBe(false);
-      expect((manager as unknown as { owesWake(run: RunRecord): boolean }).owesWake(store.getRun(f.p.id)!)).toBe(false);
+      expect(runInternals(manager).wakeAdmission.owesWake(store.getRun(f.p.id)!)).toBe(false);
       expect(humanOpen(f.p.id)).toEqual([expect.objectContaining({ phase: WAIT_PHASE.open, source: WAIT_SOURCE.cezar })]);
       expect(deriveAttention(store.getRun(f.p.id)!).label).toBe('needs you');
       // A human message restarts the budget, and its turn takes the held message.
@@ -3318,7 +3319,7 @@ function singleRunnerCells(): void {
     fireTimer(timer.id);
     await until(() => settled(run.id, timer.id)?.phase === 'delivered' && store.getRun(run.id)?.status === 'waiting');
     const owes = (record: RunRecord) => {
-      return (manager as unknown as { owesWake(run: RunRecord): boolean }).owesWake(record);
+      return runInternals(manager).wakeAdmission.owesWake(record);
     };
     const replayed = { ...store.getRun(run.id)!, agentInputs: store.getRun(run.id)!.agentInputs!.map(input => input.id === timer.id ? { ...input, deliveredAt: undefined } : input) };
     expect(owes(replayed)).toBe(false);
