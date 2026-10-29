@@ -36,7 +36,6 @@ import type {
 } from './run/types.ts';
 export type { TurnTail, DelegationExecutionSettings, StartRunInput, WorkerTerminationBlocker, AutomationToolService } from './run/types.ts';
 import { openCompletionRequests, recordRequestRefusal, repairFailedRootFinish, startCompletionCycle, settledRootFinishPatch, type CompletionRefusal } from './completion-policy.ts';
-import * as continuation from './continuation-admission.ts';
 import type { ContinueRunOptions } from './continuation-admission.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { doneErrorMessage } from '../ci-wait/errors.ts';
@@ -51,6 +50,7 @@ import { beginUsageInvocation, recordUsagePeaks } from './run/usage-accounting.t
 import { continuationModel, continuationEffort, continuationRunner } from './run/launch-settings.ts';
 import { ownedContinuationWorkspace, REPOSITORY_ROOT_LOCK_DISABLED_NOTE } from './run/run-workspace.ts';
 import * as inputReceipts from './run/input-receipts.ts';
+import { ContinuationAcceptance } from './run/continuation-acceptance.ts';
 import { AutoResumeScheduler } from './run/auto-resume.ts';
 export { AUTO_RESUME_GRACE_MS, MAX_AUTO_RESUMES, AUTO_RESUME_MISSED_WINDOW_MS } from './run/auto-resume.ts';
 import type { RunModuleContext } from './run/types.ts';
@@ -431,10 +431,7 @@ export class RunManager {
    *  explicit user Continue, these are bulk scheduler work and must re-enter
    *  through `pump()` so both workspace and per-project caps are honored. */
   private get pendingContinuations() { return this.line.pendingContinuations; }
-  /** Accepted Continues supersede in-flight settlement even before launch or after
-   * idle close. Retain these across dropActive/dispose so absence cannot look like
-   * the earlier execution again; disposal alone never revokes terminal intent. */
-  private readonly continuationGenerations = new Map<string, symbol>();
+  private readonly continuationAcceptance: ContinuationAcceptance;
   private readonly turnSettler: TurnSettler;
   private readonly inputDelivery: InputDelivery;
   private readonly runSkills: RunSkills;
@@ -704,11 +701,21 @@ export class RunManager {
       countAutomaticWakes: (id, budget) => this.automaticWakes(id, budget),
       workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
     }, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS);
+    this.continuationAcceptance = new ContinuationAcceptance(this.inputReceiptContext, {
+      isActive: id => this.isActive(id), move: (id, exit, patch) => this.move(id, exit, patch),
+      ownedJob: run => this.ownedJob(run), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
+      finishWorkerExecution: id => this.finishWorkerExecution(id), clearWakeBackoff: id => this.clearWakeBackoff(id),
+      dropActive: id => this.dropActive(id), pump: () => this.pump(),
+      runContinuation: (...args) => this.runContinuation(...args), workerStep: (id, step) => this.workerStep(id, step),
+      isUntouchedCancelledRun: run => isUntouchedCancelledRun(run), admissionError: (error, fallback) => admissionError(error, fallback),
+      isSyntheticContinuation: (run, step) => isSyntheticContinuation(run, step),
+    }, this.claims, this.line, this.workerExecutions, this.queuedInput, this.autoResumeScheduler,
+    this.worktreeAutosave, this.workerQuestions, ROUTED_QUESTION_REFUSAL, RESTART_CONTINUATION_PROMPT);
     this.runSettlement = new RunSettlement(this.inputReceiptContext, this.humanWaits, this.workerQuestions,
       this.worktreeAutosave, this.turnBookkeeper, this.line, this.autoResumeScheduler, this.workerExecutions,
       this.completionGateHost, {
         active: this.active, isSyntheticContinuation: (run, step) => isSyntheticContinuation(run, step),
-        generation: id => this.continuationGenerations.get(id), isActive: id => this.isActive(id),
+        generation: id => this.continuationAcceptance.generation(id), isActive: id => this.isActive(id),
         move: (id, exit, patch) => this.move(id, exit, patch), dropActive: id => this.dropActive(id),
         saveWorktree: (id, state, reason) => this.saveWorktree(id, state, reason),
         settleSuccess: (id, durable, keep) => this.settleSuccess(id, durable, keep),
@@ -1045,14 +1052,6 @@ export class RunManager {
 
   private clearWakeBackoff(runId: string): void {
     this.retries.clearWakeBackoff(runId);
-  }
-
-  /** Saves an accepted continuation. A human Continue also answers every human wait, ends failed
-   *  deliveries and restarts the budget, in the same best-effort commit. */
-  private commitContinuation(runId: string, human: boolean): void {
-    const outcomes: RunOutcome[] = [{ kind: 'answered' }, { kind: 'counted', waitDeliveryFailures: undefined },
-      ...(this.store.getRun(runId)?.automaticWakes ? [{ kind: 'charged' as const, automaticWakes: 0 }] : [])];
-    if (!human || !this.store.commitOutcome(runId, outcomes, {}, { bestEffort: true }).committed) this.store.flush();
   }
 
   private spendWakeAdmission(runId: string, state: ActiveRun, owed: boolean): void { return this.wakeAdmission.spendWakeAdmission(runId, state, owed); }
@@ -1995,157 +1994,13 @@ export class RunManager {
       return { ok: false, error: this.store.getRun(runId) ? this.store.writeRefusal(runId) ?? RUN_IN_USE_ELSEWHERE : 'not found' };
     }
     try {
-      return this.admitContinuation(runId, opts, deferForCapacity, conversation);
+      return this.continuationAcceptance.admitContinuation(runId, opts, deferForCapacity, conversation);
     } finally {
       this.store.unpin(runId, 'continue');
     }
   }
 
-  private admitContinuation(
-    runId: string,
-    opts: ContinueRunOptions,
-    deferForCapacity: boolean,
-    conversation: continuation.ContinuationConversation,
-  ): { ok: boolean; error?: string } {
-    const admitted = new continuation.ContinuationChecks(runId, this.repoRoot, opts, deferForCapacity, conversation, {
-      active: () => this.isActive(runId),
-      autosaveBlocker: () => this.autosaveCleanupBlocker(runId),
-      reclaiming: () => this.claims.has(runId),
-      run: () => this.store.getRun(runId),
-      historyDeletionPending: () => this.historyDeletionPending(runId),
-      parentInReview: parentId => this.store.getRun(parentId)?.status === 'review',
-      answersFallback: () => this.answersFallenBackAsk(runId, opts, deferForCapacity),
-      identity: (run, session) => this.workerStep(runId, continuationDefStep(this.store, run, session)?.id),
-      beforeFinalStep: run => this.waitingBeforeFinalWorkflowStep(run),
-      waitingStepIndex: run => this.waitingWorkflowStepIndex(run),
-      pendingFallback: () => this.pendingWorkerFallback(runId),
-      pendingAsk: () => this.hasPendingHumanAsk(runId),
-      rootFinishing: run => this.executionBlockedByRootFinish(run),
-      routedAsk: () => this.routedAsk(runId),
-      ciStepIndex: run => this.ciWorkflowResumeStepIndex(run),
-      untouched: isUntouchedCancelledRun,
-      sessionId: step => this.resumableSessionId(runId, step),
-    }, ROUTED_QUESTION_REFUSAL).prepare();
-    if (!admitted.ok) return admitted;
-    return this.acceptContinuation(runId, opts, deferForCapacity, conversation, admitted);
-  }
-
-  /** Overrides still persist before the execution checkpoint, even if that checkpoint refuses. */
-  private acceptContinuation(runId: string, opts: ContinueRunOptions, deferForCapacity: boolean,
-    conversation: continuation.ContinuationConversation, admitted: continuation.ContinuationAdmission): { ok: boolean; error?: string } {
-    if (admitted.identity === undefined && continuation.hasOverrides(opts)) {
-      const refusal = continuation.modelRefusal(opts, admitted.targetRunner);
-      if (refusal) return refusal;
-      this.store.updateRun(runId, continuation.overridePatch(admitted.run, opts, admitted.targetRunner, admitted.originalRunner));
-    }
-    if (admitted.untouched) return this.acceptUntouchedContinuation(runId, opts, admitted.supersedes);
-    return this.acceptResumedContinuation(runId, opts, deferForCapacity, conversation, admitted);
-  }
-
-  private acceptUntouchedContinuation(runId: string, opts: ContinueRunOptions, supersedes: boolean): { ok: boolean; error?: string } {
-    const current = this.store.getRun(runId)!;
-    let job: { workflow: WorkflowDef; input: StartRunInput };
-    try {
-      job = current.delegation?.role === 'worker'
-        // A projection of the job the line will start, not a status write.
-        // ast-grep-ignore: run-status-write-outside-transition
-        ? this.ownedJob({ ...current, status: 'queued' })
-        : { workflow: current.workflowDef!, input: queuedRecoveryInput(current) };
-      this.beginWorkerExecution(runId, false);
-    } catch (error) { return { ok: false, error: admissionError(error, 'original execution checkpoint unavailable') }; }
-    if (supersedes) this.supersedeWorkerFallback(runId);
-    const content = continuation.content(opts);
-    const message = content.length ? this.toQueuedMessage(runId, content) : undefined;
-    this.clearAutoResume(runId);
-    this.store.setArchived(runId, false);
-    this.move(runId, 'continue-line', { stopping: undefined, error: undefined, finishedAt: undefined,
-      currentStepId: undefined, ...(message ? { queuedMessages: [...(current.queuedMessages ?? []), message] } : {}) });
-    this.store.flush();
-    this.line.enqueueJob(runId, job);
-    void this.pump();
-    return { ok: true };
-  }
-
-  private acceptResumedContinuation(runId: string, opts: ContinueRunOptions, deferForCapacity: boolean,
-    conversation: continuation.ContinuationConversation, admitted: continuation.ContinuationAdmission): { ok: boolean; error?: string } {
-    const { run, supersedes } = admitted;
-    // Usage-limit holds join the line even for a human Continue, behind known account deadlines.
-    const toLine = deferForCapacity || isUsageLimitHold(run);
-    try { this.beginWorkerExecution(runId, !toLine); }
-    catch (error) { return { ok: false, error: admissionError(error, 'worker execution checkpoint unavailable') }; }
-    this.clearAutoResume(runId);
-    if (!deferForCapacity) this.clearWakeBackoff(runId);
-    const failure = continuation.previousFailure(run);
-    const continuationStep = continuation.nextStep(run);
-    const stepId = continuationStep.id;
-    if (run.delegation?.role !== 'worker') this.store.addStep(runId, continuationStep);
-    const recovered = deferForCapacity && !conversation && !opts.answerInputId ? run.continuationMessage : undefined;
-    const message = recovered ?? this.toQueuedMessage(runId, continuation.content(opts));
-    const { prompt, resumeContext } = continuation.opening(message, recovered, deferForCapacity, conversation, opts,
-      RESTART_CONTINUATION_PROMPT, failure);
-    // The recoverable status and original input must commit before startup can await anything.
-    const acceptedPatch = {
-      continuationMessage: continuation.acceptedMessage(message, stepId, prompt, resumeContext, recovered, conversation, opts, deferForCapacity),
-      status: transition(toLine ? 'continue-line' : 'continue-now', () => this.store.getRun(runId)),
-      error: undefined,
-      finishedAt: undefined,
-      currentStepId: toLine ? undefined : stepId,
-      invalidAsk: undefined,
-      archived: false,
-      archivedAt: undefined,
-    };
-    const refusal = this.checkpointContinuation(runId, run, acceptedPatch, continuationStep, conversation);
-    if (refusal) return refusal;
-    if (supersedes) this.supersedeWorkerFallback(runId);
-    // Resolve waits/restart budgets only with or after the dependent answer (hearsay-tools/cezarion#1805).
-    this.commitContinuation(runId, !deferForCapacity);
-    this.continuationGenerations.set(runId, Symbol());
-    const images = contentBlocksOf(opts.images ?? []).filter(block => block.type === 'image');
-    return this.dispatchAcceptedContinuation(runId, toLine, stepId, admitted.resumeSessionId, admitted.targetRunner, prompt, images);
-  }
-
-  private checkpointContinuation(runId: string, run: RunRecord,
-    acceptedPatch: Parameters<RunStore['commitWorkerContinuation']>[1],
-    continuationStep: Parameters<RunStore['commitWorkerContinuation']>[2],
-    conversation: continuation.ContinuationConversation): continuation.ContinuationRefusal | undefined {
-    if (run.delegation?.role === 'worker') {
-      try { this.store.commitWorkerContinuation(runId, acceptedPatch, continuationStep, conversation); }
-      catch {
-        // No session exists yet. Release the private reservation through execution finalization.
-        void this.finishWorkerExecution(runId);
-        return { ok: false, error: 'worker execution checkpoint unavailable' };
-      }
-    } else this.store.updateRun(runId, acceptedPatch);
-  }
-
-  private dispatchAcceptedContinuation(runId: string, toLine: boolean, stepId: string,
-    resumeSessionId: string | undefined, targetRunner: RunnerId, prompt: string, images: PastedContent[]): { ok: boolean } {
-    if (toLine) {
-      this.line.enqueueContinuation(runId, {
-        stepId, sessionId: resumeSessionId, backend: targetRunner, prompt, images, lineJoinedAt: Date.now(),
-      });
-      this.move(runId, 'continue-line', { error: undefined, finishedAt: undefined, currentStepId: undefined });
-      // Enqueueing wakes the scheduler even after the previous execution released its slot.
-      void this.pump();
-      return { ok: true };
-    }
-    this.line.markStarting(runId);
-    void this.runContinuation(runId, stepId, resumeSessionId, targetRunner, prompt, images)
-      .catch((err: unknown) => this.failCrashedContinuation(runId, err))
-      .finally(() => this.finishWorkerExecution(runId));
-    return { ok: true };
-  }
-
-  /** A Continue whose engine threw: the run fails and leaves the active set (exit `fail-crash`). */
-  private failCrashedContinuation(runId: string, err: unknown): void {
-    const message = err instanceof Error ? err.message : String(err);
-    this.move(runId, 'fail-crash', {
-      error: `continue crashed: ${message}`,
-      finishedAt: new Date().toISOString(),
-    });
-    this.line.unmarkStarting(runId);
-    this.dropActive(runId);
-  }
+  private failCrashedContinuation(runId: string, err: unknown): void { return this.continuationAcceptance.failCrashedContinuation(runId, err); }
 
   private async runContinuation(
     runId: string,
