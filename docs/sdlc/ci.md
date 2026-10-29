@@ -55,6 +55,29 @@ reporting a pass; select test files explicitly and report any coverage gap.
 This does not cover all runtime dependencies, Node tests, or browser tests and is
 not a final gate. `.ai/agentic.config.json` records CI's complete final command list.
 
+### Clone comparison
+
+`node .github/scripts/check-clones.cjs --base origin/main --head HEAD` scans
+committed Git trees: the merge-base and the selected head. Working-tree edits
+are outside the measurement. Both trees use trusted installed jscpd tooling,
+fixed detection options, and the same source scope and test/fixture exclusions;
+candidate config, gitignore files and scripts cannot change those options.
+
+Within a package, each unordered pair of different file paths has a ceiling:
+the sum of jscpd's reported duplicated tokens at the merge-base. An equal or
+smaller head total passes even when fragments split or change fingerprints.
+A larger total or a new reported pair fails; reductions in other pairs cannot
+offset it. Removed pairs pass. Renamed files form new pairs. Reported line
+counts are diagnostic only: splitting a clone can count a boundary line twice.
+This uses jscpd's detected pairs, not an exhaustive comparison of all file pairs.
+Moving duplication within one pair can pass within its token ceiling.
+
+Cross-package clones always fail, including inherited copies. Within one file,
+the existing fingerprint rule still rejects new fragments. Scan/report errors
+fail the gate. The comparison saves a temporary fingerprint baseline during the
+first scan and removes all temporary inputs and reports on exit; it adds no
+persistent baseline file or migration.
+
 ### Runner regression coverage
 
 A runner lifecycle, input-delivery or attention fix adds shared regression
