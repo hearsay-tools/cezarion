@@ -1,3 +1,4 @@
+import { ContinuationSession } from './run/continuation-session.ts';
 import { StepLoop as WorkflowStepLoop } from './run/step-loop.ts';
 import { RunRecovery } from './run/run-recovery.ts';
 import { TurnSettler } from './run/turn-settler.ts';
@@ -28,11 +29,7 @@ import { RepoRootLease } from './run/repo-root-lease.ts';
 import { MaintenanceClaims } from './run/maintenance-claims.ts';
 import { WorkerOrphans } from './run/worker-orphans.ts';
 import type {
-  SettledTurn, DelegationExecutionSettings, StartRunInput, PendingContinuation,
-  Execution, StepLoop, SessionTurn, LaunchDelegation,
-  LaunchCiTools, LaunchOpening, StepProfile,
-  WorkerDelegationRecord, ContinuationOpening, OpeningAnswer, ContinuationSettings, ContinuationSkills,
-  ContinuationSessionLaunch, ContinuationClose, WorkerTerminationBlocker, AutomationToolService,
+  SettledTurn, DelegationExecutionSettings, StartRunInput, PendingContinuation, Execution, StepLoop, WorkerTerminationBlocker, AutomationToolService,
 } from './run/types.ts';
 export type { TurnTail, DelegationExecutionSettings, StartRunInput, WorkerTerminationBlocker, AutomationToolService } from './run/types.ts';
 import { openCompletionRequests, recordRequestRefusal, repairFailedRootFinish, startCompletionCycle, settledRootFinishPatch, type CompletionRefusal } from './completion-policy.ts';
@@ -47,20 +44,17 @@ import { createActiveRun, type ActiveRun } from './active-run.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
 import { canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested, isDisposedDelegatedRun, preserveRunAfterDisposal } from './run/run-guards.ts';
 import { beginUsageInvocation, recordUsagePeaks } from './run/usage-accounting.ts';
-import { continuationModel, continuationEffort, continuationRunner } from './run/launch-settings.ts';
-import { ownedContinuationWorkspace, REPOSITORY_ROOT_LOCK_DISABLED_NOTE } from './run/run-workspace.ts';
+import { REPOSITORY_ROOT_LOCK_DISABLED_NOTE } from './run/run-workspace.ts';
 import * as inputReceipts from './run/input-receipts.ts';
 import { ContinuationAcceptance } from './run/continuation-acceptance.ts';
 import { AutoResumeScheduler } from './run/auto-resume.ts';
 export { AUTO_RESUME_GRACE_MS, MAX_AUTO_RESUMES, AUTO_RESUME_MISSED_WINDOW_MS } from './run/auto-resume.ts';
 import type { RunModuleContext } from './run/types.ts';
-import { createSessionEventHandler, launchPreamble } from './run/session-events.ts';
 import * as launchContext from './run/launch-context.ts';
-import { continuationOpening, openingInputs } from './run/opening.ts';
+import { openingInputs } from './run/opening.ts';
 import { releaseActiveResources } from './run/drop-active.ts';
-import { agentDirectories, composeSystemPrompt, expandRegistrySlashSkillText, leadingSlashSkillName, skillSystemPrompt } from './run/prompts.ts';
 import { delegationExecutionSettings, selectDelegationExecutionSettings } from '../delegation/execution-settings.ts';
-import { stepLabel, stepScope } from './run/steps.ts';
+import { stepLabel } from './run/steps.ts';
 import { makeRunTitle } from '../runs/run-title.ts';
 export { agentDirectories, composeSystemPrompt, expandRegistrySlashSkill, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt } from './run/prompts.ts';
 export { stepLabel } from './run/steps.ts';
@@ -81,7 +75,6 @@ import type { CezarToolHandlers } from '../ci-wait/controller.ts';
 import { workerIdentity, continuationDefStep, ownedWorkflow, workerStepIdentity, WorkerIdentityError, type WorkerAccountBinding, type WorkerStepIdentity } from '../delegation/execution-identity.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AskRequest } from '../core/ask.ts';
 import { type AgentSession } from '../core/claude-cli-runner.ts';
@@ -91,8 +84,6 @@ import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
 import { ORPHAN_BACKOFF, WAKE_RETRY_BACKOFF, type Backoff } from '../delegation/retry-backoff.ts';
 import { type CwdSource } from '../delegation/process-liveness.ts';
 import { parseUsageLimit } from '../core/usage-limit.ts';
-import { startManagedSession } from '../core/managed-session.ts';
-import { createRunner } from '../core/runner-factory.ts';
 import type { RunnerId } from '../core/agent-runner.ts';
 import { agentModelsLocked } from '../core/agent-model-policy.ts';
 import {
@@ -115,15 +106,13 @@ import {
   type ConversationMessage,
   type RequestWaitRequest,
 } from '@open-mercato/cezar-contract/conversations';
-import { contentBlocksOf, pastedAttachmentsText, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from './pasted-content.ts';
+import { contentBlocksOf, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from './pasted-content.ts';
 export { contentBlocksOf, highestImageSeq, mediaTypeFor, pastedAttachmentsNote, pastedAttachmentsText, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from './pasted-content.ts';
-import type { AgentEvent, ContentBlock, ToolGrant } from '../core/agent-runner.ts';
-import { inputDeliveryOf } from '../core/agent-runner.ts';
+import type { ContentBlock, ToolGrant } from '../core/agent-runner.ts';
 import { readProjectUiState } from '../ui-state.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
-import { waitForCachedTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
 import { readAgentModelSettings } from '../agent-config/models.ts';
-import { loadConfig, resolveWorktreeRetention } from '../config.ts';
+import { resolveWorktreeRetention } from '../config.ts';
 import { type AutosaveReason } from '../git-worktree.ts';
 import { getRepoInfo } from '../server/git.ts';
 import { enqueueAgentInput } from '../delegation/input.ts';
@@ -132,7 +121,7 @@ import { projectConversationEvents, settledRunFamilies } from '../delegation/con
 import * as queuedRevival from './run/queued-revival.ts';
 import type { RunOutcome } from '../runs/outcome-commit.ts';
 import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
-import { reclaimWorktrees, rematerializeReclaimedWorktree } from '../runs/retention.ts';
+import { reclaimWorktrees } from '../runs/retention.ts';
 import {
   removeAgentTmpDir,
 } from '../runs/agent-tmpdir.ts';
@@ -142,12 +131,7 @@ import { WorkspaceSemaphore, type AccountHolds } from '../workspace/semaphore.ts
 import type { UiEventSink } from '../runs/ui-event-sink.ts';
 import type { UiEvent } from '../core/ui-events.ts';
 import {
-  QUICK_TASK_WORKFLOW,
-  stepKind,
-  stepToolGrant,
-  toolGrantLists,
-  type WorkflowDef,
-  type WorkflowStepDef,
+  QUICK_TASK_WORKFLOW, stepKind, type WorkflowDef, type WorkflowStepDef,
 } from './types.ts';
 
 /** An interactive session that hears nothing from the user closes itself. */
@@ -265,6 +249,7 @@ export class RunManager {
   private readonly active = new Map<string, ActiveRun>();
   private readonly inputReceiptContext: RunModuleContext;
   private readonly stepSession: StepSession;
+  private readonly continuationSession: ContinuationSession;
   private readonly stepLoop: WorkflowStepLoop;
   private readonly sessionHelperHost: sessionEvents.SessionHelperHost;
   private readonly completionGateHost: completionGateReads.CompletionGateHost = {
@@ -727,6 +712,23 @@ export class RunManager {
         enforceRetention: () => this.enforceRetention(), reapTerminalScratch: id => this.reapTerminalScratch(id),
         forgetMemoryPause: id => { this.memoryPausing.delete(id); },
       }, WAKE_SESSION_CLOSED_ERROR, WAKE_DELIVERY_CAP_NOTE);
+    this.continuationSession = new ContinuationSession(this.inputReceiptContext, {
+      move: (...args) => this.move(...args), dropActive: id => this.dropActive(id),
+      isSyntheticContinuation: (run, step) => isSyntheticContinuation(run, step),
+      beginUsageInvocation: (...args) => this.beginUsageInvocation(...args),
+      trackWorkerSessionResult: (...args) => this.trackWorkerSessionResult(...args),
+      recordUsagePeaks: id => this.recordUsagePeaks(id),
+      saveWorktree: (...args) => this.saveWorktree(...args), pump: () => this.pump(),
+      makeUiSink: (...args) => this.makeUiSink(...args),
+      repositoryRootLockDisabled: () => repositoryRootLockDisabled(),
+      prepareWorktree: (...args) => this.prepareWorktree(...args),
+      workerStep: (...args) => this.workerStep(...args),
+      latchAgentInputError: (...args) => this.latchAgentInputError(...args),
+      reconcileWorkerWaits: () => this.reconcileWorkerWaits(),
+      holdContinuationForRootFinish: (...args) => this.holdContinuationForRootFinish(...args),
+    }, this.line, this.sessionHelperHost, this.repoRootLease, this.worktreeAutosave, this.runSkills,
+    this.sessionEventHost(), this.launchPreambleHost(), this.inputReceiptHost, this.inputReceiptSteps,
+    this.humanWaits, this.queuedInput, this.workerQuestions, this.runSettlement);
     this.stepLoop = new WorkflowStepLoop(this.inputReceiptContext, {
       active: this.active, move: (id, exit, patch) => this.move(id, exit, patch), dropActive: id => this.dropActive(id),
       closingWakeDecision: (id, holds, cancelled, error) => this.closingWakeDecision(id, holds, cancelled, error),
@@ -2030,9 +2032,9 @@ export class RunManager {
     if (this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() })) return;
     workerIdentity(this.store, this.repoRoot, runId);
     const record = this.store.getRun(runId);
-    const workspace = await this.continuationWorkspace(runId, stepId, record);
+    const workspace = await this.continuationSession.continuationWorkspace(runId, stepId, record);
     if (!workspace) return;
-    if (this.settleStoppedContinuation(runId)) return;
+    if (this.continuationSession.settleStoppedContinuation(runId)) return;
     // Continue and restart recovery build their own ActiveRun: hydrate the durable mode here.
     const state = createActiveRun({
       cwd: workspace.cwd,
@@ -2041,237 +2043,8 @@ export class RunManager {
     });
     this.activate(runId, state);
     this.line.unmarkStarting(runId);
-    const lease = this.continuationRepoRootLease(runId, state);
-    if (lease && !(await lease)) return;
-    const setupNote = await this.prepareContinuationWorktree(runId, state, record, workspace.rematerialized);
-    // A Stop during setup settles below, at the prelaunch cancellation check before any spawn.
-    // Registry snapshot for `/skill` expansion. A continuation builds its OWN ActiveRun, and without
-    // this the resumed session expanded against an empty registry and leaked `/om-...` verbatim to
-    // the backend, which answered "Unknown skill" (open-mercato/cezar#811). Best-effort — discovery must never
-    // break Continue.
-    await this.loadRunSkills(state, 'ignore');
-
-    this.startContinuationStep(runId, stepId, record, sessionId, backend);
-    const opening = continuationOpening(this.store, {
-      routedAsk: (id) => this.routedAsk(id),
-      readPersistedAttachments: (id, urls, kind) => this.readPersistedAttachments(id, urls, kind),
-    }, runId, stepId, state, record, { prompt, images, persistedImages, persistedAttachments });
-    prompt = opening.prompt;
-    const answer = this.openingAnswer(runId, state, opening);
-    state.pendingHumanAsk = answer.askSeq === undefined && this.hasPendingHumanAsk(runId);
-
-    const turn: SessionTurn = { text: '', completedText: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
-    const sink = this.makeUiSink(runId, stepId);
-    const onEvent = createSessionEventHandler(this.inputReceiptContext, this.sessionEventHost(), {
-      runId, state, turn, stepId, backend, sink, tokenBase: 0,
-      emit: event => this.store.appendEvent(runId, event),
-      acknowledge: () => this.acknowledgeOpeningTurn(runId, state, answer),
-    });
-
-    const settings = await this.continuationLaunchSettings(runId, stepId, state, record, sessionId, backend, sink);
-    if (!settings) return;
-    if (state.cancelled) { this.settleContinuationPrelaunchCancel(runId, stepId, state); return; }
-    if (this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() }, state)) return;
-    this.applyContinuationSettings(runId, stepId, state, backend, settings);
-    const { runner, skipSkillOnResume } = continuationRunner(backend, sessionId, settings.owningStep);
-    // Re-expand the continued step's skill from the current registry (#790) BEFORE
-    // provisionSession. Materializing the skill used to sit after the pre-launch
-    // revalidation, so Stop during that await still launched with revoked tools.
-    // `record.systemPrompt` is only the extra prompt; the opening session put
-    // `skillSystemPrompt(skill)` in front. Skip that prefix only when this
-    // session resumes into its own thread on an in-thread runner — those
-    // already carry the playbook in history. A missing skill degrades to
-    // today's extra-only prompt with one lifecycle warning; in-thread skips
-    // do not warn. Workers still inherit only the extra prompt (#778).
-    const pendingSkills = this.continuationSkills(runId, state, prompt, settings.toolsStep, skipSkillOnResume);
-    const skills = pendingSkills
-      ? await pendingSkills
-      : { skillPrompt: undefined, fallbackSkillPrompt: undefined, files: new Map<string, string>() };
-    state.currentStepId = stepId;
-    this.beginUsageInvocation(runId, state, stepId);
-    // A continuation's opening message becomes the session's `userPrompt` and never passes
-    // through `deliverMessage`, so it needs the SAME delivery-only `/skill` rewrite the
-    // live path applies (#811). Delivery-only: the `user-message` event above already
-    // persisted the user's original text, and the transcript must keep showing that.
-    state.agentSessionError = undefined;
-    if (this.workerExecutionStopped(runId)) { state.cancelled = true; throw new Error('Worker stopped before launch'); }
-    const launch = await launchPreamble(this.launchPreambleHost(), runId, state);
-    const { delegation, webhooksPart, ciTools } = launch;
-    // Stop/Finish can arrive while the local tool controller is starting.
-    if (launch.stale) {
-      this.settleStaleContinuationLaunch(runId, stepId, state, { stepId, sessionId, backend, prompt, images });
-      return;
-    }
-    state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
-    const session = this.startContinuationSession(runId, state, runner, {
-      stepId, sessionId, prompt, setupNote, opening, skills, skipSkillOnResume, settings, delegation, webhooksPart, ciTools,
-    }, onEvent, turn, sink);
-    return this.awaitContinuationSession(runId, state, session, { stepId, sink, turn, delegation, ciTools });
-  }
-
-  /** Where a Continue runs: an owned worker's verified workspace, or the task's worktree, which
-   *  retention may have reclaimed (#483), else the repository root. Returns undefined after an
-   *  unavailable owned workspace failed the run. */
-  private async continuationWorkspace(
-    runId: string,
-    stepId: string,
-    record: RunRecord | undefined,
-  ): Promise<{ cwd: string; rematerialized: boolean } | undefined> {
-    if (record?.delegation?.role === 'worker') {
-      const cwd = await this.ownedContinuationWorkspace(runId, stepId, record, record.delegation);
-      return cwd === undefined ? undefined : { cwd, rematerialized: false };
-    }
-    // Retention (#483) rebuilt a reclaimed directory: a bare checkout that needs setup again (#917).
-    const rematerialized = await rematerializeReclaimedWorktree(this.repoRoot, this.store, runId);
-    const cwd = record?.worktreePath && existsSync(record.worktreePath) ? record.worktreePath : this.repoRoot;
-    return { cwd, rematerialized };
-  }
-
-  /** An owned worker's workspace for a Continue, verified with its parent's context. Returns
-   *  undefined after it failed the run: owned workers never adopt or recreate an unverified resource. */
-  private async ownedContinuationWorkspace(
-    runId: string,
-    stepId: string,
-    record: RunRecord,
-    delegation: WorkerDelegationRecord,
-  ): Promise<string | undefined> {
-    try {
-      return await ownedContinuationWorkspace(this.store, this.repoRoot, this.dataDir, record, delegation);
-    } catch (error) {
-      const message = `owned workspace unavailable: ${error instanceof Error ? error.message : String(error)}`;
-      const finishedAt = new Date().toISOString();
-      this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt });
-      this.move(runId, 'fail-start', { error: message, finishedAt, currentStepId: undefined });
-      this.store.appendEvent(runId, { type: 'lifecycle', message });
-      this.line.unmarkStarting(runId);
-      this.dropActive(runId);
-      return undefined;
-    }
-  }
-
-  /** A Stop that arrived while the Continue resolved its workspace cancels the run before it
-   *  becomes active. */
-  private settleStoppedContinuation(runId: string): boolean {
-    if (!this.store.getRun(runId)?.stopping) return false;
-    this.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
-    this.line.unmarkStarting(runId);
-    this.dropActive(runId);
-    return true;
-  }
-
-  /** The repository-root lease of a Continue that runs in the repository root. Returns undefined
-   *  when no lease is needed, so that path does not yield, else whether the lease was granted. */
-  private continuationRepoRootLease(runId: string, state: ActiveRun): Promise<boolean> | undefined {
-    if (state.cwd !== this.repoRoot) return undefined;
-    if (repositoryRootLockDisabled()) {
-      this.store.appendEvent(runId, {
-        type: 'note',
-        message: REPOSITORY_ROOT_LOCK_DISABLED_NOTE,
-      });
-      return undefined;
-    }
-    this.store.appendEvent(runId, {
-      type: 'note',
-      message: 'waiting for exclusive access to the repository working tree',
-    });
-    return this.acquireContinuationRepoRoot(runId, state);
-  }
-
-  /** Wait for the repository-root lease; a Stop during the wait cancels the run. */
-  private async acquireContinuationRepoRoot(runId: string, state: ActiveRun): Promise<boolean> {
-    if (await this.acquireRepoRoot(runId, state)) return true;
-    this.move(runId, 'cancel', {
-      finishedAt: new Date().toISOString(),
-      currentStepId: undefined,
-    });
-    this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
-    this.dropActive(runId);
-    return false;
-  }
-
-  /** Arm autosave, seed the handoff file, and run worktree setup. Returns setup's note for the
-   *  opening message. */
-  private async prepareContinuationWorktree(
-    runId: string,
-    state: ActiveRun,
-    record: RunRecord | undefined,
-    rematerialized: boolean,
-  ): Promise<string | undefined> {
-    this.armAutosave(runId, state);
-    if (record) seedHandoffFile(this.dataDir, record); // idempotent — normally already there
-    // Worktree setup (#917) for a directory retention rebuilt, or one a restart interrupted.
-    return this.prepareWorktree(
-      runId,
-      state,
-      (await loadConfig(this.repoRoot)).worktreeSetup,
-      (event) => this.store.appendEvent(runId, event),
-      rematerialized ? 'rematerialized' : 'resume',
-    );
-  }
-
-  /** Mark the run and the Continue's step as running, then open the step. A Cursor session resumes
-   *  on the transport it was opened with. */
-  private startContinuationStep(
-    runId: string,
-    stepId: string,
-    record: RunRecord | undefined,
-    sessionId: string | undefined,
-    backend: RunnerId,
-  ): void {
-    this.move(runId, 'start', {
-      error: undefined,
-      finishedAt: undefined,
-      currentStepId: stepId,
-    });
-    this.store.updateStep(runId, stepId, {
-      status: 'running',
-      iterations: 1,
-      startedAt: new Date().toISOString(),
-      sessionId,
-      backend,
-      ...(sessionId && backend === 'cursor' ? {
-        sessionTransport: record?.steps.find((step) => step.sessionId === sessionId)?.sessionTransport ?? 'cursor-acp',
-      } : {}),
-    });
-    this.store.appendEvent(runId, { type: 'step-start', stepId, name: 'Continue', kind: 'agent', iteration: 1 });
-  }
-
-  /** The human ask a human Continue answers, and the human waits that answer settles. */
-  private openingAnswer(runId: string, state: ActiveRun, opening: ContinuationOpening): OpeningAnswer {
-    const askSeq = opening.checkpoint?.origin === 'human' ? this.pendingHumanAskSeq(runId) : undefined;
-    state.openingAnswerAskSeq = askSeq;
-    // The human waits this answer answers; one the opening turn opens is its next question.
-    const waits = askSeq === undefined ? []
-      : openWaits(this.store.getRun(runId) ?? {}).filter(wait => wait.kind === 'human').map(wait => wait.id);
-    return { askSeq, waits, parentAnswer: opening.parentAnswer };
-  }
-
-  /**
-   * A completed turn acknowledges the opening payload. Until then a restart
-   * must replay it, including a crash after startSession but before delivery.
-   * Returns false when the opening input's checkpoint failed, and the turn end stops there.
-   */
-  private acknowledgeOpeningTurn(runId: string, state: ActiveRun, answer: OpeningAnswer): boolean {
-    if (state.cancelled) return true;
-    const session = state.session?.open ? state.session : undefined;
-    const opening = session ? state.openingAgentInputId : undefined;
-    const askSeq = session ? answer.askSeq : undefined;
-    // One commit (hearsay-tools/cezarion#1805): a store reopened after a crash never reads the
-    // opening input handled while the question it answers is still open.
-    const outcomes: RunOutcome[] = [
-      ...(opening ? [{ kind: 'opening-handled' as const, inputId: opening, at: new Date().toISOString() }] : []),
-      ...(askSeq !== undefined ? [{ kind: 'answered' as const, waitIds: answer.waits }] : []),
-    ];
-    // Only the opening input's checkpoint stops the turn end; the rest is best effort, as before.
-    try { this.store.commitOutcome(runId, outcomes, { patch: { continuationMessage: undefined } }, { bestEffort: !opening }); }
-    catch (error) { this.latchAgentInputError(runId, state, session!, `agent input delivery checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return false; }
-    if (opening) { state.openingAgentInputId = undefined; this.reconcileWorkerWaits(); }
-    if (askSeq !== undefined) {
-      this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq, ...(answer.parentAnswer ? { source: 'parent' } : {}) });
-      answer.askSeq = undefined;
-      state.openingAnswerAskSeq = undefined;
-    }
-    return true;
+    return this.continuationSession.launchContinuation(runId, stepId, sessionId, backend, prompt,
+      images, persistedImages, persistedAttachments, state, record, workspace.rematerialized);
   }
 
   /** Latch an agent input error, then interrupt: a transport failure the interrupt causes is secondary. */
@@ -2280,353 +2053,6 @@ export class RunManager {
     try { session.interrupt(); } finally {
       try { this.store.appendEvent(runId, { type: 'error', message }); }
       catch { console.error(`[cez] ${message}`); }
-    }
-  }
-
-  /**
-   * What a Continue runs with. Backend + model come off the record: the run's current backend by
-   * default, or the follow-up override that `continueRun` persisted before scheduling (#401).
-   * Returns undefined after a pre-spawn gate failed the turn.
-   */
-  private async continuationLaunchSettings(
-    runId: string,
-    stepId: string,
-    state: ActiveRun,
-    record: RunRecord | undefined,
-    sessionId: string | undefined,
-    backend: RunnerId,
-    sink: UiEventSink,
-  ): Promise<ContinuationSettings | undefined> {
-    // Resuming reattaches to a session that lives inside ONE account's config dir, so the
-    // continuation must run under the account that created it — not whatever the project has
-    // been switched to since. The owning step is the one carrying this session id.
-    const owningStep = sessionId === undefined
-      ? undefined
-      : record?.steps.find((s) => s.sessionId === sessionId);
-    // An owned worker's turn runs under the identity pinned for the step it extends (#452).
-    const toolsStep = continuationDefStep(this.store, record, sessionId);
-    const stepIdentity = this.workerStep(runId, toolsStep?.id);
-    // The owning step also names the session's tools: resolve `allowedTools`/`bashAllowlist`
-    // from the persisted `workflowDef` exactly as the first spawn did (`runAgentStep`).
-    // Rebuilding with the bare DEFAULT_ALLOWED_TOOLS silently revoked every per-step grant
-    // (MCP servers, subagents) on Continue, restart recovery and the usage-limit auto-resume
-    // — and dropping `bashAllowlist` WIDENED Bash from an allowlist to unrestricted
-    // (`AgentRunSpec.toolGrant`, #430). Record steps share ids with `workflowDef.steps`;
-    // a synthetic `continue-N` owner and a fresh-session continuation (backend switch — no
-    // owning session) both extend the run's tail, so they resolve from the definition's last
-    // agent step. A legacy record without `workflowDef` (#367), or a session no step owns,
-    // keeps today's defaults.
-    const toolGrant = stepToolGrant(stepIdentity?.grants, toolsStep, backend);
-    const model = await continuationModel(this.store, this.repoRoot, runId, state, record, toolsStep, stepIdentity, backend);
-    if (typeof model === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, model); return undefined; }
-    const effort = continuationEffort(this.repoRoot, record, toolsStep, stepIdentity);
-    if (typeof effort === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, effort); return undefined; }
-    // The temp-directory preflight (#785) rides along with the account resolution: a resumed
-    // turn hits the same broken `/tmp` a fresh one would, and an agent whose shell silently
-    // returns nothing is worse than a turn that refuses to start and says why. So does an account
-    // that would open another folder than the one its session lives in (#1283).
-    const profile = await this.stepProfileFor(runId, backend, {
-      recordedProfileId: owningStep?.profileId,
-      stepId: toolsStep?.id,
-    });
-    if (typeof profile === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, profile); return undefined; }
-    return {
-      owningStep, toolsStep, toolGrant, backendModel: model.backendModel, effort: effort.effort, profile,
-      extraSystemPrompt: record?.systemPrompt,
-    };
-  }
-
-  /** Settle this turn as a failure before anything is spawned — the shape every
-   *  pre-spawn gate needs (model identity, #405; temp directory, #785). */
-  private failContinuationBeforeSpawn(runId: string, stepId: string, sink: UiEventSink, message: string): void {
-    const failedAt = new Date().toISOString();
-    sink.sessionEnded('error', message);
-    this.store.updateStep(runId, stepId, {
-      status: 'failed',
-      error: message,
-      finishedAt: failedAt,
-    });
-    this.move(runId, 'fail-start', {
-      error: `continue failed: ${message}`,
-      finishedAt: failedAt,
-      currentStepId: undefined,
-    });
-    this.store.appendEvent(runId, {
-      type: 'lifecycle',
-      message: `continue failed — ${message}`,
-    });
-    this.dropActive(runId);
-  }
-
-  /** Record the Continue's account on its step and the settings its workers inherit. */
-  private applyContinuationSettings(
-    runId: string,
-    stepId: string,
-    state: ActiveRun,
-    backend: RunnerId,
-    settings: ContinuationSettings,
-  ): void {
-    this.store.updateStep(runId, stepId, { profileId: settings.profile.profileId });
-    state.delegationSettings = { cwd: state.cwd, runner: backend, model: settings.backendModel,
-      effort: settings.effort, agentProfile: settings.profile.profileId, accountBinding: settings.profile.accountBinding,
-      systemPrompt: settings.extraSystemPrompt, ...toolGrantLists(settings.toolGrant) };
-  }
-
-  /** The continued step's skill files and playbook, when the step names a skill or the prompt
-   *  starts with a `/name`. Returns undefined otherwise, so that path does not yield. */
-  private continuationSkills(
-    runId: string,
-    state: ActiveRun,
-    prompt: string,
-    toolsStep: WorkflowStepDef | undefined,
-    skipSkillOnResume: boolean,
-  ): Promise<ContinuationSkills> | undefined {
-    const continuedSkillName = toolsStep?.skill;
-    // The continued step's skill and a leading `/name` in this prompt both get their companions;
-    // upstream rebuilt only the slash name, so an ordinary Continue lost the step skill's (#1408).
-    const continuationSlash = leadingSlashSkillName(prompt);
-    if (!continuedSkillName && !continuationSlash) return undefined;
-    return this.provisionContinuationSkills(runId, state, continuedSkillName, continuationSlash, skipSkillOnResume);
-  }
-
-  /** Reinstall the continued step's skill and a leading `/name`'s, and build the playbook. */
-  private async provisionContinuationSkills(
-    runId: string,
-    state: ActiveRun,
-    continuedSkillName: string | undefined,
-    continuationSlash: string | undefined,
-    skipSkillOnResume: boolean,
-  ): Promise<ContinuationSkills> {
-    let skillPrompt: string | undefined;
-    let fallbackSkillPrompt: string | undefined;
-    let files = new Map<string, string>();
-    if (continuedSkillName) {
-      let skill = this.enabledSkills(state).find((candidate) => candidate.name === continuedSkillName);
-      if (!skill) skill = await this.awaitContinuedSkill(state, continuedSkillName);
-      if (skill) {
-        // Reinstall the skill and its companions — into a #483 rematerialized
-        // worktree, or a team skill's cache copy when the worktree is gone — before
-        // the playbook, which names a cache copy's directory (#1024, #1408). No note on Continue.
-        files = (await this.runSkills.provisionRunSkills(runId, state, { stepSkill: skill.name, slash: continuationSlash })).filesDir;
-        const playbook = skillSystemPrompt(skill, files.get(skill.name));
-        if (skipSkillOnResume) fallbackSkillPrompt = playbook;
-        else skillPrompt = playbook;
-      } else if (!skipSkillOnResume) {
-        this.store.appendEvent(runId, {
-          type: 'lifecycle',
-          message: `skill /${continuedSkillName} is not in the skill registry — its instructions were not re-sent to the continued session`,
-        });
-      }
-    }
-    if (!continuedSkillName || !this.enabledSkills(state).some((candidate) => candidate.name === continuedSkillName)) {
-      if (continuationSlash) files = (await this.runSkills.provisionRunSkills(runId, state, { slash: continuationSlash })).filesDir;
-    }
-    return { skillPrompt, fallbackSkillPrompt, files };
-  }
-
-  /** The continued step's skill when the registry did not list it yet. */
-  private async awaitContinuedSkill(state: ActiveRun, continuedSkillName: string): Promise<Skill | undefined> {
-    // Boot recovery can outrun the async team-skills cache (`getTeamSkillsCached`
-    // returns [] until `initialTeamSkillsLoad` resolves). Wait briefly, then
-    // re-discover; never hang Continue on the network. The on-disk clone's
-    // list arrives before the passive fetch (#859), so stop as soon as it
-    // names this skill instead of waiting out a slow first fetch of the day.
-    try {
-      await new Promise<void>((resolve) => {
-        const timeout = setTimeout(resolve, 1_500);
-        timeout.unref?.();
-        const settle = () => { clearTimeout(timeout); resolve(); };
-        waitForTeamSkills(this.repoRoot).then(settle, settle);
-        waitForCachedTeamSkills(this.repoRoot).then((cached) => {
-          if (cached.some((candidate) => candidate.name === continuedSkillName)) settle();
-        }, () => undefined);
-      });
-      await this.loadRunSkills(state, 'ignore');
-      return this.enabledSkills(state).find((candidate) => candidate.name === continuedSkillName);
-    } catch {
-      // Best-effort — a slow or failing team-skills load must not fail Continue.
-      return undefined;
-    }
-  }
-
-  /** A Stop before the Continue's session spawned: cancel the step and the run. */
-  private settleContinuationPrelaunchCancel(runId: string, stepId: string, state: ActiveRun): void {
-    this.store.updateStep(runId, stepId, { status: 'cancelled' });
-    this.move(runId, 'cancel', { finishedAt: new Date().toISOString(), currentStepId: undefined });
-    this.clearAutosaveTimer(state); this.dropActive(runId);
-  }
-
-  /** A Continue's launch went stale while it provisioned (`launchStale`). A replaced active run
-   *  needs nothing more; a Stop cancels the run; a root Finish holds the Continue in the queue. */
-  private settleStaleContinuationLaunch(
-    runId: string,
-    stepId: string,
-    state: ActiveRun,
-    held: Omit<PendingContinuation, 'lineJoinedAt'>,
-  ): void {
-    if (this.active.get(runId) !== state) return;
-    if (state.cancelled || this.workerExecutionStopped(runId)) {
-      state.cancelled = true;
-      this.settleContinuationPrelaunchCancel(runId, stepId, state);
-    } else {
-      this.holdContinuationForRootFinish(runId, { ...held, lineJoinedAt: Date.now() }, state);
-    }
-  }
-
-  /** Start a Continue's session, resuming its own session when it has one. A throw revokes the
-   *  tools this launch was given and propagates to `continueRun`. */
-  private startContinuationSession(
-    runId: string,
-    state: ActiveRun,
-    runner: ReturnType<typeof createRunner>,
-    launch: ContinuationSessionLaunch,
-    onEvent: (event: AgentEvent) => void,
-    turn: SessionTurn,
-    sink: UiEventSink,
-  ): AgentSession {
-    const { delegation, ciTools, opening, skills, settings } = launch;
-    let session: AgentSession | undefined;
-    try {
-      // Provisioning determines the actual capability, including a fresh session after recovery.
-      const resumed = this.launchOpening(runId, state, launch.stepId, {
-        body: expandRegistrySlashSkillText(launch.prompt, this.enabledSkills(state), skills.files) +
-          (launch.setupNote ? `\n\n${launch.setupNote}` : ''),
-        ciTools,
-        checkpoint: opening.checkpoint,
-      });
-      const continuationTail = this.launchSystemTail({
-        extraSystemPrompt: settings.extraSystemPrompt, delegation, webhooksPart: launch.webhooksPart,
-        env: settings.profile.env, ciTools, handoffInjected: resumed.handoffInjected,
-      });
-      session = startManagedSession(runner,
-        {
-          // Skill body (when resent), then the run's extra system prompt, then
-          // the handoff contract — the same order as the opening session (#790).
-          // In-thread resume omits the skill from systemPrompt; OpenCode's 404
-          // fallback uses resumeFallbackSystemPrompt so the fresh session still
-          // gets the playbook.
-          systemPrompt: composeSystemPrompt(skills.skillPrompt, continuationTail),
-          ...(launch.skipSkillOnResume ? {
-            resumeFallbackSystemPrompt: composeSystemPrompt(skills.fallbackSkillPrompt, continuationTail),
-          } : {}),
-          userPrompt: opening.attachments.length
-            ? `${resumed.userPrompt}\n\n${pastedAttachmentsText(opening.attachments)}`
-            : resumed.userPrompt,
-          ...(opening.openingImages.length ? { images: opening.openingImages } : {}),
-          cwd: state.cwd,
-          toolGrant: settings.toolGrant,
-          additionalDirectories: agentDirectories(join(this.dataDir, 'runs'), settings.profile.env),
-          env: { ...settings.profile.env, ...delegation?.env, ...ciTools?.env },
-          ...(ciTools ? { cezarTools: ciTools.descriptor } : {}),
-          ...(delegation ? { restrictNativeDelegation: delegation.restrictNativeDelegation } : {}),
-          model: settings.backendModel,
-          effort: settings.effort,
-          sessionId: launch.sessionId,
-          resume: launch.sessionId !== undefined,
-          timeoutMs: 0,
-        },
-        onEvent,
-        inputReceipts.inputReceiptCallbacks(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, runId, state, () => session, turn, sink, true),
-      );
-    } catch (error) { ciTools?.revoke(); state.revokeCiTools = undefined; delegation?.revoke(); state.revokeDelegation = undefined; throw error; }
-    return session;
-  }
-
-  /** Wait for a Continue's session to close, then settle the run by how it closed. Teardown always
-   *  revokes the launch's tools, saves the worktree and leaves the active set
-   *  (`releaseContinuationSession`). */
-  private async awaitContinuationSession(runId: string, state: ActiveRun, session: AgentSession, launch: {
-    stepId: string;
-    sink: UiEventSink;
-    turn: SessionTurn;
-    delegation: LaunchDelegation;
-    ciTools: LaunchCiTools;
-  }): Promise<void> {
-    const { stepId, sink, turn } = launch;
-    const sessionClosed = this.trackWorkerSessionResult(runId, session);
-    state.session = session;
-    const resumedNext = this.continuationNextStep(runId);
-    state.nextStep = stepScope(session, resumedNext);
-    state.sessionEverOpened = true;
-    state.interrupt = () => session.interrupt();
-    let setupComplete = false;
-    const close: ContinuationClose = {};
-    try {
-      const result = await inputReceipts.sessionResultWithReceipts(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, runId, state, session, () => { setupComplete = true; });
-      if (this.preserveRunAfterDisposal(runId, state)) return;
-      this.withdrawCezarHumanWaits(runId);
-      this.persistWorkerAssistantResult(runId, stepId, result.text);
-      // A durable CI wait keeps recovery live, not this failed attempt successful.
-      if (turn.sessionError || state.agentInputError) throw new Error(turn.sessionError ?? state.agentInputError);
-      const settled = this.settleClosedContinuation(runId, state, stepId, sink, resumedNext, close);
-      if (settled) await settled;
-    } catch (err) {
-      if (!setupComplete) {
-        try { session.interrupt(); } catch { /* Still wait for actual termination. */ }
-        await sessionClosed;
-      }
-      if (this.preserveRunAfterDisposal(runId, state)) return;
-      this.settleFailedContinuation(runId, state, stepId, sink, turn, err);
-    } finally {
-      await this.releaseContinuationSession(runId, state, launch.delegation, launch.ciTools, close);
-    }
-  }
-
-  /** Settle a Continue whose session closed without a fault: undelivered wakes, a Stop, a step left
-   *  open, a done, or an idle close. Returns the settlement to wait for, or undefined when it
-   *  completed without yielding. */
-  private settleClosedContinuation(
-    runId: string,
-    state: ActiveRun,
-    stepId: string,
-    sink: UiEventSink,
-    resumedNext: WorkflowStepDef | undefined,
-    close: ContinuationClose,
-  ): Promise<void> | undefined { return this.runSettlement.settleClosedContinuation(runId, state, stepId, sink, resumedNext, close); }
-
-  /** The Continue's session failed, or its settlement threw: fail its step, then park the run
-   *  when it still holds wakes, else fail it. */
-  private settleFailedContinuation(
-    runId: string,
-    state: ActiveRun,
-    stepId: string,
-    sink: UiEventSink,
-    turn: SessionTurn,
-    err: unknown,
-  ): void { return this.runSettlement.settleFailedContinuation(runId, state, stepId, sink, turn, err); }
-
-  /** A Continue's session teardown: revoke the launch's tools, record the usage peaks, clear the
-   *  timers, save the worktree, leave the active set, then queue the workflow remainder. */
-  private async releaseContinuationSession(
-    runId: string,
-    state: ActiveRun,
-    delegation: LaunchDelegation,
-    ciTools: LaunchCiTools,
-    close: ContinuationClose,
-  ): Promise<void> {
-    ciTools?.revoke(); state.revokeCiTools = undefined;
-    delegation?.revoke(); state.revokeDelegation = undefined;
-    this.recordUsagePeaks(runId);
-    this.clearIdleTimer(state);
-    this.clearAutosaveTimer(state);
-    await this.saveWorktree(runId, state, 'turn end');
-    // Cancellation may be accepted while final autosave is yielding, even
-    // after success was recorded. Retire any durable queue intent before
-    // dropping the active state, otherwise pump can launch the tail with a
-    // fresh `cancelled:false` state.
-    if (state.cancelled) {
-      close.resumeWorkflow = undefined;
-      if (this.store.getRun(runId)?.status !== 'cancelled') {
-        this.move(runId, 'cancel-late', {
-          finishedAt: new Date().toISOString(), currentStepId: undefined,
-        });
-        this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
-      }
-    }
-    this.dropActive(runId);
-    if (close.resumeWorkflow) {
-      this.line.enqueueJob(runId, close.resumeWorkflow);
-      void this.pump();
     }
   }
 
@@ -2721,30 +2147,6 @@ export class RunManager {
       launchStale: (...args) => sessionEvents.launchStale(this.inputReceiptContext, this.sessionHelperHost, ...args),
     };
   }
-
-  private async stepProfileFor(
-    runId: string,
-    stepBackend: RunnerId,
-    options: { recordedProfileId?: string | undefined; stepId?: string | undefined },
-  ): Promise<StepProfile | string> { return sessionEvents.stepProfileFor(this.inputReceiptContext, this.sessionHelperHost, runId, stepBackend, options); }
-
-  private launchOpening(
-    runId: string,
-    state: ActiveRun,
-    stepId: string,
-    launch: { body: string; ciTools: LaunchCiTools; checkpoint?: RunRecord['continuationMessage'] },
-  ): LaunchOpening { return sessionEvents.launchOpening(this.inputReceiptContext, this.sessionHelperHost, runId, state, stepId, launch); }
-
-  private launchSystemTail(launch: {
-    extraSystemPrompt: string | undefined;
-    delegation: LaunchDelegation;
-    webhooksPart: string | undefined;
-    env: StepProfile['env'];
-    ciTools: LaunchCiTools;
-    handoffInjected: boolean;
-  }): string { return sessionEvents.launchSystemTail(this.inputReceiptContext, this.sessionHelperHost, launch); }
-
-  private persistWorkerAssistantResult(runId: string, stepId: string, text: string): void { return sessionEvents.persistWorkerAssistantResult(this.inputReceiptContext, this.sessionHelperHost, runId, stepId, text); }
 
   private makeUiSink(runId: string, stepId: string): UiEventSink { return sessionEvents.makeUiSink(this.inputReceiptContext, this.sessionHelperHost, runId, stepId); }
 
