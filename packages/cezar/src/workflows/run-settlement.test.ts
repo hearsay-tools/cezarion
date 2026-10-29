@@ -1,3 +1,4 @@
+import { makeTimerWait, RUN_STATUS, STEP_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -105,6 +106,34 @@ describe('successful run settlement (#473)', () => {
     expect(store.getRun(id)?.status).toBe('waiting');
     expect(store.getRun(id)?.finishedAt).toBeUndefined();
     expect(store.getRun(id)?.steps).toEqual(steps);
+  });
+
+  it('publishes a usage-limit resume before releasing a failed run with an open wait', () => {
+    const run = store.createRun({ title: 'limit', task: 'wait', workflow: 'quick-task', steps: [] });
+    store.addStep(run.id, { id: 'work', name: 'Work', kind: STEP_KIND.agent });
+    store.updateStep(run.id, 'work', { status: STEP_STATUS.failed, sessionId: 'session-1' });
+    const reset = Math.floor(Date.now() / 1000) + 3600;
+    const now = new Date().toISOString();
+    store.updateRun(run.id, { status: RUN_STATUS.running });
+    const held = store.pin(run.id, 'active')!;
+    store.pin(run.id, 'continue');
+    store.updateRun(run.id, {
+      status: RUN_STATUS.failed, error: `Claude AI usage limit reached|${reset}`,
+      agentInputs: [{ id: randomUUID(), parentRunId: run.id, source: 'lifecycle', text: 'pending', createdAt: now }],
+    });
+    held.waits = [makeTimerWait({ id: randomUUID(), registeredAt: now, deadline: new Date(Date.now() + 60_000).toISOString() })];
+    const internal = manager as unknown as { dropActive(id: string): void; releaseSlot(): void; line: { hasWake(id: string): boolean } };
+    const snapshots: Array<{ resume: string | undefined; wake: boolean }> = [];
+    const release = internal.releaseSlot.bind(manager);
+    vi.spyOn(internal, 'releaseSlot').mockImplementation(() => {
+      snapshots.push({ resume: store.getRun(run.id)?.autoResumeAt, wake: internal.line.hasWake(run.id) });
+      release();
+    });
+    internal.dropActive(run.id);
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]).toEqual({ resume: expect.any(String), wake: false });
+    expect(store.getRun(run.id)?.status).toBe('waiting');
+    store.unpin(run.id, 'continue');
   });
 
   it('uses current step statuses after diff I/O, retaining a concurrent failure', async () => {
