@@ -23,7 +23,7 @@ const RESUME_TIME_READERS: Record<string, string> = {
   'packages/cezar/src/runs/store.ts': 'the write rule, load-time healing, and the withdrawal and resume writes',
   'packages/cezar/src/workflows/run/auto-resume.ts': 'arms, re-arms, withdraws and clears the resume timer at its time',
   'packages/cezar/src/workflows/run-scheduling.ts': 'derives account holds from future resume deadlines',
-  'packages/cezar/src/workflows/run.ts': 'queue rescue, success and turn settlement read or retire the resume time',
+  'packages/cezar/src/workflows/run/run-line.ts': 'queue rescue reads the resume time',
   'packages/cezar/src/runs/run-row.ts': 'the live column keeps an older row with a stale time live, so the store can heal it',
   'packages/cezar/src/runs/run-index.ts': 'the cold reader decodes a summary with a stale time to heal it',
   'packages/cezar/src/task-cli/projections.ts': 'prints the resume time beside the usage-limit label',

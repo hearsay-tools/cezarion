@@ -1,6 +1,6 @@
 import { WaitWatches } from './run/wait-watches.ts';
 import { HumanWaits } from './run/human-waits.ts';
-import { RunLine } from './run/run-line.ts';
+import { RunLine, type PendingJob } from './run/run-line.ts';
 import { WorktreeAutosave } from './run/worktree-autosave.ts';
 import { RunSkills } from './run/run-skills.ts';
 import { InboxClaims } from './run/inbox-claims.ts';
@@ -58,7 +58,6 @@ import * as stepDecisions from './run/step-decisions.ts';
 import * as pendingAskFacts from './run/pending-ask-facts.ts';
 import * as workflowPosition from './run/workflow-position.ts';
 import { RUN_EXITS, transition, transitionVia, type RunExitId } from './run-states.ts';
-import { nextLineEntry } from './line-order.ts';
 import { accountHeldFor, deriveAccountHolds, queuedRecoveryInput, queuedStartAt, sessionlessWakePrompt } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
 import { executionAccount } from './execution-account.ts';
@@ -286,8 +285,6 @@ export const REFUSAL_DISCARDED_NOTE = 'Stop discarded the completion refusal thi
  * in-memory checks), unref'd, and it only ever acts when idling has no justification left.
  */
 export const QUEUE_WATCHDOG_MS = 60_000;
-/** Shared empty holds for the common "nothing is held" pump — avoids allocating per sweep. */
-const NO_HOLDS: AccountHolds = { deadline: new Set(), inFlight: new Set() };
 
 const RESTART_CONTINUATION_PROMPT =
   'The cezar process restarted while you were working on this task. Read the handoff file (CEZ_HANDOFF_FILE) to recover context, then continue the task from where you left off.';
@@ -351,7 +348,7 @@ export class RunManager {
   // Queue + `starting` set (spec 006, janitor's pump() pattern): `starting`
   // covers the window between shifting a run off the queue and the run
   // registering in `active`, so parallel-slot counting is never racy.
-  private readonly line = new RunLine();
+  private readonly line: RunLine;
   private get queue() { return this.line.queue; }
   private readonly worktreeAutosave: WorktreeAutosave;
   private readonly workerExecutions: WorkerExecutions;
@@ -504,9 +501,6 @@ export class RunManager {
    *  explicit user Continue, these are bulk scheduler work and must re-enter
    *  through `pump()` so both workspace and per-project caps are honored. */
   private get pendingContinuations() { return this.line.pendingContinuations; }
-  /** The configured default runner as `pump()` last read it, so the sync `oldestWakeAt()` resolves
-   *  a runnerless record's account the same way (hearsay-tools/cezarion#1236). */
-  private configuredDefaultRunner: RunnerId | undefined;
   /** Accepted Continues supersede in-flight settlement even before launch or after
    * idle close. Retain these across dropActive/dispose so absence cannot look like
    * the earlier execution again; disposal alone never revokes terminal intent. */
@@ -520,14 +514,6 @@ export class RunManager {
   private get deferredMessages() { return this.queuedInput.deferredMessages; }
   private readonly autoResumeScheduler: AutoResumeScheduler;
   private get autoResumeTimers() { return this.autoResumeScheduler.autoResumeTimers; }
-  private pumping = false;
-  /** The scheduler only needs repo presence, stable for this manager's lifetime.
-   * Cache the promise (including null) so every sweep doesn't spawn Git (#364).
-   * execute() still reads fresh branch/remote metadata for each run. */
-  private pumpRepoInfo?: ReturnType<typeof getRepoInfo>;
-  /** A pump that arrived while one was in flight — replayed by `pump()`'s own
-   *  loop so a slot freed mid-sweep is never a lost wakeup. */
-  private pumpAgain = false;
   private readonly repoRootLease: RepoRootLease;
 
   /** `.ai/cezar` — where the per-task handoff files live. */
@@ -568,6 +554,20 @@ export class RunManager {
     this.noWaitNudgeReplyMs = options.noWaitNudgeReplyMs ?? NO_WAIT_NUDGE_REPLY_MS;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
     this.inputReceiptContext = { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed };
+    this.line = new RunLine(this.inputReceiptContext, {
+      activeSize: () => this.active.size, activeHas: id => this.active.has(id),
+      withExecutionAccount: run => this.withExecutionAccount(run),
+      maintenance: id => this.claims.has(id) || !!this.autosaveCleanupBlocker(id),
+      admitted: id => this.workerExecutions.admitted(id), workerExecutionStopped: id => this.workerExecutionStopped(id),
+      recovering: () => this.recovering, recoveringRun: run => this.recoveringRun(run),
+      reconcileAutoResumes: () => this.reconcileAutoResumes(), cancel: id => this.cancel(id),
+      move: (id, patch) => this.move(id, 'fail-start', patch), beginWorkerExecution: id => this.beginWorkerExecution(id),
+      admissionError: (error, fallback) => admissionError(error, fallback),
+      admitQueuedWaitWake: id => this.admitQueuedWaitWake(id),
+      launchQueuedRun: (id, job, continuation) => this.launchQueuedRun(id, job, continuation),
+      reviveQueuedRun: (run, reason) => this.reviveQueuedRun(run, reason), pump: () => this.pump(),
+      busySlots: () => this.busySlots(),
+    });
     this.waitWatches = new WaitWatches(this.inputReceiptContext, {
       canProceedWithRun: (id, run) => this.canProceedWithRun(id, run), ciSupervisor: () => this.ciSupervisor,
       resolveWait: (id, waitId, result) => this.resolveWait(id, waitId, result),
@@ -1426,12 +1426,6 @@ export class RunManager {
     return { ...run, ...executionAccount(run, this.line.continuation(run.id), live) };
   }
 
-  /** A monitoring-pool member's wake waiting in the line: it already holds its slot, so it needs
-   *  no regular one to leave (hearsay-tools/cezarion#1236). */
-  private poolWakeQueued(runId: string): boolean {
-    return this.line.inPool(runId) && this.line.hasWake(runId) && this.active.has(runId);
-  }
-
   /** A worker wait the store upgraded from the old engine as already settled may have had no wake input
    *  queued yet (hearsay-tools/cezarion#1235): the old engine wrote it on its next pass, so its
    *  result is written here, once, before the wake that delivers it. A full inbox waits. */
@@ -1673,88 +1667,9 @@ export class RunManager {
     };
   }
 
-  /**
-   * Slots this manager holds against the workspace-wide cap. `waiting` runs
-   * don't hold a slot (#347): an idle claude process costs memory but no
-   * tokens, queued work progressing matters more, and the idle timeout already
-   * bounds how long a session can sit open. Because the exemption lives HERE —
-   * in the count, not in any acquire path — a message into a `waiting` run
-   * (sendMessage) resumes it immediately even when that momentarily exceeds
-   * `maxParallel`, including when other projects saturate the cap.
-   */
-  private busySlots(): number {
-    // A CI or timer park keeps its slot (hearsay-tools/cezarion#1233): up to
-    // `maxMonitoringSessions` of them hold a monitoring slot instead of a regular one, and the
-    // rest keep their regular slot. Every other park holds none: a park whose top wait is human
-    // or workers (hearsay-tools/cezarion#1235) is in `waiting` and outside the pool.
-    const parkedWithoutSlot = [...this.line.parked()].filter(id => !this.line.inPool(id)).length;
-    const pool = Math.min(this.line.poolSize(), this.semaphore.maxMonitoringSessions());
-    return this.active.size + this.line.startingCount() - parkedWithoutSlot - pool;
-  }
-
-  /** Epoch ms of this manager's oldest queued run (the semaphore's fairness
-   *  key when a freed slot is broadcast), or null when nothing is queued.
-   *  `queue` is FIFO — `startRun` pushes and `recover()` re-queues by
-   *  `createdAt` — so the head is the oldest. */
-  private oldestQueuedAt(): number | null {
-    const head = this.line.entries()[0];
-    if (!head) return null;
-    const wakeQueuedAt = this.wakeJoinedAt(head);
-    if (wakeQueuedAt !== undefined) return wakeQueuedAt;
-    const createdAt = this.store.getRun(head)?.createdAt;
-    const ms = createdAt ? Date.parse(createdAt) : Number.NaN;
-    return Number.isNaN(ms) ? null : ms;
-  }
-
-  /** When a queued entry joined the line as a wake of a run already in progress, or undefined for
-   *  a run that has not started (hearsay-tools/cezarion#1236, `nextLineEntry`). */
-  private wakeJoinedAt(runId: string): number | undefined {
-    const wake = this.line.wakeAt(runId) ?? this.line.continuation(runId)?.lineJoinedAt;
-    if (wake !== undefined || !this.line.hasJob(runId)) return wake;
-    // An owned worker is its family's work in progress, not a new task: it joins the wakes at its
-    // creation, so its parent's later wake (a worker wait that timed out, say) does not take the
-    // slot before the worker it waits on has run.
-    const run = this.store.getRun(runId);
-    if (run?.delegation?.role !== 'worker') return undefined;
-    const created = Date.parse(run.createdAt);
-    return Number.isFinite(created) ? created : undefined;
-  }
-
-  /** The oldest wake in this manager's line that an account hold does not keep there, or null:
-   *  the semaphore gives a freed slot to the project holding the oldest such wake before any
-   *  project's unstarted runs. A held wake is left out, or its project would take the slot and
-   *  start a new task ahead of another project's started run (hearsay-tools/cezarion#1236). */
-  private oldestWakeAt(): number | null {
-    let oldest: number | null = null;
-    let holds: AccountHolds | undefined;
-    for (const id of this.line.entries()) {
-      const at = this.wakeJoinedAt(id);
-      if (at === undefined || (oldest !== null && at >= oldest)) continue;
-      holds ??= this.semaphore.accountHolds();
-      // The same blockers `pump()` applies, capacity aside: a wake that cannot leave for any of
-      // them must not win the slot for its project's unstarted work. A runnerless record runs on
-      // the configured default, which only `pump()` reads (async); until it has, such a wake is
-      // not advertised while anything is held.
-      const runnerless = holds.deadline.size + holds.inFlight.size > 0 && this.store.getRun(id)?.runner === undefined;
-      if (runnerless && this.configuredDefaultRunner === undefined) continue;
-      if (!this.canLeaveLine(id, holds, this.configuredDefaultRunner ?? 'claude')) continue;
-      oldest = at;
-    }
-    return oldest;
-  }
-
-  /** Can this queued entry leave the line now, capacity aside? No worktree cleanup, no
-   *  autosave cleanup, no pending root finish, no account hold, and not already admitted
-   *  elsewhere. `pump()` and `oldestWakeAt()` share it, so the workspace order and the project
-   *  order agree (hearsay-tools/cezarion#1236). */
-  private canLeaveLine(id: string, holds: AccountHolds, fallbackRunner: RunnerId): boolean {
-    if (this.claims.has(id) || this.autosaveCleanupBlocker(id)) return false;
-    const queued = this.store.getRun(id);
-    if (!queued || this.historyDeletionPending(id)) return true;
-    if (this.workerExecutions.admitted(id) && !this.active.has(id)) return false;
-    if (this.executionBlockedByRootFinish(queued)) return false;
-    return !accountHeldFor(this.withExecutionAccount(queued), holds, fallbackRunner);
-  }
+  private busySlots(): number { return this.line.busySlots(); }
+  private oldestQueuedAt(): number | null { return this.line.oldestQueuedAt(); }
+  private oldestWakeAt(): number | null { return this.line.oldestWakeAt(); }
 
   /**
    * A slot this manager held just came free. Pump the whole WORKSPACE, not
@@ -1769,103 +1684,7 @@ export class RunManager {
     void this.semaphore.release();
   }
 
-  /**
-   * Start queued runs while parallel slots are free. A run starts only under
-   * BOTH ceilings: the WORKSPACE `resources.maxParallel` (default 2, counted
-   * across every manager — spec 2026-07-20, step 2.5) AND this project's own
-   * per-project `maxParallel` when the registry sets one (spec 2026-07-22,
-   * inherits the workspace cap when unset). Legacy per-repo `maxParallel` keys
-   * are ignored. A non-git directory degrades to 1 sequential run in the repo
-   * root (spec 006 degradation rule), which is always the tighter bound.
-   */
-  private async pump(): Promise<void> {
-    // Any recovery, scoped or not: each ends with a pump of its own, so nothing waits for long.
-    if (this.disposed || this.recovering) return;
-    this.reconcileAutoResumes();
-    // A pump requested while one is in flight can't just be dropped: the
-    // in-flight pass may already have read capacity (it awaits `getRepoInfo`
-    // before the first check), so a slot freed in that window would be lost
-    // until the next unrelated event. Re-run the sweep instead.
-    if (this.pumping) {
-      this.pumpAgain = true;
-      return;
-    }
-    this.pumping = true;
-    try {
-      do {
-        this.pumpAgain = false;
-        const repo = await (this.pumpRepoInfo ??= getRepoInfo(this.repoRoot));
-        const maxParallel = this.semaphore.maxParallel();
-        // Per-project ceiling (spec 2026-07-22-per-project-concurrency): this
-        // project never runs more than its own configured `maxParallel`; absent
-        // an override it equals the workspace cap, so behavior is unchanged.
-        const projectMax = this.semaphore.projectMaxParallel(this.repoRoot);
-        // `waiting` runs don't hold a slot (#347) — see busySlots(). The check
-        // below is the only slot gate: resumes never pass through it. A run
-        // starts only under BOTH the workspace cap and this project's ceiling.
-        const capacity = () =>
-          this.semaphore.busy() < maxParallel &&
-          this.busySlots() < projectMax &&
-          (repo !== null || this.busySlots() < 1);
-        // The usage-limit hold (spec 2026-08-03-auto-resume-after-usage-limit).
-        //
-        // A limit closes an ACCOUNT, not a run — so starting the next queued task walks it into
-        // the same wall. Measured before this gate existed: eight tasks under `maxParallel: 2`
-        // all failed within 517 ms, each spawning a CLI (and, outside worktree-opt-out mode, a
-        // worktree and a branch) only to be marked `scheduled`. The cap was respected at every
-        // instant and was no brake at all, because a doomed run lives ~200 ms.
-        //
-        // So: while any run on an account is waiting out a limit, nothing new starts on THAT
-        // account. Other accounts (a second login, a different backend) keep running — the hold
-        // is keyed, not global. The set is derived from the durable records rather than tracked
-        // separately, which is what makes it survive a restart, expire on its own, and lift the
-        // instant a user cancels a resume.
-        // The watchdog's one-shot override — read and cleared here, so a forced sweep never
-        // leaks into the next ordinary one.
-        const forced = this.line.takeForced();
-        const holds = this.line.entries().length > 0 && !forced ? this.semaphore.accountHolds() : NO_HOLDS;
-        const anyHold = holds.deadline.size > 0 || holds.inFlight.size > 0;
-        // Only pay for the config read when something is actually held: a queued record may name
-        // no runner, and then the account it would use is the configured default.
-        const defaultRunner = anyHold ? (await loadConfig(this.repoRoot)).defaultRunner : undefined;
-        if (defaultRunner !== undefined) this.configuredDefaultRunner = defaultRunner;
-        while (this.line.entries().length > 0) {
-          // Recovery may have begun while this pump awaited repository/config discovery.
-          if (this.disposed || this.recovering) return;
-          // Wakes first, then unstarted runs, each FIFO among the entries that CAN start
-          // (hearsay-tools/cezarion#1236); a held one keeps its place in the queue rather than
-          // being dequeued and re-queued (which would churn its position and its record).
-          const next = nextLineEntry(this.line.entries(), (id) => this.wakeJoinedAt(id),
-            (id) => (capacity() || this.poolWakeQueued(id)) && this.canLeaveLine(id, anyHold ? holds : NO_HOLDS, defaultRunner ?? 'claude'));
-          if (next === -1) break; // every queued run has a durable reason to remain held
-          const candidate = this.line.entries()[next]!;
-          if (this.workerExecutionStopped(candidate)) { this.cancel(candidate); continue; }
-          if (!this.checkpointQueuedWorker(candidate, next)) continue;
-          const runId = this.line.takeAt(next);
-          if (!runId) break;
-          const wake = this.admitQueuedWaitWake(runId);
-          if (wake === 'deferred') break;
-          if (wake === 'handled') continue;
-          this.launchQueuedRun(runId, forced);
-        }
-      } while (this.pumpAgain);
-    } finally {
-      this.pumping = false;
-    }
-  }
-
-  /** Checkpoint before dequeue, while worker cancellation can still find the queued entry. */
-  private checkpointQueuedWorker(candidate: string, next: number): boolean {
-    if (!this.active.has(candidate) && (this.line.hasJob(candidate) || this.line.hasContinuation(candidate))) {
-      try { this.beginWorkerExecution(candidate); }
-      catch (error) {
-        this.line.takeAt(next); this.line.takePending(candidate);
-        this.move(candidate, 'fail-start', { error: admissionError(error, 'worker execution checkpoint unavailable'), finishedAt: new Date().toISOString() });
-        return false;
-      }
-    }
-    return true;
-  }
+  private pump(): Promise<void> { return this.line.pump(); }
 
   /** A lost runner boundary requeues the wake and ends this pass instead of spinning. */
   private admitQueuedWaitWake(runId: string): 'none' | 'handled' | 'deferred' {
@@ -1892,14 +1711,7 @@ export class RunManager {
   }
 
   /** Read and hydrate mutable queued input in the same synchronous tick as dequeue. */
-  private launchQueuedRun(runId: string, forced: boolean): void {
-    if (this.line.removeWake(runId, false)) this.line.admitWake(runId);
-    // A forced sweep has to reach the spawn: the gate inside `execute` asks the same
-    // question and would send this run straight back to the queue.
-    if (forced) this.line.markForced(runId);
-    const { job, continuation } = this.line.takePending(runId);
-    if (!job && !continuation) return;
-    this.line.markStarting(runId);
+  private launchQueuedRun(runId: string, job: PendingJob | undefined, continuation: PendingContinuation | undefined): void {
     if (continuation) {
       void (async () => {
         const hydrated = this.hydrateQueuedContinuation(runId, continuation);
@@ -2600,46 +2412,7 @@ export class RunManager {
     return true;
   }
 
-  /**
-   * Repair queued records missing executable state. Rescue an idle queue only when no running work
-   * or future appointment explains it; start through ordinary caps. Public for direct tests.
-   */
-  async rescueStalledQueue(now = Date.now()): Promise<void> {
-    if (this.disposed) return;
-    // First, the worst shape: a record that says `queued` while the engine holds no job, no
-    // continuation and no queue entry for it. `pump()` cannot see such a run — it iterates the
-    // queue, and this one is not in it — so nothing will ever start it. Re-adopt it through the
-    // same path boot recovery uses.
-    for (const run of this.store.listRuns()) {
-      if (run.status !== 'queued' || this.recoveringRun(run)) continue;
-      if (this.active.has(run.id) || this.line.hasStarting(run.id)) continue;
-      if (this.line.hasJob(run.id) || this.line.hasContinuation(run.id)) continue;
-      if (this.line.hasQueued(run.id)) continue;
-      console.warn(`[cez] queue watchdog: re-adopting queued run ${run.id} the engine had lost`);
-      await this.reviveQueuedRun(run, 'queue watchdog');
-    }
-    if (this.line.entries().length === 0) return;
-    if (this.busySlots() > 0 || this.line.startingCount() > 0) return;
-    if (this.semaphore.busy() > 0) return;
-    // A future deadline is a real reason to sit still: that timer will fire and pump.
-    for (const run of this.store.listRuns()) {
-      if (!isUsageLimitHold(run)) continue;
-      const deadline = Date.parse(run.autoResumeAt);
-      if (Number.isFinite(deadline) && deadline > now) return;
-    }
-    if (this.semaphore.accountHolds().inFlight.size === 0) {
-      // Not the hold, then — some other wakeup went missing. An ordinary pump is the whole fix,
-      // and it is idempotent, so this stays quiet.
-      void this.pump();
-      return;
-    }
-    console.warn(
-      '[cez] queue watchdog: work is queued, nothing is running, and the usage-limit hold has no'
-      + ' deadline behind it — starting the next task anyway',
-    );
-    this.line.forceNext();
-    void this.pump();
-  }
+  async rescueStalledQueue(now = Date.now()): Promise<void> { return this.line.rescueStalledQueue(now); }
 
   accountHolds(now = Date.now()): AccountHolds {
     return deriveAccountHolds(this.store.listRuns(), run => this.withExecutionAccount(run), now);
