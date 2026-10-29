@@ -24,7 +24,7 @@ Methods are named, never cited by line number: every move shifts the lines.
    takes `Pick<RunManager, …>`, because that makes private methods public and ties the module
    back to `run.ts`.
 3. **One shared context.** Modules read `store`, `repoRoot`, `dataDir`, `semaphore` and
-   `disposed()` from one `RunContext` object. No module copies a manager map.
+   `disposed()` and owned `work` from one `RunModuleContext` object. No module copies a manager map.
 4. **One module per pull request, each at most 1,000 lines.** `file-length.test.ts` refuses a
    new file over 1,000 lines, so the class needs at least ten modules. Each move PR lowers the
    `run.ts` entry in `file-length.baseline.json` (`FILE_LENGTH_UPDATE=1`).
@@ -351,9 +351,13 @@ Two kinds of seam fail differently when code moves:
 Members that tests wrap or spy on, which must stay `RunManager` methods called through the host
 until Phase 5. The list was checked against `main` at `97335b352`:
 
-- The 12 that `fixture-cleanup.testkit.ts` replaces: `pump`, `execute`, `runContinuation`,
+- The 12 operations that `context.work` tracks at promise creation (hearsay-tools/cezarion#2226): `pump`, `execute`, `runContinuation`,
   `recordTurnEnd`, `saveWorktree`, `autoNameRun`, `enforceRetention`, `finishWorkerExecution`,
   `settleSuccess`, `settleRequestedRootFinish`, `rescueStalledQueue`, `trackWorkerSessionResult`.
+  The fixture reads one `TrackedWork` per repository root. It does not replace manager methods.
+  `runInternals(manager)` provides the typed module, context, active-map and disposal reads; its
+  instance test pins every class-module field. The 12 facade members remain in this PR, while
+  cleanup ownership also covers a module calling its own methods.
 - Spied: `awaitRunTermination`, `reconcileWorkerWaits`, `startRun`, `recover`, `queueWaitWake`,
   `deliverConversationInput`, `continueRun`, `settledTurnOutcome`, `submitAgentInput`,
   `releaseSlot`, `noticeParkedWorker`, `completionGate`, `dropActive`, `reviveQueuedRun`,
