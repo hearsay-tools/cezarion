@@ -58,6 +58,7 @@ import * as inputReceipts from './run/input-receipts.ts';
 import { ContinuationAcceptance } from './run/continuation-acceptance.ts';
 import { AutoResumeScheduler } from './run/auto-resume.ts';
 export { AUTO_RESUME_GRACE_MS, MAX_AUTO_RESUMES, AUTO_RESUME_MISSED_WINDOW_MS } from './run/auto-resume.ts';
+import { TrackedWork } from './run/tracked-work.ts';
 import type { RunModuleContext } from './run/types.ts';
 import * as launchContext from './run/launch-context.ts';
 import { openingInputs } from './run/opening.ts';
@@ -167,7 +168,7 @@ export { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NO
  */
 export class RunManager {
   private readonly active = new Map<string, ActiveRun>();
-  private readonly inputReceiptContext: RunModuleContext;
+  private readonly context: RunModuleContext;
   private readonly stepSession: StepSession;
   private readonly continuationSession: ContinuationSession;
   private readonly stepLoop: WorkflowStepLoop;
@@ -373,7 +374,7 @@ export class RunManager {
   constructor(
     private readonly store: RunStore,
     private readonly repoRoot: string,
-    options: { semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined } = {},
+    options: { work?: TrackedWork; semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined } = {},
   ) {
     this.dataDir = join(repoRoot, '.ai/cezar');
     this.workerScratchCleanup = new WorkerScratchCleanup(store, this.dataDir, id => this.isActive(id) || this.workerExecutions.has(id) || this.claims.has(id) || !!this.autosaveCleanupBlocker(id));
@@ -384,8 +385,8 @@ export class RunManager {
     this.unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
     this.noWaitNudgeReplyMs = options.noWaitNudgeReplyMs ?? NO_WAIT_NUDGE_REPLY_MS;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
-    this.inputReceiptContext = { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed };
-    this.retries = new WakeRetries(this.inputReceiptContext, {
+    this.context = { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed, work: options.work ?? new TrackedWork() };
+    this.retries = new WakeRetries(this.context, {
       owesWake: run => this.owesWake(run), queueWaitWake: id => this.queueWaitWake(id),
       retryWaitAdmission: id => this.retryWaitAdmission(id), wakeRetryBackoff: () => this.wakeRetryBackoff,
     });
@@ -399,7 +400,7 @@ export class RunManager {
       reviveQueuedRun: (run, reason) => this.reviveQueuedRun(run, reason), reviveWorkflow: run => this.reviveWorkflow(run),
       checkpointRestartContext: (run, step) => this.checkpointRestartContext(run, step),
     };
-    this.line = new RunLine(this.inputReceiptContext, {
+    this.line = new RunLine(this.context, {
       activeSize: () => this.active.size, activeHas: id => this.active.has(id),
       withExecutionAccount: run => this.withExecutionAccount(run),
       maintenance: id => this.claims.has(id) || !!this.autosaveCleanupBlocker(id),
@@ -413,7 +414,7 @@ export class RunManager {
       reviveQueuedRun: (run, reason) => this.reviveQueuedRun(run, reason), pump: () => this.pump(),
       busySlots: () => this.busySlots(),
     });
-    this.workerQuestions = new WorkerQuestions(this.inputReceiptContext, {
+    this.workerQuestions = new WorkerQuestions(this.context, {
       active: id => this.active.get(id), deliverConversationInput: id => this.deliverConversationInput(id),
       chargeAutomaticWake: id => this.chargeAutomaticWake(id), hasQueuedAgentInputs: id => this.hasQueuedAgentInputs(id),
       providerOwnsInboxInput: (id, inputId) => this.providerOwnsInboxInput(id, inputId), reconcileWorkerWaits: id => this.reconcileWorkerWaits(id),
@@ -424,7 +425,7 @@ export class RunManager {
       deleteUnreadInput: (id, input) => { this.active.get(id)?.unreadInputIds?.delete(input); },
       updatePendingHumanAsk: (id, value) => { const state = this.active.get(id); if (state) state.pendingHumanAsk = value; },
     }, MAX_AUTO_CONTINUES);
-    this.familyReconciler = new FamilyReconciler(this.inputReceiptContext, {
+    this.familyReconciler = new FamilyReconciler(this.context, {
       active: id => this.active.get(id), isActive: id => this.isActive(id), recoveringRun: run => this.recoveringRun(run),
       cancel: id => this.cancel(id), armWait: (id, wait) => this.armWait(id, wait),
       armWorkerDeadline: (id, wait, delay) => this.armWorkerDeadline(id, wait, delay), disarmWait: id => this.disarmWait(id),
@@ -432,7 +433,7 @@ export class RunManager {
       retireSettledQuestions: id => this.retireSettledQuestions(id), fallbackRoutedQuestions: (id, reason) => this.fallbackRoutedQuestions(id, reason),
       reconcileWorkerWaits: id => this.reconcileWorkerWaits(id),
     });
-    this.waitWatches = new WaitWatches(this.inputReceiptContext, {
+    this.waitWatches = new WaitWatches(this.context, {
       canProceedWithRun: (id, run) => this.canProceedWithRun(id, run), ciSupervisor: () => this.ciSupervisor,
       resolveWait: (id, waitId, result) => this.resolveWait(id, waitId, result),
       reconcileWorkerWaits: family => this.reconcileWorkerWaits(family),
@@ -440,7 +441,7 @@ export class RunManager {
       armWorkerDeadline: (id, wait, delay) => this.armWorkerDeadline(id, wait, delay),
       settleWait: (id, waitId, result) => this.settleWait(id, waitId, result), exitFileRoots: id => this.exitFileRoots(id),
     });
-    this.waitRegistry = new WaitRegistry(this.inputReceiptContext, {
+    this.waitRegistry = new WaitRegistry(this.context, {
       active: id => this.active.get(id), workerExecutionStopped: id => this.workerExecutionStopped(id),
       executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run), ciSupervisor: () => this.ciSupervisor,
       isParked: id => this.line.isParked(id), countAutomaticWakes: id => this.automaticWakes(id),
@@ -453,7 +454,7 @@ export class RunManager {
       reparkWithoutWaits: (id, state) => this.reparkWithoutWaits(id, state), waitOnUserWithoutSession: id => this.wakeAdmission.waitOnUserWithoutSession(id),
       queueWaitWake: id => this.queueWaitWake(id), retryWaitAdmission: id => this.retryWaitAdmission(id),
     }, MAX_AUTO_CONTINUES);
-    this.humanWaits = new HumanWaits(this.inputReceiptContext, { routeWorkerQuestion: id => this.routeWorkerQuestion(id) }, MAX_AUTO_CONTINUES);
+    this.humanWaits = new HumanWaits(this.context, { routeWorkerQuestion: id => this.routeWorkerQuestion(id) }, MAX_AUTO_CONTINUES);
     this.sessionHelperHost = {
       active: this.active, line: this.line, humanWaits: this.humanWaits, inputReceiptHost: this.inputReceiptHost,
       move: (...args) => this.move(...args),
@@ -469,7 +470,7 @@ export class RunManager {
       releaseSlot: () => this.releaseSlot(),
       routeWorkerQuestion: id => this.routeWorkerQuestion(id),
     };
-    this.turnNudges = new TurnNudges(this.inputReceiptContext, this.humanWaits, this.line, this.completionGateHost, {
+    this.turnNudges = new TurnNudges(this.context, this.humanWaits, this.line, this.completionGateHost, {
       active: this.active, move: (id, exit, patch) => this.move(id, exit, patch),
       workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
       countAutomaticWakes: id => this.automaticWakes(id), hasQueuedAgentInputs: id => this.hasQueuedAgentInputs(id),
@@ -480,21 +481,21 @@ export class RunManager {
       armNoWaitNudgeReplyTimer: (id, state) => this.armNoWaitNudgeReplyTimer(id, state), noWaitNudgeReplyMs: () => this.noWaitNudgeReplyMs,
     }, MAX_AUTO_CONTINUES, COMPLETION_WILL_WAIT);
     this.worktreeAutosave = new WorktreeAutosave(
-      this.inputReceiptContext,
+      this.context,
       { holdForMaintenance: ids => this.holdForMaintenance(ids),
         reapTerminalScratch: id => this.reapTerminalScratch(id), releaseSlot: () => this.releaseSlot(),
         saveWorktree: (id, state, reason) => this.saveWorktree(id, state, reason),
         trackTurn: (id, task) => this.workerExecutions.trackTurn(id, task) },
     );
     this.orphans = new WorkerOrphans(
-      { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
+      this.context,
       { holds: (id, admitting) => this.workerExecutions.has(id) || this.active.has(id) || this.line.hasStarting(id) || (!admitting && this.line.hasQueued(id)),
         reapTerminalScratch: id => this.reapTerminalScratch(id),
         settleOrphanedWorkerExecution: (id, opts) => this.settleOrphanedWorkerExecution(id, opts),
         orphanBackoff: () => this.orphanBackoff, orphanTermGraceMs: () => this.orphanTermGraceMs },
     );
     this.workerExecutions = new WorkerExecutions(
-      { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed }, this.orphans,
+      this.context, this.orphans,
       { maintenance: id => this.claims.has(id) || !!this.autosaveCleanupBlocker(id),
         admissionError: message => new WorkerOrphanAliveError(message),
         settleOrphanedWorkerExecution: (id, opts) => this.settleOrphanedWorkerExecution(id, opts),
@@ -502,21 +503,21 @@ export class RunManager {
         retryWaitAdmission: id => this.retryWaitAdmission(id), releaseSlot: () => this.releaseSlot() },
     );
     this.automationToolsSlot = new AutomationToolsSlot(
-      { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
+      this.context,
       () => !!this.cockpit,
     );
     this.claims = new MaintenanceClaims(
-      { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
+      this.context,
       { isActive: id => this.isActive(id), autosaveCleanupBlocker: id => this.autosaveCleanupBlocker(id),
         hasExecution: id => this.workerExecutions.has(id), scheduleScratchCleanup: id => this.workerScratchCleanup.schedule(id),
         holdForMaintenance: ids => this.holdForMaintenance(ids) },
     );
     this.attachments = new AttachmentWriter(
-      { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
+      this.context,
       { persistAttachment: (id, mediaType, data, prefix) => this.persistAttachment(id, mediaType, data, prefix) },
     );
     this.queuedInput = new QueuedInput(
-      { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
+      this.context,
       { hasJob: id => this.line.hasJob(id), hasContinuation: id => this.line.hasContinuation(id), job: id => this.line.job(id),
         canProceedWithRun: (id, run): run is RunRecord => this.canProceedWithRun(id, run),
         activeGet: id => this.active.get(id), startingHas: id => this.line.hasStarting(id),
@@ -525,7 +526,7 @@ export class RunManager {
         sendMessage: (id, content, messageId) => this.sendMessage(id, content, messageId) },
     );
     this.inboxClaims = new InboxClaims(
-      { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
+      this.context,
       { activeGet: id => this.active.get(id),
         executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
         workerExecutionStopped: id => this.workerExecutionStopped(id),
@@ -537,21 +538,21 @@ export class RunManager {
         armInboxClaimExpiry: id => this.armInboxClaimExpiry(id) },
     );
     this.repoRootLease = new RepoRootLease(
-      { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
+      this.context,
       { park: id => { this.line.park(id); }, unpark: id => { this.line.unpark(id); },
         releaseSlot: () => this.releaseSlot() },
     );
     this.turnBookkeeper = new TurnBookkeeper(
-      { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
+      this.context,
       { isDisposedDelegatedRun: id => this.isDisposedDelegatedRun(id), discoverSkills: () => this.discoverSkills(),
         reviveWorkflow: run => this.reviveWorkflow(run), autoNameRun: (id, skill, task, live) => this.autoNameRun(id, skill, task, live) },
     );
     this.runSkills = new RunSkills(
-      { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
+      this.context,
       { discoverSkills: () => this.discoverSkills(), workerExecutionStopped: id => this.workerExecutionStopped(id),
         isCurrentState: (id, state) => this.active.get(id) === state, flushAgentInputs: id => this.flushAgentInputs(id) },
     );
-    this.stepSession = new StepSession(this.inputReceiptContext, {
+    this.stepSession = new StepSession(this.context, {
       workerExecutionStopped: id => this.workerExecutionStopped(id),
       executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
       trackWorkerSessionResult: (...args) => this.trackWorkerSessionResult(...args),
@@ -561,11 +562,11 @@ export class RunManager {
     }, this.sessionEventHost(), this.launchPreambleHost(), this.sessionHelperHost, this.line,
     this.runSkills, this.humanWaits, this.inputReceiptHost, this.inputReceiptSteps);
     this.autoResumeScheduler = new AutoResumeScheduler(
-      { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
+      this.context,
       { move: (id, exit, patch) => this.move(id, exit, patch),
         continueRun: (id, opts, defer) => this.continueRun(id, opts, defer), pump: () => this.pump() },
     );
-    this.recovery = new RunRecovery(this.inputReceiptContext, this.familyReconciler,
+    this.recovery = new RunRecovery(this.context, this.familyReconciler,
       this.workerQuestions, this.autoResumeScheduler, {
         workerScratchCleanup: this.workerScratchCleanup, humanWaits: this.humanWaits,
         waitWatches: this.waitWatches, inboxClaims: this.inboxClaims, orphans: this.orphans,
@@ -591,7 +592,7 @@ export class RunManager {
         adoptTranscriptAsk: (...args) => this.adoptTranscriptAsk(...args),
         settleAnsweredLegacyAsk: (...args) => this.settleAnsweredLegacyAsk(...args),
       }, RESTART_CONTINUATION_PROMPT);
-    this.wakeAdmission = new WakeAdmission(this.inputReceiptContext, {
+    this.wakeAdmission = new WakeAdmission(this.context, {
       active: this.active, retries: this.retries, line: this.line, waitWatches: this.waitWatches, waitRegistry: this.waitRegistry,
       inboxClaims: this.inboxClaims, workerQuestions: this.workerQuestions, humanWaits: this.humanWaits,
       isActive: id => this.isActive(id), move: (id, exit) => this.move(id, exit), recoveringRun: run => this.recoveringRun(run),
@@ -603,7 +604,7 @@ export class RunManager {
       countAutomaticWakes: (id, budget) => this.automaticWakes(id, budget),
       workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
     }, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS);
-    this.continuationAcceptance = new ContinuationAcceptance(this.inputReceiptContext, {
+    this.continuationAcceptance = new ContinuationAcceptance(this.context, {
       isActive: id => this.isActive(id), move: (id, exit, patch) => this.move(id, exit, patch),
       ownedJob: run => this.ownedJob(run), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
       finishWorkerExecution: id => this.finishWorkerExecution(id), clearWakeBackoff: id => this.clearWakeBackoff(id),
@@ -613,7 +614,7 @@ export class RunManager {
       isSyntheticContinuation: (run, step) => isSyntheticContinuation(run, step),
     }, this.claims, this.line, this.workerExecutions, this.queuedInput, this.autoResumeScheduler,
     this.worktreeAutosave, this.workerQuestions, ROUTED_QUESTION_REFUSAL, RESTART_CONTINUATION_PROMPT);
-    this.runSettlement = new RunSettlement(this.inputReceiptContext, this.humanWaits, this.workerQuestions,
+    this.runSettlement = new RunSettlement(this.context, this.humanWaits, this.workerQuestions,
       this.worktreeAutosave, this.turnBookkeeper, this.line, this.autoResumeScheduler, this.workerExecutions,
       this.completionGateHost, {
         active: this.active, isSyntheticContinuation: (run, step) => isSyntheticContinuation(run, step),
@@ -629,7 +630,7 @@ export class RunManager {
         enforceRetention: () => this.enforceRetention(), reapTerminalScratch: id => this.reapTerminalScratch(id),
         forgetMemoryPause: id => { this.memoryPausing.delete(id); },
       }, WAKE_SESSION_CLOSED_ERROR, WAKE_DELIVERY_CAP_NOTE);
-    this.continuationSession = new ContinuationSession(this.inputReceiptContext, {
+    this.continuationSession = new ContinuationSession(this.context, {
       move: (...args) => this.move(...args), dropActive: id => this.dropActive(id),
       isSyntheticContinuation: (run, step) => isSyntheticContinuation(run, step),
       beginUsageInvocation: (...args) => this.beginUsageInvocation(...args),
@@ -646,7 +647,7 @@ export class RunManager {
     }, this.line, this.sessionHelperHost, this.repoRootLease, this.worktreeAutosave, this.runSkills,
     this.sessionEventHost(), this.launchPreambleHost(), this.inputReceiptHost, this.inputReceiptSteps,
     this.humanWaits, this.queuedInput, this.workerQuestions, this.runSettlement);
-    this.stepLoop = new WorkflowStepLoop(this.inputReceiptContext, {
+    this.stepLoop = new WorkflowStepLoop(this.context, {
       active: this.active, move: (id, exit, patch) => this.move(id, exit, patch), dropActive: id => this.dropActive(id),
       closingWakeDecision: (id, holds, cancelled, error) => this.closingWakeDecision(id, holds, cancelled, error),
       owesDelivery: id => this.owesDelivery(id),
@@ -654,7 +655,7 @@ export class RunManager {
       executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
     }, this.line, this.worktreeAutosave, this.humanWaits, this.runSettlement, this.stepSession,
     this.completionGateHost, WAKE_SESSION_CLOSED_ERROR);
-    this.turnSettler = new TurnSettler(this.inputReceiptContext, {
+    this.turnSettler = new TurnSettler(this.context, {
       humanWaits: this.humanWaits, line: this.line, waitWatches: this.waitWatches, waitRegistry: this.waitRegistry,
       workerQuestions: this.workerQuestions, completionGateHost: this.completionGateHost,
       move: (id, exit) => this.move(id, exit), releaseSlot: () => this.releaseSlot(), completionGate: id => this.completionGate(id),
@@ -670,7 +671,7 @@ export class RunManager {
       noticeParkedWorker: id => this.noticeParkedWorker(id), routeWorkerQuestion: id => this.routeWorkerQuestion(id),
       settledTurnOutcome: (id, entry, outcome) => this.settledTurnOutcome(id, entry, outcome),
     }, IDLE_TIMEOUT_MS, MAX_AUTO_CONTINUES, COMPLETION_WILL_WAIT, SCHEDULE_WAKEUP_MAX_SECONDS);
-    this.inputDelivery = new InputDelivery(this.inputReceiptContext, {
+    this.inputDelivery = new InputDelivery(this.context, {
       active: this.active, line: this.line, workerExecutions: this.workerExecutions, runSkills: this.runSkills,
       attachments: this.attachments, humanWaits: this.humanWaits, workerQuestions: this.workerQuestions,
       waitRegistry: this.waitRegistry, inputReceiptHost: this.inputReceiptHost,
@@ -936,7 +937,7 @@ export class RunManager {
     return { ok: true, finishes: 'at_turn_end', ...(next === undefined ? { completes: 'task' as const } : { completes: 'step' as const, next_step: next }), open_waits };
   }
 
-  private completionRefusal(runId: string): CompletionRefusal | undefined { return completionGateReads.completionRefusal(this.inputReceiptContext, this.completionGateHost, runId); }
+  private completionRefusal(runId: string): CompletionRefusal | undefined { return completionGateReads.completionRefusal(this.context, this.completionGateHost, runId); }
 
   async stopPreviewServer(runId: string, request: PreviewStopRequest, signal?: AbortSignal): Promise<PreviewStopResult> {
     return stopPreviewServer(this.store, this.preview, this.cezarPort, () => this.disposed, runId, request, signal);
@@ -1210,9 +1211,9 @@ export class RunManager {
     }).finally(() => this.finishWorkerExecution(runId));
   }
 
-  private checkpointRestartContext(run: RunRecord, queuedStepId?: string): RunRecord { return queuedRevival.checkpointRestartContext(this.inputReceiptContext, this.queuedRevivalHost, run, queuedStepId); }
+  private checkpointRestartContext(run: RunRecord, queuedStepId?: string): RunRecord { return queuedRevival.checkpointRestartContext(this.context, this.queuedRevivalHost, run, queuedStepId); }
 
-  private async reviveQueuedRun(run: RunRecord, reason: string): Promise<void> { return queuedRevival.reviveQueuedRun(this.inputReceiptContext, this.queuedRevivalHost, run, reason); }
+  private async reviveQueuedRun(run: RunRecord, reason: string): Promise<void> { return queuedRevival.reviveQueuedRun(this.context, this.queuedRevivalHost, run, reason); }
 
   /**
    * Startup recovery (#367) — re-adopt runs that were live when the previous
@@ -1232,7 +1233,7 @@ export class RunManager {
    */
   async recover(familyRootId?: string): Promise<void> { return this.recovery.recover(familyRootId); }
 
-  private requeueInterruptedRun(run: RunRecord, interruptedStepId: RunRecord['currentStepId']): boolean { return queuedRevival.requeueInterruptedRun(this.inputReceiptContext, this.queuedRevivalHost, run, interruptedStepId); }
+  private requeueInterruptedRun(run: RunRecord, interruptedStepId: RunRecord['currentStepId']): boolean { return queuedRevival.requeueInterruptedRun(this.context, this.queuedRevivalHost, run, interruptedStepId); }
 
   /**
    * Adopt a dead owner’s family for a control, then recover the settled family without resuming
@@ -1241,7 +1242,7 @@ export class RunManager {
    */
   adoptOrphanedRun(runId: string, opts: { stop?: boolean } = {}): Promise<boolean> { return this.recovery.adoptOrphanedRun(runId, opts); }
 
-  private async reviveWorkflow(run: RunRecord): Promise<WorkflowDef | null> { return queuedRevival.reviveWorkflow(this.inputReceiptContext, this.queuedRevivalHost, run); }
+  private async reviveWorkflow(run: RunRecord): Promise<WorkflowDef | null> { return queuedRevival.reviveWorkflow(this.context, this.queuedRevivalHost, run); }
 
   private isDisposedDelegatedRun(runId: string): boolean {
     return isDisposedDelegatedRun(this.store, () => this.disposed, runId);
@@ -1433,14 +1434,14 @@ export class RunManager {
   editTask(runId: string, task: string): boolean { return this.queuedInput.editTask(runId, task); }
   deferMessage(runId: string, content: PastedContent[]): boolean { return this.queuedInput.deferMessage(runId, content); }
 
-  private parentCompletionBlockers(runId: string) { return completionGateReads.parentCompletionBlockers(this.inputReceiptContext, this.completionGateHost, runId); }
+  private parentCompletionBlockers(runId: string) { return completionGateReads.parentCompletionBlockers(this.context, this.completionGateHost, runId); }
 
   /** The read-only verdict and explicit Finish share this decision. Operational failures
    * (for example a failed durable write) are still handled at execution time. */
   private finishDecision(runId: string):
-    { action: 'session' | 'root' | 'waiting' | 'review' } | { reason: string; warn?: boolean } { return completionGateReads.finishDecision(this.inputReceiptContext, this.completionGateHost, runId); }
+    { action: 'session' | 'root' | 'waiting' | 'review' } | { reason: string; warn?: boolean } { return completionGateReads.finishDecision(this.context, this.completionGateHost, runId); }
 
-  finishBlockedReason(runId: string): string | undefined { return completionGateReads.finishBlockedReason(this.inputReceiptContext, this.completionGateHost, runId); }
+  finishBlockedReason(runId: string): string | undefined { return completionGateReads.finishBlockedReason(this.context, this.completionGateHost, runId); }
 
   private deferParentCompletion(runId: string): boolean {
     const gate = this.completionGate(runId);
@@ -1489,7 +1490,7 @@ export class RunManager {
   }
 
   /** Human Finish keeps the worker guarantees and bypasses request obligations only. */
-  private completionMayPass(runId: string): boolean { return completionGateReads.completionMayPass(this.inputReceiptContext, this.completionGateHost, runId); }
+  private completionMayPass(runId: string): boolean { return completionGateReads.completionMayPass(this.context, this.completionGateHost, runId); }
 
   /** The session just took a refusal nudge, live or queued (hearsay-tools/cezarion#1301): its turn is
    *  the nudge's, and its reply is bounded by the no-wait nudge's reply timer, so a harness that
@@ -1985,10 +1986,10 @@ export class RunManager {
 
   private sessionEventHost(): import('./run/session-events.ts').SessionEventHost {
     return {
-      disposedSessionEvent: (...args) => sessionEvents.disposedSessionEvent(this.inputReceiptContext, this.sessionHelperHost, ...args),
-      handleReceiptEvent: (...args) => inputReceipts.handleReceiptEvent(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, ...args),
-      recordSessionFault: (...args) => sessionEvents.recordSessionFault(this.inputReceiptContext, this.sessionHelperHost, ...args),
-      markTurnBoundary: (...args) => sessionEvents.markTurnBoundary(this.inputReceiptContext, this.sessionHelperHost, ...args),
+      disposedSessionEvent: (...args) => sessionEvents.disposedSessionEvent(this.context, this.sessionHelperHost, ...args),
+      handleReceiptEvent: (...args) => inputReceipts.handleReceiptEvent(this.context, this.inputReceiptHost, this.inputReceiptSteps, ...args),
+      recordSessionFault: (...args) => sessionEvents.recordSessionFault(this.context, this.sessionHelperHost, ...args),
+      markTurnBoundary: (...args) => sessionEvents.markTurnBoundary(this.context, this.sessionHelperHost, ...args),
       trackTurnEnd: (...args) => this.trackTurnEnd(...args),
       endTurn: (...args) => this.endTurn(...args),
     };
@@ -1999,11 +2000,11 @@ export class RunManager {
       provisionSession: (...args) => this.provisionSession(...args),
       agentWebhooksPart: () => this.agentWebhooksPart(),
       provisionCiSession: (...args) => this.provisionCiSession(...args),
-      launchStale: (...args) => sessionEvents.launchStale(this.inputReceiptContext, this.sessionHelperHost, ...args),
+      launchStale: (...args) => sessionEvents.launchStale(this.context, this.sessionHelperHost, ...args),
     };
   }
 
-  private makeUiSink(runId: string, stepId: string): UiEventSink { return sessionEvents.makeUiSink(this.inputReceiptContext, this.sessionHelperHost, runId, stepId); }
+  private makeUiSink(runId: string, stepId: string): UiEventSink { return sessionEvents.makeUiSink(this.context, this.sessionHelperHost, runId, stepId); }
 
   private prepareHumanAsk(state: ActiveRun): void { return this.humanWaits.prepareHumanAsk(state); }
   private openHumanAlias(runId: string, state: ActiveRun | undefined, via: WaitVia, card?: AskRequest): HumanWaitEntry | undefined { return this.humanWaits.openHumanAlias(runId, state, via, card); }
@@ -2011,7 +2012,7 @@ export class RunManager {
   private withdrawCezarHumanWaits(runId: string): void { return this.humanWaits.withdrawCezarHumanWaits(runId); }
   private holdsAgentWaits(runId: string): boolean { return this.humanWaits.holdsAgentWaits(runId); }
 
-  private handleRunnerUiEvent(runId: string, state: ActiveRun, sink: UiEventSink, event: UiEvent): void { return sessionEvents.handleRunnerUiEvent(this.inputReceiptContext, this.sessionHelperHost, runId, state, sink, event); }
+  private handleRunnerUiEvent(runId: string, state: ActiveRun, sink: UiEventSink, event: UiEvent): void { return sessionEvents.handleRunnerUiEvent(this.context, this.sessionHelperHost, runId, state, sink, event); }
 
   /** Persist the invocation checkpoint before launching a runner. A throw or
    * process exit before `turn.started` therefore leaves a durable mismatch. */
