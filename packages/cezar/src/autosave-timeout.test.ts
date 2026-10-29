@@ -149,8 +149,6 @@ exec ${shQuote(realGit)} "$@"
     try {
       // Nothing is stalled here, so the save runs with the product budget. The shrunk one is for the
       // stalled commands above: a real Git command can outlast 500 ms on a loaded host (hearsay-tools/cezarion#1203).
-      // Provenance: a `git` shim first on PATH (`sleep 0.7; exec git "$@"`), this case and the serialize case below.
-      // With the 500 ms budget both failed (1 run of 2, "expected 'failed' to be 'committed'"); without it both passed (1 run of 2).
       const job = autosaveCommit(repo, 'run finalize');
       jobs.push(job);
       expect(await job).toBe('committed');

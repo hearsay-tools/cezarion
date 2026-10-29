@@ -143,16 +143,8 @@ it('scrolls a keyboard-focused transcript control above the desktop footer', () 
   browser.goto(`${baseUrl}/p/${project}/tasks/${runId}?thread=flat`)
   const target = '[data-slot="tool-card"][data-kind="execute"] > button'
   browser.waitForFunction(`document.querySelector('${target}') !== null`)
-  // Finish paging before selecting and covering the keyboard target. Evidence for
-  // hearsay-tools/cezarion#1510: CPU15/two-loop old-test diagnosis failed 1/1 with
-  // focused:true/clear:false/hit:false: page 2 arrived after Tab and moved the focused
-  // button to y=8419.14. Bundle:
-  // .ai/qa/failures/before.test.ts/scrolls-a-keyboard-focused-transcript-control-above-the-desktop-footer-1.
-  // Repro: LOOPS=2 RUNS=1 LABEL=old-1 timeout --kill-after=5s 120s taskset -c 15
-  // bash .ai/qa/1510-proof/run-loaded.sh. Matched scratch proof: old failed 1/1,
-  // fixed passed 1/1; final targeted acceptance passed 10/10 with the same CPU/load.
-  // This proves the paging/layout variant. The later historical focus proof is recorded in
-  // .ai/specs/2026-10-27-1510-keyboard-focus-proof.md, with its remaining evidence limits.
+  // Finish paging before selecting and covering the keyboard target: a late page moves the
+  // focused button (hearsay-tools/cezarion#1510).
   browser.evaluate(`document.querySelector('[data-slot="history-boundary"] button').click()`)
   browser.waitForFunction(`document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '2' &&
     document.querySelector('[data-slot="history-boundary"]')?.getAttribute('aria-busy') === 'false' && window.__cezIdle === true`)
@@ -172,11 +164,8 @@ it('scrolls a keyboard-focused transcript control above the desktop footer', () 
     const start = document.createElement('span');
     start.id = 'footer-focus-start'; start.tabIndex = -1;
     button.before(start); start.focus({ preventScroll: true });
-    // Retain the node rather than re-querying after a prepend (PR hearsay-tools/cezarion#1507).
-    // Historical 9d41b6faa on its own application failed 5/5 with focused:false: Tab reached
-    // this button, but the final query selected an older card. Current test on the same build
-    // passed 5/5; uninstrumented current CPU1/two-loop acceptance passed 10/10. Reproduction,
-    // full failure-bundle path and focus traces: .ai/specs/2026-10-27-1510-keyboard-focus-proof.md.
+    // Retain the node rather than re-querying after a prepend: a re-query can select an older
+    // card (PR hearsay-tools/cezarion#1507).
     window.__footerFocusTarget = button;
   })()`)
   browser.waitForFunction(`document.activeElement === document.getElementById('footer-focus-start') && window.__footerFocusTarget.isConnected`)

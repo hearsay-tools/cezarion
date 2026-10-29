@@ -34,15 +34,8 @@ export function useSocketSafeTmpdir(
   }
 }
 
-/** Prepare browser E2E even when Vitest is driven directly by Squeal.
- * Provenance: hearsay-tools/cezarion#1304. A local reproduction on main
- * 049628d0d ran the actual try_reuse/teardown_stale functions against a live
- * temporary HTTP server: stale TTL changed HTTP 200 to ECONNREFUSED while its
- * caller was active. The launcher regression pins that replacement boundary.
- * With the lease, two concurrent smoke.e2e.ts invocations (second TTL=1),
- * and a separate --force pair, each passed 24 tests / 1 skip after queueing.
- * This setup applies the same lifetime protection to direct Vitest/Squeal.
- */
+/** Prepare browser E2E even when Vitest is driven directly by Squeal. The lease keeps a stale
+ * TTL from tearing down an env a caller still uses (hearsay-tools/cezarion#1304). */
 export async function setup(): Promise<() => void> {
   const previousToken = process.env.TEST_ENV_LEASE_TOKEN
   const lease = await acquireTestEnvLease(root, {

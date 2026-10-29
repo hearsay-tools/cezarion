@@ -180,8 +180,7 @@ describe('mid-turn human follow-up parity — #486', () => {
               if (lateStart) {
                 // Settled is the first `waiting`; a spurious park precedes the late native turn
                 // start, so wait out that start before asserting no turn followed the park.
-                // Provenance: hearsay-tools/cezarion#1112 (cursor parked 250 ms after turn-end,
-                // then ran the follow-up as `waiting`; reproduced with this token, red without the fix).
+                // hearsay-tools/cezarion#1112: cursor parked after turn-end, then ran the follow-up as `waiting`.
                 const parkedAt = store.readEvents(runId).length;
                 // bound: observe past the real mock's 800 ms deferred native turn-start timer plus its 250 ms settle drain (1,500 ms total).
                 await new Promise(resolve => setTimeout(resolve, DEFERRED_TURN_START_MS + 700));

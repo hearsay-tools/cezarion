@@ -157,66 +157,23 @@ line; the fix is a wait, never a baseline entry.
    it (see `fixture-server.md`).
 
 One more rule is enforced by review, not by the scan: **a wait added or changed to fix a flake
-cites its evidence in the comment at the site.** The comment names the failure bundle path (or
-the single-test reproduction that went red, with its command or delay) and the before/after run
-counts. The evidence in a PR description or a review thread does not count: the next reader
-meets the wait, not the PR, and the automated review sends a bare wait back
-(hearsay-tools/cezarion#1000).
+cites its evidence in the PR description.** A code comment at the wait may say in one line why
+the wait exists. Use this template in the PR:
 
-A local bundle path names evidence nobody else can open. `.ai/qa/failures/` is gitignored, and
-a later run, a cleanup or a removed worktree deletes it. So write the full directory name (the
-test segment is the test name with each run of characters other than letters, digits, `.`, `_`
-and `-` turned into one `-`, cut to 80 characters, then `-<n>`), not a path shortened with `…`. Next to it, cite something that lasts:
-for a CI failure, the run and its `cockpit-failures-shard-<n>` artifact (see
-[Reading a failure bundle](#reading-a-failure-bundle)). For a local one, the PR comment that
-records what the bundle's `probe.json` showed. `setViewport` in `agent-browser.ts` is the durable
-form: "`cockpit-failures-shard-2` artifacts 11255134650, 11255508374 and 11259950580 (draft
-PR #791)".
-
-Copy this provenance comment and fill every part:
-
-```ts
-// <what changed and why>. Evidence: <spec> failed with "<headline>" (bundle
-// .ai/qa/failures/<spec>/<test>-<n>/: probe.json <key fact>, snapshot.txt <key fact>;
-// <durable citation>). Reproduce with `npm run test:e2e -- <spec>.e2e.ts -t '<name>'` —
-// <failed> of <runs> failed before, <passed> of <runs> passed after.
+```md
+**Flake evidence.** <spec> failed with "<headline>". Bundle:
+`.ai/qa/failures/<spec>/<test>-<n>/` (<CI run id and `cockpit-failures-shard-<n>` artifact>;
+probe.json <key fact>). Reproduce: `npm run test:e2e -- <spec>.e2e.ts -t '<name>'` (or the
+env-gated delay). Before: <failed> of <runs> failed. After: <passed> of <runs> passed.
 ```
 
-Three parts are required, and review checks each one (hearsay-tools/cezarion#1093):
-
-| Part | Write |
-| --- | --- |
-| Bundle leaf path | The full `<spec>/<test>-<n>/` directory, named by the rule above, never the `<spec>/` parent. Add the durable citation next to it: the CI run id and its `cockpit-failures-shard-<n>` artifact, or the PR comment for a local bundle. A red run of the reproduction writes a bundle too (`failure-setup.ts` for any failed test with a browser attached, the seam when a wait gives up), so name that bundle. |
-| Reproduction command | The single-test recipe from [Reproducing one test](#reproducing-one-test-locally), or the env-gated delay that made it red. |
-| Before/after counts | Both totals: how many of how many runs failed without the change, and how many of how many passed with it ("2 of 6", "8 of 8" below). A bare count cannot tell 2 of 6 from 2 of 200, nor show whether an after-run still failed. |
-
-The worked example for the counts is `liftWithSpace` in `project-order.e2e.ts`, quoted as it
-stands:
-
-```ts
- *  Provenance (hearsay-tools/cezarion#438, local, 2026-10-13): with a one-shot
- *  `waitForFunction(data-dragging)` here instead, the collapsed-mark test failed 2 of 6 full-spec
- *  runs of `npm run test:e2e -- project-order.e2e.ts`. Failure bundles
- *  `.ai/qa/failures/project-order/reorders-a-collapsed-mark-…-20` and `-22` both time out on
- *  `"e2e-order-a moved to position 3 of 4."` with focus on the lifted mark's link: the row was
- *  lifted, the key reached the activator, and dnd-kit never saw it. The single test alone passed
- *  4 of 4, because the earlier tests' load is what widens the gap. With this hold: 8 of 8 full-spec
- *  runs passed.
-```
-
-It names the command, what the bundles' `probe.json` showed, the before count (2 of 6) and the
-after count (8 of 8). It also shows the gap this rule now closes. The paths are shortened, and the
-bundles were local and are gone. The naming rule spells them out as
-`.ai/qa/failures/project-order/reorders-a-collapsed-mark-from-the-keyboard-with-Space-leaving-Enter-to-the-link-20`
-and
-`.ai/qa/failures/project-order/reorders-a-collapsed-mark-from-the-keyboard-with-Space-leaving-Enter-to-the-link-22`.
-Those names are derived from the rule, not read from disk. What survives is the
-diagnosis recorded in the comment and in the hearsay-tools/cezarion#999 review reply from
-commit `740b35ff`. A reproduction stands in for a bundle the same way:
-`task-handoff.e2e.ts`'s `window.__cezLive` wait cites "Reproduced 3/3 by delaying the built
-server's workspace-events attach 4 s behind E2E_DELAY_MS; 0/3 with this wait"
-(hearsay-tools/cezarion#1069). Anyone can rerun that from the
-[single-test recipe](#reproducing-one-test-locally).
+Write the full bundle leaf directory, not the `<spec>/` parent and not a path shortened with
+`…`. The test segment is the test name with each run of characters other than letters, digits,
+`.`, `_` and `-` turned into one `-`, cut to 80 characters, then `-<n>`. `.ai/qa/failures/` is
+gitignored and gets deleted, so for a CI bundle cite the run and its artifact (see
+[Reading a failure bundle](#reading-a-failure-bundle)). For a local bundle, write what its
+`probe.json` showed. A reproduction stands in for a bundle. Give both totals for the counts: "2
+of 6" is not "2 of 200".
 
 One site to know about: `selection-states.e2e.ts` asserts `matches(':hover')` after
 `hoverVisiblePoint`. That is a one-shot assertion, not a wait, and it holds because that spec adds
@@ -437,8 +394,8 @@ Seeded NDJSON transcripts must go through `seedTranscript` from `seed-transcript
 When a test change removes a hidden catalog dependency, follow
 [AGENTS.md’s regression-proof rule](../../../AGENTS.md#regression-proof): run the
 old test with the dependency absent, then the fixed test under the same conditions,
-even when no failure was observed. Record the evidence at the changed test site
-in the provenance form above.
+even when no failure was observed. Record the evidence in the PR description, in the form
+above.
 
 A spec seeds every catalog entry whose count or presence it relies on: skills, workflows,
 registered projects and the like. It never relies on a catalog it did not write: the skills

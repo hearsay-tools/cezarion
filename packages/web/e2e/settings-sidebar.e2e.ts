@@ -60,7 +60,7 @@ describe('Settings view sidebar (#622)', () => {
       browser.waitForFunction(`document.querySelector('[data-route="settings"]') !== null`)
       expect(browser.waitForValue(`document.querySelector('${sidebar} [aria-current="page"]')?.dataset.section`)).toBe('general')
       // In-app, not a goto: right after a cold load the view tabs are still settling, and a
-      // click there landed on Workflows (failure bundle light-navigates-…-2, probe.json).
+      // click there landed on Workflows.
       browser.click(`${sidebar} [data-section="agents"]`)
       browser.waitForFunction(`document.querySelector('[data-route="settings-agents"]') !== null`)
       browser.click('[data-slot="view-tabs"] a[aria-label="Settings"]')

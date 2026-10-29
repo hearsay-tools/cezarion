@@ -38,8 +38,6 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   it.each(['agent', 'check'].flatMap(next => ['early', 'late'].map(timing => ({ next, timing }))))('holds a nonfinal agent session and the following $next behind $timing admitted worker wake at cap one', async ({ next, timing }) => {
     // hearsay-tools/cezarion#1856: delivery can outlive the wake turn and its slot. Hold the native
     // response while checking admission; after release, the next step still needs an explicit done.
-    // Proof: .ai/specs/2026-10-27-worker-wake-capacity-proof.md (same scheduled observer: old 1/1
-    // failed, fixed 1/1 passed; a parent-slot-release mutant still fails the busy=1 assertion).
     await withHeldResponse('claude', async (release, held) => {
       try {
         const run = manager.startRun({ name: 'multi-step wait', source: 'built-in', steps: [

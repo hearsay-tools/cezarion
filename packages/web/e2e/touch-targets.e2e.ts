@@ -413,14 +413,8 @@ describe('references on a device that cannot hover (#617 01b)', () => {
         expect(chip.h, JSON.stringify(chip)).toBeGreaterThanOrEqual(44)
         expect(chip.right, JSON.stringify(chip)).toBeLessThanOrEqual(header.inner)
       }
-      // PRs and Issues now have separate labeled rows. The former same-row assertion failed
-      // at both widths: CI run 39610780143, cockpit-failures-shard-1 artifact 12351000804,
-      // touch-targets/360px-Session-activity-carries-the-44px-links-and-the-touch-sidebar-row-is-the-t-1/
-      // and touch-targets/390px-Session-activity-carries-the-44px-links-and-the-touch-sidebar-row-is-the-t-1/.
-      // Its probe.json reports a 56px top difference; snapshot.txt and screenshot.png show
-      // the approved grouped layout. Keep the 44px targets, aligned chip column and overflow guard.
-      // Scratch test-only proof at a4e88c027: 2/2 failed before, 2/2 passed after, using
-      // `npm exec -- vitest run --config .ai/qa/touch-reference-proof/vitest.config.ts -t 'Session activity carries'`.
+      // PRs and Issues now have separate labeled rows. Keep the 44px targets, aligned chip column
+      // and overflow guard.
       expect(header.groups).toEqual([
         { kind: 'PR', label: 'PRs', slots: ['pr-chip'] },
         { kind: 'Issue', label: 'Issues', slots: ['issue-chip'] },

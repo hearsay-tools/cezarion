@@ -151,18 +151,8 @@ it('blocked SharedWorker uses finite HTTP in ten visible windows and aborts on p
         pages.push({ targetId, sessionId })
       }
       const run = fixture.runs[0]!
-      // hearsay-tools/cezarion#1547: parallel startup failed 1/1 loaded diagnostics;
-      // telemetry left 8/10 documents loading. Bundle:
-      // .ai/qa/failures/selected/blocked-SharedWorker-uses-finite-HTTP-in-ten-visible-windows-and-aborts-on-pageh-1/
-      // probe.json: "probe exceeded 2000ms", captured after cleanup at about:blank;
-      // pre-cleanup state and run counts: https://github.com/hearsay-tools/cezarion/pull/1569#discussion_r4363857533
-      // Reproduce with `taskset -c 17 npm run test:e2e -- tab-coordination.e2e.ts -t 'blocked SharedWorker uses finite HTTP'`
-      // plus two owned busy loops on CPU17. Sequential startup passed 1/1 scratch
-      // proofs and 10/10 tracked acceptance processes; no retries. Old global setup
-      // ran under load; fixed global setup preceded burners, with fresh tab fixtures
-      // under load in both. Sequential startup took 2852–5620 ms per document with
-      // the same predicate and 22 s guard, increasing aggregate setup allowance.
-      // The shared 50 s deadline caps polling across the unchanged 60 s row;
+      // Start documents one at a time: parallel startup under load left documents loading
+      // (hearsay-tools/cezarion#1547). The shared 50 s deadline caps polling across the 60 s row;
       // later concurrent checks still use all ten windows.
       for (const page of pages) {
         await request('Page.navigate', { url: `${fixture.origin}/p/${run.projectId}/tasks/${run.runId}` }, page.sessionId)
@@ -178,13 +168,6 @@ it('blocked SharedWorker uses finite HTTP in ten visible windows and aborts on p
       }
       expect(persistent).toEqual([])
       const session = pages[0]!.sessionId
-      // Evidence: hearsay-tools/cezarion CI run 39973711080, cockpit-failures-shard-3
-      // artifact 12510856696, bundle .ai/qa/failures/tab-coordination/
-      // blocked-SharedWorker-uses-finite-HTTP-in-ten-visible-windows-and-aborts-on-pageh-1/:
-      // probe.json records "expected {} to be true" after cleanup at about:blank.
-      // Reproduce with `npm run test:e2e -- tab-coordination.e2e.ts -t 'blocked SharedWorker uses finite HTTP'`
-      // and CDP Network.emulateNetworkConditions latency=2500 before this request:
-      // 1 of 1 failed before; 1 of 1 passed after under the same delayed-response condition.
       // Start one request. Poll its result, never retry the request or its failure.
       await read(request, session, `(() => {
         const probe = window.__finiteHttpProbe = { controller: new AbortController() };

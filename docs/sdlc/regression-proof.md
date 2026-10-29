@@ -81,12 +81,9 @@ A **test-only change that removes a hidden dependency** needs this proof even
 when no failure has been observed. This includes dependence on a catalog, a host
 setting or a default the test did not write. Run the old test with that dependency
 absent and confirm it fails for that reason, then run the fixed test under the
-same conditions and confirm it passes. Cite the evidence in a comment at the
-changed test site, using the [E2E provenance form](../../packages/web/e2e/README.md#the-rules-the-ratchet-enforces):
-the reproduction command and conditions, and both before/after counts with their
-totals. For browser failures, include the full failure-bundle leaf path and a
-durable citation as that form requires; for non-browser tests, cite the captured
-runner output instead.
+same conditions and confirm it passes. Cite the evidence in the PR body, in the
+[E2E form](../../packages/web/e2e/README.md#the-rules-the-ratchet-enforces); for
+non-browser tests, cite the runner output instead of a bundle.
 
 ## Test-only fix
 

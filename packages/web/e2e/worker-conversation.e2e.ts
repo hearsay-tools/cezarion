@@ -160,14 +160,8 @@ describe('chronological worker conversation', () => {
       expect(explanations.some(text => text.includes('Not delivered: worker is done') && text.includes('worker resume'))).toBe(true)
       const rejected = browser.waitForValue<string>(`[...document.querySelectorAll('${card}')].find(el => el.textContent.includes('Correct the returned result'))?.textContent`)
       expect(rejected).toContain('Not delivered')
-      // #548 verification reproduction: `npm run test:e2e -- worker-conversation.e2e.ts
-      // -t 'shows actionable delivery feedback and distinct clocks: desktop-dark-comfortable'`.
-      // Bundle: .ai/qa/failures/worker-conversation/
-      // shows-actionable-delivery-feedback-and-distinct-clocks-desktop-dark-comfortable-1/.
-      // Its probe reports the sticky header covering Details. A local geometry probe showed
-      // hover repinning main.scrollTop from 16 to 449 and moving Details from y=459.53 to
-      // y=26.53. The old CLI wheel failed the inMain assertion below; explicit wheelAt
-      // reached main and reduced scrollTop by 100 in all four viewport/theme variants.
+      // Hover can repin main's scroll so the sticky header covers Details (#548); an explicit
+      // wheelAt reaches main where the CLI wheel did not.
       const scroller = browser.waitForStable<{ x: number; y: number; top: number; height: number; scrollHeight: number }>(`(() => {
         const main = document.querySelector('[data-slot="main"]');
         const rect = main.getBoundingClientRect();
@@ -267,15 +261,6 @@ describe('chronological worker conversation', () => {
       browser.press('Space')
       browser.waitForFunction(`document.querySelector('${request} [data-slot="conversation-body-toggle"]').getAttribute('aria-expanded') === 'false'`)
       // After collapsing the request, render and settle the reply row before pointer clicks.
-      // Evidence: worker-conversation failed with last value "Show message" (bundle
-      // .ai/qa/failures/worker-conversation/keeps-direction-and-interleaved-work-visible-mobile-light-comfortable-1/:
-      // probe.json lastValue="Show message"; snapshot.txt reply toggle expanded=false).
-      // CI run 39991752744, cockpit-failures-shard-1 artifact 12517699947:
-      // https://github.com/hearsay-tools/cezarion/actions/runs/39991752744/artifacts/12517699947
-      // Reproduce: npm run test:e2e -- worker-conversation.e2e.ts -t 'keeps direction and interleaved work visible: mobile-light-comfortable'
-      // CI command: npm run test:e2e -- --shard=1/4; 1 of 1 runs failed before (0db0c8d16),
-      // 1 of 1 passed after (28cab79d9, run 39995644693). Local agent-browser 0.39.2
-      // scratch full-spec runs passed 1 of 1 before and 1 of 1 after; no local red reproduced.
       hoverVisiblePoint(browser, `${replyCard} [data-slot="conversation-body-toggle"]`)
       settleVisual(browser, replyCard)
       browser.click(`${replyCard} [data-slot="conversation-body-toggle"]`)
@@ -332,16 +317,7 @@ describe('chronological worker conversation', () => {
     expect(body.text).toContain('Paragraph 44')
     expect(body.reference).toBe('https://example.com/')
     // Let virtua apply the expanded height before the Tab start scrolls: a scroll first
-    // windows the rows with the collapsed height and unmounts this card. Evidence:
-    // worker-conversation failed with "focus never reached … it is on
-    // button.pointer-events-auto.inline-flex.min-h-11" (bundle
-    // .ai/qa/failures/worker-conversation/expands-a-long-body-and-preserves-it-across-virtual-row-navigation-1/:
-    // probe.json active element data-slot="jump-to-latest"; snapshot.txt has no conversation card;
-    // CI run 40017980734, cockpit-failures-shard-1 artifact 12530555246,
-    // hearsay-tools/cezarion#1573). Reproduce with an AGENT_BROWSER_INIT_SCRIPTS script that holds
-    // ResizeObserver callbacks for 1.5 s from the expanding Enter, on
-    // `npm run test:e2e -- worker-conversation.e2e.ts -t 'expands a long body'`:
-    // 5 of 5 runs failed before, 5 of 5 passed after.
+    // windows the rows with the collapsed height and unmounts this card (hearsay-tools/cezarion#1573).
     waitForVirtualRowMeasured(request, collapsed)
     focusWithKeyboard(browser, `${request} ${connector}`)
     browser.press('Enter')

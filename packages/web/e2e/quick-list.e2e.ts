@@ -213,13 +213,6 @@ describe('task quick-list', () => {
 
   it('groups attention before finished outcomes while retaining independent status rows', () => {
     // Sample the complete grouping at the assertion, after any setup-time remount.
-    // Evidence: .ai/qa/failures/quick-list/groups-attention-before-finished-outcomes-while-retaining-independent-status-row-1/
-    // in CI run 39934997946, cockpit-failures-shard-4 artifact 12493998500:
-    // probe.json records []; snapshot.txt and screenshot.png show both buckets and all rows.
-    // Controlled proof: ignored scratch copies detach both buckets for exactly their first read,
-    // then restore them in a microtask. `npm exec -- vitest run --config
-    // .ai/qa/1509-proof/vitest.config.ts -t 'groups attention before finished outcomes'`:
-    // 1 of 1 failed before; 1 of 1 passed after, with the same detach/restore and no burners.
     const expectedBuckets = ['Needs you', 'Finished']
     // Historical variant runs are ordinary rows since the compare page was retired
     // (hearsay-tools/cezarion#1760).
@@ -1072,10 +1065,7 @@ describe('a row under width contention, in a column the user can widen', () => {
 
   /** The row title's measured width — how much of the column the NAME actually got.
    *  Wait, then read as one step: the row existed at the `beforeEach` wait, was absent at the
-   *  measurement, and was present again in the failure snapshot. The trigger was not reproduced
-   *  in four targeted reruns. Evidence: .ai/qa/local-runs/1790767992591-919007/lane-4-failures/
-   *  quick-list/grows-the-name-as-the-column-grows-without-ever-shrinking-it-1/{probe.json,snapshot.txt}.
-   *  Read only while the measured node exists; keep the width assertions unchanged. */
+   *  measurement, and was present again in the failure snapshot. Read only while the measured node exists; keep the width assertions unchanged. */
   const titleWidth = () =>
     Number(
       waitForSettledSample(browser,
@@ -1289,9 +1279,7 @@ describe('a row under width contention, in a column the user can widen', () => {
     expect(browser.evaluate(`document.querySelector('${overflow}')?.textContent`)).toBe('+2')
     browser.click(overflow)
     // One sample, read as it passes the wait (#409, hearsay-tools/cezarion#1027). Under a loaded
-    // Squeal slow tier the list existed at the wait and was gone at the next read (bundle
-    // `.ai/qa/failures/quick-list/drops-the-age-whole-…-1`, trigger `aria-expanded="false"`):
-    // the click had toggled a hover-opened list shut. reference-overflow.test.tsx pins that fix.
+    // Squeal slow tier the list existed at the wait and was gone at the next read: the click had toggled a hover-opened list shut. reference-overflow.test.tsx pins that fix.
     const list = browser.waitForValue(`(() => {
       const list = document.querySelector('[data-slot="reference-overflow-list"]')
       const links = list?.querySelectorAll('a').length ?? 0
@@ -1596,13 +1584,7 @@ describe('archive from the sidebar (#780)', () => {
   it('folds sections with the keyboard, persists across canonical routes, and shares mobile state (#811)', () => {
     const desktop = '[data-slot="sidebar"]'
     const finished = `${desktop} [data-bucket="Finished"] [data-slot="section-toggle"]`
-    // Reject the empty loading sample; keep the exact bucket order in the assertion. Evidence:
-    // .ai/qa/failures/quick-list/folds-sections-with-the-keyboard-persists-across-canonical-routes-and-shares-mob-1/
-    // (CI run 40553790857 attempt 1, job 122364489299, cockpit-failures-shard-4 artifact 12757296359).
-    // Cold /p/default/ navigation before this read reproduced the same [] failure in an ignored
-    // copy: `vitest run --config .ai/qa/repair1981-proof/quick.config.ts -t 'folds sections with the keyboard'`.
-    // 1 of 1 failed before; 1 of 1 passed after. Setup and result details:
-    // https://github.com/hearsay-tools/cezarion/issues/1981#issuecomment-6450213215
+    // Reject the empty loading sample; keep the exact bucket order in the assertion (hearsay-tools/cezarion#1981).
     expect(browser.waitForValue<string[]>(`Array.from(document.querySelectorAll('${desktop} [data-bucket]')).map(el => el.dataset.bucket)`, value => value.length > 0)).toEqual(['Needs you', 'Finished', 'Working'])
     focusWithKeyboard(browser, finished)
     browser.press('Enter')
@@ -1615,15 +1597,7 @@ describe('archive from the sidebar (#780)', () => {
         const mobile = variant.viewport.width === 360
         // The drawer this opens must survive `/p/default/` resolving to `/p/<boot>/`, which can
         // land after the click: AppShell closed it on that in-place rewrite until
-        // hearsay-tools/cezarion#1129 (a product fix; no wait changed here). Evidence: this test
-        // failed with "value never stayed stable" from the settleVisual below (bundle
-        // .ai/qa/failures/quick-list/folds-sections-with-the-keyboard-persists-across-canonical-routes-and-shares-mob-1/:
-        // probe.json lastValue null and activeElement "Open projects" with data-state="closed",
-        // snapshot.txt `button "Open projects" [expanded=false]`; Squeal run
-        // 9f51ddd7-68da-4e5a-a7bf-1d3e243d85ce, recorded on hearsay-tools/cezarion#1129). Reproduce
-        // with `E2E_DELAY_MS=300 npm run test:e2e -- quick-list.e2e.ts -t 'folds sections with the keyboard'`
-        // and the README's delay patched into the built `GET /projects` handler — 9 of 9 failed
-        // before with the same probe, 8 of 8 passed after.
+        // hearsay-tools/cezarion#1129 (a product fix; no wait changed here).
         if (mobile) browser.click('[data-slot="mobile-top-bar"] button[aria-label^="Open projects"]')
         const surface = mobile ? '[data-slot="drawer-tasks"]' : desktop
         const toggle = `${surface} [data-bucket="Finished"] [data-slot="section-toggle"]`

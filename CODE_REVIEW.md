@@ -83,7 +83,7 @@ Manual review dispatches judge code and replies without waiting for tests, and b
 
 ### Cockpit e2e
 
-- A change that fixes or retries a flaky cockpit spec carries its evidence: the failure bundle (`.ai/qa/failures/…`, the `cockpit-failures-shard-<n>` artifact) or a local reproduction with the single-test recipe in `packages/web/e2e/README.md`. One that carries neither is a guess; request changes. The same page names the wait rules — a one-shot `expect(browser.…)` after an action, `:hover` in a wait, a scrolling predicate, a sleep — and the `e2e-wait-discipline` baseline may only shrink in a diff.
+- A change that fixes or retries a flaky cockpit spec carries its evidence in the PR description or a review thread, not in code comments: the failure bundle (`.ai/qa/failures/…`, the `cockpit-failures-shard-<n>` artifact) or a local reproduction with the single-test recipe in `packages/web/e2e/README.md`. One that carries neither is a guess; request changes. The same page names the wait rules — a one-shot `expect(browser.…)` after an action, `:hover` in a wait, a scrolling predicate, a sleep — and the `e2e-wait-discipline` baseline may only shrink in a diff.
 
 ## Severity guidance
 
