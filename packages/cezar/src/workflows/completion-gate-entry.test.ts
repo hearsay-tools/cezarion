@@ -1,4 +1,5 @@
 import { runInternals } from './run-internals.testkit.ts';
+import { clearIdleTimer } from './run/input-timers.ts';
 import type { ActiveRun } from './active-run.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -44,7 +45,7 @@ describe('the completion gate outside a turn end', () => {
     manager['active'].set(id, state);
     vi.spyOn(manager as unknown as { completionGate: () => unknown }, 'completionGate').mockReturnValue(refusal);
   });
-  afterEach(() => { manager['clearIdleTimer'](state); manager.dispose(); store.close(); rmSync(root, { recursive: true, force: true }); });
+  afterEach(() => { clearIdleTimer(state); manager.dispose(); store.close(); rmSync(root, { recursive: true, force: true }); });
 
   const queueInput = () => store.commitAgentInputs(id, [{ id: randomUUID(), source: 'agent', parentRunId: randomUUID(), text: 'Read this first', createdAt: new Date().toISOString() }]);
   const openWorkerWait = () => store.commitWait(id, { kind: 'worker', id: randomUUID(), source: 'agent', via: 'cezar_wait', registeredAt: new Date().toISOString(),
@@ -82,7 +83,7 @@ describe('the completion gate outside a turn end', () => {
   it('a turn end with an ask line and a monitoring line opens the timer alias', () => {
     state.atTurnBoundary = session;
     const ask = { questions: [{ header: 'Choice', question: 'Which framework?', options: [{ label: 'Vitest' }, { label: 'Node' }] }] };
-    manager['settleTurn'](id, state, 'turn-end', { stepId: 'task', monitoring: true, humanGate: false, ask,
+    runInternals(manager).turnSettler.settleTurn(id, state, 'turn-end', { stepId: 'task', monitoring: true, humanGate: false, ask,
       askNudged: false, done: false, nudgedLastTurn: false });
     expect(store.getRun(id)?.waits?.some(wait => wait.kind === 'timer')).toBe(true);
     expect(store.getRun(id)?.status).toBe('waiting');
@@ -105,9 +106,9 @@ describe('the completion gate outside a turn end', () => {
   describe('a done the gate holds', () => {
     let seeded: string;
     const handoff = () => readFileSync(handoffPath(join(root, '.ai/cezar'), id), 'utf8');
-    const turnEnd = () => manager['settleTurn'](id, state, 'turn-end', { stepId: 'task', monitoring: false, humanGate: false,
+    const turnEnd = () => runInternals(manager).turnSettler.settleTurn(id, state, 'turn-end', { stepId: 'task', monitoring: false, humanGate: false,
       ask: null, askNudged: false, done: true, nudgedLastTurn: false });
-    const ack = () => manager['settleTurn'](id, state, 'ack', manager['boundaryTurn'](id, state, session, true));
+    const ack = () => runInternals(manager).turnSettler.settleTurn(id, state, 'ack', runInternals(manager).turnSettler.boundaryTurn(id, state, session, true));
     beforeEach(() => {
       vi.mocked(manager['completionGate']).mockReturnValue('held');
       seedHandoffFile(join(root, '.ai/cezar'), store.getRun(id)!);

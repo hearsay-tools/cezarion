@@ -175,7 +175,7 @@ export class RunManager {
     active: this.active,
     pendingHumanAskSeq: id => this.pendingHumanAskSeq(id),
     isActive: id => this.isActive(id),
-    holdsAgentWaits: id => this.holdsAgentWaits(id),
+    holdsAgentWaits: id => this.humanWaits.holdsAgentWaits(id),
     waitingBeforeFinalWorkflowStep: run => this.waitingBeforeFinalWorkflowStep(run),
     parentCompletionBlockers: id => this.parentCompletionBlockers(id),
     unansweredQuestions: id => this.unansweredQuestions(id),
@@ -386,8 +386,8 @@ export class RunManager {
       active: id => this.active.get(id), deliverConversationInput: id => this.deliverConversationInput(id),
       chargeAutomaticWake: id => this.wakeAdmission.chargeAutomaticWake(id), hasQueuedAgentInputs: id => this.hasQueuedAgentInputs(id),
       providerOwnsInboxInput: (id, inputId) => this.providerOwnsInboxInput(id, inputId), reconcileWorkerWaits: id => this.reconcileWorkerWaits(id),
-      openHumanAlias: (id, state, via, card) => this.openHumanAlias(id, state, via, card), prepareHumanAsk: state => this.prepareHumanAsk(state),
-      markHumanWaitSurfaced: (id, wait, card) => this.markHumanWaitSurfaced(id, wait, card), withdrawCezarHumanWaits: id => this.withdrawCezarHumanWaits(id),
+      openHumanAlias: (id, state, via, card) => this.humanWaits.openHumanAlias(id, state, via, card), prepareHumanAsk: state => this.humanWaits.prepareHumanAsk(state),
+      markHumanWaitSurfaced: (id, wait, card) => this.humanWaits.markHumanWaitSurfaced(id, wait, card), withdrawCezarHumanWaits: id => this.humanWaits.withdrawCezarHumanWaits(id),
       routeWorkerQuestion: id => this.routeWorkerQuestion(id), noticeParkedWorker: id => this.noticeParkedWorker(id),
       retireUnreadParentQuestion: (id, request) => this.retireUnreadParentQuestion(id, request),
       deleteUnreadInput: (id, input) => { this.active.get(id)?.unreadInputIds?.delete(input); },
@@ -417,7 +417,7 @@ export class RunManager {
       canProceedWithRun: (id, run) => this.canProceedWithRun(id, run),
       exitFileRoots: (id, run) => this.waitWatches.exitFileRoots(id, run), disarmWait: id => this.disarmWait(id),
       settleWait: (id, waitId, result) => this.waitWatches.settleWait(id, waitId, result),
-      withdrawCezarHumanWaits: id => this.withdrawCezarHumanWaits(id), armWait: (id, wait) => this.waitWatches.armWait(id, wait),
+      withdrawCezarHumanWaits: id => this.humanWaits.withdrawCezarHumanWaits(id), armWait: (id, wait) => this.waitWatches.armWait(id, wait),
       parkOnWaits: (id, state) => this.wakeAdmission.parkOnWaits(id, state), cancelAutomaticAtCap: (id, waits) => this.wakeAdmission.cancelAutomaticAtCap(id, waits),
       reparkWithoutWaits: (id, state) => this.wakeAdmission.reparkWithoutWaits(id, state), waitOnUserWithoutSession: id => this.wakeAdmission.waitOnUserWithoutSession(id),
       queueWaitWake: id => this.wakeAdmission.queueWaitWake(id), retryWaitAdmission: id => this.retries.retryWaitAdmission(id),
@@ -443,8 +443,8 @@ export class RunManager {
       workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
       countAutomaticWakes: id => this.wakeAdmission.automaticWakes(id), hasQueuedAgentInputs: id => this.hasQueuedAgentInputs(id),
       submitAgentInput: (id, state, content) => this.submitAgentInput(id, state, content), resumeParkedRun: (id, state) => this.resumeParkedRun(id, state),
-      chargeAutomaticWake: id => this.wakeAdmission.chargeAutomaticWake(id), retryWaitAdmission: id => this.retries.retryWaitAdmission(id), armIdleTimer: (id, state) => this.armIdleTimer(id, state),
-      openTurnEndHumanWait: (id, state, step, via, note) => this.openTurnEndHumanWait(id, state, step, via, note),
+      chargeAutomaticWake: id => this.wakeAdmission.chargeAutomaticWake(id), retryWaitAdmission: id => this.retries.retryWaitAdmission(id), armIdleTimer: (id, state) => this.turnSettler.armIdleTimer(id, state),
+      openTurnEndHumanWait: (id, state, step, via, note) => this.turnSettler.openTurnEndHumanWait(id, state, step, via, note),
       settledTurnOutcome: (id, entry, outcome) => this.settledTurnOutcome(id, entry, outcome), queueWaitWake: id => this.wakeAdmission.queueWaitWake(id),
       noWaitNudgeReplyMs: () => this.noWaitNudgeReplyMs,
     }, MAX_AUTO_CONTINUES, COMPLETION_WILL_WAIT);
@@ -554,7 +554,7 @@ export class RunManager {
       isActive: id => this.isActive(id), move: (id, exit) => this.move(id, exit), recoveringRun: run => this.recoveringRun(run),
       continueRun: (id, opts, defer) => this.continueRun(id, opts, defer), disarmWait: id => this.disarmWait(id),
       reconcileWorkerWaits: id => this.reconcileWorkerWaits(id), releaseSlot: () => this.line.releaseSlot(),
-      parkForUser: (id, state, step) => this.parkForUser(id, state, step), armIdleTimer: (id, state) => this.armIdleTimer(id, state),
+      parkForUser: (id, state, step) => this.turnSettler.parkForUser(id, state, step), armIdleTimer: (id, state) => this.turnSettler.armIdleTimer(id, state),
       flushAgentInputs: id => this.flushAgentInputs(id), answerRoutedQuestion: (id, flush) => this.answerRoutedQuestion(id, flush),
       queueWaitWake: id => this.wakeAdmission.queueWaitWake(id), retryWaitAdmission: id => this.retries.retryWaitAdmission(id),
       countAutomaticWakes: (id, budget) => this.wakeAdmission.automaticWakes(id, budget),
@@ -636,8 +636,8 @@ export class RunManager {
       hasUnansweredHumanAsk: id => this.hasUnansweredHumanAsk(id), countAutomaticWakes: (id, budget) => this.wakeAdmission.automaticWakes(id, budget),
       recoveringRun: id => this.recoveringRun(id), continueRun: (id, opts, defer) => this.continueRun(id, opts, defer),
       latchAgentInputError: (id, state, session, message) => this.latchAgentInputError(id, state, session, message),
-      parkForUser: (id, state, step) => this.parkForUser(id, state, step), settleTurn: (id, state, entry, turn) => this.settleTurn(id, state, entry, turn),
-      boundaryTurn: (id, state, session, done) => this.boundaryTurn(id, state, session, done),
+      parkForUser: (id, state, step) => this.turnSettler.parkForUser(id, state, step), settleTurn: (id, state, entry, turn) => this.turnSettler.settleTurn(id, state, entry, turn),
+      boundaryTurn: (id, state, session, done) => this.turnSettler.boundaryTurn(id, state, session, done),
       canAutoContinue: (id, state) => this.turnNudges.canAutoContinue(id, state), armNoWaitNudgeReplyTimer: (id, state) => this.turnNudges.armNoWaitNudgeReplyTimer(id, state),
       awaitCompletionNudgeReply: (id, state, session) => this.turnNudges.awaitCompletionNudgeReply(id, state, session),
       queueWaitWake: id => this.wakeAdmission.queueWaitWake(id), owesWake: (run, budget) => this.wakeAdmission.owesWake(run, budget),
@@ -698,7 +698,7 @@ export class RunManager {
     for (const [runId, state] of this.active) {
       state.revokeCiTools?.(); state.revokeCiTools = undefined;
       state.revokeDelegation?.(); state.revokeDelegation = undefined;
-      this.clearIdleTimer(state);
+      clearIdleTimer(state);
       this.clearAutosaveTimer(state);
       state.releaseRepoRoot?.();
       state.releaseRepoRoot = undefined;
@@ -750,7 +750,7 @@ export class RunManager {
       // Closing the session frees the tree and lets the normal exit path settle the run and
       // pump the queue. Suppress autonomous auto-continue so the pause actually holds.
       state.autonomous = false;
-      this.clearIdleTimer(state);
+      clearIdleTimer(state);
       state.session.end();
     }
   }
@@ -1082,7 +1082,7 @@ export class RunManager {
       });
       const state = this.active.get(runId);
       if (state) {
-        this.clearIdleTimer(state);
+        clearIdleTimer(state);
         this.clearAutosaveTimer(state);
       }
       this.line.unmarkStarting(runId);
@@ -1145,7 +1145,7 @@ export class RunManager {
     const state = this.active.get(runId);
     releaseActiveResources(this.store, runId, state);
     if (state) {
-      this.clearIdleTimer(state);
+      clearIdleTimer(state);
       this.clearAutosaveTimer(state);
       clearHeldHumanInputTimer(state);
     }
@@ -1243,7 +1243,7 @@ export class RunManager {
     this.store.flush();
     state.revokeCiTools?.(); state.revokeCiTools = undefined;
     state.revokeDelegation?.(); state.revokeDelegation = undefined;
-    this.clearIdleTimer(state);
+    clearIdleTimer(state);
     state.interrupt();
   }
 
@@ -1324,7 +1324,7 @@ export class RunManager {
     const state = this.active.get(runId);
     // Mid-turn, the live turn end takes its done to the gate itself, behind owed input and waits.
     if (typeof gate === 'object' && state?.session && state.atTurnBoundary === state.session) {
-      this.settleTurn(runId, state, 'gate', this.boundaryTurn(runId, state, state.session, true), gate);
+      this.turnSettler.settleTurn(runId, state, 'gate', this.turnSettler.boundaryTurn(runId, state, state.session, true), gate);
     }
     return true;
   }
@@ -1356,7 +1356,7 @@ export class RunManager {
     this.move(runId, 'park', { finishedAt: undefined });
     this.store.flush();
     if (state) {
-      this.clearIdleTimer(state);
+      clearIdleTimer(state);
       this.line.leavePool(runId); this.line.park(runId);
       if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
       this.line.releaseSlot();
@@ -1366,9 +1366,6 @@ export class RunManager {
 
   /** Human Finish keeps the worker guarantees and bypasses request obligations only. */
   private completionMayPass(runId: string): boolean { return completionGateReads.completionMayPass(this.context, this.completionGateHost, runId); }
-
-
-
 
   registerWorkerWait(parentId: string, request: WorkerWaitRequest): WorkerWait { return this.waitRegistry.registerWorkerWait(parentId, request); }
   registerWorkerListWait(runId: string, request: { workerIds?: string[]; requestIds?: string[] | undefined; mode?: WorkerWaitRequest['mode']; timeoutSeconds: number }, via: 'cezar_wait' | 'cez-worker-wait'): DeadlinedWorkerWaitEntry { return this.waitRegistry.registerWorkerListWait(runId, request, via); }
@@ -1519,7 +1516,7 @@ export class RunManager {
     const askSeq = this.pendingHumanAskSeq(runId);
     const human = openWaits(this.store.getRun(runId) ?? {}).filter((wait): wait is HumanWaitEntry => wait.kind === 'human');
     if (askSeq === undefined || !this.store.getRun(runId) || human.some(wait => !isCezarHumanWait(wait) || wait.askSeq === askSeq)) return false;
-    this.withdrawCezarHumanWaits(runId);
+    this.humanWaits.withdrawCezarHumanWaits(runId);
     if (openWaits(this.store.getRun(runId) ?? {}).some(wait => wait.kind === 'human')) return false;
     try {
       this.store.commitWait(runId, { id: randomUUID(), kind: 'human', source: 'agent', via: 'ask-line', registeredAt: new Date().toISOString(), phase: 'open', turnId: 'recovered', askSeq });
@@ -1632,7 +1629,7 @@ export class RunManager {
       } catch { return false; }
       this.closeQuestionOnFinish(runId);
       state.finishRequested = true;
-      this.clearIdleTimer(state);
+      clearIdleTimer(state);
       this.store.appendEvent(runId, { type: 'lifecycle', message: 'session closed by user' });
       state.session.end();
       return true;
@@ -1854,7 +1851,7 @@ export class RunManager {
       recordSessionFault: (...args) => sessionEvents.recordSessionFault(this.context, this.sessionHelperHost, ...args),
       markTurnBoundary: (...args) => sessionEvents.markTurnBoundary(this.context, this.sessionHelperHost, ...args),
       trackTurnEnd: (...args) => this.trackTurnEnd(...args),
-      endTurn: (...args) => this.endTurn(...args),
+      endTurn: (...args) => this.turnSettler.endTurn(...args),
     };
   }
 
@@ -1868,12 +1865,6 @@ export class RunManager {
   }
 
   private makeUiSink(runId: string, stepId: string): UiEventSink { return sessionEvents.makeUiSink(this.context, this.sessionHelperHost, runId, stepId); }
-
-  private prepareHumanAsk(state: ActiveRun): void { return this.humanWaits.prepareHumanAsk(state); }
-  private openHumanAlias(runId: string, state: ActiveRun | undefined, via: WaitVia, card?: AskRequest): HumanWaitEntry | undefined { return this.humanWaits.openHumanAlias(runId, state, via, card); }
-  private markHumanWaitSurfaced(runId: string, wait: HumanWaitEntry, shownCard?: AskRequest): void { return this.humanWaits.markHumanWaitSurfaced(runId, wait, shownCard); }
-  private withdrawCezarHumanWaits(runId: string): void { return this.humanWaits.withdrawCezarHumanWaits(runId); }
-  private holdsAgentWaits(runId: string): boolean { return this.humanWaits.holdsAgentWaits(runId); }
 
   private handleRunnerUiEvent(runId: string, state: ActiveRun, sink: UiEventSink, event: UiEvent): void { return sessionEvents.handleRunnerUiEvent(this.context, this.sessionHelperHost, runId, state, sink, event); }
 
@@ -1921,32 +1912,6 @@ export class RunManager {
     return this.attachments.persistAttachment(runId, mediaType, data, namePrefix);
   }
 
-
-
-  /**
-   * A turn end on the runner's own signal, shared by the fresh step's and the Continue's turn-end
-   * handlers (hearsay-tools/cezarion#1525): read what the turn said, keep it for an acknowledgement
-   * that lands after the turn end (`parkAfterAck`), then settle it (`settleTurn`). Nothing reads the
-   * turn's prose beyond its markers.
-   */
-  private endTurn(runId: string, state: ActiveRun, sink: UiEventSink, turn: { stepId: string; text: string; completedText: string; scheduleWakeup: number | null | undefined }): void { return this.turnSettler.endTurn(runId, state, sink, turn); }
-
-  /** The turn end an entry settles after it (`settleIdleBoundary`, `handleAgentInputReady`), and
-   *  the completion gate's live refusal: what `parkAfterAck` kept of it. */
-  private boundaryTurn(runId: string, state: ActiveRun, session: AgentSession, done: boolean): SettledTurn { return this.turnSettler.boundaryTurn(runId, state, session, done); }
-
-  /**
-   * Settle a turn end (hearsay-tools/cezarion#1525). Every entry goes through it: the turn end
-   * itself (`turn-end`, a fresh step or a Continue), an acknowledgement that lands after it
-   * (`ack`), input readiness for a refused autonomous nudge (`ready`), and the completion gate's
-   * refusal of a live session's done outside a turn end (`gate`). It takes a done to the completion
-   * gate, gathers the facts, lets the pure rule (`decideTurnEnd`) decide and carries out the
-   * decision. False when nothing was settled: the done closed the session, or the input checkpoint
-   * failed.
-   */
-  private settleTurn(runId: string, state: ActiveRun, entry: 'turn-end' | 'ack' | 'ready' | 'gate', turn: SettledTurn,
-    refusal?: CompletionRefusal): boolean { return this.turnSettler.settleTurn(runId, state, entry, turn, refusal); }
-
   /** The outcome a settled turn reached, for the parity cells that prove which path ran
    *  (hearsay-tools/cezarion#1809, which removed the handoff heartbeat line that recorded it). No
    *  outcome for the completion gate's refusal outside a turn end, nor while input readiness waits. */
@@ -1955,32 +1920,13 @@ export class RunManager {
     return entry === 'gate' || (entry === 'ready' && outcome.kind === 'readiness') ? undefined : outcome;
   }
 
-
-  /** Cezar's own human wait at a turn end (hearsay-tools/cezarion#1234): the cause as a note, the
-   *  wait shown as Needs you, and the run parked for the user. A worker's `no-wait` fallback at its
-   *  turn end (`turnEnd`) asks its parent instead (`askParentForWorker`, hearsay-tools/cezarion#1301);
-   *  any other worker fallback stays a plain park. */
-  private openTurnEndHumanWait(runId: string, state: ActiveRun, stepId: string | undefined, via: 'no-wait' | 'budget', note: string, turnEnd = false): void { return this.turnSettler.openTurnEndHumanWait(runId, state, stepId, via, note, turnEnd); }
-
   private retireUnreadParentQuestion(parentId: string, requestId: string): void { return this.workerQuestions.retireUnreadParentQuestion(parentId, requestId); }
-
-
 
   /** Every run status `run.ts` writes comes from the run state table (hearsay-tools/cezarion#1804). */
   private move(runId: string, exit: RunExitId, patch: Omit<Parameters<RunStore['updateRun']>[1], 'status'> = {}): RunRecord | undefined {
     const status = transition(exit, () => this.store.getRun(runId));
     return this.store.updateRun(runId, { ...patch, ...(status === 'failed' ? settledRootFinishPatch(this.store, runId) : {}), status });
   }
-
-  private armIdleTimer(runId: string, state: ActiveRun): void { return this.turnSettler.armIdleTimer(runId, state); }
-
-  private clearIdleTimer(state: ActiveRun): void {
-    clearIdleTimer(state);
-  }
-
-  /** The turn-end tail's park for the user: `waiting` with the idle timer, no slot. A result
-   *  already in (a pending question beside a resolved wait) still queues its wake. */
-  private parkForUser(runId: string, state: ActiveRun, stepId: string | undefined): void { return this.turnSettler.parkForUser(runId, state, stepId); }
 
   autosaveCleanupBlocker(runId: string): string | undefined {
     return this.worktreeAutosave.autosaveCleanupBlocker(runId);

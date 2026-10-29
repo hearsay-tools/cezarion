@@ -1,3 +1,4 @@
+import { clearIdleTimer } from './run/input-timers.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import type { ActiveRun } from './active-run.ts';
 import { randomUUID } from 'node:crypto';
@@ -39,7 +40,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     };
     state = { cwd: root, cancelled: false, interrupt: () => {}, pendingHumanAsk: false, autonomous: true, session };
   });
-  afterEach(() => { manager['clearIdleTimer'](state); manager.dispose(); vi.useRealTimers(); store.close(); rmSync(root, { recursive: true, force: true }); });
+  afterEach(() => { clearIdleTimer(state); manager.dispose(); vi.useRealTimers(); store.close(); rmSync(root, { recursive: true, force: true }); });
 
   function applyGuard(guard: typeof guards[number]): void {
     switch (guard) {
@@ -183,7 +184,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
   it('a pending autonomous retry is not replaced by the no-wait nudge', () => {
     pendingBoundary();
     // The turn end an acknowledgement settles late decides by the same rule (hearsay-tools/cezarion#1525).
-    expect(manager['settleTurn'](id, state, 'ack', manager['boundaryTurn'](id, state, session, false))).toBe(true);
+    expect(runInternals(manager).turnSettler.settleTurn(id, state, 'ack', runInternals(manager).turnSettler.boundaryTurn(id, state, session, false))).toBe(true);
     expect(state.autonomousNudgePending).toBe(session);
     expect(session.sendAgentMessage).not.toHaveBeenCalled();
     expect(session.sendMessage).not.toHaveBeenCalled();
