@@ -244,9 +244,13 @@ export class InputDelivery {
     state.heldHumanInputTimer = timer;
   }
 
+  private inputReadyAuthorized(runId: string, state: ActiveRun, session: AgentSession | undefined): session is AgentSession {
+    return !(!session || this.context.disposed() || this.host.active.get(runId) !== state || state.session !== session ||
+      !session.open || state.idleClosed || state.cancelled || state.finishRequested || state.agentInputError || state.agentSessionError);
+  }
+
   handleAgentInputReady(runId: string, state: ActiveRun, session: AgentSession | undefined): void {
-    if (!session || this.context.disposed() || this.host.active.get(runId) !== state || state.session !== session ||
-      !session.open || state.idleClosed || state.cancelled || state.finishRequested || state.agentInputError || state.agentSessionError) return;
+    if (!this.inputReadyAuthorized(runId, state, session)) return;
     // Durable input always gets the first opportunity. Only the same refused,
     // completed boundary may retry; ordinary/native question parks are not wakes.
     if (this.flushAgentInputs(runId)) return;

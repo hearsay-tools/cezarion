@@ -2552,8 +2552,6 @@ export class RunManager {
    * out inputs already submitted, such as an acknowledgement still in flight. */
   private hasQueuedAgentInputs(runId: string, except: readonly string[] = []): boolean { return this.inputDelivery.hasQueuedAgentInputs(runId, except); }
 
-
-
   /** #505 liveness bound: a harness that accepted input and then neither read it nor ran
    * another turn must not hold the run and its slot forever. After a quiet grace window the
    * input is resubmitted once; after a second it is left delivered but unconfirmed. */
