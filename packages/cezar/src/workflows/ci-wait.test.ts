@@ -761,7 +761,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     else if (action === 'finish') expect(manager.finish(run.id)).toBe(true);
     else {
       // Deletion takes an inactive run: a closed session keeps its waits (R72).
-      (manager as unknown as { active: Map<string, { session: { end(): void } }> }).active.get(run.id)!.session!.end();
+      runInternals(manager).active.get(run.id)!.session!.end();
       await until(() => !manager.isActive(run.id));
       expect(store.deleteRun(run.id)).toBe(true);
     }
