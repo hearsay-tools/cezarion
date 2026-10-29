@@ -1,3 +1,5 @@
+import { AutomationToolsSlot, cezarToolHandlers, toolSessionRefusal } from './run/cezar-tools.ts';
+import { registerPreviewServer, stopPreviewServer } from '../preview/run-tools.ts';
 import { AttachmentWriter } from './run/attachment-writer.ts';
 import { RepoRootLease } from './run/repo-root-lease.ts';
 import { MaintenanceClaims } from './run/maintenance-claims.ts';
@@ -14,10 +16,10 @@ import * as continuation from './continuation-admission.ts';
 import type { ContinueRunOptions } from './continuation-admission.ts';
 import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
-import { askErrorMessage, doneErrorMessage, scheduleRefusal, waitErrorMessage } from '../ci-wait/errors.ts';
-import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type CezarWaitRequestInput, type DoneErrorCode, type PeerWaitEntry, type PeerWaitResult, type PrWaitEntry, type ProcessWaitEntry, type ProcessWaitResult, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, isUsageLimitHold, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT } from '@open-mercato/cezar-contract/waits';
+import { askErrorMessage, doneErrorMessage, waitErrorMessage } from '../ci-wait/errors.ts';
+import { cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskRequest, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type CezarWaitRequestInput, type DoneErrorCode, type PeerWaitEntry, type PeerWaitResult, type PrWaitEntry, type ProcessWaitEntry, type ProcessWaitResult, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, isUsageLimitHold, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT } from '@open-mercato/cezar-contract/waits';
 import { ciWaitResultSchema, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
-import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
+import { type PreviewStopRequest, type PreviewStopResult, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, decideTurnEnd, stepScopedNudge, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
 import { claudeScheduleWakeupDelay, isRunnerActivity, appendTurnText, appendCompletedAssistantText, trackTurnTail, stripDoneMarker, stripMonitoringMarker, emitAskRequested, askCardFields, humanWaitCard, classifyTurnEnd, discardQueuedMessagesOnAsk, type TurnEndRead } from './run/turn-markers.ts';
@@ -46,10 +48,9 @@ import { nextLineEntry } from './line-order.ts';
 import { accountHeldFor, formatWakeInstant, resumeInFlight, runAccountKey, queuedRecoveryInput, queuedStartAt, sessionlessWakePrompt } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
 import { executionAccount } from './execution-account.ts';
-import { CANCEL_MESSAGES, chargesBudget, chargesBudgetMessage, ciWatchRequest, hasPrWait, holdsOwedResults, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitAnswerKind, waitInputId, waitResultText } from './waits.ts';
+import { chargesBudget, chargesBudgetMessage, ciWatchRequest, hasPrWait, holdsOwedResults, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitInputId, waitResultText } from './waits.ts';
 import { assertOwnedWorkerWaitScope, assertRequestWaitScope, delegationWaitRefusal, isDelegationWait, peerWaitEntry, peerWaitOf, peerWaitResult, runsAwaitingPeer, workerListTarget, workerWaitTarget } from './wait-scope.ts';
-import { previewToolEnabled } from '../ci-wait/tools.ts';
-import { previewCdpSession, previewRunContext, previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
+import { previewCdpSession, previewRunContext, type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
 import { artifactInstructions, provisionArtifactDirectory } from '../artifacts/lifecycle.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
@@ -345,8 +346,6 @@ const NO_HOLDS: AccountHolds = { deadline: new Set(), inFlight: new Set() };
 
 const AUTO_RESUME_PROMPT =
   'The provider usage limit that interrupted this task has reset. Read the handoff file (CEZ_HANDOFF_FILE) to recover context, then continue the task from where you left off.';
-/** How long a schedule tool call waits for the server to attach the service after recovery (#1465). */
-const AUTOMATION_TOOLS_READY_MS = 30_000;
 
 
 const RESTART_CONTINUATION_PROMPT =
@@ -923,6 +922,10 @@ export class RunManager {
     this.unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
     this.noWaitNudgeReplyMs = options.noWaitNudgeReplyMs ?? NO_WAIT_NUDGE_REPLY_MS;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
+    this.automationToolsSlot = new AutomationToolsSlot(
+      { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
+      () => !!this.cockpit,
+    );
     this.claims = new MaintenanceClaims(
       { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
       { isActive: id => this.isActive(id), autosaveCleanupBlocker: id => this.autosaveCleanupBlocker(id),
@@ -1137,23 +1140,9 @@ export class RunManager {
    * before its context is announced: a resumed session can call a tool in that window. With a
    * cockpit address the call waits for the service, bounded like the CLI's startup retry.
    */
-  private automationTools?: AutomationToolService | undefined;
-  private automationToolsWaiters = new Set<() => void>();
-  setAutomationTools(tools: AutomationToolService | undefined): void {
-    this.automationTools = tools;
-    if (tools) for (const wake of [...this.automationToolsWaiters]) wake();
-  }
-  private async awaitAutomationTools(signal: AbortSignal): Promise<AutomationToolService | undefined> {
-    if (this.automationTools || !this.cockpit) return this.automationTools;
-    await new Promise<void>((resolve) => {
-      const done = () => { clearTimeout(timer); signal.removeEventListener('abort', done); this.automationToolsWaiters.delete(done); resolve(); };
-      // bound: the CLI's 30 s startup retry; the server attaches the service right after recovery.
-      const timer = setTimeout(done, AUTOMATION_TOOLS_READY_MS);
-      signal.addEventListener('abort', done, { once: true });
-      this.automationToolsWaiters.add(done);
-    });
-    return this.automationTools;
-  }
+  private readonly automationToolsSlot: AutomationToolsSlot;
+  setAutomationTools(tools: AutomationToolService | undefined): void { this.automationToolsSlot.setAutomationTools(tools); }
+  private awaitAutomationTools(signal: AbortSignal): Promise<AutomationToolService | undefined> { return this.automationToolsSlot.awaitAutomationTools(signal); }
   /** Automations on AND a cockpit attached: the one predicate behind the prompt part and the built-in skill. */
   private automationsReachable(): boolean {
     return !!this.cockpit && resolveCapabilities().automations;
@@ -1397,68 +1386,11 @@ export class RunManager {
    * thrower's text, and anything else is left to the tool server's `unavailable`.
    */
   cezarToolHandlers(runId: string, generation: string): CezarToolHandlers {
-    const listOpen = () => openWaitList(this.store.getRun(runId)?.waits ?? []);
-    const thrownCode = (error: unknown) => error && typeof error === 'object' && 'code' in error ? error.code : undefined;
-    return {
-      registerWait: async (request, via, signal) => {
-        try {
-          const wait = await this.registerWait(runId, request, via, generation, signal);
-          // The tools only open agent waits, which always carry a deadline.
-          if (wait.deadline === undefined) throw new Error('registered wait has no deadline');
-          return { answer: { ok: true, wait_id: wait.id, kind: waitAnswerKind(wait), deadline: wait.deadline, open_waits: listOpen() }, wait };
-        } catch (error) {
-          const code = waitErrorCodeSchema.safeParse(thrownCode(error));
-          if (!code.success) throw error;
-          return { answer: { ok: false, code: code.data, message: waitErrorMessage(code.data), open_waits: listOpen() } };
-        }
-      },
-      ask: async (request, signal): Promise<CezarAskAnswer> => {
-        try {
-          const wait = await this.registerAsk(runId, request, generation, signal);
-          return { ok: true, wait_id: wait.id, open_waits: listOpen() };
-        } catch (error) {
-          const code = askErrorCodeSchema.safeParse(thrownCode(error));
-          if (!code.success) throw error;
-          return { ok: false, code: code.data, message: askErrorMessage(code.data), open_waits: listOpen() };
-        }
-      },
-      cancelWait: async ({ wait_id }) => {
-        let outcome: ReturnType<RunManager['cancelWait']>;
-        try { outcome = this.cancelWait(runId, wait_id, generation); }
-        catch { return { cancelled: false, code: 'unavailable', message: waitErrorMessage('unavailable'), open_waits: listOpen() }; }
-        if (outcome.cancelled) return { cancelled: true, wait_id, open_waits: listOpen() };
-        return { cancelled: false, code: outcome.code, message: CANCEL_MESSAGES[outcome.code], open_waits: listOpen() } satisfies CezarCancelWaitAnswer;
-      },
-      finishTurn: async (request, signal) => this.acceptDone(runId, generation, request, signal),
-      registerPreview: (request, signal) => this.registerPreviewServer(runId, request, signal),
-      stopPreview: (request, signal) => this.stopPreviewServer(runId, request, signal),
-      // A schedule belongs to the project, not to this run: any session there may manage one.
-      scheduleTask: async (request, signal) => {
-        const tools = await this.awaitAutomationTools(signal);
-        return tools ? tools.scheduleTask(request) : scheduleRefusal('unavailable');
-      },
-      scheduledTasks: async (request, signal) => {
-        const tools = await this.awaitAutomationTools(signal);
-        return tools ? tools.scheduledTasks(request) : scheduleRefusal('unavailable');
-      },
-    };
-  }
-
-  /** The refusals every cezar tool call shares: it must come from the run's current, open session,
-   *  the one `state` was when the call began. */
-  private toolSessionRefusal(runId: string, state: ActiveRun | undefined, generation: string, signal?: AbortSignal) {
-    const run = this.store.getRun(runId);
-    if (this.disposed) return 'manager_disposed' as const;
-    if (signal?.aborted) return 'capability_revoked' as const;
-    if (!run) return 'run_missing' as const;
-    if (!['running', 'waiting'].includes(run.status)) return 'run_not_running' as const;
-    if (run.stopping) return 'run_stopping' as const;
-    if (!state || this.active.get(runId) !== state) return 'session_replaced' as const;
-    if (!state.session?.open) return 'session_closed' as const;
-    if (state.cancelled) return 'run_cancelled' as const;
-    if (state.finishRequested) return 'finish_requested' as const;
-    if (state.ciGeneration !== generation) return 'generation_mismatch' as const;
-    return undefined;
+    return cezarToolHandlers(runId, generation, { store: this.store,
+      registerWait: (...args) => this.registerWait(...args), registerAsk: (...args) => this.registerAsk(...args),
+      cancelWait: (...args) => this.cancelWait(...args), acceptDone: (...args) => this.acceptDone(...args),
+      registerPreviewServer: (...args) => this.registerPreviewServer(...args), stopPreviewServer: (...args) => this.stopPreviewServer(...args),
+      awaitAutomationTools: signal => this.awaitAutomationTools(signal) });
   }
 
   /**
@@ -1478,7 +1410,7 @@ export class RunManager {
       console.warn(`[cez] cezar_done refused: ${code}`);
       return { ok: false, code, message, ...(workers.length ? { workers: workers.slice(0, 64) } : {}), open_waits };
     };
-    const session = this.toolSessionRefusal(runId, state, generation, signal);
+    const session = toolSessionRefusal(this.store.getRun(runId), state, this.active.get(runId), generation, signal, this.disposed);
     const run = this.store.getRun(runId);
     if (session || !run || !state?.session) return refuse(session ?? 'run_missing', doneErrorMessage(session ?? 'run_missing'));
     if (this.executionBlockedByRootFinish(run)) return refuse('root_finish_pending', doneErrorMessage('root_finish_pending'));
@@ -1529,62 +1461,10 @@ export class RunManager {
   }
 
   async stopPreviewServer(runId: string, request: PreviewStopRequest, signal?: AbortSignal): Promise<PreviewStopResult> {
-    const parsed = previewStopRequestSchema.parse(request);
-    if (!previewToolEnabled()) return previewStopResult('preview_disabled');
-    if (!this.preview) return previewStopResult('headless');
-    if (this.disposed || signal?.aborted) return previewStopResult('unavailable');
-    const run = this.store.getRun(runId);
-    if (!run?.worktreePath || !existsSync(run.worktreePath)) return previewStopResult('worktree_missing');
-    const owner = this.preview.portOwner(parsed.port);
-    if (owner && owner.runId !== runId) return previewStopResult('port_held');
-    if (!run.previewServers?.some(server => server.port === parsed.port)) return previewStopResult('not_registered');
-    return this.preview.stopPreview(runId, parsed, signal);
+    return stopPreviewServer(this.store, this.preview, this.cezarPort, () => this.disposed, runId, request, signal);
   }
-
-  /**
-   * #781: record a dev server the agent registered. One probe at registration becomes
-   * `answeredAtRegistration`; the run is re-validated after it, since the probe awaits.
-   */
   async registerPreviewServer(runId: string, request: PreviewServeRequest, signal?: AbortSignal): Promise<PreviewServeResult> {
-    const parsed = previewServeRequestSchema.parse(request);
-    const validate = () => {
-      const run = this.store.getRun(runId);
-      const owner = this.preview?.portOwner(parsed.port);
-      const result = validateRegistration({
-        request: parsed,
-        worktreePath: run?.worktreePath && existsSync(run.worktreePath) ? run.worktreePath : undefined,
-        cezarPort: this.cezarPort?.(),
-        existing: run?.previewServers ?? [],
-        owner,
-        runId,
-        enabled: previewToolEnabled(),
-        headless: !this.preview,
-      });
-      const withoutWorktree = !!run && !run.worktreePath;
-      return { ...result, answer: () => previewResult(result.code, { ...parsed, ownerTitle: owner?.title, withoutWorktree }) };
-    };
-    const first = validate();
-    if (!first.server || !this.preview) return first.answer();
-    // A server process supplies `cezarPort`, but recovered runs can call before the cockpit binds:
-    // until it knows its port, `cezar_port` cannot be checked, so the tool asks for a retry instead.
-    if (this.cezarPort && this.cezarPort() === undefined) return previewResult('unavailable', parsed);
-    const answered = await this.preview.probe(parsed.port).catch(() => false);
-    // A session revoked during the probe (cancel, stop) must leave no card behind.
-    signal?.throwIfAborted();
-    const checked = validate();
-    if (!checked.server) return checked.answer();
-    const server = { ...checked.server, answeredAtRegistration: answered };
-    const existing = this.store.getRun(runId)?.previewServers ?? [];
-    const previous = existing.find(entry => entry.port === server.port);
-    const changed = !!previous && (previous.command !== server.command || previous.cwd !== server.cwd || previous.path !== server.path);
-    const previewServers = checked.code === 'replaced'
-      ? existing.map(entry => entry.port === server.port ? server : entry)
-      : [...existing, server];
-    this.store.updateRun(runId, { previewServers });
-    this.store.appendEvent(runId, { type: 'preview.server-registered', server });
-    // A copy cezar runs from the old command must not keep answering for the new registration.
-    if (changed) await this.preview.replaced(runId, server.port).catch(() => {});
-    return checked.answer();
+    return registerPreviewServer(this.store, this.preview, this.cezarPort, () => this.disposed, runId, request, signal);
   }
 
   /** The checks every wait registration shares: the session that called is the run's current one,
@@ -1597,7 +1477,7 @@ export class RunManager {
       throw Object.assign(new Error(code === 'autonomous_run' ? askErrorMessage(code) : waitErrorMessage(code)), { code });
     };
     const assertCanRegister = () => {
-      const refused = this.toolSessionRefusal(runId, state, generation, capabilitySignal);
+      const refused = toolSessionRefusal(this.store.getRun(runId), state, this.active.get(runId), generation, capabilitySignal, this.disposed);
       const run = this.store.getRun(runId);
       if (refused || !run || !state) return refuse(refused ?? 'run_missing');
       if (this.workerExecutionStopped(runId)) refuse('worker_execution_stopped');
