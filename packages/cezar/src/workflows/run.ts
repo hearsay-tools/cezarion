@@ -1,4 +1,5 @@
 import { StepLoop as WorkflowStepLoop } from './run/step-loop.ts';
+import { RunRecovery } from './run/run-recovery.ts';
 import { TurnSettler } from './run/turn-settler.ts';
 import { StepSession } from './run/step-session.ts';
 import * as sessionEvents from './run/session-events.ts';
@@ -45,7 +46,7 @@ import { type PreviewStopRequest, type PreviewStopResult, type PreviewServeReque
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, stepScopedNudge, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
-import { familyOf, canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested, isDisposedDelegatedRun, preserveRunAfterDisposal } from './run/run-guards.ts';
+import { canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested, isDisposedDelegatedRun, preserveRunAfterDisposal } from './run/run-guards.ts';
 import { beginUsageInvocation, recordUsagePeaks } from './run/usage-accounting.ts';
 import { continuationModel, continuationEffort, continuationRunner } from './run/launch-settings.ts';
 import { ownedContinuationWorkspace, REPOSITORY_ROOT_LOCK_DISABLED_NOTE } from './run/run-workspace.ts';
@@ -125,7 +126,7 @@ import { readAgentModelSettings } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
 import { type AutosaveReason } from '../git-worktree.ts';
 import { getRepoInfo } from '../server/git.ts';
-import { enqueueAgentInput, hasLiveInboxClaim } from '../delegation/input.ts';
+import { enqueueAgentInput } from '../delegation/input.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { projectConversationEvents, settledRunFamilies } from '../delegation/conversations.ts';
 import * as queuedRevival from './run/queued-revival.ts';
@@ -390,13 +391,7 @@ export class RunManager {
   private ciSupervisor: Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
   private readonly inboxClaims: InboxClaims;
   private get inboxClaimTimers() { return this.inboxClaims.inboxClaimTimers; }
-  /** What the recovery in progress covers: every run at boot (`family` undefined), or the one
-   *  family an adoption hands it (#779, plan step 3). Undefined: no recovery in progress. */
-  private recoveryScope: { family?: string } | undefined;
-  /** Settles when the recovery in progress (if any) has finished. */
-  private recoveryInFlight: Promise<void> | undefined;
-  /** Adoptions of dead processes' runs, one at a time (`adoptOrphanedRun`). */
-  private adoptionTail: Promise<unknown> = Promise.resolve();
+  private readonly recovery: RunRecovery;
   /** Quiet window before unread input is resubmitted or left unconfirmed (#505). */
   private readonly unreadInputGraceMs: number;
   /** Quiet window after a final-message nudge before a still-silent session parks (#544). */
@@ -404,9 +399,7 @@ export class RunManager {
   private disposed = false;
 
   /** Whether any recovery is in progress: one at a time (`recover`), and `pump` waits for it. */
-  private get recovering(): boolean {
-    return this.recoveryScope !== undefined;
-  }
+  private get recovering(): boolean { return this.recovery.recovering; }
 
   /**
    * Whether a recovery in progress holds this run, so its wakes, input flushes and delegation
@@ -414,13 +407,7 @@ export class RunManager {
    * adopted family's during a recovery scoped to one. The rest of a running project stays live: a
    * wake held back for an unrelated family would be lost, since the scoped passes never revisit it.
    */
-  private recoveringRun(run: RunRecord | string | undefined): boolean {
-    const scope = this.recoveryScope;
-    if (!scope) return false;
-    if (scope.family === undefined) return true;
-    const record = typeof run === 'string' ? this.store.getRun(run) : run;
-    return record !== undefined && familyOf(record) === scope.family;
-  }
+  private recoveringRun(run: RunRecord | string | undefined): boolean { return this.recovery.recoveringRun(run); }
 
   private readonly onDelegationRun = (run: RunRecord, source?: CommitSource): void => {
     // Delegation metadata checkpoints do not change task status.
@@ -679,6 +666,32 @@ export class RunManager {
       { move: (id, exit, patch) => this.move(id, exit, patch),
         continueRun: (id, opts, defer) => this.continueRun(id, opts, defer), pump: () => this.pump() },
     );
+    this.recovery = new RunRecovery(this.inputReceiptContext, this.familyReconciler,
+      this.workerQuestions, this.autoResumeScheduler, {
+        workerScratchCleanup: this.workerScratchCleanup, humanWaits: this.humanWaits,
+        waitWatches: this.waitWatches, inboxClaims: this.inboxClaims, orphans: this.orphans,
+        isActive: (...args) => this.isActive(...args),
+        workerExecutionStopped: (...args) => this.workerExecutionStopped(...args),
+        move: (...args) => this.move(...args),
+        cancel: (...args) => this.cancel(...args),
+        continueRun: (...args) => this.continueRun(...args),
+        reviveQueuedRun: (...args) => this.reviveQueuedRun(...args),
+        requeueInterruptedRun: (...args) => this.requeueInterruptedRun(...args),
+        checkpointRestartContext: (...args) => this.checkpointRestartContext(...args),
+        deliverConversationInput: (...args) => this.deliverConversationInput(...args),
+        answerRoutedQuestion: (...args) => this.answerRoutedQuestion(...args),
+        queueWaitWake: (...args) => this.queueWaitWake(...args),
+        owesWake: (...args) => this.owesWake(...args),
+        cancelOpenWaits: (...args) => this.cancelOpenWaits(...args),
+        settleOrphanedWorkerExecution: (...args) => this.settleOrphanedWorkerExecution(...args),
+        settleRequestedRootFinish: (...args) => this.settleRequestedRootFinish(...args),
+        settleSuccess: (...args) => this.settleSuccess(...args),
+        reconcileWorkerWaits: (...args) => this.reconcileWorkerWaits(...args),
+        pump: (...args) => this.pump(...args),
+        recover: (...args) => this.recover(...args),
+        adoptTranscriptAsk: (...args) => this.adoptTranscriptAsk(...args),
+        settleAnsweredLegacyAsk: (...args) => this.settleAnsweredLegacyAsk(...args),
+      }, RESTART_CONTINUATION_PROMPT);
     this.wakeAdmission = new WakeAdmission(this.inputReceiptContext, {
       active: this.active, retries: this.retries, line: this.line, waitWatches: this.waitWatches, waitRegistry: this.waitRegistry,
       inboxClaims: this.inboxClaims, workerQuestions: this.workerQuestions, humanWaits: this.humanWaits,
@@ -1301,343 +1314,16 @@ export class RunManager {
    * touched: another live process's runs are not in the live set, and the passes that read every
    * worker or root skip their families (#779, plan step 3).
    */
-  async recover(familyRootId?: string): Promise<void> {
-    // A store that could not open (#779) knows none of its runs: recovering it would read "none".
-    if (this.disposed || this.recovering || this.store.unavailable) return;
-    this.recoveryScope = { ...(familyRootId === undefined ? {} : { family: familyRootId }) };
-    let settled!: () => void;
-    this.recoveryInFlight = new Promise<void>((resolve) => { settled = resolve; });
-    const inScope = (run: RunRecord) => familyRootId === undefined || familyOf(run) === familyRootId;
-    try {
-    this.familyReconciler.setRecoveryFactsPending(true);
-    await this.store.prepareRecoveryFacts(familyRootId);
-    if (this.disposed) return;
-    // Public terminal state can precede the private completion checkpoint. Such a family
-    // has no live/deferred anchor, but orphan settlement still appends its lifecycle event.
-    // Prepare only eligible starting generations' families before any repair mutation;
-    // retain IDs, never an ownership or execution snapshot, across readiness.
-    const { orphanWorkerIds, orphanFactIds } = this.collectOrphanWorkerGenerations(familyRootId, inScope);
-    await this.store.prepareTranscriptFacts(orphanFactIds);
-    if (this.disposed) return;
-    this.familyReconciler.setRecoveryFactsPending(false);
-    // Recovery reads the live set (#779): `listRuns()` is the runs `open` loaded by the `live`
-    // column, and finished runs have nothing to recover. The worker passes below go through
-    // indexed queries instead.
-    this.recoverUnreadInputs(inScope);
-    // #469: a generation whose processes died with the old controller is finalized first, so it
-    // re-launches through the ordinary Continue path; live task scratch is retained.
-    // Any worker, finished or not, may hold a generation a dead controller left `starting`. Its
-    // private proof is read first, so only those workers' records are decoded: settling and
-    // re-probing are no-ops for every other proof phase.
-    // Another process's workers are its own to settle.
-    this.settleOrphanWorkerGenerations(orphanWorkerIds, inScope);
-    this.reconcileWorkerWaits(familyRootId);
-    const live = this.store
-      .listRuns()
-      .filter((r) => inScope(r) && ['queued', 'waiting', 'running'].includes(r.status))
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    // Scratch cleanup discovers private evidence independently of the salvageable run index.
-    // Terminal worker cleanup/retries and the generic orphan sweep share this boundary. An
-    // adopted family only schedules its own members: the sweep belongs to restart.
-    this.recoverWorkerScratch(familyRootId);
-    for (const run of live) {
-      // Await only what the run hands back, so a run that settles nothing recovers without
-      // yielding to the work an earlier run started.
-      const settling = this.recoverLiveRun(run);
-      if (settling) await settling;
-    }
-    if (familyRootId === undefined) await this.familyReconciler.reconcileRecoveryWorkerFamilies();
-    if (this.disposed) return;
-    } finally {
-      this.familyReconciler.setRecoveryFactsPending(false);
-      this.recoveryScope = undefined;
-      this.recoveryInFlight = undefined;
-      settled();
-    }
-    // Only a family with a live member has anyone left to route to or fall back from.
-    this.recoverWorkerMessages(familyRootId === undefined ? this.familyReconciler.liveFamilyMembers() : this.familyReconciler.familyMembers(familyRootId), familyRootId);
-    // A parent reply accepted just before the crash still answers its worker (#505), and only a
-    // live worker takes one.
-    this.answerRecoveredRoutedQuestions(inScope);
-    // The rest re-arms wakes from durable state and is idempotent, so it runs for every live run
-    // even after one adopted family: anything the recovery window held back goes out now.
-    this.rearmRecoveredWakes();
-    // Re-arm usage-limit resumes (spec 2026-08-03-auto-resume-after-usage-limit): the wait is
-    // routinely longer than a cezar session, so the deadline is durable and the timer is rebuilt
-    // from it. `pump()` reconciles again on every sweep, so this is the fast path, not the only
-    // one — see `reconcileAutoResumes`.
-    this.reconcileAutoResumes();
-    void this.pump();
-  }
-
-  /** The workers in scope whose generation a dead controller left `starting`, and the members of
-   *  their families, whose transcript facts recovery prepares before it settles them. */
-  private collectOrphanWorkerGenerations(
-    familyRootId: string | undefined,
-    inScope: (run: RunRecord) => boolean,
-  ): { orphanWorkerIds: string[]; orphanFactIds: Set<string> } {
-    const workerIds = familyRootId === undefined ? this.store.listWorkerIds() : this.store.listWorkersOf(familyRootId).map((run) => run.id);
-    const orphanWorkerIds: string[] = [];
-    const orphanFactIds = new Set<string>();
-    for (const id of workerIds) {
-      if (this.store.readWorkerExecution(id)?.phase !== 'starting' || this.store.writeRefusal(id)) continue;
-      const run = this.store.getRun(id);
-      if (run?.delegation?.role !== 'worker' || !inScope(run)) continue;
-      orphanWorkerIds.push(id);
-      for (const member of this.store.listFamilyRunIds(run.delegation.parentRunId)) orphanFactIds.add(member);
-    }
-    return { orphanWorkerIds, orphanFactIds };
-  }
-
-  /** Recovery's first pass over the live set: the input state a dead controller left behind. */
-  private recoverUnreadInputs(inScope: (run: RunRecord) => boolean): void {
-    for (const run of this.store.listRuns().filter(inScope)) {
-      // A restarted controller cannot answer an old transport's permission RPC.
-      if (!this.isActive(run.id) && run.hasPendingPermission) {
-        // A permission wait interrupted an unfinished native turn. Route it
-        // through interrupted-turn recovery, never the settled-worker fallback.
-        this.store.updateRun(run.id, { hasPendingPermission: false,
-          ...(run.status === 'waiting' && !run.stopping && !this.workerExecutionStopped(run.id) ? { status: transition('resume', () => this.store.getRun(run.id)) } : {}) });
-      }
-      this.store.clearExpiredInboxClaims(run.id, new Date().toISOString());
-      this.armInboxClaimExpiry(run.id);
-      // #505: the session that accepted this input died before the model read it.
-      // Delivery is at-least-once: the replay keeps the input's ID in its text.
-      if (['queued', 'running', 'waiting'].includes(run.status) && !this.isActive(run.id)) {
-        const replayed = this.store.requeueAwaitingReadInputs(run.id);
-        if (replayed.length) this.store.appendEvent(run.id, { type: 'note', message: `replaying ${replayed.length} message${replayed.length === 1 ? '' : 's'} accepted before the restart but not read` });
-      }
-    }
-  }
-
-  /** Settles each orphaned `starting` generation, or re-probes it when its proof does not settle. */
-  private settleOrphanWorkerGenerations(orphanWorkerIds: string[], inScope: (run: RunRecord) => boolean): void {
-    for (const id of orphanWorkerIds) {
-      const run = this.store.getRun(id);
-      if (!run || !inScope(run)) continue;
-      if (this.store.readWorkerExecution(id)?.phase === 'starting' && !this.store.writeRefusal(id) &&
-        !this.settleOrphanedWorkerExecution(id)) this.armOrphanReprobe(id);
-    }
-  }
-
-  /** Restart sweeps every worker's scratch; an adopted family schedules only its own members. */
-  private recoverWorkerScratch(familyRootId: string | undefined): void {
-    if (familyRootId === undefined) this.workerScratchCleanup.recover();
-    else for (const run of this.familyReconciler.familyMembers(familyRootId)) this.workerScratchCleanup.schedule(run.id);
-  }
-
-  /**
-   * One live run of the restart loop. Returns the promise the loop must await (a root finish, a
-   * re-queue or a settlement), else `undefined`.
-   */
-  private recoverLiveRun(found: RunRecord): Promise<void> | undefined {
-    if (this.isActive(found.id)) return undefined;
-    if (this.workerExecutionStopped(found.id)) return undefined;
-    if (this.recoveryLeavesWorkerToRoot(found)) return undefined;
-    if (this.rootFinishRequested(found.id)) return this.settleRequestedRootFinish(found.id);
-    // A usage-limit hold ran no process, so nothing was interrupted: its waits re-arm and resolve,
-    // and `reconcileAutoResumes` re-arms the resume that delivers them (hearsay-tools/cezarion#1236).
-    if (isUsageLimitHold(found)) {
-      for (const wait of openWaits(found)) this.armWait(found.id, wait);
-      return undefined;
-    }
-    const run = this.reconcileRecoveredAsk(found);
-    if (this.parkRecoveredRun(run)) return undefined;
-    // A pending question or a queued message leaves the waits open: they re-arm, and a result
-    // still wakes the run.
-    for (const wait of openWaits(run)) this.armWait(run.id, wait);
-    if (run.status === 'queued') return this.reviveQueuedRun(run, 'cezar restarted');
-    this.deliverConversationInput(run.id);
-    if (run.status === 'waiting') return this.recoverClosedWaitingRun(run);
-    this.recoverInterruptedRun(run);
-    return undefined;
-  }
-
-  /** True when a worker's root takes no more work from it: a closed root cancels the worker, and a
-   *  root in review or finishing leaves it as it is. */
-  private recoveryLeavesWorkerToRoot(run: RunRecord): boolean {
-    if (run.delegation?.role !== 'worker') return false;
-    const parent = this.store.getRun(run.delegation.parentRunId);
-    if (parent?.delegation?.role !== 'root') return false;
-    if (['done', 'failed', 'cancelled'].includes(parent.status)) {
-      this.cancel(run.id);
-      return true;
-    }
-    return parent.status === 'review' || Boolean(parent.delegation.finishRequestedAt);
-  }
-
-  /** The run as recovery reads it after it reconciles the run's question state. */
-  private reconcileRecoveredAsk(found: RunRecord): RunRecord {
-    let run = found;
-    // A worker no process survived for is a closed session: Cezar's fallback question goes as at an
-    // idle close, and the worker recovers as its plain park did (hearsay-tools/cezarion#1301).
-    if (run.delegation?.role === 'worker' && run.status === 'waiting' && this.supersedeWorkerFallback(run.id)) run = this.store.getRun(run.id)!;
-    // Phase 4b (hearsay-tools/cezarion#1236): attention reads the human wait, so an unanswered ask
-    // an older cezar left without one gets one now, attached to that ask.
-    if (this.adoptTranscriptAsk(run.id)) run = this.store.getRun(run.id)!;
-    // A stored pending-question flag can be stale: the answer's receipt reached the transcript and
-    // the row's save did not. The wait read from it is answered (review of #1437).
-    if (this.settleAnsweredLegacyAsk(run.id)) run = this.store.getRun(run.id)!;
-    return run;
-  }
-
-  /** True when the recovered run stays parked: on a human wait, a pending question or its waits. */
-  private parkRecoveredRun(run: RunRecord): boolean {
-    // hearsay-tools/cezarion#1234: a crash after a human wait's registration and before its turn
-    // end shows the question now. The run waits on the user, its other waits re-armed.
-    if (this.unsurfacedHumanWait(run.id)) {
-      this.surfaceHumanWait(run.id, undefined);
-      this.parkOnOpenWaits(run);
-      return true;
-    }
-    if (run.delegation && run.delegation.role !== 'invalid' && this.hasPendingHumanAsk(run.id)) {
-      // A pending question leaves its waits open: they re-arm, and a result still wakes the run.
-      this.parkOnOpenWaits(run);
-      // Only the durable, explicitly human payload may resume an unanswered
-      // question. A refused recovery leaves attention, not terminal failure.
-      if (run.continuationMessage?.origin === 'human') {
-        const restarted = this.checkpointRestartContext(run);
-        this.continueRun(restarted.id, {}, true);
-      }
-      return true;
-    }
-    // No process survived. Open waits re-arm from their stored deadlines (an overdue timer
-    // resolves now); resolved ones wake through a scheduler-owned continuation after recovery.
-    // A human message no longer withdraws a wait, so an interrupted or queued run with queued
-    // messages still owes their delivery: it recovers as below, with its waits armed
-    // (hearsay-tools/cezarion#1233). A parked one stays parked; its wake folds them in.
-    if (run.waits?.length && !this.hasPendingHumanAsk(run.id) && (run.status === 'waiting' || !run.queuedMessages?.length)) {
-      this.parkOnOpenWaits(run);
-      return true;
-    }
-    return false;
-  }
-
-  /** Parks a recovered run: `waiting`, with each of its open waits re-armed. */
-  private parkOnOpenWaits(run: RunRecord): void {
-    this.move(run.id, 'park');
-    for (const wait of openWaits(run)) this.armWait(run.id, wait);
-  }
-
-  /**
-   * A `waiting` run that did not park. Returns the settlement the loop must await, else
-   * `undefined`.
-   */
-  private recoverClosedWaitingRun(run: RunRecord): Promise<void> | undefined {
-    // Waiting is durable human attention for roots and ordinary top-level
-    // runs. A worker reaches here only when it has neither a recoverable ask
-    // nor a worker wait; preserving that record would strand both it and its
-    // parent because workers cannot accept an ordinary inactive Continue.
-    if (run.delegation?.role !== 'worker' ||
-      run.agentInputs?.some(input => !input.deliveredAt && hasLiveInboxClaim(input))) return undefined;
-    const finishedAt = new Date().toISOString();
-    if (run.invalidAsk) {
-      this.failRecoveredInvalidAsk(run, finishedAt);
-      return undefined;
-    }
-    if (this.ciWorkflowResumeStepIndex(run) >= 0) {
-      // CI ACK retires the wait, but not the failed workflow source. A closed
-      // worker at this boundary must resume before its remaining checks run.
-      const resumed = this.continueRun(run.id, { text: RESTART_CONTINUATION_PROMPT }, true);
-      this.store.appendEvent(run.id, { type: 'lifecycle', message: resumed.ok
-        ? 'cezar restarted — resuming the worker CI recovery from its last session'
-        : `cezar restarted — could not resume worker CI recovery (${resumed.error ?? 'unknown'})` });
-      return undefined;
-    }
-    for (const step of run.steps) {
-      if (step.status === 'waiting' || step.status === 'running') {
-        this.store.updateStep(run.id, step.id, { status: 'done', finishedAt });
-      }
-    }
-    this.store.appendEvent(run.id, {
-      type: 'lifecycle',
-      message: 'cezar restarted — the open worker session was settled',
-    });
-    return this.settleSuccess(run.id);
-  }
-
-  /** A recovered run whose structured question cannot be answered fails with its open steps. */
-  private failRecoveredInvalidAsk(run: RunRecord, finishedAt: string): void {
-    for (const step of run.steps) if (step.status === 'waiting' || step.status === 'running') {
-      this.store.updateStep(run.id, step.id, { status: 'failed', error: 'invalid structured question', finishedAt });
-    }
-    this.move(run.id, 'fail', { error: 'invalid structured question', finishedAt, currentStepId: undefined });
-  }
-
-  /** A `running` run whose process died mid-turn. */
-  private recoverInterruptedRun(found: RunRecord): void {
-    // `running`: the process died mid-turn. Mark it interrupted (the state
-    // continueRun expects), then pick the work back up from the last session.
-    const run = this.checkpointRestartContext(found);
-    const interruptedStepId = run.currentStepId;
-    const finishedAt = new Date().toISOString();
-    for (const step of run.steps) {
-      if (step.status === 'running' || step.status === 'waiting') {
-        this.store.updateStep(run.id, step.id, {
-          status: 'failed',
-          error: 'interrupted — cezar process exited during the run',
-          finishedAt,
-        });
-      }
-    }
-    this.move(run.id, 'fail-interrupted', {
-      error: 'interrupted — cezar process exited during the run',
-      finishedAt,
-      currentStepId: undefined,
-    });
-    if (this.requeueInterruptedRun(run, interruptedStepId)) return;
-    const resumed = this.continueRun(
-      run.id,
-      {
-        text: run.continuationMessage?.text ?? RESTART_CONTINUATION_PROMPT,
-      },
-      true,
-    );
-    this.store.appendEvent(run.id, {
-      type: 'lifecycle',
-      message: resumed.ok
-        ? 'cezar restarted — resuming the interrupted task from its last session'
-        : `cezar restarted — could not resume the interrupted task (${resumed.error ?? 'unknown'})`,
-    });
-  }
+  async recover(familyRootId?: string): Promise<void> { return this.recovery.recover(familyRootId); }
 
   private requeueInterruptedRun(run: RunRecord, interruptedStepId: RunRecord['currentStepId']): boolean { return queuedRevival.requeueInterruptedRun(this.inputReceiptContext, this.queuedRevivalHost, run, interruptedStepId); }
-
-  /** Delivers the parent replies routed to each worker in scope. */
-  private answerRecoveredRoutedQuestions(inScope: (run: RunRecord) => boolean): void {
-    for (const run of this.store.listRuns().filter(inScope)) if (run.delegation?.role === 'worker') this.answerRoutedQuestion(run.id);
-  }
-
-  /** Re-arms each live run's waits, or queues the wake it owes. */
-  private rearmRecoveredWakes(): void {
-    for (const run of this.store.listRuns()) {
-      // A terminal row keeps its waits (and stays live) until something cancels them. A failed run
-      // that owes results keeps them for a human, and its open waits still resolve without a wake.
-      if (run.waits?.length && holdsOwedResults(run)) for (const wait of openWaits(run)) this.armWait(run.id, wait);
-      else if (run.waits?.length && !['running', 'waiting', 'queued'].includes(run.status)) this.cancelOpenWaits(run.id);
-      else if (run.waits?.length) this.queueWaitWake(run.id);
-      // A message the recovery window held back is a wake of its own (hearsay-tools/cezarion#1235).
-      else if (['running', 'waiting', 'queued'].includes(run.status) && this.owesWake(run)) this.queueWaitWake(run.id);
-    }
-  }
 
   /**
    * Adopt a dead owner’s family for a control, then recover the settled family without resuming
    * work. Stop cancels its target; only Continue starts work. Serialize adoptions after recovery.
    * False means missing or live-owned.
    */
-  adoptOrphanedRun(runId: string, opts: { stop?: boolean } = {}): Promise<boolean> {
-    const adoption = this.adoptionTail.then(async () => {
-      while (this.recovering && this.recoveryInFlight) await this.recoveryInFlight;
-      if (this.disposed) return false;
-      const family = this.store.adoptFamily(runId, opts);
-      if (family === undefined) return false;
-      await this.recover(family);
-      return true;
-    });
-    this.adoptionTail = adoption.catch(() => undefined);
-    return adoption;
-  }
+  adoptOrphanedRun(runId: string, opts: { stop?: boolean } = {}): Promise<boolean> { return this.recovery.adoptOrphanedRun(runId, opts); }
 
   private async reviveWorkflow(run: RunRecord): Promise<WorkflowDef | null> { return queuedRevival.reviveWorkflow(this.inputReceiptContext, this.queuedRevivalHost, run); }
 
