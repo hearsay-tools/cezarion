@@ -59,7 +59,7 @@ import * as stepDecisions from './run/step-decisions.ts';
 import * as pendingAskFacts from './run/pending-ask-facts.ts';
 import * as workflowPosition from './run/workflow-position.ts';
 import { RUN_EXITS, transition, transitionVia, type RunExitId } from './run-states.ts';
-import { accountHeldFor, deriveAccountHolds, queuedRecoveryInput, queuedStartAt, sessionlessWakePrompt } from './run-scheduling.ts';
+import { accountHeldFor, deriveAccountHolds, queuedRecoveryInput, sessionlessWakePrompt } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
 import { executionAccount } from './execution-account.ts';
 import { chargesBudget, chargesBudgetMessage, hasPrWait, holdsOwedResults, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitInputId, waitResultText } from './waits.ts';
@@ -143,7 +143,7 @@ import { answersQuestion, questionMessage, reservedReplies } from '../delegation
 import { workerQuestionFallback } from './question-routing.ts';
 import { messagedParentSince, parkNoticeIdInUse, parkNoticeMessage, parkNoticeWait, parkingTurn } from '../delegation/park-notice.ts';
 import { workerOutcome } from '../runs/delegation-state.ts';
-import { loadWorkflows } from './load.ts';
+import * as queuedRevival from './run/queued-revival.ts';
 import type { RunOutcome } from '../runs/outcome-commit.ts';
 import { acknowledgedBatch } from './outcome-batches.ts';
 import { analyseAcknowledgedInput, type AcknowledgedInput } from './input-acknowledgement.ts';
@@ -157,7 +157,6 @@ import {
 import { extractTaskRefs, refineTaskRefs } from '../runs/task-refs.ts';
 import { reviewGateEnabled } from '../runs/review-gate.ts';
 import { AgentAccountUnavailableError, resolveProfileEnvForRoot } from '../workspace/agent-profiles.ts';
-import { DEFAULT_AGENT_ACCOUNT_ID } from '../workspace/agent-accounts.ts';
 import { WorkspaceSemaphore, type AccountHolds } from '../workspace/semaphore.ts';
 import { UiEventSink } from '../runs/ui-event-sink.ts';
 import type { UiEvent } from '../core/ui-events.ts';
@@ -326,6 +325,7 @@ type HumanAnswerBudget = { spent: number };
 export class RunManager {
   private readonly active = new Map<string, ActiveRun>();
   private readonly inputReceiptContext: RunModuleContext;
+  private readonly queuedRevivalHost: queuedRevival.QueuedRevivalHost;
   private readonly humanWaits: HumanWaits;
   private readonly waitRegistry: WaitRegistry;
   private readonly waitWatches: WaitWatches;
@@ -554,6 +554,16 @@ export class RunManager {
     this.noWaitNudgeReplyMs = options.noWaitNudgeReplyMs ?? NO_WAIT_NUDGE_REPLY_MS;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
     this.inputReceiptContext = { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed };
+    this.queuedRevivalHost = {
+      move: (id, exit, patch) => this.move(id, exit, patch), isActive: id => this.isActive(id),
+      workerExecutionStopped: id => this.workerExecutionStopped(id), ownedJob: run => this.ownedJob(run),
+      resumableSessionId: (id, step) => this.resumableSessionId(id, step), workerStep: (id, step) => this.workerStep(id, step),
+      toQueuedMessage: (id, content) => this.toQueuedMessage(id, content), hydrateQueuedInput: (id, input) => this.hydrateQueuedInput(id, input),
+      enqueueJob: (id, job) => this.line.enqueueJob(id, job), enqueueContinuation: (id, continuation) => this.line.enqueueContinuation(id, continuation),
+      isSyntheticContinuation: (run, step) => isSyntheticContinuation(run, step), restartContinuationPrompt: RESTART_CONTINUATION_PROMPT,
+      reviveQueuedRun: (run, reason) => this.reviveQueuedRun(run, reason), reviveWorkflow: run => this.reviveWorkflow(run),
+      checkpointRestartContext: (run, step) => this.checkpointRestartContext(run, step),
+    };
     this.line = new RunLine(this.inputReceiptContext, {
       activeSize: () => this.active.size, activeHas: id => this.active.has(id),
       withExecutionAccount: run => this.withExecutionAccount(run),
@@ -1562,116 +1572,9 @@ export class RunManager {
     }).finally(() => this.finishWorkerExecution(runId));
   }
 
-  /** Save restart evidence before queue admission or the next startup await. */
-  private checkpointRestartContext(run: RunRecord, queuedStepId?: string): RunRecord {
-    const message = run.continuationMessage ?? (queuedStepId ? {
-      ...this.toQueuedMessage(run.id, []), id: queuedStepId, text: 'Continue.', origin: 'lifecycle' as const,
-    } : undefined);
-    if (!message) return run;
-    const updated = this.store.updateRun(run.id, { continuationMessage: {
-      ...message,
-      ...(message.origin === 'lifecycle' && message.text === RESTART_CONTINUATION_PROMPT ? { text: 'Continue.' } : {}),
-      resumeContext: { ...message.resumeContext, restarted: true },
-    } }) ?? run;
-    this.store.flush();
-    return updated;
-  }
+  private checkpointRestartContext(run: RunRecord, queuedStepId?: string): RunRecord { return queuedRevival.checkpointRestartContext(this.inputReceiptContext, this.queuedRevivalHost, run, queuedStepId); }
 
-  /**
-   * Rebuild executable state for a durable queued record. Shared by recovery and the watchdog;
-   * reconstruct jobs or continuations before pumping.
-   */
-  private async reviveQueuedRun(run: RunRecord, reason: string): Promise<void> {
-    if (this.isActive(run.id) || this.workerExecutionStopped(run.id)) return;
-    const queuedContinuation = [...run.steps]
-      .reverse()
-      .find((step) => step.status === 'pending' && isSyntheticContinuation(run, step));
-    const sessionStep = queuedContinuation
-      ? [...run.steps].reverse().find((step) => step.id !== queuedContinuation.id && step.sessionId)
-      : undefined;
-    if (queuedContinuation && sessionStep?.sessionId) {
-      this.reviveQueuedContinuation(run, reason, queuedContinuation.id, sessionStep);
-      return;
-    }
-    if (run.delegation?.role === 'worker') {
-      this.reviveQueuedWorker(run, reason);
-      return;
-    }
-    const workflow = await this.reviveWorkflow(run);
-    if (!workflow) {
-      this.move(run.id, 'fail-start', {
-        error: 'interrupted — workflow definition not recoverable after a restart',
-        finishedAt: new Date().toISOString(),
-      });
-      this.store.appendEvent(run.id, {
-        type: 'lifecycle',
-        message: `${reason} — workflow definition not recoverable, task failed`,
-      });
-      return;
-    }
-    this.line.enqueueJob(run.id, {
-      workflow,
-      startAt: queuedStartAt(run, workflow),
-      // Rehydrate again at dequeue so edits and stacked messages keep their admission-time reads.
-      input: this.hydrateQueuedInput(run.id, queuedRecoveryInput(run)),
-    });
-    this.store.appendEvent(run.id, { type: 'lifecycle', message: `${reason} — task re-queued` });
-  }
-
-  private reviveQueuedContinuation(run: RunRecord, reason: string, queuedStepId: string, sessionStep: RunRecord['steps'][number]): void {
-    if (reason === 'cezar restarted') run = this.checkpointRestartContext(run, queuedStepId);
-    const { backend, sessionBackend, sameAccount, recoveredSessionId } = this.queuedResumeSession(run, sessionStep);
-    if (sessionStep.sessionTransport === 'cursor-print' && sessionBackend === backend && sameAccount && !recoveredSessionId) {
-      const error = 'Cursor print session identity lacks a matching recorded session event';
-      const finishedAt = new Date().toISOString();
-      this.store.updateStep(run.id, queuedStepId, { status: 'failed', error, finishedAt });
-      this.move(run.id, 'fail-start', { error, finishedAt, currentStepId: undefined });
-      return;
-    }
-    this.line.enqueueContinuation(run.id, {
-      stepId: queuedStepId,
-      sessionId: recoveredSessionId,
-      backend,
-      prompt: run.continuationMessage?.text ?? RESTART_CONTINUATION_PROMPT,
-      images: [],
-      lineJoinedAt: Date.now(),
-    });
-    this.store.appendEvent(run.id, {
-      type: 'lifecycle',
-      message: `${reason} — interrupted continuation re-queued`,
-    });
-  }
-
-  /** Match the pinned execution account before considering a persisted session resumable. */
-  private queuedResumeSession(run: RunRecord, sessionStep: RunRecord['steps'][number]) {
-    // An accepted worker's continuation extends the step owning the resumed session, so its
-    // runner and account come from that step's pinned identity, never the run-level
-    // first-step fields — those would re-queue a claude review's Continue as a codex turn with
-    // no session to resume. Broken identity evidence is left for the launch to report.
-    let resumeIdentity: WorkerStepIdentity | undefined;
-    try { resumeIdentity = this.workerStep(run.id, continuationDefStep(this.store, run, sessionStep.sessionId)?.id); }
-    catch (error) { if (!(error instanceof WorkerIdentityError)) throw error; }
-    const backend = resumeIdentity?.account.provider ?? run.runner ?? 'claude';
-    const sessionBackend = sessionStep.backend ?? backend;
-    const sessionAccount = sessionStep.profileId ?? DEFAULT_AGENT_ACCOUNT_ID;
-    const agentProfile = resumeIdentity?.account.profileId ?? run.agentProfile;
-    const sameAccount = agentProfile === undefined || agentProfile === sessionAccount;
-    const recoveredSessionId = sessionBackend === backend && sameAccount
-      ? this.resumableSessionId(run.id, sessionStep) : undefined;
-    return { backend, sessionBackend, sameAccount, recoveredSessionId };
-  }
-
-  private reviveQueuedWorker(run: RunRecord, reason: string): void {
-    try {
-      const job = this.ownedJob(run);
-      // Use the privately bound workflow, and the same durable pending-step
-      // cursor as root recovery. A queued tail must not replay a failed source.
-      this.line.enqueueJob(run.id, { ...job, startAt: queuedStartAt(run, job.workflow) });
-      this.store.appendEvent(run.id, { type: 'lifecycle', message: `${reason} — owned task re-queued` });
-    } catch (error) {
-      this.move(run.id, 'fail-start', { error: String(error), finishedAt: new Date().toISOString() });
-    }
-  }
+  private async reviveQueuedRun(run: RunRecord, reason: string): Promise<void> { return queuedRevival.reviveQueuedRun(this.inputReceiptContext, this.queuedRevivalHost, run, reason); }
 
   /**
    * Startup recovery (#367) — re-adopt runs that were live when the previous
@@ -1989,31 +1892,7 @@ export class RunManager {
     });
   }
 
-  /** True when the interrupted run has no session to continue and goes back to the queue. */
-  private requeueInterruptedRun(run: RunRecord, interruptedStepId: RunRecord['currentStepId']): boolean {
-    const interruptedIndex = run.workflowDef?.steps.findIndex(step => step.id === interruptedStepId) ?? -1;
-    const interruptedDef = interruptedIndex >= 0 ? run.workflowDef?.steps[interruptedIndex] : undefined;
-    // Worktree setup (#917) interrupted before any agent session: there is no session to
-    // continue, so start the workflow over. `execute` sees setup still `running` and reruns it.
-    if (run.workflowDef && run.worktreeSetup?.status === 'running' && !run.steps.some(step => step.sessionId)) {
-      this.move(run.id, 'requeue', { error: undefined, finishedAt: undefined, currentStepId: undefined });
-      this.store.flush();
-      this.line.enqueueJob(run.id, { workflow: run.workflowDef, startAt: 0, input: queuedRecoveryInput(run) });
-      return true;
-    }
-    if (run.workflowDef && interruptedDef && stepKind(interruptedDef) === 'check') {
-      this.store.updateStep(run.id, interruptedDef.id, { status: 'pending', error: undefined, finishedAt: undefined });
-      this.move(run.id, 'requeue', { error: undefined, finishedAt: undefined, currentStepId: undefined });
-      this.store.flush();
-      this.line.enqueueJob(run.id, {
-        workflow: run.workflowDef,
-        startAt: interruptedIndex,
-        input: queuedRecoveryInput(run),
-      });
-      return true;
-    }
-    return false;
-  }
+  private requeueInterruptedRun(run: RunRecord, interruptedStepId: RunRecord['currentStepId']): boolean { return queuedRevival.requeueInterruptedRun(this.inputReceiptContext, this.queuedRevivalHost, run, interruptedStepId); }
 
   /** Delivers the parent replies routed to each worker in scope. */
   private answerRecoveredRoutedQuestions(inScope: (run: RunRecord) => boolean): void {
@@ -2051,16 +1930,7 @@ export class RunManager {
     return adoption;
   }
 
-  /** The persisted definition when it looks sane, else the catalog by name. */
-  private async reviveWorkflow(run: RunRecord): Promise<WorkflowDef | null> {
-    // "Looks sane" is the STORE's job now: it parses `workflowDef` against the definition schema
-    // and `.catch`es a def that no longer fits to `undefined`, so anything present here already
-    // has the `steps` array the old inline `Array.isArray` check was asking for.
-    const def = run.workflowDef;
-    if (def) return def;
-    const { workflows } = await loadWorkflows(this.repoRoot);
-    return workflows.find((w) => w.name === run.workflow) ?? null;
-  }
+  private async reviveWorkflow(run: RunRecord): Promise<WorkflowDef | null> { return queuedRevival.reviveWorkflow(this.inputReceiptContext, this.queuedRevivalHost, run); }
 
   private isDisposedDelegatedRun(runId: string): boolean {
     const role = this.store.getRun(runId)?.delegation?.role;
