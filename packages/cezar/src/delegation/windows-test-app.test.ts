@@ -66,16 +66,20 @@ it.runIf(process.platform === 'win32')('stops the owned app only after its live 
     const qa = join(workspace.path, '.ai/qa');
     const descriptor = (pid: number) => JSON.stringify({ startedByThisRepo: true, app: { pid, start: windowsStartToken(pid) } });
     await writeFile(join(qa, 'test-env.json'), descriptor(app.pid!));
-    const watcher = spawn(process.execPath, [resolve(import.meta.dirname, '../../../../.ai/scripts/test-env-lease.mjs'), 'watch-app', String(app.pid), windowsStartToken(app.pid!)!, workspace.path, workspace.path], {
-      cwd: tmpdir(), env: { ...process.env, TEST_ENV_WATCH_INTERVAL_SECONDS: '2' }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
-    });
-    children.push(watcher);
-    let watcherError = '';
-    watcher.stderr!.on('data', chunk => { watcherError += String(chunk); });
-    await Promise.race([
-      once(watcher.stdout!, 'data'),
-      once(watcher, 'exit').then(([code]) => { throw new Error(`watcher exited before ready (${code}): ${watcherError}`); }),
-    ]);
+    const launchWatcher = async () => {
+      const watcher = spawn(process.execPath, [resolve(import.meta.dirname, '../../../../.ai/scripts/test-env-lease.mjs'), 'watch-app', String(app.pid), windowsStartToken(app.pid!)!, workspace.path, workspace.path], {
+        cwd: tmpdir(), env: { ...process.env, TEST_ENV_WATCH_INTERVAL_SECONDS: '2' }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+      });
+      children.push(watcher);
+      let watcherError = '';
+      watcher.stderr!.on('data', chunk => { watcherError += String(chunk); });
+      await Promise.race([
+        once(watcher.stdout!, 'data'),
+        once(watcher, 'exit').then(([code]) => { throw new Error(`watcher exited before ready (${code}): ${watcherError}`); }),
+      ]);
+      return watcher;
+    };
+    let watcher = await launchWatcher();
     console.info('native cleanup: watcher ready');
     const db = new DatabaseSync(join(qa, 'test-env-lease.sqlite'));
     try {
@@ -92,6 +96,8 @@ it.runIf(process.platform === 'win32')('stops the owned app only after its live 
     expect(missingDescriptor, JSON.stringify(missingDescriptor)).toMatchObject({ state: 'incomplete' });
     expect((await lstat(workspace.path)).isDirectory()).toBe(true);
     expect(app.exitCode).toBeNull();
+    await writeFile(join(qa, 'test-env.json'), descriptor(app.pid!));
+    watcher = await launchWatcher();
     await writeFile(join(qa, 'test-env.json'), descriptor(other.pid!));
     expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete' });
     expect(other.exitCode).toBeNull();
