@@ -34,18 +34,6 @@ interface RunSettlementHost {
   move(id: string, exit: RunExitId, patch?: Omit<Parameters<RunStore['updateRun']>[1], 'status'>): RunRecord | undefined;
   dropActive(id: string): void;
   saveWorktree(id: string, state: ActiveRun, reason: AutosaveReason): Promise<void>;
-/**
-   * Diff-first review gate (spec 009), shared by `execute` and
-   * `runContinuation`: a *successful* run whose worktree holds changes rests
-   * at `review` instead of `done` — the user inspects the diff first, then
-   * sends feedback back, opens a draft PR, or just finishes. Failed/cancelled
-   * runs never enter review; no worktree or an empty diff means plain `done`.
-   *
-   * The gate is opt-in (#489): the review park happens only when it is enabled
-   * (`reviewGateEnabled` — config toggle over the `CEZ_REVIEW_GATE` env, default
-   * OFF) AND the run is not autonomous. Autonomous runs — and runs with the gate
-   * off — settle straight to `done`, leaving the diff in the worktree untouched.
-   */
   settleSuccess(id: string, durableRootFinish?: boolean, keepStepId?: string): Promise<void>;
   deferParentCompletion(id: string): boolean;
   closingWakeDecision(id: string, holds: boolean, cancelled: boolean, error: string | undefined): 'park' | 'settle' | 'capped';
@@ -315,7 +303,7 @@ export class RunSettlement {
    * sends feedback back, opens a draft PR, or just finishes. Failed/cancelled
    * runs never enter review; no worktree or an empty diff means plain `done`.
    *
-   * The gate is opt-in (#489): the review park happens only when it is enabled
+   * The gate is opt-in (open-mercato/cezar#489): the review park happens only when it is enabled
    * (`reviewGateEnabled` — config toggle over the `CEZ_REVIEW_GATE` env, default
    * OFF) AND the run is not autonomous. Autonomous runs — and runs with the gate
    * off — settle straight to `done`, leaving the diff in the worktree untouched.

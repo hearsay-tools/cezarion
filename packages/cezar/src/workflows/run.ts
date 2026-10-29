@@ -56,7 +56,7 @@ import { continuationOpening, openingInputs } from './run/opening.ts';
 import { releaseActiveResources } from './run/drop-active.ts';
 import { agentDirectories, applyTemplate, composeSystemPrompt, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt, withResumeContext } from './run/prompts.ts';
 import { delegationExecutionSettings, selectDelegationExecutionSettings } from '../delegation/execution-settings.ts';
-import { settlesAsDone, stepLabel, stepScope } from './run/steps.ts';
+import { stepLabel, stepScope } from './run/steps.ts';
 import { makeRunTitle } from '../runs/run-title.ts';
 export { agentDirectories, composeSystemPrompt, expandRegistrySlashSkill, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt } from './run/prompts.ts';
 export { stepLabel } from './run/steps.ts';
@@ -124,7 +124,7 @@ import { waitForCachedTeamSkills, waitForTeamSkills } from '../skills-remote.ts'
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelSettings } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
-import { type AutosaveReason, worktreeDiff } from '../git-worktree.ts';
+import { type AutosaveReason } from '../git-worktree.ts';
 import { runGroupedCommand } from './grouped-command.ts';
 import {
   resolveWorktreeSetup,
@@ -150,7 +150,6 @@ import {
   removeAgentTmpDir,
 } from '../runs/agent-tmpdir.ts';
 import { extractTaskRefs, refineTaskRefs } from '../runs/task-refs.ts';
-import { reviewGateEnabled } from '../runs/review-gate.ts';
 import { AgentAccountUnavailableError, resolveProfileEnvForRoot } from '../workspace/agent-profiles.ts';
 import { WorkspaceSemaphore, type AccountHolds } from '../workspace/semaphore.ts';
 import { UiEventSink } from '../runs/ui-event-sink.ts';
