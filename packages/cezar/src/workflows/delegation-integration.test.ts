@@ -1,3 +1,4 @@
+import { createFixtureManager, fixtureWorkSettled, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { execFile as execFileCallback, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -22,8 +23,6 @@ const entry = fileURLToPath(new URL('../index.ts', import.meta.url));
 describe('public delegation completion integration', () => {
   let root: string, repo: string, control: string, store: RunStore, manager: RunManager, controller: DelegationController;
   const environments = new Map<string, Record<string, string>>();
-  const executions: Promise<unknown>[] = [];
-  const turns: Promise<unknown>[] = [];
   const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: 'pipe' }).trim();
   // hearsay-tools/cezarion#1233: a monitoring park is a waiting run with an open monitoring timer.
   const monitoringPark = (id: string) => store.getRun(id)?.status === 'waiting' && !!monitoringWakeOf(store.getRun(id));
@@ -39,11 +38,7 @@ describe('public delegation completion integration', () => {
       if (session) environments.set(id, session.env);
       return session;
     });
-    const engine = manager as unknown as Record<'execute' | 'runContinuation' | 'recordTurnEnd', (...args: unknown[]) => Promise<unknown>>;
-    for (const name of ['execute', 'runContinuation', 'recordTurnEnd'] as const) {
-      const original = engine[name].bind(manager);
-      engine[name] = (...args) => { const result = original(...args); (name === 'recordTurnEnd' ? turns : executions).push(result); return result; };
-    }
+
   }
   beforeEach(async () => {
     onTestFinished(scopeFixtureProcesses());
@@ -59,13 +54,14 @@ describe('public delegation completion integration', () => {
     for (const [name, value] of Object.entries({ CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '0', CEZ_DELEGATION: '1', CEZ_AUTONAME: '0', CEZ_REVIEW_GATE: '1',
       CEZ_CLAUDE_BIN: wire, CEZ_CODEX_BIN: wire, CLAUDE_CONFIG_DIR: claudeHome, CODEX_HOME: codexHome })) vi.stubEnv(name, value);
     store = RunStore.open(join(repo, '.ai/cezar'), { keepLive: true });
-    manager = new RunManager(store, repo, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 3 } }) }); track();
+    manager = createFixtureManager(store, repo, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 3 } }) }); track();
     controller = await DelegationController.start(); controller.attachProject({ id: 'integration', root: repo, store, manager });
   });
   afterEach(async () => {
     for (const run of store.listRuns()) manager.cancel(run.id);
     await until(() => store.listRuns().every(run => !manager.isActive(run.id)), 'all sessions stopped');
-    await Promise.all(executions.splice(0)); await Promise.all(turns.splice(0));
+    await fixtureWorkSettled(repo);
+    await drainFixtureManagers(repo);
     manager.dispose(); store.flush(); await controller.close();
     environments.clear(); vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true });
   }, 30_000);
@@ -191,10 +187,10 @@ describe('public delegation completion integration', () => {
     expect(manager.finish(p.id)).toBe(true);
     await until(() => !manager.isActive(p.id), 'parent session closes at review');
     expect(store.getRun(p.id)?.status).toBe('review');
-    await Promise.all(executions.splice(0)); await Promise.all(turns.splice(0));
+    await fixtureWorkSettled(repo);
     manager.dispose(); store.close(); await controller.close();
     store = RunStore.open(join(repo, '.ai/cezar'), { keepLive: true });
-    manager = new RunManager(store, repo); track();
+    manager = createFixtureManager(store, repo); track();
     controller = await DelegationController.start(); controller.attachProject({ id: 'integration', root: repo, store, manager });
     await manager.recover();
     expect(store.getRun(p.id)?.status).toBe('review');

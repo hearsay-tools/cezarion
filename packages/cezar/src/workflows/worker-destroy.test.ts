@@ -1,3 +1,4 @@
+import { createFixtureManager, fixtureWorkSettled, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { nonDumpableHolder } from '../delegation/non-dumpable.testkit.ts';
 import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { readPid, requirePid, requirePidText } from '../pid-file.testkit.ts';
@@ -38,7 +39,6 @@ function gate() { let release!: () => void; const promise = new Promise<void>(re
 describe('worker termination barrier', { timeout: 30_000 }, () => {
   let root: string, store: RunStore, manager: RunManager, parent: RunRecord;
   const releases: Array<() => void> = [];
-  const executions: Promise<unknown>[] = [];
   beforeEach(() => {
     scopeFixtureProcesses();
     vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
@@ -50,12 +50,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     execFileSync('git', ['config', 'maintenance.auto', 'false'], { cwd: root });
     execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: root });
     store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
-    manager = new RunManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 1 } }) });
-    const engine = manager as unknown as Record<'execute' | 'runContinuation', (...args: unknown[]) => Promise<unknown>>;
-    for (const name of ['execute', 'runContinuation'] as const) {
-      const real = engine[name].bind(manager);
-      engine[name] = (...args) => { const p = real(...args); executions.push(p); return p; };
-    }
+    manager = createFixtureManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 1 } }) });
+
     parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
     store.updateRun(parent.id, { status: 'waiting', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
   });
@@ -63,8 +59,9 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     for (const release of releases.splice(0)) release();
     // A test that restarted disposed this manager and closed this store: nothing to cancel here.
     if (!managerDisposed(manager)) for (const run of store.listRuns()) manager.cancel(run.id);
-    await Promise.allSettled(executions.splice(0));
+    await fixtureWorkSettled(root);
     await until(() => store.listRuns().every(run => !manager.isActive(run.id)));
+    await drainFixtureManagers(root);
     manager.dispose(); store.flush(); vi.restoreAllMocks(); vi.unstubAllEnvs();
     rmSync(root, { recursive: true, force: true });
   }, 30_000);
@@ -99,7 +96,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     store.updateRun(w.id, { workflowDef: { name: 'quick-task', source: 'built-in', steps: [{ id: 'task', prompt: '{{task}}' }] } });
     expect(manager.requestWorkerStop(w.id).state).toBe('terminated');
     manager.dispose();
-    manager = new RunManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
+    manager = createFixtureManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
     store.updateRun(parent.id, { status: 'review' });
     expect(manager.continueRun(w.id)).toMatchObject({ ok: false });
     store.updateRun(parent.id, { status: 'waiting' });

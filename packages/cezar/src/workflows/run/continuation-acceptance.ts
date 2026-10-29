@@ -186,7 +186,7 @@ export class ContinuationAcceptance {
       return { ok: true };
     }
     this.line.markStarting(runId);
-    void this.host.runContinuation(runId, stepId, resumeSessionId, targetRunner, prompt, images)
+    void this.context.work.track('runContinuation', this.host.runContinuation(runId, stepId, resumeSessionId, targetRunner, prompt, images))
       .catch((err: unknown) => this.failCrashedContinuation(runId, err))
       .finally(() => this.host.finishWorkerExecution(runId));
     return { ok: true };

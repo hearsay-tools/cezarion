@@ -77,8 +77,8 @@ test('installed CLI completes owned-worker lifecycle with lost spawn reply and o
   let manager: import('../../src/workflows/run.ts').RunManager | undefined;
   let store: import('../../src/runs/store.ts').RunStore | undefined;
   let controller: import('../../src/delegation/provision.ts').DelegationController | undefined;
-  const executions: Promise<unknown>[] = [];
-  const turns: Promise<unknown>[] = [];
+  const { TrackedWork } = await import('../../dist/workflows/run/tracked-work.js') as unknown as typeof import('../../src/workflows/run/tracked-work.ts');
+  const work = new TrackedWork();
   const exists = async (path: string) => access(path).then(() => true, () => false);
   async function until(check: () => boolean | Promise<boolean>, label: string) {
     const deadline = Date.now() + 15_000;
@@ -95,7 +95,7 @@ test('installed CLI completes owned-worker lifecycle with lost spawn reply and o
         manager.cancel(run.id);
       }
       for (const run of store.listRuns()) if (run.delegation?.role === 'worker') assert.equal(await manager.awaitRunTermination(run.id, 15_000), true);
-      await Promise.all(executions); await Promise.all(turns);
+      while (work.pending.size) await Promise.allSettled([...work.pending.keys()]);
       manager.dispose(); store.flush();
     }
     await controller?.close();
@@ -167,7 +167,7 @@ rl.on('close', () => queue.then(() => process.exit(0)));
     delete process.env.CEZ_DELEGATION_TOKEN; delete process.env.CEZ_DELEGATION_URL;
     store = RunStore.open(join(repo, '.ai/cezar'), { keepLive: true });
     const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
-    manager = new RunManager(store, repo, { semaphore });
+    manager = new RunManager(store, repo, { semaphore, work });
     // Observe the real provisioner without replacing its identity, environment,
     // instructions, credential generation, or revocation behavior.
     const environments = new Map<string, Record<string, string>>();
@@ -175,11 +175,7 @@ rl.on('close', () => queue.then(() => process.exit(0)));
     manager.setDelegationProvisioner = provisioner => setProvisioner(id => {
       const session = provisioner(id); if (session) environments.set(id, session.env); return session;
     });
-    const engine = manager as unknown as Record<'execute' | 'runContinuation' | 'recordTurnEnd', (...args: unknown[]) => Promise<unknown>>;
-    for (const name of ['execute', 'runContinuation', 'recordTurnEnd'] as const) {
-      const real = engine[name].bind(manager);
-      engine[name] = (...args) => { const promise = real(...args); (name === 'recordTurnEnd' ? turns : executions).push(promise); return promise; };
-    }
+
     controller = await DelegationController.start();
     controller.attachProject({ id: 'package-project', root: repo, store, manager });
     const parent = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'package parent', runner: 'claude', worktree: false });

@@ -1,3 +1,4 @@
+import { TrackedWork } from './tracked-work.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -38,7 +39,7 @@ function opening() {
   state.openingAgentInputId = message.id;
   const host = { reconcileWorkerWaits: vi.fn(() => projectConversationEvents(store, store.getRun(parent.id)!)),
     flushAgentInputs: vi.fn(), isCurrentState: vi.fn(() => true) };
-  const context = { store, repoRoot: root, dataDir: root, semaphore: new WorkspaceSemaphore(), disposed: () => false };
+  const context = { store, repoRoot: root, dataDir: root, semaphore: new WorkspaceSemaphore(), work: new TrackedWork(), disposed: () => false };
   const saved = () => readPersistedRuns(root).find(run => run.id === recipient.id)!;
   const deliveries = (id: string) => store.readEvents(id).filter(event => event.type === 'conversation-message' && event.delivery === 'delivered');
   return { parent, recipient, state, host, context, saved, deliveries };
