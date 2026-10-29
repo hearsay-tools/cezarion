@@ -3519,7 +3519,7 @@ export class RunManager {
    * cancelled, failed, incomplete-step, idle-closed or success settlement.
    */
   private async settleExecution(runId: string, state: ActiveRun, loop: StepLoop): Promise<void> { return this.runSettlement.settleExecution(runId, state, loop); }
-
+  private settleFailedRun(runId: string, runError: string, deliveryCapped: boolean): void { this.runSettlement.settleFailedRun(runId, runError, deliveryCapped); }
   /** Returns an error message, or null on success. */
   private async runAgentStep(
     runId: string,
