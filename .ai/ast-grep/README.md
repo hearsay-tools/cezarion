@@ -58,3 +58,6 @@ it; editing that line makes the match new. That is deliberate: edit it by moving
 binary. The test reads stdout only and finds the binary through the package's own resolver. A
 host with no platform binary (musl, or `--no-optional`) fails the test with the package name,
 never skips it. The scan reads local files only.
+
+For local three-way baseline merges and driver setup, see
+[Local ratchet baseline merges](../../docs/sdlc/ci.md#local-ratchet-baseline-merges).

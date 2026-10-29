@@ -1106,17 +1106,17 @@ function deliveryPromptText(body, received) {
   return deliveryText;
 }
 
-async function acknowledgeSteer(body, res) {
+async function acknowledgeSteer(body, res, deliveryText) {
   const text = JSON.parse(body).parts.map(part => part.text ?? '').join('\n');
   const userId = `msg_steer_user_${++steerSerial}`;
-  // #505 review: acknowledge a steer later than the runner's lost-wake window.
   const ackDelay = Number(process.env.CEZ_MOCK_OPENCODE_STEER_ACK_MS ?? 0);
-  if (ackDelay > 0) setTimeout(() => { res.writeHead(204); res.end(); }, ackDelay);
-  else { res.writeHead(204); res.end(); }
+  const ack = () => { res.writeHead(204); res.end(); };
+  const acknowledge = () => { if (ackDelay > 0) setTimeout(ack, ackDelay); else ack(); };
+  // Hold busy-input ACKs too; native consumption still streams (hearsay-tools/cezarion#2127).
+  if (delivery) delivery.ack(deliveryText, acknowledge); else acknowledge();
   send({ type: 'message.updated', properties: { info: { id: userId, sessionID: SESSION_ID, role: 'user', time: { created: Date.now() } } } });
   send({ type: 'message.part.updated', properties: { part: { id: `prt_${userId}`, messageID: userId, sessionID: SESSION_ID, type: 'text', text } } });
   steers.push({ userId, text });
-  return;
 }
 
 function acknowledgePrompt(res, body, deliveryText) {
@@ -1173,7 +1173,7 @@ async function preparePromptTurn(res, url, body, received) {
     return true;
   }
   if (heldBeats && url.endsWith('/prompt_async')) { clearInterval(heldBeats); heldBeats = undefined; turnActive = false; }
-  if (turnActive && url.endsWith('/prompt_async')) { await acknowledgeSteer(body, res); return true; }
+  if (turnActive && url.endsWith('/prompt_async')) { await acknowledgeSteer(body, res, deliveryText); return true; }
   // A prompt posted while a follow-on run is due runs after it.
   if (followOn) await followOn;
   turnActive = true;

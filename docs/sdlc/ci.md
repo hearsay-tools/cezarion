@@ -736,3 +736,28 @@ Reverting reuse restores full verification on future pushes. Queue rollback is
 maintainer-owned: inspect active entries, remove only the queue requirement and
 restore the behind-main policy. Retain full main CI, both required checks,
 review-thread resolution and no-bypass protection.
+
+### Local ratchet baseline merges
+
+Run `npm run setup:merge-drivers` once per clone to register the `cezar-ratchet`
+Git merge driver in repository-local config. Linked worktrees share that config.
+Dependency installation does not register it. Setup refuses to replace a different
+existing definition. Node must be on PATH when Git merges.
+
+The attributes cover `packages/cezar/src/file-length.baseline.json` and
+`.ai/ast-grep/rules/*.baseline.json`. The former shared
+`packages/cezar/src/ast-grep-rules.baseline.json` no longer exists.
+The driver takes the lower numeric pin or site count, matching AST sites by
+`(file, rule, site)`. It keeps additions, and preserves a removal against an
+unchanged entry. A removal against a modified entry, conflicting metadata,
+duplicate AST identities or unsupported JSON leaves a conflict for manual
+resolution. Output keeps the existing schema with stable key ordering.
+
+This merge does not approve baseline growth. Existing CI growth and stale-entry
+checks still apply; combined source changes can require another baseline refresh.
+Only the owner can approve growth through the existing `baseline-growth` policy.
+GitHub does not run this custom driver: resolve server-side conflicts with a local
+merge and push. Clones without setup use Git's ordinary merge behavior.
+
+Remove registration with `git config --local --unset-all merge.cezar-ratchet.driver`.
+This affects developer Git operations only; it adds no cockpit runtime setting.
