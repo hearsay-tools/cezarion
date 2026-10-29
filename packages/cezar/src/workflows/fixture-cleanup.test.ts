@@ -87,7 +87,7 @@ it('drains queue rescue held while loading a lost queued run workflow', async ()
     return result;
   });
   expect(store.getRun(run.id)?.status).toBe('queued');
-  const rescued = Promise.allSettled([manager.rescueStalledQueue()]);
+  const rescued = Promise.allSettled([runInternals(manager).line.rescueStalledQueue()]);
   await boundary.entered;
   const removing = removeFixtureRepo(root);
   try {

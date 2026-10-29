@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -155,7 +156,7 @@ describe('session-start context through every native wire (hearsay-tools/cezario
       const held = vi.spyOn(semaphore, 'maxParallel').mockReturnValue(0);
       await restart();
       held.mockRestore();
-      await (manager as unknown as { pump(): Promise<void> }).pump();
+      await (runInternals(manager).line).pump();
       await until(() => messages().length > before);
       const recovered = messages()[before]!;
       expect(count(recovered, '<cezar-context id="handoff"')).toBe(1);

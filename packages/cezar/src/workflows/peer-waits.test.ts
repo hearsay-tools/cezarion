@@ -24,7 +24,6 @@ import { controlledWire, fixtureUpdateRun, manager, parent, restart, root, semap
 
 type Internals = {
   active: Map<string, { ciGeneration?: string; idleTimer?: unknown; session?: { open: boolean } }>;
-  monitoring: Set<string>;
 };
 const internals = () => manager as unknown as Internals;
 const handlers = (runId: string) => manager.cezarToolHandlers(runId, internals().active.get(runId)!.ciGeneration!);

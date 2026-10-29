@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentRunResult, AgentSession } from '../core/agent-runner.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
@@ -20,7 +21,7 @@ describe('launch disposal routes', { timeout: 30_000 }, () => {
   beforeEach(() => {
     vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
     f = fixture();
-    vi.mocked((f.manager as unknown as { pump(): Promise<void> }).pump).mockRestore();
+    vi.mocked((runInternals(f.manager).line).pump).mockRestore();
     vi.spyOn(runners, 'createRunner').mockImplementation(backend => ({
       backend: backend ?? 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
       interrupt: async () => {}, run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }),

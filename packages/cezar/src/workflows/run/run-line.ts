@@ -178,7 +178,6 @@ export class RunLine {
     void this.context.semaphore.release();
   }
 
-
   /**
    * Start queued runs while parallel slots are free. A run starts only under
    * BOTH ceilings: the WORKSPACE `resources.maxParallel` (default 2, counted
@@ -188,7 +187,7 @@ export class RunLine {
    * are ignored. A non-git directory degrades to 1 sequential run in the repo
    * root (spec 006 degradation rule), which is always the tighter bound.
    */
-  pump(): Promise<void> {
+  async pump(): Promise<void> {
     return this.context.work.track('pump', this.pumpWork());
   }
 
@@ -296,7 +295,7 @@ export class RunLine {
    * Repair queued records missing executable state. Rescue an idle queue only when no running work
    * or future appointment explains it; start through ordinary caps. Public for direct tests.
    */
-  rescueStalledQueue(now = Date.now()): Promise<void> {
+  async rescueStalledQueue(now = Date.now()): Promise<void> {
     return this.context.work.track('rescueStalledQueue', this.rescueStalledQueueWork(now));
   }
 

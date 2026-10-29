@@ -1,3 +1,4 @@
+import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
@@ -313,9 +314,10 @@ describe('verified destruction retains results through explicit history deletion
     interruptedParentDeletion(); f.store.updateRun(f.parent.id, { status }); f.store.close();
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
     const manager = createFixtureManager(reopened, f.root);
-    vi.spyOn(manager as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
+    const pump = vi.spyOn(runInternals(manager).line, 'pump').mockResolvedValue();
     try {
       await manager.recover();
+      expect(pump).toHaveBeenCalled();
       expect(manager.isActive(f.parent.id)).toBe(false);
       expect(reopened.getRun(f.parent.id)?.delegation).toMatchObject({ historyDeletion: 'pending' });
       expect(reopened.deleteRun(f.parent.id)).toBe(true);

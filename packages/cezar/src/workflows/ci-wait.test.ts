@@ -133,8 +133,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     writeFileSync(gate, 'end');
     await until(() => store.getRun(run.id)?.status === 'waiting' && store.readEvents(run.id).some(event => event.type === 'ask.requested'));
     const engine = manager as unknown as {
-      active: Map<string, { session: AgentSession; atTurnBoundary?: AgentSession | undefined }>; pump(): Promise<void>;
-    };
+      active: Map<string, { session: AgentSession; atTurnBoundary?: AgentSession | undefined }>; };
     const state = engine.active.get(run.id)!;
     // Hold scheduler capacity until the observation is queued, then lose the
     // boundary before admission (a backend can resume autonomously).
@@ -143,7 +142,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     await until(() => runInternals(manager).line.waitWakeQueuedAt.has(run.id));
     state.atTurnBoundary = undefined;
     capacity.mockRestore();
-    await engine.pump();
+    await runInternals(manager).line.pump();
     expect.soft(runInternals(manager).line.queue).toContain(run.id);
     state.atTurnBoundary = state.session;
     await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
@@ -657,10 +656,10 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     interval.mockReturnValue(5);
     const wait = await registerTimer(run.id, 600);
     interval.mockReturnValue(1);
-    await (manager as unknown as { pump(): Promise<void> }).pump();
+    await (runInternals(manager).line).pump();
     expect(waitById(run.id, wait.id)?.deadline).toBe(wait.deadline);
     interval.mockReturnValue(null);
-    await (manager as unknown as { pump(): Promise<void> }).pump();
+    await (runInternals(manager).line).pump();
     expect(waitById(run.id, wait.id)).toMatchObject({ phase: 'open', deadline: wait.deadline });
     expect(runInternals(manager).waitWatches.waitTimers.has(wait.id)).toBe(true);
   });

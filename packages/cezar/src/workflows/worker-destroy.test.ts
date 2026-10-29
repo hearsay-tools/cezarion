@@ -444,7 +444,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     const w = await worker(); manager.enqueueOwnedRun(w.id); await until(() => store.getRun(w.id)?.status === 'waiting');
     manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
     // Finish the old release sweep: Continue must schedule its own new queue entry.
-    await (manager as unknown as { pump(): Promise<void> }).pump();
+    await (runInternals(manager).line).pump();
     expect(manager.continueRun(w.id, { text: 'mock:hold' }, true).ok).toBe(true);
     const deferred = store.readWorkerExecution(w.id)!;
     await until(() => store.getRun(w.id)?.status === 'waiting');

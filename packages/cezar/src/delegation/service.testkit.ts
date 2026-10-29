@@ -1,10 +1,11 @@
+import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers, managerDisposed } from '../workflows/fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { vi } from 'vitest';
+import { expect, vi } from 'vitest';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { CredentialRegistry, type Caller } from './credentials.ts';
@@ -68,7 +69,7 @@ export function fixture(): { root: string; sha: string; store: RunStore; manager
   const store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
   const manager = createFixtureManager(store, root);
   // Scheduler admission is deliberately held: service acceptance must be durable before it.
-  vi.spyOn(manager as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
+  const pump = vi.spyOn(runInternals(manager).line, 'pump').mockResolvedValue();
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', runner: 'claude', model: 'opus', effort: 'high', steps: [] });
   store.updateRun(parent.id, { status: 'running', worktreePath: root, delegation: { role: 'root', permissions: ['spawn', 'inspect', 'steer', 'stop', 'destroy', 'diff', 'wait'], receipts: [] } });
   const credentials = new CredentialRegistry();
@@ -76,6 +77,12 @@ export function fixture(): { root: string; sha: string; store: RunStore; manager
   const caller = credentials.authenticate(token)!;
   vi.spyOn(manager, 'delegationExecutionSettings').mockReturnValue({ cwd: root, runner: 'claude', model: 'opus', effort: 'high', agentProfile: 'default', accountBinding: { provider: 'claude', profileId: 'default', homePath: root, claudeLayout: { kind: 'relocated' } } });
   const service = new DelegationService();
+  const spawn = service.spawn.bind(service);
+  vi.spyOn(service, 'spawn').mockImplementation(async (...args) => {
+    const result = await spawn(...args);
+    if (store.getRun(result.workerId)?.status === 'queued') expect(pump).toHaveBeenCalled();
+    return result;
+  });
   const unregister = service.registerProject({ id: 'project', root, store, manager });
   return { root, sha, store, manager, parent, credentials, caller, token, service,
     async close() {

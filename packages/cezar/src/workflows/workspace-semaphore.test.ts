@@ -119,13 +119,12 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     const projectA = project('cez-monitor-cap-', semaphore);
     const internals = projectA.manager as unknown as {
       active: Map<string, object>;
-      busySlots(): number;
-    };
+      };
     for (const id of ['ordinary', 'm1', 'm2', 'm3']) internals.active.set(id, {});
     for (const id of ['ordinary', 'm1', 'm2', 'm3']) runInternals(projectA.manager).line.waiting.add(id);
     for (const id of ['m1', 'm2', 'm3']) runInternals(projectA.manager).line.monitoring.add(id);
     // ordinary wait is exempt; two monitors are exempt; monitor #3 back-pressures the active pool.
-    expect(internals.busySlots()).toBe(1);
+    expect(runInternals(projectA.manager).line.busySlots()).toBe(1);
     expect(semaphore.busy()).toBe(1);
   });
 

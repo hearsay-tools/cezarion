@@ -613,11 +613,10 @@ describe('RunManager.continueRun override', () => {
     manager.dispose(); crashStore(store);
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
     manager = createFixtureManager(store, repoRoot);
-    const internals = manager as unknown as {
-      pump(): Promise<void>;
-    };
-    internals.pump = async () => {};
+    const internals = runInternals(manager).line;
+    const pump = vi.spyOn(internals, 'pump').mockResolvedValue();
     await manager.recover();
+    expect(pump).toHaveBeenCalled();
     expect(runInternals(manager).line.pendingContinuations.get(id)?.prompt).toContain('read this with the chosen account');
     expect(runInternals(manager).line.pendingContinuations.get(id)?.sessionId).toBeUndefined();
     expect(store.getRun(id)?.agentProfile).toBe(after);
@@ -1406,14 +1405,13 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
 
     const internals = manager as unknown as {
       active: Map<string, Record<string, unknown>>;
-      busySlots(): number;
-    };
+      };
     const state = internals.active.get(record.id);
     if (!state) throw new Error('active run state missing');
     const originalDeadline = Date.parse(String(monitoringWakeOf(store.getRun(record.id))));
     expect(runInternals(manager).line.waiting.has(record.id)).toBe(true);
     expect(runInternals(manager).line.monitoring.has(record.id)).toBe(true);
-    expect(internals.busySlots()).toBe(0);
+    expect(runInternals(manager).line.busySlots()).toBe(0);
     expect(semaphore.busy()).toBe(0);
 
     await waitFor(record.id, () => {
@@ -1428,7 +1426,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     expect(monitoringTimerOf(manager, record.id)).toBeDefined();
     expect(runInternals(manager).line.waiting.has(record.id)).toBe(false);
     expect(runInternals(manager).line.monitoring.has(record.id)).toBe(true);
-    expect(internals.busySlots()).toBe(0);
+    expect(runInternals(manager).line.busySlots()).toBe(0);
     expect(semaphore.busy()).toBe(0);
     expect((state.session as { open?: boolean } | undefined)?.open).toBe(true);
 
@@ -1450,7 +1448,6 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
 
     const internals = manager as unknown as {
       active: Map<string, Record<string, unknown>>;
-      busySlots(): number;
       makeUiSink(runId: string, stepId: string): { handle(event: UiEvent): void };
       handleRunnerUiEvent(
         runId: string,
@@ -1473,7 +1470,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     expect(monitoringTimerOf(manager, record.id)).toBe(wakeTimer);
     expect(runInternals(manager).line.waiting.has(record.id)).toBe(true);
     expect(runInternals(manager).line.monitoring.has(record.id)).toBe(true);
-    expect(internals.busySlots()).toBe(0);
+    expect(runInternals(manager).line.busySlots()).toBe(0);
     expect(semaphore.busy()).toBe(0);
     await waitFor(record.id, () => {
       const events = readFileSync(join(repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`), 'utf8');
@@ -1498,7 +1495,6 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
 
     const internals = manager as unknown as {
       active: Map<string, Record<string, unknown>>;
-      busySlots(): number;
       makeUiSink(runId: string, stepId: string): { handle(event: UiEvent): void };
       handleRunnerUiEvent(
         runId: string,
@@ -1563,7 +1559,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     expect(monitoringTimerOf(manager, record.id)).toBe(wakeTimer);
     expect(runInternals(manager).line.waiting.has(record.id)).toBe(true);
     expect(runInternals(manager).line.monitoring.has(record.id)).toBe(true);
-    expect(internals.busySlots()).toBe(0);
+    expect(runInternals(manager).line.busySlots()).toBe(0);
     expect(semaphore.busy()).toBe(0);
 
     await waitFor(record.id, () => {
@@ -1582,7 +1578,6 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
 
     const internals = manager as unknown as {
       active: Map<string, Record<string, unknown>>;
-      busySlots(): number;
       makeUiSink(runId: string, stepId: string): { handle(event: UiEvent): void };
       handleRunnerUiEvent(
         runId: string,
@@ -1607,7 +1602,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     expect(monitoringTimerOf(manager, record.id)).toBeDefined();
     expect(runInternals(manager).line.waiting.has(record.id)).toBe(false);
     expect(runInternals(manager).line.monitoring.has(record.id)).toBe(true);
-    expect(internals.busySlots()).toBe(0);
+    expect(runInternals(manager).line.busySlots()).toBe(0);
     expect(semaphore.busy()).toBe(0);
   }, 30_000);
 
@@ -2901,15 +2896,7 @@ describe('RunManager queued-stack mutators (#472)', () => {
     });
     store.updateRun(r.id, { status: 'queued' });
 
-    type PendingContinuation = {
-      stepId: string;
-      sessionId: string | undefined;
-      backend: 'claude';
-      prompt: string;
-      images: ContentBlock[];
-    };
     const internals = manager as unknown as {
-      pump(): Promise<void>;
       runContinuation(
         runId: string,
         stepId: string,
@@ -2927,6 +2914,7 @@ describe('RunManager queued-stack mutators (#472)', () => {
       backend: 'claude',
       prompt: 'restart recovery',
       images: [],
+      lineJoinedAt: Date.parse(r.createdAt),
     });
     runInternals(manager).line.queue.push(r.id);
 
@@ -2955,7 +2943,7 @@ describe('RunManager queued-stack mutators (#472)', () => {
     ) => {
       delivered = { prompt, images, persistedImages, persistedAttachments };
     };
-    await internals.pump();
+    await runInternals(manager).line.pump();
 
     expect(delivered?.prompt).toBe(
       'restart recovery\n\nCurrent task and queued updates:\n\n' +

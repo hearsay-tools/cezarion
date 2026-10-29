@@ -205,11 +205,11 @@ describe('CI wait failure history through every native runner (hearsay-tools/cez
       if (boundary === 'queued tail') {
         // Hold only scheduler dispatch, after the real CI input ACK. Native teardown
         // durably queues the workflow remainder before any next execute can start.
-        const pump = vi.spyOn(manager as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
+        const pump = vi.spyOn(runInternals(manager).line, 'pump').mockResolvedValue();
         signalDone(run.id, runner);
         await until(() => store.getRun(run.id)?.status === 'queued' && !active(run.id) && store.readWorkerExecution(run.id)?.phase === 'complete');
         expect(store.getRun(run.id)?.steps.find(step => step.id === 'later')?.status).toBe('pending');
-        pump.mockRestore();
+        expect(pump).toHaveBeenCalled(); pump.mockRestore();
       }
       await restart(false, undefined, eventCheckpoint());
       await until(() => ['done', 'failed'].includes(store.getRun(run.id)?.status ?? '') || store.getRun(run.id)?.status === 'waiting' && !!active(run.id)?.session.open);

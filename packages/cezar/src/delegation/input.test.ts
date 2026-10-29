@@ -1,3 +1,4 @@
+import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -353,7 +354,7 @@ it.each(['live', 'expired'] as const)('restart recovers a %s receipt and expiry 
     vi.setSystemTime(Date.now() + (mode === 'live' ? 60_000 : 120_001));
     const reopened = RunStore.open(dir, { keepLive: true }), recovered = new RunManager(reopened, dir);
     // Hold scheduler admission while observing the real durable wake produced by expiry.
-    const pump = vi.spyOn(recovered as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
+    const pump = vi.spyOn(runInternals(recovered).line, 'pump').mockResolvedValue();
     try {
       await recovered.recover();
       if (mode === 'live') {
@@ -369,7 +370,7 @@ it.each(['live', 'expired'] as const)('restart recovers a %s receipt and expiry 
       expect(reopened.readEvents(runId).filter(event => event.type === 'note' && String(event.message).startsWith('Messages retained; continuation unavailable: '))).toHaveLength(1);
       expect(reopened.getRun(runId)?.agentInputs?.[0]?.deliveredAt).toBeUndefined();
       expect(() => recovered.acknowledgeInbox(runId, generation, receipt.receiptId)).toThrow();
-    } finally { recovered.dispose(); reopened.flush(); pump.mockRestore(); }
+    } finally { recovered.dispose(); reopened.flush(); expect(pump).toHaveBeenCalled(); pump.mockRestore(); }
   });
 });
 
@@ -382,7 +383,7 @@ it('a continuation refused across several admission retries writes the retained 
     enqueue('owed message');
     store.updateRun(runId, { status: 'waiting' }); store.close(); manager.dispose();
     const reopened = RunStore.open(dir, { keepLive: true }), recovered = new RunManager(reopened, dir);
-    const pump = vi.spyOn(recovered as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
+    const pump = vi.spyOn(runInternals(recovered).line, 'pump').mockResolvedValue();
     const resume = vi.spyOn(recovered, 'continueRun');
     const notes = () => reopened.readEvents(runId).filter(event => event.type === 'note' && String(event.message).startsWith('Messages retained; continuation unavailable: '));
     try {
@@ -393,7 +394,7 @@ it('a continuation refused across several admission retries writes the retained 
       expect(resume.mock.calls.length).toBeGreaterThanOrEqual(tries + 4);
       expect(resume.mock.results.every(result => result.type === 'return' && !result.value.ok)).toBe(true);
       expect(notes()).toHaveLength(1);
-    } finally { recovered.dispose(); reopened.flush(); pump.mockRestore(); }
+    } finally { recovered.dispose(); reopened.flush(); expect(pump).toHaveBeenCalled(); pump.mockRestore(); }
   });
 });
 
@@ -459,13 +460,13 @@ it('restart after durable inbox ACK retires the wake without creating a continua
     store.ackInboxInputs(runId, receiptId, generation, new Date().toISOString());
     manager.dispose(); store.close();
     const reopened = RunStore.open(dir, { keepLive: true }), recovered = new RunManager(reopened, dir);
-    const pump = vi.spyOn(recovered as unknown as { pump(): Promise<void> }, 'pump').mockResolvedValue();
+    const pump = vi.spyOn(runInternals(recovered).line, 'pump').mockResolvedValue();
     try {
       await recovered.recover();
       expect(reopened.getRun(runId)?.delegation).not.toHaveProperty('wait');
       expect(reopened.getRun(runId)?.continuationMessage).toBeUndefined();
       expect(reopened.getRun(runId)?.status).toBe('waiting');
       expect(recovered.acknowledgeInbox(runId, generation, receiptId)).toBe('already-acknowledged');
-    } finally { recovered.dispose(); reopened.flush(); pump.mockRestore(); }
+    } finally { recovered.dispose(); reopened.flush(); expect(pump).toHaveBeenCalled(); pump.mockRestore(); }
   });
 });

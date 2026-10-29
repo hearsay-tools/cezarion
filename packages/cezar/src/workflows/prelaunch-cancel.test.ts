@@ -124,7 +124,7 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     const stepId = a.store.getRun(id)!.currentStepId!;
     expect(launches.mock.calls.length).toBe(0);
 
-    const admission = vi.spyOn(b.manager as unknown as { pump(): Promise<void> }, 'pump');
+    const admission = vi.spyOn(runInternals(b.manager).line, 'pump');
     const queuedExecution = watchExecution(b, 'fresh');
     const queued = b.manager.startRun({ name: 'next', source: 'built-in', steps: [{ id: 'check', command: 'true' }] }, { task: 'next project', worktree: false });
     expect(admission).toHaveBeenCalled();

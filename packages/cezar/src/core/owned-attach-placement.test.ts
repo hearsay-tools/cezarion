@@ -1,3 +1,4 @@
+import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -58,7 +59,7 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
   };
   const launch = async () => {
     (f.manager as unknown as { pump: MockInstance }).pump.mockRestore();
-    await (f.manager as unknown as { pump(): Promise<void> }).pump();
+    await (runInternals(f.manager).line).pump();
   };
   beforeEach(() => {
     vi.stubEnv('CEZ_DELEGATION', '1'); vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
@@ -156,7 +157,7 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
     f.store.updateStep(workerId, 'second', { status: 'pending', finishedAt: undefined });
     f.store.updateRun(workerId, { status: 'queued', finishedAt: undefined, error: undefined });
     await (f.manager as unknown as { reviveQueuedRun(run: unknown, reason: string): Promise<void> }).reviveQueuedRun(f.store.getRun(workerId), 'cezar restarted');
-    await (f.manager as unknown as { pump(): Promise<void> }).pump();
+    await (runInternals(f.manager).line).pump();
     await until(() => seen.length === 3);
     expect(seen[2]!.files).toEqual({ 'qa/1149/brief.md': undefined, 'qa/evidence.log': ATTACHED['qa/evidence.log'] });
   });

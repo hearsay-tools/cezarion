@@ -386,6 +386,15 @@ State that tests reach, ranked by test files: `active` (49 files, 174 sites), `p
 `waiting` (7), `busySlots` (6), `starting` (6), `settleSuccess` (6), `waitTimers` (6),
 `executions` (5).
 
+Phase 5 migration (hearsay-tools/cezarion#2231): scheduler tests now read `queue`,
+`starting`, `waiting`, `monitoring`, `waitWakeQueuedAt`, `waitWakeAdmitted`,
+`pendingJobs` and `pendingContinuations` through `runInternals(manager).line`.
+The same instance owns the `releaseSlot`, `pump`, `busySlots`, `oldestQueuedAt`,
+`oldestWakeAt` and `rescueStalledQueue` seams. The facade keeps `reviveQueuedRun`
+for the function-module spy in `scoped-recovery.test.ts`; other queued-revival
+calls go directly to `queued-revival.ts`. `pump` and `rescueStalledQueue` keep
+async tracking wrappers so dropped calls retain their rejection behavior.
+
 ## Facade surface
 
 Shipped code calls these 48 members from outside `run.ts`; Phase 5 may narrow their types but
@@ -405,7 +414,7 @@ keeps their names and signatures:
   `registerPeerWait`, `enqueueOwnedRun`, `settleOrphanedWorkerExecution`, `steerWorker`,
   `requestWorkerStop`, `registerWorkerWait`, `cancelPeerWait`, `cancelWorkerWait`,
   `awaitRunTermination`, `takeWorkerTerminationBlocker`, `previewHost`.
-- The semaphore registers five callbacks: `busySlots`, `oldestWakeAt`, `pump`, `oldestQueuedAt`,
+- The semaphore registers five callbacks (the scheduler four now target `RunLine`): `busySlots`, `oldestWakeAt`, `pump`, `oldestQueuedAt`,
   `accountHolds`.
 
 These members stay on the facade with no Phase 4 issue, and their code waits for Phase 5:

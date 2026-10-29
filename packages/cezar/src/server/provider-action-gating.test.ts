@@ -1,3 +1,4 @@
+import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -485,7 +486,7 @@ describe('provider availability preserves existing execution', () => {
       ],
     };
 
-    const engine = manager as unknown as { pump: () => Promise<void> };
+    const engine = runInternals(manager).line;
     const pausedPump = vi.spyOn(engine, 'pump').mockResolvedValue();
     const run = manager.startRun(workflow, {
       task: 'mock:native-codex-ask choose a library',
@@ -501,7 +502,7 @@ describe('provider availability preserves existing execution', () => {
       body: JSON.stringify({ enabled: false }),
     });
     expect(disabled.status).toBe(200);
-    pausedPump.mockRestore();
+    expect(pausedPump).toHaveBeenCalled(); pausedPump.mockRestore();
     void engine.pump();
 
     await waitFor(() => {

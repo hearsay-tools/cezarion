@@ -1,3 +1,4 @@
+import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -116,13 +117,13 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
             manager.enqueueOwnedRun(runId);
             await waitFor(() => nudgeNotes(store.readEvents(runId).slice(startSeq)).length === 1);
             expect(store.getRun(runId)?.status).toBe('running');
-            expect(manager['busySlots']()).toBe(1);
+            expect(runInternals(manager).line.busySlots()).toBe(1);
             // bound: observe the real silent-tail-no-reply child for 150 ms before the 300 ms reply deadline; no early park may release its slot.
             await new Promise(resolve => setTimeout(resolve, 150));
             expect(store.getRun(runId)?.status).toBe('running');
-            expect(manager['busySlots']()).toBe(1);
+            expect(runInternals(manager).line.busySlots()).toBe(1);
             await waitFor(() => store.getRun(runId)?.status === 'waiting');
-            expect(manager['busySlots']()).toBe(0);
+            expect(runInternals(manager).line.busySlots()).toBe(0);
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
             expect(noReplyNotes(store.readEvents(runId))).toHaveLength(1);
             expect(turns.words(runId)).toContain('waiting');
@@ -151,12 +152,12 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
               manager.enqueueOwnedRun(runId);
               await waitFor(() => noReplyNotes(store.readEvents(runId).slice(startSeq)).length === 1);
               expect(store.getRun(runId)?.status).toBe('waiting');
-              expect(manager['busySlots']()).toBe(0);
+              expect(runInternals(manager).line.busySlots()).toBe(0);
               // The native reply stays blocked until parking and slot release are observed.
               // Capture the resumed slot in the store callback: DONE can follow in the same tick.
               let resumedSlots: number | undefined;
               const onRun = (run: { id: string; status: string }) => {
-                if (run.id === runId && run.status === 'running') resumedSlots ??= manager['busySlots']();
+                if (run.id === runId && run.status === 'running') resumedSlots ??= runInternals(manager).line.busySlots();
               };
               store.on('run', onRun);
               try {
@@ -190,13 +191,13 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
               manager.enqueueOwnedRun(runId);
               await waitFor(() => noReplyNotes(store.readEvents(runId).slice(startSeq)).length === 1);
               expect(store.getRun(runId)?.status).toBe('waiting');
-              expect(manager['busySlots']()).toBe(0);
+              expect(runInternals(manager).line.busySlots()).toBe(0);
               const parkedSeq = store.readEvents(runId).length;
               // The mock waits for observed parking instead of racing a 200 ms window.
               writeFileSync(release, 'go');
               // Content has its own gate, so only native turn-start can resume the run here.
               await waitFor(() => store.getRun(runId)?.status === 'running');
-              expect(manager['busySlots']()).toBe(1);
+              expect(runInternals(manager).line.busySlots()).toBe(1);
               expect(lateDoneContent(store.readEvents(runId).slice(parkedSeq))).toBe(false);
               writeFileSync(`${release}.content`, 'go');
               await waitFor(() => store.getRun(runId)?.status === 'done');
@@ -243,7 +244,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
                 // The native mock holds DONE until this test crosses the reply bound.
                 await vi.advanceTimersByTimeAsync(300);
                 expect(store.getRun(runId)?.status).toBe('running');
-                expect(manager['busySlots']()).toBe(1);
+                expect(runInternals(manager).line.busySlots()).toBe(1);
                 expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
               } finally { armClock.mockRestore(); replyClock.mockRestore(); vi.useRealTimers(); }
               writeFileSync(join(gateRoot, 'done'), 'go');
@@ -275,7 +276,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
             if (row.id === 'F6') {
               await waitFor(() => autonomousNotes(store.readEvents(runId).slice(startSeq)).length >= 1);
               expect(store.getRun(runId)?.status).toBe('running');
-              expect(manager['busySlots']()).toBe(1);
+              expect(runInternals(manager).line.busySlots()).toBe(1);
               expect(manager['active'].get(runId)?.idleTimer).toBeUndefined();
               expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
               return;

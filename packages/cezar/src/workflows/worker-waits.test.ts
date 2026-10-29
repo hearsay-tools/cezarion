@@ -531,7 +531,6 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
 
   type Internals = {
     active: Map<string, { session: AgentSession; idleTimer?: unknown; sessionEverOpened?: boolean }>;
-    monitoring: Set<string>;
   };
   const internals = () => manager as unknown as Internals;
   const parkedOn = (runId: string, waitId: string) =>

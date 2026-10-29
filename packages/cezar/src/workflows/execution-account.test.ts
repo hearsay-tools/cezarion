@@ -115,7 +115,7 @@ describe('a held wake does not advertise itself to the workspace line', () => {
     const holder = store.createRun({ title: 'holder', workflow: 'w', task: 't', runner: 'claude', steps: [] });
     store.updateRun(holder.id, { status: 'waiting', autoResumeAt: new Date(Date.now() + 600_000).toISOString() });
     const parked = store.createRun({ title: 'parked', workflow: 'w', task: 't', runner: 'claude', steps: [] });
-    const engine = manager as unknown as { oldestWakeAt(): number | null };
+    const engine = runInternals(manager).line;
     runInternals(manager).line.queue.push(parked.id);
     runInternals(manager).line.waitWakeQueuedAt.set(parked.id, 1);
     try {
@@ -140,7 +140,7 @@ describe('a held wake does not advertise itself to the workspace line', () => {
     const holder = store.createRun({ title: 'holder', workflow: 'w', task: 't', runner: 'codex', steps: [] });
     store.updateRun(holder.id, { status: 'waiting', autoResumeAt: new Date(Date.now() + 600_000).toISOString() });
     const parked = store.createRun({ title: 'parked', workflow: 'w', task: 't', steps: [] });
-    const engine = manager as unknown as { oldestWakeAt(): number | null; pump(): Promise<void> };
+    const engine = runInternals(manager).line;
     runInternals(manager).line.queue.push(parked.id);
     runInternals(manager).line.waitWakeQueuedAt.set(parked.id, 1);
     try {

@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,7 +18,7 @@ describe('scheduler repository probe budget (#364)', () => {
       semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }),
     });
     fixtures.push({ root, store, manager });
-    return { root, pump: () => (manager as unknown as { pump(): Promise<void> }).pump() };
+    return { root, pump: () => (runInternals(manager).line).pump() };
   }
 
   afterEach(() => {

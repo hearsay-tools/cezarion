@@ -434,7 +434,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       const unrelated = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:hold', runner: 'claude' });
       manager.cancel(blocker.id);
       await until(() => store.getRun(unrelated.id)?.status === 'waiting');
-      await manager.rescueStalledQueue();
+      await runInternals(manager).line.rescueStalledQueue();
       expect(store.getRun(queued.id)?.status).toBe('queued');
       expect(store.getRun(queued.id)?.worktreePath).toBeUndefined();
       expect(store.readEvents(queued.id).some(event => event.type === 'session')).toBe(false);

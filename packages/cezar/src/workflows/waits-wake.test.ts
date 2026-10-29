@@ -42,7 +42,6 @@ function nativeWire(runner: RunnerId) {
 const engine = () => manager as unknown as {
   active: Map<string, { session?: AgentSession; ciGeneration: string; idleTimer?: NodeJS.Timeout & { _onTimeout(): void };
     agentInputFlight?: { inputIds: string[] } }>;
-  pump(): Promise<void>;
   autoResumeTimers: Map<string, NodeJS.Timeout>;
 };
 async function openWait(id: string, request: CezarWaitRequestInput): Promise<TimedWait> {
@@ -121,7 +120,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     external.settle();
     await until(() => waitById(run.id, ci.id)?.phase === 'resolved');
     // The question holds its turn open: nothing may reach the wire, however often the line is pumped.
-    await engine().pump();
+    await runInternals(manager).line.pump();
     await flushMicrotasks();
     expect(store.getRun(run.id)?.agentInputs?.find(input => input.id === ci.id)?.deliveredAt).toBeUndefined();
     expect(existsSync(join(root, 'args')) && readFileSync(join(root, 'args'), 'utf8').includes(ci.id)).toBe(false);

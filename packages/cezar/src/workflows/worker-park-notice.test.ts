@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -95,13 +96,13 @@ describe('a parked worker tells its waiting parent why (hearsay-tools/cezarion#1
     const { p, service, callerOf } = await family();
     const w = await parkedWorker(p.id, 'Parked before the request.');
     // The scheduler holds the request, so it stays queued on the parked worker.
-    const engine = manager as unknown as { pump(): Promise<void> };
+    const engine = runInternals(manager).line;
     const pump = vi.spyOn(engine, 'pump').mockResolvedValue();
     const request = randomUUID();
     await service.send(callerOf(p.id), { id: request, recipientRunId: w.id, kind: 'request', text: messagesPrompt('claude', ['Took the request; still blocked.']), timeoutSeconds: 600 });
     const wait = manager.registerWorkerListWait(p.id, { requestIds: [request], timeoutSeconds: 600 }, 'cez-worker-wait');
     expect(notices(p.id, w.id)).toEqual([]);
-    pump.mockRestore();
+    expect(pump).toHaveBeenCalled(); pump.mockRestore();
     await engine.pump();
     await until(() => notices(p.id, w.id).length > 0 && parked(w.id), () => timeline(w.id));
     const [notice, ...more] = notices(p.id, w.id);
