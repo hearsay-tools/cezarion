@@ -1,3 +1,4 @@
+import { TurnSettler } from './run/turn-settler.ts';
 import { WakeAdmission } from './run/wake-admission.ts';
 import { RunSettlement } from './run/run-settlement.ts';
 import { InputDelivery } from './run/input-delivery.ts';
@@ -30,17 +31,17 @@ import type {
   ContinuationSessionLaunch, ContinuationClose, WorkerTerminationBlocker, AutomationToolService,
 } from './run/types.ts';
 export type { TurnTail, DelegationExecutionSettings, StartRunInput, WorkerTerminationBlocker, AutomationToolService } from './run/types.ts';
-import { openCompletionRequests, recordRequestRefusal, repairFailedRootFinish, startCompletionCycle, sentRequestInstructions, settledRootFinishPatch, type CompletionRefusal } from './completion-policy.ts';
+import { openCompletionRequests, recordRequestRefusal, repairFailedRootFinish, startCompletionCycle, settledRootFinishPatch, type CompletionRefusal } from './completion-policy.ts';
 import * as continuation from './continuation-admission.ts';
 import type { ContinueRunOptions } from './continuation-admission.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { doneErrorMessage } from '../ci-wait/errors.ts';
-import { cezarDoneRequestSchema, type CezarAskRequest, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type DoneErrorCode, type PeerWaitEntry, type PeerWaitResult, type PrWaitEntry, type ProcessWaitEntry, type ProcessWaitResult, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, isUsageLimitHold, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT } from '@open-mercato/cezar-contract/waits';
+import { cezarDoneRequestSchema, type CezarAskRequest, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type DoneErrorCode, type PeerWaitEntry, type PeerWaitResult, type PrWaitEntry, type ProcessWaitEntry, type ProcessWaitResult, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { type PreviewStopRequest, type PreviewStopResult, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
-import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, decideTurnEnd, stepScopedNudge, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
+import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, stepScopedNudge, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
-import { isRunnerActivity, emitAskRequested, classifyTurnEnd, discardQueuedMessagesOnAsk, type TurnEndRead } from './run/turn-markers.ts';
+import { isRunnerActivity } from './run/turn-markers.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
 import { familyOf, canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested, isDisposedDelegatedRun, preserveRunAfterDisposal } from './run/run-guards.ts';
 import { beginUsageInvocation, recordUsageUiEvent, recordUsagePeaks } from './run/usage-accounting.ts';
@@ -61,7 +62,7 @@ import { makeRunTitle } from '../runs/run-title.ts';
 export { agentDirectories, composeSystemPrompt, expandRegistrySlashSkill, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt } from './run/prompts.ts';
 export { stepLabel } from './run/steps.ts';
 export { makeRunTitle } from '../runs/run-title.ts';
-import { clearUnreadInputTimer, clearHeldHumanInputTimer, harnessOwesInput, harnessHoldsHumanInput, clearIdleTimer, clearAutosaveTimer } from './run/input-timers.ts';
+import { clearUnreadInputTimer, clearHeldHumanInputTimer, clearIdleTimer, clearAutosaveTimer } from './run/input-timers.ts';
 import * as stepDecisions from './run/step-decisions.ts';
 import * as pendingAskFacts from './run/pending-ask-facts.ts';
 import * as workflowPosition from './run/workflow-position.ts';
@@ -192,17 +193,6 @@ export { periodicAutosaveEnabled, AUTOSAVE_INTERVAL_MS } from './run/worktree-au
 export function repositoryRootLockDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.CEZ_DISABLE_REPO_LOCK === '1';
 }
-
-/** What `carryOutTurnEnd` hands the method for a decision kind. `session` is the session as the
- *  decision found it. */
-type TurnEndCarry = {
-  runId: string; state: ActiveRun; session: AgentSession | undefined; stepId: string | undefined;
-  refused: CompletionRefusal | undefined; noteRefusal: () => void;
-  /** The refusal settles this turn end, so Cezar's own human waits are already withdrawn. */
-  settlesRefusal: boolean;
-};
-/** One method per decision kind of `decideTurnEnd` (`RunManager.turnEndCarriers`). */
-type TurnEndCarriers = { [K in TurnEndDecision['kind']]: (carry: TurnEndCarry, decision: Extract<TurnEndDecision, { kind: K }>) => TurnEndOutcome };
 
 /** #505: a real steer is read at the harness's next model step; a quiet boundary this long
  * with input still unread means the harness will not read it without help. */
@@ -473,6 +463,7 @@ export class RunManager {
    * idle close. Retain these across dropActive/dispose so absence cannot look like
    * the earlier execution again; disposal alone never revokes terminal intent. */
   private readonly continuationGenerations = new Map<string, symbol>();
+  private readonly turnSettler: TurnSettler;
   private readonly inputDelivery: InputDelivery;
   private readonly runSkills: RunSkills;
   private readonly attachments: AttachmentWriter;
@@ -707,6 +698,22 @@ export class RunManager {
         enforceRetention: () => this.enforceRetention(), reapTerminalScratch: id => this.reapTerminalScratch(id),
         forgetMemoryPause: id => { this.memoryPausing.delete(id); },
       }, WAKE_SESSION_CLOSED_ERROR, WAKE_DELIVERY_CAP_NOTE);
+    this.turnSettler = new TurnSettler(this.inputReceiptContext, {
+      humanWaits: this.humanWaits, line: this.line, waitWatches: this.waitWatches, waitRegistry: this.waitRegistry,
+      workerQuestions: this.workerQuestions, completionGateHost: this.completionGateHost,
+      move: (id, exit) => this.move(id, exit), releaseSlot: () => this.releaseSlot(), completionGate: id => this.completionGate(id),
+      cancelOpenWaits: id => this.cancelOpenWaits(id), countAutomaticWakes: id => this.automaticWakes(id),
+      workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
+      submitAgentInput: (id, state, content) => this.submitAgentInput(id, state, content), flushAgentInputs: id => this.flushAgentInputs(id),
+      hasQueuedAgentInputs: (id, except) => this.hasQueuedAgentInputs(id, except), armUnreadInputTimer: (id, state) => this.armUnreadInputTimer(id, state),
+      armHeldHumanInputTimer: (id, state) => this.armHeldHumanInputTimer(id, state), parkOnWaits: (id, state) => this.parkOnWaits(id, state),
+      queueWaitWake: id => this.queueWaitWake(id), leaveMonitoringPool: id => this.leaveMonitoringPool(id), chargeAutomaticWake: id => this.chargeAutomaticWake(id),
+      canAutoContinue: (id, state) => this.canAutoContinue(id, state), tryAutonomousNudge: (id, state, step, ask) => this.tryAutonomousNudge(id, state, step, ask),
+      sendTurnEndNudge: (id, state, step, text) => this.sendTurnEndNudge(id, state, step, text),
+      awaitCompletionNudgeReply: (id, state, session) => this.awaitCompletionNudgeReply(id, state, session),
+      noticeParkedWorker: id => this.noticeParkedWorker(id), routeWorkerQuestion: id => this.routeWorkerQuestion(id),
+      settledTurnOutcome: (id, entry, outcome) => this.settledTurnOutcome(id, entry, outcome),
+    }, IDLE_TIMEOUT_MS, MAX_AUTO_CONTINUES, COMPLETION_WILL_WAIT, SCHEDULE_WAKEUP_MAX_SECONDS);
     this.inputDelivery = new InputDelivery(this.inputReceiptContext, {
       active: this.active, line: this.line, workerExecutions: this.workerExecutions, runSkills: this.runSkills,
       attachments: this.attachments, humanWaits: this.humanWaits, workerQuestions: this.workerQuestions,
@@ -974,34 +981,6 @@ export class RunManager {
   }
 
   private completionRefusal(runId: string): CompletionRefusal | undefined { return completionGateReads.completionRefusal(this.inputReceiptContext, this.completionGateHost, runId); }
-
-  /** The `cezar_done` this session accepted since its last turn end, taken by this turn end: a
-   *  later turn must call it again, as it must repeat the done line. */
-  private takeDoneRequest(state: ActiveRun) {
-    const request = state.doneRequested?.session === state.session ? state.doneRequested : undefined;
-    state.doneRequested = undefined;
-    return request;
-  }
-
-  /** The DONE boundary and close metadata; a refused DONE may retain metadata for readiness. */
-  private recordDoneAtBoundary(state: ActiveRun, done: boolean, request: ActiveRun['doneRequested'], keepClose = done): void {
-    state.doneAtBoundary = done ? state.session : undefined;
-    state.doneClose = keepClose ? { via: request ? 'cezar_done' : 'done-line', ...(request?.summary === undefined ? {} : { summary: request.summary }) } : undefined;
-  }
-
-  /** Goal achieved (agent contract, #347): the summary `cezar_done` gave as a note, the closing
-   *  event naming what declared it, every open wait cancelled (DONE ranks above every wait), and
-   *  the session closes instead of parking, so the run completes and frees its slot. */
-  private closeAsDone(runId: string, state: ActiveRun, session: AgentSession | undefined): void {
-    const close = state.doneClose;
-    // A workflow step that is not the last completes, and the next step starts (hearsay-tools/cezarion#1620).
-    const step = !!session && state.nextStep?.session === session;
-    state.completedStepId = state.currentStepId;
-    if (close?.summary) this.store.appendEvent(runId, { type: 'note', message: close.summary });
-    this.store.appendEvent(runId, { type: 'lifecycle', message: step ? 'step complete — session closed' : 'goal achieved — session closed', via: close?.via ?? 'done-line' });
-    this.cancelOpenWaits(runId);
-    session?.end();
-  }
 
   async stopPreviewServer(runId: string, request: PreviewStopRequest, signal?: AbortSignal): Promise<PreviewStopResult> {
     return stopPreviewServer(this.store, this.preview, this.cezarPort, () => this.disposed, runId, request, signal);
@@ -4099,73 +4078,11 @@ export class RunManager {
    * that lands after the turn end (`parkAfterAck`), then settle it (`settleTurn`). Nothing reads the
    * turn's prose beyond its markers.
    */
-  private endTurn(runId: string, state: ActiveRun, sink: UiEventSink, turn: {
-    stepId: string; text: string; completedText: string; scheduleWakeup: number | null | undefined;
-  }): void {
-    const sessionOpen = !state.cancelled && !!state.session?.open;
-    const humanWait = this.turnEndHumanWait(runId);
-    const doneRequest = this.takeDoneRequest(state);
-    const read = classifyTurnEnd(turn.text, turn.completedText, {
-      sessionOpen, pendingHumanAsk: !!state.pendingHumanAsk,
-      scheduledWake: turn.scheduleWakeup !== undefined,
-      liveWorkers: this.monitorsLiveWorkers(runId),
-      humanWait, doneRequested: !!doneRequest,
-    });
-    const { monitoring, humanGate, ask } = read;
-    this.latchAskLineCard(runId, humanWait, read);
-    discardQueuedMessagesOnAsk(state.session, read);
-    // The turn that just ended answered a nudge: one flag per cause (hearsay-tools/cezarion#1234,
-    // hearsay-tools/cezarion#1301).
-    const nudgedLastTurn = state.noWaitNudged === state.session;
-    state.noWaitNudged = undefined;
-    state.completionNudgeAnswered = state.completionNudged === state.session ? state.session : undefined;
-    state.completionNudged = undefined;
-    const askNudged = this.prepareTurnAsk(runId, state, { stepId: turn.stepId, sessionOpen, humanWait }, read);
-    state.parkAfterAck = sessionOpen && state.session
-      ? { session: state.session, monitoring, humanGate, nudgedLastTurn, scheduleWakeup: turn.scheduleWakeup } : undefined;
-    const settled = this.settleTurn(runId, state, 'turn-end', {
-      stepId: turn.stepId, monitoring, humanGate, ask, askNudged, humanWait, sink,
-      done: read.done, doneRequest, nudgedLastTurn, scheduleWakeup: turn.scheduleWakeup,
-    });
-    // A turn that completed is the ONLY evidence the provider's window actually reopened, so
-    // it is what retires the consecutive-resume counter — which in turn releases the account
-    // hold for every other task queued behind it (spec
-    // 2026-08-03-auto-resume-after-usage-limit). `settleSuccess` does the same for a run that
-    // finishes outright; this covers the far more common "parked for the user" ending.
-    if (settled && this.store.getRun(runId)?.autoResumeAttempts !== undefined) {
-      this.store.updateRun(runId, { autoResumeAttempts: undefined });
-    }
-  }
-
-  /** Prepare the turn's ask before the turn end settles (`endTurn`): its notes, the `invalidAsk`
-   *  flag, and the ask or human gate the run parks on. True when the autonomous nudge went instead
-   *  of the ask line. */
-  private prepareTurnAsk(runId: string, state: ActiveRun, turn: { stepId: string; sessionOpen: boolean; humanWait: HumanWaitEntry | undefined },
-    read: TurnEndRead): boolean {
-    const { humanGate, ask, notes: askNotes, waitCard } = read;
-    for (const note of askNotes) this.store.appendEvent(runId, { type: 'note', stepId: turn.stepId, ...note });
-    this.store.updateRun(runId, { invalidAsk: !ask && askNotes.length > 0 ? true : undefined });
-    // An autonomous run registers no newly parsed ask line before the budget, as `cezar_ask`
-    // refuses it (hearsay-tools/cezarion#1234): the autonomous nudge goes instead. Do this before
-    // prepareHumanAsk latches it; an existing/native ask or a human wait's card still blocks the helper.
-    const askNudged = !!ask && !waitCard && turn.sessionOpen && this.tryAutonomousNudge(runId, state, turn.stepId, ask);
-    if (ask && !askNudged) this.prepareHumanAsk(state);
-    if (humanGate && !ask && !state.pendingHumanAsk) this.raiseHumanGate(runId, state);
-    if (humanGate && !ask) this.recordTurnEndQuestion(runId, state, turn.humanWait, null);
-    return askNudged;
-  }
+  private endTurn(runId: string, state: ActiveRun, sink: UiEventSink, turn: { stepId: string; text: string; completedText: string; scheduleWakeup: number | null | undefined }): void { return this.turnSettler.endTurn(runId, state, sink, turn); }
 
   /** The turn end an entry settles after it (`settleIdleBoundary`, `handleAgentInputReady`), and
    *  the completion gate's live refusal: what `parkAfterAck` kept of it. */
-  private boundaryTurn(runId: string, state: ActiveRun, session: AgentSession, done: boolean): SettledTurn {
-    const ack = state.parkAfterAck?.session === session ? state.parkAfterAck : undefined;
-    return {
-      stepId: state.currentStepId, humanGate: !!ack?.humanGate, ask: null, askNudged: false, done,
-      // A done names no monitoring, as the turn end's own reading of it does (`classifyTurnEnd`).
-      monitoring: !done && !!ack && (ack.monitoring || (!ack.humanGate && this.monitorsLiveWorkers(runId))),
-      nudgedLastTurn: !!ack?.nudgedLastTurn, scheduleWakeup: ack?.scheduleWakeup,
-    };
-  }
+  private boundaryTurn(runId: string, state: ActiveRun, session: AgentSession, done: boolean): SettledTurn { return this.turnSettler.boundaryTurn(runId, state, session, done); }
 
   /**
    * Settle a turn end (hearsay-tools/cezarion#1525). Every entry goes through it: the turn end
@@ -4177,247 +4094,10 @@ export class RunManager {
    * failed.
    */
   private settleTurn(runId: string, state: ActiveRun, entry: 'turn-end' | 'ack' | 'ready' | 'gate', turn: SettledTurn,
-    refusal?: CompletionRefusal): boolean {
-    const session = state.session;
-    const stepId = turn.stepId;
-    // A done goes to the completion gate first (hearsay-tools/cezarion#1301). A refused done is not a done.
-    const gate = refusal ?? (turn.done && session?.open ? this.completionGate(runId) : 'accept');
-    if (gate === 'held') return this.settleHeldTurn(runId, state, entry, turn);
-    const refused = typeof gate === 'object' ? gate : undefined;
-    if (entry === 'ready') state.autonomousNudgePending = undefined;
-    let noted = false;
-    const noteRefusal = () => {
-      if (!refused || noted) return;
-      noted = true;
-      this.store.appendEvent(runId, { type: 'note', tone: 'warning', ...(stepId ? { stepId } : {}), message: `Completion blocked: ${refused.message}` });
-    };
-    if (turn.askNudged) return this.settleAskNudgedTurn(runId, state, entry, turn);
-    const { decision, tried } = this.decideSettledTurn(runId, state, session, entry, turn, refused, noteRefusal);
-    if (entry === 'turn-end' && !this.settleTurnEndInput(runId, state, turn, tried, decision)) return false;
-    // A run an earlier entry already parked keeps that park: a second one would free its slot twice.
-    if (entry !== 'turn-end' && decision.kind === 'park' && this.line.isParked(runId)) return true;
-    const outcome = this.carryOutTurnEnd(runId, state, stepId, decision, refused, noteRefusal);
-    if (outcome.kind === 'done') return false;
-    this.settledTurnOutcome(runId, entry, outcome);
-    return true;
-  }
-
-  /** The completion gate held the done (`settleTurn`). A stopped root, or a question that parked
-   *  for the user: the done stays at the boundary. False when the input checkpoint failed. */
-  private settleHeldTurn(runId: string, state: ActiveRun, entry: 'turn-end' | 'ack' | 'ready' | 'gate', turn: SettledTurn): boolean {
-    if (entry === 'turn-end') {
-      this.recordDoneAtBoundary(state, true, turn.doneRequest);
-      clearHeldHumanInputTimer(state);
-      if (state.agentInputError) return false;
-    }
-    this.settledTurnOutcome(runId, entry, { kind: 'park', keepsSlot: this.line.inPool(runId) });
-    return true;
-  }
-
-  /** The ask line's autonomous nudge went instead of the question (`settleTurn`): its turn is the
-   *  next one. False when the input checkpoint failed. */
-  private settleAskNudgedTurn(runId: string, state: ActiveRun, entry: 'turn-end' | 'ack' | 'ready' | 'gate', turn: SettledTurn): boolean {
-    this.recordDoneAtBoundary(state, false, turn.doneRequest);
-    clearHeldHumanInputTimer(state);
-    if (state.agentInputError) return false;
-    this.settledTurnOutcome(runId, entry, { kind: 'nudge', cause: 'no-wait', autonomous: true });
-    return true;
-  }
-
-  /** What the turn-end rule decides for a settled turn (`settleTurn`): the timer alias the rule
-   *  reads, the first decision and the done it keeps, then the owed input a `take-input` decision
-   *  tries and the decision after it. `tried` is true when that input was tried. */
-  private decideSettledTurn(runId: string, state: ActiveRun, session: AgentSession | undefined, entry: 'turn-end' | 'ack' | 'ready' | 'gate',
-    turn: SettledTurn, refused: CompletionRefusal | undefined, noteRefusal: () => void): { decision: TurnEndDecision; tried: boolean } {
-    // A turn end opens it once owed input was tried; this turn's ask keeps that input back, so its
-    // monitoring line opens the timer now. A refused done decides before any alias, as before.
-    if (entry !== 'turn-end' || (turn.ask && !refused)) this.openTurnTimerAlias(runId, state, session, turn);
-    // The turn end and the gate deliver owed input; an acknowledgement or readiness finds it already tried.
-    const decision = decideTurnEnd(this.turnEndFacts(runId, state, session, turn, refused, entry === 'turn-end' || entry === 'gate' ? undefined : false));
-    this.keepSettledDone(state, entry, turn, refused, decision);
-    if (decision.kind !== 'take-input') return { decision, tried: false };
-    if (decision.refused) noteRefusal();
-    const taken = this.takeOwedInput(runId, state, turn);
-    if (!taken) this.openTurnTimerAlias(runId, state, session, turn);
-    return { decision: decideTurnEnd(this.turnEndFacts(runId, state, session, turn, refused, taken)), tried: true };
-  }
-
-  /** The facts the turn-end rule reads for a settled turn (`decideSettledTurn`). `session` is the
-   *  session `settleTurn` found. */
-  private turnEndFacts(runId: string, state: ActiveRun, session: AgentSession | undefined, turn: SettledTurn,
-    refused: CompletionRefusal | undefined, inputTaken: boolean | undefined): TurnEndFacts {
-    const run = this.store.getRun(runId);
-    return {
-      sessionOpen: !state.cancelled && !!session?.open,
-      done: turn.done,
-      ...(refused ? { doneRefused: { liveWorkers: refused.liveWorkerIds.length > 0 || !!refused.requestIds?.length } } : {}),
-      inputInFlight: !!state.agentInputFlight,
-      inputQueued: this.hasQueuedAgentInputs(runId, state.agentInputFlight?.inputIds),
-      inputTaken,
-      nudgePending: !!session && state.autonomousNudgePending === session,
-      turnAsk: !!turn.ask,
-      nativeAsk: !!state.pendingHumanAsk,
-      question: !!turn.ask || turn.humanGate || !!state.pendingHumanAsk || this.hasPendingHumanAsk(runId),
-      agentWaits: this.holdsAgentWaits(runId),
-      cezarHumanWait: (run?.waits ?? []).some(isCezarHumanWait),
-      stepScope: !!session && state.nextStep?.session === session,
-      noWaitNudgedLastTurn: turn.nudgedLastTurn,
-      completionNudgedLastTurn: (!!session && state.completionNudgeAnswered === session) || (!!refused?.requestIds?.length && !!state.sentRequestRefused),
-      autonomous: !!state.autonomous,
-      budgetSpent: this.automaticWakes(runId) >= MAX_AUTO_CONTINUES,
-      tools: !state.toolless,
-    };
-  }
-
-  /** The monitoring line and `ScheduleWakeup` open their timer before the rule reads the waits, as
-   *  the `cezar_wait` timer they alias. An autonomous nudge waiting for readiness keeps precedence. */
-  private openTurnTimerAlias(runId: string, state: ActiveRun, session: AgentSession | undefined, turn: SettledTurn): void {
-    if (turn.monitoring && session?.open && state.autonomousNudgePending !== session) this.openTimerAlias(runId, state, turn.scheduleWakeup);
-  }
-
-  /** The done the first decision keeps at the boundary (`decideSettledTurn`): a turn end records
-   *  it, and an acknowledgement drops a refused done the rule does not keep. */
-  private keepSettledDone(state: ActiveRun, entry: 'turn-end' | 'ack' | 'ready' | 'gate', turn: SettledTurn,
-    refused: CompletionRefusal | undefined, decision: TurnEndDecision): void {
-    const keepDone = turn.done && (!refused || (decision.kind === 'defer' && !!decision.keepDone));
-    if (entry === 'turn-end') this.recordDoneAtBoundary(state, keepDone, turn.doneRequest, turn.done);
-    else if (entry === 'ack' && turn.done && !keepDone) state.doneAtBoundary = undefined;
-  }
-
-  /** The owed input a `take-input` decision tries (`decideSettledTurn`). True when input was taken.
-   *  #505: input the harness accepted but has not read yet runs as its next turn. An in-flight
-   *  submission is settled by its acknowledgement (parkAfterAck), not here. */
-  private takeOwedInput(runId: string, state: ActiveRun, turn: SettledTurn): boolean {
-    return this.flushAgentInputs(runId) || (!turn.humanGate && harnessOwesInput(state)) ||
-      !!state.agentInputFlight || harnessHoldsHumanInput(state);
-  }
-
-  /** A turn end's own steps after the rule decided (`settleTurn`): the unread and held input timers,
-   *  then the `CEZ:ASK` card. False when the input checkpoint failed. */
-  private settleTurnEndInput(runId: string, state: ActiveRun, turn: SettledTurn, tried: boolean, decision: TurnEndDecision): boolean {
-    if (tried) this.armUnreadInputTimer(runId, state);
-    if (tried && harnessHoldsHumanInput(state)) this.armHeldHumanInputTimer(runId, state);
-    else clearHeldHumanInputTimer(state);
-    if (state.agentInputError) return false;
-    // `CEZ:ASK` surfaces the structured question as an ask card (#473) before the rule parks on it.
-    if (turn.ask && turn.sink && decision.kind !== 'closed' && decision.kind !== 'input' && !this.humanWaitShown(runId, turn.humanWait)) {
-      emitAskRequested(turn.sink, turn.ask);
-      this.recordTurnEndQuestion(runId, state, turn.humanWait, turn.ask);
-      this.routeWorkerQuestion(runId);
-    }
-    return true;
-  }
-
-  /** Carry out what the turn-end rule decided, and report how it left the run. A refusal the
-   *  decision follows is noted first; then the decision kind's own method runs (`turnEndCarriers`). */
-  private carryOutTurnEnd(runId: string, state: ActiveRun, stepId: string | undefined, decision: TurnEndDecision,
-    refused: CompletionRefusal | undefined, noteRefusal: () => void): TurnEndOutcome {
-    const session = state.session;
-    const decisionRefused = 'refused' in decision && !!decision.refused;
-    if (decisionRefused) noteRefusal();
-    // A refusal that settles the turn end replaces Cezar's own human wait, as the agent's own wait would.
-    const settlesRefusal = !!refused && !decisionRefused && !(decision.kind === 'defer' && decision.keepDone);
-    if (settlesRefusal) this.withdrawCezarHumanWaits(runId);
-    const carryOut = this.turnEndCarriers[decision.kind] as (carry: TurnEndCarry, decision: TurnEndDecision) => TurnEndOutcome;
-    return carryOut({ runId, state, session, stepId, refused, noteRefusal, settlesRefusal }, decision);
-  }
+    refusal?: CompletionRefusal): boolean { return this.turnSettler.settleTurn(runId, state, entry, turn, refusal); }
 
   /** The method for each decision kind (`carryOutTurnEnd`). A closed session settles elsewhere, and
    *  owed input runs as the session's next turn: the run keeps running. */
-  private readonly turnEndCarriers: TurnEndCarriers = {
-    closed: () => ({ kind: 'running' }),
-    input: () => ({ kind: 'running' }),
-    'take-input': () => ({ kind: 'running' }),
-    defer: (carry, decision) => this.carryOutDefer(carry, decision),
-    done: carry => this.carryOutDone(carry),
-    park: carry => this.carryOutPark(carry),
-    'completion-wait': carry => this.carryOutCompletionWait(carry),
-    'human-wait': (carry, { via }) => via === 'completion' ? this.carryOutCompletionHumanWait(carry) : this.carryOutHumanWait(carry, via),
-    nudge: (carry, decision) => decision.cause === 'completion' ? this.carryOutCompletionNudge(carry) : this.carryOutNoWaitNudge(carry, decision.text!),
-  };
-
-  /** Every park returns this once it is carried out, so a worker's park notice goes here whichever
-   *  decision parked it (hearsay-tools/cezarion#1327). */
-  private parkedOutcome(runId: string): TurnEndOutcome {
-    this.noticeParkedWorker(runId);
-    return { kind: 'park', keepsSlot: this.line.inPool(runId) };
-  }
-
-  /** A refused autonomous nudge waits for readiness at this boundary, bounded by the idle timer. */
-  private carryOutDefer({ state, session }: TurnEndCarry, decision: Extract<TurnEndDecision, { kind: 'defer' }>): TurnEndOutcome {
-    return !decision.keepDone && session && state.autonomousNudgePending === session ? { kind: 'readiness' } : { kind: 'running' };
-  }
-
-  private carryOutDone({ runId, state, session }: TurnEndCarry): TurnEndOutcome {
-    this.closeAsDone(runId, state, session);
-    return { kind: 'done' };
-  }
-
-  /** A human wait is shown and parks for the user; CI and timer waits keep their slot. A question
-   *  with no wait parks for the user, and the freed slot can start a queued run. */
-  private carryOutPark({ runId, state, stepId }: TurnEndCarry): TurnEndOutcome {
-    if (!this.parkOnWaits(runId, state)) this.parkForUser(runId, state, stepId);
-    return this.parkedOutcome(runId);
-  }
-
-  /** One nudge per cycle: Cezar waits on the live workers for the agent, then parks as `park` does. */
-  private carryOutCompletionWait(carry: TurnEndCarry): TurnEndOutcome {
-    carry.noteRefusal();
-    this.registerCompletionWait(carry.runId, carry.refused!.liveWorkerIds, carry.refused!.requestIds);
-    return this.carryOutPark(carry);
-  }
-
-  /** The completion cause's human wait: the refusal is its note, and Cezar's own wait shows it. */
-  private carryOutCompletionHumanWait({ runId, state, stepId, refused, noteRefusal }: TurnEndCarry): TurnEndOutcome {
-    noteRefusal();
-    const wait = this.openHumanAlias(runId, state, 'completion');
-    if (wait?.source === 'cezar' && wait.askSeq === undefined) this.showCezarHumanWait(runId, state, wait, refused!.message);
-    this.parkForUser(runId, state, stepId);
-    return this.parkedOutcome(runId);
-  }
-
-  /** The no-wait and budget human waits. A refusal that settles the turn end opens the budget wait. */
-  private carryOutHumanWait({ runId, state, stepId, noteRefusal, settlesRefusal }: TurnEndCarry, via: 'no-wait' | 'budget'): TurnEndOutcome {
-    const capNote = state.autonomous ? `autonomous — safety cap reached (${MAX_AUTO_CONTINUES}); automatic continuation paused`
-      : `automatic-wake budget spent (${MAX_AUTO_CONTINUES}); waiting for you`;
-    if (settlesRefusal) {
-      noteRefusal();
-      this.openTurnEndHumanWait(runId, state, stepId, 'budget', capNote);
-      return this.parkedOutcome(runId);
-    }
-    // Stopping, finishing, parent completion and owed input keep today's plain park.
-    if (!this.canAutoContinue(runId, state)) this.parkForUser(runId, state, stepId);
-    else this.openTurnEndHumanWait(runId, state, stepId, via, via === 'no-wait' ? NO_WAIT_NOTE : capNote, true);
-    return this.parkedOutcome(runId);
-  }
-
-  /** Send the refusal nudge, or park retaining DONE for transport readiness when permitted. */
-  private carryOutCompletionNudge({ runId, state, session, stepId, refused, noteRefusal }: TurnEndCarry): TurnEndOutcome {
-    const text = refused!.liveWorkerIds.length ? `${refused!.message} ${COMPLETION_WILL_WAIT}` : refused!.message;
-    state.noWaitNudgeSawContent = false;
-    if (!session || !this.canAutoContinue(runId, state) || !this.submitAgentInput(runId, state, [{ type: 'text', text }])) {
-      if (session && this.canAutoContinue(runId, state)) state.doneAtBoundary = session;
-      noteRefusal();
-      this.parkForUser(runId, state, stepId);
-      return this.parkedOutcome(runId);
-    }
-    this.awaitCompletionNudgeReply(runId, state, session);
-    const spent = this.chargeAutomaticWake(runId);
-    this.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}), message: `${COMPLETION_NUDGE_NOTE} (${spent}/${MAX_AUTO_CONTINUES}): ${refused!.code}` });
-    return { kind: 'nudge', cause: 'completion', autonomous: !!state.autonomous };
-  }
-
-  /** The no-wait cause's nudge. One the wire refuses waits for input readiness when it is
-   *  autonomous, else opens Cezar's no-wait human wait. */
-  private carryOutNoWaitNudge({ runId, state, session, stepId }: TurnEndCarry, text: string): TurnEndOutcome {
-    const sent = openCompletionRequests(this.store, runId).sent;
-    if (sent.length) text += ` ${sentRequestInstructions(sent)}`;
-    if (this.sendTurnEndNudge(runId, state, stepId, text)) return { kind: 'nudge', cause: 'no-wait', autonomous: !!state.autonomous };
-    if (session && state.autonomousNudgePending === session) return { kind: 'readiness' };
-    if (!this.canAutoContinue(runId, state)) this.parkForUser(runId, state, stepId);
-    else this.openTurnEndHumanWait(runId, state, stepId, 'no-wait', NO_WAIT_NOTE, true);
-    return this.parkedOutcome(runId);
-  }
 
   /** The outcome a settled turn reached, for the parity cells that prove which path ran
    *  (hearsay-tools/cezarion#1809, which removed the handoff heartbeat line that recorded it). No
@@ -4436,17 +4116,7 @@ export class RunManager {
    *  wait shown as Needs you, and the run parked for the user. A worker's `no-wait` fallback at its
    *  turn end (`turnEnd`) asks its parent instead (`askParentForWorker`, hearsay-tools/cezarion#1301);
    *  any other worker fallback stays a plain park. */
-  private openTurnEndHumanWait(runId: string, state: ActiveRun, stepId: string | undefined, via: 'no-wait' | 'budget', note: string, turnEnd = false): void {
-    const worker = this.store.getRun(runId)?.delegation?.role === 'worker';
-    if (worker && via === 'no-wait' && turnEnd) { this.askParentForWorker(runId, state, stepId); this.parkForUser(runId, state, stepId); return; }
-    const wait = worker ? undefined : this.openHumanAlias(runId, state, via);
-    if (wait?.source === 'cezar' && wait.askSeq === undefined) this.showCezarHumanWait(runId, state, wait, note);
-    else {
-      this.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}), message: note });
-      if (wait) this.surfaceHumanWait(runId, state, wait);
-    }
-    this.parkForUser(runId, state, stepId);
-  }
+  private openTurnEndHumanWait(runId: string, state: ActiveRun, stepId: string | undefined, via: 'no-wait' | 'budget', note: string, turnEnd = false): void { return this.turnSettler.openTurnEndHumanWait(runId, state, stepId, via, note, turnEnd); }
 
   private askParentForWorker(runId: string, state: ActiveRun, stepId: string | undefined): void { return this.workerQuestions.askParentForWorker(runId, state, stepId); }
 
@@ -4476,21 +4146,7 @@ export class RunManager {
     return this.store.updateRun(runId, { ...patch, ...(status === 'failed' ? settledRootFinishPatch(this.store, runId) : {}), status });
   }
 
-  private armIdleTimer(runId: string, state: ActiveRun): void {
-    this.clearIdleTimer(state);
-    state.idleClosed = false;
-    state.idleTimer = setTimeout(() => {
-      if (state.session?.open && !state.cancelled) {
-        state.idleClosed = true;
-        this.store.appendEvent(runId, {
-          type: 'lifecycle',
-          message: `session closed after ${Math.round(IDLE_TIMEOUT_MS / 60_000)}m of inactivity`,
-        });
-        state.session.end();
-      }
-    }, IDLE_TIMEOUT_MS);
-    state.idleTimer.unref?.();
-  }
+  private armIdleTimer(runId: string, state: ActiveRun): void { return this.turnSettler.armIdleTimer(runId, state); }
 
   private clearIdleTimer(state: ActiveRun): void {
     clearIdleTimer(state);
@@ -4498,68 +4154,7 @@ export class RunManager {
 
   /** The turn-end tail's park for the user: `waiting` with the idle timer, no slot. A result
    *  already in (a pending question beside a resolved wait) still queues its wake. */
-  private parkForUser(runId: string, state: ActiveRun, stepId: string | undefined): void {
-    this.move(runId, 'park');
-    if (stepId) this.store.updateStep(runId, stepId, { status: 'waiting' });
-    this.store.flush();
-    this.line.park(runId);
-    this.leaveMonitoringPool(runId);
-    this.armIdleTimer(runId, state);
-    this.releaseSlot();
-    this.queueWaitWake(runId);
-  }
-
-  /**
-   * The monitoring line and Claude's `ScheduleWakeup` open a timer in the wait list
-   * (hearsay-tools/cezarion#1233): the line for the configured interval, `ScheduleWakeup` for its
-   * `delaySeconds` clamped to 60–3,600 (the interval without one). Idempotent per `via`: while one
-   * is open the alias registers nothing and the timer keeps its deadline. The line is only a
-   * fallback: any open non-human wait suppresses its registration (hearsay-tools/cezarion#1268),
-   * including the off/budget human fallback. With timers off and no such wait it opens
-   * a `monitoring-line` human wait instead, and with the automatic-wake budget spent a `budget` one
-   * (hearsay-tools/cezarion#1234); the park shows it. An autonomous run's nudge keeps precedence
-   * over the line.
-   */
-  private openTimerAlias(runId: string, state: ActiveRun, scheduleWakeup: number | null | undefined): void {
-    const run = this.store.getRun(runId);
-    if (!this.canProceedWithRun(runId, run)) return;
-    if (state.autonomous && this.automaticWakes(runId) < MAX_AUTO_CONTINUES && this.canAutoContinue(runId, state)) return;
-    const via: WaitVia = scheduleWakeup === undefined ? 'monitoring-line' : 'schedule-wakeup';
-    const open = openWaits(run);
-    // The line is a fallback, not another poll beside a wait that already supplies its wake
-    // (hearsay-tools/cezarion#1268). Keep explicit ScheduleWakeup requests and existing timers.
-    if (via === 'monitoring-line' && open.some(wait => wait.kind !== 'human')) return;
-    if (open.some(wait => wait.kind === 'timer' && wait.via === via)) return;
-    const minutes = this.semaphore.monitoringWakeIntervalMinutes();
-    if (minutes === null) {
-      this.store.appendEvent(runId, { type: 'note', message: 'automatic re-checks are off; waiting for you' });
-      this.openHumanAlias(runId, state, 'monitoring-line');
-      return;
-    }
-    if (this.automaticWakes(runId) >= MAX_AUTO_CONTINUES) {
-      if (!state.monitoringCapNoted) {
-        state.monitoringCapNoted = true;
-        this.store.appendEvent(runId, {
-          type: 'note',
-          message: `automatic monitoring wake-up cap reached (${MAX_AUTO_CONTINUES}); session remains parked`,
-        });
-      }
-      this.openHumanAlias(runId, state, 'budget');
-      return;
-    }
-    if (openWaits(run).length >= WAIT_LIMIT) return;
-    const delay = typeof scheduleWakeup === 'number' ? Math.min(SCHEDULE_WAKEUP_MAX_SECONDS, Math.max(TIMER_MIN_SECONDS, Math.round(scheduleWakeup))) : undefined;
-    const now = Date.now();
-    // `seconds` is the record's bound; the line's deadline is the interval itself (tests run it sub-minute).
-    const wait: TimerWaitEntry = { id: randomUUID(), kind: 'timer', source: 'agent', via, registeredAt: new Date(now).toISOString(),
-      deadline: new Date(now + (delay === undefined ? minutes * 60_000 : delay * 1000)).toISOString(), phase: 'open', turnId: state.ciTurnId ?? 'monitoring',
-      seconds: delay ?? Math.min(TIMER_MAX_SECONDS, Math.max(TIMER_MIN_SECONDS, Math.round(minutes * 60))),
-      ...(via === 'monitoring-line' ? { note: 'Opened by CEZ:MONITORING.' } : {}) };
-    this.withdrawCezarHumanWaits(runId);
-    try { this.store.commitWait(runId, wait); }
-    catch (error) { console.warn(`[cez] monitoring timer checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return; }
-    this.armWait(runId, wait);
-  }
+  private parkForUser(runId: string, state: ActiveRun, stepId: string | undefined): void { return this.turnSettler.parkForUser(runId, state, stepId); }
 
   autosaveCleanupBlocker(runId: string): string | undefined {
     return this.worktreeAutosave.autosaveCleanupBlocker(runId);
