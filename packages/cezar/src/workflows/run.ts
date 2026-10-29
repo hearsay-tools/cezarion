@@ -2,6 +2,7 @@ import { WorkerQuestions } from './run/worker-questions.ts';
 import { FamilyReconciler } from './run/family-reconciler.ts';
 import * as completionGateReads from './run/completion-gate.ts';
 import { WaitRegistry } from './run/wait-registry.ts';
+import { WakeRetries } from './run/wake-retries.ts';
 import { WaitWatches } from './run/wait-watches.ts';
 import { HumanWaits } from './run/human-waits.ts';
 import { RunLine, type PendingJob } from './run/run-line.ts';
@@ -83,7 +84,7 @@ import { type AgentSession } from '../core/claude-cli-runner.ts';
 import { onUsage, replaceRunProcess, type ProcessUsage } from '../core/process-usage.ts';
 import { type ExitFileRoots } from '../process-wait/exit-file.ts';
 import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
-import { noJitter, ORPHAN_BACKOFF, retryDelayMs, WAKE_RETRY_BACKOFF, type Backoff } from '../delegation/retry-backoff.ts';
+import { ORPHAN_BACKOFF, WAKE_RETRY_BACKOFF, type Backoff } from '../delegation/retry-backoff.ts';
 import { type CwdSource } from '../delegation/process-liveness.ts';
 import { parseUsageLimit } from '../core/usage-limit.ts';
 import { startManagedSession } from '../core/managed-session.ts';
@@ -423,13 +424,9 @@ export class RunManager {
   private get waitWakeAdmitted() { return this.line.waitWakeAdmitted; }
   /** CI lookups in flight, keyed by run id and normalized PR URL: two PRs may register at once. */
   private get ciRegistrations() { return this.waitRegistry.ciRegistrations; }
-  /** A wake that could not be admitted yet, retried by run id. */
-  private readonly wakeRetries = new Map<string, NodeJS.Timeout>();
-  /** The last "retained; continuation unavailable" note per run: the 1 Hz admission retry writes
-   *  it on the transition into refusal or when the reason changes, never once per retry. */
-  private readonly retainedNotes = new Map<string, string>();
-  /** The wait before the next automatic delivery attempt after a failed one, by run id. */
-  private readonly wakeBackoffs = new Map<string, NodeJS.Timeout>();
+  private readonly retries: WakeRetries;
+  private get wakeRetries() { return this.retries.wakeRetries; }
+  private get wakeBackoffs() { return this.retries.wakeBackoffs; }
   // Private and overridable so tests need not wait out production cadence.
   private wakeRetryBackoff: Backoff = WAKE_RETRY_BACKOFF;
   private readonly ciResources: ReturnType<typeof acquireCiResources>;
@@ -551,6 +548,10 @@ export class RunManager {
     this.noWaitNudgeReplyMs = options.noWaitNudgeReplyMs ?? NO_WAIT_NUDGE_REPLY_MS;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
     this.inputReceiptContext = { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed };
+    this.retries = new WakeRetries(this.inputReceiptContext, {
+      owesWake: run => this.owesWake(run), queueWaitWake: id => this.queueWaitWake(id),
+      retryWaitAdmission: id => this.retryWaitAdmission(id), wakeRetryBackoff: () => this.wakeRetryBackoff,
+    });
     this.queuedRevivalHost = {
       move: (id, exit, patch) => this.move(id, exit, patch), isActive: id => this.isActive(id),
       workerExecutionStopped: id => this.workerExecutionStopped(id), ownedJob: run => this.ownedJob(run),
@@ -727,10 +728,7 @@ export class RunManager {
     this.waitWatches.disposeWatches();
     this.waitRegistry.dispose();
     this.waitWatches.disposeRetries();
-    for (const timer of this.wakeRetries.values()) clearTimeout(timer);
-    this.wakeRetries.clear();
-    for (const timer of this.wakeBackoffs.values()) clearTimeout(timer);
-    this.wakeBackoffs.clear();
+    this.retries.dispose();
     // Wait records stay as they are: a later manager re-arms them from their deadlines.
     this.waitWatches.dispose();
     this.ciResources.release();
@@ -1046,17 +1044,11 @@ export class RunManager {
     if (failures >= MAX_WAKE_DELIVERY_ATTEMPTS) {
       // Nothing may wake the settled run: its admission retry goes with the count.
       this.resetWakeDelivery(runId);
-      const retry = this.wakeRetries.get(runId); if (retry) clearTimeout(retry); this.wakeRetries.delete(runId);
+      this.retries.stopRetry(runId);
       return 'capped';
     }
     this.store.commitOutcome(runId, { kind: 'counted', waitDeliveryFailures: failures }, {}, { bestEffort: true });
-    const previous = this.wakeBackoffs.get(runId); if (previous) clearTimeout(previous);
-    const timer = setTimeout(() => {
-      if (this.wakeBackoffs.get(runId) !== timer) return;
-      this.wakeBackoffs.delete(runId);
-      try { this.queueWaitWake(runId); } catch { this.retryWaitAdmission(runId); }
-    }, retryDelayMs(failures - 1, this.wakeRetryBackoff, noJitter));
-    timer.unref(); this.wakeBackoffs.set(runId, timer);
+    this.retries.backoff(runId, failures);
     return 'park';
   }
 
@@ -1077,7 +1069,7 @@ export class RunManager {
   }
 
   private clearWakeBackoff(runId: string): void {
-    const timer = this.wakeBackoffs.get(runId); if (timer) clearTimeout(timer); this.wakeBackoffs.delete(runId);
+    this.retries.clearWakeBackoff(runId);
   }
 
   /** Saves an accepted continuation. A human Continue also answers every human wait, ends failed
@@ -1092,7 +1084,7 @@ export class RunManager {
    *  changes only at a turn end or a terminal path; a worker park's idle timer belongs to the park,
    *  not to the wake turn. */
   private spendWakeAdmission(runId: string, state: ActiveRun, owed: boolean): void {
-    if (!owed) { const retry = this.wakeRetries.get(runId); if (retry) clearTimeout(retry); this.wakeRetries.delete(runId); }
+    if (!owed) { this.retries.stopRetry(runId); }
     this.line.unpark(runId); this.clearIdleTimer(state);
     this.move(runId, 'resume');
   }
@@ -1119,13 +1111,7 @@ export class RunManager {
   }
 
   private retryWaitAdmission(runId: string): void {
-    const run = this.store.getRun(runId);
-    if (this.disposed || this.wakeRetries.has(runId) || !run || !this.owesWake(run)) return;
-    const timer = setTimeout(() => {
-      this.wakeRetries.delete(runId);
-      try { this.queueWaitWake(runId); } catch { this.retryWaitAdmission(runId); }
-    }, 1000);
-    timer.unref(); this.wakeRetries.set(runId, timer);
+    this.retries.retryWaitAdmission(runId);
   }
 
   /**
@@ -1219,7 +1205,7 @@ export class RunManager {
     if (this.disposed || this.recoveringRun(run) || !run || isUsageLimitHold(run) || !this.owesWake(run) ||
       !['running', 'waiting', 'queued'].includes(run.status) || !this.canProceedWithRun(runId, run)) return false;
     // A failed delivery waits out its backoff; the backoff's own timer queues this wake again.
-    if (this.wakeBackoffs.has(runId)) return false;
+    if (this.retries.inBackoff(runId)) return false;
     return true;
   }
 
@@ -1230,13 +1216,12 @@ export class RunManager {
     const resumed = this.continueRun(runId, { text, waitWake: true }, true);
     if (!resumed.ok) {
       const message = `${resolved.length ? 'Wait result' : 'Messages'} retained; continuation unavailable: ${resumed.error ?? 'unknown'}`;
-      if (this.retainedNotes.get(runId) !== message) {
-        this.retainedNotes.set(runId, message);
+      if (this.retries.noteRetained(runId, message)) {
         this.store.appendEvent(runId, { type: 'note', message });
       }
       return false;
     }
-    this.retainedNotes.delete(runId);
+    this.retries.clearRetained(runId);
     this.line.markWake(runId, Date.now());
     return true;
   }
@@ -1316,7 +1301,7 @@ export class RunManager {
     if (!run || this.owesWake(run) || state?.agentInputFlight) return;
     this.line.removeWake(runId);
     if (this.line.retireAdmission(runId) && state && run.status === 'waiting' && state.atTurnBoundary === state.session) this.line.park(runId);
-    const retry = this.wakeRetries.get(runId); if (retry) clearTimeout(retry); this.wakeRetries.delete(runId);
+    this.retries.stopRetry(runId);
   }
 
   /**
@@ -1341,8 +1326,7 @@ export class RunManager {
       registration.abort.abort(); this.ciRegistrations.delete(key);
     }
     this.waitWatches.disarmRun(runId);
-    const timer = this.wakeRetries.get(runId); if (timer) clearTimeout(timer); this.wakeRetries.delete(runId);
-    this.retainedNotes.delete(runId);
+    this.retries.forget(runId);
     this.resetWakeDelivery(runId);
     this.line.removeWake(runId, this.active.has(runId));
     this.line.retireAdmission(runId);
