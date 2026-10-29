@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createActiveRun, type ActiveRun } from '../active-run.ts';
+import { createActiveRun } from '../active-run.ts';
 import type { AgentSession } from '../../core/agent-runner.ts';
-import type { RunRecord } from '../../runs/store.ts';
+import { makeRunRecord, RUN_STATUS, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { UiEventSink } from '../../runs/ui-event-sink.ts';
 import * as rule from '../turn-end.ts';
 import type { CompletionRefusal } from '../completion-policy.ts';
@@ -24,7 +24,7 @@ function fixture() {
   const session = { open: true, holdsHumanInput: call('holds', false), discardQueuedMessages: call('discard', undefined), end: call('end', undefined) } as unknown as AgentSession;
   state.session = session;
   state.currentStepId = 'step';
-  const run = { id: 'run', status: 'running', waits: [], autoResumeAttempts: 2 } as unknown as RunRecord;
+  const run = makeRunRecord({ id: 'run', status: RUN_STATUS.running, waits: [], autoResumeAttempts: 2 });
   const store = {
     getRun: () => run,
     transcriptFacts: () => ({}),
@@ -37,7 +37,7 @@ function fixture() {
     prepareHumanAsk: call('prepareAsk', undefined), raiseHumanGate: call('raiseGate', undefined),
     recordTurnEndQuestion: call('recordQuestion', undefined), holdsAgentWaits: call('agentWaits', false),
     humanWaitShown: call('shown', false), withdrawCezarHumanWaits: call('withdraw', undefined),
-    openHumanAlias: call('humanAlias', { source: 'cezar' }), showCezarHumanWait: call('show', undefined),
+    openHumanAlias: call('humanAlias', { source: WAIT_SOURCE.cezar }), showCezarHumanWait: call('show', undefined),
     surfaceHumanWait: call('surface', undefined),
   };
   const host = {
@@ -53,10 +53,11 @@ function fixture() {
     sendTurnEndNudge: call('sendNudge', true), awaitCompletionNudgeReply: call('replyBound', undefined), noticeParkedWorker: call('notice', undefined),
     routeWorkerQuestion: call('route', undefined), settledTurnOutcome: call('outcome', undefined),
   };
-  const context = { store, semaphore: { monitoringWakeIntervalMinutes: call('interval', 1) } } as unknown as RunModuleContext;
+  const semaphore = { monitoringWakeIntervalMinutes: call<number | null>('interval', 1) };
+  const context = { store, semaphore } as unknown as RunModuleContext;
   const settler = new TurnSettler(context, host as unknown as Host, 60_000, 10, 'wait for workers', 3600);
   log.length = 0;
-  return { log, state, session, run, host, store, settler };
+  return { log, state, session, run, host, store, semaphore, settler };
 }
 
 type Fixture = ReturnType<typeof fixture>;
@@ -131,7 +132,7 @@ describe('turn settler entry orders', () => {
 
   it.each([false, true])('ask nudge clears done then held timer before the input error checkpoint (%s)', failed => {
     const f = fixture();
-    f.state.agentInputError = failed ? 'checkpoint failed' : undefined;
+    if (failed) f.state.agentInputError = 'checkpoint failed';
     f.log.length = 0;
     const result = f.settler.settleTurn('run', f.state, 'turn-end', { ...turn, askNudged: true });
     expect(result).toBe(!failed);
@@ -167,4 +168,136 @@ describe('turn settler entry orders', () => {
     expect(f.host.routeWorkerQuestion).not.toHaveBeenCalled();
     expect(f.host.settledTurnOutcome).not.toHaveBeenCalled();
   });
+});
+
+
+describe('turn settler carrier orders', () => {
+  it.each(['closed', 'input', 'take-input'] as const)('%s has no carrier effects before the running outcome', kind => {
+    const f = fixture();
+    decide({ kind }, { kind });
+    f.settler.settleTurn('run', f.state, 'ack', turn);
+    expect(f.host.settledTurnOutcome).toHaveBeenCalledWith('run', 'ack', { kind: 'running' });
+    expect(f.log.slice(f.log.lastIndexOf('wakes') + 1)).toEqual(['outcome']);
+  });
+
+  it.each(['closed', 'input', 'defer', 'park', 'human-wait', 'nudge', 'completion-wait'] as const)('withdraws settled refusal before the %s carrier, then records its outcome', kind => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const decisions: Record<typeof kind, rule.TurnEndDecision> = {
+      closed: { kind: 'closed' }, input: { kind: 'input' }, defer: { kind: 'defer' }, park: { kind: 'park' },
+      'human-wait': { kind: 'human-wait', via: WAIT_VIA.completion },
+      nudge: { kind: 'nudge', cause: 'completion', ifRefused: 'park-for-user' }, 'completion-wait': { kind: 'completion-wait' },
+    };
+    decide(decisions[kind]);
+    f.settler.settleTurn('run', f.state, 'ack', turn, refusal);
+    const withdrawal = f.log.indexOf('withdraw');
+    const outcome = f.log.indexOf('outcome');
+    expect(withdrawal).toBeGreaterThan(-1);
+    expect(outcome).toBeGreaterThan(withdrawal);
+    const effects: Partial<Record<typeof kind, string>> = { park: 'parkWaits', 'human-wait': 'humanAlias', nudge: 'submit', 'completion-wait': 'completionWait' };
+    const effect = effects[kind];
+    if (effect) expect(f.log.indexOf(effect)).toBeGreaterThan(withdrawal);
+    expect(f.log.at(-1)).toBe('outcome');
+    expect(f.host.settledTurnOutcome).toHaveBeenCalledTimes(1);
+  });
+
+  it('selected refusal is noted before the park carrier and its outcome', () => {
+    const f = fixture();
+    decide({ kind: 'park', refused: true });
+    f.settler.settleTurn('run', f.state, 'ack', turn, refusal);
+    order(f, ['event:note', 'parkWaits', 'notice', 'inPool', 'outcome']);
+    expect(f.host.humanWaits.withdrawCezarHumanWaits).not.toHaveBeenCalled();
+  });
+
+  it('done marks the step before summary, lifecycle, wait cancellation, and session close, without an outcome', () => {
+    const f = fixture();
+    f.state.doneClose = { via: 'cezar_done', summary: 'finished' };
+    decide({ kind: 'done' });
+    f.settler.settleTurn('run', f.state, 'ack', { ...turn, done: true });
+    order(f, ['state:completedStepId', 'event:note', 'event:lifecycle', 'cancelWaits', 'end']);
+    expect(f.state.completedStepId).toBe('step');
+    expect(f.host.settledTurnOutcome).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('park tries waits before user fallback, worker notice and slot report (waits=%s)', waits => {
+    vi.useFakeTimers();
+    const f = fixture();
+    f.host.parkOnWaits.mockImplementation(() => { f.log.push('parkWaits'); return waits; });
+    decide({ kind: 'park' });
+    f.settler.settleTurn('run', f.state, 'ack', turn);
+    order(f, ['parkWaits', ...(waits ? [] : ['move', 'release', 'wake']), 'notice', 'inPool', 'outcome']);
+  });
+
+  it('completion human wait notes refusal, opens and shows alias, then parks and notifies worker', () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    decide({ kind: 'human-wait', via: WAIT_VIA.completion });
+    f.settler.settleTurn('run', f.state, 'ack', turn, refusal);
+    order(f, ['withdraw', 'event:note', 'humanAlias', 'show', 'move', 'release', 'wake', 'notice', 'inPool', 'outcome']);
+  });
+
+  it.each([true, false])('completion nudge resets content before submission and completes the %s path in order', sent => {
+    vi.useFakeTimers();
+    const f = fixture();
+    f.host.submitAgentInput.mockImplementation(() => {
+      expect(f.state.noWaitNudgeSawContent).toBe(false); f.log.push('submit'); return sent;
+    });
+    decide({ kind: 'nudge', cause: 'completion', ifRefused: 'park-for-user' });
+    f.settler.settleTurn('run', f.state, 'ack', turn, refusal);
+    const tail = sent ? ['replyBound', 'charge', 'event:note', 'outcome']
+      : ['state:doneAtBoundary', 'event:note', 'move', 'release', 'wake', 'notice', 'outcome'];
+    order(f, ['withdraw', 'state:noWaitNudgeSawContent', 'submit', ...tail]);
+  });
+
+  it('already parked non-turn-end does not park, release, or report another outcome', () => {
+    const f = fixture();
+    f.host.line.isParked.mockReturnValue(true);
+    decide({ kind: 'park' });
+    expect(f.settler.settleTurn('run', f.state, 'ack', turn)).toBe(true);
+    expect(f.host.parkOnWaits).not.toHaveBeenCalled();
+    expect(f.host.releaseSlot).not.toHaveBeenCalled();
+    expect(f.host.settledTurnOutcome).not.toHaveBeenCalled();
+  });
+
+  it('user park updates and flushes waiting before line, pool, idle bound, release and wake', () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const arm = f.settler.armIdleTimer.bind(f.settler);
+    vi.spyOn(f.settler, 'armIdleTimer').mockImplementation((id, state) => { f.log.push('idle'); arm(id, state); });
+    f.settler.parkForUser('run', f.state, 'step');
+    order(f, ['move', 'step', 'flush', 'parkLine', 'leavePool', 'idle', 'release', 'wake']);
+    expect(f.state.idleTimer).toBeDefined();
+  });
+});
+
+describe('turn settler monitoring alias orders', () => {
+  it('withdraws human waits, commits timer, then arms it before reading decision facts', () => {
+    const f = fixture();
+    decide({ kind: 'park' });
+    f.settler.settleTurn('run', f.state, 'ack', { ...turn, monitoring: true });
+    order(f, ['interval', 'withdraw', 'commitWait', 'armWait', 'queued', 'parkWaits', 'outcome']);
+    expect(f.store.commitWait).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['off', 'budget'] as const)('%s fallback notes the cause before opening its human alias', reason => {
+    const f = fixture();
+    if (reason === 'off') f.semaphore.monitoringWakeIntervalMinutes.mockReturnValue(null);
+    else f.host.countAutomaticWakes.mockReturnValue(10);
+    decide({ kind: 'park' });
+    f.settler.settleTurn('run', f.state, 'ack', { ...turn, monitoring: true });
+    order(f, ['event:note', 'humanAlias', 'parkWaits', 'outcome']);
+    expect(f.store.commitWait).not.toHaveBeenCalled();
+    expect(f.host.waitWatches.armWait).not.toHaveBeenCalled();
+  });
+
+  it('failed timer checkpoint leaves it unarmed before carrying out the park', () => {
+    const f = fixture();
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    f.store.commitWait.mockImplementation(() => { f.log.push('commitWait'); throw new Error('disk'); });
+    decide({ kind: 'park' });
+    f.settler.settleTurn('run', f.state, 'ack', { ...turn, monitoring: true });
+    order(f, ['withdraw', 'commitWait', 'queued', 'parkWaits', 'outcome']);
+    expect(f.host.waitWatches.armWait).not.toHaveBeenCalled();
+  });
+
 });
