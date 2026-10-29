@@ -394,8 +394,8 @@ A move never answers these:
    paths share code.
 3. The `dropActive` order invariant in [Orders that must survive](#orders-that-must-survive) has
    no comment or test. The `run-settlement` move (hearsay-tools/cezarion#2200) adds both.
-4. `unansweredWorkflowAsk` reads like a query but calls `supersedeWorkerFallback` first.
-   hearsay-tools/cezarion#2200 renames it when it moves.
+4. `supersedeFallbackThenWorkflowAsk` supersedes the worker fallback before checking for an unanswered ask.
+   hearsay-tools/cezarion#2200 renamed it when it moved.
 5. `registerAsk` and `stopPreviewServer` are public, but no shipped code outside `run.ts` calls
    them: the only caller of each is the cezar-tools host that `run.ts` builds, which
    `cezar-tools.ts` calls. `reconcileAllWorkerFamilies` delegates to `FamilyReconciler` and has
