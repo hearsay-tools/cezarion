@@ -119,6 +119,54 @@ test('manual context recognizes skipped matrices before shard expansion', () => 
   assert.match(reviewCiContext(f), /Heavy verification: not started: blocked by review/);
 });
 
+function literalMatrixFixture() {
+  const f = blockedFixture();
+  f.jobs = f.jobs.filter(job => !/shard/.test(job.name));
+  // Exact names captured from hearsay-tools/cezarion Actions run 40930132068, attempt 1.
+  f.jobs.push(...['Cockpit browser E2E shard ${{ matrix.shard }}/4', 'Vitest shard ${{ matrix.shard }}/3']
+    .map(name => ({ name, status: 'completed', conclusion: 'skipped' })));
+  return f;
+}
+
+test('manual context recognizes the literal matrix names captured from GitHub', () => {
+  const text = reviewCiContext(literalMatrixFixture());
+  assert.match(text, /Heavy verification: not started: blocked by review/);
+  assert.match(text, /Verification aggregate: failure/);
+  assert.match(text, /Workflow conclusion: failure/);
+  assert.doesNotMatch(text, /## Failed jobs/);
+});
+
+test('literal matrix names never hide actual heavy outcomes or unfinished jobs', () => {
+  for (const prefix of ['Vitest shard ', 'Cockpit browser E2E shard ']) {
+    for (const conclusion of ['failure', 'timed_out', 'cancelled', 'success', null]) {
+      const f = literalMatrixFixture();
+      f.jobs.find(job => job.name.startsWith(prefix)).conclusion = conclusion;
+      assert.doesNotMatch(reviewCiContext(f), /blocked by review/, `${prefix}: ${conclusion}`);
+    }
+    for (const status of ['queued', 'in_progress']) {
+      const f = literalMatrixFixture();
+      f.jobs.find(job => job.name.startsWith(prefix)).status = status;
+      assert.doesNotMatch(reviewCiContext(f), /blocked by review/, `${prefix}: ${status}`);
+    }
+  }
+});
+
+test('skipped matrices still require unique complete names or one exact placeholder', () => {
+  for (const [prefix, count] of [['Vitest shard ', 3], ['Cockpit browser E2E shard ', 4]]) {
+    const literal = `${prefix}${'${{ matrix.shard }}'}/${count}`;
+    const expanded = Array.from({ length: count }, (_, i) => `${prefix}${i + 1}/${count}`);
+    for (const names of [[], [literal, literal], [literal, `${prefix}/${count}`], [literal, ...expanded],
+      [literal, expanded[0]], expanded.slice(1), expanded.map(() => expanded[0]),
+      [`${prefix}${'${{ matrix.other }}'}/${count}`], [`${prefix}${'${{matrix.shard}}'}/${count}`],
+      [`${literal} extra`], [`${prefix}${'${{ matrix.shard }}'}/${count + 1}`]]) {
+      const f = literalMatrixFixture();
+      f.jobs = f.jobs.filter(job => !job.name.startsWith(prefix));
+      f.jobs.push(...names.map(name => ({ name, status: 'completed', conclusion: 'skipped' })));
+      assert.doesNotMatch(reviewCiContext(f), /blocked by review/, JSON.stringify(names));
+    }
+  }
+});
+
 test('manual context never hides actual heavy outcomes behind a failed review', () => {
   for (const name of ['Unit, build, and package', 'Vitest shard 2/3', 'Cockpit browser E2E shard 3/4']) {
     for (const conclusion of ['failure', 'timed_out', 'cancelled', 'success', null]) {
