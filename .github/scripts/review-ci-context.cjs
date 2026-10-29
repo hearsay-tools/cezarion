@@ -100,8 +100,9 @@ function skippedMatrix(jobs, prefix, count) {
   const names = new Set(matches.map(job => job.name));
   const complete = matches.length === count && Array.from({ length: count }, (_, i) => `${prefix}${i + 1}/${count}`)
     .every(name => names.has(name));
-  // GitHub can skip a matrix before expansion, leaving one unnamed shard.
-  const unexpanded = matches.length === 1 && names.has(`${prefix}/${count}`);
+  // GitHub can skip before expansion, leaving an empty or literal shard expression.
+  const unexpanded = matches.length === 1
+    && (names.has(`${prefix}/${count}`) || names.has(`${prefix}${'${{ matrix.shard }}'}/${count}`));
   return (complete || unexpanded) && matches.every(job => job.status === 'completed' && job.conclusion === 'skipped');
 }
 
