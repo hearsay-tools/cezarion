@@ -78,7 +78,16 @@ import { gitCommonDir, planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline,
 import { holdersStillHold, observeDestroy, recordHolders, type DestroyObservation } from './destroy-observation.ts';
 import { DESTROY_ATTENTION_ATTEMPTS, DESTROY_BACKOFF, retryDelayMs, type Backoff } from './retry-backoff.ts';
 
-export type DelegationProject = { id: string; root: string; store: RunStore; manager: RunManager };
+export type DelegationManager = Pick<RunManager,
+  | 'acknowledgeInbox' | 'awaitRunTermination' | 'builtinSkills' | 'canClaimInboxInput'
+  | 'cancelPeerWait' | 'cancelWorkerWait' | 'claimWorkerCleanup' | 'continueRun'
+  | 'deliverConversationInput' | 'enqueueOwnedRun' | 'isActive' | 'pauseWorkerCleanup'
+  | 'previewHost' | 'reconcileWorkerWaits' | 'recoverWorkerCleanup' | 'registerPeerWait'
+  | 'registerRequestWait' | 'registerWorkerWait' | 'releaseInbox' | 'requestWorkerStop'
+  | 'reserveInboxInputs' | 'selectDelegationExecutionSettings' | 'settleOrphanedWorkerExecution'
+  | 'steerWorker' | 'takeWorkerTerminationBlocker'>;
+
+export type DelegationProject = { id: string; root: string; store: RunStore; manager: DelegationManager };
 
 /**
  * Resolve an explicit workflow or skill. With neither, use the built-in quick-task constant, not
@@ -119,7 +128,7 @@ type ResolvedSpawnStep = { step: WorkflowStepDef; settings: DelegationExecutionS
  * Resolve each agent step before acceptance. Step choices override spawn defaults; equal
  * selections share resolution. Bind account, runner, model, effort and narrowed grants together.
  */
-async function resolveSpawnSteps(manager: RunManager, parentId: string, request: WorkerSpawnRequest, workflow: WorkflowDef, validateModel: (step: WorkflowStepDef, settings: DelegationExecutionSettings) => Promise<void>): Promise<ResolvedSpawnStep[]> {
+async function resolveSpawnSteps(manager: DelegationManager, parentId: string, request: WorkerSpawnRequest, workflow: WorkflowDef, validateModel: (step: WorkflowStepDef, settings: DelegationExecutionSettings) => Promise<void>): Promise<ResolvedSpawnStep[]> {
   const cache = new Map<string, Promise<DelegationExecutionSettings>>();
   const resolved: ResolvedSpawnStep[] = [];
   for (const step of workflow.steps) {
