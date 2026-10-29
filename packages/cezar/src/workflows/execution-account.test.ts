@@ -115,9 +115,9 @@ describe('a held wake does not advertise itself to the workspace line', () => {
     const holder = store.createRun({ title: 'holder', workflow: 'w', task: 't', runner: 'claude', steps: [] });
     store.updateRun(holder.id, { status: 'waiting', autoResumeAt: new Date(Date.now() + 600_000).toISOString() });
     const parked = store.createRun({ title: 'parked', workflow: 'w', task: 't', runner: 'claude', steps: [] });
-    const engine = manager as unknown as { queue: string[]; waitWakeQueuedAt: Map<string, number>; oldestWakeAt(): number | null };
-    engine.queue.push(parked.id);
-    engine.waitWakeQueuedAt.set(parked.id, 1);
+    const engine = manager as unknown as { oldestWakeAt(): number | null };
+    runInternals(manager).line.queue.push(parked.id);
+    runInternals(manager).line.waitWakeQueuedAt.set(parked.id, 1);
     try {
       expect(engine.oldestWakeAt()).toBeNull();
       store.updateRun(holder.id, { status: 'failed', finishedAt: new Date().toISOString() });
@@ -127,8 +127,8 @@ describe('a held wake does not advertise itself to the workspace line', () => {
       reclaiming.add(parked.id);
       try { expect(engine.oldestWakeAt()).toBeNull(); } finally { reclaiming.delete(parked.id); }
     } finally {
-      engine.queue.splice(engine.queue.indexOf(parked.id), 1);
-      engine.waitWakeQueuedAt.delete(parked.id);
+      runInternals(manager).line.queue.splice(runInternals(manager).line.queue.indexOf(parked.id), 1);
+      runInternals(manager).line.waitWakeQueuedAt.delete(parked.id);
     }
   });
 
@@ -140,18 +140,18 @@ describe('a held wake does not advertise itself to the workspace line', () => {
     const holder = store.createRun({ title: 'holder', workflow: 'w', task: 't', runner: 'codex', steps: [] });
     store.updateRun(holder.id, { status: 'waiting', autoResumeAt: new Date(Date.now() + 600_000).toISOString() });
     const parked = store.createRun({ title: 'parked', workflow: 'w', task: 't', steps: [] });
-    const engine = manager as unknown as { queue: string[]; waitWakeQueuedAt: Map<string, number>; oldestWakeAt(): number | null; pump(): Promise<void> };
-    engine.queue.push(parked.id);
-    engine.waitWakeQueuedAt.set(parked.id, 1);
+    const engine = manager as unknown as { oldestWakeAt(): number | null; pump(): Promise<void> };
+    runInternals(manager).line.queue.push(parked.id);
+    runInternals(manager).line.waitWakeQueuedAt.set(parked.id, 1);
     try {
       // Before any pump has read the configuration, the default is unknown: not advertised.
       expect(engine.oldestWakeAt()).toBeNull();
       await engine.pump();
-      expect(engine.queue).toContain(parked.id);
+      expect(runInternals(manager).line.queue).toContain(parked.id);
       expect(engine.oldestWakeAt()).toBeNull();
     } finally {
-      engine.queue.splice(engine.queue.indexOf(parked.id), 1);
-      engine.waitWakeQueuedAt.delete(parked.id);
+      runInternals(manager).line.queue.splice(runInternals(manager).line.queue.indexOf(parked.id), 1);
+      runInternals(manager).line.waitWakeQueuedAt.delete(parked.id);
     }
   });
 });

@@ -605,8 +605,8 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   it('recovery admits an older queued child before an expired parent wake', async () => {
     const p = await parent(); const w = await worker(p.id, 'mock:slow');
     const explain = (stage: string) => {
-      const engine = manager as unknown as { queue: string[]; starting: Set<string>; active: Map<string, unknown>; executions: Map<string, unknown> };
-      return `${stage}\n${JSON.stringify({ ...captureState(), queue: engine.queue, starting: [...engine.starting],
+      const engine = manager as unknown as { active: Map<string, unknown>; executions: Map<string, unknown> };
+      return `${stage}\n${JSON.stringify({ ...captureState(), queue: runInternals(manager).line.queue, starting: [...runInternals(manager).line.starting],
         active: [...engine.active.keys()], executions: [...engine.executions.keys()], workerExecution: store.readWorkerExecution(w.id) })}\n${timeline(p.id)}\n${timeline(w.id)}`;
     };
     // Expire the deadline only after the parent parks; mock startup must not race a 1 s budget.

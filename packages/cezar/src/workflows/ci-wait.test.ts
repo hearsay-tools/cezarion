@@ -71,7 +71,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     await until(() => parked(run.id));
     expect(store.getRun(run.id)?.waits?.some(entry => entry.kind === 'timer')).toBeFalsy();
     expect(semaphore.busy()).toBe(0); // its slot is a monitoring slot
-    expect((manager as unknown as { monitoring: Set<string> }).monitoring.has(run.id)).toBe(true);
+    expect(runInternals(manager).line.monitoring.has(run.id)).toBe(true);
     expect(external.aborted()).toBe(false);
   });
 
@@ -108,12 +108,12 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: adapter.scenarios.hold!, runner });
     await until(() => store.getRun(run.id)?.status === 'waiting');
     const receipt = await register(run.id);
-    const engine = manager as unknown as { monitoring: Set<string>; active: Map<string, { session: AgentSession }> };
+    const engine = manager as unknown as { active: Map<string, { session: AgentSession }> };
     const session = engine.active.get(run.id)!.session;
     const send = vi.spyOn(session, 'sendAgentMessage').mockReturnValueOnce(false);
     external.settle(success());
     await until(() => send.mock.calls.length > 0);
-    expect.soft(engine.monitoring.has(run.id)).toBe(true);
+    expect.soft(runInternals(manager).line.monitoring.has(run.id)).toBe(true);
     expect.soft(store.getRun(run.id)?.status).toBe('waiting');
     expect(store.getRun(run.id)?.agentInputs?.find(input => input.id === receipt.id)?.deliveredAt).toBeUndefined();
     expect.soft(semaphore.busy()).toBe(0); // The park's monitoring slot carries the wake.
@@ -133,19 +133,18 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     writeFileSync(gate, 'end');
     await until(() => store.getRun(run.id)?.status === 'waiting' && store.readEvents(run.id).some(event => event.type === 'ask.requested'));
     const engine = manager as unknown as {
-      active: Map<string, { session: AgentSession; atTurnBoundary?: AgentSession | undefined }>;
-      queue: string[]; waitWakeQueuedAt: Map<string, number>; pump(): Promise<void>;
+      active: Map<string, { session: AgentSession; atTurnBoundary?: AgentSession | undefined }>; pump(): Promise<void>;
     };
     const state = engine.active.get(run.id)!;
     // Hold scheduler capacity until the observation is queued, then lose the
     // boundary before admission (a backend can resume autonomously).
     const capacity = vi.spyOn(semaphore, 'busy').mockReturnValue(1);
     external.settle(success());
-    await until(() => engine.waitWakeQueuedAt.has(run.id));
+    await until(() => runInternals(manager).line.waitWakeQueuedAt.has(run.id));
     state.atTurnBoundary = undefined;
     capacity.mockRestore();
     await engine.pump();
-    expect.soft(engine.queue).toContain(run.id);
+    expect.soft(runInternals(manager).line.queue).toContain(run.id);
     state.atTurnBoundary = state.session;
     await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
   });
@@ -154,7 +153,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     const external = github();
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
     await register(run.id);
-    const engine = manager as unknown as { monitoring: Set<string>; active: Map<string, { session: AgentSession }> };
+    const engine = manager as unknown as { active: Map<string, { session: AgentSession }> };
     const session = engine.active.get(run.id)!.session;
     const original = session.sendAgentMessage.bind(session);
     let acknowledge!: () => void;
@@ -168,14 +167,14 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
       await until(() => send.mock.calls.length === 1);
       // Native activity and turn-end happen before the held transport ACK.
       await until(() => store.readEvents(run.id).filter(event => event.type === 'turn-end').length === 2);
-      expect(engine.monitoring.has(run.id)).toBe(true);
+      expect(runInternals(manager).line.monitoring.has(run.id)).toBe(true);
       expect(store.getRun(run.id)?.status).toBe('waiting');
       expect(semaphore.busy()).toBe(0);
       expect(ciWaitOf(run.id)?.phase).toBe('resolved');
       acknowledge();
       await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
       // Nothing left open: the boundary parks for the user and gives the pool slot back.
-      await until(() => !engine.monitoring.has(run.id) && store.getRun(run.id)?.status === 'waiting');
+      await until(() => !runInternals(manager).line.monitoring.has(run.id) && store.getRun(run.id)?.status === 'waiting');
     } finally { acknowledge(); }
   });
 
@@ -203,7 +202,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     const second = await parent(); await until(() => store.getRun(second.id)?.status === 'waiting');
     await register(second.id);
     expect(semaphore.busy()).toBe(1); // one pool slot, one regular slot
-    const queue = vi.spyOn((manager as unknown as { queue: string[] }).queue, 'push');
+    const queue = vi.spyOn(runInternals(manager).line.queue, 'push');
     external.settle(success());
     await until(() => !!lastCiWaitOf(first.id)?.deliveredAt && !!lastCiWaitOf(second.id)?.deliveredAt);
     expect(queue.mock.calls.flat()).not.toContain(first.id);

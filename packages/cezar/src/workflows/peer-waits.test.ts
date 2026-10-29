@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
@@ -97,7 +98,7 @@ describe('peer waits (R9)', { timeout: 45_000 }, () => {
     const run = store.getRun(a)!;
     expect(stateOf(run)).toBe('waiting:peer');
     expect(entry).toMatchObject({ kind: WAIT_KIND.peer, phase: WAIT_PHASE.open, timeoutSeconds: 600 });
-    expect(internals().monitoring.has(a)).toBe(false);
+    expect(runInternals(manager).line.monitoring.has(a)).toBe(false);
     expect(semaphore.busy()).toBe(0);
     expect(internals().active.get(a)?.idleTimer).toBeDefined();
     expect(deriveAttention(run)).toMatchObject({ rung: 'waiting-on-workers', bucket: 'none', label: 'waiting on 1 task' });

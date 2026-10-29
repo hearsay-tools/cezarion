@@ -203,11 +203,7 @@ export class RunManager {
     flushAgentInputs: id => this.flushAgentInputs(id),
     isCurrentState: (id, state) => this.active.get(id) === state,
   };
-  // Queue + `starting` set (spec 006, janitor's pump() pattern): `starting`
-  // covers the window between shifting a run off the queue and the run
-  // registering in `active`, so parallel-slot counting is never racy.
   private readonly line: RunLine;
-  private get queue() { return this.line.queue; }
   private readonly worktreeAutosave: WorktreeAutosave;
   private readonly workerExecutions: WorkerExecutions;
   private get executions() { return this.workerExecutions.executions; }
@@ -254,23 +250,10 @@ export class RunManager {
       (!!run.delegation.destroy || this.workerExecutions.isStopped(runId)));
   }
 
-  private get starting() { return this.line.starting; }
   /** Runs whose worktree a reclaim, or whose branch a delete, is removing right now
    *  (`claimWorktreeReclaim`, `claimForBranchCleanup`). `continueRun` refuses them. */
   private readonly claims: MaintenanceClaims;
   private get reclaiming(): Set<string> { return this.claims.reclaiming; }
-  // Runs parked at `waiting` (open session, ball in the user's court). They
-  // don't consume a `maxParallel` slot (#347) — an idle claude process costs
-  // memory but no tokens, queued work progressing matters more, and the idle
-  // timeout already bounds how long a session can sit open. Invariant:
-  // `waiting ⊆ active` — always cleared together via dropActive().
-  private get waiting() { return this.line.waiting; }
-  /** Durable monitoring subset. Only the configured number receives the waiting-slot exemption. */
-  private get monitoring() { return this.line.monitoring; }
-  /** A run whose resolved waits wait for a wake (hearsay-tools/cezarion#1233). Separate from
-   *  human waiting: these resumes MUST reacquire scheduler capacity. Keyed by run id. */
-  private get waitWakeQueuedAt() { return this.line.waitWakeQueuedAt; }
-  private get waitWakeAdmitted() { return this.line.waitWakeAdmitted; }
   private readonly wakeAdmission: WakeAdmission;
   private readonly retries: WakeRetries;
   private readonly ciResources: ReturnType<typeof acquireCiResources>;
@@ -319,11 +302,6 @@ export class RunManager {
     }
     this.waitRegistry.resolvePeerWaits(runsAwaitingPeer(run, () => this.store.listRuns())); // never in recovery: an interrupted peer fails, then continues
   };
-  private get pendingJobs() { return this.line.pendingJobs; }
-  /** Interrupted agent turns recovered after a process restart. Unlike an
-   *  explicit user Continue, these are bulk scheduler work and must re-enter
-   *  through `pump()` so both workspace and per-project caps are honored. */
-  private get pendingContinuations() { return this.line.pendingContinuations; }
   private readonly continuationAcceptance: ContinuationAcceptance;
   private readonly turnSettler: TurnSettler;
   private readonly inputDelivery: InputDelivery;
@@ -457,7 +435,7 @@ export class RunManager {
       resumeParkedRun: (...args) => this.resumeParkedRun(...args),
       noteNoWaitNudgeContent: (...args) => this.noteNoWaitNudgeContent(...args),
       parkedOnWorkers: id => this.wakeAdmission.parkedOnWorkers(id),
-      releaseSlot: () => this.releaseSlot(),
+      releaseSlot: () => this.line.releaseSlot(),
       routeWorkerQuestion: id => this.routeWorkerQuestion(id),
     };
     this.turnNudges = new TurnNudges(this.context, this.humanWaits, this.line, this.completionGateHost, {
@@ -472,7 +450,7 @@ export class RunManager {
     }, MAX_AUTO_CONTINUES, COMPLETION_WILL_WAIT);
     this.worktreeAutosave = new WorktreeAutosave(this.context,
       { holdForMaintenance: ids => this.holdForMaintenance(ids),
-        reapTerminalScratch: id => this.reapTerminalScratch(id), releaseSlot: () => this.releaseSlot(),
+        reapTerminalScratch: id => this.reapTerminalScratch(id), releaseSlot: () => this.line.releaseSlot(),
         saveWorktree: (id, state, reason) => this.saveWorktree(id, state, reason),
         trackTurn: (id, task) => this.workerExecutions.trackTurn(id, task) },
     );
@@ -487,7 +465,7 @@ export class RunManager {
         admissionError: message => new WorkerOrphanAliveError(message),
         settleOrphanedWorkerExecution: (id, opts) => this.settleOrphanedWorkerExecution(id, opts),
         reapTerminalScratch: id => this.reapTerminalScratch(id), queueWaitWake: id => this.wakeAdmission.queueWaitWake(id),
-        retryWaitAdmission: id => this.retries.retryWaitAdmission(id), releaseSlot: () => this.releaseSlot() },
+        retryWaitAdmission: id => this.retries.retryWaitAdmission(id), releaseSlot: () => this.line.releaseSlot() },
     );
     this.automationToolsSlot = new AutomationToolsSlot(this.context,
       () => !!this.cockpit,
@@ -515,13 +493,13 @@ export class RunManager {
         reconcileWorkerWaits: () => this.reconcileWorkerWaits(), retireEmptyWake: id => this.wakeAdmission.retireEmptyWake(id),
         deliverConversationInput: id => this.deliverConversationInput(id),
         settleIdleBoundary: (id, state, session) => this.inputDelivery.settleIdleBoundary(id, state, session),
-        releaseSlot: () => this.releaseSlot(), providerOwnsInboxInput: (id, inputId) => this.providerOwnsInboxInput(id, inputId),
+        releaseSlot: () => this.line.releaseSlot(), providerOwnsInboxInput: (id, inputId) => this.providerOwnsInboxInput(id, inputId),
         canClaimInboxInput: (id, inputId) => this.canClaimInboxInput(id, inputId),
         armInboxClaimExpiry: id => this.armInboxClaimExpiry(id) },
     );
     this.repoRootLease = new RepoRootLease(this.context,
       { park: id => { this.line.park(id); }, unpark: id => { this.line.unpark(id); },
-        releaseSlot: () => this.releaseSlot() },
+        releaseSlot: () => this.line.releaseSlot() },
     );
     this.turnBookkeeper = new TurnBookkeeper(this.context,
       { isDisposedDelegatedRun: id => this.isDisposedDelegatedRun(id), discoverSkills: () => this.discoverSkills(),
@@ -575,7 +553,7 @@ export class RunManager {
       inboxClaims: this.inboxClaims, workerQuestions: this.workerQuestions, humanWaits: this.humanWaits,
       isActive: id => this.isActive(id), move: (id, exit) => this.move(id, exit), recoveringRun: run => this.recoveringRun(run),
       continueRun: (id, opts, defer) => this.continueRun(id, opts, defer), disarmWait: id => this.disarmWait(id),
-      reconcileWorkerWaits: id => this.reconcileWorkerWaits(id), releaseSlot: () => this.releaseSlot(),
+      reconcileWorkerWaits: id => this.reconcileWorkerWaits(id), releaseSlot: () => this.line.releaseSlot(),
       parkForUser: (id, state, step) => this.parkForUser(id, state, step), armIdleTimer: (id, state) => this.armIdleTimer(id, state),
       flushAgentInputs: id => this.flushAgentInputs(id), answerRoutedQuestion: (id, flush) => this.answerRoutedQuestion(id, flush),
       queueWaitWake: id => this.wakeAdmission.queueWaitWake(id), retryWaitAdmission: id => this.retries.retryWaitAdmission(id),
@@ -604,7 +582,7 @@ export class RunManager {
         closingWakeDecision: (id, holds, cancelled, error) => this.wakeAdmission.closingWakeDecision(id, holds, cancelled, error),
         owesDelivery: id => this.wakeAdmission.owesDelivery(id), preserveRunAfterDisposal: (id, state) => this.preserveRunAfterDisposal(id, state),
         isDisposedDelegatedRun: id => this.isDisposedDelegatedRun(id), queueWaitWake: id => this.wakeAdmission.queueWaitWake(id),
-        reconcileWorkerWaits: id => this.reconcileWorkerWaits(id), releaseSlot: () => this.releaseSlot(),
+        reconcileWorkerWaits: id => this.reconcileWorkerWaits(id), releaseSlot: () => this.line.releaseSlot(),
         enforceRetention: () => this.enforceRetention(), reapTerminalScratch: id => this.reapTerminalScratch(id),
         forgetMemoryPause: id => { this.memoryPausing.delete(id); },
       }, WAKE_SESSION_CLOSED_ERROR, WAKE_DELIVERY_CAP_NOTE);
@@ -636,7 +614,7 @@ export class RunManager {
     this.turnSettler = new TurnSettler(this.context, {
       humanWaits: this.humanWaits, line: this.line, waitWatches: this.waitWatches, waitRegistry: this.waitRegistry,
       workerQuestions: this.workerQuestions, completionGateHost: this.completionGateHost,
-      move: (id, exit) => this.move(id, exit), releaseSlot: () => this.releaseSlot(), completionGate: id => this.completionGate(id),
+      move: (id, exit) => this.move(id, exit), releaseSlot: () => this.line.releaseSlot(), completionGate: id => this.completionGate(id),
       cancelOpenWaits: id => this.wakeAdmission.cancelOpenWaits(id), countAutomaticWakes: id => this.wakeAdmission.automaticWakes(id),
       workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
       submitAgentInput: (id, state, content) => this.submitAgentInput(id, state, content), flushAgentInputs: id => this.flushAgentInputs(id),
@@ -1072,18 +1050,6 @@ export class RunManager {
   private oldestQueuedAt(): number | null { return this.line.oldestQueuedAt(); }
   private oldestWakeAt(): number | null { return this.line.oldestWakeAt(); }
 
-  /**
-   * A slot this manager held just came free. Pump the whole WORKSPACE, not
-   * just this manager: `maxParallel` is counted across every project, so the
-   * run that should take the slot is the workspace's oldest queued one — which
-   * usually sits in another project's queue. Pumping only `this` is what left
-   * a queued run in project B stuck at `queued` while project A's runs came
-   * and went. `release()` pumps this manager too, so it replaces the local
-   * `pump()` at every slot-freeing transition.
-   */
-  private releaseSlot(): void {
-    void this.semaphore.release();
-  }
 
   private async pump(): Promise<void> { return this.line.pump(); }
 
@@ -1407,7 +1373,7 @@ export class RunManager {
       this.clearIdleTimer(state);
       this.line.leavePool(runId); this.line.park(runId);
       if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
-      this.releaseSlot();
+      this.line.releaseSlot();
     }
     return 'held';
   }

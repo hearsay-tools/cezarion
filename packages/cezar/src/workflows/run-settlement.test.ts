@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { makeTimerWait, RUN_STATUS, STEP_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -122,14 +123,14 @@ describe('successful run settlement (#473)', () => {
       agentInputs: [{ id: randomUUID(), parentRunId: run.id, source: 'lifecycle', text: 'pending', createdAt: now }],
     });
     held.waits = [makeTimerWait({ id: randomUUID(), registeredAt: now, deadline: new Date(Date.now() + 60_000).toISOString() })];
-    const internal = manager as unknown as { dropActive(id: string): void; releaseSlot(): void; line: { hasWake(id: string): boolean } };
+    const line = runInternals(manager).line;
     const snapshots: Array<{ resume: string | undefined; wake: boolean }> = [];
-    const release = internal.releaseSlot.bind(manager);
-    vi.spyOn(internal, 'releaseSlot').mockImplementation(() => {
-      snapshots.push({ resume: store.getRun(run.id)?.autoResumeAt, wake: internal.line.hasWake(run.id) });
+    const release = line.releaseSlot.bind(line);
+    vi.spyOn(line, 'releaseSlot').mockImplementation(() => {
+      snapshots.push({ resume: store.getRun(run.id)?.autoResumeAt, wake: line.hasWake(run.id) });
       release();
     });
-    internal.dropActive(run.id);
+    manager['dropActive'](run.id);
     expect(snapshots).toHaveLength(1);
     expect(snapshots[0]).toEqual({ resume: expect.any(String), wake: false });
     expect(store.getRun(run.id)?.status).toBe('waiting');

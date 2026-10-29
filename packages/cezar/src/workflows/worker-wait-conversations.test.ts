@@ -117,7 +117,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
 
   it('inbox ACK of progress preserves a parked worker wait and its terminal wake', async () => {
     const f = await conversationPair();
-    const engine = manager as unknown as { pump(): Promise<void>; queue: string[] };
+    const engine = manager as unknown as { pump(): Promise<void>;};
     // The wait opens on a parked worker, which sends its park notice (hearsay-tools/cezarion#1327).
     // The parent takes it and parks again before the progress this test acknowledges.
     const turns = turnEnds(f.p.id);
@@ -133,7 +133,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       const claim = manager.reserveInboxInputs(f.p.id, generation, [id])!;
       expect(manager.acknowledgeInbox(f.p.id, generation, claim.receiptId)).toBe('acknowledged');
       expect(waitOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, phase: 'parked', deadline: wait.deadline });
-      expect(engine.queue).not.toContain(f.p.id);
+      expect(runInternals(manager).line.queue).not.toContain(f.p.id);
       expect(semaphore.busy()).toBe(0);
       pump.mockRestore();
       expect(manager.finish(f.w.id)).toBe(true);
@@ -411,18 +411,18 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
   // hearsay-tools/cezarion#1235: the message wake is the wait list's admission, not a stand-in wait.
   it.each(['queued', 'admitted'] as const)('inbox ACK retires an unsubmitted message wake (%s) without resolving the request', async mode => {
     const f = await conversationPair();
-    const engine = manager as unknown as { pump(): Promise<void>; queue: string[]; waitWakeQueuedAt: Map<string, number>;
-      active: Map<string, { session: AgentSession }>; waitWakeAdmitted: Set<string> };
+    const engine = manager as unknown as { pump(): Promise<void>;
+      active: Map<string, { session: AgentSession }> };
     const pump = vi.spyOn(engine, 'pump').mockResolvedValue();
     const send = vi.spyOn(engine.active.get(f.p.id)!.session, 'sendAgentMessage');
     try {
       const first = randomUUID();
       await f.service.send(f.workerCaller, { id: first, recipientRunId: f.p.id, kind: 'request', text: 'Unanswered request mock:hold', timeoutSeconds: 600 });
       expect(waitOf(store.getRun(f.p.id))).toBeUndefined();
-      expect(engine.queue).toContain(f.p.id);
+      expect(runInternals(manager).line.queue).toContain(f.p.id);
       if (mode === 'admitted') {
         send.mockReturnValue(false); pump.mockRestore(); await engine.pump();
-        expect(engine.waitWakeAdmitted.has(f.p.id)).toBe(true);
+        expect(runInternals(manager).line.waitWakeAdmitted.has(f.p.id)).toBe(true);
       }
       const before = store.getRun(f.p.id)?.delegation;
       const beforeOutcomes = before?.role === 'root' ? before.conversation?.outcomes : undefined;
@@ -434,13 +434,13 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       if (mode === 'queued') {
         // The claimed message owes no wake: the queued one is dropped rather than admitted.
         expect(semaphore.busy()).toBe(0);
-        expect(engine.queue).not.toContain(f.p.id);
+        expect(runInternals(manager).line.queue).not.toContain(f.p.id);
       }
       expect(manager.acknowledgeInbox(f.p.id, generation, receipt.receiptId)).toBe('acknowledged');
       expect(waitOf(store.getRun(f.p.id))).toBeUndefined();
-      expect(engine.queue).not.toContain(f.p.id);
-      expect(engine.waitWakeQueuedAt.has(f.p.id)).toBe(false);
-      expect(engine.waitWakeAdmitted.has(f.p.id)).toBe(false);
+      expect(runInternals(manager).line.queue).not.toContain(f.p.id);
+      expect(runInternals(manager).line.waitWakeQueuedAt.has(f.p.id)).toBe(false);
+      expect(runInternals(manager).line.waitWakeAdmitted.has(f.p.id)).toBe(false);
       expect(semaphore.busy()).toBe(0);
       const after = store.getRun(f.p.id)?.delegation;
       expect(after?.role === 'root' ? after.conversation?.outcomes : undefined).toEqual(beforeOutcomes);
@@ -450,7 +450,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
 
   it('a claimed message cannot interrupt a registered wait or acquire a wake admission', async () => {
     const f = await conversationPair();
-    const engine = manager as unknown as { pump(): Promise<void>; queue: string[] };
+    const engine = manager as unknown as { pump(): Promise<void>;};
     const pump = vi.spyOn(engine, 'pump').mockResolvedValue();
     try {
       const request = randomUUID();
@@ -462,11 +462,11 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       const generation = randomUUID(); const receipt = manager.reserveInboxInputs(f.p.id, generation, [incoming.id])!;
       manager.reconcileWorkerWaits();
       expect(waitOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, phase: 'parked' });
-      expect(engine.queue).not.toContain(f.p.id);
+      expect(runInternals(manager).line.queue).not.toContain(f.p.id);
       expect(manager.releaseInbox(f.p.id, generation, receipt.receiptId)).toBe('released');
       // hearsay-tools/cezarion#1235: the released message wakes the run on its own; the wait stays open.
       expect(waitOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, phase: 'parked' });
-      expect(engine.queue).toContain(f.p.id);
+      expect(runInternals(manager).line.queue).toContain(f.p.id);
     } finally { pump.mockRestore(); f.close(); }
   });
 

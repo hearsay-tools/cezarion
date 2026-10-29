@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -144,7 +145,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     expect(state.idleTimer).toBeDefined();
     expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
     expect(store.getRun(id)?.status).toBe('running');
-    expect(manager['waiting'].has(id)).toBe(false);
+    expect(runInternals(manager).line.waiting.has(id)).toBe(false);
     manager['handleAgentInputReady'](id, state, session);
     expect(session.sendAgentMessage).toHaveBeenLastCalledWith([{ type: 'text', text: AUTONOMOUS_NUDGE }], []);
     expect(state.autonomousNudgePending).toBeUndefined();

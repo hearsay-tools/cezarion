@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -258,9 +259,9 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     expect(p.store.getRun(id)?.status).toBe('queued');
     expect(p.store.getRun(id)?.steps.find(step => step.id === stepId)?.status).toBe('pending');
     // Held in the queue for the Finish, with no session state left behind.
-    const engine = p.manager as unknown as { active: Map<string, unknown>; queue: string[] };
+    const engine = p.manager as unknown as { active: Map<string, unknown>;};
     expect(engine.active.has(id)).toBe(false);
-    expect(engine.queue).toContain(id);
+    expect(runInternals(p.manager).line.queue).toContain(id);
   });
 
   // hearsay-tools/cezarion#1632: a run whose execution stops during setup (here an invalid

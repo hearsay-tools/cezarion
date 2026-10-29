@@ -112,10 +112,10 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
   it('stop in starting-before-ActiveRun waits for startup finalization and prevents launch', async () => {
     const w = await worker(); const hold = gate(); releases.push(hold.release);
-    const engine = manager as unknown as { execute(...args: unknown[]): Promise<unknown>; starting: Set<string> };
+    const engine = manager as unknown as { execute(...args: unknown[]): Promise<unknown>;};
     const real = engine.execute.bind(manager);
     engine.execute = async (...args) => { await hold.promise; return real(...args); };
-    manager.enqueueOwnedRun(w.id); await until(() => engine.starting.has(w.id));
+    manager.enqueueOwnedRun(w.id); await until(() => runInternals(manager).line.starting.has(w.id));
     expect(store.readWorkerExecution(w.id)).toMatchObject({ phase: 'starting' });
     expect(existsSync(workspace(w).path)).toBe(false);
     destroy(w); expect(manager.requestWorkerStop(w.id).state).toBe('stopping');
@@ -473,9 +473,9 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     store.commitRootFinishCancellation(parent.id);
     store.updateRun(parent.id, { status: 'waiting' });
     const another = await worker(); const hold = gate(); releases.push(hold.release);
-    const engine = manager as unknown as { execute(...args: unknown[]): Promise<unknown>; starting: Set<string> };
+    const engine = manager as unknown as { execute(...args: unknown[]): Promise<unknown>;};
     const real = engine.execute.bind(manager); engine.execute = async (...args) => { await hold.promise; return real(...args); };
-    manager.enqueueOwnedRun(another.id); await until(() => engine.starting.has(another.id));
+    manager.enqueueOwnedRun(another.id); await until(() => runInternals(manager).line.starting.has(another.id));
     destroy(another);
     expect(manager.deferMessage(another.id, [{ type: 'text', text: 'new work' }])).toBe(false);
     manager.requestWorkerStop(another.id); hold.release(); expect(await manager.awaitRunTermination(another.id, 15_000)).toBe(true);

@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -54,7 +55,7 @@ describe('the completion gate outside a turn end', () => {
     setup();
     expect(manager['deferParentCompletion'](id)).toBe(true);
     expect(store.getRun(id)?.status).toBe('running');
-    expect(manager['waiting'].has(id)).toBe(false);
+    expect(runInternals(manager).line.waiting.has(id)).toBe(false);
     expect(sent()).toBe(0);
   });
 
@@ -64,7 +65,7 @@ describe('the completion gate outside a turn end', () => {
     expect(manager['deferParentCompletion'](id)).toBe(true);
     expect(sent()).toBe(1);
     expect(store.getRun(id)?.status).toBe('running');
-    expect(manager['waiting'].has(id)).toBe(false);
+    expect(runInternals(manager).line.waiting.has(id)).toBe(false);
   });
 
   it('at the boundary, an open agent wait parks the run', () => {
@@ -90,7 +91,7 @@ describe('the completion gate outside a turn end', () => {
   it('at the boundary, a second refusal keeps the park the first one made and frees no second slot', () => {
     state.atTurnBoundary = session;
     openWorkerWait();
-    const release = vi.spyOn(manager as unknown as { releaseSlot: () => void }, 'releaseSlot');
+    const release = vi.spyOn(runInternals(manager).line, 'releaseSlot');
     expect(manager['deferParentCompletion'](id)).toBe(true);
     expect(manager['deferParentCompletion'](id)).toBe(true);
     expect(release).toHaveBeenCalledOnce();
