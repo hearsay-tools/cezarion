@@ -23,3 +23,8 @@ export function canProceedWithRun(
 ): run is RunRecord {
   return !(!run || run.stopping || workerExecutionStopped() || executionBlockedByRootFinish(run));
 }
+
+/** The delegation family a run belongs to, by its root's id: a worker's parent, else itself. */
+export function familyOf(run: RunRecord): string {
+  return run.delegation?.role === 'worker' ? run.delegation.parentRunId : run.id;
+}
