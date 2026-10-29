@@ -89,7 +89,6 @@ import type { AskRequest } from '../core/ask.ts';
 import { type AgentSession } from '../core/claude-cli-runner.ts';
 import { onUsage, replaceRunProcess, type ProcessUsage } from '../core/process-usage.ts';
 import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
-import { ORPHAN_BACKOFF, type Backoff } from '../delegation/retry-backoff.ts';
 import { type CwdSource } from '../delegation/process-liveness.ts';
 import { parseUsageLimit } from '../core/usage-limit.ts';
 import type { RunnerId } from '../core/agent-runner.ts';
@@ -194,9 +193,9 @@ export class RunManager {
     noteActivity: (id, state, event) => this.turnNudges.noteNoWaitNudgeContent(id, state, event),
     persistAttachment: (id, mediaType, data) => this.attachments.persistAttachment(id, mediaType, data),
     ready: (id, state, session) => this.inputDelivery.handleAgentInputReady(id, state, session),
-    pid: (id, pid) => { replaceRunProcess(id, pid); this.recordWorkerProcess(id, pid); },
+    pid: (id, pid) => { replaceRunProcess(id, pid); this.workerExecutions.recordWorkerProcess(id, pid); },
     ui: (id, state, sink, event) => this.handleRunnerUiEvent(id, state, sink, event),
-    flushDeferred: id => this.queuedInput.flushDeferred(id), recordProcess: (id, pid) => this.recordWorkerProcess(id, pid),
+    flushDeferred: id => this.queuedInput.flushDeferred(id), recordProcess: (id, pid) => this.workerExecutions.recordWorkerProcess(id, pid),
   };
   private readonly inputReceiptHost: inputReceipts.InputReceiptsHost = {
     reconcileWorkerWaits: () => this.reconcileWorkerWaits(),
@@ -206,19 +205,9 @@ export class RunManager {
   private readonly line: RunLine;
   private readonly worktreeAutosave: WorktreeAutosave;
   private readonly workerExecutions: WorkerExecutions;
-  private get executions() { return this.workerExecutions.executions; }
-  private beginWorkerExecution(id: string, admitted = true) { this.workerExecutions.beginWorkerExecution(id, admitted); }
-  private async finishWorkerExecution(id: string) { return this.workerExecutions.finishWorkerExecution(id); }
-  private trackWorkerSessionResult(id: string, session: AgentSession) { return this.workerExecutions.trackWorkerSessionResult(id, session); }
-  private recordWorkerProcess(id: string, pid: number) { this.workerExecutions.recordWorkerProcess(id, pid); }
 
   private readonly orphans: WorkerOrphans;
-  private orphanBackoff: Backoff = ORPHAN_BACKOFF;
-  private orphanTermGraceMs = 10_000;
-  private get orphanDue() { return this.orphans.orphanDue; }
-  private orphanedWorkerGeneration(runId: string, admitting = false) { return this.orphans.orphanedWorkerGeneration(runId, admitting); }
   settleOrphanedWorkerExecution(runId: string, opts: { admitting?: boolean; fresh?: boolean; cwds?: CwdSource } = {}): boolean { return this.orphans.settleOrphanedWorkerExecution(runId, opts); }
-  private armOrphanReprobe(runId: string): void { this.orphans.armOrphanReprobe(runId); }
   takeWorkerTerminationBlocker(runId: string): { blocker: WorkerTerminationBlocker; changed: boolean } | undefined { return this.orphans.takeWorkerTerminationBlocker(runId); }
   private async terminateFinishedWorkerGroups(runId: string, timeoutMs: number): Promise<void> { return this.orphans.terminateFinishedWorkerGroups(runId, timeoutMs); }
 
@@ -362,7 +351,7 @@ export class RunManager {
       admitted: id => this.workerExecutions.admitted(id), workerExecutionStopped: id => this.workerExecutionStopped(id),
       recovering: () => this.recovering, recoveringRun: run => this.recoveringRun(run),
       reconcileAutoResumes: () => this.reconcileAutoResumes(), cancel: id => this.cancel(id),
-      move: (id, patch) => this.move(id, 'fail-start', patch), beginWorkerExecution: id => this.beginWorkerExecution(id),
+      move: (id, patch) => this.move(id, 'fail-start', patch), beginWorkerExecution: id => this.workerExecutions.beginWorkerExecution(id),
       admissionError: (error, fallback) => admissionError(error, fallback),
       admitQueuedWaitWake: id => this.wakeAdmission.admitQueuedWaitWake(id),
       launchQueuedRun: (id, job, continuation) => this.launchQueuedRun(id, job, continuation),
@@ -443,8 +432,7 @@ export class RunManager {
     this.orphans = new WorkerOrphans(this.context,
       { holds: (id, admitting) => this.workerExecutions.has(id) || this.active.has(id) || this.line.hasStarting(id) || (!admitting && this.line.hasQueued(id)),
         reapTerminalScratch: id => this.reapTerminalScratch(id),
-        settleOrphanedWorkerExecution: (id, opts) => this.settleOrphanedWorkerExecution(id, opts),
-        orphanBackoff: () => this.orphanBackoff, orphanTermGraceMs: () => this.orphanTermGraceMs },
+        settleOrphanedWorkerExecution: (id, opts) => this.settleOrphanedWorkerExecution(id, opts) },
     );
     this.workerExecutions = new WorkerExecutions(this.context, this.orphans,
       { maintenance: id => this.claims.has(id) || !!this.autosaveCleanupBlocker(id),
@@ -498,7 +486,7 @@ export class RunManager {
     this.stepSession = new StepSession(this.context, {
       workerExecutionStopped: id => this.workerExecutionStopped(id),
       executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
-      trackWorkerSessionResult: (...args) => this.trackWorkerSessionResult(...args),
+      trackWorkerSessionResult: (...args) => this.workerExecutions.trackWorkerSessionResult(...args),
       workerStep: (...args) => this.workerStep(...args),
       beginUsageInvocation: (...args) => this.beginUsageInvocation(...args),
       recordUsagePeaks: id => this.recordUsagePeaks(id),
@@ -549,7 +537,7 @@ export class RunManager {
     this.continuationAcceptance = new ContinuationAcceptance(this.context, {
       isActive: id => this.isActive(id), move: (id, exit, patch) => this.move(id, exit, patch),
       ownedJob: run => this.ownedJob(run), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
-      finishWorkerExecution: id => this.finishWorkerExecution(id), clearWakeBackoff: id => this.retries.clearWakeBackoff(id),
+      finishWorkerExecution: id => this.workerExecutions.finishWorkerExecution(id), clearWakeBackoff: id => this.retries.clearWakeBackoff(id),
       dropActive: id => this.dropActive(id), pump: () => this.line.pump(),
       runContinuation: (...args) => this.runContinuation(...args), workerStep: (id, step) => this.workerStep(id, step),
       isUntouchedCancelledRun: run => isUntouchedCancelledRun(run), admissionError: (error, fallback) => admissionError(error, fallback),
@@ -576,7 +564,7 @@ export class RunManager {
       move: (...args) => this.move(...args), dropActive: id => this.dropActive(id),
       isSyntheticContinuation: (run, step) => isSyntheticContinuation(run, step),
       beginUsageInvocation: (...args) => this.beginUsageInvocation(...args),
-      trackWorkerSessionResult: (...args) => this.trackWorkerSessionResult(...args),
+      trackWorkerSessionResult: (...args) => this.workerExecutions.trackWorkerSessionResult(...args),
       recordUsagePeaks: id => this.recordUsagePeaks(id),
       saveWorktree: (...args) => this.saveWorktree(...args), pump: () => this.line.pump(),
       makeUiSink: (...args) => this.makeUiSink(...args),
@@ -1048,7 +1036,7 @@ export class RunManager {
           hydrated.persistedAttachments,
         ));
       })().catch((err: unknown) => this.failCrashedContinuation(runId, err))
-        .finally(() => this.finishWorkerExecution(runId));
+        .finally(() => this.workerExecutions.finishWorkerExecution(runId));
       return;
     }
     if (!job) return;
@@ -1072,7 +1060,7 @@ export class RunManager {
       }
       this.line.unmarkStarting(runId);
       this.dropActive(runId);
-    }).finally(() => this.finishWorkerExecution(runId));
+    }).finally(() => this.workerExecutions.finishWorkerExecution(runId));
   }
 
   private async reviveQueuedRun(run: RunRecord, reason: string): Promise<void> { return queuedRevival.reviveQueuedRun(this.context, this.queuedRevivalHost, run, reason); }
@@ -1248,7 +1236,7 @@ export class RunManager {
     this.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
     this.store.appendEvent(runId, { type: 'lifecycle', message: 'cancelled while queued' });
     this.store.flush();
-    if (this.workerExecutions.admitted(runId) === false) void this.finishWorkerExecution(runId);
+    if (this.workerExecutions.admitted(runId) === false) void this.workerExecutions.finishWorkerExecution(runId);
   }
 
   private cancelRunWithoutSession(runId: string, hadWaits: boolean, retiredRefusal: boolean, cancelledFinish: boolean): boolean {

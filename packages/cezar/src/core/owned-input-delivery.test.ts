@@ -124,7 +124,7 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
           text: 'mock:agent-echo delay-owned-ack stopped', createdAt: new Date().toISOString() };
         expect(manager.steerWorker(runId, input)).toBe('queued');
         await waitFor(() => store.readEvents(runId).some(event => event.type === 'text' && String(event.text).includes('stopped')));
-        const internals = manager as unknown as { active: Map<string, { session: import('./agent-runner.ts').AgentSession; agentInputFlight?: { settled?: Promise<void> } }>; executions: Map<string, unknown> };
+        const internals = runInternals(manager);
         const state = internals.active.get(runId)!;
         const session = state.session;
         const settled = state.agentInputFlight?.settled;
@@ -146,7 +146,7 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
         } finally {
           session.interrupt();
           await session.result.catch(() => undefined);
-          await waitFor(() => !internals.executions.has(runId));
+          await waitFor(() => !internals.workerExecutions.executions.has(runId));
         }
       });
     });

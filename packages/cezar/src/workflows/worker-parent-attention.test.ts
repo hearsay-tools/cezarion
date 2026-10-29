@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
@@ -154,7 +155,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
       // Hold that proof the way a loaded host delays it (hearsay-tools/cezarion#1113: the
       // gate read `parked` right after the worker reached `done`).
       let releaseExit!: () => void;
-      (manager as unknown as { executions: Map<string, { deliveries: Set<Promise<void>> }> }).executions.get(w.id)!
+      runInternals(manager).workerExecutions.executions.get(w.id)!
         .deliveries.add(new Promise<void>(resolve => { releaseExit = resolve; }));
       manager.finish(w.id);
       try {
