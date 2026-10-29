@@ -1,4 +1,5 @@
 import { AttachmentWriter } from './run/attachment-writer.ts';
+import { RepoRootLease } from './run/repo-root-lease.ts';
 import { MaintenanceClaims } from './run/maintenance-claims.ts';
 import type {
   DelegationExecutionSettings, StartRunInput, PendingContinuation, ExecutionEmit,
@@ -876,13 +877,7 @@ export class RunManager {
   /** A pump that arrived while one was in flight — replayed by `pump()`'s own
    *  loop so a slot freed mid-sweep is never a lost wakeup. */
   private pumpAgain = false;
-  /**
-   * Runs normally isolate in worktrees and may execute in parallel. When that
-   * isolation is unavailable (or explicitly disabled), access to `repoRoot` is
-   * serialized by default so two agents cannot edit/revert the same files
-   * (#438). `CEZ_DISABLE_REPO_LOCK=1` deliberately bypasses this safety lease.
-   */
-  private repoRootTail: Promise<void> = Promise.resolve();
+  private readonly repoRootLease: RepoRootLease;
 
   /** `.ai/cezar` — where the per-task handoff files live. */
   private readonly dataDir: string;
@@ -937,6 +932,11 @@ export class RunManager {
     this.attachments = new AttachmentWriter(
       { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
       { persistAttachment: (id, mediaType, data, prefix) => this.persistAttachment(id, mediaType, data, prefix) },
+    );
+    this.repoRootLease = new RepoRootLease(
+      { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
+      { park: id => { this.waiting.add(id); }, unpark: id => { this.waiting.delete(id); },
+        releaseSlot: () => this.releaseSlot() },
     );
     this.ciResources = acquireCiResources(this.semaphore);
     this.ciSupervisor = this.ciResources.supervisor;
@@ -3651,46 +3651,8 @@ export class RunManager {
   /** Last live-refresh namer inputs per run — unchanged inputs skip the call. */
   private lastNamerKey = new Map<string, string>();
 
-  /**
-   * Acquire the exclusive repository-root lease. A waiter releases scheduling capacity but stays
-   * running in the store. Hold the lease across idle turns; false means cancellation before
-   * acquisition and forbids tree access.
-   */
   private async acquireRepoRoot(runId: string, state: ActiveRun): Promise<boolean> {
-    // `cancel()` can land between the run going `running` and reaching here,
-    // while `interrupt` is still the default no-op — never enter the chain.
-    if (state.cancelled) return false;
-    const previous = this.repoRootTail;
-    let release: () => void = () => undefined;
-    this.repoRootTail = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    // Until `previous` resolves this run does not own the tree yet, so a drop
-    // during the wait must not hand the tree to the next waiter — chain our
-    // release behind `previous` instead of resolving the tail early.
-    state.releaseRepoRoot = () => {
-      void previous.then(release);
-    };
-    let abort: () => void = () => undefined;
-    const cancelled = new Promise<void>((resolve) => {
-      abort = resolve;
-    });
-    const parked = state.interrupt;
-    state.interrupt = () => {
-      parked();
-      abort();
-    };
-    this.waiting.add(runId);
-    this.releaseSlot();
-    try {
-      await Promise.race([previous, cancelled]);
-    } finally {
-      state.interrupt = parked;
-      this.waiting.delete(runId);
-    }
-    if (state.cancelled) return false;
-    state.releaseRepoRoot = release;
-    return true;
+    return this.repoRootLease.acquireRepoRoot(runId, state);
   }
 
   cancel(runId: string): boolean {
