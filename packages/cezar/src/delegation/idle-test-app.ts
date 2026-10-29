@@ -4,7 +4,7 @@ import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as delay } from 'node:timers/promises';
-import { processStartToken, stopGroup } from '../detached-process.ts';
+import { processStartToken, stopGroup, leaseIdentity, leaseGroupLive, reclaimTestEnvHolders } from '../detached-process.ts';
 import { inspectGeneration } from './process-liveness.ts';
 import { windowsStartToken, windowsTestAppHolds } from './windows-test-app.ts';
 
@@ -18,13 +18,13 @@ function present(path: string): boolean {
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
 }
 
-function claimIdle(db: DatabaseSync, start: string): string | undefined {
+function claimIdle(db: DatabaseSync, start: string, blocked: (holders: ReturnType<typeof reclaimTestEnvHolders>) => void): string | undefined {
   db.exec('PRAGMA busy_timeout=1000'); db.exec('BEGIN IMMEDIATE');
   try {
-    // Keep even stale or unreadable holders: only the lease owner may reclaim them.
-    if (db.prepare('SELECT 1 FROM holders LIMIT 1').get()) { db.exec('COMMIT'); return undefined; }
+    const holders = reclaimTestEnvHolders(db, leaseIdentity, leaseGroupLive);
+    if (holders.length) { blocked(holders); db.exec('COMMIT'); return undefined; }
     const claim = `destroy-${randomUUID()}`;
-    db.prepare('INSERT INTO holders (id, token, pid, start, pgid) VALUES (?, ?, ?, ?, NULL)').run(claim, randomUUID(), process.pid, start);
+    db.prepare('INSERT INTO holders (id, token, pid, start) VALUES (?, ?, ?, ?)').run(claim, randomUUID(), process.pid, start);
     db.exec('COMMIT'); return claim;
   } catch (error) { db.exec('ROLLBACK'); throw error; }
 }
@@ -32,7 +32,10 @@ function claimIdle(db: DatabaseSync, start: string): string | undefined {
 function readApp(root: string) {
   const qa = join(root, '.ai/qa'); const database = join(qa, 'test-env-lease.sqlite');
   const descriptor = join(qa, 'test-env.json');
-  if (!existsSync(database) || !samePath(realpathSync(qa), qa) || !samePath(realpathSync(database), database) || !samePath(realpathSync(descriptor), descriptor)) return undefined;
+  if (!existsSync(database) || !samePath(realpathSync(qa), qa) || !samePath(realpathSync(database), database)) return undefined;
+  // Windows has no cwd-holder scan to exclude a surviving descriptor-less app.
+  if (!present(descriptor)) return process.platform === 'win32' ? undefined : { app: undefined, pid: null, start: null, database, descriptor };
+  if (!samePath(realpathSync(descriptor), descriptor)) return undefined;
   const app = JSON.parse(readFileSync(descriptor, 'utf8'));
   if (app?.startedByThisRepo !== true) return undefined;
   const pid = app.app?.pid; const start = app.app?.start;
@@ -67,8 +70,10 @@ async function stopOwnedApp(root: string, entry: NonNullable<ReturnType<typeof r
 }
 
 /** Claim the checkout's test environment while removing it. Any uncertain state fails closed. */
-export async function withIdleTestApp<T>(root: string, remove: (stopped: boolean, busy: boolean) => Promise<T>): Promise<T> {
+export async function withIdleTestApp<T>(root: string, remove: (stopped: boolean, busy: boolean, reason?: string) => Promise<T>): Promise<T> {
   let db: DatabaseSync | undefined; let claim: string | undefined; let claimDb: string | undefined; let stopped = false;
+  const database = join(root, '.ai/qa/test-env-lease.sqlite');
+  let reason = `Test environment metadata could not be verified: ${database} or ${join(root, '.ai/qa/test-env.json')}; keep the checkout and repair the metadata before retrying destroy`;
   let busy = present(join(root, '.ai/qa/test-env.json')) || present(join(root, '.ai/qa/test-env-lease.sqlite'));
   try {
    try {
@@ -76,7 +81,10 @@ export async function withIdleTestApp<T>(root: string, remove: (stopped: boolean
     const ownStart = entry && startToken(process.pid);
     if (entry && ownStart) {
       db = new DatabaseSync(entry.database);
-      claim = claimIdle(db, ownStart);
+      claim = claimIdle(db, ownStart, holders => {
+        const summary = holders.slice(0, 8).map(holder => `pid ${holder.pid} start ${JSON.stringify(String(holder.start ?? 'unknown').slice(0, 128))} group ${JSON.stringify(String(holder.pgid ?? 'none').slice(0, 128))}`).join(', ');
+        reason = `Test environment lease ${entry.database} is held by ${summary}${holders.length > 8 ? ', …' : ''}; wait for holders and their groups to exit, then retry destroy`;
+      });
       // The durable row protects the environment after closing SQLite. Keeping the file
       // open here prevents Windows from removing the checkout that contains it.
       if (claim) {
@@ -87,7 +95,7 @@ export async function withIdleTestApp<T>(root: string, remove: (stopped: boolean
       }
     }
    } catch { /* Unverifiable metadata or a failed stop must block even without a cwd scan. */ }
-   return await remove(stopped, busy);
+   return await remove(stopped, busy, busy ? reason : undefined);
   }
   finally {
     if (claim && claimDb) {

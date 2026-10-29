@@ -296,10 +296,11 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false; let lockBusy = false; let heldBy: readonly number[] = [];
   const held = (pids: readonly number[]) => { heldBy = pids; report?.held?.(pids); };
-  let stranded: string | undefined;
+  let stranded: string | undefined; let testAppBlocker: string | undefined;
   const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
     ...(remaining.length ? { error: lockBusy ? WORKTREE_LOCK_BUSY_ERROR
       : heldBy.length ? `Owned resources retained: processes ${heldBy.join(', ')} may still hold the worker worktree or scratch; retry destroy after they exit`
+      : testAppBlocker ? testAppBlocker
       : stranded ? `Owned branch ${value.branch} ${stranded}; keep what you need, delete the branch, then retry destroy`
       : 'Owned resources remain: resource identity or Git cleanup could not be verified. Check the worker worktree, Git lock and ownership receipt, then retry destroy after correcting the blocker' } : {}),
     ...(provisioned ? { deleted: [
@@ -393,7 +394,8 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         // Preview release may itself terminate a known owned holder. Check unrelated holders
         // only afterwards, immediately before destructive Git; they are never signalled.
         checkUnheld(assertUnheld);
-        const removed = await withIdleTestApp(workspace.path, async (_stopped, busy) => {
+        const removed = await withIdleTestApp(workspace.path, async (_stopped, busy, reason) => {
+          if (busy) testAppBlocker = reason;
           if (busy) { report?.unexplained?.(); return false; }
           if (!await waitForTestAppWatcher(workspace.path)) { report?.unexplained?.(); return false; }
           assertCurrent?.(); assertUnheld?.();
