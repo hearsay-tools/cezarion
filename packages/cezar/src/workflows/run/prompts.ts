@@ -76,7 +76,7 @@ export function applyTemplate(template: string, task: string): string {
  * resolves against the MAIN project root (`discoverSkills(repoRoot)`), i.e. the
  * current `npx skills`-installed copy, so a worktree agent and the main
  * checkout read the exact same, up-to-date files. A team skill's `path` is not
- * on disk: its files are materialized per run (`RunManager.provisionRunSkills`).
+ * on disk: its files are materialized per run (`RunSkills.provisionRunSkills`).
  * Inside the run's task worktree they need no pointer; a run without one, or
  * whose worktree took no copy, gets a per-commit cache copy, passed here as
  * `teamFilesDir` (#1024). A worktree that took only some of its copies passes
