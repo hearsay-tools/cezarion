@@ -36,6 +36,10 @@ it.each(['dead', 'missing-descriptor', 'reused', 'interrupted-destroy'])('claims
     .run(mode === 'interrupted-destroy' ? 'destroy-old' : 'old', 'old', mode === 'reused' ? process.pid : 2147483647, 'old-incarnation');
   try {
     await withIdleTestApp(root, async (stopped, busy) => {
+      if (mode === 'missing-descriptor' && process.platform === 'win32') {
+        expect(stopped).toBe(false); expect(busy).toBe(true);
+        expect(db.prepare('SELECT * FROM holders').all()).toEqual([]); return false;
+      }
       expect(stopped).toBe(false); expect(busy).toBe(false);
       expect(db.prepare('SELECT id FROM holders').all()).toEqual([{ id: expect.stringMatching(/^destroy-/) }]);
       // The callback sees a durable claim even though the writer handle was closed.
@@ -49,11 +53,12 @@ it.each([false, true])('completes owned worker destroy with stale lease (descrip
   const { root, workspace } = await ownedWorkspace();
   const db = lease(workspace.path, descriptor);
   db.prepare('INSERT INTO holders VALUES (?, ?, ?, ?, NULL)').run('dead', 'old', 2147483647, 'gone'); db.close();
-  expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });
+  expect(await removeOwnedWorkspace(root, workspace)).toMatchObject(!descriptor && process.platform === 'win32'
+    ? { state: 'incomplete', remaining: ['worktree', 'branch'] } : { state: 'complete', remaining: [] });
 });
 it('names a live holder and lease path when worker destroy is blocked', async () => {
   const { root, workspace } = await ownedWorkspace();
-  const db = lease(workspace.path, false);
+  const db = lease(workspace.path);
   const start = process.platform === 'win32' ? windowsStartToken(process.pid) : processStartToken(process.pid);
   db.prepare('INSERT INTO holders VALUES (?, ?, ?, ?, NULL)').run('live', 'live', process.pid, start!); db.close();
   const result = await removeOwnedWorkspace(root, workspace);

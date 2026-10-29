@@ -12,6 +12,21 @@ vi.mock('../detached-process.ts', async importOriginal => ({
 }));
 afterEach(() => { vi.unstubAllGlobals(); vi.resetAllMocks(); });
 
+it('retains a Windows environment when its app descriptor is missing', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'cez-missing-app-'));
+  try {
+    vi.stubGlobal('process', Object.create(process, { platform: { value: 'win32' } }));
+    const qa = join(root, '.ai/qa'); await mkdir(qa, { recursive: true });
+    const db = new DatabaseSync(join(qa, 'test-env-lease.sqlite'));
+    try { db.exec('CREATE TABLE holders (id TEXT PRIMARY KEY, token TEXT NOT NULL, pid INTEGER NOT NULL, start TEXT, pgid INTEGER)'); }
+    finally { db.close(); }
+    await withIdleTestApp(root, async (stopped, busy) => {
+      expect(stopped).toBe(false); expect(busy).toBe(true);
+    });
+    expect(probes.stop).not.toHaveBeenCalled();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 it.each(['unverifiable owner', 'failed stop', 'corrupt descriptor'])(
   'blocks Windows cleanup after a lease claim with %s', async reason => {
     const root = await mkdtemp(join(tmpdir(), 'cez-refused-app-'));

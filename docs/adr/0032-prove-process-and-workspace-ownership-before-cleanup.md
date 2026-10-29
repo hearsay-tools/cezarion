@@ -64,7 +64,9 @@ recorded group is absent. Unknown probes and surviving descendants retain the ro
 Supervision release also reclaims exited joined shells; it never releases the rows
 of still-live participants merely because its command leader exited.
 
-A missing descriptor with a safe lease database can be idle. Destroy claims that
+A missing descriptor with a safe lease database can be idle on POSIX. Windows
+retains the checkout because its process scans cannot exclude a surviving app
+without the descriptor. On POSIX, destroy claims that
 database before continuing, signals no app without a descriptor, and still requires
 the watcher and worktree process scans. Corrupt or unreadable metadata and redirected
 paths remain refusals. Refusals report the lease path and bounded PID/start/group
@@ -76,6 +78,6 @@ and is reclaimed after an interrupted destroy only with the same death proof.
 | Command exits normally, with an error, SIGINT or SIGTERM | Supervisor settles its child and releases its lease | Reclaims joined participants only after their incarnation and group are gone |
 | Supervisor dies before or after child start | No supervisor cleanup is assumed | Surviving joined participants keep their protection; later acquisition/destroy reclaims only proven-dead rows |
 | Dead leader leaves live or uncertain group | Last group member exits and a later probe proves absence | Retains checkout until then |
-| Descriptor missing | No signal is authorized | Validated idle lease plus watcher and process scans can permit removal |
+| Descriptor missing | No signal is authorized | POSIX: validated idle lease plus watcher and process scans can permit removal. Windows: retains checkout, including after its watcher exits |
 | Descriptor corrupt, unreadable or redirected | Human repairs metadata | Retains checkout and reports the blocker |
 | Destroy dies after claiming | Later destroy/acquisition proves its incarnation gone | Reclaims stale claim inside the next write transaction |

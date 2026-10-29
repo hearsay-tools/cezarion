@@ -33,7 +33,8 @@ function readApp(root: string) {
   const qa = join(root, '.ai/qa'); const database = join(qa, 'test-env-lease.sqlite');
   const descriptor = join(qa, 'test-env.json');
   if (!existsSync(database) || !samePath(realpathSync(qa), qa) || !samePath(realpathSync(database), database)) return undefined;
-  if (!present(descriptor)) return { app: undefined, pid: null, start: null, database, descriptor };
+  // Windows has no cwd-holder scan to exclude a surviving descriptor-less app.
+  if (!present(descriptor)) return process.platform === 'win32' ? undefined : { app: undefined, pid: null, start: null, database, descriptor };
   if (!samePath(realpathSync(descriptor), descriptor)) return undefined;
   const app = JSON.parse(readFileSync(descriptor, 'utf8'));
   if (app?.startedByThisRepo !== true) return undefined;

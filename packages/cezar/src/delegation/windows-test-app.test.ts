@@ -85,6 +85,12 @@ it.runIf(process.platform === 'win32')('stops the owned app only after its live 
       expect(app.exitCode).toBeNull(); expect(other.exitCode).toBeNull();
       db.exec('DELETE FROM holders');
     } finally { db.close(); }
+    const watcherExited = once(watcher, 'exit'); watcher.kill('SIGKILL'); await watcherExited;
+    await rm(join(qa, 'test-env.json'));
+    const missingDescriptor = await removeOwnedWorkspace(root, workspace);
+    expect(missingDescriptor, JSON.stringify(missingDescriptor)).toMatchObject({ state: 'incomplete' });
+    expect((await lstat(workspace.path)).isDirectory()).toBe(true);
+    expect(app.exitCode).toBeNull();
     await writeFile(join(qa, 'test-env.json'), descriptor(other.pid!));
     expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete' });
     expect(other.exitCode).toBeNull();
