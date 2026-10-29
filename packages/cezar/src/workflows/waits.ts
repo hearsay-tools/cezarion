@@ -1,3 +1,7 @@
+import { randomUUID } from 'node:crypto';
+import type { CezarWaitRequest, WaitVia, ProcessWaitResult, PeerWaitResult } from '@open-mercato/cezar-contract/waits';
+import type { CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
+import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import type { AgentInput, CezarWaitRequestInput, CiWait, OpenWait, PeerWaitEntry, PrWaitEntry, ProcessWaitEntry, RunRecord, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 
 /**
@@ -262,4 +266,39 @@ export function openWaitsFooter(waits: readonly Wait[], { tools }: { tools: bool
 /** An open or resolved PR wait: it holds conversation input for its own wake (#476). */
 export function hasPrWait(run: Pick<RunRecord, 'waits'>): boolean {
   return (run.waits ?? []).some((wait) => wait.kind === 'pr' && (wait.phase === 'open' || wait.phase === 'resolved'));
+}
+
+export function timerWaitEntry(parsed: Extract<CezarWaitRequest, { kind: 'timer' }>, via: WaitVia, turnId: string, now: number) {
+  const wait: TimerWaitEntry = { id: randomUUID(), kind: 'timer', source: 'agent', via, registeredAt: new Date(now).toISOString(),
+        deadline: new Date(now + parsed.seconds * 1000).toISOString(), phase: 'open', turnId, seconds: parsed.seconds,
+        ...(parsed.note === undefined ? {} : { note: parsed.note }) };
+  return wait;
+}
+
+export function prWaitEntry(identity: Awaited<ReturnType<CiWatcherSupervisor['resolve']>>, parsed: Extract<CezarWaitRequest, { kind: 'pr' }>, via: WaitVia, generation: string, turnId: string, now: number) {
+  const wait: PrWaitEntry = { ...identity, id: randomUUID(), kind: 'pr', source: 'agent', via, generation, turnId,
+        timeoutSeconds: parsed.timeout_seconds, until: parsed.until, wakeOnConflict: parsed.wake_on_conflict, registeredAt: new Date(now).toISOString(),
+        deadline: new Date(now + parsed.timeout_seconds * 1000).toISOString(), phase: 'open' };
+  return wait;
+}
+
+export function processWaitEntry(request: Extract<CezarWaitRequest, { kind: 'process' }>, via: WaitVia, turnId: string, now: number, startToken: string | undefined, exitFile: string | undefined) {
+  const wait: ProcessWaitEntry = { id: randomUUID(), kind: 'process', source: 'agent', via, registeredAt: new Date(now).toISOString(),
+      deadline: new Date(now + request.timeout_seconds * 1000).toISOString(), phase: 'open', turnId, timeoutSeconds: request.timeout_seconds,
+      pid: request.pid, ...(startToken === undefined ? {} : { startToken }), ...(exitFile === undefined ? {} : { exitFile }),
+      ...(request.note === undefined ? {} : { note: request.note }) };
+  return wait;
+}
+
+export function settledWaitEntry(latest: Wait, result: CiWaitResult | ProcessWaitResult | PeerWaitResult | undefined, observed: WorkerWaitEntry | undefined, resolvedAt: string): Wait {
+  const settled: Wait = latest.kind === 'pr'
+      ? { ...latest, phase: 'resolved', resolvedAt, result: (result as CiWaitResult | undefined) ?? { outcome: 'deadline', headSha: latest.headSha, observedAt: resolvedAt, checks: [], totalChecks: 0, truncated: false } }
+      : latest.kind === 'process'
+        ? { ...latest, phase: 'resolved', resolvedAt, result: (result as ProcessWaitResult | undefined) ?? { outcome: 'deadline', observedAt: resolvedAt } }
+      : latest.kind === 'worker'
+        ? { ...observed ?? latest, phase: 'resolved', resolvedAt, result: observed?.result ?? { reason: 'timeout' } }
+      : latest.kind === 'peer'
+        ? { ...latest, phase: 'resolved', resolvedAt, result: (result as PeerWaitResult | undefined) ?? { reason: 'timeout' } }
+        : { ...latest, phase: 'resolved', resolvedAt };
+  return settled;
 }
