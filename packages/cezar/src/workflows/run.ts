@@ -1,4 +1,5 @@
 import { WakeAdmission } from './run/wake-admission.ts';
+import { RunSettlement } from './run/run-settlement.ts';
 import { InputDelivery } from './run/input-delivery.ts';
 import { TurnNudges } from './run/turn-nudges.ts';
 import { WorkerQuestions } from './run/worker-questions.ts';
@@ -41,7 +42,7 @@ import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_
 import { createActiveRun, type ActiveRun } from './active-run.ts';
 import { isRunnerActivity, emitAskRequested, classifyTurnEnd, discardQueuedMessagesOnAsk, type TurnEndRead } from './run/turn-markers.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
-import { familyOf, canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested } from './run/run-guards.ts';
+import { familyOf, canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested, isDisposedDelegatedRun, preserveRunAfterDisposal } from './run/run-guards.ts';
 import { beginUsageInvocation, recordUsageUiEvent, recordUsagePeaks } from './run/usage-accounting.ts';
 import { continuationModel, continuationEffort, continuationRunner, taskModelIdentity, stepModel } from './run/launch-settings.ts';
 import { executionBaseRef, openExecutionWorktree, ownedContinuationWorkspace, executionSeedFiles, REPOSITORY_ROOT_LOCK_DISABLED_NOTE } from './run/run-workspace.ts';
@@ -55,7 +56,7 @@ import { continuationOpening, openingInputs } from './run/opening.ts';
 import { releaseActiveResources } from './run/drop-active.ts';
 import { agentDirectories, applyTemplate, composeSystemPrompt, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt, withResumeContext } from './run/prompts.ts';
 import { delegationExecutionSettings, selectDelegationExecutionSettings } from '../delegation/execution-settings.ts';
-import { settlesAsDone, stepLabel, stepScope } from './run/steps.ts';
+import { stepLabel, stepScope } from './run/steps.ts';
 import { makeRunTitle } from '../runs/run-title.ts';
 export { agentDirectories, composeSystemPrompt, expandRegistrySlashSkill, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt } from './run/prompts.ts';
 export { stepLabel } from './run/steps.ts';
@@ -123,7 +124,7 @@ import { waitForCachedTeamSkills, waitForTeamSkills } from '../skills-remote.ts'
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelSettings } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
-import { type AutosaveReason, worktreeDiff } from '../git-worktree.ts';
+import { type AutosaveReason } from '../git-worktree.ts';
 import { runGroupedCommand } from './grouped-command.ts';
 import {
   resolveWorktreeSetup,
@@ -149,7 +150,6 @@ import {
   removeAgentTmpDir,
 } from '../runs/agent-tmpdir.ts';
 import { extractTaskRefs, refineTaskRefs } from '../runs/task-refs.ts';
-import { reviewGateEnabled } from '../runs/review-gate.ts';
 import { AgentAccountUnavailableError, resolveProfileEnvForRoot } from '../workspace/agent-profiles.ts';
 import { WorkspaceSemaphore, type AccountHolds } from '../workspace/semaphore.ts';
 import { UiEventSink } from '../runs/ui-event-sink.ts';
@@ -192,9 +192,6 @@ export { periodicAutosaveEnabled, AUTOSAVE_INTERVAL_MS } from './run/worktree-au
 export function repositoryRootLockDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.CEZ_DISABLE_REPO_LOCK === '1';
 }
-
-
-
 
 /** What `carryOutTurnEnd` hands the method for a decision kind. `session` is the session as the
  *  decision found it. */
@@ -306,6 +303,7 @@ export class RunManager {
   private readonly queuedRevivalHost: queuedRevival.QueuedRevivalHost;
   private readonly humanWaits: HumanWaits;
   private readonly turnNudges: TurnNudges;
+  private readonly runSettlement: RunSettlement;
   private readonly waitRegistry: WaitRegistry;
   private readonly waitWatches: WaitWatches;
   private readonly familyReconciler: FamilyReconciler;
@@ -693,6 +691,22 @@ export class RunManager {
       countAutomaticWakes: (id, budget) => this.automaticWakes(id, budget),
       workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
     }, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS);
+    this.runSettlement = new RunSettlement(this.inputReceiptContext, this.humanWaits, this.workerQuestions,
+      this.worktreeAutosave, this.turnBookkeeper, this.line, this.autoResumeScheduler, this.workerExecutions,
+      this.completionGateHost, {
+        active: this.active, isSyntheticContinuation: (run, step) => isSyntheticContinuation(run, step),
+        generation: id => this.continuationGenerations.get(id), isActive: id => this.isActive(id),
+        move: (id, exit, patch) => this.move(id, exit, patch), dropActive: id => this.dropActive(id),
+        saveWorktree: (id, state, reason) => this.saveWorktree(id, state, reason),
+        settleSuccess: (id, durable, keep) => this.settleSuccess(id, durable, keep),
+        deferParentCompletion: id => this.deferParentCompletion(id),
+        closingWakeDecision: (id, holds, cancelled, error) => this.closingWakeDecision(id, holds, cancelled, error),
+        owesDelivery: id => this.owesDelivery(id), preserveRunAfterDisposal: (id, state) => this.preserveRunAfterDisposal(id, state),
+        isDisposedDelegatedRun: id => this.isDisposedDelegatedRun(id), queueWaitWake: id => this.queueWaitWake(id),
+        reconcileWorkerWaits: id => this.reconcileWorkerWaits(id), releaseSlot: () => this.releaseSlot(),
+        enforceRetention: () => this.enforceRetention(), reapTerminalScratch: id => this.reapTerminalScratch(id),
+        forgetMemoryPause: id => { this.memoryPausing.delete(id); },
+      }, WAKE_SESSION_CLOSED_ERROR, WAKE_DELIVERY_CAP_NOTE);
     this.inputDelivery = new InputDelivery(this.inputReceiptContext, {
       active: this.active, line: this.line, workerExecutions: this.workerExecutions, runSkills: this.runSkills,
       attachments: this.attachments, humanWaits: this.humanWaits, workerQuestions: this.workerQuestions,
@@ -1632,13 +1646,12 @@ export class RunManager {
   private async reviveWorkflow(run: RunRecord): Promise<WorkflowDef | null> { return queuedRevival.reviveWorkflow(this.inputReceiptContext, this.queuedRevivalHost, run); }
 
   private isDisposedDelegatedRun(runId: string): boolean {
-    const role = this.store.getRun(runId)?.delegation?.role;
-    return this.disposed && (role === 'root' || role === 'worker' || !!this.store.getRun(runId)?.waits?.length);
+    return isDisposedDelegatedRun(this.store, () => this.disposed, runId);
   }
 
   /** Shutdown is not completion. Explicit terminal controls retain their precedence. */
   private preserveRunAfterDisposal(runId: string, state: ActiveRun): boolean {
-    return this.isDisposedDelegatedRun(runId) && !state.cancelled && !state.finishRequested;
+    return preserveRunAfterDisposal(this.store, () => this.disposed, runId, state);
   }
 
   /**
@@ -1655,16 +1668,6 @@ export class RunManager {
     this.store.pin(runId, 'active');
   }
 
-  /** A detail's finish verdict reads the live registries, and a session leaves them after its
-   *  last write (the final autosave), so the cockpit's refetch on that write still saw "no open
-   *  session" and hid Accept. Publish a resting run again once it is out of them
-   *  (hearsay-tools/cezarion#1301). */
-  private republishFinishVerdict(runId: string): void {
-    if (this.disposed || this.isActive(runId)) return;
-    const status = this.store.getRun(runId)?.status;
-    if (status === 'waiting' || status === 'review') this.store.republish(runId);
-  }
-
   /** Remove a run from the live registries — keeps `waiting ⊆ active`. */
   private dropActive(runId: string): void {
     const state = this.active.get(runId);
@@ -1677,45 +1680,7 @@ export class RunManager {
     this.line.forget(runId);
     this.active.delete(runId);
     this.store.unpin(runId, 'active');
-    // Open waits keep their watch or timer: their result reopens the run when it resolves. A
-    // refusal queued for the closing session reopens it now (hearsay-tools/cezarion#1301).
-    if (!this.disposed && (this.store.getRun(runId)?.waits?.length || this.owesCompletionRefusal(runId))) this.queueWaitWake(runId);
-    if (!this.workerExecutions.has(runId) && this.store.getRun(runId)?.stopping) this.store.updateRun(runId, { stopping: undefined });
-    this.republishFinishVerdict(runId);
-    this.memoryPausing.delete(runId);
-    this.turnBookkeeper.forget(runId);
-    this.line.clearForced(runId);
-    if (this.isDisposedDelegatedRun(runId)) return; // teardown above, no autonomous durable side effects
-    // The run's slot is gone from busySlots() as of the deletes above — hand it
-    // to the workspace's oldest queued run, in ANY project. Every terminal path
-    // funnels through here, so this one call covers them all.
-    // Same reasoning as retention below — every terminal path funnels through here, so the
-    // usage-limit question ("did this run stop because the account is out of window, and when
-    // does that window reopen?") is asked once, in one place, off the record the failing path
-    // has already written. Nothing to do for any other outcome.
-    //
-    // BEFORE releasing the slot, and that order is the whole point: `releaseSlot` pumps every
-    // manager, and a pump reads the hold off the records. Publishing the schedule afterwards
-    // left a window — measured as exactly one extra task — where the queue saw a free slot and
-    // an account that looked healthy, and started work that was already doomed.
-    this.scheduleAutoResumeIfLimited(runId);
-    // Closed-session success may have parked a completion wait without a live wire. The global
-    // pass covers the families still in memory (#779); this run's own family may have just left
-    // the live set with it, so it is reconciled by name first.
-    const settled = this.store.getRun(runId);
-    if (settled?.delegation) {
-      for (const id of settledRunFamilies(this.store, settled)) this.reconcileWorkerWaits(id);
-      // Then every other family still in memory (hearsay-tools/cezarion#779).
-      this.reconcileWorkerWaits();
-    }
-    this.releaseSlot();
-    // A run leaving the active registry may have reached a terminal transition
-    // (done/review/failed/cancelled), increasing the finished-worktree count.
-    // Enforce count-based retention (#483) here so a single hook covers every
-    // terminal path. Fire-and-forget: retention must never delay or throw into
-    // the lifecycle.
-    void this.enforceRetention();
-    this.reapTerminalScratch(runId);
+    this.runSettlement.afterDropActive(runId);
   }
 
   private readonly workerScratchCleanup: WorkerScratchCleanup;
@@ -1798,7 +1763,6 @@ export class RunManager {
   cancelAutoResume(runId: string): boolean { return this.autoResumeScheduler.cancelAutoResume(runId); }
 
   private clearAutoResume(runId: string): void { this.autoResumeScheduler.clearAutoResume(runId); }
-
 
   /** Reclaim finished worktrees beyond the keep-limit (#483) — directory only,
    *  `cez/<id8>` branch kept. Best-effort; a failure never affects run
@@ -2055,8 +2019,6 @@ export class RunManager {
 
   private noticeParkedWorker(workerId: string): void { return this.workerQuestions.noticeParkedWorker(workerId); }
 
-
-
   private recoverWorkerMessages(families: readonly RunRecord[], familyRootId: string | undefined): void { return this.workerQuestions.recoverWorkerMessages(families, familyRootId); }
 
   private noticeParkedWorkers(rootId: string): void { return this.workerQuestions.noticeParkedWorkers(rootId); }
@@ -2074,8 +2036,6 @@ export class RunManager {
   private unansweredQuestions(parentId: string): { workerId: string; messageId: string }[] { return this.workerQuestions.unansweredQuestions(parentId); }
 
   private fallbackRoutedQuestions(parentId: string, reason: string): void { return this.workerQuestions.fallbackRoutedQuestions(parentId, reason); }
-
-
 
   /**
    * `cez worker cancel-wait`: cancels a worker wait in the list, as `cezar_cancel_wait` does, and
@@ -2338,36 +2298,20 @@ export class RunManager {
    * Keep its existing durable waiting step so Continue can resume the tail. Cezar's fallback
    * question on a worker is not one: the clean exit supersedes it, so the workflow goes on as the
    * plain park it replaced did (hearsay-tools/cezarion#1301). */
-  private unansweredWorkflowAsk(runId: string, state: ActiveRun): boolean {
-    if (!state.finishRequested) this.supersedeWorkerFallback(runId);
-    const run = this.store.getRun(runId);
-    return !state.finishRequested && !!run && this.hasPendingHumanAsk(runId) &&
-      this.waitingBeforeFinalWorkflowStep(run);
-  }
+  private supersedeFallbackThenWorkflowAsk(runId: string, state: ActiveRun): boolean { return this.runSettlement.supersedeFallbackThenWorkflowAsk(runId, state); }
 
   private waitingWorkflowStepIndex(run: RunRecord): number {
     return workflowPosition.waitingWorkflowStepIndex(run, isSyntheticContinuation, record => this.ciWorkflowResumeStepIndex(record));
   }
 
-  /** The workflow step after the one a continuation resumes, when that one is not the last: the
-   *  continuation's done completes the resumed step and starts this one (hearsay-tools/cezarion#1620). */
   /**
    * Whether a step session closed without its done while a later step waits (hearsay-tools/cezarion#1620).
    * It reads and clears the done `closeAsDone` recorded. Finish is an explicit stop, settled as before.
    */
-  private stepLeftOpen(state: ActiveRun, stepId: string, next: WorkflowStepDef | undefined): boolean {
-    const completed = state.completedStepId === stepId;
-    state.completedStepId = undefined;
-    return !!next && !completed && !state.finishRequested;
-  }
+  private stepLeftOpen(state: ActiveRun, stepId: string, next: WorkflowStepDef | undefined): boolean { return this.runSettlement.stepLeftOpen(state, stepId, next); }
 
-  /** A resumed earlier step that closed without a done stays open: its workflow step, not the Continue's own. */
-  private async settleIncompleteContinuation(runId: string, stepId: string): Promise<void> {
-    const resumed = this.store.getRun(runId);
-    const source = resumed ? resumed.workflowDef?.steps[this.waitingWorkflowStepIndex(resumed)] : undefined;
-    await this.settleIncompleteStep(runId, source?.id ?? stepId);
-  }
-
+  /** The workflow step after the one a continuation resumes, when that one is not the last: the
+   *  continuation's done completes the resumed step and starts this one (hearsay-tools/cezarion#1620). */
   private continuationNextStep(runId: string): WorkflowStepDef | undefined {
     return workflowPosition.continuationNextStep(this.store, runId, record => this.waitingWorkflowStepIndex(record));
   }
@@ -3138,107 +3082,7 @@ export class RunManager {
     sink: UiEventSink,
     resumedNext: WorkflowStepDef | undefined,
     close: ContinuationClose,
-  ): Promise<void> | undefined {
-    if (this.holdsClosingWakes(runId) && !state.cancelled) {
-      this.settleClosingWakes(runId, state, stepId, sink);
-      return undefined;
-    }
-    if (!state.cancelled) {
-      this.store.updateRun(runId, { continuationMessage: undefined });
-      this.store.flush();
-    }
-    sink.sessionEnded(state.cancelled ? 'cancelled' : 'end_turn');
-    const incomplete = !state.cancelled && this.stepLeftOpen(state, stepId, resumedNext);
-    const kind = stepDecisions.continuationCloseKind(state.cancelled, incomplete,
-      !state.cancelled && !incomplete && (state.idleClosed || this.unansweredWorkflowAsk(runId, state)));
-    if (kind === 'cancelled') {
-      this.settleCancelledContinuation(runId, stepId);
-      return undefined;
-    }
-    if (kind === 'incomplete') return this.settleIncompleteContinuation(runId, stepId);
-    if (kind === 'done') return this.settleDoneContinuation(runId, state, stepId, close);
-    return this.settleIdleClosedRun(runId, state);
-  }
-
-  /** The session closed with wakes it still holds: park the run, or fail it when their delivery
-   *  failed. */
-  private settleClosingWakes(runId: string, state: ActiveRun, stepId: string, sink: UiEventSink): void {
-    sink.sessionEnded('end_turn');
-    // A clean close that leaves results undelivered is a failed delivery too.
-    const delivery = this.closingWakeDecision(runId, true, false, this.owesDelivery(runId) ? WAKE_SESSION_CLOSED_ERROR : undefined);
-    if (delivery === 'park') {
-      // No turn end will show a human wait this session registered (hearsay-tools/cezarion#1234).
-      this.surfaceHumanWait(runId, state);
-      this.move(runId, 'park');
-      return;
-    }
-    this.store.updateStep(runId, stepId, { status: 'failed', error: WAKE_SESSION_CLOSED_ERROR, finishedAt: new Date().toISOString() });
-    this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
-    this.move(runId, 'fail', { error: `continue failed: ${WAKE_SESSION_CLOSED_ERROR}`, finishedAt: new Date().toISOString(), currentStepId: undefined });
-    this.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${WAKE_SESSION_CLOSED_ERROR}` });
-    this.store.appendEvent(runId, { type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
-  }
-
-  /** A Stop ended the Continue's session: cancel its step and the run. */
-  private settleCancelledContinuation(runId: string, stepId: string): void {
-    this.store.updateStep(runId, stepId, { status: 'cancelled', finishedAt: new Date().toISOString() });
-    this.move(runId, 'cancel', { finishedAt: new Date().toISOString(), currentStepId: undefined });
-    this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
-  }
-
-  /** The Continue's step is done: settle the run, or the workflow step it resumed. Returns the
-   *  settlement to wait for, or undefined when it queued the workflow remainder. */
-  private settleDoneContinuation(runId: string, state: ActiveRun, stepId: string, close: ContinuationClose): Promise<void> | undefined {
-    this.store.updateStep(runId, stepId, { status: 'done', finishedAt: new Date().toISOString() });
-    this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'done' });
-    const completed = this.store.getRun(runId);
-    const waitingIndex = completed ? this.waitingWorkflowStepIndex(completed) : -1;
-    if (completed?.workflowDef && waitingIndex >= 0) {
-      return this.settleResumedWorkflowStep(runId, state, stepId, completed, completed.workflowDef, waitingIndex, close);
-    }
-    return this.succeedContinuation(runId, stepId);
-  }
-
-  /** The Continue finished the workflow step it resumed: queue the workflow remainder, or settle
-   *  the run when none is left or Finish was requested. */
-  private settleResumedWorkflowStep(
-    runId: string,
-    state: ActiveRun,
-    stepId: string,
-    completed: RunRecord,
-    workflow: WorkflowDef,
-    waitingIndex: number,
-    close: ContinuationClose,
-  ): Promise<void> | undefined {
-    const waitingStep = workflow.steps[waitingIndex]!;
-    // The continuation succeeded, not the failed attempt it recovered.
-    if (waitingStep.id !== completed.workflowResumeStepId) {
-      this.store.updateStep(runId, waitingStep.id, { status: 'done', finishedAt: new Date().toISOString() });
-      this.store.appendEvent(runId, { type: 'step-end', stepId: waitingStep.id, status: 'done' });
-    }
-    // Finish accepts this resumed step before the async settlement gate,
-    // but must not launch the remaining workflow. A later cancellation
-    // may cancel still-live steps, never this completed one (R30).
-    if (!state.finishRequested && waitingIndex < workflow.steps.length - 1) {
-      close.resumeWorkflow = {
-        workflow,
-        startAt: waitingIndex + 1,
-        input: queuedRecoveryInput(completed),
-      };
-      this.move(runId, 'requeue', { currentStepId: undefined, workflowResumeStepId: undefined });
-      // The workflow remainder is a crash boundary. Persist it before the
-      // finally block awaits worktree autosave and installs its in-memory job.
-      this.store.flush();
-      return undefined;
-    }
-    this.store.updateRun(runId, { workflowResumeStepId: undefined });
-    return this.succeedContinuation(runId, stepId);
-  }
-
-  /** Settle the run after a successful Continue. */
-  private async succeedContinuation(runId: string, stepId: string): Promise<void> {
-    await this.settleSuccess(runId);
-  }
+  ): Promise<void> | undefined { return this.runSettlement.settleClosedContinuation(runId, state, stepId, sink, resumedNext, close); }
 
   /** The Continue's session failed, or its settlement threw: fail its step, then park the run
    *  when it still holds wakes, else fail it. */
@@ -3249,29 +3093,7 @@ export class RunManager {
     sink: UiEventSink,
     turn: SessionTurn,
     err: unknown,
-  ): void {
-    // Keep the provider failure that triggered teardown, even if teardown rejects.
-    const message = turn.sessionError ?? state.agentInputError ?? (err instanceof Error ? err.message : String(err));
-    sink.sessionEnded('error', message);
-    this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt: new Date().toISOString() });
-    this.withdrawCezarHumanWaits(runId);
-    const delivery = this.closingWakeDecision(runId, this.holdsClosingWakes(runId), state.cancelled, message);
-    if (delivery === 'park') {
-      // Retain the wait and scheduler wake source while closing this attempt.
-      // settleSuccess only completes running/waiting steps, so its failure is durable.
-      this.surfaceHumanWait(runId, state);
-      this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
-      this.move(runId, 'park', { error: `continue failed: ${message}` });
-      return;
-    }
-    this.move(runId, 'fail-continue', {
-      error: `continue failed: ${message}`,
-      finishedAt: new Date().toISOString(),
-      currentStepId: undefined,
-    });
-    this.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${message}` });
-    if (delivery === 'capped') this.store.appendEvent(runId, { type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
-  }
+  ): void { return this.runSettlement.settleFailedContinuation(runId, state, stepId, sink, turn, err); }
 
   /** A Continue's session teardown: revoke the launch's tools, record the usage peaks, clear the
    *  timers, save the worktree, leave the active set, then queue the workflow remainder. */
@@ -3594,7 +3416,7 @@ export class RunManager {
     if (failure || loop.deliveryCapped) return 'settle';
     // A session that closed without a done leaves its step resumable; the tail never starts.
     if (this.stepLeftOpen(state, step.id, attempt.nextStep)) { loop.incompleteStepId = step.id; return 'settle'; }
-    if (state.idleClosed || this.unansweredWorkflowAsk(runId, state)) return 'settle';
+    if (state.idleClosed || this.supersedeFallbackThenWorkflowAsk(runId, state)) return 'settle';
     this.finishStep(runId, step.id, 'done', undefined, emit);
     // Finish is an explicit stop, not an answer or permission to run checks.
     return state.finishRequested ? 'settle' : 'next';
@@ -3696,58 +3518,8 @@ export class RunManager {
    * Settles the run once the step loop of `execute` ended: the final autosave, then the
    * cancelled, failed, incomplete-step, idle-closed or success settlement.
    */
-  private async settleExecution(runId: string, state: ActiveRun, loop: StepLoop): Promise<void> {
-    // Final autosave: the task branch ends holding the finished state; on a branch the
-    // agent checked out, the work stays uncommitted and the handoff's Autosave section
-    // says so (#1004).
-    this.clearAutosaveTimer(state);
-    await this.saveWorktree(runId, state, 'run finalize');
-
-    if (this.preserveRunAfterDisposal(runId, state)) {
-      this.clearIdleTimer(state);
-      this.dropActive(runId);
-      return;
-    }
-    const settlement = stepDecisions.executionSettlementKind(state.cancelled, loop.runError, loop.incompleteStepId,
-      !state.cancelled && !loop.runError && !loop.incompleteStepId && (state.idleClosed || this.unansweredWorkflowAsk(runId, state)));
-    if (settlement.kind === 'cancelled') {
-      this.settleCancelledRun(runId);
-    } else if (settlement.kind === 'failed') {
-      this.settleFailedRun(runId, settlement.error, loop.deliveryCapped);
-    } else if (settlement.kind === 'incomplete') {
-      await this.settleIncompleteStep(runId, settlement.stepId);
-    } else if (settlement.kind === 'idle') {
-      await this.settleIdleClosedRun(runId, state);
-      this.dropActive(runId);
-      return;
-    } else {
-      await this.settleSuccess(runId);
-    }
-    this.clearIdleTimer(state);
-    this.dropActive(runId);
-  }
-
-  /** The cancelled settlement: the run and its running and waiting steps become cancelled. */
-  private settleCancelledRun(runId: string): void {
-    const finishedAt = new Date().toISOString();
-    const run = this.store.getRun(runId);
-    for (const s of run?.steps ?? []) {
-      if (s.status === 'running' || s.status === 'waiting') {
-        this.store.updateStep(runId, s.id, { status: 'cancelled' });
-      }
-    }
-    this.move(runId, 'cancel', { finishedAt, currentStepId: undefined });
-    this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
-  }
-
-  /** The failed settlement. A capped wake delivery adds the cap's note. */
-  private settleFailedRun(runId: string, runError: string, deliveryCapped: boolean): void {
-    const finishedAt = new Date().toISOString();
-    this.move(runId, 'fail', { error: runError, finishedAt, currentStepId: undefined });
-    this.store.appendEvent(runId, { type: 'lifecycle', message: `run failed — ${runError}` });
-    if (deliveryCapped) this.store.appendEvent(runId, { type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
-  }
-
+  private async settleExecution(runId: string, state: ActiveRun, loop: StepLoop): Promise<void> { return this.runSettlement.settleExecution(runId, state, loop); }
+  private settleFailedRun(runId: string, runError: string, deliveryCapped: boolean): void { this.runSettlement.settleFailedRun(runId, runError, deliveryCapped); }
   /** Returns an error message, or null on success. */
   private async runAgentStep(
     runId: string,
@@ -4292,174 +4064,7 @@ export class RunManager {
    * OFF) AND the run is not autonomous. Autonomous runs — and runs with the gate
    * off — settle straight to `done`, leaving the diff in the worktree untouched.
    */
-  private async settleSuccess(runId: string, durableRootFinish = false, keepStepId?: string): Promise<void> {
-    const state = this.active.get(runId);
-    const continuationGeneration = this.continuationGenerations.get(runId);
-    if (this.deferParentCompletion(runId)) return;
-    const run = this.store.getRun(runId);
-    let review = false;
-    if (run?.worktreePath && existsSync(run.worktreePath)) {
-      review = await this.successNeedsReview(run, run.worktreePath, durableRootFinish);
-    }
-    // Diff/config I/O can race cancellation or a replacement execution. Re-read
-    // the record before touching steps, and never settle another session's work.
-    const current = this.store.getRun(runId);
-    if (!current || this.successSuperseded(runId, current.status, state, continuationGeneration)) return;
-    if (state?.cancelled) {
-      this.settleCancelledSuccess(runId, current);
-      return;
-    }
-    // A worker's accepted continuation or a new child can defer parent completion.
-    if (this.deferParentCompletion(runId)) return;
-    if (durableRootFinish) {
-      // A later explicit cancellation wins over a slow diff. Publication/cascade
-      // follows the atomic terminal/step checkpoint, never the other way around.
-      const exit = review ? 'succeed-review' as const : 'succeed' as const;
-      if (!transitionVia(exit, () => this.store.getRun(runId), () => this.store.commitRootFinishSuccess(runId, RUN_EXITS[exit].to))) return;
-    } else {
-      this.commitOrdinarySuccess(runId, review, keepStepId);
-    }
-    this.store.appendEvent(runId, {
-      type: 'lifecycle',
-      message: review
-        ? 'changes ready for review — send feedback, open a draft PR, or finish'
-        : 'run finished',
-    });
-  }
-
-  /**
-   * Whether a successful run rests at `review`: its worktree holds a diff, the review gate is
-   * on, and the run is not autonomous. A root finish cannot settle without a diff, so a failed
-   * diff throws for it.
-   */
-  private async successNeedsReview(run: RunRecord, worktreePath: string, durableRootFinish: boolean): Promise<boolean> {
-    // An unresolved autosave may still own the real index. Conservatively
-    // treat its retained work as reviewable without starting `git add -N`.
-    const diff = this.autosaveCleanupBlocker(run.id)
-      ? 'autosave cleanup pending'
-      : await worktreeDiff(worktreePath, run.baseBranch ?? 'HEAD');
-    if (durableRootFinish && diff.startsWith('(diff failed')) throw new Error('parent finish diff unavailable');
-    const hasDiff = diff.trim().length > 0 && !diff.startsWith('(diff failed');
-    const config = await loadConfig(this.repoRoot);
-    return hasDiff && reviewGateEnabled(config) && run.autonomous !== true;
-  }
-
-  /** True when the success settlement must not write: the run is no longer live, a newer
-   *  continuation started, or another execution replaced the one that began settling. */
-  private successSuperseded(
-    runId: string,
-    status: RunRecord['status'],
-    state: ActiveRun | undefined,
-    continuationGeneration: symbol | undefined,
-  ): boolean {
-    const active = this.active.get(runId);
-    // Disposal clears active, but cannot revoke an already accepted Finish/Stop.
-    // A different active state is still a replacement, even after disposal.
-    const disposedWithTerminalIntent = this.disposed && active === undefined && (state?.finishRequested || state?.cancelled);
-    return !['queued', 'running', 'waiting'].includes(status) ||
-      this.continuationGenerations.get(runId) !== continuationGeneration ||
-      (active !== state && !disposedWithTerminalIntent);
-  }
-
-  /** A Stop accepted while the success settlement read the diff: the run and its running and
-   *  waiting steps become cancelled, and a step keeps a finish time it already has. */
-  private settleCancelledSuccess(runId: string, current: RunRecord): void {
-    const finishedAt = new Date().toISOString();
-    for (const step of current.steps) {
-      if (step.status === 'running' || step.status === 'waiting') {
-        this.store.updateStep(runId, step.id, { status: 'cancelled', finishedAt: step.finishedAt ?? finishedAt });
-      }
-    }
-    this.move(runId, 'cancel', { finishedAt, currentStepId: undefined });
-    this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
-  }
-
-  /** The ordinary success path (not a root finish): the steps that settle as done, then the run
-   *  as `review` or `done`. */
-  private commitOrdinarySuccess(runId: string, review: boolean, keepStepId: string | undefined): void {
-    const finishedAt = new Date().toISOString();
-    // An idle-closed Continue remains waiting until the whole task succeeds.
-    // Complete those intermediate steps before publishing terminal run status.
-    // A worker's incomplete earlier step stays `waiting`: a parent resume re-enters it (hearsay-tools/cezarion#1620).
-    for (const step of this.store.getRun(runId)?.steps ?? []) {
-      if (settlesAsDone(step, keepStepId)) {
-        this.store.updateStep(runId, step.id, { status: 'done', finishedAt: step.finishedAt ?? finishedAt });
-      }
-    }
-    this.store.updateRun(runId, {
-      status: transition(review ? 'succeed-review' : 'succeed', () => this.store.getRun(runId)),
-      ...settledRootFinishPatch(this.store, runId),
-      finishedAt,
-      currentStepId: undefined,
-      // A run that got all the way to a settled turn is not in a limit loop, so the resume
-      // counter starts over — otherwise a task that legitimately met the limit once a week would
-      // creep toward the cap forever and stop resuming for no reason anyone could see.
-      autoResumeAttempts: undefined,
-    });
-  }
-
-  /** Called only after session/process settlement. A refused nudge retained its
-   * slot and running status until idle close; ordinary roots must now become
-   * resumable. Previously parked roots and delegated lifecycle policy stay intact. */
-  private async settleIdleClosedRun(runId: string, state: ActiveRun): Promise<void> {
-    const run = this.store.getRun(runId);
-    if (run?.delegation?.role === 'worker') {
-      await this.settleIdleClosedWorker(runId);
-      return;
-    }
-    if (!run || !state.autonomousNudgePending || run.waits?.length || this.hasPendingHumanAsk(runId)) return;
-    for (const step of run.steps) {
-      if (step.status === 'running') this.store.updateStep(runId, step.id, { status: 'waiting' });
-    }
-    this.move(runId, 'park');
-    this.store.flush();
-  }
-
-  /** An ordinary owned worker cannot accept an inactive Continue. Once its
-   * idle-closed process has ended, publish the same terminal outcome recovery
-   * would produce so its parent can collect it. Explicit asks and worker waits
-   * remain durable attention states. */
-  private async settleIdleClosedWorker(runId: string, keepStepId?: string): Promise<boolean> {
-    // An idle close supersedes Cezar's fallback question, so the worker settles as its plain park
-    // did (hearsay-tools/cezarion#1301).
-    this.supersedeWorkerFallback(runId);
-    const run = this.store.getRun(runId);
-    if (run?.delegation?.role !== 'worker' || this.hasPendingHumanAsk(runId)) return false;
-    const finishedAt = new Date().toISOString();
-    if (run.invalidAsk) {
-      for (const step of run.steps) if (step.status === 'waiting' || step.status === 'running') {
-        this.store.updateStep(runId, step.id, { status: 'failed', error: 'invalid structured question', finishedAt });
-      }
-      this.move(runId, 'fail', { error: 'invalid structured question', finishedAt, currentStepId: undefined });
-      return true;
-    }
-    for (const step of run.steps) {
-      if (settlesAsDone(step, keepStepId)) {
-        this.store.updateStep(runId, step.id, { status: 'done', finishedAt });
-      }
-    }
-    await this.settleSuccess(runId, false, keepStepId);
-    return true;
-  }
-
-  /**
-   * An earlier workflow step whose session closed without a done: a clean exit, an idle close, or
-   * a Continue that resumed it and closed the same way (hearsay-tools/cezarion#1620). The step stays
-   * `waiting` and the tail never starts. A root waits for Continue, which resumes the step. An owned
-   * worker settles as a single-step task's close does, so its parent can collect it; the step stays
-   * `waiting`, and a parent resume re-enters it. A question still pending keeps either one waiting.
-   */
-  private async settleIncompleteStep(runId: string, stepId: string): Promise<void> {
-    const run = this.store.getRun(runId);
-    if (!run) return;
-    for (const step of run.steps) if (step.status === 'running') this.store.updateStep(runId, step.id, { status: 'waiting' });
-    // A failed attempt a continuation recovers stays failed: the resume cursor finds it as it is.
-    if (run.steps.find(step => step.id === stepId)?.status !== 'failed') this.store.updateStep(runId, stepId, { status: 'waiting' });
-    this.store.appendEvent(runId, { type: 'lifecycle', stepId, message: `step "${stepId}" ended without done — Continue to resume it` });
-    if (run.delegation?.role === 'worker' && await this.settleIdleClosedWorker(runId, stepId)) return;
-    this.move(runId, 'park');
-    this.store.flush();
-  }
+  private async settleSuccess(runId: string, durableRootFinish = false, keepStepId?: string): Promise<void> { return this.runSettlement.settleSuccess(runId, durableRootFinish, keepStepId); }
 
   private persistPastedAttachments(runId: string, content: readonly PastedContent[]): PersistedAttachment[] {
     return this.attachments.persistPastedAttachments(runId, content);

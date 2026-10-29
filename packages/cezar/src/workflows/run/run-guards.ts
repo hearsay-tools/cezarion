@@ -1,3 +1,4 @@
+import type { ActiveRun } from '../active-run.ts';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
 
 export function rootFinishRequested(store: Pick<RunStore, 'getRun'>, runId: string): boolean {
@@ -27,4 +28,14 @@ export function canProceedWithRun(
 /** The delegation family a run belongs to, by its root's id: a worker's parent, else itself. */
 export function familyOf(run: RunRecord): string {
   return run.delegation?.role === 'worker' ? run.delegation.parentRunId : run.id;
+}
+
+export function isDisposedDelegatedRun(store: Pick<RunStore, 'getRun'>, disposed: () => boolean, runId: string): boolean {
+  const role = store.getRun(runId)?.delegation?.role;
+  return disposed() && (role === 'root' || role === 'worker' || !!store.getRun(runId)?.waits?.length);
+}
+
+/** Shutdown is not completion. Explicit terminal controls retain their precedence. */
+export function preserveRunAfterDisposal(store: Pick<RunStore, 'getRun'>, disposed: () => boolean, runId: string, state: ActiveRun): boolean {
+  return isDisposedDelegatedRun(store, disposed, runId) && !state.cancelled && !state.finishRequested;
 }
