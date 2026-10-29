@@ -1,3 +1,4 @@
+import { WorktreeAutosave } from './run/worktree-autosave.ts';
 import { RunSkills } from './run/run-skills.ts';
 import { InboxClaims } from './run/inbox-claims.ts';
 import { WorkerExecutions } from './run/worker-executions.ts';
@@ -20,7 +21,6 @@ export type { TurnTail, DelegationExecutionSettings, StartRunInput, WorkerTermin
 import { openCompletionRequests, recordRequestRefusal, repairFailedRootFinish, rootCompletionRefusal, sentRequestInstructions, settledRootFinishPatch, type CompletionRefusal } from './completion-policy.ts';
 import * as continuation from './continuation-admission.ts';
 import type { ContinueRunOptions } from './continuation-admission.ts';
-import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { askErrorMessage, doneErrorMessage, waitErrorMessage } from '../ci-wait/errors.ts';
 import { cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskRequest, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type CezarWaitRequestInput, type DoneErrorCode, type PeerWaitEntry, type PeerWaitResult, type PrWaitEntry, type ProcessWaitEntry, type ProcessWaitResult, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, isUsageLimitHold, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT } from '@open-mercato/cezar-contract/waits';
@@ -86,8 +86,6 @@ import { agentModelsLocked } from '../core/agent-model-policy.ts';
 import {
   handoffInstructions,
   handoffPath,
-  recordHandoffAutosave,
-  recordHandoffPeriodicAutosave,
   seedHandoffFile,
 } from '../handoff.ts';
 import type { SessionContext } from '../session-context.ts';
@@ -119,7 +117,7 @@ import { waitForCachedTeamSkills, waitForTeamSkills } from '../skills-remote.ts'
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelSettings } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
-import { autosaveCommit, type AutosaveOutcome, type AutosaveReason, worktreeDiff } from '../git-worktree.ts';
+import { type AutosaveReason, worktreeDiff } from '../git-worktree.ts';
 import { runGroupedCommand } from './grouped-command.ts';
 import {
   resolveWorktreeSetup,
@@ -187,31 +185,8 @@ function isSyntheticContinuation(run: RunRecord, step: StepState): boolean {
     (!!run.workflowDef && !run.workflowDef.steps.some(candidate => candidate.id === step.id) &&
       step.kind === 'agent' && step.name === 'Continue')) && /^continue-\d+$/.test(step.id);
 }
-/** Periodic "cezar autosave" commit in the task worktree (spec 006). */
-export const AUTOSAVE_INTERVAL_MS = 90_000;
-
 export { CHECK_KILL_GRACE_MS, CHECK_TERMINATION_CONFIRM_MS } from './grouped-command.ts';
-
-/**
- * Periodic saves are opt-in. Turn-end, finalization and pre-PR flushes remain enabled; only
- * pre-PR follows a repointed HEAD. Coalesce timer-save evidence in the handoff.
- */
-export function periodicAutosaveEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.CEZ_AUTOSAVE === '1';
-}
-
-/** The handoff block's autosave record and cockpit note for a save that committed or left work
- *  behind (hearsay-tools/cezarion#1004): a resumed session reads this, not `git log`. */
-function autosaveReportLine(reason: AutosaveReason, outcome: AutosaveOutcome, taskBranch: string | undefined): string {
-  const where = outcome.branch ?? 'detached HEAD';
-  if (outcome.result === 'committed') {
-    const what = outcome.sha ? `${outcome.sha} on ${where}` : `on ${where} (sha unavailable)`;
-    return `${reason}: cezar autosave committed ${what}; ` +
-      `to fold it into your own commits while it is HEAD, run \`git reset --soft ${outcome.sha ?? 'HEAD'}~1\``;
-  }
-  return `${reason}: ${outcome.changedPaths} changed path(s) left uncommitted on ${where}; ` +
-    `cezar does not autosave on a branch other than the task branch ${taskBranch ?? '(unrecorded)'}`;
-}
+export { periodicAutosaveEnabled, AUTOSAVE_INTERVAL_MS } from './run/worktree-autosave.ts';
 
 /**
  * Explicitly opt out of the repository-root lease for runs that execute in the
@@ -403,6 +378,7 @@ export class RunManager {
   // covers the window between shifting a run off the queue and the run
   // registering in `active`, so parallel-slot counting is never racy.
   private readonly queue: string[] = [];
+  private readonly worktreeAutosave: WorktreeAutosave;
   private readonly workerExecutions: WorkerExecutions;
   private get executions() { return this.workerExecutions.executions; }
   private beginWorkerExecution(id: string, admitted = true) { this.workerExecutions.beginWorkerExecution(id, admitted); }
@@ -637,6 +613,13 @@ export class RunManager {
     this.noWaitNudgeReplyMs = options.noWaitNudgeReplyMs ?? NO_WAIT_NUDGE_REPLY_MS;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
     this.inputReceiptContext = { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed };
+    this.worktreeAutosave = new WorktreeAutosave(
+      this.inputReceiptContext,
+      { holdForMaintenance: ids => this.holdForMaintenance(ids),
+        reapTerminalScratch: id => this.reapTerminalScratch(id), releaseSlot: () => this.releaseSlot(),
+        saveWorktree: (id, state, reason) => this.saveWorktree(id, state, reason),
+        trackTurn: (id, task) => this.workerExecutions.trackTurn(id, task) },
+    );
     this.orphans = new WorkerOrphans(
       { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
       { holds: (id, admitting) => this.workerExecutions.has(id) || this.active.has(id) || this.starting.has(id) || (!admitting && this.queue.includes(id)),
@@ -777,6 +760,7 @@ export class RunManager {
     this.pendingContinuations.clear();
     this.memoryPausing.clear();
     this.turnBookkeeper.clear();
+    this.worktreeAutosave.dispose();
   }
 
   /**
@@ -7622,103 +7606,16 @@ export class RunManager {
     this.armWait(runId, wait);
   }
 
-  /** The save may finish execution while its strict writer proof remains pending. */
-  private readonly autosaveTasks = new Map<string, { settlement: Promise<void>; blocker?: string }>();
-
-  /** Cleanup evidence survives manager disposal and store close/reopen. */
   autosaveCleanupBlocker(runId: string): string | undefined {
-    return this.autosaveTasks.get(runId)?.blocker ?? autosaveCleanupBlocker(this.dataDir, runId);
+    return this.worktreeAutosave.autosaveCleanupBlocker(runId);
   }
 
-  /** Keep a separate maintenance hold until autosave proves all its processes exited.
-   *  Commits only while HEAD is the run's recorded branch (hearsay-tools/cezarion#1004), and
-   *  records a commit or a skip in the run store, shown in the handoff's records block, and as a
-   *  note; a periodic save records only a commit, with no note, merged with the
-   *  periodic commits right before it. A run with no recorded branch keeps committing on
-   *  whatever HEAD is. */
   private async saveWorktree(runId: string, state: ActiveRun, reason: AutosaveReason): Promise<void> {
-    if (state.cwd === this.repoRoot) return;
-    for (;;) {
-      const previous = this.autosaveTasks.get(runId);
-      if (!previous) break;
-      await previous.settlement;
-      // A blocked save still owns the tree. Do not queue another writer behind it.
-      if (previous.blocker) return;
-    }
-    const note = (message: string) => {
-      try { this.store.appendEvent(runId, { type: 'note', message }); }
-      catch { /* Cleanup may outlive the store or its history; reporting cannot interrupt it. */ }
-    };
-    let settle!: () => void;
-    const entry: { settlement: Promise<void>; blocker?: string } = { settlement: new Promise(resolve => { settle = resolve; }) };
-    this.autosaveTasks.set(runId, entry);
-    let release: (() => void) | undefined;
-    let retained = false;
-    let cleanupConfirmed = false;
-    let taskBranch: string | undefined;
-    try { taskBranch = this.store.getRun(runId)?.branch; } catch { /* A closed store keeps the old rule. */ }
-    let outcome: AutosaveOutcome | undefined;
-    const task = autosaveCommit(state.cwd, reason, {
-      ...(taskBranch ? { taskBranch } : {}),
-      onOutcome: reported => { outcome = reported; },
-      onWarning: note,
-      onBlocked: (message, proof) => {
-        retainAutosaveCleanup(this.dataDir, runId, state.cwd, message, proof);
-        retained = true;
-        if (!release) {
-          const hold = this.holdForMaintenance([runId]);
-          if (!hold) return; // Never release execution without a replacement writer guard.
-          release = hold;
-          note(`${reason} autosave unsuccessful; run can settle, working files remain in ${state.cwd}`);
-        }
-        entry.blocker = message;
-        settle();
-      },
-    });
-    void task.then(result => {
-      cleanupConfirmed = true;
-      if (result === 'failed') note(`${reason} autosave failed; working files remain in ${state.cwd}`);
-      else if (result === 'refused') note(`${reason} autosave refused: unresolved conflicts or an unfinished merge, cherry-pick or revert; working files remain in ${state.cwd}`);
-      else if (outcome && reason === 'periodic') {
-        // The timer reports its commits too, since a clean closing flush reports nothing
-        // (review on hearsay-tools/cezarion#1111): one coalesced handoff line per run of
-        // periodic commits and no note, as a note every 90 s would flood the timeline. A
-        // periodic skip stays silent; the closing flush reports one with the final count.
-        if (outcome.result === 'committed') {
-          recordHandoffPeriodicAutosave(this.store, this.dataDir, runId, outcome);
-        }
-      } else if (outcome) {
-        const message = autosaveReportLine(reason, outcome, taskBranch);
-        note(message);
-        recordHandoffAutosave(this.store, this.dataDir, runId, message);
-      }
-    }, error => note(`${reason} autosave failed: ${String(error)}; working files remain in ${state.cwd}`)).finally(() => {
-      if (this.autosaveTasks.get(runId) === entry) this.autosaveTasks.delete(runId);
-      if (retained && cleanupConfirmed) {
-        try { clearAutosaveCleanup(this.dataDir, runId); }
-        catch { note('autosave cleanup confirmed but retained evidence could not be cleared; worktree reuse remains blocked'); }
-      }
-      try { release?.(); } catch { /* The store may already be closed; durable evidence is independent. */ }
-      if (entry.blocker) {
-        note(this.autosaveCleanupBlocker(runId) ? 'autosave cleanup confirmed; retained evidence still blocks worktree reuse' : 'autosave cleanup confirmed; worktree reuse is available again');
-        if (!this.disposed) this.reapTerminalScratch(runId);
-        if (!this.disposed) this.releaseSlot();
-      }
-      settle();
-    });
-    await entry.settlement;
+    return this.worktreeAutosave.saveWorktree(runId, state, reason);
   }
 
-  /** Autosave-commit the worktree every 90 s while the run lives (spec 006).
-   *  Opt-in via CEZ_AUTOSAVE=1 (#471) — see periodicAutosaveEnabled. */
   private armAutosave(runId: string, state: ActiveRun): void {
-    if (!periodicAutosaveEnabled()) return;
-    if (state.cwd === this.repoRoot || state.autosaveTimer) return;
-    state.autosaveTimer = setInterval(() => {
-      const task = this.saveWorktree(runId, state, 'periodic');
-      this.workerExecutions.trackTurn(runId, task);
-    }, AUTOSAVE_INTERVAL_MS);
-    state.autosaveTimer.unref?.();
+    this.worktreeAutosave.armAutosave(runId, state);
   }
 
   private clearAutosaveTimer(state: ActiveRun): void {
