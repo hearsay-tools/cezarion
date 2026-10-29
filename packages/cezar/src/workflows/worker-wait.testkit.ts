@@ -87,14 +87,11 @@ let began = 0;
 let failureState: unknown;
 export function checkpoint(value: string) { phase = value; checkpoints.push({ phase, ms: Math.round(performance.now() - began) }); }
 function fixtureEngine() {
-  return manager as unknown as {
-    active: Map<string, { sessionEverOpened?: boolean; cancelled: boolean; interrupt(): void; session?: AgentSession; agentInputFlight?: { inputIds: readonly string[] } }>;
-    executions: Map<string, { sessions: Set<unknown>; turns: Set<unknown>; deliveries: Set<unknown> }>;
-  };
+  return runInternals(manager);
 }
 export function captureState() { const engine = fixtureEngine(); return { root, phase, checkpoints: checkpoints.map(entry => ({ ...entry })), elapsedMs: Math.round(performance.now() - began), busy: semaphore?.busy(),
   starting: [...runInternals(manager).line.starting], queued: [...runInternals(manager).line.queue],
-  executions: [...engine.executions].map(([id, entry]) => ({ id, sessions: entry.sessions.size, turns: entry.turns.size, deliveries: entry.deliveries.size })),
+  executions: [...engine.workerExecutions.executions].map(([id, entry]) => ({ id, sessions: entry.sessions.size, turns: entry.turns.size, deliveries: entry.deliveries.size })),
   runs: store?.listRunIds().flatMap(id => store!.getRun(id) ?? []).map(run => ({ id: run.id, status: run.status, error: run.error, step: run.currentStepId, wait: waitOf(run)?.phase,
     active: manager.isActive(run.id), stopping: run.stopping, executionPhase: store.readWorkerExecution(run.id)?.phase,
     session: (() => { const state = engine.active.get(run.id); return state ? { opened: state.sessionEverOpened, cancelled: state.cancelled,

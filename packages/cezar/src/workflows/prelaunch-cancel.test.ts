@@ -259,7 +259,7 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     expect(p.store.getRun(id)?.status).toBe('queued');
     expect(p.store.getRun(id)?.steps.find(step => step.id === stepId)?.status).toBe('pending');
     // Held in the queue for the Finish, with no session state left behind.
-    const engine = p.manager as unknown as { active: Map<string, unknown>;};
+    const engine = runInternals(p.manager);
     expect(engine.active.has(id)).toBe(false);
     expect(runInternals(p.manager).line.queue).toContain(id);
   });

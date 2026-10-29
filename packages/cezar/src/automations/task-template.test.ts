@@ -377,7 +377,7 @@ describe('automation task templates', () => {
       const manager = createFixtureManager(store, root);
       vi.spyOn(store, 'updateRun').mockImplementationOnce(() => { throw new Error('crash after create'); });
       const { runId } = await launchScheduledRun({ root, manager, store, definition: scheduled, occurrence, receiptId: 'receipt', projectName: 'demo', timeZone: 'UTC' });
-      const engine = manager as unknown as { active: Map<string, unknown> };
+      const engine = runInternals(manager);
       expect(runInternals(manager).line.queue.includes(runId) || runInternals(manager).line.pendingJobs.has(runId) || runInternals(manager).line.starting.has(runId) || engine.active.has(runId)).toBe(true);
       vi.restoreAllMocks();
       manager.cancel(runId);

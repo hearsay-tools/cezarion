@@ -108,8 +108,8 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: adapter.scenarios.hold!, runner });
     await until(() => store.getRun(run.id)?.status === 'waiting');
     const receipt = await register(run.id);
-    const engine = manager as unknown as { active: Map<string, { session: AgentSession }> };
-    const session = engine.active.get(run.id)!.session;
+    const engine = runInternals(manager);
+    const session = engine.active.get(run.id)!.session!;
     const send = vi.spyOn(session, 'sendAgentMessage').mockReturnValueOnce(false);
     external.settle(success());
     await until(() => send.mock.calls.length > 0);
@@ -132,8 +132,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     await register(run.id);
     writeFileSync(gate, 'end');
     await until(() => store.getRun(run.id)?.status === 'waiting' && store.readEvents(run.id).some(event => event.type === 'ask.requested'));
-    const engine = manager as unknown as {
-      active: Map<string, { session: AgentSession; atTurnBoundary?: AgentSession | undefined }>; };
+    const engine = runInternals(manager);
     const state = engine.active.get(run.id)!;
     // Hold scheduler capacity until the observation is queued, then lose the
     // boundary before admission (a backend can resume autonomously).
@@ -152,8 +151,8 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     const external = github();
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
     await register(run.id);
-    const engine = manager as unknown as { active: Map<string, { session: AgentSession }> };
-    const session = engine.active.get(run.id)!.session;
+    const engine = runInternals(manager);
+    const session = engine.active.get(run.id)!.session!;
     const original = session.sendAgentMessage.bind(session);
     let acknowledge!: () => void;
     const ack = new Promise<void>(resolve => { acknowledge = resolve; });
@@ -216,14 +215,14 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: adapter.scenarios.hold!, runner });
     await until(() => store.getRun(run.id)?.status === 'waiting');
     await register(run.id);
-    const engine = manager as unknown as { active: Map<string, { session: AgentSession }> };
+    const engine = runInternals(manager);
     // Counted from here: the no-wait nudge's turn came before the park (hearsay-tools/cezarion#1234).
     const started = () => store.readEvents(run.id).filter(event => event.type === 'turn.started').length;
     const before = started();
     // Resume the backend itself, bypassing the manager's human-input path.
     // Native frames resume the run; it works in the monitoring slot its park kept
     // (hearsay-tools/cezarion#1233), so no regular slot is charged.
-    expect(engine.active.get(run.id)!.session.sendMessage([{ type: 'text', text: adapter.scenarios.hold! }])).toBe(true);
+    expect(engine.active.get(run.id)!.session!.sendMessage([{ type: 'text', text: adapter.scenarios.hold! }])).toBe(true);
     await until(() => started() > before);
     expect(store.getRun(run.id)?.status).toBe('running');
     expect(semaphore.busy()).toBe(0);
@@ -451,7 +450,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
     const wait = await register(run.id);
     await until(() => parked(run.id));
-    const session = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(run.id)!.session;
+    const session = runInternals(manager).active.get(run.id)!.session!;
     const send = vi.spyOn(session, 'sendAgentMessage');
     const update = (n: number) => ({ id: randomUUID(), parentRunId: run.id, source: 'agent' as const, text: `worker update ${n}`,
       createdAt: new Date().toISOString(), conversation: { senderRunId: randomUUID(), recipientRunId: run.id, kind: 'progress' as const } });
@@ -762,7 +761,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     else if (action === 'finish') expect(manager.finish(run.id)).toBe(true);
     else {
       // Deletion takes an inactive run: a closed session keeps its waits (R72).
-      (manager as unknown as { active: Map<string, { session: { end(): void } }> }).active.get(run.id)!.session.end();
+      (manager as unknown as { active: Map<string, { session: { end(): void } }> }).active.get(run.id)!.session!.end();
       await until(() => !manager.isActive(run.id));
       expect(store.deleteRun(run.id)).toBe(true);
     }
@@ -796,7 +795,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     await resolve(first.id, () => external.settle(12));
     await resolve(timer.id, () => fireTimer(timer.id));
     await resolve(second.id, () => external.settle(13));
-    const session = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(run.id)!.session;
+    const session = runInternals(manager).active.get(run.id)!.session!;
     const send = vi.spyOn(session, 'sendAgentMessage');
     writeFileSync(gate, 'end');
     const ids = [first.id, timer.id, second.id];

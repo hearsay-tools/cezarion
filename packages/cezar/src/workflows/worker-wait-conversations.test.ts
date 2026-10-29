@@ -159,8 +159,8 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
         const claim = manager.reserveInboxInputs(f.p.id, generation, [progressId, requestId])!;
         expect(manager.acknowledgeInbox(f.p.id, generation, claim.receiptId)).toBe('acknowledged');
       } else {
-        const active = manager as unknown as { active: Map<string, { session: AgentSession }> };
-        const send = vi.spyOn(active.active.get(f.p.id)!.session, 'sendAgentMessage');
+        const active = runInternals(manager);
+        const send = vi.spyOn(active.active.get(f.p.id)!.session!, 'sendAgentMessage');
         expect(pump).toHaveBeenCalled(); pump.mockRestore(); await runInternals(manager).line.pump();
         await until(() => [progressId, requestId].every(id => !!store.getRun(f.p.id)?.agentInputs?.find(input => input.id === id)?.deliveredAt));
         const submitted = JSON.stringify(send.mock.calls);
@@ -176,11 +176,11 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
   // hearsay-tools/cezarion#1235: neither message ends the worker wait.
   it('a request-only inbox ACK beside a progress wake still awaiting provider ACK leaves the worker wait open', async () => {
     const f = await conversationPair();
-    const engine = manager as unknown as { active: Map<string, { session: AgentSession }> };
+    const engine = runInternals(manager);
     const pump = vi.spyOn(runInternals(manager).line, 'pump').mockResolvedValue();
     let acknowledge!: () => void;
     const pending = new Promise<void>(resolve => { acknowledge = resolve; });
-    const send = vi.spyOn(engine.active.get(f.p.id)!.session, 'sendAgentMessage').mockReturnValue(pending);
+    const send = vi.spyOn(engine.active.get(f.p.id)!.session!, 'sendAgentMessage').mockReturnValue(pending);
     try {
       const wait = manager.registerWorkerWait(f.p.id, { workerIds: [f.w.id], timeoutSeconds: 600 });
       expect(pump).toHaveBeenCalled();
@@ -415,7 +415,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
     const f = await conversationPair();
     const engine = runInternals(manager);
     const pump = vi.spyOn(engine.line, 'pump').mockResolvedValue();
-    const send = vi.spyOn(engine.active.get(f.p.id)!.session, 'sendAgentMessage');
+    const send = vi.spyOn(engine.active.get(f.p.id)!.session!, 'sendAgentMessage');
     try {
       const first = randomUUID();
       await f.service.send(f.workerCaller, { id: first, recipientRunId: f.p.id, kind: 'request', text: 'Unanswered request mock:hold', timeoutSeconds: 600 });

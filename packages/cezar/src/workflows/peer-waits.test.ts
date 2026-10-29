@@ -22,10 +22,7 @@ import { controlledWire, fixtureUpdateRun, manager, parent, restart, root, semap
  * A peer is a root task of the project; it needs no session to send, so it is a record here.
  */
 
-type Internals = {
-  active: Map<string, { ciGeneration?: string; idleTimer?: unknown; session?: { open: boolean } }>;
-};
-const internals = () => manager as unknown as Internals;
+const internals = () => runInternals(manager);
 const handlers = (runId: string) => manager.cezarToolHandlers(runId, internals().active.get(runId)!.ciGeneration!);
 const entryOf = (runId: string, waitId: string): Wait | undefined => store.getRun(runId)?.waits?.find(wait => wait.id === waitId);
 const settledOf = (runId: string, waitId: string): Wait | undefined => store.getRun(runId)?.lastWaits?.filter(wait => wait.id === waitId).at(-1);

@@ -101,8 +101,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         ] }, { task: 'parent', runner: backend });
         store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
         // hearsay-tools/cezarion#1235: the list's park and admission, not `workerWaiting`/`workerWakeAdmitted`.
-        const engine = manager as unknown as {
-          active: Map<string, { sessionEverOpened?: boolean; session?: AgentSession }> };
+        const engine = runInternals(manager);
         await until(() => !!engine.active.get(run.id)?.sessionEverOpened);
         const session = engine.active.get(run.id)!.session!;
         const w = await worker(run.id, 'mock:slow');
@@ -252,10 +251,8 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         await until(() => store.getRun(p.id)?.status === 'waiting');
       }
       // hearsay-tools/cezarion#1235: the list's admission, not `workerWakeAdmitted`.
-      const engine = manager as unknown as { active: Map<string, {
-        session: { sendAgentMessage(content: unknown[]): false | Promise<void>; sendMessage(content: unknown[]): boolean }
-      }> };
-      const session = engine.active.get(p.id)!.session;
+      const engine = runInternals(manager);
+      const session = engine.active.get(p.id)!.session!;
       const accept = session.sendAgentMessage.bind(session);
       // A backend opening/ack window legitimately refuses non-human input.
       session.sendAgentMessage = () => false;

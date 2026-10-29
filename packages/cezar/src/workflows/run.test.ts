@@ -1403,9 +1403,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
 
-    const internals = manager as unknown as {
-      active: Map<string, Record<string, unknown>>;
-      };
+    const internals = runInternals(manager);
     const state = internals.active.get(record.id);
     if (!state) throw new Error('active run state missing');
     const originalDeadline = Date.parse(String(monitoringWakeOf(store.getRun(record.id))));

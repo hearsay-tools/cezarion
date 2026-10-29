@@ -112,7 +112,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
   it('stop in starting-before-ActiveRun waits for startup finalization and prevents launch', async () => {
     const w = await worker(); const hold = gate(); releases.push(hold.release);
-    const engine = manager as unknown as { execute(...args: unknown[]): Promise<unknown>;};
+    const engine = manager as unknown as { execute(...args: unknown[]): Promise<unknown>; };
     const real = engine.execute.bind(manager);
     engine.execute = async (...args) => { await hold.promise; return real(...args); };
     manager.enqueueOwnedRun(w.id); await until(() => runInternals(manager).line.starting.has(w.id));
@@ -473,7 +473,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     store.commitRootFinishCancellation(parent.id);
     store.updateRun(parent.id, { status: 'waiting' });
     const another = await worker(); const hold = gate(); releases.push(hold.release);
-    const engine = manager as unknown as { execute(...args: unknown[]): Promise<unknown>;};
+    const engine = manager as unknown as { execute(...args: unknown[]): Promise<unknown>; };
     const real = engine.execute.bind(manager); engine.execute = async (...args) => { await hold.promise; return real(...args); };
     manager.enqueueOwnedRun(another.id); await until(() => runInternals(manager).line.starting.has(another.id));
     destroy(another);

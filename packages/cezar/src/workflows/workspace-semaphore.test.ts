@@ -1,3 +1,4 @@
+import { createActiveRun } from './active-run.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFileSync } from 'node:child_process';
@@ -117,10 +118,8 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
   it('exempts only the configured number of durable monitoring sessions', () => {
     const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 2, maxMonitoringSessions: 2 } });
     const projectA = project('cez-monitor-cap-', semaphore);
-    const internals = projectA.manager as unknown as {
-      active: Map<string, object>;
-      };
-    for (const id of ['ordinary', 'm1', 'm2', 'm3']) internals.active.set(id, {});
+    const internals = runInternals(projectA.manager);
+    for (const id of ['ordinary', 'm1', 'm2', 'm3']) internals.active.set(id, createActiveRun({ cwd: projectA.root, pendingHumanAsk: false, autonomous: false }));
     for (const id of ['ordinary', 'm1', 'm2', 'm3']) runInternals(projectA.manager).line.waiting.add(id);
     for (const id of ['m1', 'm2', 'm3']) runInternals(projectA.manager).line.monitoring.add(id);
     // ordinary wait is exempt; two monitors are exempt; monitor #3 back-pressures the active pool.
