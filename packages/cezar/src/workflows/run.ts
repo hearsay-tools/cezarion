@@ -1,3 +1,4 @@
+import { StepLoop as WorkflowStepLoop } from './run/step-loop.ts';
 import { TurnSettler } from './run/turn-settler.ts';
 import { StepSession } from './run/step-session.ts';
 import * as sessionEvents from './run/session-events.ts';
@@ -27,7 +28,7 @@ import { MaintenanceClaims } from './run/maintenance-claims.ts';
 import { WorkerOrphans } from './run/worker-orphans.ts';
 import type {
   SettledTurn, DelegationExecutionSettings, StartRunInput, PendingContinuation,
-  Execution, ExecutionLaunch, StepLoop, SessionTurn, LaunchDelegation,
+  Execution, StepLoop, SessionTurn, LaunchDelegation,
   LaunchCiTools, LaunchOpening, StepProfile,
   WorkerDelegationRecord, ContinuationOpening, OpeningAnswer, ContinuationSettings, ContinuationSkills,
   ContinuationSessionLaunch, ContinuationClose, WorkerTerminationBlocker, AutomationToolService,
@@ -46,8 +47,8 @@ import { createActiveRun, type ActiveRun } from './active-run.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
 import { familyOf, canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested, isDisposedDelegatedRun, preserveRunAfterDisposal } from './run/run-guards.ts';
 import { beginUsageInvocation, recordUsagePeaks } from './run/usage-accounting.ts';
-import { continuationModel, continuationEffort, continuationRunner, taskModelIdentity } from './run/launch-settings.ts';
-import { executionBaseRef, openExecutionWorktree, ownedContinuationWorkspace, executionSeedFiles, REPOSITORY_ROOT_LOCK_DISABLED_NOTE } from './run/run-workspace.ts';
+import { continuationModel, continuationEffort, continuationRunner } from './run/launch-settings.ts';
+import { ownedContinuationWorkspace, REPOSITORY_ROOT_LOCK_DISABLED_NOTE } from './run/run-workspace.ts';
 import * as inputReceipts from './run/input-receipts.ts';
 import { AutoResumeScheduler } from './run/auto-resume.ts';
 export { AUTO_RESUME_GRACE_MS, MAX_AUTO_RESUMES, AUTO_RESUME_MISSED_WINDOW_MS } from './run/auto-resume.ts';
@@ -56,7 +57,7 @@ import { createSessionEventHandler, launchPreamble } from './run/session-events.
 import * as launchContext from './run/launch-context.ts';
 import { continuationOpening, openingInputs } from './run/opening.ts';
 import { releaseActiveResources } from './run/drop-active.ts';
-import { agentDirectories, composeSystemPrompt, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt } from './run/prompts.ts';
+import { agentDirectories, composeSystemPrompt, expandRegistrySlashSkillText, leadingSlashSkillName, skillSystemPrompt } from './run/prompts.ts';
 import { delegationExecutionSettings, selectDelegationExecutionSettings } from '../delegation/execution-settings.ts';
 import { stepLabel, stepScope } from './run/steps.ts';
 import { makeRunTitle } from '../runs/run-title.ts';
@@ -68,7 +69,7 @@ import * as stepDecisions from './run/step-decisions.ts';
 import * as pendingAskFacts from './run/pending-ask-facts.ts';
 import * as workflowPosition from './run/workflow-position.ts';
 import { RUN_EXITS, transition, transitionVia, type RunExitId } from './run-states.ts';
-import { accountHeldFor, deriveAccountHolds, queuedRecoveryInput } from './run-scheduling.ts';
+import { deriveAccountHolds, queuedRecoveryInput } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
 import { holdsOwedResults, isCezarHumanWait, openWaitList, openWaits, resolvedWaits } from './waits.ts';
 import { runsAwaitingPeer } from './wait-scope.ts';
@@ -120,22 +121,10 @@ import { inputDeliveryOf } from '../core/agent-runner.ts';
 import { readProjectUiState } from '../ui-state.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
 import { waitForCachedTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
-import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelSettings } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
 import { type AutosaveReason } from '../git-worktree.ts';
-import { runGroupedCommand } from './grouped-command.ts';
-import {
-  resolveWorktreeSetup,
-  runWorktreeSetup,
-  worktreeSetupAgentNote,
-  worktreeSetupEndNote,
-  worktreeSetupEnv,
-  worktreeSetupRecordError,
-  worktreeSetupStartNote,
-  type WorktreeSetupOutcome,
-} from '../worktree-setup.ts';
-import { getHeadCommit, getRepoInfo } from '../server/git.ts';
+import { getRepoInfo } from '../server/git.ts';
 import { enqueueAgentInput, hasLiveInboxClaim } from '../delegation/input.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { projectConversationEvents, settledRunFamilies } from '../delegation/conversations.ts';
@@ -144,8 +133,6 @@ import type { RunOutcome } from '../runs/outcome-commit.ts';
 import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
 import { reclaimWorktrees, rematerializeReclaimedWorktree } from '../runs/retention.ts';
 import {
-  AgentTempDirError,
-  agentTmpEnv,
   removeAgentTmpDir,
 } from '../runs/agent-tmpdir.ts';
 import { extractTaskRefs, refineTaskRefs } from '../runs/task-refs.ts';
@@ -155,15 +142,12 @@ import type { UiEventSink } from '../runs/ui-event-sink.ts';
 import type { UiEvent } from '../core/ui-events.ts';
 import {
   QUICK_TASK_WORKFLOW,
-  chainStepNote,
   stepKind,
   stepToolGrant,
   toolGrantLists,
   type WorkflowDef,
   type WorkflowStepDef,
 } from './types.ts';
-
-const CHECK_OUTPUT_CAP = 20_000;
 
 /** An interactive session that hears nothing from the user closes itself. */
 export const IDLE_TIMEOUT_MS = 15 * 60_000;
@@ -280,6 +264,7 @@ export class RunManager {
   private readonly active = new Map<string, ActiveRun>();
   private readonly inputReceiptContext: RunModuleContext;
   private readonly stepSession: StepSession;
+  private readonly stepLoop: WorkflowStepLoop;
   private readonly sessionHelperHost: sessionEvents.SessionHelperHost;
   private readonly completionGateHost: completionGateReads.CompletionGateHost = {
     active: this.active,
@@ -722,6 +707,14 @@ export class RunManager {
         enforceRetention: () => this.enforceRetention(), reapTerminalScratch: id => this.reapTerminalScratch(id),
         forgetMemoryPause: id => { this.memoryPausing.delete(id); },
       }, WAKE_SESSION_CLOSED_ERROR, WAKE_DELIVERY_CAP_NOTE);
+    this.stepLoop = new WorkflowStepLoop(this.inputReceiptContext, {
+      active: this.active, move: (id, exit, patch) => this.move(id, exit, patch), dropActive: id => this.dropActive(id),
+      closingWakeDecision: (id, holds, cancelled, error) => this.closingWakeDecision(id, holds, cancelled, error),
+      owesDelivery: id => this.owesDelivery(id),
+      workerExecutionStopped: id => this.workerExecutionStopped(id),
+      executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
+    }, this.line, this.worktreeAutosave, this.humanWaits, this.runSettlement, this.stepSession,
+    this.completionGateHost, WAKE_SESSION_CLOSED_ERROR);
     this.turnSettler = new TurnSettler(this.inputReceiptContext, {
       humanWaits: this.humanWaits, line: this.line, waitWatches: this.waitWatches, waitRegistry: this.waitRegistry,
       workerQuestions: this.workerQuestions, completionGateHost: this.completionGateHost,
@@ -1711,19 +1704,6 @@ export class RunManager {
 
   private reconcileAutoResumes(): void { this.autoResumeScheduler.reconcileAutoResumes(); }
 
-  /**
-   * Hand a run that has not spawned anything back to the queue, when the account it would run on
-   * went into a usage-limit hold (spec 2026-08-03-auto-resume-after-usage-limit).
-   *
-   * The dequeue-time gate in `pump()` cannot be the only one: a run can sit between dequeue and
-   * spawn for a long time — an in-place run waiting for the exclusive repo-root lease is the
-   * measured case — and the account can close in that gap. This is the last honest moment to
-   * refuse, because everything after it costs a real agent turn.
-   *
-   * "Untouched" is the contract: the run has created no session and no worktree, so it goes back
-   * as plain `queued` with its `startedAt` cleared, and `pump()` will pick it up when the window
-   * reopens. Returns true when the caller must abandon the run.
-   */
   private requeueWhileHeld(
     runId: string,
     workflow: WorkflowDef,
@@ -1731,31 +1711,7 @@ export class RunManager {
     runner: RunnerId,
     state?: ActiveRun,
     startAt?: number,
-  ): boolean {
-    const run = this.store.getRun(runId);
-    if (!run || run.status === 'cancelled' || state?.cancelled) return false;
-    // The watchdog sent this one through. Checked, never consumed: the spawn path asks this
-    // question TWICE — here at the top of `execute`, and again after the exclusive repo-root
-    // lease is granted — so a one-shot flag would clear at the first gate and let the second one
-    // hand an in-place run straight back, re-wedging the queue the rescue had just freed.
-    // `dropActive` retires the entry on every terminal path, so the set still cleans itself up.
-    const finishHeld = this.executionBlockedByRootFinish(run);
-    if (!finishHeld && (this.line.isForced(runId) ||
-      !accountHeldFor({ ...run, runner }, this.semaphore.accountHolds(), runner))) return false;
-    state?.releaseRepoRoot?.();
-    if (state) { state.releaseRepoRoot = undefined; this.clearAutosaveTimer(state); }
-    this.line.enqueueJob(runId, { workflow, input, startAt });
-    this.move(runId, 'requeue', {
-      ...(startAt !== undefined && startAt > 0 ? {} : { startedAt: undefined }),
-      currentStepId: undefined,
-    });
-    this.store.appendEvent(runId, {
-      type: 'note',
-      message: finishHeld ? 'held in the queue — parent finish is pending' : 'held in the queue — this agent account is waiting out a usage limit',
-    });
-    this.dropActive(runId);
-    return true;
-  }
+  ): boolean { return this.stepLoop.requeueWhileHeld(runId, workflow, input, runner, state, startAt); }
 
   async rescueStalledQueue(now = Date.now()): Promise<void> { return this.line.rescueStalledQueue(now); }
 
@@ -3149,9 +3105,9 @@ export class RunManager {
       this.store.appendEvent(runId, event);
     const execution: Execution = { runId, workflow, input, startAt, state, emit };
 
-    const launch = await this.startExecution(execution);
+    const launch = await this.stepLoop.startExecution(execution);
     if (!launch) return;
-    if (!(await this.prepareExecutionWorktree(execution, launch))) return;
+    if (!(await this.stepLoop.prepareExecutionWorktree(execution, launch))) return;
 
     if (state.cwd === this.repoRoot) {
       if (repositoryRootLockDisabled()) {
@@ -3176,7 +3132,7 @@ export class RunManager {
       // is a spawn, and hand the run back to the queue if the account closed meanwhile. This
       // check also covers the explicit lock-bypass path, where the account may close while the
       // run is preparing its first step.
-      if (this.requeueWhileHeld(runId, workflow, input, launch.taskBackend, state, startAt)) return;
+      if (this.stepLoop.requeueWhileHeld(runId, workflow, input, launch.taskBackend, state, startAt)) return;
     }
 
     // Handoff journal (spec 007) — seeded after the worktree exists so the
@@ -3185,336 +3141,13 @@ export class RunManager {
     if (seeded) seedHandoffFile(this.dataDir, seeded);
     // Worktree setup (#917): before the first step, so the agent starts in a prepared tree. Its
     // note rides the first agent step's opening message only, like the task's attachments.
-    const setupNote = await this.prepareWorktree(runId, state, launch.config.worktreeSetup, emit, 'start');
+    const setupNote = await this.stepLoop.prepareWorktree(runId, state, launch.config.worktreeSetup, emit, 'start');
 
     // Every entry path loads the registry — `runContinuation` loads its own, and the one that
     // skipped this leaked raw `/skill` text to the backend (open-mercato/cezar#811). A failed discovery fails the run.
     await this.loadRunSkills(state, 'throw');
-    const loop = await this.runWorkflowSteps(execution, launch, { ...openingInputs(this.store, this.dataDir, execution), setupNote });
-    if (loop) await this.settleExecution(runId, state, loop);
-  }
-
-  /**
-   * The launch half of `execute`: the backend, extra system prompt and model identity the run
-   * starts with, recorded on the run as it starts. Undefined when the run was cancelled or went
-   * back to the queue first.
-   */
-  private async startExecution(execution: Execution): Promise<ExecutionLaunch | undefined> {
-    const { runId, workflow, input, startAt, state, emit } = execution;
-    // Resolve the agent backend for this run: the task choice (GUI) wins over
-    // the config default. Per-step `runner` can still override it at the step.
-    const config = await loadConfig(this.repoRoot);
-    if (state.cancelled || this.store.getRun(runId)?.stopping) {
-      this.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
-      this.dropActive(runId);
-      return undefined;
-    }
-    const taskBackend: RunnerId = input.runner ?? config.defaultRunner;
-    // The account may have gone into a usage-limit hold since this run was dequeued — the queue
-    // gate cannot be the only one, because dequeue is not the moment of no return. Nothing has
-    // happened yet here, so the run goes back to the queue untouched (spec
-    // 2026-08-03-auto-resume-after-usage-limit).
-    if (this.requeueWhileHeld(runId, workflow, input, taskBackend, undefined, startAt)) return undefined;
-    // Extra system prompt (R2 2.3): POST override > config default; echoed on
-    // the record so the UI/API can show what the run actually used.
-    const extraSystemPrompt = this.store.getRun(runId)?.delegation?.role === 'worker'
-      ? input.systemPrompt
-      : resolveExtraSystemPrompt(input.systemPrompt, config.systemPrompt);
-    const modelIdentity = await taskModelIdentity(this.repoRoot, taskBackend, input);
-    if (state.cancelled) {
-      this.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
-      this.dropActive(runId);
-      return undefined;
-    }
-    const ownedRun = this.store.getRun(runId);
-    const owned = ownedRun?.delegation?.role === 'worker' ? ownedRun.delegation.workspace : undefined;
-    this.store.updateRun(runId, {
-      // A resumed workflow stays durably queued until its next step is actually
-      // entered. If setup crashes, recovery can replay from `startAt` instead
-      // of treating the previous continuation as the interrupted step.
-      status: transition(startAt > 0 ? 'start-held' : 'start', () => this.store.getRun(runId)),
-      invalidAsk: undefined,
-      startedAt: ownedRun?.startedAt ?? new Date().toISOString(),
-      runner: taskBackend,
-      systemPrompt: extraSystemPrompt,
-      modelIdentity,
-    });
-    emit({ type: 'lifecycle', message: `run started — workflow "${workflow.name}" (runner: ${taskBackend})` });
-    return { config, taskBackend, extraSystemPrompt, ownedRun, owned };
-  }
-
-  /**
-   * Worktree per task (spec 006): the agent works on its own branch in
-   * `.ai/cezar/worktrees/<id>`, never in the user's working tree. A Git task
-   * that requests isolation fails closed if the worktree cannot be
-   * established; only explicit opt-out and non-Git modes run in place.
-   * False when the run stopped here.
-   */
-  private async prepareExecutionWorktree(execution: Execution, launch: ExecutionLaunch): Promise<boolean> {
-    const { runId, input, emit } = execution;
-    const repo = await getRepoInfo(this.repoRoot);
-    if (repo && input.worktree === false && !launch.owned) {
-      // Composer opt-out: run in the repo working tree, no branch/worktree. The
-      // repository-root lease serializes these runs by default; the explicit
-      // CEZ_DISABLE_REPO_LOCK=1 escape hatch allows unsafe overlap.
-      // Pin the starting commit: the session's Changes and Commits views use it
-      // as their stable lower bound while reading the current working copy.
-      const startingCommit = await getHeadCommit(repo.root);
-      if (startingCommit && !launch.ownedRun?.baseBranch) this.store.updateRun(runId, { baseBranch: startingCommit });
-      emit({ type: 'note', message: 'worktree off — running in the repo working tree' });
-    } else if (repo || launch.owned) {
-      emit({
-        type: 'note',
-        message: `worktree on — using an isolated task worktree (${input.worktree === true ? 'explicit request' : 'default'})`,
-      });
-      const base = await executionBaseRef(this.store, this.repoRoot, execution, repo, launch);
-      return this.createExecutionWorktree(execution, launch, base);
-    } else {
-      emit({ type: 'note', message: 'not a git repository — running in place, one task at a time' });
-    }
-    return true;
-  }
-
-  /** Opens the task's worktree and prepares it for the first step. False when the worker stopped
-   *  first, or when the worktree could not be established, which fails the run. */
-  private async createExecutionWorktree(execution: Execution, launch: ExecutionLaunch, base: string): Promise<boolean> {
-    const { runId, state, emit } = execution;
-    const { owned, ownedRun } = launch;
-    try {
-      if (this.workerExecutionStopped(runId)) { this.dropActive(runId); return false; }
-      const wt = await openExecutionWorktree(this.store, this.repoRoot, this.dataDir, execution, launch, base);
-      state.cwd = wt.path;
-      this.store.updateRun(runId, {
-        worktreePath: wt.path,
-        branch: wt.branch,
-        baseBranch: wt.baseBranch,
-        ...(owned ? { worktree: undefined } : {}),
-      });
-      emit({ type: 'note', message: `worktree ready — branch ${wt.branch} (base ${wt.baseBranch})` });
-      // Seed from this manager's project root: each multi-project context has
-      // its own manager/repoRoot and must never copy another project's layer.
-      // A worker's explicit `--attach` files win over the main checkout's copy (hearsay-tools/cezarion#1149).
-      const attached = executionSeedFiles(ownedRun);
-      const seededConfig = await seedAgentConfigLocalLayer(this.repoRoot, state.cwd, process.env, attached).catch(() => []);
-      if (seededConfig.length > 0) {
-        emit({ type: 'note', message: `seeded personal agent config: ${seededConfig.join(', ')}` });
-      }
-      this.armAutosave(runId, state);
-      return true;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      const error = `worktree creation failed: ${message}`;
-      emit({ type: 'note', message: `${error} — task stopped before workflow execution` });
-      this.move(runId, 'fail-start', {
-        error,
-        finishedAt: new Date().toISOString(),
-        currentStepId: undefined,
-      });
-      emit({ type: 'lifecycle', message: `run failed — ${error}` });
-      this.dropActive(runId);
-      return false;
-    }
-  }
-
-  /**
-   * The step loop of `execute`, from `startAt`. Returns its outcome for `settleExecution`, or
-   * undefined when the run left this execution: parked, back in the queue, or held by another
-   * owner.
-   */
-  private async runWorkflowSteps(
-    execution: Execution,
-    launch: ExecutionLaunch,
-    opening: { attachments: PersistedAttachment[]; images: ContentBlock[] | undefined; setupNote: string | undefined },
-  ): Promise<StepLoop | undefined> {
-    const { runId, workflow, input, startAt, state, emit } = execution;
-    const loop: StepLoop = { checkFailure: null, runError: null, deliveryCapped: false };
-    let startImages = opening.images;
-    let startAttachments = opening.attachments;
-    let startSetupNote = opening.setupNote;
-
-    let i = startAt;
-    while (i < workflow.steps.length) {
-      if (state.cancelled || this.workerExecutionStopped(runId)) { state.cancelled = true; break; }
-      const step = workflow.steps[i] as WorkflowStepDef;
-      const kind = stepKind(step);
-      const record = this.store.getRun(runId)?.steps.find((s) => s.id === step.id);
-      const iteration = (record?.iterations ?? 0) + 1;
-
-      this.move(runId, 'start', { currentStepId: step.id });
-      this.store.updateStep(runId, step.id, {
-        status: 'running',
-        iterations: iteration,
-        startedAt: new Date().toISOString(),
-        error: undefined,
-      });
-      emit({ type: 'step-start', stepId: step.id, name: step.name ?? step.id, kind, iteration });
-
-      if (kind === 'agent') {
-        // Every agent step's session stays open after its turn until a done, finish, idle or cancel
-        // closes it. Only a done completes a step that is not the last (hearsay-tools/cezarion#1620).
-        const nextStep = workflow.steps[i + 1];
-        const attemptStartedAt = Date.now();
-        const failure = await this.runAgentStep(
-          runId,
-          state,
-          step,
-          input,
-          loop.checkFailure,
-          nextStep,
-          emit,
-          startImages,
-          launch.taskBackend,
-          launch.extraSystemPrompt,
-          chainStepNote(workflow.steps, i),
-          startAttachments,
-          startSetupNote,
-        );
-        startImages = undefined;
-        startAttachments = [];
-        startSetupNote = undefined;
-        loop.checkFailure = null;
-        const after = this.nextAfterAgentStep(execution, launch, loop, { index: i, step, nextStep, failure, startedAt: attemptStartedAt });
-        if (after === 'handed-off') return undefined;
-        if (after === 'settle') break;
-        i++;
-        continue;
-      }
-
-      const { ok, output } = await this.runCheckStep(state, step, emit);
-      if (state.cancelled || this.preserveRunAfterDisposal(runId, state)) break;
-      const nextIndex = this.settleCheckStep(execution, i, record, { ok, output }, loop);
-      if (nextIndex === undefined) break;
-      i = nextIndex;
-    }
-    return loop;
-  }
-
-  /**
-   * What the step loop does once an agent step's session ended: start the next step, settle the
-   * run, or leave the run to what holds it now (another owner, the queue, or a park). Synchronous,
-   * like the loop body it came from, so the loop yields only where it awaits the step itself.
-   */
-  private nextAfterAgentStep(
-    execution: Execution,
-    launch: ExecutionLaunch,
-    loop: StepLoop,
-    attempt: { index: number; step: WorkflowStepDef; nextStep: WorkflowStepDef | undefined; failure: string | null; startedAt: number },
-  ): 'next' | 'settle' | 'handed-off' {
-    const { runId, workflow, input, state, emit } = execution;
-    const { step, failure } = attempt;
-    // Stale setup cannot finalize a replacement owner. Disposal also clears
-    // active, but must still honor a previously accepted Stop/Finish intent.
-    if (this.active.get(runId) !== state &&
-      !(this.disposed && (state.cancelled || state.finishRequested))) return 'handed-off';
-    if (state.cancelled || this.preserveRunAfterDisposal(runId, state)) return 'settle';
-    this.withdrawCezarHumanWaits(runId);
-    this.expireStepDeadlineWaits(runId, step, failure, attempt.startedAt);
-    const current = this.store.getRun(runId);
-    if (current && this.executionBlockedByRootFinish(current) && !state.sessionEverOpened) {
-      this.store.updateStep(runId, step.id, { status: 'pending' });
-      this.requeueWhileHeld(runId, workflow, input, launch.taskBackend, state, attempt.index);
-      return 'handed-off';
-    }
-    if (this.settleAgentStepWakes(execution, step.id, failure, loop)) return 'handed-off';
-    if (failure || loop.deliveryCapped) return 'settle';
-    // A session that closed without a done leaves its step resumable; the tail never starts.
-    if (this.stepLeftOpen(state, step.id, attempt.nextStep)) { loop.incompleteStepId = step.id; return 'settle'; }
-    if (state.idleClosed || this.supersedeFallbackThenWorkflowAsk(runId, state)) return 'settle';
-    this.finishStep(runId, step.id, 'done', undefined, emit);
-    // Finish is an explicit stop, not an answer or permission to run checks.
-    return state.finishRequested ? 'settle' : 'next';
-  }
-
-  /**
-   * An authored step deadline bounds the whole step, its question included (#427 Q8, #470 T3):
-   * once it has passed, the step's human waits expire with it and the failure settles as it
-   * did before questions were waits. CI and timer waits still park the failure
-   * (`settleAgentStepWakes`). The clock starts before session setup, so a failure that close to
-   * the deadline counts as it.
-   */
-  private expireStepDeadlineWaits(runId: string, step: WorkflowStepDef, failure: string | null, attemptStartedAt: number): void {
-    if (failure && step.timeoutMs && Date.now() - attemptStartedAt >= step.timeoutMs) {
-      const human = openWaits(this.store.getRun(runId) ?? {}).filter(wait => wait.kind === 'human').map(wait => wait.id);
-      if (human.length) this.store.commitOutcome(runId, { kind: 'cancelled', waitIds: human });
-    }
-  }
-
-  /**
-   * Records a failed agent step, then settles what the run's closing wakes need. True when the
-   * run parked to deliver them; a capped delivery fails the step and marks the loop capped.
-   */
-  private settleAgentStepWakes(execution: Execution, stepId: string, failure: string | null, loop: StepLoop): boolean {
-    const { runId, state, emit } = execution;
-    // runAgentStep already emitted session.ended(error). Record the failed
-    // attempt before parking so later successful CI recovery cannot erase it.
-    if (failure) {
-      if (this.holdsClosingWakes(runId)) this.store.updateRun(runId, { workflowResumeStepId: stepId });
-      this.finishStep(runId, stepId, 'failed', failure, emit);
-      loop.runError = `step "${stepId}" failed: ${failure}`;
-    }
-    // A clean close that leaves results undelivered is a failed delivery too.
-    const undelivered = failure ?? (this.owesDelivery(runId) ? WAKE_SESSION_CLOSED_ERROR : undefined);
-    const delivery = this.closingWakeDecision(runId, this.holdsClosingWakes(runId), state.cancelled, undelivered || undefined);
-    if (delivery === 'capped') {
-      loop.deliveryCapped = true;
-      if (!failure) {
-        this.finishStep(runId, stepId, 'failed', WAKE_SESSION_CLOSED_ERROR, emit);
-        loop.runError = `step "${stepId}" failed: ${WAKE_SESSION_CLOSED_ERROR}`;
-      }
-    }
-    if (delivery !== 'park') return false;
-    this.surfaceHumanWait(runId, state);
-    this.move(runId, 'park', {
-      ...(failure ? { error: loop.runError! } : {}) });
-    this.store.flush(); // checkpoint the failed attempt and its recoverable workflow cursor before parking
-    this.dropActive(runId);
-    return true;
-  }
-
-  /**
-   * A check step's result: a pass goes on to the next step, a failure loops back to its
-   * `onFail.retry` step while retries remain, and otherwise fails the run. Returns the index the
-   * step loop continues from, or undefined when the run fails.
-   */
-  private settleCheckStep(
-    execution: Execution,
-    index: number,
-    record: StepState | undefined,
-    check: { ok: boolean; output: string },
-    loop: StepLoop,
-  ): number | undefined {
-    const { runId, workflow, emit } = execution;
-    const step = workflow.steps[index] as WorkflowStepDef;
-    const outcome = stepDecisions.checkStepOutcome(workflow, index, record, check.ok);
-    if (outcome.kind === 'done') {
-      this.finishStep(runId, step.id, 'done', undefined, emit);
-      return outcome.nextIndex;
-    }
-
-    if (outcome.kind === 'retry') {
-      loop.checkFailure = check.output;
-      this.finishStep(runId, step.id, 'failed', 'check failed — looping back', emit);
-      emit({
-        type: 'note',
-        stepId: step.id,
-        message: outcome.note,
-      });
-      // Steps we're about to re-run go back to pending so the GUI rail
-      // reads top-to-bottom truthfully.
-      for (const s of workflow.steps.slice(outcome.retryIndex, index + 1)) {
-        this.store.updateStep(runId, s.id, { status: 'pending' });
-      }
-      this.store.updateStep(runId, step.id, { retriesUsed: outcome.used + 1 });
-      this.move(runId, 'requeue', { currentStepId: undefined });
-      // The retry target and its consumed budget form one crash boundary: a
-      // restart must observe the queued target, budget, and cursor together.
-      this.store.flush();
-      return outcome.retryIndex;
-    }
-
-    this.finishStep(runId, step.id, 'failed', outcome.error, emit);
-    loop.runError = outcome.runError;
-    return undefined;
+    const loop = await this.stepLoop.runWorkflowSteps(execution, launch, { ...openingInputs(this.store, this.dataDir, execution), setupNote });
+    if (loop) await this.runSettlement.settleExecution(runId, state, loop);
   }
 
   /**
@@ -3753,113 +3386,8 @@ export class RunManager {
     clearAutosaveTimer(state);
   }
 
-  /**
-   * Worktree setup (#917, spec `.ai/specs/2026-10-07-worktree-setup.md`): run the project's
-   * `worktreeSetup` commands in this run's isolated worktree when it needs them, and return the
-   * paragraph for the agent's opening message. `start` is a new task or worker, `rematerialized`
-   * a Continue that rebuilt a reclaimed directory, and `resume` any other Continue, which only
-   * finishes a setup a restart interrupted. In-place and non-Git runs never get setup: that tree
-   * is the user's own checkout.
-   */
-  private async prepareWorktree(
-    runId: string,
-    state: ActiveRun,
-    raw: unknown,
-    emit: (event: { type: string; [k: string]: unknown }) => void,
-    trigger: 'start' | 'rematerialized' | 'resume',
-  ): Promise<string | undefined> {
-    const record = this.store.getRun(runId);
-    if (!record || state.cwd === this.repoRoot) return undefined;
-    const plan = resolveWorktreeSetup(raw);
-    const interrupted = record.worktreeSetup?.status === 'running';
-    if (plan.kind === 'none') {
-      // A restart interrupted setup the project has since removed: nothing is left to finish.
-      if (interrupted) this.store.updateRun(runId, { worktreeSetup: undefined });
-      return undefined;
-    }
-    const fresh = trigger === 'start' && record.worktreeSetup === undefined &&
-      !record.steps.some((step) => step.kind === 'agent' && step.iterations > 0);
-    if (!interrupted && !fresh && trigger !== 'rematerialized') return undefined;
-
-    const startedAt = new Date().toISOString();
-    let outcome: WorktreeSetupOutcome;
-    if (plan.kind === 'invalid') {
-      outcome = { status: 'invalid', issue: plan.issue };
-    } else {
-      // Durable before the first command: recovery reads `running` to requeue a run a restart
-      // interrupted here, instead of failing it with no agent session to resume.
-      this.store.updateRun(runId, { worktreeSetup: { status: 'running', startedAt } });
-      this.store.flush();
-      emit({ type: 'note', message: worktreeSetupStartNote(plan.commands.length) });
-      let tmpEnv: Record<string, string> = {};
-      try {
-        tmpEnv = agentTmpEnv(this.dataDir, runId);
-      } catch (err) {
-        if (!(err instanceof AgentTempDirError)) throw err;
-      }
-      outcome = await runWorktreeSetup({
-        plan,
-        cwd: state.cwd,
-        env: worktreeSetupEnv({ projectRoot: this.repoRoot, runId, tmpEnv }),
-        setInterrupt: (stop) => { state.interrupt = stop; },
-        isCancelled: () => state.cancelled,
-        onCommandResult: (result) => emit({
-          type: 'check-output',
-          command: result.command,
-          text: result.output,
-          exitCode: result.exitCode ?? -1,
-        }),
-      });
-    }
-    const finishedAt = new Date().toISOString();
-    const error = worktreeSetupRecordError(outcome);
-    this.store.updateRun(runId, {
-      worktreeSetup: {
-        status: outcome.status === 'done' ? 'done' : 'failed',
-        startedAt,
-        finishedAt,
-        durationMs: 'durationMs' in outcome ? outcome.durationMs : 0,
-        ...(error !== undefined ? { error } : {}),
-      },
-    });
-    const endNote = worktreeSetupEndNote(outcome);
-    emit({ type: 'note', message: endNote });
-    return worktreeSetupAgentNote(outcome);
+  private async prepareWorktree(...args: Parameters<WorkflowStepLoop['prepareWorktree']>): Promise<string | undefined> {
+    return this.stepLoop.prepareWorktree(...args);
   }
 
-  private async runCheckStep(
-    state: ActiveRun,
-    step: WorkflowStepDef,
-    emit: (event: { type: string; stepId?: string; [k: string]: unknown }) => void,
-  ): Promise<{ ok: boolean; output: string }> {
-    const command = step.command as string;
-    emit({ type: 'note', stepId: step.id, message: `$ ${command}` });
-    // Check steps run in the same cwd as the agent steps — the worktree — in their own process
-    // group, shared with worktree setup (#917).
-    const result = await runGroupedCommand({
-      command,
-      cwd: state.cwd,
-      env: process.env,
-      setInterrupt: (stop) => { state.interrupt = stop; },
-      keep: 'head',
-      cap: CHECK_OUTPUT_CAP,
-    });
-    emit({ type: 'check-output', stepId: step.id, command, text: result.output, exitCode: result.exitCode ?? -1 });
-    return { ok: result.exitCode === 0, output: result.output };
-  }
-
-  private finishStep(
-    runId: string,
-    stepId: string,
-    status: 'done' | 'failed',
-    error: string | undefined,
-    emit: (event: { type: string; stepId?: string; [k: string]: unknown }) => void,
-  ): void {
-    this.store.updateStep(runId, stepId, {
-      status,
-      error,
-      finishedAt: new Date().toISOString(),
-    });
-    emit({ type: 'step-end', stepId, status, ...(error ? { error } : {}) });
-  }
 }

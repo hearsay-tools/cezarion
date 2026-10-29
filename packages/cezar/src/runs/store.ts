@@ -3082,7 +3082,7 @@ export class RunStore extends EventEmitter {
   /**
    * Step-level counterpart of `redactPatch` (#456 review). `error` is the only
    * free-text `StepState` field — it is set from raw `err.message` /process
-   * output (`run.ts` `finishStep`), and `touch()` fans the whole record out
+   * output (`workflows/run/step-loop.ts` `finishStep`), and `touch()` fans the whole record out
    * over SSE, so an unscrubbed copy leaked to `runs.json` AND to the browser.
    * The remaining fields are ids, enums, counters and timestamps.
    */
