@@ -27,6 +27,7 @@ export function createSessionEventHandler(context: RunModuleContext, host: Sessi
     if (event.type === 'error') { host.recordSessionFault(state, turn, event.message); return; }
     if (turn.sessionError || state.agentInputError) return;
     if (event.type === 'session') {
+      // Codex/OpenCode mint their own session id: persist it so resume works.
       context.store.updateStep(runId, stepId, { sessionId: event.sessionId, backend,
         ...(event.sessionTransport ? { sessionTransport: event.sessionTransport } : {}) });
     }
@@ -36,6 +37,8 @@ export function createSessionEventHandler(context: RunModuleContext, host: Sessi
     if (event.type === 'turn-end') {
       host.markTurnBoundary(runId, state, event);
       if (!acknowledge()) return;
+      // v2 `turn.completed` already flushed the delta coalescers; the v1 turn boundary
+      // flushes again (idempotent), so no buffered delta can outlive its turn.
       sink.flushAll();
       host.trackTurnEnd(runId, turn.text);
       const text = turn.text;
@@ -59,6 +62,7 @@ export interface LaunchPreambleHost {
 
 export async function launchPreamble(host: LaunchPreambleHost, runId: string, state: ActiveRun) {
   const delegation = host.provisionSession(runId, state);
+  // Read before the cancellation checks below, which also cover this await (hearsay-tools/cezarion#1576).
   const webhooksPart = await host.agentWebhooksPart();
   const ciTools = await host.provisionCiSession(runId, state);
   const stale = host.launchStale(runId, state, delegation, ciTools);
