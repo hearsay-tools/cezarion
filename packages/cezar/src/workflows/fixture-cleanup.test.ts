@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { AgentSession } from '../core/agent-runner.ts';
 import type { RunManager } from './run.ts';
 import { createActiveRun } from './active-run.ts';
@@ -216,7 +217,7 @@ const ownedOperations: Array<{ label: string; invoke(manager: RunManager, id: st
 it.each(ownedOperations)('records module-owned $label before returning', async ({ label, invoke }) => {
   const { root, store, manager } = fixture();
   const run = store.createRun({ title: 'ownership', task: 'hello', workflow: 'cleanup', steps: [] });
-  store.updateRun(run.id, { status: 'waiting' });
+  store.updateRun(run.id, { status: RUN_STATUS.waiting });
   const work = runInternals(manager).context.work;
   const promise = invoke(manager, run.id);
   try { expect([...work.pending.values()]).toContain(label); }
@@ -230,9 +231,9 @@ it('records a queued continuation at launch', async () => {
   const manager = createFixtureManager(store, root, { semaphore });
   const work = runInternals(manager).context.work;
   const track = vi.spyOn(work, 'track');
-  const run = store.createRun({ title: 'resume', task: 'hello', workflow: 'cleanup', runner: 'claude', steps: [{ id: 'work', name: 'Work', kind: 'agent' }] });
+  const run = store.createRun({ title: 'resume', task: 'hello', workflow: 'cleanup', runner: 'claude', steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }] });
   store.updateStep(run.id, 'work', { sessionId: 'prior-session', backend: 'claude' });
-  store.updateRun(run.id, { status: 'done', worktree: false });
+  store.updateRun(run.id, { status: RUN_STATUS.done, worktree: false });
   expect(manager.continueRun(run.id, { text: 'hello' }, true)).toEqual({ ok: true });
   expect(store.getRun(run.id)?.status).toBe('queued');
   try {
