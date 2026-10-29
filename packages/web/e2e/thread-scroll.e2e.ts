@@ -375,7 +375,17 @@ describe('Activity folds while reading up (#1601)', () => {
   function readTo(target: string, deltaY: number) {
     const top = Number(browser.evaluate(`(() => { const m = ${MAIN}; return Math.round(${target}) })()`))
     browser.evaluate(`${MAIN}.dispatchEvent(new WheelEvent('wheel', { deltaY: ${deltaY}, bubbles: true }))`)
-    browser.waitForFunction(`(() => {
+    // Virtua can compensate after the first matching scrollTop and send a downward scroll
+    // that restores Activity. Hold the position AND extent while retrying the reader gesture.
+    // Evidence: CI run 40824220171 attempt 1, job 123283507112, cockpit-failures-shard-2
+    // artifact 12876415800, .ai/qa/failures/thread-scroll/
+    // starts-folded-on-desktop-folds-an-open-card-while-reading-up-and-restores-it-rea-1/:
+    // probe.json and snapshot.txt kept Activity expanded after the upward read.
+    // Reproduce: `npm run test:e2e -- thread-scroll.e2e.ts -t 'starts folded on desktop, folds an open card'`
+    // in a disposable checkout at proof_base 7b673db75dea86d3cdc284c519c24604746c7c0a,
+    // sampling this predicate with waitForValue(..., undefined, { intervalMs: 0 }): 1/1 failed
+    // before; waitForStable with the same interval and holdMs: 200: 1/1 passed after.
+    browser.waitForStable(`(() => {
       const m = ${MAIN}
       const target = ${top}
       if (Math.abs(m.scrollTop - target) > 50) {
@@ -383,8 +393,8 @@ describe('Activity folds while reading up (#1601)', () => {
         m.scrollTop = target
         return false
       }
-      return true
-    })()`)
+      return { top: m.scrollTop, height: m.scrollHeight, viewport: m.clientHeight }
+    })()`, { holdMs: 200 })
   }
   /** The first transcript row under the sticky header, and where it sits. */
   const anchor = `(() => {
