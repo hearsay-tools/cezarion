@@ -47,9 +47,9 @@ function harness(snapshots) {
   return { gh, calls, elapsed: () => t, options: { gh, repo: 'o/n', headSha: 'abc', sleep: ms => { t += ms; } } };
 }
 
-// The review runs inside the same ci.yml run, after verify: the run itself is still in
-// progress, with publishing and the review's own jobs unfinished.
-test('verification completion releases review while the run, publishing and review are still running', () => {
+// Legacy verification-context consumers can read the aggregate while the run
+// is still in progress. Review-first model jobs use review-ci-context.cjs instead.
+test('legacy required-success context accepts completed verification while the run is still active', () => {
   const reviewJob = job({ databaseId: 103, name: 'Review / codex-review', status: 'in_progress', conclusion: '' });
   const h = harness([{ jobs: [job(), publish(), reviewJob] }]);
   const context = required(h);
@@ -86,7 +86,7 @@ for (const state of ['queued', 'in_progress', 'completed']) {
       { jobs: [job({ status: 'in_progress', conclusion: '' }), publish({ status: state, conclusion: state === 'completed' ? 'success' : '' })] },
     ]);
     assert.throws(() => required(h), /verification.*did not succeed.*pending/i);
-    assert.equal(h.elapsed(), 0, 'nothing waits: the caller starts review only after verify');
+    assert.equal(h.elapsed(), 0, 'the legacy utility reports once and never polls');
   });
 }
 

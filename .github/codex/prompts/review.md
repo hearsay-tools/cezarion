@@ -7,9 +7,10 @@ guess alternate module paths. The available tools include Python 3.12.3, Node
 v24.19.0, npm 11.17.0, git, rg, sed, nl, jq, find, `node --test`, yamllint,
 and `python -c` with `compile(...)` for non-writing syntax checks.
 
-Read `.review-context/ci-results.md` for the `CI` workflow's test
-conclusion, including failing job names and output. If that file says the
-run has not finished, treat the tests as pending and do not run the suite.
+Read `.review-context/ci-results.md` for current CI evidence. Native review
+runs after preflight and before heavy verification. Pending tests are not a
+pass and are not a reason to defer code review. Do not wait for CI or run the
+suite. Manual review context retains the current attempt's failure or cancellation.
 
 Review this pull request for consequential defects introduced or exposed by its
 merge-base diff. Finish the review in one batch. Do not stop after finding one

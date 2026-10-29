@@ -315,15 +315,15 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.match(codex, /gh api --paginate "\/repos\/\$GITHUB_REPOSITORY\/pulls\/\$PR_NUMBER\/comments" --jq '\.\[\]' > pull-request\/\.review-context\/prior-inline-comments\.jsonl/);
   assert.match(codex, /rm -rf -- pull-request\/\.review-context\n\s+mkdir -- pull-request\/\.review-context/, 'Codex must replace an untrusted context symlink before writing');
   assert.doesNotMatch(codex, /mkdir -p pull-request\/\.review-context/, 'Codex must not follow a PR-controlled context symlink');
-  assert.match(codex, /name: Fetch CI workflow results/);
+  assert.match(codex, /name: Read current review CI context/);
   assert.match(codex, /HEAD_SHA: \$\{\{ needs\.review-round\.outputs\.head_sha \}\}/);
-  assert.match(codex, /node trusted-review\/\.github\/scripts\/fetch-ci-results\.cjs/);
-  assert.match(codex, /--out pull-request\/\.review-context\/ci-results\.md/);
-  assert.match(codex, /--require-success/);
+  assert.match(codex, /node trusted-review\/\.github\/scripts\/review-ci-context\.cjs/);
+  assert.match(codex, /pull-request\/\.review-context\/ci-results\.md/);
+  assert.match(codex, /REVIEW_PREFLIGHT_RESULT: \$\{\{ inputs\.preflight_result \}\}/);
   assert.doesNotMatch(codex, /node pull-request\/\.github\/scripts\/fetch-ci-results/);
   assert.doesNotMatch(codex, /TMPDIR:/, 'codex-review must not add a writable TMPDIR');
   assert.match(codex, /name: Checkout trusted review instructions/);
-  assert.match(codex, /ref: \$\{\{ needs\.review-round\.outputs\.base_sha \}\}/);
+  assert.match(codex, /ref: \$\{\{ github\.workflow_sha \}\}/);
   assert.match(codex, /path: trusted-review/);
   assert.match(codex, /prompt-file: trusted-review\/\.github\/codex\/prompts\/review\.md/);
   assert.match(codex, /output-schema-file: trusted-review\/\.github\/schemas\/review-findings\.schema\.json/);
@@ -352,7 +352,7 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.match(codex, /actions\/upload-artifact@[0-9a-f]{40}[\s\S]*?name: review-output/);
 
   const poster = job(workflow, 'post-review');
-  assert.match(poster, /if: \$\{\{ always\(\) &&/);
+  assert.match(poster, /if: \$\{\{ !cancelled\(\) &&/);
   assert.match(poster, /needs: \[validate-provider, review-round, claude-review, codex-review\]/);
   assert.match(poster, /needs\.review-round\.outputs\.can_review == 'false'/);
   assert.match(poster, /name: Download review output\n\s+if: needs\.review-round\.outputs\.can_review == 'true'/, 'only a real review round has an artifact to download');
@@ -826,28 +826,28 @@ test('post-review stamps the computed patch-id onto posted reviews', () => {
   assert.match(poster, /patchId: process\.env\.PATCH_ID/);
 });
 
-test('both model jobs run on provider and round alone, and recheck verification before model work', async () => {
+test('both model jobs run on provider and round alone, and validate preflight context before model work', async () => {
   const { parse } = await import('yaml');
   const { runInNewContext } = require('node:vm');
   const workflow = parse(fs.readFileSync(workflowPath, 'utf8'));
   const expression = condition => condition.replace(/^\$\{\{\s*|\s*\}\}$/g, '').replace(/needs\.([\w-]+)/g, "needs['$1']");
   for (const provider of ['codex', 'claude']) {
     const modelJob = workflow.jobs[`${provider}-review`];
-    // The verification gate is ci.yml's `review: needs: verify`, pinned in the next test.
+    // The preflight gate is ci.yml's review prerequisite, pinned in the next test.
     assert.deepEqual(modelJob.needs, ['validate-provider', 'review-round']);
     for (const [selected, canReview, runs] of [[provider, 'true', true], [provider, 'false', false], [provider === 'codex' ? 'claude' : 'codex', 'true', false]]) {
       const needs = { 'validate-provider': { outputs: { provider: selected } }, 'review-round': { outputs: { can_review: canReview } } };
       assert.equal(runInNewContext(expression(modelJob.if), { needs }), runs, `${provider}: provider=${selected} can_review=${canReview}`);
     }
     const modelIndex = modelJob.steps.findIndex(step => step.uses?.includes(provider === 'codex' ? 'openai/codex-action' : 'anthropics/claude-code-action'));
-    const contextIndex = modelJob.steps.findIndex(step => step.run?.includes('--require-success'));
+    const contextIndex = modelJob.steps.findIndex(step => step.run?.includes('review-ci-context.cjs'));
     assert.ok(contextIndex >= 0 && contextIndex < modelIndex, `${provider} rechecks before model work`);
     const context = modelJob.steps[contextIndex];
-    assert.match(context.run, /node trusted-review\/\.github\/scripts\/fetch-ci-results\.cjs/);
+    assert.match(context.run, /node trusted-review\/\.github\/scripts\/review-ci-context\.cjs/);
     assert.equal(context['continue-on-error'], undefined);
     assert.equal(modelJob.permissions.actions, 'read');
     const trusted = modelJob.steps.find(step => step.with?.path === 'trusted-review');
-    assert.equal(trusted?.with.ref, '${{ needs.review-round.outputs.base_sha }}');
+    assert.equal(trusted?.with.ref, '${{ github.workflow_sha }}');
     assert.equal(trusted?.with['persist-credentials'], false);
     if (provider === 'claude') {
       const resetIndex = modelJob.steps.findIndex(step => step.run === 'rm -rf -- trusted-review');
@@ -869,7 +869,7 @@ test('the Automated Code Review check fails on new or still-open finding threads
   const workflow = parse(fs.readFileSync(workflowPath, 'utf8'));
   const step = workflow.jobs['review-complete'].steps.find(step => step.name === 'Require the selected review path to succeed');
   const passing = {
-    VALIDATE_RESULT: 'success', REVIEW_ROUND_RESULT: 'success', CAN_REVIEW: 'true', PROVIDER: 'codex',
+    CANCELLED: 'false', VALIDATE_RESULT: 'success', REVIEW_ROUND_RESULT: 'success', CAN_REVIEW: 'true', PROVIDER: 'codex',
     CLAUDE_RESULT: 'skipped', CODEX_RESULT: 'success', POST_RESULT: 'success', NEW_THREADS: '0', OPEN_THREADS: '0',
     PR_NUMBER: '42',
   };
@@ -945,7 +945,7 @@ test('the review is a called workflow plus a manual dispatch, never its own pull
   assert.equal(fs.existsSync(path.join(__dirname, 'recover-review.cjs')), false);
 });
 
-test('ci.yml starts the review after verify and owns the required Automated Code Review check', async () => {
+test('ci.yml starts the review after preflight and owns the required Automated Code Review check', async () => {
   const { parse } = await import('yaml');
   const { runInNewContext } = require('node:vm');
   const { spawnSync } = require('node:child_process');
@@ -962,7 +962,7 @@ test('ci.yml starts the review after verify and owns the required Automated Code
 
   const caller = ci.jobs.review;
   assert.equal(caller.uses, './.github/workflows/automated-code-review.yml');
-  assert.equal(caller.needs, 'verify', 'the review starts when verification succeeds, so no job waits for CI');
+  assert.equal(caller.needs, 'preflight', 'the review starts after cheap checks, with heavy tests pending');
   assert.deepEqual(caller.secrets, {
     ANTHROPIC_API_KEY: '${{ secrets.ANTHROPIC_API_KEY }}',
     OPENAI_API_KEY: '${{ secrets.OPENAI_API_KEY }}',
@@ -989,7 +989,7 @@ test('ci.yml starts the review after verify and owns the required Automated Code
   };
   const shards = ['vitest', 'cockpit-browser'];
   const outcome = (shardResult, verifyResult) => Object.fromEntries(Object.keys(ci.jobs).map(job => [job,
-    job === 'verify' ? verifyResult : shards.includes(job) ? shardResult : 'success']));
+    job === 'preflight' ? verifyResult : shards.includes(job) ? shardResult : 'success']));
   for (const [context, expected] of routing) {
     assert.equal(runs('review', { github: context, results: outcome('success', 'success') }), expected, JSON.stringify(context));
   }
@@ -1016,10 +1016,10 @@ test('ci.yml starts the review after verify and owns the required Automated Code
   assert.deepEqual(caller.permissions, union);
 
   const named = Object.values(ci.jobs).filter(j => typeof j.name === 'string' && j.name.includes('Automated Code Review'));
-  assert.equal(named.length, 1, 'exactly one ci.yml job carries the required check name');
+  assert.equal(named.length, 2, 'PR and queue gates route the protected name to distinct applicable jobs');
   const result = ci.jobs['review-result'];
-  assert.deepEqual(result.needs, ['verify', 'review', 'queue-admission']);
-  assert.deepEqual(result.permissions, {});
+  assert.deepEqual(result.needs, ['preflight', 'review']);
+  assert.deepEqual(result.permissions, { contents: 'read', 'pull-requests': 'read' });
   for (const [context, expected] of routing) {
     assert.equal(evaluate(result.if, { github: context }), expected, JSON.stringify(context));
     // A skipped job reports success: under the required name it would pass the check unreviewed.
@@ -1028,14 +1028,14 @@ test('ci.yml starts the review after verify and owns the required Automated Code
 
   const [step] = result.steps;
   const run = env => spawnSync('bash', ['--noprofile', '--norc', '-eu', '-o', 'pipefail', '-c', step.run], {
-    env: { PATH: process.env.PATH, BASH_ENV: '/dev/null', EVENT_NAME: 'pull_request_target', ...env }, encoding: 'utf8',
+    env: { PATH: process.env.PATH, BASH_ENV: '/dev/null', CANCELLED: 'false', PREFLIGHT_RESULT: 'success', EVENT_NAME: 'pull_request_target', ...env }, encoding: 'utf8',
   });
-  assert.equal(run({ VERIFY_RESULT: 'success', REVIEW_RESULT: 'success' }).status, 0);
+  assert.equal(run({ PREFLIGHT_RESULT: 'success', REVIEW_RESULT: 'success' }).status, 0);
   for (const reviewResult of ['failure', 'cancelled', 'skipped', '']) {
-    assert.notEqual(run({ VERIFY_RESULT: 'success', REVIEW_RESULT: reviewResult }).status, 0, `review ${reviewResult}`);
+    assert.notEqual(run({ PREFLIGHT_RESULT: 'success', REVIEW_RESULT: reviewResult }).status, 0, `review ${reviewResult}`);
   }
   for (const verifyResult of ['failure', 'cancelled', 'skipped']) {
-    const failed = run({ VERIFY_RESULT: verifyResult, REVIEW_RESULT: 'skipped' });
+    const failed = run({ PREFLIGHT_RESULT: verifyResult, REVIEW_RESULT: 'skipped' });
     assert.notEqual(failed.status, 0, `verify ${verifyResult}`);
     assert.match(failed.stderr, /Re-run failed jobs/);
   }
@@ -1064,7 +1064,7 @@ test('review findings never reach the CI failure sweep as an error cause', async
   const { spawnSync } = require('node:child_process');
   const { causesForStep } = require('./failure-diagnostics.cjs');
   const run = (script, env) => spawnSync('bash', ['--noprofile', '--norc', '-eu', '-o', 'pipefail', '-c', script], {
-    env: { PATH: process.env.PATH, BASH_ENV: '/dev/null', EVENT_NAME: 'pull_request_target', ...env }, encoding: 'utf8',
+    env: { PATH: process.env.PATH, BASH_ENV: '/dev/null', CANCELLED: 'false', PREFLIGHT_RESULT: 'success', EVENT_NAME: 'pull_request_target', ...env }, encoding: 'utf8',
   });
   // GitHub renders a ::<level>:: workflow command into the job log as ##[<level>].
   const swept = (result, stepName) => causesForStep({
@@ -1075,7 +1075,7 @@ test('review findings never reach the CI failure sweep as an error cause', async
   const review = parse(fs.readFileSync(workflowPath, 'utf8'));
   const verdict = review.jobs['review-complete'].steps.find(step => step.name === 'Require the selected review path to succeed');
   const passing = {
-    VALIDATE_RESULT: 'success', REVIEW_ROUND_RESULT: 'success', CAN_REVIEW: 'true', PROVIDER: 'codex',
+    CANCELLED: 'false', VALIDATE_RESULT: 'success', REVIEW_ROUND_RESULT: 'success', CAN_REVIEW: 'true', PROVIDER: 'codex',
     CLAUDE_RESULT: 'skipped', CODEX_RESULT: 'success', POST_RESULT: 'success', NEW_THREADS: '0', OPEN_THREADS: '0',
   };
   for (const findings of [{ NEW_THREADS: '1', OPEN_THREADS: '1' }, { OPEN_THREADS: '2' }]) {
@@ -1088,7 +1088,7 @@ test('review findings never reach the CI failure sweep as an error cause', async
 
   const ci = parse(fs.readFileSync(ciPath, 'utf8'));
   const [gate] = ci.jobs['review-result'].steps;
-  for (const env of [{ VERIFY_RESULT: 'success', REVIEW_RESULT: 'failure' }, { VERIFY_RESULT: 'failure', REVIEW_RESULT: 'skipped' }]) {
+  for (const env of [{ PREFLIGHT_RESULT: 'success', REVIEW_RESULT: 'failure' }, { PREFLIGHT_RESULT: 'failure', REVIEW_RESULT: 'skipped' }]) {
     const result = run(gate.run, env);
     assert.equal(result.status, 1, JSON.stringify(env));
     assert.deepEqual(swept(result, gate.name), ['unknown'], JSON.stringify(env));

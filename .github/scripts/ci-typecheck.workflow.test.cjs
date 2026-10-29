@@ -30,7 +30,7 @@ test('typecheck uses the smallest Blacksmith runner only for PRs and dispatches'
     }
   }
   assert.equal(leaf.needs, 'queue-proof');
-  assert.equal(leaf.if, ci.jobs['build-and-package'].if);
+  assert.notEqual(leaf.if, ci.jobs['build-and-package'].if, 'only heavy work waits for review');
   assert.deepEqual(leaf.permissions, { contents: 'read', 'pull-requests': 'read' });
 });
 
@@ -39,7 +39,7 @@ test('typecheck keeps minimum Node, its bounded retry and an independent full ch
   const setups = job => job.steps.filter(step => step.uses?.startsWith('actions/setup-node@'));
   assert.deepEqual(setups(leaf), setups(build));
   assert.equal(leaf['timeout-minutes'], build['timeout-minutes']);
-  assert.deepEqual(leaf.steps.filter(step => step.run && step.id !== 'resolve-dispatch'), [
+  assert.deepEqual(leaf.steps.filter(step => step.run && ['Install dependencies', 'Install pnpm dependencies', 'Typecheck'].includes(step.name)), [
     { name: 'Install dependencies', if: "hashFiles('pnpm-lock.yaml') == ''", run: 'npm ci' },
     { name: 'Install pnpm dependencies', if: "hashFiles('pnpm-lock.yaml') != ''", run: 'pnpm install --frozen-lockfile' },
     { name: 'Typecheck', run: 'npm run typecheck' },
@@ -47,7 +47,7 @@ test('typecheck keeps minimum Node, its bounded retry and an independent full ch
   assert.equal(build.steps.some(step => step.run === 'npm run typecheck'), false);
   const prepare = build.steps.findIndex(step => step.run === 'npm run build:server');
   assert.ok(prepare >= 0 && prepare < build.steps.findIndex(step => step.run === 'npm run test:unit'));
-  assert.equal(build.needs, 'queue-proof', 'build and typecheck must run independently');
+  assert.deepEqual(build.needs, ['queue-proof', 'preflight', 'review-result'], 'heavy build follows preflight and review');
 });
 
 test('required typecheck cannot fail or skip behind docs, infra or release-bump exemptions', () => {
@@ -56,7 +56,7 @@ test('required typecheck cannot fail or skip behind docs, infra or release-bump 
   for (const CHANGE_SURFACE of ['full-matrix', 'docs-only', 'infra-only']) {
     for (const BUMP_PR of ['false', 'true']) for (const TYPECHECK_RESULT of ['success', 'failure', 'cancelled', 'skipped', '']) {
       const result = spawnSync('bash', ['-eu', '-c', gate.run], { encoding: 'utf8', env: {
-        PATH: process.env.PATH, EVENT_NAME: 'pull_request_target', CLASSIFY_RESULT: 'success', SURFACE_RESULT: 'success',
+        PATH: process.env.PATH, BASH_ENV: '/dev/null', CANCELLED: 'false', PREFLIGHT_RESULT: 'success', BASE_REF: 'main', REVIEW_RESULT: 'success', EVENT_NAME: 'pull_request_target', CLASSIFY_RESULT: 'success', SURFACE_RESULT: 'success',
         COMPLEXITY_GATE_RESULT: 'success', CLONE_GATE_RESULT: 'success', BUILD_AND_PACKAGE_RESULT: 'success',
         VITEST_RESULT: 'success', COCKPIT_BROWSER_RESULT: 'success', CHANGE_SURFACE, BUMP_PR, TYPECHECK_RESULT,
         PROOF_RESULT: 'success', PROOF_VERIFIED: 'false',
