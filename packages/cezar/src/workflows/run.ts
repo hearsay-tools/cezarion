@@ -714,14 +714,12 @@ export class RunManager {
       }, WAKE_SESSION_CLOSED_ERROR, WAKE_DELIVERY_CAP_NOTE);
     this.continuationSession = new ContinuationSession(this.inputReceiptContext, {
       move: (...args) => this.move(...args), dropActive: id => this.dropActive(id),
-      continuationNextStep: id => this.continuationNextStep(id),
-      hasPendingHumanAsk: id => this.hasPendingHumanAsk(id),
+      isSyntheticContinuation: (run, step) => isSyntheticContinuation(run, step),
       beginUsageInvocation: (...args) => this.beginUsageInvocation(...args),
       trackWorkerSessionResult: (...args) => this.trackWorkerSessionResult(...args),
       recordUsagePeaks: id => this.recordUsagePeaks(id),
       saveWorktree: (...args) => this.saveWorktree(...args), pump: () => this.pump(),
       makeUiSink: (...args) => this.makeUiSink(...args),
-      routedAsk: id => this.routedAsk(id), readPersistedAttachments: (...args) => this.readPersistedAttachments(...args),
       repositoryRootLockDisabled: () => repositoryRootLockDisabled(),
       prepareWorktree: (...args) => this.prepareWorktree(...args),
       workerStep: (...args) => this.workerStep(...args),
@@ -730,7 +728,7 @@ export class RunManager {
       holdContinuationForRootFinish: (...args) => this.holdContinuationForRootFinish(...args),
     }, this.line, this.sessionHelperHost, this.repoRootLease, this.worktreeAutosave, this.runSkills,
     this.sessionEventHost(), this.launchPreambleHost(), this.inputReceiptHost, this.inputReceiptSteps,
-    this.humanWaits, this.runSettlement);
+    this.humanWaits, this.queuedInput, this.workerQuestions, this.runSettlement);
     this.stepLoop = new WorkflowStepLoop(this.inputReceiptContext, {
       active: this.active, move: (id, exit, patch) => this.move(id, exit, patch), dropActive: id => this.dropActive(id),
       closingWakeDecision: (id, holds, cancelled, error) => this.closingWakeDecision(id, holds, cancelled, error),

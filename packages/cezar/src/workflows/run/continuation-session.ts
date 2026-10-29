@@ -1,3 +1,6 @@
+import { continuationNextStep, waitingWorkflowStepIndex, ciWorkflowResumeStepIndex } from './workflow-position.ts';
+import type { QueuedInput } from './queued-input.ts';
+import type { WorkerQuestions } from './worker-questions.ts';
 import { join } from 'node:path';
 import type { AgentEvent, ContentBlock } from '../../core/agent-runner.ts';
 import { inputDeliveryOf } from '../../core/agent-runner.ts';
@@ -5,7 +8,6 @@ import { createRunner } from '../../core/runner-factory.ts';
 import { startManagedSession } from '../../core/managed-session.ts';
 import { pastedAttachmentsText, type PastedContent, type PersistedAttachment } from '../pasted-content.ts';
 import type { AutosaveReason } from '../../git-worktree.ts';
-import type { OpeningHost } from './opening.ts';
 import { continuationOpening } from './opening.ts';
 import { createSessionEventHandler, launchPreamble } from './session-events.ts';
 import { agentDirectories, composeSystemPrompt, expandRegistrySlashSkillText } from './prompts.ts';
@@ -31,7 +33,7 @@ import type { Skill } from '../../skills.ts';
 import { waitForCachedTeamSkills, waitForTeamSkills } from '../../skills-remote.ts';
 import { continuationModel, continuationEffort } from './launch-settings.ts';
 import { leadingSlashSkillName, skillSystemPrompt } from './prompts.ts';
-import { pendingHumanAskSeq } from './pending-ask-facts.ts';
+import { hasPendingHumanAsk, pendingHumanAskSeq } from './pending-ask-facts.ts';
 import { clearAutosaveTimer } from './input-timers.ts';
 import { REPOSITORY_ROOT_LOCK_DISABLED_NOTE } from './run-workspace.ts';
 import type { RepoRootLease } from './repo-root-lease.ts';
@@ -40,14 +42,14 @@ import type { RunSkills } from './run-skills.ts';
 import * as sessionEvents from './session-events.ts';
 import type { PendingContinuation, ContinuationOpening, OpeningAnswer, ContinuationSettings, ContinuationSkills } from './types.ts';
 import { existsSync } from 'node:fs';
-import type { RunRecord } from '../../runs/store.ts';
+import type { RunRecord, StepState } from '../../runs/store.ts';
 import { rematerializeReclaimedWorktree } from '../../runs/retention.ts';
 import { ownedContinuationWorkspace } from './run-workspace.ts';
 import type { RunExitId } from '../run-states.ts';
 import type { RunLine } from './run-line.ts';
 import type { RunModuleContext, WorkerDelegationRecord } from './types.ts';
 
-export interface ContinuationSessionHost extends OpeningHost {
+export interface ContinuationSessionHost {
   move(runId: string, exit: RunExitId, patch?: Partial<RunRecord>): void;
   dropActive(runId: string): void;
   repositoryRootLockDisabled(): boolean;
@@ -56,8 +58,7 @@ export interface ContinuationSessionHost extends OpeningHost {
   recordUsagePeaks(runId: string): void;
   saveWorktree(runId: string, state: ActiveRun, reason: AutosaveReason): Promise<void>;
   pump(): Promise<void>;
-  hasPendingHumanAsk(runId: string): boolean;
-  continuationNextStep(runId: string): WorkflowStepDef | undefined;
+  isSyntheticContinuation(run: RunRecord, step: StepState): boolean;
   makeUiSink(runId: string, stepId: string): UiEventSink;
   prepareWorktree(runId: string, state: ActiveRun, config: Awaited<ReturnType<typeof loadConfig>>['worktreeSetup'], emit: (event: { type: string; [key: string]: unknown }) => void, reason: 'rematerialized' | 'resume'): Promise<string | undefined>;
   workerStep(runId: string, stepId: string | undefined): WorkerStepIdentity | undefined;
@@ -81,6 +82,8 @@ export class ContinuationSession {
     private readonly inputReceiptHost: inputReceipts.InputReceiptsHost,
     private readonly inputReceiptSteps: inputReceipts.InputReceiptSteps,
     private readonly humanWaits: HumanWaits,
+    private readonly queuedInput: QueuedInput,
+    private readonly workerQuestions: WorkerQuestions,
     private readonly runSettlement: RunSettlement,
   ) {}
 
@@ -464,10 +467,13 @@ export class ContinuationSession {
     await this.runSkills.loadRunSkills(state, 'ignore');
 
     this.startContinuationStep(runId, stepId, record, sessionId, backend);
-    const opening = continuationOpening(this.context.store, this.host, runId, stepId, state, record, { prompt, images, persistedImages, persistedAttachments });
+    const opening = continuationOpening(this.context.store, {
+      routedAsk: id => this.workerQuestions.routedAsk(id),
+      readPersistedAttachments: (...args) => this.queuedInput.readPersistedAttachments(...args),
+    }, runId, stepId, state, record, { prompt, images, persistedImages, persistedAttachments });
     prompt = opening.prompt;
     const answer = this.openingAnswer(runId, state, opening);
-    state.pendingHumanAsk = answer.askSeq === undefined && this.host.hasPendingHumanAsk(runId);
+    state.pendingHumanAsk = answer.askSeq === undefined && hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id));
 
     const turn: SessionTurn = { text: '', completedText: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
     const sink = this.host.makeUiSink(runId, stepId);
@@ -590,7 +596,8 @@ export class ContinuationSession {
     const { stepId, sink, turn } = launch;
     const sessionClosed = this.host.trackWorkerSessionResult(runId, session);
     state.session = session;
-    const resumedNext = this.host.continuationNextStep(runId);
+    const resumedNext = continuationNextStep(this.context.store, runId, record => waitingWorkflowStepIndex(record,
+      (run, step) => this.host.isSyntheticContinuation(run, step), ciWorkflowResumeStepIndex));
     state.nextStep = stepScope(session, resumedNext);
     state.sessionEverOpened = true;
     state.interrupt = () => session.interrupt();
