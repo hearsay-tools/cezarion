@@ -4,8 +4,10 @@ const tty = require('node:tty');
 // Docs: paths no Vitest test or cockpit browser spec reads (testReadDocuments
 // below names the exceptions). A change confined to them skips both suites and
 // the automated review; scripts/test-changed.mjs skips the same set through
-// isDocsPath. build-and-package still runs every node:test file, so Markdown
-// that only a .github/scripts test reads stays docs.
+// isDocsPath. build-and-package still runs every node:test file, so a docs
+// path that only a node:test file reads stays docs; put a check on a docs file
+// there (hearsay-tools/cezarion#2166). change-surface-readers.test.cjs fails
+// when package code outside those files reads a docs path not listed below.
 const docsAllowlisted = [
   /^[^/]+\.md$/,
   /^docs\/(?:[^/]+\/)*[^/]+$/,
@@ -13,7 +15,7 @@ const docsAllowlisted = [
   /^\.ai\/analysis\/(?:[^/]+\/)*[^/]+$/,
   // Markdown at any depth under packages/, except in a fixture or snapshot
   // directory, where it may be test data (hearsay-tools/cezarion#1099).
-  // change-surface-readers.test.cjs fails when package code names one.
+  // change-surface-readers.test.cjs fails when package code reads one.
   /^packages\/(?!(?:[^/]+\/)*(?:__fixtures__|fixtures|__snapshots__)\/)(?:[^/]+\/)*[^/]+\.md$/,
   // Generated scan data only, not arbitrary files under .ai/upstream. The
   // unconditional build-and-package job validates the ledger via test:unit.
