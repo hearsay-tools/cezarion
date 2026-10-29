@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -76,7 +77,7 @@ describe('CI wait failure history through every native runner (hearsay-tools/cez
       const wire = gatedProviderFailure(root, runner);
       // A failure that owes the CI result retries after the wake backoff (hearsay-tools/cezarion#1233);
       // the cell is about the failure history, so the retry need not wait out production cadence.
-      (manager as unknown as { wakeRetryBackoff: Backoff }).wakeRetryBackoff = { fastMs: 0, fastCount: 1, capMs: 0 };
+      runInternals(manager).retries.wakeRetryBackoff = { fastMs: 0, fastCount: 1, capMs: 0 };
       const adapter = HARNESS_ADAPTERS[runner];
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: adapter.scenarios[mode === 'fresh' ? 'provider-error' : 'baseline']! });
       let wait: Wait;

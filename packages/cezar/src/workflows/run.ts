@@ -91,7 +91,7 @@ import { type AgentSession } from '../core/claude-cli-runner.ts';
 import { onUsage, replaceRunProcess, type ProcessUsage } from '../core/process-usage.ts';
 import { type ExitFileRoots } from '../process-wait/exit-file.ts';
 import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
-import { ORPHAN_BACKOFF, WAKE_RETRY_BACKOFF, type Backoff } from '../delegation/retry-backoff.ts';
+import { ORPHAN_BACKOFF, type Backoff } from '../delegation/retry-backoff.ts';
 import { type CwdSource } from '../delegation/process-liveness.ts';
 import { parseUsageLimit } from '../core/usage-limit.ts';
 import type { RunnerId } from '../core/agent-runner.ts';
@@ -191,8 +191,6 @@ export class RunManager {
   private readonly familyReconciler: FamilyReconciler;
   private readonly workerQuestions: WorkerQuestions;
   private get recoveryFactsPending() { return this.familyReconciler.recoveryFactsPending; }
-  private get waitTimers() { return this.waitWatches.waitTimers; }
-  private get ciWatches() { return this.waitWatches.ciWatches; }
   private readonly inputReceiptSteps: inputReceipts.InputReceiptSteps = {
     clearUnread: state => this.clearUnreadInputTimer(state), clearHeld: state => this.clearHeldHumanInputTimer(state),
     noteActivity: (id, state, event) => this.noteNoWaitNudgeContent(id, state, event),
@@ -275,14 +273,8 @@ export class RunManager {
    *  human waiting: these resumes MUST reacquire scheduler capacity. Keyed by run id. */
   private get waitWakeQueuedAt() { return this.line.waitWakeQueuedAt; }
   private get waitWakeAdmitted() { return this.line.waitWakeAdmitted; }
-  /** CI lookups in flight, keyed by run id and normalized PR URL: two PRs may register at once. */
-  private get ciRegistrations() { return this.waitRegistry.ciRegistrations; }
   private readonly wakeAdmission: WakeAdmission;
   private readonly retries: WakeRetries;
-  private get wakeRetries() { return this.retries.wakeRetries; }
-  private get wakeBackoffs() { return this.retries.wakeBackoffs; }
-  // Private and overridable so tests need not wait out production cadence.
-  private wakeRetryBackoff: Backoff = WAKE_RETRY_BACKOFF;
   private readonly ciResources: ReturnType<typeof acquireCiResources>;
   /** #781: the workspace-wide preview host. Absent (`cez run`, tests) means every registration is `headless`. */
   private readonly preview?: PreviewHostLike | undefined;
@@ -388,7 +380,7 @@ export class RunManager {
     this.context = { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed, work: options.work ?? new TrackedWork() };
     this.retries = new WakeRetries(this.context, {
       owesWake: run => this.owesWake(run), queueWaitWake: id => this.queueWaitWake(id),
-      retryWaitAdmission: id => this.retryWaitAdmission(id), wakeRetryBackoff: () => this.wakeRetryBackoff,
+      retryWaitAdmission: id => this.retryWaitAdmission(id),
     });
     this.queuedRevivalHost = {
       move: (id, exit, patch) => this.move(id, exit, patch), isActive: id => this.isActive(id),

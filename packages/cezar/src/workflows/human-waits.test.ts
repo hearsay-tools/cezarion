@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
@@ -41,7 +42,7 @@ async function heldTurn(options: { autonomous?: boolean } = {}) {
 
 const engine = () => manager as unknown as {
   active: Map<string, { session?: AgentSession & { end(): void }; ciGeneration: string }>;
-  waitTimers: Map<string, { timer: NodeJS.Timeout & { _onTimeout(): void } }>;
+
 };
 const tools = (id: string) => manager.cezarToolHandlers(id, engine().active.get(id)!.ciGeneration);
 const ask = (id: string, questions: AskQuestion[], context = '## Draft\n\nThe plan.') => tools(id).ask({ context, questions }, new AbortController().signal);
@@ -208,7 +209,7 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     await until(() => store.getRun(run.id)?.status === 'waiting' && store.getRun(run.id)?.waits?.some(wait => wait.kind === 'timer') === true);
     const timer = store.getRun(run.id)!.waits!.find(wait => wait.kind === 'timer')!;
     store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES });
-    engine().waitTimers.get(timer.id)!.timer._onTimeout();
+    runInternals(manager).waitWatches.waitTimers.get(timer.id)!.timer._onTimeout();
     await until(() => needsYou(run.id));
     expect(settled(run.id, timer.id)?.phase).toBe('cancelled');
     const [budget, ...more] = humanOpen(run.id);
@@ -268,7 +269,7 @@ describe('the lifecycle prompt follows the session\'s cezar tools', { timeout: 4
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: messagesPrompt('claude', ['Still waiting for the load test.\nCEZ:MONITORING']), runner: 'claude' });
       await until(() => store.getRun(run.id)?.status === 'waiting' && store.getRun(run.id)?.waits?.some(wait => wait.kind === 'timer') === true);
       const timer = store.getRun(run.id)!.waits!.find(wait => wait.kind === 'timer')!;
-      engine().waitTimers.get(timer.id)!.timer._onTimeout();
+      runInternals(manager).waitWatches.waitTimers.get(timer.id)!.timer._onTimeout();
       await until(() => store.getRun(run.id)?.agentInputs?.some(input => input.id === timer.id) === true);
       expect(store.getRun(run.id)!.agentInputs!.find(input => input.id === timer.id)!.text).toBe(withTools ? MONITORING_WAKE_NUDGE : MONITORING_WAKE_NUDGE_MARKERS);
     });
@@ -286,7 +287,7 @@ describe('the lifecycle prompt follows the session\'s cezar tools', { timeout: 4
     await until(() => !manager.isActive(run.id));
     // The timer resolves with no session, and the continuation it opens has no cezar tools.
     vi.spyOn((manager as unknown as { ciResources: { controller(): Promise<unknown> } }).ciResources, 'controller').mockResolvedValue(undefined);
-    engine().waitTimers.get(timer.id)!.timer._onTimeout();
+    runInternals(manager).waitWatches.waitTimers.get(timer.id)!.timer._onTimeout();
     await until(() => inbound().some(text => text.includes(MONITORING_WAKE_NUDGE_MARKERS)));
     expect(inbound().some(text => text.includes(MONITORING_WAKE_NUDGE))).toBe(false);
     expect(prompts()[1]).toContain(handoffInstructions({ tools: false, handoffInjected: true }));

@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -183,12 +184,12 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     const external = github();
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
     const wait = await register(run.id);
-    const engine = manager as unknown as { wakeRetries: Map<string, unknown>; active: Map<string, { session: AgentSession }> };
+    const engine = runInternals(manager);
     const send = vi.spyOn(engine.active.get(run.id)!.session, 'sendAgentMessage').mockReturnValue(false);
     external.settle(success());
     await until(() => send.mock.calls.length >= 2);
     expect(manager.cancel(run.id)).toBe(true);
-    expect(engine.wakeRetries.has(run.id)).toBe(false);
+    expect(runInternals(manager).retries.wakeRetries.has(run.id)).toBe(false);
     expect(ciWaitOf(run.id)).toBeUndefined();
     expect(store.getRun(run.id)?.agentInputs?.some(input => input.id === wait.id)).toBe(false);
   });
@@ -494,7 +495,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     const state = (manager as unknown as { active: Map<string, { session: { end(): void } }> }).active.get(child.id)!;
     // The session closes with the result owed: one failed delivery, retried after the wake backoff
     // (hearsay-tools/cezarion#1233), which the test need not wait out.
-    (manager as unknown as { wakeRetryBackoff: Backoff }).wakeRetryBackoff = { fastMs: 0, fastCount: 1, capMs: 0 };
+    runInternals(manager).retries.wakeRetryBackoff = { fastMs: 0, fastCount: 1, capMs: 0 };
     state.session.end(); writeFileSync(gate, 'end');
     await until(() => !!lastCiWaitOf(child.id)?.deliveredAt);
     expect(ciWaitOf(child.id)).toBeUndefined();
@@ -513,8 +514,7 @@ const registerTimer = async (id: string, seconds = 60, note?: string) =>
 const waitById = (id: string, waitId: string) => store.getRun(id)?.waits?.find((entry): entry is TimedWait => entry.id === waitId && entry.kind !== 'human');
 const settledById = (id: string, waitId: string) => store.getRun(id)?.lastWaits?.find(entry => entry.id === waitId);
 const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?.filter(input => input.id === waitId) ?? [];
-const armed = () => manager as unknown as { waitTimers: Map<string, { timer: NodeJS.Timeout & { _onTimeout(): void } }>; ciWatches: Map<string, unknown>; ciRegistrations: Map<string, unknown> };
-const fireTimer = (waitId: string) => armed().waitTimers.get(waitId)!.timer._onTimeout();
+const fireTimer = (waitId: string) => runInternals(manager).waitWatches.waitTimers.get(waitId)!.timer._onTimeout();
 /** This suite's sessions have no cezar tool controller (`controller: async () => undefined`), so a
  *  timer wakes them in the marker wording (hearsay-tools/cezarion#1234). */
 const timerFired = (waitId: string, note: string) =>
@@ -614,7 +614,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     // The tool answer lists what is still open.
     const answer = await manager.cezarToolHandlers(run.id, generationOf(run.id)).cancelWait({ wait_id: kept.id }, new AbortController().signal);
     expect(answer).toEqual({ cancelled: true, wait_id: kept.id, open_waits: [] });
-    expect(armed().waitTimers.has(kept.id)).toBe(false);
+    expect(runInternals(manager).waitWatches.waitTimers.has(kept.id)).toBe(false);
   });
 
   it('two concurrent cezar_wait ci calls for different PRs both register', async () => {
@@ -622,7 +622,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     githubByPr(new Promise<void>(resolve => { release = resolve; }));
     const run = await waitingParent();
     const pending = Promise.all([registerPr(run.id, 12), registerPr(run.id, 13)]);
-    await until(() => armed().ciRegistrations.size === 2);
+    await until(() => runInternals(manager).waitRegistry.ciRegistrations.size === 2);
     release();
     const [first, second] = await pending;
     expect(first.id).not.toBe(second.id);
@@ -663,7 +663,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     interval.mockReturnValue(null);
     await (manager as unknown as { pump(): Promise<void> }).pump();
     expect(waitById(run.id, wait.id)).toMatchObject({ phase: 'open', deadline: wait.deadline });
-    expect(armed().waitTimers.has(wait.id)).toBe(true);
+    expect(runInternals(manager).waitWatches.waitTimers.has(wait.id)).toBe(true);
   });
 
   it('timer refuses wake_budget_spent once the run spent its automatic wakes', async () => {
@@ -697,7 +697,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     expect(manager.isActive(run.id)).toBe(false);
     expect(store.getRun(run.id)?.status).toBe('waiting');
     expect(waitById(run.id, wait.id)).toMatchObject({ phase: 'open', deadline: wait.deadline });
-    expect(armed().waitTimers.has(wait.id)).toBe(true);
+    expect(runInternals(manager).waitWatches.waitTimers.has(wait.id)).toBe(true);
     fireTimer(wait.id);
     await until(() => settledById(run.id, wait.id)?.phase === 'delivered');
     expect(inputsFor(run.id, wait.id)).toHaveLength(1);
@@ -748,7 +748,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     await restart(false, disk);
     await until(() => (store.getRun(run.id)?.waits ?? []).length === 0);
     expect([settledById(run.id, ci.id)?.phase, settledById(run.id, timer.id)?.phase]).toEqual(['cancelled', 'cancelled']);
-    expect([armed().waitTimers.size, armed().ciWatches.size]).toEqual([0, 0]);
+    expect([runInternals(manager).waitWatches.waitTimers.size, runInternals(manager).waitWatches.ciWatches.size]).toEqual([0, 0]);
     expect(store.getRun(run.id)?.agentInputs ?? []).toEqual([]);
   });
 
@@ -769,7 +769,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
       expect(store.deleteRun(run.id)).toBe(true);
     }
     expect(external.aborted(12)).toBe(true);
-    expect([armed().waitTimers.size, armed().ciWatches.size]).toEqual([0, 0]);
+    expect([runInternals(manager).waitWatches.waitTimers.size, runInternals(manager).waitWatches.ciWatches.size]).toEqual([0, 0]);
     if (action !== 'delete') {
       expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
       expect([settledById(run.id, ci.id)?.phase, settledById(run.id, timer.id)?.phase]).toEqual(['cancelled', 'cancelled']);

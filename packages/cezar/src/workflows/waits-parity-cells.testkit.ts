@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -86,18 +87,18 @@ const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?
 function engine() {
   return manager as unknown as {
     active: Map<string, { session: AgentSession & { end(): void }; ciGeneration: string }>;
-    waitTimers: Map<string, { timer: NodeJS.Timeout & { _onTimeout(): void } }>;
+
     monitoring: Set<string>;
-    wakeRetryBackoff: Backoff;
-    wakeBackoffs: Map<string, NodeJS.Timeout>;
-    wakeRetries: Map<string, NodeJS.Timeout>;
+
+
+
     queue: string[];
     deferredMessages: Map<string, Array<{ content: Array<{ type: 'text'; text: string }>; messageId?: string }>>;
     flushDeferred(id: string): void;
   };
 }
 // The delivery bound, not the backoff, is what these cells pin: retries start at once.
-const retryAtOnce = () => { engine().wakeRetryBackoff = { fastMs: 0, fastCount: MAX_WAKE_DELIVERY_ATTEMPTS, capMs: 0 }; };
+const retryAtOnce = () => { runInternals(manager).retries.wakeRetryBackoff = { fastMs: 0, fastCount: MAX_WAKE_DELIVERY_ATTEMPTS, capMs: 0 }; };
 const stepStatus = (id: string, stepId: string) => store.getRun(id)?.steps.find(step => step.id === stepId)?.status;
 const failedSteps = (id: string) => store.getRun(id)?.steps.filter(step => step.status === 'failed').length;
 
@@ -113,9 +114,9 @@ function expectHeldAtTheBound(id: string, waitId: string, { error = /^continue f
   expect(store.readEvents(id).filter(event => event.type === 'note' && event.message === WAKE_DELIVERY_CAP_NOTE)).toHaveLength(1);
   expect(failedSteps(id)).toBe(failed);
   expect(manager.isActive(id)).toBe(false);
-  expect(engine().wakeBackoffs.has(id)).toBe(false);
+  expect(runInternals(manager).retries.wakeBackoffs.has(id)).toBe(false);
 }
-const fireTimer = (waitId: string) => engine().waitTimers.get(waitId)!.timer._onTimeout();
+const fireTimer = (waitId: string) => runInternals(manager).waitWatches.waitTimers.get(waitId)!.timer._onTimeout();
 const flushMicrotasks = async () => { for (let n = 0; n < 5; n++) await Promise.resolve(); };
 const turnEnds = (id: string) => store.readEvents(id).filter(event => event.type === 'turn-end').length;
 const viaOf = (id: string, via: Wait['via']) => store.getRun(id)?.waits?.find((wait): wait is TimedWait => wait.via === via && wait.kind !== 'human');
@@ -439,7 +440,7 @@ function baseCells(runners: RunnerId[]): void {
         && store.readEvents(run.id).filter(event => event.type === 'turn-end').length > turns);
       const timer = store.getRun(run.id)!.lastWaits!.find(wait => wait.kind === 'timer')!;
       expect(timer).toMatchObject({ phase: 'cancelled', note: 'u4' });
-      expect(engine().waitTimers.has(timer.id)).toBe(false);
+      expect(runInternals(manager).waitWatches.waitTimers.has(timer.id)).toBe(false);
       await until(() => store.getRun(run.id)?.status === 'waiting');
       expect(inputsFor(run.id, timer.id)).toEqual([]);
       expect(agentWaits(run.id)).toEqual([]);
@@ -872,8 +873,8 @@ function baseCells(runners: RunnerId[]): void {
       expect(store.getRun(id)?.status).toBe('failed');
       expect(manager.isActive(id)).toBe(false);
       expect(engine().queue).not.toContain(id);
-      expect(engine().wakeRetries.has(id)).toBe(false);
-      expect(engine().wakeBackoffs.has(id)).toBe(false);
+      expect(runInternals(manager).retries.wakeRetries.has(id)).toBe(false);
+      expect(runInternals(manager).retries.wakeBackoffs.has(id)).toBe(false);
     };
     async function timerWaits(id: string) {
       const tools = manager.cezarToolHandlers(id, engine().active.get(id)!.ciGeneration);
@@ -1054,7 +1055,7 @@ function baseCells(runners: RunnerId[]): void {
       expect(settled(run.id, timer.id)?.phase).toBe('cancelled');
       expect(settled(run.id, later.id)?.phase).toBe('cancelled');
       expect(inputsFor(run.id, timer.id)).toEqual([]);
-      expect(engine().waitTimers.has(later.id)).toBe(false);
+      expect(runInternals(manager).waitWatches.waitTimers.has(later.id)).toBe(false);
       expect(store.getRun(run.id)?.waitDeliveryFailures).toBeUndefined();
       expectNoWakeFor(run.id);
       expect(store.readEvents(run.id).filter(event => event.type === 'note' && event.message === WAITS_DISCARDED_NOTE)).toHaveLength(1);
@@ -1921,8 +1922,8 @@ function workersCells(runners: RunnerId[]): void {
       expect(run.error).toMatch(/^continue failed: /);
       expect(delivered(f.p.id, id)).toBe(false);
       expect(store.readEvents(f.p.id).filter(event => event.type === 'note' && event.message === WAKE_DELIVERY_CAP_NOTE)).toHaveLength(1);
-      expect(engine().wakeBackoffs.has(f.p.id)).toBe(false);
-      expect(engine().wakeRetries.has(f.p.id)).toBe(false);
+      expect(runInternals(manager).retries.wakeBackoffs.has(f.p.id)).toBe(false);
+      expect(runInternals(manager).retries.wakeRetries.has(f.p.id)).toBe(false);
       // A steering wire took the message into each failed opening turn; none of them read it.
       const attempts = prompted(runner, 'Worker progress u14m').length;
       f.failure.lift();
@@ -1934,14 +1935,14 @@ function workersCells(runners: RunnerId[]): void {
 
     it(`${runner} U14m a message-only wake that fails once counts the failure, and the delivered message clears it`, async () => {
       // The retry waits on its backoff, which the test fires once the provider is lifted.
-      engine().wakeRetryBackoff = { fastMs: 60_000, fastCount: MAX_WAKE_DELIVERY_ATTEMPTS, capMs: 60_000 };
+      runInternals(manager).retries.wakeRetryBackoff = { fastMs: 60_000, fastCount: MAX_WAKE_DELIVERY_ATTEMPTS, capMs: 60_000 };
       const f = await messageWakeWithoutSession();
       const id = await f.progress('Worker progress u14m once');
-      await until(() => store.getRun(f.p.id)?.waitDeliveryFailures === 1 && engine().wakeBackoffs.has(f.p.id) && !manager.isActive(f.p.id));
+      await until(() => store.getRun(f.p.id)?.waitDeliveryFailures === 1 && runInternals(manager).retries.wakeBackoffs.has(f.p.id) && !manager.isActive(f.p.id));
       expect(store.getRun(f.p.id)?.status).toBe('waiting');
       f.failure.lift();
       const commits = recordCommits(join(root, '.ai/cezar'));
-      const backoff = engine().wakeBackoffs.get(f.p.id) as NodeJS.Timeout & { _onTimeout(): void };
+      const backoff = runInternals(manager).retries.wakeBackoffs.get(f.p.id) as NodeJS.Timeout & { _onTimeout(): void };
       backoff._onTimeout(); clearTimeout(backoff);
       await until(() => delivered(f.p.id, id) && store.getRun(f.p.id)?.agentInputs?.find(input => input.id === id)?.awaitingRead !== true);
       expect(store.getRun(f.p.id)?.waitDeliveryFailures).toBeUndefined();
@@ -2320,7 +2321,7 @@ function workersCells(runners: RunnerId[]): void {
       expect(entry).toMatchObject({ kind: 'worker', source: 'cezar', via: 'completion', mode: 'all', workerIds: [w.id], phase: 'open' });
       expect(entry).not.toHaveProperty('deadline');
       expect(entry).not.toHaveProperty('timeoutSeconds');
-      expect(engine().waitTimers.has(entry.id)).toBe(false);
+      expect(runInternals(manager).waitWatches.waitTimers.has(entry.id)).toBe(false);
       expect(engine().monitoring.has(p.id)).toBe(false);
       expect(semaphore.busy()).toBe(0);
       expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');
@@ -2575,7 +2576,7 @@ function workersCells(runners: RunnerId[]): void {
           expect(store.getRun(p.id)?.automaticWakes).toBe(wakes + 1);
           expect(store.getRun(p.id)?.error).toBe(`continue failed: ${WAKE_SESSION_CLOSED_ERROR}`);
           expect(store.readEvents(p.id).filter(event => event.type === 'note' && event.message === WAKE_DELIVERY_CAP_NOTE)).toHaveLength(1);
-          expect(engine().wakeBackoffs.has(p.id)).toBe(false);
+          expect(runInternals(manager).retries.wakeBackoffs.has(p.id)).toBe(false);
           expect(store.getRun(p.id)?.delegation).not.toHaveProperty('finishRequestedAt');
           closing = false;
           expect(manager.continueRun(p.id, { text: 'go on' })).toEqual({ ok: true });
@@ -3294,7 +3295,7 @@ function singleRunnerCells(): void {
     store.on('event', closeAtTurnEnd);
     try {
       engine().active.get(p.id)!.session.end();
-      await until(() => store.getRun(p.id)?.waitDeliveryFailures === 1 && !manager.isActive(p.id) && engine().wakeBackoffs.has(p.id));
+      await until(() => store.getRun(p.id)?.waitDeliveryFailures === 1 && !manager.isActive(p.id) && runInternals(manager).retries.wakeBackoffs.has(p.id));
       closing = false;
       const wakes = store.getRun(p.id)?.automaticWakes;
       expect((manager as unknown as { deferParentCompletion(id: string): boolean }).deferParentCompletion(p.id)).toBe(true);

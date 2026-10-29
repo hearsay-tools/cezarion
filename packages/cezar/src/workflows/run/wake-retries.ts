@@ -1,15 +1,16 @@
 import type { RunModuleContext } from './types.ts';
 import type { RunRecord } from '../../runs/store.ts';
-import { noJitter, retryDelayMs, type Backoff } from '../../delegation/retry-backoff.ts';
+import { noJitter, retryDelayMs, WAKE_RETRY_BACKOFF, type Backoff } from '../../delegation/retry-backoff.ts';
 
 interface WakeRetriesHost {
   owesWake(run: RunRecord): boolean;
   queueWaitWake(runId: string): void;
   retryWaitAdmission(runId: string): void;
-  wakeRetryBackoff(): Backoff;
 }
 
 export class WakeRetries {
+  // Overridable so tests need not wait out production cadence.
+  wakeRetryBackoff: Backoff = WAKE_RETRY_BACKOFF;
   /** A wake that could not be admitted yet, retried by run id. */
   readonly wakeRetries = new Map<string, NodeJS.Timeout>();
   /** The last "retained; continuation unavailable" note per run: the 1 Hz admission retry writes
@@ -44,7 +45,7 @@ export class WakeRetries {
       if (this.wakeBackoffs.get(runId) !== timer) return;
       this.wakeBackoffs.delete(runId);
       try { this.host.queueWaitWake(runId); } catch { this.host.retryWaitAdmission(runId); }
-    }, retryDelayMs(failures - 1, this.host.wakeRetryBackoff(), noJitter));
+    }, retryDelayMs(failures - 1, this.wakeRetryBackoff, noJitter));
     timer.unref(); this.wakeBackoffs.set(runId, timer);
   }
 

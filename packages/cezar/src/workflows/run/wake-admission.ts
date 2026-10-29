@@ -358,10 +358,7 @@ export class WakeAdmission {
 
   /** Stop every watch, timer, retry and queued wake a run's waits hold in memory. */
   disarmRunWaits(runId: string): void {
-    for (const [key, registration] of this.host.waitRegistry.ciRegistrations) {
-      if (registration.runId !== runId) continue;
-      registration.abort.abort(); this.host.waitRegistry.ciRegistrations.delete(key);
-    }
+    this.host.waitRegistry.abortRegistrations(runId);
     this.host.waitWatches.disarmRun(runId);
     this.host.retries.forget(runId);
     this.resetWakeDelivery(runId);
