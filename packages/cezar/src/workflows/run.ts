@@ -1,4 +1,5 @@
 import { InputDelivery } from './run/input-delivery.ts';
+import { TurnNudges } from './run/turn-nudges.ts';
 import { WorkerQuestions } from './run/worker-questions.ts';
 import { FamilyReconciler } from './run/family-reconciler.ts';
 import * as completionGateReads from './run/completion-gate.ts';
@@ -58,7 +59,7 @@ import { makeRunTitle } from '../runs/run-title.ts';
 export { agentDirectories, composeSystemPrompt, expandRegistrySlashSkill, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt } from './run/prompts.ts';
 export { stepLabel } from './run/steps.ts';
 export { makeRunTitle } from '../runs/run-title.ts';
-import { clearUnreadInputTimer, clearHeldHumanInputTimer, harnessOwesInput, harnessHoldsHumanInput, clearNoWaitNudgeReplyTimer, clearIdleTimer, clearAutosaveTimer } from './run/input-timers.ts';
+import { clearUnreadInputTimer, clearHeldHumanInputTimer, harnessOwesInput, harnessHoldsHumanInput, clearIdleTimer, clearAutosaveTimer } from './run/input-timers.ts';
 import * as wakeLedger from './run/wake-ledger.ts';
 import * as stepDecisions from './run/step-decisions.ts';
 import * as pendingAskFacts from './run/pending-ask-facts.ts';
@@ -196,6 +197,7 @@ export function repositoryRootLockDisabled(env: NodeJS.ProcessEnv = process.env)
 
 
 
+
 /** What `carryOutTurnEnd` hands the method for a decision kind. `session` is the session as the
  *  decision found it. */
 type TurnEndCarry = {
@@ -265,7 +267,6 @@ interface PersistedAttachments {
   attachments: PersistedAttachment[];
 }
 
-
 /** Only an original workflow that has never executed may return to its queue. */
 export function isUntouchedCancelledRun(run: RunRecord): boolean {
   return run.status === 'cancelled' && !run.startedAt && !!run.workflowDef &&
@@ -275,7 +276,6 @@ export function isUntouchedCancelledRun(run: RunRecord): boolean {
 /** #469: admission refused because a process of the previous generation still runs. */
 class WorkerOrphanAliveError extends Error {}
 const admissionError = (error: unknown, fallback: string) => error instanceof WorkerOrphanAliveError ? error.message : fallback;
-
 
 /** Only the synchronous delivery of a human answer uses the budget its reset replaced. */
 type HumanAnswerBudget = { spent: number };
@@ -307,6 +307,7 @@ export class RunManager {
   };
   private readonly queuedRevivalHost: queuedRevival.QueuedRevivalHost;
   private readonly humanWaits: HumanWaits;
+  private readonly turnNudges: TurnNudges;
   private readonly waitRegistry: WaitRegistry;
   private readonly waitWatches: WaitWatches;
   private readonly familyReconciler: FamilyReconciler;
@@ -594,6 +595,16 @@ export class RunManager {
       queueWaitWake: id => this.queueWaitWake(id), retryWaitAdmission: id => this.retryWaitAdmission(id),
     }, MAX_AUTO_CONTINUES);
     this.humanWaits = new HumanWaits(this.inputReceiptContext, { routeWorkerQuestion: id => this.routeWorkerQuestion(id) }, MAX_AUTO_CONTINUES);
+    this.turnNudges = new TurnNudges(this.inputReceiptContext, this.humanWaits, this.line, this.completionGateHost, {
+      active: this.active, move: (id, exit, patch) => this.move(id, exit, patch),
+      workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
+      countAutomaticWakes: id => this.automaticWakes(id), hasQueuedAgentInputs: id => this.hasQueuedAgentInputs(id),
+      submitAgentInput: (id, state, content) => this.submitAgentInput(id, state, content), resumeParkedRun: (id, state) => this.resumeParkedRun(id, state),
+      chargeAutomaticWake: id => this.chargeAutomaticWake(id), retryWaitAdmission: id => this.retryWaitAdmission(id), armIdleTimer: (id, state) => this.armIdleTimer(id, state),
+      openTurnEndHumanWait: (id, state, step, via, note) => this.openTurnEndHumanWait(id, state, step, via, note),
+      settledTurnOutcome: (id, entry, outcome) => this.settledTurnOutcome(id, entry, outcome), queueWaitWake: id => this.queueWaitWake(id),
+      armNoWaitNudgeReplyTimer: (id, state) => this.armNoWaitNudgeReplyTimer(id, state), noWaitNudgeReplyMs: () => this.noWaitNudgeReplyMs,
+    }, MAX_AUTO_CONTINUES, COMPLETION_WILL_WAIT);
     this.worktreeAutosave = new WorktreeAutosave(
       this.inputReceiptContext,
       { holdForMaintenance: ids => this.holdForMaintenance(ids),
@@ -2034,7 +2045,6 @@ export class RunManager {
 
   private scheduleAutoResumeIfLimited(runId: string): void { this.autoResumeScheduler.scheduleAutoResumeIfLimited(runId); }
 
-
   private reconcileAutoResumes(): void { this.autoResumeScheduler.reconcileAutoResumes(); }
 
   /**
@@ -2092,7 +2102,6 @@ export class RunManager {
   cancelAutoResume(runId: string): boolean { return this.autoResumeScheduler.cancelAutoResume(runId); }
 
   private clearAutoResume(runId: string): void { this.autoResumeScheduler.clearAutoResume(runId); }
-
 
 
   /** Reclaim finished worktrees beyond the keep-limit (#483) — directory only,
@@ -2279,14 +2288,7 @@ export class RunManager {
   /** The session just took a refusal nudge, live or queued (hearsay-tools/cezarion#1301): its turn is
    *  the nudge's, and its reply is bounded by the no-wait nudge's reply timer, so a harness that
    *  reads the refusal and says nothing parks on Cezar's human wait instead of holding the slot. */
-  private awaitCompletionNudgeReply(runId: string, state: ActiveRun, session: AgentSession): void {
-    state.completionNudged = session;
-    const refusal = this.completionRefusal(runId);
-    if (refusal) recordRequestRefusal(state, refusal);
-    state.noWaitNudgeSawContent = false;
-    this.clearIdleTimer(state);
-    this.armNoWaitNudgeReplyTimer(runId, state);
-  }
+  private awaitCompletionNudgeReply(runId: string, state: ActiveRun, session: AgentSession): void { this.turnNudges.awaitCompletionNudgeReply(runId, state, session); }
 
   /**
    * A blocked done found when the session is gone (`settleSuccess` after its async work, a
@@ -2296,53 +2298,11 @@ export class RunManager {
    * the run, and the refusal is a note. A spent budget opens Cezar's `budget` human wait, and an
    * input the full inbox refuses leaves the run waiting for the user. Always true.
    */
-  private queueCompletionRefusal(runId: string, refusal: NonNullable<ReturnType<RunManager['completionRefusal']>>): boolean {
-    const state = this.active.get(runId);
-    this.store.appendEvent(runId, { type: 'note', tone: 'warning', message: `Completion blocked: ${refusal.message}` });
-    this.move(runId, 'park', { finishedAt: undefined });
-    this.store.flush();
-    if (this.holdsAgentWaits(runId)) return true;
-    // One refusal owed at a time: the copy already queued reopens the run (hearsay-tools/cezarion#1301).
-    if (this.owesCompletionRefusal(runId)) {
-      try { this.queueWaitWake(runId); } catch { this.retryWaitAdmission(runId); }
-      return true;
-    }
-    if (this.automaticWakes(runId) >= MAX_AUTO_CONTINUES) {
-      this.surfaceHumanWait(runId, state, this.openHumanAlias(runId, state, 'budget'));
-      return true;
-    }
-    const text = refusal.liveWorkerIds.length ? `${refusal.message} ${COMPLETION_WILL_WAIT}` : refusal.message;
-    // Its purpose is on the persisted input, so a Continue after a failed run and a restart still
-    // deliver it as the nudge (hearsay-tools/cezarion#1301).
-    const input: AgentInput = { id: randomUUID(), parentRunId: runId, source: 'lifecycle', purpose: 'completion-refusal', text, createdAt: new Date().toISOString() };
-    // The refusal is queued with its charge (hearsay-tools/cezarion#1805): no restart delivers it uncharged.
-    const spent = (this.store.getRun(runId)?.automaticWakes ?? 0) + 1;
-    try {
-      enqueueAgentInput(this.store.getRun(runId)!, input);
-      this.store.commitOutcome(runId, { kind: 'charged', automaticWakes: spent }, { enqueue: [input] });
-    } catch (error) {
-      console.warn(`[cez] completion refusal not queued: ${error instanceof Error ? error.message : String(error)}`);
-      return true;
-    }
-    this.store.appendEvent(runId, { type: 'agent-input', input });
-    this.store.appendEvent(runId, { type: 'note', message: `${COMPLETION_NUDGE_NOTE} (${spent}/${MAX_AUTO_CONTINUES}): ${refusal.code}` });
-    try { this.queueWaitWake(runId); } catch { this.retryWaitAdmission(runId); }
-    return true;
-  }
+  private queueCompletionRefusal(runId: string, refusal: NonNullable<ReturnType<RunManager['completionRefusal']>>): boolean { return this.turnNudges.queueCompletionRefusal(runId, refusal); }
 
   /** Stop discards a refusal the run still owes, as it discards its waits: a later Continue must not
    *  deliver a stale one (hearsay-tools/cezarion#1301). One an inbox read holds is left to it. */
-  private retireCompletionRefusal(runId: string): boolean {
-    const inputs = this.store.getRun(runId)?.agentInputs ?? [];
-    const kept = inputs.filter(input => input.deliveredAt || input.purpose !== 'completion-refusal' || hasLiveInboxClaim(input));
-    if (kept.length === inputs.length) return false;
-    try { this.store.commitAgentInputs(runId, kept); }
-    catch (error) {
-      console.warn(`[cez] completion refusal not retired: ${error instanceof Error ? error.message : String(error)}`);
-      return false;
-    }
-    return true;
-  }
+  private retireCompletionRefusal(runId: string): boolean { return this.turnNudges.retireCompletionRefusal(runId); }
 
   /** A refusal `queueCompletionRefusal` queued and the run has not received yet. */
   private owesCompletionRefusal(runId: string): boolean { return completionGateReads.owesCompletionRefusal(this.inputReceiptContext, this.completionGateHost, runId); }
@@ -2401,8 +2361,6 @@ export class RunManager {
 
 
 
-
-
   private recoverWorkerMessages(families: readonly RunRecord[], familyRootId: string | undefined): void { return this.workerQuestions.recoverWorkerMessages(families, familyRootId); }
 
   private noticeParkedWorkers(rootId: string): void { return this.workerQuestions.noticeParkedWorkers(rootId); }
@@ -2420,8 +2378,6 @@ export class RunManager {
   private unansweredQuestions(parentId: string): { workerId: string; messageId: string }[] { return this.workerQuestions.unansweredQuestions(parentId); }
 
   private fallbackRoutedQuestions(parentId: string, reason: string): void { return this.workerQuestions.fallbackRoutedQuestions(parentId, reason); }
-
-
 
 
 
@@ -4818,13 +4774,7 @@ export class RunManager {
   }
 
   /** Shared stop/input/liveness guards for an automatic continuation. */
-  private canAutoContinue(runId: string, state: ActiveRun): boolean {
-    const run = this.store.getRun(runId);
-    return !!run && !this.disposed && !run.stopping && !state.cancelled && !state.finishRequested &&
-      !state.agentInputError && !state.pendingHumanAsk && !this.hasPendingHumanAsk(runId) && !!state.session?.open &&
-      !this.workerExecutionStopped(runId) && !this.executionBlockedByRootFinish(run) && !run.waits?.length &&
-      !state.agentInputFlight && !harnessOwesInput(state) && !this.hasQueuedAgentInputs(runId);
-  }
+  private canAutoContinue(runId: string, state: ActiveRun): boolean { return this.turnNudges.canAutoContinue(runId, state); }
 
   /**
    * Both turn-end paths keep a nudged session running, with no user-wait timer or
@@ -4840,48 +4790,7 @@ export class RunManager {
    */
   /** `text` is the turn-end rule's nudge; an ask line's nudge scopes the same one itself (hearsay-tools/cezarion#1620). */
   private tryAutonomousNudge(runId: string, state: ActiveRun, stepId: string, ask: AskRequest | null,
-    text = stepScopedNudge(AUTONOMOUS_NUDGE, !!state.session && state.nextStep?.session === state.session)): boolean {
-    const session = state.session;
-    if (!state.autonomous || !session || !this.canAutoContinue(runId, state)) return false;
-    state.autonomousNudgePending = undefined;
-    this.clearIdleTimer(state);
-    // One budget with the timer wakes (hearsay-tools/cezarion#1234).
-    if (this.automaticWakes(runId) >= MAX_AUTO_CONTINUES) {
-      this.store.appendEvent(runId, { type: 'note', stepId, message: `autonomous — safety cap reached (${MAX_AUTO_CONTINUES}); automatic continuation paused` });
-      return false;
-    }
-    const content: ContentBlock[] = [{ type: 'text', text }];
-    // sendAgentMessage deliberately refuses portable asks on some native wires.
-    // The existing answer transport clears that marker, but is safe ONLY for this
-    // fresh turn-end ask line: the guards above exclude every pending native/persisted
-    // question. Do not route via deliverMessage, which attributes a human answer.
-    // Ordinary nudges keep #505's acknowledged agent-input failure semantics.
-    const sent = ask ? session.sendMessage(content) : this.submitAgentInput(runId, state, content);
-    if (!sent) {
-      // An unregistered ask line uses sendMessage: its POST may still be awaiting ACK
-      // after the next SSE turn ends. It is not an agentInputFlight. Keep this
-      // exact boundary running until onAgentInputReady retries, without charging
-      // the cap or claiming delivery. Missing readiness closes via the idle bound.
-      if (!ask && session.open && !state.agentInputError && !state.agentSessionError) {
-        state.autonomousNudgePending = session;
-        this.armIdleTimer(runId, state);
-      }
-      return false;
-    }
-    if (ask) this.resumeParkedRun(runId, state);
-    // The marker is stripped from visible text. Retain the question as a note,
-    // never an ask card or a fabricated human-input-delivered acknowledgement.
-    if (ask) this.store.appendEvent(runId, {
-      type: 'note', stepId,
-      message: `${AUTONOMOUS_ASK_NOTE}: ${ask.questions.map(question => question.question).join(' | ')}`,
-    });
-    const spent = this.chargeAutomaticWake(runId);
-    this.store.appendEvent(runId, {
-      type: 'note', stepId,
-      message: `autonomous — continuing without pausing (${spent}/${MAX_AUTO_CONTINUES})`,
-    });
-    return true;
-  }
+    text = stepScopedNudge(AUTONOMOUS_NUDGE, !!state.session && state.nextStep?.session === state.session)): boolean { return this.turnNudges.tryAutonomousNudge(runId, state, stepId, ask, text); }
 
   /**
    * A turn end on the runner's own signal, shared by the fresh step's and the Continue's turn-end
@@ -5220,18 +5129,7 @@ export class RunManager {
   /** The nudge a turn end with no wait or done gets: one automatic turn, charged to the
    *  automatic-wake budget. The autonomous wording repeats; the no-wait one is sent once and is
    *  bounded by its reply timer (#544's liveness). */
-  private sendTurnEndNudge(runId: string, state: ActiveRun, stepId: string | undefined, text: string): boolean {
-    if (state.autonomous) return !!stepId && this.tryAutonomousNudge(runId, state, stepId, null, text);
-    if (!this.canAutoContinue(runId, state)) return false;
-    state.noWaitNudgeSawContent = false;
-    if (!this.submitAgentInput(runId, state, [{ type: 'text', text }])) return false;
-    state.noWaitNudged = state.session;
-    this.clearIdleTimer(state);
-    this.armNoWaitNudgeReplyTimer(runId, state);
-    const spent = this.chargeAutomaticWake(runId);
-    this.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}), message: `${NO_WAIT_NUDGE_NOTE} (${spent}/${MAX_AUTO_CONTINUES})` });
-    return true;
-  }
+  private sendTurnEndNudge(runId: string, state: ActiveRun, stepId: string | undefined, text: string): boolean { return this.turnNudges.sendTurnEndNudge(runId, state, stepId, text); }
 
   /** Cezar's own human wait at a turn end (hearsay-tools/cezarion#1234): the cause as a note, the
    *  wait shown as Needs you, and the run parked for the user. A worker's `no-wait` fallback at its
@@ -5261,49 +5159,15 @@ export class RunManager {
 
   private retireUnreadParentQuestion(parentId: string, requestId: string): void { return this.workerQuestions.retireUnreadParentQuestion(parentId, requestId); }
 
-  /** Heartbeats and nested subagent items are not a reply. A `turn.started` counts only while the
-   *  reply timer runs or after it expired on this session: OpenCode and Cursor emit a synthetic one
-   *  inside `sendAgentMessage`, and a later send goes through `submitAgentInput`, which resumes. */
-  private isNoWaitNudgeReply(state: ActiveRun, event: { type: string; item?: { parentItemId?: string } }): boolean {
-    if (event.type === 'turn.started') return state.noWaitNudgeReplyTimer !== undefined || state.noWaitNudgeParked === state.session;
-    if (event.type === 'text' || event.type === 'tool-call' || event.type === 'tool-result') return true;
-    if (event.type === 'item.delta' || !event.type.startsWith('item.')) return false;
-    return event.item?.parentItemId === undefined;
-  }
-
   /** A reply to the nudge clears its bound. One that arrives after the bound parked the run resumes
    *  it, as the final-message nudge's did (#544); its turn end then decides, and a run still on
    *  Cezar's no-wait wait parks on it again. */
-  private noteNoWaitNudgeContent(runId: string, state: ActiveRun, event: { type: string; item?: { parentItemId?: string } }): void {
-    if (!this.isNoWaitNudgeReply(state, event)) return;
-    state.noWaitNudgeSawContent = true;
-    clearNoWaitNudgeReplyTimer(state);
-    if (state.noWaitNudgeParked !== state.session || !this.line.isParked(runId)) return;
-    if (state.pendingHumanAsk || this.hasPendingHumanAsk(runId)) return;
-    this.resumeParkedRun(runId, state);
-    state.noWaitNudgeParked = undefined;
-  }
+  private noteNoWaitNudgeContent(runId: string, state: ActiveRun, event: { type: string; item?: { parentItemId?: string } }): void { this.turnNudges.noteNoWaitNudgeContent(runId, state, event); }
 
   /** A no-wait nudge the harness acknowledged but never answered (an OpenCode heartbeat keeps the
    *  session alive without a turn): at the bound Cezar opens the no-wait human wait and the run
    *  waits for the user. A reply that arrives after it runs, and the run stays on that question. */
-  private armNoWaitNudgeReplyTimer(runId: string, state: ActiveRun): void {
-    clearNoWaitNudgeReplyTimer(state);
-    if (state.noWaitNudgeSawContent) return;
-    const session = state.session;
-    if (!session?.open) return;
-    const timer = setTimeout(() => {
-      state.noWaitNudgeReplyTimer = undefined;
-      if (this.disposed || this.active.get(runId) !== state || state.session !== session || !session.open ||
-        state.cancelled || state.finishRequested || this.line.isParked(runId)) return;
-      state.noWaitNudgeParked = session;
-      // The note names the nudge left unanswered (hearsay-tools/cezarion#1301).
-      this.openTurnEndHumanWait(runId, state, state.currentStepId, 'no-wait', state.completionNudged === session ? COMPLETION_NO_REPLY_NOTE : NO_WAIT_NO_REPLY_NOTE);
-      this.settledTurnOutcome(runId, 'reply-timer', { kind: 'park', keepsSlot: false });
-    }, this.noWaitNudgeReplyMs);
-    timer.unref?.();
-    state.noWaitNudgeReplyTimer = timer;
-  }
+  private armNoWaitNudgeReplyTimer(runId: string, state: ActiveRun): void { this.turnNudges.armNoWaitNudgeReplyTimer(runId, state); }
 
   /** Every run status `run.ts` writes comes from the run state table (hearsay-tools/cezarion#1804). */
   private move(runId: string, exit: RunExitId, patch: Omit<Parameters<RunStore['updateRun']>[1], 'status'> = {}): RunRecord | undefined {
@@ -5330,7 +5194,6 @@ export class RunManager {
   private clearIdleTimer(state: ActiveRun): void {
     clearIdleTimer(state);
   }
-
 
   /** The turn-end tail's park for the user: `waiting` with the idle timer, no slot. A result
    *  already in (a pending question beside a resolved wait) still queues its wake. */
