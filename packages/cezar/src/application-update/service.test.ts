@@ -96,7 +96,10 @@ describe('application update preparation', () => {
       await install(args);
     });
     const first = service.apply();
-    await vi.waitFor(() => expect(service.snapshot().status).toBe('preparing'), { timeout: HANG_GUARD_MS });
+    // Preparing precedes npm entry. Wait for the release closure, not that earlier state.
+    // Delay proof: hearsay-tools/cezarion#2114, comment 6486640412 (old 1 failed; fixed 1 passed; 27 skipped / 28).
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'), { timeout: HANG_GUARD_MS });
+    expect(service.snapshot().status).toBe('preparing');
     const other = new ApplicationUpdateService({ packageRoot: original, launchEntry: join(original, 'dist/index.js'),
       npmPrefix: join(root, 'prefix'), npmCache: join(root, 'cache'), home, targetVersion: () => '2.0.0', runNpm });
     const second = other.apply();

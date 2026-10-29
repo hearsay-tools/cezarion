@@ -2,7 +2,7 @@ import { summaryOf } from '@/test/run-summary-fixture'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ComponentProps } from 'react'
-import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router'
+import { createPath, MemoryRouter, NavigationType, Route, Router, Routes, useLocation, useNavigate } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Exercise the workspace reducers through their named-event adapter seam.
@@ -1221,6 +1221,46 @@ describe('TasksOverviewRoute — wired to the app', () => {
     fireEvent.change(box, { target: { value: '' } })
     act(() => { void navigate({ search: '?q=Needle' }) })
     await waitFor(() => expect(box.value).toBe('Needle'))
+  })
+
+  it('keeps a cleared search when the real debounced writer lands late (hearsay-tools/cezarion#2081)', async () => {
+    // Hold the router commit, not the writer callback: the input must recognise the real
+    // writer's echo after another keystroke. CI run 40763004045 attempt 1, job 123079799508
+    // captured the archived view with q=done restored after Backspace.
+    fetchMock.mockImplementation(async () => json([]))
+    const navigator = { createHref: createPath, go: vi.fn(), push: vi.fn(), replace: vi.fn() }
+    type Location = ComponentProps<typeof Router>['location']
+    const client = createQueryClient()
+    const tree = (location: Location, state?: unknown) => (
+      <QueryClientProvider client={client}>
+        <Router location={typeof location === 'string' ? location : { ...location, state }}
+          navigator={navigator} navigationType={NavigationType.Replace}>
+          <ListViewProvider><TasksOverviewRoute /></ListViewProvider>
+        </Router>
+      </QueryClientProvider>
+    )
+    const { rerender } = render(tree('/?archived=1'))
+    const box = await screen.findByRole('textbox', { name: 'Search tasks' }) as HTMLInputElement
+    vi.useFakeTimers()
+    try {
+      fireEvent.change(box, { target: { value: 'Needle' } })
+      act(() => vi.advanceTimersByTime(250))
+      expect(navigator.replace).toHaveBeenCalledTimes(1)
+      const [destination, state] = navigator.replace.mock.calls[0]!
+      expect(destination.search).toBe('?archived=1&q=Needle')
+      fireEvent.change(box, { target: { value: '' } })
+      rerender(tree({ ...destination, key: 'late-query' }, state))
+      expect(box.value).toBe('')
+      expect(overviewTab('archived').getAttribute('aria-pressed')).toBe('true')
+      act(() => vi.advanceTimersByTime(250))
+      expect(navigator.replace).toHaveBeenCalledTimes(2)
+      expect(navigator.replace.mock.calls[1]![0].search).toBe('?archived=1')
+      // An external link still wins over the cleared input.
+      rerender(tree({ pathname: '/', search: '?archived=1&q=Haystack', key: 'external' }))
+      expect(box.value).toBe('Haystack')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('reads the archived pages when the window is full, and pages older ones in (#864)', { timeout: 30_000 }, async () => {
