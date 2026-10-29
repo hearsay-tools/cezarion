@@ -142,7 +142,13 @@ Paths are under `packages/cezar/src/workflows/run/`. A path that starts with ano
 | `run-recovery.ts` | 4 | hearsay-tools/cezarion#2202 | `recover`, `adoptOrphanedRun` and their passes | `recoveryScope`, `recoveryInFlight`, `adoptionTail` | 20 | 350 |
 | `step-loop.ts` | 4 | hearsay-tools/cezarion#2203 | Twelve methods behind `execute`: start, worktree, the step loop, check steps, `requeueWhileHeld`. `execute` stays on the facade | — | 7, plus the `run-settlement` and `step-session` instances | 480 |
 | `continuation-session.ts` | 4 | hearsay-tools/cezarion#2204 | The part of `runContinuation` after `unmarkStarting`, under a new name: workspace, repository-root lease, worktree, settings and skills, prelaunch stops, start, await and release. `runContinuation` keeps its head on the facade | — | 15, plus the `run-settlement` instance | 540 |
+| `tracked-work.ts` | 5 | hearsay-tools/cezarion#2226 | Records the 12 operations that `fixture-cleanup.testkit.ts` wraps, where each promise is made; `RunModuleContext.work` | the tracked promises and sessions | 0 | 0 |
+| `run-finish.ts` | 5 | hearsay-tools/cezarion#2238 | `completionGate`, `deferParentCompletion`, `acceptDone`, `finish`, `acceptRootRequestFinish`, `closeQuestionOnFinish`, `settleRequestedRootFinish`, `holdContinuationForRootFinish`. `finish` and `acceptDone` delegators stay | — | 5, plus four instances | 175 |
+| `run-start.ts` | 5 | hearsay-tools/cezarion#2239 | `startRun`, `startRunIdempotent`, `enqueueOwnedRun`, `ownedJob`, `launchQueuedRun`. The three public delegators stay | — | 5 | 150 |
+| `run-cancel.ts` | 5 | hearsay-tools/cezarion#2241 | `cancel`, `cancelActiveRun`, `cancelWorkerExecution`, `cancelQueuedRun`, `cancelRunWithoutSession`, `requestWorkerStop`, `cancelWorkerWait`. The three public delegators stay | — | — | 95 |
+| `compose.ts` | 5 | hearsay-tools/cezarion#2243 | The constructor's wiring: builds every module from `RunModuleContext` and one `FacadeHost`, and returns one record of module instances | — | `FacadeHost` | 430 |
 
+Phase 5 rows come from the check against `main` at `ca83636c4`; their lines are lines out of `run.ts`.
 Phase 4 rows come from the check against `main` at `97335b352`. Their host counts callbacks after
 Phase 2 and 3 modules are passed as instances, and their lines are gross lines out of `run.ts`,
 before delegators and wiring come back. Two Phase 4 children change tests only:
@@ -169,7 +175,7 @@ accepted them; Phase 5 narrows them.
 | 2 State owners | about 14 | 2,100 | 6,900 | Each moved field has one owning module |
 | 3 Hubs | about 8 | 1,800 | 5,300 | Only `activate` and `dropActive` write shared state |
 | 4 Orchestrators | about 14 | 3,900 | 2,100 | No function in `run.ts` or `workflows/run/` is over complexity 20 |
-| 5 Thin the facade | 6 or more | 1,900 | at most 1,000 | `run.ts` has no entry in `file-length.baseline.json` |
+| 5 Thin the facade | 18 issues, hearsay-tools/cezarion#2226 to hearsay-tools/cezarion#2243 | about 1,650 | about 680 | `run.ts` has no entry in `file-length.baseline.json`. If it ends above 1,000 lines, its final length is pinned and the epic closes (owner, 2026-10-29) |
 
 "After" includes the delegators and wiring that each phase adds to the facade. The Phase 4 row
 was measured again before its children were filed; the first estimate was about 8 pull requests,
@@ -183,6 +189,8 @@ Results so far:
   Squeal checks the complexity of `run.ts` again.
 - Phase 3: 7,510 lines to 6,048 lines and 353,889 bytes at `97335b352`, with
   hearsay-tools/cezarion#2151 still open.
+- Phase 4: 14 pull requests; 6,007 lines to 2,336 lines at `ca83636c4`. No function in `run.ts` or
+  `workflows/run/` is over complexity 20.
 
 **Phase 0.** hearsay-tools/cezarion#2053 widens the guards before any code moves into
 `workflows/run/`. hearsay-tools/cezarion#2054 then adds the shared types, which removes the eight
@@ -246,12 +254,28 @@ wrapper. Tests spy on three wrappers on the manager, so these stay host calls: `
 `canProceedWithRun` passes it the host's `workerExecutionStopped` and
 `executionBlockedByRootFinish`, which tests also spy on.
 
-**Phase 5.** `delegation/service.ts` types its manager as a narrow port of the members it uses, as
-`server/repo-branches.ts` already does with `Pick<RunManager, 'isActive' | 'claimForBranchCleanup'>`.
-A product hook (for example a tracked-work registry that the fixture drains) replaces the 12
-instance wrappers in `fixture-cleanup.testkit.ts`. Tests move to the collaborators, and each
-delegator and compatibility getter goes when no test reaches it. Each of these PRs changes tests
-only and removes a hidden dependency, so each carries the red proof that AGENTS.md requires.
+**Phase 5.** At most two PRs that edit `run.ts` are open at once; the epic lists the waves.
+
+1. `TrackedWork` (hearsay-tools/cezarion#2226) replaces the 12 instance wrappers in
+   `fixture-cleanup.testkit.ts` and the six hand-written wrappers, and adds `runInternals(manager)`.
+   It lands before every test-migration issue and hearsay-tools/cezarion#2239.
+2. Beside the train, with no `run.ts` edit: narrow `RunManager` ports for delegation, automations
+   and server (hearsay-tools/cezarion#2228), input-receipt tests (hearsay-tools/cezarion#2229),
+   turn-settler order pins (hearsay-tools/cezarion#2230), and a `stepLeftOpen` that clears nothing
+   (hearsay-tools/cezarion#2233, after hearsay-tools/cezarion#2227).
+3. hearsay-tools/cezarion#2227 moves the module-level constants and deletes uncalled delegators.
+4. Tests move off `RunManager` to the module instances, family by family: run line
+   (hearsay-tools/cezarion#2231), waits (hearsay-tools/cezarion#2232), input
+   (hearsay-tools/cezarion#2234), turn (hearsay-tools/cezarion#2235), launch
+   (hearsay-tools/cezarion#2236) and workers (hearsay-tools/cezarion#2237). Each delegator and
+   compatibility getter goes when no test reaches it. Each PR records its proof in the PR body
+   (`docs/sdlc/regression-proof.md`), and each moved spy or replacement asserts that it was reached.
+5. The last facade bodies move: Finish and the completion gate (hearsay-tools/cezarion#2238, after
+   hearsay-tools/cezarion#2235 and hearsay-tools/cezarion#2237), run start
+   (hearsay-tools/cezarion#2239), input and launch-context bodies (hearsay-tools/cezarion#2240),
+   Stop (hearsay-tools/cezarion#2241) and the lifecycle leftovers (hearsay-tools/cezarion#2242).
+6. `compose.ts` takes the constructor's wiring and meets the exit (hearsay-tools/cezarion#2243,
+   last).
 
 ## Rules for a move pull request
 
@@ -269,7 +293,8 @@ The PR body states each of these:
   move relies on CI's Vitest shards for those verdicts. A PR that is not a verbatim move (a split,
   a handler merge, a call-order change, shared launch-path code, or a test change) also runs both
   parity globs locally with `npm test`, never through Squeal, before the PR. This is an exception
-  to AGENTS.md § Runner regressions ship with shared coverage, for this epic only.
+  to AGENTS.md § Runner regressions ship with shared coverage, for this epic only. A Phase 5 PR
+  that changes tests only relies on CI's parity shards too (owner, 2026-10-29).
 - The new `run.ts` entry in `file-length.baseline.json`.
 
 Review asks one question of every move: does any test wrap or spy on a moved method, and does
@@ -344,6 +369,10 @@ until Phase 5. The list was checked against `main` at `97335b352`:
 - Called, not spied: `parkOnWaits` (`worker-wait-durability.test.ts`). It keeps a delegator
   because the test calls it, but no spy needs the host route.
 
+Function modules have no instance: `launch-context.ts`, `session-events.ts`, `completion-gate.ts`,
+`queued-revival.ts`, `input-receipts.ts`, `usage-accounting.ts`, `run-guards.ts`,
+`pending-ask-facts.ts` and `workflow-position.ts`. Their spied seams stay facade members.
+
 State that tests reach, ranked by test files: `active` (49 files, 174 sites), `pump` (22 files),
 `runContinuation` (10), `queue` (10), `execute` (9), `monitoring` (9), `agentEnvForStep` (7),
 `waiting` (7), `busySlots` (6), `starting` (6), `settleSuccess` (6), `waitTimers` (6),
@@ -396,18 +425,18 @@ A move never answers these:
    no comment or test. The `run-settlement` move (hearsay-tools/cezarion#2200) adds both.
 4. `supersedeFallbackThenWorkflowAsk` supersedes the worker fallback before checking for an unanswered ask.
    hearsay-tools/cezarion#2200 renamed it when it moved.
-5. `registerAsk` and `stopPreviewServer` are public, but no shipped code outside `run.ts` calls
-   them: the only caller of each is the cezar-tools host that `run.ts` builds, which
-   `cezar-tools.ts` calls. `reconcileAllWorkerFamilies` delegates to `FamilyReconciler` and has
-   test callers only (`delegation-reconcile.test.ts`). Phase 5 makes them private, points the host
-   at the modules, or moves the tests.
+5. `registerAsk`, `stopPreviewServer` and `autosaveCleanupBlocker` are public, but no shipped code
+   outside `run.ts` calls them. The only caller of the first two is the cezar-tools host that
+   `run.ts` builds, which `cezar-tools.ts` calls. `autosaveCleanupBlocker` has one test caller
+   (`harness-autosave-settlement.test.ts`). `reconcileAllWorkerFamilies` delegates to
+   `FamilyReconciler` and has test callers only (`delegation-reconcile.test.ts`). Phase 5 makes them
+   private, points the host at the modules, or moves the tests.
 6. `stepLeftOpen` reads like a query but clears `completedStepId` as it reads.
-   hearsay-tools/cezarion#2200 moves it verbatim and notes it in the PR; a pure read is Phase 5
-   work or its own issue.
+   hearsay-tools/cezarion#2200 moves it verbatim; hearsay-tools/cezarion#2233 makes it a pure read.
 7. `disarmRunWaits` deletes entries from `ciRegistrations`, the map that `WaitRegistry` owns, from
    outside the registry. That goes against the Phase 3 exit. hearsay-tools/cezarion#2197 moves the
-   loop verbatim and reads the map through `WaitRegistry`; a named registry operation is Phase 5
-   work.
+   loop verbatim and reads the map through `WaitRegistry`; hearsay-tools/cezarion#2232 gives the
+   registry its own CI-registration teardown.
 
 ## Risks
 
