@@ -9,6 +9,11 @@ import { QUICK_TASK_WORKFLOW } from './types.ts';
 // bound: Git and the manager must have time to launch on a loaded host.
 const until = (predicate: () => boolean) => vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15_000, interval: 10 });
 
+function expectedStatus(path: 'fresh' | 'continue', outcome: string): 'running' | 'cancelled' | 'done' {
+  if (outcome === 'preserve' || outcome === 'failure' || (path === 'fresh' && outcome === 'ordinary')) return 'running';
+  return outcome === 'stop' ? 'cancelled' : 'done';
+}
+
 describe('launch disposal routes', { timeout: 30_000 }, () => {
   let f: ReturnType<typeof fixture>;
   const sessions: Array<{ close(fail?: boolean): void }> = [];
@@ -75,12 +80,12 @@ describe('launch disposal routes', { timeout: 30_000 }, () => {
     f.manager.dispose(); sessions.at(-1)!.close(outcome === 'failure');
     await fixtureWorkSettled(f.root);
     const record = f.store.getRun(run.id)!;
-    const preserved = outcome === 'preserve' || outcome === 'failure' || (path === 'fresh' && outcome === 'ordinary');
-    expect(record.status).toBe(preserved ? 'running' : outcome === 'stop' ? 'cancelled' : 'done');
+    const status = expectedStatus(path, outcome);
+    expect(record.status).toBe(status);
     if (outcome === 'preserve' || outcome === 'failure') {
       expect(record.steps.at(-1)?.tokensUsed).toBe(0);
       expect(f.store.readEvents(run.id).slice(eventsBefore).filter(event => event.type === 'session.ended' || event.type === 'session.error')).toEqual([]);
     }
-    expect(record.steps.map(step => step.status)).toEqual(path === 'fresh' ? [preserved ? 'running' : outcome === 'stop' ? 'cancelled' : 'done'] : ['done', preserved ? 'running' : outcome === 'stop' ? 'cancelled' : 'done']);
+    expect(record.steps.map(step => step.status)).toEqual(path === 'fresh' ? [status] : ['done', status]);
   });
 });
