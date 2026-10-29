@@ -1,3 +1,4 @@
+import { AttachmentWriter } from './run/attachment-writer.ts';
 import { MaintenanceClaims } from './run/maintenance-claims.ts';
 import type {
   DelegationExecutionSettings, StartRunInput, PendingContinuation, ExecutionEmit,
@@ -56,7 +57,7 @@ import { workerIdentity, continuationDefStep, ownedWorkflow, workerStepIdentity,
 import { buildChildEnv } from '../core/agent-env.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import {
   stripAskMarker,
@@ -84,7 +85,7 @@ import {
   seedHandoffFile,
 } from '../handoff.ts';
 import { buildSessionContext, formatSessionContextReport, type SessionContext } from '../session-context.ts';
-import { attachmentDirectory, resolveAttachmentPath } from './attachment-path.ts';
+import { resolveAttachmentPath } from './attachment-path.ts';
 // Contract VALUES, like `workspaceUiStateSchema` in workspace/migrations.ts: the attachment
 // vocabulary the routes validate with is the same one the engine stores and re-reads by, so the
 // wire and the disk can never disagree about what counts as an image (#950).
@@ -103,8 +104,8 @@ import {
   type RequestWaitRequest,
   requestWaitRequestSchema,
 } from '@open-mercato/cezar-contract/conversations';
-import { attachmentExtension, isImageAttachmentName } from '@open-mercato/cezar-contract/attachments';
-import { contentBlocksOf, highestImageSeq, mediaTypeFor, pastedAttachmentsNote, pastedAttachmentsText, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from './pasted-content.ts';
+import { isImageAttachmentName } from '@open-mercato/cezar-contract/attachments';
+import { contentBlocksOf, mediaTypeFor, pastedAttachmentsNote, pastedAttachmentsText, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from './pasted-content.ts';
 export { contentBlocksOf, highestImageSeq, mediaTypeFor, pastedAttachmentsNote, pastedAttachmentsText, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from './pasted-content.ts';
 import { askPayloadOf, askRequestOf } from '@open-mercato/cezar-contract/pending-ask';
 import type { AgentEvent, ContentBlock, ToolGrant } from '../core/agent-runner.ts';
@@ -856,10 +857,8 @@ export class RunManager {
    * idle close. Retain these across dropActive/dispose so absence cannot look like
    * the earlier execution again; disposal alone never revokes terminal intent. */
   private readonly continuationGenerations = new Map<string, symbol>();
-  /** Per-run image counter behind `pasted-<n>` / `screenshot-<n>` (#472). Lives on
-   *  the manager rather than the `ActiveRun` so a *queued* run — which has no
-   *  `ActiveRun` at all — can persist attachments. Seeded lazily from disk. */
-  private readonly queuedImageSeq = new Map<string, number>();
+  private readonly attachments: AttachmentWriter;
+  private get queuedImageSeq(): Map<string, number> { return this.attachments.queuedImageSeq; }
   /** Messages after hydration in the dequeue → session-open gap (#472).
    * Wait-withdrawing entries also retain a durable queue ID until delivered. */
   private readonly deferredMessages = new Map<string, Array<{ content: PastedContent[]; messageId?: string }>>();
@@ -934,6 +933,10 @@ export class RunManager {
       { isActive: id => this.isActive(id), autosaveCleanupBlocker: id => this.autosaveCleanupBlocker(id),
         hasExecution: id => this.executions.has(id), scheduleScratchCleanup: id => this.workerScratchCleanup.schedule(id),
         holdForMaintenance: ids => this.holdForMaintenance(ids) },
+    );
+    this.attachments = new AttachmentWriter(
+      { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
+      { persistAttachment: (id, mediaType, data, prefix) => this.persistAttachment(id, mediaType, data, prefix) },
     );
     this.ciResources = acquireCiResources(this.semaphore);
     this.ciSupervisor = this.ciResources.supervisor;
@@ -8240,90 +8243,12 @@ export class RunManager {
     this.store.flush();
   }
 
-  /**
-   * Persist every attachment a user message carries — images and files alike (#950) — into the
-   * run's own attachment folder, in the order they were attached. The returned paths are what the
-   * agent is told about; the caller decides which of them also ride along as viewable blocks.
-   */
-  private persistPastedAttachments(
-    runId: string,
-    content: readonly PastedContent[],
-  ): PersistedAttachment[] {
-    return content
-      .map((b) => {
-        const saved = b.type === 'image'
-          ? this.persistAttachment(runId, b.source.media_type, b.source.data, 'pasted')
-          : b.type === 'file'
-            ? this.persistAttachment(runId, b.mediaType, b.data, 'pasted')
-            : null;
-        if (b.type === 'file' && !saved) {
-          this.store.appendEvent(runId, {
-            type: 'note', tone: 'danger',
-            message: `${b.mediaType} attachment could not be saved — please attach it again`,
-          });
-        }
-        return saved;
-      })
-      .filter((saved): saved is PersistedAttachment => saved !== null);
+  private persistPastedAttachments(runId: string, content: readonly PastedContent[]): PersistedAttachment[] {
+    return this.attachments.persistPastedAttachments(runId, content);
   }
 
-  /**
-   * Agent screenshot (an image block inside a tool result) or a user attachment —
-   * a pasted screenshot, or since #950 a PDF/TXT/MD file: the base64 data never
-   * enters the NDJSON event log — it lands as a file under
-   * `.ai/cezar/runs/<id>-images/` and the transcript event carries only the name +
-   * serving URL. `namePrefix` distinguishes the two origins on disk
-   * (`screenshot-<n>.<ext>` for agent tool screenshots, `pasted-<n>.<ext>` for user
-   * attachments, #357) and the absolute `path` lets the agent operate on the file
-   * directly (save/attach/upload) — for a non-image attachment that path is the ONLY
-   * way it ever reaches the agent.
-   * Best effort: on failure the attachment is dropped, the transcript still
-   * shows the tool result's `[screenshot]` placeholder (or the image count).
-   */
-  private persistAttachment(
-    runId: string,
-    mediaType: string,
-    data: string,
-    namePrefix: string = 'screenshot',
-  ): PersistedAttachment | null {
-    try {
-      // One mapping, shared with the wire (`packages/contract`): an image keeps the extension it
-      // always had, a file gets `pdf`/`txt`/`md`, and both share the `pasted-<n>` numbering space
-      // below so a `pasted-3.md` can never collide with a `pasted-3.png`.
-      const ext = attachmentExtension(mediaType);
-      const dir = join(this.dataDir, 'runs', `${runId}-images`);
-      mkdirSync(dir, { recursive: true });
-      if (!attachmentDirectory(this.dataDir, runId)) return null;
-      // Seed from the highest numeric suffix already on disk, NOT the file count:
-      // `screenshot-*` and `pasted-*` share one numbering space, so counting would
-      // re-issue a live number after any deletion. Only matters on the first write
-      // of a process (restart case) — afterwards the map is authoritative.
-      let seq = this.queuedImageSeq.get(runId);
-      if (seq === undefined) seq = highestImageSeq(dir);
-      // `persistAttachment` is fully synchronous, so two pastes cannot interleave between
-      // the read of the counter and the write. The exclusive-create flag is the
-      // belt-and-braces guard for a stale seed: it degrades to a renamed file rather
-      // than a silent overwrite.
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        seq += 1;
-        const name = `${namePrefix}-${seq}.${ext}`;
-        const path = join(dir, name);
-        try {
-          writeFileSync(path, Buffer.from(data, 'base64'), { flag: 'wx' });
-        } catch (err) {
-          if ((err as NodeJS.ErrnoException).code === 'EEXIST') continue;
-          throw err;
-        }
-        this.queuedImageSeq.set(runId, seq);
-        // Versioned, because that is the only surface served now. The cockpit still upgrades
-        // the unversioned URLs sitting in OLD transcripts when it renders them
-        // (`resolveApiUrl`), but a URL minted today must be fetchable as written.
-        return { name, url: `/api/v1/runs/${runId}/images/${name}`, path };
-      }
-      return null;
-    } catch {
-      return null;
-    }
+  private persistAttachment(runId: string, mediaType: string, data: string, namePrefix: string = 'screenshot'): PersistedAttachment | null {
+    return this.attachments.persistAttachment(runId, mediaType, data, namePrefix);
   }
 
   /** Shared stop/input/liveness guards for an automatic continuation. */
