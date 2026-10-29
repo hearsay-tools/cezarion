@@ -9,8 +9,11 @@ trusting an uploaded artifact’s metadata.
 
 Model calls receive only their required credentials and tools. Intake choices are bounded by
 the prefetched candidate set; a decision engine cannot invent another target. Review generation
-and posting use separate jobs and permissions. Verification precedes automated review, while
-the trusted poster alone receives write scopes.
+and posting use separate jobs and permissions. Cheap deterministic preflight precedes automated review. A passing current-head
+review releases heavy verification, which remains required before merge. The
+trusted poster alone receives write scopes. The owner approved this ordering in
+[the review-first plan](../../.ai/specs/2026-10-29-review-first-ci-plan.md); model
+generation and trusted mutations remain separate.
 
 This separation constrains what a model or artifact can request; it does not make arbitrary
 same-user shell access an isolation boundary. Keep workflow permission and timing comments

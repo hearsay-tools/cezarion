@@ -19,7 +19,7 @@ function context(event = 'merge_group') {
     needs: { 'queue-proof': { result: 'success', outputs: { verified: 'false' } },
       'change-surface': { result: 'success', outputs: { surface: 'full-matrix' } },
       'classify-pr': { result: 'success', outputs: { bump_pr: 'false' } },
-      verify: { result: 'success' }, review: { result: 'skipped' }, 'queue-admission': { result: 'success' } },
+      preflight: { result: 'success' }, 'review-result': { result: 'skipped' }, verify: { result: 'success' }, review: { result: 'skipped' }, 'queue-admission': { result: 'success' } },
     cancelled: () => false, always: () => true };
 }
 function evaluate(expression, ctx) {
@@ -32,7 +32,7 @@ function evaluate(expression, ctx) {
 }
 function shell(command, env = {}) {
   return spawnSync('bash', ['-eu', '-c', command], { encoding: 'utf8', env: { PATH: process.env.PATH,
-    EVENT_NAME: 'merge_group', CLASSIFY_RESULT: 'success', SURFACE_RESULT: 'success', COMPLEXITY_GATE_RESULT: 'success', CLONE_GATE_RESULT: 'success',
+    CANCELLED: 'false', PREFLIGHT_RESULT: 'success', BASE_REF: '', REVIEW_RESULT: 'skipped', EVENT_NAME: 'merge_group', CLASSIFY_RESULT: 'success', SURFACE_RESULT: 'success', COMPLEXITY_GATE_RESULT: 'success', CLONE_GATE_RESULT: 'success',
     TYPECHECK_RESULT: 'success', BUILD_AND_PACKAGE_RESULT: 'success', VITEST_RESULT: 'success',
     COCKPIT_BROWSER_RESULT: 'success', CHANGE_SURFACE: 'full-matrix', BUMP_PR: 'false',
     VERIFIED_SHA: 'a'.repeat(40), PROOF_RESULT: 'success', PROOF_VERIFIED: 'false', PROOF_SOURCE: '', GITHUB_STEP_SUMMARY: '/dev/null', ...env } });
@@ -40,12 +40,12 @@ function shell(command, env = {}) {
 test('proof roster expands every verification matrix and queue admission', () => {
   const { REQUIRED_QUEUE_JOBS } = require('./queue-ci-proof.cjs');
   const ci = workflow();
-  const names = ['change-surface', 'classify-pr', 'complexity-gate', 'clone-gate', 'typecheck', 'build-and-package', 'vitest', 'cockpit-browser', 'verify', 'queue-admission']
+  const names = ['change-surface', 'classify-pr', 'complexity-gate', 'clone-gate', 'preflight', 'typecheck', 'build-and-package', 'vitest', 'cockpit-browser', 'verify', 'queue-admission']
     .flatMap(id => {
       const j = ci.jobs[id];
       return j.strategy ? j.strategy.matrix.shard.map(n => j.name.replace('${{ matrix.shard }}', String(n))) : [j.name];
     });
-  names.push(evaluate(ci.jobs['review-result'].name, context()));
+  names.push(evaluate(ci.jobs['queue-review-result'].name, context()));
   assert.deepEqual(names.sort(), [...REQUIRED_QUEUE_JOBS].sort());
 });
 test('queue always runs the complete immutable combined revision and no paid review or publication', () => {
@@ -97,7 +97,7 @@ test('queue aggregate rejects failures and skips even if classifier offers exemp
   }
 });
 test('required review name cannot pass from a skipped model call on a queue event', () => {
-  const ci = workflow(), ctx = context(); const j = ci.jobs['review-result'];
+  const ci = workflow(), ctx = context(); const j = ci.jobs['queue-review-result'];
   assert.equal(evaluate(j.if, ctx), true);
   assert.equal(evaluate(j.name, ctx), 'Automated Code Review');
   for (const result of ['success', 'skipped', 'failure', 'cancelled', '']) {

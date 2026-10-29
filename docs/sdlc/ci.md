@@ -9,9 +9,24 @@ has one concurrency group, so a new head cancels its predecessor without a
 competing same-head `pull_request` run. Failed or cancelled verification never
 satisfies the required aggregate.
 
-The review's CI context uses the newest target run for the current head. It
-falls back to legacy `pull_request` CI only when no target run exists, never
-when target verification failed or was cancelled.
+Main PRs run cheap deterministic preflight, automated review, then heavy
+verification. Findings block heavy work. Both protected checks remain required.
+Native review context is bound to the trusted caller event, workflow, run,
+attempt and live head. It reports heavy tests as pending, not successful.
+Manual review context reads only the newest current-head native run and its
+latest attempt. Missing evidence stays pending; failure/cancellation never
+falls back to an earlier success. When the current attempt proves that review
+failed and all heavy jobs were skipped, it reports heavy verification as not
+started because review blocked it. The failed aggregate remains a merge blocker;
+it does not mean tests ran and failed.
+
+Previously, only test-green heads consumed automated review rounds. Review now
+spends rounds on preflight-green heads whose tests may later fail. The owner
+requested review before tests and accepted that later tests may fail. This can
+exhaust the unchanged cap earlier, so subsequent final-head changes may receive
+no new model review. Final-head model review was already conditional on that cap.
+The provider and review policy are unchanged; both required checks still gate
+merge.
 
 Local typechecking starts with `pnpm install --frozen-lockfile` in the checkout being verified, including
 nested task worktrees. Both `npm run typecheck:web` and
@@ -113,13 +128,15 @@ The path-filtered `Windows test environment lease` workflow also runs the worker
 cleanup regression on native Windows when its cleanup code changes. It checks the pre-fix
 failure and the fixed result, including lease and checkout isolation.
 
-Required verification has nine parallel test jobs, plus the complexity and clone
-gates. Seven test jobs use the current Node LTS; typecheck and build/package use
+Required verification has nine verification jobs, plus the complexity and clone
+gates. Typecheck, workflow lint, citations, classification and policy ratchets
+feed the `Review preflight` gate. On PRs into main, the other eight jobs wait for
+the protected review result. Other events keep their existing test inventory. Seven test jobs use the current Node LTS; typecheck and build/package use
 exactly the `engines.node` minimum (Node 24.21.0):
 
 - Three Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/3 --maxWorkers=4` for N=1..3.
-- The required typecheck job uses `blacksmith-2vcpu-ubuntu-2404` (2 vCPU, 8 GB) for PRs and manual dispatches, and `ubuntu-24.04` for pushes and merge groups. It runs `npm run typecheck` for all change surfaces, including docs, infrastructure and release bumps. It keeps the minimum-Node setup and its bounded retry.
-- The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It runs the issue-citation check, builds server declarations, then runs Node unit tests, the full application build, packaged CLI E2E tests, and release-package dry-run packing. The explicit server build preserves the preparation that typecheck supplied before the split. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
+- The required typecheck job uses `blacksmith-2vcpu-ubuntu-2404` (2 vCPU, 8 GB) for PRs and manual dispatches, and `ubuntu-24.04` for pushes and merge groups. It runs pinned workflow lint, issue-citation checking and `npm run typecheck` for all change surfaces, including docs, infrastructure and release bumps. It keeps the minimum-Node setup and its bounded retry.
+- The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It builds server declarations, then runs Node unit tests, the full application build, packaged CLI E2E tests, and release-package dry-run packing. The explicit server build preserves the preparation that typecheck supplied before the split. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
 - Four cockpit browser E2E shards on `ubicloud-standard-2` (2 vCPU, 8 GB RAM, Ubuntu 24.04 x64) each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
 
 The Ubicloud trial moves only the four browser CI shards to the lowest x64 tier,
@@ -230,7 +247,9 @@ sequencer's balancing-only role and median fallback for unlisted files.
 
 The push-only `.github/workflows/ci-benchmark.yml` workflow runs controlled experiments on `bench/156-*` branches. It uses a fixed application baseline, records failures and resource usage, and performs publication experiments only as dry runs. Reproduction instructions and retained results are in [the issue 156 benchmark report](../benchmarks/ci-performance-156.md). Automated review remains enabled throughout.
 
-Automated code review runs inside the `ci.yml` pull-request run, as the `review` job that calls `automated-code-review.yml` with `needs: verify`. GitHub starts it only when the **Unit, build, E2E, and package** job succeeds, so no runner sits polling for CI. Failed, cancelled or skipped verification leaves the review skipped. The model jobs still run on the trusted base's scripts, and their context fetch rechecks that verification succeeded for the exact head SHA immediately before model work. Standalone CI context collection still reports verification's actual conclusion and failed verification jobs; individual completed-job logs avoid waiting for the whole workflow archive. Ambiguous jobs or job-query errors fail the recheck.
+Automated code review runs inside the `ci.yml` main pull-request run after `preflight`. The gate requires trusted classification and applicable baseline/complexity/clone checks, plus typecheck, workflow lint and citations. Typecheck retains its server declaration preparation; it does not run the full application build or product suites. The model jobs use the trusted workflow revision and validate native caller provenance against Actions metadata and the live PR head. Their context states that heavy verification is pending behind review. Manual context reads the latest current-head native attempt without polling or accepting older success. API errors fail context collection. The legacy `fetch-ci-results.cjs` utility remains available to its independent consumers; it no longer gates model work.
+
+A passing PR review result releases build/package, Vitest and browser jobs. The review result checks the live head again before release. The final verification gate fails on a blocked review or an unexpected skipped heavy job. The queue has a separate protected review result after full verification and native admission, so it cannot create a PR dependency cycle. Failed or cancelled preflight never starts review; cancellation never releases heavy work. Explicit status functions preserve intended docs/infra/bot skips without GitHub's implicit `success()` suppressing later jobs.
 
 Codex reviews keep a 12-minute action limit for smaller PRs. At 3,000 added plus
 deleted lines or 50 changed files, the action gets 24 minutes. Unavailable or
@@ -434,8 +453,7 @@ change before merge, push the branch and run `gh workflow run ci.yml --ref <bran
 without `-f pr_number`, which only bot release PRs take. The dispatched run uses the
 branch's `ci.yml` on the pushed head, with the full matrix. It skips both publishing
 jobs, so it publishes nothing: `publish-snapshot` runs only on a push to `main`, and
-`prepare-pr-snapshot` only on `pull_request_target`. It also skips `review` and
-`review-result`, so it never exercises `automated-code-review.yml`, the one workflow
+`prepare-pr-snapshot` only on `pull_request_target`. It also skips `review`, `review-result` and `queue-review-result`, so it never exercises `automated-code-review.yml`, the one workflow
 `ci.yml` calls. The dispatched run does not satisfy the PR's required checks (see
 § Diagnostic dispatch), so cite its run ID in the PR's
 Verification section. Run `38979957113` proved the new `Lint workflows` step of
@@ -459,13 +477,13 @@ that leave the workflow files unchanged do not invalidate the proof.
 
 ### Re-running a review
 
-A flaky verification failure needs no separate recovery workflow. **Re-run failed jobs** on the CI run reruns the failed shards, `verify`, and every job downstream of it, including the review. The poster reads the PR's reviews and live head again just before posting, so a rerun never exceeds `AUTOMATED_REVIEW_ROUNDS`, never posts a second review on one head, and never posts on a stale head.
+A flaky verification failure needs no separate recovery workflow. **Re-run failed jobs** retains the successful review and successful heavy jobs, and reruns failed tests and `verify`. A review-only retry releases previously blocked heavy jobs after the review passes. The poster retains its round-cap, same-head duplicate and live-head guards. Do not rerun an already successful upstream review job to retry tests: GitHub can rerun its dependents too.
 
 After resolving findings by hand, re-run **Review / review-round** in the PR's CI run rather than the whole run. That reruns the round and every review job after it. An unchanged patch skips the model and only recounts the open threads.
 
 Pushback replies need the model to judge them. Re-running the round does not do that: the patch-ID guard skips the model on an unchanged patch. Instead, run `automated-code-review.yml` manually (`workflow_dispatch`) with `pr_number`. A manual review skips the patch-ID guard and the round cap, judges every earlier thread including its replies, and resolves the addressed ones. Its checks attach to the dispatched branch, not the PR head, so afterwards re-run **Review / review-round** in the CI run to recount the required check.
 
-**Validation limit:** `pull_request_target` loads `ci.yml` from the base branch, so the PR introducing this layout is reviewed by the previous standalone workflow. After it merges, use a disposable same-repository draft PR: confirm one green run with a single posted review, then fail one verification job on purpose and confirm that **Re-run failed jobs** runs the review once verification passes. Record the run URLs and close the PR without merging.
+**Validation limit:** `pull_request_target` loads `ci.yml` from the base branch, so the introducing PR does not prove the new native graph. A final-head bare dispatch proves the changed verification workflow but skips review. After rollout, use a disposable same-repository draft PR to confirm that findings block all heavy jobs, a passing review releases them, failed-test retry retains successful review and tests, and manual reply rejudgement plus native recount releases blocked work. Record run, attempt and job IDs; close the PR without merging. Local fixtures do not prove GitHub's reusable-workflow or rerun scheduling semantics.
 
 ### Stable release recovery
 

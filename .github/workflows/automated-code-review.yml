@@ -1,11 +1,22 @@
 name: Automated Code Review
 
-# ci.yml calls this workflow once its verification job succeeds, so no runner
-# sits polling for CI (spec .ai/specs/2026-10-15-review-inside-ci.md). Under
-# workflow_call, github.* is the caller's pull_request_target event.
-# workflow_dispatch reviews one PR on demand, outside the round cap.
+# ci.yml calls after cheap preflight; heavy verification waits for this verdict.
+# workflow_call retains the trusted caller event. Dispatch judges replies on demand.
 on:
   workflow_call:
+    inputs:
+      preflight_result:
+        required: true
+        type: string
+      caller_run_id:
+        required: true
+        type: string
+      caller_attempt:
+        required: true
+        type: string
+      caller_head:
+        required: true
+        type: string
     secrets:
       ANTHROPIC_API_KEY:
         required: false
@@ -260,7 +271,7 @@ jobs:
       - name: Checkout trusted CI context script
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.review-round.outputs.base_sha }}
+          ref: ${{ github.workflow_sha }}
           path: trusted-review
           persist-credentials: false
 
@@ -280,16 +291,16 @@ jobs:
           gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --jq '.[]' > .review-context/prior-review-bodies.jsonl
           gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/comments" --jq '.[]' > .review-context/prior-inline-comments.jsonl
 
-      - name: Fetch CI workflow results (verification only)
+      - name: Read current review CI context
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ needs.review-round.outputs.head_sha }}
-        run: |
-          node trusted-review/.github/scripts/fetch-ci-results.cjs \
-            --repo "$GITHUB_REPOSITORY" \
-            --head-sha "$HEAD_SHA" \
-            --out .review-context/ci-results.md \
-            --require-success
+          PR_NUMBER: ${{ needs.review-round.outputs.pr_number }}
+          REVIEW_PREFLIGHT_RESULT: ${{ inputs.preflight_result }}
+          REVIEW_CALLER_RUN_ID: ${{ inputs.caller_run_id }}
+          REVIEW_CALLER_ATTEMPT: ${{ inputs.caller_attempt }}
+          REVIEW_CALLER_HEAD: ${{ inputs.caller_head }}
+        run: node trusted-review/.github/scripts/review-ci-context.cjs .review-context/ci-results.md
 
       - name: Run Claude Code Review
         id: claude-review
@@ -306,7 +317,8 @@ jobs:
           prompt: >-
             /code-review:code-review ${{ github.repository }}/pull/${{ needs.review-round.outputs.pr_number }}
 
-            Read successful CI verification from .review-context/ci-results.md.
+            Read preflight and pending verification context from .review-context/ci-results.md.
+            Review before heavy tests; do not wait for them or treat pending tests as passing.
 
             Override for this repository: in step 1, do NOT treat "the pull
             request is a draft" as a reason to stop. Draft is the normal
@@ -387,7 +399,7 @@ jobs:
       - name: Checkout trusted review instructions
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.review-round.outputs.base_sha }}
+          ref: ${{ github.workflow_sha }}
           path: trusted-review
           persist-credentials: false
 
@@ -415,16 +427,16 @@ jobs:
           gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" --jq '.[]' > pull-request/.review-context/prior-review-bodies.jsonl
           gh api --paginate "/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/comments" --jq '.[]' > pull-request/.review-context/prior-inline-comments.jsonl
 
-      - name: Fetch CI workflow results (verification only)
+      - name: Read current review CI context
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HEAD_SHA: ${{ needs.review-round.outputs.head_sha }}
-        run: |
-          node trusted-review/.github/scripts/fetch-ci-results.cjs \
-            --repo "$GITHUB_REPOSITORY" \
-            --head-sha "$HEAD_SHA" \
-            --out pull-request/.review-context/ci-results.md \
-            --require-success
+          PR_NUMBER: ${{ needs.review-round.outputs.pr_number }}
+          REVIEW_PREFLIGHT_RESULT: ${{ inputs.preflight_result }}
+          REVIEW_CALLER_RUN_ID: ${{ inputs.caller_run_id }}
+          REVIEW_CALLER_ATTEMPT: ${{ inputs.caller_attempt }}
+          REVIEW_CALLER_HEAD: ${{ inputs.caller_head }}
+        run: node trusted-review/.github/scripts/review-ci-context.cjs pull-request/.review-context/ci-results.md
 
       # Policy code belongs to this trusted workflow revision. In a manual
       # branch dispatch it must not silently use the old policy from PR base.
@@ -503,7 +515,7 @@ jobs:
 
   post-review:
     needs: [validate-provider, review-round, claude-review, codex-review]
-    if: ${{ always() && (needs.review-round.outputs.can_review == 'false' || (needs.review-round.outputs.can_review == 'true' && ((needs.validate-provider.outputs.provider == 'claude' && needs.claude-review.result == 'success') || (needs.validate-provider.outputs.provider == 'codex' && needs.codex-review.result == 'success')))) }}
+    if: ${{ !cancelled() && (needs.review-round.outputs.can_review == 'false' || (needs.review-round.outputs.can_review == 'true' && ((needs.validate-provider.outputs.provider == 'claude' && needs.claude-review.result == 'success') || (needs.validate-provider.outputs.provider == 'codex' && needs.codex-review.result == 'success')))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -573,6 +585,8 @@ jobs:
             const { owner, repo } = context.repo;
             const pullNumber = Number(process.env.PR_NUMBER);
             const eventHeadSha = process.env.HEAD_SHA;
+            // Even a reused/skipped round must belong to the live PR head.
+            await assertLiveHead({ github, owner, repo, pullNumber, eventHeadSha, reviewedHeadSha: eventHeadSha });
             // A skipped round posts nothing; it only reports what is still open.
             if (process.env.CAN_REVIEW !== 'true') {
               const threads = await listReviewThreads({ github, owner, repo, pullNumber });
@@ -659,6 +673,7 @@ jobs:
         # A diagnostic checkout/API failure must not skip the failed verdict.
         if: ${{ always() }}
         env:
+          CANCELLED: ${{ job.status == 'cancelled' }}
           VALIDATE_RESULT: ${{ needs.validate-provider.result }}
           REVIEW_ROUND_RESULT: ${{ needs.review-round.result }}
           CAN_REVIEW: ${{ needs.review-round.outputs.can_review }}
@@ -671,6 +686,7 @@ jobs:
           OPEN_THREADS: ${{ needs.post-review.outputs.open_threads }}
           PR_NUMBER: ${{ needs.review-round.outputs.pr_number }}
         run: |
+          [ "$CANCELLED" = 'false' ] || exit 1
           [ "$VALIDATE_RESULT" = 'success' ] || exit 1
           [ "$REVIEW_ROUND_RESULT" = 'success' ] || exit 1
           if [ "$CAN_REVIEW" != 'false' ]; then
@@ -711,3 +727,6 @@ jobs:
             verdict "$OPEN_THREADS automated review thread(s) are still unresolved. Re-running the failed jobs alone reuses the old count. If you resolved them by hand, re-run Review / review-round in the CI run to recount. $rejudge"
             exit 1
           fi
+      - name: Reject a cancelled run
+        if: cancelled()
+        run: exit 1

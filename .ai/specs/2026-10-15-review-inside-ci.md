@@ -2,6 +2,9 @@
 
 Status: implemented · Date: 2026-10-15 · Relates: `.github/workflows/ci.yml`, `.github/workflows/automated-code-review.yml`, ruleset **Protect main** (required checks `Unit, build, E2E, and package` and `Automated Code Review`)
 
+Timing superseded on 2026-10-29 by [review-first CI](2026-10-29-review-first-ci-plan.md).
+The following text records the original implementation and its evidence.
+
 ## TLDR
 
 The automated review used to be its own `pull_request_target` workflow. A `wait-for-ci` job held a runner while it polled for CI to succeed. It is now a reusable workflow that `ci.yml` calls with `needs: verify`, so GitHub starts it when verification succeeds and nothing waits. The `wait-for-ci` job, its 20-minute deadline and the **Recover Automated Review** workflow that rescued expired waits are all gone.

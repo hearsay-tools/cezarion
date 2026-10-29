@@ -433,71 +433,6 @@ jobs:
           # opt out of checkout's fork protection for this reviewed, read-only gate.
           allow-unsafe-pr-checkout: true
           persist-credentials: false
-          fetch-depth: 1
-
-      - name: Set up pnpm
-        if: hashFiles('pnpm-lock.yaml') != ''
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          version: '12.11.2'
-
-      - name: Set up Node.js
-        id: setup-node
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        timeout-minutes: 3
-        continue-on-error: true
-        with:
-          node-version: '24.21.0'
-          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
-          cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
-
-      # Keep the bounded download retry from the former floor job
-      # (hearsay-tools/cezarion#1214). A second failure fails this job.
-      - name: Retry Node.js setup
-        if: steps['setup-node'].outcome != 'success'
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        timeout-minutes: 3
-        with:
-          node-version: '24.21.0'
-          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
-          cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
-
-      - name: Install dependencies
-        if: hashFiles('pnpm-lock.yaml') == ''
-        run: npm ci
-
-      - name: Install pnpm dependencies
-        if: hashFiles('pnpm-lock.yaml') != ''
-        run: pnpm install --frozen-lockfile
-
-      - name: Typecheck
-        run: npm run typecheck
-
-  build-and-package:
-    name: Unit, build, and package
-    needs: queue-proof
-    if: ${{ !cancelled() && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-
-    permissions:
-      contents: read
-      pull-requests: read
-
-    steps:
-      - *resolve-dispatch
-      # PR-aware dispatch verifies the same merge result as the PR event.
-      # Bare dispatch keeps the immutable SHA receiving the check.
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ (github.event.pull_request.number || steps['resolve-dispatch'].outputs.valid == 'true') && format('refs/pull/{0}/merge', github.event.pull_request.number || inputs.pr_number) || github.sha }}
-          # CI intentionally executes the PR merge result under pull_request_target;
-          # opt out of checkout's fork protection for this reviewed, read-only gate.
-          allow-unsafe-pr-checkout: true
-          persist-credentials: false
-          # The merge result and its first parent, the base it merged into, for
-          # the citation check below.
           fetch-depth: 2
 
       # Lint the merge result's workflows, so an unknown input or secret on a
@@ -528,10 +463,6 @@ jobs:
           tar -xzf "$tools/shellcheck.tar.gz" -C "$tools" "shellcheck-v${SHELLCHECK_VERSION}/shellcheck"
           "$tools/actionlint" -shellcheck="$tools/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" -pyflakes=
 
-      # Select the installer from the checked-out merge result: this trusted-base
-      # workflow must support a PR that replaces the npm lockfile with pnpm.
-      # The build and packaged CLI tests verify the exact engines.node minimum.
-      # Vitest and browser shards follow current LTS without repeating the suites.
       - name: Set up pnpm
         if: hashFiles('pnpm-lock.yaml') != ''
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -577,6 +508,113 @@ jobs:
         if: github.event_name != 'push'
         run: node .github/scripts/check-citations.cjs --base HEAD^1
 
+      - name: Typecheck
+        run: npm run typecheck
+
+  # Cheap deterministic checks precede paid review and heavy verification.
+  preflight:
+    name: Review preflight
+    needs: [queue-proof, change-surface, classify-pr, complexity-gate, clone-gate, typecheck]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require preflight checks
+        env:
+          CANCELLED: ${{ job.status == 'cancelled' }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          CLASSIFY_RESULT: ${{ needs.classify-pr.result }}
+          SURFACE_RESULT: ${{ needs.change-surface.result }}
+          COMPLEXITY_RESULT: ${{ needs.complexity-gate.result }}
+          CLONE_RESULT: ${{ needs.clone-gate.result }}
+          TYPECHECK_RESULT: ${{ needs.typecheck.result }}
+          PROOF_RESULT: ${{ needs.queue-proof.result }}
+          PROOF_VERIFIED: ${{ needs.queue-proof.outputs.verified }}
+        run: |
+          test "$CANCELLED" = false
+          test "$CLASSIFY_RESULT" = success
+          test "$SURFACE_RESULT" = success
+          if [ "$EVENT_NAME" = pull_request_target ] || [ "$EVENT_NAME" = merge_group ] || { [ "$EVENT_NAME" = workflow_dispatch ] && [ -z "$PR_NUMBER" ]; }; then
+            test "$COMPLEXITY_RESULT" = success
+            test "$CLONE_RESULT" = success
+          else
+            test "$COMPLEXITY_RESULT" = success -o "$COMPLEXITY_RESULT" = skipped
+            test "$CLONE_RESULT" = success -o "$CLONE_RESULT" = skipped
+          fi
+          if [ "$EVENT_NAME" = push ] && [ "$PROOF_RESULT" = success ] && [ "$PROOF_VERIFIED" = true ]; then
+            test "$TYPECHECK_RESULT" = skipped
+          else
+            test "$TYPECHECK_RESULT" = success
+          fi
+      - name: Reject a cancelled run
+        if: cancelled()
+        run: exit 1
+
+  build-and-package:
+    name: Unit, build, and package
+    needs: [queue-proof, preflight, review-result]
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && (github.event_name != 'pull_request_target' || github.event.pull_request.base.ref != 'main' || needs.review-result.result == 'success') && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - *resolve-dispatch
+      # PR-aware dispatch verifies the same merge result as the PR event.
+      # Bare dispatch keeps the immutable SHA receiving the check.
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ (github.event.pull_request.number || steps['resolve-dispatch'].outputs.valid == 'true') && format('refs/pull/{0}/merge', github.event.pull_request.number || inputs.pr_number) || github.sha }}
+          # CI intentionally executes the PR merge result under pull_request_target;
+          # opt out of checkout's fork protection for this reviewed, read-only gate.
+          allow-unsafe-pr-checkout: true
+          persist-credentials: false
+
+      # Select the installer from the checked-out merge result: this trusted-base
+      # workflow must support a PR that replaces the npm lockfile with pnpm.
+      # The build and packaged CLI tests verify the exact engines.node minimum.
+      # Vitest and browser shards follow current LTS without repeating the suites.
+      - name: Set up pnpm
+        if: hashFiles('pnpm-lock.yaml') != ''
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: '12.11.2'
+
+      - name: Set up Node.js
+        id: setup-node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          node-version: '24.21.0'
+          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
+          cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
+
+      # Keep the bounded download retry from the former floor job
+      # (hearsay-tools/cezarion#1214). A second failure fails this job.
+      - name: Retry Node.js setup
+        if: steps['setup-node'].outcome != 'success'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 3
+        with:
+          node-version: '24.21.0'
+          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
+          cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
+
+      - name: Install dependencies
+        if: hashFiles('pnpm-lock.yaml') == ''
+        run: npm ci
+
+      - name: Install pnpm dependencies
+        if: hashFiles('pnpm-lock.yaml') != ''
+        run: pnpm install --frozen-lockfile
+
       # The former typecheck step built the server before these unit tests.
       # Keep that preparation on this VM after moving typecheck to its own job.
       - name: Build server for unit tests
@@ -607,9 +645,10 @@ jobs:
     # bumps, do not need to repeat the suites already covered by the relevant
     # release or docs gate; infra-only diffs cannot reach the package sources
     # Vitest covers, and their script tests run under build-and-package.
-    needs: [queue-proof, change-surface, classify-pr]
+    needs: [queue-proof, change-surface, classify-pr, preflight, review-result]
     if: >-
       !cancelled() &&
+      needs.preflight.result == 'success' && (github.event_name != 'pull_request_target' || github.event.pull_request.base.ref != 'main' || needs.review-result.result == 'success') &&
       (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') &&
       needs.change-surface.outputs.surface == 'full-matrix' &&
       needs.classify-pr.outputs.bump_pr != 'true'
@@ -789,9 +828,10 @@ jobs:
   cockpit-browser:
     name: Cockpit browser E2E shard ${{ matrix.shard }}/4
     # Same docs-only, infra-only, and verified bump-PR skips as Vitest.
-    needs: [queue-proof, change-surface, classify-pr]
+    needs: [queue-proof, change-surface, classify-pr, preflight, review-result]
     if: >-
       !cancelled() &&
+      needs.preflight.result == 'success' && (github.event_name != 'pull_request_target' || github.event.pull_request.base.ref != 'main' || needs.review-result.result == 'success') &&
       (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') &&
       needs.change-surface.outputs.surface == 'full-matrix' &&
       needs.classify-pr.outputs.bump_pr != 'true'
@@ -870,7 +910,7 @@ jobs:
   # cockpit browser jobs.
   verify:
     name: Unit, build, E2E, and package
-    needs: [queue-proof, change-surface, classify-pr, complexity-gate, clone-gate, typecheck, build-and-package, vitest, cockpit-browser]
+    needs: [queue-proof, change-surface, classify-pr, complexity-gate, clone-gate, typecheck, preflight, review-result, build-and-package, vitest, cockpit-browser]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -878,6 +918,10 @@ jobs:
     steps:
       - name: Require every verification job
         env:
+          CANCELLED: ${{ job.status == 'cancelled' }}
+          PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          REVIEW_RESULT: ${{ needs.review-result.result }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
           PROOF_RESULT: ${{ needs.queue-proof.result }}
           PROOF_VERIFIED: ${{ needs.queue-proof.outputs.verified }}
           PROOF_SOURCE: ${{ needs.queue-proof.outputs.source }}
@@ -897,6 +941,11 @@ jobs:
           # classification, may leave Vitest and cockpit browser skipped.
           BUMP_PR: ${{ needs.classify-pr.outputs.bump_pr }}
         run: |
+          test "$CANCELLED" = false
+          test "$PREFLIGHT_RESULT" = success
+          if [ "$EVENT_NAME" = pull_request_target ] && [ "$BASE_REF" = main ]; then
+            test "$REVIEW_RESULT" = success
+          fi
           test "$CLASSIFY_RESULT" = success
           test "$SURFACE_RESULT" = success
           # The complexity ratchet runs on pull requests, merge groups and bare dispatches.
@@ -925,18 +974,16 @@ jobs:
             test "$VITEST_RESULT" = success
             test "$COCKPIT_BROWSER_RESULT" = success
           fi
+      - name: Reject a cancelled run
+        if: cancelled()
+        run: exit 1
 
-  # Automated code review (spec .ai/specs/2026-10-15-review-inside-ci.md). It
-  # starts only after verify succeeds, so no job waits on CI. Model keys go to
-  # this call alone, never `secrets: inherit`. The called jobs narrow these
-  # permissions per job; only the trusted poster gets the write scopes. The status
-  # function keeps GitHub from adding its implicit success(), which reads false
-  # when a shard before verify was skipped, as every docs-only, infra-only and
-  # bump PR skips them (hearsay-tools/cezarion#1100).
+  # Review gates heavy PR verification. Only trusted posting receives write scopes.
+  # Explicit status functions permit intentional skips without implicit success().
   review:
     name: Review
-    needs: verify
-    if: ${{ !cancelled() && needs.verify.result == 'success' && github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main' }}
+    needs: preflight
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main' }}
     permissions:
       actions: read
       checks: read
@@ -944,6 +991,11 @@ jobs:
       issues: read
       pull-requests: write
     uses: ./.github/workflows/automated-code-review.yml
+    with:
+      preflight_result: ${{ needs.preflight.result }}
+      caller_run_id: ${{ github.run_id }}
+      caller_attempt: ${{ github.run_attempt }}
+      caller_head: ${{ github.event.pull_request.head.sha }}
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -977,40 +1029,64 @@ jobs:
               core.setFailed('Queue admission could not verify current native PR CI/review, membership and rules. Inspect the queue and retry; do not bypass.');
             }
 
-  # Keep the protected name on PRs into main and on real queue admission.
-  # Other events use another name so a skipped job cannot supply review.
+  # Distinct inactive names prevent a skipped job supplying a protected check.
   review-result:
-    name: ${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main')) && 'Automated Code Review' || 'Automated Code Review (not a pull request into main)' }}
-    needs: [verify, review, queue-admission]
-    if: always() && (github.event_name == 'merge_group' || (github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main'))
+    name: ${{ (github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main') && 'Automated Code Review' || 'PR review (not applicable)' }}
+    needs: [preflight, review]
+    if: always() && github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Require a completed review
+        env:
+          CANCELLED: ${{ job.status == 'cancelled' }}
+          PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          REVIEW_RESULT: ${{ needs.review.result }}
+        run: |
+          test "$CANCELLED" = false
+          if [ "$PREFLIGHT_RESULT" != success ]; then
+            echo "::notice::Preflight ended '$PREFLIGHT_RESULT'. Fix it, then use Re-run failed jobs." >&2
+            exit 1
+          fi
+          if [ "$REVIEW_RESULT" != success ]; then
+            echo "::notice::The review ended '$REVIEW_RESULT'. Its Review verdict job names the reason; heavy verification has not been released." >&2
+            exit 1
+          fi
+      - name: Require the current PR head before releasing verification
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          live_head="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)"
+          test "$live_head" = "$EXPECTED_HEAD"
+      - name: Reject a cancelled run
+        if: cancelled()
+        run: exit 1
+
+  queue-review-result:
+    name: ${{ github.event_name == 'merge_group' && 'Automated Code Review' || 'Queue review (not applicable)' }}
+    needs: [verify, queue-admission]
+    if: always() && github.event_name == 'merge_group'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
     steps:
-      - name: Require a completed review
+      - name: Require verified queue admission
         env:
+          CANCELLED: ${{ job.status == 'cancelled' }}
           VERIFY_RESULT: ${{ needs.verify.result }}
-          REVIEW_RESULT: ${{ needs.review.result }}
           QUEUE_RESULT: ${{ needs.queue-admission.result }}
-          EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [ "$EVENT_NAME" = merge_group ]; then
-            test "$VERIFY_RESULT" = success
-            test "$QUEUE_RESULT" = success
-            exit 0
-          fi
-          if [ "$REVIEW_RESULT" = success ]; then
-            exit 0
-          fi
-          # Notices, not errors: the CI failure sweep groups identical error lines
-          # across PRs, and this line repeats on every PR with open findings. The
-          # failing verify or Review job carries the actual diagnostic.
-          if [ "$VERIFY_RESULT" != success ]; then
-            echo "::notice::Verification ended '$VERIFY_RESULT', so the review did not run. Fix it, then use Re-run failed jobs: the review runs once verification succeeds." >&2
-            exit 1
-          fi
-          echo "::notice::The review ended '$REVIEW_RESULT'. Its Review verdict job names the reason." >&2
-          exit 1
+          test "$CANCELLED" = false
+          test "$VERIFY_RESULT" = success
+          test "$QUEUE_RESULT" = success
+      - name: Reject a cancelled run
+        if: cancelled()
+        run: exit 1
 
   # npm preview publishing (spec .ai/specs/2026-07-18-npm-preview-publish.md, #482).
   # Publishes `dev` snapshots from `main` after a fully green verify run.
@@ -1098,6 +1174,7 @@ jobs:
     name: Prepare PR snapshot archives
     needs: verify
     if: >-
+      !cancelled() && needs.verify.result == 'success' &&
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest

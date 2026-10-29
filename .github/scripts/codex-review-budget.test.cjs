@@ -31,7 +31,7 @@ test('Review verdict names a confirmed Codex timeout and the failed-jobs rerun c
     const result = spawnSync('bash', ['--noprofile', '--norc', '-eu', '-o', 'pipefail', '-c',
       verdictJob.steps.find(step => step.name === 'Require the selected review path to succeed').run], {
       cwd, encoding: 'utf8', env: { ...process.env, BASH_ENV: '/dev/null',
-        VALIDATE_RESULT: 'success', REVIEW_ROUND_RESULT: 'success', CAN_REVIEW: 'true',
+        CANCELLED: 'false', VALIDATE_RESULT: 'success', REVIEW_ROUND_RESULT: 'success', CAN_REVIEW: 'true',
         PROVIDER: 'codex', CODEX_RESULT: 'failure', POST_RESULT: 'skipped',
         CODEX_FAILURE_MESSAGE: output.message || '', GITHUB_STEP_SUMMARY: path.join(cwd, 'summary'),
       },

@@ -36,7 +36,7 @@ function runShell(command, env = {}) {
   return spawnSync('bash', ['-e', '-c', command], {
     cwd: repoRoot,
     encoding: 'utf8',
-    env: { ...process.env, TYPECHECK_RESULT: 'success', CLASSIFY_RESULT: 'success', SURFACE_RESULT: 'success', CLONE_GATE_RESULT: 'success', COMPLEXITY_GATE_RESULT: 'success', EVENT_NAME: 'pull_request_target', ...env },
+    env: { ...process.env, CANCELLED: 'false', PREFLIGHT_RESULT: 'success', BASE_REF: 'main', REVIEW_RESULT: 'success', TYPECHECK_RESULT: 'success', CLASSIFY_RESULT: 'success', SURFACE_RESULT: 'success', CLONE_GATE_RESULT: 'success', COMPLEXITY_GATE_RESULT: 'success', EVENT_NAME: 'pull_request_target', ...env },
   });
 }
 
@@ -202,8 +202,8 @@ test('ledger-only PRs skip both matrices but cannot bypass the required build an
   for (const name of ['vitest', 'cockpit-browser']) {
     // Actions permits hyphens in property names; JavaScript requires brackets.
     const condition = ci.jobs[name].if.replace(/needs\.([a-z]+-[a-z]+)/g, "needs['$1']");
-    assert.equal(runInNewContext(condition, { cancelled: () => false, needs: {
-      'queue-proof': { result: 'success', outputs: { verified: 'false' } },
+    assert.equal(runInNewContext(condition, { github: { event_name: 'pull_request_target', event: { pull_request: { base: { ref: 'main' } } } }, cancelled: () => false, needs: {
+      'queue-proof': { result: 'success', outputs: { verified: 'false' } }, preflight: { result: 'success' }, 'review-result': { result: 'success' },
       'change-surface': { outputs: { surface } }, 'classify-pr': { outputs: { bump_pr: 'false' } },
     } }), false, name);
   }
@@ -223,16 +223,16 @@ test('ledger-only PRs skip both matrices but cannot bypass the required build an
   assert.match(ci.jobs['build-and-package'].if, /!cancelled\(\)/);
 });
 
-test('classification is not a path filter and build-and-package stays unconditional', () => {
+test('classification is not a path filter and build-and-package requires review without surface skips', () => {
   const ci = workflow();
   assert.equal(ci.on.pull_request_target.paths, undefined);
   assert.equal(ci.on.push.paths, undefined);
   assert.match(ci.jobs['build-and-package'].if, /!cancelled\(\)/);
-  assert.equal(ci.jobs['build-and-package'].needs, 'queue-proof');
+  assert.deepEqual(ci.jobs['build-and-package'].needs, ['queue-proof', 'preflight', 'review-result']);
 });
 
-test('build-and-package lints workflows with pinned, hash-verified actionlint and shellcheck (hearsay-tools/cezarion#1130)', () => {
-  const steps = workflow().jobs['build-and-package'].steps;
+test('preflight typecheck lints workflows with pinned, hash-verified actionlint and shellcheck (hearsay-tools/cezarion#1130)', () => {
+  const steps = workflow().jobs.typecheck.steps;
   const index = steps.findIndex((step) => step.name === 'Lint workflows');
   assert.ok(index > 0, 'expected a Lint workflows step');
   assert.equal(steps[index - 1].name, 'Check out repository', 'lint before Node setup so it fails in seconds');
@@ -255,8 +255,8 @@ test('build-and-package lints workflows with pinned, hash-verified actionlint an
   assert.match(lint, /-pyflakes=(\s|$)/, 'pyflakes is off');
 });
 
-test('build-and-package fails an added bare issue citation before every merge (hearsay-tools/cezarion#1310)', () => {
-  const steps = workflow().jobs['build-and-package'].steps;
+test('preflight typecheck fails an added bare issue citation before every merge (hearsay-tools/cezarion#1310)', () => {
+  const steps = workflow().jobs.typecheck.steps;
   const checkout = steps.find((step) => step.name === 'Check out repository');
   assert.equal(checkout.with['fetch-depth'], 2, 'the merge result and the base it merged into');
   const index = steps.findIndex((step) => step.name === 'Check issue citations');
@@ -332,8 +332,8 @@ test('bot-authored release/v* PRs skip Vitest and cockpit E2E via classify-pr fi
   assert.equal(classifyStep.env.EVENT_NAME, '${{ github.event_name }}');
   assert.equal(classifyStep.env.PR_AUTHOR, '${{ github.event.pull_request.user.login }}');
   assert.equal(classifyStep.env.EXPECTED_HEAD_SHA, '${{ github.event.pull_request.head.sha || github.sha }}');
-  assert.deepEqual(ci.jobs.vitest.needs, ['queue-proof', 'change-surface', 'classify-pr']);
-  assert.deepEqual(ci.jobs['cockpit-browser'].needs, ['queue-proof', 'change-surface', 'classify-pr']);
+  assert.deepEqual(ci.jobs.vitest.needs, ['queue-proof', 'change-surface', 'classify-pr', 'preflight', 'review-result']);
+  assert.deepEqual(ci.jobs['cockpit-browser'].needs, ['queue-proof', 'change-surface', 'classify-pr', 'preflight', 'review-result']);
   assert.match(ci.jobs.vitest.if, /needs\.classify-pr\.outputs\.bump_pr != 'true'/);
   assert.match(ci.jobs['cockpit-browser'].if, /needs\.classify-pr\.outputs\.bump_pr != 'true'/);
   assert.ok(ci.jobs.verify.needs.includes('classify-pr'));
@@ -481,7 +481,7 @@ test('event routing keeps one PR verifier and preserves push/manual publication 
     ['workflow_dispatch', 'refs/heads/main', false, false, false],
   ]) {
     const github = { event_name: event, ref, repository: 'o/n', event: { pull_request: { head: { repo: { full_name: fork ? 'fork/n' : 'o/n' } } } } };
-    assert.equal(runInNewContext(ci.jobs['prepare-pr-snapshot'].if, { github }), prepare);
+    assert.equal(runInNewContext(ci.jobs['prepare-pr-snapshot'].if, { github, cancelled: () => false, needs: { verify: { result: 'success' } } }), prepare);
     assert.equal(runInNewContext(ci.jobs['publish-snapshot'].if, { github, cancelled: () => false, needs: { verify: { result: 'success' } } }), publish);
   }
   const group = (pr, sha) => ci.concurrency.group.replace(/\$\{\{(.*?)\}\}/g, (_, expression) => runInNewContext(expression, {
