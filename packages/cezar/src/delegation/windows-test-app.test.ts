@@ -78,17 +78,20 @@ it.runIf(process.platform === 'win32')('stops the owned app only after its live 
     ]);
     console.info('native cleanup: watcher ready');
     const db = new DatabaseSync(join(qa, 'test-env-lease.sqlite'));
-    db.exec('CREATE TABLE holders (id TEXT PRIMARY KEY, token TEXT NOT NULL, pid INTEGER NOT NULL, start TEXT, pgid INTEGER)');
-    db.prepare('INSERT INTO holders VALUES (?, ?, ?, ?, NULL)').run('live', 'live', process.pid, windowsStartToken(process.pid)!);
-    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete' });
-    expect(app.exitCode).toBeNull(); expect(other.exitCode).toBeNull();
-    db.exec('DELETE FROM holders'); db.close();
+    try {
+      db.exec('CREATE TABLE holders (id TEXT PRIMARY KEY, token TEXT NOT NULL, pid INTEGER NOT NULL, start TEXT, pgid INTEGER)');
+      db.prepare('INSERT INTO holders VALUES (?, ?, ?, ?, NULL)').run('live', 'live', process.pid, windowsStartToken(process.pid)!);
+      expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete' });
+      expect(app.exitCode).toBeNull(); expect(other.exitCode).toBeNull();
+      db.exec('DELETE FROM holders');
+    } finally { db.close(); }
     await writeFile(join(qa, 'test-env.json'), descriptor(other.pid!));
     expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete' });
     expect(other.exitCode).toBeNull();
     await writeFile(join(qa, 'test-env.json'), descriptor(app.pid!));
     console.info('native cleanup: stopping owned app');
-    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });
+    const removed = await removeOwnedWorkspace(root, workspace);
+    expect(removed, JSON.stringify(removed)).toMatchObject({ state: 'complete', remaining: [] });
     expect(watcher.exitCode).not.toBeNull();
     expect(other.exitCode).toBeNull();
   } finally {
