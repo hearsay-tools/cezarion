@@ -124,7 +124,7 @@ export function track() {
  * no turn-end or finalize autosave has a commit to make: each one cost about 20 Git calls behind
  * its process-holder scans, most of a waits cell's cleanup (hearsay-tools/cezarion#1665).
  */
-export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply?: 'card' | 'plain'; mockNotes?: true; noWaitNudgeReplyMs?: number } = {}): void {
+export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply?: 'card' | 'plain'; mockNotes?: true } = {}): void {
   beforeEach(() => {
     // Native mock children belong to this fixture; specialized holder tests supply their own scope.
     if (options.processScope !== false) onTestFinished(scopeFixtureProcesses());
@@ -140,7 +140,7 @@ export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply
     execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: root });
     semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 1 } });
     store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
-    manager = new RunManager(store, root, { semaphore, ...options }); track();
+    manager = new RunManager(store, root, { semaphore }); track();
   });
   afterEach(async () => {
     const errors: unknown[] = [];

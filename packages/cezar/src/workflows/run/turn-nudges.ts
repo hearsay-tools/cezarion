@@ -31,13 +31,12 @@ interface TurnNudgesHost {
   openTurnEndHumanWait(id: string, state: ActiveRun, step: string | undefined, via: 'no-wait' | 'budget', note: string): void;
   settledTurnOutcome(id: string, entry: 'turn-end' | 'ack' | 'ready' | 'gate' | 'reply-timer', outcome: TurnEndOutcome): TurnEndOutcome | undefined;
   queueWaitWake(id: string): void;
-  noWaitNudgeReplyMs(): number;
 }
 
 export class TurnNudges {
   constructor(private readonly context: RunModuleContext, private readonly humanWaits: HumanWaits,
     private readonly line: RunLine, private readonly completionGateHost: completionGateReads.CompletionGateHost,
-    private readonly host: TurnNudgesHost, private readonly maxAutoContinues: number, private readonly completionWillWait: string) {}
+    private readonly host: TurnNudgesHost, private readonly maxAutoContinues: number, private readonly completionWillWait: string, public noWaitNudgeReplyMs: number) {}
   /** The session just took a refusal nudge, live or queued (hearsay-tools/cezarion#1301): its turn is
    *  the nudge's, and its reply is bounded by the no-wait nudge's reply timer, so a harness that
    *  reads the refusal and says nothing parks on Cezar's human wait instead of holding the slot. */
@@ -227,7 +226,7 @@ export class TurnNudges {
       // The note names the nudge left unanswered (hearsay-tools/cezarion#1301).
       this.host.openTurnEndHumanWait(runId, state, state.currentStepId, 'no-wait', state.completionNudged === session ? COMPLETION_NO_REPLY_NOTE : NO_WAIT_NO_REPLY_NOTE);
       this.host.settledTurnOutcome(runId, 'reply-timer', { kind: 'park', keepsSlot: false });
-    }, this.host.noWaitNudgeReplyMs());
+    }, this.noWaitNudgeReplyMs);
     timer.unref?.();
     state.noWaitNudgeReplyTimer = timer;
   }

@@ -380,7 +380,8 @@ until Phase 5. The list was checked against `main` at `97335b352`:
 - Turn seams moved in hearsay-tools/cezarion#2235: `endTurn`, `settleTurn`, `boundaryTurn`,
   `parkForUser`, `armIdleTimer` and `openTurnEndHumanWait` call `TurnSettler` directly;
   `clearIdleTimer` uses `input-timers.ts`. Nudge tests use `.turnNudges`, including the
-  `armNoWaitNudgeReplyTimer` spy. Timeout tests pass `noWaitNudgeReplyMs` at construction.
+  `armNoWaitNudgeReplyTimer` spy. Timeout tests pass `noWaitNudgeReplyMs` at construction;
+  waits-parity cells tune `.turnNudges.noWaitNudgeReplyMs` only when they did so before.
   Bookkeeping calls and `lastNamerKey` reads use `.turnBookkeeper`; `trackTurnEnd` lives there.
   `recordTurnEnd` and `autoNameRun` stay async tracking wrappers so dropped calls retain their
   rejection behavior. The harness bookkeeping drain reads only tracked `recordTurnEnd` work.
