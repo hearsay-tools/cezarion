@@ -31,7 +31,6 @@ interface TurnNudgesHost {
   openTurnEndHumanWait(id: string, state: ActiveRun, step: string | undefined, via: 'no-wait' | 'budget', note: string): void;
   settledTurnOutcome(id: string, entry: 'turn-end' | 'ack' | 'ready' | 'gate' | 'reply-timer', outcome: TurnEndOutcome): TurnEndOutcome | undefined;
   queueWaitWake(id: string): void;
-  armNoWaitNudgeReplyTimer(id: string, state: ActiveRun): void;
   noWaitNudgeReplyMs(): number;
 }
 
@@ -45,7 +44,7 @@ export class TurnNudges {
     if (refusal) recordRequestRefusal(state, refusal);
     state.noWaitNudgeSawContent = false;
     clearIdleTimer(state);
-    this.host.armNoWaitNudgeReplyTimer(runId, state);
+    this.armNoWaitNudgeReplyTimer(runId, state);
   }
 
   queueCompletionRefusal(runId: string, refusal: CompletionRefusal): boolean {
@@ -153,7 +152,7 @@ export class TurnNudges {
     if (!this.host.submitAgentInput(runId, state, [{ type: 'text', text }])) return false;
     state.noWaitNudged = state.session;
     clearIdleTimer(state);
-    this.host.armNoWaitNudgeReplyTimer(runId, state);
+    this.armNoWaitNudgeReplyTimer(runId, state);
     const spent = this.host.chargeAutomaticWake(runId);
     this.context.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}), message: `${NO_WAIT_NUDGE_NOTE} (${spent}/${this.maxAutoContinues})` });
     return true;

@@ -263,7 +263,6 @@ const noReplyNotes = (id: string) => store.readEvents(id).filter(event => event.
  *  alive without one. The nudge's reply bound is shortened so its no-reply park comes at once.
  *  Call it before the session starts: a mock reads its environment when it is spawned. */
 function silenceRefusals() {
-  (manager as unknown as { noWaitNudgeReplyMs: number }).noWaitNudgeReplyMs = 300;
   process.env.CEZ_MOCK_COMPLETION_REPLY = 'mock:ack-only';
 }
 
@@ -312,7 +311,7 @@ export const WAIT_PARITY_FILES: Readonly<Record<WaitParityPart, (runner: RunnerI
 export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPart } | 'once'): void {
   const runnersFor = (part: WaitParityPart): RunnerId[] => scope !== 'once' && scope.part === part ? [scope.runner] : [];
   describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', { timeout: 45_000 }, () => {
-    useWorkerWaitFixture();
+    useWorkerWaitFixture({ noWaitNudgeReplyMs: 300 });
     beforeEach(() => { turns = watchTurnOutcomes(); });
     afterEach(() => vi.restoreAllMocks());
 

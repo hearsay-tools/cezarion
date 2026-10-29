@@ -1311,6 +1311,7 @@ export async function withOwnedInputRun(
     env?: Record<string, string>;
     /** Preserve a legacy native-wire fixture while the backend default changes. */
     mockBin?: string;
+    noWaitNudgeReplyMs?: number;
   } = {},
 ): Promise<void> {
   const adapter = HARNESS_ADAPTERS[backend];
@@ -1366,7 +1367,7 @@ export async function withOwnedInputRun(
         : [{ id: 'task', name: 'Task', kind: 'agent' }] }, parent.id, randomUUID(), {
       role: 'worker', parentRunId: parent.id, permissions: [], workspace,
     }, 'a'.repeat(64), options.identity ?? { kind: 'internal', ...(workflowDef ? { workflowHash: workerWorkflowHash(workflowDef) } : {}) });
-    manager = new RunManager(store, repoRoot);
+    manager = new RunManager(store, repoRoot, { ...(options.noWaitNudgeReplyMs === undefined ? {} : { noWaitNudgeReplyMs: options.noWaitNudgeReplyMs }) });
     drainBookkeeping = trackTurnBookkeeping(manager);
     const adoptContext = async (context: { store: RunStore; manager: RunManager }) => {
       await drainBookkeeping();
@@ -1387,7 +1388,7 @@ export async function withOwnedInputRun(
       seedRuns(join(repoRoot, '.ai/cezar'), index);
       beforeOpen?.(join(repoRoot, '.ai/cezar'));
       store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-      manager = new RunManager(store, repoRoot);
+      manager = new RunManager(store, repoRoot, { ...(options.noWaitNudgeReplyMs === undefined ? {} : { noWaitNudgeReplyMs: options.noWaitNudgeReplyMs }) });
       drainBookkeeping = trackTurnBookkeeping(manager);
       await manager.recover();
       return { store, manager };

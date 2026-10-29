@@ -1,4 +1,5 @@
 import { runInternals } from './run-internals.testkit.ts';
+import type { ActiveRun } from './active-run.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,7 +12,7 @@ import { AUTONOMOUS_NUDGE, COMPLETION_NO_REPLY_NOTE, NO_WAIT_NO_REPLY_NOTE, NO_W
 
 // Focused policy guards complement workflow-autonomous-parity's actual native
 // wires. A refused nudge must never touch either transport or consume its budget.
-type State = Parameters<RunManager['tryAutonomousNudge']>[1];
+type State = ActiveRun;
 const ask = { questions: [{ header: 'Choice', question: 'Which framework?', options: [{ label: 'Vitest' }, { label: 'Node' }] }] };
 const guards = ['disabled', 'cancelled', 'finish', 'disposed', 'stopping', 'input-error', 'native-ask', 'persisted-ask',
   'closed', 'queued-input', 'unread-input', 'input-flight', 'worker-wait', 'ci-wait', 'root-finish'] as const;
@@ -30,7 +31,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     store.updateRun(id, { status: 'running' });
     // Worker startup belongs to fixture setup, before policy tests replace timers.
     await store.factsWarmIdle();
-    manager = new RunManager(store, root);
+    manager = new RunManager(store, root, { noWaitNudgeReplyMs: 300 });
     session = {
       open: true, result: Promise.resolve({ text: '', toolCalls: [], tokensUsed: 0 }),
       sendMessage: vi.fn(() => true), sendAgentMessage: vi.fn(() => Promise.resolve()),
@@ -68,7 +69,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
 
   for (const portable of [false, true]) it.each(guards)('%s blocks the nudge (portable ASK=' + portable + ')', guard => {
     applyGuard(guard);
-    expect(manager['tryAutonomousNudge'](id, state, 'task', portable ? ask : null)).toBe(false);
+    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task', portable ? ask : null)).toBe(false);
     expect(session.sendMessage).not.toHaveBeenCalled();
     expect(session.sendAgentMessage).not.toHaveBeenCalled();
     expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
@@ -78,7 +79,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
   // hearsay-tools/cezarion#1234: one budget of automatic wakes on the record, for nudges and timers.
   it('autonomous nudges and timer wakes share one budget of 40', async () => {
     store.updateRun(id, { automaticWakes: 39 });
-    expect(manager['tryAutonomousNudge'](id, state, 'task', null)).toBe(true);
+    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task', null)).toBe(true);
     expect(store.getRun(id)?.automaticWakes).toBe(40);
     // The charge is committed at once, so a crash before the debounced save cannot lose it.
     expect(readPersistedRuns(join(root, '.ai/cezar')).find(record => record.id === id)?.automaticWakes).toBe(40);
@@ -86,14 +87,14 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     // The nudge's input was acknowledged; only the budget stands in the way of the next one.
     await state.agentInputFlight?.settled;
     state.agentInputFlight = undefined;
-    expect(manager['tryAutonomousNudge'](id, state, 'task', null)).toBe(false);
+    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task', null)).toBe(false);
     expect(store.getRun(id)?.automaticWakes).toBe(40);
     expect(store.readEvents(id).some(e => e.type === 'note' && String(e.message).startsWith('autonomous — safety cap reached (40)'))).toBe(true);
   });
 
   it('a nudge the wire refuses after an ask line leaves the question and budget untouched', () => {
     vi.mocked(session.sendMessage).mockReturnValue(false);
-    expect(manager['tryAutonomousNudge'](id, state, 'task', ask)).toBe(false);
+    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task', ask)).toBe(false);
     expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
     expect(store.readEvents(id).filter(e => e.type === 'note' || e.type === 'human-input-delivered')).toEqual([]);
   });
@@ -140,7 +141,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
   it('refused ordinary input waits for readiness without charging the cap or releasing capacity', () => {
     pendingBoundary();
     vi.mocked(session.sendAgentMessage).mockReturnValueOnce(false);
-    expect(manager['tryAutonomousNudge'](id, state, 'task', null)).toBe(false);
+    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task', null)).toBe(false);
     expect(state.autonomousNudgePending).toBe(session);
     expect(state.idleTimer).toBeDefined();
     expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
@@ -158,7 +159,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     vi.useFakeTimers();
     pendingBoundary();
     vi.mocked(session.sendAgentMessage).mockReturnValue(false);
-    expect(manager['tryAutonomousNudge'](id, state, 'task', null)).toBe(false);
+    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task', null)).toBe(false);
     vi.runOnlyPendingTimers();
     expect(session.end).toHaveBeenCalledOnce();
     expect(state.idleClosed).toBe(true);
@@ -170,7 +171,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
   it('parent activity invalidates the refused boundary and its timer', () => {
     pendingBoundary();
     vi.mocked(session.sendAgentMessage).mockReturnValue(false);
-    manager['tryAutonomousNudge'](id, state, 'task', null);
+    runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task', null);
     manager['handleRunnerUiEvent'](id, state, manager['makeUiSink'](id, 'task'), { type: 'turn.started', turnId: randomUUID() });
     expect(state.autonomousNudgePending).toBeUndefined();
     expect(state.atTurnBoundary).toBeUndefined();
@@ -192,16 +193,16 @@ describe('autonomous nudge priority and lifecycle guards', () => {
   it('nested subagent items do not clear the no-wait nudge reply bound', () => {
     state.noWaitNudged = session;
     manager['active'].set(id, state);
-    manager['armNoWaitNudgeReplyTimer'](id, state);
+    runInternals(manager).turnNudges.armNoWaitNudgeReplyTimer(id, state);
     expect(state.noWaitNudgeReplyTimer).toBeDefined();
-    manager['noteNoWaitNudgeContent'](id, state, {
+    runInternals(manager).turnNudges.noteNoWaitNudgeContent(id, state, {
       type: 'item.started',
       item: { parentItemId: 'parent' },
     });
     expect(state.noWaitNudgeReplyTimer).toBeDefined();
-    manager['noteNoWaitNudgeContent'](id, state, { type: 'item.delta' });
+    runInternals(manager).turnNudges.noteNoWaitNudgeContent(id, state, { type: 'item.delta' });
     expect(state.noWaitNudgeReplyTimer).toBeDefined();
-    manager['noteNoWaitNudgeContent'](id, state, {
+    runInternals(manager).turnNudges.noteNoWaitNudgeContent(id, state, {
       type: 'item.started',
       item: {},
     });
@@ -211,18 +212,18 @@ describe('autonomous nudge priority and lifecycle guards', () => {
   it('text before the reply timer is armed means the nudge was answered', () => {
     state.noWaitNudged = session;
     manager['active'].set(id, state);
-    manager['noteNoWaitNudgeContent'](id, state, { type: 'text' });
-    manager['armNoWaitNudgeReplyTimer'](id, state);
+    runInternals(manager).turnNudges.noteNoWaitNudgeContent(id, state, { type: 'text' });
+    runInternals(manager).turnNudges.armNoWaitNudgeReplyTimer(id, state);
     expect(state.noWaitNudgeReplyTimer).toBeUndefined();
   });
 
   it('turn.started before the reply timer is armed does not count as a nudge reply', () => {
     state.noWaitNudged = session;
     manager['active'].set(id, state);
-    manager['noteNoWaitNudgeContent'](id, state, { type: 'turn.started' });
-    manager['armNoWaitNudgeReplyTimer'](id, state);
+    runInternals(manager).turnNudges.noteNoWaitNudgeContent(id, state, { type: 'turn.started' });
+    runInternals(manager).turnNudges.armNoWaitNudgeReplyTimer(id, state);
     expect(state.noWaitNudgeReplyTimer).toBeDefined();
-    manager['noteNoWaitNudgeContent'](id, state, { type: 'turn.started' });
+    runInternals(manager).turnNudges.noteNoWaitNudgeContent(id, state, { type: 'turn.started' });
     expect(state.noWaitNudgeReplyTimer).toBeUndefined();
   });
 
@@ -240,8 +241,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     state.currentStepId = 'task';
     state.noWaitNudged = session;
     manager['active'].set(id, state);
-    (manager as unknown as { noWaitNudgeReplyMs: number }).noWaitNudgeReplyMs = 300;
-    manager['armNoWaitNudgeReplyTimer'](id, state);
+    runInternals(manager).turnNudges.armNoWaitNudgeReplyTimer(id, state);
     await vi.advanceTimersByTimeAsync(300);
     expect(store.getRun(id)?.status).toBe('waiting');
     expect(store.getRun(id)?.waits).toMatchObject([{ kind: 'human', via: 'no-wait', source: 'cezar', phase: 'open', askSeq: expect.any(Number) }]);
@@ -254,8 +254,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     state.currentStepId = 'task';
     state.completionNudged = session;
     manager['active'].set(id, state);
-    (manager as unknown as { noWaitNudgeReplyMs: number }).noWaitNudgeReplyMs = 300;
-    manager['armNoWaitNudgeReplyTimer'](id, state);
+    runInternals(manager).turnNudges.armNoWaitNudgeReplyTimer(id, state);
     await vi.advanceTimersByTimeAsync(300);
     expect(store.getRun(id)?.status).toBe('waiting');
     const notes = store.readEvents(id).filter(e => e.type === 'note').map(e => e.message);
@@ -266,7 +265,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
   it('a transport exception fails without retaining a readiness retry', () => {
     pendingBoundary();
     vi.mocked(session.sendAgentMessage).mockImplementation(() => { throw new Error('failed transport'); });
-    expect(manager['tryAutonomousNudge'](id, state, 'task', null)).toBe(false);
+    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task', null)).toBe(false);
     expect(state.agentInputError).toContain('failed transport');
     expect(state.autonomousNudgePending).toBeUndefined();
     expect(state.idleTimer).toBeUndefined();

@@ -1,4 +1,5 @@
 import { runInternals } from './run-internals.testkit.ts';
+import type { ActiveRun } from './active-run.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,7 +15,7 @@ import { watchTurnOutcomes } from './turn-outcomes.testkit.ts';
 // entry, hearsay-tools/cezarion#1525). Mid-turn, the live turn end decides the refusal; at the
 // boundary, owed input runs first, as at a turn end. Also the turn end's monitoring alias beside
 // an ask line.
-type State = Parameters<RunManager['tryAutonomousNudge']>[1];
+type State = ActiveRun;
 const workerId = randomUUID();
 const refusal = { code: 'workers_outstanding' as const, message: `Workers are still live: ${workerId}.`,
   workers: [{ worker_id: workerId, reason: 'outstanding' as const }], liveWorkerIds: [workerId] };

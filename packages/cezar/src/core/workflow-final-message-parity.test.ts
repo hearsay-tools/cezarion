@@ -29,10 +29,6 @@ const noReplyNotes = (events: readonly Record<string, unknown>[]) =>
   events.filter(e => e.type === 'note' && e.message === NO_WAIT_NO_REPLY_NOTE);
 const autonomousNotes = (events: readonly Record<string, unknown>[]) =>
   events.filter(e => e.type === 'note' && String(e.message).includes('continuing without pausing'));
-const shortenNudgeBound = (manager: { noWaitNudgeReplyMs?: number }) => {
-  // bound: exercise expiry without the production five-minute wait; late replies are gated.
-  manager.noWaitNudgeReplyMs = 300;
-};
 const lateDoneContent = (events: readonly Record<string, unknown>[]) =>
   events.some(e => {
     if (e.type === 'text') return String(e.text).includes('Filed #543');
@@ -111,7 +107,6 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
         }
         it(`${backend} ${row.id} ${row.name}`, async () => {
           await withOwnedInputRun(backend, 'silent-tail-no-reply', async ({ store, manager, runId }) => {
-            shortenNudgeBound(manager as unknown as { noWaitNudgeReplyMs?: number });
             const turns = watchTurnOutcomes();
             const startSeq = store.readEvents(runId).length;
             manager.enqueueOwnedRun(runId);
@@ -127,7 +122,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
             expect(noReplyNotes(store.readEvents(runId))).toHaveLength(1);
             expect(turns.words(runId)).toContain('waiting');
-          });
+          }, { noWaitNudgeReplyMs: 300 });
         }, 30_000);
         continue;
       }
@@ -147,7 +142,6 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
           const release = join(gateRoot, 'release');
           try {
             await withOwnedInputRun(backend, 'silent-tail-late-reply', async ({ store, manager, runId }) => {
-              shortenNudgeBound(manager as unknown as { noWaitNudgeReplyMs?: number });
               const startSeq = store.readEvents(runId).length;
               manager.enqueueOwnedRun(runId);
               await waitFor(() => noReplyNotes(store.readEvents(runId).slice(startSeq)).length === 1);
@@ -168,7 +162,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
               } finally { store.off('run', onRun); }
               expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
               expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
-            }, { env: { CEZ_MOCK_RELEASE_FILE: release } });
+            }, { noWaitNudgeReplyMs: 300, env: { CEZ_MOCK_RELEASE_FILE: release } });
           } finally { rmSync(gateRoot, { recursive: true, force: true }); }
         }, 30_000);
         continue;
@@ -186,7 +180,6 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
           const release = join(gateRoot, 'release');
           try {
             await withOwnedInputRun(backend, 'silent-tail-late-turn-start', async ({ store, manager, runId }) => {
-              shortenNudgeBound(manager as unknown as { noWaitNudgeReplyMs?: number });
               const startSeq = store.readEvents(runId).length;
               manager.enqueueOwnedRun(runId);
               await waitFor(() => noReplyNotes(store.readEvents(runId).slice(startSeq)).length === 1);
@@ -203,7 +196,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
               await waitFor(() => store.getRun(runId)?.status === 'done');
               expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
               expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
-            }, { env: { CEZ_MOCK_RELEASE_FILE: release } });
+            }, { noWaitNudgeReplyMs: 300, env: { CEZ_MOCK_RELEASE_FILE: release } });
           } finally { rmSync(gateRoot, { recursive: true, force: true }); }
         }, 30_000);
         continue;
@@ -212,7 +205,6 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
         it(`${backend} ${row.id} ${row.name}`, async () => {
           const gateRoot = backend === 'cursor' ? mkdtempSync(join(tmpdir(), 'cez-nudge-content-')) : undefined;
           try { await withOwnedInputRun(backend, 'silent-tail-slow-done', async ({ store, manager, runId }) => {
-            shortenNudgeBound(manager as unknown as { noWaitNudgeReplyMs?: number });
             const turns = watchTurnOutcomes();
             const startSeq = store.readEvents(runId).length;
             if (gateRoot) {
@@ -224,8 +216,8 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
               const fakeSetTimeout = globalThis.setTimeout;
               let armingReply = false;
               let replyTimers = 0;
-              const timerOwner = manager as unknown as { armNoWaitNudgeReplyTimer: typeof manager['armNoWaitNudgeReplyTimer'] };
-              const armReply = timerOwner.armNoWaitNudgeReplyTimer.bind(manager);
+              const timerOwner = runInternals(manager).turnNudges;
+              const armReply = timerOwner.armNoWaitNudgeReplyTimer.bind(timerOwner);
               const armClock = vi.spyOn(timerOwner, 'armNoWaitNudgeReplyTimer').mockImplementation((...args) => {
                 armingReply = true;
                 try { armReply(...args); } finally { armingReply = false; }
@@ -239,6 +231,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
                 manager.enqueueOwnedRun(runId);
                 await waitForNativeContent(() => store.readEvents(runId).slice(startSeq).some(e =>
                   e.type === 'text' && String(e.text).includes('Working on the wrap-up.')));
+                expect(armClock).toHaveBeenCalledOnce();
                 expect(replyTimers).toBe(1);
                 expect(manager['active'].get(runId)?.noWaitNudgeReplyTimer).toBeUndefined();
                 // The native mock holds DONE until this test crosses the reply bound.
@@ -254,7 +247,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
             expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
             expect(turns.words(runId)).toContain('running (no-wait nudge)');
-          }, gateRoot ? { env: { CEZ_MOCK_RELEASE_FILE: join(gateRoot, 'done') } } : {});
+          }, { noWaitNudgeReplyMs: 300, ...(gateRoot ? { env: { CEZ_MOCK_RELEASE_FILE: join(gateRoot, 'done') } } : {}) });
           } finally { if (gateRoot) rmSync(gateRoot, { recursive: true, force: true }); }
         }, 30_000);
         continue;
