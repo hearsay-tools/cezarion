@@ -72,7 +72,10 @@ export function recordOpeningAccepted(context: RunModuleContext, host: InputRece
   const inputs = context.store.getRun(runId)?.agentInputs ?? [];
   if (!inputs.some(input => input.id === id && !input.deliveredAt)) return;
   const deliveredAt = new Date().toISOString();
-  try { context.store.commitOutcome(runId, { kind: 'delivered', inputIds: [id], at: deliveredAt }); }
+  try {
+    context.store.commitOutcome(runId, { kind: 'delivered', inputIds: [id], at: deliveredAt });
+    host.reconcileWorkerWaits();
+  }
   catch (error) { console.warn(`[cez] opening input acceptance checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
 }
 
