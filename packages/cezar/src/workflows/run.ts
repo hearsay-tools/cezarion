@@ -1173,7 +1173,7 @@ export class RunManager {
     if (continuation) {
       void (async () => {
         const hydrated = this.hydrateQueuedContinuation(runId, continuation);
-        await this.runContinuation(
+        await this.context.work.track('runContinuation', this.runContinuation(
           runId,
           hydrated.stepId,
           hydrated.sessionId,
@@ -1182,7 +1182,7 @@ export class RunManager {
           hydrated.images,
           hydrated.persistedImages,
           hydrated.persistedAttachments,
-        );
+        ));
       })().catch((err: unknown) => this.failCrashedContinuation(runId, err))
         .finally(() => this.finishWorkerExecution(runId));
       return;
@@ -1194,7 +1194,7 @@ export class RunManager {
     // handler can observe a half-dequeued run.
     void (async () => {
       const input = this.hydrateQueuedInput(runId, job.input);
-      await this.execute(runId, job.workflow, input, job.startAt);
+      await this.context.work.track('execute', this.execute(runId, job.workflow, input, job.startAt));
     })().catch((err: unknown) => {
       const message = err instanceof Error ? err.message : String(err);
       this.move(runId, 'fail-crash', {
@@ -1325,7 +1325,11 @@ export class RunManager {
   /** Reclaim finished worktrees beyond the keep-limit (#483) — directory only,
    *  `cez/<id8>` branch kept. Best-effort; a failure never affects run
    *  lifecycle. `review`/live runs are excluded by the selector. */
-  private async enforceRetention(): Promise<void> {
+  private enforceRetention(): Promise<void> {
+    return this.context.work.track('enforceRetention', this.enforceRetentionWork());
+  }
+
+  private async enforceRetentionWork(): Promise<void> {
     try {
       const keep = await resolveWorktreeRetention(this.repoRoot);
       await reclaimWorktrees(this.repoRoot, this.store, keep, { claim: (run) => this.claimWorktreeReclaim(run.id), previewHost: this.preview });
@@ -1615,7 +1619,11 @@ export class RunManager {
     this.line.unmarkStarting(runId); this.dropActive(runId);
     return true;
   }
-  private async settleRequestedRootFinish(runId: string): Promise<void> {
+  private settleRequestedRootFinish(runId: string): Promise<void> {
+    return this.context.work.track('settleRequestedRootFinish', this.settleRequestedRootFinishWork(runId));
+  }
+
+  private async settleRequestedRootFinishWork(runId: string): Promise<void> {
     try {
       const status = this.store.getRun(runId)?.status;
       if (status === 'review') { this.finish(runId); return; }

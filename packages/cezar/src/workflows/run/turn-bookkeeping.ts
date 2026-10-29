@@ -30,7 +30,11 @@ export class TurnBookkeeper {
    * refresh). A user-owned title (`titleOrigin: 'user'`) is never overwritten;
    * namer-owned titles may be replaced by fresher namer results.
    */
-  async autoNameRun(
+  autoNameRun(runId: string, skillName: string | undefined, task: string, live?: { turnText?: string; diffStat?: string | undefined }): Promise<void> {
+    return this.context.work.track('autoNameRun', this.autoNameRunWork(runId, skillName, task, live));
+  }
+
+  private async autoNameRunWork(
     runId: string,
     skillName: string | undefined,
     task: string,
@@ -82,7 +86,11 @@ export class TurnBookkeeper {
    * Not `private` so the integration tests can drive a turn-end directly —
    * a real agent session is the only other way to reach this path.
    */
-  async recordTurnEnd(runId: string, turnText: string): Promise<void> {
+  recordTurnEnd(runId: string, turnText: string): Promise<void> {
+    return this.context.work.track('recordTurnEnd', this.recordTurnEndWork(runId, turnText));
+  }
+
+  private async recordTurnEndWork(runId: string, turnText: string): Promise<void> {
     if (this.host.isDisposedDelegatedRun(runId)) return;
     try {
       const run = this.context.store.getRun(runId);

@@ -160,7 +160,11 @@ export class RunLine {
    * are ignored. A non-git directory degrades to 1 sequential run in the repo
    * root (spec 006 degradation rule), which is always the tighter bound.
    */
-  async pump(): Promise<void> {
+  pump(): Promise<void> {
+    return this.context.work.track('pump', this.pumpWork());
+  }
+
+  private async pumpWork(): Promise<void> {
     // Any recovery, scoped or not: each ends with a pump of its own, so nothing waits for long.
     if (this.context.disposed() || this.host.recovering()) return;
     this.host.reconcileAutoResumes();
@@ -264,7 +268,11 @@ export class RunLine {
    * Repair queued records missing executable state. Rescue an idle queue only when no running work
    * or future appointment explains it; start through ordinary caps. Public for direct tests.
    */
-  async rescueStalledQueue(now = Date.now()): Promise<void> {
+  rescueStalledQueue(now = Date.now()): Promise<void> {
+    return this.context.work.track('rescueStalledQueue', this.rescueStalledQueueWork(now));
+  }
+
+  private async rescueStalledQueueWork(now = Date.now()): Promise<void> {
     if (this.context.disposed()) return;
     // First, the worst shape: a record that says `queued` while the engine holds no job, no
     // continuation and no queue entry for it. `pump()` cannot see such a run — it iterates the

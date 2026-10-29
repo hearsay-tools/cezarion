@@ -47,7 +47,11 @@ export class WorkerExecutions {
     this.stoppedWorkers.delete(runId);
   }
 
-  async finishWorkerExecution(runId: string): Promise<void> {
+  finishWorkerExecution(runId: string): Promise<void> {
+    return this.context.work.track('finishWorkerExecution', this.finishWorkerExecutionWork(runId));
+  }
+
+  private async finishWorkerExecutionWork(runId: string): Promise<void> {
     const execution = this.executions.get(runId);
     if (!execution) return;
     await Promise.allSettled([...execution.sessions]);
@@ -73,7 +77,7 @@ export class WorkerExecutions {
   trackWorkerSessionResult(runId: string, session: AgentSession): Promise<void> {
     const closed = session.result.then(() => undefined, () => undefined);
     this.executions.get(runId)?.sessions.add(closed);
-    return closed;
+    return this.context.work.trackSession(session, closed);
   }
 
   private persistWorkerCompletion(runId: string, generation: string): void {
