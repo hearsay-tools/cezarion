@@ -190,3 +190,88 @@ test('manual context refuses a new attempt that appears while reading jobs', () 
   };
   assert.throws(() => reviewCiContext(f), /attempt changed/);
 });
+
+function manualFixture(baseRef = 'release/1.x') {
+  const f = fixture();
+  f.env.GITHUB_EVENT_NAME = 'workflow_dispatch';
+  f.live.base = { ...base, ref: baseRef };
+  // Actions uses a sparse PR association, not the full pulls API response.
+  f.run.pull_requests = [{ number: 7, base: { ref: baseRef } }];
+  f.run.status = 'completed'; f.run.conclusion = 'success';
+  f.jobs = [{ name: 'Unit, build, E2E, and package', status: 'completed', conclusion: 'success' }];
+  return f;
+}
+
+for (const baseRef of ['release/1.x', 'maintenance']) {
+  test(`manual context accepts live ${baseRef} target without CI evidence`, () => {
+    const f = manualFixture(baseRef); f.latest = null;
+    assert.match(reviewCiContext(f), /status: pending/);
+    assert.ok(!f.calls.some(args => args.at(-1).includes('/jobs')));
+  });
+  test(`manual context accepts matching native evidence for ${baseRef}`, () => {
+    const f = manualFixture(baseRef);
+    assert.match(reviewCiContext(f), /status: completed\nconclusion: success/);
+    assert.ok(f.calls.some(args => args.at(-1).includes('/attempts/2/jobs')));
+  });
+}
+
+test('manual context cannot borrow same-head evidence from another PR or base', () => {
+  for (const baseRef of ['main', 'release/1.x']) {
+    const otherBase = baseRef === 'main' ? 'release/1.x' : 'main';
+    for (const associations of [[], undefined, [{ number: 7, base: { ref: otherBase } }],
+      [{ number: 8, base: { ref: baseRef } }], [{ number: 7 }]]) {
+      const f = manualFixture(baseRef); f.run.pull_requests = associations;
+      assert.match(reviewCiContext(f), /status: pending\nconclusion: \n/);
+      assert.ok(!f.calls.some(args => args.at(-1).includes('/jobs')));
+    }
+  }
+});
+
+test('native context retains main-only event and live-base provenance', () => {
+  const event = fixture(); event.event.pull_request.base = { ...base, ref: 'release/1.x' };
+  assert.throws(() => reviewCiContext(event), /provenance/);
+  const live = fixture(); live.live.base = { ...base, ref: 'release/1.x' };
+  assert.throws(() => reviewCiContext(live), /head changed/);
+});
+
+test('manual context rejects stale, closed and wrong-repository live PRs with or without CI', () => {
+  for (const latest of [null, 42]) {
+    for (const patch of [{ head: { sha: 'b'.repeat(40) } }, { state: 'closed' },
+      { base: { ref: 'release/1.x', repo: { full_name: 'evil/r' } } }, { base: { repo: base.repo } }]) {
+      const f = manualFixture(); f.latest = latest; Object.assign(f.live, patch);
+      assert.throws(() => reviewCiContext(f), /head changed/);
+    }
+  }
+});
+
+test('manual context retains official run identity and attempt checks on release targets', () => {
+  for (const patch of [{ id: 41 }, { run_attempt: 0 }, { repository: { full_name: 'evil/r' } },
+    { path: '.github/workflows/evil.yml' }, { event: 'workflow_dispatch' }, { head_sha: 'b'.repeat(40) },
+    { head_branch: 'other' }, { head_repository: { full_name: 'evil/r' } }]) {
+    const f = manualFixture(); Object.assign(f.run, patch);
+    assert.throws(() => reviewCiContext(f), /evidence|run changed/);
+  }
+});
+
+test('manual context rejects a live base change during collection, including without CI', () => {
+  for (const latest of [null, 42]) {
+    const f = manualFixture(); f.latest = latest; const gh = f.gh;
+    f.gh = args => {
+      if (latest ? args.at(-1).includes('/jobs') : args[0] === 'run') f.live.base = base;
+      return gh(args);
+    };
+    assert.throws(() => reviewCiContext(f), /head changed/);
+  }
+});
+
+test('manual context rechecks current run provenance and target after reading jobs', () => {
+  for (const patch of [{ run_attempt: 3 }, { pull_requests: [{ number: 7, base: { ref: 'main' } }] },
+    { repository: { full_name: 'evil/r' } }, { id: 41 }, { status: 'in_progress', conclusion: null }]) {
+    const f = manualFixture(); const gh = f.gh; let reads = 0;
+    f.gh = args => {
+      if (args.at(-1).endsWith('/runs/42') && ++reads === 2) Object.assign(f.run, patch);
+      return gh(args);
+    };
+    assert.throws(() => reviewCiContext(f), /evidence|attempt changed/);
+  }
+});

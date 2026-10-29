@@ -31,7 +31,7 @@ function assertNativeRun(run, repo, head, pr) {
   if (!positive(run?.id) || !positive(run.run_attempt) || run.path !== CI_PATH
     || run.event !== 'pull_request_target' || run.repository?.full_name !== repo || run.head_sha !== head
     || run.head_branch !== pr.head.ref || run.head_repository?.full_name !== pr.head.repo?.full_name) {
-    throw new Error('CI context is not native current-head main PR evidence');
+    throw new Error('CI context is not native current-head PR evidence');
   }
 }
 
@@ -48,10 +48,11 @@ function assertCaller(env, event, head, pullNumber) {
   }
 }
 
-function assertLiveHead(gh, repo, pullNumber, head) {
+function assertLiveHead(gh, repo, pullNumber, head, baseRef) {
   const pr = api(gh, repo, `pulls/${pullNumber}`);
   if (pr.state !== 'open' || pr.head?.sha !== head || typeof pr.head?.ref !== 'string'
-    || typeof pr.head?.repo?.full_name !== 'string' || pr.base?.ref !== 'main' || pr.base?.repo?.full_name !== repo) {
+    || typeof pr.head?.repo?.full_name !== 'string' || typeof pr.base?.ref !== 'string' || !pr.base.ref
+    || (baseRef !== undefined && pr.base.ref !== baseRef) || pr.base?.repo?.full_name !== repo) {
     throw new Error('PR head changed before review context was read');
   }
   return pr;
@@ -62,7 +63,7 @@ function nativeContext(gh, env, event, head, pullNumber) {
   const repo = env.GITHUB_REPOSITORY;
   const readRun = () => api(gh, repo, `actions/runs/${env.GITHUB_RUN_ID}`);
   const run = readRun();
-  assertNativeRun(run, repo, head, assertLiveHead(gh, repo, pullNumber, head));
+  assertNativeRun(run, repo, head, assertLiveHead(gh, repo, pullNumber, head, 'main'));
   if (String(run.id) !== env.GITHUB_RUN_ID || String(run.run_attempt) !== env.GITHUB_RUN_ATTEMPT || run.status !== 'in_progress') {
     throw new Error('Caller run or attempt changed');
   }
@@ -79,7 +80,7 @@ function nativeContext(gh, env, event, head, pullNumber) {
     || preflight[0].status !== 'completed' || preflight[0].conclusion !== 'success') {
     throw new Error('Caller preflight did not succeed');
   }
-  assertLiveHead(gh, repo, pullNumber, head);
+  assertLiveHead(gh, repo, pullNumber, head, 'main');
   const final = readRun();
   if (final.id !== run.id || final.run_attempt !== run.run_attempt || final.status !== 'in_progress') {
     throw new Error('Caller run changed while collecting preflight');
@@ -118,21 +119,32 @@ function blockedByReview(run, jobs) {
     && skippedMatrix(jobs, 'Cockpit browser E2E shard ', 4);
 }
 
+function matchesPullTarget(run, pullNumber, baseRef) {
+  // Unlike native calls, dispatch has no trusted PR event to bind an empty
+  // association list. Missing target evidence stays pending, never a CI pass.
+  return Array.isArray(run.pull_requests) && run.pull_requests.some(pr =>
+    pr.number === pullNumber && pr.base?.ref === baseRef);
+}
+
 function manualContext(gh, env, head, pullNumber) {
   const repo = env.GITHUB_REPOSITORY;
-  assertLiveHead(gh, repo, pullNumber, head);
+  const pr = assertLiveHead(gh, repo, pullNumber, head);
   const latest = latestNative(gh, repo, head);
+  assertLiveHead(gh, repo, pullNumber, head, pr.base.ref);
   if (!latest) return renderCiResults(resolveCiResults([]));
   const run = api(gh, repo, `actions/runs/${latest.databaseId}`);
-  assertNativeRun(run, repo, head, assertLiveHead(gh, repo, pullNumber, head));
+  assertNativeRun(run, repo, head, assertLiveHead(gh, repo, pullNumber, head, pr.base.ref));
+  if (run.id !== latest.databaseId) throw new Error('Current CI run changed');
+  if (!matchesPullTarget(run, pullNumber, pr.base.ref)) return renderCiResults(resolveCiResults([]));
   const jobs = jobsForAttempt(gh, repo, run);
   const result = resolveCiResults([{ databaseId: run.id, headSha: head, event: run.event, url: run.html_url }], { jobs, headSha: head });
   const final = api(gh, repo, `actions/runs/${run.id}`);
-  if (final.id !== run.id || final.run_attempt !== run.run_attempt || final.status !== run.status
+  assertNativeRun(final, repo, head, pr);
+  if (!matchesPullTarget(final, pullNumber, pr.base.ref) || final.id !== run.id || final.run_attempt !== run.run_attempt || final.status !== run.status
     || final.conclusion !== run.conclusion || latestNative(gh, repo, head)?.databaseId !== run.id) {
     throw new Error('Current CI attempt changed while collecting context');
   }
-  assertLiveHead(gh, repo, pullNumber, head);
+  assertLiveHead(gh, repo, pullNumber, head, pr.base.ref);
   const context = blockedByReview(run, jobs)
     ? '# CI review context\n\nHeavy verification: not started: blocked by review.\nVerification aggregate: failure because the review gate failed; tests did not run.\n'
     : renderCiResults(result);

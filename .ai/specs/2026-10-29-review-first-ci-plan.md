@@ -88,7 +88,13 @@ Manual review dispatch still judges replies outside the cap. Its context reads
 the newest native run for the requested current head and its latest attempt;
 missing, pending, failed or cancelled verification stays exactly that. No legacy
 or earlier-attempt success fallback may turn absence into success. API failure
-remains failure. Keep `pickPullRequestRun` compatibility for its independent
+remains failure. Manual dispatch accepts the requested open PR's live base, including
+release branches; only native caller provenance requires main. Manual CI evidence
+must associate the run with that PR number and live base ref. An empty association
+list or a different target leaves context pending without an older-run fallback.
+The trusted native event still permits native runs with empty association lists.
+Recheck the pinned live base as well as the head during manual collection.
+Keep `pickPullRequestRun` compatibility for its independent
 snapshot-publishing caller unless a specific tested change is necessary.
 
 An unchanged patch keeps the existing eligible review reuse and fresh thread
