@@ -83,9 +83,10 @@ it.runIf(process.platform === 'win32')('stops the owned app only after its live 
       db.prepare('INSERT INTO holders VALUES (?, ?, ?, ?, NULL)').run('live', 'live', process.pid, windowsStartToken(process.pid)!);
       expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete' });
       expect(app.exitCode).toBeNull(); expect(other.exitCode).toBeNull();
+      // Settle the watcher and its SQLite transaction before releasing our row.
+      const watcherExited = once(watcher, 'exit'); watcher.kill('SIGKILL'); await watcherExited;
       db.exec('DELETE FROM holders');
     } finally { db.close(); }
-    const watcherExited = once(watcher, 'exit'); watcher.kill('SIGKILL'); await watcherExited;
     await rm(join(qa, 'test-env.json'));
     const missingDescriptor = await removeOwnedWorkspace(root, workspace);
     expect(missingDescriptor, JSON.stringify(missingDescriptor)).toMatchObject({ state: 'incomplete' });
