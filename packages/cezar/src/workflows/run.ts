@@ -35,16 +35,17 @@ import { type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { type PreviewStopRequest, type PreviewStopResult, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, decideTurnEnd, stepScopedNudge, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
-import { claudeScheduleWakeupDelay, isRunnerActivity, emitAskRequested, classifyTurnEnd, discardQueuedMessagesOnAsk, type TurnEndRead } from './run/turn-markers.ts';
+import { isRunnerActivity, emitAskRequested, classifyTurnEnd, discardQueuedMessagesOnAsk, type TurnEndRead } from './run/turn-markers.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
 import { familyOf, canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested } from './run/run-guards.ts';
-import { beginUsageInvocation, recordReportedCost, recordUsageUiEvent, recordUsagePeaks } from './run/usage-accounting.ts';
+import { beginUsageInvocation, recordUsageUiEvent, recordUsagePeaks } from './run/usage-accounting.ts';
 import { continuationModel, continuationEffort, continuationRunner, taskModelIdentity, stepModel } from './run/launch-settings.ts';
 import { executionBaseRef, openExecutionWorktree, ownedContinuationWorkspace, executionSeedFiles, REPOSITORY_ROOT_LOCK_DISABLED_NOTE } from './run/run-workspace.ts';
 import * as inputReceipts from './run/input-receipts.ts';
 import { AutoResumeScheduler } from './run/auto-resume.ts';
 export { AUTO_RESUME_GRACE_MS, MAX_AUTO_RESUMES, AUTO_RESUME_MISSED_WINDOW_MS } from './run/auto-resume.ts';
 import type { RunModuleContext } from './run/types.ts';
+import { createSessionEventHandler, launchPreamble } from './run/session-events.ts';
 import * as launchContext from './run/launch-context.ts';
 import { continuationOpening, openingInputs } from './run/opening.ts';
 import { releaseActiveResources } from './run/drop-active.ts';
@@ -3447,40 +3448,11 @@ export class RunManager {
 
     const turn: SessionTurn = { text: '', completedText: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
     const sink = this.makeUiSink(runId, stepId);
-    const onEvent = (event: AgentEvent) => {
-      if (this.disposedSessionEvent(runId, state, event)) return;
-      if (inputReceipts.handleReceiptEvent(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, runId, state, turn, event, stepId, event => this.store.appendEvent(runId, event))) return;
-      this.store.appendEvent(runId, { ...event, stepId });
-      if (event.type === 'cost') recordReportedCost(this.store, runId, stepId, state, backend, event.usd);
-      if (event.type === 'error') { this.recordSessionFault(state, turn, event.message); return; }
-      if (turn.sessionError || state.agentInputError) return;
-      if (event.type === 'session') {
-        this.store.updateStep(runId, stepId, { sessionId: event.sessionId, backend,
-          ...(event.sessionTransport ? { sessionTransport: event.sessionTransport } : {}) });
-      }
-      if (event.type === 'token-usage') {
-        this.store.updateStep(runId, stepId, { tokensUsed: event.tokensUsed });
-      }
-      const wakeDelay = claudeScheduleWakeupDelay(event, backend);
-      if (wakeDelay !== undefined) turn.scheduleWakeup = wakeDelay;
-      if (event.type === 'turn-end') {
-        this.markTurnBoundary(runId, state, event);
-        if (!this.acknowledgeOpeningTurn(runId, state, answer)) return;
-        // Belt-and-braces: v2 `turn.completed` already flushed the delta
-        // coalescers; the v1 turn boundary flushes again (idempotent) so no
-        // buffered delta can outlive its turn.
-        sink.flushAll();
-        this.trackTurnEnd(runId, turn.text); // titleSummary + diffStat (#389)
-        const text = turn.text;
-        const completedText = turn.completedText;
-        turn.text = '';
-        turn.completedText = '';
-        turn.tail = 'none';
-        const turnWakeDelay = turn.scheduleWakeup;
-        turn.scheduleWakeup = undefined;
-        this.endTurn(runId, state, sink, { stepId, text, completedText, scheduleWakeup: turnWakeDelay });
-      }
-    };
+    const onEvent = createSessionEventHandler(this.inputReceiptContext, this.sessionEventHost(), {
+      runId, state, turn, stepId, backend, sink, tokenBase: 0,
+      emit: event => this.store.appendEvent(runId, event),
+      acknowledge: () => this.acknowledgeOpeningTurn(runId, state, answer),
+    });
 
     const settings = await this.continuationLaunchSettings(runId, stepId, state, record, sessionId, backend, sink);
     if (!settings) return;
@@ -3509,12 +3481,10 @@ export class RunManager {
     // persisted the user's original text, and the transcript must keep showing that.
     state.agentSessionError = undefined;
     if (this.workerExecutionStopped(runId)) { state.cancelled = true; throw new Error('Worker stopped before launch'); }
-    const delegation = this.provisionSession(runId, state);
-    // Read before the cancellation checks below, which also cover this await (#1576).
-    const webhooksPart = await this.agentWebhooksPart();
-    const ciTools = await this.provisionCiSession(runId, state);
+    const launch = await launchPreamble(this.launchPreambleHost(), runId, state);
+    const { delegation, webhooksPart, ciTools } = launch;
     // Stop/Finish can arrive while the local tool controller is starting.
-    if (this.launchStale(runId, state, delegation, ciTools)) {
+    if (launch.stale) {
       this.settleStaleContinuationLaunch(runId, stepId, state, { stepId, sessionId, backend, prompt, images });
       return;
     }
@@ -4641,39 +4611,10 @@ export class RunManager {
     const startTokens = stepRecord?.tokensUsed ?? 0;
     const turn: SessionTurn = { text: '', completedText: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
     const sink = this.makeUiSink(runId, step.id);
-    const onEvent = (event: AgentEvent) => {
-      if (this.disposedSessionEvent(runId, state, event)) return;
-      if (inputReceipts.handleReceiptEvent(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, runId, state, turn, event, step.id, emit)) return;
-      emit({ ...event, stepId: step.id });
-      if (event.type === 'cost') recordReportedCost(this.store, runId, step.id, state, backend, event.usd);
-      if (event.type === 'error') { this.recordSessionFault(state, turn, event.message); return; }
-      if (turn.sessionError || state.agentInputError) return;
-      if (event.type === 'session') {
-        // Codex/OpenCode mint their own session id — persist it so resume works.
-        this.store.updateStep(runId, step.id, { sessionId: event.sessionId, backend,
-          ...(event.sessionTransport ? { sessionTransport: event.sessionTransport } : {}) });
-      }
-      if (event.type === 'token-usage') {
-        this.store.updateStep(runId, step.id, { tokensUsed: startTokens + event.tokensUsed });
-      }
-      const wakeDelay = claudeScheduleWakeupDelay(event, backend);
-      if (wakeDelay !== undefined) turn.scheduleWakeup = wakeDelay;
-      if (event.type === 'turn-end') {
-        this.markTurnBoundary(runId, state, event);
-        // v2 `turn.completed` already flushed the coalescers; the v1 turn
-        // boundary flushes again (idempotent) as a backstop.
-        sink.flushAll();
-        this.trackTurnEnd(runId, turn.text); // titleSummary + diffStat (#389)
-        const text = turn.text;
-        const completedText = turn.completedText;
-        turn.text = '';
-        turn.completedText = '';
-        turn.tail = 'none';
-        const turnWakeDelay = turn.scheduleWakeup;
-        turn.scheduleWakeup = undefined;
-        this.endTurn(runId, state, sink, { stepId: step.id, text, completedText, scheduleWakeup: turnWakeDelay });
-      }
-    };
+    const onEvent = createSessionEventHandler(this.inputReceiptContext, this.sessionEventHost(), {
+      runId, state, turn, stepId: step.id, backend, sink, tokenBase: startTokens, emit,
+      acknowledge: () => true,
+    });
 
     const stepBackend = step.runner ?? taskBackend;
     // An owned worker's step runs under what its identity pinned for it (#452): model, effort,
@@ -4702,13 +4643,11 @@ export class RunManager {
     state.currentStepId = step.id;
     state.completedStepId = undefined;
     this.beginUsageInvocation(runId, state, step.id);
-    const delegation = this.provisionSession(runId, state);
-    // Read before the cancellation checks below, which also cover this await (#1576).
-    const webhooksPart = await this.agentWebhooksPart();
-    const ciTools = await this.provisionCiSession(runId, state);
+    const launch = await launchPreamble(this.launchPreambleHost(), runId, state);
+    const { delegation, webhooksPart, ciTools } = launch;
     // Revalidate after provisioning, then let execute settle cancellation or
     // requeue a Finish-held step through its existing no-session paths.
-    if (this.launchStale(runId, state, delegation, ciTools)) {
+    if (launch.stale) {
       if (this.workerExecutionStopped(runId)) state.cancelled = true;
       state.currentStepId = undefined;
       return null;
@@ -4788,6 +4727,26 @@ export class RunManager {
     if (parts.attachments.length) userPrompt += `\n\n${pastedAttachmentsText(parts.attachments)}`;
     if (parts.openingNote) userPrompt += `\n\n${parts.openingNote}`;
     return { userPrompt, skillPrompt };
+  }
+
+  private sessionEventHost(): import('./run/session-events.ts').SessionEventHost {
+    return {
+      disposedSessionEvent: (...args) => this.disposedSessionEvent(...args),
+      handleReceiptEvent: (...args) => inputReceipts.handleReceiptEvent(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, ...args),
+      recordSessionFault: (...args) => this.recordSessionFault(...args),
+      markTurnBoundary: (...args) => this.markTurnBoundary(...args),
+      trackTurnEnd: (...args) => this.trackTurnEnd(...args),
+      endTurn: (...args) => this.endTurn(...args),
+    };
+  }
+
+  private launchPreambleHost(): import('./run/session-events.ts').LaunchPreambleHost {
+    return {
+      provisionSession: (...args) => this.provisionSession(...args),
+      agentWebhooksPart: () => this.agentWebhooksPart(),
+      provisionCiSession: (...args) => this.provisionCiSession(...args),
+      launchStale: (...args) => this.launchStale(...args),
+    };
   }
 
   /** Shutdown left this delegated run to restart recovery: its session's events are dropped, and an
