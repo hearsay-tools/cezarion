@@ -1,3 +1,4 @@
+import { WorkerExecutions } from './run/worker-executions.ts';
 import { TurnBookkeeper } from './run/turn-bookkeeping.ts';
 import { AutomationToolsSlot, cezarToolHandlers, toolSessionRefusal } from './run/cezar-tools.ts';
 import { registerPreviewServer, stopPreviewServer } from '../preview/run-tools.ts';
@@ -69,7 +70,7 @@ import {
 } from '../core/ask.ts';
 import { type AgentSession } from '../core/claude-cli-runner.ts';
 import { hasRegisteredRunProcess, onUsage, registerRunProcess, replaceRunProcess, type ProcessUsage } from '../core/process-usage.ts';
-import { isSessionLeader, sessionGroupOf } from '../core/session-process.ts';
+import { isSessionLeader } from '../core/session-process.ts';
 import { ProcessWaitSupervisor, probeProcessWait } from '../process-wait/supervisor.ts';
 import { confineExitFile, type ExitFileRoots } from '../process-wait/exit-file.ts';
 import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
@@ -397,75 +398,12 @@ export class RunManager {
   // covers the window between shifting a run off the queue and the run
   // registering in `active`, so parallel-slot counting is never racy.
   private readonly queue: string[] = [];
-  private readonly executions = new Map<string, { generation: string; admitted: boolean; promise: Promise<void>; resolve: () => void; sessions: Set<Promise<void>>; turns: Set<Promise<void>>; deliveries: Set<Promise<void>> }>();
-  private readonly finalizedWorkers = new Map<string, string>();
-  private readonly stoppedWorkers = new Set<string>();
-  private readonly terminationWaiters = new Set<() => void>();
-
-  private beginWorkerExecution(runId: string, admitted = true): void {
-    if (this.store.getRun(runId)?.delegation?.role !== 'worker') return;
-    if (this.claims.has(runId) || !!this.autosaveCleanupBlocker(runId)) throw new Error('Worker resources are being cleaned up');
-    // #469: one site for Continue, --resume, parent replies and queued revival after a crash.
-    // Fresh: admission is one-shot, so a cached "alive" must not refuse an orphan that has since died.
-    if (!this.executions.has(runId)) this.settleOrphanedWorkerExecution(runId, { admitting: true, fresh: true });
-    const refusal = this.executions.has(runId) ? undefined : this.orphanAdmissionRefusal(runId);
-    if (refusal) throw new WorkerOrphanAliveError(refusal);
-    const existing = this.executions.get(runId);
-    if (existing) {
-      const proof = this.store.readWorkerExecution(runId);
-      if (!existing.admitted && admitted && proof?.generation === existing.generation && proof.phase === 'starting') {
-        existing.admitted = true; return;
-      }
-      throw new Error('Worker execution is still finalizing');
-    }
-    const generation = this.store.commitWorkerExecutionStart(runId);
-    let resolve!: () => void;
-    const promise = new Promise<void>(done => { resolve = done; });
-    this.executions.set(runId, { generation, admitted, promise, resolve, sessions: new Set(), turns: new Set(), deliveries: new Set() });
-    this.finalizedWorkers.delete(runId);
-    // #469: an earlier generation's destroy blocker never describes this one.
-    this.orphans.forgetBlockers(runId);
-    this.stoppedWorkers.delete(runId);
-  }
-
-  private async finishWorkerExecution(runId: string): Promise<void> {
-    const execution = this.executions.get(runId);
-    if (!execution) return;
-    await Promise.allSettled([...execution.sessions]);
-    await Promise.allSettled([...execution.turns]);
-    await Promise.allSettled([...execution.deliveries]);
-    // Every wrapper settles after runner result, workflow and final filesystem work.
-    // A disposed manager cannot attest to the recovered generation's state.
-    if (!this.disposed) {
-      this.finalizedWorkers.set(runId, execution.generation);
-      this.persistWorkerCompletion(runId, execution.generation);
-    }
-    if (this.executions.get(runId) === execution) this.executions.delete(runId);
-    execution.resolve();
-    if (!this.disposed) {
-      try { this.queueWaitWake(runId); } catch { this.retryWaitAdmission(runId); }
-    }
-    if (!this.disposed && this.store.getRun(runId)?.stopping) this.store.updateRun(runId, { stopping: undefined });
-    if (!this.disposed) this.releaseSlot();
-  }
-
-  /** Capture every returned process result before setup can throw. A setup
-   * exception or an interrupt request cannot stand in for session termination. */
-  private trackWorkerSessionResult(runId: string, session: AgentSession): Promise<void> {
-    const closed = session.result.then(() => undefined, () => undefined);
-    this.executions.get(runId)?.sessions.add(closed);
-    return closed;
-  }
-
-  private persistWorkerCompletion(runId: string, generation: string): void {
-    try {
-      if (this.stoppedWorkers.has(runId)) transitionVia('stop-worker', () => this.store.getRun(runId), () => this.store.commitWorkerCancellation(runId));
-      if (this.store.commitWorkerExecutionComplete(runId, generation)) {
-        this.finalizedWorkers.delete(runId);
-        this.reapTerminalScratch(runId);
-      }
-    } catch { /* Finalized in this process; preserve exact generation for an explicit retry. */ }
-  }
+  private readonly workerExecutions: WorkerExecutions;
+  private get executions() { return this.workerExecutions.executions; }
+  private beginWorkerExecution(id: string, admitted = true) { this.workerExecutions.beginWorkerExecution(id, admitted); }
+  private finishWorkerExecution(id: string) { return this.workerExecutions.finishWorkerExecution(id); }
+  private trackWorkerSessionResult(id: string, session: AgentSession) { return this.workerExecutions.trackWorkerSessionResult(id, session); }
+  private recordWorkerProcess(id: string, pid: number) { this.workerExecutions.recordWorkerProcess(id, pid); }
 
   private readonly orphans: WorkerOrphans;
   private orphanBackoff: Backoff = ORPHAN_BACKOFF;
@@ -479,51 +417,22 @@ export class RunManager {
   private async reapOrphanedWorker(runId: string, timeoutMs: number): Promise<void> { return this.orphans.reapOrphanedWorker(runId, timeoutMs); }
   private async terminateFinishedWorkerGroups(runId: string, timeoutMs: number): Promise<void> { return this.orphans.terminateFinishedWorkerGroups(runId, timeoutMs); }
 
-  /** Best effort: a failed write leaves the working-directory scan as this process's evidence. */
-  private recordWorkerProcess(runId: string, pid: number): void {
-    const generation = this.executions.get(runId)?.generation;
-    if (!generation) return;
-    try { if (!this.store.appendWorkerProcess(runId, generation, pid, sessionGroupOf(pid))) console.warn(`[cez] worker ${runId} process record unavailable; relying on the working-directory scan`); }
-    catch { console.warn(`[cez] worker ${runId} process record write failed; relying on the working-directory scan`); }
-  }
-
   private trackTurnEnd(runId: string, text: string): void {
     const task = this.recordTurnEnd(runId, text);
-    const turns = this.executions.get(runId)?.turns;
-    turns?.add(task);
-    void task.catch(() => undefined).finally(() => turns?.delete(task));
+    this.workerExecutions.trackTurn(runId, task);
   }
 
   requestWorkerStop(runId: string): WorkerStopResult {
     if (this.store.getRun(runId)?.delegation?.role !== 'worker') throw new Error('Worker not found');
-    if (!this.executions.has(runId) && !this.isActive(runId) && ['done', 'failed', 'cancelled', 'review'].includes(this.store.getRun(runId)!.status) && this.store.readWorkerExecution(runId)?.phase === 'complete') return { workerId: runId, state: 'terminated' };
+    if (!this.workerExecutions.has(runId) && !this.isActive(runId) && ['done', 'failed', 'cancelled', 'review'].includes(this.store.getRun(runId)!.status) && this.store.readWorkerExecution(runId)?.phase === 'complete') return { workerId: runId, state: 'terminated' };
     this.cancel(runId);
-    return { workerId: runId, state: !this.executions.has(runId) && this.store.readWorkerExecution(runId)?.phase === 'complete' ? 'terminated' : 'stopping' };
+    return { workerId: runId, state: !this.workerExecutions.has(runId) && this.store.readWorkerExecution(runId)?.phase === 'complete' ? 'terminated' : 'stopping' };
   }
 
   async awaitRunTermination(runId: string, timeoutMs: number, opts: { reapOrphans?: boolean } = {}): Promise<boolean> {
-    const terminated = await this.proveRunTermination(runId, timeoutMs, opts);
+    const terminated = await this.workerExecutions.proveRunTermination(runId, timeoutMs, opts);
     if (terminated && opts.reapOrphans && !this.disposed) await this.terminateFinishedWorkerGroups(runId, timeoutMs);
     return terminated;
-  }
-
-  private async proveRunTermination(runId: string, timeoutMs: number, opts: { reapOrphans?: boolean }): Promise<boolean> {
-    const execution = this.executions.get(runId);
-    if (!execution) {
-      const generation = this.finalizedWorkers.get(runId);
-      if (!this.disposed && generation) this.persistWorkerCompletion(runId, generation);
-      else if (!generation && opts.reapOrphans) await this.reapOrphanedWorker(runId, timeoutMs);
-      else if (!generation) this.settleOrphanedWorkerExecution(runId);
-      return this.store.readWorkerExecution(runId)?.phase === 'complete';
-    }
-    if (this.disposed) return false;
-    await new Promise<void>(resolve => {
-      const settle = () => { clearTimeout(timer); this.terminationWaiters.delete(settle); resolve(); };
-      const timer = setTimeout(settle, Math.min(30_000, Math.max(0, Number.isFinite(timeoutMs) ? timeoutMs : 0)));
-      this.terminationWaiters.add(settle);
-      void execution.promise.then(settle);
-    });
-    return !this.executions.has(runId) && this.store.readWorkerExecution(runId)?.phase === 'complete';
   }
 
   private historyDeletionPending(runId: string): boolean {
@@ -533,7 +442,7 @@ export class RunManager {
   private workerExecutionStopped(runId: string): boolean {
     const run = this.store.getRun(runId);
     return this.historyDeletionPending(runId) || run?.delegation?.role === 'invalid' || (run?.delegation?.role === 'worker' &&
-      (!!run.delegation.destroy || this.stoppedWorkers.has(runId)));
+      (!!run.delegation.destroy || this.workerExecutions.isStopped(runId)));
   }
 
   private readonly starting = new Set<string>();
@@ -711,7 +620,7 @@ export class RunManager {
     options: { semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined } = {},
   ) {
     this.dataDir = join(repoRoot, '.ai/cezar');
-    this.workerScratchCleanup = new WorkerScratchCleanup(store, this.dataDir, id => this.isActive(id) || this.executions.has(id) || this.claims.has(id) || !!this.autosaveCleanupBlocker(id));
+    this.workerScratchCleanup = new WorkerScratchCleanup(store, this.dataDir, id => this.isActive(id) || this.workerExecutions.has(id) || this.claims.has(id) || !!this.autosaveCleanupBlocker(id));
     this.preview = options.preview;
     this.cezarPort = options.cezarPort;
     // #774: `serve` knows its bound origin before it recovers, so recovered runs carry it too.
@@ -721,10 +630,18 @@ export class RunManager {
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
     this.orphans = new WorkerOrphans(
       { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
-      { holds: (id, admitting) => this.executions.has(id) || this.active.has(id) || this.starting.has(id) || (!admitting && this.queue.includes(id)),
+      { holds: (id, admitting) => this.workerExecutions.has(id) || this.active.has(id) || this.starting.has(id) || (!admitting && this.queue.includes(id)),
         reapTerminalScratch: id => this.reapTerminalScratch(id),
         settleOrphanedWorkerExecution: (id, opts) => this.settleOrphanedWorkerExecution(id, opts),
         orphanBackoff: () => this.orphanBackoff, orphanTermGraceMs: () => this.orphanTermGraceMs },
+    );
+    this.workerExecutions = new WorkerExecutions(
+      { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed }, this.orphans,
+      { maintenance: id => this.claims.has(id) || !!this.autosaveCleanupBlocker(id),
+        admissionError: message => new WorkerOrphanAliveError(message),
+        settleOrphanedWorkerExecution: (id, opts) => this.settleOrphanedWorkerExecution(id, opts),
+        reapTerminalScratch: id => this.reapTerminalScratch(id), queueWaitWake: id => this.queueWaitWake(id),
+        retryWaitAdmission: id => this.retryWaitAdmission(id), releaseSlot: () => this.releaseSlot() },
     );
     this.automationToolsSlot = new AutomationToolsSlot(
       { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
@@ -733,7 +650,7 @@ export class RunManager {
     this.claims = new MaintenanceClaims(
       { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
       { isActive: id => this.isActive(id), autosaveCleanupBlocker: id => this.autosaveCleanupBlocker(id),
-        hasExecution: id => this.executions.has(id), scheduleScratchCleanup: id => this.workerScratchCleanup.schedule(id),
+        hasExecution: id => this.workerExecutions.has(id), scheduleScratchCleanup: id => this.workerScratchCleanup.schedule(id),
         holdForMaintenance: ids => this.holdForMaintenance(ids) },
     );
     this.attachments = new AttachmentWriter(
@@ -797,9 +714,8 @@ export class RunManager {
     this.waitTimers.clear();
     this.ciResources.release();
     this.delegationProvisioner = undefined;
-    this.finalizedWorkers.clear();
     this.orphans.dispose();
-    for (const settle of this.terminationWaiters) settle();
+    this.workerExecutions.dispose();
     this.store.off('run', this.onDelegationRun);
     this.store.off('deleted', this.onRunDeleted);
     for (const timer of this.requestDeadlineTimers.values()) clearTimeout(timer);
@@ -2210,7 +2126,7 @@ export class RunManager {
     if (this.claims.has(id) || this.autosaveCleanupBlocker(id)) return false;
     const queued = this.store.getRun(id);
     if (!queued || this.historyDeletionPending(id)) return true;
-    if (this.executions.get(id)?.admitted && !this.active.has(id)) return false;
+    if (this.workerExecutions.admitted(id) && !this.active.has(id)) return false;
     if (this.executionBlockedByRootFinish(queued)) return false;
     return !accountHeldFor(this.withExecutionAccount(queued), holds, fallbackRunner);
   }
@@ -2964,7 +2880,7 @@ export class RunManager {
     // Open waits keep their watch or timer: their result reopens the run when it resolves. A
     // refusal queued for the closing session reopens it now (hearsay-tools/cezarion#1301).
     if (!this.disposed && (this.store.getRun(runId)?.waits?.length || this.owesCompletionRefusal(runId))) this.queueWaitWake(runId);
-    if (!this.executions.has(runId) && this.store.getRun(runId)?.stopping) this.store.updateRun(runId, { stopping: undefined });
+    if (!this.workerExecutions.has(runId) && this.store.getRun(runId)?.stopping) this.store.updateRun(runId, { stopping: undefined });
     this.republishFinishVerdict(runId);
     this.memoryPausing.delete(runId);
     this.turnBookkeeper.forget(runId);
@@ -3378,8 +3294,8 @@ export class RunManager {
     if (this.store.getRun(runId)?.delegation?.role === 'worker') {
       const proof = this.store.readWorkerExecution(runId);
       transitionVia('stop-worker', () => this.store.getRun(runId), () => this.store.commitWorkerCancellation(runId));
-      this.stoppedWorkers.add(runId);
-      if (!this.executions.has(runId) && !this.active.has(runId) && !this.starting.has(runId) && proof?.phase === 'queued') {
+      this.workerExecutions.markStopped(runId);
+      if (!this.workerExecutions.has(runId) && !this.active.has(runId) && !this.starting.has(runId) && proof?.phase === 'queued') {
         this.store.commitWorkerExecutionComplete(runId, proof.generation);
       }
     }
@@ -3392,7 +3308,7 @@ export class RunManager {
     this.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
     this.store.appendEvent(runId, { type: 'lifecycle', message: 'cancelled while queued' });
     this.store.flush();
-    if (this.executions.get(runId)?.admitted === false) void this.finishWorkerExecution(runId);
+    if (this.workerExecutions.admitted(runId) === false) void this.finishWorkerExecution(runId);
   }
 
   private cancelRunWithoutSession(runId: string, hadWaits: boolean, retiredRefusal: boolean, cancelledFinish: boolean): boolean {
@@ -3420,7 +3336,7 @@ export class RunManager {
   }
 
   isActive(runId: string): boolean {
-    return this.executions.has(runId) || this.active.has(runId) || this.starting.has(runId) || this.queue.includes(runId);
+    return this.workerExecutions.has(runId) || this.active.has(runId) || this.starting.has(runId) || this.queue.includes(runId);
   }
 
   claimWorktreeReclaim(runId: string): (() => void) | null { return this.claims.claimWorktreeReclaim(runId); }
@@ -5012,8 +4928,7 @@ export class RunManager {
     state.agentInputFlight = flight;
     const settled = this.sendAgentInput(runId, state, flight, content, refusal);
     if (!settled) return false;
-    const deliveries = this.executions.get(runId)?.deliveries; deliveries?.add(settled);
-    void settled.then(() => deliveries?.delete(settled));
+    this.workerExecutions.trackDelivery(runId, settled);
     this.resumeParkedRun(runId, state, beforeHumanReset);
     this.recordAgentInputTurn(runId, state, flight, refusal);
     return true;
@@ -8528,9 +8443,7 @@ export class RunManager {
     if (state.cwd === this.repoRoot || state.autosaveTimer) return;
     state.autosaveTimer = setInterval(() => {
       const task = this.saveWorktree(runId, state, 'periodic');
-      const turns = this.executions.get(runId)?.turns;
-      turns?.add(task);
-      void task.catch(() => undefined).finally(() => turns?.delete(task));
+      this.workerExecutions.trackTurn(runId, task);
     }, AUTOSAVE_INTERVAL_MS);
     state.autosaveTimer.unref?.();
   }
