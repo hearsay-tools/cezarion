@@ -1,3 +1,22 @@
+import { join } from 'node:path';
+import type { AgentEvent, ContentBlock } from '../../core/agent-runner.ts';
+import { inputDeliveryOf } from '../../core/agent-runner.ts';
+import { createRunner } from '../../core/runner-factory.ts';
+import { startManagedSession } from '../../core/managed-session.ts';
+import { pastedAttachmentsText, type PastedContent, type PersistedAttachment } from '../pasted-content.ts';
+import type { AutosaveReason } from '../../git-worktree.ts';
+import type { OpeningHost } from './opening.ts';
+import { continuationOpening } from './opening.ts';
+import { createSessionEventHandler, launchPreamble } from './session-events.ts';
+import { agentDirectories, composeSystemPrompt, expandRegistrySlashSkillText } from './prompts.ts';
+import { continuationRunner } from './launch-settings.ts';
+import { preserveRunAfterDisposal } from './run-guards.ts';
+import { stepScope } from './steps.ts';
+import { clearIdleTimer } from './input-timers.ts';
+import * as inputReceipts from './input-receipts.ts';
+import type { HumanWaits } from './human-waits.ts';
+import type { RunSettlement } from './run-settlement.ts';
+import type { SessionTurn, ContinuationSessionLaunch, ContinuationClose, LaunchDelegation, LaunchCiTools } from './types.ts';
 import type { AgentSession, RunnerId } from '../../core/agent-runner.ts';
 import type { WorkerStepIdentity } from '../../delegation/execution-identity.ts';
 import { continuationDefStep } from '../../delegation/execution-identity.ts';
@@ -28,10 +47,18 @@ import type { RunExitId } from '../run-states.ts';
 import type { RunLine } from './run-line.ts';
 import type { RunModuleContext, WorkerDelegationRecord } from './types.ts';
 
-export interface ContinuationSessionHost {
+export interface ContinuationSessionHost extends OpeningHost {
   move(runId: string, exit: RunExitId, patch?: Partial<RunRecord>): void;
   dropActive(runId: string): void;
   repositoryRootLockDisabled(): boolean;
+  beginUsageInvocation(runId: string, state: ActiveRun, stepId: string): void;
+  trackWorkerSessionResult(runId: string, session: AgentSession): Promise<void>;
+  recordUsagePeaks(runId: string): void;
+  saveWorktree(runId: string, state: ActiveRun, reason: AutosaveReason): Promise<void>;
+  pump(): Promise<void>;
+  hasPendingHumanAsk(runId: string): boolean;
+  continuationNextStep(runId: string): WorkflowStepDef | undefined;
+  makeUiSink(runId: string, stepId: string): UiEventSink;
   prepareWorktree(runId: string, state: ActiveRun, config: Awaited<ReturnType<typeof loadConfig>>['worktreeSetup'], emit: (event: { type: string; [key: string]: unknown }) => void, reason: 'rematerialized' | 'resume'): Promise<string | undefined>;
   workerStep(runId: string, stepId: string | undefined): WorkerStepIdentity | undefined;
   latchAgentInputError(runId: string, state: ActiveRun, session: AgentSession, message: string): void;
@@ -49,6 +76,12 @@ export class ContinuationSession {
     private readonly repoRootLease: RepoRootLease,
     private readonly autosave: WorktreeAutosave,
     private readonly runSkills: RunSkills,
+    private readonly sessionEventHost: sessionEvents.SessionEventHost,
+    private readonly launchPreambleHost: sessionEvents.LaunchPreambleHost,
+    private readonly inputReceiptHost: inputReceipts.InputReceiptsHost,
+    private readonly inputReceiptSteps: inputReceipts.InputReceiptSteps,
+    private readonly humanWaits: HumanWaits,
+    private readonly runSettlement: RunSettlement,
   ) {}
 
   /** Where a Continue runs: an owned worker's verified workspace, or the task's worktree, which
@@ -69,10 +102,9 @@ export class ContinuationSession {
     return { cwd, rematerialized };
   }
 
-
   /** An owned worker's workspace for a Continue, verified with its parent's context. Returns
    *  undefined after it failed the run: owned workers never adopt or recreate an unverified resource. */
-  async ownedContinuationWorkspace(
+  private async ownedContinuationWorkspace(
     runId: string,
     stepId: string,
     record: RunRecord,
@@ -92,7 +124,6 @@ export class ContinuationSession {
     }
   }
 
-
   /** A Stop that arrived while the Continue resolved its workspace cancels the run before it
    *  becomes active. */
   settleStoppedContinuation(runId: string): boolean {
@@ -103,10 +134,9 @@ export class ContinuationSession {
     return true;
   }
 
-
   /** The repository-root lease of a Continue that runs in the repository root. Returns undefined
    *  when no lease is needed, so that path does not yield, else whether the lease was granted. */
-  continuationRepoRootLease(runId: string, state: ActiveRun): Promise<boolean> | undefined {
+  private continuationRepoRootLease(runId: string, state: ActiveRun): Promise<boolean> | undefined {
     if (state.cwd !== this.context.repoRoot) return undefined;
     if (this.host.repositoryRootLockDisabled()) {
       this.context.store.appendEvent(runId, {
@@ -122,9 +152,8 @@ export class ContinuationSession {
     return this.acquireContinuationRepoRoot(runId, state);
   }
 
-
   /** Wait for the repository-root lease; a Stop during the wait cancels the run. */
-  async acquireContinuationRepoRoot(runId: string, state: ActiveRun): Promise<boolean> {
+  private async acquireContinuationRepoRoot(runId: string, state: ActiveRun): Promise<boolean> {
     if (await this.repoRootLease.acquireRepoRoot(runId, state)) return true;
     this.host.move(runId, 'cancel', {
       finishedAt: new Date().toISOString(),
@@ -135,10 +164,9 @@ export class ContinuationSession {
     return false;
   }
 
-
   /** Arm autosave, seed the handoff file, and run worktree setup. Returns setup's note for the
    *  opening message. */
-  async prepareContinuationWorktree(
+  private async prepareContinuationWorktree(
     runId: string,
     state: ActiveRun,
     record: RunRecord | undefined,
@@ -156,10 +184,9 @@ export class ContinuationSession {
     );
   }
 
-
   /** Mark the run and the Continue's step as running, then open the step. A Cursor session resumes
    *  on the transport it was opened with. */
-  startContinuationStep(
+  private startContinuationStep(
     runId: string,
     stepId: string,
     record: RunRecord | undefined,
@@ -184,9 +211,8 @@ export class ContinuationSession {
     this.context.store.appendEvent(runId, { type: 'step-start', stepId, name: 'Continue', kind: 'agent', iteration: 1 });
   }
 
-
   /** The human ask a human Continue answers, and the human waits that answer settles. */
-  openingAnswer(runId: string, state: ActiveRun, opening: ContinuationOpening): OpeningAnswer {
+  private openingAnswer(runId: string, state: ActiveRun, opening: ContinuationOpening): OpeningAnswer {
     const askSeq = opening.checkpoint?.origin === 'human' ? pendingHumanAskSeq(this.context.store, runId) : undefined;
     state.openingAnswerAskSeq = askSeq;
     // The human waits this answer answers; one the opening turn opens is its next question.
@@ -195,13 +221,12 @@ export class ContinuationSession {
     return { askSeq, waits, parentAnswer: opening.parentAnswer };
   }
 
-
   /**
    * A completed turn acknowledges the opening payload. Until then a restart
    * must replay it, including a crash after startSession but before delivery.
    * Returns false when the opening input's checkpoint failed, and the turn end stops there.
    */
-  acknowledgeOpeningTurn(runId: string, state: ActiveRun, answer: OpeningAnswer): boolean {
+  private acknowledgeOpeningTurn(runId: string, state: ActiveRun, answer: OpeningAnswer): boolean {
     if (state.cancelled) return true;
     const session = state.session?.open ? state.session : undefined;
     const opening = session ? state.openingAgentInputId : undefined;
@@ -224,13 +249,12 @@ export class ContinuationSession {
     return true;
   }
 
-
   /**
    * What a Continue runs with. Backend + model come off the record: the run's current backend by
    * default, or the follow-up override that `continueRun` persisted before scheduling (#401).
    * Returns undefined after a pre-spawn gate failed the turn.
    */
-  async continuationLaunchSettings(
+  private async continuationLaunchSettings(
     runId: string,
     stepId: string,
     state: ActiveRun,
@@ -278,10 +302,9 @@ export class ContinuationSession {
     };
   }
 
-
   /** Settle this turn as a failure before anything is spawned — the shape every
    *  pre-spawn gate needs (model identity, #405; temp directory, #785). */
-  failContinuationBeforeSpawn(runId: string, stepId: string, sink: UiEventSink, message: string): void {
+  private failContinuationBeforeSpawn(runId: string, stepId: string, sink: UiEventSink, message: string): void {
     const failedAt = new Date().toISOString();
     sink.sessionEnded('error', message);
     this.context.store.updateStep(runId, stepId, {
@@ -301,9 +324,8 @@ export class ContinuationSession {
     this.host.dropActive(runId);
   }
 
-
   /** Record the Continue's account on its step and the settings its workers inherit. */
-  applyContinuationSettings(
+  private applyContinuationSettings(
     runId: string,
     stepId: string,
     state: ActiveRun,
@@ -316,10 +338,9 @@ export class ContinuationSession {
       systemPrompt: settings.extraSystemPrompt, ...toolGrantLists(settings.toolGrant) };
   }
 
-
   /** The continued step's skill files and playbook, when the step names a skill or the prompt
    *  starts with a `/name`. Returns undefined otherwise, so that path does not yield. */
-  continuationSkills(
+  private continuationSkills(
     runId: string,
     state: ActiveRun,
     prompt: string,
@@ -334,9 +355,8 @@ export class ContinuationSession {
     return this.provisionContinuationSkills(runId, state, continuedSkillName, continuationSlash, skipSkillOnResume);
   }
 
-
   /** Reinstall the continued step's skill and a leading `/name`'s, and build the playbook. */
-  async provisionContinuationSkills(
+  private async provisionContinuationSkills(
     runId: string,
     state: ActiveRun,
     continuedSkillName: string | undefined,
@@ -370,9 +390,8 @@ export class ContinuationSession {
     return { skillPrompt, fallbackSkillPrompt, files };
   }
 
-
   /** The continued step's skill when the registry did not list it yet. */
-  async awaitContinuedSkill(state: ActiveRun, continuedSkillName: string): Promise<Skill | undefined> {
+  private async awaitContinuedSkill(state: ActiveRun, continuedSkillName: string): Promise<Skill | undefined> {
     // Boot recovery can outrun the async team-skills cache (`getTeamSkillsCached`
     // returns [] until `initialTeamSkillsLoad` resolves). Wait briefly, then
     // re-discover; never hang Continue on the network. The on-disk clone's
@@ -396,18 +415,16 @@ export class ContinuationSession {
     }
   }
 
-
   /** A Stop before the Continue's session spawned: cancel the step and the run. */
-  settleContinuationPrelaunchCancel(runId: string, stepId: string, state: ActiveRun): void {
+  private settleContinuationPrelaunchCancel(runId: string, stepId: string, state: ActiveRun): void {
     this.context.store.updateStep(runId, stepId, { status: 'cancelled' });
     this.host.move(runId, 'cancel', { finishedAt: new Date().toISOString(), currentStepId: undefined });
     clearAutosaveTimer(state); this.host.dropActive(runId);
   }
 
-
   /** A Continue's launch went stale while it provisioned (`launchStale`). A replaced active run
    *  needs nothing more; a Stop cancels the run; a root Finish holds the Continue in the queue. */
-  settleStaleContinuationLaunch(
+  private settleStaleContinuationLaunch(
     runId: string,
     stepId: string,
     state: ActiveRun,
@@ -422,4 +439,216 @@ export class ContinuationSession {
     }
   }
 
+  /** Launch the active Continue after its facade has pinned it and left the starting set. */
+  async launchContinuation(
+    runId: string,
+    stepId: string,
+    sessionId: string | undefined,
+    backend: RunnerId,
+    prompt: string,
+    images: PastedContent[],
+    persistedImages: ContentBlock[],
+    persistedAttachments: PersistedAttachment[],
+    state: ActiveRun,
+    record: RunRecord | undefined,
+    rematerialized: boolean,
+  ): Promise<void> {
+    const lease = this.continuationRepoRootLease(runId, state);
+    if (lease && !(await lease)) return;
+    const setupNote = await this.prepareContinuationWorktree(runId, state, record, rematerialized);
+    // A Stop during setup settles below, at the prelaunch cancellation check before any spawn.
+    // Registry snapshot for `/skill` expansion. A continuation builds its OWN ActiveRun, and without
+    // this the resumed session expanded against an empty registry and leaked `/om-...` verbatim to
+    // the backend, which answered "Unknown skill" (open-mercato/cezar#811). Best-effort — discovery must never
+    // break Continue.
+    await this.runSkills.loadRunSkills(state, 'ignore');
+
+    this.startContinuationStep(runId, stepId, record, sessionId, backend);
+    const opening = continuationOpening(this.context.store, this.host, runId, stepId, state, record, { prompt, images, persistedImages, persistedAttachments });
+    prompt = opening.prompt;
+    const answer = this.openingAnswer(runId, state, opening);
+    state.pendingHumanAsk = answer.askSeq === undefined && this.host.hasPendingHumanAsk(runId);
+
+    const turn: SessionTurn = { text: '', completedText: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
+    const sink = this.host.makeUiSink(runId, stepId);
+    const onEvent = createSessionEventHandler(this.context, this.sessionEventHost, {
+      runId, state, turn, stepId, backend, sink, tokenBase: 0,
+      emit: event => this.context.store.appendEvent(runId, event),
+      acknowledge: () => this.acknowledgeOpeningTurn(runId, state, answer),
+    });
+
+    const settings = await this.continuationLaunchSettings(runId, stepId, state, record, sessionId, backend, sink);
+    if (!settings) return;
+    if (state.cancelled) { this.settleContinuationPrelaunchCancel(runId, stepId, state); return; }
+    if (this.host.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() }, state)) return;
+    this.applyContinuationSettings(runId, stepId, state, backend, settings);
+    const { runner, skipSkillOnResume } = continuationRunner(backend, sessionId, settings.owningStep);
+    // Re-expand the continued step's skill from the current registry (#790) BEFORE
+    // provisionSession. Materializing the skill used to sit after the pre-launch
+    // revalidation, so Stop during that await still launched with revoked tools.
+    // `record.systemPrompt` is only the extra prompt; the opening session put
+    // `skillSystemPrompt(skill)` in front. Skip that prefix only when this
+    // session resumes into its own thread on an in-thread runner — those
+    // already carry the playbook in history. A missing skill degrades to
+    // today's extra-only prompt with one lifecycle warning; in-thread skips
+    // do not warn. Workers still inherit only the extra prompt (#778).
+    const pendingSkills = this.continuationSkills(runId, state, prompt, settings.toolsStep, skipSkillOnResume);
+    const skills = pendingSkills
+      ? await pendingSkills
+      : { skillPrompt: undefined, fallbackSkillPrompt: undefined, files: new Map<string, string>() };
+    state.currentStepId = stepId;
+    this.host.beginUsageInvocation(runId, state, stepId);
+    // A continuation's opening message becomes the session's `userPrompt` and never passes
+    // through `deliverMessage`, so it needs the SAME delivery-only `/skill` rewrite the
+    // live path applies (#811). Delivery-only: the `user-message` event above already
+    // persisted the user's original text, and the transcript must keep showing that.
+    state.agentSessionError = undefined;
+    if (this.sharedHost.workerExecutionStopped(runId)) { state.cancelled = true; throw new Error('Worker stopped before launch'); }
+    const launch = await launchPreamble(this.launchPreambleHost, runId, state);
+    const { delegation, webhooksPart, ciTools } = launch;
+    // Stop/Finish can arrive while the local tool controller is starting.
+    if (launch.stale) {
+      this.settleStaleContinuationLaunch(runId, stepId, state, { stepId, sessionId, backend, prompt, images });
+      return;
+    }
+    state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
+    const session = this.startContinuationSession(runId, state, runner, {
+      stepId, sessionId, prompt, setupNote, opening, skills, skipSkillOnResume, settings, delegation, webhooksPart, ciTools,
+    }, onEvent, turn, sink);
+    return this.awaitContinuationSession(runId, state, session, { stepId, sink, turn, delegation, ciTools });
+  }
+
+  /** Start a Continue's session, resuming its own session when it has one. A throw revokes the
+   *  tools this launch was given and propagates to `continueRun`. */
+  private startContinuationSession(
+    runId: string,
+    state: ActiveRun,
+    runner: ReturnType<typeof createRunner>,
+    launch: ContinuationSessionLaunch,
+    onEvent: (event: AgentEvent) => void,
+    turn: SessionTurn,
+    sink: UiEventSink,
+  ): AgentSession {
+    const { delegation, ciTools, opening, skills, settings } = launch;
+    let session: AgentSession | undefined;
+    try {
+      // Provisioning determines the actual capability, including a fresh session after recovery.
+      const resumed = sessionEvents.launchOpening(this.context, this.sharedHost, runId, state, launch.stepId, {
+        body: expandRegistrySlashSkillText(launch.prompt, this.runSkills.enabledSkills(state), skills.files) +
+          (launch.setupNote ? `\n\n${launch.setupNote}` : ''),
+        ciTools,
+        checkpoint: opening.checkpoint,
+      });
+      const continuationTail = sessionEvents.launchSystemTail(this.context, this.sharedHost, {
+        extraSystemPrompt: settings.extraSystemPrompt, delegation, webhooksPart: launch.webhooksPart,
+        env: settings.profile.env, ciTools, handoffInjected: resumed.handoffInjected,
+      });
+      session = startManagedSession(runner,
+        {
+          // Skill body (when resent), then the run's extra system prompt, then
+          // the handoff contract — the same order as the opening session (#790).
+          // In-thread resume omits the skill from systemPrompt; OpenCode's 404
+          // fallback uses resumeFallbackSystemPrompt so the fresh session still
+          // gets the playbook.
+          systemPrompt: composeSystemPrompt(skills.skillPrompt, continuationTail),
+          ...(launch.skipSkillOnResume ? {
+            resumeFallbackSystemPrompt: composeSystemPrompt(skills.fallbackSkillPrompt, continuationTail),
+          } : {}),
+          userPrompt: opening.attachments.length
+            ? `${resumed.userPrompt}\n\n${pastedAttachmentsText(opening.attachments)}`
+            : resumed.userPrompt,
+          ...(opening.openingImages.length ? { images: opening.openingImages } : {}),
+          cwd: state.cwd,
+          toolGrant: settings.toolGrant,
+          additionalDirectories: agentDirectories(join(this.context.dataDir, 'runs'), settings.profile.env),
+          env: { ...settings.profile.env, ...delegation?.env, ...ciTools?.env },
+          ...(ciTools ? { cezarTools: ciTools.descriptor } : {}),
+          ...(delegation ? { restrictNativeDelegation: delegation.restrictNativeDelegation } : {}),
+          model: settings.backendModel,
+          effort: settings.effort,
+          sessionId: launch.sessionId,
+          resume: launch.sessionId !== undefined,
+          timeoutMs: 0,
+        },
+        onEvent,
+        inputReceipts.inputReceiptCallbacks(this.context, this.inputReceiptHost, this.inputReceiptSteps, runId, state, () => session, turn, sink, true),
+      );
+    } catch (error) { ciTools?.revoke(); state.revokeCiTools = undefined; delegation?.revoke(); state.revokeDelegation = undefined; throw error; }
+    return session;
+  }
+
+  /** Wait for a Continue's session to close, then settle the run by how it closed. Teardown always
+   *  revokes the launch's tools, saves the worktree and leaves the active set
+   *  (`releaseContinuationSession`). */
+  private async awaitContinuationSession(runId: string, state: ActiveRun, session: AgentSession, launch: {
+    stepId: string;
+    sink: UiEventSink;
+    turn: SessionTurn;
+    delegation: LaunchDelegation;
+    ciTools: LaunchCiTools;
+  }): Promise<void> {
+    const { stepId, sink, turn } = launch;
+    const sessionClosed = this.host.trackWorkerSessionResult(runId, session);
+    state.session = session;
+    const resumedNext = this.host.continuationNextStep(runId);
+    state.nextStep = stepScope(session, resumedNext);
+    state.sessionEverOpened = true;
+    state.interrupt = () => session.interrupt();
+    let setupComplete = false;
+    const close: ContinuationClose = {};
+    try {
+      const result = await inputReceipts.sessionResultWithReceipts(this.context, this.inputReceiptHost, this.inputReceiptSteps, runId, state, session, () => { setupComplete = true; });
+      if (preserveRunAfterDisposal(this.context.store, this.context.disposed, runId, state)) return;
+      this.humanWaits.withdrawCezarHumanWaits(runId);
+      sessionEvents.persistWorkerAssistantResult(this.context, this.sharedHost, runId, stepId, result.text);
+      // A durable CI wait keeps recovery live, not this failed attempt successful.
+      if (turn.sessionError || state.agentInputError) throw new Error(turn.sessionError ?? state.agentInputError);
+      const settled = this.runSettlement.settleClosedContinuation(runId, state, stepId, sink, resumedNext, close);
+      if (settled) await settled;
+    } catch (err) {
+      if (!setupComplete) {
+        try { session.interrupt(); } catch { /* Still wait for actual termination. */ }
+        await sessionClosed;
+      }
+      if (preserveRunAfterDisposal(this.context.store, this.context.disposed, runId, state)) return;
+      this.runSettlement.settleFailedContinuation(runId, state, stepId, sink, turn, err);
+    } finally {
+      await this.releaseContinuationSession(runId, state, launch.delegation, launch.ciTools, close);
+    }
+  }
+
+  /** A Continue's session teardown: revoke the launch's tools, record the usage peaks, clear the
+   *  timers, save the worktree, leave the active set, then queue the workflow remainder. */
+  private async releaseContinuationSession(
+    runId: string,
+    state: ActiveRun,
+    delegation: LaunchDelegation,
+    ciTools: LaunchCiTools,
+    close: ContinuationClose,
+  ): Promise<void> {
+    ciTools?.revoke(); state.revokeCiTools = undefined;
+    delegation?.revoke(); state.revokeDelegation = undefined;
+    this.host.recordUsagePeaks(runId);
+    clearIdleTimer(state);
+    clearAutosaveTimer(state);
+    await this.host.saveWorktree(runId, state, 'turn end');
+    // Cancellation may be accepted while final autosave is yielding, even
+    // after success was recorded. Retire any durable queue intent before
+    // dropping the active state, otherwise pump can launch the tail with a
+    // fresh `cancelled:false` state.
+    if (state.cancelled) {
+      close.resumeWorkflow = undefined;
+      if (this.context.store.getRun(runId)?.status !== 'cancelled') {
+        this.host.move(runId, 'cancel-late', {
+          finishedAt: new Date().toISOString(), currentStepId: undefined,
+        });
+        this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
+      }
+    }
+    this.host.dropActive(runId);
+    if (close.resumeWorkflow) {
+      this.line.enqueueJob(runId, close.resumeWorkflow);
+      void this.host.pump();
+    }
+  }
 }
