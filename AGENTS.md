@@ -157,10 +157,12 @@ and a case that cannot happen stated with the reason.
 
 | Change | Table and columns | Required cases |
 | --- | --- | --- |
+| Adds or changes a cross-run relationship: messaging, delegation or settlement notification | **Both ends**, each state at each end: State · Send path behavior · Settlement path behavior | queued, running, waiting, Finish pending, stopping, review, done, failed, cancelled, deleted, history deletion pending, restart, other process owns it, unreadable record. |
 | Adds or changes a run state | **Transitions out**, copied from `workflows/run-states.ts`: State · Trigger · Who or what fires it · Behavior at shipped defaults | Declare each exit there first: `run-states.test.ts` fails a state with no automatic exit and no recorded reason. |
 | Changes how a `ToolGrant` (`core/agent-runner.ts`) maps onto a runner's tool flags | **Tool-list kinds**, one per affected runner: Case · Emitted runner flags · Callable built-in, MCP and extension tools at shipped defaults | Every case in `TOOL_GRANT_CASES` (`core/tool-grant-parity-cells.testkit.ts`); its cells pin each case on each runner. Show effective tool access, not only the flags sent, and say when a runner ignores a restriction or cannot distinguish two cases. |
 | Adds, replaces or removes files in a running task's worktree. Write through `packages/cezar/src/worktree-manifest.ts`: it keeps what the agent changed and repairs a crash inside one write | **Worktree cases**: Case · Files written, kept or removed · Worktree state at the next step, Continue and restart | A catalog or source that has not loaded yet; the same name from two sources; records written by an older cezar version; a crash between two writes (see *Commit an outcome with what it depends on, or after it*); the source removing the item. |
 | Starts a process that outlives the command that started it, which code and scripts do through `packages/cezar/src/detached-process.ts` | **Process exits**: Case · What stops it · Behavior at shipped defaults | The normal stop; the starting command interrupted by SIGINT or SIGKILL before and after the start; the handle the stop reads, such as a descriptor, deleted or forged. The helper's tests hold the rest: the leader exits first, a member ignores SIGTERM, zombies, an unreadable or reused start identity. |
+| Restores saved client state for an entity | **State restore cases**: Path or trigger · Restored value · Displayed value | Reopen without a selection; switch between two restored entities; entity unavailable after restore; derived display differs from saved state (e.g. provider mask). Derive from one state; never mask in a provider. See hearsay-tools/cezarion#2079. |
 
 Each table exists because a plan named only the obvious case and review rounds found
 the rest: hearsay-tools/cezarion#1305 and hearsay-tools/cezarion#1360 (tool lists with
@@ -610,8 +612,12 @@ The scan cannot see a shrunk product budget, so review checks that one.
 2. For a change to wait, turn-end, failure or step-settlement paths in
    `packages/cezar/src/workflows/run.ts` or `workflows/run/`, verify the parity suites
    ([Runner regressions ship with shared coverage](#runner-regressions-ship-with-shared-coverage)).
-3. Run the root `npm run typecheck` once when declarations matter (*Typecheck* above).
-4. Run the code-quality check and the auto-merge decision that the Dev flow bindings
+3. Before the first push of a `packages/**` source or test change, require both guards
+   to pass: use current Squeal results, or run `npm test -- packages/cezar/src/file-length.test.ts packages/cezar/src/ast-grep-rules.test.ts`.
+   If a pinned source shrinks, first run `FILE_LENGTH_UPDATE=1 npm test -- packages/cezar/src/file-length.test.ts`
+   to lower its pin; review and commit the baseline diff.
+4. Run the root `npm run typecheck` once when declarations matter (*Typecheck* above).
+5. Run the code-quality check and the auto-merge decision that the Dev flow bindings
    name.
 
 ### CI owns the final gate
@@ -689,7 +695,7 @@ row's value when the thing it names changes, rather than its label.
 | Specs and plans | `.ai/specs/`, `.ai/specs/` (tracked; new files are `YYYY-MM-DD-<slug>.md`, and plans end in `-plan.md`) |
 | Board | **Cezarion**, org `hearsay-tools`, project #1. For same-repository PRs targeting `main`, `.github/workflows/pr-readiness.yml` owns draft state and syncs existing PR and closing-linked issue cards: draft → In progress, ready → In review. Each new head returns the PR to draft; the workflow marks it ready when the head's required checks pass and no review thread is unresolved. Open a draft PR, fix its checks and review threads, and let the workflow move it to ready and In review; do not move the card to In review or run `gh pr ready` by hand. Board sync skips without project access and never moves Done cards back. The initial claim still moves the issue to In progress. |
 | Auto-merge | Read `.ai/skills/auto-merge/SKILL.md` before you open a pull request into `main`, and after each push, CI result, review round or draft/ready change on one you opened with the `auto-merge` label. It decides whether the PR merges without owner review; every merge it makes is a squash. |
-| Code quality | Read `.ai/skills/check-code-quality/SKILL.md` for file/function/module quality stats and before opening a pull request. Use its measurement path for requested stats and its pre-PR path for changed-function checks, small fixes and inherited-refactor issues. |
+| Code quality | Read `.ai/skills/check-code-quality/SKILL.md` for file/function/module quality stats and before opening a pull request. Use its measurement path for requested stats and its Squeal-first pre-PR path, with complete bundled fallback, for changed-function checks and findings. |
 | Design track label | An issue labeled `friction-design` takes `/dev-flow`'s Design Track, even when Direct or Micro fits; read labels before the design gate. [docs/sdlc/friction.md § Handling automations](docs/sdlc/friction.md#handling-automations). |
 | Task orchestrator | Cezar |
 | SDLC feedback | `apptension/toolkit-dev` |
