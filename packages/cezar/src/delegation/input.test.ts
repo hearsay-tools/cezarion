@@ -1,4 +1,4 @@
-import type { ActiveRun } from '../workflows/active-run.ts';
+import { createActiveRun, type ActiveRun } from '../workflows/active-run.ts';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -113,7 +113,7 @@ it('readiness hints ignore stale/disposed sessions and guard duplicate/reentrant
     await Promise.resolve();
     expect(store.getRun(record.id)?.agentInputs?.[0]?.deliveredAt).toBeDefined();
     store.commitAgentInputs(record.id, [{ ...input, id: randomUUID() }]);
-    internal.active.set(record.id, { ...state } as ActiveRun);
+    internal.active.set(record.id, Object.assign(createActiveRun({ cwd: dir, pendingHumanAsk: state.pendingHumanAsk, autonomous: false }), state));
     internal.inputDelivery.handleAgentInputReady(record.id, state as ActiveRun, session);
     expect(sends).toBe(1);
     internal.active.set(record.id, state as ActiveRun);
@@ -170,7 +170,7 @@ it.each(['cancelled', 'finish requested', 'disposed', 'replacement session', 're
       if (transition === 'finish requested') state.finishRequested = true;
       if (transition === 'disposed') manager.dispose();
       if (transition === 'replacement session') state.session = { ...session };
-      if (transition === 'replacement state') internal.active.set(run.id, { ...state } as ActiveRun);
+      if (transition === 'replacement state') internal.active.set(run.id, Object.assign(createActiveRun({ cwd: dir, pendingHumanAsk: state.pendingHumanAsk, autonomous: false }), state));
       const before = JSON.stringify(store.getRun(run.id));
       acknowledge(); await settled;
       expect(JSON.stringify(store.getRun(run.id))).toBe(before);
