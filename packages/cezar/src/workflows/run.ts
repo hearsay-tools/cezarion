@@ -1,4 +1,6 @@
 import { TurnSettler } from './run/turn-settler.ts';
+import { StepSession } from './run/step-session.ts';
+import * as sessionEvents from './run/session-events.ts';
 import { WakeAdmission } from './run/wake-admission.ts';
 import { RunSettlement } from './run/run-settlement.ts';
 import { InputDelivery } from './run/input-delivery.ts';
@@ -24,9 +26,9 @@ import { RepoRootLease } from './run/repo-root-lease.ts';
 import { MaintenanceClaims } from './run/maintenance-claims.ts';
 import { WorkerOrphans } from './run/worker-orphans.ts';
 import type {
-  SettledTurn, DelegationExecutionSettings, StartRunInput, PendingContinuation, ExecutionEmit,
+  SettledTurn, DelegationExecutionSettings, StartRunInput, PendingContinuation,
   Execution, ExecutionLaunch, StepLoop, SessionTurn, LaunchDelegation,
-  LaunchCiTools, LaunchOpening, StepProfile, StepSessionLaunch,
+  LaunchCiTools, LaunchOpening, StepProfile,
   WorkerDelegationRecord, ContinuationOpening, OpeningAnswer, ContinuationSettings, ContinuationSkills,
   ContinuationSessionLaunch, ContinuationClose, WorkerTerminationBlocker, AutomationToolService,
 } from './run/types.ts';
@@ -41,11 +43,10 @@ import { type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { type PreviewStopRequest, type PreviewStopResult, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, stepScopedNudge, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
-import { isRunnerActivity } from './run/turn-markers.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
 import { familyOf, canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested, isDisposedDelegatedRun, preserveRunAfterDisposal } from './run/run-guards.ts';
-import { beginUsageInvocation, recordUsageUiEvent, recordUsagePeaks } from './run/usage-accounting.ts';
-import { continuationModel, continuationEffort, continuationRunner, taskModelIdentity, stepModel } from './run/launch-settings.ts';
+import { beginUsageInvocation, recordUsagePeaks } from './run/usage-accounting.ts';
+import { continuationModel, continuationEffort, continuationRunner, taskModelIdentity } from './run/launch-settings.ts';
 import { executionBaseRef, openExecutionWorktree, ownedContinuationWorkspace, executionSeedFiles, REPOSITORY_ROOT_LOCK_DISABLED_NOTE } from './run/run-workspace.ts';
 import * as inputReceipts from './run/input-receipts.ts';
 import { AutoResumeScheduler } from './run/auto-resume.ts';
@@ -55,7 +56,7 @@ import { createSessionEventHandler, launchPreamble } from './run/session-events.
 import * as launchContext from './run/launch-context.ts';
 import { continuationOpening, openingInputs } from './run/opening.ts';
 import { releaseActiveResources } from './run/drop-active.ts';
-import { agentDirectories, applyTemplate, composeSystemPrompt, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt, withResumeContext } from './run/prompts.ts';
+import { agentDirectories, composeSystemPrompt, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt } from './run/prompts.ts';
 import { delegationExecutionSettings, selectDelegationExecutionSettings } from '../delegation/execution-settings.ts';
 import { stepLabel, stepScope } from './run/steps.ts';
 import { makeRunTitle } from '../runs/run-title.ts';
@@ -69,11 +70,10 @@ import * as workflowPosition from './run/workflow-position.ts';
 import { RUN_EXITS, transition, transitionVia, type RunExitId } from './run-states.ts';
 import { accountHeldFor, deriveAccountHolds, queuedRecoveryInput } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
-import { holdsOwedResults, isCezarHumanWait, openWaitList, openWaits, openWaitsFooter, resolvedWaits } from './waits.ts';
+import { holdsOwedResults, isCezarHumanWait, openWaitList, openWaits, resolvedWaits } from './waits.ts';
 import { runsAwaitingPeer } from './wait-scope.ts';
 import { previewCdpSession, previewRunContext, type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
-import { artifactInstructions } from '../artifacts/lifecycle.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import type { CezarToolHandlers } from '../ci-wait/controller.ts';
 import { workerIdentity, continuationDefStep, ownedWorkflow, workerStepIdentity, WorkerIdentityError, type WorkerAccountBinding, type WorkerStepIdentity } from '../delegation/execution-identity.ts';
@@ -94,7 +94,6 @@ import { createRunner } from '../core/runner-factory.ts';
 import type { RunnerId } from '../core/agent-runner.ts';
 import { agentModelsLocked } from '../core/agent-model-policy.ts';
 import {
-  handoffInstructions,
   handoffPath,
   seedHandoffFile,
 } from '../handoff.ts';
@@ -116,7 +115,6 @@ import {
 } from '@open-mercato/cezar-contract/conversations';
 import { contentBlocksOf, pastedAttachmentsText, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from './pasted-content.ts';
 export { contentBlocksOf, highestImageSeq, mediaTypeFor, pastedAttachmentsNote, pastedAttachmentsText, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from './pasted-content.ts';
-import { askPayloadOf, askRequestOf } from '@open-mercato/cezar-contract/pending-ask';
 import type { AgentEvent, ContentBlock, ToolGrant } from '../core/agent-runner.ts';
 import { inputDeliveryOf } from '../core/agent-runner.ts';
 import { readProjectUiState } from '../ui-state.ts';
@@ -151,9 +149,9 @@ import {
   removeAgentTmpDir,
 } from '../runs/agent-tmpdir.ts';
 import { extractTaskRefs, refineTaskRefs } from '../runs/task-refs.ts';
-import { AgentAccountUnavailableError, resolveProfileEnvForRoot } from '../workspace/agent-profiles.ts';
+import { resolveProfileEnvForRoot } from '../workspace/agent-profiles.ts';
 import { WorkspaceSemaphore, type AccountHolds } from '../workspace/semaphore.ts';
-import { UiEventSink } from '../runs/ui-event-sink.ts';
+import type { UiEventSink } from '../runs/ui-event-sink.ts';
 import type { UiEvent } from '../core/ui-events.ts';
 import {
   QUICK_TASK_WORKFLOW,
@@ -281,6 +279,8 @@ type HumanAnswerBudget = { spent: number };
 export class RunManager {
   private readonly active = new Map<string, ActiveRun>();
   private readonly inputReceiptContext: RunModuleContext;
+  private readonly stepSession: StepSession;
+  private readonly sessionHelperHost: sessionEvents.SessionHelperHost;
   private readonly completionGateHost: completionGateReads.CompletionGateHost = {
     active: this.active,
     pendingHumanAskSeq: id => this.pendingHumanAskSeq(id),
@@ -583,6 +583,21 @@ export class RunManager {
       queueWaitWake: id => this.queueWaitWake(id), retryWaitAdmission: id => this.retryWaitAdmission(id),
     }, MAX_AUTO_CONTINUES);
     this.humanWaits = new HumanWaits(this.inputReceiptContext, { routeWorkerQuestion: id => this.routeWorkerQuestion(id) }, MAX_AUTO_CONTINUES);
+    this.sessionHelperHost = {
+      active: this.active, line: this.line, humanWaits: this.humanWaits, inputReceiptHost: this.inputReceiptHost,
+      move: (...args) => this.move(...args),
+      workerExecutionStopped: id => this.workerExecutionStopped(id),
+      executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
+      agentEnvForStep: (...args) => this.agentEnvForStep(...args),
+      sessionContextFor: (...args) => this.sessionContextFor(...args),
+      automationsPart: () => this.automationsPart(),
+      flushAgentInputs: id => this.flushAgentInputs(id),
+      resumeParkedRun: (...args) => this.resumeParkedRun(...args),
+      noteNoWaitNudgeContent: (...args) => this.noteNoWaitNudgeContent(...args),
+      parkedOnWorkers: id => this.parkedOnWorkers(id),
+      releaseSlot: () => this.releaseSlot(),
+      routeWorkerQuestion: id => this.routeWorkerQuestion(id),
+    };
     this.turnNudges = new TurnNudges(this.inputReceiptContext, this.humanWaits, this.line, this.completionGateHost, {
       active: this.active, move: (id, exit, patch) => this.move(id, exit, patch),
       workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
@@ -665,6 +680,15 @@ export class RunManager {
       { discoverSkills: () => this.discoverSkills(), workerExecutionStopped: id => this.workerExecutionStopped(id),
         isCurrentState: (id, state) => this.active.get(id) === state, flushAgentInputs: id => this.flushAgentInputs(id) },
     );
+    this.stepSession = new StepSession(this.inputReceiptContext, {
+      workerExecutionStopped: id => this.workerExecutionStopped(id),
+      executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
+      trackWorkerSessionResult: (...args) => this.trackWorkerSessionResult(...args),
+      workerStep: (...args) => this.workerStep(...args),
+      beginUsageInvocation: (...args) => this.beginUsageInvocation(...args),
+      recordUsagePeaks: id => this.recordUsagePeaks(id),
+    }, this.sessionEventHost(), this.launchPreambleHost(), this.sessionHelperHost, this.line,
+    this.runSkills, this.humanWaits, this.inputReceiptHost, this.inputReceiptSteps);
     this.autoResumeScheduler = new AutoResumeScheduler(
       { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
       { move: (id, exit, patch) => this.move(id, exit, patch),
@@ -3500,162 +3524,16 @@ export class RunManager {
   private async settleExecution(runId: string, state: ActiveRun, loop: StepLoop): Promise<void> { return this.runSettlement.settleExecution(runId, state, loop); }
   private settleFailedRun(runId: string, runError: string, deliveryCapped: boolean): void { this.runSettlement.settleFailedRun(runId, runError, deliveryCapped); }
   /** Returns an error message, or null on success. */
-  private async runAgentStep(
-    runId: string,
-    state: ActiveRun,
-    step: WorkflowStepDef,
-    input: StartRunInput,
-    checkFailure: string | null,
-    /** The step after this one, which this step's done starts; undefined for the last step. */
-    nextStep: WorkflowStepDef | undefined,
-    emit: (event: { type: string; stepId?: string; [k: string]: unknown }) => void,
-    images: ContentBlock[] | undefined,
-    taskBackend: RunnerId,
-    extraSystemPrompt: string | undefined,
-    /** The chain-boundary note for this step (#410), or undefined when the
-     *  workflow has a single agent step and there is no boundary to explain. */
-    chainNote: string | undefined,
-    /** Pasted attachments already materialized to disk (#357) — their absolute
-     *  paths are appended to `userPrompt` so the agent can operate on the
-     *  real files, not just view the inline image blocks. */
-    attachments: PersistedAttachment[] = [],
-    /** Worktree setup's paragraph for the agent (#917) — appended to the opening message. */
-    openingNote?: string,
-  ): Promise<string | null> {
-    const opening = await this.stepOpening(runId, state, step, input, emit, { checkFailure, images, chainNote, attachments, openingNote });
-
-    const sessionId = randomUUID();
-    const backend = step.runner ?? taskBackend;
-    this.store.updateStep(runId, step.id, { sessionId, backend });
-
-    const stepRecord = this.store.getRun(runId)?.steps.find((s) => s.id === step.id);
-    const startTokens = stepRecord?.tokensUsed ?? 0;
-    const turn: SessionTurn = { text: '', completedText: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
-    const sink = this.makeUiSink(runId, step.id);
-    const onEvent = createSessionEventHandler(this.inputReceiptContext, this.sessionEventHost(), {
-      runId, state, turn, stepId: step.id, backend, sink, tokenBase: startTokens, emit,
-      acknowledge: () => true,
-    });
-
-    const stepBackend = step.runner ?? taskBackend;
-    // An owned worker's step runs under what its identity pinned for it (#452): model, effort,
-    // account and grants alike. The bound `workflowDef` carries the same values; the private
-    // evidence is the authority.
-    const stepIdentity = this.workerStep(runId, step.id);
-    const model = await stepModel(this.store, this.repoRoot, runId, state, step, input, stepBackend, stepIdentity);
-    if (typeof model === 'string') return model;
-    // Which agent account this step spawns under, and — recorded on the step before the spawn —
-    // which one its session belongs to. `sessionId` and `profileId` are a pair: a resume that
-    // reads the wrong account's config dir finds no session and silently starts a fresh one.
-    const stepProfile = await this.stepProfileFor(runId, stepBackend, { stepId: step.id });
-    if (typeof stepProfile === 'string') return stepProfile;
-    const beforeSpawn = this.store.getRun(runId);
-    if (state.cancelled || (beforeSpawn && this.executionBlockedByRootFinish(beforeSpawn))) return null;
-    this.store.updateStep(runId, step.id, { profileId: stepProfile.profileId });
-
-    const toolGrant = stepToolGrant(stepIdentity?.grants, step, stepBackend);
-    // Workers inherit only the extra prompt, never the parent's selected skill (#778).
-    state.delegationSettings = { cwd: state.cwd, runner: stepBackend, model: model.backendModel,
-      effort: model.effectiveEffort,
-      agentProfile: stepProfile.profileId, accountBinding: stepProfile.accountBinding, systemPrompt: extraSystemPrompt,
-      ...toolGrantLists(toolGrant) };
-    const runner = createRunner(stepBackend);
-    state.agentSessionError = undefined;
-    state.currentStepId = step.id;
-    state.completedStepId = undefined;
-    this.beginUsageInvocation(runId, state, step.id);
-    const launch = await launchPreamble(this.launchPreambleHost(), runId, state);
-    const { delegation, webhooksPart, ciTools } = launch;
-    // Revalidate after provisioning, then let execute settle cancellation or
-    // requeue a Finish-held step through its existing no-session paths.
-    if (launch.stale) {
-      if (this.workerExecutionStopped(runId)) state.cancelled = true;
-      state.currentStepId = undefined;
-      return null;
-    }
-    state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
-    const launchOpening = this.launchOpening(runId, state, step.id, { body: opening.userPrompt, ciTools });
-    const session = this.startStepSession(runId, state, runner, {
-      step, sessionId, images, opening: launchOpening, skillPrompt: opening.skillPrompt, extraSystemPrompt,
-      toolGrant, profile: stepProfile, model, delegation, webhooksPart, ciTools,
-    }, onEvent, turn, sink);
-    if (typeof session === 'string') return session;
-    return this.awaitStepSession(runId, state, session, { stepId: step.id, nextStep, sink, turn, startTokens, delegation, ciTools });
-  }
-
-  /** A fresh step's opening message, before the open-waits footer and the session-start context,
-   *  and the selected skill's playbook for its system prompt. */
-  private async stepOpening(
-    runId: string,
-    state: ActiveRun,
-    step: WorkflowStepDef,
-    input: StartRunInput,
-    emit: ExecutionEmit,
-    parts: {
-      checkFailure: string | null;
-      images: ContentBlock[] | undefined;
-      chainNote: string | undefined;
-      attachments: PersistedAttachment[];
-      openingNote: string | undefined;
-    },
-  ): Promise<{ userPrompt: string; skillPrompt: string | undefined }> {
-    let skillPrompt: string | undefined;
-    const rawPrompt = applyTemplate(step.prompt ?? '{{task}}', input.task);
-    // The selected skill, a leading `/name`, every skill the prompt names as `/name`, and their
-    // companions go where the agent looks (#1408, #1672).
-    const provisioned = await this.runSkills.provisionRunSkills(runId, state, {
-      stepSkill: step.skill, slash: leadingSlashSkillName(rawPrompt), prompt: rawPrompt,
-    });
-    for (const message of provisioned.notes) emit({ type: 'note', stepId: step.id, message });
-    if (step.skill) {
-      const skill = this.enabledSkills(state).find((s) => s.name === step.skill);
-      if (skill) {
-        // The body alone often does not identify the selected skill. Keep its
-        // name and catalog description in the normalized runner payload so a
-        // numeric task such as "432" still gives the model enough context to
-        // describe the work — and therefore derive a useful title (#432).
-        // A directory team skill outside the worktree names its cache copy (#1024).
-        skillPrompt = skillSystemPrompt(skill, provisioned.filesDir.get(skill.name));
-      } else {
-        emit({
-          type: 'note',
-          stepId: step.id,
-          message: `skill "${step.skill}" not found in .ai/cezar/skills, .ai/skills or the team skills repo — running with the plain prompt`,
-        });
-      }
-    }
-
-    // Opening prompts bypass deliverMessage. Expand before workflow and attachment
-    // context so a leading registry skill matches, without changing the stored task.
-    let userPrompt = expandRegistrySlashSkillText(rawPrompt, this.enabledSkills(state), provisioned.filesDir);
-    if (parts.chainNote) userPrompt = `${parts.chainNote}\n\n---\n\n${userPrompt}`;
-    if (parts.checkFailure) {
-      userPrompt += `\n\nA verification command failed after the previous attempt. Fix the cause. Failing output:\n\n${parts.checkFailure}`;
-    }
-    if (parts.images?.length) {
-      emit({
-        type: 'note',
-        stepId: step.id,
-        message: `${parts.images.length} screenshot${parts.images.length > 1 ? 's' : ''} attached to the task`,
-      });
-    }
-    // Point the agent at the on-disk files (#357) — for an image the base64 block above already
-    // let it *view* the file and this is what lets it *use* it (save, attach to an issue/PR, copy
-    // into the repo); for a non-image attachment (#950) it is the only reference the agent gets
-    // at all. Deliberately NOT nested in the branch above: gating the paths on an image block
-    // existing is what would leave an agent holding a task about a `.pdf` it was never told the
-    // location of.
-    if (parts.attachments.length) userPrompt += `\n\n${pastedAttachmentsText(parts.attachments)}`;
-    if (parts.openingNote) userPrompt += `\n\n${parts.openingNote}`;
-    return { userPrompt, skillPrompt };
+  private async runAgentStep(...args: Parameters<StepSession['runAgentStep']>): Promise<string | null> {
+    return this.stepSession.runAgentStep(...args);
   }
 
   private sessionEventHost(): import('./run/session-events.ts').SessionEventHost {
     return {
-      disposedSessionEvent: (...args) => this.disposedSessionEvent(...args),
+      disposedSessionEvent: (...args) => sessionEvents.disposedSessionEvent(this.inputReceiptContext, this.sessionHelperHost, ...args),
       handleReceiptEvent: (...args) => inputReceipts.handleReceiptEvent(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, ...args),
-      recordSessionFault: (...args) => this.recordSessionFault(...args),
-      markTurnBoundary: (...args) => this.markTurnBoundary(...args),
+      recordSessionFault: (...args) => sessionEvents.recordSessionFault(this.inputReceiptContext, this.sessionHelperHost, ...args),
+      markTurnBoundary: (...args) => sessionEvents.markTurnBoundary(this.inputReceiptContext, this.sessionHelperHost, ...args),
       trackTurnEnd: (...args) => this.trackTurnEnd(...args),
       endTurn: (...args) => this.endTurn(...args),
     };
@@ -3666,143 +3544,23 @@ export class RunManager {
       provisionSession: (...args) => this.provisionSession(...args),
       agentWebhooksPart: () => this.agentWebhooksPart(),
       provisionCiSession: (...args) => this.provisionCiSession(...args),
-      launchStale: (...args) => this.launchStale(...args),
+      launchStale: (...args) => sessionEvents.launchStale(this.inputReceiptContext, this.sessionHelperHost, ...args),
     };
   }
 
-  /** Shutdown left this delegated run to restart recovery: its session's events are dropped, and an
-   *  error still interrupts the session. */
-  private disposedSessionEvent(runId: string, state: ActiveRun, event: AgentEvent): boolean {
-    if (!this.isDisposedDelegatedRun(runId)) return false;
-    if (event.type === 'error') state.session?.interrupt();
-    return true;
-  }
-
-  /** A session's fault: the first one stands, an agent input error recorded before it wins, and the
-   *  session is interrupted. */
-  private recordSessionFault(state: ActiveRun, turn: SessionTurn, message: string): void {
-    // Preserve the initiating fault: interrupt may fail an in-flight HTTP request.
-    turn.sessionError ??= state.agentInputError ?? message;
-    state.agentSessionError = turn.sessionError;
-    state.session?.interrupt();
-  }
-
-  /** The session reached a turn end: retire the inputs it left unread, read the bundled inputs, and
-   *  open the turn boundary with a fresh CI turn id. */
-  private markTurnBoundary(runId: string, state: ActiveRun, event: Extract<AgentEvent, { type: 'turn-end' }>): void {
-    inputReceipts.retireUnreadInputs(this.inputReceiptContext, this.inputReceiptHost, runId, state, event.unconsumedInputIds ?? [], false);
-    inputReceipts.readBundledInputs(this.inputReceiptContext, this.inputReceiptHost, runId, state);
-    state.waitWakeTurn = undefined;
-    state.atTurnBoundary = state.session;
-    state.ciTurnId = randomUUID();
-  }
-
-  /**
-   * The account a step's session spawns under, resolved together with the temp-directory preflight
-   * (#785): the step fails with a named, actionable error instead of spawning a backend whose shell
-   * would return empty output. An account that would open another folder than its own fails the
-   * same way (#1283). Returns the profile, or that error's message.
-   */
   private async stepProfileFor(
     runId: string,
     stepBackend: RunnerId,
     options: { recordedProfileId?: string | undefined; stepId?: string | undefined },
-  ): Promise<StepProfile | string> {
-    try {
-      return await this.agentEnvForStep(runId, stepBackend, options);
-    } catch (err) {
-      if (err instanceof AgentTempDirError || err instanceof AgentAccountUnavailableError) return err.message;
-      throw err;
-    }
-  }
+  ): Promise<StepProfile | string> { return sessionEvents.stepProfileFor(this.inputReceiptContext, this.sessionHelperHost, runId, stepBackend, options); }
 
-  /**
-   * Pre-launch revalidation (hearsay-tools/cezarion#1632). Stop, a stopped execution, a replaced
-   * active run or a root Finish can arrive while provisioning awaits. Then this launch's CI tools
-   * and delegation are revoked, and the run state forgets each one only while it is still this
-   * launch's. The caller settles the run.
-   */
-  private launchStale(runId: string, state: ActiveRun, delegation: LaunchDelegation, ciTools: LaunchCiTools): boolean {
-    const launchRun = this.store.getRun(runId);
-    if (!(state.cancelled || this.workerExecutionStopped(runId) || this.active.get(runId) !== state ||
-      (launchRun && this.executionBlockedByRootFinish(launchRun)))) return false;
-    ciTools?.revoke();
-    if (state.revokeCiTools === ciTools?.revoke) state.revokeCiTools = undefined;
-    delegation?.revoke();
-    if (state.revokeDelegation === delegation?.revoke) state.revokeDelegation = undefined;
-    return true;
-  }
-
-  /** A launch's opening message (hearsay-tools/cezarion#1632): the body, the open-waits footer, the
-   *  resume context of a Continue's checkpoint, then the session-start context in front. */
   private launchOpening(
     runId: string,
     state: ActiveRun,
     stepId: string,
     launch: { body: string; ciTools: LaunchCiTools; checkpoint?: RunRecord['continuationMessage'] },
-  ): LaunchOpening {
-    // Opening prompts bypass live delivery; do not infer tools before provisioning finishes.
-    const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? [], { tools: !!launch.ciTools });
-    const prompt = withResumeContext(footer ? `${launch.body}\n\n${footer}` : launch.body, launch.checkpoint);
-    const sessionContext = this.sessionContextFor(runId, state, stepId, prompt);
-    return { userPrompt: sessionContext.prefix + prompt, handoffInjected: sessionContext.handoffInjected };
-  }
+  ): LaunchOpening { return sessionEvents.launchOpening(this.inputReceiptContext, this.sessionHelperHost, runId, state, stepId, launch); }
 
-  /** Start a fresh step's session. A throw revokes the tools this launch was given and returns its
-   *  message as the step's error. */
-  private startStepSession(
-    runId: string,
-    state: ActiveRun,
-    runner: ReturnType<typeof createRunner>,
-    launch: StepSessionLaunch,
-    onEvent: (event: AgentEvent) => void,
-    turn: SessionTurn,
-    sink: UiEventSink,
-  ): AgentSession | string {
-    const { delegation, ciTools, profile } = launch;
-    let session: AgentSession | undefined;
-    try {
-      session = startManagedSession(runner,
-        {
-          // Skill body, then the run's extra prompt (POST override or config
-          // default), then the handoff contract — every agent step.
-          systemPrompt: composeSystemPrompt(launch.skillPrompt, this.launchSystemTail({
-            extraSystemPrompt: launch.extraSystemPrompt, delegation, webhooksPart: launch.webhooksPart,
-            env: profile.env, ciTools, handoffInjected: launch.opening.handoffInjected,
-          })),
-          userPrompt: launch.opening.userPrompt,
-          images: launch.images,
-          cwd: state.cwd,
-          toolGrant: launch.toolGrant,
-          // The handoff file lives outside the worktree — grant access.
-          additionalDirectories: agentDirectories(join(this.dataDir, 'runs'), profile.env),
-          env: { ...profile.env, ...delegation?.env, ...ciTools?.env },
-          ...(ciTools ? { cezarTools: ciTools.descriptor } : {}),
-          ...(delegation ? { restrictNativeDelegation: delegation.restrictNativeDelegation } : {}),
-          model: launch.model.backendModel,
-          effort: launch.model.effectiveEffort,
-          sessionId: launch.sessionId,
-          // Managed work has no default wall clock, including non-final steps.
-          // Only an authored step opts in; turn completion still advances the chain.
-          timeoutMs: launch.step.timeoutMs ?? 0,
-        },
-        onEvent,
-        inputReceipts.inputReceiptCallbacks(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, runId, state, () => session, turn, sink, false),
-      );
-    } catch (err) {
-      ciTools?.revoke(); state.revokeCiTools = undefined;
-      delegation?.revoke(); state.revokeDelegation = undefined;
-      state.currentStepId = undefined;
-      return err instanceof Error ? err.message : String(err);
-    }
-    return session;
-  }
-
-  /**
-   * The system prompt after the skill playbook (hearsay-tools/cezarion#1632): the run's extra
-   * prompt, the delegation instructions, the automations and project webhooks parts, the artifact
-   * contract, then the handoff contract.
-   */
   private launchSystemTail(launch: {
     extraSystemPrompt: string | undefined;
     delegation: LaunchDelegation;
@@ -3810,113 +3568,11 @@ export class RunManager {
     env: StepProfile['env'];
     ciTools: LaunchCiTools;
     handoffInjected: boolean;
-  }): string {
-    return composeSystemPrompt(
-      launch.extraSystemPrompt,
-      launch.delegation?.instructions,
-      this.automationsPart(),
-      launch.webhooksPart,
-      artifactInstructions(launch.env.CEZ_ARTIFACTS_DIR),
-      handoffInstructions({ tools: !!launch.ciTools, handoffInjected: launch.handoffInjected }),
-    );
-  }
+  }): string { return sessionEvents.launchSystemTail(this.inputReceiptContext, this.sessionHelperHost, launch); }
 
-  /** Wait for a fresh step's session to close. Returns the step's error, or null. Teardown always
-   *  revokes the launch's tools and clears the session's state (`releaseStepSession`). */
-  private async awaitStepSession(runId: string, state: ActiveRun, session: AgentSession, launch: {
-    stepId: string;
-    nextStep: WorkflowStepDef | undefined;
-    sink: UiEventSink;
-    turn: SessionTurn;
-    startTokens: number;
-    delegation: LaunchDelegation;
-    ciTools: LaunchCiTools;
-  }): Promise<string | null> {
-    const { stepId, sink, turn } = launch;
-    const sessionClosed = this.trackWorkerSessionResult(runId, session);
-    state.session = session;
-    state.nextStep = stepScope(session, launch.nextStep);
-    state.sessionEverOpened = true;
-    state.currentStepId = stepId;
-    state.interrupt = () => session.interrupt();
-    let setupComplete = false;
-    try {
-      const result = await inputReceipts.sessionResultWithReceipts(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, runId, state, session, () => { setupComplete = true; });
-      if (this.isDisposedDelegatedRun(runId)) return null;
-      this.persistWorkerAssistantResult(runId, stepId, result.text);
-      const inputOrSessionError = turn.sessionError ?? state.agentInputError;
-      if (inputOrSessionError) {
-        sink.sessionEnded('error', inputOrSessionError);
-        return inputOrSessionError;
-      }
-      // v2 counterpart of v1's `done` (spec: the mappers leave session-close
-      // events to the RunManager — only it knows how the session settled).
-      sink.sessionEnded(state.cancelled ? 'cancelled' : 'end_turn');
-      this.store.updateStep(runId, stepId, { tokensUsed: launch.startTokens + result.tokensUsed });
-      return null;
-    } catch (err) {
-      if (!setupComplete) {
-        try { session.interrupt(); } catch { /* Still wait for actual termination. */ }
-        await sessionClosed;
-      }
-      if (this.isDisposedDelegatedRun(runId)) return null;
-      // Keep the provider failure that triggered teardown, even if teardown rejects.
-      const message = turn.sessionError ?? state.agentInputError ?? (err instanceof Error ? err.message : String(err));
-      sink.sessionEnded('error', message); // alongside v1's fatal `error`
-      return message;
-    } finally {
-      this.releaseStepSession(runId, state, launch.delegation, launch.ciTools);
-    }
-  }
+  private persistWorkerAssistantResult(runId: string, stepId: string, text: string): void { return sessionEvents.persistWorkerAssistantResult(this.inputReceiptContext, this.sessionHelperHost, runId, stepId, text); }
 
-  /** A fresh step's session teardown: revoke the launch's tools, record the usage peaks, and clear
-   *  what its turns left on the run state: the idle timer, the monitoring and waiting marks, the
-   *  turn boundary, the park intents and the session itself. */
-  private releaseStepSession(runId: string, state: ActiveRun, delegation: LaunchDelegation, ciTools: LaunchCiTools): void {
-    ciTools?.revoke(); state.revokeCiTools = undefined;
-    delegation?.revoke(); state.revokeDelegation = undefined;
-    this.recordUsagePeaks(runId);
-    this.clearIdleTimer(state);
-    this.line.leavePool(runId);
-    this.line.unpark(runId);
-    state.nextStep = undefined;
-    state.waitWakeTurn = undefined;
-    state.atTurnBoundary = undefined;
-    state.doneAtBoundary = undefined;
-    state.parkAfterAck = undefined;
-    state.session = undefined;
-    state.currentStepId = undefined;
-    state.interrupt = () => undefined;
-  }
-
-  /** Some adapters return assistant text only in their final result. Preserve that
-   * evidence for collection without duplicating an already persisted transcript. */
-  private persistWorkerAssistantResult(runId: string, stepId: string, text: string): void {
-    if (this.store.getRun(runId)?.delegation?.role !== 'worker' || !text.trim()) return;
-    const present = this.store.readEvents(runId).some(event => {
-      if (event.stepId !== stepId) return false;
-      const item = event.item as { kind?: string; role?: string; text?: string; parentItemId?: string } | undefined;
-      return (event.type === 'text' && typeof event.text === 'string' && !!event.text.trim()) ||
-        (event.type === 'item.completed' && item?.kind === 'message' && item.role === 'assistant' && !item.parentItemId && !!item.text?.trim());
-    });
-    if (!present) this.store.appendEvent(runId, { type: 'text', text, stepId });
-  }
-
-  /**
-   * Protocol-v2 sink for one agent session (R2 step 2.1): the runner's
-   * `onUiEvent` stream flows through here. Persisted snapshots ride the same
-   * NDJSON file as v1 (the store stamps `seq`/`ts`, `appendEvent` fans them
-   * out live too); coalesced `item.delta` flushes go out live-only via
-   * `emitEphemeral` — raw deltas never hit disk (spec §performance
-   * guardrails). One sink per session: cumulative usage dedup and the
-   * item-shape cache are session-scoped, like the mapper state feeding them.
-   */
-  private makeUiSink(runId: string, stepId: string): UiEventSink {
-    return new UiEventSink({
-      persist: (event) => this.store.appendEvent(runId, { ...event, stepId }),
-      emitLive: (event) => this.store.emitEphemeral(runId, { ...event, stepId }),
-    });
-  }
+  private makeUiSink(runId: string, stepId: string): UiEventSink { return sessionEvents.makeUiSink(this.inputReceiptContext, this.sessionHelperHost, runId, stepId); }
 
   private prepareHumanAsk(state: ActiveRun): void { return this.humanWaits.prepareHumanAsk(state); }
   private raiseHumanGate(runId: string, state: ActiveRun): void { return this.humanWaits.raiseHumanGate(runId, state); }
@@ -3932,82 +3588,7 @@ export class RunManager {
   private humanWaitShown(runId: string, wait: HumanWaitEntry | undefined): boolean { return this.humanWaits.humanWaitShown(runId, wait); }
   private recordTurnEndQuestion(runId: string, state: ActiveRun, wait: HumanWaitEntry | undefined, ask: AskRequest | null): void { return this.humanWaits.recordTurnEndQuestion(runId, state, wait, ask); }
 
-  /** Native backend asks arrive before turn-end. Persist and park immediately
-   * so the cockpit shows attention and the run releases its workspace slot. */
-  private handleRunnerUiEvent(runId: string, state: ActiveRun, sink: UiEventSink, event: UiEvent): void {
-    if (this.isDisposedDelegatedRun(runId)) return;
-    recordUsageUiEvent(this.store, runId, state, event);
-    sink.handle(event);
-    if (state.cancelled) return;
-    this.noteNoWaitNudgeContent(runId, state, event);
-    if (isRunnerActivity(event)) {
-      if (state.autonomousNudgePending) { state.autonomousNudgePending = undefined; this.clearIdleTimer(state); }
-      clearHeldHumanInputTimer(state);
-      state.atTurnBoundary = undefined; state.doneAtBoundary = undefined; state.parkAfterAck = undefined;
-    }
-    if (event.type === 'permission.requested') {
-      this.handlePermissionRequested(runId, state, event.requestId);
-      return;
-    }
-    if (event.type === 'permission.resolved' && state.pendingPermissions?.delete(event.requestId)) {
-      this.handlePermissionResolved(runId, state, state.pendingPermissions);
-      return;
-    }
-    const ask = askPayloadOf(event);
-    if (ask) {
-      this.handleNativeAskRequested(runId, state, ask);
-      return;
-    }
-    // Pi can resume autonomously when an async subagent completes — the mapper
-    // synthesizes a parent `turn.started` for that work (#61). Nested child
-    // items without a parent turn must not unpark monitoring or worker waits (#121).
-    // A list worker park (hearsay-tools/cezarion#1235), Cezar's completion wait included
-    // (hearsay-tools/cezarion#1301), resumes the same way.
-    if (this.line.isParked(runId) && (this.line.inPool(runId) || this.parkedOnWorkers(runId)) && isRunnerActivity(event)) {
-      this.resumeParkedRun(runId, state);
-    }
-  }
-
-  private handlePermissionRequested(runId: string, state: ActiveRun, requestId: string): void {
-    (state.pendingPermissions ??= new Set()).add(requestId);
-    this.prepareHumanAsk(state);
-    state.session?.discardQueuedMessages();
-    this.clearIdleTimer(state);
-    clearUnreadInputTimer(state);
-    clearHeldHumanInputTimer(state);
-    this.line.leavePool(runId); // released below; its waits stay open
-    this.line.park(runId);
-    this.move(runId, 'park', { hasPendingPermission: true });
-    if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
-    this.releaseSlot();
-    // Authorization is the human's, even when this run is an owned worker.
-  }
-
-  private handlePermissionResolved(runId: string, state: ActiveRun, pendingPermissions: ReadonlySet<string>): void {
-    if (!pendingPermissions.size) {
-      this.store.updateRun(runId, { hasPendingPermission: false });
-      state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
-      if (!state.pendingHumanAsk && state.session?.open && !this.store.getRun(runId)?.stopping) {
-        this.resumeParkedRun(runId, state);
-        this.flushAgentInputs(runId);
-      }
-    }
-  }
-
-  private handleNativeAskRequested(runId: string, state: ActiveRun, ask: NonNullable<ReturnType<typeof askPayloadOf>>): void {
-    this.prepareHumanAsk(state);
-    // A native ask is a human wait the user already sees (hearsay-tools/cezarion#1234).
-    const questions = askRequestOf({ questions: ask.questions })?.questions;
-    const wait = this.openHumanAlias(runId, state, 'native-ask', questions ? { questions } : undefined);
-    if (wait) this.markHumanWaitSurfaced(runId, wait, questions ? { questions } : undefined);
-    this.clearIdleTimer(state);
-    this.line.leavePool(runId); // released below; its waits stay open
-    this.line.park(runId);
-    this.move(runId, 'park');
-    if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
-    this.releaseSlot();
-    this.routeWorkerQuestion(runId);
-  }
+  private handleRunnerUiEvent(runId: string, state: ActiveRun, sink: UiEventSink, event: UiEvent): void { return sessionEvents.handleRunnerUiEvent(this.inputReceiptContext, this.sessionHelperHost, runId, state, sink, event); }
 
   /** Persist the invocation checkpoint before launching a runner. A throw or
    * process exit before `turn.started` therefore leaves a durable mismatch. */
