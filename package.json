@@ -14,6 +14,7 @@
     "packages/web"
   ],
   "scripts": {
+    "setup:merge-drivers": "node scripts/setup-merge-drivers.mjs",
     "build": "npm run build:server && npm run build:web && npm run check:pack",
     "build:server": "npm run build -w @wjarka/cezarion",
     "build:web": "npm run build -w @open-mercato/cezar-web",
