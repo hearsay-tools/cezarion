@@ -5,7 +5,7 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, rmdirSync,
 import type { FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WorkerSpawnRequest } from '@open-mercato/cezar-contract';
 import type { AgentRunResult, AgentRunSpec, AgentSession } from './agent-runner.ts';
 import * as runners from './runner-factory.ts';
@@ -58,7 +58,9 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
     return { worker, delegation: worker.delegation };
   };
   const launch = async () => {
-    (f.manager as unknown as { pump: MockInstance }).pump.mockRestore();
+    const pump = vi.mocked(runInternals(f.manager).line.pump);
+    expect(pump).toHaveBeenCalled();
+    pump.mockRestore();
     await (runInternals(f.manager).line).pump();
   };
   beforeEach(() => {
