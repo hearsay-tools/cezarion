@@ -1,3 +1,12 @@
+import { IDLE_TIMEOUT_MS, ROUTED_QUESTION_REFUSAL, UNREAD_INPUT_GRACE_MS, NO_WAIT_NUDGE_REPLY_MS, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, SCHEDULE_WAKEUP_MAX_SECONDS, MAX_WAKE_DELIVERY_ATTEMPTS, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WAITS_DISCARDED_NOTE, REFUSAL_DISCARDED_NOTE, QUEUE_WATCHDOG_MS, RESTART_CONTINUATION_PROMPT } from './run/constants.ts';
+export { IDLE_TIMEOUT_MS, UNREAD_INPUT_GRACE_MS, NO_WAIT_NUDGE_REPLY_MS, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WAITS_DISCARDED_NOTE, REFUSAL_DISCARDED_NOTE, QUEUE_WATCHDOG_MS } from './run/constants.ts';
+import { isSyntheticContinuation } from './run/workflow-position.ts';
+import { repositoryRootLockDisabled } from './run/repo-root-lease.ts';
+export { repositoryRootLockDisabled } from './run/repo-root-lease.ts';
+import { isUntouchedCancelledRun } from './run/run-guards.ts';
+export { isUntouchedCancelledRun } from './run/run-guards.ts';
+import { WorkerOrphanAliveError, admissionError } from './run/worker-orphans.ts';
+import type { HumanAnswerBudget, PersistedAttachments } from './run/types.ts';
 import { ContinuationSession } from './run/continuation-session.ts';
 import { StepLoop as WorkflowStepLoop } from './run/step-loop.ts';
 import { RunRecovery } from './run/run-recovery.ts';
@@ -134,103 +143,14 @@ import {
   QUICK_TASK_WORKFLOW, stepKind, type WorkflowDef, type WorkflowStepDef,
 } from './types.ts';
 
-/** An interactive session that hears nothing from the user closes itself. */
-export const IDLE_TIMEOUT_MS = 15 * 60_000;
 import { PROSE_HUMAN_GATE } from '../runs/transcript-facts.ts';
-/** #505: a worker question routed to its parent is answered there until it falls back. */
-const ROUTED_QUESTION_REFUSAL = 'This question was sent to the parent task; answer it there.';
-function isSyntheticContinuation(run: RunRecord, step: StepState): boolean {
-  if (step.synthetic === 'continuation') return true;
-  // Legacy records predate explicit provenance. Only an accepted continuation's
-  // durable message links its generated step; an ID prefix alone is never identity.
-  return (run.continuationMessage?.id === step.id ||
-    (!!run.workflowDef && !run.workflowDef.steps.some(candidate => candidate.id === step.id) &&
-      step.kind === 'agent' && step.name === 'Continue')) && /^continue-\d+$/.test(step.id);
-}
 export { CHECK_KILL_GRACE_MS, CHECK_TERMINATION_CONFIRM_MS } from './grouped-command.ts';
 export { periodicAutosaveEnabled, AUTOSAVE_INTERVAL_MS } from './run/worktree-autosave.ts';
-
-/**
- * Explicitly opt out of the repository-root lease for runs that execute in the
- * current checkout. This covers explicit worktree opt-out, non-Git degradation,
- * and continuations whose worktree cannot be restored (spec 006 hardening, #438).
- * This is intentionally unsafe: concurrent agents may overwrite each other's
- * files or Git state. Isolated worktree runs are unaffected.
- */
-export function repositoryRootLockDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.CEZ_DISABLE_REPO_LOCK === '1';
-}
-
-/** #505: a real steer is read at the harness's next model step; a quiet boundary this long
- * with input still unread means the harness will not read it without help. */
-export const UNREAD_INPUT_GRACE_MS = 30_000;
 /** #486: recheck a turn-end that deferred close/park only because the harness still held a human follow-up. */
 export { HELD_HUMAN_INPUT_RECHECK_MS } from './run/input-delivery.ts';
-
-/** Bound a no-wait nudge that is ACKed but never produces a turn (#544,
- *  hearsay-tools/cezarion#1234). OpenCode heartbeats re-arm the managed-session no-progress
- *  guard, so this is the DEFAULT-path exit when the agent stays silent. Overridable on RunManager. */
-export const NO_WAIT_NUDGE_REPLY_MS = 5 * 60_000;
 export { WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_HEADER } from './run/worker-questions.ts';
-/** A root's done blocked at a turn end is answered with the refusal `cezar_done` gives, as one
- *  automatic turn (hearsay-tools/cezarion#1301). The nudge adds this sentence when live workers block
- *  it; the mid-turn answer never does. */
-export const COMPLETION_WILL_WAIT = 'If you end your turn with done again while these workers are live, Cezar will wait on them for you and wake you when they have all settled.';
-/** Bound one unattended session; an explicit Continue starts a new budget. */
-export const MAX_AUTO_CONTINUES = 40;
-/** Claude's `ScheduleWakeup` accepts at most an hour (hearsay-tools/cezarion#1233). */
-const SCHEDULE_WAKEUP_MAX_SECONDS = 3600;
 export { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE };
 
-/**
- * Consecutive failed automatic attempts to deliver a run's wait results (hearsay-tools/cezarion#1233):
- * each is a session that failed, or closed cleanly, while the results were still owed, counted across
- * the replacement sessions that retry them. At the bound the run settles `failed` and keeps the
- * results for a human. The count is in memory, per manager, so a restart starts it again, like the
- * per-session wake budget. A delivery acknowledgement, human input, Continue, Stop, Finish and
- * cancel reset it; a usage-limit failure is not counted, because its own hold and automatic resume
- * take it.
- */
-export const MAX_WAKE_DELIVERY_ATTEMPTS = 3;
-export const WAKE_DELIVERY_CAP_NOTE = `could not deliver wait results after ${MAX_WAKE_DELIVERY_ATTEMPTS} attempts — continue this task to retry`;
-/** The error of a session that closed cleanly while it still owed wait results. */
-export const WAKE_SESSION_CLOSED_ERROR = 'the session closed before the wait results were delivered';
-/** Stop on a failed run that held wait results: the results and the open waits are gone. */
-export const WAITS_DISCARDED_NOTE = 'Stop discarded the waits this task held and their results; the task stays failed';
-/** Stop on a failed run that only owed a completion refusal (hearsay-tools/cezarion#1301). */
-export const REFUSAL_DISCARDED_NOTE = 'Stop discarded the completion refusal this task still owed; the task stays failed';
-
-/**
- * How often the queue checks that it is not wedged.
- *
- * A hold is the only thing in the engine that can make an idle queue CORRECT, so it is also the
- * only thing that can make a wedged one look correct. This tick is the way out: cheap (a few
- * in-memory checks), unref'd, and it only ever acts when idling has no justification left.
- */
-export const QUEUE_WATCHDOG_MS = 60_000;
-
-const RESTART_CONTINUATION_PROMPT =
-  'The cezar process restarted while you were working on this task. Read the handoff file (CEZ_HANDOFF_FILE) to recover context, then continue the task from where you left off.';
-
-/** What re-reading a message's persisted attachments yields: viewable blocks for the images, and
- *  a path for every attachment including the files that have no block. */
-interface PersistedAttachments {
-  blocks: ContentBlock[];
-  attachments: PersistedAttachment[];
-}
-
-/** Only an original workflow that has never executed may return to its queue. */
-export function isUntouchedCancelledRun(run: RunRecord): boolean {
-  return run.status === 'cancelled' && !run.startedAt && !!run.workflowDef &&
-    run.steps.every(step => step.status === 'pending' && !step.startedAt && !step.sessionId);
-}
-
-/** #469: admission refused because a process of the previous generation still runs. */
-class WorkerOrphanAliveError extends Error {}
-const admissionError = (error: unknown, fallback: string) => error instanceof WorkerOrphanAliveError ? error.message : fallback;
-
-/** Only the synchronous delivery of a human answer uses the budget its reset replaced. */
-type HumanAnswerBudget = { spent: number };
 /**
  * The mini workflow engine: executes a `WorkflowDef` against a repo, one step
  * at a time, persisting every event to the RunStore (which the SSE endpoints
@@ -307,8 +227,6 @@ export class RunManager {
   settleOrphanedWorkerExecution(runId: string, opts: { admitting?: boolean; fresh?: boolean; cwds?: CwdSource } = {}): boolean { return this.orphans.settleOrphanedWorkerExecution(runId, opts); }
   private armOrphanReprobe(runId: string): void { this.orphans.armOrphanReprobe(runId); }
   takeWorkerTerminationBlocker(runId: string): { blocker: WorkerTerminationBlocker; changed: boolean } | undefined { return this.orphans.takeWorkerTerminationBlocker(runId); }
-  private orphanAdmissionRefusal(runId: string): string | undefined { return this.orphans.orphanAdmissionRefusal(runId); }
-  private async reapOrphanedWorker(runId: string, timeoutMs: number): Promise<void> { return this.orphans.reapOrphanedWorker(runId, timeoutMs); }
   private async terminateFinishedWorkerGroups(runId: string, timeoutMs: number): Promise<void> { return this.orphans.terminateFinishedWorkerGroups(runId, timeoutMs); }
 
   private trackTurnEnd(runId: string, text: string): void {
@@ -375,7 +293,6 @@ export class RunManager {
   private readonly cezarPort?: (() => number | undefined) | undefined;
   private ciSupervisor: Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
   private readonly inboxClaims: InboxClaims;
-  private get inboxClaimTimers() { return this.inboxClaims.inboxClaimTimers; }
   private readonly recovery: RunRecovery;
   /** Quiet window before unread input is resubmitted or left unconfirmed (#505). */
   private readonly unreadInputGraceMs: number;
@@ -1030,9 +947,7 @@ export class RunManager {
 
   async registerAsk(runId: string, request: CezarAskRequest, generation: string, capabilitySignal?: AbortSignal): Promise<HumanWaitEntry> { return this.waitRegistry.registerAsk(runId, request, generation, capabilitySignal); }
   async registerWait(runId: string, request: CezarWaitRequestInput, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry | PeerWaitEntry> { return this.waitRegistry.registerWait(runId, request, via, generation, capabilitySignal); }
-  private openWait<W extends Wait>(runId: string, state: ActiveRun, wait: W): W { return this.waitRegistry.openWait(runId, state, wait); }
   cancelWait(runId: string, waitId: string, generation: string) { return this.waitRegistry.cancelWait(runId, waitId, generation); }
-  private readonly workerStatus = (workerId: string): string => this.waitRegistry.workerStatus(workerId);
   private resolveWait(runId: string, waitId: string, result?: CiWaitResult | ProcessWaitResult | PeerWaitResult, observed?: WorkerWaitEntry): void { this.waitRegistry.resolveWait(runId, waitId, result, observed); }
 
   private exitFileRoots(runId: string, run = this.store.getRun(runId)): ExitFileRoots {
@@ -1387,8 +1302,6 @@ export class RunManager {
 
   // ---- usage-limit auto-resume (spec 2026-08-03-auto-resume-after-usage-limit) --------------
 
-  private scheduleAutoResumeIfLimited(runId: string): void { this.autoResumeScheduler.scheduleAutoResumeIfLimited(runId); }
-
   private reconcileAutoResumes(): void { this.autoResumeScheduler.reconcileAutoResumes(); }
 
   private requeueWhileHeld(
@@ -1407,8 +1320,6 @@ export class RunManager {
   }
 
   cancelAutoResume(runId: string): boolean { return this.autoResumeScheduler.cancelAutoResume(runId); }
-
-  private clearAutoResume(runId: string): void { this.autoResumeScheduler.clearAutoResume(runId); }
 
   /** Reclaim finished worktrees beyond the keep-limit (#483) — directory only,
    *  `cez/<id8>` branch kept. Best-effort; a failure never affects run
@@ -1515,7 +1426,6 @@ export class RunManager {
 
   private hydrateQueuedInput(runId: string, input: StartRunInput): StartRunInput { return this.queuedInput.hydrateQueuedInput(runId, input); }
   private hydrateQueuedContinuation(runId: string, value: PendingContinuation) { return this.queuedInput.hydrateQueuedContinuation(runId, value); }
-  private readPersistedAttachments(runId: string, urls: string[], kind: 'task' | 'queued' | 'continuation'): PersistedAttachments { return this.queuedInput.readPersistedAttachments(runId, urls, kind); }
   private toQueuedMessage(runId: string, content: PastedContent[]): QueuedMessage { return this.queuedInput.toQueuedMessage(runId, content); }
   enqueueMessage(runId: string, content: PastedContent[]): QueuedMessage | null { return this.queuedInput.enqueueMessage(runId, content); }
   editQueuedMessage(runId: string, msgId: string, edit: { text?: string; images?: PastedContent[] }): QueuedMessage | null { return this.queuedInput.editQueuedMessage(runId, msgId, edit); }
@@ -1524,16 +1434,6 @@ export class RunManager {
   deferMessage(runId: string, content: PastedContent[]): boolean { return this.queuedInput.deferMessage(runId, content); }
 
   private parentCompletionBlockers(runId: string) { return completionGateReads.parentCompletionBlockers(this.inputReceiptContext, this.completionGateHost, runId); }
-
-  /** A settled-but-uncollected result is work for the parent, not a live worker.
-   * Keep the private termination proof: a public terminal status can precede exit. */
-  private hasLiveWorkers(runId: string): boolean { return completionGateReads.hasLiveWorkers(this.inputReceiptContext, this.completionGateHost, runId); }
-
-  /** Live workers keep a turn end monitoring unless the agent already waits on workers: an open
-   *  worker entry is the wait, so no implicit re-check timer goes beside it (hearsay-tools/cezarion#1235). */
-  private monitorsLiveWorkers(runId: string): boolean { return completionGateReads.monitorsLiveWorkers(this.inputReceiptContext, this.completionGateHost, runId); }
-
-  private delegationFinishBlockedReason(runId: string): string | undefined { return completionGateReads.delegationFinishBlockedReason(this.inputReceiptContext, this.completionGateHost, runId); }
 
   /** The read-only verdict and explicit Finish share this decision. Operational failures
    * (for example a failed durable write) are still handled at execution time. */
@@ -1610,22 +1510,8 @@ export class RunManager {
    *  deliver a stale one (hearsay-tools/cezarion#1301). One an inbox read holds is left to it. */
   private retireCompletionRefusal(runId: string): boolean { return this.turnNudges.retireCompletionRefusal(runId); }
 
-  /** A refusal `queueCompletionRefusal` queued and the run has not received yet. */
-  private owesCompletionRefusal(runId: string): boolean { return completionGateReads.owesCompletionRefusal(this.inputReceiptContext, this.completionGateHost, runId); }
-
-  /** A closing session leaves the run something to reopen for: an agent wait, or a refusal queued
-   *  for it (hearsay-tools/cezarion#1301). A refusal takes a wait's bounded delivery retry, so a
-   *  session that keeps closing before it is submitted stops at `MAX_WAKE_DELIVERY_ATTEMPTS`
-   *  instead of reaching the success path, which would queue the refusal again. */
-  private holdsClosingWakes(runId: string): boolean { return completionGateReads.holdsClosingWakes(this.inputReceiptContext, this.completionGateHost, runId); }
-
-  /** A human message or a wake (hearsay-tools/cezarion#1301): the turn it opens or steers no longer
-   *  answers a refusal nudge, so its blocked done gets a fresh nudge rather than the second step. */
-  private startCompletionCycle(state: ActiveRun): void { startCompletionCycle(state); }
-
   registerWorkerWait(parentId: string, request: WorkerWaitRequest): WorkerWait { return this.waitRegistry.registerWorkerWait(parentId, request); }
   registerWorkerListWait(runId: string, request: { workerIds?: string[]; requestIds?: string[] | undefined; mode?: WorkerWaitRequest['mode']; timeoutSeconds: number }, via: 'cezar_wait' | 'cez-worker-wait'): DeadlinedWorkerWaitEntry { return this.waitRegistry.registerWorkerListWait(runId, request, via); }
-  private registerCompletionWait(runId: string, workerIds: string[], requestIds?: string[]): WorkerWaitEntry { return this.waitRegistry.registerCompletionWait(runId, workerIds, requestIds); }
   registerRequestWait(runId: string, request: RequestWaitRequest): WorkerWait { return this.waitRegistry.registerRequestWait(runId, request); }
   registerPeerWait(runId: string, request: { peerIds: string[]; timeoutSeconds: number }, via: 'cezar_wait' | 'cez-message-wait'): PeerWaitEntry { return this.waitRegistry.registerPeerWait(runId, request, via); }
   cancelPeerWait(runId: string, waitId: string): PeerWaitEntry { return this.waitRegistry.cancelPeerWait(runId, waitId); }
@@ -1665,11 +1551,7 @@ export class RunManager {
 
   private noticeParkedWorker(workerId: string): void { return this.workerQuestions.noticeParkedWorker(workerId); }
 
-  private recoverWorkerMessages(families: readonly RunRecord[], familyRootId: string | undefined): void { return this.workerQuestions.recoverWorkerMessages(families, familyRootId); }
-
   private noticeParkedWorkers(rootId: string): void { return this.workerQuestions.noticeParkedWorkers(rootId); }
-
-  private answersFallenBackAsk(runId: string, opts: { text?: string | undefined; images?: PastedContent[] | undefined }, deferred: boolean): boolean { return this.workerQuestions.answersFallenBackAsk(runId, opts, deferred); }
 
   private routedAsk(runId: string): { askSeq: number; message: ConversationMessage } | undefined { return this.workerQuestions.routedAsk(runId); }
 
@@ -1940,26 +1822,8 @@ export class RunManager {
     return workflowPosition.waitingBeforeFinalWorkflowStep(run, isSyntheticContinuation, record => this.waitingWorkflowStepIndex(record));
   }
 
-  /** A clean process exit cannot complete a workflow still blocked on a question.
-   * Keep its existing durable waiting step so Continue can resume the tail. Cezar's fallback
-   * question on a worker is not one: the clean exit supersedes it, so the workflow goes on as the
-   * plain park it replaced did (hearsay-tools/cezarion#1301). */
-  private supersedeFallbackThenWorkflowAsk(runId: string, state: ActiveRun): boolean { return this.runSettlement.supersedeFallbackThenWorkflowAsk(runId, state); }
-
   private waitingWorkflowStepIndex(run: RunRecord): number {
     return workflowPosition.waitingWorkflowStepIndex(run, isSyntheticContinuation, record => this.ciWorkflowResumeStepIndex(record));
-  }
-
-  /**
-   * Whether a step session closed without its done while a later step waits (hearsay-tools/cezarion#1620).
-   * It reads and clears the done `closeAsDone` recorded. Finish is an explicit stop, settled as before.
-   */
-  private stepLeftOpen(state: ActiveRun, stepId: string, next: WorkflowStepDef | undefined): boolean { return this.runSettlement.stepLeftOpen(state, stepId, next); }
-
-  /** The workflow step after the one a continuation resumes, when that one is not the last: the
-   *  continuation's done completes the resumed step and starts this one (hearsay-tools/cezarion#1620). */
-  private continuationNextStep(runId: string): WorkflowStepDef | undefined {
-    return workflowPosition.continuationNextStep(this.store, runId, record => this.waitingWorkflowStepIndex(record));
   }
 
   private ciWorkflowResumeStepIndex(run: RunRecord): number {
@@ -2117,16 +1981,7 @@ export class RunManager {
     if (loop) await this.runSettlement.settleExecution(runId, state, loop);
   }
 
-  /**
-   * Settles the run once the step loop of `execute` ended: the final autosave, then the
-   * cancelled, failed, incomplete-step, idle-closed or success settlement.
-   */
-  private async settleExecution(runId: string, state: ActiveRun, loop: StepLoop): Promise<void> { return this.runSettlement.settleExecution(runId, state, loop); }
   private settleFailedRun(runId: string, runError: string, deliveryCapped: boolean): void { this.runSettlement.settleFailedRun(runId, runError, deliveryCapped); }
-  /** Returns an error message, or null on success. */
-  private async runAgentStep(...args: Parameters<StepSession['runAgentStep']>): Promise<string | null> {
-    return this.stepSession.runAgentStep(...args);
-  }
 
   private sessionEventHost(): import('./run/session-events.ts').SessionEventHost {
     return {
@@ -2151,18 +2006,10 @@ export class RunManager {
   private makeUiSink(runId: string, stepId: string): UiEventSink { return sessionEvents.makeUiSink(this.inputReceiptContext, this.sessionHelperHost, runId, stepId); }
 
   private prepareHumanAsk(state: ActiveRun): void { return this.humanWaits.prepareHumanAsk(state); }
-  private raiseHumanGate(runId: string, state: ActiveRun): void { return this.humanWaits.raiseHumanGate(runId, state); }
-  private unsurfacedHumanWait(runId: string): HumanWaitEntry | undefined { return this.humanWaits.unsurfacedHumanWait(runId); }
-  private turnEndHumanWait(runId: string): HumanWaitEntry | undefined { return this.humanWaits.turnEndHumanWait(runId); }
   private openHumanAlias(runId: string, state: ActiveRun | undefined, via: WaitVia, card?: AskRequest): HumanWaitEntry | undefined { return this.humanWaits.openHumanAlias(runId, state, via, card); }
   private markHumanWaitSurfaced(runId: string, wait: HumanWaitEntry, shownCard?: AskRequest): void { return this.humanWaits.markHumanWaitSurfaced(runId, wait, shownCard); }
-  private surfaceHumanWait(runId: string, state: ActiveRun | undefined, wait?: HumanWaitEntry): void { return this.humanWaits.surfaceHumanWait(runId, state, wait); }
-  private showCezarHumanWait(runId: string, state: ActiveRun | undefined, wait: HumanWaitEntry, note?: string): void { return this.humanWaits.showCezarHumanWait(runId, state, wait, note); }
   private withdrawCezarHumanWaits(runId: string): void { return this.humanWaits.withdrawCezarHumanWaits(runId); }
   private holdsAgentWaits(runId: string): boolean { return this.humanWaits.holdsAgentWaits(runId); }
-  private latchAskLineCard(runId: string, wait: HumanWaitEntry | undefined, turn: { ask: AskRequest | null; waitCard: boolean }): void { return this.humanWaits.latchAskLineCard(runId, wait, turn); }
-  private humanWaitShown(runId: string, wait: HumanWaitEntry | undefined): boolean { return this.humanWaits.humanWaitShown(runId, wait); }
-  private recordTurnEndQuestion(runId: string, state: ActiveRun, wait: HumanWaitEntry | undefined, ask: AskRequest | null): void { return this.humanWaits.recordTurnEndQuestion(runId, state, wait, ask); }
 
   private handleRunnerUiEvent(runId: string, state: ActiveRun, sink: UiEventSink, event: UiEvent): void { return sessionEvents.handleRunnerUiEvent(this.inputReceiptContext, this.sessionHelperHost, runId, state, sink, event); }
 
@@ -2253,9 +2100,6 @@ export class RunManager {
   private settleTurn(runId: string, state: ActiveRun, entry: 'turn-end' | 'ack' | 'ready' | 'gate', turn: SettledTurn,
     refusal?: CompletionRefusal): boolean { return this.turnSettler.settleTurn(runId, state, entry, turn, refusal); }
 
-  /** The method for each decision kind (`carryOutTurnEnd`). A closed session settles elsewhere, and
-   *  owed input runs as the session's next turn: the run keeps running. */
-
   /** The outcome a settled turn reached, for the parity cells that prove which path ran
    *  (hearsay-tools/cezarion#1809, which removed the handoff heartbeat line that recorded it). No
    *  outcome for the completion gate's refusal outside a turn end, nor while input readiness waits. */
@@ -2274,16 +2118,6 @@ export class RunManager {
    *  turn end (`turnEnd`) asks its parent instead (`askParentForWorker`, hearsay-tools/cezarion#1301);
    *  any other worker fallback stays a plain park. */
   private openTurnEndHumanWait(runId: string, state: ActiveRun, stepId: string | undefined, via: 'no-wait' | 'budget', note: string, turnEnd = false): void { return this.turnSettler.openTurnEndHumanWait(runId, state, stepId, via, note, turnEnd); }
-
-  private askParentForWorker(runId: string, state: ActiveRun, stepId: string | undefined): void { return this.workerQuestions.askParentForWorker(runId, state, stepId); }
-
-  private isWorkerFallbackAsk(runId: string, askSeq: number): boolean { return this.workerQuestions.isWorkerFallbackAsk(runId, askSeq); }
-
-  private pendingWorkerFallback(runId: string): boolean { return this.workerQuestions.pendingWorkerFallback(runId); }
-
-  private chargeWorkerFallbackReply(runId: string, beforeHumanReset?: HumanAnswerBudget): void { return this.workerQuestions.chargeWorkerFallbackReply(runId, beforeHumanReset); }
-
-  private supersedeWorkerFallback(runId: string): boolean { return this.workerQuestions.supersedeWorkerFallback(runId); }
 
   private retireUnreadParentQuestion(parentId: string, requestId: string): void { return this.workerQuestions.retireUnreadParentQuestion(parentId, requestId); }
 

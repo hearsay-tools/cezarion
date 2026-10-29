@@ -78,3 +78,12 @@ export function resumableSessionId(store: Pick<RunStore, 'getRun' | 'readEvents'
   }
   return sessionStep.sessionId;
 }
+
+export function isSyntheticContinuation(run: RunRecord, step: StepState): boolean {
+  if (step.synthetic === 'continuation') return true;
+  // Legacy records predate explicit provenance. Only an accepted continuation's
+  // durable message links its generated step; an ID prefix alone is never identity.
+  return (run.continuationMessage?.id === step.id ||
+    (!!run.workflowDef && !run.workflowDef.steps.some(candidate => candidate.id === step.id) &&
+      step.kind === 'agent' && step.name === 'Continue')) && /^continue-\d+$/.test(step.id);
+}

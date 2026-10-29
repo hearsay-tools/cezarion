@@ -239,3 +239,7 @@ export class WorkerOrphans {
   }
 
 }
+
+/** #469: admission refused because a process of the previous generation still runs. */
+export class WorkerOrphanAliveError extends Error {}
+export const admissionError = (error: unknown, fallback: string) => error instanceof WorkerOrphanAliveError ? error.message : fallback;

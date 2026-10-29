@@ -39,3 +39,9 @@ export function isDisposedDelegatedRun(store: Pick<RunStore, 'getRun'>, disposed
 export function preserveRunAfterDisposal(store: Pick<RunStore, 'getRun'>, disposed: () => boolean, runId: string, state: ActiveRun): boolean {
   return isDisposedDelegatedRun(store, disposed, runId) && !state.cancelled && !state.finishRequested;
 }
+
+/** Only an original workflow that has never executed may return to its queue. */
+export function isUntouchedCancelledRun(run: RunRecord): boolean {
+  return run.status === 'cancelled' && !run.startedAt && !!run.workflowDef &&
+    run.steps.every(step => step.status === 'pending' && !step.startedAt && !step.sessionId);
+}

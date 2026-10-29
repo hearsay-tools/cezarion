@@ -410,6 +410,12 @@ the Phase 4 exit still holds.
 `StartRunInput`, `DelegationExecutionSettings`, `AutomationToolService`, `PastedContent`,
 `toPastedContent`, `isUntouchedCancelledRun`, and the constants and helpers tests import.
 
+In hearsay-tools/cezarion#2227, module-level constants move to `run/constants.ts`; helpers move
+to `workflow-position.ts`, `repo-root-lease.ts`, `run-guards.ts` and `worker-orphans.ts`, and
+local types move to `run/types.ts`. The facade keeps its existing exports. The 35 uncalled
+private delegators and getters listed in that issue are removed after the reader sweep;
+their module implementations stay, including the `run-states.ts` via targets. No test seam changes.
+
 ## Behavior questions
 
 A move never answers these:
