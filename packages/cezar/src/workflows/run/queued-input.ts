@@ -13,8 +13,8 @@ import type { PendingContinuation, RunModuleContext, StartRunInput } from './typ
 
 interface PersistedAttachments { blocks: ContentBlock[]; attachments: PersistedAttachment[] }
 interface QueuedInputHost {
-  pendingJobs: Map<string, { workflow: WorkflowDef; input: StartRunInput; startAt?: number | undefined }>;
-  pendingContinuations: Map<string, PendingContinuation>;
+  hasJob(runId: string): boolean; hasContinuation(runId: string): boolean;
+  job(runId: string): { workflow: WorkflowDef } | undefined;
   canProceedWithRun(runId: string, run: RunRecord | undefined): run is RunRecord;
   activeGet(runId: string): import('../active-run.ts').ActiveRun | undefined;
   startingHas(runId: string): boolean;
@@ -174,7 +174,7 @@ export class QueuedInput {
    * they are the authoritative answer for "can this prompt still be amended".
    */
   private isQueued(runId: string): boolean {
-    return this.host.pendingJobs.has(runId) || this.host.pendingContinuations.has(runId);
+    return this.host.hasJob(runId) || this.host.hasContinuation(runId);
   }
 
   /** Split a pasted message into the persisted shape a stacked message holds. */
@@ -271,7 +271,7 @@ export class QueuedInput {
     if (!this.isQueued(runId)) return false;
     const run = this.context.store.getRun(runId);
     if (!run) return false;
-    const workflow = this.host.pendingJobs.get(runId)?.workflow;
+    const workflow = this.host.job(runId)?.workflow;
     const skillHint = workflow?.steps.find((s) => stepKind(s) === 'agent' && s.skill)?.skill?.trim();
     const refs = refineTaskRefs(extractTaskRefs(task), skillHint);
     // Hand-edited titles always win (#389): `user` beats the heuristic, and a
