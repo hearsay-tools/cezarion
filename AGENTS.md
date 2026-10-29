@@ -513,7 +513,7 @@ current branch's commits as CI does, run
 it prints `docs-only`, `infra-only` or `full-matrix`. Markdown that a Vitest
 test or cockpit browser spec reads (`testReadDocuments`) is never docs-only.
 `.github/scripts/change-surface-readers.test.cjs` fails
-when package code names a docs-only Markdown file by path. No matching tests is
+when a Vitest test or browser spec reads a docs-only file. No matching tests is
 an error: select the relevant test files explicitly and report any coverage gap
 rather than treating it as a pass. Import graphs do not cover every runtime
 dependency, so this command is only iteration feedback, never a replacement for
