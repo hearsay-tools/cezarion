@@ -263,7 +263,6 @@ export class RunManager {
   private ciSupervisor: Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
   private readonly inboxClaims: InboxClaims;
   private readonly recovery: RunRecovery;
-  /** Quiet window after a final-message nudge before a still-silent session parks (#544). */
   private disposed = false;
 
   /** Whether any recovery is in progress: one at a time (`recover`), and `pump` waits for it. */
