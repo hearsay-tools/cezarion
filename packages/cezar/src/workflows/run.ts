@@ -35,6 +35,7 @@ export { makeRunTitle } from '../runs/run-title.ts';
 import { pendingConversationBatch, reservesAutomaticWake, formatAgentInput } from './run/input-batch.ts';
 import { clearUnreadInputTimer, clearHeldHumanInputTimer, harnessOwesInput, harnessHoldsHumanInput, clearNoWaitNudgeReplyTimer, clearIdleTimer, clearAutosaveTimer } from './run/input-timers.ts';
 import * as wakeLedger from './run/wake-ledger.ts';
+import * as stepDecisions from './run/step-decisions.ts';
 import * as pendingAskFacts from './run/pending-ask-facts.ts';
 import * as workflowPosition from './run/workflow-position.ts';
 import { RUN_EXITS, transition, transitionVia, type RunExitId } from './run-states.ts';
@@ -1985,6 +1986,12 @@ export class RunManager {
     return wakeLedger.owesDelivery(this.store, runId, run => this.owesWake(run));
   }
 
+  /** Apply the pure closing-wake decision without moving delivery counters or timers. */
+  private closingWakeDecision(runId: string, holdsClosingWakes: boolean, cancelled: boolean, undelivered: string | undefined): 'park' | 'settle' | 'capped' {
+    const decision = stepDecisions.closingWakeDecision(holdsClosingWakes, cancelled, undelivered);
+    return decision.kind === 'failed-delivery' ? this.failedWakeDelivery(runId, decision.error) : decision.kind;
+  }
+
   /** A delivery, a human or a terminal path ends a run of failed deliveries and its backoff. */
   private resetWakeDelivery(runId: string): void {
     this.clearWakeDeliveryFailures(runId);
@@ -2422,11 +2429,7 @@ export class RunManager {
         ...(grants?.allowedTools === undefined ? {} : { allowedTools: [...grants.allowedTools] }),
         ...(grants?.bashAllowlist === undefined ? {} : { bashAllowlist: [...grants.bashAllowlist] }),
       }] },
-      input: {
-        task: run.task, runner: run.runner, model: run.model, effort: run.effort,
-        agentProfile: run.agentProfile, systemPrompt: run.systemPrompt,
-        autonomous: run.autonomous, worktree: true,
-      },
+      input: { ...queuedRecoveryInput(run), worktree: true },
     };
   }
 
@@ -3137,15 +3140,12 @@ export class RunManager {
   private requeueInterruptedRun(run: RunRecord, interruptedStepId: RunRecord['currentStepId']): boolean {
     const interruptedIndex = run.workflowDef?.steps.findIndex(step => step.id === interruptedStepId) ?? -1;
     const interruptedDef = interruptedIndex >= 0 ? run.workflowDef?.steps[interruptedIndex] : undefined;
-    const requeueInput = () => ({ task: run.task, runner: run.runner, model: run.model, effort: run.effort,
-      agentProfile: run.agentProfile, systemPrompt: run.systemPrompt, autonomous: run.autonomous,
-      worktree: run.worktree });
     // Worktree setup (#917) interrupted before any agent session: there is no session to
     // continue, so start the workflow over. `execute` sees setup still `running` and reruns it.
     if (run.workflowDef && run.worktreeSetup?.status === 'running' && !run.steps.some(step => step.sessionId)) {
       this.move(run.id, 'requeue', { error: undefined, finishedAt: undefined, currentStepId: undefined });
       this.store.flush();
-      this.pendingJobs.set(run.id, { workflow: run.workflowDef, startAt: 0, input: requeueInput() });
+      this.pendingJobs.set(run.id, { workflow: run.workflowDef, startAt: 0, input: queuedRecoveryInput(run) });
       this.queue.push(run.id);
       return true;
     }
@@ -3156,7 +3156,7 @@ export class RunManager {
       this.pendingJobs.set(run.id, {
         workflow: run.workflowDef,
         startAt: interruptedIndex,
-        input: requeueInput(),
+        input: queuedRecoveryInput(run),
       });
       this.queue.push(run.id);
       return true;
@@ -5923,11 +5923,7 @@ export class RunManager {
         // A projection of the job the line will start, not a status write.
         // ast-grep-ignore: run-status-write-outside-transition
         ? this.ownedJob({ ...current, status: 'queued' })
-        : { workflow: current.workflowDef!, input: {
-          task: current.task, runner: current.runner, model: current.model, effort: current.effort,
-          agentProfile: current.agentProfile, systemPrompt: current.systemPrompt,
-          autonomous: current.autonomous, worktree: current.worktree,
-        } };
+        : { workflow: current.workflowDef!, input: queuedRecoveryInput(current) };
       this.beginWorkerExecution(runId, false);
     } catch (error) { return { ok: false, error: admissionError(error, 'original execution checkpoint unavailable') }; }
     if (supersedes) this.supersedeWorkerFallback(runId);
@@ -6680,12 +6676,15 @@ export class RunManager {
       this.store.flush();
     }
     sink.sessionEnded(state.cancelled ? 'cancelled' : 'end_turn');
-    if (state.cancelled) {
+    const incomplete = !state.cancelled && this.stepLeftOpen(state, stepId, resumedNext);
+    const kind = stepDecisions.continuationCloseKind(state.cancelled, incomplete,
+      !state.cancelled && !incomplete && (state.idleClosed || this.unansweredWorkflowAsk(runId, state)));
+    if (kind === 'cancelled') {
       this.settleCancelledContinuation(runId, stepId);
       return undefined;
     }
-    if (this.stepLeftOpen(state, stepId, resumedNext)) return this.settleIncompleteContinuation(runId, stepId);
-    if (!state.idleClosed && !this.unansweredWorkflowAsk(runId, state)) return this.settleDoneContinuation(runId, state, stepId, close);
+    if (kind === 'incomplete') return this.settleIncompleteContinuation(runId, stepId);
+    if (kind === 'done') return this.settleDoneContinuation(runId, state, stepId, close);
     return this.settleIdleClosedRun(runId, state);
   }
 
@@ -6694,7 +6693,7 @@ export class RunManager {
   private settleClosingWakes(runId: string, state: ActiveRun, stepId: string, sink: UiEventSink): void {
     sink.sessionEnded('end_turn');
     // A clean close that leaves results undelivered is a failed delivery too.
-    const delivery = this.owesDelivery(runId) ? this.failedWakeDelivery(runId, WAKE_SESSION_CLOSED_ERROR) : 'park';
+    const delivery = this.closingWakeDecision(runId, true, false, this.owesDelivery(runId) ? WAKE_SESSION_CLOSED_ERROR : undefined);
     if (delivery === 'park') {
       // No turn end will show a human wait this session registered (hearsay-tools/cezarion#1234).
       this.surfaceHumanWait(runId, state);
@@ -6752,16 +6751,7 @@ export class RunManager {
       close.resumeWorkflow = {
         workflow,
         startAt: waitingIndex + 1,
-        input: {
-          task: completed.task,
-          runner: completed.runner,
-          model: completed.model,
-          effort: completed.effort,
-          agentProfile: completed.agentProfile,
-          systemPrompt: completed.systemPrompt,
-          autonomous: completed.autonomous,
-          worktree: completed.worktree,
-        },
+        input: queuedRecoveryInput(completed),
       };
       this.move(runId, 'requeue', { currentStepId: undefined, workflowResumeStepId: undefined });
       // The workflow remainder is a crash boundary. Persist it before the
@@ -6793,7 +6783,7 @@ export class RunManager {
     sink.sessionEnded('error', message);
     this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt: new Date().toISOString() });
     this.withdrawCezarHumanWaits(runId);
-    const delivery = this.holdsClosingWakes(runId) && !state.cancelled ? this.failedWakeDelivery(runId, message) : 'settle';
+    const delivery = this.closingWakeDecision(runId, this.holdsClosingWakes(runId), state.cancelled, message);
     if (delivery === 'park') {
       // Retain the wait and scheduler wake source while closing this attempt.
       // settleSuccess only completes running/waiting steps, so its failure is durable.
@@ -7168,8 +7158,7 @@ export class RunManager {
     }
     // A clean close that leaves results undelivered is a failed delivery too.
     const undelivered = failure ?? (this.owesDelivery(runId) ? WAKE_SESSION_CLOSED_ERROR : undefined);
-    const delivery = this.holdsClosingWakes(runId) && !state.cancelled
-      ? undelivered ? this.failedWakeDelivery(runId, undelivered) : 'park' : 'settle';
+    const delivery = this.closingWakeDecision(runId, this.holdsClosingWakes(runId), state.cancelled, undelivered || undefined);
     if (delivery === 'capped') {
       loop.deliveryCapped = true;
       if (!failure) {
@@ -7200,39 +7189,35 @@ export class RunManager {
   ): number | undefined {
     const { runId, workflow, emit } = execution;
     const step = workflow.steps[index] as WorkflowStepDef;
-    if (check.ok) {
+    const outcome = stepDecisions.checkStepOutcome(workflow, index, record, check.ok);
+    if (outcome.kind === 'done') {
       this.finishStep(runId, step.id, 'done', undefined, emit);
-      return index + 1;
+      return outcome.nextIndex;
     }
 
-    // Retry consumption is distinct from executions: another check may loop
-    // back through this step after it already passed. Persist only the times
-    // this check itself invoked onFail so max remains bounded across restarts.
-    const used = record?.retriesUsed ?? 0;
-    if (step.onFail && used < step.onFail.max) {
+    if (outcome.kind === 'retry') {
       loop.checkFailure = check.output;
       this.finishStep(runId, step.id, 'failed', 'check failed — looping back', emit);
-      const retryIdx = workflow.steps.findIndex((s) => s.id === step.onFail?.retry);
       emit({
         type: 'note',
         stepId: step.id,
-        message: `check failed — retrying from "${step.onFail.retry}" (attempt ${used + 1}/${step.onFail.max})`,
+        message: outcome.note,
       });
       // Steps we're about to re-run go back to pending so the GUI rail
       // reads top-to-bottom truthfully.
-      for (const s of workflow.steps.slice(retryIdx, index + 1)) {
+      for (const s of workflow.steps.slice(outcome.retryIndex, index + 1)) {
         this.store.updateStep(runId, s.id, { status: 'pending' });
       }
-      this.store.updateStep(runId, step.id, { retriesUsed: used + 1 });
+      this.store.updateStep(runId, step.id, { retriesUsed: outcome.used + 1 });
       this.move(runId, 'requeue', { currentStepId: undefined });
       // The retry target and its consumed budget form one crash boundary: a
       // restart must observe the queued target, budget, and cursor together.
       this.store.flush();
-      return retryIdx;
+      return outcome.retryIndex;
     }
 
-    this.finishStep(runId, step.id, 'failed', `\`${step.command}\` exited non-zero`, emit);
-    loop.runError = `check "${step.id}" failed${step.onFail ? ` after ${used + 1} attempts` : ''}`;
+    this.finishStep(runId, step.id, 'failed', outcome.error, emit);
+    loop.runError = outcome.runError;
     return undefined;
   }
 
@@ -7252,13 +7237,15 @@ export class RunManager {
       this.dropActive(runId);
       return;
     }
-    if (state.cancelled) {
+    const settlement = stepDecisions.executionSettlementKind(state.cancelled, loop.runError, loop.incompleteStepId,
+      !state.cancelled && !loop.runError && !loop.incompleteStepId && (state.idleClosed || this.unansweredWorkflowAsk(runId, state)));
+    if (settlement.kind === 'cancelled') {
       this.settleCancelledRun(runId);
-    } else if (loop.runError) {
-      this.settleFailedRun(runId, loop.runError, loop.deliveryCapped);
-    } else if (loop.incompleteStepId) {
-      await this.settleIncompleteStep(runId, loop.incompleteStepId);
-    } else if (state.idleClosed || this.unansweredWorkflowAsk(runId, state)) {
+    } else if (settlement.kind === 'failed') {
+      this.settleFailedRun(runId, settlement.error, loop.deliveryCapped);
+    } else if (settlement.kind === 'incomplete') {
+      await this.settleIncompleteStep(runId, settlement.stepId);
+    } else if (settlement.kind === 'idle') {
       await this.settleIdleClosedRun(runId, state);
       this.dropActive(runId);
       return;
