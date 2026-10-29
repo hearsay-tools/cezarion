@@ -153,14 +153,7 @@ export class InputDelivery {
     // An in-flight acknowledgement still owns this boundary; its .then re-settles.
     if (harnessHoldsHumanInput(state) || state.agentInputFlight) return;
     const proseGate = state.parkAfterAck?.session === session && state.parkAfterAck.humanGate;
-    // A wake beside a pending question can be acknowledged after its turn ended, and its
-    // checkpoint takes the run out of the question's park: park for the question again
-    // (hearsay-tools/cezarion#1233).
-    if (state.pendingHumanAsk && !proseGate && state.atTurnBoundary === session && session.open &&
-      !this.host.line.isParked(runId) && state.currentStepId) {
-      this.host.parkForUser(runId, state, state.currentStepId);
-      return;
-    }
+    if (this.reparkPendingQuestion(runId, state, session, proseGate)) return;
     if (state.atTurnBoundary !== session || (state.pendingHumanAsk && !proseGate) || (!proseGate && this.hasQueuedAgentInputs(runId))) return;
     // The turn end deferred to this acknowledgement (OpenCode HTTP/SSE): the turn that answered an
     // input finished before the input's acknowledgement. Its done, the waits still owed (a wake
@@ -171,6 +164,18 @@ export class InputDelivery {
     if (!done && (this.host.line.isParked(runId) ||
       (state.parkAfterAck?.session !== session && (proseGate || !this.host.humanWaits.holdsAgentWaits(runId))))) return;
     this.host.settleTurn(runId, state, 'ack', this.host.boundaryTurn(runId, state, session, done));
+  }
+
+  private reparkPendingQuestion(runId: string, state: ActiveRun, session: AgentSession, proseGate: boolean | undefined): boolean {
+    // A wake beside a pending question can be acknowledged after its turn ended, and its
+    // checkpoint takes the run out of the question's park: park for the question again
+    // (hearsay-tools/cezarion#1233).
+    if (state.pendingHumanAsk && !proseGate && state.atTurnBoundary === session && session.open &&
+      !this.host.line.isParked(runId) && state.currentStepId) {
+      this.host.parkForUser(runId, state, state.currentStepId);
+      return true;
+    }
+    return false;
   }
 
   armUnreadInputTimer(runId: string, state: ActiveRun): void {
