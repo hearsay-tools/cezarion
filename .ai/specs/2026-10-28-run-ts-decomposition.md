@@ -367,7 +367,7 @@ until Phase 5. The list was checked against `main` at `97335b352`:
   `cancel`, `settleSuccess` (`harness-parity-cells.testkit.ts`), `settleOrphanedWorkerExecution`,
   `routeWorkerQuestion`, `unansweredQuestions`, `parentCompletionBlockers`, `acceptDone`,
   `sendMessage`, `discoverSkills`, `agentEnv`.
-- Replaced on the instance: `agentEnvForStep`, `hydrateQueuedInput`, `execute`
+- Replaced on the instance: `agentEnvForStep`, `execute`
   (`worker-destroy.test.ts`), `recordTurnEnd` (4 files), `pump` and `runContinuation`
   (`run.test.ts`), `settleSuccess` (`worker-wait-capacity.test.ts`), `submitAgentInput`
   (`workflow-step-completion-parity.test.ts`), and the field `ciSupervisor` (Decision 7).
@@ -458,6 +458,13 @@ Phase 5 (hearsay-tools/cezarion#2235) removes `recordTurnEnd` from the facade; i
 integration-test drive, while shipped callers named it only in comments. The bookkeeping,
 nudge, settlement and HumanWaits delegators listed in § Test seams are removed too. Public
 agent-tool entry points and spied function-module seams remain.
+
+Input delivery and receipt test seams now use module instances through `runInternals(manager)`
+(hearsay-tools/cezarion#2234): readiness, submission, delivery and flush use `inputDelivery`;
+queued hydration and deferred buffers use `queuedInput`; attachment writes and counters use
+`attachments`. Restart submission observes `InputDelivery.prototype`. Liveness tests supply
+`unreadInputGraceMs` through the constructor. Receipt callbacks call these instances and the
+`input-timers.ts` functions directly. The public input and inbox facade members stay unchanged.
 
 ## Behavior questions
 

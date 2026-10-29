@@ -55,6 +55,8 @@ function buildEditedQueuedMessage(current: QueuedMessage, msgId: string, text: s
 }
 
 export class QueuedInput {
+  /** Messages after hydration in the dequeue → session-open gap (#472).
+   * Wait-withdrawing entries also retain a durable queue ID until delivered. */
   readonly deferredMessages = new Map<string, Array<{ content: PastedContent[]; messageId?: string }>>();
   constructor(private readonly context: RunModuleContext, private readonly host: QueuedInputHost) {}
 

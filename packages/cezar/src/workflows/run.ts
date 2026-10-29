@@ -300,11 +300,7 @@ export class RunManager {
   private readonly inputDelivery: InputDelivery;
   private readonly runSkills: RunSkills;
   private readonly attachments: AttachmentWriter;
-  private get queuedImageSeq(): Map<string, number> { return this.attachments.queuedImageSeq; }
-  /** Messages after hydration in the dequeue → session-open gap (#472).
-   * Wait-withdrawing entries also retain a durable queue ID until delivered. */
   private readonly queuedInput: QueuedInput;
-  private get deferredMessages() { return this.queuedInput.deferredMessages; }
   private readonly autoResumeScheduler: AutoResumeScheduler;
   private get autoResumeTimers() { return this.autoResumeScheduler.autoResumeTimers; }
   private readonly repoRootLease: RepoRootLease;
@@ -354,7 +350,7 @@ export class RunManager {
       move: (id, exit, patch) => this.move(id, exit, patch), isActive: id => this.isActive(id),
       workerExecutionStopped: id => this.workerExecutionStopped(id), ownedJob: run => this.ownedJob(run),
       resumableSessionId: (id, step) => this.resumableSessionId(id, step), workerStep: (id, step) => this.workerStep(id, step),
-      toQueuedMessage: (id, content) => this.toQueuedMessage(id, content), hydrateQueuedInput: (id, input) => this.hydrateQueuedInput(id, input),
+      toQueuedMessage: (id, content) => this.queuedInput.toQueuedMessage(id, content), hydrateQueuedInput: (id, input) => this.queuedInput.hydrateQueuedInput(id, input),
       enqueueJob: (id, job) => this.line.enqueueJob(id, job), enqueueContinuation: (id, continuation) => this.line.enqueueContinuation(id, continuation),
       isSyntheticContinuation: (run, step) => isSyntheticContinuation(run, step), restartContinuationPrompt: RESTART_CONTINUATION_PROMPT,
       reviveQueuedRun: (run, reason) => this.reviveQueuedRun(run, reason), reviveWorkflow: run => queuedRevival.reviveWorkflow(this.context, this.queuedRevivalHost, run),
@@ -377,7 +373,7 @@ export class RunManager {
     this.workerQuestions = new WorkerQuestions(this.context, {
       active: id => this.active.get(id), deliverConversationInput: id => this.deliverConversationInput(id),
       chargeAutomaticWake: id => this.wakeAdmission.chargeAutomaticWake(id), hasQueuedAgentInputs: id => this.inputDelivery.hasQueuedAgentInputs(id),
-      providerOwnsInboxInput: (id, inputId) => this.providerOwnsInboxInput(id, inputId), reconcileWorkerWaits: id => this.reconcileWorkerWaits(id),
+      providerOwnsInboxInput: (id, inputId) => this.inboxClaims.providerOwnsInboxInput(id, inputId), reconcileWorkerWaits: id => this.reconcileWorkerWaits(id),
       openHumanAlias: (id, state, via, card) => this.humanWaits.openHumanAlias(id, state, via, card), prepareHumanAsk: state => this.humanWaits.prepareHumanAsk(state),
       markHumanWaitSurfaced: (id, wait, card) => this.humanWaits.markHumanWaitSurfaced(id, wait, card), withdrawCezarHumanWaits: id => this.humanWaits.withdrawCezarHumanWaits(id),
       routeWorkerQuestion: id => this.routeWorkerQuestion(id), noticeParkedWorker: id => this.noticeParkedWorker(id),
@@ -467,14 +463,14 @@ export class RunManager {
         holdForMaintenance: ids => this.holdForMaintenance(ids) },
     );
     this.attachments = new AttachmentWriter(this.context,
-      { persistAttachment: (id, mediaType, data, prefix) => this.persistAttachment(id, mediaType, data, prefix) },
+      { persistAttachment: (id, mediaType, data, prefix) => this.attachments.persistAttachment(id, mediaType, data, prefix) },
     );
     this.queuedInput = new QueuedInput(this.context,
       { hasJob: id => this.line.hasJob(id), hasContinuation: id => this.line.hasContinuation(id), job: id => this.line.job(id),
         canProceedWithRun: (id, run): run is RunRecord => this.canProceedWithRun(id, run),
         activeGet: id => this.active.get(id), startingHas: id => this.line.hasStarting(id),
-        persistPastedAttachments: (id, content) => this.persistPastedAttachments(id, content),
-        toQueuedMessage: (id, content) => this.toQueuedMessage(id, content),
+        persistPastedAttachments: (id, content) => this.attachments.persistPastedAttachments(id, content),
+        toQueuedMessage: (id, content) => this.queuedInput.toQueuedMessage(id, content),
         sendMessage: (id, content, messageId) => this.sendMessage(id, content, messageId) },
     );
     this.inboxClaims = new InboxClaims(this.context,
@@ -484,9 +480,9 @@ export class RunManager {
         reconcileWorkerWaits: () => this.reconcileWorkerWaits(), retireEmptyWake: id => this.wakeAdmission.retireEmptyWake(id),
         deliverConversationInput: id => this.deliverConversationInput(id),
         settleIdleBoundary: (id, state, session) => this.inputDelivery.settleIdleBoundary(id, state, session),
-        releaseSlot: () => this.line.releaseSlot(), providerOwnsInboxInput: (id, inputId) => this.providerOwnsInboxInput(id, inputId),
+        releaseSlot: () => this.line.releaseSlot(), providerOwnsInboxInput: (id, inputId) => this.inboxClaims.providerOwnsInboxInput(id, inputId),
         canClaimInboxInput: (id, inputId) => this.canClaimInboxInput(id, inputId),
-        armInboxClaimExpiry: id => this.armInboxClaimExpiry(id) },
+        armInboxClaimExpiry: id => this.inboxClaims.armInboxClaimExpiry(id) },
     );
     this.repoRootLease = new RepoRootLease(this.context,
       { park: id => { this.line.park(id); }, unpark: id => { this.line.unpark(id); },
@@ -982,7 +978,7 @@ export class RunManager {
       // from these URLs when a recovered run eventually starts — and for a file (#950)
       // this write is the ONLY copy, since it never had a block to be rebuilt from.
       if (input.images?.length) {
-        const persisted = this.persistPastedAttachments(run.id, input.images);
+        const persisted = this.attachments.persistPastedAttachments(run.id, input.images);
         if (persisted.length) {
           this.store.updateRun(run.id, { taskImages: persisted.map((saved) => saved.url) });
         }
@@ -1037,12 +1033,11 @@ export class RunManager {
     };
   }
 
-
   /** Read and hydrate mutable queued input in the same synchronous tick as dequeue. */
   private launchQueuedRun(runId: string, job: PendingJob | undefined, continuation: PendingContinuation | undefined): void {
     if (continuation) {
       void (async () => {
-        const hydrated = this.hydrateQueuedContinuation(runId, continuation);
+        const hydrated = this.queuedInput.hydrateQueuedContinuation(runId, continuation);
         await this.context.work.track('runContinuation', this.runContinuation(
           runId,
           hydrated.stepId,
@@ -1063,7 +1058,7 @@ export class RunManager {
     // in the same synchronous tick as the `pendingJobs.delete` above, so no
     // handler can observe a half-dequeued run.
     void (async () => {
-      const input = this.hydrateQueuedInput(runId, job.input);
+      const input = this.queuedInput.hydrateQueuedInput(runId, job.input);
       await this.context.work.track('execute', this.execute(runId, job.workflow, input, job.startAt));
     })().catch((err: unknown) => {
       const message = err instanceof Error ? err.message : String(err);
@@ -1290,9 +1285,6 @@ export class RunManager {
   claimForPublish(runId: string): (() => void) | null { return this.claims.claimForPublish(runId); }
   claimForBranchCleanup(runIds: readonly string[]): (() => void) | null { return this.claims.claimForBranchCleanup(runIds); }
 
-  private hydrateQueuedInput(runId: string, input: StartRunInput): StartRunInput { return this.queuedInput.hydrateQueuedInput(runId, input); }
-  private hydrateQueuedContinuation(runId: string, value: PendingContinuation) { return this.queuedInput.hydrateQueuedContinuation(runId, value); }
-  private toQueuedMessage(runId: string, content: PastedContent[]): QueuedMessage { return this.queuedInput.toQueuedMessage(runId, content); }
   enqueueMessage(runId: string, content: PastedContent[]): QueuedMessage | null { return this.queuedInput.enqueueMessage(runId, content); }
   editQueuedMessage(runId: string, msgId: string, edit: { text?: string; images?: PastedContent[] }): QueuedMessage | null { return this.queuedInput.editQueuedMessage(runId, msgId, edit); }
   removeQueuedMessage(runId: string, msgId: string): boolean { return this.queuedInput.removeQueuedMessage(runId, msgId); }
@@ -1367,10 +1359,6 @@ export class RunManager {
     return pendingAskFacts.hasUnansweredHumanAsk(runId, this.active, id => this.pendingHumanAskSeq(id));
   }
 
-  private providerOwnsInboxInput(runId: string, id: string): boolean {
-    return this.inboxClaims.providerOwnsInboxInput(runId, id);
-  }
-
   canClaimInboxInput(runId: string, id: string): boolean {
     return this.inboxClaims.canClaimInboxInput(runId, id);
   }
@@ -1387,10 +1375,6 @@ export class RunManager {
     return this.inboxClaims.releaseInbox(runId, generation, receiptId);
   }
 
-  private armInboxClaimExpiry(runId: string): void {
-    this.inboxClaims.armInboxClaimExpiry(runId);
-  }
-
   /** Accepted conversation input uses the existing scheduler admission for idle recipients. */
   deliverConversationInput(runId: string): void { return this.inputDelivery.deliverConversationInput(runId); }
 
@@ -1401,7 +1385,6 @@ export class RunManager {
   private noticeParkedWorkers(rootId: string): void { return this.workerQuestions.noticeParkedWorkers(rootId); }
 
   private routedAsk(runId: string): { askSeq: number; message: ConversationMessage } | undefined { return this.workerQuestions.routedAsk(runId); }
-
 
   private retireSettledQuestions(parentId: string): void { return this.workerQuestions.retireSettledQuestions(parentId); }
 
@@ -1535,15 +1518,6 @@ export class RunManager {
     return pendingAskFacts.hasPendingHumanAsk(runId, id => this.pendingHumanAskSeq(id));
   }
 
-
-
-
-
-
-
-
-  private flushDeferred(runId: string): void { this.queuedInput.flushDeferred(runId); }
-
   /**
    * Deliver a user message into the run's live claude session (mid-turn or
    * while `waiting`). Returns false when there is no open session — the GUI
@@ -1566,8 +1540,6 @@ export class RunManager {
         !state.pendingPermissions?.has(requestId)) return false;
     return state.session.respondPermission?.(requestId, optionId) ?? false;
   }
-
-
 
   /** Close the open session gracefully — the run then completes as `done`
    *  (or rests at `review` when the worktree holds changes, spec 009).
@@ -1851,13 +1823,6 @@ export class RunManager {
    */
   private async settleSuccess(runId: string, durableRootFinish = false, keepStepId?: string): Promise<void> { return this.runSettlement.settleSuccess(runId, durableRootFinish, keepStepId); }
 
-  private persistPastedAttachments(runId: string, content: readonly PastedContent[]): PersistedAttachment[] {
-    return this.attachments.persistPastedAttachments(runId, content);
-  }
-
-  private persistAttachment(runId: string, mediaType: string, data: string, namePrefix: string = 'screenshot'): PersistedAttachment | null {
-    return this.attachments.persistAttachment(runId, mediaType, data, namePrefix);
-  }
 
   /** The outcome a settled turn reached, for the parity cells that prove which path ran
    *  (hearsay-tools/cezarion#1809, which removed the handoff heartbeat line that recorded it). No

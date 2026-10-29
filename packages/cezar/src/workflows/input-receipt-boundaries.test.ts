@@ -30,7 +30,6 @@ function signal<T = void>() {
 
 type BoundaryHarness = {
   active: Map<string, ActiveRun>;
-  flushDeferred(id: string): void;
   recordWorkerProcess(id: string, pid: number): void;
   trackWorkerSessionResult(id: string, session: AgentSession): Promise<void>;
 };
@@ -99,7 +98,7 @@ it.each(['fresh', 'continuation'] as const)('%s reads the session at callback ti
     opts.onAgentInputReady?.(); opts.onAgentInputConsumed?.([inputId]);
     expect(saved(id).agentInputs?.[0]?.consumedAt).toBeUndefined();
   });
-  const setup = signal(); vi.spyOn(engine, 'flushDeferred').mockImplementation(() => { setup.resolve(); });
+  const setup = signal(); vi.spyOn(runInternals(manager).queuedInput, 'flushDeferred').mockImplementation(() => { setup.resolve(); });
   id = launch(mode); const opts = await runner.started.promise; await setup.promise;
   const state = engine.active.get(id)!;
   expect(ready.mock.calls[0]).toEqual([id, state, undefined]);
@@ -112,7 +111,7 @@ it.each(['fresh', 'continuation'] as const)('%s reads the session at callback ti
 function throwSetupAt(failure: string) {
   const error = () => { throw new Error(`setup refused: ${failure}`); };
   switch (failure) {
-    case 'deferred': vi.spyOn(engine, 'flushDeferred').mockImplementation(error); break;
+    case 'deferred': vi.spyOn(runInternals(manager).queuedInput, 'flushDeferred').mockImplementation(error); break;
     case 'inputs': vi.spyOn(runInternals(manager).inputDelivery, 'flushAgentInputs').mockImplementation(error); break;
     case 'register': vi.spyOn(processes, 'registerRunProcess').mockImplementation(error); break;
     case 'record': vi.spyOn(engine, 'recordWorkerProcess').mockImplementation(error); break;
@@ -157,7 +156,7 @@ it.each(['fresh', 'continuation'] as const)('%s replaces a changed PID before re
   const runner = controlledRunner(); const calls: string[] = [];
   vi.spyOn(processes, 'replaceRunProcess').mockImplementation(() => { calls.push('replace'); });
   vi.spyOn(engine, 'recordWorkerProcess').mockImplementation(() => { calls.push('record'); });
-  const setup = signal(); vi.spyOn(engine, 'flushDeferred').mockImplementation(() => { setup.resolve(); });
+  const setup = signal(); vi.spyOn(runInternals(manager).queuedInput, 'flushDeferred').mockImplementation(() => { setup.resolve(); });
   const id = launch(mode); const opts = await runner.started.promise; await setup.promise;
   opts.onPidChange?.(23456);
   expect(calls).toEqual(['replace', 'record']);
@@ -168,7 +167,7 @@ it.each(['fresh', 'continuation'] as const)('%s replaces a changed PID before re
 
 it.each(['fresh', 'continuation'] as const)('%s leaves an already prepared session to its result failure handler', async mode => {
   const runner = controlledRunner();
-  const setup = signal(); vi.spyOn(engine, 'flushDeferred').mockImplementation(() => { setup.resolve(); });
+  const setup = signal(); vi.spyOn(runInternals(manager).queuedInput, 'flushDeferred').mockImplementation(() => { setup.resolve(); });
   const id = launch(mode); await setup.promise;
   runner.result.reject(new Error('provider refused'));
   await fixtureWorkSettled(root);
