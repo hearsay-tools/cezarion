@@ -37,7 +37,7 @@ export interface AutomationServiceProject {
   root: string;
   automationStore: AutomationStore;
   store: RunStore;
-  manager: RunManager;
+  manager: Pick<RunManager, 'startRun' | 'cockpitAddress'>;
 }
 
 export interface AutomationServiceDeps {

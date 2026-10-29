@@ -1,3 +1,4 @@
+import type { RunManager } from '../workflows/run.ts';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { RunStore } from '../runs/store.ts';
@@ -132,7 +133,7 @@ export class DelegationController {
   private unavailable() {
     if (!this.warned) { this.warned = true; console.warn('Delegation unavailable; ordinary runs remain enabled.'); }
   }
-  attachProject(project: DelegationProject): () => void {
+  attachProject(project: DelegationProject & { manager: Pick<RunManager, 'setDelegationProvisioner'> }): () => void {
     if (this.closed) return () => {};
     this.projects.get(project.id)?.detach();
     const unregister = this.service.registerProject(project);

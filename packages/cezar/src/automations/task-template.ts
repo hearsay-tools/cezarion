@@ -102,7 +102,7 @@ async function resolveWorkflow(root: string, definition: AutomationDefinition): 
 }
 
 /** `provenance` rides on the input, so the row that creates each run already carries its receipt. */
-function startRun(manager: RunManager, workflow: WorkflowDef, definition: AutomationDefinition, task: string, provenance: Pick<StartRunInput, 'automation' | 'automationTrigger'>) {
+function startRun(manager: Pick<RunManager, 'startRun'>, workflow: WorkflowDef, definition: AutomationDefinition, task: string, provenance: Pick<StartRunInput, 'automation' | 'automationTrigger'>) {
   const input: StartRunInput = {
     ...provenance,
     task,
@@ -134,7 +134,7 @@ function startClaimedRun(store: RunStore, receiptId: string, start: () => { id: 
 
 export async function launchAutomationRun(options: {
   root: string;
-  manager: RunManager;
+  manager: Pick<RunManager, 'startRun'>;
   store: RunStore;
   definition: GithubAutomationDefinition;
   candidate: GithubCandidate;
@@ -169,7 +169,7 @@ export async function launchAutomationRun(options: {
  */
 export async function launchScheduledRun(options: {
   root: string;
-  manager: RunManager;
+  manager: Pick<RunManager, 'startRun'>;
   store: RunStore;
   definition: ScheduleAutomationDefinition;
   occurrence: ScheduleOccurrence;
