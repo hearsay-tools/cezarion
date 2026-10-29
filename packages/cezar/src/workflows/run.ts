@@ -1,4 +1,5 @@
 import { FamilyReconciler } from './run/family-reconciler.ts';
+import * as completionGateReads from './run/completion-gate.ts';
 import { WaitRegistry } from './run/wait-registry.ts';
 import { WaitWatches } from './run/wait-watches.ts';
 import { HumanWaits } from './run/human-waits.ts';
@@ -23,7 +24,7 @@ import type {
   ContinuationSessionLaunch, ContinuationClose, WorkerTerminationBlocker, AutomationToolService,
 } from './run/types.ts';
 export type { TurnTail, DelegationExecutionSettings, StartRunInput, WorkerTerminationBlocker, AutomationToolService } from './run/types.ts';
-import { openCompletionRequests, recordRequestRefusal, repairFailedRootFinish, rootCompletionRefusal, sentRequestInstructions, settledRootFinishPatch, type CompletionRefusal } from './completion-policy.ts';
+import { openCompletionRequests, recordRequestRefusal, repairFailedRootFinish, startCompletionCycle, sentRequestInstructions, settledRootFinishPatch, type CompletionRefusal } from './completion-policy.ts';
 import * as continuation from './continuation-admission.ts';
 import type { ContinueRunOptions } from './continuation-admission.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
@@ -77,7 +78,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AskRequest } from '../core/ask.ts';
 import { type AgentSession } from '../core/claude-cli-runner.ts';
-import { hasRegisteredRunProcess, onUsage, replaceRunProcess, type ProcessUsage } from '../core/process-usage.ts';
+import { onUsage, replaceRunProcess, type ProcessUsage } from '../core/process-usage.ts';
 import { type ExitFileRoots } from '../process-wait/exit-file.ts';
 import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
 import { noJitter, ORPHAN_BACKOFF, retryDelayMs, WAKE_RETRY_BACKOFF, type Backoff } from '../delegation/retry-backoff.ts';
@@ -136,7 +137,6 @@ import { enqueueAgentInput, agentInputBatch, hasLiveInboxClaim } from '../delega
 import { resolvedWaitInputBatch } from './run/resolved-wait-input-batch.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { commitNewMessage, inboxSlotsUsed, projectConversationEvents, rootsAwaitingPeer, settledRunFamilies } from '../delegation/conversations.ts';
-import { parentReadiness } from '../delegation/readiness.ts';
 import { answersQuestion, questionMessage, reservedReplies } from '../delegation/questions.ts';
 import { workerQuestionFallback } from './question-routing.ts';
 import { messagedParentSince, parkNoticeIdInUse, parkNoticeMessage, parkNoticeWait, parkingTurn } from '../delegation/park-notice.ts';
@@ -322,6 +322,15 @@ type HumanAnswerBudget = { spent: number };
 export class RunManager {
   private readonly active = new Map<string, ActiveRun>();
   private readonly inputReceiptContext: RunModuleContext;
+  private readonly completionGateHost: completionGateReads.CompletionGateHost = {
+    active: this.active,
+    pendingHumanAskSeq: id => this.pendingHumanAskSeq(id),
+    isActive: id => this.isActive(id),
+    holdsAgentWaits: id => this.holdsAgentWaits(id),
+    waitingBeforeFinalWorkflowStep: run => this.waitingBeforeFinalWorkflowStep(run),
+    parentCompletionBlockers: id => this.parentCompletionBlockers(id),
+    unansweredQuestions: id => this.unansweredQuestions(id),
+  };
   private readonly queuedRevivalHost: queuedRevival.QueuedRevivalHost;
   private readonly humanWaits: HumanWaits;
   private readonly waitRegistry: WaitRegistry;
@@ -924,11 +933,7 @@ export class RunManager {
     return { ok: true, finishes: 'at_turn_end', ...(next === undefined ? { completes: 'task' as const } : { completes: 'step' as const, next_step: next }), open_waits };
   }
 
-  private completionRefusal(runId: string): CompletionRefusal | undefined {
-    if (this.store.getRun(runId)?.delegation?.role !== 'root') return undefined;
-    return rootCompletionRefusal({ questions: this.unansweredQuestions(runId), blockers: this.parentCompletionBlockers(runId),
-      requests: openCompletionRequests(this.store, runId), incomingRefused: !!this.active.get(runId)?.incomingRequestRefused });
-  }
+  private completionRefusal(runId: string): CompletionRefusal | undefined { return completionGateReads.completionRefusal(this.inputReceiptContext, this.completionGateHost, runId); }
 
   /** The `cezar_done` this session accepted since its last turn end, taken by this turn end: a
    *  later turn must call it again, as it must repeat the done line. */
@@ -2213,66 +2218,24 @@ export class RunManager {
   editTask(runId: string, task: string): boolean { return this.queuedInput.editTask(runId, task); }
   deferMessage(runId: string, content: PastedContent[]): boolean { return this.queuedInput.deferMessage(runId, content); }
 
-  private parentCompletionBlockers(runId: string) {
-    const parent = this.store.getRun(runId);
-    if (parent?.delegation?.role !== 'root') return [];
-    const ids = new Set([...parent.delegation.receipts.map(receipt => receipt.workerId),
-      ...this.store.listWorkersOf(runId).map(run => run.id)]);
-    const workers = parentReadiness(parent, [...ids].map(workerId => ({ workerId, run: this.store.getRun(workerId),
-      terminated: this.store.readWorkerExecution(workerId)?.phase === 'complete', result: this.store.getRun(workerId)
-        ? this.store.readWorkerResult(runId, workerId) : this.store.readDeletedWorkerResult(runId, workerId),
-    })));
-    return [...workers, ...openCompletionRequests(this.store, runId).sent.map(request => ({ workerId: request.recipientRunId, reason: 'request' as const, request }))];
-  }
+  private parentCompletionBlockers(runId: string) { return completionGateReads.parentCompletionBlockers(this.inputReceiptContext, this.completionGateHost, runId); }
 
   /** A settled-but-uncollected result is work for the parent, not a live worker.
    * Keep the private termination proof: a public terminal status can precede exit. */
-  private hasLiveWorkers(runId: string): boolean {
-    return this.parentCompletionBlockers(runId).some(blocker => {
-      const worker = this.store.getRun(blocker.workerId)?.delegation;
-      return blocker.reason === 'outstanding' && worker?.role === 'worker' && worker.parentRunId === runId;
-    });
-  }
+  private hasLiveWorkers(runId: string): boolean { return completionGateReads.hasLiveWorkers(this.inputReceiptContext, this.completionGateHost, runId); }
 
   /** Live workers keep a turn end monitoring unless the agent already waits on workers: an open
    *  worker entry is the wait, so no implicit re-check timer goes beside it (hearsay-tools/cezarion#1235). */
-  private monitorsLiveWorkers(runId: string): boolean {
-    return this.hasLiveWorkers(runId) && !openWaits(this.store.getRun(runId) ?? {}).some(wait => wait.kind === 'worker');
-  }
+  private monitorsLiveWorkers(runId: string): boolean { return completionGateReads.monitorsLiveWorkers(this.inputReceiptContext, this.completionGateHost, runId); }
 
-  private delegationFinishBlockedReason(runId: string): string | undefined {
-    const parent = this.store.getRun(runId);
-    if (parent?.delegation?.role !== 'root') return undefined;
-    if (this.hasPendingHumanAsk(runId) || this.active.get(runId)?.pendingHumanAsk) return 'Answer the pending human question before finishing.';
-    const questions = this.unansweredQuestions(runId);
-    if (questions.length) return `Answer your workers' questions before finishing: ${questions.map(q => q.workerId).join(', ')}`;
-    const blockers = this.parentCompletionBlockers(runId).filter(blocker => blocker.reason !== 'request');
-    return blockers.length ? `Workers must finish or be stopped, prove termination, and have their latest results collected before finishing: ${blockers.map(b => `${b.workerId} (${b.reason})`).join(', ')}` : undefined;
-  }
+  private delegationFinishBlockedReason(runId: string): string | undefined { return completionGateReads.delegationFinishBlockedReason(this.inputReceiptContext, this.completionGateHost, runId); }
 
   /** The read-only verdict and explicit Finish share this decision. Operational failures
    * (for example a failed durable write) are still handled at execution time. */
   private finishDecision(runId: string):
-    { action: 'session' | 'root' | 'waiting' | 'review' } | { reason: string; warn?: boolean } {
-    const blocked = this.delegationFinishBlockedReason(runId);
-    if (blocked) return { reason: blocked, warn: true };
-    if (this.active.get(runId)?.session?.open) return { action: 'session' };
-    const run = this.store.getRun(runId);
-    if (run?.status === 'waiting' && !hasRegisteredRunProcess(runId) && !this.isActive(runId) &&
-      (run.delegation?.role === 'root' || run.delegation === undefined)) {
-      if (this.waitingBeforeFinalWorkflowStep(run)) {
-        return { reason: 'Continue the remaining workflow steps before finishing.' };
-      }
-      return { action: run.delegation?.role === 'root' ? 'root' : 'waiting' };
-    }
-    if (run?.status === 'review' && !this.isActive(runId)) return { action: 'review' };
-    return { reason: 'no open session' };
-  }
+    { action: 'session' | 'root' | 'waiting' | 'review' } | { reason: string; warn?: boolean } { return completionGateReads.finishDecision(this.inputReceiptContext, this.completionGateHost, runId); }
 
-  finishBlockedReason(runId: string): string | undefined {
-    const decision = this.finishDecision(runId);
-    return 'reason' in decision ? decision.reason : undefined;
-  }
+  finishBlockedReason(runId: string): string | undefined { return completionGateReads.finishBlockedReason(this.inputReceiptContext, this.completionGateHost, runId); }
 
   private deferParentCompletion(runId: string): boolean {
     const gate = this.completionGate(runId);
@@ -2321,11 +2284,7 @@ export class RunManager {
   }
 
   /** Human Finish keeps the worker guarantees and bypasses request obligations only. */
-  private completionMayPass(runId: string): boolean {
-    const run = this.store.getRun(runId);
-    const humanFinish = this.active.get(runId)?.finishRequested || (run?.delegation?.role === 'root' && run.delegation.finishRequestedAt);
-    return humanFinish ? this.parentCompletionBlockers(runId).every(blocker => blocker.reason === 'request') : !this.completionRefusal(runId);
-  }
+  private completionMayPass(runId: string): boolean { return completionGateReads.completionMayPass(this.inputReceiptContext, this.completionGateHost, runId); }
 
   /** The session just took a refusal nudge, live or queued (hearsay-tools/cezarion#1301): its turn is
    *  the nudge's, and its reply is bounded by the no-wait nudge's reply timer, so a harness that
@@ -2396,26 +2355,17 @@ export class RunManager {
   }
 
   /** A refusal `queueCompletionRefusal` queued and the run has not received yet. */
-  private owesCompletionRefusal(runId: string): boolean {
-    return !!this.store.getRun(runId)?.agentInputs?.some(input => !input.deliveredAt && input.purpose === 'completion-refusal');
-  }
+  private owesCompletionRefusal(runId: string): boolean { return completionGateReads.owesCompletionRefusal(this.inputReceiptContext, this.completionGateHost, runId); }
 
   /** A closing session leaves the run something to reopen for: an agent wait, or a refusal queued
    *  for it (hearsay-tools/cezarion#1301). A refusal takes a wait's bounded delivery retry, so a
    *  session that keeps closing before it is submitted stops at `MAX_WAKE_DELIVERY_ATTEMPTS`
    *  instead of reaching the success path, which would queue the refusal again. */
-  private holdsClosingWakes(runId: string): boolean {
-    return this.holdsAgentWaits(runId) || this.owesCompletionRefusal(runId);
-  }
+  private holdsClosingWakes(runId: string): boolean { return completionGateReads.holdsClosingWakes(this.inputReceiptContext, this.completionGateHost, runId); }
 
   /** A human message or a wake (hearsay-tools/cezarion#1301): the turn it opens or steers no longer
    *  answers a refusal nudge, so its blocked done gets a fresh nudge rather than the second step. */
-  private startCompletionCycle(state: ActiveRun): void {
-    state.incomingRequestRefused = undefined;
-    state.sentRequestRefused = undefined;
-    state.completionNudged = undefined;
-    state.completionNudgeAnswered = undefined;
-  }
+  private startCompletionCycle(state: ActiveRun): void { startCompletionCycle(state); }
 
   registerWorkerWait(parentId: string, request: WorkerWaitRequest): WorkerWait { return this.waitRegistry.registerWorkerWait(parentId, request); }
   registerWorkerListWait(runId: string, request: { workerIds?: string[]; requestIds?: string[] | undefined; mode?: WorkerWaitRequest['mode']; timeoutSeconds: number }, via: 'cezar_wait' | 'cez-worker-wait'): DeadlinedWorkerWaitEntry { return this.waitRegistry.registerWorkerListWait(runId, request, via); }

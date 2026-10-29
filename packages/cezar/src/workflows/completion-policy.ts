@@ -54,6 +54,17 @@ export function recordRequestRefusal(state: ActiveRun, refusal: CompletionRefusa
   state.sentRequestRefused = true;
 }
 
+
+/** A human message or a wake (hearsay-tools/cezarion#1301): the turn it opens or steers no longer
+ *  answers a refusal nudge, so its blocked done gets a fresh nudge rather than the second step. */
+export function startCompletionCycle(state: ActiveRun): void {
+  state.incomingRequestRefused = undefined;
+  state.sentRequestRefused = undefined;
+  state.completionNudged = undefined;
+  state.completionNudgeAnswered = undefined;
+}
+
+
 /** Only named ledgers are read; incoming peer requests live in their sender's ledger. */
 export function openCompletionRequests(store: RunStore, runId: string) {
   if (store.getRun(runId)?.delegation?.role !== 'root') return { sent: [], incoming: [] };
