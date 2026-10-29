@@ -1,4 +1,5 @@
 import { StepLoop as WorkflowStepLoop } from './run/step-loop.ts';
+import { RunRecovery } from './run/run-recovery.ts';
 import { TurnSettler } from './run/turn-settler.ts';
 import { StepSession } from './run/step-session.ts';
 import * as sessionEvents from './run/session-events.ts';
@@ -390,13 +391,7 @@ export class RunManager {
   private ciSupervisor: Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
   private readonly inboxClaims: InboxClaims;
   private get inboxClaimTimers() { return this.inboxClaims.inboxClaimTimers; }
-  /** What the recovery in progress covers: every run at boot (`family` undefined), or the one
-   *  family an adoption hands it (#779, plan step 3). Undefined: no recovery in progress. */
-  private recoveryScope: { family?: string } | undefined;
-  /** Settles when the recovery in progress (if any) has finished. */
-  private recoveryInFlight: Promise<void> | undefined;
-  /** Adoptions of dead processes' runs, one at a time (`adoptOrphanedRun`). */
-  private adoptionTail: Promise<unknown> = Promise.resolve();
+  private readonly recovery: RunRecovery;
   /** Quiet window before unread input is resubmitted or left unconfirmed (#505). */
   private readonly unreadInputGraceMs: number;
   /** Quiet window after a final-message nudge before a still-silent session parks (#544). */
@@ -404,9 +399,7 @@ export class RunManager {
   private disposed = false;
 
   /** Whether any recovery is in progress: one at a time (`recover`), and `pump` waits for it. */
-  private get recovering(): boolean {
-    return this.recoveryScope !== undefined;
-  }
+  private get recovering(): boolean { return this.recovery.recovering; }
 
   /**
    * Whether a recovery in progress holds this run, so its wakes, input flushes and delegation
@@ -414,13 +407,7 @@ export class RunManager {
    * adopted family's during a recovery scoped to one. The rest of a running project stays live: a
    * wake held back for an unrelated family would be lost, since the scoped passes never revisit it.
    */
-  private recoveringRun(run: RunRecord | string | undefined): boolean {
-    const scope = this.recoveryScope;
-    if (!scope) return false;
-    if (scope.family === undefined) return true;
-    const record = typeof run === 'string' ? this.store.getRun(run) : run;
-    return record !== undefined && familyOf(record) === scope.family;
-  }
+  private recoveringRun(run: RunRecord | string | undefined): boolean { return this.recovery.recoveringRun(run); }
 
   private readonly onDelegationRun = (run: RunRecord, source?: CommitSource): void => {
     // Delegation metadata checkpoints do not change task status.
@@ -679,6 +666,19 @@ export class RunManager {
       { move: (id, exit, patch) => this.move(id, exit, patch),
         continueRun: (id, opts, defer) => this.continueRun(id, opts, defer), pump: () => this.pump() },
     );
+    this.recovery = new RunRecovery(this.inputReceiptContext, this.familyReconciler,
+      this.workerQuestions, this.autoResumeScheduler, {
+      reconcileWorkerWaits: family => this.reconcileWorkerWaits(family),
+      collectOrphanWorkerGenerations: (...args) => this.collectOrphanWorkerGenerations(...args),
+      recoverUnreadInputs: (...args) => this.recoverUnreadInputs(...args),
+      settleOrphanWorkerGenerations: (...args) => this.settleOrphanWorkerGenerations(...args),
+      recoverWorkerScratch: (...args) => this.recoverWorkerScratch(...args),
+      recoverLiveRun: (...args) => this.recoverLiveRun(...args),
+      answerRecoveredRoutedQuestions: (...args) => this.answerRecoveredRoutedQuestions(...args),
+      rearmRecoveredWakes: (...args) => this.rearmRecoveredWakes(...args),
+      recover: (...args) => this.recover(...args),
+      pump: (...args) => this.pump(...args), 
+      });
     this.wakeAdmission = new WakeAdmission(this.inputReceiptContext, {
       active: this.active, retries: this.retries, line: this.line, waitWatches: this.waitWatches, waitRegistry: this.waitRegistry,
       inboxClaims: this.inboxClaims, workerQuestions: this.workerQuestions, humanWaits: this.humanWaits,
@@ -1301,74 +1301,7 @@ export class RunManager {
    * touched: another live process's runs are not in the live set, and the passes that read every
    * worker or root skip their families (#779, plan step 3).
    */
-  async recover(familyRootId?: string): Promise<void> {
-    // A store that could not open (#779) knows none of its runs: recovering it would read "none".
-    if (this.disposed || this.recovering || this.store.unavailable) return;
-    this.recoveryScope = { ...(familyRootId === undefined ? {} : { family: familyRootId }) };
-    let settled!: () => void;
-    this.recoveryInFlight = new Promise<void>((resolve) => { settled = resolve; });
-    const inScope = (run: RunRecord) => familyRootId === undefined || familyOf(run) === familyRootId;
-    try {
-    this.familyReconciler.setRecoveryFactsPending(true);
-    await this.store.prepareRecoveryFacts(familyRootId);
-    if (this.disposed) return;
-    // Public terminal state can precede the private completion checkpoint. Such a family
-    // has no live/deferred anchor, but orphan settlement still appends its lifecycle event.
-    // Prepare only eligible starting generations' families before any repair mutation;
-    // retain IDs, never an ownership or execution snapshot, across readiness.
-    const { orphanWorkerIds, orphanFactIds } = this.collectOrphanWorkerGenerations(familyRootId, inScope);
-    await this.store.prepareTranscriptFacts(orphanFactIds);
-    if (this.disposed) return;
-    this.familyReconciler.setRecoveryFactsPending(false);
-    // Recovery reads the live set (#779): `listRuns()` is the runs `open` loaded by the `live`
-    // column, and finished runs have nothing to recover. The worker passes below go through
-    // indexed queries instead.
-    this.recoverUnreadInputs(inScope);
-    // #469: a generation whose processes died with the old controller is finalized first, so it
-    // re-launches through the ordinary Continue path; live task scratch is retained.
-    // Any worker, finished or not, may hold a generation a dead controller left `starting`. Its
-    // private proof is read first, so only those workers' records are decoded: settling and
-    // re-probing are no-ops for every other proof phase.
-    // Another process's workers are its own to settle.
-    this.settleOrphanWorkerGenerations(orphanWorkerIds, inScope);
-    this.reconcileWorkerWaits(familyRootId);
-    const live = this.store
-      .listRuns()
-      .filter((r) => inScope(r) && ['queued', 'waiting', 'running'].includes(r.status))
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    // Scratch cleanup discovers private evidence independently of the salvageable run index.
-    // Terminal worker cleanup/retries and the generic orphan sweep share this boundary. An
-    // adopted family only schedules its own members: the sweep belongs to restart.
-    this.recoverWorkerScratch(familyRootId);
-    for (const run of live) {
-      // Await only what the run hands back, so a run that settles nothing recovers without
-      // yielding to the work an earlier run started.
-      const settling = this.recoverLiveRun(run);
-      if (settling) await settling;
-    }
-    if (familyRootId === undefined) await this.familyReconciler.reconcileRecoveryWorkerFamilies();
-    if (this.disposed) return;
-    } finally {
-      this.familyReconciler.setRecoveryFactsPending(false);
-      this.recoveryScope = undefined;
-      this.recoveryInFlight = undefined;
-      settled();
-    }
-    // Only a family with a live member has anyone left to route to or fall back from.
-    this.recoverWorkerMessages(familyRootId === undefined ? this.familyReconciler.liveFamilyMembers() : this.familyReconciler.familyMembers(familyRootId), familyRootId);
-    // A parent reply accepted just before the crash still answers its worker (#505), and only a
-    // live worker takes one.
-    this.answerRecoveredRoutedQuestions(inScope);
-    // The rest re-arms wakes from durable state and is idempotent, so it runs for every live run
-    // even after one adopted family: anything the recovery window held back goes out now.
-    this.rearmRecoveredWakes();
-    // Re-arm usage-limit resumes (spec 2026-08-03-auto-resume-after-usage-limit): the wait is
-    // routinely longer than a cezar session, so the deadline is durable and the timer is rebuilt
-    // from it. `pump()` reconciles again on every sweep, so this is the fast path, not the only
-    // one — see `reconcileAutoResumes`.
-    this.reconcileAutoResumes();
-    void this.pump();
-  }
+  async recover(familyRootId?: string): Promise<void> { return this.recovery.recover(familyRootId); }
 
   /** The workers in scope whose generation a dead controller left `starting`, and the members of
    *  their families, whose transcript facts recovery prepares before it settles them. */
@@ -1626,18 +1559,7 @@ export class RunManager {
    * work. Stop cancels its target; only Continue starts work. Serialize adoptions after recovery.
    * False means missing or live-owned.
    */
-  adoptOrphanedRun(runId: string, opts: { stop?: boolean } = {}): Promise<boolean> {
-    const adoption = this.adoptionTail.then(async () => {
-      while (this.recovering && this.recoveryInFlight) await this.recoveryInFlight;
-      if (this.disposed) return false;
-      const family = this.store.adoptFamily(runId, opts);
-      if (family === undefined) return false;
-      await this.recover(family);
-      return true;
-    });
-    this.adoptionTail = adoption.catch(() => undefined);
-    return adoption;
-  }
+  adoptOrphanedRun(runId: string, opts: { stop?: boolean } = {}): Promise<boolean> { return this.recovery.adoptOrphanedRun(runId, opts); }
 
   private async reviveWorkflow(run: RunRecord): Promise<WorkflowDef | null> { return queuedRevival.reviveWorkflow(this.inputReceiptContext, this.queuedRevivalHost, run); }
 
