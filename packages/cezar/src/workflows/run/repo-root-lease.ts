@@ -60,3 +60,14 @@ export class RepoRootLease {
     return true;
   }
 }
+
+/**
+ * Explicitly opt out of the repository-root lease for runs that execute in the
+ * current checkout. This covers explicit worktree opt-out, non-Git degradation,
+ * and continuations whose worktree cannot be restored (spec 006 hardening, #438).
+ * This is intentionally unsafe: concurrent agents may overwrite each other's
+ * files or Git state. Isolated worktree runs are unaffected.
+ */
+export function repositoryRootLockDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.CEZ_DISABLE_REPO_LOCK === '1';
+}

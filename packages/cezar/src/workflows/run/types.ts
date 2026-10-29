@@ -232,3 +232,13 @@ export type SettledTurn = {
   nudgedLastTurn: boolean;
   scheduleWakeup?: number | null | undefined;
 };
+
+/** What re-reading a message's persisted attachments yields: viewable blocks for the images, and
+ *  a path for every attachment including the files that have no block. */
+export interface PersistedAttachments {
+  blocks: ContentBlock[];
+  attachments: PersistedAttachment[];
+}
+
+/** Only the synchronous delivery of a human answer uses the budget its reset replaced. */
+export type HumanAnswerBudget = { spent: number };
