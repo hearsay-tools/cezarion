@@ -1,3 +1,4 @@
+import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import type { RunnerId } from '../core/agent-runner.ts';
 import type { RunRecord } from '../runs/store.ts';
 import type { AccountHolds } from '../workspace/semaphore.ts';
@@ -79,4 +80,29 @@ export function queuedRecoveryInput(run: RunRecord): StartRunInput {
  */
 export function formatWakeInstant(at: Date): string {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'long' }).format(at);
+}
+
+/**
+ * Derive this project’s future-deadline and in-flight account holds from records for the shared
+ * semaphore. Past deadlines do not block the queue.
+ */
+export function deriveAccountHolds(
+  records: RunRecord[],
+  withExecutionAccount: <T extends RunRecord>(run: T) => T,
+  now = Date.now(),
+): AccountHolds {
+  const deadline = new Set<string>();
+  const inFlight = new Set<string>();
+  for (const run of records) {
+    // A holding run always carries the runner it actually ran on, so the fallback is unused
+    // here — it is spelled out rather than `!` so a future record shape degrades, not throws.
+    const key = () => runAccountKey(withExecutionAccount(run), run.runner ?? 'claude');
+    if (isUsageLimitHold(run)) {
+      const at = Date.parse(run.autoResumeAt);
+      if (Number.isFinite(at) && at > now) deadline.add(key());
+    } else if (resumeInFlight(run)) {
+      inFlight.add(key());
+    }
+  }
+  return { deadline, inFlight };
 }
