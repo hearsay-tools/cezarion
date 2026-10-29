@@ -6,7 +6,7 @@ export { repositoryRootLockDisabled } from './run/repo-root-lease.ts';
 import { isUntouchedCancelledRun } from './run/run-guards.ts';
 export { isUntouchedCancelledRun } from './run/run-guards.ts';
 import { WorkerOrphanAliveError, admissionError } from './run/worker-orphans.ts';
-import type { HumanAnswerBudget, PersistedAttachments } from './run/types.ts';
+import type { PersistedAttachments } from './run/types.ts';
 import { ContinuationSession } from './run/continuation-session.ts';
 import { StepLoop as WorkflowStepLoop } from './run/step-loop.ts';
 import { RunRecovery } from './run/run-recovery.ts';
@@ -263,7 +263,6 @@ export class RunManager {
   private ciSupervisor: Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
   private readonly inboxClaims: InboxClaims;
   private readonly recovery: RunRecovery;
-  /** Quiet window before unread input is resubmitted or left unconfirmed (#505). */
   /** Quiet window after a final-message nudge before a still-silent session parks (#544). */
   private disposed = false;
 
@@ -339,6 +338,7 @@ export class RunManager {
     this.cezarPort = options.cezarPort;
     // #774: `serve` knows its bound origin before it recovers, so recovered runs carry it too.
     if (options.cockpit) this.setCockpitAddress(options.cockpit);
+    /** Quiet window before unread input is resubmitted or left unconfirmed (#505). */
     const unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
     this.context = { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed, work: options.work ?? new TrackedWork() };
