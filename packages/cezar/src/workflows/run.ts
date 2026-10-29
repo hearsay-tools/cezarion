@@ -1,3 +1,4 @@
+import { MaintenanceClaims } from './run/maintenance-claims.ts';
 import type {
   DelegationExecutionSettings, StartRunInput, PendingContinuation, ExecutionEmit,
   Execution, ExecutionLaunch, StepLoop, SessionTurn, LaunchDelegation,
@@ -149,7 +150,7 @@ import type { RunOutcome } from '../runs/outcome-commit.ts';
 import { acknowledgedBatch, answerOutcomes, chargedIf, retryDeliveryCheckpoint } from './outcome-batches.ts';
 import { analyseAcknowledgedInput, type AcknowledgedInput } from './input-acknowledgement.ts';
 import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
-import { isReclaimable, reclaimWorktrees, rematerializeReclaimedWorktree } from '../runs/retention.ts';
+import { reclaimWorktrees, rematerializeReclaimedWorktree } from '../runs/retention.ts';
 import {
   AgentTempDirError,
   agentTmpEnv,
@@ -404,7 +405,7 @@ export class RunManager {
 
   private beginWorkerExecution(runId: string, admitted = true): void {
     if (this.store.getRun(runId)?.delegation?.role !== 'worker') return;
-    if (this.reclaiming.has(runId) || !!this.autosaveCleanupBlocker(runId)) throw new Error('Worker resources are being cleaned up');
+    if (this.claims.has(runId) || !!this.autosaveCleanupBlocker(runId)) throw new Error('Worker resources are being cleaned up');
     // #469: one site for Continue, --resume, parent replies and queued revival after a crash.
     // Fresh: admission is one-shot, so a cached "alive" must not refuse an orphan that has since died.
     if (!this.executions.has(runId)) this.settleOrphanedWorkerExecution(runId, { admitting: true, fresh: true });
@@ -740,7 +741,8 @@ export class RunManager {
   private readonly starting = new Set<string>();
   /** Runs whose worktree a reclaim, or whose branch a delete, is removing right now
    *  (`claimWorktreeReclaim`, `claimForBranchCleanup`). `continueRun` refuses them. */
-  private readonly reclaiming = new Set<string>();
+  private readonly claims: MaintenanceClaims;
+  private get reclaiming(): Set<string> { return this.claims.reclaiming; }
   // Runs parked at `waiting` (open session, ball in the user's court). They
   // don't consume a `maxParallel` slot (#347) — an idle claude process costs
   // memory but no tokens, queued work progressing matters more, and the idle
@@ -919,7 +921,7 @@ export class RunManager {
     options: { semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined } = {},
   ) {
     this.dataDir = join(repoRoot, '.ai/cezar');
-    this.workerScratchCleanup = new WorkerScratchCleanup(store, this.dataDir, id => this.isActive(id) || this.executions.has(id) || this.reclaiming.has(id) || !!this.autosaveCleanupBlocker(id));
+    this.workerScratchCleanup = new WorkerScratchCleanup(store, this.dataDir, id => this.isActive(id) || this.executions.has(id) || this.claims.has(id) || !!this.autosaveCleanupBlocker(id));
     this.preview = options.preview;
     this.cezarPort = options.cezarPort;
     // #774: `serve` knows its bound origin before it recovers, so recovered runs carry it too.
@@ -927,6 +929,12 @@ export class RunManager {
     this.unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
     this.noWaitNudgeReplyMs = options.noWaitNudgeReplyMs ?? NO_WAIT_NUDGE_REPLY_MS;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
+    this.claims = new MaintenanceClaims(
+      { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
+      { isActive: id => this.isActive(id), autosaveCleanupBlocker: id => this.autosaveCleanupBlocker(id),
+        hasExecution: id => this.executions.has(id), scheduleScratchCleanup: id => this.workerScratchCleanup.schedule(id),
+        holdForMaintenance: ids => this.holdForMaintenance(ids) },
+    );
     this.ciResources = acquireCiResources(this.semaphore);
     this.ciSupervisor = this.ciResources.supervisor;
     this.offSemaphore = this.semaphore.register({
@@ -2508,7 +2516,7 @@ export class RunManager {
    *  elsewhere. `pump()` and `oldestWakeAt()` share it, so the workspace order and the project
    *  order agree (hearsay-tools/cezarion#1236). */
   private canLeaveLine(id: string, holds: AccountHolds, fallbackRunner: RunnerId): boolean {
-    if (this.reclaiming.has(id) || this.autosaveCleanupBlocker(id)) return false;
+    if (this.claims.has(id) || this.autosaveCleanupBlocker(id)) return false;
     const queued = this.store.getRun(id);
     if (!queued || this.historyDeletionPending(id)) return true;
     if (this.executions.get(id)?.admitted && !this.active.has(id)) return false;
@@ -3308,12 +3316,7 @@ export class RunManager {
   pauseWorkerCleanup(): void { this.workerScratchCleanup.pause(); }
   recoverWorkerCleanup(): void { if (!this.disposed) this.workerScratchCleanup.recover(); }
 
-  /** Hold off every admission path until destructive work (including async Git) completes. */
-  claimWorkerCleanup(runId: string): (() => void) | undefined {
-    if (this.disposed || this.reclaiming.has(runId) || !!this.autosaveCleanupBlocker(runId) || this.isActive(runId) || this.executions.has(runId)) return undefined;
-    this.reclaiming.add(runId);
-    return () => { this.reclaiming.delete(runId); this.workerScratchCleanup.schedule(runId); };
-  }
+  claimWorkerCleanup(runId: string): (() => void) | undefined { return this.claims.claimWorkerCleanup(runId); }
 
   /** Scratch belongs to the task, not its current agent process (#515).
    * Terminal status alone is not process-exit proof: an active session or an
@@ -3321,7 +3324,7 @@ export class RunManager {
   private reapTerminalScratch(runId: string): void {
     const run = this.store.getRun(runId);
     if (!run || ['queued', 'running', 'waiting'].includes(run.status)) return;
-    if (this.active.has(runId) || this.starting.has(runId) || this.queue.includes(runId) || this.reclaiming.has(runId) || !!this.autosaveCleanupBlocker(runId)) return;
+    if (this.active.has(runId) || this.starting.has(runId) || this.queue.includes(runId) || this.claims.has(runId) || !!this.autosaveCleanupBlocker(runId)) return;
     const privateWorkers = workerEvidenceRunIds(this.dataDir);
     if (run.delegation?.role === 'worker' || run.delegation?.role === 'invalid' || !privateWorkers || privateWorkers.includes(runId)) { this.workerScratchCleanup.schedule(runId); return; }
     removeAgentTmpDir(this.dataDir, runId);
@@ -3766,63 +3769,10 @@ export class RunManager {
     return this.executions.has(runId) || this.active.has(runId) || this.starting.has(runId) || this.queue.includes(runId);
   }
 
-  /**
-   * Claim a run's worktree for a reclaim (#483, issue 08 §B4), or null when it is in use or no
-   * longer reclaimable. The check and the claim are one synchronous step, and `continueRun`
-   * refuses a claimed run until the release, so a Continue can never resume into a directory a
-   * forced removal is deleting — nor a removal start under a session that was just admitted.
-   */
-  claimWorktreeReclaim(runId: string): (() => void) | null {
-    if (this.reclaiming.has(runId) || !!this.autosaveCleanupBlocker(runId) || this.isActive(runId) || this.store.writeRefusal(runId)) return null;
-    const run = this.store.getRun(runId);
-    if (!run || !isReclaimable(run, (id) => this.store.getRun(id))) return null;
-    return this.holdForMaintenance([runId]);
-  }
-
-  /**
-   * Hold `runIds` against Continue, reclaim, publish and branch cleanup here AND in every other
-   * cezar process for the length of an async operation (#779, plan step 3; PR #851 review). An
-   * ownership check alone is a moment: pinning claims each run's family, so another process
-   * cannot claim and Continue it while this one rematerializes, publishes or deletes. Null when
-   * any hold fails (another process took the claim first); nothing stays held then.
-   */
-  private holdForMaintenance(runIds: readonly string[]): (() => void) | null {
-    const pinned: string[] = [];
-    for (const id of runIds) {
-      if (!this.store.pin(id, 'maintenance')) {
-        for (const done of pinned) this.store.unpin(done, 'maintenance');
-        return null;
-      }
-      pinned.push(id);
-    }
-    for (const id of runIds) this.reclaiming.add(id);
-    return () => {
-      for (const id of runIds) { this.reclaiming.delete(id); this.store.unpin(id, 'maintenance'); }
-    };
-  }
-
-  /**
-   * Claim a settled run while its draft PR is published (`POST /runs/:id/pr`), or null when it is
-   * live or already claimed. Publishing may first re-materialize a reclaimed checkout, which
-   * clears the reclaim stamp and makes the run reclaimable again; held, the claim keeps reclaim,
-   * branch cleanup and Continue off the checkout until the push and `gh` are done with it.
-   */
-  claimForPublish(runId: string): (() => void) | null {
-    if (this.reclaiming.has(runId) || !!this.autosaveCleanupBlocker(runId) || this.isActive(runId) || this.store.writeRefusal(runId)) return null;
-    return this.holdForMaintenance([runId]);
-  }
-
-  /**
-   * Claim every run that owns a branch about to be deleted (issue 08 §B3), or null when any is in
-   * use: live, queued, at the review gate, or already claimed. The classification that allowed the
-   * delete read liveness before awaiting git and GitHub; this re-reads it and holds Continue off —
-   * its re-materialization would otherwise recreate the branch from the base under the delete.
-   */
-  claimForBranchCleanup(runIds: readonly string[]): (() => void) | null {
-    const unfinished = (id: string) => !['done', 'failed', 'cancelled'].includes(this.store.getRun(id)?.status ?? 'done');
-    if (runIds.some((id) => this.reclaiming.has(id) || !!this.autosaveCleanupBlocker(id) || this.isActive(id) || unfinished(id) || this.store.writeRefusal(id))) return null;
-    return this.holdForMaintenance(runIds);
-  }
+  claimWorktreeReclaim(runId: string): (() => void) | null { return this.claims.claimWorktreeReclaim(runId); }
+  private holdForMaintenance(runIds: readonly string[]): (() => void) | null { return this.claims.holdForMaintenance(runIds); }
+  claimForPublish(runId: string): (() => void) | null { return this.claims.claimForPublish(runId); }
+  claimForBranchCleanup(runIds: readonly string[]): (() => void) | null { return this.claims.claimForBranchCleanup(runIds); }
 
   /**
    * Fold the persisted task and queued message stack immediately before execution. Keep durable
@@ -5883,7 +5833,7 @@ export class RunManager {
     const admitted = new continuation.ContinuationChecks(runId, this.repoRoot, opts, deferForCapacity, conversation, {
       active: () => this.isActive(runId),
       autosaveBlocker: () => this.autosaveCleanupBlocker(runId),
-      reclaiming: () => this.reclaiming.has(runId),
+      reclaiming: () => this.claims.has(runId),
       run: () => this.store.getRun(runId),
       historyDeletionPending: () => this.historyDeletionPending(runId),
       parentInReview: parentId => this.store.getRun(parentId)?.status === 'review',
