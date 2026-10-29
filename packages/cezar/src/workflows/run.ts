@@ -1,3 +1,4 @@
+import { FamilyReconciler } from './run/family-reconciler.ts';
 import { WaitRegistry } from './run/wait-registry.ts';
 import { WaitWatches } from './run/wait-watches.ts';
 import { HumanWaits } from './run/human-waits.ts';
@@ -134,13 +135,11 @@ import { getHeadCommit, getRepoInfo } from '../server/git.ts';
 import { enqueueAgentInput, agentInputBatch, hasLiveInboxClaim } from '../delegation/input.ts';
 import { resolvedWaitInputBatch } from './run/resolved-wait-input-batch.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
-import { reconcileWorkerEntry } from '../delegation/wait.ts';
-import { commitNewMessage, inboxSlotsUsed, reconcileConversationState, projectConversationEvents, rootsAwaitingPeer, settledRunFamilies } from '../delegation/conversations.ts';
+import { commitNewMessage, inboxSlotsUsed, projectConversationEvents, rootsAwaitingPeer, settledRunFamilies } from '../delegation/conversations.ts';
 import { parentReadiness } from '../delegation/readiness.ts';
 import { answersQuestion, questionMessage, reservedReplies } from '../delegation/questions.ts';
 import { workerQuestionFallback } from './question-routing.ts';
 import { messagedParentSince, parkNoticeIdInUse, parkNoticeMessage, parkNoticeWait, parkingTurn } from '../delegation/park-notice.ts';
-import { workerOutcome } from '../runs/delegation-state.ts';
 import * as queuedRevival from './run/queued-revival.ts';
 import type { RunOutcome } from '../runs/outcome-commit.ts';
 import { acknowledgedBatch } from './outcome-batches.ts';
@@ -172,7 +171,7 @@ const CHECK_OUTPUT_CAP = 20_000;
 
 /** An interactive session that hears nothing from the user closes itself. */
 export const IDLE_TIMEOUT_MS = 15 * 60_000;
-import { PROSE_HUMAN_GATE, workerOutcomeKey } from '../runs/transcript-facts.ts';
+import { PROSE_HUMAN_GATE } from '../runs/transcript-facts.ts';
 /** #505: a worker question routed to its parent is answered there until it falls back. */
 const ROUTED_QUESTION_REFUSAL = 'This question was sent to the parent task; answer it there.';
 function isSyntheticContinuation(run: RunRecord, step: StepState): boolean {
@@ -327,6 +326,8 @@ export class RunManager {
   private readonly humanWaits: HumanWaits;
   private readonly waitRegistry: WaitRegistry;
   private readonly waitWatches: WaitWatches;
+  private readonly familyReconciler: FamilyReconciler;
+  private get recoveryFactsPending() { return this.familyReconciler.recoveryFactsPending; }
   private get waitTimers() { return this.waitWatches.waitTimers; }
   private get ciWatches() { return this.waitWatches.ciWatches; }
   private readonly inputReceiptSteps: inputReceipts.InputReceiptSteps = {
@@ -415,8 +416,6 @@ export class RunManager {
   private get waitWakeAdmitted() { return this.line.waitWakeAdmitted; }
   /** CI lookups in flight, keyed by run id and normalized PR URL: two PRs may register at once. */
   private get ciRegistrations() { return this.waitRegistry.ciRegistrations; }
-  /** Worker waits whose resolution write failed and is being retried: the warning is said once. */
-  private readonly workerResolveRetries = new Set<string>();
   /** A wake that could not be admitted yet, retried by run id. */
   private readonly wakeRetries = new Map<string, NodeJS.Timeout>();
   /** The last "retained; continuation unavailable" note per run: the 1 Hz admission retry writes
@@ -436,20 +435,13 @@ export class RunManager {
   /** #781: cezar's own listening port, which no dev server may register. */
   private readonly cezarPort?: (() => number | undefined) | undefined;
   private ciSupervisor: Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
-  /** Each family's conversation request deadlines. Every worker wait, Cezar's completion wait
-   *  included, parks, wakes and times out through the wait list (hearsay-tools/cezarion#1301). */
-  private readonly requestDeadlineTimers = new Map<string, NodeJS.Timeout>();
   private readonly inboxClaims: InboxClaims;
   private get inboxClaimTimers() { return this.inboxClaims.inboxClaimTimers; }
-  private reconcilingWorkers = false;
-  private reconcilingFamily: string | undefined;
-  private readonly pendingReconciliations = new Set<string | undefined>();
   /** What the recovery in progress covers: every run at boot (`family` undefined), or the one
    *  family an adoption hands it (#779, plan step 3). Undefined: no recovery in progress. */
   private recoveryScope: { family?: string } | undefined;
   /** Settles when the recovery in progress (if any) has finished. */
   private recoveryInFlight: Promise<void> | undefined;
-  private recoveryFactsPending = false;
   /** Adoptions of dead processes' runs, one at a time (`adoptOrphanedRun`). */
   private adoptionTail: Promise<unknown> = Promise.resolve();
   /** Quiet window before unread input is resubmitted or left unconfirmed (#505). */
@@ -575,6 +567,14 @@ export class RunManager {
       launchQueuedRun: (id, job, continuation) => this.launchQueuedRun(id, job, continuation),
       reviveQueuedRun: (run, reason) => this.reviveQueuedRun(run, reason), pump: () => this.pump(),
       busySlots: () => this.busySlots(),
+    });
+    this.familyReconciler = new FamilyReconciler(this.inputReceiptContext, {
+      active: id => this.active.get(id), isActive: id => this.isActive(id), recoveringRun: run => this.recoveringRun(run),
+      cancel: id => this.cancel(id), armWait: (id, wait) => this.armWait(id, wait),
+      armWorkerDeadline: (id, wait, delay) => this.armWorkerDeadline(id, wait, delay), disarmWait: id => this.disarmWait(id),
+      resolveWait: (id, waitId, result, observed) => this.resolveWait(id, waitId, result, observed),
+      retireSettledQuestions: id => this.retireSettledQuestions(id), fallbackRoutedQuestions: (id, reason) => this.fallbackRoutedQuestions(id, reason),
+      reconcileWorkerWaits: id => this.reconcileWorkerWaits(id),
     });
     this.waitWatches = new WaitWatches(this.inputReceiptContext, {
       canProceedWithRun: (id, run) => this.canProceedWithRun(id, run), ciSupervisor: () => this.ciSupervisor,
@@ -721,8 +721,7 @@ export class RunManager {
     this.workerExecutions.dispose();
     this.store.off('run', this.onDelegationRun);
     this.store.off('deleted', this.onRunDeleted);
-    for (const timer of this.requestDeadlineTimers.values()) clearTimeout(timer);
-    this.requestDeadlineTimers.clear();
+    this.familyReconciler.dispose();
     this.inboxClaims.dispose();
     this.offUsage();
     this.offSemaphore();
@@ -979,7 +978,7 @@ export class RunManager {
 
   private armWait(runId: string, wait: Wait): void { this.waitWatches.armWait(runId, wait); }
   private armWorkerDeadline(runId: string, wait: WorkerWaitEntry, firstDelay?: number): void { this.waitWatches.armWorkerDeadline(runId, wait, firstDelay); }
-  private disarmWait(waitId: string): void { this.waitWatches.disarmWait(waitId); this.workerResolveRetries.delete(waitId); this.waitWatches.disarmProcessWatch(waitId); }
+  private disarmWait(waitId: string): void { this.waitWatches.disarmWait(waitId); this.familyReconciler.forgetRetry(waitId); this.waitWatches.disarmProcessWatch(waitId); }
   private settleWait(runId: string, waitId: string, result?: CiWaitResult | ProcessWaitResult | PeerWaitResult): void { this.waitWatches.settleWait(runId, waitId, result); }
 
   /** A timer, process or peer wait due, or still owed, once the automatic-wake budget is spent
@@ -1598,7 +1597,7 @@ export class RunManager {
     this.recoveryInFlight = new Promise<void>((resolve) => { settled = resolve; });
     const inScope = (run: RunRecord) => familyRootId === undefined || familyOf(run) === familyRootId;
     try {
-    this.recoveryFactsPending = true;
+    this.familyReconciler.setRecoveryFactsPending(true);
     await this.store.prepareRecoveryFacts(familyRootId);
     if (this.disposed) return;
     // Public terminal state can precede the private completion checkpoint. Such a family
@@ -1608,7 +1607,7 @@ export class RunManager {
     const { orphanWorkerIds, orphanFactIds } = this.collectOrphanWorkerGenerations(familyRootId, inScope);
     await this.store.prepareTranscriptFacts(orphanFactIds);
     if (this.disposed) return;
-    this.recoveryFactsPending = false;
+    this.familyReconciler.setRecoveryFactsPending(false);
     // Recovery reads the live set (#779): `listRuns()` is the runs `open` loaded by the `live`
     // column, and finished runs have nothing to recover. The worker passes below go through
     // indexed queries instead.
@@ -1635,16 +1634,16 @@ export class RunManager {
       const settling = this.recoverLiveRun(run);
       if (settling) await settling;
     }
-    if (familyRootId === undefined) await this.reconcileRecoveryWorkerFamilies();
+    if (familyRootId === undefined) await this.familyReconciler.reconcileRecoveryWorkerFamilies();
     if (this.disposed) return;
     } finally {
-      this.recoveryFactsPending = false;
+      this.familyReconciler.setRecoveryFactsPending(false);
       this.recoveryScope = undefined;
       this.recoveryInFlight = undefined;
       settled();
     }
     // Only a family with a live member has anyone left to route to or fall back from.
-    this.recoverWorkerMessages(familyRootId === undefined ? this.liveFamilyMembers() : this.familyMembers(familyRootId), familyRootId);
+    this.recoverWorkerMessages(familyRootId === undefined ? this.familyReconciler.liveFamilyMembers() : this.familyReconciler.familyMembers(familyRootId), familyRootId);
     // A parent reply accepted just before the crash still answers its worker (#505), and only a
     // live worker takes one.
     this.answerRecoveredRoutedQuestions(inScope);
@@ -1712,7 +1711,7 @@ export class RunManager {
   /** Restart sweeps every worker's scratch; an adopted family schedules only its own members. */
   private recoverWorkerScratch(familyRootId: string | undefined): void {
     if (familyRootId === undefined) this.workerScratchCleanup.recover();
-    else for (const run of this.familyMembers(familyRootId)) this.workerScratchCleanup.schedule(run.id);
+    else for (const run of this.familyReconciler.familyMembers(familyRootId)) this.workerScratchCleanup.schedule(run.id);
   }
 
   /**
@@ -2737,12 +2736,6 @@ export class RunManager {
     return workerWaitEntryToLegacy(cancelled ?? { ...entry, phase: 'cancelled', cancelledAt: new Date().toISOString() });
   }
 
-  /** A turn of this run is executing now: a recovered run's is not, whatever it last recorded. */
-  private isExecutingWorkerWaitTurn(runId: string): boolean {
-    const state = this.active.get(runId);
-    return !!state?.session?.open && !state.cancelled && !this.recoveringRun(runId) && state.atTurnBoundary !== state.session;
-  }
-
   private rootFinishRequested(runId: string): boolean {
     return rootFinishRequested(this.store, runId);
   }
@@ -2777,228 +2770,8 @@ export class RunManager {
     }
     catch { console.warn('[cez] parent finish checkpoint failed; intent retained for retry'); }
   }
-  /** Request deadlines share the existing reconciliation timer registry, never a polling loop. */
-  private reconcileConversations(family: readonly RunRecord[]): void {
-    const now = new Date().toISOString();
-    for (const root of family) {
-      if (root.delegation?.role !== 'root' || !root.delegation.conversation) continue;
-      const next = reconcileConversationState(root, (id) => this.store.getRun(id), now, run =>
-        run.delegation?.role === 'worker' ? this.store.readWorkerExecution(run.id)?.phase === 'complete' : !this.isActive(run.id), id => this.store.isUnreadable(id));
-      if (next && next !== root.delegation.conversation) this.store.commitConversation(root.id, next);
-      projectConversationEvents(this.store, this.store.getRun(root.id)!);
-      this.retireSettledQuestions(root.id);
-      const key = `conversation:${root.id}`;
-      const timer = this.requestDeadlineTimers.get(key);
-      if (timer) { clearTimeout(timer); this.requestDeadlineTimers.delete(key); }
-      const deadlines = next?.messages.filter(message => message.kind === 'request' && message.deadline &&
-        !next.outcomes.some(outcome => outcome.requestId === message.id)).map(message => Date.parse(message.deadline!)) ?? [];
-      if (deadlines.length) {
-        const arm = (delay: number) => {
-          const handle = setTimeout(() => {
-            this.requestDeadlineTimers.delete(key);
-            // This root's own family by name: it may have no live member left by its deadline
-            // (#779), which the pass over live families would skip.
-            try { this.reconcileWorkerWaits(root.id); this.reconcileWorkerWaits(); }
-            catch {
-              // A failed disk checkpoint retains the obligation; a bounded retry follows the
-              // same failure policy as worker wait deadlines, never drops an unhandled error.
-              if (!this.disposed) arm(1_000);
-            }
-          }, delay);
-          handle.unref?.(); this.requestDeadlineTimers.set(key, handle);
-        };
-        arm(Math.max(0, Math.min(...deadlines) - Date.now()));
-      }
-    }
-  }
-
-  /** One delegation family: its root, then the root's direct workers (the store's
-   *  `parent_run_id` query). Workers cannot delegate, so this never recurses. */
-  private familyMembers(rootId: string): RunRecord[] {
-    const root = this.store.getRun(rootId);
-    return [...(root ? [root] : []), ...this.store.listWorkersOf(rootId)];
-  }
-
-  /** Every member of every family with a live member, each once: the families the store holds
-   *  in memory (#779), which is where every delegation sweep that is not about one family looks. */
-  private liveFamilyMembers(): RunRecord[] {
-    const roots = new Set<string>();
-    for (const run of this.store.listRuns()) {
-      if (run.delegation?.role === 'root') roots.add(run.id);
-      else if (run.delegation?.role === 'worker') roots.add(run.delegation.parentRunId);
-    }
-    return [...roots].flatMap(rootId => this.familyMembers(rootId));
-  }
-
-  /**
-   * Recovery's full pass (#661): every family whose root carries a conversation — settled ones
-   * too, so a projection or outcome a crash interrupted is repaired — then every live family.
-   * Only roots with a conversation are read; a settled family without one has nothing to settle:
-   * the other repair the sweep makes on a finished member (a cancelled root's Finish
-   * intent) is a clause of `isLiveRecord`, so open already holds that family.
-   * Everything else asks `reconcileWorkerWaits()`, which covers the live families (#779).
-   */
-  private async reconcileRecoveryWorkerFamilies(): Promise<void> {
-    for (const rootId of this.store.listConversationRootIds()) {
-      if (this.store.writeRefusal(rootId)) continue;
-      this.recoveryFactsPending = true;
-      await this.store.prepareRecoveryFacts(rootId);
-      if (this.disposed) return;
-      this.recoveryFactsPending = false;
-      this.reconcileWorkerWaits(rootId);
-    }
-  }
-
-  reconcileAllWorkerFamilies(): void {
-    // Another process's families are its own to repair (#779, plan step 3).
-    for (const rootId of this.store.listConversationRootIds()) if (!this.store.writeRefusal(rootId)) this.reconcileWorkerWaits(rootId);
-    this.reconcileWorkerWaits();
-  }
-
-  /** Authority and wait live on disk; these collections are admission/timer caches only. One
-   *  family by its root's id, or (no id) every family with a live member. */
-  reconcileWorkerWaits(familyRootId?: string): void {
-    if (this.disposed) return;
-    if (this.reconcilingWorkers) {
-      // The current pass already observes its own writes. A different family
-      // (or an explicit global pass) must not disappear behind the recursion guard.
-      if (this.reconcilingFamily !== undefined && this.reconcilingFamily !== familyRootId) {
-        this.pendingReconciliations.add(familyRootId);
-      }
-      return;
-    }
-    this.pendingReconciliations.add(familyRootId);
-    for (const pending of this.pendingReconciliations) {
-      this.pendingReconciliations.delete(pending);
-      if (this.disposed) break;
-      this.reconcileWorkerFamily(pending);
-    }
-  }
-
-  private reconcileWorkerFamily(familyRootId?: string): void {
-    this.reconcilingWorkers = true;
-    this.reconcilingFamily = familyRootId;
-    try {
-      // One family by name, or every family with a live member (#779): a family nobody in it is
-      // live has nothing left to settle, and its members are no longer in memory.
-      const family = (familyRootId === undefined ? this.liveFamilyMembers() : this.familyMembers(familyRootId))
-        .filter(run => !this.recoveryFactsPending || !this.recoveringRun(run));
-      this.reconcileConversations(family);
-      for (const parent of family) {
-        if (!parent.delegation || parent.delegation.role === 'invalid' || this.historyDeletionPending(parent.id)) continue;
-        repairFailedRootFinish(this.store, parent);
-        if (parent.status === 'cancelled' && parent.delegation.role === 'root' && parent.delegation.finishRequestedAt) {
-          transitionVia('cancel', () => this.store.getRun(parent.id), () => this.store.commitRootFinishCancellation(parent.id));
-        }
-        if (!['queued', 'running', 'waiting'].includes(parent.status)) {
-          if (!this.recoveringRun(parent)) {
-            // A settled parent waits on nobody: its worker waits are cancelled, which also lets a
-            // stored wait upgraded onto a finished root go (hearsay-tools/cezarion#1301).
-            const stale = (parent.waits ?? []).filter(wait => wait.kind === 'worker' && (wait.phase === 'open' || wait.phase === 'resolved')).map(wait => wait.id);
-            if (stale.length) { this.store.commitOutcome(parent.id, { kind: 'cancelled', waitIds: stale }); for (const id of stale) this.disarmWait(id); }
-            this.fallbackRoutedQuestions(parent.id, `parent-${parent.status}`);
-            for (const child of parent.delegation.role === 'root' && parent.status !== 'review' ? this.store.listWorkersOf(parent.id) : []) {
-              if (['queued', 'running', 'waiting'].includes(child.status)) this.cancel(child.id);
-            }
-          }
-          continue;
-        }
-        if (this.executionBlockedByRootFinish(parent)) continue;
-        const observed = (now: string) => this.workerObservations(parent, now);
-        this.reconcileWorkerEntries(parent, observed);
-      }
-    } finally { this.reconcilingWorkers = false; this.reconcilingFamily = undefined; }
-  }
-
-  /** The settled outcomes a run's worker waits can observe now: each owned worker whose execution
-   *  is provably complete, and each deleted worker's retained result. */
-  private workerObservations(parent: RunRecord, now: string) {
-    const outcomes = this.store.listWorkersOf(parent.id).flatMap(child => {
-      const outcome = workerOutcome(child, now);
-      return outcome && this.store.readWorkerExecution(child.id)?.phase === 'complete' ? [outcome] : [];
-    });
-    // Explicit history deletion replaces the live execution proof with a completed
-    // parent receipt. Keep its acknowledged outcome while other all-wait workers run.
-    const deletedResults = new Map((parent.delegation?.role === 'root' ? parent.delegation.receipts : []).flatMap(receipt => {
-      const result = this.store.readDeletedWorkerResult(parent.id, receipt.workerId);
-      return result ? [[receipt.workerId, result] as const] : [];
-    }));
-    for (const result of deletedResults.values()) {
-      if (result.status === 'review' || result.status === 'done' || result.status === 'failed' || result.status === 'cancelled') {
-        outcomes.push({ workerId: result.workerId, revision: result.revision, status: result.status, observedAt: result.observedAt,
-          ...(result.error ? { summary: result.error } : {}) });
-      }
-    }
-    return { outcomes, deletedResults };
-  }
-
-  /** The family conversation's request outcomes, which settle request waits. */
-  private requestOutcomesOf(run: RunRecord) {
-    const root = run.delegation?.role === 'root' ? run : run.delegation?.role === 'worker' ? this.store.getRun(run.delegation.parentRunId) : undefined;
-    return root?.delegation?.role === 'root' ? root.delegation.conversation?.outcomes ?? [] : [];
-  }
-
-  /**
-   * Reconcile a run's open `worker` entries (hearsay-tools/cezarion#1235): the same observation
-   * rules as the old engine's wait had (an unsettled wait follows a re-run worker's revision; an
-   * observation without current proof is dropped). A satisfied or overdue entry resolves through
-   * `resolveWait`, unless every worker it names was destroyed while the turn that waits on them is
-   * still executing: nothing is left to await, so it is cancelled. Any other entry has its deadline
-   * armed. Messages never resolve one.
-   */
-  private reconcileWorkerEntries(parent: RunRecord, observe: (now: string) => ReturnType<RunManager['workerObservations']>): void {
-    const entries = (parent.waits ?? []).filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker');
-    if (!entries.length) return;
-    const now = new Date().toISOString();
-    const { outcomes, deletedResults } = observe(now);
-    const requests = this.requestOutcomesOf(parent);
-    const destroyed = (entry: WorkerWaitEntry) => !!entry.workerIds?.length && this.isExecutingWorkerWaitTurn(parent.id) && entry.workerIds.every(id => {
-      const child = this.store.getRun(id)?.delegation;
-      return child?.role === 'worker' ? child.destroy?.phase === 'complete' : deletedResults.get(id)?.cleanup === 'complete';
-    });
-    // A result still owed for workers the executing turn has since destroyed is no longer news.
-    const retired = entries.filter(entry => entry.phase === 'resolved' && destroyed(entry)).map(entry => entry.id);
-    if (retired.length) this.store.commitOutcome(parent.id, { kind: 'cancelled', waitIds: retired });
-    for (const entry of entries.filter(wait => wait.phase === 'open')) {
-      let selected = entry;
-      if (entry.workerIds) {
-        const revisions = entry.workerIds.map(workerId => {
-          const metadata = this.store.getRun(workerId)?.delegation;
-          return { workerId, revision: metadata?.role === 'worker' ? metadata.executionRevision ?? 0 : deletedResults.get(workerId)?.revision ?? 0 };
-        });
-        if (JSON.stringify(entry.revisions) !== JSON.stringify(revisions)) selected = { ...selected, revisions };
-        const proven = (selected.outcomes ?? []).filter(previous => outcomes.some(current =>
-          current.workerId === previous.workerId && (current.revision ?? 0) === (previous.revision ?? 0)));
-        if (proven.length !== (selected.outcomes ?? []).length) selected = { ...selected, outcomes: proven };
-      }
-      const { entry: next, reason } = reconcileWorkerEntry(selected, outcomes, now, requests);
-      if (reason && destroyed(next)) {
-        this.store.commitOutcome(parent.id, { kind: 'cancelled', waitIds: [entry.id] });
-        this.disarmWait(entry.id);
-      } else if (reason) {
-        // The deadline stays armed until the resolution is durable. A failed write is retried in a
-        // second, since nothing else may touch this family again before the deadline.
-        try { this.resolveWait(parent.id, entry.id, undefined, { ...next, result: { reason } }); }
-        catch {
-          if (!this.workerResolveRetries.has(entry.id)) console.warn('[cez] worker wait checkpoint failed; retrying in 1 second');
-          this.disarmWait(entry.id);
-          this.workerResolveRetries.add(entry.id);
-          this.armWorkerDeadline(parent.id, entry, 1_000);
-          continue;
-        }
-        this.disarmWait(entry.id);
-      } else {
-        if (next !== entry) this.store.commitWait(parent.id, next);
-        this.armWait(parent.id, next);
-      }
-      const recorded = this.store.transcriptFacts(parent.id).workerOutcomeKeys;
-      for (const outcome of next.outcomes ?? []) {
-        if (!recorded.includes(workerOutcomeKey(entry.id, outcome.workerId, outcome.revision ?? 0))) {
-          this.store.appendEvent(parent.id, { type: 'worker-outcome', waitId: entry.id, outcome });
-        }
-      }
-    }
-  }
+  reconcileWorkerWaits(familyRootId?: string): void { this.familyReconciler.reconcileWorkerWaits(familyRootId); }
+  reconcileAllWorkerFamilies(): void { this.familyReconciler.reconcileAllWorkerFamilies(); }
 
   /** Durable queue is the single hydration source for fresh, continuing and recovered runs. */
   steerWorker(runId: string, input: AgentInput): 'queued' | 'delivered' {
