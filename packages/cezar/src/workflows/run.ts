@@ -28,12 +28,14 @@ import { ciWaitResultSchema, type CiWaitResult } from '@open-mercato/cezar-contr
 import { type PreviewStopRequest, type PreviewStopResult, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, decideTurnEnd, stepScopedNudge, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
-import { claudeScheduleWakeupDelay, isRunnerActivity, appendTurnText, appendCompletedAssistantText, trackTurnTail, stripDoneMarker, stripMonitoringMarker, emitAskRequested, askCardFields, humanWaitCard, classifyTurnEnd, discardQueuedMessagesOnAsk, type TurnEndRead } from './run/turn-markers.ts';
+import { claudeScheduleWakeupDelay, isRunnerActivity, emitAskRequested, askCardFields, humanWaitCard, classifyTurnEnd, discardQueuedMessagesOnAsk, type TurnEndRead } from './run/turn-markers.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
 import { canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested } from './run/run-guards.ts';
 import { beginUsageInvocation, recordReportedCost, recordUsageUiEvent, recordUsagePeaks } from './run/usage-accounting.ts';
 import { continuationModel, continuationEffort, continuationRunner, taskModelIdentity, stepModel } from './run/launch-settings.ts';
 import { executionBaseRef, openExecutionWorktree, ownedContinuationWorkspace, executionSeedFiles, REPOSITORY_ROOT_LOCK_DISABLED_NOTE } from './run/run-workspace.ts';
+import * as inputReceipts from './run/input-receipts.ts';
+import type { RunModuleContext } from './run/types.ts';
 import * as launchContext from './run/launch-context.ts';
 import { continuationOpening, openingInputs } from './run/opening.ts';
 import { releaseActiveResources } from './run/drop-active.ts';
@@ -67,12 +69,9 @@ import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  stripAskMarker,
-  type AskRequest,
-} from '../core/ask.ts';
+import type { AskRequest } from '../core/ask.ts';
 import { type AgentSession } from '../core/claude-cli-runner.ts';
-import { hasRegisteredRunProcess, onUsage, registerRunProcess, replaceRunProcess, type ProcessUsage } from '../core/process-usage.ts';
+import { hasRegisteredRunProcess, onUsage, replaceRunProcess, type ProcessUsage } from '../core/process-usage.ts';
 import { isSessionLeader } from '../core/session-process.ts';
 import { ProcessWaitSupervisor, probeProcessWait } from '../process-wait/supervisor.ts';
 import { confineExitFile, type ExitFileRoots } from '../process-wait/exit-file.ts';
@@ -145,7 +144,7 @@ import { messagedParentSince, parkNoticeIdInUse, parkNoticeMessage, parkNoticeWa
 import { workerOutcome } from '../runs/delegation-state.ts';
 import { loadWorkflows } from './load.ts';
 import type { RunOutcome } from '../runs/outcome-commit.ts';
-import { acknowledgedBatch, answerOutcomes, chargedIf, retryDeliveryCheckpoint } from './outcome-batches.ts';
+import { acknowledgedBatch } from './outcome-batches.ts';
 import { analyseAcknowledgedInput, type AcknowledgedInput } from './input-acknowledgement.ts';
 import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
 import { reclaimWorktrees, rematerializeReclaimedWorktree } from '../runs/retention.ts';
@@ -157,7 +156,6 @@ import {
   removeAgentTmpDir,
 } from '../runs/agent-tmpdir.ts';
 import { extractTaskRefs, refineTaskRefs } from '../runs/task-refs.ts';
-import { stripTaskMarkers } from '../runs/task-markers.ts';
 import { reviewGateEnabled } from '../runs/review-gate.ts';
 import { AgentAccountUnavailableError, resolveProfileEnvForRoot } from '../workspace/agent-profiles.ts';
 import { DEFAULT_AGENT_ACCOUNT_ID } from '../workspace/agent-accounts.ts';
@@ -386,6 +384,21 @@ type HumanAnswerBudget = { spent: number };
  */
 export class RunManager {
   private readonly active = new Map<string, ActiveRun>();
+  private readonly inputReceiptContext: RunModuleContext;
+  private readonly inputReceiptSteps: inputReceipts.InputReceiptSteps = {
+    clearUnread: state => this.clearUnreadInputTimer(state), clearHeld: state => this.clearHeldHumanInputTimer(state),
+    noteActivity: (id, state, event) => this.noteNoWaitNudgeContent(id, state, event),
+    persistAttachment: (id, mediaType, data) => this.persistAttachment(id, mediaType, data),
+    ready: (id, state, session) => this.handleAgentInputReady(id, state, session),
+    pid: (id, pid) => { replaceRunProcess(id, pid); this.recordWorkerProcess(id, pid); },
+    ui: (id, state, sink, event) => this.handleRunnerUiEvent(id, state, sink, event),
+    flushDeferred: id => this.flushDeferred(id), recordProcess: (id, pid) => this.recordWorkerProcess(id, pid),
+  };
+  private readonly inputReceiptHost: inputReceipts.InputReceiptsHost = {
+    reconcileWorkerWaits: () => this.reconcileWorkerWaits(),
+    flushAgentInputs: id => this.flushAgentInputs(id),
+    isCurrentState: (id, state) => this.active.get(id) === state,
+  };
   // Queue + `starting` set (spec 006, janitor's pump() pattern): `starting`
   // covers the window between shifting a run off the queue and the run
   // registering in `active`, so parallel-slot counting is never racy.
@@ -623,6 +636,7 @@ export class RunManager {
     this.unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
     this.noWaitNudgeReplyMs = options.noWaitNudgeReplyMs ?? NO_WAIT_NUDGE_REPLY_MS;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
+    this.inputReceiptContext = { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed };
     this.orphans = new WorkerOrphans(
       { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
       { holds: (id, admitting) => this.workerExecutions.has(id) || this.active.has(id) || this.starting.has(id) || (!admitting && this.queue.includes(id)),
@@ -3691,7 +3705,7 @@ export class RunManager {
     const bundle = state.atTurnBoundary === state.session ? pendingConversationBatch(this.store.getRun(runId), state, input => formatAgentInput(input, id => this.store.getRun(id)), reply.id) : undefined;
     if (!state.session.sendMessage([{ type: 'text', text }, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : [])])) return;
     this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: routed.askSeq, source: 'parent' });
-    this.commitRoutedAnswer(runId, state, [reply.id, ...(bundle?.inputs.map(input => input.id) ?? [])], fallback);
+    inputReceipts.commitRoutedAnswer(this.inputReceiptContext, runId, state, [reply.id, ...(bundle?.inputs.map(input => input.id) ?? [])], fallback, MAX_AUTO_CONTINUES);
     // Spend the answer's admission now so later messages can steer before its turn ends.
     if (this.waitWakeAdmitted.delete(runId)) state.waitWakeTurn = state.session;
     state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
@@ -4121,123 +4135,6 @@ export class RunManager {
       (!!run.agentInputs?.some(input => !input.deliveredAt && !except.includes(input.id)) || harnessOwesInput(this.active.get(runId)));
   }
 
-  /** Only the current session's observation writes consumedAt (#505). An ID reported
-   * before its acceptance checkpoint lands is applied when that checkpoint commits. */
-  private handleAgentInputConsumed(runId: string, state: ActiveRun, session: AgentSession | undefined, ids: readonly string[]): void {
-    if (!session || this.active.get(runId) !== state || state.session !== session) return;
-    const inFlight = state.agentInputFlight?.inputIds ?? [];
-    for (const id of ids) if (inFlight.includes(id)) state.consumedBeforeAck?.add(id);
-    const read = ids.filter(id => !inFlight.includes(id));
-    for (const id of read) state.unreadInputIds?.delete(id);
-    if (!harnessOwesInput(state)) clearUnreadInputTimer(state);
-    try {
-      if (!read.length) return;
-      // The read and the failure count it ends are one commit (hearsay-tools/cezarion#1805).
-      this.store.commitOutcome(runId, this.withFailuresCleared(runId, [{ kind: 'consumed', inputIds: read, at: new Date().toISOString() }], read));
-      this.reconcileWorkerWaits(); // projects the consumed receipt
-    } catch (error) { console.warn(`[cez] agent input consumption checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
-  }
-
-  /** #505: input the harness accepted but will never read returns to the queue, so
-   * DONE, auto-end and park see queued work. Out of a turn (an OpenCode lost wake)
-   * it is submitted right away; at a turn-end the handler's own flush submits it. */
-  private retireUnreadInputs(runId: string, state: ActiveRun, ids: readonly string[], outOfTurn: boolean): void {
-    if (!ids.length || state.cancelled || this.active.get(runId) !== state) return;
-    // Durable first: a failed checkpoint must never let this boundary finish (DONE, park)
-    // over input that is still marked delivered but was never read.
-    try { this.store.commitOutcome(runId, { kind: 'requeued', inputIds: ids }); }
-    catch (error) {
-      if (state.agentInputError) return;
-      state.agentInputError = `agent input requeue checkpoint failed: ${error instanceof Error ? error.message : String(error)}`;
-      try { state.session?.interrupt(); } finally {
-        try { this.store.appendEvent(runId, { type: 'error', message: state.agentInputError }); }
-        catch { console.error(`[cez] ${state.agentInputError}`); }
-      }
-      return;
-    }
-    for (const id of ids) state.unreadInputIds?.delete(id);
-    // Reported before its own acknowledgement landed: that acknowledgement must not
-    // mark it delivered again.
-    for (const id of ids) if (state.agentInputFlight?.inputIds.includes(id)) (state.retiredInFlight ??= new Set()).add(id);
-    this.store.appendEvent(runId, { type: 'note', message: `resubmitting ${ids.length} message${ids.length === 1 ? '' : 's'} the agent did not read` });
-    if (outOfTurn) this.flushAgentInputs(runId);
-  }
-
-  /** #505: the harness started the opening turn, so the opening input was accepted.
-   * Its replay-prompt retirement still waits for that turn's successful end. */
-  private recordOpeningAccepted(runId: string, state: ActiveRun): void {
-    const id = state.openingAgentInputId;
-    if (!id || state.cancelled || this.active.get(runId) !== state) return;
-    const inputs = this.store.getRun(runId)?.agentInputs ?? [];
-    if (!inputs.some(input => input.id === id && !input.deliveredAt)) return;
-    const deliveredAt = new Date().toISOString();
-    try { this.store.commitOutcome(runId, { kind: 'delivered', inputIds: [id], at: deliveredAt }); }
-    catch (error) { console.warn(`[cez] opening input acceptance checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
-  }
-
-  /** Bundled messages and answer outcomes commit together. A refused write retries its
-   *  accounting best effort; `retryDeliveryCheckpoint` preserves a deferred message's replay
-   *  policy (hearsay-tools/cezarion#1805). Returns why the first write was refused. */
-  private commitBundledDelivery(runId: string, state: ActiveRun, ids: readonly string[], also: readonly RunOutcome[] = []): string | undefined {
-    const deliveredAt = new Date().toISOString();
-    const awaiting = state.inputDelivery?.consumption === 'observable' ? { awaitingRead: true as const } : {};
-    const outcomes = [...also, ...(ids.length ? [{ kind: 'delivered' as const, inputIds: ids, at: deliveredAt, ...awaiting }] : [])];
-    let refused: string | undefined;
-    try { this.store.commitOutcome(runId, outcomes); } catch (error) {
-      refused = error instanceof Error ? error.message : String(error);
-      console.warn(`[cez] bundled delivery checkpoint failed: ${refused}`);
-      const retry = retryDeliveryCheckpoint(this.store, runId, outcomes);
-      if (retry.outcomes !== outcomes) return refused;
-      if (retry.committed) refused = undefined;
-    }
-    if (ids.length) state.bundledInputIds = [...(state.bundledInputIds ?? []), ...ids];
-    return refused;
-  }
-
-  /** The fallback reply's charge, the question it answers and the reply it delivers are one commit
-   *  (hearsay-tools/cezarion#1805): no restart reads the charge without the reply. */
-  private commitRoutedAnswer(runId: string, state: ActiveRun, delivered: readonly string[], fallback: boolean): void {
-    const spent = fallback ? (this.store.getRun(runId)?.automaticWakes ?? 0) + 1 : undefined;
-    this.commitBundledDelivery(runId, state, delivered, [{ kind: 'answered' }, ...chargedIf(spent)]);
-    if (spent !== undefined) this.store.appendEvent(runId, { type: 'note', message: `${WORKER_FALLBACK_REPLY_NOTE} (${spent}/${MAX_AUTO_CONTINUES})` });
-  }
-
-  /** One commit (hearsay-tools/cezarion#1805): the human waits a message answers, the messages bundled
-   *  with it and a deferred message's queue entry. A refused queue entry interrupts the session:
-   *  stdin and disk cannot transact, so it stays for conservative recovery. */
-  private commitAnswer(runId: string, state: ActiveRun, bundle: { inputs: AgentInput[] } | undefined, messageId: string | undefined): void {
-    const refused = this.commitBundledDelivery(runId, state, bundle?.inputs.map(input => input.id) ?? [], answerOutcomes(messageId, this.store.getRun(runId)?.automaticWakes));
-    if (!refused || !messageId) return;
-    state.agentInputError = `human input delivery checkpoint failed: ${refused}`;
-    state.session?.interrupt();
-  }
-
-  /** The turn that carried bundled messages has ended: the model read them. */
-  private readBundledInputs(runId: string, state: ActiveRun): void {
-    const ids = state.bundledInputIds ?? [];
-    state.bundledInputIds = undefined;
-    if (!ids.length || state.cancelled) return;
-    try { this.store.commitOutcome(runId, { kind: 'consumed', inputIds: ids, at: new Date().toISOString() }); this.reconcileWorkerWaits(); }
-    catch (error) { console.warn(`[cez] bundled read checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
-  }
-
-  /** #505: the session closed without reporting it read (failure, stop, exit): the input
-   * goes back to the queue so a later session delivers it; never shown as delivered. */
-  private requeueUnreadAtClose(runId: string, state: ActiveRun, session: AgentSession | undefined): void {
-    clearUnreadInputTimer(state);
-    clearHeldHumanInputTimer(state);
-    // Everything this session accepted but never saw read: steered input, messages bundled
-    // behind a human answer, and an opening instruction whose turn never succeeded.
-    const opening = state.openingAgentInputId && this.store.getRun(runId)?.agentInputs?.some(input =>
-      input.id === state.openingAgentInputId && input.deliveredAt && !input.consumedAt) ? [state.openingAgentInputId] : [];
-    const ids = [...new Set([...(state.unreadInputIds ?? []), ...(state.bundledInputIds ?? []), ...opening])];
-    if (!session || !ids.length || this.active.get(runId) !== state || state.session !== session) return;
-    state.unreadInputIds?.clear();
-    state.bundledInputIds = undefined;
-    try { this.store.commitOutcome(runId, { kind: 'requeued', inputIds: ids }); }
-    catch (error) { console.warn(`[cez] agent input requeue failed: ${error instanceof Error ? error.message : String(error)}`); }
-  }
-
   /** An idle, open boundary with nothing left to deliver: DONE closes, otherwise the
    * run parks as waiting or monitoring. Shared by acknowledgements that land after a
    * turn ended and by the unread-input grace timer (#505). */
@@ -4287,7 +4184,7 @@ export class RunManager {
       if (fresh.length) {
         state.unreadRetried ??= new Set();
         for (const id of fresh) state.unreadRetried.add(id);
-        this.retireUnreadInputs(runId, state, fresh, true);
+        inputReceipts.retireUnreadInputs(this.inputReceiptContext, this.inputReceiptHost, runId, state, fresh, true);
       }
       // No content since the last turn ended: the harness is idle, whatever turn it announced.
       if (!harnessOwesInput(state) && !state.agentInputFlight) {
@@ -4676,7 +4573,7 @@ export class RunManager {
     if (answeringAskSeq !== undefined) {
       this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: answeringAskSeq });
     }
-    this.commitAnswer(runId, state, bundle, messageId);
+    inputReceipts.commitAnswer(this.inputReceiptContext, runId, state, bundle, messageId);
     state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
     // A native answer or a full bundle leaves remaining messages to steer behind the answer.
     if (answeringAskSeq !== undefined && !state.pendingHumanAsk) this.flushAgentInputs(runId, beforeHumanReset);
@@ -5044,26 +4941,7 @@ export class RunManager {
     const sink = this.makeUiSink(runId, stepId);
     const onEvent = (event: AgentEvent) => {
       if (this.disposedSessionEvent(runId, state, event)) return;
-      if (event.type === 'image') {
-        const saved = this.persistAttachment(runId, event.mediaType, event.data);
-        if (saved) this.store.appendEvent(runId, { type: 'image', stepId, ...saved });
-        return;
-      }
-      if (event.type === 'text') {
-        this.clearUnreadInputTimer(state); // real content: the harness is working
-        this.clearHeldHumanInputTimer(state);
-        this.noteNoWaitNudgeContent(runId, state, event);
-        turn.text = appendTurnText(turn.text, event.text);
-        const text = stripAskMarker(stripTaskMarkers(stripMonitoringMarker(stripDoneMarker(event.text))), false);
-        if (text) this.store.appendEvent(runId, { type: 'text', text, stepId });
-        return;
-      }
-      if (event.type === 'input-unconsumed') { this.retireUnreadInputs(runId, state, event.inputIds, true); return; }
-      if (event.type === 'tool-call' || event.type === 'tool-result') {
-        this.clearUnreadInputTimer(state);
-        this.clearHeldHumanInputTimer(state);
-        this.noteNoWaitNudgeContent(runId, state, event);
-      }
+      if (inputReceipts.handleReceiptEvent(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, runId, state, turn, event, stepId, event => this.store.appendEvent(runId, event))) return;
       this.store.appendEvent(runId, { ...event, stepId });
       if (event.type === 'cost') recordReportedCost(this.store, runId, stepId, state, backend, event.usd);
       if (event.type === 'error') { this.recordSessionFault(state, turn, event.message); return; }
@@ -5556,17 +5434,7 @@ export class RunManager {
           timeoutMs: 0,
         },
         onEvent,
-        {
-          onUiEvent: (event) => {
-            turn.completedText = appendCompletedAssistantText(turn.completedText, event);
-            turn.tail = trackTurnTail(turn.tail, event);
-            if (event.type === 'turn.started') this.recordOpeningAccepted(runId, state);
-            this.handleRunnerUiEvent(runId, state, sink, event);
-          },
-          onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
-          onAgentInputConsumed: (ids) => this.handleAgentInputConsumed(runId, state, session, ids),
-          onPidChange: (pid) => { replaceRunProcess(runId, pid); this.recordWorkerProcess(runId, pid); },
-        },
+        inputReceipts.inputReceiptCallbacks(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, runId, state, () => session, turn, sink, true),
       );
     } catch (error) { ciTools?.revoke(); state.revokeCiTools = undefined; delegation?.revoke(); state.revokeDelegation = undefined; throw error; }
     return session;
@@ -5592,11 +5460,7 @@ export class RunManager {
     let setupComplete = false;
     const close: ContinuationClose = {};
     try {
-      this.flushDeferred(runId);
-      this.flushAgentInputs(runId);
-      if (session.pid !== undefined) { registerRunProcess(runId, session.pid); this.recordWorkerProcess(runId, session.pid); }
-      setupComplete = true;
-      const result = await session.result.finally(() => state.agentInputFlight?.settled).finally(() => this.requeueUnreadAtClose(runId, state, session));
+      const result = await inputReceipts.sessionResultWithReceipts(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, runId, state, session, () => { setupComplete = true; });
       if (this.preserveRunAfterDisposal(runId, state)) return;
       this.withdrawCezarHumanWaits(runId);
       this.persistWorkerAssistantResult(runId, stepId, result.text);
@@ -6272,26 +6136,7 @@ export class RunManager {
     const sink = this.makeUiSink(runId, step.id);
     const onEvent = (event: AgentEvent) => {
       if (this.disposedSessionEvent(runId, state, event)) return;
-      if (event.type === 'image') {
-        const saved = this.persistAttachment(runId, event.mediaType, event.data);
-        if (saved) emit({ type: 'image', stepId: step.id, ...saved });
-        return;
-      }
-      if (event.type === 'text') {
-        this.clearUnreadInputTimer(state); // real content: the harness is working
-        this.clearHeldHumanInputTimer(state);
-        this.noteNoWaitNudgeContent(runId, state, event);
-        turn.text = appendTurnText(turn.text, event.text);
-        const text = stripAskMarker(stripTaskMarkers(stripMonitoringMarker(stripDoneMarker(event.text))), false);
-        if (text) emit({ type: 'text', text, stepId: step.id });
-        return;
-      }
-      if (event.type === 'input-unconsumed') { this.retireUnreadInputs(runId, state, event.inputIds, true); return; }
-      if (event.type === 'tool-call' || event.type === 'tool-result') {
-        this.clearUnreadInputTimer(state);
-        this.clearHeldHumanInputTimer(state);
-        this.noteNoWaitNudgeContent(runId, state, event);
-      }
+      if (inputReceipts.handleReceiptEvent(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, runId, state, turn, event, step.id, emit)) return;
       emit({ ...event, stepId: step.id });
       if (event.type === 'cost') recordReportedCost(this.store, runId, step.id, state, backend, event.usd);
       if (event.type === 'error') { this.recordSessionFault(state, turn, event.message); return; }
@@ -6458,8 +6303,8 @@ export class RunManager {
   /** The session reached a turn end: retire the inputs it left unread, read the bundled inputs, and
    *  open the turn boundary with a fresh CI turn id. */
   private markTurnBoundary(runId: string, state: ActiveRun, event: Extract<AgentEvent, { type: 'turn-end' }>): void {
-    this.retireUnreadInputs(runId, state, event.unconsumedInputIds ?? [], false);
-    this.readBundledInputs(runId, state);
+    inputReceipts.retireUnreadInputs(this.inputReceiptContext, this.inputReceiptHost, runId, state, event.unconsumedInputIds ?? [], false);
+    inputReceipts.readBundledInputs(this.inputReceiptContext, this.inputReceiptHost, runId, state);
     state.waitWakeTurn = undefined;
     state.atTurnBoundary = state.session;
     state.ciTurnId = randomUUID();
@@ -6555,16 +6400,7 @@ export class RunManager {
           timeoutMs: launch.step.timeoutMs ?? 0,
         },
         onEvent,
-        {
-          onUiEvent: (event) => {
-            turn.completedText = appendCompletedAssistantText(turn.completedText, event);
-            turn.tail = trackTurnTail(turn.tail, event);
-            this.handleRunnerUiEvent(runId, state, sink, event);
-          },
-          onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
-          onAgentInputConsumed: (ids) => this.handleAgentInputConsumed(runId, state, session, ids),
-          onPidChange: (pid) => { replaceRunProcess(runId, pid); this.recordWorkerProcess(runId, pid); },
-        },
+        inputReceipts.inputReceiptCallbacks(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, runId, state, () => session, turn, sink, false),
       );
     } catch (err) {
       ciTools?.revoke(); state.revokeCiTools = undefined;
@@ -6618,11 +6454,7 @@ export class RunManager {
     state.interrupt = () => session.interrupt();
     let setupComplete = false;
     try {
-      this.flushDeferred(runId);
-      this.flushAgentInputs(runId);
-      if (session.pid !== undefined) { registerRunProcess(runId, session.pid); this.recordWorkerProcess(runId, session.pid); }
-      setupComplete = true;
-      const result = await session.result.finally(() => state.agentInputFlight?.settled).finally(() => this.requeueUnreadAtClose(runId, state, session));
+      const result = await inputReceipts.sessionResultWithReceipts(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, runId, state, session, () => { setupComplete = true; });
       if (this.isDisposedDelegatedRun(runId)) return null;
       this.persistWorkerAssistantResult(runId, stepId, result.text);
       const inputOrSessionError = turn.sessionError ?? state.agentInputError;
