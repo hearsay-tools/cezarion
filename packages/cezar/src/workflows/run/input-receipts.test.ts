@@ -157,6 +157,7 @@ it.each([{ type: 'text', text: 'answer\nCEZ:DONE' },
 it.each([true, false])('updates completed text and tail before UI and accepts opening only for continuation=%s', continuation => {
   const f = receiptFixture();
   const sink = {} as UiEventSink;
+  observeTurnWrites(f.turn, f.calls);
   f.steps.ui = (_id, _state, _sink, event) => {
     if (event.type === 'item.completed') expect([f.turn.completedText, f.turn.tail]).toEqual(['complete', 'visible']);
     if (event.type === 'turn.started') expect(!!f.saved().agentInputs?.[0]?.deliveredAt).toBe(continuation);
@@ -166,7 +167,9 @@ it.each([true, false])('updates completed text and tail before UI and accepts op
   const callbacks = receipts.inputReceiptCallbacks(f.context, f.host, f.steps, f.recipient.id, f.state, () => f.session, f.turn, sink, continuation);
   callbacks.onUiEvent({ type: 'item.completed', item: { id: 'message', kind: 'message', role: 'assistant', text: 'complete' } });
   callbacks.onUiEvent({ type: 'turn.started', turnId: 'turn' });
-  expect(f.calls).toEqual(continuation ? ['ui', 'receipt', 'ui'] : ['ui', 'ui']);
+  expect(f.calls).toEqual(continuation
+    ? ['completedText', 'tail', 'ui', 'completedText', 'tail', 'receipt', 'ui']
+    : ['completedText', 'tail', 'ui', 'completedText', 'tail', 'ui']);
 });
 
 it.each(['consume', 'opening', 'bundled', 'close'] as const)('warns and skips reconciliation after a refused %s checkpoint', operation => {
@@ -251,4 +254,23 @@ it.each(['deferred', 'inputs', 'register', 'record'] as const)('does not prepare
   expect(() => receipts.sessionResultWithReceipts(f.context, f.host, f.steps, f.recipient.id, f.state, { ...f.session, pid: 12345 }, prepared)).toThrow(failure);
   expect(f.calls).toEqual(order.slice(0, order.indexOf(failure) + 1));
   expect(prepared).not.toHaveBeenCalled(); expect(result).not.toHaveBeenCalled();
+});
+
+function observeTurnWrites(turn: SessionTurn, calls: string[]) {
+  for (const key of ['completedText', 'tail'] as const) {
+    let value = turn[key];
+    Object.defineProperty(turn, key, { get: () => value, set: (next: typeof value) => { calls.push(key); value = next; } });
+  }
+}
+
+it.each(['cancelled', 'empty'] as const)('takes bundled IDs without a commit for %s input', mode => {
+  const f = receiptFixture(); f.accept();
+  f.state.bundledInputIds = mode === 'empty' ? [] : [f.id];
+  f.state.cancelled = mode === 'cancelled';
+  const commit = vi.spyOn(store, 'commitOutcome');
+  receipts.readBundledInputs(f.context, f.host, f.recipient.id, f.state);
+  expect(f.state.bundledInputIds).toBeUndefined();
+  expect(commit).not.toHaveBeenCalled();
+  expect(f.saved().agentInputs?.[0]?.consumedAt).toBeUndefined();
+  expect(f.host.reconcileWorkerWaits).not.toHaveBeenCalled();
 });
