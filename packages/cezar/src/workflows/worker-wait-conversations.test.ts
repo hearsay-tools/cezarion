@@ -77,15 +77,34 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
       process.env[HARNESS_ADAPTERS[runner].binEnv] = HARNESS_ADAPTERS[runner].mockBin;
       const f = await conversationPair(runner);
+      const release = join(root, 'resume-receipt-release');
       try {
         await expect(f.service.send(f.parentCaller, { id: randomUUID(), recipientRunId: f.w.id,
           kind: 'request', text: 'Still active', resume: true, timeoutSeconds: 3600 })).rejects.toMatchObject({ code: 'incompatible_state' });
         manager.finish(f.w.id);
         await until(() => !manager.isActive(f.w.id));
+        process.env.CEZ_MOCK_RELEASE_FILE = release;
+        const boundaries = turnEnds(f.w.id);
         const started = Date.now();
         const sent = await f.service.send(f.parentCaller, { id: randomUUID(), recipientRunId: f.w.id,
-          kind: 'request', text: 'Fix review mock:hold', resume: true, timeoutSeconds: 3600 });
+          kind: 'request', text: 'Fix review mock:hold-gated', resume: true, timeoutSeconds: 3600 });
+        await until(() => !!store.getRun(f.w.id)?.agentInputs?.find(input => input.id === sent.message.id)?.deliveredAt);
+        // hearsay-tools/cezarion#2173: acceptance must reach both transcripts before another
+        // message, history read or turn end can incidentally reconcile the saved receipt.
+        const accepted = store.getRun(f.w.id)!.agentInputs!.find(input => input.id === sent.message.id)!;
+        for (const id of [f.p.id, f.w.id]) {
+          expect(store.readEvents(id).filter(event => event.type === 'conversation-message' &&
+            (event.message as { id: string }).id === sent.message.id && event.delivery === 'delivered'))
+            .toEqual([expect.objectContaining({ deliveredAt: accepted.deliveredAt })]);
+        }
+        expect(turnEnds(f.w.id)).toBe(boundaries);
+        expect(accepted.consumedAt).toBeUndefined();
+        expect(store.getRun(f.w.id)?.continuationMessage?.agentInputId).toBe(sent.message.id);
+        expect(store.getRun(f.p.id)?.delegation).toMatchObject({ conversation: { outcomes: [] } });
+        writeFileSync(release, 'release');
         await until(() => store.getRun(f.w.id)?.status === 'waiting');
+        expect(store.getRun(f.w.id)?.agentInputs?.find(input => input.id === sent.message.id)?.consumedAt).toBeDefined();
+        expect(store.getRun(f.w.id)?.continuationMessage).toBeUndefined();
         // Only the wall clock changes: native mock wire/process timers keep running.
         vi.useFakeTimers({ toFake: ['Date'] });
         vi.setSystemTime(started + 45 * 60_000);
@@ -97,7 +116,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
         expect(reply.outcome).toMatchObject({ status: 'replied-late', replyId: reply.message.id });
         await until(() => !!store.getRun(f.p.id)?.agentInputs?.find(input => input.id === reply.message.id)?.deliveredAt);
         expect(store.readEvents(f.p.id).some(event => event.type === 'request-outcome' && requestOutcomeSchema.safeParse(event.outcome).data?.status === 'replied-late')).toBe(true);
-      } finally { vi.useRealTimers(); f.close(); }
+      } finally { writeFileSync(release, 'release'); vi.useRealTimers(); f.close(); }
     });
   }
 
