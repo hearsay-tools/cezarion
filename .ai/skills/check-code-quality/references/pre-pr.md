@@ -3,6 +3,13 @@
 Run after implementation and repeat after a source or test change that can affect
 the result. Resolve `<skill>` to the skill directory, then follow all steps below.
 
+Before planning a split of a file with cross-file clones, check its committed
+baseline with `node .github/scripts/check-clones.cjs --base origin/main --head HEAD`
+after a local commit. The checker scans committed HEAD only; working-tree edits
+are not measured. Repeat it after committing the split. The per-pair token rule
+and unchanged cross-package/same-file guards are defined in
+[`docs/sdlc/ci.md`](../../../../docs/sdlc/ci.md#clone-comparison).
+
 ## 1. Select the local evidence
 
 Use current Squeal measurements first when Squeal is validating this worktree.
