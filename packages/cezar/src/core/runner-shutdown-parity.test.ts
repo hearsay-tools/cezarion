@@ -84,11 +84,15 @@ async function withChild(backend: RunnerId, check: (session: AgentSession, child
   vi.stubEnv('CEZ_DRY_RUN', '');
   vi.stubEnv(adapter.binEnv, adapter.mockBin);
   const events: AgentEvent[] = [];
+  let openingTurnStarted = false;
   spawned.length = 0;
   eventStreams.length = 0;
   const session = createRunner(backend).startSession({ toolGrant: UNSET_TOOL_GRANT,
     cwd, userPrompt: promptFor(backend, scenario), timeoutMs: 0,
-  }, event => events.push(event), { autoEndAfterFirstTurn: false });
+  }, event => events.push(event), {
+    autoEndAfterFirstTurn: false,
+    onUiEvent: event => { if (event.type === 'turn.started') openingTurnStarted = true; },
+  });
   const settled = session.result.catch(error => error);
   try {
     // Wait for the PID contents, not merely file creation (which precedes the
@@ -101,6 +105,16 @@ async function withChild(backend: RunnerId, check: (session: AgentSession, child
       expect(accepted).toBeDefined();
       return accepted!;
     }, { timeout: 10_000 });
+    if (backend === 'codex') {
+      // The PID receipt precedes the parent's startup-frame consumption. Stopping
+      // there can test startup failure instead of live cleanup (hearsay-tools/cezarion#2182).
+      // Proof: CI run 40873064242 attempt 1 job 123445575321; proof_base a6ad9df37.
+      // Scratch --config .ai/qa/ci-2184-proof/vitest.config.ts -t 'codex explicit end during probe',
+      // delaying turn/started stdout delivery 250 ms: old 1/1 fails, fixed 1/1 passes;
+      // fixed also passes 3/3 on CPU 0 with two busy loops. Captured output is in the repair PR.
+      // bound: wait for the native opening turn on a loaded host, before stopping its transport.
+      await vi.waitFor(() => expect(openingTurnStarted).toBe(true), { timeout: 10_000 });
+    }
     await check(session, child, events, settled, cwd);
   } finally {
     session.interrupt();
