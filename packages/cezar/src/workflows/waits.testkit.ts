@@ -1,3 +1,5 @@
+import type { RunManager } from './run.ts';
+import { runInternals } from './run-internals.testkit.ts';
 import type { TimerWaitEntry, Wait } from '@open-mercato/cezar-contract';
 import { isMonitoringTimer } from './waits.ts';
 
@@ -22,11 +24,7 @@ export function monitoringWakeOf(run?: { waits?: Wait[] | undefined }): string |
 }
 
 /** The timer RunManager armed for the run's open monitoring timer wait. */
-export function monitoringTimerOf(manager: object, runId: string): NodeJS.Timeout & { _onTimeout(): void } | undefined {
-  const internal = manager as {
-    store: { getRun(id: string): { waits?: Wait[] | undefined } | undefined };
-    waitTimers: Map<string, { runId: string; timer: NodeJS.Timeout }>;
-  };
-  const id = monitoringTimerWait(internal.store.getRun(runId))?.id;
-  return id ? internal.waitTimers.get(id)?.timer as NodeJS.Timeout & { _onTimeout(): void } | undefined : undefined;
+export function monitoringTimerOf(manager: RunManager, runId: string): NodeJS.Timeout & { _onTimeout(): void } | undefined {
+  const id = monitoringTimerWait(runInternals(manager).context.store.getRun(runId))?.id;
+  return id ? runInternals(manager).waitWatches.waitTimers.get(id)?.timer as NodeJS.Timeout & { _onTimeout(): void } | undefined : undefined;
 }

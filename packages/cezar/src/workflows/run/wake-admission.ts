@@ -358,10 +358,7 @@ export class WakeAdmission {
 
   /** Stop every watch, timer, retry and queued wake a run's waits hold in memory. */
   disarmRunWaits(runId: string): void {
-    for (const [key, registration] of this.host.waitRegistry.ciRegistrations) {
-      if (registration.runId !== runId) continue;
-      registration.abort.abort(); this.host.waitRegistry.ciRegistrations.delete(key);
-    }
+    this.host.waitRegistry.abortRegistrations(runId);
     this.host.waitWatches.disarmRun(runId);
     this.host.retries.forget(runId);
     this.resetWakeDelivery(runId);
@@ -370,14 +367,14 @@ export class WakeAdmission {
   }
 
   /** A deleted run's row is gone with its waits; only what they armed in memory is left. */
-  onRunDeleted(runId: string): void {
+  readonly onRunDeleted = (runId: string): void => {
     this.disarmRunWaits(runId);
     if (!this.context.disposed()) this.host.waitRegistry.resolvePeerWaits(runsAwaitingPeer(runId, () => this.context.store.listRuns()));
     // A peer's open requests to the deleted run settle `deleted` (spec 2026-10-27 § 5): each ledger
     // that holds one is reconciled, live or settled.
     if (this.context.disposed() || process.env.CEZ_DELEGATION !== '1') return;
     try { for (const id of rootsAwaitingPeer(this.context.store, runId)) this.host.reconcileWorkerWaits(id); } catch { /* the next reconcile settles them */ }
-  }
+  };
 
   /** A lost runner boundary requeues the wake and ends this pass instead of spinning. */
   admitQueuedWaitWake(runId: string): 'none' | 'handled' | 'deferred' {

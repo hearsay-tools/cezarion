@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { spawn } from 'node:child_process';
 import * as fc from 'fast-check';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -88,7 +89,7 @@ function target(id: string, from: RunState, pick?: RunState): RunState {
 function engine() {
   return manager as unknown as {
     active: Map<string, { idleTimer?: NodeJS.Timeout & { _onTimeout(): void } }>;
-    waitTimers: Map<string, { timer: NodeJS.Timeout & { _onTimeout(): void } }>;
+
   };
 }
 const turnEnds = (id: string) => store.readEvents(id).filter((event) => event.type === 'turn-end').length;
@@ -167,7 +168,7 @@ class ResolveWait implements Command {
     const turns = endTurn(m, 'nothing');
     const wait = store.getRun(r.id)!.waits!.find((entry) => entry.kind === this.kind && entry.phase === 'open')!;
     if (this.kind === 'timer') {
-      const armed = engine().waitTimers.get(wait.id);
+      const armed = runInternals(manager).waitWatches.waitTimers.get(wait.id);
       expect(armed, 'the table promises the timer the engine arms').toBeDefined();
       armed!.timer._onTimeout();
     } else if (this.kind === 'pr') {

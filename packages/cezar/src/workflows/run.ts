@@ -45,8 +45,7 @@ import { openCompletionRequests, recordRequestRefusal, repairFailedRootFinish, s
 import type { ContinueRunOptions } from './continuation-admission.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { doneErrorMessage } from '../ci-wait/errors.ts';
-import { cezarDoneRequestSchema, type CezarAskRequest, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type DoneErrorCode, type PeerWaitEntry, type PeerWaitResult, type PrWaitEntry, type ProcessWaitEntry, type ProcessWaitResult, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
-import { type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
+import { cezarDoneRequestSchema, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type DoneErrorCode, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { type PreviewStopRequest, type PreviewStopResult, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, stepScopedNudge, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
@@ -89,9 +88,8 @@ import { join } from 'node:path';
 import type { AskRequest } from '../core/ask.ts';
 import { type AgentSession } from '../core/claude-cli-runner.ts';
 import { onUsage, replaceRunProcess, type ProcessUsage } from '../core/process-usage.ts';
-import { type ExitFileRoots } from '../process-wait/exit-file.ts';
 import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
-import { ORPHAN_BACKOFF, WAKE_RETRY_BACKOFF, type Backoff } from '../delegation/retry-backoff.ts';
+import { ORPHAN_BACKOFF, type Backoff } from '../delegation/retry-backoff.ts';
 import { type CwdSource } from '../delegation/process-liveness.ts';
 import { parseUsageLimit } from '../core/usage-limit.ts';
 import type { RunnerId } from '../core/agent-runner.ts';
@@ -191,8 +189,6 @@ export class RunManager {
   private readonly familyReconciler: FamilyReconciler;
   private readonly workerQuestions: WorkerQuestions;
   private get recoveryFactsPending() { return this.familyReconciler.recoveryFactsPending; }
-  private get waitTimers() { return this.waitWatches.waitTimers; }
-  private get ciWatches() { return this.waitWatches.ciWatches; }
   private readonly inputReceiptSteps: inputReceipts.InputReceiptSteps = {
     clearUnread: state => this.clearUnreadInputTimer(state), clearHeld: state => this.clearHeldHumanInputTimer(state),
     noteActivity: (id, state, event) => this.noteNoWaitNudgeContent(id, state, event),
@@ -275,14 +271,8 @@ export class RunManager {
    *  human waiting: these resumes MUST reacquire scheduler capacity. Keyed by run id. */
   private get waitWakeQueuedAt() { return this.line.waitWakeQueuedAt; }
   private get waitWakeAdmitted() { return this.line.waitWakeAdmitted; }
-  /** CI lookups in flight, keyed by run id and normalized PR URL: two PRs may register at once. */
-  private get ciRegistrations() { return this.waitRegistry.ciRegistrations; }
   private readonly wakeAdmission: WakeAdmission;
   private readonly retries: WakeRetries;
-  private get wakeRetries() { return this.retries.wakeRetries; }
-  private get wakeBackoffs() { return this.retries.wakeBackoffs; }
-  // Private and overridable so tests need not wait out production cadence.
-  private wakeRetryBackoff: Backoff = WAKE_RETRY_BACKOFF;
   private readonly ciResources: ReturnType<typeof acquireCiResources>;
   /** #781: the workspace-wide preview host. Absent (`cez run`, tests) means every registration is `headless`. */
   private readonly preview?: PreviewHostLike | undefined;
@@ -317,7 +307,7 @@ export class RunManager {
     // A republish changed nothing durable: there is nothing to reap, cancel or reconcile.
     if (source === 'live-release') return;
     if (!this.disposed && source === undefined) this.reapTerminalScratch(run.id);
-    if (!this.disposed && !['queued', 'running', 'waiting'].includes(run.status) && !holdsOwedResults(run)) this.cancelOpenWaits(run.id);
+    if (!this.disposed && !['queued', 'running', 'waiting'].includes(run.status) && !holdsOwedResults(run)) this.wakeAdmission.cancelOpenWaits(run.id);
     if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.active.get(run.id)?.revokeDelegation?.();
     // Cleanup checkpoints emit terminal records too. With delegation disabled,
     // these observations must not replay the project's conversation histories.
@@ -387,8 +377,8 @@ export class RunManager {
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
     this.context = { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed, work: options.work ?? new TrackedWork() };
     this.retries = new WakeRetries(this.context, {
-      owesWake: run => this.owesWake(run), queueWaitWake: id => this.queueWaitWake(id),
-      retryWaitAdmission: id => this.retryWaitAdmission(id), wakeRetryBackoff: () => this.wakeRetryBackoff,
+      owesWake: run => this.wakeAdmission.owesWake(run), queueWaitWake: id => this.wakeAdmission.queueWaitWake(id),
+      retryWaitAdmission: id => this.retries.retryWaitAdmission(id),
     });
     this.queuedRevivalHost = {
       move: (id, exit, patch) => this.move(id, exit, patch), isActive: id => this.isActive(id),
@@ -402,21 +392,21 @@ export class RunManager {
     };
     this.line = new RunLine(this.context, {
       activeSize: () => this.active.size, activeHas: id => this.active.has(id),
-      withExecutionAccount: run => this.withExecutionAccount(run),
+      withExecutionAccount: run => this.wakeAdmission.withExecutionAccount(run),
       maintenance: id => this.claims.has(id) || !!this.autosaveCleanupBlocker(id),
       admitted: id => this.workerExecutions.admitted(id), workerExecutionStopped: id => this.workerExecutionStopped(id),
       recovering: () => this.recovering, recoveringRun: run => this.recoveringRun(run),
       reconcileAutoResumes: () => this.reconcileAutoResumes(), cancel: id => this.cancel(id),
       move: (id, patch) => this.move(id, 'fail-start', patch), beginWorkerExecution: id => this.beginWorkerExecution(id),
       admissionError: (error, fallback) => admissionError(error, fallback),
-      admitQueuedWaitWake: id => this.admitQueuedWaitWake(id),
+      admitQueuedWaitWake: id => this.wakeAdmission.admitQueuedWaitWake(id),
       launchQueuedRun: (id, job, continuation) => this.launchQueuedRun(id, job, continuation),
       reviveQueuedRun: (run, reason) => this.reviveQueuedRun(run, reason), pump: () => this.pump(),
       busySlots: () => this.busySlots(),
     });
     this.workerQuestions = new WorkerQuestions(this.context, {
       active: id => this.active.get(id), deliverConversationInput: id => this.deliverConversationInput(id),
-      chargeAutomaticWake: id => this.chargeAutomaticWake(id), hasQueuedAgentInputs: id => this.hasQueuedAgentInputs(id),
+      chargeAutomaticWake: id => this.wakeAdmission.chargeAutomaticWake(id), hasQueuedAgentInputs: id => this.hasQueuedAgentInputs(id),
       providerOwnsInboxInput: (id, inputId) => this.providerOwnsInboxInput(id, inputId), reconcileWorkerWaits: id => this.reconcileWorkerWaits(id),
       openHumanAlias: (id, state, via, card) => this.openHumanAlias(id, state, via, card), prepareHumanAsk: state => this.prepareHumanAsk(state),
       markHumanWaitSurfaced: (id, wait, card) => this.markHumanWaitSurfaced(id, wait, card), withdrawCezarHumanWaits: id => this.withdrawCezarHumanWaits(id),
@@ -427,32 +417,32 @@ export class RunManager {
     }, MAX_AUTO_CONTINUES);
     this.familyReconciler = new FamilyReconciler(this.context, {
       active: id => this.active.get(id), isActive: id => this.isActive(id), recoveringRun: run => this.recoveringRun(run),
-      cancel: id => this.cancel(id), armWait: (id, wait) => this.armWait(id, wait),
-      armWorkerDeadline: (id, wait, delay) => this.armWorkerDeadline(id, wait, delay), disarmWait: id => this.disarmWait(id),
-      resolveWait: (id, waitId, result, observed) => this.resolveWait(id, waitId, result, observed),
+      cancel: id => this.cancel(id), armWait: (id, wait) => this.waitWatches.armWait(id, wait),
+      armWorkerDeadline: (id, wait, delay) => this.waitWatches.armWorkerDeadline(id, wait, delay), disarmWait: id => this.disarmWait(id),
+      resolveWait: (id, waitId, result, observed) => this.waitRegistry.resolveWait(id, waitId, result, observed),
       retireSettledQuestions: id => this.retireSettledQuestions(id), fallbackRoutedQuestions: (id, reason) => this.fallbackRoutedQuestions(id, reason),
       reconcileWorkerWaits: id => this.reconcileWorkerWaits(id),
     });
     this.waitWatches = new WaitWatches(this.context, {
       canProceedWithRun: (id, run) => this.canProceedWithRun(id, run), ciSupervisor: () => this.ciSupervisor,
-      resolveWait: (id, waitId, result) => this.resolveWait(id, waitId, result),
+      resolveWait: (id, waitId, result) => this.waitRegistry.resolveWait(id, waitId, result),
       reconcileWorkerWaits: family => this.reconcileWorkerWaits(family),
       resolvePeerWait: (id, wait) => this.waitRegistry.resolvePeerWait(id, wait), disarmWait: id => this.disarmWait(id),
-      armWorkerDeadline: (id, wait, delay) => this.armWorkerDeadline(id, wait, delay),
-      settleWait: (id, waitId, result) => this.settleWait(id, waitId, result), exitFileRoots: id => this.exitFileRoots(id),
+      armWorkerDeadline: (id, wait, delay) => this.waitWatches.armWorkerDeadline(id, wait, delay),
+      settleWait: (id, waitId, result) => this.waitWatches.settleWait(id, waitId, result), exitFileRoots: id => this.waitWatches.exitFileRoots(id),
     });
     this.waitRegistry = new WaitRegistry(this.context, {
       active: id => this.active.get(id), workerExecutionStopped: id => this.workerExecutionStopped(id),
       executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run), ciSupervisor: () => this.ciSupervisor,
-      isParked: id => this.line.isParked(id), countAutomaticWakes: id => this.automaticWakes(id),
+      isParked: id => this.line.isParked(id), countAutomaticWakes: id => this.wakeAdmission.automaticWakes(id),
       reconcileWorkerWaits: family => this.reconcileWorkerWaits(family), noticeParkedWorkers: id => this.noticeParkedWorkers(id),
       canProceedWithRun: (id, run) => this.canProceedWithRun(id, run),
-      exitFileRoots: (id, run) => this.exitFileRoots(id, run), disarmWait: id => this.disarmWait(id),
-      settleWait: (id, waitId, result) => this.settleWait(id, waitId, result),
-      withdrawCezarHumanWaits: id => this.withdrawCezarHumanWaits(id), armWait: (id, wait) => this.armWait(id, wait),
-      parkOnWaits: (id, state) => this.parkOnWaits(id, state), cancelAutomaticAtCap: (id, waits) => this.cancelAutomaticAtCap(id, waits),
-      reparkWithoutWaits: (id, state) => this.reparkWithoutWaits(id, state), waitOnUserWithoutSession: id => this.wakeAdmission.waitOnUserWithoutSession(id),
-      queueWaitWake: id => this.queueWaitWake(id), retryWaitAdmission: id => this.retryWaitAdmission(id),
+      exitFileRoots: (id, run) => this.waitWatches.exitFileRoots(id, run), disarmWait: id => this.disarmWait(id),
+      settleWait: (id, waitId, result) => this.waitWatches.settleWait(id, waitId, result),
+      withdrawCezarHumanWaits: id => this.withdrawCezarHumanWaits(id), armWait: (id, wait) => this.waitWatches.armWait(id, wait),
+      parkOnWaits: (id, state) => this.wakeAdmission.parkOnWaits(id, state), cancelAutomaticAtCap: (id, waits) => this.wakeAdmission.cancelAutomaticAtCap(id, waits),
+      reparkWithoutWaits: (id, state) => this.wakeAdmission.reparkWithoutWaits(id, state), waitOnUserWithoutSession: id => this.wakeAdmission.waitOnUserWithoutSession(id),
+      queueWaitWake: id => this.wakeAdmission.queueWaitWake(id), retryWaitAdmission: id => this.retries.retryWaitAdmission(id),
     }, MAX_AUTO_CONTINUES);
     this.humanWaits = new HumanWaits(this.context, { routeWorkerQuestion: id => this.routeWorkerQuestion(id) }, MAX_AUTO_CONTINUES);
     this.sessionHelperHost = {
@@ -466,18 +456,18 @@ export class RunManager {
       flushAgentInputs: id => this.flushAgentInputs(id),
       resumeParkedRun: (...args) => this.resumeParkedRun(...args),
       noteNoWaitNudgeContent: (...args) => this.noteNoWaitNudgeContent(...args),
-      parkedOnWorkers: id => this.parkedOnWorkers(id),
+      parkedOnWorkers: id => this.wakeAdmission.parkedOnWorkers(id),
       releaseSlot: () => this.releaseSlot(),
       routeWorkerQuestion: id => this.routeWorkerQuestion(id),
     };
     this.turnNudges = new TurnNudges(this.context, this.humanWaits, this.line, this.completionGateHost, {
       active: this.active, move: (id, exit, patch) => this.move(id, exit, patch),
       workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
-      countAutomaticWakes: id => this.automaticWakes(id), hasQueuedAgentInputs: id => this.hasQueuedAgentInputs(id),
+      countAutomaticWakes: id => this.wakeAdmission.automaticWakes(id), hasQueuedAgentInputs: id => this.hasQueuedAgentInputs(id),
       submitAgentInput: (id, state, content) => this.submitAgentInput(id, state, content), resumeParkedRun: (id, state) => this.resumeParkedRun(id, state),
-      chargeAutomaticWake: id => this.chargeAutomaticWake(id), retryWaitAdmission: id => this.retryWaitAdmission(id), armIdleTimer: (id, state) => this.armIdleTimer(id, state),
+      chargeAutomaticWake: id => this.wakeAdmission.chargeAutomaticWake(id), retryWaitAdmission: id => this.retries.retryWaitAdmission(id), armIdleTimer: (id, state) => this.armIdleTimer(id, state),
       openTurnEndHumanWait: (id, state, step, via, note) => this.openTurnEndHumanWait(id, state, step, via, note),
-      settledTurnOutcome: (id, entry, outcome) => this.settledTurnOutcome(id, entry, outcome), queueWaitWake: id => this.queueWaitWake(id),
+      settledTurnOutcome: (id, entry, outcome) => this.settledTurnOutcome(id, entry, outcome), queueWaitWake: id => this.wakeAdmission.queueWaitWake(id),
       armNoWaitNudgeReplyTimer: (id, state) => this.armNoWaitNudgeReplyTimer(id, state), noWaitNudgeReplyMs: () => this.noWaitNudgeReplyMs,
     }, MAX_AUTO_CONTINUES, COMPLETION_WILL_WAIT);
     this.worktreeAutosave = new WorktreeAutosave(this.context,
@@ -496,8 +486,8 @@ export class RunManager {
       { maintenance: id => this.claims.has(id) || !!this.autosaveCleanupBlocker(id),
         admissionError: message => new WorkerOrphanAliveError(message),
         settleOrphanedWorkerExecution: (id, opts) => this.settleOrphanedWorkerExecution(id, opts),
-        reapTerminalScratch: id => this.reapTerminalScratch(id), queueWaitWake: id => this.queueWaitWake(id),
-        retryWaitAdmission: id => this.retryWaitAdmission(id), releaseSlot: () => this.releaseSlot() },
+        reapTerminalScratch: id => this.reapTerminalScratch(id), queueWaitWake: id => this.wakeAdmission.queueWaitWake(id),
+        retryWaitAdmission: id => this.retries.retryWaitAdmission(id), releaseSlot: () => this.releaseSlot() },
     );
     this.automationToolsSlot = new AutomationToolsSlot(this.context,
       () => !!this.cockpit,
@@ -522,7 +512,7 @@ export class RunManager {
       { activeGet: id => this.active.get(id),
         executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
         workerExecutionStopped: id => this.workerExecutionStopped(id),
-        reconcileWorkerWaits: () => this.reconcileWorkerWaits(), retireEmptyWake: id => this.retireEmptyWake(id),
+        reconcileWorkerWaits: () => this.reconcileWorkerWaits(), retireEmptyWake: id => this.wakeAdmission.retireEmptyWake(id),
         deliverConversationInput: id => this.deliverConversationInput(id),
         settleIdleBoundary: (id, state, session) => this.inputDelivery.settleIdleBoundary(id, state, session),
         releaseSlot: () => this.releaseSlot(), providerOwnsInboxInput: (id, inputId) => this.providerOwnsInboxInput(id, inputId),
@@ -568,9 +558,9 @@ export class RunManager {
         checkpointRestartContext: (...args) => this.checkpointRestartContext(...args),
         deliverConversationInput: (...args) => this.deliverConversationInput(...args),
         answerRoutedQuestion: (...args) => this.answerRoutedQuestion(...args),
-        queueWaitWake: (...args) => this.queueWaitWake(...args),
-        owesWake: (...args) => this.owesWake(...args),
-        cancelOpenWaits: (...args) => this.cancelOpenWaits(...args),
+        queueWaitWake: (...args) => this.wakeAdmission.queueWaitWake(...args),
+        owesWake: (...args) => this.wakeAdmission.owesWake(...args),
+        cancelOpenWaits: (...args) => this.wakeAdmission.cancelOpenWaits(...args),
         settleOrphanedWorkerExecution: (...args) => this.settleOrphanedWorkerExecution(...args),
         settleRequestedRootFinish: (...args) => this.settleRequestedRootFinish(...args),
         settleSuccess: (...args) => this.settleSuccess(...args),
@@ -588,14 +578,14 @@ export class RunManager {
       reconcileWorkerWaits: id => this.reconcileWorkerWaits(id), releaseSlot: () => this.releaseSlot(),
       parkForUser: (id, state, step) => this.parkForUser(id, state, step), armIdleTimer: (id, state) => this.armIdleTimer(id, state),
       flushAgentInputs: id => this.flushAgentInputs(id), answerRoutedQuestion: (id, flush) => this.answerRoutedQuestion(id, flush),
-      queueWaitWake: id => this.queueWaitWake(id), retryWaitAdmission: id => this.retryWaitAdmission(id),
-      countAutomaticWakes: (id, budget) => this.automaticWakes(id, budget),
+      queueWaitWake: id => this.wakeAdmission.queueWaitWake(id), retryWaitAdmission: id => this.retries.retryWaitAdmission(id),
+      countAutomaticWakes: (id, budget) => this.wakeAdmission.automaticWakes(id, budget),
       workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
     }, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS);
     this.continuationAcceptance = new ContinuationAcceptance(this.context, {
       isActive: id => this.isActive(id), move: (id, exit, patch) => this.move(id, exit, patch),
       ownedJob: run => this.ownedJob(run), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
-      finishWorkerExecution: id => this.finishWorkerExecution(id), clearWakeBackoff: id => this.clearWakeBackoff(id),
+      finishWorkerExecution: id => this.finishWorkerExecution(id), clearWakeBackoff: id => this.retries.clearWakeBackoff(id),
       dropActive: id => this.dropActive(id), pump: () => this.pump(),
       runContinuation: (...args) => this.runContinuation(...args), workerStep: (id, step) => this.workerStep(id, step),
       isUntouchedCancelledRun: run => isUntouchedCancelledRun(run), admissionError: (error, fallback) => admissionError(error, fallback),
@@ -611,9 +601,9 @@ export class RunManager {
         saveWorktree: (id, state, reason) => this.saveWorktree(id, state, reason),
         settleSuccess: (id, durable, keep) => this.settleSuccess(id, durable, keep),
         deferParentCompletion: id => this.deferParentCompletion(id),
-        closingWakeDecision: (id, holds, cancelled, error) => this.closingWakeDecision(id, holds, cancelled, error),
-        owesDelivery: id => this.owesDelivery(id), preserveRunAfterDisposal: (id, state) => this.preserveRunAfterDisposal(id, state),
-        isDisposedDelegatedRun: id => this.isDisposedDelegatedRun(id), queueWaitWake: id => this.queueWaitWake(id),
+        closingWakeDecision: (id, holds, cancelled, error) => this.wakeAdmission.closingWakeDecision(id, holds, cancelled, error),
+        owesDelivery: id => this.wakeAdmission.owesDelivery(id), preserveRunAfterDisposal: (id, state) => this.preserveRunAfterDisposal(id, state),
+        isDisposedDelegatedRun: id => this.isDisposedDelegatedRun(id), queueWaitWake: id => this.wakeAdmission.queueWaitWake(id),
         reconcileWorkerWaits: id => this.reconcileWorkerWaits(id), releaseSlot: () => this.releaseSlot(),
         enforceRetention: () => this.enforceRetention(), reapTerminalScratch: id => this.reapTerminalScratch(id),
         forgetMemoryPause: id => { this.memoryPausing.delete(id); },
@@ -637,8 +627,8 @@ export class RunManager {
     this.humanWaits, this.queuedInput, this.workerQuestions, this.runSettlement);
     this.stepLoop = new WorkflowStepLoop(this.context, {
       active: this.active, move: (id, exit, patch) => this.move(id, exit, patch), dropActive: id => this.dropActive(id),
-      closingWakeDecision: (id, holds, cancelled, error) => this.closingWakeDecision(id, holds, cancelled, error),
-      owesDelivery: id => this.owesDelivery(id),
+      closingWakeDecision: (id, holds, cancelled, error) => this.wakeAdmission.closingWakeDecision(id, holds, cancelled, error),
+      owesDelivery: id => this.wakeAdmission.owesDelivery(id),
       workerExecutionStopped: id => this.workerExecutionStopped(id),
       executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
     }, this.line, this.worktreeAutosave, this.humanWaits, this.runSettlement, this.stepSession,
@@ -647,12 +637,12 @@ export class RunManager {
       humanWaits: this.humanWaits, line: this.line, waitWatches: this.waitWatches, waitRegistry: this.waitRegistry,
       workerQuestions: this.workerQuestions, completionGateHost: this.completionGateHost,
       move: (id, exit) => this.move(id, exit), releaseSlot: () => this.releaseSlot(), completionGate: id => this.completionGate(id),
-      cancelOpenWaits: id => this.cancelOpenWaits(id), countAutomaticWakes: id => this.automaticWakes(id),
+      cancelOpenWaits: id => this.wakeAdmission.cancelOpenWaits(id), countAutomaticWakes: id => this.wakeAdmission.automaticWakes(id),
       workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
       submitAgentInput: (id, state, content) => this.submitAgentInput(id, state, content), flushAgentInputs: id => this.flushAgentInputs(id),
       hasQueuedAgentInputs: (id, except) => this.hasQueuedAgentInputs(id, except), armUnreadInputTimer: (id, state) => this.armUnreadInputTimer(id, state),
-      armHeldHumanInputTimer: (id, state) => this.armHeldHumanInputTimer(id, state), parkOnWaits: (id, state) => this.parkOnWaits(id, state),
-      queueWaitWake: id => this.queueWaitWake(id), leaveMonitoringPool: id => this.leaveMonitoringPool(id), chargeAutomaticWake: id => this.chargeAutomaticWake(id),
+      armHeldHumanInputTimer: (id, state) => this.armHeldHumanInputTimer(id, state), parkOnWaits: (id, state) => this.wakeAdmission.parkOnWaits(id, state),
+      queueWaitWake: id => this.wakeAdmission.queueWaitWake(id), leaveMonitoringPool: id => this.wakeAdmission.leaveMonitoringPool(id), chargeAutomaticWake: id => this.wakeAdmission.chargeAutomaticWake(id),
       canAutoContinue: (id, state) => this.canAutoContinue(id, state), tryAutonomousNudge: (id, state, step, ask) => this.tryAutonomousNudge(id, state, step, ask),
       sendTurnEndNudge: (id, state, step, text) => this.sendTurnEndNudge(id, state, step, text),
       awaitCompletionNudgeReply: (id, state, session) => this.awaitCompletionNudgeReply(id, state, session),
@@ -665,17 +655,17 @@ export class RunManager {
       waitRegistry: this.waitRegistry, inputReceiptHost: this.inputReceiptHost,
       isActive: id => this.isActive(id), move: (id, exit) => this.move(id, exit),
       workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
-      hasUnansweredHumanAsk: id => this.hasUnansweredHumanAsk(id), countAutomaticWakes: (id, budget) => this.automaticWakes(id, budget),
+      hasUnansweredHumanAsk: id => this.hasUnansweredHumanAsk(id), countAutomaticWakes: (id, budget) => this.wakeAdmission.automaticWakes(id, budget),
       recoveringRun: id => this.recoveringRun(id), continueRun: (id, opts, defer) => this.continueRun(id, opts, defer),
       latchAgentInputError: (id, state, session, message) => this.latchAgentInputError(id, state, session, message),
       parkForUser: (id, state, step) => this.parkForUser(id, state, step), settleTurn: (id, state, entry, turn) => this.settleTurn(id, state, entry, turn),
       boundaryTurn: (id, state, session, done) => this.boundaryTurn(id, state, session, done),
       canAutoContinue: (id, state) => this.canAutoContinue(id, state), armNoWaitNudgeReplyTimer: (id, state) => this.armNoWaitNudgeReplyTimer(id, state),
       awaitCompletionNudgeReply: (id, state, session) => this.awaitCompletionNudgeReply(id, state, session),
-      queueWaitWake: id => this.queueWaitWake(id), owesWake: (run, budget) => this.owesWake(run, budget),
-      pendingConversationWakes: (run, budget) => this.pendingConversationWakes(run, budget), routedAnswer: id => this.routedAnswer(id),
-      spendWakeAdmission: (id, state, owed) => this.spendWakeAdmission(id, state, owed), cancelAutomaticAtCap: (id, waits) => this.cancelAutomaticAtCap(id, waits),
-      reparkWithoutWaits: (id, state) => this.reparkWithoutWaits(id, state), holdPeerWakesAtCap: id => this.holdPeerWakesAtCap(id),
+      queueWaitWake: id => this.wakeAdmission.queueWaitWake(id), owesWake: (run, budget) => this.wakeAdmission.owesWake(run, budget),
+      pendingConversationWakes: (run, budget) => this.wakeAdmission.pendingConversationWakes(run, budget), routedAnswer: id => this.wakeAdmission.routedAnswer(id),
+      spendWakeAdmission: (id, state, owed) => this.wakeAdmission.spendWakeAdmission(id, state, owed), cancelAutomaticAtCap: (id, waits) => this.wakeAdmission.cancelAutomaticAtCap(id, waits),
+      reparkWithoutWaits: (id, state) => this.wakeAdmission.reparkWithoutWaits(id, state), holdPeerWakesAtCap: id => this.wakeAdmission.holdPeerWakesAtCap(id),
       reconcileWorkerWaits: () => this.reconcileWorkerWaits(), unreadInputGraceMs: () => this.unreadInputGraceMs,
       submitAgentInput: (id, state, content, inputs, budget) => this.submitAgentInput(id, state, content, inputs, budget),
     }, MAX_AUTO_CONTINUES, ROUTED_QUESTION_REFUSAL);
@@ -694,7 +684,7 @@ export class RunManager {
     this.queueWatchdog = setInterval(() => void this.rescueStalledQueue(), QUEUE_WATCHDOG_MS);
     this.queueWatchdog.unref?.();
     this.store.on('run', this.onDelegationRun);
-    this.store.on('deleted', this.onRunDeleted);
+    this.store.on('deleted', this.wakeAdmission.onRunDeleted);
   }
 
   /**
@@ -721,7 +711,7 @@ export class RunManager {
     this.orphans.dispose();
     this.workerExecutions.dispose();
     this.store.off('run', this.onDelegationRun);
-    this.store.off('deleted', this.onRunDeleted);
+    this.store.off('deleted', this.wakeAdmission.onRunDeleted);
     this.familyReconciler.dispose();
     this.inboxClaims.dispose();
     this.offUsage();
@@ -886,7 +876,7 @@ export class RunManager {
    */
   cezarToolHandlers(runId: string, generation: string): CezarToolHandlers {
     return cezarToolHandlers(runId, generation, { store: this.store,
-      registerWait: (...args) => this.registerWait(...args), registerAsk: (...args) => this.registerAsk(...args),
+      registerWait: (...args) => this.registerWait(...args), registerAsk: (...args) => this.waitRegistry.registerAsk(...args),
       cancelWait: (...args) => this.cancelWait(...args), acceptDone: (...args) => this.acceptDone(...args),
       registerPreviewServer: (...args) => this.registerPreviewServer(...args), stopPreviewServer: (...args) => this.stopPreviewServer(...args),
       awaitAutomationTools: signal => this.awaitAutomationTools(signal) });
@@ -934,67 +924,10 @@ export class RunManager {
     return registerPreviewServer(this.store, this.preview, this.cezarPort, () => this.disposed, runId, request, signal);
   }
 
-  async registerAsk(runId: string, request: CezarAskRequest, generation: string, capabilitySignal?: AbortSignal): Promise<HumanWaitEntry> { return this.waitRegistry.registerAsk(runId, request, generation, capabilitySignal); }
   async registerWait(runId: string, request: CezarWaitRequestInput, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry | PeerWaitEntry> { return this.waitRegistry.registerWait(runId, request, via, generation, capabilitySignal); }
   cancelWait(runId: string, waitId: string, generation: string) { return this.waitRegistry.cancelWait(runId, waitId, generation); }
-  private resolveWait(runId: string, waitId: string, result?: CiWaitResult | ProcessWaitResult | PeerWaitResult, observed?: WorkerWaitEntry): void { this.waitRegistry.resolveWait(runId, waitId, result, observed); }
 
-  private exitFileRoots(runId: string, run = this.store.getRun(runId)): ExitFileRoots {
-    return this.waitWatches.exitFileRoots(runId, run);
-  }
-
-  private armWait(runId: string, wait: Wait): void { this.waitWatches.armWait(runId, wait); }
-  private armWorkerDeadline(runId: string, wait: WorkerWaitEntry, firstDelay?: number): void { this.waitWatches.armWorkerDeadline(runId, wait, firstDelay); }
   private disarmWait(waitId: string): void { this.waitWatches.disarmWait(waitId); this.familyReconciler.forgetRetry(waitId); this.waitWatches.disarmProcessWatch(waitId); }
-  private settleWait(runId: string, waitId: string, result?: CiWaitResult | ProcessWaitResult | PeerWaitResult): void { this.waitWatches.settleWait(runId, waitId, result); }
-
-  private cancelAutomaticAtCap(runId: string, waits: readonly Wait[]): void { return this.wakeAdmission.cancelAutomaticAtCap(runId, waits); }
-
-  private reparkWithoutWaits(runId: string, state: ActiveRun): void { return this.wakeAdmission.reparkWithoutWaits(runId, state); }
-
-  private owesDelivery(runId: string): boolean { return this.wakeAdmission.owesDelivery(runId); }
-
-  private closingWakeDecision(runId: string, holdsClosingWakes: boolean, cancelled: boolean, undelivered: string | undefined): 'park' | 'settle' | 'capped' { return this.wakeAdmission.closingWakeDecision(runId, holdsClosingWakes, cancelled, undelivered); }
-
-  private clearWakeBackoff(runId: string): void {
-    this.retries.clearWakeBackoff(runId);
-  }
-
-  private spendWakeAdmission(runId: string, state: ActiveRun, owed: boolean): void { return this.wakeAdmission.spendWakeAdmission(runId, state, owed); }
-
-  private automaticWakes(runId: string, beforeHumanReset?: HumanAnswerBudget): number { return this.wakeAdmission.automaticWakes(runId, beforeHumanReset); }
-
-  private chargeAutomaticWake(runId: string): number { return this.wakeAdmission.chargeAutomaticWake(runId); }
-
-  private retryWaitAdmission(runId: string): void {
-    this.retries.retryWaitAdmission(runId);
-  }
-
-  private parkOnWaits(runId: string, state: ActiveRun): boolean { return this.wakeAdmission.parkOnWaits(runId, state); }
-
-  private parkedOnWorkers(runId: string): boolean { return this.wakeAdmission.parkedOnWorkers(runId); }
-
-  private leaveMonitoringPool(runId: string): void { return this.wakeAdmission.leaveMonitoringPool(runId); }
-
-  private queueWaitWake(runId: string): void { return this.wakeAdmission.queueWaitWake(runId); }
-
-  private wakeHeld(run: RunRecord): boolean { return this.wakeAdmission.wakeHeld(run); }
-
-  private withExecutionAccount<T extends RunRecord>(run: T): T { return this.wakeAdmission.withExecutionAccount(run); }
-
-  private pendingConversationWakes(run: RunRecord, beforeHumanReset?: HumanAnswerBudget): AgentInput[] { return this.wakeAdmission.pendingConversationWakes(run, beforeHumanReset); }
-
-  private holdPeerWakesAtCap(runId: string): void { return this.wakeAdmission.holdPeerWakesAtCap(runId); }
-
-  private routedAnswer(runId: string): AgentInput | undefined { return this.wakeAdmission.routedAnswer(runId); }
-
-  private owesWake(run: RunRecord, beforeHumanReset?: HumanAnswerBudget): boolean { return this.wakeAdmission.owesWake(run, beforeHumanReset); }
-
-  private retireEmptyWake(runId: string): void { return this.wakeAdmission.retireEmptyWake(runId); }
-
-  private cancelOpenWaits(runId: string): void { return this.wakeAdmission.cancelOpenWaits(runId); }
-
-  private readonly onRunDeleted = (runId: string): void => { this.wakeAdmission.onRunDeleted(runId); };
 
   /** Snapshot of the actual active session, never guessed from partial run settings. */
   delegationExecutionSettings(runId: string): DelegationExecutionSettings {
@@ -1154,8 +1087,6 @@ export class RunManager {
 
   private async pump(): Promise<void> { return this.line.pump(); }
 
-  private admitQueuedWaitWake(runId: string): 'none' | 'handled' | 'deferred' { return this.wakeAdmission.admitQueuedWaitWake(runId); }
-
   /** Read and hydrate mutable queued input in the same synchronous tick as dequeue. */
   private launchQueuedRun(runId: string, job: PendingJob | undefined, continuation: PendingContinuation | undefined): void {
     if (continuation) {
@@ -1305,7 +1236,7 @@ export class RunManager {
   async rescueStalledQueue(now = Date.now()): Promise<void> { return this.line.rescueStalledQueue(now); }
 
   accountHolds(now = Date.now()): AccountHolds {
-    return deriveAccountHolds(this.store.listRuns(), run => this.withExecutionAccount(run), now);
+    return deriveAccountHolds(this.store.listRuns(), run => this.wakeAdmission.withExecutionAccount(run), now);
   }
 
   cancelAutoResume(runId: string): boolean { return this.autoResumeScheduler.cancelAutoResume(runId); }
@@ -1339,7 +1270,7 @@ export class RunManager {
     if (this.store.writeRefusal(runId)) return false;
     this.cancelWorkerExecution(runId);
     const hadWaits = !!this.store.getRun(runId)?.waits?.length;
-    this.cancelOpenWaits(runId);
+    this.wakeAdmission.cancelOpenWaits(runId);
     const retiredRefusal = this.retireCompletionRefusal(runId);
     const cancelledFinish = transitionVia('cancel', () => this.store.getRun(runId), () => this.store.commitRootFinishCancellation(runId));
     // Still waiting in the queue: just drop it there.
@@ -1760,7 +1691,7 @@ export class RunManager {
     const state = this.active.get(runId);
     if (decision.action === 'session' && state?.session) {
       try {
-        this.cancelOpenWaits(runId);
+        this.wakeAdmission.cancelOpenWaits(runId);
         this.acceptRootRequestFinish(runId);
       } catch { return false; }
       this.closeQuestionOnFinish(runId);

@@ -49,6 +49,13 @@ interface WaitRegistryHost {
 export class WaitRegistry {
   readonly ciRegistrations = new Map<string, { runId: string; abort: AbortController; promise: Promise<PrWaitEntry | TimerWaitEntry> }>();
   constructor(private readonly context: RunModuleContext, private readonly host: WaitRegistryHost, private readonly maxAutoContinues: number) {}
+  abortRegistrations(runId: string): void {
+    for (const [key, registration] of this.ciRegistrations) {
+      if (registration.runId !== runId) continue;
+      registration.abort.abort(); this.ciRegistrations.delete(key);
+    }
+  }
+
   dispose(): void {
     for (const task of this.ciRegistrations.values()) task.abort.abort();
     this.ciRegistrations.clear();

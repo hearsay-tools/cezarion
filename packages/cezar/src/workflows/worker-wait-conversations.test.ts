@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -411,7 +412,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
   it.each(['queued', 'admitted'] as const)('inbox ACK retires an unsubmitted message wake (%s) without resolving the request', async mode => {
     const f = await conversationPair();
     const engine = manager as unknown as { pump(): Promise<void>; queue: string[]; waitWakeQueuedAt: Map<string, number>;
-      active: Map<string, { session: AgentSession }>; waitWakeAdmitted: Set<string>; queueWaitWake(id: string): void };
+      active: Map<string, { session: AgentSession }>; waitWakeAdmitted: Set<string> };
     const pump = vi.spyOn(engine, 'pump').mockResolvedValue();
     const send = vi.spyOn(engine.active.get(f.p.id)!.session, 'sendAgentMessage');
     try {
@@ -428,7 +429,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       const generation = randomUUID();
       expect(manager.canClaimInboxInput(f.p.id, first)).toBe(true);
       const receipt = manager.reserveInboxInputs(f.p.id, generation, [first])!;
-      engine.queueWaitWake(f.p.id);
+      runInternals(manager).wakeAdmission.queueWaitWake(f.p.id);
       pump.mockRestore(); await engine.pump();
       if (mode === 'queued') {
         // The claimed message owes no wake: the queued one is dropped rather than admitted.

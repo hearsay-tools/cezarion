@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -538,7 +539,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       await vi.advanceTimersByTimeAsync(Date.parse(deadline) - Date.now() + 1);
       if (pending) {
         expect(send).not.toHaveBeenCalled();
-        expect(manager['automaticWakes'](w.id)).toBe(0);
+        expect(runInternals(manager).wakeAdmission.automaticWakes(w.id)).toBe(0);
         expect({ ...store.getRun(w.id), monitoringWakeAt: monitoringWakeOf(store.getRun(w.id)) }).toMatchObject({ status: 'waiting', monitoringWakeAt: deadline });
         expect(engine.monitoring.has(w.id)).toBe(true);
         expect(store.readEvents(w.id).some(event => event.type === 'note' && typeof event.message === 'string' && event.message.includes('automatic monitoring wake-up'))).toBe(false);
@@ -546,7 +547,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         expect(send).not.toHaveBeenCalled();
       } else {
         expect(send).toHaveBeenCalledTimes(1);
-        expect(manager['automaticWakes'](w.id)).toBe(1);
+        expect(runInternals(manager).wakeAdmission.automaticWakes(w.id)).toBe(1);
         // hearsay-tools/cezarion#1233: the wake turn keeps its pool slot until its own turn end.
         expect(engine.monitoring.has(w.id)).toBe(true);
       }

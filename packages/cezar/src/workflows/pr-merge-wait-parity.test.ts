@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -86,17 +87,18 @@ describe('native PR merge wait parity', { timeout: 35_000 }, () => {
       await until(() => mergeReads(log) > before && probes.size > 0);
       expect(open(run.id)).toMatchObject({ id: wait.id, phase: 'open' });
       // The committed row at the wake boundary already holds the result and its input.
-      const engine = manager as unknown as { queueWaitWake(id: string): void; resolveWait(id: string, waitId: string, result: unknown): void };
-      const queue = engine.queueWaitWake.bind(manager);
+      const engine = runInternals(manager).wakeAdmission;
+      const queue = engine.queueWaitWake.bind(engine);
       let committed: ReturnType<typeof disk>;
-      vi.spyOn(engine, 'queueWaitWake').mockImplementation(id => { if (id === run.id && !committed) committed = disk(id); queue(id); });
+      const wake = vi.spyOn(engine, 'queueWaitWake').mockImplementation(id => { if (id === run.id && !committed) committed = disk(id); queue(id); });
       writeFileSync(gate + '.merged', '');
       for (const probe of [...probes]) probe.resume();
       await until(() => !!last(run.id)?.deliveredAt);
+      expect(wake).toHaveBeenCalled();
       expect(committed.waits.find((entry: { id: string }) => entry.id === wait.id)).toMatchObject({ phase: 'resolved', result: { outcome: 'merged' } });
       expect(committed.agentInputs.filter((input: { id: string }) => input.id === wait.id)).toHaveLength(1);
       expect(last(run.id)).toMatchObject({ id: wait.id, until: 'merge', result: { outcome: 'merged', mergedAt: '2026-10-23T09:00:00Z', mergeCommitSha: 'b'.repeat(40) } });
-      engine.resolveWait(run.id, wait.id, last(run.id)!.result); // A duplicate callback cannot enqueue another input.
+      runInternals(manager).waitRegistry.resolveWait(run.id, wait.id, last(run.id)!.result); // A duplicate callback cannot enqueue another input.
       await until(() => ciNativeMessages(runner, root).some(text => text.includes(`PR wait observation ${wait.id}`)));
       const prompts = ciNativeMessages(runner, root).filter(text => text.includes(`PR wait observation ${wait.id}`));
       expect(prompts).toHaveLength(1);

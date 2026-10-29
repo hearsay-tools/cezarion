@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { join } from 'node:path';
 import { writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -132,7 +133,6 @@ describe('CI metadata lookup interruption', { timeout: 30_000 }, () => {
     const run = await parent(); await until(wire.initialReceived);
     const engine = manager as unknown as {
       active: Map<string, { ciGeneration: string; ciTurnId: string }>;
-      ciRegistrations: Map<string, { runId: string; abort: AbortController }>;
     };
     const state = engine.active.get(run.id)!;
     const previousTurn = state.ciTurnId;
@@ -143,7 +143,7 @@ describe('CI metadata lookup interruption', { timeout: 30_000 }, () => {
     const assertion = expect(pending).rejects.toMatchObject({ code });
     try {
       // Keyed by run and normalised PR URL since hearsay-tools/cezarion#1233.
-      if (code === 'registration_aborted') [...engine.ciRegistrations.values()].find(entry => entry.runId === run.id)!.abort.abort();
+      if (code === 'registration_aborted') [...runInternals(manager).waitRegistry.ciRegistrations.values()].find(entry => entry.runId === run.id)!.abort.abort();
       else if (code === 'turn_changed') state.ciTurnId = 'next-turn';
       else capability.abort();
       fail(new Error('lookup aborted'));

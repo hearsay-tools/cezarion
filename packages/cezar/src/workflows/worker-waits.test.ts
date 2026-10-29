@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { join } from 'node:path';
 import { writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -247,7 +248,7 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
     if (!workers.ok || !timer.ok) throw Error('refused');
     release();
     await until(() => store.getRun(p.id)?.status === 'waiting');
-    (manager as unknown as { waitTimers: Map<string, { timer: { _onTimeout(): void } }> }).waitTimers.get(timer.wait_id)!.timer._onTimeout();
+    runInternals(manager).waitWatches.waitTimers.get(timer.wait_id)!.timer._onTimeout();
     await until(() => settledOf(p.id, timer.wait_id)?.phase === 'delivered' && store.getRun(p.id)?.status === 'waiting');
     expect(inputOf(p.id, timer.wait_id)?.deliveredAt).toBeDefined();
     expect(entryOf(p.id, workers.wait_id)).toMatchObject({ kind: 'worker', phase: 'open', workerIds: [w.id] });
@@ -468,7 +469,7 @@ describe('human messages beside an owed timer wait', { timeout: 45_000 }, () => 
     if (timer.kind === 'human') throw Error('unexpected human wait');
     await restart();
     await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(blocker.id)?.sessionEverOpened === true);
-    (manager as unknown as { waitTimers: Map<string, { timer: { _onTimeout(): void } }> }).waitTimers.get(timer.id)!.timer._onTimeout();
+    runInternals(manager).waitWatches.waitTimers.get(timer.id)!.timer._onTimeout();
     await until(() => store.getRun(p.id)?.status === 'queued');
     expect(entryOf(p.id, timer.id)?.phase).toBe('resolved');
     return { p, blocker, timer };
@@ -530,7 +531,7 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
 
   type Internals = {
     active: Map<string, { session: AgentSession; idleTimer?: unknown; sessionEverOpened?: boolean }>;
-    monitoring: Set<string>; waitTimers: Map<string, { timer: { _onTimeout(): void } }>;
+    monitoring: Set<string>;
   };
   const internals = () => manager as unknown as Internals;
   const parkedOn = (runId: string, waitId: string) =>
@@ -630,7 +631,7 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
     expect(disk.find(record => record.id === p.id)).toMatchObject({ waits: expect.arrayContaining([expect.objectContaining({ id: observed.id, phase: 'open' })]) });
     await restart(true, disk);
     expect(entryOf(p.id, deadline.id)).toMatchObject({ phase: 'open', deadline: deadline.deadline });
-    expect(internals().waitTimers.has(deadline.id)).toBe(true);
+    expect(runInternals(manager).waitWatches.waitTimers.has(deadline.id)).toBe(true);
     await until(() => settledOf(p.id, observed.id)?.phase === 'delivered');
     expect(settledOf(p.id, observed.id)).toMatchObject({ result: { reason: 'outcome' }, outcomes: [{ workerId: settles.id, status: 'done' }] });
     await until(() => store.getRun(p.id)?.status === 'waiting');

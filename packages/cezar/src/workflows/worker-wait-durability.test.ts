@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
@@ -591,9 +592,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     register(p.id, [w.id]); store.flush();
     const release = blockRunWrites(join(root, '.ai/cezar'));
     // hearsay-tools/cezarion#1235: an agent worker wait parks through the wait list (`parkOnWaits`).
-    const engine = manager as unknown as { active: Map<string, unknown>; parkOnWaits(id: string, state: unknown): boolean };
+    const engine = runInternals(manager);
     try {
-      expect(() => engine.parkOnWaits(p.id, engine.active.get(p.id))).toThrow();
+      expect(() => engine.wakeAdmission.parkOnWaits(p.id, engine.active.get(p.id)!)).toThrow();
       expect(waitOf(store.getRun(p.id))?.phase).toBe('registered');
       expect(semaphore.busy()).toBe(1);
     } finally {
