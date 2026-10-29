@@ -201,3 +201,12 @@ export type AutomationToolService = {
   scheduleTask(request: ScheduleTaskRequest): Promise<ScheduleTaskAnswer>;
   scheduledTasks(request: ScheduledTasksRequest): Promise<ScheduledTasksAnswer>;
 };
+
+/** Shared dependencies for state-owning run modules. */
+export interface RunModuleContext {
+  store: import('../../runs/store.ts').RunStore;
+  repoRoot: string;
+  dataDir: string;
+  semaphore: import('../../workspace/semaphore.ts').WorkspaceSemaphore;
+  disposed(): boolean;
+}
