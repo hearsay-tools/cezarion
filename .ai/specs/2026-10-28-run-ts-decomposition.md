@@ -437,8 +437,9 @@ A move never answers these:
    (`harness-autosave-settlement.test.ts`). `reconcileAllWorkerFamilies` delegates to
    `FamilyReconciler` and has test callers only (`delegation-reconcile.test.ts`). Phase 5 makes them
    private, points the host at the modules, or moves the tests.
-6. `stepLeftOpen` reads like a query but clears `completedStepId` as it reads.
-   hearsay-tools/cezarion#2200 moves it verbatim; hearsay-tools/cezarion#2233 makes it a pure read.
+6. `stepLeftOpen` is now a pure read (hearsay-tools/cezarion#2233); each caller clears the
+   consumed mark under its original conditions. A cancelled Continue keeps the mark, and
+   nothing reads it before its `ActiveRun` is dropped; the difference is not observable.
 7. `disarmRunWaits` deletes entries from `ciRegistrations`, the map that `WaitRegistry` owns, from
    outside the registry. That goes against the Phase 3 exit. hearsay-tools/cezarion#2197 moves the
    loop verbatim and reads the map through `WaitRegistry`; hearsay-tools/cezarion#2232 gives the
