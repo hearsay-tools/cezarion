@@ -1,3 +1,25 @@
+import { randomUUID } from 'node:crypto';
+import { askPayloadOf, askRequestOf } from '@open-mercato/cezar-contract/pending-ask';
+import type { RunRecord, RunStore } from '../../runs/store.ts';
+import { AgentTempDirError } from '../../runs/agent-tmpdir.ts';
+import { AgentAccountUnavailableError } from '../../workspace/agent-profiles.ts';
+import { artifactInstructions } from '../../artifacts/lifecycle.ts';
+import { handoffInstructions } from '../../handoff.ts';
+import type { SessionContext } from '../../session-context.ts';
+import type { UiEvent } from '../../core/ui-events.ts';
+import type { RunExitId } from '../run-states.ts';
+import { openWaitsFooter } from '../waits.ts';
+import { composeSystemPrompt, withResumeContext } from './prompts.ts';
+import { isDisposedDelegatedRun } from './run-guards.ts';
+import { hasPendingHumanAsk, pendingHumanAskSeq } from './pending-ask-facts.ts';
+import { clearIdleTimer, clearHeldHumanInputTimer, clearUnreadInputTimer } from './input-timers.ts';
+import { isRunnerActivity } from './turn-markers.ts';
+import { recordUsageUiEvent } from './usage-accounting.ts';
+import type { LaunchOpening, StepProfile } from './types.ts';
+import type { RunLine } from './run-line.ts';
+import type { HumanWaits } from './human-waits.ts';
+import * as inputReceipts from './input-receipts.ts';
+
 import type { AgentEvent, RunnerId } from '../../core/agent-runner.ts';
 import { UiEventSink } from '../../runs/ui-event-sink.ts';
 import type { ActiveRun } from '../active-run.ts';
@@ -69,28 +91,6 @@ export async function launchPreamble(host: LaunchPreambleHost, runId: string, st
   return { delegation, webhooksPart, ciTools, stale };
 }
 
-import { randomUUID } from 'node:crypto';
-import { askPayloadOf, askRequestOf } from '@open-mercato/cezar-contract/pending-ask';
-import type { RunRecord, RunStore } from '../../runs/store.ts';
-import { AgentTempDirError } from '../../runs/agent-tmpdir.ts';
-import { AgentAccountUnavailableError } from '../../workspace/agent-profiles.ts';
-import { artifactInstructions } from '../../artifacts/lifecycle.ts';
-import { handoffInstructions } from '../../handoff.ts';
-import type { SessionContext } from '../../session-context.ts';
-import type { UiEvent } from '../../core/ui-events.ts';
-import type { RunExitId } from '../run-states.ts';
-import { openWaitsFooter } from '../waits.ts';
-import { composeSystemPrompt } from './prompts.ts';
-import { withResumeContext } from './prompts.ts';
-import { isDisposedDelegatedRun } from './run-guards.ts';
-import { hasPendingHumanAsk, pendingHumanAskSeq } from './pending-ask-facts.ts';
-import { clearIdleTimer, clearHeldHumanInputTimer, clearUnreadInputTimer } from './input-timers.ts';
-import { isRunnerActivity } from './turn-markers.ts';
-import { recordUsageUiEvent } from './usage-accounting.ts';
-import type { LaunchOpening, StepProfile } from './types.ts';
-import type { RunLine } from './run-line.ts';
-import type { HumanWaits } from './human-waits.ts';
-import * as inputReceipts from './input-receipts.ts';
 
 export interface SessionHelperHost {
   active: ReadonlyMap<string, ActiveRun>;
@@ -144,7 +144,7 @@ export function markTurnBoundary(context: RunModuleContext, host: SessionHelperH
  * would return empty output. An account that would open another folder than its own fails the
  * same way (#1283). Returns the profile, or that error's message.
  */
-export async function stepProfileFor(context: RunModuleContext, host: SessionHelperHost, 
+export async function stepProfileFor(context: RunModuleContext, host: SessionHelperHost,
   runId: string,
   stepBackend: RunnerId,
   options: { recordedProfileId?: string | undefined; stepId?: string | undefined },
@@ -176,7 +176,7 @@ export function launchStale(context: RunModuleContext, host: SessionHelperHost, 
 
 /** A launch's opening message (hearsay-tools/cezarion#1632): the body, the open-waits footer, the
  *  resume context of a Continue's checkpoint, then the session-start context in front. */
-export function launchOpening(context: RunModuleContext, host: SessionHelperHost, 
+export function launchOpening(context: RunModuleContext, host: SessionHelperHost,
   runId: string,
   state: ActiveRun,
   stepId: string,

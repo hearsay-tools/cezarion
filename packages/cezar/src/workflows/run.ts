@@ -26,9 +26,9 @@ import { RepoRootLease } from './run/repo-root-lease.ts';
 import { MaintenanceClaims } from './run/maintenance-claims.ts';
 import { WorkerOrphans } from './run/worker-orphans.ts';
 import type {
-  SettledTurn, DelegationExecutionSettings, StartRunInput, PendingContinuation, ExecutionEmit,
+  SettledTurn, DelegationExecutionSettings, StartRunInput, PendingContinuation,
   Execution, ExecutionLaunch, StepLoop, SessionTurn, LaunchDelegation,
-  LaunchCiTools, LaunchOpening, StepProfile, StepSessionLaunch,
+  LaunchCiTools, LaunchOpening, StepProfile,
   WorkerDelegationRecord, ContinuationOpening, OpeningAnswer, ContinuationSettings, ContinuationSkills,
   ContinuationSessionLaunch, ContinuationClose, WorkerTerminationBlocker, AutomationToolService,
 } from './run/types.ts';
@@ -43,11 +43,10 @@ import { type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { type PreviewStopRequest, type PreviewStopResult, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, stepScopedNudge, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
-import { isRunnerActivity } from './run/turn-markers.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
 import { familyOf, canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested, isDisposedDelegatedRun, preserveRunAfterDisposal } from './run/run-guards.ts';
-import { beginUsageInvocation, recordUsageUiEvent, recordUsagePeaks } from './run/usage-accounting.ts';
-import { continuationModel, continuationEffort, continuationRunner, taskModelIdentity, stepModel } from './run/launch-settings.ts';
+import { beginUsageInvocation, recordUsagePeaks } from './run/usage-accounting.ts';
+import { continuationModel, continuationEffort, continuationRunner, taskModelIdentity } from './run/launch-settings.ts';
 import { executionBaseRef, openExecutionWorktree, ownedContinuationWorkspace, executionSeedFiles, REPOSITORY_ROOT_LOCK_DISABLED_NOTE } from './run/run-workspace.ts';
 import * as inputReceipts from './run/input-receipts.ts';
 import { AutoResumeScheduler } from './run/auto-resume.ts';
@@ -57,7 +56,7 @@ import { createSessionEventHandler, launchPreamble } from './run/session-events.
 import * as launchContext from './run/launch-context.ts';
 import { continuationOpening, openingInputs } from './run/opening.ts';
 import { releaseActiveResources } from './run/drop-active.ts';
-import { agentDirectories, applyTemplate, composeSystemPrompt, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt, withResumeContext } from './run/prompts.ts';
+import { agentDirectories, composeSystemPrompt, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt } from './run/prompts.ts';
 import { delegationExecutionSettings, selectDelegationExecutionSettings } from '../delegation/execution-settings.ts';
 import { stepLabel, stepScope } from './run/steps.ts';
 import { makeRunTitle } from '../runs/run-title.ts';
@@ -71,11 +70,10 @@ import * as workflowPosition from './run/workflow-position.ts';
 import { RUN_EXITS, transition, transitionVia, type RunExitId } from './run-states.ts';
 import { accountHeldFor, deriveAccountHolds, queuedRecoveryInput } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
-import { holdsOwedResults, isCezarHumanWait, openWaitList, openWaits, openWaitsFooter, resolvedWaits } from './waits.ts';
+import { holdsOwedResults, isCezarHumanWait, openWaitList, openWaits, resolvedWaits } from './waits.ts';
 import { runsAwaitingPeer } from './wait-scope.ts';
 import { previewCdpSession, previewRunContext, type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
-import { artifactInstructions } from '../artifacts/lifecycle.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import type { CezarToolHandlers } from '../ci-wait/controller.ts';
 import { workerIdentity, continuationDefStep, ownedWorkflow, workerStepIdentity, WorkerIdentityError, type WorkerAccountBinding, type WorkerStepIdentity } from '../delegation/execution-identity.ts';
@@ -96,7 +94,6 @@ import { createRunner } from '../core/runner-factory.ts';
 import type { RunnerId } from '../core/agent-runner.ts';
 import { agentModelsLocked } from '../core/agent-model-policy.ts';
 import {
-  handoffInstructions,
   handoffPath,
   seedHandoffFile,
 } from '../handoff.ts';
@@ -118,7 +115,6 @@ import {
 } from '@open-mercato/cezar-contract/conversations';
 import { contentBlocksOf, pastedAttachmentsText, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from './pasted-content.ts';
 export { contentBlocksOf, highestImageSeq, mediaTypeFor, pastedAttachmentsNote, pastedAttachmentsText, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from './pasted-content.ts';
-import { askPayloadOf, askRequestOf } from '@open-mercato/cezar-contract/pending-ask';
 import type { AgentEvent, ContentBlock, ToolGrant } from '../core/agent-runner.ts';
 import { inputDeliveryOf } from '../core/agent-runner.ts';
 import { readProjectUiState } from '../ui-state.ts';
@@ -153,9 +149,9 @@ import {
   removeAgentTmpDir,
 } from '../runs/agent-tmpdir.ts';
 import { extractTaskRefs, refineTaskRefs } from '../runs/task-refs.ts';
-import { AgentAccountUnavailableError, resolveProfileEnvForRoot } from '../workspace/agent-profiles.ts';
+import { resolveProfileEnvForRoot } from '../workspace/agent-profiles.ts';
 import { WorkspaceSemaphore, type AccountHolds } from '../workspace/semaphore.ts';
-import { UiEventSink } from '../runs/ui-event-sink.ts';
+import type { UiEventSink } from '../runs/ui-event-sink.ts';
 import type { UiEvent } from '../core/ui-events.ts';
 import {
   QUICK_TASK_WORKFLOW,
@@ -3528,29 +3524,8 @@ export class RunManager {
   private async settleExecution(runId: string, state: ActiveRun, loop: StepLoop): Promise<void> { return this.runSettlement.settleExecution(runId, state, loop); }
   private settleFailedRun(runId: string, runError: string, deliveryCapped: boolean): void { this.runSettlement.settleFailedRun(runId, runError, deliveryCapped); }
   /** Returns an error message, or null on success. */
-  private async runAgentStep(
-    runId: string,
-    state: ActiveRun,
-    step: WorkflowStepDef,
-    input: StartRunInput,
-    checkFailure: string | null,
-    /** The step after this one, which this step's done starts; undefined for the last step. */
-    nextStep: WorkflowStepDef | undefined,
-    emit: (event: { type: string; stepId?: string; [k: string]: unknown }) => void,
-    images: ContentBlock[] | undefined,
-    taskBackend: RunnerId,
-    extraSystemPrompt: string | undefined,
-    /** The chain-boundary note for this step (#410), or undefined when the
-     *  workflow has a single agent step and there is no boundary to explain. */
-    chainNote: string | undefined,
-    /** Pasted attachments already materialized to disk (#357) — their absolute
-     *  paths are appended to `userPrompt` so the agent can operate on the
-     *  real files, not just view the inline image blocks. */
-    attachments: PersistedAttachment[] = [],
-    /** Worktree setup's paragraph for the agent (#917) — appended to the opening message. */
-    openingNote?: string,
-  ): Promise<string | null> {
-    return this.stepSession.runAgentStep(runId, state, step, input, checkFailure, nextStep, emit, images, taskBackend, extraSystemPrompt, chainNote, attachments, openingNote);
+  private async runAgentStep(...args: Parameters<StepSession['runAgentStep']>): Promise<string | null> {
+    return this.stepSession.runAgentStep(...args);
   }
 
   private sessionEventHost(): import('./run/session-events.ts').SessionEventHost {
