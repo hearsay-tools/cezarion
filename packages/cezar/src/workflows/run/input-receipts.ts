@@ -1,5 +1,13 @@
 import type { AgentInput } from '@open-mercato/cezar-contract';
-import type { AgentSession } from '../../core/agent-runner.ts';
+import type { AgentEvent, AgentSession } from '../../core/agent-runner.ts';
+import { stripAskMarker } from '../../core/ask.ts';
+import { registerRunProcess } from '../../core/process-usage.ts';
+import { stripTaskMarkers } from '../../runs/task-markers.ts';
+import { appendTurnText, appendCompletedAssistantText, trackTurnTail, stripDoneMarker, stripMonitoringMarker } from './turn-markers.ts';
+import type { SessionTurn, ExecutionEmit } from './types.ts';
+import type { PersistedAttachment } from '../pasted-content.ts';
+import type { UiEvent } from '../../core/ui-events.ts';
+import type { UiEventSink } from '../../runs/ui-event-sink.ts';
 import type { RunOutcome } from '../../runs/outcome-commit.ts';
 import type { ActiveRun } from '../active-run.ts';
 import { answerOutcomes, chargedIf, retryDeliveryCheckpoint } from '../outcome-batches.ts';
@@ -131,3 +139,64 @@ export function requeueUnreadAtClose(context: RunModuleContext, host: InputRecei
   catch (error) { console.warn(`[cez] agent input requeue failed: ${error instanceof Error ? error.message : String(error)}`); }
 }
 
+/** Manager callbacks shared by the three call-site adapters, separate from receipt policy. */
+export interface InputReceiptSteps {
+  clearUnread(state: ActiveRun): void;
+  clearHeld(state: ActiveRun): void;
+  noteActivity(runId: string, state: ActiveRun, event: AgentEvent): void;
+  persistAttachment(runId: string, mediaType: string, data: string): PersistedAttachment | null;
+  ready(runId: string, state: ActiveRun, session: AgentSession | undefined): void;
+  pid(runId: string, pid: number): void;
+  ui(runId: string, state: ActiveRun, sink: UiEventSink, event: UiEvent): void;
+  flushDeferred(runId: string): void;
+  recordProcess(runId: string, pid: number): void;
+}
+
+/** Both launch entries process images, text, unread receipts and tool activity in this order. */
+export function handleReceiptEvent(context: RunModuleContext, host: InputReceiptsHost, steps: InputReceiptSteps, runId: string, state: ActiveRun, turn: SessionTurn, event: AgentEvent, stepId: string, emit: ExecutionEmit): boolean {
+  if (event.type === 'image') {
+    const saved = steps.persistAttachment(runId, event.mediaType, event.data);
+    if (saved) emit({ type: 'image', stepId, ...saved });
+    return true;
+  }
+  if (event.type === 'text') {
+    steps.clearUnread(state); // real content: the harness is working
+    steps.clearHeld(state);
+    steps.noteActivity(runId, state, event);
+    turn.text = appendTurnText(turn.text, event.text);
+    const text = stripAskMarker(stripTaskMarkers(stripMonitoringMarker(stripDoneMarker(event.text))), false);
+    if (text) emit({ type: 'text', text, stepId });
+    return true;
+  }
+  if (event.type === 'input-unconsumed') { retireUnreadInputs(context, host, runId, state, event.inputIds, true); return true; }
+  if (event.type === 'tool-call' || event.type === 'tool-result') {
+    steps.clearUnread(state);
+    steps.clearHeld(state);
+    steps.noteActivity(runId, state, event);
+  }
+  return false;
+}
+
+/** Read the session when the runner calls back; startSession has not returned at setup. */
+export function inputReceiptCallbacks(context: RunModuleContext, host: InputReceiptsHost, steps: InputReceiptSteps, runId: string, state: ActiveRun, session: () => AgentSession | undefined, turn: SessionTurn, sink: UiEventSink, openingAccepted: boolean) {
+  return {
+    onUiEvent: (event: UiEvent) => {
+      turn.completedText = appendCompletedAssistantText(turn.completedText, event);
+      turn.tail = trackTurnTail(turn.tail, event);
+      if (openingAccepted && event.type === 'turn.started') recordOpeningAccepted(context, host, runId, state);
+      steps.ui(runId, state, sink, event);
+    },
+    onAgentInputReady: () => steps.ready(runId, state, session()),
+    onAgentInputConsumed: (ids: readonly string[]) => handleAgentInputConsumed(context, host, runId, state, session(), ids),
+    onPidChange: (pid: number) => steps.pid(runId, pid),
+  };
+}
+
+/** Setup precedes the result wait; close waits for acknowledgement before unread requeue. */
+export function sessionResultWithReceipts(context: RunModuleContext, host: InputReceiptsHost, steps: InputReceiptSteps, runId: string, state: ActiveRun, session: AgentSession, prepared: () => void): AgentSession['result'] {
+  steps.flushDeferred(runId);
+  host.flushAgentInputs(runId);
+  if (session.pid !== undefined) { registerRunProcess(runId, session.pid); steps.recordProcess(runId, session.pid); }
+  prepared();
+  return session.result.finally(() => state.agentInputFlight?.settled).finally(() => requeueUnreadAtClose(context, host, runId, state, session));
+}

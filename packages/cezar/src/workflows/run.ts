@@ -28,7 +28,7 @@ import { ciWaitResultSchema, type CiWaitResult } from '@open-mercato/cezar-contr
 import { type PreviewStopRequest, type PreviewStopResult, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, decideTurnEnd, stepScopedNudge, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
-import { claudeScheduleWakeupDelay, isRunnerActivity, appendTurnText, appendCompletedAssistantText, trackTurnTail, stripDoneMarker, stripMonitoringMarker, emitAskRequested, askCardFields, humanWaitCard, classifyTurnEnd, discardQueuedMessagesOnAsk, type TurnEndRead } from './run/turn-markers.ts';
+import { claudeScheduleWakeupDelay, isRunnerActivity, emitAskRequested, askCardFields, humanWaitCard, classifyTurnEnd, discardQueuedMessagesOnAsk, type TurnEndRead } from './run/turn-markers.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
 import { canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested } from './run/run-guards.ts';
 import { beginUsageInvocation, recordReportedCost, recordUsageUiEvent, recordUsagePeaks } from './run/usage-accounting.ts';
@@ -69,12 +69,9 @@ import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  stripAskMarker,
-  type AskRequest,
-} from '../core/ask.ts';
+import type { AskRequest } from '../core/ask.ts';
 import { type AgentSession } from '../core/claude-cli-runner.ts';
-import { hasRegisteredRunProcess, onUsage, registerRunProcess, replaceRunProcess, type ProcessUsage } from '../core/process-usage.ts';
+import { hasRegisteredRunProcess, onUsage, replaceRunProcess, type ProcessUsage } from '../core/process-usage.ts';
 import { isSessionLeader } from '../core/session-process.ts';
 import { ProcessWaitSupervisor, probeProcessWait } from '../process-wait/supervisor.ts';
 import { confineExitFile, type ExitFileRoots } from '../process-wait/exit-file.ts';
@@ -159,7 +156,6 @@ import {
   removeAgentTmpDir,
 } from '../runs/agent-tmpdir.ts';
 import { extractTaskRefs, refineTaskRefs } from '../runs/task-refs.ts';
-import { stripTaskMarkers } from '../runs/task-markers.ts';
 import { reviewGateEnabled } from '../runs/review-gate.ts';
 import { AgentAccountUnavailableError, resolveProfileEnvForRoot } from '../workspace/agent-profiles.ts';
 import { DEFAULT_AGENT_ACCOUNT_ID } from '../workspace/agent-accounts.ts';
@@ -389,6 +385,15 @@ type HumanAnswerBudget = { spent: number };
 export class RunManager {
   private readonly active = new Map<string, ActiveRun>();
   private readonly inputReceiptContext: RunModuleContext;
+  private readonly inputReceiptSteps: inputReceipts.InputReceiptSteps = {
+    clearUnread: state => this.clearUnreadInputTimer(state), clearHeld: state => this.clearHeldHumanInputTimer(state),
+    noteActivity: (id, state, event) => this.noteNoWaitNudgeContent(id, state, event),
+    persistAttachment: (id, mediaType, data) => this.persistAttachment(id, mediaType, data),
+    ready: (id, state, session) => this.handleAgentInputReady(id, state, session),
+    pid: (id, pid) => { replaceRunProcess(id, pid); this.recordWorkerProcess(id, pid); },
+    ui: (id, state, sink, event) => this.handleRunnerUiEvent(id, state, sink, event),
+    flushDeferred: id => this.flushDeferred(id), recordProcess: (id, pid) => this.recordWorkerProcess(id, pid),
+  };
   private readonly inputReceiptHost: inputReceipts.InputReceiptsHost = {
     reconcileWorkerWaits: () => this.reconcileWorkerWaits(),
     flushAgentInputs: id => this.flushAgentInputs(id),
@@ -4936,26 +4941,7 @@ export class RunManager {
     const sink = this.makeUiSink(runId, stepId);
     const onEvent = (event: AgentEvent) => {
       if (this.disposedSessionEvent(runId, state, event)) return;
-      if (event.type === 'image') {
-        const saved = this.persistAttachment(runId, event.mediaType, event.data);
-        if (saved) this.store.appendEvent(runId, { type: 'image', stepId, ...saved });
-        return;
-      }
-      if (event.type === 'text') {
-        this.clearUnreadInputTimer(state); // real content: the harness is working
-        this.clearHeldHumanInputTimer(state);
-        this.noteNoWaitNudgeContent(runId, state, event);
-        turn.text = appendTurnText(turn.text, event.text);
-        const text = stripAskMarker(stripTaskMarkers(stripMonitoringMarker(stripDoneMarker(event.text))), false);
-        if (text) this.store.appendEvent(runId, { type: 'text', text, stepId });
-        return;
-      }
-      if (event.type === 'input-unconsumed') { inputReceipts.retireUnreadInputs(this.inputReceiptContext, this.inputReceiptHost, runId, state, event.inputIds, true); return; }
-      if (event.type === 'tool-call' || event.type === 'tool-result') {
-        this.clearUnreadInputTimer(state);
-        this.clearHeldHumanInputTimer(state);
-        this.noteNoWaitNudgeContent(runId, state, event);
-      }
+      if (inputReceipts.handleReceiptEvent(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, runId, state, turn, event, stepId, event => this.store.appendEvent(runId, event))) return;
       this.store.appendEvent(runId, { ...event, stepId });
       if (event.type === 'cost') recordReportedCost(this.store, runId, stepId, state, backend, event.usd);
       if (event.type === 'error') { this.recordSessionFault(state, turn, event.message); return; }
@@ -5448,17 +5434,7 @@ export class RunManager {
           timeoutMs: 0,
         },
         onEvent,
-        {
-          onUiEvent: (event) => {
-            turn.completedText = appendCompletedAssistantText(turn.completedText, event);
-            turn.tail = trackTurnTail(turn.tail, event);
-            if (event.type === 'turn.started') inputReceipts.recordOpeningAccepted(this.inputReceiptContext, this.inputReceiptHost, runId, state);
-            this.handleRunnerUiEvent(runId, state, sink, event);
-          },
-          onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
-          onAgentInputConsumed: (ids) => inputReceipts.handleAgentInputConsumed(this.inputReceiptContext, this.inputReceiptHost, runId, state, session, ids),
-          onPidChange: (pid) => { replaceRunProcess(runId, pid); this.recordWorkerProcess(runId, pid); },
-        },
+        inputReceipts.inputReceiptCallbacks(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, runId, state, () => session, turn, sink, true),
       );
     } catch (error) { ciTools?.revoke(); state.revokeCiTools = undefined; delegation?.revoke(); state.revokeDelegation = undefined; throw error; }
     return session;
@@ -5484,11 +5460,7 @@ export class RunManager {
     let setupComplete = false;
     const close: ContinuationClose = {};
     try {
-      this.flushDeferred(runId);
-      this.flushAgentInputs(runId);
-      if (session.pid !== undefined) { registerRunProcess(runId, session.pid); this.recordWorkerProcess(runId, session.pid); }
-      setupComplete = true;
-      const result = await session.result.finally(() => state.agentInputFlight?.settled).finally(() => inputReceipts.requeueUnreadAtClose(this.inputReceiptContext, this.inputReceiptHost, runId, state, session));
+      const result = await inputReceipts.sessionResultWithReceipts(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, runId, state, session, () => { setupComplete = true; });
       if (this.preserveRunAfterDisposal(runId, state)) return;
       this.withdrawCezarHumanWaits(runId);
       this.persistWorkerAssistantResult(runId, stepId, result.text);
@@ -6164,26 +6136,7 @@ export class RunManager {
     const sink = this.makeUiSink(runId, step.id);
     const onEvent = (event: AgentEvent) => {
       if (this.disposedSessionEvent(runId, state, event)) return;
-      if (event.type === 'image') {
-        const saved = this.persistAttachment(runId, event.mediaType, event.data);
-        if (saved) emit({ type: 'image', stepId: step.id, ...saved });
-        return;
-      }
-      if (event.type === 'text') {
-        this.clearUnreadInputTimer(state); // real content: the harness is working
-        this.clearHeldHumanInputTimer(state);
-        this.noteNoWaitNudgeContent(runId, state, event);
-        turn.text = appendTurnText(turn.text, event.text);
-        const text = stripAskMarker(stripTaskMarkers(stripMonitoringMarker(stripDoneMarker(event.text))), false);
-        if (text) emit({ type: 'text', text, stepId: step.id });
-        return;
-      }
-      if (event.type === 'input-unconsumed') { inputReceipts.retireUnreadInputs(this.inputReceiptContext, this.inputReceiptHost, runId, state, event.inputIds, true); return; }
-      if (event.type === 'tool-call' || event.type === 'tool-result') {
-        this.clearUnreadInputTimer(state);
-        this.clearHeldHumanInputTimer(state);
-        this.noteNoWaitNudgeContent(runId, state, event);
-      }
+      if (inputReceipts.handleReceiptEvent(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, runId, state, turn, event, step.id, emit)) return;
       emit({ ...event, stepId: step.id });
       if (event.type === 'cost') recordReportedCost(this.store, runId, step.id, state, backend, event.usd);
       if (event.type === 'error') { this.recordSessionFault(state, turn, event.message); return; }
@@ -6447,16 +6400,7 @@ export class RunManager {
           timeoutMs: launch.step.timeoutMs ?? 0,
         },
         onEvent,
-        {
-          onUiEvent: (event) => {
-            turn.completedText = appendCompletedAssistantText(turn.completedText, event);
-            turn.tail = trackTurnTail(turn.tail, event);
-            this.handleRunnerUiEvent(runId, state, sink, event);
-          },
-          onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
-          onAgentInputConsumed: (ids) => inputReceipts.handleAgentInputConsumed(this.inputReceiptContext, this.inputReceiptHost, runId, state, session, ids),
-          onPidChange: (pid) => { replaceRunProcess(runId, pid); this.recordWorkerProcess(runId, pid); },
-        },
+        inputReceipts.inputReceiptCallbacks(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, runId, state, () => session, turn, sink, false),
       );
     } catch (err) {
       ciTools?.revoke(); state.revokeCiTools = undefined;
@@ -6510,11 +6454,7 @@ export class RunManager {
     state.interrupt = () => session.interrupt();
     let setupComplete = false;
     try {
-      this.flushDeferred(runId);
-      this.flushAgentInputs(runId);
-      if (session.pid !== undefined) { registerRunProcess(runId, session.pid); this.recordWorkerProcess(runId, session.pid); }
-      setupComplete = true;
-      const result = await session.result.finally(() => state.agentInputFlight?.settled).finally(() => inputReceipts.requeueUnreadAtClose(this.inputReceiptContext, this.inputReceiptHost, runId, state, session));
+      const result = await inputReceipts.sessionResultWithReceipts(this.inputReceiptContext, this.inputReceiptHost, this.inputReceiptSteps, runId, state, session, () => { setupComplete = true; });
       if (this.isDisposedDelegatedRun(runId)) return null;
       this.persistWorkerAssistantResult(runId, stepId, result.text);
       const inputOrSessionError = turn.sessionError ?? state.agentInputError;
