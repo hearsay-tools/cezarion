@@ -7,7 +7,9 @@ import { withIdleTestApp } from './idle-test-app.ts';
 
 const probes = vi.hoisted(() => ({ owned: vi.fn(), stop: vi.fn() }));
 vi.mock('./windows-test-app.ts', () => ({ windowsStartToken: () => '123', windowsTestAppHolds: probes.owned }));
-vi.mock('../detached-process.ts', () => ({ processStartToken: () => '123', stopGroup: probes.stop }));
+vi.mock('../detached-process.ts', async importOriginal => ({
+  ...await importOriginal<typeof import('../detached-process.ts')>(), processStartToken: () => '123', stopGroup: probes.stop,
+}));
 afterEach(() => { vi.unstubAllGlobals(); vi.resetAllMocks(); });
 
 it.each(['unverifiable owner', 'failed stop', 'corrupt descriptor'])(

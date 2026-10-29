@@ -11,7 +11,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
-import { exitedStat, groupExists, processStartToken, startOwnedGroup, stopGroup, watchGroup } from '../../packages/cezar/src/detached-process.ts';
+import { groupExists, processStartToken, startOwnedGroup, stopGroup, watchGroup, leaseIdentity, leaseGroupLive, reclaimTestEnvHolders } from '../../packages/cezar/src/detached-process.ts';
 
 const windowsScript = resolve(import.meta.dirname, 'test-env-windows.ps1');
 function windowsProbe(mode, payload, timeout = 15_000) {
@@ -27,31 +27,7 @@ function windowsCommand(args) {
 }
 const windowsPayload = value => Buffer.from(JSON.stringify(value)).toString('base64');
 
-// A process's start identity. qa-fixture.mjs uses it too, so it never signals a reused pid.
-export function identity(pid, timeout = 15_000) {
-  try { process.kill(pid, 0); }
-  catch (error) { return error.code === 'ESRCH' ? { dead: true } : {}; }
-  if (process.platform === 'win32') {
-    const start = windowsProbe('identity', String(pid), timeout);
-    if (start === 'gone') return { dead: true };
-    return /^\d+$/.test(start ?? '') ? { start } : {};
-  }
-  if (process.platform === 'linux') {
-    try {
-      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-      const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
-      if (exitedStat(fields)) return { dead: true };
-      const boot = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
-      if (boot && /^\d+$/.test(fields[19] ?? '')) return { start: `${boot}:${fields[19]}` };
-    } catch { /* Unreadable identity is not proof of death. */ }
-  } else if (process.platform === 'darwin') {
-    const ps = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
-      encoding: 'utf8', timeout: Math.min(2000, timeout), env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' },
-    });
-    if (ps.status === 0 && ps.stdout.trim()) return { start: ps.stdout.trim() };
-  }
-  return {};
-}
+export const identity = (pid, timeout) => leaseIdentity(pid, timeout, windowsProbe);
 // The app's start identity. `identity` reads a zombie as dead and gives no start, but a zombie app
 // leader still holds its group's id, and only its start proves that the group is the app's.
 const readStart = pid => process.platform === 'win32' ? identity(pid).start : processStartToken(pid);
@@ -158,65 +134,8 @@ export function describeTestEnvHolders(holders, {
   return { owners, guidance: squeal ? `\n${SQUEAL_GUIDANCE}` : '' };
 }
 
-// A shell can die before its build/clone child. Retain its group claim until the
-// last non-zombie member exits. Returns true (live), false (dead), or undefined
-// (unknown). On Linux, unrelated process starts/exits can change the two /proc
-// listings, so unknown is common under churn, even for a zombie-only group.
-// Callers must retain ownership and retry on unknown, never treat it as stopped.
-// Sustained churn can prevent reclamation until acquisition times out. One scan
-// seeing only zombies cannot exclude a live member that forked an unseen child
-// and exited during enumeration; a dead leader alone does not remove that race.
-function groupLive(pgid) {
-  if (process.platform === 'win32') {
-    const live = windowsProbe('live', String(pgid));
-    return live === 'true' ? true : live === 'false' ? false : undefined;
-  }
-  try { process.kill(-pgid, 0); }
-  catch (error) { if (error.code === 'ESRCH') return false; }
-  if (process.platform === 'linux') {
-    let unknown = false;
-    try {
-      const snapshot = readdirSync('/proc').filter(name => /^\d+$/.test(name)).sort();
-      let sawMember = false;
-      for (const pid of snapshot) {
-        try {
-          const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
-          const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
-          if (Number(fields[2]) === pgid) {
-            sawMember = true;
-            if (!exitedStat(fields)) return true;
-          }
-        } catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ESRCH') unknown = true; }
-      }
-      // A member can fork and exit between enumeration and stat. A changing
-      // process list cannot prove that its successor is absent. Retry later.
-      const after = readdirSync('/proc').filter(name => /^\d+$/.test(name)).sort();
-      if (snapshot.join(',') !== after.join(',') || !sawMember) return undefined;
-      return unknown ? undefined : false;
-    } catch { return undefined; }
-  }
-  if (process.platform === 'darwin') {
-    const ps = spawnSync('ps', ['-axo', 'pgid=,stat='], { encoding: 'utf8', timeout: 2000 });
-    if (ps.status !== 0) return undefined;
-    return ps.stdout.split('\n').some(line => {
-      const [group, state] = line.trim().split(/\s+/);
-      return Number(group) === pgid && state && !state.startsWith('Z');
-    });
-  }
-  return undefined;
-}
-
-// Inside an open write transaction: drop the rows of dead holders, return the live ones.
-function liveHolders(db) {
-  return db.prepare('SELECT * FROM holders').all().filter(holder => {
-    const current = identity(holder.pid);
-    holder.diagnosticVerified = Boolean(holder.start && !current.dead && current.start === holder.start);
-    const reused = holder.start && current.start && holder.start !== current.start;
-    const dead = (reused || current.dead) && (!holder.pgid || groupLive(holder.pgid) === false);
-    if (dead) db.prepare('DELETE FROM holders WHERE id = ?').run(holder.id);
-    return !dead;
-  });
-}
+const groupLive = pgid => leaseGroupLive(pgid, windowsProbe);
+const liveHolders = db => reclaimTestEnvHolders(db, identity, groupLive);
 
 function openLeaseDb(root, { create = true } = {}) {
   const dir = resolve(root, '.ai/qa');
@@ -263,9 +182,16 @@ export async function acquireTestEnvLease(root, { token, pid = process.pid, grou
             token,
             release() {
               if (released) return;
-              db.prepare('DELETE FROM holders WHERE id = ?').run(id);
+              db.exec('BEGIN IMMEDIATE');
+              try {
+                db.prepare('DELETE FROM holders WHERE id = ?').run(id);
+                // Joined shells have their own rows. Reclaim them only after their
+                // incarnation and whole group have exited; live descendants stay protected.
+                try { liveHolders(db); } catch { /* Reclamation is best effort; always release our own row. */ }
+                db.exec('COMMIT');
+              } catch (error) { db.exec('ROLLBACK'); throw error; }
+              finally { db.close(); }
               released = true;
-              db.close();
             },
           };
         }

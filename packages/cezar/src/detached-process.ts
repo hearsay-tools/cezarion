@@ -1,5 +1,6 @@
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
+import type { DatabaseSync } from 'node:sqlite';
 import { setTimeout as delay } from 'node:timers/promises';
 
 /**
@@ -312,4 +313,134 @@ export async function watchGroup(options: WatchOptions): Promise<string> {
     await verdict.settle?.(stopped);
     if (stopped) return verdict.reason;
   }
+}
+
+// Test-environment holders use the same incarnation/group proof in scripts and destroy.
+export type LeaseIdentity = { start?: string; dead?: boolean };
+export type WindowsProbe = (mode: string, payload: string, timeout?: number) => string | undefined;
+export type TestEnvHolder = { id: string; token: string; pid: number; start: string | null;
+  pgid?: number | string | null; diagnosticVerified?: boolean };
+
+function readHolder(row: Record<string, unknown>): TestEnvHolder {
+  if (typeof row.id !== 'string' || typeof row.token !== 'string' ||
+      typeof row.pid !== 'number' || !Number.isSafeInteger(row.pid) || row.pid <= 0 ||
+      (row.start !== null && typeof row.start !== 'string')) throw new Error('Invalid lease holder identity');
+  if (row.pgid !== undefined && row.pgid !== null &&
+      !(typeof row.pgid === 'number' && Number.isSafeInteger(row.pgid) && row.pgid > 0) &&
+      !(typeof row.pgid === 'string' && row.pgid.length > 0)) throw new Error('Invalid lease holder group');
+  return row as TestEnvHolder;
+}
+
+// A process's start identity. qa-fixture.mjs uses it too, so it never signals a reused pid.
+export function leaseIdentity(pid: number, timeout = 15_000, windowsProbe: WindowsProbe = windowsLeaseProbe): LeaseIdentity {
+  try { process.kill(pid, 0); }
+  catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH' ? { dead: true } : {}; }
+  if (process.platform === 'win32') {
+    const start = windowsProbe('identity', String(pid), timeout);
+    if (start === 'gone') return { dead: true };
+    return start && /^\d+$/.test(start) ? { start } : {};
+  }
+  if (process.platform === 'linux') {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
+      if (exitedStat(fields)) return { dead: true };
+      const boot = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
+      if (boot && /^\d+$/.test(fields[19] ?? '')) return { start: `${boot}:${fields[19]}` };
+    } catch { /* Unreadable identity is not proof of death. */ }
+  } else if (process.platform === 'darwin') {
+    const ps = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
+      encoding: 'utf8', timeout: Math.min(2000, timeout), env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' },
+    });
+    if (ps.status === 0 && ps.stdout.trim()) return { start: ps.stdout.trim() };
+  }
+  return {};
+}
+// A shell can die before its build/clone child. Retain its group claim until the
+// last non-zombie member exits. Returns true (live), false (dead), or undefined
+// (unknown). On Linux, unrelated process starts/exits can change the two /proc
+// listings, so unknown is common under churn, even for a zombie-only group.
+// Callers must retain ownership and retry on unknown, never treat it as stopped.
+// Sustained churn can prevent reclamation until acquisition times out. One scan
+// seeing only zombies cannot exclude a live member that forked an unseen child
+// and exited during enumeration; a dead leader alone does not remove that race.
+export function leaseGroupLive(pgid: number | string, windowsProbe: WindowsProbe = windowsLeaseProbe): boolean | undefined {
+  if (process.platform === 'win32') {
+    const live = windowsProbe('live', String(pgid));
+    return live === 'true' ? true : live === 'false' ? false : undefined;
+  }
+  try { process.kill(-Number(pgid), 0); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false; }
+  if (process.platform === 'linux') {
+    let unknown = false;
+    try {
+      const snapshot = readdirSync('/proc').filter(name => /^\d+$/.test(name)).sort();
+      let sawMember = false;
+      for (const pid of snapshot) {
+        try {
+          const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+          const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
+          if (Number(fields[2]) === Number(pgid)) {
+            sawMember = true;
+            if (!exitedStat(fields)) return true;
+          }
+        } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT' && (error as NodeJS.ErrnoException).code !== 'ESRCH') unknown = true; }
+      }
+      // A member can fork and exit between enumeration and stat. A changing
+      // process list cannot prove that its successor is absent. Retry later.
+      const after = readdirSync('/proc').filter(name => /^\d+$/.test(name)).sort();
+      if (snapshot.join(',') !== after.join(',') || !sawMember) return undefined;
+      return unknown ? undefined : false;
+    } catch { return undefined; }
+  }
+  if (process.platform === 'darwin') {
+    const ps = spawnSync('ps', ['-axo', 'pgid=,stat='], { encoding: 'utf8', timeout: 2000 });
+    if (ps.status !== 0) return undefined;
+    return ps.stdout.split('\n').some(line => {
+      const [group, state] = line.trim().split(/\s+/);
+      return Number(group) === Number(pgid) && state && !state.startsWith('Z');
+    });
+  }
+  return undefined;
+}
+
+/** Called inside the caller's write transaction. Unknown identity/group evidence retains the row. */
+export function reclaimTestEnvHolders(db: DatabaseSync, identity: (pid: number) => LeaseIdentity,
+  groupLive: (pgid: number | string) => boolean | undefined): TestEnvHolder[] {
+  return db.prepare('SELECT * FROM holders').all().map(row => readHolder(row)).filter(holder => {
+    const current = identity(holder.pid);
+    holder.diagnosticVerified = Boolean(holder.start && !current.dead && current.start === holder.start);
+    const reused = holder.start && current.start && holder.start !== current.start;
+    const dead = (reused || current.dead) && (!holder.pgid || groupLive(holder.pgid) === false);
+    if (dead) db.prepare('DELETE FROM holders WHERE id = ?').run(holder.id);
+    return !dead;
+  });
+}
+
+/** Read-only Windows probes. An inaccessible job/process is unknown, never absent. */
+function windowsLeaseProbe(mode: string, payload: string): string | undefined {
+  const value = Buffer.from(payload, 'utf8').toString('base64');
+  const script = mode === 'identity'
+    ? `$p=Get-Process -Id ([int][Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${value}'))) -ErrorAction SilentlyContinue; if ($p) { [string]$p.StartTime.ToUniversalTime().Ticks } else { 'gone' }`
+    : `Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class CezLeaseJob {
+  [DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)] static extern IntPtr OpenJobObject(uint access, bool inherit, string name);
+  [DllImport("kernel32.dll", SetLastError=true)] static extern bool QueryInformationJobObject(IntPtr job, int type, IntPtr data, uint size, IntPtr length);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+  public static string Live(string name) {
+    var job=OpenJobObject(4,false,name);
+    if(job==IntPtr.Zero) return Marshal.GetLastWin32Error()==2 ? "false" : "unknown";
+    var data=Marshal.AllocHGlobal(48);
+    try { if(!QueryInformationJobObject(job,1,data,48,IntPtr.Zero)) return "unknown"; return Marshal.ReadInt32(data,40)>0 ? "true" : "false"; }
+    finally { Marshal.FreeHGlobal(data); CloseHandle(job); }
+  }
+}
+'@
+[CezLeaseJob]::Live([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${value}')))`;
+  const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from("$ErrorActionPreference='Stop'; " + script, 'utf16le').toString('base64')], {
+    encoding: 'utf8', timeout: 10_000, windowsHide: true,
+  });
+  return result.status === 0 ? result.stdout.trim() : undefined;
 }
