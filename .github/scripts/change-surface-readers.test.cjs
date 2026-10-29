@@ -1,14 +1,19 @@
-// Tripwire for the docs rule (hearsay-tools/cezarion#1099). change-surface.cjs
-// lets Markdown under packages/ skip Vitest and cockpit browser E2E because no
-// test reads it. This file fails when package code starts naming such a file
-// by path, so a new reader cannot hide behind the docs-only skip.
+// Tripwire for the docs rule (hearsay-tools/cezarion#1099,
+// hearsay-tools/cezarion#2166). change-surface.cjs lets a docs-only change skip
+// Vitest and cockpit browser E2E because no test reads those paths. This file
+// fails when package code starts reading such a path, so a new reader cannot
+// hide behind the docs-only skip. node:test entry files need no scan: the
+// unconditional build-and-package job runs every one of them, so a check on a
+// docs-only file belongs there (packages/cezar/test/unit/message-docs.test.ts).
 //
-// It is a text scan, not a parser. It catches a path token that names the
-// file, resolved from the naming file's directory or one of its ancestors
-// (`e2e/fixture-server.md` from packages/web/src/test/). It misses a path
-// assembled from separate segments, such as
-// join(root, 'packages', 'contract', 'README.md'), a path built at runtime,
-// and a token on a line the comment filter skips (`//`, `/*`, `*`).
+// It is a text scan, not a parser. It counts a path token that names a tracked
+// docs-only file, resolved from the naming file's directory or one of its
+// ancestors (`e2e/fixture-server.md` from packages/web/src/test/), when a read
+// call stands within READ_WINDOW_LINES lines of it. It misses a path assembled
+// from separate segments, such as join(root, 'packages', 'contract',
+// 'README.md'), a path built at runtime, a path held further from its read,
+// and a token on a line the comment filter skips (`//`, `/*`, `*`). The last
+// test pins that the scan still finds every reader testReadDocuments lists.
 const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
@@ -19,47 +24,28 @@ const { isDocsPath, testReadDocuments } = require('./change-surface.cjs');
 
 const repoRoot = path.join(__dirname, '..', '..');
 
-// Package files that name a docs-only Markdown file without reading it, as the
-// `naming file -> Markdown path` pairs the scan below finds.
-const TEMP_NOTES = 'names notes.md in a temporary repo or skill fixture, never this one';
-const FIXTURE_README = 'writes or checks README.md in a temporary fixture repo, never this one';
+// Package files that name a docs-only file near a read call without reading
+// it, as the `naming file -> docs path` pairs the scan below finds.
+const TEMP_NOTES = 'reads notes.md in a temporary repo or skill fixture, never this one';
 const mentionedOnly = [
-  { file: 'packages/cezar/scripts/mock-claude.mjs', markdown: 'packages/cezar/notes.md', reason: TEMP_NOTES },
-  { file: 'packages/cezar/src/artifacts/contract.test.ts', markdown: 'packages/cezar/notes.md', reason: TEMP_NOTES },
-  { file: 'packages/cezar/src/server/worktrees-api.test.ts', markdown: 'packages/cezar/notes.md', reason: TEMP_NOTES },
+  { file: 'packages/cezar/src/runs/store-database.test.ts', markdown: 'docs/run-history-recovery.md', reason: 'asserts that a warning names the doc' },
+  { file: 'packages/cezar/src/server/checkout.test.ts', markdown: 'README.md', reason: 'reads README.md in a temporary checkout, never this one' },
   { file: 'packages/cezar/src/skills-remote.test.ts', markdown: 'packages/cezar/notes.md', reason: TEMP_NOTES },
   { file: 'packages/cezar/src/workflows/run.test.ts', markdown: 'packages/cezar/notes.md', reason: TEMP_NOTES },
   { file: 'packages/cezar/src/workflows/system-prompt.test.ts', markdown: 'packages/cezar/notes.md', reason: TEMP_NOTES },
   { file: 'packages/cezar/src/workflows/team-skill-materialize.test.ts', markdown: 'packages/cezar/notes.md', reason: TEMP_NOTES },
-  { file: 'packages/cezar/test/unit/skills-remote.test.ts', markdown: 'packages/cezar/notes.md', reason: TEMP_NOTES },
-  { file: 'packages/web/e2e/agents-dock.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/commit-list.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/composer-defaults.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/composer.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/create-project.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/live-preview.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/markdown-preview.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/new-task-hierarchy.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/new-task-picker-layout.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/new-task.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/plan-mode.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/queued-stack.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/review-gate.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/settings-monitoring.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/sidebar-reference-status.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/skill-search-ranking.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/task-changes.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/task-files.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/task-github-items.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/task-pr-collection.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/task-views-layout.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/touch-targets.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/worktree-setup.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/src/test/e2e-wait-discipline.baseline.json', markdown: 'packages/web/e2e/README.md', reason: 'names the wait rules in its $comment' },
-  { file: 'packages/web/src/test/e2e-wait-discipline.test.ts', markdown: 'packages/web/e2e/README.md', reason: 'names the wait rules in an assertion message' },
-  { file: 'packages/web/src/test/e2e-wait-discipline.ts', markdown: 'packages/web/e2e/README.md', reason: 'names the wait rules in its failure message; scans only .ts specs' },
-  { file: 'packages/web/src/test/fixture-server-start.test.ts', markdown: 'packages/web/e2e/fixture-server.md', reason: 'names the doc in its problem message; reads only .e2e.ts specs' },
 ];
+
+// A call that reads a file's content. A token this many lines away still
+// counts, so a path listed just above its read is found (harness-parity).
+const READ_CALL = /\b(?:readFile|readFileSync|createReadStream)\b|new URL\(/;
+const READ_WINDOW_LINES = 5;
+
+// The node:test entry files under packages/, from the test:unit and
+// test:package scripts in packages/cezar/package.json. The scan skips them;
+// the helpers they import are still scanned.
+const NODE_TEST_GLOBS = ['test/unit/*.test.ts', 'test/e2e/*.test.ts'];
+const nodeTestEntry = /^packages\/cezar\/test\/(?:unit|e2e)\/[^/]+\.test\.ts$/;
 
 function trackedFiles(...pathspecs) {
   return execFileSync('git', ['ls-files', '-z', '--', ...pathspecs], {
@@ -67,26 +53,35 @@ function trackedFiles(...pathspecs) {
   }).split('\0').filter(Boolean);
 }
 
-function markdownTokens(source) {
-  const tokens = [];
-  for (const line of source.split('\n')) {
+// Each line with comment lines blanked and a trailing ` //` comment removed.
+function codeLines(source) {
+  return source.split('\n').map((line) => {
     const trimmed = line.trimStart();
-    if (trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*')) continue;
-    tokens.push(...line.replace(/ \/\/.*$/, '').match(/[\w.@/-]+\.md(?!\w)/g) ?? []);
-  }
+    if (trimmed.startsWith('//') || trimmed.startsWith('/*') || trimmed.startsWith('*')) return '';
+    return line.replace(/ \/\/.*$/, '');
+  });
+}
+
+// Path tokens on lines within READ_WINDOW_LINES of a read call.
+function readPathTokens(source) {
+  const lines = codeLines(source);
+  const tokens = [];
+  lines.forEach((line, index) => {
+    const window = lines.slice(Math.max(0, index - READ_WINDOW_LINES), index + READ_WINDOW_LINES + 1);
+    if (!window.some((nearby) => READ_CALL.test(nearby))) return;
+    tokens.push(...line.match(/[\w.@/-]+\.\w+(?![\w/])/g) ?? []);
+  });
   return tokens;
 }
 
-// Every (naming file, Markdown path) pair where a tracked code file under
-// packages/ names a tracked package Markdown file that isDocsPath admits. A
-// token resolves against the naming file's directory and each ancestor, so
-// `e2e/fixture-server.md` named from packages/web/src/test/ still counts.
-function docsMarkdownNamedByPackageCode() {
-  const files = trackedFiles('packages');
-  const markdown = new Set(files.filter((file) => file.endsWith('.md') && isDocsPath(file)));
+// Every (naming file, path) pair where a tracked code file under packages/
+// names one of `paths` near a read call. A token resolves against the naming
+// file's directory and each ancestor, so `e2e/fixture-server.md` named from
+// packages/web/src/test/ still counts.
+function pathsReadByPackageCode(paths) {
   const hits = new Set();
-  for (const file of files) {
-    if (!/\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json)$/.test(file)) continue;
+  for (const file of trackedFiles('packages')) {
+    if (!/\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs|json)$/.test(file) || nodeTestEntry.test(file)) continue;
     const absolute = path.join(repoRoot, file);
     if (!fs.existsSync(absolute)) continue;
     const directories = [];
@@ -94,10 +89,10 @@ function docsMarkdownNamedByPackageCode() {
       directories.push(dir);
       if (dir === '.') break;
     }
-    for (const token of markdownTokens(fs.readFileSync(absolute, 'utf8'))) {
+    for (const token of readPathTokens(fs.readFileSync(absolute, 'utf8'))) {
       for (const dir of directories) {
         const candidate = path.posix.normalize(path.posix.join(dir, token));
-        if (markdown.has(candidate)) hits.add(`${file} -> ${candidate}`);
+        if (paths.has(candidate)) hits.add(`${file} -> ${candidate}`);
       }
     }
   }
@@ -128,20 +123,38 @@ function globToRegExp(glob) {
   return new RegExp(`^${convert(glob)}$`);
 }
 
-test('package code names no docs-only Markdown it might read', () => {
+test('package code reads no docs-only file', () => {
   const listed = new Set(mentionedOnly.map(({ file, markdown }) => `${file} -> ${markdown}`));
-  const hits = docsMarkdownNamedByPackageCode();
+  const hits = pathsReadByPackageCode(new Set(trackedFiles().filter(isDocsPath)));
   const unlisted = hits.filter((hit) => !listed.has(hit));
   assert.deepEqual(unlisted, [], [
-    'Package code names Markdown that the docs-only change surface lets skip every test:',
+    'Package code reads a file that the docs-only change surface lets skip every test:',
     ...unlisted.map((hit) => `  ${hit}`),
-    'If a Vitest test or cockpit browser spec reads the file, add it to testReadDocuments in',
-    '.github/scripts/change-surface.cjs. If the code only names it, add the pair to',
-    'mentionedOnly in .github/scripts/change-surface-readers.test.cjs with a one-line reason.',
+    'If the check needs only the file\'s text, move it to a node:test file in packages/cezar/test/unit/,',
+    'which runs on docs-only changes too. If a Vitest test or cockpit browser spec must read the file,',
+    'add it to testReadDocuments in .github/scripts/change-surface.cjs. If the code only names it,',
+    'add the pair to mentionedOnly in .github/scripts/change-surface-readers.test.cjs with a one-line reason.',
   ].join('\n'));
   const stale = [...listed].filter((entry) => !hits.includes(entry));
   assert.deepEqual(stale, [], `mentionedOnly lists pairs the scan no longer finds; remove them:\n  ${stale.join('\n  ')}`);
   for (const { reason } of mentionedOnly) assert.ok(reason?.trim(), 'every mentionedOnly entry needs a reason');
+});
+
+test('the scan finds a reader for every test-read document', () => {
+  const hits = pathsReadByPackageCode(new Set(testReadDocuments));
+  for (const document of testReadDocuments) {
+    assert.ok(hits.some((hit) => hit.endsWith(` -> ${document}`)),
+      `testReadDocuments lists ${document}, but the scan finds no package code that reads it`);
+  }
+});
+
+test('the skipped node:test entries match the package node:test scripts', () => {
+  const { scripts } = JSON.parse(fs.readFileSync(path.join(repoRoot, 'packages/cezar/package.json'), 'utf8'));
+  const globs = [scripts['test:unit'], scripts['test:package']].map((script) => script.split(' ').at(-1));
+  assert.deepEqual(globs, NODE_TEST_GLOBS);
+  assert.ok(nodeTestEntry.test('packages/cezar/test/unit/message-docs.test.ts'));
+  assert.ok(!nodeTestEntry.test('packages/cezar/test/unit/test-env-lease-churn.testkit.mjs'));
+  assert.ok(!nodeTestEntry.test('packages/cezar/src/delegation/message-docs.test.ts'));
 });
 
 test('every test-read document is a tracked file', () => {
