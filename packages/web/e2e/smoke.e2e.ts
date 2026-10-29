@@ -112,7 +112,6 @@ function brandFacts(scope: string): BrandFacts {
   return waitForSettledSample(browser, `(() => {
     const root = document.querySelector(${JSON.stringify(scope)})
     const wordmark = root.querySelector('[data-slot="project-header-name"]')
-    // Local run 1790758761212-3950840 lane-4.log: theme samples were "Loading project…" and "lane-4".
     // Registry loading paints a real placeholder with a different width. Measure identity
     // only after bootstrap settles, so the two theme samples describe the same project.
     if (window.__cezIdle !== true || !wordmark || wordmark.getBoundingClientRect().width === 0) return null
@@ -599,8 +598,6 @@ describe('mobile shell', () => {
 
     it('navigates from the tab bar', () => {
       browser.goto(baseUrl + scoped('/'))
-      // Local run 1790758761212-3950840, lane-4-failures/smoke/navigates-from-the-tab-bar-1:
-      // probe.json records the focused, visible Git link but URL /p/lane-4/ after the click.
       // Wait for bootstrap before tapping: it can replace the initial navigation tree.
       browser.waitForFunction('window.__cezIdle === true')
       // The views the drawer used to list: a tab is one tap from any list screen (#621).

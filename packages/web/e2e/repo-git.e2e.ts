@@ -121,9 +121,7 @@ describe('the repo view against the live dry-run server', () => {
     browser.waitForFunction(`document.querySelector('[data-slot="repo-branch-list"]') !== null`)
 
     // The classified half is a second request that lands after the list first paints, so the
-    // count is waited for, not read once (.ai/qa/failures/repo-git/git-branches-renders-the-live-
-    // branch-list-with-the-checkout-marked-current-1, 2026-09-30 local run: 910 rows rendered
-    // against the 289 names `GET /repo` alone carries).
+    // count is waited for, not read once.
     expect(browser.waitForValue(`document.querySelectorAll('[data-slot="branch-row"]').length`, (value) => value === listed.size)).toBe(listed.size)
     // An attached checkout marks exactly its current branch. CI may run this suite from a
     // detached task worktree; then git honestly reports no branch and no row may be marked.
@@ -211,14 +209,6 @@ function buildCommitFixture(dir: string): void {
 // clone's only commit is a root commit, and its whole-tree `git diff-tree --root --patch` (33,564,799
 // bytes at 3bed231) is over the 32 MiB `maxBuffer` of `collectCommitChanges`, so the route answers 409
 // (hearsay-tools/cezarion#1840). The cap and the 409 stay; the test builds its own diff instead.
-// Evidence: repo-git.e2e.ts failed with "cezar e2e: GET /api/v1/repo/commit/3bed231?structured=1
-// answered 409" (bundle .ai/qa/failures/repo-git/opens-one-commit-s-structured-diff-a-non-merge-commit-found-honestly-1/:
-// probe.json `error` is that line and its `page.url` is `/p/cezarion/git/commits`, so the test died in
-// its API probe before any click; CI run 40223630364, job 121260693226, artifact
-// `cockpit-failures-shard-3` 12610397586). Reproduce on a depth-1 clone of main
-// (`git clone --depth 1 file://<checkout>`) with `npm run test:e2e -- repo-git.e2e.ts -t 'opens one commit'`
-// before this change and `-t 'opens the newest commit'` after: 1 of 1 failed before (the cap is
-// deterministic, so one run is the whole sample), 3 of 3 passed after.
 describe('opening one commit’s structured diff, in a repository this spec builds', () => {
   let repo = ''
   let server: ChildProcess | undefined

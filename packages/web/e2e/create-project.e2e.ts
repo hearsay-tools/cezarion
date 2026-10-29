@@ -113,13 +113,6 @@ describe('New project', () => {
       // With no project registered (a server booted inside a task worktree) the rail's Add project
       // trigger is the page's first focusable control; in CI the boot project's mark comes first.
       // `focusWithKeyboard` reaches it through a real Tab either way (hearsay-tools/cezarion#1091).
-      // Not a flake fix: the failure was deterministic. Before hearsay-tools/cezarion#1117 both
-      // themes failed here with "no visible keyboard predecessor" (bundle
-      // .ai/qa/failures/create-project/creates-a-local-project-from-the-keyboard-light-1/:
-      // probe.json `lastValue: { ready: false, predecessor: null }`), which is why
-      // hearsay-tools/cezarion#1081 focused the trigger with `.focus()`. After it, in a task
-      // worktree on 2026-10-16, `npm run test:e2e -- create-project.e2e.ts -t 'from the keyboard'`
-      // passed 2 of 2 through this helper.
       focusWithKeyboard(browser, RAIL_ADD)
       browser.press('Enter')
       // Radix focuses the first item of a menu opened from the keyboard: New project comes first.
@@ -201,14 +194,7 @@ describe('New project', () => {
     it(`fits a 360x640 screen from the Tools page, ${variant.theme}`, () => {
       browser.goto(`${baseUrl}/tools`)
       applyContrastQaVariant(browser, variant)
-      // Health metadata moves the button after it first appears. Evidence: run 40587764759,
-      // attempt 1, cockpit-failures-shard-2 artifact 12773531152, bundle
-      // .ai/qa/failures/create-project/fits-a-360x640-screen-from-the-Tools-page-light-1/:
-      // no open dialog; snapshot still shows Tools. Native-input reproduction holding health
-      // until after mouse move: 1/1 missed before, 1/1 focused the name after metadata settled
-      // (hearsay-tools/cezarion#2000, issuecomment-6454777312). Reproduce with that probe:
-      // `node --import tsx .ai/qa/ci2000/probe.mts <QA_FIXTURE_BASE_URL> old` (or `fixed`).
-      // Keep the focus assertion below.
+      // Health metadata moves the button after it first appears (hearsay-tools/cezarion#2000).
       browser.waitForFunction(`document.querySelector('[data-slot="tool-row"]') !== null &&
         document.querySelector('[aria-labelledby="add-project-heading"] dl')?.textContent.includes('Checkout folder') === true`)
       browser.click('[data-route="workspace-tools"] [data-action="new-project"]')

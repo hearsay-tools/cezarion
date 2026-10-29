@@ -38,10 +38,13 @@ test('Codex receives resolved review metadata for PR and manual triggers', async
           const match = value.match(/^\$\{\{ needs\.review-round\.outputs\.(\w+) \}\}$/);
           if (match) contextEnv[key] = outputs[match[1]];
         }
-        execFileSync('bash', ['--noprofile', '--norc', '-eu', '-o', 'pipefail', '-c', `gh() { :; }\n${context.run}`], { cwd, env: contextEnv });
+        execFileSync('bash', ['--noprofile', '--norc', '-eu', '-o', 'pipefail', '-c',
+          `gh() { case "$*" in *'pulls/220 --jq .body // ""') echo 'Evidence: bundle';; esac; }\n${context.run}`], { cwd, env: contextEnv });
         const metadataPath = path.join(cwd, 'pull-request/.review-context/pull-request.json');
         assert.ok(fs.existsSync(metadataPath), 'review must receive resolved metadata independently of the event payload');
         assert.deepEqual(JSON.parse(fs.readFileSync(metadataPath, 'utf8')), { pr_number: 220, head_sha: head, base_sha: base });
+        assert.equal(fs.readFileSync(path.join(cwd, 'pull-request/.review-context/pull-request-body.md'), 'utf8'), 'Evidence: bundle\n',
+          'review must receive the current PR description independently of the event payload');
       } finally {
         fs.rmSync(cwd, { recursive: true, force: true });
       }
@@ -49,6 +52,7 @@ test('Codex receives resolved review metadata for PR and manual triggers', async
   }
   const prompt = fs.readFileSync(promptPath, 'utf8');
   assert.match(prompt, /\.review-context\/pull-request\.json/);
+  assert.match(prompt, /\.review-context\/pull-request-body\.md/);
   assert.doesNotMatch(prompt, /Read `\$GITHUB_EVENT_PATH`/);
 });
 

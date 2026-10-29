@@ -26,14 +26,7 @@ afterAll(async () => {
   browser?.close()
 })
 function choose(index: number) {
-  // The config write can be persisted while its UI save is still pending. CI failed
-  // 1/1 at the next click with "select is disabled":
-  // https://github.com/hearsay-tools/cezarion/actions/runs/40024297695/job/120656539762
-  // cockpit-failures-shard-3 artifact12532336838.
-  // Bundle: .ai/qa/failures/settings-task-archiving/persists-project-overrides-and-inheritance-at-360px-in-both-themes-1/
-  // Controlled probe: SETTINGS_VARIANT=before pnpm exec vitest run --config
-  // .ai/qa/1569-settings-repair/vitest.config.ts; repeat with after; own select disabled for 5000 ms.
-  // The extracted old helper lost the selection in 1/1 probes; pre-click wait passed 1/1.
+  // The config write can be persisted while its UI save is still pending, and the select stays disabled.
   browser.waitForFunction(`document.querySelector('${select}')?.disabled === false`)
   browser.click(select); browser.press('Home')
   for (let i = 0; i < index; i++) browser.press('ArrowDown')

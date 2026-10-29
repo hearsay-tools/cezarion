@@ -115,14 +115,6 @@ describe('plan mode against a live dry-run server', () => {
     // The execution panel spans the submission row, so a late `/repo` answer adds the Base
     // branch row and moves Plan first down 29 px. A click that resolves its point before that
     // render lands on the composer grid instead. Settle the target with no query in flight.
-    // Evidence: plan-mode failed with "predicate never became truthy: ...aria-checked ===
-    // 'true'" (bundle .ai/qa/failures/plan-mode/Plan-first-selects-visibly-383-and-submit-produces-the-review-overlay-not-a-run-1/:
-    // probe.json times out on aria-checked, snapshot.txt shows radio "Plan first"
-    // [checked=false]; CI run 40029650149 artifact 12534278596 cockpit-failures-shard-3,
-    // hearsay-tools/cezarion#1581). Reproduce with `npm run test:e2e -- plan-mode.e2e.ts -t
-    // 'Plan first selects'` and the built `/repo` handler held until 40-50 ms before this click:
-    // the pointerdown hit y=818 on the composer while the button sat at 826.5-868.5.
-    // 4 of 18 runs failed before, 18 of 18 passed after.
     settleVisual(browser, '[data-slot="mode-plan"]', { idle: true })
     browser.click('[data-slot="mode-plan"]')
     try {

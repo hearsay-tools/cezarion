@@ -197,9 +197,8 @@ describe('harness parity — skill provisioning (#1408)', () => {
         expect(notes![0]!.deliveredAt).toBeDefined();
         if (backend === 'codex') {
           // A refused steer is retried as turn/start with the SAME client id. Counting RPC
-          // text counts that unread attempt twice. Keep one durable input and one wire identity.
-          // hearsay-tools/cezarion#2071: proof_base=f389b6838; mock:steer-race gives
-          // 1 failed / 4 skipped before this fix, 1 passed / 4 skipped after it.
+          // text counts that unread attempt twice. Keep one durable input and one wire identity
+          // (hearsay-tools/cezarion#2071).
           const requests = fixture.wire().trim().split('\n').map(line => JSON.parse(line))
             .filter(request => request.params?.input?.some((part: { text?: string }) => part.text === LIVE_NOTE));
           expect(requests[0].params.clientUserMessageId).toBeTruthy();

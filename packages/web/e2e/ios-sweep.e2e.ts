@@ -38,13 +38,7 @@ const IPHONE = { width: 390, height: 844 } // iPhone 14/15 CSS pixels
 
 /** The skills view needs one skill row. This spec seeds it rather than counting on the skills
  *  the host or this checkout happens to have (README.md, "Seed the catalog entries a spec
- *  relies on"). Evidence: with no `.ai/skills` in the checkout and no global skills in the
- *  server's HOME, the unseeded `/settings/skills` case failed with "predicate never became
- *  truthy: document.querySelector("[data-slot=\"skill-row\"]") !== null" (bundle
- *  .ai/qa/failures/ios-sweep/settings-skills-1/: probe.json URL /p/tree/skills, snapshot.txt an
- *  empty "Skills" region; recorded in hearsay-tools/cezarion#1683 comment 6391215912).
- *  Reproduce with `npm run test:e2e -- ios-sweep.e2e.ts -t 'settings/skills'` under those two
- *  conditions — 1 of 1 failed before, 1 of 1 passed after. */
+ *  relies on", hearsay-tools/cezarion#1683). */
 const skillsDir = resolve(servedRoot(), '.ai/skills')
 const SKILL = 'e2e-ios-sweep-skill'
 

@@ -650,13 +650,9 @@ export class AgentBrowser {
   /** hearsay-tools/cezarion#808: never tear a document down while one of its font faces is
    *  still fetching. Chrome keeps that half-loaded font in the renderer's memory cache, and every
    *  later document that reuses the entry waits on it forever: `document.fonts.status` stays
-   *  `loading`, so every settled sample in the session times out. Reproduced locally by holding
-   *  one font fetch open with CDP `Fetch` (every later document stuck), and seen in smoke runs
-   *  under full CPU load after the Skills page. Waiting for `document.fonts.ready` was not enough:
-   *  one of 5 loaded smoke runs read `loaded` here and the next document still stuck, so a face
-   *  can start after the check. Loading every declared face up front means none can start
-   *  between this check and the navigation (8/8 smoke runs at load 35-94). Bounded, and a page
-   *  that cannot answer navigates as before. */
+   *  `loading`, so every settled sample in the session times out. `document.fonts.ready` is not
+   *  enough, because a face can start after the check; loading every declared face up front means
+   *  none can. Bounded, and a page that cannot answer navigates as before. */
   private settleFontsBeforeLeaving(): void {
     try {
       this.run(['eval', `(async () => {
@@ -1045,13 +1041,7 @@ export class AgentBrowser {
    *  hearsay-tools/cezarion#438): press, move a few pixels, wait until `lifted` holds, move to the
    *  target, wait until `over` holds, then release. Without the waits the whole stream lands in
    *  a few milliseconds, before the sortable has measured its drop targets, and the release
-   *  resolves to no target — a race a human hand never produces.
-   *
-   *  Provenance (hearsay-tools/cezarion#438, local): with `dragTo`, the rail's pointer reorder in
-   *  `project-order.e2e.ts` failed 1 of 5 runs of that single test; bundles
-   *  `.ai/qa/failures/project-order/drags-a-collapsed-mark-…-1` and `-2` end on the unchanged
-   *  registry order with focus on the dragged mark's link. With `dragHeld`: 6 of 6, then 8 of 8,
-   *  full-spec runs passed. */
+   *  resolves to no target — a race a human hand never produces. */
   dragHeld(from: { x: number; y: number }, to: { x: number; y: number }, { lifted, over }: { lifted: string; over: string }): void {
     this.run(['mouse', 'move', String(from.x), String(from.y)])
     this.run(['mouse', 'down'])
@@ -1091,17 +1081,8 @@ export class AgentBrowser {
    *  and headless Chrome can take longer than several CLI calls to produce one. The cockpit picks
    *  WHICH tree to render from those listeners (`useIsDesktopViewport`: the run header's phone
    *  bar or its desktop title row), so in that gap a page is laid out for the new width but still
-   *  renders the old width's controls. #794: widening 360 → 1440, `focusWithKeyboard` picked
-   *  "Resize the sidebar" as the predecessor of Copy branch name because the desktop title row
-   *  was not mounted yet, the rendering update mounted it before the Tab, and Tab landed on its
-   *  Rename task button. Evidence: `cockpit-failures-shard-2` artifacts 11255134650, 11255508374
-   *  and 11259950580 (draft PR #791), whose `probe.json` all name `Rename task` as
-   *  `activeElement` at 1440x900. Local reproduction, logging the change event, the predecessor
-   *  and the `focusin` after Tab: unforced, the change had not fired by the predecessor pick in
-   *  3 of 6 runs (Tab beat the frame each time, so they passed). With a page script that holds the
-   *  widening's rendering update (its change listeners, then its frame callbacks) until the next
-   *  keydown or 1.5 s, the spec failed with the CI bundle's `activeElement` in 8 of 10 runs
-   *  without this wait, and passed 10 of 10 with it.
+   *  renders the old width's controls (hearsay-tools/cezarion#794: Tab landed on a control of
+   *  the tree that was not mounted yet).
    *
    *  So this waits for one animation frame at the new size, read in the same sample. Media query
    *  listeners run before animation-frame callbacks in a rendering update, and React commits a

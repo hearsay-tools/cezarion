@@ -37,12 +37,7 @@ const skillsDir = resolve(servedRoot(), '.ai/skills')
 const ALPHA = 'e2e-alpha-skill'
 const BETA = 'e2e-beta-skill'
 // The #384 case scrolls the list, so it must overflow. CI's runner has no global skills, and the
-// default team catalog that used to fill the list there is gone (#1494). Evidence: the case read
-// scrollTop 0, bundle .ai/qa/failures/settings-skills/
-// refresh-keeps-the-selection-and-the-list-scroll-position-384-1/ (CI run 39983148239, artifact
-// cockpit-failures-shard-4). 1 of 1 CI run failed before the fillers, 1 of 1 passed after (run
-// 39986919084). Reproduce with `npm run test:e2e -- settings-skills.e2e.ts` on a host with no
-// global skills. The fillers sort after ALPHA and BETA.
+// default team catalog that used to fill the list there is gone (#1494). The fillers sort after ALPHA and BETA.
 const FILLERS = Array.from({ length: 40 }, (_, i) => `e2e-zz-filler-${String(i).padStart(2, '0')}`)
 
 let browser: AgentBrowser
@@ -129,12 +124,7 @@ describe('settings → skills against the live dry-run server', () => {
         const selected = browser.evaluate(contrastSampleExpression(selectedSelector)) as ContrastSample
         expect(selected.ratio, `${variant.id} selected: ${selected.foreground} on ${selected.background}`).toBeGreaterThanOrEqual(4.5)
 
-        // Scroll BETA into view: at 360×640 the row can start under the mobile tab bar. Evidence: this case failed with "covered by
-        // <a.relative.flex inside div#root>" (bundle .ai/qa/failures/settings-skills/
-        // keeps-selected-and-hovered-skill-descriptions-AA-readable-with-visible-keyboard--1/:
-        // probe.json hover refused at the click point; PR #1424 comment 6316871712). Reproduce with
-        // `npm run test:e2e -- skills-update.e2e.ts settings-skills.e2e.ts` — 1 of 2 failed
-        // before, 2 of 2 passed after.
+        // Scroll BETA into view: at 360×640 the row can start under the mobile tab bar.
         browser.evaluate(`document.querySelector(${JSON.stringify(row(BETA))}).scrollIntoView({ block: 'center' })`)
         browser.hover(row(BETA))
         const hoveredSelector = `${row(BETA)} > span:last-child`
@@ -174,12 +164,7 @@ describe('settings → skills against the live dry-run server', () => {
     try {
       for (const variant of contrastQaVariants.filter((v) => v.id.startsWith('mobile-') && v.density === 'comfortable')) {
         applyContrastQaVariant(browser, variant)
-        // Scroll the switch into view: at 360×640 the row can start below the fold. Evidence: this case failed with "hit area: expected [ false, false,
-        // false, false ]" (bundle .ai/qa/failures/settings-skills/
-        // every-row-has-its-own-switch-with-a-44-px-target-at-360-640-light-and-dark-1408-1/:
-        // probe.json all four elementFromPoint probes missed; PR #1424 comment 6316871712).
-        // Reproduce with `npm run test:e2e -- skills-update.e2e.ts settings-skills.e2e.ts` —
-        // 2 of 2 failed before, 2 of 2 passed after.
+        // Scroll the switch into view: at 360×640 the row can start below the fold.
         const target = browser.waitForValue(`(() => {
           const el = document.querySelector(${JSON.stringify(toggle)})
           if (!el) return null
@@ -296,12 +281,7 @@ describe('settings → skills against the live dry-run server', () => {
     expect(before).toBe(150)
 
     // Scroll Refresh into view: clicking BETA scrolls the main pane on a long team catalog, so the
-    // page header covers the button. Evidence: this case failed with "covered by
-    // <header.row-start-1.hidden>" (bundle .ai/qa/failures/settings-skills/
-    // refresh-keeps-the-selection-and-the-list-scroll-position-384-1/: probe.json main pane
-    // scrolled to the BETA row; CI run 39596536546, artifact cockpit-failures-shard-4). Reproduce
-    // with `npm run test:e2e -- settings-skills.e2e.ts` — 1 of 1 CI run failed before (0 of 3
-    // local: the local catalog is short), 1 of 1 CI run and 4 of 4 local passed after.
+    // page header covers the button.
     browser.evaluate(`document.querySelector('[data-slot="skills-refresh"]').scrollIntoView({ block: 'center' })`)
     browser.click('[data-slot="skills-refresh"]')
     // The button disables while the POST runs; wait until the round-trip settled.

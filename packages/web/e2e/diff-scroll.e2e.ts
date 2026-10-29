@@ -52,11 +52,7 @@ const lineCount = () => browser.count('[data-slot="diff-line"]')
 /**
  * Sampled-expression prelude: hold the diff scroller at `top`, re-applying it each sample rather
  * than once before sampling (#409). A one-shot assignment was lost once under a loaded Squeal
- * slow tier (hearsay-tools/cezarion#1029). Squeal run 08779938, 2026-10-14T22:01Z, left the bundle
- * `.ai/qa/failures/diff-scroll/keeps-the-per-file-header-sticky-while-virtualized-the-layout-hazard-virtua-pose-1/`
- * (local, not a CI artifact): the view sat at scroll 0. Six loaded reruns did not reproduce it.
- * Forced reproduction: resetting `scrollTop` to 0 30 ms after the one-shot assignment fails the
- * old spec with this exact error, and this prelude passes it. The sample also reports the offset,
+ * slow tier (hearsay-tools/cezarion#1029). The sample also reports the offset,
  * the height and whether the scroller element was replaced, so a recurrence names its cause.
  * `top` is a number or a page expression, so a caller can move its target between samples.
  */
@@ -188,10 +184,7 @@ describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, (
     // offset depends on the height of every card above it, and the fixture's first cards are
     // files cezar itself writes (`.ai/cezar/.gitignore`, `.cez-home/config.json`).
     // hearsay-tools/cezarion#1037 added one `.gitignore` line, and the fold then sat at the
-    // boundary between those two cards: no card had more than 40 px below it.
-    // `diff-scroll.e2e.ts` failed 4/4 locally on that branch (load 22-27) and on two CI attempts
-    // of run 38662243293, shard 4/4. The bundle screenshot shows the `.cez-home/config.json`
-    // header just below the fold. Every card is far taller than 60 + 40 px, so one step leaves
+    // boundary between those two cards: no card had more than 40 px below it. Every card is far taller than 60 + 40 px, so one step leaves
     // that band. The cap of 10 steps keeps a real sticky failure a failure.
     const pinned = waitForSettledSample(browser, `(() => {
       window.__e2eStickyTop ??= 900

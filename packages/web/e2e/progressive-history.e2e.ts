@@ -30,8 +30,7 @@ const RUN = {
   // Same local day as the rewritten event `ts` below. The record fixture's createdAt is
   // 2026-07-14; events are restamped to 2026-07-30. After #435 that 16-day gap inserted a
   // day-separator as the first non-task row, and `preserves a virtual history anchor
-  // behind the task prefix` timed out waiting on `turn-seq-2768:day-separator`
-  // (local bundle `.ai/qa/failures/progressive-history/preserves-a-virtual-history-anchor-behind-the-task-prefix-at-360px-1`).
+  // behind the task prefix` timed out waiting on `turn-seq-2768:day-separator`.
   createdAt: '2026-07-30T00:00:00.000Z',
   steps: [record.steps[0]],
   pullRequestUrl: undefined,

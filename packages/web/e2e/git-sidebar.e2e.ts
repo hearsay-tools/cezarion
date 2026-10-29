@@ -152,8 +152,7 @@ const openDesktop = (path = '/git', id = project) => {
   browser.waitForFunction(has(`${SIDEBAR} ${SECTIONS}`))
   // The sections render before `/repo` answers and the checkout block then mounts ABOVE them,
   // pushing every section row down. Clicking a section before that lands on the checkout's
-  // uncommitted line instead (CI failure bundle, PR #716 run 36772703613 shard 4:
-  // git-sidebar/All-branches-lists-the-branches-…-1 — focus on git-uncommitted, URL /git/changes).
+  // uncommitted line instead.
   browser.waitForFunction(has(`${SIDEBAR} ${CHECKOUT}`))
 }
 const setTheme = (theme: 'light' | 'dark') =>
@@ -273,12 +272,6 @@ describe('Git desktop sidebar (issue 06 §3)', () => {
     // The list draws `/repo`'s names first and the `cez/*` ones once `GET /repo/branches` answers.
     // The sidebar used to warm that query; since hearsay-tools/cezarion#2029 it reads only
     // `/repo/branches/counts`, so the list now fetches it itself, and a one-shot count raced it.
-    // Evidence: git-sidebar failed with "expected 2 to be 5" (bundle
-    // .ai/qa/failures/git-sidebar/All-branches-lists-the-branches-and-the-uncommitted-line-opens-the-main-tree-s-c-1/:
-    // probe.json error "expected 2 to be 5", snapshot.txt already lists the `cez/nl-task` row;
-    // recorded in the provenance comment on the pull request for hearsay-tools/cezarion#2029).
-    // Reproduce with `npm run test:e2e -- git-sidebar.e2e.ts` — 1 of 1 failed before,
-    // 3 of 3 passed after.
     expect(browser.waitForValue(`document.querySelectorAll('[data-slot="branch-row"]').length`, (value) => value === 5)).toBe(5)
     expect(browser.evaluate(litJs)).toEqual(['branches'])
 
@@ -314,8 +307,7 @@ describe('Git desktop sidebar (issue 06 §3)', () => {
     expect(config.baseBranch).toBe('feature')
     // Back to the zero-config default: follow the checked-out branch. Reopen only once the first
     // menu has fully left: a trigger press during its exit animation lands as an outside dismiss
-    // and the menu stays closed (.ai/qa/failures/git-sidebar/the-base-branch-picker-sets-where-new-
-    // tasks-start-through-PUT-config-1, 2026-09-30T20:17Z: trigger focused, aria-expanded=false).
+    // and the menu stays closed.
     browser.waitForFunction(`document.querySelector('[role="menu"]') === null`)
     browser.click(`${CHECKOUT} [data-slot="base-branch-picker"]`)
     browser.click('[role="menuitemradio"][data-branch=""]')

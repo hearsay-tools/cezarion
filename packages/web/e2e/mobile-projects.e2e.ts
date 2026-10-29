@@ -204,12 +204,7 @@ describe('phone Tools page (#621 follow-up)', () => {
       // "Set up ›" have something to render whatever this machine has installed.
       const health = (await fetch(`${baseUrl}/api/v1/health`).then((r) => r.json())) as { checks: Array<Record<string, unknown>>; capabilities: Record<string, unknown> }
       // Keep the routed health fixture isolated from real WebSocket health snapshots, which can
-      // replace it in the query cache. CI run 36715710375 shard 2 read a null last-tool hint instead
-      // of the injected hint; its snapshot still contains three other "Set up" links.
-      // Evidence: artifact cockpit-failures-shard-2, mobile-projects/
-      // reaches-tools-from-the-drawer-with-status-dots-and-the-settings-link-light-1/{probe.json,snapshot.txt}.
-      // A separate local reproduction failed 1/6 runs with no "Set up" links, then passed 14/14
-      // with this isolation. As in smoke/application-update, localHandoff:false prevents the
+      // replace it in the query cache. As in smoke/application-update, localHandoff:false prevents the
       // health subscription; these assertions do not depend on local handoff.
       health.capabilities = { ...health.capabilities, localHandoff: false }
       const missing = health.checks.length - 1
@@ -237,8 +232,7 @@ describe('phone Tools page (#621 follow-up)', () => {
           }
         })()`) as { rows: Array<{ available: string; tone: string; size: number; state: string; hint: string | null; setup: number | null }>; settings: number; overflow: boolean }
         expect(page.rows.length).toBe(health.checks.length)
-        // Compare against the routed payload, not a fixed count: a CI runner may lack other tools too
-        // (run 36685908950 shard 4/4 had more than one missing, each with its own server hint).
+        // Compare against the routed payload, not a fixed count: a CI runner may lack other tools too.
         page.rows.forEach((row, index) => {
           const check = health.checks[index]!
           expect(row.size).toBe(7)

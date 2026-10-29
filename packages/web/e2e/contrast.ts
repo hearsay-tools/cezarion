@@ -121,13 +121,8 @@ const FIRST_CONTROL_HOLD_MS = 500
  * prepends to `<body>` and focuses. The anchor and its hold stamp go after the Tab and on every
  * failure, including one whose probe the matcher never saw. Blurring the active element is not
  * enough: Chrome keeps its sequential focus navigation starting point where focus, or the last
- * click, was. Evidence (local, 2026-10-16, a throwaway spec on the shared env with an empty
- * registry, focus parked by `.focus()` on the sidebar resize handle or by a click on the page
- * heading, 3 runs each): a bare Tab, and `activeElement.blur()` then Tab, both landed on the main
- * view's Active tab (`data-slot="overview-tab"`) 6 of 6. Focusing `<body>` under a temporary
- * `tabindex="-1"`, and focusing this anchor, both landed on Add project 6 of 6. The anchor won
- * because each poll finds it by id and one removal undoes it, where a body attribute would need
- * its old value carried across polls.
+ * click, was. An anchor, not a body attribute, because each poll finds it by id and one removal
+ * undoes it.
  *
  * A target can render before its predecessor does (the rail mounts once the projects query
  * answers), and a Tab from the top would then land on the late arrival. Today's callers wait for
@@ -213,12 +208,7 @@ export function focusWithKeyboard(browser: AgentBrowser, selector: string): void
  * here), and only when it unmounts does `FocusScope` refocus the trigger, from a zero-delay
  * timer (`onCloseAutoFocus`). A wait for `content` to be `null` resolves inside that gap, so
  * a scripted `.focus()` there is undone a millisecond later: the row-rename pencil's Tab
- * started from the Columns trigger and ended on "New task" (#410). Evidence: the
- * `cockpit-failures-shard-3` artifact of run 35333371534 (job 105562586371), whose `probe.json`
- * names `data-slot="new-task-inline"` as `activeElement` after Tab; and a local reproduction
- * that replayed the spec's CLI-call order while logging `focusin` and `animationend` with
- * `performance.now()` stamps: the trigger took focus 1 ms after the helper's `.focus()` in 2 of
- * 13 runs without this wait, and in 0 of 10 with it. The end state is the focus, not the
+ * started from the Columns trigger and ended on "New task" (#410). The end state is the focus, not the
  * absence, so this waits for both.
  *
  * `focus` is where the overlay returns focus: its trigger, or whatever its `onCloseAutoFocus`

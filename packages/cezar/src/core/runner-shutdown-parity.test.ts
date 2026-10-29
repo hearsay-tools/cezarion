@@ -108,10 +108,6 @@ async function withChild(backend: RunnerId, check: (session: AgentSession, child
     if (backend === 'codex') {
       // The PID receipt precedes the parent's startup-frame consumption. Stopping
       // there can test startup failure instead of live cleanup (hearsay-tools/cezarion#2182).
-      // Proof: CI run 40873064242 attempt 1 job 123445575321; proof_base a6ad9df37.
-      // Scratch --config .ai/qa/ci-2184-proof/vitest.config.ts -t 'codex explicit end during probe',
-      // delaying turn/started stdout delivery 250 ms: old 1/1 fails, fixed 1/1 passes;
-      // fixed also passes 3/3 on CPU 0 with two busy loops. Captured output is in the repair PR.
       // bound: wait for the native opening turn on a loaded host, before stopping its transport.
       await vi.waitFor(() => expect(openingTurnStarted).toBe(true), { timeout: 10_000 });
     }

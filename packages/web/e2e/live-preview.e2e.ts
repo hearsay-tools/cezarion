@@ -105,8 +105,7 @@ beforeAll(async () => {
   // The cockpit's own browser is launched with --no-sandbox exactly where this machine needs it.
   // Whether the Chromium cezar resolves can use its sandbox depends on the host: GitHub's Ubuntu
   // runners and this repo's dev boxes restrict unprivileged user namespaces (AppArmor), and the
-  // pane then shows 5.4 (failure bundle live-preview/registers-runs-streams-takes-a-click-and-stops-1,
-  // PR #792). That state has its own unit coverage; this spec is about streaming, so it always opts
+  // pane then shows 5.4. That state has its own unit coverage; this spec is about streaming, so it always opts
   // out the documented way.
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(dataRoot, { CEZ_PREVIEW: '1', CEZ_PREVIEW_NO_SANDBOX: '1' }),
@@ -133,7 +132,6 @@ afterAll(async () => {
   else process.env.AGENT_BROWSER_DEFAULT_TIMEOUT = priorWaitBudget
   browser?.close()
   await stopFixtureServer(server)
-  // Local ENOTEMPTY evidence: https://github.com/hearsay-tools/cezarion/pull/841#discussion_r4185080113
   // Retry transient directory-writer races after shutdown; persistent failures still throw.
   if (dataRoot) rmSync(dataRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 })
@@ -150,14 +148,10 @@ describe('live preview', () => {
     // Open the pane from the header toggle and approve the run there (spec 5.16). The thread card
     // offers the same Run and open, but the thread follows its tail while the agent's reply
     // renders, so on CI (longer reply, deeper fixture paths) the card sat under the sticky
-    // breadcrumb and agent-browser refused the covered click (failure bundle
-    // live-preview/registers-runs-streams-takes-a-click-and-stops-1, PR #792). The toggle sits in
+    // breadcrumb and agent-browser refused the covered click. The toggle sits in
     // the fixed task header and never moves with the thread.
     browser.click('[data-slot="preview-toggle"]')
     const approval = '[data-slot="preview-pane"] [data-slot="preview-state"][data-state="needs-approval"]'
-    // CI evidence: https://github.com/hearsay-tools/cezarion/actions/runs/37986554086/job/114009939596
-    // Artifact cockpit-failures-shard-4, live-preview/registers-runs-streams-takes-a-click-and-stops-1:
-    // snapshot shows the registered server's Review button; probe has needs-approval=null.
     // Registration can reach the header before its default server selection.
     // The empty pane legitimately lists that server for review in this ordering.
     const landing = browser.waitForValue(
@@ -176,23 +170,10 @@ describe('live preview', () => {
     browser.click(`${approval} button`)
 
     // First the pane leaves its state screens (server start, then the browser's cold launch, which
-    // took over 10 s on a loaded CI runner: failure bundle live-preview/registers-runs-streams-
-    // takes-a-click-and-stops-1, PR #792), so the frame check below gets its own wait budget. A
+    // took over 10 s on a loaded CI runner), so the frame check below gets its own wait budget. A
     // launch that fails leaves a terminal state screen up: the wait ends on it at once, with the
-    // pane's reason in the failure, instead of polling out its budget.
-    // Evidence (hearsay-tools/cezarion#1474): this spec failed with "predicate never became truthy:
-    // !document.querySelector('[data-slot="preview-pane"] [data-slot="preview-state"]')" (bundle
-    // .ai/qa/failures/live-preview/registers-runs-streams-takes-a-click-and-stops-1/: probe.json
-    // names only that predicate, while screenshot.png shows "The browser stopped" with the log tail
-    // "Chromium did not open its DevTools port within 30 s (/usr/bin/google-chrome)" and one D-Bus
-    // line; CI run 39864969030, job 120124823181, artifact cockpit-failures-shard-1). Chrome was
-    // stalled, not crashed, so the launch now retries once and this budget covers two attempts.
-    // No local run reproduces the stall: a fresh-profile launch took 0.25 s idle and 2 s pinned to
-    // one CPU with 8 busy loops. Its unit reproduction is a fake that never opens its port on the
-    // first run: `npm test -- packages/cezar/src/preview/chromium.test.ts -t 'retries once'`. Run
-    // this test with `npm run test:e2e -- live-preview.e2e.ts -t 'registers, runs, streams, takes a
-    // click and stops'`. Before: 1 of 300 ci.yml runs (2026-10-18 to 2026-10-22, first attempts
-    // included) failed here. After: 2 of 2 CI runs passed (39925276822, 39934204853).
+    // pane's reason in the failure, instead of polling out its budget. A stalled Chrome launch
+    // retries once, so this budget covers two attempts (hearsay-tools/cezarion#1474).
     const left = browser.waitForValue(
       `(() => {
         const state = document.querySelector('[data-slot="preview-pane"] [data-slot="preview-state"]');
@@ -308,12 +289,8 @@ describe('live preview', () => {
       const second = { targetId: browser.newTab() }
       // `tab new` made the second tab the session's active one. Hand the session back before this
       // CDP connection navigates and closes it, or the next provider command can land on the closed
-      // target. Evidence: CI run 38474591376 (hearsay-tools/cezarion#1019, shard 2/4), artifact
-      // cockpit-failures-shard-2, bundle live-preview/registers-runs-streams-takes-a-click-and-stops-1:
-      // `wait button[aria-label="More"]` failed with CDP "Session with given id not found", yet
-      // the bundle's snapshot.txt, captured right after on the first tab, lists the More button.
-      // Locally, closing the tab with `tab close` instead fails at once ("No target with given id
-      // found"): the provider still tracks the tab this connection navigated.
+      // target (hearsay-tools/cezarion#1019). `tab close` fails too: the provider still tracks
+      // the tab this connection navigated.
       browser.switchTab(first.targetId)
       const secondSession = (await request('Target.attachToTarget', { targetId: second.targetId, flatten: true })).sessionId
       try {

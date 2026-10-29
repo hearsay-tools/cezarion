@@ -123,8 +123,6 @@ it('lays out New Task pickers in reading order without clipping at desktop, narr
       browser.waitForFunction(`document.querySelector('[data-testid="effort-pill-menu"]') === null`)
       // The opencode default model reaches the pill after the runner switch, once `/config`
       // answers. Measure the long value, not `Model · auto` (hearsay-tools/cezarion#946).
-      // Reproduced locally by delaying the server's `/config` response 1.5 s: `main` fails
-      // with `expected 'Model · auto' to contain 'opencode/muse-spark-…'`, this spec passes 4/4.
       browser.waitForFunction(`document.querySelector('[data-slot="model-pill"]')?.textContent?.includes('opencode/muse-spark-1.3-contributor-free') === true`)
       expect(browser.text('[data-slot="runner-pill"]')).toContain('opencode')
       expect(browser.text('[data-slot="effort-pill"]')).toContain('medium')

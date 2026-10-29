@@ -38,8 +38,10 @@ correctness or contract failures. Do not put low-severity or cosmetic advice in
 Do not inflate severity to make a suggestion qualify.
 
 A change under `packages/web/e2e/` that fixes or retries a flaky spec must cite a
-failure bundle or a local reproduction (see `packages/web/e2e/README.md`); report
-one that cites neither, and report any growth of
+failure bundle or a local reproduction (see `packages/web/e2e/README.md`). Evidence
+in the PR description or a review thread counts; do not ask for it in code
+comments. When `.review-context/pull-request-body.md` exists, read the current PR
+description from it; a missing file is not a review failure. Report one that cites neither, and report any growth of
 `packages/web/src/test/e2e-wait-discipline.baseline.json`.
 
 ## Review procedure

@@ -90,12 +90,7 @@ describe('Hand off to webhook', () => {
     // agent-browser's full-page capture resizes the window to 1x1 and back, so the md media
     // query flips for a frame; when React commits that frame the run header swaps to its phone
     // layout, `HandoffAction` remounts and its dialog state is lost. The `fill` below then finds
-    // no note field (hearsay-tools/cezarion#971 lane-3 bundle: `openDialogs: []`, the Hand off
-    // button still rendered). Reproduced with an instrumented copy of these steps at load 35-64:
-    // full-page capture closed the dialog in 4 of 30 iterations, each logging `resize 1x1
-    // md=false` and a `run-title-row` -> `run-details-actions` swap (now `run-mobile-actions`,
-    // hearsay-tools/cezarion#1333); viewport capture closed it
-    // in 0 of 30 and fired no resize. The dialog is fixed-position, so the viewport holds it all.
+    // no note field (hearsay-tools/cezarion#971). The dialog is fixed-position, so the viewport holds it all.
     settledShot('desktop-dialog.png', { viewport: true })
 
     browser.fill('[data-slot="handoff-note"]', 'Take over from here')
@@ -150,10 +145,7 @@ describe('Hand off to webhook', () => {
     // the stream is attached: a stop clicked before the first post-open `ping` (written only after
     // the server's store listeners attach, #795) is never delivered, and the barrier's recovery
     // GET is the off-state response this test holds, so the glyph can never clear
-    // (hearsay-tools/cezarion#1069). Evidence: guard-full bundle task-handoff/keeps-the-live-glyph-
-    // when-an-older-stop-notifying-list-response-arrives-after-re-1 (POST recorded in the
-    // timeline, sidebar glyph still shown, probe on the wait below). Reproduced 3/3 by delaying
-    // the built server's workspace-events attach 4 s behind E2E_DELAY_MS; 0/3 with this wait.
+    // (hearsay-tools/cezarion#1069).
     browser.waitForFunction(`window.__cezLive === true`)
     // Hold only the real server's off-state list response, leaving POST, SSE and detail native.
     // This is a route-response fixture, not a rewrite of any React-owned node.
@@ -197,11 +189,7 @@ describe('Hand off to webhook', () => {
     // #621: below md the pushed top bar owns the title row, so Hand off lives in the
     // `run-mobile-actions` row under it (hearsay-tools/cezarion#1333; before that, in the
     // run-details disclosure).
-    // Ensure the scrolling trigger is on screen before clicking. CI run 36715710375
-    // shard 3 captured no open dialog at failure and a trigger outside the viewport. A tail-pin
-    // moving it before the click is an inference, not a proven sequence; five local runs did not
-    // reproduce it (four under CPU load). Evidence: artifact cockpit-failures-shard-3, task-handoff/
-    // is-a-bottom-sheet-with-a-full-width-44px-action-at-360-640-1/{probe.json,screenshot.png,snapshot.txt}.
+    // Ensure the scrolling trigger is on screen before clicking: it can sit outside the viewport.
     const trigger = browser.waitForStable<{ top: number; bottom: number; width: number; height: number }>(`(() => {
       const el = document.querySelector(${JSON.stringify(handoff)});
       if (!el) return null;
@@ -232,10 +220,7 @@ describe('Hand off to webhook', () => {
     for (const theme of ['dark', 'light'] as const) {
       applyContrastQaVariant(browser, { id: `mobile-${theme}`, theme, density: 'comfortable', viewport: { width: 360, height: 640 } })
       // `DialogContent` carries `duration-200` with the initial `transition-property: all`, so its
-      // background eases for 200 ms after the theme class flips. The first local run sampled that
-      // transition (light ink on the old dark card, 2.38:1; bundle
-      // .ai/qa/failures/task-handoff/keeps-AA-contrast-…-1 shows the settled sheet light). Sample
-      // only once no transition is running inside the dialog.
+      // background eases for 200 ms after the theme class flips. Sample only once no transition is running inside the dialog.
       browser.waitForFunction(`(() => {
         const el = document.querySelector(${JSON.stringify(dialog)});
         return Boolean(el) && el.getAnimations({ subtree: true }).every(a => a.playState !== 'running');

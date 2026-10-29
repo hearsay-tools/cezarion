@@ -437,9 +437,6 @@ describe('task thread', () => {
   })
 
   it('collapsing the plan section folds the list away and keeps its odometer', () => {
-    // Local repro: `npm run test:e2e -- task-thread.e2e.ts` failed here (49/50 passed):
-    // the header moved from y=664.53 to y=542.53. This wait gives 50/50; evidence:
-    // https://github.com/hearsay-tools/cezarion/pull/853#issuecomment-6006814817
     // Expanding the checklist moves the dock. Let its geometry and animations settle
     // before targeting the plan header again, so the click lands on that header.
     settleVisual(browser, '[data-slot="run-activity-dock"]')
@@ -1039,10 +1036,7 @@ describe('task thread', () => {
 
   // hearsay-tools/cezarion#1537: the summary's 8px gap used to appear only with its first shown
   // value. Where a value fitted only without that gap, it showed, lost the room, hid and showed
-  // again on every frame, so main CI's touch-targets 360px cell never settled (failure bundle
-  // .ai/qa/failures/touch-targets/comfortable-dark-360-edge-taps-keyboard-drafts-pins-and-pending-controls-1
-  // in run 39970537530 attempt 1, artifact cockpit-failures-shard-1). Locally it failed 1 of 4
-  // runs: `npm run test:e2e -- touch-targets.e2e.ts -t 'comfortable/dark/360'`. Every card width
+  // again on every frame, so main CI's touch-targets 360px cell never settled. Every card width
   // exercises the boundary, so the sweep finds it without the fixture's exact font widths. The
   // flip period is one or two frames: three settle frames, then three sampled frames per width.
   it('folded Activity settles at every card width', () => {

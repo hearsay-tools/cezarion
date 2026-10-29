@@ -14,13 +14,7 @@ import {
 
 describe('parent and worker conversation waits through RunManager', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
-  // Regression proof (hearsay-tools/cezarion#1752), proof_base=2a28cfe91:
-  // npm test -- --config .ai/qa/worker-wait-proof/vitest.config.ts -t 'claude WP1'
-  // Ignored scratch copy of this test, with CEZ_DELEGATION deleted before setup; relative
-  // imports resolved to their original files. Before: 0 passed, 1 failed, 28 skipped / 29;
-  // unavailable_transport at DelegationService.context. After: 1 passed, 0 failed,
-  // 28 skipped / 29 with the same absent flag and the shared helper. Captured runner output:
-  // /p/cezar/tasks/f4a3c123-a0a3-428a-92d3-df300459b424/files?artifact=43db3075-91aa-41fc-b958-54fe92bc150a
+  // `delegatingParent` sets CEZ_DELEGATION, so these tests do not depend on the host (hearsay-tools/cezarion#1752).
   async function conversationPair(runner: RunnerId = 'claude') {
     const { p, service, callerFor, close } = await delegatingParent({ runner, permissions: ['spawn', 'wait', 'steer'] });
     await until(() => store.getRun(p.id)?.status === 'waiting');

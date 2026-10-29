@@ -141,11 +141,7 @@ for (const [width, height] of [[1440, 900], [360, 640]]) for (const theme of ['l
     // stops between the first and last worker link are counted from the rendered controls
     // instead of assumed to be links only. The buttons arrive with the worker inspection, after
     // the links: wait for all 32 before counting, or the count comes up short and focus stops
-    // mid-list (hearsay-tools/cezarion#913). Evidence: CI run 37643183029, job 112867230820
-    // (hearsay-tools/cezarion#912), artifact `cockpit-failures-shard-2`, bundle
-    // `360x640-dark-keyboard-reaches-last-worker-…-1`: probe.json shows focus parked on the
-    // worker link in row 20, and its snapshot already lists all 32 Clean up buttons, so they
-    // rendered after the count. The target is named
+    // mid-list (hearsay-tools/cezarion#913). The target is named
     // (the oldest worker, now last, which Enter opens below), never a positional row.
     browser.waitForFunction(`document.querySelectorAll('${region} button[aria-label^="Clean up worker"], ${region} button[aria-label^="Retry clean up of worker"]').length === 32`)
     browser.evaluate(`document.querySelector('${region} a').focus()`)
