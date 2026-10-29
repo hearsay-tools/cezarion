@@ -1124,6 +1124,12 @@ their own tool allowlists — see
 [Coding agent backends](#coding-agent-backends) for what each one actually
 locks down. Nothing runs on a server you don't own.
 
+Live Preview lets Chromium use host graphics when available. Chromium selects the
+backend and falls back to software when hardware is unavailable or blocked. This
+needs no Cezarion setting or VirGL-specific setup. On Linux, GPU access may also
+need a working display in the cockpit process environment. JPEG streaming is
+unchanged; GPU rendering does not guarantee hardware frame encoding.
+
 Useful environment variables:
 
 | Var | Effect |

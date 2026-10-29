@@ -366,13 +366,14 @@ const LAUNCH_ATTEMPTS = 2;
 /** How long a timed-out launch may take to exit after SIGKILL before the retry starts anyway. */
 const KILLED_EXIT_WAIT_MS = 5_000;
 
-/** Chromium's argv: the prototype's, without its automatic `--no-sandbox` for root.
+/** Chromium discovers usable host graphics; `--enable-gpu` opts headless into that discovery.
+ *  Keep its driver blocklist and software fallback; never pin a vendor or graphics backend.
  *  `--proxy-server=direct://` so Linux Chrome does not inherit HTTP(S)_PROXY: it will not send
  *  proxy auth the way curl does, and a render-blocking third-party stylesheet then never paints.
  *  `--remote-debugging-pipe` opens no port: only cezar reaches the browser, and an agent drives it
  *  through cezar's CDP proxy alone (hearsay-tools/cezarion#784). */
 export function chromiumArgs(profileDir: string, env: NodeJS.ProcessEnv): string[] {
-  const args = ['--headless=new', '--remote-debugging-pipe', `--user-data-dir=${profileDir}`, '--no-first-run', '--no-default-browser-check', '--proxy-server=direct://', 'about:blank'];
+  const args = ['--headless=new', '--enable-gpu', '--remote-debugging-pipe', `--user-data-dir=${profileDir}`, '--no-first-run', '--no-default-browser-check', '--proxy-server=direct://', 'about:blank'];
   return env.CEZ_PREVIEW_NO_SANDBOX === '1' ? ['--no-sandbox', ...args] : args;
 }
 

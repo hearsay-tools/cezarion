@@ -475,9 +475,9 @@ describe('launchChromium (#781)', () => {
   };
   const posix = process.platform !== 'win32';
 
-  it('passes the prototype args, and --no-sandbox only for CEZ_PREVIEW_NO_SANDBOX=1, even as root', () => {
+  it('requests host graphics, and --no-sandbox only for CEZ_PREVIEW_NO_SANDBOX=1, even as root', () => {
     vi.spyOn(process, 'getuid').mockReturnValue(0);
-    const base = ['--headless=new', '--remote-debugging-pipe', '--user-data-dir=/p', '--no-first-run', '--no-default-browser-check', '--proxy-server=direct://', 'about:blank'];
+    const base = ['--headless=new', '--enable-gpu', '--remote-debugging-pipe', '--user-data-dir=/p', '--no-first-run', '--no-default-browser-check', '--proxy-server=direct://', 'about:blank'];
     expect(chromiumArgs('/p', {})).toEqual(base);
     expect(chromiumArgs('/p', { CEZ_PREVIEW_NO_SANDBOX: '0' })).toEqual(base);
     expect(chromiumArgs('/p', { CEZ_PREVIEW_NO_SANDBOX: 'true' })).toEqual(base);
