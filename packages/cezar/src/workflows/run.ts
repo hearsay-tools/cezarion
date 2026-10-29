@@ -190,17 +190,17 @@ export class RunManager {
   private readonly workerQuestions: WorkerQuestions;
   private get recoveryFactsPending() { return this.familyReconciler.recoveryFactsPending; }
   private readonly inputReceiptSteps: inputReceipts.InputReceiptSteps = {
-    clearUnread: state => this.clearUnreadInputTimer(state), clearHeld: state => this.clearHeldHumanInputTimer(state),
+    clearUnread: state => clearUnreadInputTimer(state), clearHeld: state => clearHeldHumanInputTimer(state),
     noteActivity: (id, state, event) => this.turnNudges.noteNoWaitNudgeContent(id, state, event),
-    persistAttachment: (id, mediaType, data) => this.persistAttachment(id, mediaType, data),
-    ready: (id, state, session) => this.handleAgentInputReady(id, state, session),
+    persistAttachment: (id, mediaType, data) => this.attachments.persistAttachment(id, mediaType, data),
+    ready: (id, state, session) => this.inputDelivery.handleAgentInputReady(id, state, session),
     pid: (id, pid) => { replaceRunProcess(id, pid); this.recordWorkerProcess(id, pid); },
     ui: (id, state, sink, event) => this.handleRunnerUiEvent(id, state, sink, event),
-    flushDeferred: id => this.flushDeferred(id), recordProcess: (id, pid) => this.recordWorkerProcess(id, pid),
+    flushDeferred: id => this.queuedInput.flushDeferred(id), recordProcess: (id, pid) => this.recordWorkerProcess(id, pid),
   };
   private readonly inputReceiptHost: inputReceipts.InputReceiptsHost = {
     reconcileWorkerWaits: () => this.reconcileWorkerWaits(),
-    flushAgentInputs: id => this.flushAgentInputs(id),
+    flushAgentInputs: id => this.inputDelivery.flushAgentInputs(id),
     isCurrentState: (id, state) => this.active.get(id) === state,
   };
   private readonly line: RunLine;
@@ -264,7 +264,6 @@ export class RunManager {
   private readonly inboxClaims: InboxClaims;
   private readonly recovery: RunRecovery;
   /** Quiet window before unread input is resubmitted or left unconfirmed (#505). */
-  private readonly unreadInputGraceMs: number;
   /** Quiet window after a final-message nudge before a still-silent session parks (#544). */
   private disposed = false;
 
@@ -344,7 +343,7 @@ export class RunManager {
     this.cezarPort = options.cezarPort;
     // #774: `serve` knows its bound origin before it recovers, so recovered runs carry it too.
     if (options.cockpit) this.setCockpitAddress(options.cockpit);
-    this.unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
+    const unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
     this.context = { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed, work: options.work ?? new TrackedWork() };
     this.retries = new WakeRetries(this.context, {
@@ -610,8 +609,8 @@ export class RunManager {
       cancelOpenWaits: id => this.wakeAdmission.cancelOpenWaits(id), countAutomaticWakes: id => this.wakeAdmission.automaticWakes(id),
       workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
       submitAgentInput: (id, state, content) => this.submitAgentInput(id, state, content), flushAgentInputs: id => this.flushAgentInputs(id),
-      hasQueuedAgentInputs: (id, except) => this.hasQueuedAgentInputs(id, except), armUnreadInputTimer: (id, state) => this.armUnreadInputTimer(id, state),
-      armHeldHumanInputTimer: (id, state) => this.armHeldHumanInputTimer(id, state), parkOnWaits: (id, state) => this.wakeAdmission.parkOnWaits(id, state),
+      hasQueuedAgentInputs: (id, except) => this.hasQueuedAgentInputs(id, except), armUnreadInputTimer: (id, state) => this.inputDelivery.armUnreadInputTimer(id, state),
+      armHeldHumanInputTimer: (id, state) => this.inputDelivery.armHeldHumanInputTimer(id, state), parkOnWaits: (id, state) => this.wakeAdmission.parkOnWaits(id, state),
       queueWaitWake: id => this.wakeAdmission.queueWaitWake(id), leaveMonitoringPool: id => this.wakeAdmission.leaveMonitoringPool(id), chargeAutomaticWake: id => this.wakeAdmission.chargeAutomaticWake(id),
       canAutoContinue: (id, state) => this.turnNudges.canAutoContinue(id, state), tryAutonomousNudge: (id, state, step, ask) => this.turnNudges.tryAutonomousNudge(id, state, step, ask),
       sendTurnEndNudge: (id, state, step, text) => this.turnNudges.sendTurnEndNudge(id, state, step, text),
@@ -636,7 +635,7 @@ export class RunManager {
       pendingConversationWakes: (run, budget) => this.wakeAdmission.pendingConversationWakes(run, budget), routedAnswer: id => this.wakeAdmission.routedAnswer(id),
       spendWakeAdmission: (id, state, owed) => this.wakeAdmission.spendWakeAdmission(id, state, owed), cancelAutomaticAtCap: (id, waits) => this.wakeAdmission.cancelAutomaticAtCap(id, waits),
       reparkWithoutWaits: (id, state) => this.wakeAdmission.reparkWithoutWaits(id, state), holdPeerWakesAtCap: id => this.wakeAdmission.holdPeerWakesAtCap(id),
-      reconcileWorkerWaits: () => this.reconcileWorkerWaits(), unreadInputGraceMs: () => this.unreadInputGraceMs,
+      reconcileWorkerWaits: () => this.reconcileWorkerWaits(), unreadInputGraceMs: () => unreadInputGraceMs,
       submitAgentInput: (id, state, content, inputs, budget) => this.submitAgentInput(id, state, content, inputs, budget),
     }, MAX_AUTO_CONTINUES, ROUTED_QUESTION_REFUSAL);
     this.ciResources = acquireCiResources(this.semaphore);
@@ -1544,18 +1543,8 @@ export class RunManager {
    * out inputs already submitted, such as an acknowledgement still in flight. */
   private hasQueuedAgentInputs(runId: string, except: readonly string[] = []): boolean { return this.inputDelivery.hasQueuedAgentInputs(runId, except); }
 
-  /** #505 liveness bound: a harness that accepted input and then neither read it nor ran
-   * another turn must not hold the run and its slot forever. After a quiet grace window the
-   * input is resubmitted once; after a second it is left delivered but unconfirmed. */
-  private armUnreadInputTimer(runId: string, state: ActiveRun): void { return this.inputDelivery.armUnreadInputTimer(runId, state); }
 
-  // Keep both launch paths' session-event handlers unchanged until Phase 3's
-  // run/session-events.ts merges them (epic hearsay-tools/cezarion#2051).
-  private clearUnreadInputTimer(state: ActiveRun): void { clearUnreadInputTimer(state); }
-  private clearHeldHumanInputTimer(state: ActiveRun, resetClock = true): void { clearHeldHumanInputTimer(state, resetClock); }
 
-  /** #486: a turn-end deferred close/park only because the harness still held a human follow-up. */
-  private armHeldHumanInputTimer(runId: string, state: ActiveRun): void { return this.inputDelivery.armHeldHumanInputTimer(runId, state); }
 
   /** A callback from an old/replaced/disposed session carries no authority. */
   private handleAgentInputReady(runId: string, state: ActiveRun, session: AgentSession | undefined): void { return this.inputDelivery.handleAgentInputReady(runId, state, session); }

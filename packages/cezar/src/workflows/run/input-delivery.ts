@@ -178,6 +178,9 @@ export class InputDelivery {
     return false;
   }
 
+  /** #505 liveness bound: a harness that accepted input and then neither read it nor ran
+   * another turn must not hold the run and its slot forever. After a quiet grace window the
+   * input is resubmitted once; after a second it is left delivered but unconfirmed. */
   armUnreadInputTimer(runId: string, state: ActiveRun): void {
     clearUnreadInputTimer(state);
     const session = state.session;
@@ -210,6 +213,7 @@ export class InputDelivery {
     state.unreadInputTimer = timer;
   }
 
+  /** #486: a turn-end deferred close/park only because the harness still held a human follow-up. */
   armHeldHumanInputTimer(runId: string, state: ActiveRun): void {
     clearHeldHumanInputTimer(state, false);
     const session = state.session;

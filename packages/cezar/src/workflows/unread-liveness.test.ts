@@ -5,11 +5,10 @@ import { manager, parent, store, until, useWorkerWaitFixture, worker } from './w
 
 /** #505 review: accepted input a harness never reads must not hold the run forever. */
 describe('unread input liveness bound (#505)', { timeout: 45_000 }, () => {
-  useWorkerWaitFixture();
+  useWorkerWaitFixture({ unreadInputGraceMs: 300 });
   async function sendDropped(text: string) {
     // The line lands while the parent's turn runs; the harness then never runs it.
     const p = await parent('mock:hold');
-    (manager as unknown as { unreadInputGraceMs: number }).unreadInputGraceMs = 300;
     const w = await worker(p.id);
     const id = randomUUID(); const createdAt = new Date().toISOString();
     const input: AgentInput = { id, source: 'agent', parentRunId: p.id, text, createdAt, conversation: { senderRunId: w.id, recipientRunId: p.id, kind: 'progress' } };
