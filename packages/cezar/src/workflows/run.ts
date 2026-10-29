@@ -1,5 +1,6 @@
 import { WaitWatches } from './run/wait-watches.ts';
 import { HumanWaits } from './run/human-waits.ts';
+import { RunLine } from './run/run-line.ts';
 import { WorktreeAutosave } from './run/worktree-autosave.ts';
 import { RunSkills } from './run/run-skills.ts';
 import { InboxClaims } from './run/inbox-claims.ts';
@@ -350,7 +351,8 @@ export class RunManager {
   // Queue + `starting` set (spec 006, janitor's pump() pattern): `starting`
   // covers the window between shifting a run off the queue and the run
   // registering in `active`, so parallel-slot counting is never racy.
-  private readonly queue: string[] = [];
+  private readonly line = new RunLine();
+  private get queue() { return this.line.queue; }
   private readonly worktreeAutosave: WorktreeAutosave;
   private readonly workerExecutions: WorkerExecutions;
   private get executions() { return this.workerExecutions.executions; }
@@ -399,7 +401,7 @@ export class RunManager {
       (!!run.delegation.destroy || this.workerExecutions.isStopped(runId)));
   }
 
-  private readonly starting = new Set<string>();
+  private get starting() { return this.line.starting; }
   /** Runs whose worktree a reclaim, or whose branch a delete, is removing right now
    *  (`claimWorktreeReclaim`, `claimForBranchCleanup`). `continueRun` refuses them. */
   private readonly claims: MaintenanceClaims;
@@ -409,13 +411,13 @@ export class RunManager {
   // memory but no tokens, queued work progressing matters more, and the idle
   // timeout already bounds how long a session can sit open. Invariant:
   // `waiting ⊆ active` — always cleared together via dropActive().
-  private readonly waiting = new Set<string>();
+  private get waiting() { return this.line.waiting; }
   /** Durable monitoring subset. Only the configured number receives the waiting-slot exemption. */
-  private readonly monitoring = new Set<string>();
+  private get monitoring() { return this.line.monitoring; }
   /** A run whose resolved waits wait for a wake (hearsay-tools/cezarion#1233). Separate from
    *  human waiting: these resumes MUST reacquire scheduler capacity. Keyed by run id. */
-  private readonly waitWakeQueuedAt = new Map<string, number>();
-  private readonly waitWakeAdmitted = new Set<string>();
+  private get waitWakeQueuedAt() { return this.line.waitWakeQueuedAt; }
+  private get waitWakeAdmitted() { return this.line.waitWakeAdmitted; }
   /** CI lookups in flight, keyed by run id and normalized PR URL: two PRs may register at once. */
   private readonly ciRegistrations = new Map<string, { runId: string; abort: AbortController; promise: Promise<PrWaitEntry | TimerWaitEntry> }>();
   /** Worker waits whose resolution write failed and is being retried: the warning is said once. */
@@ -497,11 +499,11 @@ export class RunManager {
     }
     this.resolvePeerWaits(runsAwaitingPeer(run, () => this.store.listRuns())); // never in recovery: an interrupted peer fails, then continues
   };
-  private readonly pendingJobs = new Map<string, { workflow: WorkflowDef; input: StartRunInput; startAt?: number | undefined }>();
+  private get pendingJobs() { return this.line.pendingJobs; }
   /** Interrupted agent turns recovered after a process restart. Unlike an
    *  explicit user Continue, these are bulk scheduler work and must re-enter
    *  through `pump()` so both workspace and per-project caps are honored. */
-  private readonly pendingContinuations = new Map<string, PendingContinuation>();
+  private get pendingContinuations() { return this.line.pendingContinuations; }
   /** The configured default runner as `pump()` last read it, so the sync `oldestWakeAt()` resolves
    *  a runnerless record's account the same way (hearsay-tools/cezarion#1236). */
   private configuredDefaultRunner: RunnerId | undefined;
@@ -541,13 +543,6 @@ export class RunManager {
 
   /** The stalled-queue watchdog (see `rescueStalledQueue`). */
   private readonly queueWatchdog: ReturnType<typeof setInterval>;
-
-  /** Set by the watchdog for exactly one sweep: ignore the usage-limit hold and make progress. */
-  private forceNextPump = false;
-
-  /** Runs the watchdog started despite the hold. The spawn-time gate (`requeueWhileHeld`) would
-   *  otherwise hand them straight back and the rescue would undo itself in a millisecond. */
-  private readonly forceStarted = new Set<string>();
 
   /** The workspace-wide parallel-cap semaphore + cached resource config
    *  (spec 2026-07-20, step 2.5). Boot constructs ONE and every manager shares
@@ -591,7 +586,7 @@ export class RunManager {
     );
     this.orphans = new WorkerOrphans(
       { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
-      { holds: (id, admitting) => this.workerExecutions.has(id) || this.active.has(id) || this.starting.has(id) || (!admitting && this.queue.includes(id)),
+      { holds: (id, admitting) => this.workerExecutions.has(id) || this.active.has(id) || this.line.hasStarting(id) || (!admitting && this.line.hasQueued(id)),
         reapTerminalScratch: id => this.reapTerminalScratch(id),
         settleOrphanedWorkerExecution: (id, opts) => this.settleOrphanedWorkerExecution(id, opts),
         orphanBackoff: () => this.orphanBackoff, orphanTermGraceMs: () => this.orphanTermGraceMs },
@@ -620,9 +615,9 @@ export class RunManager {
     );
     this.queuedInput = new QueuedInput(
       { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
-      { pendingJobs: this.pendingJobs, pendingContinuations: this.pendingContinuations,
+      { hasJob: id => this.line.hasJob(id), hasContinuation: id => this.line.hasContinuation(id), job: id => this.line.job(id),
         canProceedWithRun: (id, run): run is RunRecord => this.canProceedWithRun(id, run),
-        activeGet: id => this.active.get(id), startingHas: id => this.starting.has(id),
+        activeGet: id => this.active.get(id), startingHas: id => this.line.hasStarting(id),
         persistPastedAttachments: (id, content) => this.persistPastedAttachments(id, content),
         toQueuedMessage: (id, content) => this.toQueuedMessage(id, content),
         sendMessage: (id, content, messageId) => this.sendMessage(id, content, messageId) },
@@ -641,7 +636,7 @@ export class RunManager {
     );
     this.repoRootLease = new RepoRootLease(
       { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
-      { park: id => { this.waiting.add(id); }, unpark: id => { this.waiting.delete(id); },
+      { park: id => { this.line.park(id); }, unpark: id => { this.line.unpark(id); },
         releaseSlot: () => this.releaseSlot() },
     );
     this.turnBookkeeper = new TurnBookkeeper(
@@ -722,11 +717,7 @@ export class RunManager {
     }
     this.autoResumeScheduler.dispose();
     this.active.clear();
-    this.waiting.clear();
-    this.starting.clear();
-    this.queue.length = 0;
-    this.pendingJobs.clear();
-    this.pendingContinuations.clear();
+    this.line.dispose();
     this.memoryPausing.clear();
     this.turnBookkeeper.clear();
     this.worktreeAutosave.dispose();
@@ -1109,7 +1100,7 @@ export class RunManager {
     try { this.store.commitWait(runId, wait); }
     catch { throw Object.assign(new Error(waitErrorMessage('persistence')), { code: 'persistence' }); }
     this.armWait(runId, wait);
-    if (state.atTurnBoundary === state.session || this.waiting.has(runId)) this.parkOnWaits(runId, state);
+    if (state.atTurnBoundary === state.session || this.line.isParked(runId)) this.parkOnWaits(runId, state);
     // The store keeps the entry it was given; only its phase can have moved since.
     return (this.store.getRun(runId)?.waits?.find(entry => entry.id === wait.id) as W | undefined) ?? wait;
   }
@@ -1194,7 +1185,7 @@ export class RunManager {
    *  turn end. */
   private reparkWithoutWaits(runId: string, state: ActiveRun): void {
     const run = this.store.getRun(runId);
-    if (!run || run.status !== 'waiting' || !this.waiting.has(runId) || state.atTurnBoundary !== state.session || run.waits?.length) return;
+    if (!run || run.status !== 'waiting' || !this.line.isParked(runId) || state.atTurnBoundary !== state.session || run.waits?.length) return;
     this.surfaceHumanWait(runId, state, this.openHumanAlias(runId, state, 'budget'));
     this.leaveMonitoringPool(runId);
     this.armIdleTimer(runId, state);
@@ -1272,7 +1263,7 @@ export class RunManager {
    *  not to the wake turn. */
   private spendWakeAdmission(runId: string, state: ActiveRun, owed: boolean): void {
     if (!owed) { const retry = this.wakeRetries.get(runId); if (retry) clearTimeout(retry); this.wakeRetries.delete(runId); }
-    this.waiting.delete(runId); this.clearIdleTimer(state);
+    this.line.unpark(runId); this.clearIdleTimer(state);
     this.move(runId, 'resume');
   }
 
@@ -1333,8 +1324,8 @@ export class RunManager {
       this.move(runId, 'park');
       if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
     } else transitionVia('park', () => this.store.getRun(runId), () => this.store.commitParked(runId, state.currentStepId));
-    this.waiting.add(runId);
-    if (keepsSlot) this.monitoring.add(runId); else this.leaveMonitoringPool(runId);
+    this.line.park(runId);
+    if (keepsSlot) this.line.joinPool(runId); else this.leaveMonitoringPool(runId);
     if (top === 'workers' || top === 'peers') this.armIdleTimer(runId, state);
     this.queueWaitWake(runId);
     this.releaseSlot();
@@ -1351,7 +1342,7 @@ export class RunManager {
   /** Leave the monitoring pool. Only a turn end or a terminal path does; a member's slot
    *  goes back to the workspace. */
   private leaveMonitoringPool(runId: string): void {
-    if (this.monitoring.delete(runId)) this.releaseSlot();
+    if (this.line.leavePool(runId)) this.releaseSlot();
   }
 
   /**
@@ -1373,19 +1364,18 @@ export class RunManager {
     // Settlement ends the watcher. Keep a bounded-rate wake source until ACK,
     // cancellation or termination, including refusals with no runner-ready callback.
     this.retryWaitAdmission(runId);
-    if (this.waitWakeAdmitted.has(runId)) { this.deliverAdmittedWake(runId); return; }
+    if (this.line.isAdmitted(runId)) { this.deliverAdmittedWake(runId); return; }
     // A pool member's wake is admitted at once, unless its account is on a usage-limit hold: then
     // it waits in the line, keeping its monitoring slot, until the hold lifts (hearsay-tools/cezarion#1236).
-    if (state && this.monitoring.has(runId) && !this.wakeHeld(run)) {
-      if (this.waitWakeQueuedAt.delete(runId)) { const at = this.queue.indexOf(runId); if (at >= 0) this.queue.splice(at, 1); }
-      this.waitWakeAdmitted.add(runId);
+    if (state && this.line.inPool(runId) && !this.wakeHeld(run)) {
+      this.line.removeWake(runId);
+      this.line.admitWake(runId);
       this.deliverAdmittedWake(runId);
       return;
     }
-    if (this.waitWakeQueuedAt.has(runId)) { this.releaseSlot(); return; }
+    if (this.line.hasWake(runId)) { this.releaseSlot(); return; }
     if (state) {
-      this.waitWakeQueuedAt.set(runId, Date.now());
-      if (!this.queue.includes(runId)) this.queue.push(runId);
+      this.line.enqueueWake(runId, Date.now());
     } else if (!this.isActive(runId)) {
       if (!this.queueSessionlessWaitWake(runId, resolved)) return;
     }
@@ -1417,7 +1407,7 @@ export class RunManager {
       return false;
     }
     this.retainedNotes.delete(runId);
-    this.waitWakeQueuedAt.set(runId, Date.now());
+    this.line.markWake(runId, Date.now());
     return true;
   }
 
@@ -1433,13 +1423,13 @@ export class RunManager {
    *  read it, so a mixed-runner step is held by the account it ran on (hearsay-tools/cezarion#1236). */
   private withExecutionAccount<T extends RunRecord>(run: T): T {
     const live = this.active.get(run.id)?.delegationSettings;
-    return { ...run, ...executionAccount(run, this.pendingContinuations.get(run.id), live) };
+    return { ...run, ...executionAccount(run, this.line.continuation(run.id), live) };
   }
 
   /** A monitoring-pool member's wake waiting in the line: it already holds its slot, so it needs
    *  no regular one to leave (hearsay-tools/cezarion#1236). */
   private poolWakeQueued(runId: string): boolean {
-    return this.monitoring.has(runId) && this.waitWakeQueuedAt.has(runId) && this.active.has(runId);
+    return this.line.inPool(runId) && this.line.hasWake(runId) && this.active.has(runId);
   }
 
   /** A worker wait the store upgraded from the old engine as already settled may have had no wake input
@@ -1500,8 +1490,8 @@ export class RunManager {
     const run = this.store.getRun(runId);
     const state = this.active.get(runId);
     if (!run || this.owesWake(run) || state?.agentInputFlight) return;
-    if (this.waitWakeQueuedAt.delete(runId)) { const at = this.queue.indexOf(runId); if (at >= 0) this.queue.splice(at, 1); }
-    if (this.waitWakeAdmitted.delete(runId) && state && run.status === 'waiting' && state.atTurnBoundary === state.session) this.waiting.add(runId);
+    this.line.removeWake(runId);
+    if (this.line.retireAdmission(runId) && state && run.status === 'waiting' && state.atTurnBoundary === state.session) this.line.park(runId);
     const retry = this.wakeRetries.get(runId); if (retry) clearTimeout(retry); this.wakeRetries.delete(runId);
   }
 
@@ -1530,10 +1520,8 @@ export class RunManager {
     const timer = this.wakeRetries.get(runId); if (timer) clearTimeout(timer); this.wakeRetries.delete(runId);
     this.retainedNotes.delete(runId);
     this.resetWakeDelivery(runId);
-    if (this.waitWakeQueuedAt.delete(runId) && this.active.has(runId)) {
-      const index = this.queue.indexOf(runId); if (index >= 0) this.queue.splice(index, 1);
-    }
-    this.waitWakeAdmitted.delete(runId);
+    this.line.removeWake(runId, this.active.has(runId));
+    this.line.retireAdmission(runId);
   }
 
   /** A deleted run's row is gone with its waits; only what they armed in memory is left. */
@@ -1650,8 +1638,7 @@ export class RunManager {
       // the model answers. Never awaited, never fails the run.
       void this.autoNameRun(run.id, skillHint, input.task);
     } finally {
-      this.pendingJobs.set(run.id, { workflow, input: effectiveInput });
-      this.queue.push(run.id);
+      this.line.enqueueJob(run.id, { workflow, input: effectiveInput });
       void this.pump();
     }
     return run;
@@ -1662,9 +1649,8 @@ export class RunManager {
     const run = this.store.getRun(runId);
     if (!run) throw new DelegationPolicyError('incompatible_state', 'Owned queued run not found');
     const job = this.ownedJob(run);
-    if (this.queue.includes(runId) || this.starting.has(runId) || this.active.has(runId)) return;
-    this.pendingJobs.set(runId, job);
-    this.queue.push(runId);
+    if (this.line.hasQueued(runId) || this.line.hasStarting(runId) || this.active.has(runId)) return;
+    this.line.enqueueJob(runId, job);
     void this.pump();
   }
 
@@ -1701,9 +1687,9 @@ export class RunManager {
     // `maxMonitoringSessions` of them hold a monitoring slot instead of a regular one, and the
     // rest keep their regular slot. Every other park holds none: a park whose top wait is human
     // or workers (hearsay-tools/cezarion#1235) is in `waiting` and outside the pool.
-    const parkedWithoutSlot = [...this.waiting].filter(id => !this.monitoring.has(id)).length;
-    const pool = Math.min(this.monitoring.size, this.semaphore.maxMonitoringSessions());
-    return this.active.size + this.starting.size - parkedWithoutSlot - pool;
+    const parkedWithoutSlot = [...this.line.parked()].filter(id => !this.line.inPool(id)).length;
+    const pool = Math.min(this.line.poolSize(), this.semaphore.maxMonitoringSessions());
+    return this.active.size + this.line.startingCount() - parkedWithoutSlot - pool;
   }
 
   /** Epoch ms of this manager's oldest queued run (the semaphore's fairness
@@ -1711,7 +1697,7 @@ export class RunManager {
    *  `queue` is FIFO — `startRun` pushes and `recover()` re-queues by
    *  `createdAt` — so the head is the oldest. */
   private oldestQueuedAt(): number | null {
-    const head = this.queue[0];
+    const head = this.line.entries()[0];
     if (!head) return null;
     const wakeQueuedAt = this.wakeJoinedAt(head);
     if (wakeQueuedAt !== undefined) return wakeQueuedAt;
@@ -1723,8 +1709,8 @@ export class RunManager {
   /** When a queued entry joined the line as a wake of a run already in progress, or undefined for
    *  a run that has not started (hearsay-tools/cezarion#1236, `nextLineEntry`). */
   private wakeJoinedAt(runId: string): number | undefined {
-    const wake = this.waitWakeQueuedAt.get(runId) ?? this.pendingContinuations.get(runId)?.lineJoinedAt;
-    if (wake !== undefined || !this.pendingJobs.has(runId)) return wake;
+    const wake = this.line.wakeAt(runId) ?? this.line.continuation(runId)?.lineJoinedAt;
+    if (wake !== undefined || !this.line.hasJob(runId)) return wake;
     // An owned worker is its family's work in progress, not a new task: it joins the wakes at its
     // creation, so its parent's later wake (a worker wait that timed out, say) does not take the
     // slot before the worker it waits on has run.
@@ -1741,7 +1727,7 @@ export class RunManager {
   private oldestWakeAt(): number | null {
     let oldest: number | null = null;
     let holds: AccountHolds | undefined;
-    for (const id of this.queue) {
+    for (const id of this.line.entries()) {
       const at = this.wakeJoinedAt(id);
       if (at === undefined || (oldest !== null && at >= oldest)) continue;
       holds ??= this.semaphore.accountHolds();
@@ -1836,27 +1822,26 @@ export class RunManager {
         // instant a user cancels a resume.
         // The watchdog's one-shot override — read and cleared here, so a forced sweep never
         // leaks into the next ordinary one.
-        const forced = this.forceNextPump;
-        this.forceNextPump = false;
-        const holds = this.queue.length > 0 && !forced ? this.semaphore.accountHolds() : NO_HOLDS;
+        const forced = this.line.takeForced();
+        const holds = this.line.entries().length > 0 && !forced ? this.semaphore.accountHolds() : NO_HOLDS;
         const anyHold = holds.deadline.size > 0 || holds.inFlight.size > 0;
         // Only pay for the config read when something is actually held: a queued record may name
         // no runner, and then the account it would use is the configured default.
         const defaultRunner = anyHold ? (await loadConfig(this.repoRoot)).defaultRunner : undefined;
         if (defaultRunner !== undefined) this.configuredDefaultRunner = defaultRunner;
-        while (this.queue.length > 0) {
+        while (this.line.entries().length > 0) {
           // Recovery may have begun while this pump awaited repository/config discovery.
           if (this.disposed || this.recovering) return;
           // Wakes first, then unstarted runs, each FIFO among the entries that CAN start
           // (hearsay-tools/cezarion#1236); a held one keeps its place in the queue rather than
           // being dequeued and re-queued (which would churn its position and its record).
-          const next = nextLineEntry(this.queue, (id) => this.wakeJoinedAt(id),
+          const next = nextLineEntry(this.line.entries(), (id) => this.wakeJoinedAt(id),
             (id) => (capacity() || this.poolWakeQueued(id)) && this.canLeaveLine(id, anyHold ? holds : NO_HOLDS, defaultRunner ?? 'claude'));
           if (next === -1) break; // every queued run has a durable reason to remain held
-          const candidate = this.queue[next]!;
+          const candidate = this.line.entries()[next]!;
           if (this.workerExecutionStopped(candidate)) { this.cancel(candidate); continue; }
           if (!this.checkpointQueuedWorker(candidate, next)) continue;
-          const runId = this.queue.splice(next, 1)[0];
+          const runId = this.line.takeAt(next);
           if (!runId) break;
           const wake = this.admitQueuedWaitWake(runId);
           if (wake === 'deferred') break;
@@ -1871,10 +1856,10 @@ export class RunManager {
 
   /** Checkpoint before dequeue, while worker cancellation can still find the queued entry. */
   private checkpointQueuedWorker(candidate: string, next: number): boolean {
-    if (!this.active.has(candidate) && (this.pendingJobs.has(candidate) || this.pendingContinuations.has(candidate))) {
+    if (!this.active.has(candidate) && (this.line.hasJob(candidate) || this.line.hasContinuation(candidate))) {
       try { this.beginWorkerExecution(candidate); }
       catch (error) {
-        this.queue.splice(next, 1); this.pendingJobs.delete(candidate); this.pendingContinuations.delete(candidate);
+        this.line.takeAt(next); this.line.takePending(candidate);
         this.move(candidate, 'fail-start', { error: admissionError(error, 'worker execution checkpoint unavailable'), finishedAt: new Date().toISOString() });
         return false;
       }
@@ -1884,21 +1869,20 @@ export class RunManager {
 
   /** A lost runner boundary requeues the wake and ends this pass instead of spinning. */
   private admitQueuedWaitWake(runId: string): 'none' | 'handled' | 'deferred' {
-    if (this.waitWakeQueuedAt.has(runId) && this.active.has(runId)) {
-      this.waitWakeQueuedAt.delete(runId);
+    if (this.line.hasWake(runId) && this.active.has(runId)) {
+      this.line.removeWake(runId, false);
       const state = this.active.get(runId)!;
       const queued = this.store.getRun(runId);
       const owed = !!queued && this.owesWake(queued);
       if (owed && this.takesWake(runId, state)) {
         // The wake holds a regular slot from admission until its acknowledgement.
-        this.waiting.delete(runId);
-        this.waitWakeAdmitted.add(runId);
+        this.line.unpark(runId);
+        this.line.admitWake(runId);
         this.deliverAdmittedWake(runId);
       } else if (owed) {
         // The runner may lose its boundary between queueing and admission.
         // Retain the wake, but do not spin on it in this pump pass.
-        this.waitWakeQueuedAt.set(runId, Date.now());
-        this.queue.push(runId);
+        this.line.enqueueWake(runId, Date.now(), false);
         this.retryWaitAdmission(runId);
         return 'deferred';
       }
@@ -1909,16 +1893,13 @@ export class RunManager {
 
   /** Read and hydrate mutable queued input in the same synchronous tick as dequeue. */
   private launchQueuedRun(runId: string, forced: boolean): void {
-    if (this.waitWakeQueuedAt.delete(runId)) this.waitWakeAdmitted.add(runId);
+    if (this.line.removeWake(runId, false)) this.line.admitWake(runId);
     // A forced sweep has to reach the spawn: the gate inside `execute` asks the same
     // question and would send this run straight back to the queue.
-    if (forced) this.forceStarted.add(runId);
-    const job = this.pendingJobs.get(runId);
-    const continuation = this.pendingContinuations.get(runId);
-    this.pendingJobs.delete(runId);
-    this.pendingContinuations.delete(runId);
+    if (forced) this.line.markForced(runId);
+    const { job, continuation } = this.line.takePending(runId);
     if (!job && !continuation) return;
-    this.starting.add(runId);
+    this.line.markStarting(runId);
     if (continuation) {
       void (async () => {
         const hydrated = this.hydrateQueuedContinuation(runId, continuation);
@@ -1955,7 +1936,7 @@ export class RunManager {
         this.clearIdleTimer(state);
         this.clearAutosaveTimer(state);
       }
-      this.starting.delete(runId);
+      this.line.unmarkStarting(runId);
       this.dropActive(runId);
     }).finally(() => this.finishWorkerExecution(runId));
   }
@@ -2007,13 +1988,12 @@ export class RunManager {
       });
       return;
     }
-    this.pendingJobs.set(run.id, {
+    this.line.enqueueJob(run.id, {
       workflow,
       startAt: queuedStartAt(run, workflow),
       // Rehydrate again at dequeue so edits and stacked messages keep their admission-time reads.
       input: this.hydrateQueuedInput(run.id, queuedRecoveryInput(run)),
     });
-    this.queue.push(run.id);
     this.store.appendEvent(run.id, { type: 'lifecycle', message: `${reason} — task re-queued` });
   }
 
@@ -2027,7 +2007,7 @@ export class RunManager {
       this.move(run.id, 'fail-start', { error, finishedAt, currentStepId: undefined });
       return;
     }
-    this.pendingContinuations.set(run.id, {
+    this.line.enqueueContinuation(run.id, {
       stepId: queuedStepId,
       sessionId: recoveredSessionId,
       backend,
@@ -2035,7 +2015,6 @@ export class RunManager {
       images: [],
       lineJoinedAt: Date.now(),
     });
-    this.queue.push(run.id);
     this.store.appendEvent(run.id, {
       type: 'lifecycle',
       message: `${reason} — interrupted continuation re-queued`,
@@ -2066,8 +2045,7 @@ export class RunManager {
       const job = this.ownedJob(run);
       // Use the privately bound workflow, and the same durable pending-step
       // cursor as root recovery. A queued tail must not replay a failed source.
-      this.pendingJobs.set(run.id, { ...job, startAt: queuedStartAt(run, job.workflow) });
-      this.queue.push(run.id);
+      this.line.enqueueJob(run.id, { ...job, startAt: queuedStartAt(run, job.workflow) });
       this.store.appendEvent(run.id, { type: 'lifecycle', message: `${reason} — owned task re-queued` });
     } catch (error) {
       this.move(run.id, 'fail-start', { error: String(error), finishedAt: new Date().toISOString() });
@@ -2399,20 +2377,18 @@ export class RunManager {
     if (run.workflowDef && run.worktreeSetup?.status === 'running' && !run.steps.some(step => step.sessionId)) {
       this.move(run.id, 'requeue', { error: undefined, finishedAt: undefined, currentStepId: undefined });
       this.store.flush();
-      this.pendingJobs.set(run.id, { workflow: run.workflowDef, startAt: 0, input: queuedRecoveryInput(run) });
-      this.queue.push(run.id);
+      this.line.enqueueJob(run.id, { workflow: run.workflowDef, startAt: 0, input: queuedRecoveryInput(run) });
       return true;
     }
     if (run.workflowDef && interruptedDef && stepKind(interruptedDef) === 'check') {
       this.store.updateStep(run.id, interruptedDef.id, { status: 'pending', error: undefined, finishedAt: undefined });
       this.move(run.id, 'requeue', { error: undefined, finishedAt: undefined, currentStepId: undefined });
       this.store.flush();
-      this.pendingJobs.set(run.id, {
+      this.line.enqueueJob(run.id, {
         workflow: run.workflowDef,
         startAt: interruptedIndex,
         input: queuedRecoveryInput(run),
       });
-      this.queue.push(run.id);
       return true;
     }
     return false;
@@ -2508,12 +2484,7 @@ export class RunManager {
       this.clearAutosaveTimer(state);
       clearHeldHumanInputTimer(state);
     }
-    this.waiting.delete(runId);
-    this.monitoring.delete(runId);
-    this.waitWakeAdmitted.delete(runId);
-    if (this.waitWakeQueuedAt.delete(runId)) {
-      const index = this.queue.indexOf(runId); if (index >= 0) this.queue.splice(index, 1);
-    }
+    this.line.forget(runId);
     this.active.delete(runId);
     this.store.unpin(runId, 'active');
     // Open waits keep their watch or timer: their result reopens the run when it resolves. A
@@ -2523,7 +2494,7 @@ export class RunManager {
     this.republishFinishVerdict(runId);
     this.memoryPausing.delete(runId);
     this.turnBookkeeper.forget(runId);
-    this.forceStarted.delete(runId);
+    this.line.clearForced(runId);
     if (this.isDisposedDelegatedRun(runId)) return; // teardown above, no autonomous durable side effects
     // The run's slot is gone from busySlots() as of the deletes above — hand it
     // to the workspace's oldest queued run, in ANY project. Every terminal path
@@ -2570,7 +2541,7 @@ export class RunManager {
   private reapTerminalScratch(runId: string): void {
     const run = this.store.getRun(runId);
     if (!run || ['queued', 'running', 'waiting'].includes(run.status)) return;
-    if (this.active.has(runId) || this.starting.has(runId) || this.queue.includes(runId) || this.claims.has(runId) || !!this.autosaveCleanupBlocker(runId)) return;
+    if (this.active.has(runId) || this.line.hasStarting(runId) || this.line.hasQueued(runId) || this.claims.has(runId) || !!this.autosaveCleanupBlocker(runId)) return;
     const privateWorkers = workerEvidenceRunIds(this.dataDir);
     if (run.delegation?.role === 'worker' || run.delegation?.role === 'invalid' || !privateWorkers || privateWorkers.includes(runId)) { this.workerScratchCleanup.schedule(runId); return; }
     removeAgentTmpDir(this.dataDir, runId);
@@ -2612,12 +2583,11 @@ export class RunManager {
     // hand an in-place run straight back, re-wedging the queue the rescue had just freed.
     // `dropActive` retires the entry on every terminal path, so the set still cleans itself up.
     const finishHeld = this.executionBlockedByRootFinish(run);
-    if (!finishHeld && (this.forceStarted.has(runId) ||
+    if (!finishHeld && (this.line.isForced(runId) ||
       !accountHeldFor({ ...run, runner }, this.semaphore.accountHolds(), runner))) return false;
     state?.releaseRepoRoot?.();
     if (state) { state.releaseRepoRoot = undefined; this.clearAutosaveTimer(state); }
-    this.pendingJobs.set(runId, { workflow, input, startAt });
-    this.queue.push(runId);
+    this.line.enqueueJob(runId, { workflow, input, startAt });
     this.move(runId, 'requeue', {
       ...(startAt !== undefined && startAt > 0 ? {} : { startedAt: undefined }),
       currentStepId: undefined,
@@ -2642,14 +2612,14 @@ export class RunManager {
     // same path boot recovery uses.
     for (const run of this.store.listRuns()) {
       if (run.status !== 'queued' || this.recoveringRun(run)) continue;
-      if (this.active.has(run.id) || this.starting.has(run.id)) continue;
-      if (this.pendingJobs.has(run.id) || this.pendingContinuations.has(run.id)) continue;
-      if (this.queue.includes(run.id)) continue;
+      if (this.active.has(run.id) || this.line.hasStarting(run.id)) continue;
+      if (this.line.hasJob(run.id) || this.line.hasContinuation(run.id)) continue;
+      if (this.line.hasQueued(run.id)) continue;
       console.warn(`[cez] queue watchdog: re-adopting queued run ${run.id} the engine had lost`);
       await this.reviveQueuedRun(run, 'queue watchdog');
     }
-    if (this.queue.length === 0) return;
-    if (this.busySlots() > 0 || this.starting.size > 0) return;
+    if (this.line.entries().length === 0) return;
+    if (this.busySlots() > 0 || this.line.startingCount() > 0) return;
     if (this.semaphore.busy() > 0) return;
     // A future deadline is a real reason to sit still: that timer will fire and pump.
     for (const run of this.store.listRuns()) {
@@ -2667,7 +2637,7 @@ export class RunManager {
       '[cez] queue watchdog: work is queued, nothing is running, and the usage-limit hold has no'
       + ' deadline behind it — starting the next task anyway',
     );
-    this.forceNextPump = true;
+    this.line.forceNext();
     void this.pump();
   }
 
@@ -2710,7 +2680,7 @@ export class RunManager {
     const retiredRefusal = this.retireCompletionRefusal(runId);
     const cancelledFinish = transitionVia('cancel', () => this.store.getRun(runId), () => this.store.commitRootFinishCancellation(runId));
     // Still waiting in the queue: just drop it there.
-    const queuedAt = this.queue.indexOf(runId);
+    const queuedAt = this.line.indexOf(runId);
     if (queuedAt >= 0) {
       this.cancelQueuedRun(runId, queuedAt);
       return true;
@@ -2736,16 +2706,15 @@ export class RunManager {
       const proof = this.store.readWorkerExecution(runId);
       transitionVia('stop-worker', () => this.store.getRun(runId), () => this.store.commitWorkerCancellation(runId));
       this.workerExecutions.markStopped(runId);
-      if (!this.workerExecutions.has(runId) && !this.active.has(runId) && !this.starting.has(runId) && proof?.phase === 'queued') {
+      if (!this.workerExecutions.has(runId) && !this.active.has(runId) && !this.line.hasStarting(runId) && proof?.phase === 'queued') {
         this.store.commitWorkerExecutionComplete(runId, proof.generation);
       }
     }
   }
 
   private cancelQueuedRun(runId: string, queuedAt: number): void {
-    this.queue.splice(queuedAt, 1);
-    this.pendingJobs.delete(runId);
-    this.pendingContinuations.delete(runId);
+    this.line.takeAt(queuedAt);
+    this.line.takePending(runId);
     this.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
     this.store.appendEvent(runId, { type: 'lifecycle', message: 'cancelled while queued' });
     this.store.flush();
@@ -2753,7 +2722,7 @@ export class RunManager {
   }
 
   private cancelRunWithoutSession(runId: string, hadWaits: boolean, retiredRefusal: boolean, cancelledFinish: boolean): boolean {
-    if (this.starting.has(runId)) {
+    if (this.line.hasStarting(runId)) {
       this.store.updateRun(runId, { stopping: true });
       this.store.flush();
       return true;
@@ -2777,7 +2746,7 @@ export class RunManager {
   }
 
   isActive(runId: string): boolean {
-    return this.workerExecutions.has(runId) || this.active.has(runId) || this.starting.has(runId) || this.queue.includes(runId);
+    return this.workerExecutions.has(runId) || this.active.has(runId) || this.line.hasStarting(runId) || this.line.hasQueued(runId);
   }
 
   claimWorktreeReclaim(runId: string): (() => void) | null { return this.claims.claimWorktreeReclaim(runId); }
@@ -2895,7 +2864,7 @@ export class RunManager {
     this.store.flush();
     if (state) {
       this.clearIdleTimer(state);
-      this.monitoring.delete(runId); this.waiting.add(runId);
+      this.line.leavePool(runId); this.line.park(runId);
       if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
       this.releaseSlot();
     }
@@ -3039,7 +3008,7 @@ export class RunManager {
     // A worker that parked before this wait opened tells the parent now (hearsay-tools/cezarion#1327).
     this.noticeParkedWorkers(familyOf(run));
     const current = this.store.getRun(runId);
-    if (current?.waits?.some(wait => wait.id === entry.id) && (state.atTurnBoundary === state.session || this.waiting.has(runId))) this.parkOnWaits(runId, state);
+    if (current?.waits?.some(wait => wait.id === entry.id) && (state.atTurnBoundary === state.session || this.line.isParked(runId))) this.parkOnWaits(runId, state);
     return this.recordedWorkerWait(runId, entry.id) ?? entry;
   }
 
@@ -3324,8 +3293,8 @@ export class RunManager {
     const { routed, reply, text, fallback } = answer;
     if (!state.session?.open || state.cancelled || state.openingAgentInputId === reply.id) return;
     // Already waiting for admission: only the admission itself may deliver it.
-    if (!admitted && (this.waitWakeQueuedAt.has(runId) || this.waitWakeAdmitted.has(runId))) return;
-    if (!admitted && this.waiting.has(runId)) {
+    if (!admitted && (this.line.hasWake(runId) || this.line.isAdmitted(runId))) return;
+    if (!admitted && this.line.isParked(runId)) {
       // The parked worker released its slot: the answer is a wake (`owesWake`), which the
       // scheduler's admission delivers here (`deliverAdmittedWake`). It withdraws no wait the
       // worker registered before asking (hearsay-tools/cezarion#1235).
@@ -3337,7 +3306,7 @@ export class RunManager {
     this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: routed.askSeq, source: 'parent' });
     inputReceipts.commitRoutedAnswer(this.inputReceiptContext, runId, state, [reply.id, ...(bundle?.inputs.map(input => input.id) ?? [])], fallback, MAX_AUTO_CONTINUES);
     // Spend the answer's admission now so later messages can steer before its turn ends.
-    if (this.waitWakeAdmitted.delete(runId)) state.waitWakeTurn = state.session;
+    if (this.line.retireAdmission(runId)) state.waitWakeTurn = state.session;
     state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
     if (!state.pendingHumanAsk) this.flushAgentInputs(runId);
     this.resumeParkedRun(runId, state);
@@ -3454,12 +3423,11 @@ export class RunManager {
   private holdContinuationForRootFinish(runId: string, continuation: PendingContinuation, state?: ActiveRun): boolean {
     const run = this.store.getRun(runId);
     if (!run || !this.executionBlockedByRootFinish(run)) return false;
-    this.pendingContinuations.set(runId, continuation);
-    if (!this.queue.includes(runId)) this.queue.push(runId);
+    this.line.enqueueContinuation(runId, continuation, true);
     this.store.updateStep(runId, continuation.stepId, { status: 'pending' });
     this.move(runId, 'requeue', { currentStepId: undefined });
     if (state) this.clearAutosaveTimer(state);
-    this.starting.delete(runId); this.dropActive(runId);
+    this.line.unmarkStarting(runId); this.dropActive(runId);
     return true;
   }
   private async settleRequestedRootFinish(runId: string): Promise<void> {
@@ -3776,7 +3744,7 @@ export class RunManager {
     // checkpoint takes the run out of the question's park: park for the question again
     // (hearsay-tools/cezarion#1233).
     if (state.pendingHumanAsk && !proseGate && state.atTurnBoundary === session && session.open &&
-      !this.waiting.has(runId) && state.currentStepId) {
+      !this.line.isParked(runId) && state.currentStepId) {
       this.parkForUser(runId, state, state.currentStepId);
       return;
     }
@@ -3787,7 +3755,7 @@ export class RunManager {
     // queued and accepted input still taking priority above (hearsay-tools/cezarion#1234, #1525).
     // Cezar's own human wait is not owed: the rule decides, and the agent's wait replaces it.
     const done = state.doneAtBoundary === session;
-    if (!done && (this.waiting.has(runId) ||
+    if (!done && (this.line.isParked(runId) ||
       (state.parkAfterAck?.session !== session && (proseGate || !this.holdsAgentWaits(runId))))) return;
     this.settleTurn(runId, state, 'ack', this.boundaryTurn(runId, state, session, done));
   }
@@ -3907,7 +3875,7 @@ export class RunManager {
     // A refusal queued for a closed session (hearsay-tools/cezarion#1301): this turn is the nudge's.
     const refusal = !!this.store.getRun(runId)?.agentInputs?.some(input => input.purpose === 'completion-refusal' && inputIds.includes(input.id));
     const flight: NonNullable<ActiveRun['agentInputFlight']> = { session, inputIds,
-      ...(this.waitWakeAdmitted.has(runId) && state.atTurnBoundary === session ? { admittedWake: true } : {}) };
+      ...(this.line.isAdmitted(runId) && state.atTurnBoundary === session ? { admittedWake: true } : {}) };
     // A batch with timer results is an automatic wake: it reserves one unit of the budget now, so a timer that comes due before this acknowledgement counts it, and gives it back if the batch is refused or its acknowledgement rejects (hearsay-tools/cezarion#1233).
     if (reservesAutomaticWake(this.store.getRun(runId), flight, inputIds, () => this.automaticWakes(runId, beforeHumanReset), MAX_AUTO_CONTINUES)) flight.wakeReserved = true;
     state.agentInputFlight = flight;
@@ -3959,7 +3927,7 @@ export class RunManager {
       if (!current()) return;
       try {
         if (inputIds.length) {
-          const batch = analyseAcknowledgedInput(runId, state, flight, inputIds, this.store, this.waitWakeAdmitted, run => this.owesWake(run));
+          const batch = analyseAcknowledgedInput(runId, state, flight, inputIds, this.store, this.line.admissions(), run => this.owesWake(run));
           if (!batch) return;
           const { accepted, resolvedIds, early, spent, observable, at, resumes } = batch;
           // One commit (hearsay-tools/cezarion#1805): the messages, then each wait's delivery (a message a wait carries keeps its read receipt), the charge, the early reads, the cleared failure count and the resume (hearsay-tools/cezarion#1235).
@@ -3995,7 +3963,7 @@ export class RunManager {
       this.store.appendEvent(runId, { type: 'note', message: `automatic ${kind} wake-up (${spent}/${MAX_AUTO_CONTINUES})` });
     }
     // A wake of results always spends its admission; a wake of messages alone, only one it holds.
-    if (resumes && (this.waitWakeAdmitted.delete(runId) || resolvedIds.length > 0)) {
+    if (resumes && (this.line.retireAdmission(runId) || resolvedIds.length > 0)) {
       this.spendWakeAdmission(runId, state, resolvedIds.length ? resolvedWaits(this.store.getRun(runId) ?? {}).length > 0 : owedBefore);
     }
     // Rearm the refusal turn's bound after the wake checkpoint cleared the park's timers.
@@ -4040,13 +4008,13 @@ export class RunManager {
   private cancelCappedTimersBeforeFlush(runId: string, state: ActiveRun, run: RunRecord, beforeHumanReset?: HumanAnswerBudget): RunRecord {
     // A timer result still owed when the budget is spent is cancelled before its batch is sent; the
     // CI results beside it are delivered.
-    if (this.automaticWakes(runId, beforeHumanReset) >= MAX_AUTO_CONTINUES && this.waitWakeAdmitted.has(runId) && state.atTurnBoundary === state.session) {
+    if (this.automaticWakes(runId, beforeHumanReset) >= MAX_AUTO_CONTINUES && this.line.isAdmitted(runId) && state.atTurnBoundary === state.session) {
       const owedTimers = resolvedWaits(run).filter(chargesBudget);
       if (owedTimers.length) {
         this.cancelAutomaticAtCap(runId, owedTimers);
         run = this.store.getRun(runId)!;
         // Nothing left to wake for: the admission ends here, and a parked run becomes a plain park.
-        if (!resolvedWaits(run).length) { this.waitWakeAdmitted.delete(runId); this.reparkWithoutWaits(runId, state); }
+        if (!resolvedWaits(run).length) { this.line.retireAdmission(runId); this.reparkWithoutWaits(runId, state); }
       }
     }
     return run;
@@ -4065,7 +4033,7 @@ export class RunManager {
     const boundary = state.atTurnBoundary === state.session;
     const queue = (run.agentInputs ?? []).filter(input => input.id !== state.openingAgentInputId && !owed.has(input.id) &&
       (!askPending || beside.has(input.id)) && (boundary || input.purpose !== 'completion-refusal'));
-    const admitted = this.waitWakeAdmitted.has(runId) && state.atTurnBoundary === state.session;
+    const admitted = this.line.isAdmitted(runId) && state.atTurnBoundary === state.session;
     if (resolved.length && admitted) {
       const batch = resolvedWaitInputBatch(run, resolved, queue, input => formatAgentInput(input, id => this.store.getRun(id)), { tools: !state.toolless, workerStatus: this.workerStatus });
       if (!batch) return false;
@@ -4119,10 +4087,10 @@ export class RunManager {
     // A wake command can emit activity before its transport ACK. Keep its park
     // until the durable delivery checkpoint; admission already reserves capacity.
     const owing = this.store.getRun(runId);
-    if (owing && this.owesWake(owing, beforeHumanReset) && this.waitWakeAdmitted.has(runId)) return;
+    if (owing && this.owesWake(owing, beforeHumanReset) && this.line.isAdmitted(runId)) return;
     // Its waits stay open and a pool member keeps its slot: only a turn end or a terminal path
     // changes either (hearsay-tools/cezarion#1233).
-    this.waiting.delete(runId);
+    this.line.unpark(runId);
     this.move(runId, 'resume');
     if (state.currentStepId) {
       this.store.updateStep(runId, state.currentStepId, { status: 'running' });
@@ -4421,8 +4389,7 @@ export class RunManager {
     this.move(runId, 'continue-line', { stopping: undefined, error: undefined, finishedAt: undefined,
       currentStepId: undefined, ...(message ? { queuedMessages: [...(current.queuedMessages ?? []), message] } : {}) });
     this.store.flush();
-    this.pendingJobs.set(runId, job);
-    this.queue.push(runId);
+    this.line.enqueueJob(runId, job);
     void this.pump();
     return { ok: true };
   }
@@ -4482,16 +4449,15 @@ export class RunManager {
   private dispatchAcceptedContinuation(runId: string, toLine: boolean, stepId: string,
     resumeSessionId: string | undefined, targetRunner: RunnerId, prompt: string, images: PastedContent[]): { ok: boolean } {
     if (toLine) {
-      this.pendingContinuations.set(runId, {
+      this.line.enqueueContinuation(runId, {
         stepId, sessionId: resumeSessionId, backend: targetRunner, prompt, images, lineJoinedAt: Date.now(),
       });
-      this.queue.push(runId);
       this.move(runId, 'continue-line', { error: undefined, finishedAt: undefined, currentStepId: undefined });
       // Enqueueing wakes the scheduler even after the previous execution released its slot.
       void this.pump();
       return { ok: true };
     }
-    this.starting.add(runId);
+    this.line.markStarting(runId);
     void this.runContinuation(runId, stepId, resumeSessionId, targetRunner, prompt, images)
       .catch((err: unknown) => this.failCrashedContinuation(runId, err))
       .finally(() => this.finishWorkerExecution(runId));
@@ -4505,7 +4471,7 @@ export class RunManager {
       error: `continue crashed: ${message}`,
       finishedAt: new Date().toISOString(),
     });
-    this.starting.delete(runId);
+    this.line.unmarkStarting(runId);
     this.dropActive(runId);
   }
 
@@ -4533,7 +4499,7 @@ export class RunManager {
     // for retention again — otherwise it keeps a dir on disk while staying
     // invisible to the enforcer forever. Ordinary runs retain their best-effort
     // repoRoot fallback; owned workers must never adopt/recreate an unverified resource.
-    if (this.workerExecutionStopped(runId)) { this.starting.delete(runId); return; }
+    if (this.workerExecutionStopped(runId)) { this.line.unmarkStarting(runId); return; }
     if (this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() })) return;
     workerIdentity(this.store, this.repoRoot, runId);
     const record = this.store.getRun(runId);
@@ -4547,7 +4513,7 @@ export class RunManager {
       autonomous: record?.autonomous === true,
     });
     this.activate(runId, state);
-    this.starting.delete(runId);
+    this.line.unmarkStarting(runId);
     const lease = this.continuationRepoRootLease(runId, state);
     if (lease && !(await lease)) return;
     const setupNote = await this.prepareContinuationWorktree(runId, state, record, workspace.rematerialized);
@@ -4681,7 +4647,7 @@ export class RunManager {
       this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt });
       this.move(runId, 'fail-start', { error: message, finishedAt, currentStepId: undefined });
       this.store.appendEvent(runId, { type: 'lifecycle', message });
-      this.starting.delete(runId);
+      this.line.unmarkStarting(runId);
       this.dropActive(runId);
       return undefined;
     }
@@ -4692,7 +4658,7 @@ export class RunManager {
   private settleStoppedContinuation(runId: string): boolean {
     if (!this.store.getRun(runId)?.stopping) return false;
     this.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
-    this.starting.delete(runId);
+    this.line.unmarkStarting(runId);
     this.dropActive(runId);
     return true;
   }
@@ -5285,8 +5251,7 @@ export class RunManager {
     }
     this.dropActive(runId);
     if (close.resumeWorkflow) {
-      this.pendingJobs.set(runId, close.resumeWorkflow);
-      this.queue.push(runId);
+      this.line.enqueueJob(runId, close.resumeWorkflow);
       void this.pump();
     }
   }
@@ -5294,7 +5259,7 @@ export class RunManager {
   // ---- execution -----------------------------------------------------------
 
   private async execute(runId: string, workflow: WorkflowDef, input: StartRunInput, startAt = 0): Promise<void> {
-    if (this.workerExecutionStopped(runId)) { this.starting.delete(runId); return; }
+    if (this.workerExecutionStopped(runId)) { this.line.unmarkStarting(runId); return; }
     workerIdentity(this.store, this.repoRoot, runId);
     const state = createActiveRun({
       cwd: this.repoRoot,
@@ -5302,7 +5267,7 @@ export class RunManager {
       autonomous: input.autonomous === true,
     });
     this.activate(runId, state);
-    this.starting.delete(runId);
+    this.line.unmarkStarting(runId);
     const emit = (event: { type: string; stepId?: string; [k: string]: unknown }) =>
       this.store.appendEvent(runId, event);
     const execution: Execution = { runId, workflow, input, startAt, state, emit };
@@ -6120,8 +6085,8 @@ export class RunManager {
     delegation?.revoke(); state.revokeDelegation = undefined;
     this.recordUsagePeaks(runId);
     this.clearIdleTimer(state);
-    this.monitoring.delete(runId);
-    this.waiting.delete(runId);
+    this.line.leavePool(runId);
+    this.line.unpark(runId);
     state.nextStep = undefined;
     state.waitWakeTurn = undefined;
     state.atTurnBoundary = undefined;
@@ -6206,7 +6171,7 @@ export class RunManager {
     // items without a parent turn must not unpark monitoring or worker waits (#121).
     // A list worker park (hearsay-tools/cezarion#1235), Cezar's completion wait included
     // (hearsay-tools/cezarion#1301), resumes the same way.
-    if (this.waiting.has(runId) && (this.monitoring.has(runId) || this.parkedOnWorkers(runId)) && isRunnerActivity(event)) {
+    if (this.line.isParked(runId) && (this.line.inPool(runId) || this.parkedOnWorkers(runId)) && isRunnerActivity(event)) {
       this.resumeParkedRun(runId, state);
     }
   }
@@ -6218,8 +6183,8 @@ export class RunManager {
     this.clearIdleTimer(state);
     clearUnreadInputTimer(state);
     clearHeldHumanInputTimer(state);
-    this.monitoring.delete(runId); // released below; its waits stay open
-    this.waiting.add(runId);
+    this.line.leavePool(runId); // released below; its waits stay open
+    this.line.park(runId);
     this.move(runId, 'park', { hasPendingPermission: true });
     if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
     this.releaseSlot();
@@ -6244,8 +6209,8 @@ export class RunManager {
     const wait = this.openHumanAlias(runId, state, 'native-ask', questions ? { questions } : undefined);
     if (wait) this.markHumanWaitSurfaced(runId, wait, questions ? { questions } : undefined);
     this.clearIdleTimer(state);
-    this.monitoring.delete(runId); // released below; its waits stay open
-    this.waiting.add(runId);
+    this.line.leavePool(runId); // released below; its waits stay open
+    this.line.park(runId);
     this.move(runId, 'park');
     if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
     this.releaseSlot();
@@ -6631,7 +6596,7 @@ export class RunManager {
     const { decision, tried } = this.decideSettledTurn(runId, state, session, entry, turn, refused, noteRefusal);
     if (entry === 'turn-end' && !this.settleTurnEndInput(runId, state, turn, tried, decision)) return false;
     // A run an earlier entry already parked keeps that park: a second one would free its slot twice.
-    if (entry !== 'turn-end' && decision.kind === 'park' && this.waiting.has(runId)) return true;
+    if (entry !== 'turn-end' && decision.kind === 'park' && this.line.isParked(runId)) return true;
     const outcome = this.carryOutTurnEnd(runId, state, stepId, decision, refused, noteRefusal);
     if (outcome.kind === 'done') return false;
     this.settledTurnOutcome(runId, entry, outcome);
@@ -6646,7 +6611,7 @@ export class RunManager {
       clearHeldHumanInputTimer(state);
       if (state.agentInputError) return false;
     }
-    this.settledTurnOutcome(runId, entry, { kind: 'park', keepsSlot: this.monitoring.has(runId) });
+    this.settledTurnOutcome(runId, entry, { kind: 'park', keepsSlot: this.line.inPool(runId) });
     return true;
   }
 
@@ -6776,7 +6741,7 @@ export class RunManager {
    *  decision parked it (hearsay-tools/cezarion#1327). */
   private parkedOutcome(runId: string): TurnEndOutcome {
     this.noticeParkedWorker(runId);
-    return { kind: 'park', keepsSlot: this.monitoring.has(runId) };
+    return { kind: 'park', keepsSlot: this.line.inPool(runId) };
   }
 
   /** A refused autonomous nudge waits for readiness at this boundary, bounded by the idle timer. */
@@ -7002,7 +6967,7 @@ export class RunManager {
     if (!this.isNoWaitNudgeReply(state, event)) return;
     state.noWaitNudgeSawContent = true;
     clearNoWaitNudgeReplyTimer(state);
-    if (state.noWaitNudgeParked !== state.session || !this.waiting.has(runId)) return;
+    if (state.noWaitNudgeParked !== state.session || !this.line.isParked(runId)) return;
     if (state.pendingHumanAsk || this.hasPendingHumanAsk(runId)) return;
     this.resumeParkedRun(runId, state);
     state.noWaitNudgeParked = undefined;
@@ -7019,7 +6984,7 @@ export class RunManager {
     const timer = setTimeout(() => {
       state.noWaitNudgeReplyTimer = undefined;
       if (this.disposed || this.active.get(runId) !== state || state.session !== session || !session.open ||
-        state.cancelled || state.finishRequested || this.waiting.has(runId)) return;
+        state.cancelled || state.finishRequested || this.line.isParked(runId)) return;
       state.noWaitNudgeParked = session;
       // The note names the nudge left unanswered (hearsay-tools/cezarion#1301).
       this.openTurnEndHumanWait(runId, state, state.currentStepId, 'no-wait', state.completionNudged === session ? COMPLETION_NO_REPLY_NOTE : NO_WAIT_NO_REPLY_NOTE);
@@ -7062,7 +7027,7 @@ export class RunManager {
     this.move(runId, 'park');
     if (stepId) this.store.updateStep(runId, stepId, { status: 'waiting' });
     this.store.flush();
-    this.waiting.add(runId);
+    this.line.park(runId);
     this.leaveMonitoringPool(runId);
     this.armIdleTimer(runId, state);
     this.releaseSlot();
