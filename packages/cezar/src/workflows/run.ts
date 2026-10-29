@@ -1,3 +1,4 @@
+import { InboxClaims } from './run/inbox-claims.ts';
 import { WorkerExecutions } from './run/worker-executions.ts';
 import { TurnBookkeeper } from './run/turn-bookkeeping.ts';
 import { AutomationToolsSlot, cezarToolHandlers, toolSessionRefusal } from './run/cezar-tools.ts';
@@ -96,7 +97,6 @@ import { buildSessionContext, formatSessionContextReport, type SessionContext } 
 // wire and the disk can never disagree about what counts as an image (#950).
 import {
   type AgentInput,
-  type InboxClaim,
   type WorkerStopResult,
   type WorkerWait,
   type WorkerWaitRequest,
@@ -496,7 +496,8 @@ export class RunManager {
   /** Each family's conversation request deadlines. Every worker wait, Cezar's completion wait
    *  included, parks, wakes and times out through the wait list (hearsay-tools/cezarion#1301). */
   private readonly requestDeadlineTimers = new Map<string, NodeJS.Timeout>();
-  private readonly inboxClaimTimers = new Map<string, NodeJS.Timeout>();
+  private readonly inboxClaims: InboxClaims;
+  private get inboxClaimTimers() { return this.inboxClaims.inboxClaimTimers; }
   private reconcilingWorkers = false;
   private reconcilingFamily: string | undefined;
   private readonly pendingReconciliations = new Set<string | undefined>();
@@ -666,6 +667,18 @@ export class RunManager {
         toQueuedMessage: (id, content) => this.toQueuedMessage(id, content),
         sendMessage: (id, content, messageId) => this.sendMessage(id, content, messageId) },
     );
+    this.inboxClaims = new InboxClaims(
+      { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
+      { activeGet: id => this.active.get(id),
+        executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
+        workerExecutionStopped: id => this.workerExecutionStopped(id),
+        reconcileWorkerWaits: () => this.reconcileWorkerWaits(), retireEmptyWake: id => this.retireEmptyWake(id),
+        deliverConversationInput: id => this.deliverConversationInput(id),
+        settleIdleBoundary: (id, state, session) => this.settleIdleBoundary(id, state, session),
+        releaseSlot: () => this.releaseSlot(), providerOwnsInboxInput: (id, inputId) => this.providerOwnsInboxInput(id, inputId),
+        canClaimInboxInput: (id, inputId) => this.canClaimInboxInput(id, inputId),
+        armInboxClaimExpiry: id => this.armInboxClaimExpiry(id) },
+    );
     this.repoRootLease = new RepoRootLease(
       { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
       { park: id => { this.waiting.add(id); }, unpark: id => { this.waiting.delete(id); },
@@ -729,8 +742,7 @@ export class RunManager {
     this.store.off('deleted', this.onRunDeleted);
     for (const timer of this.requestDeadlineTimers.values()) clearTimeout(timer);
     this.requestDeadlineTimers.clear();
-    for (const timer of this.inboxClaimTimers.values()) clearTimeout(timer);
-    this.inboxClaimTimers.clear();
+    this.inboxClaims.dispose();
     this.offUsage();
     this.offSemaphore();
     clearInterval(this.queueWatchdog);
@@ -3691,88 +3703,28 @@ export class RunManager {
     return !!result && this.store.getRun(runId)?.waits?.find(entry => entry.id === wait.id)?.phase !== 'open';
   }
 
-  /** A wait wake is only a pointer. Only provider submission/opening prompts own delivery. */
   private providerOwnsInboxInput(runId: string, id: string): boolean {
-    const state = this.active.get(runId);
-    return !!state?.agentInputFlight?.inputIds.includes(id) || state?.openingAgentInputId === id ||
-      this.store.getRun(runId)?.continuationMessage?.agentInputId === id;
+    return this.inboxClaims.providerOwnsInboxInput(runId, id);
   }
 
   canClaimInboxInput(runId: string, id: string): boolean {
-    const run = this.store.getRun(runId);
-    const input = run?.agentInputs?.find(entry => entry.id === id);
-    return !this.disposed && !!run && ['queued', 'running', 'waiting'].includes(run.status) &&
-      !this.historyDeletionPending(runId) && !this.executionBlockedByRootFinish(run) && !this.workerExecutionStopped(runId) &&
-      !!input && input.source === 'agent' && !!input.conversation && !input.deliveredAt &&
-      !hasLiveInboxClaim(input) && !this.providerOwnsInboxInput(runId, id);
+    return this.inboxClaims.canClaimInboxInput(runId, id);
   }
 
-  /** The service supplies authorized, bounded IDs; claim and flight reservations are synchronous. */
   reserveInboxInputs(runId: string, generation: string, ids: readonly string[]): { receiptId: string; expiresAt: string; inputIds: string[] } | undefined {
-    if (!ids.length || ids.some(id => !this.canClaimInboxInput(runId, id)) ||
-      this.store.getRun(runId)?.agentInputs?.some(input => !input.deliveredAt && hasLiveInboxClaim(input))) return undefined;
-    const claim: InboxClaim = { receiptId: randomUUID(), generation, expiresAt: new Date(Date.now() + 120_000).toISOString() };
-    this.store.claimInboxInputs(runId, ids, claim);
-    this.armInboxClaimExpiry(runId);
-    return { receiptId: claim.receiptId, expiresAt: claim.expiresAt, inputIds: [...ids] };
+    return this.inboxClaims.reserveInboxInputs(runId, generation, ids);
   }
 
   acknowledgeInbox(runId: string, generation: string, receiptId: string): 'acknowledged' | 'already-acknowledged' {
-    if (this.disposed || this.store.getRun(runId)?.agentInputs?.some(input => input.inboxClaim?.receiptId === receiptId &&
-      !input.deliveredAt && this.providerOwnsInboxInput(runId, input.id))) throw new Error('inbox receipt displaced');
-    const result = this.store.ackInboxInputs(runId, receiptId, generation, new Date().toISOString());
-    this.armInboxClaimExpiry(runId);
-    this.reconcileWorkerWaits();
-    this.retireEmptyWake(runId);
-    this.deliverConversationInput(runId);
-    // A done the turn end kept behind this claim settles now that the input is read: the inbox
-    // acknowledgement is the boundary's last owed input (hearsay-tools/cezarion#1620).
-    const state = this.active.get(runId);
-    if (state?.session?.open) this.settleIdleBoundary(runId, state, state.session);
-    this.releaseSlot();
-    return result;
+    return this.inboxClaims.acknowledgeInbox(runId, generation, receiptId);
   }
 
   releaseInbox(runId: string, generation: string, receiptId: string): 'released' {
-    if (this.disposed) throw new Error('inbox manager disposed');
-    const result = this.store.releaseInboxInputs(runId, receiptId, generation);
-    this.armInboxClaimExpiry(runId);
-    this.reconcileWorkerWaits();
-    this.deliverConversationInput(runId);
-    this.releaseSlot();
-    return result;
+    return this.inboxClaims.releaseInbox(runId, generation, receiptId);
   }
 
-  /** Expiry is an independent wake source, including after the provider's last turn. */
   private armInboxClaimExpiry(runId: string): void {
-    const previous = this.inboxClaimTimers.get(runId);
-    if (previous) clearTimeout(previous);
-    this.inboxClaimTimers.delete(runId);
-    if (this.disposed) return;
-    const deadlines = (this.store.getRun(runId)?.agentInputs ?? []).flatMap(input =>
-      input.inboxClaim && !input.inboxClaim.acknowledgedAt ? [Date.parse(input.inboxClaim.expiresAt)] : []);
-    if (!deadlines.length) return;
-    let warned = false;
-    const expire = () => {
-      this.inboxClaimTimers.delete(runId);
-      if (this.disposed || !this.store.getRun(runId)) return;
-      try {
-        this.store.clearExpiredInboxClaims(runId, new Date().toISOString());
-        this.reconcileWorkerWaits();
-        this.deliverConversationInput(runId);
-        this.armInboxClaimExpiry(runId);
-        this.releaseSlot();
-      } catch {
-        if (!warned) console.warn('[cez] inbox expiry checkpoint failed; retrying in 1 second');
-        warned = true;
-        if (!this.disposed) arm(1_000);
-      }
-    };
-    const arm = (delay: number) => {
-      const timer = setTimeout(expire, delay);
-      timer.unref?.(); this.inboxClaimTimers.set(runId, timer);
-    };
-    arm(Math.max(0, Math.min(...deadlines) - Date.now()));
+    this.inboxClaims.armInboxClaimExpiry(runId);
   }
 
   /** Accepted conversation input uses the existing scheduler admission for idle recipients. */
