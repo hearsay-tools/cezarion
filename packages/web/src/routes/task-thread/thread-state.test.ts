@@ -601,7 +601,7 @@ describe('latestPlanEntries — the dock takes the newest snapshot across turns'
 
 describe('reduceThread — check-output (check steps, v1-only by nature)', () => {
   it('a passing check becomes a completed execute card with the exit code and output', () => {
-    // Verbatim shape from src/workflows/run.ts runCheckStep().
+    // Verbatim shape from src/workflows/run/step-loop.ts runCheckStep().
     const { turns } = reduceThread([
       line(1, 'note', { message: '$ npm test', stepId: 'verify' }),
       line(2, 'check-output', { stepId: 'verify', command: 'npm test', text: '72 passing (1.2s)', exitCode: 0 }),
