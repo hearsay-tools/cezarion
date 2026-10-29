@@ -5910,7 +5910,7 @@ export class RunManager {
    *  any other worker fallback stays a plain park. */
   private openTurnEndHumanWait(runId: string, state: ActiveRun, stepId: string | undefined, via: 'no-wait' | 'budget', note: string, turnEnd = false): void {
     const worker = this.store.getRun(runId)?.delegation?.role === 'worker';
-    if (worker && via === 'no-wait' && turnEnd) { this.askParentForWorker(runId, state, stepId); return; }
+    if (worker && via === 'no-wait' && turnEnd) { this.askParentForWorker(runId, state, stepId); this.parkForUser(runId, state, stepId); return; }
     const wait = worker ? undefined : this.openHumanAlias(runId, state, via);
     if (wait?.source === 'cezar' && wait.askSeq === undefined) this.showCezarHumanWait(runId, state, wait, note);
     else {
@@ -5938,7 +5938,6 @@ export class RunManager {
       this.markHumanWaitSurfaced(runId, wait, { questions });
       this.routeWorkerQuestion(runId);
     }
-    this.parkForUser(runId, state, stepId);
   }
 
   /** The worker's pending question is the one `askParentForWorker` raised. */
