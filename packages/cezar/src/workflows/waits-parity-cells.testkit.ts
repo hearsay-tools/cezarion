@@ -22,7 +22,6 @@ import { claudeScheduleWakeupDelay, COMPLETION_NO_REPLY_NOTE, COMPLETION_NUDGE_N
 import { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE } from './turn-end.ts';
 import { expectNoWaitNudgeKinds } from './turn-end.testkit.ts';
 import { watchTurnOutcomes, type TurnOutcomes } from './turn-outcomes.testkit.ts';
-import type { Backoff } from '../delegation/retry-backoff.ts';
 import { ASK_TEXT, messagesPrompt, MONITORING_TEXT } from './monitoring-turn.testkit.ts';
 import { blockRunWrites, muteLockedDatabaseLogs, readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { recordCommits } from '../runs/outcome-crash.testkit.ts';
@@ -542,7 +541,7 @@ function baseCells(runners: RunnerId[]): void {
         await parentTurn(run.id, marker, () => parkedOn(run.id, waitOfKind(run.id, kind)) === true);
         expect(store.getRun(run.id)?.waits).toEqual([wait]);
         expect(humanOpen(run.id)).toEqual([]);
-        expect(budget).toHaveBeenCalled();
+        expect(budget).toHaveBeenCalledWith(run.id);
         budget.mockRestore();
         if (kind === 'timer') {
           await restart();

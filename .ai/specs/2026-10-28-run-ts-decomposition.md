@@ -40,7 +40,8 @@ Methods are named, never cited by line number: every move shifts the lines.
 7. **Tuning fields are read at use time.** Tests overwrite `wakeRetryBackoff`, `orphanBackoff`,
    `orphanTermGraceMs`, `noWaitNudgeReplyMs` and `unreadInputGraceMs` on the instance, and the CI
    wait tests replace `ciSupervisor` with `Object.assign`. A module reads them through the host when
-   it uses them; a copy taken at construction ignores the test.
+   it uses them; a copy taken at construction ignores the test. Phase 5 moves
+   `wakeRetryBackoff` into `WakeRetries` and tests set that instance field directly.
 8. **Teardown keeps its order.** Each module owns a `dispose()` for its own timers and maps. The
    facade's `dispose` calls them in today's order, with `disposed = true` first. Maps that
    `dispose` does not clear today stay uncleared until hearsay-tools/cezarion#2064 decides.
@@ -132,7 +133,7 @@ Paths are under `packages/cezar/src/workflows/run/`. A path that starts with ano
 | `session-events.ts` | 3 | hearsay-tools/cezarion#2151 | One session event handler and one launch preamble for both launch paths | — | about 13 | 150 |
 | `input-delivery.ts` | 4 | hearsay-tools/cezarion#2192 | Flush, submit and acknowledge input, the idle boundary (`settleIdleBoundary`), `handleAgentInputReady`, the unread and held input timers, human message delivery, the body of `deliverConversationInput`, routed answer delivery: 23 methods, moved verbatim. `sendMessage`, `respondPermission` and `steerWorker` stay on the facade | — | 26 | 500 |
 | `input-delivery.ts` (splits) | 4 | hearsay-tools/cezarion#2196 | After hearsay-tools/cezarion#2192, splits `settleIdleBoundary` (22, to about 17) and `handleAgentInputReady` (22, to about 13) inside the module | — | — | 0 |
-| `wake-retries.ts` | 4 | hearsay-tools/cezarion#2194 | `retryWaitAdmission` and `clearWakeBackoff` (delegators stay), named operations for the inline reads and writes, its `dispose` step | `wakeRetries`, `wakeBackoffs`, `retainedNotes` | 3 | 25 |
+| `wake-retries.ts` | 4 | hearsay-tools/cezarion#2194 | `retryWaitAdmission` and `clearWakeBackoff` (delegators removed in hearsay-tools/cezarion#2232), named operations for the inline reads and writes, its `dispose` step | `wakeRetries`, `wakeBackoffs`, `retainedNotes` | 3 | 25 |
 | `wake-admission.ts` | 4 | hearsay-tools/cezarion#2197 | `parkOnWaits`, `queueWaitWake`, `deliverAdmittedWake`, sessionless wakes, empty-wake retirement, the wake budget, delivery failures, and the wait teardown (`cancelOpenWaits`, `disarmRunWaits`, `onRunDeleted`). `commitContinuation` stays for hearsay-tools/cezarion#2199 | — | 16 | 360 |
 | `turn-nudges.ts` | 4 | hearsay-tools/cezarion#2195 | The autonomous nudge, the no-wait nudge and the completion refusal: nine methods | — | 15 | 195 |
 | `turn-settler.ts` | 4 | hearsay-tools/cezarion#2198 | `settleTurn`, `takeDoneRequest` to `closeAsDone`, `endTurn` to `settledTurnOutcome`, `openTurnEndHumanWait`, `armIdleTimer`, `parkForUser`, `openTimerAlias` | `turnEndCarriers` | 23 | 470 |
@@ -445,19 +446,20 @@ A move never answers these:
    no comment or test. The `run-settlement` move (hearsay-tools/cezarion#2200) adds both.
 4. `supersedeFallbackThenWorkflowAsk` supersedes the worker fallback before checking for an unanswered ask.
    hearsay-tools/cezarion#2200 renamed it when it moved.
-5. `registerAsk`, `stopPreviewServer` and `autosaveCleanupBlocker` are public, but no shipped code
+5. At Phase 4, `registerAsk`, `stopPreviewServer` and `autosaveCleanupBlocker` were public, but no shipped code
    outside `run.ts` calls them. The only caller of the first two is the cezar-tools host that
    `run.ts` builds, which `cezar-tools.ts` calls. `autosaveCleanupBlocker` has one test caller
    (`harness-autosave-settlement.test.ts`). `reconcileAllWorkerFamilies` delegates to
    `FamilyReconciler` and has test callers only (`delegation-reconcile.test.ts`). Phase 5 makes them
-   private, points the host at the modules, or moves the tests.
+   private, points the host at the modules, or moves the tests. `registerAsk` now goes directly
+   to `WaitRegistry` (hearsay-tools/cezarion#2232).
 6. `stepLeftOpen` is now a pure read (hearsay-tools/cezarion#2233); each caller clears the
    consumed mark under its original conditions. A cancelled Continue keeps the mark, and
    nothing reads it before its `ActiveRun` is dropped; the difference is not observable.
-7. `disarmRunWaits` deletes entries from `ciRegistrations`, the map that `WaitRegistry` owns, from
+7. At Phase 4, `disarmRunWaits` deleted entries from `ciRegistrations`, the map that `WaitRegistry` owns, from
    outside the registry. That goes against the Phase 3 exit. hearsay-tools/cezarion#2197 moves the
    loop verbatim and reads the map through `WaitRegistry`; hearsay-tools/cezarion#2232 gives the
-   registry its own CI-registration teardown.
+   registry its own CI-registration teardown (`abortRegistrations`), called before watch teardown.
 
 ## Risks
 

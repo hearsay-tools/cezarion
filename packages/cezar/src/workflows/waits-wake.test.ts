@@ -13,7 +13,6 @@ import { readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { MAX_WAKE_DELIVERY_ATTEMPTS, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE } from './run.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { ciNativeMessages, persistentWakeFailure, TIMER_WAKE_OPENING, toolCall } from './waits-parity.testkit.ts';
-import type { Backoff } from '../delegation/retry-backoff.ts';
 
 // hearsay-tools/cezarion#1233: how resolved waits wake a run beside a pending question, what every
 // delivered turn ends with, and which parks hold a slot. The runner wires, store and scheduler are

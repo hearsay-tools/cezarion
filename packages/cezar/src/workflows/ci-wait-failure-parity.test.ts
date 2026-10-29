@@ -7,7 +7,6 @@ import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runn
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { supportsProfiles } from '../core/agent-profiles.ts';
 import { acceptedWorkerIdentitySchema, workerWorkflowHash } from '../delegation/execution-identity.ts';
-import type { Backoff } from '../delegation/retry-backoff.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { eventCheckpoint, manager, restart, root, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { QUICK_TASK_WORKFLOW, stepKind, type WorkflowDef } from './types.ts';
