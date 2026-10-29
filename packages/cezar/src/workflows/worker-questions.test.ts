@@ -85,7 +85,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
   it('leaves the question with the human when a peer message took its ID first', async () => {
     const { p, service, callerFor } = await delegatingParent({ permissions: ['spawn', 'wait', 'steer'] });
     await until(() => store.getRun(p.id)?.status === 'waiting');
-    const routing = manager as unknown as { routeWorkerQuestion(id: string): void };
+    const routing = runInternals(manager).workerQuestions;
     const route = vi.spyOn(routing, 'routeWorkerQuestion').mockImplementation(() => {});
     const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
     await until(() => eventsOf(w.id, 'ask.requested').length === 1);
@@ -94,6 +94,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     const peer = store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [] });
     store.updateRun(peer.id, { status: RUN_STATUS.running, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     await service.send(callerFor(peer.id), { id, recipientRunId: p.id, kind: 'progress', text: 'Peer progress first', timeoutSeconds: 600 });
+    expect(route).toHaveBeenCalledWith(w.id);
     route.mockRestore();
     routing.routeWorkerQuestion(w.id);
     expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
@@ -260,7 +261,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       const f = await idleWorker();
       const fail = failing === 'outcome'
         ? vi.spyOn(store, 'commitConversation').mockImplementationOnce(() => { throw Error('disk full'); })
-        : vi.spyOn(manager as unknown as { retireUnreadParentQuestion(parentId: string, requestId: string): void }, 'retireUnreadParentQuestion')
+        : vi.spyOn(runInternals(manager).workerQuestions, 'retireUnreadParentQuestion')
           .mockImplementationOnce(() => { throw Error('disk full'); });
       vi.spyOn(console, 'warn').mockImplementation(() => {});
       expect(steer(f.w.id, f.p.id, 'mock:agent-echo Also lint').result).toBe('queued');
@@ -421,7 +422,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
         // Wait for that physical precondition without finalizing the proof,
         // suppressing any PIDs, or retrying the answer under test.
         await until(() => {
-          const orphan = manager['orphanedWorkerGeneration'](f.w.id);
+          const orphan = runInternals(manager).orphans.orphanedWorkerGeneration(f.w.id);
           if (orphan) return inspectGeneration(orphan).liveness === 'gone';
           const proof = store.readWorkerExecution(f.w.id);
           const delegation = store.getRun(f.w.id)?.delegation;

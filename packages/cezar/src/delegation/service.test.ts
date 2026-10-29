@@ -1,3 +1,4 @@
+import * as executionSettings from './execution-settings.ts';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { runIds } from '../runs/run-store.testkit.ts';
 import { syncBuiltinESMExports } from 'node:module';
@@ -63,7 +64,7 @@ describe('delegation service durable authority', () => {
     ]) });
   });
   it('switches backend without carrying parent provider model, effort, account, or widening empty grants', async () => {
-    vi.mocked(f.manager.delegationExecutionSettings).mockReturnValue({ cwd: f.root, runner: 'claude', model: 'opus', effort: 'high', agentProfile: 'default', allowedTools: [], bashAllowlist: [], accountBinding: { provider: 'claude', profileId: 'default', homePath: f.root, claudeLayout: { kind: 'relocated' } } });
+    vi.mocked(executionSettings.delegationExecutionSettings).mockReturnValue({ cwd: f.root, runner: 'claude', model: 'opus', effort: 'high', agentProfile: 'default', allowedTools: [], bashAllowlist: [], accountBinding: { provider: 'claude', profileId: 'default', homePath: f.root, claudeLayout: { kind: 'relocated' } } });
     vi.stubEnv('CODEX_HOME', f.root);
     const { workerId } = await f.service.spawn(f.caller, { ...input(), backend: 'codex' });
     expect(f.store.getRun(workerId)).toMatchObject({ runner: 'codex', agentProfile: 'default' });
@@ -222,7 +223,7 @@ describe('delegation service durable authority', () => {
         expect(f.store.readWorkerIdentity(workerId)).toMatchObject({ steps: [{ stepId: 'a', account: { provider: 'claude' } }, { stepId: 'b', account: { provider: 'codex' } }] });
       });
       it('narrows a step\'s authored tools to the parent\'s grants and never widens them', async () => {
-        vi.mocked(f.manager.delegationExecutionSettings).mockReturnValue({ cwd: f.root, runner: 'claude', model: 'opus', effort: 'high', agentProfile: 'default',
+        vi.mocked(executionSettings.delegationExecutionSettings).mockReturnValue({ cwd: f.root, runner: 'claude', model: 'opus', effort: 'high', agentProfile: 'default',
           allowedTools: ['Read', 'Edit', 'Bash'], bashAllowlist: ['git status', 'git diff'], accountBinding: { provider: 'claude', profileId: 'default', homePath: f.root, claudeLayout: { kind: 'relocated' } } });
         catalog('tools', ['name: tools', 'steps:',
           '  - id: narrow', '    prompt: "{{task}}"', '    allowedTools: [WebFetch, Read, Bash]', '    bashAllowlist: ["git diff", "rm -rf"]',
@@ -246,7 +247,7 @@ describe('delegation service durable authority', () => {
       });
       it('applies the model lock per step', async () => {
         // A parent with no pin of its own: only the authored step model can trip the lock.
-        vi.mocked(f.manager.delegationExecutionSettings).mockReturnValue({ cwd: f.root, runner: 'claude', agentProfile: 'default', accountBinding: { provider: 'claude', profileId: 'default', homePath: f.root, claudeLayout: { kind: 'relocated' } } });
+        vi.mocked(executionSettings.delegationExecutionSettings).mockReturnValue({ cwd: f.root, runner: 'claude', agentProfile: 'default', accountBinding: { provider: 'claude', profileId: 'default', homePath: f.root, claudeLayout: { kind: 'relocated' } } });
         catalog('plain', ['name: plain', 'steps:', '  - id: a', '    prompt: "{{task}}"'].join('\n'));
         catalog('pinned', ['name: pinned', 'steps:', '  - id: a', '    prompt: "{{task}}"', '  - id: b', '    prompt: "{{task}}"', '    model: sonnet'].join('\n'));
         vi.stubEnv('CEZ_AGENT_MODELS_LOCKED', '1');
@@ -285,12 +286,12 @@ describe('delegation service durable authority', () => {
       steps: [{ stepId: 'task', account, grants: {}, model: 'opus', effort: 'high' }] });
     const path = join(f.root, '.ai/cezar/runs', `${worker.workerId}.identity.json`);
     const before = readFileSync(path, 'utf8');
-    vi.mocked(f.manager.delegationExecutionSettings).mockReturnValue({ cwd: f.root, runner: 'claude', agentProfile: 'other', accountBinding: { provider: 'claude', profileId: 'other', homePath: '/different', claudeLayout: { kind: 'relocated' } } });
+    vi.mocked(executionSettings.delegationExecutionSettings).mockReturnValue({ cwd: f.root, runner: 'claude', agentProfile: 'other', accountBinding: { provider: 'claude', profileId: 'other', homePath: '/different', claudeLayout: { kind: 'relocated' } } });
     expect(await f.service.spawn(f.caller, request)).toEqual(worker); expect(readFileSync(path, 'utf8')).toBe(before);
     expect(JSON.stringify(f.store.listRuns()) + JSON.stringify(f.store.readEvents(worker.workerId))).not.toContain('homePath');
   });
   it('cannot accept a worker without a concrete account binding', async () => {
-    vi.mocked(f.manager.delegationExecutionSettings).mockReturnValue({ cwd: f.root, runner: 'claude', agentProfile: 'default' });
+    vi.mocked(executionSettings.delegationExecutionSettings).mockReturnValue({ cwd: f.root, runner: 'claude', agentProfile: 'default' });
     await expect(f.service.spawn(f.caller, input())).rejects.toThrow();
     expect(f.store.listRuns()).toHaveLength(1); expect(f.parent.delegation).toMatchObject({ receipts: [] });
   });

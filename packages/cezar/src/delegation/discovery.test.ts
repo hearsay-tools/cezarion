@@ -1,3 +1,4 @@
+import * as executionSettings from './execution-settings.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -46,7 +47,7 @@ describe('parent discovery and model admission', () => {
   it.each(['inherited', 'workflow'] as const)('does not disprove an %s named-account pin with the host default catalog', async kind => {
     const home = join(f.root, 'work-account'); mkdirSync(home);
     if (kind === 'inherited') {
-      vi.mocked(f.manager.delegationExecutionSettings).mockReturnValue({ cwd: f.root, runner: 'codex', agentProfile: 'work', accountBinding: { provider: 'codex', profileId: 'work', homePath: home } });
+      vi.mocked(executionSettings.delegationExecutionSettings).mockReturnValue({ cwd: f.root, runner: 'codex', agentProfile: 'work', accountBinding: { provider: 'codex', profileId: 'work', homePath: home } });
       const accepted = await spawn();
       expect(f.store.readWorkerIdentity(accepted.workerId)).toMatchObject({ model: 'gpt-retired', account: { profileId: 'work' } });
     } else {

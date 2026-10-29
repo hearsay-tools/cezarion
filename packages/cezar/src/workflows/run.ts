@@ -177,7 +177,7 @@ export class RunManager {
     holdsAgentWaits: id => this.humanWaits.holdsAgentWaits(id),
     waitingBeforeFinalWorkflowStep: run => this.waitingBeforeFinalWorkflowStep(run),
     parentCompletionBlockers: id => this.parentCompletionBlockers(id),
-    unansweredQuestions: id => this.unansweredQuestions(id),
+    unansweredQuestions: id => this.workerQuestions.unansweredQuestions(id),
   };
   private readonly queuedRevivalHost: queuedRevival.QueuedRevivalHost;
   private readonly humanWaits: HumanWaits;
@@ -187,7 +187,6 @@ export class RunManager {
   private readonly waitWatches: WaitWatches;
   private readonly familyReconciler: FamilyReconciler;
   private readonly workerQuestions: WorkerQuestions;
-  private get recoveryFactsPending() { return this.familyReconciler.recoveryFactsPending; }
   private readonly inputReceiptSteps: inputReceipts.InputReceiptSteps = {
     clearUnread: state => clearUnreadInputTimer(state), clearHeld: state => clearHeldHumanInputTimer(state),
     noteActivity: (id, state, event) => this.turnNudges.noteNoWaitNudgeContent(id, state, event),
@@ -237,7 +236,6 @@ export class RunManager {
   /** Runs whose worktree a reclaim, or whose branch a delete, is removing right now
    *  (`claimWorktreeReclaim`, `claimForBranchCleanup`). `continueRun` refuses them. */
   private readonly claims: MaintenanceClaims;
-  private get reclaiming(): Set<string> { return this.claims.reclaiming; }
   private readonly wakeAdmission: WakeAdmission;
   private readonly retries: WakeRetries;
   private readonly ciResources: ReturnType<typeof acquireCiResources>;
@@ -364,8 +362,8 @@ export class RunManager {
       providerOwnsInboxInput: (id, inputId) => this.inboxClaims.providerOwnsInboxInput(id, inputId), reconcileWorkerWaits: id => this.reconcileWorkerWaits(id),
       openHumanAlias: (id, state, via, card) => this.humanWaits.openHumanAlias(id, state, via, card), prepareHumanAsk: state => this.humanWaits.prepareHumanAsk(state),
       markHumanWaitSurfaced: (id, wait, card) => this.humanWaits.markHumanWaitSurfaced(id, wait, card), withdrawCezarHumanWaits: id => this.humanWaits.withdrawCezarHumanWaits(id),
-      routeWorkerQuestion: id => this.routeWorkerQuestion(id), noticeParkedWorker: id => this.noticeParkedWorker(id),
-      retireUnreadParentQuestion: (id, request) => this.retireUnreadParentQuestion(id, request),
+      routeWorkerQuestion: id => this.workerQuestions.routeWorkerQuestion(id), noticeParkedWorker: id => this.workerQuestions.noticeParkedWorker(id),
+      retireUnreadParentQuestion: (id, request) => this.workerQuestions.retireUnreadParentQuestion(id, request),
       deleteUnreadInput: (id, input) => { this.active.get(id)?.unreadInputIds?.delete(input); },
       updatePendingHumanAsk: (id, value) => { const state = this.active.get(id); if (state) state.pendingHumanAsk = value; },
     }, MAX_AUTO_CONTINUES);
@@ -398,7 +396,7 @@ export class RunManager {
       reparkWithoutWaits: (id, state) => this.wakeAdmission.reparkWithoutWaits(id, state), waitOnUserWithoutSession: id => this.wakeAdmission.waitOnUserWithoutSession(id),
       queueWaitWake: id => this.wakeAdmission.queueWaitWake(id), retryWaitAdmission: id => this.retries.retryWaitAdmission(id),
     }, MAX_AUTO_CONTINUES);
-    this.humanWaits = new HumanWaits(this.context, { routeWorkerQuestion: id => this.routeWorkerQuestion(id) }, MAX_AUTO_CONTINUES);
+    this.humanWaits = new HumanWaits(this.context, { routeWorkerQuestion: id => this.workerQuestions.routeWorkerQuestion(id) }, MAX_AUTO_CONTINUES);
     this.sessionHelperHost = {
       active: this.active, line: this.line, humanWaits: this.humanWaits, inputReceiptHost: this.inputReceiptHost,
       move: (...args) => this.move(...args),
@@ -412,7 +410,7 @@ export class RunManager {
       noteNoWaitNudgeContent: (...args) => this.turnNudges.noteNoWaitNudgeContent(...args),
       parkedOnWorkers: id => this.wakeAdmission.parkedOnWorkers(id),
       releaseSlot: () => this.line.releaseSlot(),
-      routeWorkerQuestion: id => this.routeWorkerQuestion(id),
+      routeWorkerQuestion: id => this.workerQuestions.routeWorkerQuestion(id),
     };
     this.turnNudges = new TurnNudges(this.context, this.humanWaits, this.line, this.completionGateHost, {
       active: this.active, move: (id, exit, patch) => this.move(id, exit, patch),
@@ -598,7 +596,7 @@ export class RunManager {
       canAutoContinue: (id, state) => this.turnNudges.canAutoContinue(id, state), tryAutonomousNudge: (id, state, step, ask) => this.turnNudges.tryAutonomousNudge(id, state, step, ask),
       sendTurnEndNudge: (id, state, step, text) => this.turnNudges.sendTurnEndNudge(id, state, step, text),
       awaitCompletionNudgeReply: (id, state, session) => this.turnNudges.awaitCompletionNudgeReply(id, state, session),
-      noticeParkedWorker: id => this.noticeParkedWorker(id), routeWorkerQuestion: id => this.routeWorkerQuestion(id),
+      noticeParkedWorker: id => this.workerQuestions.noticeParkedWorker(id), routeWorkerQuestion: id => this.workerQuestions.routeWorkerQuestion(id),
       settledTurnOutcome: (id, entry, outcome) => this.settledTurnOutcome(id, entry, outcome),
     }, IDLE_TIMEOUT_MS, MAX_AUTO_CONTINUES, COMPLETION_WILL_WAIT, SCHEDULE_WAKEUP_MAX_SECONDS);
     this.inputDelivery = new InputDelivery(this.context, {
@@ -882,7 +880,7 @@ export class RunManager {
   private disarmWait(waitId: string): void { this.waitWatches.disarmWait(waitId); this.familyReconciler.forgetRetry(waitId); this.waitWatches.disarmProcessWatch(waitId); }
 
   /** Snapshot of the actual active session, never guessed from partial run settings. */
-  delegationExecutionSettings(runId: string): DelegationExecutionSettings {
+  private delegationExecutionSettings(runId: string): DelegationExecutionSettings {
     return delegationExecutionSettings(this.active.get(runId));
   }
 
@@ -1365,17 +1363,13 @@ export class RunManager {
   /** Accepted conversation input uses the existing scheduler admission for idle recipients. */
   deliverConversationInput(runId: string): void { return this.inputDelivery.deliverConversationInput(runId); }
 
-  private routeWorkerQuestion(workerId: string): void { return this.workerQuestions.routeWorkerQuestion(workerId); }
 
-  private noticeParkedWorker(workerId: string): void { return this.workerQuestions.noticeParkedWorker(workerId); }
 
   private noticeParkedWorkers(rootId: string): void { return this.workerQuestions.noticeParkedWorkers(rootId); }
 
-  private routedAsk(runId: string): { askSeq: number; message: ConversationMessage } | undefined { return this.workerQuestions.routedAsk(runId); }
 
   private retireSettledQuestions(parentId: string): void { return this.workerQuestions.retireSettledQuestions(parentId); }
 
-  private unansweredQuestions(parentId: string): { workerId: string; messageId: string }[] { return this.workerQuestions.unansweredQuestions(parentId); }
 
   private fallbackRoutedQuestions(parentId: string, reason: string): void { return this.workerQuestions.fallbackRoutedQuestions(parentId, reason); }
 
@@ -1443,7 +1437,6 @@ export class RunManager {
     catch { console.warn('[cez] parent finish checkpoint failed; intent retained for retry'); }
   }
   reconcileWorkerWaits(familyRootId?: string): void { this.familyReconciler.reconcileWorkerWaits(familyRootId); }
-  reconcileAllWorkerFamilies(): void { this.familyReconciler.reconcileAllWorkerFamilies(); }
 
   /** Durable queue is the single hydration source for fresh, continuing and recovered runs. */
   steerWorker(runId: string, input: AgentInput): 'queued' | 'delivered' {
@@ -1819,7 +1812,6 @@ export class RunManager {
     return entry === 'gate' || (entry === 'ready' && outcome.kind === 'readiness') ? undefined : outcome;
   }
 
-  private retireUnreadParentQuestion(parentId: string, requestId: string): void { return this.workerQuestions.retireUnreadParentQuestion(parentId, requestId); }
 
   /** Every run status `run.ts` writes comes from the run state table (hearsay-tools/cezarion#1804). */
   private move(runId: string, exit: RunExitId, patch: Omit<Parameters<RunStore['updateRun']>[1], 'status'> = {}): RunRecord | undefined {

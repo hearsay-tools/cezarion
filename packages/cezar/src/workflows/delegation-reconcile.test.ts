@@ -60,7 +60,7 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
   it('retains global reconciliation for recovery and explicit callers', () => {
     // The full pass recovery runs (#779): settled families are no longer in memory, and the
     // pass over live families would skip them.
-    manager.reconcileAllWorkerFamilies();
+    runInternals(manager).familyReconciler.reconcileAllWorkerFamilies();
     for (const family of [a, b]) expect(store.readEvents(family.parentId).some(e => e.type === 'conversation-message')).toBe(true);
   });
 
@@ -171,7 +171,7 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
     expect(settlement).not.toHaveBeenCalled();
     expect(store.readWorkerExecution(a.workerId)?.phase).toBe(outcome === 'completed' ? 'complete' : 'starting');
     expect(store.readEvents(a.workerId).some(e => e.type === 'lifecycle' && /execution was finalized/.test(String(e.message)))).toBe(false);
-    expect((manager as unknown as { recoveryFactsPending: boolean }).recoveryFactsPending).toBe(false);
+    expect(runInternals(manager).familyReconciler.recoveryFactsPending).toBe(false);
     store.close();
   });
 
@@ -191,7 +191,7 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
       if (!changed && id === a.parentId && event.type === 'conversation-message') {
         changed = true;
         if (scope === 'family') cleanupCheckpoint(store, b.workerId);
-        else if (scope === 'full') manager.reconcileAllWorkerFamilies();
+        else if (scope === 'full') runInternals(manager).familyReconciler.reconcileAllWorkerFamilies();
         else manager.reconcileWorkerWaits();
       }
       return append(id, event);

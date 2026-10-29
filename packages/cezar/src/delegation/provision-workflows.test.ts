@@ -1,3 +1,4 @@
+import * as executionSettings from './execution-settings.ts';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { createFixtureManager, managerDisposed } from '../workflows/fixture-cleanup.testkit.ts';
@@ -735,7 +736,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     const first = sessions[0]!; const token = first.spec.env?.CEZ_DELEGATION_TOKEN!;
     expect(token).toBeTypeOf('string'); expect(first.spec.systemPrompt).not.toContain(token);
     expect(f.store.getRun(run.id)?.delegation).toMatchObject({ role: 'root' });
-    const settings = f.manager.delegationExecutionSettings(run.id);
+    const settings = executionSettings.delegationExecutionSettings(runInternals(f.manager).active.get(run.id));
     expect(settings).toMatchObject({ model: 'haiku', systemPrompt: 'parent restriction', allowedTools: ['Read', 'Bash'], bashAllowlist: ['git status'] });
     // Hold admission after parent is live, so snapshot durability is independently observable.
     const pump = vi.spyOn(runInternals(f.manager).line, 'pump').mockResolvedValue();

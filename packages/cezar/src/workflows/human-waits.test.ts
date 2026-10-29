@@ -316,7 +316,6 @@ describe('cezar_done refusals at worker capacity', { timeout: 45_000 }, () => {
 
   const ids = () => Array.from({ length: 32 }, () => randomUUID());
   const internals = () => manager as unknown as {
-    unansweredQuestions(id: string): { workerId: string; messageId: string }[];
     parentCompletionBlockers(id: string): { workerId: string; reason: string }[];
   };
   const done = (id: string) => tools(id).finishTurn({}, new AbortController().signal);
@@ -326,11 +325,12 @@ describe('cezar_done refusals at worker capacity', { timeout: 45_000 }, () => {
     // A parent parked on a timer, not on a question of its own: the worker checks decide.
     const p = await parent(toolCall('cezar_wait', { kind: 'timer', seconds: 600, note: 'recheck' }), 'claude');
     await until(() => store.getRun(p.id)?.status === 'waiting');
-    const asked = vi.spyOn(internals(), 'unansweredQuestions').mockReturnValue(ids().map(workerId => ({ workerId, messageId: randomUUID() })));
+    const asked = vi.spyOn(runInternals(manager).workerQuestions, 'unansweredQuestions').mockReturnValue(ids().map(workerId => ({ workerId, messageId: randomUUID() })));
     const questions = await done(p.id);
     expect(cezarDoneAnswerSchema.safeParse(questions).success).toBe(true);
     expect(questions).toMatchObject({ ok: false, code: 'worker_questions' });
     expect(questions.ok === false && questions.workers).toHaveLength(32);
+    expect(asked).toHaveBeenCalledWith(p.id);
     asked.mockReturnValue([]);
     const blockers = vi.spyOn(internals(), 'parentCompletionBlockers');
     for (const reason of ['outstanding', 'uncollected'] as const) {

@@ -1,3 +1,4 @@
+import * as executionSettings from '../delegation/execution-settings.ts';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -114,8 +115,8 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
     execFileSync('git', ['worktree', 'add', '-q', '--detach', parentCwd, 'HEAD'], { cwd: f.root });
     try {
       f.store.updateRun(f.parent.id, { worktreePath: parentCwd });
-      const settings = f.manager.delegationExecutionSettings(f.parent.id);
-      vi.mocked(f.manager.delegationExecutionSettings).mockReturnValue({ ...settings, cwd: parentCwd });
+      const settings = executionSettings.delegationExecutionSettings(runInternals(f.manager).active.get(f.parent.id));
+      vi.mocked(executionSettings.delegationExecutionSettings).mockReturnValue({ ...settings, cwd: parentCwd });
       write('CLAUDE.local.md', 'main checkout bytes');
       writeFileSync(join(parentCwd, 'CLAUDE.local.md'), 'explicit parent attachment');
       await spawn(['CLAUDE.local.md']);
