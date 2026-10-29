@@ -38,8 +38,9 @@ Methods are named, never cited by line number: every move shifts the lines.
    still sees the call. A map that tests reach stays reachable on the manager under the same
    name, through a getter that returns the same instance. Phase 5 moves the tests.
 7. **Tuning fields are read at use time.** Tests overwrite `wakeRetryBackoff`, `orphanBackoff`,
-   `orphanTermGraceMs`, `noWaitNudgeReplyMs` and `unreadInputGraceMs` on the instance. A module
-   reads them through the host when it uses them; a copy taken at construction ignores the test.
+   `orphanTermGraceMs`, `noWaitNudgeReplyMs` and `unreadInputGraceMs` on the instance, and the CI
+   wait tests replace `ciSupervisor` with `Object.assign`. A module reads them through the host when
+   it uses them; a copy taken at construction ignores the test.
 8. **Teardown keeps its order.** Each module owns a `dispose()` for its own timers and maps. The
    facade's `dispose` calls them in today's order, with `disposed = true` first. Maps that
    `dispose` does not clear today stay uncleared until hearsay-tools/cezarion#2064 decides.
@@ -79,9 +80,9 @@ Each module imports only from its own layer or a lower one. The facade sits on t
 | Layer | Phase | Modules |
 |---|---|---|
 | Facade | — | `workflows/run.ts`: constructor (composition root), ordered `dispose`, `activate` and `dropActive`, the public members, test-seam delegators, `execute` and `runContinuation` entry points, `cancel`, `finish`, `startRun`, `continueRun`, `move` |
-| Orchestrators | 4 | `input-delivery`, `wake-admission`, `turn-settler`, `step-session`, `continuation-session`, `run-settlement`, `continuation-acceptance`, `run-recovery` |
+| Orchestrators | 4 | `input-delivery`, `wake-admission`, `turn-nudges`, `turn-settler`, `run-settlement`, `continuation-acceptance`, `step-session`, `step-loop`, `continuation-session`, `run-recovery` |
 | Hubs | 3 | `run-line` (the scheduler line), `queued-revival`, `wait-watches`, `wait-registry`, `family-reconciler`, `human-waits`, `worker-questions`, `completion-gate`, `session-events` |
-| State owners | 2 | `maintenance-claims`, `repo-root-lease`, `attachment-writer`, `cezar-tools`, `worker-orphans`, `worker-executions`, `queued-input`, `launch-context`, `run-skills`, `worktree-autosave`, `turn-bookkeeping`, `wake-retries`, `auto-resume`, `inbox-claims`, `input-receipts` |
+| State owners | 2 | `maintenance-claims`, `repo-root-lease`, `attachment-writer`, `cezar-tools`, `worker-orphans`, `worker-executions`, `queued-input`, `launch-context`, `run-skills`, `worktree-autosave`, `turn-bookkeeping`, `wake-retries` (moved to Phase 4), `auto-resume`, `inbox-claims`, `input-receipts` |
 | Pure modules | 1 | `turn-markers`, `prompts`, `steps`, `run-guards`, `wake-ledger`, `pending-ask-facts`, `workflow-position`, `step-decisions`, `launch-settings`, `run-workspace`, `opening`, `usage-accounting`, `input-timers`, `input-batch`, plus `delegation/execution-settings.ts`, `delegation/execution-identity.ts` and `runs/run-title.ts` |
 | Shared | 0 | `types.ts`, `RunContext` |
 
@@ -106,36 +107,48 @@ Paths are under `packages/cezar/src/workflows/run/`. A path that starts with ano
 | `launch-settings.ts`, `run-workspace.ts`, `opening.ts` | 1 | hearsay-tools/cezarion#2061 | Model, effort and runner resolution for both launch paths; base ref and workspace; opening inputs and composition | — | 0 | 430 |
 | `usage-accounting.ts` | 1 | hearsay-tools/cezarion#2062 | `beginUsageInvocation`, `recordReportedCost`, `recordUsageUiEvent`, `persistUsageCheckpoint`, `recordUsagePeaks` | — | 0 | 150 |
 | `input-timers.ts`, `input-batch.ts` | 1 | hearsay-tools/cezarion#2063 | Timer clears and harness reads; pure stages of input submission and flushing | — | 0 | 160 |
-| `maintenance-claims.ts` | 2 | — | `claimForPublish`, `claimWorktreeReclaim`, `claimForBranchCleanup`, `claimWorkerCleanup` | `reclaiming` | 4–7 | 60 |
-| `repo-root-lease.ts` | 2 | — | `acquireRepoRoot` | `repoRootTail` | 3 | 50 |
-| `attachment-writer.ts` | 2 | — | `persistAttachment`, `persistPastedAttachments` | `queuedImageSeq` | 2 | 80 |
-| `cezar-tools.ts`, `preview/run-tools.ts` | 2 | — | Tool handler factory, `toolSessionRefusal` as a pure function, the automation-tools slot, preview register and stop | `automationTools`, `automationToolsWaiters` | 8 | 180 |
-| `worker-orphans.ts` | 2 | — | Orphan probe, reprobe, reap and terminate | the 8 `orphan*` fields | 4 | 220 |
-| `worker-executions.ts` | 2 | — | `beginWorkerExecution`, `finishWorkerExecution`, the termination proof; `trackTurn` and `trackDelivery` replace direct writes to `executions` | `executions`, `finalizedWorkers`, `stoppedWorkers`, `terminationWaiters` | 6 | 200 |
-| `queued-input.ts` | 2 | — | Queued and deferred messages, prompt amendments, hydration | `deferredMessages` | 9 | 240 |
-| `launch-context.ts` | 2 | — | `agentEnv`, `agentEnvForStep` (delegator stays), `automationsPart`, `agentWebhooksPart`, `sessionContextFor` | — | 5 | 170 |
-| `run-skills.ts` | 2 | — | `loadRunSkills`, `enabledSkills`, `provisionRunSkills`, `provisionLiveSlashSkill` | — | 6 | 190 |
-| `worktree-autosave.ts` | 2 | — | The autosave body; `saveWorktree` and `autosaveCleanupBlocker` delegators stay | `autosaveTasks` | 8 | 130 |
-| `turn-bookkeeping.ts` | 2 | — | Turn markers, `diffStat`, the namer; `recordTurnEnd` and `autoNameRun` delegators stay | `lastNamerKey` | 5 | 110 |
-| `wake-retries.ts` | 2 | — | Admission retry, backoff timers, retained notes | `wakeRetries`, `wakeBackoffs`, `retainedNotes` | 3 | 70 |
-| `auto-resume.ts` | 2 | — | Arm, fire, reconcile and withdraw the usage-limit resume; `deriveAccountHolds` | `autoResumeTimers` | 5 | 200 |
-| `inbox-claims.ts` | 2 | — | Claim, acknowledge, release and expire inbox claims | `inboxClaimTimers` | 10 | 90 |
-| `input-receipts.ts` | 2 | — | Consumed and unread receipts; bundled delivery and answer commits | — | 4 | 100 |
-| `run-line.ts` | 3 | — | Slot counting, `pump`, line order, launch dequeue, the stalled-queue watchdog; implements `SemaphoreParticipant` | `queue`, `pendingJobs`, `pendingContinuations`, `starting`, `waiting`, `monitoring`, `waitWakeQueuedAt`, `waitWakeAdmitted`, `forceNextPump`, `forceStarted`, `pumping`, `pumpAgain`, `pumpRepoInfo` | about 16 | 300 |
-| `queued-revival.ts` | 3 | — | Revive queued runs and continuations, for recovery and the watchdog | — | about 12 | 150 |
-| `wait-watches.ts` | 3 | — | Arm, disarm and settle timers, CI watches and process watches | `waitTimers`, `ciWatches`, `ciRetries`, `processWatches`, `processSupervisor` | 6 | 170 |
-| `wait-registry.ts` | 3 | — | Register, cancel and resolve waits, including worker, request and peer waits | `ciRegistrations` | about 12 | 400 |
-| `family-reconciler.ts` | 3 | — | `reconcileWorkerWaits` (delegator stays) and the family passes | `reconcilingWorkers`, `reconcilingFamily`, `pendingReconciliations`, `requestDeadlineTimers`, `workerResolveRetries`, `recoveryFactsPending` | about 15 | 220 |
-| `human-waits.ts`, `worker-questions.ts` | 3 | — | Open, show and withdraw human waits; route worker questions, park notices, routed answers, fallback asks | — | about 8 | 330 |
-| `completion-gate.ts` | 3 | — | Read side of the completion gate, `completionRefusal` | — | 7 | 90 |
-| `session-events.ts` | 3 | — | One session event handler and one launch preamble for both launch paths | — | about 13 | 150 |
-| `input-delivery.ts` | 4 | — | Flush, submit and acknowledge input, the idle boundary, human message delivery, routed answer delivery | — | about 12 | 550 |
-| `wake-admission.ts` | 4 | — | `parkOnWaits`, `queueWaitWake`, sessionless wakes, empty-wake retirement | — | about 12 | 250 |
-| `turn-settler.ts` | 4 | — | `settleTurn`, the turn-end carriers, `endTurn`, nudges, `parkForUser`, `openTimerAlias` | `turnEndCarriers` | 6 ports | 480 |
-| `step-session.ts`, `continuation-session.ts` | 4 | — | The two launch paths over the shared preamble and event handler | — | about 20 | 700 |
-| `run-settlement.ts` | 4 | — | `settleSuccess` (delegator stays), execution, continuation and idle settlement, the terminal steps of `dropActive` | — | about 12 | 400 |
-| `continuation-acceptance.ts` | 4 | — | Accept, checkpoint and dispatch a Continue | `continuationGenerations` | about 12 | 140 |
-| `run-recovery.ts` | 4 | — | `recover` and its passes | `recoveryScope`, `recoveryInFlight`, `adoptionTail` | about 20 | 320 |
+| `maintenance-claims.ts` | 2 | hearsay-tools/cezarion#2096 | `claimForPublish`, `claimWorktreeReclaim`, `claimForBranchCleanup`, `claimWorkerCleanup` | `reclaiming` | 4–7 | 60 |
+| `repo-root-lease.ts` | 2 | hearsay-tools/cezarion#2098 | `acquireRepoRoot` | `repoRootTail` | 3 | 50 |
+| `attachment-writer.ts` | 2 | hearsay-tools/cezarion#2097 | `persistAttachment`, `persistPastedAttachments` | `queuedImageSeq` | 2 | 80 |
+| `cezar-tools.ts`, `preview/run-tools.ts` | 2 | hearsay-tools/cezarion#2099 | Tool handler factory, `toolSessionRefusal` as a pure function, the automation-tools slot, preview register and stop | `automationTools`, `automationToolsWaiters` | 8 | 180 |
+| `worker-orphans.ts` | 2 | hearsay-tools/cezarion#2100 | Orphan probe, reprobe, reap and terminate | the 8 `orphan*` fields | 4 | 220 |
+| `worker-executions.ts` | 2 | hearsay-tools/cezarion#2102 | `beginWorkerExecution`, `finishWorkerExecution`, the termination proof; `trackTurn` and `trackDelivery` replace direct writes to `executions` | `executions`, `finalizedWorkers`, `stoppedWorkers`, `terminationWaiters` | 6 | 200 |
+| `queued-input.ts` | 2 | hearsay-tools/cezarion#2103 | Queued and deferred messages, prompt amendments, hydration | `deferredMessages` | 9 | 240 |
+| `launch-context.ts` | 2 | hearsay-tools/cezarion#2104 | `agentEnv`, `agentEnvForStep` (delegator stays), `automationsPart`, `agentWebhooksPart`, `sessionContextFor` | — | 5 | 170 |
+| `run-skills.ts` | 2 | hearsay-tools/cezarion#2106 | `loadRunSkills`, `enabledSkills`, `provisionRunSkills`, `provisionLiveSlashSkill` | — | 6 | 190 |
+| `worktree-autosave.ts` | 2 | hearsay-tools/cezarion#2108 | The autosave body; `saveWorktree` and `autosaveCleanupBlocker` delegators stay | `autosaveTasks` | 8 | 130 |
+| `turn-bookkeeping.ts` | 2 | hearsay-tools/cezarion#2101 | Turn markers, `diffStat`, the namer; `recordTurnEnd` and `autoNameRun` delegators stay | `lastNamerKey` | 5 | 110 |
+| `wake-retries.ts` | 2, moved to 4 | hearsay-tools/cezarion#2194 | Moved to Phase 4: see its Phase 4 row | — | — | — |
+| `auto-resume.ts` | 2 | hearsay-tools/cezarion#2109 | Arm, fire, reconcile and withdraw the usage-limit resume; `deriveAccountHolds` | `autoResumeTimers` | 5 | 200 |
+| `inbox-claims.ts` | 2 | hearsay-tools/cezarion#2105 | Claim, acknowledge, release and expire inbox claims | `inboxClaimTimers` | 10 | 90 |
+| `input-receipts.ts` | 2 | hearsay-tools/cezarion#2107 | Consumed and unread receipts; bundled delivery and answer commits | — | 4 | 100 |
+| `run-line.ts` | 3 | hearsay-tools/cezarion#2141, hearsay-tools/cezarion#2143 | Slot counting, `pump`, line order, launch dequeue, the stalled-queue watchdog; implements `SemaphoreParticipant` | `queue`, `pendingJobs`, `pendingContinuations`, `starting`, `waiting`, `monitoring`, `waitWakeQueuedAt`, `waitWakeAdmitted`, `forceNextPump`, `forceStarted`, `pumping`, `pumpAgain`, `pumpRepoInfo` | about 16 | 300 |
+| `queued-revival.ts` | 3 | hearsay-tools/cezarion#2145 | Revive queued runs and continuations, for recovery and the watchdog | — | about 12 | 150 |
+| `wait-watches.ts` | 3 | hearsay-tools/cezarion#2144 | Arm, disarm and settle timers, CI watches and process watches | `waitTimers`, `ciWatches`, `ciRetries`, `processWatches`, `processSupervisor` | 6 | 170 |
+| `wait-registry.ts` | 3 | hearsay-tools/cezarion#2146, hearsay-tools/cezarion#2147 | Register, cancel and resolve waits, including worker, request and peer waits | `ciRegistrations` | about 12 | 400 |
+| `family-reconciler.ts` | 3 | hearsay-tools/cezarion#2148 | `reconcileWorkerWaits` (delegator stays) and the family passes | `reconcilingWorkers`, `reconcilingFamily`, `pendingReconciliations`, `requestDeadlineTimers`, `workerResolveRetries`, `recoveryFactsPending` | about 15 | 220 |
+| `human-waits.ts`, `worker-questions.ts` | 3 | hearsay-tools/cezarion#2142, hearsay-tools/cezarion#2149 | Open, show and withdraw human waits; route worker questions, park notices, routed answers, fallback asks | — | about 8 | 330 |
+| `completion-gate.ts` | 3 | hearsay-tools/cezarion#2150 | Read side of the completion gate, `completionRefusal` | — | 7 | 90 |
+| `session-events.ts` | 3 | hearsay-tools/cezarion#2151 | One session event handler and one launch preamble for both launch paths | — | about 13 | 150 |
+| `input-delivery.ts` | 4 | hearsay-tools/cezarion#2192 | Flush, submit and acknowledge input, the idle boundary (`settleIdleBoundary`), `handleAgentInputReady`, the unread and held input timers, human message delivery, the body of `deliverConversationInput`, routed answer delivery: 23 methods, moved verbatim. `sendMessage`, `respondPermission` and `steerWorker` stay on the facade | — | 26 | 500 |
+| `input-delivery.ts` (splits) | 4 | hearsay-tools/cezarion#2196 | After hearsay-tools/cezarion#2192, splits `settleIdleBoundary` (22, to about 17) and `handleAgentInputReady` (22, to about 13) inside the module | — | — | 0 |
+| `wake-retries.ts` | 4 | hearsay-tools/cezarion#2194 | `retryWaitAdmission` and `clearWakeBackoff` (delegators stay), named operations for the inline reads and writes, its `dispose` step | `wakeRetries`, `wakeBackoffs`, `retainedNotes` | 3 | 25 |
+| `wake-admission.ts` | 4 | hearsay-tools/cezarion#2197 | `parkOnWaits`, `queueWaitWake`, `deliverAdmittedWake`, sessionless wakes, empty-wake retirement, the wake budget, delivery failures, and the wait teardown (`cancelOpenWaits`, `disarmRunWaits`, `onRunDeleted`). `commitContinuation` stays for hearsay-tools/cezarion#2199 | — | 16 | 360 |
+| `turn-nudges.ts` | 4 | hearsay-tools/cezarion#2195 | The autonomous nudge, the no-wait nudge and the completion refusal: nine methods | — | 15 | 195 |
+| `turn-settler.ts` | 4 | hearsay-tools/cezarion#2198 | `settleTurn`, `takeDoneRequest` to `closeAsDone`, `endTurn` to `settledTurnOutcome`, `openTurnEndHumanWait`, `armIdleTimer`, `parkForUser`, `openTimerAlias` | `turnEndCarriers` | 23 | 470 |
+| `run-settlement.ts` | 4 | hearsay-tools/cezarion#2200 | Execution, continuation, success and idle settlement (`settleSuccess` delegator stays), `stepLeftOpen`, `unansweredWorkflowAsk` (renamed), `republishFinishVerdict`, and the tail of `dropActive` after `store.unpin`. `dropActive` stays on the facade | — | 16 | 460 |
+| `continuation-acceptance.ts` | 4 | hearsay-tools/cezarion#2199 | Accept, checkpoint, commit (`commitContinuation`) and dispatch a Continue; `failCrashedContinuation` (delegator stays). `continueRun` stays on the facade | `continuationGenerations` | 10 | 155 |
+| `step-session.ts`, `session-events.ts` | 4 | hearsay-tools/cezarion#2201 | `runAgentStep`, `stepOpening`, `startStepSession`, `awaitStepSession`, `releaseStepSession`. The shared launch helpers (`stepProfileFor`, `launchStale`, `launchOpening`, `launchSystemTail`, `persistWorkerAssistantResult`, `makeUiSink`, the runner UI handlers, `disposedSessionEvent`, `recordSessionFault`, `markTurnBoundary`) go to `session-events.ts` | — | 6, plus one 13-member shared-helper host | 460, of which about 160 go to `session-events.ts` |
+| `run-recovery.ts` | 4 | hearsay-tools/cezarion#2202 | `recover`, `adoptOrphanedRun` and their passes | `recoveryScope`, `recoveryInFlight`, `adoptionTail` | 20 | 350 |
+| `step-loop.ts` | 4 | hearsay-tools/cezarion#2203 | Twelve methods behind `execute`: start, worktree, the step loop, check steps, `requeueWhileHeld`. `execute` stays on the facade | — | 7, plus the `run-settlement` and `step-session` instances | 480 |
+| `continuation-session.ts` | 4 | hearsay-tools/cezarion#2204 | The part of `runContinuation` after `unmarkStarting`, under a new name: workspace, repository-root lease, worktree, settings and skills, prelaunch stops, start, await and release. `runContinuation` keeps its head on the facade | — | 15, plus the `run-settlement` instance | 540 |
+
+Phase 4 rows come from the check against `main` at `97335b352`. Their host counts callbacks after
+Phase 2 and 3 modules are passed as instances, and their lines are gross lines out of `run.ts`,
+before delegators and wiring come back. Two Phase 4 children change tests only:
+hearsay-tools/cezarion#2193 pins the disposal routes (question 2 in
+[Behavior questions](#behavior-questions)), and hearsay-tools/cezarion#2205 fixes a spy that no
+code reaches.
 
 The methods that hearsay-tools/cezarion#2044 and hearsay-tools/cezarion#2049 split out of
 `submitAgentInput` and `flushAgentInputs` (`recordAgentInputTurn`, `admitsAgentInput`,
@@ -143,7 +156,9 @@ The methods that hearsay-tools/cezarion#2044 and hearsay-tools/cezarion#2049 spl
 `flushAgentInputBatch`) go to `input-delivery.ts`; their pure parts go to `input-batch.ts`.
 
 A module whose host would pass about 12 members waits until its dependencies have moved, so its
-host shrinks. That is why the orchestrators come last.
+host shrinks. That is why the orchestrators come last. After Phase 3, three Phase 4 hosts are still
+well over 12: `input-delivery` (26), `turn-settler` (23) and `run-recovery` (20). The planner
+accepted them; Phase 5 narrows them.
 
 ## Phases and exits
 
@@ -153,10 +168,21 @@ host shrinks. That is why the orchestrators come last.
 | 1 Pure modules | about 9 | 1,700 | 8,800 | `run.ts` is under 524,288 bytes, so Squeal checks its complexity again |
 | 2 State owners | about 14 | 2,100 | 6,900 | Each moved field has one owning module |
 | 3 Hubs | about 8 | 1,800 | 5,300 | Only `activate` and `dropActive` write shared state |
-| 4 Orchestrators | about 8 | 2,800 | 2,900 | No function in `run.ts` or `workflows/run/` is over complexity 20 |
+| 4 Orchestrators | about 14 | 3,900 | 2,100 | No function in `run.ts` or `workflows/run/` is over complexity 20 |
 | 5 Thin the facade | 6 or more | 1,900 | at most 1,000 | `run.ts` has no entry in `file-length.baseline.json` |
 
-"After" includes the delegators and wiring that each phase adds to the facade.
+"After" includes the delegators and wiring that each phase adds to the facade. The Phase 4 row
+was measured again before its children were filed; the first estimate was about 8 pull requests,
+2,800 lines out and 2,900 after.
+
+Results so far:
+
+- Phase 1: `run.ts` went from 10,486 lines and 600,109 bytes to 9,251 lines and 533,544 bytes. The
+  byte exit missed by 9,256 bytes, because the delegators that test seams need stay in the facade.
+- Phase 2: 14 pull requests; 9,251 lines to 7,510 lines and 439,702 bytes, under 524,288 bytes, so
+  Squeal checks the complexity of `run.ts` again.
+- Phase 3: 7,510 lines to 6,048 lines and 353,889 bytes at `97335b352`, with
+  hearsay-tools/cezarion#2151 still open.
 
 **Phase 0.** hearsay-tools/cezarion#2053 widens the guards before any code moves into
 `workflows/run/`. hearsay-tools/cezarion#2054 then adds the shared types, which removes the eight
@@ -169,7 +195,9 @@ complexity 20 while they move.
 **Phase 2.** Order: maintenance claims, repo-root lease and attachments first (no hot paths); then
 the cezar tools, where a pure `toolSessionRefusal` breaks the cycle between the tools and the
 waits; then worker orphans before worker executions; queued input and launch context; run skills;
-autosave and turn bookkeeping; wake retries and auto-resume; inbox claims and input receipts.
+autosave and turn bookkeeping; auto-resume; inbox claims and input receipts. The wake-retries
+move went to Phase 4 (hearsay-tools/cezarion#2194): it is about 25 lines and had to follow
+hearsay-tools/cezarion#2060.
 
 **Phase 3.** `run-line` first: every write from outside becomes a named operation (`enqueueJob`,
 `park`, `unpark`, `joinPool`, `leavePool`, `admitWake`, `forget`), and compatibility getters keep
@@ -179,12 +207,44 @@ stay synchronous and re-entrant through `onDelegationRun`; human waits and worke
 after the `parkForUser` call moves out of `askParentForWorker` into its only caller; the
 completion gate; session events.
 
-**Phase 4.** Input delivery, then wake admission. Turn settlement after PR
-hearsay-tools/cezarion#2026 merges; hearsay-tools/cezarion#1534 is the history of `settleTurn`, and
-AGENTS.md's rule on merging handlers applies. The two launch paths, after the disposal
-difference in [Behavior questions](#behavior-questions) is pinned. Run settlement, Continue
-acceptance, and recovery last: recovery is a leaf with a wide host and pays off only after its
-neighbors move.
+**Phase 4.** The order follows the measured sizes and the hosts. At most two move PRs are open;
+while hearsay-tools/cezarion#2151 is open, it counts as one of them.
+
+1. The disposal pin first: hearsay-tools/cezarion#2193 pins both launch paths' disposal routes
+   (question 2 in [Behavior questions](#behavior-questions)) before any PR shares code between
+   them. It changes tests only.
+2. Input delivery moves verbatim (hearsay-tools/cezarion#2192), including `settleIdleBoundary` and
+   `handleAgentInputReady` at complexity 22. hearsay-tools/cezarion#2196 then splits them inside
+   `input-delivery.ts`. Decision 5 allows a split during a move only in Phase 1, and a split
+   inside `run.ts` would grow its pinned length. The split touches only `input-delivery.ts`, so it
+   may run beside any wave after the move.
+3. Wake retries before wake admission: hearsay-tools/cezarion#2194 gives the three maps one owner,
+   so hearsay-tools/cezarion#2197 takes `WakeRetries` instead of three raw maps.
+4. The nudges before the settler: with the nudges, `turn-settler.ts` measures about 660 lines, so
+   hearsay-tools/cezarion#2195 moves them first. Turn settlement (hearsay-tools/cezarion#2198) then
+   follows PR hearsay-tools/cezarion#2026, which has merged; hearsay-tools/cezarion#1534 is the
+   history of `settleTurn`, and AGENTS.md's rule on merging handlers applies.
+5. Continue acceptance (hearsay-tools/cezarion#2199) and run settlement
+   (hearsay-tools/cezarion#2200) before the launch paths. Settlement code sits inside both launch
+   paths. Moving it first removes about 8 callbacks from each launch-path host, and no code moves
+   twice.
+6. The step session (hearsay-tools/cezarion#2201) and recovery (hearsay-tools/cezarion#2202), then
+   the step loop (hearsay-tools/cezarion#2203) and the Continue session
+   (hearsay-tools/cezarion#2204). The launch paths wait for hearsay-tools/cezarion#2151, the
+   disposal pin and settlement.
+
+An orchestrator calls another orchestrator through its host, as a lazy callback to the
+`RunManager` member, never by importing it. One exception: a launch-path module (`step-loop.ts`,
+`continuation-session.ts`) takes the `run-settlement.ts` instance, and `step-loop.ts` also takes
+the `step-session.ts` instance. Neither callee calls back into a launch path, so the edges have no
+cycle, and the constructor builds the callees first.
+
+A module imports the Phase 1 pure functions it needs instead of taking the manager's one-line
+wrapper. Tests spy on three wrappers on the manager, so these stay host calls: `automaticWakes`
+(`waits-parity-cells.testkit.ts`, row U7m), `executionBlockedByRootFinish` and
+`hasUnansweredHumanAsk` (`ci-wait-registration.test.ts`). A module that imports
+`canProceedWithRun` passes it the host's `workerExecutionStopped` and
+`executionBlockedByRootFinish`, which tests also spy on.
 
 **Phase 5.** `delegation/service.ts` types its manager as a narrow port of the members it uses, as
 `server/repo-branches.ts` already does with `Pick<RunManager, 'isActive' | 'claimForBranchCleanup'>`.
@@ -205,7 +265,11 @@ The PR body states each of these:
 - The reader sweep: every guard, test, doc and comment that names a moved member, and what
   changed in each.
 - For a move in a wait, turn-end, failure or step-settlement path: the `core/*-parity` and
-  `workflows/*-parity` verdicts.
+  `workflows/*-parity` verdicts. For this epic, the owner set this rule on 2026-10-29: a verbatim
+  move relies on CI's Vitest shards for those verdicts. A PR that is not a verbatim move (a split,
+  a handler merge, a call-order change, shared launch-path code, or a test change) also runs both
+  parity globs locally with `npm test`, never through Squeal, before the PR. This is an exception
+  to AGENTS.md § Runner regressions ship with shared coverage, for this epic only.
 - The new `run.ts` entry in `file-length.baseline.json`.
 
 Review asks one question of every move: does any test wrap or spy on a moved method, and does
@@ -228,7 +292,7 @@ Each order below is load-bearing: other code reaches a correct state because of 
 | `recover` | Facts, orphan settlement, `reconcileWorkerWaits`, scratch, per-run recovery, family reconcile, the scope clear in `finally`, messages, routed answers, re-armed wakes, `reconcileAutoResumes`, and `pump` last | `run-recovery` |
 | `releaseContinuationSession` | Revoke the CI tools and the delegation, record usage peaks, clear the idle and autosave timers, await `saveWorktree`, check for a late cancel, `dropActive`, queue the workflow remainder, then `pump` | `continuation-session` |
 | Session `onEvent` (both launch paths) | Disposed check, image, text (clear timers, note nudge content, append, strip markers), unconsumed input, tool events, raw event, cost, error (then return), the session-error short-circuit, session id, token usage, `ScheduleWakeup`, turn end. The return points decide what is persisted | `session-events` |
-| `queueCompletionRefusal` | The refusal is enqueued with its charge in one commit, before `queueWaitWake` | facade, later `turn-settler` |
+| `queueCompletionRefusal` | The refusal is enqueued with its charge in one commit, before `queueWaitWake` | facade, later `turn-nudges` (hearsay-tools/cezarion#2195) |
 | `finish` | Cancel open waits, persist the root finish request, close the question, set `finishRequested`, clear the idle timer, the lifecycle event, then end the session | facade |
 | `dispose` | `disposed = true` first; orphan state cleared before termination waiters settle; wait records stay for a later manager to re-arm | facade |
 
@@ -260,16 +324,25 @@ Two kinds of seam fail differently when code moves:
   waiting. The test can stay green and prove nothing.
 
 Members that tests wrap or spy on, which must stay `RunManager` methods called through the host
-until Phase 5:
+until Phase 5. The list was checked against `main` at `97335b352`:
 
 - The 12 that `fixture-cleanup.testkit.ts` replaces: `pump`, `execute`, `runContinuation`,
   `recordTurnEnd`, `saveWorktree`, `autoNameRun`, `enforceRetention`, `finishWorkerExecution`,
   `settleSuccess`, `settleRequestedRootFinish`, `rescueStalledQueue`, `trackWorkerSessionResult`.
 - Spied: `awaitRunTermination`, `reconcileWorkerWaits`, `startRun`, `recover`, `queueWaitWake`,
   `deliverConversationInput`, `continueRun`, `settledTurnOutcome`, `submitAgentInput`,
-  `releaseSlot`, `noticeParkedWorker`, `completionGate`, `dropActive`, `parkOnWaits`,
-  `reviveQueuedRun`, `retireUnreadParentQuestion`, `armNoWaitNudgeReplyTimer`.
-- Replaced on the instance in a few tests: `agentEnvForStep`, `hydrateQueuedInput`.
+  `releaseSlot`, `noticeParkedWorker`, `completionGate`, `dropActive`, `reviveQueuedRun`,
+  `retireUnreadParentQuestion`, `armNoWaitNudgeReplyTimer`, `automaticWakes`,
+  `executionBlockedByRootFinish`, `hasUnansweredHumanAsk`, `workerExecutionStopped`, `isActive`,
+  `cancel`, `settleSuccess` (`harness-parity-cells.testkit.ts`), `settleOrphanedWorkerExecution`,
+  `routeWorkerQuestion`, `unansweredQuestions`, `parentCompletionBlockers`, `acceptDone`,
+  `sendMessage`, `discoverSkills`, `agentEnv`.
+- Replaced on the instance: `agentEnvForStep`, `hydrateQueuedInput`, `execute`
+  (`worker-destroy.test.ts`), `recordTurnEnd` (4 files), `pump` and `runContinuation`
+  (`run.test.ts`), `settleSuccess` (`worker-wait-capacity.test.ts`), `submitAgentInput`
+  (`workflow-step-completion-parity.test.ts`), and the field `ciSupervisor` (Decision 7).
+- Called, not spied: `parkOnWaits` (`worker-wait-durability.test.ts`). It keeps a delegator
+  because the test calls it, but no spy needs the host route.
 
 State that tests reach, ranked by test files: `active` (49 files, 174 sites), `pump` (22 files),
 `runContinuation` (10), `queue` (10), `execute` (9), `monitoring` (9), `agentEnvForStep` (7),
@@ -298,6 +371,12 @@ keeps their names and signatures:
 - The semaphore registers five callbacks: `busySlots`, `oldestWakeAt`, `pump`, `oldestQueuedAt`,
   `accountHolds`.
 
+These members stay on the facade with no Phase 4 issue, and their code waits for Phase 5:
+`completionGate` (complexity 20), `deferParentCompletion`, `acceptDone`, `finish`, `cancel`,
+`launchQueuedRun`, `onDelegationRun` (complexity 20), `settleRequestedRootFinish`,
+`holdContinuationForRootFinish`, `latchAgentInputError` and `steerWorker`. None is over 20, so
+the Phase 4 exit still holds.
+
 `run.ts` also keeps re-exporting the module-level names that shipped code and tests import:
 `StartRunInput`, `DelegationExecutionSettings`, `AutomationToolService`, `PastedContent`,
 `toPastedContent`, `isUntouchedCancelledRun`, and the constants and helpers tests import.
@@ -311,14 +390,24 @@ A move never answers these:
 2. Both launch paths honor a Stop or Finish accepted before the manager is disposed, by different
    routes. `awaitContinuationSession` checks `preserveRunAfterDisposal` itself. `awaitStepSession`
    returns on `isDisposedDelegatedRun` and leaves the decision to `nextAfterAgentStep` and
-   `settleExecution`. Pin both routes with a test before the two paths share code.
+   `settleExecution`. hearsay-tools/cezarion#2193 pins both routes with a test before the two
+   paths share code.
 3. The `dropActive` order invariant in [Orders that must survive](#orders-that-must-survive) has
-   no comment or test. The `run-settlement` move adds one.
-4. `unansweredWorkflowAsk` reads like a query but calls `supersedeWorkerFallback` first. Rename it
-   when it moves.
-5. `registerAsk` and `stopPreviewServer` are public, but only `run.ts` calls them;
-   `reconcileAllWorkerFamilies` has test callers only. Phase 5 makes them private or moves the
-   tests.
+   no comment or test. The `run-settlement` move (hearsay-tools/cezarion#2200) adds both.
+4. `unansweredWorkflowAsk` reads like a query but calls `supersedeWorkerFallback` first.
+   hearsay-tools/cezarion#2200 renames it when it moves.
+5. `registerAsk` and `stopPreviewServer` are public, but no shipped code outside `run.ts` calls
+   them: the only caller of each is the cezar-tools host that `run.ts` builds, which
+   `cezar-tools.ts` calls. `reconcileAllWorkerFamilies` delegates to `FamilyReconciler` and has
+   test callers only (`delegation-reconcile.test.ts`). Phase 5 makes them private, points the host
+   at the modules, or moves the tests.
+6. `stepLeftOpen` reads like a query but clears `completedStepId` as it reads.
+   hearsay-tools/cezarion#2200 moves it verbatim and notes it in the PR; a pure read is Phase 5
+   work or its own issue.
+7. `disarmRunWaits` deletes entries from `ciRegistrations`, the map that `WaitRegistry` owns, from
+   outside the registry. That goes against the Phase 3 exit. hearsay-tools/cezarion#2197 moves the
+   loop verbatim and reads the map through `WaitRegistry`; a named registry operation is Phase 5
+   work.
 
 ## Risks
 
@@ -354,7 +443,7 @@ hearsay-tools/cezarion#2050 split `submitAgentInput`, `flushAgentInputs` and `dr
 | `selectDelegationExecutionSettings` | 27 | hearsay-tools/cezarion#2057 |
 | `workerIdentity` | 25 | hearsay-tools/cezarion#2057 |
 | `recordUsageUiEvent` | 23 | hearsay-tools/cezarion#2062 |
-| `openTimerAlias` | 23 | `turn-settler`, Phase 4 |
-| `settleIdleBoundary` | 22 | `input-delivery`, Phase 4 |
-| `handleAgentInputReady` | 22 | `input-delivery`, Phase 4 |
+| `openTimerAlias` | 23 | `turn-settler` (hearsay-tools/cezarion#2198); 20 on `97335b352` |
+| `settleIdleBoundary` | 22 | hearsay-tools/cezarion#2196, after the move in hearsay-tools/cezarion#2192 |
+| `handleAgentInputReady` | 22 | hearsay-tools/cezarion#2196, after the move in hearsay-tools/cezarion#2192 |
 | `registerProcessWait` | 21 | `wait-registry`, Phase 3 |
