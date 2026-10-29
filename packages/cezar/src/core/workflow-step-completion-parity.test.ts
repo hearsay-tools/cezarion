@@ -1,7 +1,8 @@
+import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { RunRecord } from '@open-mercato/cezar-contract';
-import type { ContentBlock } from './agent-runner.ts';
+import type { RunManager } from '../workflows/run.ts';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { driveRun, promptFor, STEP_COMPLETION_CRITERIA, waitFor } from './harness-parity.testkit.ts';
 import { RunStore } from '../runs/store.ts';
@@ -26,15 +27,19 @@ describe('explicit step completion parity — hearsay-tools/cezarion#1620', () =
       const finished = (run: RunRecord | undefined) => ['done', 'review', 'failed'].includes(run?.status ?? '');
       // The text Cezar submits to the session: an earlier step's nudge names the step.
       const submitted: string[] = [];
-      const observe = ({ manager }: { manager: object }) => {
-        const engine = manager as { submitAgentInput(runId: string, state: unknown, content: ContentBlock[]): boolean };
+      let intercepted: ReturnType<typeof vi.fn>;
+      const observe = ({ manager }: { manager: RunManager }) => {
+        const engine = runInternals(manager).inputDelivery;
         const submit = engine.submitAgentInput.bind(engine);
-        engine.submitAgentInput = (runId, state, content) => {
+        engine.submitAgentInput = intercepted = vi.fn((runId, state, content) => {
           for (const block of content) if (block.type === 'text') submitted.push(block.text);
           return submit(runId, state, content);
-        };
+        });
       };
-      const nudged = (nudge: string) => submitted.some(text => text.startsWith(nudge) && text.includes(STEP_NUDGE_SUFFIX));
+      const nudged = (nudge: string) => {
+        expect(intercepted).toHaveBeenCalled();
+        return submitted.some(text => text.startsWith(nudge) && text.includes(STEP_NUDGE_SUFFIX));
+      };
       await driveRun(backend, row.scenario, run => parked(run) || finished(run), 20_000, async (fixture) => {
         let { manager, store } = fixture;
         const { runId } = fixture;

@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
@@ -29,9 +30,7 @@ function signal<T = void>() {
 
 type BoundaryHarness = {
   active: Map<string, ActiveRun>;
-  handleAgentInputReady(id: string, state: ActiveRun, session: AgentSession | undefined): void;
   flushDeferred(id: string): void;
-  flushAgentInputs(id: string): void;
   recordWorkerProcess(id: string, pid: number): void;
   trackWorkerSessionResult(id: string, session: AgentSession): Promise<void>;
 };
@@ -90,7 +89,7 @@ function launch(mode: 'fresh' | 'continuation') {
 const saved = (id: string) => { store.flush(); return readPersistedRuns(join(root, '.ai/cezar')).find(run => run.id === id)!; };
 
 it.each(['fresh', 'continuation'] as const)('%s reads the session at callback time before and after startSession returns', async mode => {
-  const ready = vi.spyOn(engine, 'handleAgentInputReady');
+  const ready = vi.spyOn(runInternals(manager).inputDelivery, 'handleAgentInputReady');
   let id = '';
   const inputId = randomUUID();
   const runner = controlledRunner(opts => {
@@ -114,7 +113,7 @@ function throwSetupAt(failure: string) {
   const error = () => { throw new Error(`setup refused: ${failure}`); };
   switch (failure) {
     case 'deferred': vi.spyOn(engine, 'flushDeferred').mockImplementation(error); break;
-    case 'inputs': vi.spyOn(engine, 'flushAgentInputs').mockImplementation(error); break;
+    case 'inputs': vi.spyOn(runInternals(manager).inputDelivery, 'flushAgentInputs').mockImplementation(error); break;
     case 'register': vi.spyOn(processes, 'registerRunProcess').mockImplementation(error); break;
     case 'record': vi.spyOn(engine, 'recordWorkerProcess').mockImplementation(error); break;
   }

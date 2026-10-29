@@ -1,3 +1,4 @@
+import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
 import { existsSync } from 'node:fs';
@@ -76,8 +77,7 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
           text: 'mock:agent-echo delay-owned-ack\nCEZ:DONE', createdAt: new Date().toISOString() };
         const session = (manager as unknown as { active: Map<string, { session: import('./agent-runner.ts').AgentSession }> }).active.get(runId)!.session;
         if (origin === 'owned') expect(manager.steerWorker(runId, input)).toBe('queued');
-        else expect((manager as unknown as { deliverMessage(id: string, content: unknown[], human: boolean): boolean })
-          .deliverMessage(runId, [{ type: 'text', text: input.text }], false)).toBe(true);
+        else expect(runInternals(manager).inputDelivery.deliverMessage(runId, [{ type: 'text', text: input.text }], false)).toBe(true);
         await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes('delay-owned-ack')));
         expect(manager.isActive(runId)).toBe(true);
         expect(session.open).toBe(true);

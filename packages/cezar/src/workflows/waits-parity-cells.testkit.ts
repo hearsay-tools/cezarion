@@ -2862,8 +2862,7 @@ function workersCells(runners: RunnerId[]): void {
       };
       expect(unanswered()).toEqual([expect.objectContaining({ workerId: w.id })]);
       const text = 'automatic steer U25';
-      expect((manager as unknown as { deliverMessage(id: string, content: unknown[], userAuthored: boolean): boolean })
-        .deliverMessage(w.id, [{ type: 'text', text }], false)).toBe(true);
+      expect(runInternals(manager).inputDelivery.deliverMessage(w.id, [{ type: 'text', text }], false)).toBe(true);
       await until(() => prompted(runner, text).length > 0);
       expect(store.readEvents(w.id).filter(event => event.type === 'human-ask-closed'))
         .toEqual([expect.objectContaining({ askSeq, reason: 'superseded' })]);

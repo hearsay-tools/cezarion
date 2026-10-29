@@ -324,7 +324,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
     const f = await conversationPair();
     const engine = runInternals(manager).line;
     const pump = vi.spyOn(runInternals(manager).line, 'pump').mockResolvedValue();
-    const submissions = vi.spyOn(manager as unknown as { submitAgentInput(runId: string, state: unknown, content: Array<{ type: string; text: string }>, ids: string[]): boolean }, 'submitAgentInput');
+    const submissions = vi.spyOn(runInternals(manager).inputDelivery, 'submitAgentInput');
     try {
       const requestIds = Array.from({ length: 32 }, () => randomUUID());
       for (const id of requestIds) await f.service.send(f.parentCaller, { id, recipientRunId: f.w.id, kind: 'request', text: 'Batch question mock:hold', timeoutSeconds: 600 });
@@ -351,8 +351,8 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       const delivered = submissions.mock.calls.filter((call, index) => call[0] === f.p.id && submissions.mock.results[index]?.value === true);
       expect(delivered).toHaveLength(1);
       expect(delivered.flatMap(call => call[3])).toEqual([wait.id, ...replyIds]);
-      expect(delivered.at(-1)?.[2][0]?.text).toContain(`Request wait ${wait.id} (outcome). Request outcomes:`);
-      expect(delivered.at(-1)?.[2][0]?.text.match(/Batch answer mock:hold/g)).toHaveLength(32);
+      expect((delivered.at(-1)?.[2][0] as { text: string })?.text).toContain(`Request wait ${wait.id} (outcome). Request outcomes:`);
+      expect((delivered.at(-1)?.[2][0] as { text: string })?.text.match(/Batch answer mock:hold/g)).toHaveLength(32);
     } finally { pump.mockRestore(); submissions.mockRestore(); f.close(); }
   }, 90_000);
 
