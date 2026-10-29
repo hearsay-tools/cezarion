@@ -32,6 +32,7 @@ import { canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending
 import { beginUsageInvocation, recordReportedCost, recordUsageUiEvent, recordUsagePeaks } from './run/usage-accounting.ts';
 import { continuationModel, continuationEffort, continuationRunner, taskModelIdentity, stepModel } from './run/launch-settings.ts';
 import { executionBaseRef, openExecutionWorktree, ownedContinuationWorkspace, executionSeedFiles, REPOSITORY_ROOT_LOCK_DISABLED_NOTE } from './run/run-workspace.ts';
+import * as launchContext from './run/launch-context.ts';
 import { continuationOpening, openingInputs } from './run/opening.ts';
 import { releaseActiveResources } from './run/drop-active.ts';
 import { agentDirectories, applyTemplate, composeSystemPrompt, expandRegistrySlashSkill, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt, withResumeContext } from './run/prompts.ts';
@@ -56,11 +57,10 @@ import { chargesBudget, chargesBudgetMessage, ciWatchRequest, hasPrWait, holdsOw
 import { assertOwnedWorkerWaitScope, assertRequestWaitScope, delegationWaitRefusal, isDelegationWait, peerWaitEntry, peerWaitOf, peerWaitResult, runsAwaitingPeer, workerListTarget, workerWaitTarget } from './wait-scope.ts';
 import { previewCdpSession, previewRunContext, type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
-import { artifactInstructions, provisionArtifactDirectory } from '../artifacts/lifecycle.ts';
+import { artifactInstructions } from '../artifacts/lifecycle.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import type { CezarToolHandlers } from '../ci-wait/controller.ts';
-import { workerIdentity, continuationDefStep, ownedWorkflow, workerStepIdentity, captureWorkerAccount, boundWorkerAccountEnv, WorkerIdentityError, type WorkerAccountBinding, type WorkerStepIdentity } from '../delegation/execution-identity.ts';
-import { buildChildEnv } from '../core/agent-env.ts';
+import { workerIdentity, continuationDefStep, ownedWorkflow, workerStepIdentity, WorkerIdentityError, type WorkerAccountBinding, type WorkerStepIdentity } from '../delegation/execution-identity.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync, realpathSync } from 'node:fs';
@@ -87,10 +87,9 @@ import {
   handoffPath,
   recordHandoffAutosave,
   recordHandoffPeriodicAutosave,
-  refreshHandoffRecords,
   seedHandoffFile,
 } from '../handoff.ts';
-import { buildSessionContext, formatSessionContextReport, type SessionContext } from '../session-context.ts';
+import type { SessionContext } from '../session-context.ts';
 // Contract VALUES, like `workspaceUiStateSchema` in workspace/migrations.ts: the attachment
 // vocabulary the routes validate with is the same one the engine stores and re-reads by, so the
 // wire and the disk can never disagree about what counts as an image (#950).
@@ -116,12 +115,6 @@ import type { AgentEvent, ContentBlock, ToolGrant } from '../core/agent-runner.t
 import { inputDeliveryOf } from '../core/agent-runner.ts';
 import { readProjectUiState, readProjectUiStateSync } from '../ui-state.ts';
 import { discoverSkills, filterDisabledTeamSkills, readDisabledTeamSkills, type Skill } from '../skills.ts';
-import { resolveCapabilities } from '../server/capabilities.ts';
-import { automationCliCommand, automationsPrompt } from '../automations/prompts.ts';
-import { registryEntry } from '../runs/webhook.ts';
-import { agentWebhooksPrompt, webhookCliCommand } from '../webhooks/prompt.ts';
-import { agentWebhooks } from '../workspace/webhooks.ts';
-import { createAutomationSkill } from '../automations/builtin-skill.ts';
 import { getTeamSkillsCached, materializeSkillToCache, TEAM_SKILL_AGENT_DIRS, waitForCachedTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
 import { MAX_SKILL_CLOSURE, namesSkillCommand, provisionSkills } from '../skills-provision.ts';
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
@@ -798,23 +791,8 @@ export class RunManager {
     }
   }
 
-  /** Env for the rolling handoff and artifacts.
-   *
-   *  `TMPDIR`/`TEMP`/`TMP` (#785) point at this run's own scratch directory
-   *  instead of the machine-wide one every agent used to share. Created and
-   *  write-probed here, on the last common path before a spawn, so an unusable
-   *  temp directory throws `AgentTempDirError` at the caller rather than
-   *  turning into empty command output inside a running agent. */
   private agentEnv(runId: string): Record<string, string> {
-    return {
-      CEZ_ARTIFACTS_DIR: provisionArtifactDirectory(this.dataDir, runId),
-      CEZ_HANDOFF_FILE: handoffPath(this.dataDir, runId),
-      CEZ_TASK_ID: runId,
-      // Shadow a path inherited from an older parent process.
-      CEZ_TODOS_FILE: '',
-      ...agentTmpEnv(this.dataDir, runId),
-      ...(this.cockpit ? { CEZ_COCKPIT_URL: this.cockpit.origin, CEZ_PROJECT_ID: this.cockpit.projectId } : {}),
-    };
+    return launchContext.agentEnv({ store: this.store, repoRoot: this.repoRoot, dataDir: this.dataDir }, this.cockpit, runId);
   }
 
   /** The pinned identity one agent step of an owned worker runs under; undefined for ordinary and internal runs. */
@@ -826,30 +804,15 @@ export class RunManager {
       : workerStepIdentity(identity, stepId);
   }
 
-  private async agentEnvForStep(
+  private agentEnvForStep(
     runId: string,
     backend: RunnerId,
     options: { recordedProfileId?: string | undefined; stepId?: string | undefined } = {},
   ): Promise<{ env: Record<string, string>; profileId: string; accountBinding?: WorkerAccountBinding | undefined }> {
-    // An owned worker binds the account its identity pinned for THIS step (#452); a legacy identity
-    // answers every step with its single run-level account, so the one-provider rule still holds there.
-    const step = this.workerStep(runId, options.stepId);
-    if (step) {
-      if (backend !== step.account.provider) throw new WorkerIdentityError('Accepted worker provider identity cannot change');
-      const env = this.agentEnv(runId);
-      return { env: { ...env, ...boundWorkerAccountEnv(step.account, buildChildEnv({ backend, extraEnv: env })) },
-        profileId: step.account.profileId, accountBinding: step.account };
-    }
-    const run = this.store.getRun(runId);
-    const profileId = options.recordedProfileId
-      ?? (backend === (run?.runner ?? 'claude') ? run?.agentProfile : undefined);
-    const resolved = await resolveProfileEnvForRoot(this.repoRoot, backend, profileId);
-    const env = { ...this.agentEnv(runId), ...resolved.env };
-    return {
-      env,
-      profileId: resolved.profile.id,
-      accountBinding: process.env.CEZ_DELEGATION === '1' ? captureWorkerAccount(resolved.profile, buildChildEnv({ backend, extraEnv: env })) : undefined,
-    };
+    return launchContext.agentEnvForStep({ store: this.store, repoRoot: this.repoRoot, dataDir: this.dataDir }, {
+      agentEnv: (id) => this.agentEnv(id),
+      workerStep: (id, stepId) => this.workerStep(id, stepId),
+    }, runId, backend, options);
   }
 
   /**
@@ -876,59 +839,11 @@ export class RunManager {
   private readonly automationToolsSlot: AutomationToolsSlot;
   setAutomationTools(tools: AutomationToolService | undefined): void { this.automationToolsSlot.setAutomationTools(tools); }
   private awaitAutomationTools(signal: AbortSignal): Promise<AutomationToolService | undefined> { return this.automationToolsSlot.awaitAutomationTools(signal); }
-  /** Automations on AND a cockpit attached: the one predicate behind the prompt part and the built-in skill. */
-  private automationsReachable(): boolean {
-    return !!this.cockpit && resolveCapabilities().automations;
-  }
-  /** The built-in skills this manager may offer now; empty unless automations are reachable. */
-  builtinSkills(): Skill[] {
-    return this.automationsReachable() ? [createAutomationSkill(automationCliCommand())] : [];
-  }
-  /** The automations part of every session's system prompt, or nothing. */
-  private automationsPart(): string | undefined {
-    return this.automationsReachable() ? automationsPrompt(automationCliCommand()) : undefined;
-  }
-  /** The "Project webhooks" part (#1576): the webhooks this project exposes to agents, read from
-   *  the registry when a session starts. Needs a cockpit to send through; nothing exposed, or an
-   *  unreadable registry, adds nothing. */
-  private async agentWebhooksPart(): Promise<string | undefined> {
-    if (!this.cockpit) return undefined;
-    const entry = await registryEntry(this.cockpit.projectId, this.repoRoot).catch(() => undefined);
-    return agentWebhooksPrompt(webhookCliCommand(), agentWebhooks(entry));
-  }
-  /**
-   * One launch's session-start context (hearsay-tools/cezarion#1584): the run's own handoff,
-   * then the project's `context.yaml` rules for this recipient, read now and rendered once.
-   * Every launch reports its outcome as one lifecycle line. Both launch sites — a fresh step
-   * and `runContinuation` — come here; a live message never does. The prefix goes into the
-   * opening message only, never the system prompt a worker inherits (#778).
-   */
+  builtinSkills(): Skill[] { return launchContext.builtinSkills(this.cockpit); }
+  private automationsPart(): string | undefined { return launchContext.automationsPart(this.cockpit); }
+  private agentWebhooksPart(): Promise<string | undefined> { return launchContext.agentWebhooksPart({ store: this.store, repoRoot: this.repoRoot, dataDir: this.dataDir }, this.cockpit); }
   private sessionContextFor(runId: string, state: ActiveRun, stepId: string, openingPrompt: string): SessionContext {
-    const run = this.store.getRun(runId);
-    const role = run?.delegation?.role === 'worker' ? 'worker' : 'parent';
-    const handoff = handoffPath(this.dataDir, runId);
-    refreshHandoffRecords(this.store, this.dataDir, runId);
-    // A backend's own slash command only works at character zero (#676); a prefix would turn
-    // it into plain text, so such a launch gets no context and keeps the read instruction.
-    const context: SessionContext = leadingSlashSkillName(openingPrompt)
-      ? { prefix: '', handoffInjected: false, reports: [{ id: 'session-context', status: 'skipped', sources: [], reason: 'the opening message is a slash command, which must stay at its start' }] }
-      : buildSessionContext({
-        projectRoot: this.repoRoot,
-        cwd: state.cwd,
-        role,
-        handoffPath: handoff,
-        variables: {
-          ...(run ? { task: run.task, 'workflow.name': run.workflow } : {}),
-          'run.id': runId,
-          role,
-          'step.id': stepId,
-          'project.root': this.repoRoot,
-          'worktree.root': state.cwd,
-          'handoff.path': handoff,
-        },
-      });
-    this.store.appendEvent(runId, { type: 'lifecycle', message: formatSessionContextReport(context.reports) });
-    return context;
+    return launchContext.sessionContextFor({ store: this.store, repoRoot: this.repoRoot, dataDir: this.dataDir }, runId, state, stepId, openingPrompt);
   }
   /** Every skill lookup in this manager goes through here, so the built-ins reach all of them. */
   private discoverSkills(): Promise<Skill[]> {
