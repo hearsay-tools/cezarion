@@ -112,10 +112,10 @@ export interface ActiveRun {
    *  blocked done at this turn end takes the second step. Every turn end sets or clears it. */
   completionNudgeAnswered?: AgentSession | undefined;
   /** Registry snapshot used to expand `/skill` follow-ups before a backend can
-   *  mistake them for its own slash commands (#676). Only `RunManager.loadRunSkills` writes it,
-   *  and only `RunManager.enabledSkills` reads it. */
+   *  mistake them for its own slash commands (hearsay-tools/cezarion#676). Only `RunSkills.loadRunSkills` writes it,
+   *  and only `RunSkills.enabledSkills` reads it. */
   skills?: Skill[];
-  /** The install a live `/name` started after its message went out (#1408); tests await it. */
+  /** The install a live `/name` started after its message went out (hearsay-tools/cezarion#1408); tests await it. */
   liveSkillProvisioning?: Promise<void>;
   /** Release for exclusive execution in the user's repository working tree.
    *  Worktree-backed runs never need it; root runs ordinarily do unless the
@@ -151,7 +151,7 @@ export interface ActiveRunInit {
  * literals; a second literal is refused by the `active-run-literal` ast-grep rule.
  *
  * The skill registry is not built here: it needs I/O after the run is registered, so
- * `RunManager.loadRunSkills` loads it, from the same two callers.
+ * `RunSkills.loadRunSkills` loads it, from the same two callers.
  */
 export function createActiveRun(init: ActiveRunInit): ActiveRun {
   return {

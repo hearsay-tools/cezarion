@@ -2,10 +2,10 @@ id: skills-write-outside-load-run-skills
 language: typescript
 severity: warning
 message: >-
-  Write a run's skills only in RunManager.loadRunSkills (workflows/run.ts), which RunManager.execute
+  Write a run's skills only in RunSkills.loadRunSkills (workflows/run/run-skills.ts), which RunManager.execute
   and RunManager.runContinuation both call. A launch path that loads the registry itself can skip
   the load, as open-mercato/cezar#811 did; call loadRunSkills there, and read the registry through
-  RunManager.enabledSkills (hearsay-tools/cezarion#1806).
+  RunSkills.enabledSkills (hearsay-tools/cezarion#1806).
 files:
   - packages/cezar/src/workflows/run.ts
   - packages/cezar/src/workflows/run/**
