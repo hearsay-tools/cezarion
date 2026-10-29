@@ -102,15 +102,20 @@ describe('turn settler entry orders', () => {
     const f = fixture();
     f.state.autonomousNudgePending = f.session;
     f.log.length = 0;
-    decide({ kind: 'park' });
-    f.settler.settleTurn('run', f.state, 'ready', { ...turn, done: true });
+    f.state.parkAfterAck = { session: f.session, monitoring: false, humanGate: true, nudgedLastTurn: true };
+    f.log.length = 0;
+    const decision = decide({ kind: 'park' });
+    f.settler.settleTurn('run', f.state, 'ready', f.settler.boundaryTurn('run', f.state, f.session, true));
+    expect(decision).toHaveBeenCalledWith(expect.objectContaining({ done: true, question: true, noWaitNudgedLastTurn: true }));
     order(f, ['gate', 'state:autonomousNudgePending', 'parkWaits', 'outcome']);
   });
 
   it('gate uses the supplied refusal without calling the gate again, and records only through the outcome seam', () => {
     const f = fixture();
-    decide({ kind: 'park', refused: true });
-    f.settler.settleTurn('run', f.state, 'gate', { ...turn, done: true }, refusal);
+    f.state.parkAfterAck = { session: f.session, monitoring: false, humanGate: true, nudgedLastTurn: true };
+    const decision = decide({ kind: 'park', refused: true });
+    f.settler.settleTurn('run', f.state, 'gate', f.settler.boundaryTurn('run', f.state, f.session, true), refusal);
+    expect(decision).toHaveBeenCalledWith(expect.objectContaining({ done: true, question: true, noWaitNudgedLastTurn: true }));
     expect(f.host.completionGate).not.toHaveBeenCalled();
     expect(f.host.settledTurnOutcome).toHaveBeenCalledWith('run', 'gate', { kind: 'park', keepsSlot: false });
     order(f, ['event:note', 'parkWaits', 'notice', 'outcome']);
@@ -247,6 +252,37 @@ describe('turn settler carrier orders', () => {
     const tail = sent ? ['replyBound', 'charge', 'event:note', 'outcome']
       : ['state:doneAtBoundary', 'event:note', 'move', 'release', 'wake', 'notice', 'outcome'];
     order(f, ['withdraw', 'state:noWaitNudgeSawContent', 'submit', ...tail]);
+  });
+
+  it('settled refusal withdraws human waits before the done carrier closes the session', () => {
+    const f = fixture();
+    decide({ kind: 'done' });
+    f.settler.settleTurn('run', f.state, 'ack', turn, refusal);
+    order(f, ['withdraw', 'state:completedStepId', 'event:lifecycle', 'cancelWaits', 'end']);
+    expect(f.host.settledTurnOutcome).not.toHaveBeenCalled();
+  });
+
+  it('completion wait notes the refusal before registering, parking and reporting the outcome', () => {
+    const f = fixture();
+    decide({ kind: 'completion-wait' });
+    f.settler.settleTurn('run', f.state, 'ack', turn, refusal);
+    order(f, ['withdraw', 'event:note', 'completionWait', 'parkWaits', 'notice', 'inPool', 'outcome']);
+  });
+
+  it.each(['no-wait', 'budget'] as const)('%s human wait opens and shows its alias before parking and recording the outcome', via => {
+    vi.useFakeTimers();
+    const f = fixture();
+    decide({ kind: 'human-wait', via });
+    f.settler.settleTurn('run', f.state, 'ack', turn);
+    order(f, ['humanAlias', 'show', 'move', 'release', 'wake', 'notice', 'inPool', 'outcome']);
+  });
+
+  it('no-wait nudge sends before recording its outcome', () => {
+    const f = fixture();
+    decide({ kind: 'nudge', cause: 'no-wait', text: 'continue', ifRefused: 'human-wait' });
+    f.settler.settleTurn('run', f.state, 'ack', turn);
+    order(f, ['sendNudge', 'outcome']);
+    expect(f.host.settledTurnOutcome).toHaveBeenCalledWith('run', 'ack', { kind: 'nudge', cause: 'no-wait', autonomous: false });
   });
 
   it('already parked non-turn-end does not park, release, or report another outcome', () => {
