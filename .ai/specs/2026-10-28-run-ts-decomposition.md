@@ -360,7 +360,7 @@ until Phase 5. The list was checked against `main` at `97335b352`:
   instance test pins every class-module field. The 12 facade members remain in this PR, while
   cleanup ownership also covers a module calling its own methods.
 - Spied: `awaitRunTermination`, `reconcileWorkerWaits`, `startRun`, `recover`,
-  `deliverConversationInput`, `continueRun`, `settledTurnOutcome`, `submitAgentInput`,
+  `deliverConversationInput`, `continueRun`, `settledTurnOutcome`,
   `releaseSlot`, `noticeParkedWorker`, `completionGate`, `dropActive`, `reviveQueuedRun`,
   `retireUnreadParentQuestion`, `armNoWaitNudgeReplyTimer`,
   `executionBlockedByRootFinish`, `hasUnansweredHumanAsk`, `workerExecutionStopped`, `isActive`,
@@ -369,8 +369,7 @@ until Phase 5. The list was checked against `main` at `97335b352`:
   `sendMessage`, `discoverSkills`, `agentEnv`.
 - Replaced on the instance: `agentEnvForStep`, `execute`
   (`worker-destroy.test.ts`), `recordTurnEnd` (4 files), `pump` and `runContinuation`
-  (`run.test.ts`), `settleSuccess` (`worker-wait-capacity.test.ts`), `submitAgentInput`
-  (`workflow-step-completion-parity.test.ts`), and the field `ciSupervisor` (Decision 7).
+  (`run.test.ts`), `settleSuccess` (`worker-wait-capacity.test.ts`), and the field `ciSupervisor` (Decision 7).
 - Wait seams moved in hearsay-tools/cezarion#2232: `queueWaitWake`, `automaticWakes`,
   `owesWake`, `parkOnWaits` and `wakeHeld` use `runInternals(manager).wakeAdmission`;
   `resolveWait` uses `.waitRegistry`. Timer and CI-watch reads use `.waitWatches`;

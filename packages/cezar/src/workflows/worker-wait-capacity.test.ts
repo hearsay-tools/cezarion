@@ -521,7 +521,6 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const engine = manager as unknown as {
       active: Map<string, { session: { sendAgentMessage(...args: unknown[]): false | Promise<void> } }>;
       settleSuccess(id: string, durable?: boolean): Promise<void>;
-      deliverMessage(id: string, content: { type: 'text'; text: string }[], human: boolean): boolean;
     };
     const state = engine.active.get(w.id)!;
     const send = vi.spyOn(state.session, 'sendAgentMessage');

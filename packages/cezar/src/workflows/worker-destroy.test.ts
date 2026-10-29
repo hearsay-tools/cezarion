@@ -526,9 +526,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
   it('synchronous dequeue hydration failure still finalizes the admitted generation', async () => {
     const w = await worker();
-    const engine = manager as unknown as { finishWorkerExecution(id: string): Promise<void> };
     const hydrate = vi.spyOn(runInternals(manager).queuedInput, 'hydrateQueuedInput').mockImplementation(() => { throw Error('fixture hydration failed'); });
-    releases.push(() => { void engine.finishWorkerExecution(w.id); });
+    releases.push(() => { void manager['finishWorkerExecution'](w.id); });
     manager.enqueueOwnedRun(w.id);
     await vi.waitFor(() => expect(store.getRun(w.id)?.status).toBe('failed'), { timeout: HANG_GUARD_MS });
     expect(await manager.awaitRunTermination(w.id, 100)).toBe(true);

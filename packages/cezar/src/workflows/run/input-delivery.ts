@@ -55,7 +55,6 @@ interface InputDeliveryHost {
   spendWakeAdmission(id: string, state: ActiveRun, owed: boolean): void; cancelAutomaticAtCap(id: string, waits: readonly Wait[]): void;
   reparkWithoutWaits(id: string, state: ActiveRun): void; holdPeerWakesAtCap(id: string): void;
   reconcileWorkerWaits(): void; unreadInputGraceMs(): number;
-  /** Reservation is synchronous; only an acknowledged transport may checkpoint delivery. */
   submitAgentInput(id: string, state: ActiveRun, content: ContentBlock[], inputs?: readonly string[], budget?: HumanAnswerBudget): boolean;
 }
 
@@ -287,6 +286,7 @@ export class InputDelivery {
     if (idle) this.settleIdleBoundary(runId, state, session);
   }
 
+  /** Reservation is synchronous; only an acknowledged transport may checkpoint delivery. */
   submitAgentInput(runId: string, state: ActiveRun, content: ContentBlock[], inputIds: readonly string[] = [], beforeHumanReset?: HumanAnswerBudget): boolean {
     const session = state.session;
     if (!session?.open || state.agentInputFlight || state.cancelled || state.finishRequested || state.agentInputError) return false;

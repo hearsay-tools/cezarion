@@ -98,8 +98,9 @@ it.each(['fresh', 'continuation'] as const)('%s reads the session at callback ti
     opts.onAgentInputReady?.(); opts.onAgentInputConsumed?.([inputId]);
     expect(saved(id).agentInputs?.[0]?.consumedAt).toBeUndefined();
   });
-  const setup = signal(); vi.spyOn(runInternals(manager).queuedInput, 'flushDeferred').mockImplementation(() => { setup.resolve(); });
+  const setup = signal(); const flush = vi.spyOn(runInternals(manager).queuedInput, 'flushDeferred').mockImplementation(() => { setup.resolve(); });
   id = launch(mode); const opts = await runner.started.promise; await setup.promise;
+  expect(flush).toHaveBeenCalled();
   const state = engine.active.get(id)!;
   expect(ready.mock.calls[0]).toEqual([id, state, undefined]);
   opts.onAgentInputReady?.(); opts.onAgentInputConsumed?.([inputId]);
@@ -111,10 +112,10 @@ it.each(['fresh', 'continuation'] as const)('%s reads the session at callback ti
 function throwSetupAt(failure: string) {
   const error = () => { throw new Error(`setup refused: ${failure}`); };
   switch (failure) {
-    case 'deferred': vi.spyOn(runInternals(manager).queuedInput, 'flushDeferred').mockImplementation(error); break;
-    case 'inputs': vi.spyOn(runInternals(manager).inputDelivery, 'flushAgentInputs').mockImplementation(error); break;
-    case 'register': vi.spyOn(processes, 'registerRunProcess').mockImplementation(error); break;
-    case 'record': vi.spyOn(engine, 'recordWorkerProcess').mockImplementation(error); break;
+    case 'deferred': return vi.spyOn(runInternals(manager).queuedInput, 'flushDeferred').mockImplementation(error);
+    case 'inputs': return vi.spyOn(runInternals(manager).inputDelivery, 'flushAgentInputs').mockImplementation(error);
+    case 'register': return vi.spyOn(processes, 'registerRunProcess').mockImplementation(error);
+    case 'record': return vi.spyOn(engine, 'recordWorkerProcess').mockImplementation(error);
   }
 }
 
@@ -139,9 +140,10 @@ for (const mode of ['fresh', 'continuation'] as const) {
         boundary.resolve('termination'); return closed.then(...args);
       } } as Promise<void>;
     });
-    throwSetupAt(failure);
+    const setupFailure = throwSetupAt(failure);
     const id = launch(mode); await runner.started.promise;
     expect(await boundary.promise).toBe('termination');
+    expect(setupFailure).toHaveBeenCalled();
     expect(resultSpies).toHaveLength(1);
     expect(runner.session.interrupt).toHaveBeenCalledOnce();
     expect(manager.isActive(id)).toBe(true);
@@ -156,8 +158,9 @@ it.each(['fresh', 'continuation'] as const)('%s replaces a changed PID before re
   const runner = controlledRunner(); const calls: string[] = [];
   vi.spyOn(processes, 'replaceRunProcess').mockImplementation(() => { calls.push('replace'); });
   vi.spyOn(engine, 'recordWorkerProcess').mockImplementation(() => { calls.push('record'); });
-  const setup = signal(); vi.spyOn(runInternals(manager).queuedInput, 'flushDeferred').mockImplementation(() => { setup.resolve(); });
+  const setup = signal(); const flush = vi.spyOn(runInternals(manager).queuedInput, 'flushDeferred').mockImplementation(() => { setup.resolve(); });
   const id = launch(mode); const opts = await runner.started.promise; await setup.promise;
+  expect(flush).toHaveBeenCalled();
   opts.onPidChange?.(23456);
   expect(calls).toEqual(['replace', 'record']);
   expect(processes.replaceRunProcess).toHaveBeenCalledWith(id, 23456);
@@ -167,8 +170,9 @@ it.each(['fresh', 'continuation'] as const)('%s replaces a changed PID before re
 
 it.each(['fresh', 'continuation'] as const)('%s leaves an already prepared session to its result failure handler', async mode => {
   const runner = controlledRunner();
-  const setup = signal(); vi.spyOn(runInternals(manager).queuedInput, 'flushDeferred').mockImplementation(() => { setup.resolve(); });
+  const setup = signal(); const flush = vi.spyOn(runInternals(manager).queuedInput, 'flushDeferred').mockImplementation(() => { setup.resolve(); });
   const id = launch(mode); await setup.promise;
+  expect(flush).toHaveBeenCalled();
   runner.result.reject(new Error('provider refused'));
   await fixtureWorkSettled(root);
   expect(saved(id)).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('provider refused') });
