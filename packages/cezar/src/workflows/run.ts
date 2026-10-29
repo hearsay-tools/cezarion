@@ -1,8 +1,10 @@
+import { TurnBookkeeper } from './run/turn-bookkeeping.ts';
 import { AutomationToolsSlot, cezarToolHandlers, toolSessionRefusal } from './run/cezar-tools.ts';
 import { registerPreviewServer, stopPreviewServer } from '../preview/run-tools.ts';
 import { AttachmentWriter } from './run/attachment-writer.ts';
 import { RepoRootLease } from './run/repo-root-lease.ts';
 import { MaintenanceClaims } from './run/maintenance-claims.ts';
+import { WorkerOrphans } from './run/worker-orphans.ts';
 import type {
   DelegationExecutionSettings, StartRunInput, PendingContinuation, ExecutionEmit,
   Execution, ExecutionLaunch, StepLoop, SessionTurn, LaunchDelegation,
@@ -67,12 +69,12 @@ import {
 } from '../core/ask.ts';
 import { type AgentSession } from '../core/claude-cli-runner.ts';
 import { hasRegisteredRunProcess, onUsage, registerRunProcess, replaceRunProcess, type ProcessUsage } from '../core/process-usage.ts';
-import { isSessionLeader, processGroupAlive, processGroupOf, sessionGroupOf, signalProcessGroup } from '../core/session-process.ts';
+import { isSessionLeader, sessionGroupOf } from '../core/session-process.ts';
 import { ProcessWaitSupervisor, probeProcessWait } from '../process-wait/supervisor.ts';
 import { confineExitFile, type ExitFileRoots } from '../process-wait/exit-file.ts';
 import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
 import { noJitter, ORPHAN_BACKOFF, retryDelayMs, WAKE_RETRY_BACKOFF, type Backoff } from '../delegation/retry-backoff.ts';
-import { inspectExecutionGeneration, isCurrentProcess, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive, sharedCwdScan, type CwdSource, type GenerationProbe, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
+import { processStartToken, recordedProcessLive, type CwdSource } from '../delegation/process-liveness.ts';
 import { parseUsageLimit } from '../core/usage-limit.ts';
 import { startManagedSession } from '../core/managed-session.ts';
 import { createRunner } from '../core/runner-factory.ts';
@@ -125,7 +127,7 @@ import { MAX_SKILL_CLOSURE, namesSkillCommand, provisionSkills } from '../skills
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelSettings } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
-import { autosaveCommit, type AutosaveOutcome, type AutosaveReason, worktreeDiff, worktreeShortstat } from '../git-worktree.ts';
+import { autosaveCommit, type AutosaveOutcome, type AutosaveReason, worktreeDiff } from '../git-worktree.ts';
 import { runGroupedCommand } from './grouped-command.ts';
 import {
   resolveWorktreeSetup,
@@ -158,13 +160,11 @@ import {
   AgentTempDirError,
   agentTmpEnv,
   agentTmpDirEnabled,
-  agentTmpDirLocationEvidence,
   resolveAgentTmpDir,
   removeAgentTmpDir,
 } from '../runs/agent-tmpdir.ts';
 import { extractTaskRefs, refineTaskRefs } from '../runs/task-refs.ts';
-import { parseTaskMarkers, stripTaskMarkers } from '../runs/task-markers.ts';
-import { autoNamingActive, generateRunName, liveTitleUpdatesEnabled, postValidateTitle } from '../runs/auto-name.ts';
+import { stripTaskMarkers } from '../runs/task-markers.ts';
 import { reviewGateEnabled } from '../runs/review-gate.ts';
 import { AgentAccountUnavailableError, resolveProfileEnvForRoot } from '../workspace/agent-profiles.ts';
 import { DEFAULT_AGENT_ACCOUNT_ID } from '../workspace/agent-accounts.ts';
@@ -365,8 +365,6 @@ export function isUntouchedCancelledRun(run: RunRecord): boolean {
     run.steps.every(step => step.status === 'pending' && !step.startedAt && !step.sessionId);
 }
 
-/** #469: how long a non-gone orphan probe stands before the next scan. */
-const ORPHAN_PROBE_CACHE_MS = 2_000;
 /** #469: admission refused because a process of the previous generation still runs. */
 class WorkerOrphanAliveError extends Error {}
 const admissionError = (error: unknown, fallback: string) => error instanceof WorkerOrphanAliveError ? error.message : fallback;
@@ -426,7 +424,7 @@ export class RunManager {
     this.executions.set(runId, { generation, admitted, promise, resolve, sessions: new Set(), turns: new Set(), deliveries: new Set() });
     this.finalizedWorkers.delete(runId);
     // #469: an earlier generation's destroy blocker never describes this one.
-    this.orphanBlockers.delete(runId); this.reportedOrphanBlockers.delete(runId);
+    this.orphans.forgetBlockers(runId);
     this.stoppedWorkers.delete(runId);
   }
 
@@ -469,218 +467,17 @@ export class RunManager {
     } catch { /* Finalized in this process; preserve exact generation for an explicit retry. */ }
   }
 
-  /** #469: the generation a dead controller left `starting`, if this manager may judge it. A
-   * generation this process controls is never judged here: the in-memory execution map owns it,
-   * and a disposed manager's still-running sessions look like orphans. `busy` is transient (this
-   * manager holds the run); `unknown` is a present record that proves nothing. */
-  private orphanState(runId: string, admitting = false):
-    | { state: 'none' | 'busy' | 'unknown' }
-    | { state: 'orphan'; generation: string; record?: WorkerProcessRecord; paths: string[]; pathsComplete: boolean } {
-    const run = this.store.getRun(runId);
-    if (run?.delegation?.role !== 'worker' || this.disposed) return { state: 'none' };
-    if (this.executions.has(runId) || this.active.has(runId) || this.starting.has(runId) || (!admitting && this.queue.includes(runId))) return { state: 'busy' };
-    const proof = this.store.readWorkerExecution(runId);
-    if (proof?.phase !== 'starting') return { state: 'none' };
-    const record = this.store.readWorkerProcesses(runId, proof.generation);
-    // A present record that proves nothing (unreadable, malformed, another generation) blocks both
-    // finalization and reaping; only an absent one is legacy, scan-only evidence.
-    if (record === 'unknown') return { state: 'unknown' };
-    if (record !== 'absent' && isCurrentProcess(record.controller)) return { state: 'none' };
-    // Legacy execution proof also considers scratch holders; cleanup uses a separate strict proof.
-    const locations = agentTmpDirLocationEvidence(this.dataDir, runId);
-    return { state: 'orphan', generation: proof.generation, ...(record === 'absent' ? {} : { record }),
-      paths: [run.delegation.workspace.path, ...locations.paths], pathsComplete: locations.complete };
-  }
-
-  private orphanedWorkerGeneration(runId: string, admitting = false) {
-    const orphan = this.orphanState(runId, admitting);
-    return orphan.state === 'orphan' ? orphan : undefined;
-  }
-
-  /** Settles a crashed generation after exit proof. Sync and signal-free; recovery, resume,
-   * delivery, collect and destroy then take their normal paths.
-   * A non-gone probe is cached briefly: on darwin the scan is a synchronous `lsof` on the event loop. */
-  settleOrphanedWorkerExecution(runId: string, opts: { admitting?: boolean; fresh?: boolean; cwds?: CwdSource } = {}): boolean {
-    const orphan = this.orphanedWorkerGeneration(runId, opts.admitting);
-    if (!orphan) return false;
-    const cached = this.orphanProbes.get(runId);
-    if (!opts.fresh && cached?.generation === orphan.generation && Date.now() - cached.at < ORPHAN_PROBE_CACHE_MS) return false;
-    const probe = inspectExecutionGeneration({ ...orphan, cwds: opts.cwds });
-    if (probe.liveness !== 'gone') { this.orphanProbes.set(runId, { generation: orphan.generation, at: Date.now(), probe }); return false; }
-    // A stale `alive` must not outlive a `gone` probe, even when the commit below fails.
-    this.orphanProbes.delete(runId);
-    try {
-      if (!this.store.commitWorkerExecutionComplete(runId, orphan.generation)) return false;
-    } catch { return false; }
-    this.orphanProbes.delete(runId); this.orphanBlockers.delete(runId); this.reportedOrphanBlockers.delete(runId); this.clearOrphanReprobe(runId);
-    this.store.appendEvent(runId, { type: 'lifecycle', message: "the interrupted worker's processes are gone; its execution was finalized" });
-    this.reapTerminalScratch(runId);
-    return true;
-  }
-
-  private readonly orphanProbes = new Map<string, { generation: string; at: number; probe: GenerationProbe }>();
-  /** Pending orphan reprobes by run id. One timer serves them all (hearsay-tools/cezarion#879). */
-  private readonly orphanDue = new Map<string, { generation: string; at: number; attempts: number }>();
-  private orphanTimer?: NodeJS.Timeout | undefined;
-  /** The `at` the timer was armed for; with the clock, it decides what a tick takes. */
-  private orphanArmedFor = 0;
-  private readonly orphanBlockers = new Map<string, WorkerTerminationBlocker>();
-  private readonly reportedOrphanBlockers = new Map<string, string>();
-  // Private and overridable so tests need not wait out production cadence.
+  private readonly orphans: WorkerOrphans;
   private orphanBackoff: Backoff = ORPHAN_BACKOFF;
   private orphanTermGraceMs = 10_000;
-
-  /** #469: a survivor that dies after recovery has no other wake source (no exit callback for a
-   * process another cezar spawned). Unref'd; finalization's `run` event then lets worker waits and
-   * outcomes observe it. Every 15 s for the first 15 minutes, then backing off to hourly
-   * (hearsay-tools/cezarion#879), so a long-lived survivor is still noticed when it exits. One
-   * timer serves every orphan, and a tick shares one `/proc` scan across them. A tick while this
-   * manager holds the run is skipped; only terminal reasons (proof settled, generation changed,
-   * run gone, unknown record, dispose) stop it. */
-  private armOrphanReprobe(runId: string): void {
-    const armed = this.orphanedWorkerGeneration(runId);
-    if (this.disposed || this.orphanDue.has(runId) || !armed) return;
-    this.orphanDue.set(runId, { generation: armed.generation, at: Date.now() + retryDelayMs(0, this.orphanBackoff, noJitter), attempts: 0 });
-    this.wakeOrphanReprobes();
-  }
-
-  private wakeOrphanReprobes(): void {
-    clearTimeout(this.orphanTimer); this.orphanTimer = undefined;
-    if (this.disposed || !this.orphanDue.size) return;
-    let next = Infinity;
-    for (const { at } of this.orphanDue.values()) next = Math.min(next, at);
-    this.orphanArmedFor = next;
-    this.orphanTimer = setTimeout(() => this.orphanReprobeTick(), Math.max(0, next - Date.now()));
-    this.orphanTimer.unref?.();
-  }
-
-  private orphanReprobeTick(): void {
-    this.orphanTimer = undefined;
-    if (this.disposed) return;
-    // Orphans due within 5 % of the fast cadence ride along, so near neighbours share the scan, and
-    // every orphan this tick keeps is re-armed from the same instant, so they stay together.
-    const now = Date.now();
-    const dueBy = Math.max(this.orphanArmedFor, now) + this.orphanBackoff.fastMs / 20;
-    const cwds = sharedCwdScan();
-    for (const [runId, pending] of [...this.orphanDue]) {
-      if (pending.at > dueBy) continue;
-      this.orphanDue.delete(runId);
-      const orphan = this.orphanState(runId);
-      let attempts = pending.attempts;
-      if (orphan.state !== 'busy') {
-        // Ticks are seconds apart, so the brief probe cache would only skip them: probe fresh.
-        if (orphan.state !== 'orphan' || orphan.generation !== pending.generation ||
-          this.settleOrphanedWorkerExecution(runId, { fresh: true, cwds })) continue;
-        attempts++;
-      }
-      this.orphanDue.set(runId, { ...pending, attempts, at: now + retryDelayMs(attempts, this.orphanBackoff, noJitter) });
-    }
-    this.wakeOrphanReprobes();
-  }
-
-  private clearOrphanReprobe(runId: string): void {
-    this.orphanDue.delete(runId);
-  }
-
-  /** Why the last destroy could not prove termination (#469), and whether that differs from the
-   * reason last reported, so a retry loop appends one lifecycle event per distinct blocker set. */
-  takeWorkerTerminationBlocker(runId: string): { blocker: WorkerTerminationBlocker; changed: boolean } | undefined {
-    const blocker = this.orphanBlockers.get(runId);
-    if (!blocker) return undefined;
-    const key = JSON.stringify(blocker);
-    const changed = this.reportedOrphanBlockers.get(runId) !== key;
-    this.reportedOrphanBlockers.set(runId, key);
-    return { blocker, changed };
-  }
-
-  /** Continue over a live orphan names what still runs; other refusals keep the generic text. */
-  private orphanAdmissionRefusal(runId: string): string | undefined {
-    const orphan = this.orphanedWorkerGeneration(runId, true);
-    const probe = orphan && this.orphanProbes.get(runId);
-    if (!probe || probe.generation !== orphan.generation) return undefined;
-    if (probe.probe.controller !== undefined) return `the worker is still controlled by a live cezar (pid ${probe.probe.controller})`;
-    const pid = probe.probe.pids[0];
-    return pid === undefined ? undefined : `a process of the previous execution is still running (pid ${pid})`;
-  }
-
-  /** Destroy only (#469): signal the recorded, token-verified survivors of a generation whose
-   * controller is proven dead, then finalize on `gone`. Scan-only processes are never signalled. */
-  private async reapOrphanedWorker(runId: string, timeoutMs: number): Promise<void> {
-    const deadline = Date.now() + Math.min(30_000, Math.max(0, Number.isFinite(timeoutMs) ? timeoutMs : 0));
-    this.orphanBlockers.delete(runId);
-    const initial = this.orphanState(runId);
-    if (initial.state === 'unknown') { this.orphanBlockers.set(runId, { kind: 'unreadable' }); return; }
-    const orphan = this.orphanedWorkerGeneration(runId);
-    if (!orphan || this.settleOrphanedWorkerExecution(runId, { fresh: true })) return;
-    const same = () => this.orphanedWorkerGeneration(runId)?.generation === orphan.generation;
-    // >= 500 ms: every probe may be a synchronous darwin `lsof`.
-    const pause = () => new Promise(resolve => setTimeout(resolve, Math.max(0, Math.min(500, deadline - Date.now()))));
-    // A live controller is another cezar's: nothing to signal or wait for. Otherwise signal only
-    // recorded, token-verified survivors and recorded session groups (none for a legacy
-    // record-less generation), then wait for readable cwd holders until the deadline.
-    if (!orphan.record || !recordedProcessLive(orphan.record.controller)) {
-      if (orphan.record) {
-        const { processes } = orphan.record;
-        await this.terminateRecorded({
-          pids: processes.filter(entry => entry.pgid === undefined && entry.startToken !== undefined && recordedProcessLive(entry)),
-          groups: processes.filter(entry => entry.pgid !== undefined),
-          paths: orphan.paths,
-        }, deadline, pause, same);
-      }
-      while (!this.settleOrphanedWorkerExecution(runId, { fresh: true }) && Date.now() < deadline && same()) await pause();
-    }
-    if (!same()) return;
-    const probe = this.orphanProbes.get(runId)?.probe;
-    if (probe?.controller !== undefined) this.orphanBlockers.set(runId, { kind: 'controller', pid: probe.controller });
-    else if (probe?.pids.length) this.orphanBlockers.set(runId, { kind: 'processes', pids: probe.pids });
-  }
-
-  /** Destroy only: SIGTERM recorded survivors, then SIGKILL what outlives `orphanTermGraceMs`.
-   * `pids` are signalled by token-verified pid; `groups` are session leaders whose whole process
-   * group is signalled (hearsay-tools/cezarion#890), so what an agent left behind exits with it. A
-   * dead leader's group counts only while a process holding `paths` is in it. Every signal
-   * re-verifies first: a reused PID or group number is never touched. */
-  private async terminateRecorded(targets: { pids: RecordedProcess[]; groups: RecordedProcess[]; paths: readonly string[] }, deadline: number,
-    pause: () => Promise<unknown>, current: () => boolean = () => true): Promise<void> {
-    const holders = processesWithCwdUnder(targets.paths);
-    const holderGroups = () => (holders === 'unknown' ? [] : holders).map(processGroupOf).filter((pgid): pgid is number => pgid !== undefined);
-    const groups = targets.groups.filter(entry => recordedGroupSignalable(entry, holderGroups()) && processGroupAlive(entry.pgid!));
-    const living = () => targets.pids.some(recordedProcessLive) || groups.some(entry => processGroupAlive(entry.pgid!));
-    const signal = (name: NodeJS.Signals) => {
-      for (const entry of targets.pids) {
-        if (!current()) return;
-        if (processStartToken(entry.pid) === entry.startToken) try { process.kill(entry.pid, name); } catch { /* already gone */ }
-      }
-      const evidence = holderGroups();
-      for (const entry of groups) {
-        if (!current()) return;
-        if (recordedGroupSignalable(entry, evidence)) signalProcessGroup(entry.pgid!, name);
-      }
-    };
-    if (!living()) return;
-    signal('SIGTERM');
-    const killAt = Math.min(deadline, Date.now() + this.orphanTermGraceMs);
-    while (Date.now() < killAt && living()) await pause();
-    if (living()) signal('SIGKILL');
-  }
-
-  /** Destroy of a finished generation (hearsay-tools/cezarion#890): a dev server or watcher its
-   * agent left in its process group holds the worktree, and nothing else ties it to the worker.
-   * A record whose controller is another live cezar is not ours to act on. */
-  private async terminateFinishedWorkerGroups(runId: string, timeoutMs: number): Promise<void> {
-    const proof = this.store.readWorkerExecution(runId);
-    if (proof?.phase !== 'complete') return;
-    const record = this.store.readWorkerProcesses(runId, proof.generation);
-    const run = this.store.getRun(runId);
-    if (typeof record === 'string' || run?.delegation?.role !== 'worker' ||
-      (recordedProcessLive(record.controller) && !isCurrentProcess(record.controller))) return;
-    const groups = record.processes.filter(entry => entry.pgid !== undefined);
-    if (!groups.length) return;
-    const deadline = Date.now() + Math.min(30_000, Math.max(0, Number.isFinite(timeoutMs) ? timeoutMs : 0));
-    const pause = () => new Promise(resolve => setTimeout(resolve, Math.max(0, Math.min(100, deadline - Date.now()))));
-    const paths = [run.delegation.workspace.path, ...agentTmpDirLocationEvidence(this.dataDir, runId).paths];
-    await this.terminateRecorded({ pids: [], groups, paths }, deadline, pause);
-  }
+  private get orphanDue() { return this.orphans.orphanDue; }
+  private orphanedWorkerGeneration(runId: string, admitting = false) { return this.orphans.orphanedWorkerGeneration(runId, admitting); }
+  settleOrphanedWorkerExecution(runId: string, opts: { admitting?: boolean; fresh?: boolean; cwds?: CwdSource } = {}): boolean { return this.orphans.settleOrphanedWorkerExecution(runId, opts); }
+  private armOrphanReprobe(runId: string): void { this.orphans.armOrphanReprobe(runId); }
+  takeWorkerTerminationBlocker(runId: string): { blocker: WorkerTerminationBlocker; changed: boolean } | undefined { return this.orphans.takeWorkerTerminationBlocker(runId); }
+  private orphanAdmissionRefusal(runId: string): string | undefined { return this.orphans.orphanAdmissionRefusal(runId); }
+  private async reapOrphanedWorker(runId: string, timeoutMs: number): Promise<void> { return this.orphans.reapOrphanedWorker(runId, timeoutMs); }
+  private async terminateFinishedWorkerGroups(runId: string, timeoutMs: number): Promise<void> { return this.orphans.terminateFinishedWorkerGroups(runId, timeoutMs); }
 
   /** Best effort: a failed write leaves the working-directory scan as this process's evidence. */
   private recordWorkerProcess(runId: string, pid: number): void {
@@ -922,6 +719,13 @@ export class RunManager {
     this.unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
     this.noWaitNudgeReplyMs = options.noWaitNudgeReplyMs ?? NO_WAIT_NUDGE_REPLY_MS;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
+    this.orphans = new WorkerOrphans(
+      { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
+      { holds: (id, admitting) => this.executions.has(id) || this.active.has(id) || this.starting.has(id) || (!admitting && this.queue.includes(id)),
+        reapTerminalScratch: id => this.reapTerminalScratch(id),
+        settleOrphanedWorkerExecution: (id, opts) => this.settleOrphanedWorkerExecution(id, opts),
+        orphanBackoff: () => this.orphanBackoff, orphanTermGraceMs: () => this.orphanTermGraceMs },
+    );
     this.automationToolsSlot = new AutomationToolsSlot(
       { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
       () => !!this.cockpit,
@@ -940,6 +744,11 @@ export class RunManager {
       { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
       { park: id => { this.waiting.add(id); }, unpark: id => { this.waiting.delete(id); },
         releaseSlot: () => this.releaseSlot() },
+    );
+    this.turnBookkeeper = new TurnBookkeeper(
+      { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed },
+      { isDisposedDelegatedRun: id => this.isDisposedDelegatedRun(id), discoverSkills: () => this.discoverSkills(),
+        reviveWorkflow: run => this.reviveWorkflow(run), autoNameRun: (id, skill, task, live) => this.autoNameRun(id, skill, task, live) },
     );
     this.ciResources = acquireCiResources(this.semaphore);
     this.ciSupervisor = this.ciResources.supervisor;
@@ -989,8 +798,7 @@ export class RunManager {
     this.ciResources.release();
     this.delegationProvisioner = undefined;
     this.finalizedWorkers.clear();
-    this.orphanDue.clear(); clearTimeout(this.orphanTimer); this.orphanTimer = undefined;
-    this.orphanProbes.clear(); this.orphanBlockers.clear(); this.reportedOrphanBlockers.clear();
+    this.orphans.dispose();
     for (const settle of this.terminationWaiters) settle();
     this.store.off('run', this.onDelegationRun);
     this.store.off('deleted', this.onRunDeleted);
@@ -1018,7 +826,7 @@ export class RunManager {
     this.pendingJobs.clear();
     this.pendingContinuations.clear();
     this.memoryPausing.clear();
-    this.lastNamerKey.clear();
+    this.turnBookkeeper.clear();
   }
 
   /**
@@ -3159,7 +2967,7 @@ export class RunManager {
     if (!this.executions.has(runId) && this.store.getRun(runId)?.stopping) this.store.updateRun(runId, { stopping: undefined });
     this.republishFinishVerdict(runId);
     this.memoryPausing.delete(runId);
-    this.lastNamerKey.delete(runId);
+    this.turnBookkeeper.forget(runId);
     this.forceStarted.delete(runId);
     if (this.isDisposedDelegatedRun(runId)) return; // teardown above, no autonomous durable side effects
     // The run's slot is gone from busySlots() as of the deletes above — hand it
@@ -3528,8 +3336,9 @@ export class RunManager {
     }
   }
 
-  /** Last live-refresh namer inputs per run — unchanged inputs skip the call. */
-  private lastNamerKey = new Map<string, string>();
+  private readonly turnBookkeeper: TurnBookkeeper;
+  /** Test seam: the module owns this same map for its whole lifetime. */
+  private get lastNamerKey() { return this.turnBookkeeper.lastNamerKey; }
 
   private async acquireRepoRoot(runId: string, state: ActiveRun): Promise<boolean> {
     return this.repoRootLease.acquireRepoRoot(runId, state);
@@ -7762,142 +7571,16 @@ export class RunManager {
     beginUsageInvocation(this.store, runId, state, stepId);
   }
 
-  /**
-   * The namer's apply path (task auto-naming spec). Fire-and-forget: called
-   * without await from `startRun` (creation) and `recordTurnEnd` (live
-   * refresh). A user-owned title (`titleOrigin: 'user'`) is never overwritten;
-   * namer-owned titles may be replaced by fresher namer results.
-   */
-  private async autoNameRun(
-    runId: string,
-    skillName: string | undefined,
-    task: string,
-    live?: { turnText?: string; diffStat?: string | undefined },
-  ): Promise<void> {
-    // CEZ_AUTONAME=0 kills all LLM naming; dry-run skips it too unless
-    // CEZ_AUTONAME=1 forces the mock path — see autoNamingActive.
-    if (!autoNamingActive()) return;
-    try {
-      let skillDescription: string | undefined;
-      if (skillName) {
-        const skills = await this.discoverSkills().catch(() => [] as Skill[]);
-        skillDescription = skills.find((s) => s.name === skillName)?.description;
-      }
-      const result = await generateRunName(this.repoRoot, { task, skillName, skillDescription, ...live });
-      if (!result || this.isDisposedDelegatedRun(runId)) return;
-      const run = this.store.getRun(runId);
-      // Marker-owned state outranks the namer (spec 2026-07-18-task-ref-markers):
-      // a declared title blocks the whole apply (this call raced the marker),
-      // and a declared pr/issue kind blocks that kind field-by-field.
-      if (!run || run.titleOrigin === 'user' || run.titleOrigin === 'marker') return;
-      this.store.updateRun(runId, {
-        titleSummary: result.titleSummary,
-        titleOrigin: 'auto',
-        ...(result.prNumber !== undefined && run.markerRefs?.pr === undefined
-          ? { prNumber: result.prNumber }
-          : {}),
-        ...(result.issueNumber !== undefined && run.markerRefs?.issue === undefined
-          ? { issueNumber: result.issueNumber }
-          : {}),
-      });
-    } catch {
-      // Naming is best-effort — nothing here may disturb the run.
-    }
+  private async autoNameRun(runId: string, skillName: string | undefined, task: string, live?: { turnText?: string; diffStat?: string | undefined }): Promise<void> {
+    return this.turnBookkeeper.autoNameRun(runId, skillName, task, live);
   }
 
-  /**
-   * Turn-end bookkeeping (#389), shared by `runAgentStep` and
-   * `runContinuation` — called (fire-and-forget) from every `turn-end` event:
-   *
-   *  - `titleSummary`: derived from the turn's text, set ONCE — only while the
-   *    record has none. A user's inline edit also lands in `titleSummary`
-   *    (see `PATCH /api/runs/:id`), so an edit is never overwritten either.
-   *  - `diffStat`: cheap `git diff --shortstat` vs the base, refreshed every
-   *    turn. Async and best-effort — a git failure becomes at most a `note`
-   *    event, NEVER a run failure. `updateRun` fans the record out over SSE,
-   *    so the list views pick both up with no extra wiring.
-   *
-   * Not `private` so the integration tests can drive a turn-end directly —
-   * a real agent session is the only other way to reach this path.
-   */
   async recordTurnEnd(runId: string, turnText: string): Promise<void> {
-    if (this.isDisposedDelegatedRun(runId)) return;
-    try {
-      const run = this.store.getRun(runId);
-      if (!run) return;
-      this.applyTurnMarkers(runId, run, turnText);
-      // Titles are the namer's job (task auto-naming spec) — turn text is
-      // deliberately NEVER a title source; see maybeRefreshTitle below. The
-      // one exception is an explicit CEZ:TITLE declaration (applied above).
-      if (run.worktreePath && existsSync(run.worktreePath)) {
-        // `taskBranch` + `runStartedAt` are what keep this number *this task's* (#751): a
-        // review/QA run repoints the worktree onto the branch under review, and without the
-        // branch to compare HEAD against and the moment it was checked out, the stat would
-        // claim that whole branch's diff.
-        const stat = await worktreeShortstat(run.worktreePath, run.baseBranch ?? 'HEAD', {
-          taskBranch: run.branch,
-          runStartedAt: run.startedAt,
-        });
-        if (this.isDisposedDelegatedRun(runId)) return;
-        if (stat) this.store.updateRun(runId, { diffStat: stat });
-        else this.store.appendEvent(runId, { type: 'note', message: 'diff stat unavailable — git diff --shortstat failed in the worktree' });
-      }
-      await this.maybeRefreshTitle(runId, turnText);
-    } catch {
-      // Bookkeeping only — nothing here may disturb the run.
-    }
+    return this.turnBookkeeper.recordTurnEnd(runId, turnText);
   }
 
-  /**
-   * In-band declarations from the finished turn (spec
-   * 2026-07-18-task-ref-markers): the main thread's own `CEZ:PR=` /
-   * `CEZ:ISSUE=` / `CEZ:TITLE=` lines, parsed from the accumulated turn text
-   * like `CEZ:DONE` — never from tool output. Declared numbers overwrite the
-   * regex/namer display tier (the store re-resolves the referenced-PR chip);
-   * a declared title takes `titleOrigin: 'marker'`, which beats the namer but
-   * never a user rename, and silences the live refresh below.
-   */
-  private applyTurnMarkers(runId: string, run: RunRecord, turnText: string): void {
-    const markers = parseTaskMarkers(turnText);
-    if (markers.pr !== undefined || markers.issue !== undefined) {
-      this.store.applyMarkerRefs(runId, { pr: markers.pr, prs: markers.prs, issue: markers.issue });
-    }
-    if (markers.title && run.titleOrigin !== 'user') {
-      const current = this.store.getRun(runId);
-      const promptRefs = extractTaskRefs(run.task);
-      const promptIssue = promptRefs.issueNumber ?? (promptRefs.prNumber === undefined ? promptRefs.ambiguousNumber : undefined);
-      const refNumber = promptRefs.prNumber === undefined && promptIssue !== undefined && promptIssue === current?.issueNumber
-        ? current.issueNumber : current?.prNumber ?? current?.issueNumber;
-      const validated = postValidateTitle(markers.title, refNumber);
-      // Same junk guard as composeNameResult: a declaration that validates to
-      // nothing (or to a bare number prefix) must not blank the title.
-      if (validated && validated !== `${refNumber}:`) {
-        this.store.updateRun(runId, { titleSummary: validated, titleOrigin: 'marker' });
-      }
-    }
-  }
-
-  /**
-   * Live title refresh (task auto-naming spec, step 3): re-run the namer with
-   * the turn's context. Skips: toggle off (`liveTitleUpdates` config over
-   * `CEZ_TITLE_UPDATES` env, default ON), user-owned title, marker-owned title
-   * (the agent declares via `CEZ:TITLE` — the token-saving fast path), dry-run
-   * mocks (canned answers add nothing), empty turn text, unchanged namer inputs.
-   */
   private async maybeRefreshTitle(runId: string, turnText: string): Promise<void> {
-    if (!autoNamingActive()) return;
-    if (!turnText.trim()) return;
-    const config = await loadConfig(this.repoRoot);
-    if (!liveTitleUpdatesEnabled(config)) return;
-    const run = this.store.getRun(runId);
-    if (!run || run.titleOrigin === 'user' || run.titleOrigin === 'marker') return;
-    const statText = run.diffStat ? `${run.diffStat.files} files, +${run.diffStat.adds} -${run.diffStat.dels}` : undefined;
-    const key = `${turnText.slice(0, 200)}|${statText ?? ''}`;
-    if (this.lastNamerKey.get(runId) === key) return;
-    this.lastNamerKey.set(runId, key);
-    const workflow = await this.reviveWorkflow(run);
-    const skillName = workflow?.steps.find((s) => stepKind(s) === 'agent' && s.skill)?.skill?.trim();
-    void this.autoNameRun(runId, skillName, run.task, { turnText, diffStat: statText });
+    return this.turnBookkeeper.maybeRefreshTitle(runId, turnText);
   }
 
   private recordUsagePeaks(runId: string): void {
