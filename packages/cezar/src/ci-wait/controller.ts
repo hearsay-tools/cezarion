@@ -151,10 +151,14 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
     if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
     return fallback();
   };
-  const capabilityAnswer = async <T, R extends Response>(capability: Capability, answer: () => Promise<T>, respond: (answer: T) => R) => {
-    const result = await answer();
-    capability.lifetime.signal.throwIfAborted();
-    return respond(result);
+  const capabilityAnswer = async <T, R extends Response, F extends Response>(c: Context<{ Variables: { capability: Capability } }>, capability: Capability, answer: () => Promise<T>, respond: (answer: T) => R, fallback: () => F) => {
+    try {
+      const result = await answer();
+      capability.lifetime.signal.throwIfAborted();
+      return respond(result);
+    } catch {
+      return capabilityRevoked(c, capability, fallback);
+    }
   };
   return new Hono<{ Variables: { capability: Capability } }>()
     .use('/api/v1/tools/ci-wait', requireCapability)
@@ -257,11 +261,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
     }, jsonZodValidator(scheduleTaskRequestSchema, { invalid: (c, error) => c.json(scheduleRefusal('invalid_request', scheduleInvalidInput(error))) }), async c => {
       const capability = c.get('capability');
       if (!capability.scheduleTask) return c.json(scheduleRefusal('unavailable'));
-      try {
-        return await capabilityAnswer(capability, async () => scheduleTaskAnswerSchema.parse(await capability.scheduleTask!(c.req.valid('json'), capability.lifetime.signal)), answer => c.json(answer));
-      } catch {
-        return capabilityRevoked(c, capability, () => c.json(scheduleRefusal('unavailable')));
-      }
+      return capabilityAnswer(c, capability, async () => scheduleTaskAnswerSchema.parse(await capability.scheduleTask!(c.req.valid('json'), capability.lifetime.signal)), answer => c.json(answer), () => c.json(scheduleRefusal('unavailable')));
     })
     .use('/api/v1/tools/scheduled-tasks', requireCapability)
     .post('/api/v1/tools/scheduled-tasks', bodyLimit({ maxSize: SCHEDULED_TASK_LIMITS.wireBytes, onError: c => c.json(scheduleRefusal('invalid_request', 'The arguments exceed 1 MiB.')) }), async (c, next) => {
@@ -270,11 +270,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
     }, jsonZodValidator(scheduledTasksRequestSchema, { invalid: (c, error) => c.json(scheduleRefusal('invalid_request', scheduleInvalidInput(error))) }), async c => {
       const capability = c.get('capability');
       if (!capability.scheduledTasks) return c.json(scheduleRefusal('unavailable'));
-      try {
-        return await capabilityAnswer(capability, async () => scheduledTasksAnswerSchema.parse(await capability.scheduledTasks!(c.req.valid('json'), capability.lifetime.signal)), answer => c.json(answer));
-      } catch {
-        return capabilityRevoked(c, capability, () => c.json(scheduleRefusal('unavailable')));
-      }
+      return capabilityAnswer(c, capability, async () => scheduledTasksAnswerSchema.parse(await capability.scheduledTasks!(c.req.valid('json'), capability.lifetime.signal)), answer => c.json(answer), () => c.json(scheduleRefusal('unavailable')));
     });
 }
 export type CiToolApp = ReturnType<typeof ciToolRoutes>;
