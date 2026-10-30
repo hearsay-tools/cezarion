@@ -67,6 +67,8 @@ struct Shell {
     update_available: Mutex<Option<String>>,
     /// True while a supervisor thread is alive; the splash's "Try again" starts one when none is.
     supervising: AtomicBool,
+    /// Set under the child lock when the app quits: no supervisor starts a cockpit after it.
+    quitting: AtomicBool,
     /// A verified shell update downloaded at launch, installed only when the user quits.
     shell_update: Mutex<Option<(tauri_plugin_updater::Update, Vec<u8>)>>,
 }
@@ -404,32 +406,41 @@ fn switch_version(app: &AppHandle, shell: &Arc<Shell>, id: &str) -> bool {
     true
 }
 
-/// A new version is current: restart the running cockpit on it, or start a supervisor when none
-/// is alive (the launcher, or after a failed start), so the splash never waits forever.
+/// A new version is current: restart the running (or starting) cockpit on it, ask a supervisor
+/// without one to go round again, or start a supervisor when none is alive (the launcher, or
+/// after a failed start), so the splash never waits forever. Decided under the child lock, where
+/// `supervise` publishes a cockpit and decides whether to stop.
 fn after_new_version(app: &AppHandle, shell: &Arc<Shell>) {
-    let running = shell.child.lock().unwrap().is_some();
-    match sidecar::after_new_version(running, shell.supervising.load(Ordering::SeqCst)) {
-        sidecar::AfterNewVersion::RestartRunning => restart_running(shell),
-        sidecar::AfterNewVersion::StartSupervisor => {
-            let app = app.clone();
-            let shell = shell.clone();
-            std::thread::spawn(move || supervise(app, shell));
+    let stopping = {
+        let mut guard = shell.child.lock().unwrap();
+        match sidecar::after_new_version(guard.is_some(), shell.supervising.load(Ordering::SeqCst)) {
+            sidecar::AfterNewVersion::RestartRunning => {
+                shell.restart_requested.store(true, Ordering::SeqCst);
+                guard.as_mut().map(|child| {
+                    sidecar::request_stop(child);
+                    child.id()
+                })
+            }
+            sidecar::AfterNewVersion::AskSupervisor => {
+                shell.restart_requested.store(true, Ordering::SeqCst);
+                None
+            }
+            sidecar::AfterNewVersion::StartSupervisor => {
+                let app = app.clone();
+                let shell = shell.clone();
+                std::thread::spawn(move || supervise(app, shell));
+                None
+            }
         }
-        sidecar::AfterNewVersion::LeaveToSupervisor => {}
+    };
+    if let Some(pid) = stopping {
+        kill_after_grace(shell, pid);
     }
 }
 
-/// Ask the running cockpit to shut down; its supervisor sees the exit and relaunches the current
-/// version. A cockpit still running after `STOP_GRACE` (an older cezar ignores the request) is
-/// force-killed.
-fn restart_running(shell: &Arc<Shell>) {
-    let pid = {
-        let mut guard = shell.child.lock().unwrap();
-        let Some(child) = guard.as_mut() else { return };
-        shell.restart_requested.store(true, Ordering::SeqCst);
-        sidecar::request_stop(child);
-        child.id()
-    };
+/// A cockpit asked to stop that is still running after `STOP_GRACE` (an older cezar ignores the
+/// request) is force-killed, if it is still the one the shell owns.
+fn kill_after_grace(shell: &Arc<Shell>, pid: u32) {
     let shell = shell.clone();
     std::thread::spawn(move || {
         std::thread::sleep(sidecar::STOP_GRACE);
@@ -440,6 +451,14 @@ fn restart_running(shell: &Arc<Shell>) {
             }
         }
     });
+}
+
+/// Quit (or a signal): no supervisor starts a cockpit after this, and the one it owns, starting
+/// or running, is handed over to be stopped.
+fn take_for_quit(shell: &Shell) -> Option<Child> {
+    let mut guard = shell.child.lock().unwrap();
+    shell.quitting.store(true, Ordering::SeqCst);
+    guard.take()
 }
 
 /// The legacy strip's "Update cezar" button lands here (capability: `allow-update-cezar` for
@@ -568,6 +587,7 @@ pub fn run() {
         running_version: Mutex::new(None),
         update_available: Mutex::new(None),
         supervising: AtomicBool::new(false),
+        quitting: AtomicBool::new(false),
         shell_update: Mutex::new(None),
     });
     let shell_for_setup = shell.clone();
@@ -579,7 +599,7 @@ pub fn run() {
     // down here, then leave.
     let shell_for_signal = shell.clone();
     let _ = ctrlc::set_handler(move || {
-        if let Some(mut child) = shell_for_signal.child.lock().unwrap().take() {
+        if let Some(mut child) = take_for_quit(&shell_for_signal) {
             sidecar::stop(&mut child, sidecar::STOP_GRACE);
         }
         std::process::exit(0);
@@ -706,7 +726,7 @@ pub fn run() {
                 }
                 // Let the cockpit shut down on its own (store flush, agent cleanup), then install
                 // a shell update downloaded at launch: nothing runs any more that it could close.
-                if let Some(mut child) = shell_for_run.child.lock().unwrap().take() {
+                if let Some(mut child) = take_for_quit(&shell_for_run) {
                     sidecar::stop(&mut child, sidecar::STOP_GRACE);
                 }
                 install_shell_update(&shell_for_run);
@@ -739,19 +759,13 @@ fn install_shell_update(shell: &Shell) {
     }
 }
 
-/// Spawn → wait for health → show cockpit → wait for exit → relaunch on 75 (or on a requested
-/// restart), report otherwise. A missing install is installed first.
+/// Run cockpits until nothing asks for another: each one is spawned, published, health-checked,
+/// shown and watched (`run_cockpit`); a restart request or exit 75 starts the current version
+/// again, a failure is reported, and quit ends it. A missing install is installed first.
 fn supervise(app: AppHandle, shell: Arc<Shell>) {
     if shell.supervising.swap(true, Ordering::SeqCst) {
         return;
     }
-    struct Done<'a>(&'a Shell);
-    impl Drop for Done<'_> {
-        fn drop(&mut self) {
-            self.0.supervising.store(false, Ordering::SeqCst);
-        }
-    }
-    let _done = Done(&shell);
     let window = loop {
         if let Some(window) = app.get_webview_window("main") {
             break window;
@@ -762,112 +776,182 @@ fn supervise(app: AppHandle, shell: Arc<Shell>) {
     // Everything below needs the Node floor: the install, the sidecar, the update check. Without it
     // the honest answer is a page that says so, with the download link and a retry — not npm's
     // "command not found" three layers down.
-    if !require_node(&window) {
-        return;
+    let mut relaunch = require_node(&window) && run_cockpit(&app, &shell, &window);
+    while supervisor_continues(&shell, relaunch) {
+        relaunch = run_cockpit(&app, &shell, &window);
     }
+}
 
-    loop {
-        let entry = match resolve_entry() {
-            Some(entry) => entry,
-            None => {
-                // First launch on this machine: the supervisor puts a cezar in place itself.
-                if !update_cezar(&app, &shell, "Installing cezar…") {
-                    return;
-                }
-                match resolve_entry() {
-                    Some(entry) => entry,
-                    None => return,
-                }
-            }
-        };
-        let port = pick_port();
-        shell.port.store(port, Ordering::SeqCst);
-        if let Some(item) = shell.open_item.lock().unwrap().as_ref() {
-            let _ = item.set_enabled(true);
+/// Whether a supervisor whose cockpit is gone, or never came up, goes round again: a restart
+/// asked for meanwhile, or an exit 75 (`relaunch`), does; quitting never. Decided under the child
+/// lock, where `after_new_version` asks; a supervisor that stops is marked so there, and a later
+/// new version starts a fresh one.
+fn supervisor_continues(shell: &Shell, relaunch: bool) -> bool {
+    let _guard = shell.child.lock().unwrap();
+    let requested = shell.restart_requested.swap(false, Ordering::SeqCst);
+    match sidecar::supervisor_next(shell.quitting.load(Ordering::SeqCst), requested || relaunch) {
+        sidecar::Next::Relaunch => true,
+        sidecar::Next::Quit | sidecar::Next::Stop => {
+            shell.supervising.store(false, Ordering::SeqCst);
+            false
         }
-        let cwd = pick_cwd();
-        refresh_versions_menu(&app, &shell);
-        splash_reset(&window, "Starting cezar…", &entry.to_string_lossy());
+    }
+}
 
-        let log: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
-        let mut child = match spawn_sidecar(&entry, port, &cwd, log.clone()) {
-            Ok(child) => child,
+/// The entry to run, installing cezar first on a machine that has none.
+fn entry_or_install(app: &AppHandle, shell: &Arc<Shell>) -> Option<PathBuf> {
+    if let Some(entry) = resolve_entry() {
+        return Some(entry);
+    }
+    // First launch on this machine: the supervisor puts a cezar in place itself.
+    if !update_cezar(app, shell, "Installing cezar…") {
+        return None;
+    }
+    resolve_entry()
+}
+
+/// Whether the cockpit with `pid` is gone: exited, or no longer the one the shell owns (quit).
+fn owned_cockpit_gone(shell: &Shell, pid: u32) -> bool {
+    let mut guard = shell.child.lock().unwrap();
+    match guard.as_mut().filter(|child| child.id() == pid) {
+        Some(child) => !matches!(child.try_wait(), Ok(None)),
+        None => true,
+    }
+}
+
+/// One cockpit's life. Returns true when it asked to be relaunched (exit 75); every other end
+/// returns false, and `supervisor_continues` decides from the flags what comes next.
+fn run_cockpit(app: &AppHandle, shell: &Arc<Shell>, window: &WebviewWindow) -> bool {
+    let Some(entry) = entry_or_install(app, shell) else { return false };
+    let port = pick_port();
+    shell.port.store(port, Ordering::SeqCst);
+    if let Some(item) = shell.open_item.lock().unwrap().as_ref() {
+        let _ = item.set_enabled(true);
+    }
+    let cwd = pick_cwd();
+    refresh_versions_menu(app, shell);
+    splash_reset(window, "Starting cezar…", &entry.to_string_lossy());
+
+    let log: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
+    // Spawn and publish under the child lock, after checking quit there: quit either finds this
+    // cockpit to stop, or this supervisor sees the quit and starts nothing. A pending restart is
+    // answered by this very start, which runs whatever is current now.
+    let pid = {
+        let mut guard = shell.child.lock().unwrap();
+        if shell.quitting.load(Ordering::SeqCst) {
+            return false;
+        }
+        shell.restart_requested.store(false, Ordering::SeqCst);
+        match spawn_sidecar(&entry, port, &cwd, log.clone()) {
+            Ok(child) => {
+                let pid = child.id();
+                *guard = Some(child);
+                pid
+            }
             Err(error) => {
-                fail(&window, "cezar could not start", &error, "");
-                return;
+                drop(guard);
+                fail(window, "cezar could not start", &error, "");
+                return false;
             }
-        };
-        let pid = child.id();
+        }
+    };
 
-        let url = format!("http://127.0.0.1:{port}");
-        if let Some(version) = wait_for_health(port, &mut child, HEALTH_TIMEOUT) {
-            *shell.running_version.lock().unwrap() = Some(version);
-            *shell.update_available.lock().unwrap() = None;
-            if let Ok(parsed) = url::Url::parse(&url) {
-                let _ = window.navigate(parsed);
+    let url = format!("http://127.0.0.1:{port}");
+    let Some(version) = wait_for_health(port, || owned_cockpit_gone(shell, pid), HEALTH_TIMEOUT) else {
+        return failed_start(shell, window, pid, &url, &log);
+    };
+    *shell.running_version.lock().unwrap() = Some(version);
+    *shell.update_available.lock().unwrap() = None;
+    if let Ok(parsed) = url::Url::parse(&url) {
+        let _ = window.navigate(parsed);
+    }
+    probe_ipc(window);
+    start_update_checks(app, shell, pid);
+    watch_cockpit(shell, window, pid, &log)
+}
+
+/// A cockpit that never answered health: stop it if the shell still owns it, and say why unless a
+/// quit or a restart request made it go away.
+fn failed_start(shell: &Shell, window: &WebviewWindow, pid: u32, url: &str, log: &Mutex<VecDeque<String>>) -> bool {
+    let owned = {
+        let mut guard = shell.child.lock().unwrap();
+        if guard.as_ref().map(|child| child.id()) == Some(pid) { guard.take() } else { None }
+    };
+    if let Some(mut child) = owned {
+        sidecar::stop(&mut child, sidecar::STOP_GRACE);
+    }
+    if shell.quitting.load(Ordering::SeqCst) {
+        return false;
+    }
+    if shell.restart_requested.load(Ordering::SeqCst) {
+        splash_reset(window, "Restarting cezar…", "Switching to the newly installed version.");
+        return false;
+    }
+    let tail = log.lock().unwrap().iter().cloned().collect::<Vec<_>>().join("\n");
+    fail(window, "cezar did not come up", &format!("No answer on {url} within {}s (pid {pid}).", HEALTH_TIMEOUT.as_secs()), &tail);
+    false
+}
+
+/// Registry check for the legacy strip's button: now, then every half hour, while the cockpit
+/// with `pid` is the one running.
+fn start_update_checks(app: &AppHandle, shell: &Arc<Shell>, pid: u32) {
+    let app = app.clone();
+    let shell = shell.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_secs(4));
+        // The chip is a SWITCHER: with one version installed it would open a list of
+        // one. The version itself is already in the cockpit's sidebar and in the menu.
+        if switcher_has_choices(installed_versions().len()) {
+            if let (Some(version), Some(window)) = (shell.running_version.lock().unwrap().clone(), app.get_webview_window("main")) {
+                offer_version(&window, &version);
             }
-            probe_ipc(&window);
-            // Registry check for the legacy strip's button: now, then every half hour.
-            let app = app.clone();
-            let shell = shell.clone();
-            let generation = pid;
-            std::thread::spawn(move || loop {
-                std::thread::sleep(Duration::from_secs(4));
-                // The chip is a SWITCHER: with one version installed it would open a list of
-                // one. The version itself is already in the cockpit's sidebar and in the menu.
-                if switcher_has_choices(installed_versions().len()) {
-                    if let (Some(version), Some(window)) = (shell.running_version.lock().unwrap().clone(), app.get_webview_window("main")) {
-                        offer_version(&window, &version);
-                    }
-                }
-                check_cezar_update(&app, &shell);
-                std::thread::sleep(Duration::from_secs(30 * 60));
-                // A new sidecar starts its own checker; this one retires.
-                let current = shell.child.lock().unwrap().as_ref().map(|child| child.id());
-                if current != Some(generation) {
-                    return;
-                }
-            });
-        } else {
-            let tail = log.lock().unwrap().iter().cloned().collect::<Vec<_>>().join("\n");
-            fail(&window, "cezar did not come up", &format!("No answer on {url} within {}s (pid {pid}).", HEALTH_TIMEOUT.as_secs()), &tail);
-            sidecar::stop(&mut child, sidecar::STOP_GRACE);
+        }
+        check_cezar_update(&app, &shell);
+        std::thread::sleep(Duration::from_secs(30 * 60));
+        // A new sidecar starts its own checker; this one retires.
+        let current = shell.child.lock().unwrap().as_ref().map(|child| child.id());
+        if current != Some(pid) {
             return;
         }
+    });
+}
 
-        *shell.child.lock().unwrap() = Some(child);
-        let status = loop {
-            let mut guard = shell.child.lock().unwrap();
-            match guard.as_mut() {
-                Some(child) => match child.try_wait() {
-                    Ok(Some(status)) => break Some(status),
-                    Ok(None) => {}
-                    Err(_) => break None,
-                },
-                None => break None, // taken by Exit — the app is quitting
-            }
-            drop(guard);
-            std::thread::sleep(Duration::from_millis(250));
-        };
-        *shell.child.lock().unwrap() = None;
-
-        let requested = shell.restart_requested.swap(false, Ordering::SeqCst);
-        match status.and_then(|s| s.code()) {
-            Some(RESTART_EXIT_CODE) => {
-                splash_reset(&window, "Restarting cezar…", "Switching to the newly activated version.");
-                continue;
-            }
-            _ if requested => {
-                splash_reset(&window, "Restarting cezar…", "Switching to the newly installed version.");
-                continue;
-            }
-            Some(code) => {
-                let tail = log.lock().unwrap().iter().cloned().collect::<Vec<_>>().join("\n");
-                fail(&window, "cezar stopped", &format!("The cockpit process exited with status {code}."), &tail);
-                return;
-            }
-            None => return,
+/// Wait for the running cockpit to exit. True when it asked to be relaunched (exit 75).
+fn watch_cockpit(shell: &Shell, window: &WebviewWindow, pid: u32, log: &Mutex<VecDeque<String>>) -> bool {
+    let status = loop {
+        let mut guard = shell.child.lock().unwrap();
+        match guard.as_mut().filter(|child| child.id() == pid) {
+            Some(child) => match child.try_wait() {
+                Ok(Some(status)) => {
+                    *guard = None;
+                    break Some(status);
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    *guard = None;
+                    break None;
+                }
+            },
+            None => break None, // taken by quit
         }
+        drop(guard);
+        std::thread::sleep(Duration::from_millis(250));
+    };
+    match status.and_then(|s| s.code()) {
+        Some(RESTART_EXIT_CODE) => {
+            splash_reset(window, "Restarting cezar…", "Switching to the newly activated version.");
+            true
+        }
+        _ if shell.restart_requested.load(Ordering::SeqCst) => {
+            splash_reset(window, "Restarting cezar…", "Switching to the newly installed version.");
+            false
+        }
+        Some(code) if !shell.quitting.load(Ordering::SeqCst) => {
+            let tail = log.lock().unwrap().iter().cloned().collect::<Vec<_>>().join("\n");
+            fail(window, "cezar stopped", &format!("The cockpit process exited with status {code}."), &tail);
+            false
+        }
+        _ => false,
     }
 }
 
@@ -1316,14 +1400,14 @@ fn health_version(port: u16) -> Option<String> {
     Some(version.unwrap_or_default())
 }
 
-fn wait_for_health(port: u16, child: &mut Child, timeout: Duration) -> Option<String> {
+fn wait_for_health(port: u16, mut gone: impl FnMut() -> bool, timeout: Duration) -> Option<String> {
     let start = Instant::now();
     while start.elapsed() < timeout {
         if let Some(version) = health_version(port) {
             return Some(version);
         }
-        if let Ok(Some(_)) = child.try_wait() {
-            return None; // died while starting
+        if gone() {
+            return None; // died while starting, or was taken by quit
         }
         std::thread::sleep(Duration::from_millis(300));
     }
@@ -1865,7 +1949,7 @@ if (process.env.CEZ_SUPERVISOR_STDIN === '1') process.stdin.on('end', () => proc
         let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
         let log = Arc::new(Mutex::new(VecDeque::new()));
         let mut child = spawn_sidecar(&entry, port, &scratch.0, log.clone()).expect("node starts");
-        let version = wait_for_health(port, &mut child, Duration::from_secs(20));
+        let version = wait_for_health(port, || !matches!(child.try_wait(), Ok(None)), Duration::from_secs(20));
         let stopped = sidecar::stop(&mut child, Duration::from_secs(10));
         assert_eq!(version.as_deref(), Some("9.9.9-test"), "sidecar output: {:?}", log.lock().unwrap());
         assert_eq!(stopped, sidecar::Stopped::Exited, "sidecar output: {:?}", log.lock().unwrap());
