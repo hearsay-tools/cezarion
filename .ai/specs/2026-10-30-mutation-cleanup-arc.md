@@ -70,16 +70,17 @@ comment.
 
 ## Guard functions
 
-Every mutant in these functions is killed or named as equivalent, whatever the file's tier.
+Every mutant in these functions is killed or named as equivalent, whatever the file's tier. A class
+method is written `Class.method`, as `.github/mutants/targets.json` matches it.
 
 | File | Functions |
 |---|---|
 | `packages/cezar/src/server/repo-branches.ts` | `deleteBranches`, `deletionVerdicts`, `claimDeletionRuns`, `retainingRef`, `classifyBranches`, `mergedPrBranches`, `recordedPrs` |
-| `packages/cezar/src/automations/scheduler.ts` | `ProjectAutomationScheduler.check`, `ProjectAutomationScheduler.launch`, `launchCandidates`, `candidateAcceptor`, `afterBaseline`, `pollWindow` |
+| `packages/cezar/src/automations/scheduler.ts` | `ProjectAutomationScheduler.check`, `ProjectAutomationScheduler.launch`, `ProjectAutomationScheduler.launchCandidates`, `candidateAcceptor`, `afterBaseline`, `pollWindow` |
 | `packages/cezar/src/automations/github-poller.ts` | `matchesFilters`, `GithubPoller.matchesCurrentLabels`, `incompleteHistory` |
 | `packages/contract/src/waits.ts` | `workerWaitView`, `computeWaitingOn`, `workerEntryOwed`, `oneModeTakesOneId` |
 | `packages/contract/src/delegation.ts` | `parentFileRefusal` |
-| `packages/cezar/src/preview/host.ts` | `PreviewHost.stopPreview`, `heldByAnotherTab`, `heldByOther`, `portOwner`, `ownsBrowser`, `sameOrigin` |
+| `packages/cezar/src/preview/host.ts` | `PreviewHost.stopPreview`, `PreviewHost.heldByAnotherTab`, `PreviewHost.heldByOther`, `PreviewHost.portOwner`, `PreviewHost.ownsBrowser`, `sameOrigin` |
 | `packages/cezar/src/task-cli/cli.ts` | `validateFlags`, `parseOperation`, `positiveInt`, `nonNegativeInt` |
 | `packages/web/src/routes/repo-git/repo-not-landed.tsx` | `DeleteBranchDialog` |
 
