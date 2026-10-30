@@ -151,6 +151,11 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
     if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
     return fallback();
   };
+  const capabilityAnswer = async <T, R extends Response>(capability: Capability, answer: () => Promise<T>, respond: (answer: T) => R) => {
+    const result = await answer();
+    capability.lifetime.signal.throwIfAborted();
+    return respond(result);
+  };
   return new Hono<{ Variables: { capability: Capability } }>()
     .use('/api/v1/tools/ci-wait', requireCapability)
     .get('/api/v1/tools/ci-wait', c => {
@@ -253,9 +258,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
       const capability = c.get('capability');
       if (!capability.scheduleTask) return c.json(scheduleRefusal('unavailable'));
       try {
-        const answer = scheduleTaskAnswerSchema.parse(await capability.scheduleTask(c.req.valid('json'), capability.lifetime.signal));
-        capability.lifetime.signal.throwIfAborted();
-        return c.json(answer);
+        return await capabilityAnswer(capability, async () => scheduleTaskAnswerSchema.parse(await capability.scheduleTask!(c.req.valid('json'), capability.lifetime.signal)), answer => c.json(answer));
       } catch {
         return capabilityRevoked(c, capability, () => c.json(scheduleRefusal('unavailable')));
       }
@@ -268,9 +271,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
       const capability = c.get('capability');
       if (!capability.scheduledTasks) return c.json(scheduleRefusal('unavailable'));
       try {
-        const answer = scheduledTasksAnswerSchema.parse(await capability.scheduledTasks(c.req.valid('json'), capability.lifetime.signal));
-        capability.lifetime.signal.throwIfAborted();
-        return c.json(answer);
+        return await capabilityAnswer(capability, async () => scheduledTasksAnswerSchema.parse(await capability.scheduledTasks!(c.req.valid('json'), capability.lifetime.signal)), answer => c.json(answer));
       } catch {
         return capabilityRevoked(c, capability, () => c.json(scheduleRefusal('unavailable')));
       }
