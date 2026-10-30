@@ -250,4 +250,4 @@ function shouldCreate(artifact) {
   return artifact.state !== 'no-mutable-lines';
 }
 
-module.exports = { MARKER, LIMITS, VERSION, collectPackage, validateArtifact, renderReport, renderUnavailable, shouldCreate };
+module.exports = { sliceSource, MARKER, LIMITS, VERSION, collectPackage, validateArtifact, renderReport, renderUnavailable, shouldCreate };

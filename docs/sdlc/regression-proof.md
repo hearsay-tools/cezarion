@@ -75,6 +75,18 @@ test pins timing or load, or when no pull request exists yet. Use the matching r
 the job by hand, do it in a scratch worktree where Squeal does not run, because Stryker edits files in
 place: `STRYKER_PROJECT=<package> pnpm exec stryker run --mutate 'packages/<package>/src/<file>.ts:<from>-<to>'`.
 
+To measure a whole file, run:
+
+```bash
+node .github/scripts/mutants-file.cjs packages/<package>/src/<file>.ts \
+  --out ~/.cache/cez/mutants/result.json
+```
+
+The command creates and removes its own disposable worktree, so Stryker never edits the worktree
+that Squeal validates. Contract files also run their direct server and web consumer tests; add
+`--tests <test files>` for more contract consumers. Use `--compare ~/.cache/cez/mutants/earlier.json`
+to compare runs.
+
 ## Test-only change that removes a hidden dependency
 
 A **test-only change that removes a hidden dependency** needs this proof even

@@ -121,20 +121,30 @@ async function main(argv, env, deps) {
 }
 
 /** Run Stryker in its own process group so a timeout can stop the test runners it started too. */
-function runStryker(name, mutate, ms) {
+function runStryker(name, mutate, ms, options = {}) {
   return new Promise(resolve => {
-    const child = spawn(STRYKER, ['run', '--mutate', mutate.join(',')], {
-      detached: true, stdio: 'inherit', env: { ...process.env, STRYKER_PROJECT: name },
+    const child = (options.spawn ?? spawn)(STRYKER, ['run', '--mutate', mutate.join(','), ...(options.extraArgs ?? [])], {
+      cwd: options.cwd, detached: true, stdio: options.onOutput ? ['inherit', 'pipe', 'pipe'] : 'inherit', env: { ...process.env, STRYKER_PROJECT: name },
     });
+    if (options.onOutput) {
+      child.stdout.on('data', chunk => { process.stdout.write(chunk); options.onOutput(String(chunk)); });
+      child.stderr.on('data', chunk => { process.stderr.write(chunk); options.onOutput(String(chunk)); });
+    }
     let timedOut = false;
-    const stop = signal => { try { process.kill(-child.pid, signal); } catch { /* the group is already gone */ } };
+    const stop = signal => { try { (options.kill ?? process.kill)(-child.pid, signal); } catch { /* the group is already gone */ } };
     const timer = setTimeout(() => {
       timedOut = true;
       stop('SIGTERM');
       setTimeout(() => stop('SIGKILL'), 20_000).unref();
     }, ms);
-    child.on('exit', code => { clearTimeout(timer); stop('SIGKILL'); resolve({ outcome: timedOut ? 'timed-out' : 'exited', code }); });
-    child.on('error', () => { clearTimeout(timer); resolve({ outcome: 'exited', code: 'spawn-error' }); });
+    const abort = () => stop('SIGKILL');
+    options.signal?.addEventListener('abort', abort, { once: true });
+    if (options.signal?.aborted) abort();
+    const clear = () => { clearTimeout(timer); options.signal?.removeEventListener('abort', abort); };
+    const result = code => ({ outcome: timedOut ? 'timed-out' : 'exited', code });
+    child.on('exit', code => { clear(); stop('SIGKILL'); if (!options.onOutput) resolve(result(code)); });
+    if (options.onOutput) child.on('close', code => resolve(result(code)));
+    child.on('error', () => { clear(); resolve({ outcome: 'exited', code: 'spawn-error' }); });
   });
 }
 
@@ -145,6 +155,13 @@ function countRelated(name, files) {
   const count = JSON.parse(result.stdout.trim().split('\n').at(-1) ?? '{}').count;
   if (!Number.isInteger(count)) throw new Error(`mutants-related.mjs printed no count (exit ${result.status})`);
   return count;
+}
+
+/** Restore Stryker's in-place edits, including executable bits lost by its backup copies. */
+function restoreTree(cwd = process.cwd(), { removeReport = false } = {}) {
+  spawnSync('git', ['checkout', '--', 'packages'], { cwd });
+  fs.rmSync(path.join(cwd, '.stryker-tmp'), { recursive: true, force: true });
+  if (removeReport) fs.rmSync(path.join(cwd, REPORT), { force: true });
 }
 
 function defaultDeps(env) {
@@ -158,7 +175,7 @@ function defaultDeps(env) {
     removeReport: () => fs.rmSync(REPORT, { force: true }),
     readReport: () => (fs.existsSync(REPORT) ? JSON.parse(fs.readFileSync(REPORT, 'utf8')) : null),
     // A killed Stryker can leave a mutated file behind; the tree was clean when the job began.
-    restoreTree: () => { spawnSync('git', ['checkout', '--', 'packages']); fs.rmSync('.stryker-tmp', { recursive: true, force: true }); },
+    restoreTree,
     writeFile: (file, text) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text); },
     appendSummary: text => append(env.GITHUB_STEP_SUMMARY, `${text}\n`),
     setOutput: (key, value) => append(env.GITHUB_OUTPUT, `${key}=${value}\n`),
@@ -174,4 +191,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { main, parseArgs, EVIDENCE, REPORT };
+module.exports = { restoreTree, runStryker, main, parseArgs, EVIDENCE, REPORT };
