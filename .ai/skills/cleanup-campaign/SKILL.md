@@ -51,8 +51,9 @@ resume, read it before anything else.
 
 ### 1. Inventory and confirm
 
-Run `git fetch origin` and record the `origin/main` SHA. List the issues. For
-each one, read the body and the comments, and list the open
+Bring your worktree to fresh main (`git fetch origin`, then
+`git merge --ff-only origin/main`) and record its SHA: every read below uses
+those files. List the issues. For each one, read the body and the comments, and list the open
 PRs that touch its files (`gh pr list`, then `gh pr diff <n> --name-only`).
 Measure each target on current main:
 `node .ai/skills/check-code-quality/scripts/metrics.mjs <file> --json`.
@@ -150,9 +151,10 @@ Done when the PR is merged at the reviewed head and its issue shows closed.
 
 ### 6. Teardown and refill
 
-1. Record the metric on main (lines, bytes or complexity) in `state.json`.
-2. Run `git fetch origin`, then `git merge-tree origin/main <head>` for the
-   other open PR in the same hot file. Tell its worker to rebase only when it
+1. Bring your worktree to fresh main (`git fetch origin`, then
+   `git merge --ff-only origin/main`). Record the metric there (lines, bytes or
+   complexity) in `state.json`, with the SHA.
+2. Run `git merge-tree origin/main <head>` for the other open PR in the same hot file. Tell its worker to rebase only when it
    conflicts.
 3. Tell this worker to finish. Wait until it shows settled, collect its latest
    revision, then tear it down with

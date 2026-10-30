@@ -62,8 +62,9 @@ hearsay-tools/cezarion#<b>. The epic body lists them in waves with their gates.
 Read the spec <path> first, especially <sections>.
 
 Controls: <worker model>, at most <k> live workers, at most 2 open PRs that edit
-<hot file>. You merge on the gate when the change is exactly what the issue
-asked for.
+<hot file>. <Only when the owner granted the merge for this epic, in words:
+"You merge on the gate when the change is exactly what the issue asked for."
+Otherwise: "The owner merges each PR.">
 
 Phase rules: <exceptions the owner approved for this phase, each with its date>.
 
