@@ -16,11 +16,13 @@ linked from the campaign issue or epic; the campaign PR keeps the old behavior.
 
 Pick the mode from the prompt:
 
-- **Batch mode:** the prompt names a label or a list of issues. Run the loop
-  below once, until the queue is empty.
-- **Epic mode:** the prompt names an epic with phases. Read
-  [references/epic-mode.md](references/epic-mode.md) first. You are the planner
-  there, and each phase runs this loop in its own coordinator task.
+- **Batch mode:** the prompt names a label, a list of issues, or one phase of
+  an epic with its issues. A phase coordinator that epic mode started is in
+  batch mode. Run the loop below once, until the queue is empty.
+- **Epic mode:** the prompt asks you to run a whole epic across its phases and
+  names no single phase. Read [references/epic-mode.md](references/epic-mode.md)
+  first. You are the planner there, and each phase runs this loop in its own
+  coordinator task.
 
 ## Controls
 
@@ -102,15 +104,18 @@ For each free slot:
 2. Bring your worktree to fresh main (`git fetch origin` and then
    `git merge --ff-only origin/main`), so `--baseline parent-head` is the main
    that the gate will merge into. Record that SHA for the worker.
-3. Write the brief: the per-issue facts (regions, callers, the seams to keep,
+3. When main moved since § 2 Map regions mapped this issue, map its region
+   again on the new SHA and check it against the open PRs' regions. Update `state.json`, and
+   move the issue later in the order when it now overlaps an open PR.
+4. Write the brief: the per-issue facts (regions, callers, the seams to keep,
    the order gate), then the text of
    [references/worker-brief.md](references/worker-brief.md) with its
    placeholders filled.
-4. Spawn with `cez worker spawn --baseline parent-head --request-id <UUID>
+5. Spawn with `cez worker spawn --baseline parent-head --request-id <UUID>
    --context-file <brief> 'Work hearsay-tools/cezarion#<N> as the brief says.'`
    and the control's runner and model. Keep the brief under `.ai/qa/campaign/`.
    Start workers one minute apart: Codex returned 429 to a burst of starts.
-5. Register a worker wait that covers every live worker.
+6. Register a worker wait that covers every live worker.
 
 Done when the worker is accepted, its id is in `state.json`, and a wait covers
 it.
@@ -154,8 +159,8 @@ Done when the PR is merged at the reviewed head and its issue shows closed.
 1. Bring your worktree to fresh main (`git fetch origin`, then
    `git merge --ff-only origin/main`). Record the metric there (lines, bytes or
    complexity) in `state.json`, with the SHA.
-2. Run `git merge-tree origin/main <head>` for the other open PR in the same hot file. Tell its worker to rebase only when it
-   conflicts.
+2. Run `git merge-tree origin/main <head>` for the other open PR in the same
+   hot file. Tell its worker to rebase only when it conflicts.
 3. Tell this worker to finish. Wait until it shows settled, collect its latest
    revision, then tear it down with
    [references/teardown.md](references/teardown.md).

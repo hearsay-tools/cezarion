@@ -55,7 +55,7 @@ worker you own.
 ## Coordinator prompt
 
 ```text
-/cleanup-campaign
+/cleanup-campaign in batch mode: you coordinate one phase.
 
 Epic hearsay-tools/cezarion#<E>, Phase <N>: hearsay-tools/cezarion#<a> to
 hearsay-tools/cezarion#<b>. The epic body lists them in waves with their gates.
