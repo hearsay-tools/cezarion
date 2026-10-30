@@ -1,30 +1,22 @@
 import { composeRunModules, type RunModules } from './run/compose.ts';
-
-import { IDLE_TIMEOUT_MS, UNREAD_INPUT_GRACE_MS, NO_WAIT_NUDGE_REPLY_MS, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WAITS_DISCARDED_NOTE, REFUSAL_DISCARDED_NOTE, QUEUE_WATCHDOG_MS } from './run/constants.ts';
+import { UNREAD_INPUT_GRACE_MS, QUEUE_WATCHDOG_MS } from './run/constants.ts';
 export { IDLE_TIMEOUT_MS, UNREAD_INPUT_GRACE_MS, NO_WAIT_NUDGE_REPLY_MS, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WAITS_DISCARDED_NOTE, REFUSAL_DISCARDED_NOTE, QUEUE_WATCHDOG_MS } from './run/constants.ts';
 import { isSyntheticContinuation } from './run/workflow-position.ts';
 import { repositoryRootLockDisabled } from './run/repo-root-lease.ts';
 export { repositoryRootLockDisabled } from './run/repo-root-lease.ts';
-import { isUntouchedCancelledRun } from './run/run-guards.ts';
 export { isUntouchedCancelledRun } from './run/run-guards.ts';
-
 import * as completionGateReads from './run/completion-gate.ts';
-
 import { cezarToolHandlers } from './run/cezar-tools.ts';
-
 import type { DelegationExecutionSettings, StartRunInput, Execution, WorkerTerminationBlocker, AutomationToolService } from './run/types.ts';
 export type { TurnTail, DelegationExecutionSettings, StartRunInput, WorkerTerminationBlocker, AutomationToolService } from './run/types.ts';
 import { settledRootFinishPatch } from './completion-policy.ts';
 import type { ContinueRunOptions } from './continuation-admission.ts';
-import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
-import { type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitVia, type WorkerWaitEntry, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
+import { type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type TimerWaitEntry, type Wait, type WaitVia, type WorkerWaitEntry, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
 import { canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested } from './run/run-guards.ts';
-
 import { REPOSITORY_ROOT_LOCK_DISABLED_NOTE } from './run/run-workspace.ts';
-
 export { AUTO_RESUME_GRACE_MS, MAX_AUTO_RESUMES, AUTO_RESUME_MISSED_WINDOW_MS } from './run/auto-resume.ts';
 import { TrackedWork } from './run/tracked-work.ts';
 import type { RunModuleContext } from './run/types.ts';
@@ -32,32 +24,24 @@ import * as launchContext from './run/launch-context.ts';
 import { openingInputs } from './run/opening.ts';
 import { releaseActiveResources } from './run/drop-active.ts';
 import { delegationExecutionSettings, selectDelegationExecutionSettings } from '../delegation/execution-settings.ts';
-import { stepLabel } from './run/steps.ts';
 export { agentDirectories, composeSystemPrompt, expandRegistrySlashSkill, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt } from './run/prompts.ts';
 export { stepLabel } from './run/steps.ts';
 export { makeRunTitle } from '../runs/run-title.ts';
 import { clearHeldHumanInputTimer, clearIdleTimer, clearAutosaveTimer } from './run/input-timers.ts';
-
 import * as pendingAskFacts from './run/pending-ask-facts.ts';
 import * as workflowPosition from './run/workflow-position.ts';
 import { transition, type RunExitId } from './run-states.ts';
 import { deriveAccountHolds } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
-import { holdsOwedResults, isCezarHumanWait, openWaits } from './waits.ts';
-import { runsAwaitingPeer } from './wait-scope.ts';
 import { type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import type { CezarToolHandlers } from '../ci-wait/controller.ts';
 import { workerIdentity, type WorkerAccountBinding } from '../delegation/execution-identity.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
-import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-
 import { onUsage, type ProcessUsage } from '../core/process-usage.ts';
-
 import { type CwdSource } from '../delegation/process-liveness.ts';
-
 import type { RunnerId } from '../core/agent-runner.ts';
 import { seedHandoffFile } from '../handoff.ts';
 // Contract VALUES, like `workspaceUiStateSchema` in workspace/migrations.ts: the attachment
@@ -69,30 +53,17 @@ import {
   type WorkerWait,
   type WorkerWaitRequest,
 } from '@open-mercato/cezar-contract/delegation';
-
 import {
   type RequestWaitRequest,
 } from '@open-mercato/cezar-contract/conversations';
-import { contentBlocksOf, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from './pasted-content.ts';
+import { type PastedContent, type PersistedAttachment } from './pasted-content.ts';
 export { contentBlocksOf, highestImageSeq, mediaTypeFor, pastedAttachmentsNote, pastedAttachmentsText, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from './pasted-content.ts';
 import type { ContentBlock } from '../core/agent-runner.ts';
-
 import { type Skill } from '../skills.ts';
-
-import { resolveWorktreeRetention } from '../config.ts';
-
-import { settledRunFamilies } from '../delegation/conversations.ts';
 import * as queuedRevival from './run/queued-revival.ts';
-
 import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
-import { reclaimWorktrees } from '../runs/retention.ts';
-import {
-  removeAgentTmpDir,
-} from '../runs/agent-tmpdir.ts';
-
 import { WorkspaceSemaphore, type AccountHolds } from '../workspace/semaphore.ts';
 import { type WorkflowDef } from './types.ts';
-
 export { CHECK_KILL_GRACE_MS, CHECK_TERMINATION_CONFIRM_MS } from './grouped-command.ts';
 export { periodicAutosaveEnabled, AUTOSAVE_INTERVAL_MS } from './run/worktree-autosave.ts';
 /** #486: recheck a turn-end that deferred close/park only because the harness still held a human follow-up. */
@@ -118,8 +89,6 @@ export class RunManager {
   private readonly active = new Map<string, ActiveRun>();
   private readonly context: RunModuleContext;
   private readonly modules: RunModules;
-
-  
 
   settleOrphanedWorkerExecution(runId: string, opts: { admitting?: boolean; fresh?: boolean; cwds?: CwdSource } = {}): boolean { return this.modules.orphans.settleOrphanedWorkerExecution(runId, opts); }
   takeWorkerTerminationBlocker(runId: string): { blocker: WorkerTerminationBlocker; changed: boolean } | undefined { return this.modules.orphans.takeWorkerTerminationBlocker(runId); }
@@ -156,29 +125,11 @@ export class RunManager {
   private disposed = false;
 
   private readonly onDelegationRun = (run: RunRecord, source?: CommitSource): void => {
-    // Delegation metadata checkpoints do not change task status.
-    // A republish changed nothing durable: there is nothing to reap, cancel or reconcile.
-    if (source === 'live-release') return;
-    if (!this.disposed && source === undefined) this.reapTerminalScratch(run.id);
-    if (!this.disposed && !['queued', 'running', 'waiting'].includes(run.status) && !holdsOwedResults(run)) this.modules.wakeAdmission.cancelOpenWaits(run.id);
-    if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.active.get(run.id)?.revokeDelegation?.();
-    // Cleanup checkpoints emit terminal records too. With delegation disabled,
-    // these observations must not replay the project's conversation histories.
-    if (this.disposed || this.modules.recovery.recoveringRun(run) || (source === 'delegation-checkpoint' && process.env.CEZ_DELEGATION !== '1')) return;
-    // A destroy retry changes nothing the family reconcile reads (#880).
-    if (source === 'delegation-destroy-progress') return;
-    if (run.delegation && run.delegation.role !== 'invalid' && !['queued', 'running', 'waiting'].includes(run.status)) {
-      for (const id of settledRunFamilies(this.store, run)) this.reconcileWorkerWaits(id);
-    }
-    this.modules.waitRegistry.resolvePeerWaits(runsAwaitingPeer(run, () => this.store.listRuns())); // never in recovery: an interrupted peer fails, then continues
+    this.modules.familyReconciler.onDelegationRun(run, source);
   };
 
   /** `.ai/cezar` — where the per-task handoff files live. */
   private readonly dataDir: string;
-
-  /** Runs currently being paused by the memory guard — dedupes the ~2 s samples so one breach
-   *  triggers one pause, not a burst. Cleared in dropActive when the run leaves the registry. */
-  private readonly memoryPausing = new Set<string>();
 
   /** Unsubscribe handle for the constructor's `onUsage` subscription — released
    *  by dispose() so a torn-down manager stops receiving sampler ticks. */
@@ -210,6 +161,8 @@ export class RunManager {
     this.context = { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed, work: options.work ?? new TrackedWork() };
     const facade = this;
     this.modules = composeRunModules(this.context, {
+      unreadInputGraceMs: () => unreadInputGraceMs,
+      noWaitNudgeReplyMs: () => options.noWaitNudgeReplyMs,
       pendingHumanAskSeq: (...args) => this.pendingHumanAskSeq(...args),
       waitingBeforeFinalWorkflowStep: (...args) => this.waitingBeforeFinalWorkflowStep(...args),
       parentCompletionBlockers: (...args) => this.parentCompletionBlockers(...args),
@@ -217,6 +170,7 @@ export class RunManager {
       cezarToolHandlers: (...args) => this.cezarToolHandlers(...args),
       get delegationProvisioner() { return facade.delegationProvisioner; },
       set delegationProvisioner(value) { facade.delegationProvisioner = value; },
+      claimWorktreeReclaim: (...args) => this.claimWorktreeReclaim(...args),
       move: (...args) => this.move(...args),
       isActive: (...args) => this.isActive(...args),
       workerExecutionStopped: (...args) => this.workerExecutionStopped(...args),
@@ -235,19 +189,14 @@ export class RunManager {
       get cockpit() { return facade.cockpit; },
       set cockpit(value) { facade.cockpit = value; },
       settledTurnOutcome: (...args) => this.settledTurnOutcome(...args),
-      reapTerminalScratch: (...args) => this.reapTerminalScratch(...args),
       settleOrphanedWorkerExecution: (...args) => this.settleOrphanedWorkerExecution(...args),
       sendMessage: (...args) => this.sendMessage(...args),
       canClaimInboxInput: (...args) => this.canClaimInboxInput(...args),
       builtinSkills: (...args) => this.builtinSkills(...args),
       continueRun: (...args) => this.continueRun(...args),
       recover: (...args) => this.recover(...args),
-      adoptTranscriptAsk: (...args) => this.adoptTranscriptAsk(...args),
-      settleAnsweredLegacyAsk: (...args) => this.settleAnsweredLegacyAsk(...args),
       dropActive: (...args) => this.dropActive(...args),
       runContinuation: (...args) => this.runContinuation(...args),
-      enforceRetention: (...args) => this.enforceRetention(...args),
-      get memoryPausing() { return facade.memoryPausing; },
       startRun: (...args) => this.startRun(...args),
       execute: (...args) => this.execute(...args),
       historyDeletionPending: (...args) => this.historyDeletionPending(...args),
@@ -259,7 +208,7 @@ export class RunManager {
       acceptDone: (...args) => this.acceptDone(...args),
       get preview() { return facade.preview; },
       get cezarPort() { return facade.cezarPort; },
-    }, { noWaitNudgeReplyMs: options.noWaitNudgeReplyMs, unreadInputGraceMs });
+    });
     // #774: `serve` knows its bound origin before it recovers, so recovered runs carry it too.
     if (options.cockpit) this.setCockpitAddress(options.cockpit);
     this.ciResources = acquireCiResources(this.semaphore);
@@ -321,53 +270,13 @@ export class RunManager {
     this.modules.autoResumeScheduler.dispose();
     this.active.clear();
     this.modules.line.dispose();
-    this.memoryPausing.clear();
+    this.modules.memoryGuard.dispose();
     this.modules.turnBookkeeper.clear();
     this.modules.worktreeAutosave.dispose();
   }
 
-  /**
-   * Pause any active run whose whole process tree exceeds the WORKSPACE
-   * `resources.memoryLimitMb`, freeing its slot so the queue advances
-   * (#memory-guard). "Pause" closes the session — freeing the tree's
-   * memory — and leaves the run resumable via Continue; a loud warning explains why. No-op when
-   * no limit is set or the sampler has no data (e.g. `ps`/PowerShell unavailable).
-   */
   private async enforceMemoryLimit(snapshot: Record<string, ProcessUsage>): Promise<void> {
-    // The sampler is module-global (one `ps` for the whole process), so with
-    // multiple projects a snapshot carries EVERY project's runs. Act only on
-    // rows this manager owns (multi-project spec, step 2.4).
-    const runIds = Object.keys(snapshot).filter((runId) => this.active.has(runId));
-    if (runIds.length === 0) return;
-    // Workspace limit from the shared semaphore's in-memory cache (step 2.5:
-    // refreshed at boot and on PUT /api/workspace/config — never N per-tick
-    // file reads across N projects). Legacy per-repo `memoryLimitMb` keys are
-    // ignored post-migration.
-    const limitMb = this.semaphore.memoryLimitMb();
-    if (!limitMb || limitMb <= 0) return;
-    const limitBytes = limitMb * 1024 * 1024;
-    for (const runId of runIds) {
-      const usage = snapshot[runId];
-      if (!usage || usage.rssBytes <= limitBytes) continue;
-      if (this.memoryPausing.has(runId)) continue;
-      const state = this.active.get(runId);
-      if (!state?.session?.open || state.cancelled) continue;
-      this.memoryPausing.add(runId);
-      const usedMb = Math.round(usage.rssBytes / (1024 * 1024));
-      this.store.appendEvent(runId, {
-        type: 'note',
-        message: `⚠ memory limit exceeded — this task's process tree is using ${usedMb} MiB (limit ${limitMb} MiB). Pausing it and letting the next queued task run; resume it with Continue.`,
-      });
-      this.store.appendEvent(runId, {
-        type: 'lifecycle',
-        message: `paused — memory limit exceeded (${usedMb} MiB > ${limitMb} MiB)`,
-      });
-      // Closing the session frees the tree and lets the normal exit path settle the run and
-      // pump the queue. Suppress autonomous auto-continue so the pause actually holds.
-      state.autonomous = false;
-      clearIdleTimer(state);
-      state.session.end();
-    }
+    return this.modules.memoryGuard.enforceMemoryLimit(snapshot);
   }
 
   private agentEnv(runId: string): Record<string, string> {
@@ -403,7 +312,6 @@ export class RunManager {
    * before its context is announced: a resumed session can call a tool in that window. With a
    * cockpit address the call waits for the service, bounded like the CLI's startup retry.
    */
-
   setAutomationTools(tools: AutomationToolService | undefined): void { this.modules.automationToolsSlot.setAutomationTools(tools); }
 
   builtinSkills(): Skill[] { return launchContext.builtinSkills(this.cockpit); }
@@ -516,18 +424,6 @@ export class RunManager {
 
   claimWorkerCleanup(runId: string): (() => void) | undefined { return this.modules.claims.claimWorkerCleanup(runId); }
 
-  /** Scratch belongs to the task, not its current agent process (#515).
-   * Terminal status alone is not process-exit proof: an active session or an
-   * unfinished private worker generation must retain its files until exit. */
-  private reapTerminalScratch(runId: string): void {
-    const run = this.store.getRun(runId);
-    if (!run || ['queued', 'running', 'waiting'].includes(run.status)) return;
-    if (this.active.has(runId) || this.modules.line.hasStarting(runId) || this.modules.line.hasQueued(runId) || this.modules.claims.has(runId) || !!this.autosaveCleanupBlocker(runId)) return;
-    const privateWorkers = workerEvidenceRunIds(this.dataDir);
-    if (run.delegation?.role === 'worker' || run.delegation?.role === 'invalid' || !privateWorkers || privateWorkers.includes(runId)) { this.modules.workerScratchCleanup.schedule(runId); return; }
-    removeAgentTmpDir(this.dataDir, runId);
-  }
-
   // ---- usage-limit auto-resume (spec 2026-08-03-auto-resume-after-usage-limit) --------------
 
   accountHolds(now = Date.now()): AccountHolds {
@@ -535,22 +431,6 @@ export class RunManager {
   }
 
   cancelAutoResume(runId: string): boolean { return this.modules.autoResumeScheduler.cancelAutoResume(runId); }
-
-  /** Reclaim finished worktrees beyond the keep-limit (#483) — directory only,
-   *  `cez/<id8>` branch kept. Best-effort; a failure never affects run
-   *  lifecycle. `review`/live runs are excluded by the selector. */
-  private async enforceRetention(): Promise<void> {
-    return this.context.work.track('enforceRetention', this.enforceRetentionWork());
-  }
-
-  private async enforceRetentionWork(): Promise<void> {
-    try {
-      const keep = await resolveWorktreeRetention(this.repoRoot);
-      await reclaimWorktrees(this.repoRoot, this.store, keep, { claim: (run) => this.claimWorktreeReclaim(run.id), previewHost: this.preview });
-    } catch {
-      // retention is best-effort; swallow so terminal transitions never break.
-    }
-  }
 
   /** Test seam: the module owns this same map for its whole lifetime. */
 
@@ -630,42 +510,6 @@ export class RunManager {
 
   private pendingHumanAskSeq(runId: string): number | undefined {
     return pendingAskFacts.pendingHumanAskSeq(this.store, runId);
-  }
-
-  /** An unanswered `ask.requested` with no open human wait (a row written before every ask opened
-   *  one) gets an open agent wait shown as that ask. Answer delivery still reads the transcript.
-   *  Cezar's own wait not shown as that ask is replaced, as the live ask does: a crash between
-   *  saving the ask and replacing it leaves that wait open (review of #1437). */
-  private adoptTranscriptAsk(runId: string): boolean {
-    const askSeq = this.pendingHumanAskSeq(runId);
-    const human = openWaits(this.store.getRun(runId) ?? {}).filter((wait): wait is HumanWaitEntry => wait.kind === 'human');
-    if (askSeq === undefined || !this.store.getRun(runId) || human.some(wait => !isCezarHumanWait(wait) || wait.askSeq === askSeq)) return false;
-    this.modules.humanWaits.withdrawCezarHumanWaits(runId);
-    if (openWaits(this.store.getRun(runId) ?? {}).some(wait => wait.kind === 'human')) return false;
-    try {
-      this.store.commitWait(runId, { id: randomUUID(), kind: 'human', source: 'agent', via: 'ask-line', registeredAt: new Date().toISOString(), phase: 'open', turnId: 'recovered', askSeq });
-      return true;
-    } catch (error) {
-      console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
-      return false;
-    }
-  }
-
-  /** The human wait upgraded from a stored `hasPendingHumanAsk` (`turnId: 'legacy'`, never shown)
-   *  is settled as answered when the transcript's facts are known and hold no unanswered ask: that
-   *  flag was read from the transcript, so its ask was answered after the row was last saved.
-   *  Unknown facts are no evidence, and the wait stays open. */
-  private settleAnsweredLegacyAsk(runId: string): boolean {
-    const legacy = this.store.getRun(runId)?.waits?.filter(wait => wait.kind === 'human' && wait.phase === 'open' && wait.turnId === 'legacy' && wait.askSeq === undefined) ?? [];
-    // Only facts read from a non-empty transcript are evidence of the answer (review of #1437).
-    const facts = this.store.knownTranscriptFacts(runId);
-    if (!legacy.length || !facts || facts.bytes === 0 || facts.pendingGateSeq !== undefined) return false;
-    try {
-      return this.store.commitOutcome(runId, { kind: 'answered', waitIds: legacy.map(wait => wait.id) }).answered.length > 0;
-    } catch (error) {
-      console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
-      return false;
-    }
   }
 
   private hasPendingHumanAsk(runId: string): boolean {
