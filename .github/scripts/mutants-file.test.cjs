@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const m = require('./mutants-file.cjs');
 const root = path.resolve(__dirname, '../..');
 const mutant = (overrides = {}) => ({ status: 'Survived', mutator: 'StringLiteral', original: "'hello'", replacement: "''", function: 'guard', kind: 'Value', ...overrides });
@@ -435,4 +436,47 @@ test('pass reset runs after missing report and thrown Stryker errors', async () 
     assert.equal(calls.filter(c => c[0] === 'reset').length, 1);
     assert.ok(calls.findIndex(c => c[0] === 'reset') < calls.findIndex(c => c[2] === 'remove'));
   }
+});
+
+
+test('ambiguous function entries exclude nothing and report ambiguous rather than stale', () => {
+  const file = 'packages/contract/src/sample.ts';
+  const ranges = [
+    { name: 'same', range: { start: { line: 0, column: 0 }, end: { line: 1, column: 0 } } },
+    { name: 'same', range: { start: { line: 1, column: 0 }, end: { line: 2, column: 0 } } },
+  ];
+  const entry = equivalentEntry({ function: 'same' });
+  const result = m.measure(report(file), file, 'sha', ranges, {}, [entry, { ...entry, file: 'other.ts' }]);
+  assert.equal(result.equivalentCount, 0);
+  assert.equal(result.survivors.length, 1);
+  assert.deepEqual(result.staleEquivalent, []);
+  assert.deepEqual(result.ambiguousEquivalent, [entry]);
+  assert.match(m.summary(result), /Warning: ambiguous equivalent function names/);
+});
+
+test('shared reset restores executable modes and preserves the PR report unless removal is requested', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mutants-reset-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const git = args => execFileSync('git', args, { cwd: dir });
+  git(['init', '-q']);
+  git(['config', 'core.filemode', 'true']);
+  fs.mkdirSync(path.join(dir, 'packages'));
+  const file = path.join(dir, 'packages/mock.mjs');
+  fs.writeFileSync(file, 'original');
+  fs.chmodSync(file, 0o755);
+  git(['add', 'packages']);
+  git(['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '-qm', 'fixture']);
+  fs.chmodSync(file, 0o644);
+  fs.writeFileSync(file, 'mutated');
+  fs.mkdirSync(path.join(dir, '.stryker-tmp'));
+  fs.mkdirSync(path.join(dir, 'reports/mutation'), { recursive: true });
+  const reportFile = path.join(dir, 'reports/mutation/mutation.json');
+  fs.writeFileSync(reportFile, '{}');
+  require('./mutants-run.cjs').restoreTree(dir);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'original');
+  assert.ok(fs.statSync(file).mode & 0o111);
+  assert.equal(fs.existsSync(path.join(dir, '.stryker-tmp')), false);
+  assert.equal(fs.existsSync(reportFile), true, 'PR job reads its report after restoring');
+  m.defaultDeps().reset(dir);
+  assert.equal(fs.existsSync(reportFile), false);
 });

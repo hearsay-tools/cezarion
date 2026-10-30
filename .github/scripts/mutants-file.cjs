@@ -9,7 +9,7 @@ const { promisify } = require('node:util');
 const { sliceSource } = require('./mutants-report.cjs');
 const { runStryker, restoreTree } = require('./mutants-run.cjs');
 const { EQUIVALENT_FILE, readEquivalent, matchesEntry } = require('./mutants-equivalent.cjs');
-const { namedRanges, functionRanges, functionOf } = require('./mutants-functions.cjs');
+const { namedRanges, functionRanges, functionOf, duplicateNames } = require('./mutants-functions.cjs');
 const TARGETS = require('../mutants/targets.json');
 const REPORT = 'reports/mutation/mutation.json';
 const STATUS = { Killed: 'killed', Timeout: 'timeout', Survived: 'survived', NoCoverage: 'noCoverage', CompileError: 'error', RuntimeError: 'error', Ignored: 'ignored' };
@@ -160,10 +160,13 @@ function measure(report, file, head, ranges, targets = TARGETS, entries = []) {
     return { ...row, kind: kindOf(row, file) };
   });
   const target = tierOf(file, targets);
-  const kept = mutants.filter(m => !entries.some(entry => matchesEntry(entry, m)));
-  const staleEquivalent = entries.filter(entry => entry.file === file && !mutants.some(m => matchesEntry(entry, m)));
+  const duplicates = duplicateNames(ranges);
+  const ambiguousEquivalent = entries.filter(entry => entry.file === file && duplicates.has(entry.function));
+  const eligible = entries.filter(entry => !duplicates.has(entry.function));
+  const kept = mutants.filter(m => !eligible.some(entry => matchesEntry(entry, m)));
+  const staleEquivalent = eligible.filter(entry => entry.file === file && !mutants.some(m => matchesEntry(entry, m)));
   return { version: 1, file, head, tier: target.tier, mutants: kept, equivalentCount: mutants.length - kept.length,
-    ...evaluate(kept, target, ranges), rawCounts: countsOf(mutants), rawScore: scoreOf(countsOf(mutants)), staleEquivalent };
+    ...evaluate(kept, target, ranges), rawCounts: countsOf(mutants), rawScore: scoreOf(countsOf(mutants)), staleEquivalent, ambiguousEquivalent };
 }
 
 function summary(result) {
@@ -178,6 +181,7 @@ function summary(result) {
   for (const target of result.targets) lines.push(`${target.pass ? 'PASS' : 'FAIL'}: ${target.name}`);
   lines.push(`Equivalent mutants excluded: ${result.equivalentCount}`, `Stale equivalent entries: ${JSON.stringify(result.staleEquivalent)}`);
   if (result.consumers) lines.push(result.consumers.state === 'failed' ? `FAIL: consumer tests: failed — ${result.consumers.reason}` : `PASS: consumer tests: merged (${result.consumers.tests.length} files)`);
+  if (result.ambiguousEquivalent.length) lines.push(`Warning: ambiguous equivalent function names: ${JSON.stringify(result.ambiguousEquivalent)}`);
   if (result.warning) lines.push(result.warning);
   if (result.comparison) lines.push(`Change: ${JSON.stringify(result.comparison)}`);
   return lines.join('\n');
