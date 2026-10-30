@@ -1,3 +1,4 @@
+import type { Dirent } from 'node:fs';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { expandTilde } from '../paths.ts';
@@ -183,6 +184,36 @@ export async function browseDirectory(opts: {
   // existence of a file the caller was never shown.
   if (!info?.isDirectory()) return { ok: false, status: 404, error: 'no such directory' };
 
+  const entries = await readEntries(real);
+  if (!Array.isArray(entries)) return entries;
+
+  const showHidden = opts.showHidden === true;
+  const candidates = entries
+    .filter((entry) => showHidden || !entry.name.startsWith('.'))
+    // Symlinks are resolved below (a symlinked project dir is a normal setup);
+    // everything that is neither a directory nor a symlink is not our business.
+    .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const truncated = candidates.length > MAX_ENTRIES;
+  const inHome = real === (await realpathOrNull(expandTilde('~')));
+
+  const dirs = await listDirs(root, real, candidates.slice(0, MAX_ENTRIES), inHome);
+
+  return {
+    ok: true,
+    body: {
+      path: real,
+      // Never above the root, even when the real parent exists — `dirname('/')`
+      // is `/`, and the root's parent is simply not part of this surface.
+      parent: real === root ? null : dirname(real),
+      dirs,
+      truncated,
+    },
+  };
+}
+
+/** The entries of `real`, or the failure to answer when it cannot be read. */
+async function readEntries(real: string): Promise<Dirent[] | Extract<BrowseResult, { ok: false }>> {
   let readError: NodeJS.ErrnoException | null = null;
   const entries = await readdir(real, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
     readError = error;
@@ -199,18 +230,13 @@ export async function browseDirectory(opts: {
     return { ok: false, status: 404, error: 'no such directory' };
   }
 
-  const showHidden = opts.showHidden === true;
-  const candidates = entries
-    .filter((entry) => showHidden || !entry.name.startsWith('.'))
-    // Symlinks are resolved below (a symlinked project dir is a normal setup);
-    // everything that is neither a directory nor a symlink is not our business.
-    .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const truncated = candidates.length > MAX_ENTRIES;
-  const inHome = real === (await realpathOrNull(expandTilde('~')));
+  return entries;
+}
 
+/** The listed directories among `entries`, each with whether it is a git repository. */
+async function listDirs(root: string, real: string, entries: Dirent[], inHome: boolean): Promise<FsBrowseDir[]> {
   const dirs: FsBrowseDir[] = [];
-  for (const entry of candidates.slice(0, MAX_ENTRIES)) {
+  for (const entry of entries) {
     const childPath = join(real, entry.name);
     if (entry.isSymbolicLink()) {
       const childReal = await realpathOrNull(childPath);
@@ -232,15 +258,5 @@ export async function browseDirectory(opts: {
     });
   }
 
-  return {
-    ok: true,
-    body: {
-      path: real,
-      // Never above the root, even when the real parent exists — `dirname('/')`
-      // is `/`, and the root's parent is simply not part of this surface.
-      parent: real === root ? null : dirname(real),
-      dirs,
-      truncated,
-    },
-  };
+  return dirs;
 }

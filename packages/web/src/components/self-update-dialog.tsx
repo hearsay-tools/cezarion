@@ -218,91 +218,110 @@ function ChannelToggle({
   )
 }
 
-function LatestCard({
-  data,
-  checking,
-  onCheck,
-  onApply,
-  applying,
-}: {
+type Installed = SelfUpdateStatus['installed'][number]
+
+interface CardProps {
   data: SelfUpdateStatus
   checking: boolean
   onCheck: () => void
   onApply: (version: string) => void
   applying: boolean
-}) {
-  const jobBusy = data.job?.status === 'running' || data.job?.status === 'restarting'
+}
+
+const jobBusyOf = (data: SelfUpdateStatus) => data.job?.status === 'running' || data.job?.status === 'restarting'
+
+function LatestCard(props: CardProps) {
+  const { data } = props
   // A linked worktree or a local build shares its version number with a release but is not that
   // release: "newest version" would be a claim about code cezar did not ship. Offer the channel's
   // newest release as the way back instead.
   const active = data.installed.find((entry) => entry.active)
   const pr = active?.source === 'registry' ? pullOfVersion(active.version) : null
   const dev = active && (active.source === 'link' || active.source === 'local' || pr !== null) ? active : null
-  if (dev || data.channel === 'development') {
-    // Development never offers an update; the way back to releases is the channel toggle.
-    const release = data.channel === 'development' ? null : data.latest[data.channel]
-    // "Back to" only when that release is really on disk; otherwise it is a download.
-    const releaseInstalled = release !== null && data.installed.some((entry) => entry.source === 'registry' && entry.id === release)
-    // Stacked rather than side by side: branch names and nightly versions are long enough to
-    // squeeze a one-row layout into a narrow word-per-line column.
-    return (
-      <div data-slot="self-update-latest" className="flex flex-col gap-2 rounded-md border border-border bg-card px-3 py-2.5">
-        <div className="min-w-0 text-[13px] break-words">
-          {dev?.source === 'link' ? (
-            <>
-              Running worktree <span className="font-mono text-[12.5px] font-semibold">{dev.branch ?? dev.id}</span>, not
-              a release.
-            </>
-          ) : dev?.source === 'local' ? (
-            <>Running a local build, not a release.</>
-          ) : pr !== null ? (
-            <>
-              Running the preview build of <span className="font-semibold">PR #{pr}</span>, not a release.
-            </>
-          ) : (
-            <>
-              Running <span className="font-semibold">v{data.version}</span>. Pick a worktree or a pull request below.
-            </>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
-          <div className="min-w-0 text-[11.5px] break-words text-muted-foreground">
-            {data.channel === 'development' ? (
-              'Switch the channel back to Stable or Nightly to follow releases again.'
-            ) : !data.checkedAt ? (
-              'The npm registry has not answered yet.'
-            ) : (
-              <>
-                {release ? (
-                  <>
-                    Newest {data.channel}: <span className="font-mono text-foreground">v{release}</span> ·{' '}
-                  </>
-                ) : null}
-                checked {new Date(data.checkedAt).toLocaleTimeString()}
-              </>
-            )}
-          </div>
-          {data.channel !== 'development' ? (
-            <div className="ml-auto flex shrink-0 items-center gap-2">
-              <Button variant="ghost" size="sm" onClick={onCheck} disabled={checking || jobBusy}>
-                {checking ? 'Checking…' : 'Check again'}
-              </Button>
-              {release ? (
-                <Button
-                  size="sm"
-                  aria-label={releaseInstalled ? `Back to v${release}` : `Install v${release} & restart`}
-                  onClick={() => onApply(release)}
-                  disabled={!data.canSelfUpdate || applying || jobBusy}
-                >
-                  {releaseInstalled ? 'Switch back' : 'Install & restart'}
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
+  if (dev || data.channel === 'development') return <NotAReleaseCard {...props} dev={dev} pr={pr} />
+  return <ReleaseCard {...props} />
+}
+
+function NotAReleaseCard({ data, checking, onCheck, onApply, applying, dev, pr }: CardProps & { dev: Installed | null; pr: number | null }) {
+  const jobBusy = jobBusyOf(data)
+  // Development never offers an update; the way back to releases is the channel toggle.
+  const release = data.channel === 'development' ? null : data.latest[data.channel]
+  // "Back to" only when that release is really on disk; otherwise it is a download.
+  const releaseInstalled = release !== null && data.installed.some((entry) => entry.source === 'registry' && entry.id === release)
+  // Stacked rather than side by side: branch names and nightly versions are long enough to
+  // squeeze a one-row layout into a narrow word-per-line column.
+  return (
+    <div data-slot="self-update-latest" className="flex flex-col gap-2 rounded-md border border-border bg-card px-3 py-2.5">
+      <div className="min-w-0 text-[13px] break-words">
+        <RunningBuild data={data} dev={dev} pr={pr} />
       </div>
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <div className="min-w-0 text-[11.5px] break-words text-muted-foreground">
+          <ReleaseNote data={data} release={release} />
+        </div>
+        {data.channel !== 'development' ? (
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={onCheck} disabled={checking || jobBusy}>
+              {checking ? 'Checking…' : 'Check again'}
+            </Button>
+            {release ? (
+              <Button
+                size="sm"
+                aria-label={releaseInstalled ? `Back to v${release}` : `Install v${release} & restart`}
+                onClick={() => onApply(release)}
+                disabled={!data.canSelfUpdate || applying || jobBusy}
+              >
+                {releaseInstalled ? 'Switch back' : 'Install & restart'}
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
+}
+
+function RunningBuild({ data, dev, pr }: { data: SelfUpdateStatus; dev: Installed | null; pr: number | null }) {
+  if (dev?.source === 'link') {
+    return (
+      <>
+        Running worktree <span className="font-mono text-[12.5px] font-semibold">{dev.branch ?? dev.id}</span>, not
+        a release.
+      </>
     )
   }
+  if (dev?.source === 'local') return <>Running a local build, not a release.</>
+  if (pr !== null) {
+    return (
+      <>
+        Running the preview build of <span className="font-semibold">PR #{pr}</span>, not a release.
+      </>
+    )
+  }
+  return (
+    <>
+      Running <span className="font-semibold">v{data.version}</span>. Pick a worktree or a pull request below.
+    </>
+  )
+}
+
+function ReleaseNote({ data, release }: { data: SelfUpdateStatus; release: string | null }) {
+  if (data.channel === 'development') return <>Switch the channel back to Stable or Nightly to follow releases again.</>
+  if (!data.checkedAt) return <>The npm registry has not answered yet.</>
+  return (
+    <>
+      {release ? (
+        <>
+          Newest {data.channel}: <span className="font-mono text-foreground">v{release}</span> ·{' '}
+        </>
+      ) : null}
+      checked {new Date(data.checkedAt).toLocaleTimeString()}
+    </>
+  )
+}
+
+function ReleaseCard({ data, checking, onCheck, onApply, applying }: CardProps) {
+  const jobBusy = jobBusyOf(data)
   const target = data.updateAvailable
   return (
     <div
@@ -313,18 +332,7 @@ function LatestCard({
       )}
     >
       <div className="min-w-0 text-[13px]">
-        {!data.checkedAt ? (
-          <span className="text-muted-foreground">The npm registry has not answered yet.</span>
-        ) : target ? (
-          <>
-            <span className="font-semibold">v{target}</span> is available on {data.channel}.
-          </>
-        ) : (
-          <>
-            You are on the newest {data.channel} version
-            {data.channel === 'nightly' && data.latest.nightly ? ` (v${data.latest.nightly})` : ''}.
-          </>
-        )}
+        <ReleaseState data={data} target={target} />
         {data.checkedAt ? (
           <div className="text-[11.5px] text-muted-foreground">checked {new Date(data.checkedAt).toLocaleTimeString()}</div>
         ) : null}
@@ -340,6 +348,23 @@ function LatestCard({
         ) : null}
       </div>
     </div>
+  )
+}
+
+function ReleaseState({ data, target }: { data: SelfUpdateStatus; target: string | null }) {
+  if (!data.checkedAt) return <span className="text-muted-foreground">The npm registry has not answered yet.</span>
+  if (target) {
+    return (
+      <>
+        <span className="font-semibold">v{target}</span> is available on {data.channel}.
+      </>
+    )
+  }
+  return (
+    <>
+      You are on the newest {data.channel} version
+      {data.channel === 'nightly' && data.latest.nightly ? ` (v${data.latest.nightly})` : ''}.
+    </>
   )
 }
 

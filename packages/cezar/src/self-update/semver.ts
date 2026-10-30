@@ -29,32 +29,41 @@ export function compareVersions(a: string, b: string): number {
   const pa = parseVersion(a);
   const pb = parseVersion(b);
   if (!pa || !pb) return pa ? 1 : pb ? -1 : a.localeCompare(b);
+  return compareCore(pa.core, pb.core) || comparePrerelease(pa.pre, pb.pre);
+}
+
+function compareCore(a: ParsedVersion['core'], b: ParsedVersion['core']): number {
   for (let i = 0; i < 3; i++) {
-    const diff = pa.core[i]! - pb.core[i]!;
+    const diff = a[i]! - b[i]!;
     if (diff !== 0) return diff > 0 ? 1 : -1;
   }
-  if (pa.pre.length === 0 && pb.pre.length === 0) return 0;
-  if (pa.pre.length === 0) return 1;
-  if (pb.pre.length === 0) return -1;
-  const len = Math.max(pa.pre.length, pb.pre.length);
+  return 0;
+}
+
+/** A release (no identifiers) beats any prerelease; otherwise identifiers left to right, and a
+ *  shorter list loses. */
+function comparePrerelease(a: string[], b: string[]): number {
+  if (a.length === 0 || b.length === 0) return Math.sign(b.length - a.length);
+  const len = Math.max(a.length, b.length);
   for (let i = 0; i < len; i++) {
-    const x = pa.pre[i];
-    const y = pb.pre[i];
+    const x = a[i];
+    const y = b[i];
     if (x === undefined) return -1;
     if (y === undefined) return 1;
-    const nx = /^\d+$/.test(x) ? Number(x) : null;
-    const ny = /^\d+$/.test(y) ? Number(y) : null;
-    if (nx !== null && ny !== null) {
-      if (nx !== ny) return nx > ny ? 1 : -1;
-    } else if (nx !== null) {
-      return -1; // numeric identifiers sort before alphanumeric ones
-    } else if (ny !== null) {
-      return 1;
-    } else if (x !== y) {
-      return x > y ? 1 : -1;
-    }
+    const order = compareIdentifier(x, y);
+    if (order !== 0) return order;
   }
   return 0;
+}
+
+/** Numbers numerically, strings lexically, and a numeric identifier before an alphanumeric one. */
+function compareIdentifier(x: string, y: string): number {
+  const nx = /^\d+$/.test(x) ? Number(x) : null;
+  const ny = /^\d+$/.test(y) ? Number(y) : null;
+  if (nx !== null && ny !== null) return Math.sign(nx - ny);
+  if (nx !== null) return -1;
+  if (ny !== null) return 1;
+  return x === y ? 0 : x > y ? 1 : -1;
 }
 
 export function isNewer(candidate: string, current: string): boolean {

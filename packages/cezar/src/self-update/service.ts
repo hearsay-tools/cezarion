@@ -11,7 +11,7 @@ import { cezarHomeDir } from '../paths.ts';
 import { loadWorkspaceConfig, mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { installFromLocal, installFromRegistry } from './installer.ts';
 import { buildCheckout, discoverCheckouts } from './checkouts.ts';
-import { activate, detectInstallKind, findInstalled, linkCheckout, listInstalled, packageRootOf, type InstallKind } from './layout.ts';
+import { activate, detectInstallKind, findInstalled, linkCheckout, listInstalled, packageRootOf, type InstalledEntry, type InstallKind } from './layout.ts';
 import { CEZAR_REPO, fetchOpenPulls, OpenPullsCache, type OpenPulls } from './pulls.ts';
 import { distTagFor, RegistryCache, type PackageDocument } from './registry.ts';
 import { classifyVersion, isNewer } from './semver.ts';
@@ -90,33 +90,15 @@ export class SelfUpdateService {
    *  read waits for the bounded initial registry request so the dialog receives its result.
    *  Active jobs must report progress before restart even when the registry is unreachable. */
   async status(opts: { refresh?: boolean; registryOnly?: boolean } = {}): Promise<SelfUpdateStatus> {
-    let doc: PackageDocument | null;
-    if (this.job?.status === 'running' || this.job?.status === 'restarting') doc = this.registry.current();
-    else if (opts.refresh) doc = await this.registry.refresh();
-    else {
-      doc = this.registry.current();
-      if (!doc) doc = await this.registry.get();
-      else void this.registry.get().catch(() => {});
-    }
+    const doc = await this.statusDocument(opts.refresh);
     const channel = await this.channel();
-    const registryOnly = opts.registryOnly || this.deps.trimPaths?.();
-    const installed = listInstalled(this.env).filter(entry => !registryOnly || entry.source === 'registry');
+    const trim = !!(opts.registryOnly || this.deps.trimPaths?.());
+    const installed = listInstalled(this.env).filter(entry => !trim || entry.source === 'registry');
     const installedIds = new Set(installed.map((entry) => entry.id));
     const stable = doc?.distTags.latest ?? null;
     const nightly = doc?.distTags.nightly ?? null;
     const target = channel === 'stable' ? stable : channel === 'nightly' ? nightly : null;
     const { canSelfUpdate, reason } = this.capability();
-    const trim = !!registryOnly;
-    // Keep raw diagnostics for local callers, but never disclose the managed home through
-    // hosted npm command output or the final error. npm can normalize Windows separators.
-    const home = cezarHomeDir(this.env);
-    const redact = (line: string) => [home, home.replaceAll('\\', '/')]
-      .reduce((text, path) => text.replaceAll(path, '[cezar home]'), line);
-    const job = this.job && trim ? {
-      ...this.job,
-      log: this.job.log.map(redact),
-      ...(this.job.error ? { error: redact(this.job.error) } : {}),
-    } : this.job;
     return {
       version: this.deps.version,
       installKind: this.installKind,
@@ -128,28 +110,36 @@ export class SelfUpdateService {
       latest: { stable, nightly },
       updateAvailable: target && isNewer(target, this.deps.version) ? target : null,
       checkedAt: doc?.fetchedAt ?? null,
-      installed: installed.map((entry) => ({
-        id: entry.id,
-        version: entry.version,
-        source: entry.source,
-        installedAt: entry.installedAt,
-        active: entry.active,
-        ...(entry.branch ? { branch: entry.branch } : {}),
-        ...(entry.checkout && !trim ? { checkout: entry.checkout } : {}),
-      })),
-      // Previews (`-pr123.`, `-develop.`) are noise in a picker meant for stable ↔ nightly
-      // moves; the PoC lists stable releases and nightlies only.
-      available: (doc?.versions ?? [])
-        .filter((entry) => entry.channel !== 'preview')
-        .slice(0, 60)
-        .map((entry) => ({
-          version: entry.version,
-          channel: entry.channel,
-          publishedAt: entry.publishedAt,
-          installed: installedIds.has(entry.version),
-        })),
-      job,
+      installed: installed.map((entry) => installedView(entry, trim)),
+      available: availableVersions(doc, installedIds),
+      job: this.jobView(trim),
       activeRuns: this.deps.activeRuns?.() ?? 0,
+    };
+  }
+
+  /** The registry document `status` reads: the cached one while a job runs, a fresh one on
+   *  `refresh`, else the cache with a background refresh (a cold cache waits for its first read). */
+  private async statusDocument(refresh: boolean | undefined): Promise<PackageDocument | null> {
+    if (this.job?.status === 'running' || this.job?.status === 'restarting') return this.registry.current();
+    if (refresh) return this.registry.refresh();
+    const doc = this.registry.current();
+    if (!doc) return this.registry.get();
+    void this.registry.get().catch(() => {});
+    return doc;
+  }
+
+  /** The job as `status` reports it. Keep raw diagnostics for local callers, but never disclose
+   *  the managed home through hosted npm command output or the final error. npm can normalize
+   *  Windows separators. */
+  private jobView(trim: boolean): SelfUpdateStatus['job'] {
+    if (!this.job || !trim) return this.job;
+    const home = cezarHomeDir(this.env);
+    const redact = (line: string) => [home, home.replaceAll('\\', '/')]
+      .reduce((text, path) => text.replaceAll(path, '[cezar home]'), line);
+    return {
+      ...this.job,
+      log: this.job.log.map(redact),
+      ...(this.job.error ? { error: redact(this.job.error) } : {}),
     };
   }
 
@@ -333,4 +323,30 @@ export class SelfUpdateService {
     activate(result.id, this.env);
     return result;
   }
+}
+
+function installedView(entry: InstalledEntry, trim: boolean): SelfUpdateStatus['installed'][number] {
+  return {
+    id: entry.id,
+    version: entry.version,
+    source: entry.source,
+    installedAt: entry.installedAt,
+    active: entry.active,
+    ...(entry.branch ? { branch: entry.branch } : {}),
+    ...(entry.checkout && !trim ? { checkout: entry.checkout } : {}),
+  };
+}
+
+/** Previews (`-pr123.`, `-develop.`) are noise in a picker meant for stable ↔ nightly moves;
+ *  the picker lists stable releases and nightlies only. */
+function availableVersions(doc: PackageDocument | null, installedIds: ReadonlySet<string>): SelfUpdateStatus['available'] {
+  return (doc?.versions ?? [])
+    .filter((entry) => entry.channel !== 'preview')
+    .slice(0, 60)
+    .map((entry) => ({
+      version: entry.version,
+      channel: entry.channel,
+      publishedAt: entry.publishedAt,
+      installed: installedIds.has(entry.version),
+    }));
 }

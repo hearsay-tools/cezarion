@@ -92,21 +92,46 @@ async function installCommand(opts: SelfUpdateCliOptions): Promise<number> {
   }
 }
 
-async function updateCommand(opts: SelfUpdateCliOptions): Promise<number> {
-  const { service } = opts;
+/** Apply `--channel` when given, then answer the channel in force; undefined on a bad value. */
+async function updateChannel(opts: SelfUpdateCliOptions): Promise<string | undefined> {
   const requested = opts.channel;
   if (requested !== undefined && requested !== 'stable' && requested !== 'nightly' && requested !== 'development') {
     console.error(`  --channel must be stable, nightly or development (got ${requested})`);
+    return undefined;
+  }
+  if (requested) await opts.service.setChannel(requested);
+  return opts.service.channel();
+}
+
+function printDevelopmentChannelHelp(): void {
+  // Development follows no dist-tag: there is no "newest" to update to.
+  console.log('\n  channel development — nothing to update to. Pick a build by hand:');
+  console.log('    cez link [<worktree>] --use   run a cez worktree');
+  console.log('    cez update --version <version> install a release or a PR preview (e.g. 0.13.0-pr1169.1234)');
+  console.log('    cez update --channel stable    go back to releases\n');
+}
+
+/** Install `target` unless it is already installed, make it current, and write the launchers. */
+async function activateTarget(target: string): Promise<number> {
+  try {
+    const installed = findInstalled(target);
+    const id = installed ? installed.id : (await installFromRegistry(target, { onLog: (line) => console.log(`  · ${line}`) })).id;
+    activate(id);
+    const dir = writeLaunchers();
+    console.log(`\n  ✓ ${id} is now current — start it with: ${isOnPath(dir) ? 'cez' : `${dir}/cezarion`}\n`);
+    return 0;
+  } catch (error) {
+    console.error(`\n  ✗ update failed: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
-  if (requested) await service.setChannel(requested);
-  const channel = await service.channel();
+}
+
+async function updateCommand(opts: SelfUpdateCliOptions): Promise<number> {
+  const { service } = opts;
+  const channel = await updateChannel(opts);
+  if (channel === undefined) return 1;
   if (channel === 'development' && !opts.version) {
-    // Development follows no dist-tag: there is no "newest" to update to.
-    console.log('\n  channel development — nothing to update to. Pick a build by hand:');
-    console.log('    cez link [<worktree>] --use   run a cez worktree');
-    console.log('    cez update --version <version> install a release or a PR preview (e.g. 0.13.0-pr1169.1234)');
-    console.log('    cez update --channel stable    go back to releases\n');
+    printDevelopmentChannelHelp();
     return 0;
   }
   const status = await service.status({ refresh: true });
@@ -129,17 +154,7 @@ async function updateCommand(opts: SelfUpdateCliOptions): Promise<number> {
     // Not managed: install the target into the managed layout anyway, then explain the switch.
     console.log(`  ${status.reason ?? ''}\n  installing ${target} into the managed layout so \`cezarion\` can run it:\n`);
   }
-  try {
-    const installed = findInstalled(target);
-    const id = installed ? installed.id : (await installFromRegistry(target, { onLog: (line) => console.log(`  · ${line}`) })).id;
-    activate(id);
-    const dir = writeLaunchers();
-    console.log(`\n  ✓ ${id} is now current — start it with: ${isOnPath(dir) ? 'cez' : `${dir}/cezarion`}\n`);
-    return 0;
-  } catch (error) {
-    console.error(`\n  ✗ update failed: ${error instanceof Error ? error.message : String(error)}\n`);
-    return 1;
-  }
+  return activateTarget(target);
 }
 
 async function versionsCommand(): Promise<number> {
