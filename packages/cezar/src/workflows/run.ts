@@ -14,6 +14,7 @@ import { TurnSettler } from './run/turn-settler.ts';
 import { StepSession } from './run/step-session.ts';
 import * as sessionEvents from './run/session-events.ts';
 import { WakeAdmission } from './run/wake-admission.ts';
+import { RunFinish } from './run/run-finish.ts';
 import { RunSettlement } from './run/run-settlement.ts';
 import { InputDelivery } from './run/input-delivery.ts';
 import { TurnNudges } from './run/turn-nudges.ts';
@@ -30,7 +31,7 @@ import { RunSkills } from './run/run-skills.ts';
 import { InboxClaims } from './run/inbox-claims.ts';
 import { WorkerExecutions } from './run/worker-executions.ts';
 import { TurnBookkeeper } from './run/turn-bookkeeping.ts';
-import { AutomationToolsSlot, cezarToolHandlers, toolSessionRefusal } from './run/cezar-tools.ts';
+import { AutomationToolsSlot, cezarToolHandlers } from './run/cezar-tools.ts';
 import { registerPreviewServer, stopPreviewServer } from '../preview/run-tools.ts';
 import { AttachmentWriter } from './run/attachment-writer.ts';
 import { QueuedInput } from './run/queued-input.ts';
@@ -41,11 +42,10 @@ import type {
   DelegationExecutionSettings, StartRunInput, PendingContinuation, Execution, StepLoop, WorkerTerminationBlocker, AutomationToolService,
 } from './run/types.ts';
 export type { TurnTail, DelegationExecutionSettings, StartRunInput, WorkerTerminationBlocker, AutomationToolService } from './run/types.ts';
-import { openCompletionRequests, recordRequestRefusal, repairFailedRootFinish, startCompletionCycle, settledRootFinishPatch, type CompletionRefusal } from './completion-policy.ts';
+import { repairFailedRootFinish, startCompletionCycle, settledRootFinishPatch } from './completion-policy.ts';
 import type { ContinueRunOptions } from './continuation-admission.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
-import { doneErrorMessage } from '../ci-wait/errors.ts';
-import { cezarDoneRequestSchema, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type DoneErrorCode, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
+import { type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
@@ -74,7 +74,7 @@ import * as workflowPosition from './run/workflow-position.ts';
 import { RUN_EXITS, transition, transitionVia, type RunExitId } from './run-states.ts';
 import { deriveAccountHolds, queuedRecoveryInput } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
-import { holdsOwedResults, isCezarHumanWait, openWaitList, openWaits, resolvedWaits } from './waits.ts';
+import { holdsOwedResults, isCezarHumanWait, openWaits, resolvedWaits } from './waits.ts';
 import { runsAwaitingPeer } from './wait-scope.ts';
 import { previewCdpSession, previewRunContext, type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
@@ -178,6 +178,7 @@ export class RunManager {
   private readonly humanWaits: HumanWaits;
   private readonly turnNudges: TurnNudges;
   private readonly runSettlement: RunSettlement;
+  private readonly runFinish: RunFinish;
   private readonly waitRegistry: WaitRegistry;
   private readonly waitWatches: WaitWatches;
   private readonly familyReconciler: FamilyReconciler;
@@ -495,7 +496,7 @@ export class RunManager {
         owesWake: (...args) => this.wakeAdmission.owesWake(...args),
         cancelOpenWaits: (...args) => this.wakeAdmission.cancelOpenWaits(...args),
         settleOrphanedWorkerExecution: (...args) => this.settleOrphanedWorkerExecution(...args),
-        settleRequestedRootFinish: (...args) => this.settleRequestedRootFinish(...args),
+        settleRequestedRootFinish: (...args) => this.runFinish.settleRequestedRootFinish(...args),
         settleSuccess: (...args) => this.runSettlement.settleSuccess(...args),
         reconcileWorkerWaits: (...args) => this.reconcileWorkerWaits(...args),
         pump: (...args) => this.line.pump(...args),
@@ -533,7 +534,7 @@ export class RunManager {
         move: (id, exit, patch) => this.move(id, exit, patch), dropActive: id => this.dropActive(id),
         saveWorktree: (id, state, reason) => this.worktreeAutosave.saveWorktree(id, state, reason),
         settleSuccess: (id, durable, keep) => this.runSettlement.settleSuccess(id, durable, keep),
-        deferParentCompletion: id => this.deferParentCompletion(id),
+        deferParentCompletion: id => this.runFinish.deferParentCompletion(id),
         closingWakeDecision: (id, holds, cancelled, error) => this.wakeAdmission.closingWakeDecision(id, holds, cancelled, error),
         owesDelivery: id => this.wakeAdmission.owesDelivery(id), preserveRunAfterDisposal: (id, state) => preserveRunAfterDisposal(this.store, () => this.disposed, id, state),
         isDisposedDelegatedRun: id => isDisposedDelegatedRun(this.store, () => this.disposed, id), queueWaitWake: id => this.wakeAdmission.queueWaitWake(id),
@@ -554,7 +555,7 @@ export class RunManager {
       workerStep: (...args) => this.workerStep(...args),
       latchAgentInputError: (...args) => this.latchAgentInputError(...args),
       reconcileWorkerWaits: () => this.reconcileWorkerWaits(),
-      holdContinuationForRootFinish: (...args) => this.holdContinuationForRootFinish(...args),
+      holdContinuationForRootFinish: (...args) => this.runFinish.holdContinuationForRootFinish(...args),
     }, this.line, this.sessionHelperHost, this.repoRootLease, this.worktreeAutosave, this.runSkills,
     this.sessionEventHost(), this.launchPreambleHost(), this.inputReceiptHost, this.inputReceiptSteps,
     this.humanWaits, this.queuedInput, this.workerQuestions, this.runSettlement);
@@ -569,7 +570,7 @@ export class RunManager {
     this.turnSettler = new TurnSettler(this.context, {
       humanWaits: this.humanWaits, line: this.line, waitWatches: this.waitWatches, waitRegistry: this.waitRegistry,
       workerQuestions: this.workerQuestions, completionGateHost: this.completionGateHost,
-      move: (id, exit) => this.move(id, exit), releaseSlot: () => this.line.releaseSlot(), completionGate: id => this.completionGate(id),
+      move: (id, exit) => this.move(id, exit), releaseSlot: () => this.line.releaseSlot(), completionGate: id => this.runFinish.completionGate(id),
       cancelOpenWaits: id => this.wakeAdmission.cancelOpenWaits(id), countAutomaticWakes: id => this.wakeAdmission.automaticWakes(id),
       workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
       submitAgentInput: (id, state, content) => this.inputDelivery.submitAgentInput(id, state, content), flushAgentInputs: id => this.inputDelivery.flushAgentInputs(id),
@@ -582,6 +583,11 @@ export class RunManager {
       noticeParkedWorker: id => this.workerQuestions.noticeParkedWorker(id), routeWorkerQuestion: id => this.workerQuestions.routeWorkerQuestion(id),
       settledTurnOutcome: (id, entry, outcome) => this.settledTurnOutcome(id, entry, outcome),
     }, IDLE_TIMEOUT_MS, MAX_AUTO_CONTINUES, COMPLETION_WILL_WAIT, SCHEDULE_WAKEUP_MAX_SECONDS);
+    this.runFinish = new RunFinish(this.context, this.completionGateHost, this.runSettlement, this.turnSettler, this.turnNudges, this.line, {
+      move: (id, exit, patch) => this.move(id, exit, patch), dropActive: id => this.dropActive(id),
+      cancelOpenWaits: id => this.wakeAdmission.cancelOpenWaits(id), reconcileWorkerWaits: id => this.reconcileWorkerWaits(id),
+      executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run), hasUnansweredHumanAsk: id => this.hasUnansweredHumanAsk(id),
+    });
     this.inputDelivery = new InputDelivery(this.context, {
       active: this.active, line: this.line, workerExecutions: this.workerExecutions, runSkills: this.runSkills,
       attachments: this.attachments, humanWaits: this.humanWaits, workerQuestions: this.workerQuestions,
@@ -809,40 +815,8 @@ export class RunManager {
       awaitAutomationTools: signal => this.awaitAutomationTools(signal) });
   }
 
-  /**
-   * `cezar_done` (hearsay-tools/cezarion#1234). Accepted, the run finishes at this turn's end
-   * through the done branch, which cancels every open wait; in a workflow step that is not the
-   * last, that branch completes the step and the next one starts (hearsay-tools/cezarion#1620), and
-   * the answer says which. Refused, the answer says what to do
-   * first. The gate is the completion gate, in order: the session, a root finish, the user's
-   * question, then for a root its workers' questions, live workers and uncollected results. The turn end re-checks it (`deferParentCompletion`).
-   */
-  acceptDone(runId: string, generation: string, request: CezarDoneRequest, signal?: AbortSignal): CezarDoneAnswer {
-    const parsed = cezarDoneRequestSchema.parse(request);
-    const state = this.active.get(runId);
-    const open_waits = openWaitList(this.store.getRun(runId)?.waits ?? []);
-    const refuse = (code: DoneErrorCode, message: string, workers: { worker_id: string; reason: 'outstanding' | 'uncollected' | 'question' }[] = []): CezarDoneAnswer => {
-      // Fixed codes only, as for wait registration.
-      console.warn(`[cez] cezar_done refused: ${code}`);
-      return { ok: false, code, message, ...(workers.length ? { workers: workers.slice(0, 64) } : {}), open_waits };
-    };
-    const session = toolSessionRefusal(this.store.getRun(runId), state, this.active.get(runId), generation, signal, this.disposed);
-    const run = this.store.getRun(runId);
-    if (session || !run || !state?.session) return refuse(session ?? 'run_missing', doneErrorMessage(session ?? 'run_missing'));
-    if (this.executionBlockedByRootFinish(run)) return refuse('root_finish_pending', doneErrorMessage('root_finish_pending'));
-    // The answer a continuation opened with is not a pending question while its turn runs.
-    if (state.pendingHumanAsk || this.hasUnansweredHumanAsk(runId)) return refuse('human_question_pending', doneErrorMessage('human_question_pending'));
-    const refusal = this.completionRefusal(runId);
-    if (refusal) {
-      recordRequestRefusal(state, refusal, true);
-      return refuse(refusal.code, refusal.message, refusal.workers);
-    }
-    state.doneRequested = { session: state.session, ...(parsed.summary === undefined ? {} : { summary: parsed.summary }) };
-    const next = state.nextStep?.session === state.session ? state.nextStep.label : undefined;
-    return { ok: true, finishes: 'at_turn_end', ...(next === undefined ? { completes: 'task' as const } : { completes: 'step' as const, next_step: next }), open_waits };
-  }
+  acceptDone(runId: string, generation: string, request: CezarDoneRequest, signal?: AbortSignal): CezarDoneAnswer { return this.runFinish.acceptDone(runId, generation, request, signal); }
 
-  private completionRefusal(runId: string): CompletionRefusal | undefined { return completionGateReads.completionRefusal(this.context, this.completionGateHost, runId); }
 
 
 
@@ -1226,61 +1200,11 @@ export class RunManager {
 
   private parentCompletionBlockers(runId: string) { return completionGateReads.parentCompletionBlockers(this.context, this.completionGateHost, runId); }
 
-  /** The read-only verdict and explicit Finish share this decision. Operational failures
-   * (for example a failed durable write) are still handled at execution time. */
-  private finishDecision(runId: string):
-    { action: 'session' | 'root' | 'waiting' | 'review' } | { reason: string; warn?: boolean } { return completionGateReads.finishDecision(this.context, this.completionGateHost, runId); }
 
   finishBlockedReason(runId: string): string | undefined { return completionGateReads.finishBlockedReason(this.context, this.completionGateHost, runId); }
 
-  private deferParentCompletion(runId: string): boolean {
-    const gate = this.completionGate(runId);
-    if (gate === 'accept') return false;
-    const state = this.active.get(runId);
-    // Mid-turn, the live turn end takes its done to the gate itself, behind owed input and waits.
-    if (typeof gate === 'object' && state?.session && state.atTurnBoundary === state.session) {
-      this.turnSettler.settleTurn(runId, state, 'gate', this.turnSettler.boundaryTurn(runId, state, state.session, true), gate);
-    }
-    return true;
-  }
 
-  /** The completion gate for a root's done: `accept`; a refusal a live session takes as its turn
-   *  end's (`settleTurn`); or `held` when the gate settled it itself: a stopped root, a refusal
-   *  queued for a closed session, or a pending human question that parks for the user. */
-  private completionGate(runId: string): 'accept' | 'held' | CompletionRefusal {
-    let parent = this.store.getRun(runId);
-    if (parent?.delegation?.role !== 'root') return 'accept';
-    // A late success callback has no authority to reopen a stopped/reviewing root.
-    if (['done', 'review', 'failed', 'cancelled'].includes(parent.status)) return 'held';
-    const state = this.active.get(runId);
-    const pendingAsk = this.hasPendingHumanAsk(runId) || state?.pendingHumanAsk;
-    if (!pendingAsk && this.completionMayPass(runId)) return 'accept';
-    if (parent.delegation.finishRequestedAt) {
-      // Legacy accepted Finish cannot strand the new gate behind an execution ban.
-      const { finishRequestedAt: _intent, ...delegation } = parent.delegation;
-      this.store.commitDelegation([{ id: runId, delegation }]);
-      parent = { ...parent, delegation };
-    }
-    if (parent.delegation?.role !== 'root') return 'accept';
-    const refusal = pendingAsk ? undefined : this.completionRefusal(runId);
-    if (refusal && state?.session?.open) return refusal;
-    // A legacy accepted Finish takes the same path as a done: its refusal reopens the session.
-    if (refusal) { this.turnNudges.queueCompletionRefusal(runId, refusal); return 'held'; }
-    // Every blocker but the pending human question is a refusal: the question parks for the user.
-    this.store.appendEvent(runId, { type: 'note', tone: 'warning', message: 'Completion blocked: answer the pending human question.' });
-    this.move(runId, 'park', { finishedAt: undefined });
-    this.store.flush();
-    if (state) {
-      clearIdleTimer(state);
-      this.line.leavePool(runId); this.line.park(runId);
-      if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
-      this.line.releaseSlot();
-    }
-    return 'held';
-  }
 
-  /** Human Finish keeps the worker guarantees and bypasses request obligations only. */
-  private completionMayPass(runId: string): boolean { return completionGateReads.completionMayPass(this.context, this.completionGateHost, runId); }
 
   registerWorkerWait(parentId: string, request: WorkerWaitRequest): WorkerWait { return this.waitRegistry.registerWorkerWait(parentId, request); }
   registerWorkerListWait(runId: string, request: { workerIds?: string[]; requestIds?: string[] | undefined; mode?: WorkerWaitRequest['mode']; timeoutSeconds: number }, via: 'cezar_wait' | 'cez-worker-wait'): DeadlinedWorkerWaitEntry { return this.waitRegistry.registerWorkerListWait(runId, request, via); }
@@ -1355,32 +1279,7 @@ export class RunManager {
     return canProceedWithRun(run, () => this.workerExecutionStopped(runId), run => this.executionBlockedByRootFinish(run));
   }
 
-  /** Finish can arrive during continuation preflight. Retain its accepted
-   * payload in the ordinary queue, releasing the slot without opening a session. */
-  private holdContinuationForRootFinish(runId: string, continuation: PendingContinuation, state?: ActiveRun): boolean {
-    const run = this.store.getRun(runId);
-    if (!run || !this.executionBlockedByRootFinish(run)) return false;
-    this.line.enqueueContinuation(runId, continuation, true);
-    this.store.updateStep(runId, continuation.stepId, { status: 'pending' });
-    this.move(runId, 'requeue', { currentStepId: undefined });
-    if (state) clearAutosaveTimer(state);
-    this.line.unmarkStarting(runId); this.dropActive(runId);
-    return true;
-  }
-  private async settleRequestedRootFinish(runId: string): Promise<void> {
-    return this.context.work.track('settleRequestedRootFinish', this.settleRequestedRootFinishWork(runId));
-  }
 
-  private async settleRequestedRootFinishWork(runId: string): Promise<void> {
-    try {
-      const status = this.store.getRun(runId)?.status;
-      if (status === 'review') { this.finish(runId); return; }
-      if (status === 'running') this.move(runId, 'park');
-      this.reconcileWorkerWaits(runId);
-      await this.runSettlement.settleSuccess(runId, true);
-    }
-    catch { console.warn('[cez] parent finish checkpoint failed; intent retained for retry'); }
-  }
   reconcileWorkerWaits(familyRootId?: string): void { this.familyReconciler.reconcileWorkerWaits(familyRootId); }
 
   /** Durable queue is the single hydration source for fresh, continuing and recovered runs. */
@@ -1466,74 +1365,9 @@ export class RunManager {
     return state.session.respondPermission?.(requestId, optionId) ?? false;
   }
 
-  /** Close the open session gracefully — the run then completes as `done`
-   *  (or rests at `review` when the worktree holds changes, spec 009).
-   *  On a run already resting at `review` (no session — the engine loop is
-   *  over), "Finish" is the third review exit: accept the changes without a
-   *  PR and flip straight to `done`. */
-  finish(runId: string): boolean {
-    const decision = this.finishDecision(runId);
-    if ('reason' in decision) {
-      if (decision.warn) this.store.appendEvent(runId, { type: 'note', tone: 'warning', message: decision.reason });
-      return false;
-    }
-    const state = this.active.get(runId);
-    if (decision.action === 'session' && state?.session) {
-      try {
-        this.wakeAdmission.cancelOpenWaits(runId);
-        this.acceptRootRequestFinish(runId);
-      } catch { return false; }
-      this.closeQuestionOnFinish(runId);
-      state.finishRequested = true;
-      clearIdleTimer(state);
-      this.store.appendEvent(runId, { type: 'lifecycle', message: 'session closed by user' });
-      state.session.end();
-      return true;
-    }
-    const run = this.store.getRun(runId);
-    if (decision.action === 'root') {
-      try { this.store.commitRootFinishIntent(runId); this.reconcileWorkerWaits(runId); }
-      catch { return false; }
-      void this.settleRequestedRootFinish(runId);
-      return true;
-    }
-    if (decision.action === 'waiting' && run) {
-      this.closeQuestionOnFinish(runId);
-      const finishedAt = new Date().toISOString();
-      for (const step of run.steps) {
-        if (step.status === 'waiting' || step.status === 'running') {
-          this.store.updateStep(runId, step.id, { status: 'done', finishedAt });
-        }
-      }
-      void this.runSettlement.settleSuccess(runId);
-      return true;
-    }
-    if (decision.action === 'review') {
-      try { this.acceptRootRequestFinish(runId); } catch { return false; }
-      this.closeQuestionOnFinish(runId);
-      this.move(runId, 'accept-review', settledRootFinishPatch(this.store, runId));
-      this.store.appendEvent(runId, { type: 'lifecycle', message: 'review accepted — finished without a PR' });
-      return true;
-    }
-    return false;
-  }
+  finish(runId: string): boolean { return this.runFinish.finish(runId); }
 
-  /** Persist the human's authority before settling obligations or closing a live session. */
-  private acceptRootRequestFinish(runId: string): void {
-    const run = this.store.getRun(runId);
-    if (run?.delegation?.role !== 'root' || !openCompletionRequests(this.store, runId).sent.length) return;
-    this.store.commitDelegation([{ id: runId, delegation: { ...run.delegation, finishRequestedAt: new Date().toISOString() } }]);
-    this.reconcileWorkerWaits(runId);
-  }
 
-  /** Finish ends the task, so an unanswered question is closed rather than left answerable on a
-   * finished run (hearsay-tools/cezarion#1260). A root never gets here with one pending: its Finish
-   * is refused until the question is answered. Stop keeps the question, which a human may still
-   * answer to reopen the run (#505). */
-  private closeQuestionOnFinish(runId: string): void {
-    const askSeq = this.pendingHumanAskSeq(runId);
-    if (askSeq !== undefined) this.store.appendEvent(runId, { type: 'human-ask-closed', askSeq, reason: 'finish' });
-  }
 
   private waitingBeforeFinalWorkflowStep(run: RunRecord): boolean {
     return workflowPosition.waitingBeforeFinalWorkflowStep(run, isSyntheticContinuation, record => this.waitingWorkflowStepIndex(record));
@@ -1609,7 +1443,7 @@ export class RunManager {
     // invisible to the enforcer forever. Ordinary runs retain their best-effort
     // repoRoot fallback; owned workers must never adopt/recreate an unverified resource.
     if (this.workerExecutionStopped(runId)) { this.line.unmarkStarting(runId); return; }
-    if (this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() })) return;
+    if (this.runFinish.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() })) return;
     workerIdentity(this.store, this.repoRoot, runId);
     const record = this.store.getRun(runId);
     const workspace = await this.continuationSession.continuationWorkspace(runId, stepId, record);

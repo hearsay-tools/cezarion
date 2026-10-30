@@ -3289,7 +3289,7 @@ function singleRunnerCells(): void {
       await until(() => store.getRun(p.id)?.waitDeliveryFailures === 1 && !manager.isActive(p.id) && runInternals(manager).retries.wakeBackoffs.has(p.id));
       closing = false;
       const wakes = store.getRun(p.id)?.automaticWakes;
-      expect((manager as unknown as { deferParentCompletion(id: string): boolean }).deferParentCompletion(p.id)).toBe(true);
+      expect(runInternals(manager).runFinish.deferParentCompletion(p.id)).toBe(true);
       expect(refusals()).toHaveLength(1);
       expect(refusals()[0]!.deliveredAt).toBeUndefined();
       expect(nudgeNotes(p.id)).toHaveLength(1);

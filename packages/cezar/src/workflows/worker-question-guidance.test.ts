@@ -10,11 +10,8 @@ describe('unanswered worker question completion guidance', () => {
 
   it.each([1, 100])('teaches usable message commands for %i questions without a live session', count => {
     const questions = Array.from({ length: count }, () => ({ workerId: randomUUID(), messageId: randomUUID() }));
-    const manager = f.manager as unknown as {
-      completionRefusal(id: string): { code: string; message: string } | undefined;
-    };
     const asked = vi.spyOn(runInternals(f.manager).workerQuestions, 'unansweredQuestions').mockReturnValue(questions);
-    const gate = manager.completionRefusal(f.parent.id)!;
+    const gate = runInternals(f.manager).runFinish.completionRefusal(f.parent.id)!;
     expect(asked).toHaveBeenCalledWith(f.parent.id);
     expect(gate.code).toBe('worker_questions');
     expect(gate.message).toContain('cez message reply');

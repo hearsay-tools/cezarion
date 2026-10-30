@@ -54,10 +54,9 @@ it.each(['ordinary', 'delegated root'] as const)('drains detached Finish settlem
     boundary.enter(); await boundary.held;
     return result;
   });
-  const engine = manager as unknown as { settleRequestedRootFinish(id: string): Promise<void> };
   const settlement = mode === 'ordinary'
     ? vi.spyOn(runInternals(manager).runSettlement, 'settleSuccess')
-    : vi.spyOn(engine, 'settleRequestedRootFinish');
+    : vi.spyOn(runInternals(manager).runFinish, 'settleRequestedRootFinish');
   expect(manager.isActive(run.id)).toBe(false);
   expect(manager.finish(run.id)).toBe(true);
   expect(settlement).toHaveBeenCalledWith(run.id);
@@ -215,7 +214,7 @@ const ownedOperations: Array<{ label: string; invoke(manager: RunManager, id: st
   } },
   { label: 'settleSuccess', invoke: (manager, id) => runInternals(manager).runSettlement.settleSuccess(id) },
   { label: 'enforceRetention', invoke: manager => manager['enforceRetention']() },
-  { label: 'settleRequestedRootFinish', invoke: (manager, id) => manager['settleRequestedRootFinish'](id) },
+  { label: 'settleRequestedRootFinish', invoke: (manager, id) => runInternals(manager).runFinish.settleRequestedRootFinish(id) },
 ];
 
 it.each(ownedOperations)('records module-owned $label before returning', async ({ label, invoke }) => {
