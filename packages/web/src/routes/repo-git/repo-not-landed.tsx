@@ -176,6 +176,34 @@ function NotLandedRow({ entry, finishedAt, onDelete }: {
   finishedAt: string | undefined
   onDelete: () => void
 }) {
+  return (
+    <li data-slot="not-landed-row" data-branch={entry.name} data-branch-class={entry.class} className="flex min-h-[56px] items-center gap-[12px] rounded-[6px] px-[10px] py-[6px] hover:bg-sidebar-row-hover">
+      <NotLandedTitleAndMeta entry={entry} finishedAt={finishedAt} />
+      <NotLandedPr entry={entry} />
+      <NotLandedActions entry={entry} onDelete={onDelete} />
+    </li>
+  )
+}
+
+function NotLandedPr({ entry }: { entry: RepoBranchEntry }) {
+  return (
+    <>
+      {entry.pr ? (
+        <span data-slot="not-landed-pr" className="hidden shrink-0 items-center gap-[4px] text-[11.5px] text-muted-foreground md:flex">
+          <ReferenceChip
+            plain
+            reference={{ kind: 'PR', number: entry.pr.number, url: entry.pr.url }}
+            taskTitle={entry.title ?? entry.name}
+            status={entry.pr.state === 'draft' ? 'draft' : entry.pr.state === 'closed' ? 'closed' : undefined}
+          />
+          <PrStateWords entry={entry} />
+        </span>
+      ) : null}
+    </>
+  )
+}
+
+function NotLandedActions({ entry, onDelete }: { entry: RepoBranchEntry; onDelete: () => void }) {
   const queryClient = useQueryClient()
   const orphan = entry.class === 'orphan'
   const openPr = entry.pr && (entry.pr.state === 'open' || entry.pr.state === 'draft') ? entry.pr : null
@@ -199,19 +227,7 @@ function NotLandedRow({ entry, finishedAt, onDelete }: {
 
   const button = 'inline-flex h-[28px] shrink-0 items-center gap-[5px] rounded-[6px] px-[10px] text-[12px] font-medium text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50 [&>svg]:size-[12px]'
   return (
-    <li data-slot="not-landed-row" data-branch={entry.name} data-branch-class={entry.class} className="flex min-h-[56px] items-center gap-[12px] rounded-[6px] px-[10px] py-[6px] hover:bg-sidebar-row-hover">
-      <NotLandedTitleAndMeta entry={entry} finishedAt={finishedAt} />
-      {entry.pr ? (
-        <span data-slot="not-landed-pr" className="hidden shrink-0 items-center gap-[4px] text-[11.5px] text-muted-foreground md:flex">
-          <ReferenceChip
-            plain
-            reference={{ kind: 'PR', number: entry.pr.number, url: entry.pr.url }}
-            taskTitle={entry.title ?? entry.name}
-            status={entry.pr.state === 'draft' ? 'draft' : entry.pr.state === 'closed' ? 'closed' : undefined}
-          />
-          <PrStateWords entry={entry} />
-        </span>
-      ) : null}
+    <>
       {entry.runId ? (
         <Link to={`/tasks/${entry.runId}`} data-action="not-landed-open" className={cn(button, 'hidden border border-border hover:bg-muted md:inline-flex')}>
           Open task
@@ -252,7 +268,7 @@ function NotLandedRow({ entry, finishedAt, onDelete }: {
           <DropdownMenuItem data-action="not-landed-delete" variant="destructive" onSelect={onDelete}>Delete branch…</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-    </li>
+    </>
   )
 }
 
