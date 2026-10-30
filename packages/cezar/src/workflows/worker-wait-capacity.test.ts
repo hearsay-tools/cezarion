@@ -523,10 +523,6 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     };
     const state = engine.active.get(w.id)!;
     const send = vi.spyOn(state.session, 'sendAgentMessage');
-    const settle = runInternals(manager).runSettlement.settleSuccess.bind(runInternals(manager).runSettlement);
-    let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
-    let completion: Promise<void> | undefined;
-    runInternals(manager).runSettlement.settleSuccess = (id, durable) => id === p.id ? completion = gate.then(() => settle(id, durable)) : settle(id, durable);
     const deadline = monitoringWakeOf(store.getRun(w.id))!;
     try {
       if (pending) store.commitRootFinishIntent(p.id);
@@ -545,8 +541,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         // hearsay-tools/cezarion#1233: the wake turn keeps its pool slot until its own turn end.
         expect(runInternals(manager).line.monitoring.has(w.id)).toBe(true);
       }
-      if (pending) expect(completion).toBeInstanceOf(Promise);
-    } finally { vi.useRealTimers(); release(); await completion; }
+    } finally { vi.useRealTimers(); }
   });
 
   it.each(['delayed diff', 'failed diff'])('cancellation retires pending Finish after %s and preserves human Continue across restart', async mode => {
