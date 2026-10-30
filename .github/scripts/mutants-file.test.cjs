@@ -98,8 +98,8 @@ test('logic needs covered lines and 85 percent; components need 75 percent', () 
   assert.equal(m.evaluate(eightyFive, { tier: 'logic', guards: [] }, []).targets[0].pass, true);
 });
 
-test('comparison ignores line movement and whitespace, reports changed survivors and counts', () => {
-  const before = { version: 1, file: 'x.ts', ...m.evaluate([mutant({ original: 'a  b', line: 1 }), mutant({ original: 'removed' })], { tier: 'logic', guards: [] }, []) };
+test('comparison ignores line movement, reports changed survivors and counts', () => {
+  const before = { version: 1, file: 'x.ts', ...m.evaluate([mutant({ original: 'a b', line: 1 }), mutant({ original: 'removed' })], { tier: 'logic', guards: [] }, []) };
   const after = { version: 1, file: 'x.ts', ...m.evaluate([mutant({ original: 'a b', line: 20 }), mutant({ original: 'added' }), mutant({ status: 'Killed' })], { tier: 'logic', guards: [] }, []) };
   const delta = m.compareResults(before, after);
   assert.equal(delta.added[0].original, 'added');
@@ -286,7 +286,7 @@ const equivalentEntry = (overrides = {}) => ({ file: 'packages/contract/src/samp
 
 test('equivalents use full function identity, leave raw scores intact, and report only this file stale entries', () => {
   const file = 'packages/contract/src/sample.ts';
-  const entries = [equivalentEntry({ original: ' true \n' }), equivalentEntry({ function: 'other' }), equivalentEntry({ file: 'packages/contract/src/other.ts' })];
+  const entries = [equivalentEntry(), equivalentEntry({ function: 'other' }), equivalentEntry({ file: 'packages/contract/src/other.ts' })];
   const result = m.measure(report(file), file, 'sha', [], {}, entries);
   assert.equal(result.equivalentCount, 1);
   assert.equal(result.mutants.length, 0);
@@ -333,4 +333,18 @@ test('command keeps missing and empty equivalent lists behavior and warns on inv
   const matched = await run(JSON.stringify([equivalentEntry()]));
   assert.equal(matched.equivalentCount, 1);
   assert.equal(matched.survivors.length, 0);
+});
+
+
+test('comparison and equivalent stale checks preserve exact source text, including literal whitespace', () => {
+  const file = 'packages/contract/src/sample.ts';
+  const make = original => ({ version: 1, file, ...m.evaluate([mutant({ original })], { tier: 'logic', guards: [] }, []) });
+  const before = make("'a  b'");
+  const after = make("'a b'");
+  assert.equal(m.compareResults(before, after).added.length, 1);
+  assert.equal(m.compareResults(before, after).removed.length, 1);
+  const spaced = equivalentEntry({ original: ' true ' });
+  const result = m.measure(report(file), file, 'sha', [], {}, [spaced]);
+  assert.equal(result.equivalentCount, 0);
+  assert.deepEqual(result.staleEquivalent, [spaced]);
 });
