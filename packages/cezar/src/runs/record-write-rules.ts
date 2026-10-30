@@ -25,7 +25,7 @@ export const WRITE_PATH_RULES = {
   // updateRun, marker declarations, PR discovery and event observations.
   pullRequests: ['merge-pull-requests'],
   // stageArchive, updateRun and applyArchived, including bulk archive.
-  archiveFields: ['archive-time', 'store-owned:withdraw-hold', 'clear-pin'],
+  archiveFields: ['archive-time', 'store-owned:withdraw-hold', 'store-owned:clear-pin'],
   stepUpdate: ['redact-step-error'],
 } as const;
 
@@ -35,12 +35,14 @@ interface CommitHooks {
   stageArchive(staged: Map<string, RunRecord | null>, run: RunRecord, archived: boolean): void;
 }
 
+// Pure reference helpers remain in store.ts; callbacks avoid a store/module value cycle.
 interface UpdateHooks {
   redact(text: string): string;
   refUrlNumber(url: string | undefined): number | undefined;
   repoHandle?: RepoHandle | null | undefined;
   restore(): void;
   withdrawHold(run: RunRecord): void;
+  clearPin(run: RunRecord): void;
   hasPrUrl(text: string): boolean;
   hasIssueUrl(text: string): boolean;
   trackReferencedPrs(run: RunRecord, text: string): unknown;
@@ -78,9 +80,11 @@ function prepareUpdate(run: RunRecord, patch: RecordPatch, hooks: UpdateHooks) {
       return parsed.success ? [parsed.data] : [];
     }), hooks.repoHandle);
   }
+  // Waits are not cleared here: RunManager cancels them explicitly when a run ends (spec
+  // 2026-10-17-unified-waits), so a terminal patch never retires one as a side effect.
   const archived = Object.prototype.hasOwnProperty.call(normalized, 'archived') ? Boolean(normalized.archived) : undefined;
   if (archived !== undefined) { delete normalized.archived; delete normalized.archivedAt; }
-  // Restore before mutating so a throw leaves status and archived unchanged.
+  // Restore before mutating so a throw leaves status and archived unchanged (hearsay-tools/cezarion#818 S3).
   if (archived === false) hooks.restore();
   return { normalized, archived };
 }
@@ -88,13 +92,16 @@ function prepareUpdate(run: RunRecord, patch: RecordPatch, hooks: UpdateHooks) {
 export function stageDurableUpdate(run: RunRecord, patch: RecordPatch, hooks: UpdateHooks): RunRecord {
   const { normalized, archived } = prepareUpdate(run, patch, hooks);
   const next = { ...run, ...redactPatch(normalized, hooks.redact) };
-  if (archived !== undefined) stageArchiveFields(next, archived, new Date().toISOString(), hooks.withdrawHold);
+  if (archived !== undefined) stageArchiveFields(next, archived, new Date().toISOString(), hooks.withdrawHold, hooks.clearPin);
   return next;
 }
 
 export function stageDebouncedUpdate(run: RunRecord, patch: RecordPatch, hooks: UpdateHooks): void {
   const { normalized, archived } = prepareUpdate(run, patch, hooks);
   Object.assign(run, redactPatch(normalized, hooks.redact));
+  // The usage-limit resume is the appointment of a `waiting` run (hearsay-tools/cezarion#1236),
+  // so a run coming back to life or settling retires it. stageCommit applies the hold predicate;
+  // this debounced path mutates the held record with the status-only predicate.
   stageLoaded(run);
   if (normalized.task !== undefined) resolveEditedTaskRefs(run, hooks);
   if (archived !== undefined) hooks.archive(run, archived);
@@ -107,10 +114,11 @@ export function stageStepUpdate(patch: Partial<Omit<StepState, 'id'>>, redact: (
   return { ...patch, error: redact(patch.error) };
 }
 
-/** Stage the ledger before its recipient input, also when both are the same run. */
+/** Stage the ledger before its recipient input, also when both are the same run.
+ * Worker continuation appends to original run.agentInputs even when its patch carries agentInputs. */
 export function stageConversation(staged: Map<string, RunRecord>, root: RunRecord, state: ConversationState,
   delivery: { recipientRunId: string; input: AgentInput; recipientDelegation?: DelegationState } | undefined,
-  peek: (id: string) => RunRecord | undefined, redact: (text: string) => string): void {
+  peek: (id: string) => RunRecord | undefined, redact: (text: string) => string, inputBase?: readonly AgentInput[]): void {
   staged.set(root.id, { ...root, delegation: delegationStateSchema.parse({ ...root.delegation, conversation: { ...state,
     messages: state.messages.map(message => ({ ...message, text: redact(message.text) })),
   } }) });
@@ -119,7 +127,7 @@ export function stageConversation(staged: Map<string, RunRecord>, root: RunRecor
     if (!recipient) throw new Error('missing conversation recipient');
     const input = agentInputSchema.parse({ ...delivery.input, text: redact(delivery.input.text) });
     const delegation = !recipient.delegation && delivery.recipientDelegation ? { delegation: delegationStateSchema.parse(delivery.recipientDelegation) } : {};
-    staged.set(recipient.id, { ...recipient, ...delegation, agentInputs: [...(recipient.agentInputs ?? []), input] });
+    staged.set(recipient.id, { ...recipient, ...delegation, agentInputs: [...(inputBase ?? recipient.agentInputs ?? []), input] });
   }
 }
 
@@ -201,7 +209,7 @@ export function stagePullRequests(run: RunRecord, entries: readonly RunPullReque
 }
 
 /**
- * Scrub the free-text fields of a record patch (#427 review). Redacting only
+ * Scrub the free-text fields of a record patch (open-mercato/cezar#427 review). Redacting only
  * events left a hole: `titleSummary` is derived from the RAW first agent turn
  * and `error` from raw process output, so a token the agent echoed was
  * `[REDACTED]` in the NDJSON yet verbatim in `runs.json` — the file the "no
@@ -212,7 +220,7 @@ export function stagePullRequests(run: RunRecord, entries: readonly RunPullReque
  * `StepState.error` is the step-level counterpart and is scrubbed the same
  * way in `updateStep` — `run.ts` feeds the SAME `err.message` string to both
  * calls, so redacting only the run-level copy left the token verbatim one
- * field away (#456 review).
+ * field away (open-mercato/cezar#456 review).
  */
 export function redactPatch(
   patch: RecordPatch, redact: (text: string) => string,
@@ -226,9 +234,9 @@ export function redactPatch(
   return out;
 }
 
-export function stageArchiveFields(run: RunRecord, archived: boolean, now: string, withdrawHold: (run: RunRecord) => void): void {
+export function stageArchiveFields(run: RunRecord, archived: boolean, now: string, withdrawHold: (run: RunRecord) => void, clearPin: (run: RunRecord) => void): void {
   run.archived = archived;
   run.archivedAt = archived ? now : undefined;
-  if (archived) { withdrawHold(run); delete run.pinned; delete run.pinnedAt; }
+  if (archived) { withdrawHold(run); clearPin(run); }
   else run.manualUnarchivedAt = now;
 }

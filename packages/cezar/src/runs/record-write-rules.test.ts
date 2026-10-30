@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { makeRunRecord, RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { makeRunRecord, RUN_STATUS, WAIT_SOURCE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { AgentInput, ConversationState } from '@open-mercato/cezar-contract';
 import {
   WRITE_PATH_RULES, redactText, stageArchiveFields, stageCommit, stageConversation,
@@ -14,21 +14,21 @@ const issue = 'https://github.com/example/project/issues/7';
 const redact = (text: string) => text.replaceAll('secret', '[REDACTED]');
 function hooks(log: string[] = []): Parameters<typeof stageDebouncedUpdate>[2] {
   return {
-    redact, withdrawHold: vi.fn(), refUrlNumber: (value: string | undefined) => value ? Number(value.split('/').pop()) : undefined,
+    redact, withdrawHold: vi.fn(), clearPin: vi.fn(), refUrlNumber: (value: string | undefined) => value ? Number(value.split('/').pop()) : undefined,
     restore: () => { log.push('restore'); },
     hasPrUrl: () => true, hasIssueUrl: () => true,
     trackReferencedPrs: () => { log.push('collect-pr'); }, trackReferencedIssues: () => { log.push('collect-issue'); },
     resolveReferencedPr: () => { log.push('resolve-pr'); return url; },
     resolveIssueReference: () => { log.push('resolve-issue'); return issue; },
     rescopeRun: () => { log.push('rescope'); },
-    archive: (run: RunRecord, archived: boolean) => { log.push('archive'); stageArchiveFields(run, archived, at, vi.fn()); },
+    archive: (run: RunRecord, archived: boolean) => { log.push('archive'); stageArchiveFields(run, archived, at, vi.fn(), vi.fn()); },
     touch: () => { log.push('touch'); },
   };
 }
 function commit(run: RunRecord, previous?: RunRecord, blocker?: string) {
   return stageCommit(new Map([[run.id, run]]), {
     peek: () => previous, completionArchiveBlocker: () => blocker,
-    stageArchive: (staged, next, archived) => { stageArchiveFields(next, archived, at, vi.fn()); staged.set(next.id, next); },
+    stageArchive: (staged, next, archived) => { stageArchiveFields(next, archived, at, vi.fn(), vi.fn()); staged.set(next.id, next); },
   }).get(run.id)!;
 }
 
@@ -42,7 +42,7 @@ describe('record write paths without a database', () => {
     ['loaded', ['stale-resume:status']],
     ['conversation', ['redact-messages', 'parse-delegation', 'redact-input', 'parse-input', 'append-input']],
     ['pullRequests', ['merge-pull-requests']],
-    ['archiveFields', ['archive-time', 'store-owned:withdraw-hold', 'clear-pin']],
+    ['archiveFields', ['archive-time', 'store-owned:withdraw-hold', 'store-owned:clear-pin']],
     ['stepUpdate', ['redact-step-error']],
   ] as const)('declares the ordered %s rules', (path, rules) => {
     expect(WRITE_PATH_RULES[path]).toEqual(rules);
@@ -123,7 +123,7 @@ describe('record write paths without a database', () => {
   it.each([true, false])('sets archive fields and retires appointments only on archive=%s', archived => {
     const run = makeRunRecord({ status: RUN_STATUS.waiting, autoResumeAt: at, autoResumeAttempts: 2, pinned: true, pinnedAt: at });
     const withdraw = vi.fn((next: RunRecord) => { expect(next.archivedAt).toBe(at); expect(next.pinned).toBe(true); });
-    stageArchiveFields(run, archived, at, withdraw);
+    stageArchiveFields(run, archived, at, withdraw, next => { delete next.pinned; delete next.pinnedAt; });
     expect(withdraw).toHaveBeenCalledTimes(archived ? 1 : 0);
     expect(run.archived).toBe(archived);
     expect(run.archivedAt).toBe(archived ? at : undefined);
@@ -157,11 +157,21 @@ describe('record write paths without a database', () => {
     const root = makeRunRecord({ id: randomUUID(), delegation: { role: 'root', permissions: [], receipts: [] } });
     const recipient = same ? root : makeRunRecord({ id: randomUUID() });
     const state: ConversationState = { messages: [{ id: randomUUID(), senderRunId: root.id, recipientRunId: recipient.id, kind: 'progress', text: 'secret', createdAt: at, requestHash: 'a'.repeat(64), state: 'accepted' }], outcomes: [] };
-    const input: AgentInput = { id: randomUUID(), source: 'agent', parentRunId: root.id, text: 'secret', createdAt: at };
+    const input: AgentInput = { id: randomUUID(), source: WAIT_SOURCE.agent, parentRunId: root.id, text: 'secret', createdAt: at };
     const staged = new Map<string, RunRecord>();
     stageConversation(staged, root, state, { recipientRunId: recipient.id, input }, () => recipient, redact);
     expect(staged.get(root.id)?.delegation).toMatchObject({ conversation: { messages: [{ ...state.messages[0], text: '[REDACTED]' }], outcomes: [] } });
     expect(staged.get(recipient.id)?.agentInputs?.[0]?.text).toBe('[REDACTED]');
     expect(recipient.agentInputs).toBeUndefined();
   });
+  it('keeps continuation inputBase when its staged patch has a different queue', () => {
+    const root = makeRunRecord({ id: randomUUID(), delegation: { role: 'root', permissions: [], receipts: [] } });
+    const input: AgentInput = { id: randomUUID(), source: WAIT_SOURCE.agent, parentRunId: root.id, text: 'secret', createdAt: at };
+    const worker = makeRunRecord({ id: randomUUID(), agentInputs: [input] });
+    const staged = new Map([[worker.id, worker]]);
+    stageConversation(staged, root, { messages: [], outcomes: [] }, { recipientRunId: worker.id, input },
+      () => worker, redact, []);
+    expect(staged.get(worker.id)?.agentInputs).toEqual([{ ...input, text: '[REDACTED]' }]);
+  });
+
 });
