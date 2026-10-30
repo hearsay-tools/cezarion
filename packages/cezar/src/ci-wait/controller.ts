@@ -147,7 +147,10 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
     c.set('capability', capability);
     await next();
   });
-  const capabilityRevoked = (c: Context<{ Variables: { capability: Capability } }>) => c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
+  const capabilityRevoked = <T extends Response>(c: Context<{ Variables: { capability: Capability } }>, capability: Capability, fallback: () => T) => {
+    if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
+    return fallback();
+  };
   return new Hono<{ Variables: { capability: Capability } }>()
     .use('/api/v1/tools/ci-wait', requireCapability)
     .get('/api/v1/tools/ci-wait', c => {
@@ -169,9 +172,10 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(cezarWaitAnswerSchema.parse(answer));
       } catch (error) {
-        if (capability.lifetime.signal.aborted) return capabilityRevoked(c);
-        const code = ciRefusalCode(thrownCode(error)) ?? 'unavailable';
-        return c.json({ ok: false as const, code, message: ciErrorMessage(code) });
+        return capabilityRevoked(c, capability, () => {
+          const code = ciRefusalCode(thrownCode(error)) ?? 'unavailable';
+          return c.json({ ok: false as const, code, message: ciErrorMessage(code) });
+        });
       }
     })
     .use('/api/v1/tools/ask', requireCapability)
@@ -182,8 +186,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(answer);
       } catch {
-        if (capability.lifetime.signal.aborted) return capabilityRevoked(c);
-        return c.json({ ok: false as const, code: 'unavailable' as const, message: askErrorMessage('unavailable') });
+        return capabilityRevoked(c, capability, () => c.json({ ok: false as const, code: 'unavailable' as const, message: askErrorMessage('unavailable') }));
       }
     })
     .use('/api/v1/tools/cancel-wait', requireCapability)
@@ -194,8 +197,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(answer);
       } catch {
-        if (capability.lifetime.signal.aborted) return capabilityRevoked(c);
-        return c.json({ cancelled: false as const, code: 'unavailable' as const, message: ciErrorMessage('unavailable') });
+        return capabilityRevoked(c, capability, () => c.json({ cancelled: false as const, code: 'unavailable' as const, message: ciErrorMessage('unavailable') }));
       }
     })
     .use('/api/v1/tools/done', requireCapability)
@@ -206,8 +208,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(answer);
       } catch {
-        if (capability.lifetime.signal.aborted) return capabilityRevoked(c);
-        return c.json({ ok: false as const, code: 'unavailable' as const, message: doneErrorMessage('unavailable') });
+        return capabilityRevoked(c, capability, () => c.json({ ok: false as const, code: 'unavailable' as const, message: doneErrorMessage('unavailable') }));
       }
     })
     .use('/api/v1/tools/preview-stop', requireCapability)
@@ -222,8 +223,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(result);
       } catch {
-        if (capability.lifetime.signal.aborted) return capabilityRevoked(c);
-        return c.json(previewStopResult('unavailable'));
+        return capabilityRevoked(c, capability, () => c.json(previewStopResult('unavailable')));
       }
     })
     .use('/api/v1/tools/preview-serve', requireCapability)
@@ -240,8 +240,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(result);
       } catch {
-        if (capability.lifetime.signal.aborted) return capabilityRevoked(c);
-        return c.json(previewRefusal('unavailable'));
+        return capabilityRevoked(c, capability, () => c.json(previewRefusal('unavailable')));
       }
     })
     .use('/api/v1/tools/schedule-task', requireCapability)
@@ -258,8 +257,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(answer);
       } catch {
-        if (capability.lifetime.signal.aborted) return capabilityRevoked(c);
-        return c.json(scheduleRefusal('unavailable'));
+        return capabilityRevoked(c, capability, () => c.json(scheduleRefusal('unavailable')));
       }
     })
     .use('/api/v1/tools/scheduled-tasks', requireCapability)
@@ -274,8 +272,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(answer);
       } catch {
-        if (capability.lifetime.signal.aborted) return capabilityRevoked(c);
-        return c.json(scheduleRefusal('unavailable'));
+        return capabilityRevoked(c, capability, () => c.json(scheduleRefusal('unavailable')));
       }
     });
 }
