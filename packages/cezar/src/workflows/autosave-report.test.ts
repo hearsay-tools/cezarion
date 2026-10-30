@@ -37,7 +37,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
   let branch: string;
   let bin: string | undefined;
 
-  const git = (args: string[]) => run(realGit, args, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }));
+  const git = (args: string[]) => run(realGit, args, { cwd: worktreePath });
   const out = async (args: string[]) => (await git(args)).stdout.trim();
   const notes = (id = runId) => store.readEvents(id).flatMap(event => event.type === 'note' ? [String(event.message)] : []);
   /** Text of one `## Header` section, up to the next `## ` header. */
