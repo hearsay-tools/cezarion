@@ -1,3 +1,4 @@
+import { commitStagedRuns } from './run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -179,8 +180,7 @@ describe('writing a finished run', () => {
     const events: string[] = [];
     store.on('run', (run: RunRecord) => { events.push(`run ${run.id}`); store.flush(); });
     store.on('deleted', (id: string) => events.push(`deleted ${id}`));
-    const internal = store as unknown as { commitIndex(staged: Map<string, RunRecord>): void };
-    internal.commitIndex(new Map([[first.id, { ...store.getRun(first.id)!, title: 'one' }], [second.id, { ...store.getRun(second.id)!, title: 'two' }]]));
+    commitStagedRuns(store, new Map([[first.id, { ...store.getRun(first.id)!, title: 'one' }], [second.id, { ...store.getRun(second.id)!, title: 'two' }]]));
     expect(events).toEqual([`run ${first.id}`, `run ${second.id}`]);
     store.flush();
     expect(held(store)).toEqual([first.id]);

@@ -77,6 +77,9 @@ import { assertNoLegacyCockpit, assertNoLegacyWriter, backUpLegacyIndex, LEGACY_
 import { RunStoreOpenError, toRunStoreOpenError } from './store-open-error.ts';
 import { claimOwnerLive, closeClaimSession, openClaimSession, type ClaimOwner } from './run-claims.ts';
 
+/** Per-store persistence adapter; the second argument is the normal fenced transaction. */
+export type RunStorePersistence = (changes: RunDatabaseChanges, transaction: RunDatabase['transaction']) => RunDatabaseCommit;
+
 export type RunStatus = 'queued' | 'running' | 'waiting' | 'review' | 'done' | 'failed' | 'cancelled';
 export type StepStatus =
   | 'pending'
@@ -1217,7 +1220,6 @@ const recordedProcessSchema = z.object({ pid: z.number().int().positive(), start
 const workerProcessRecordSchema = z.object({ generation: z.string().uuid(), controller: recordedProcessSchema,
   processes: z.array(recordedProcessSchema).max(WORKER_PROCESS_CAP) }).strict();
 const startToken = (pid: number) => { const token = processStartToken(pid); return token === undefined ? {} : { startToken: token }; };
-
 /**
  * Run rows in runs.db plus append-only NDJSON events and an in-process event bus. Hold live,
  * pinned, related and unsettled records only. Optimistic writes debounce; durable commits
@@ -1236,6 +1238,7 @@ export class RunStore extends EventEmitter {
   private db: RunDatabase | null = null;
   /** Why `open` failed, in a `RunStore.unavailable` store. */
   private openFailure: RunStoreOpenError | undefined;
+  private persistence: RunStorePersistence | undefined;
   /** Runs whose held record is ahead of its row; the next save or commit writes them. */
   private readonly dirty = new Set<string>();
   /** Runs gone from memory whose rows the next save or commit deletes. */
@@ -1290,7 +1293,6 @@ export class RunStore extends EventEmitter {
     this.compressor = new HistoryCompressor(dataDir, (id) => this.isHistoryCompressEligible(id),
       (id, plain, archive) => this.facts.adoptArchive(id, plain, stampOf(archive)));
   }
-
   /**
    * Open the project's run store. See `reconcileLoadedRun` for what `keepLive` (#367) decides
    * about live-looking rows.
@@ -1308,13 +1310,13 @@ export class RunStore extends EventEmitter {
    * only a boot passes it, while nothing else runs yet. Without it a busy database fails after
    * one busy timeout.
    */
-  static open(dataDir: string, opts?: { keepLive?: boolean | undefined; retryBusy?: boolean; maintenance?: boolean }): RunStore {
+  static open(dataDir: string, opts?: { keepLive?: boolean | undefined; retryBusy?: boolean; maintenance?: boolean; persist?: RunStorePersistence }): RunStore {
     const path = join(dataDir, RUNS_DB_FILE);
     const delays = opts?.retryBusy ? OPEN_RETRY_DELAYS_MS : [];
     const started = Date.now();
     for (let attempt = 0; ; attempt++) {
       try {
-        return RunStore.openOnce(dataDir, path, opts?.keepLive === true, opts?.maintenance === true);
+        return RunStore.openOnce(dataDir, path, opts?.keepLive === true, opts?.maintenance === true, opts?.persist);
       } catch (error) {
         const transient = error instanceof RunDatabaseBusyError || (error instanceof LegacyWriterError && error.reason === 'cockpit');
         if (!transient || attempt >= delays.length) {
@@ -1324,11 +1326,11 @@ export class RunStore extends EventEmitter {
       }
     }
   }
-
-  private static openOnce(dataDir: string, path: string, keepLive: boolean, maintenance: boolean): RunStore {
+  private static openOnce(dataDir: string, path: string, keepLive: boolean, maintenance: boolean, persist?: RunStorePersistence): RunStore {
     mkdirSync(join(dataDir, 'runs'), { recursive: true });
     const store = new RunStore(dataDir);
     store.keepLive = keepLive;
+    store.persistence = persist;
     const db = RunDatabase.open(path);
     try {
       if (db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) importLegacyIndex(db, dataDir);
@@ -2941,7 +2943,6 @@ export class RunStore extends EventEmitter {
     stageDebouncedUpdate(run, patch, hooks);
     return run;
   }
-
   private redactPatch(patch: Partial<Omit<RunRecord, 'id' | 'steps'>>): Partial<Omit<RunRecord, 'id' | 'steps'>> {
     return redactPatch(patch, text => this.redactText(text));
   }
@@ -2953,7 +2954,6 @@ export class RunStore extends EventEmitter {
     run.steps.push({ ...step, status: 'pending', iterations: 0, tokensUsed: 0 });
     this.touch(run);
   }
-
   updateStep(runId: string, stepId: string, patch: Partial<Omit<StepState, 'id'>>): void {
     const run = this.record(runId);
     const step = run?.steps.find((s) => s.id === stepId);
@@ -3503,7 +3503,6 @@ export class RunStore extends EventEmitter {
     if (changed) this.touch(run);
     return run;
   }
-
   private accumulatePullRequests(run: RunRecord, entries: readonly RunPullRequest[]): boolean {
     return stagePullRequests(run, entries, this.repoHandle);
   }
@@ -4141,7 +4140,8 @@ export class RunStore extends EventEmitter {
 
   /** The single database write, so a test can fail it the way a full disk would. */
   private writeIndex(changes: RunDatabaseChanges): RunDatabaseCommit {
-    return this.db!.transaction(changes);
+    const transaction = (changes: RunDatabaseChanges) => this.db!.transaction(changes);
+    return this.persistence ? this.persistence(changes, transaction) : transaction(changes);
   }
 
   /**

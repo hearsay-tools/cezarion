@@ -1,3 +1,4 @@
+import { openTestRunStore, runPersistence } from '../runs/run-store.testkit.ts';
 import * as executionSettings from './execution-settings.ts';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
@@ -87,7 +88,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
       // A restart: the old store goes too, or it would still own the parent's family.
       f.manager.dispose(); sessions[0]!.finish();
       f.store.updateRun(accepted.parent.id, { status: 'waiting' }); f.store.close();
-      const store = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
+      const store = openTestRunStore(join(f.root, '.ai/cezar'), { keepLive: true });
       const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager); recoveredStores.push(store);
       controller.attachProject({ id: 'restarted', root: f.root, store, manager });
       await manager.recover(); return { manager, store };
@@ -210,7 +211,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     sessions[1]!.emit({ type: 'session', sessionId: 'worker-session' }); sessions[1]!.finish();
     expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
     const run = f.store.getRun(a.child.workerId)!; const steps = structuredClone(run.steps);
-    const failure = vi.spyOn(f.store as unknown as { writeIndex(): void }, 'writeIndex').mockImplementation(() => { throw Error('disk failure'); });
+    const failure = vi.spyOn(runPersistence(f.store), 'persist').mockImplementation(() => { throw Error('disk failure'); });
     expect(f.manager.continueRun(run.id, { text: 'again' })).toMatchObject({ ok: false });
     expect(run.delegation).not.toHaveProperty('executionRevision'); expect(run.steps).toEqual(steps);
     failure.mockRestore();
@@ -225,7 +226,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     expect(await controller.service.collect(a.caller, { workerId: a.child.workerId })).toMatchObject({ revision: 0, settled: true, summary: { state: 'available', text: 'Initial result-only summary' } });
     expect(f.manager.continueRun(a.child.workerId, { text: 'again' }).ok).toBe(true);
     expect(f.store.getRun(a.child.workerId)?.delegation).toMatchObject({ executionRevision: 1 });
-    const disk = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
+    const disk = openTestRunStore(join(f.root, '.ai/cezar'), { keepLive: true });
     expect(disk.getRun(a.child.workerId)?.delegation).toMatchObject({ executionRevision: 1 }); disk.flush();
     await until(() => sessions.length === 3);
     sessions[2]!.finish('Continuation result-only summary');
@@ -350,7 +351,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
       continuationMessage: { id: 'continue-1', text: 'again', origin: 'human', createdAt: new Date().toISOString() } });
     f.manager.dispose(); sessions[0]!.finish();
     f.store.updateRun(a.parent.id, { status: 'waiting' }); f.store.close();
-    const store = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
+    const store = openTestRunStore(join(f.root, '.ai/cezar'), { keepLive: true });
     const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager); recoveredStores.push(store);
     controller.attachProject({ id: 'restarted', root: f.root, store, manager });
     await manager.recover();
@@ -439,7 +440,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     f.store.close(); // a restart: the old store must not still own the family it reloads
     seedRuns(dataDir, records);
     f.manager.dispose(); sessions[0]!.finish();
-    const store = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });
+    const store = openTestRunStore(join(f.root, '.ai/cezar'), { keepLive: true });
     const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager); recoveredStores.push(store);
     // Keep root live without restarting its old session; this case concerns only the worker.
     store.updateRun(a.parent.id, { status: 'waiting' });
@@ -719,7 +720,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     f.store.updateRun(worker.id, { status: 'queued', finishedAt: undefined, currentStepId: undefined,
       continuationMessage: { id: 'continue-2', text: 'recover legacy', origin: 'human', createdAt: new Date().toISOString() } });
     f.store.updateRun(f.parent.id, { status: 'waiting' }); f.store.close(); f.manager.dispose();
-    const store = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true }); recoveredStores.push(store);
+    const store = openTestRunStore(join(f.root, '.ai/cezar'), { keepLive: true }); recoveredStores.push(store);
     expect(store.getRun(worker.id)?.systemPrompt).toBe(legacyPrompt);
     const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager);
     controller.attachProject({ id: 'restarted-legacy', root: f.root, store, manager });

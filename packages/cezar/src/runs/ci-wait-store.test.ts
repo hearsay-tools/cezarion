@@ -1,3 +1,4 @@
+import { openTestRunStore, runPersistence } from './run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -17,7 +18,7 @@ describe('atomic CI wait checkpoints', () => {
   let wait: CiWait;
   beforeEach(() => {
     directory = mkdtempSync(join(tmpdir(), 'cez-ci-store-'));
-    store = RunStore.open(directory, { keepLive: true });
+    store = openTestRunStore(directory, { keepLive: true });
     id = store.createRun({ title: 'CI', workflow: 'quick-task', task: 'wait', steps: [] }).id;
     store.updateRun(id, { status: 'running' });
     wait = { id: randomUUID(), generation: 'session', turnId: 'turn', prUrl: 'https://github.com/acme/repo/pull/12',
@@ -31,7 +32,7 @@ describe('atomic CI wait checkpoints', () => {
     store.flush();
     const disk = readPersistedText(directory);
     const events = vi.fn(); store.on('run', events);
-    vi.spyOn(store as unknown as { writeIndex(): void }, 'writeIndex').mockImplementation(() => { throw new Error('read only'); });
+    vi.spyOn(runPersistence(store), 'persist').mockImplementation(() => { throw new Error('read only'); });
     expect(() => store.commitCiWait(id, wait)).toThrow('read only');
     expect(store.getRun(id)?.waits).toBeUndefined();
     expect(events).not.toHaveBeenCalled();
@@ -52,7 +53,7 @@ describe('atomic CI wait checkpoints', () => {
   it('checkpointing delivery retires current intent atomically and preserves the stable receipt', () => {
     store.commitCiWait(id, { ...wait, phase: 'wake-pending', wakeId: wait.id }, input(id, wait.id));
     store.commitOutcome(id, { kind: 'delivered', inputIds: [wait.id], at: new Date().toISOString() });
-    const record = RunStore.open(directory, { keepLive: true }).getRun(id);
+    const record = openTestRunStore(directory, { keepLive: true }).getRun(id);
     expect(store.getRun(id)?.waits).toBeUndefined();
     expect(record?.waits).toBeUndefined();
     expect(record?.lastWaits).toEqual([expect.objectContaining({ id: wait.id, phase: 'delivered' })]);

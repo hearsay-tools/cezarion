@@ -1,3 +1,4 @@
+import { openTestRunStore, runPersistence } from './run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -202,13 +203,13 @@ describe('wait checkpoints', () => {
   let id: string;
   beforeEach(() => {
     directory = mkdtempSync(join(tmpdir(), 'cez-waits-store-'));
-    store = RunStore.open(directory, { keepLive: true });
+    store = openTestRunStore(directory, { keepLive: true });
     id = store.createRun({ title: 'Waits', workflow: 'quick-task', task: 'wait', steps: [] }).id;
     store.updateRun(id, { status: 'waiting' });
   });
   afterEach(() => { vi.restoreAllMocks(); store.flush(); rmSync(directory, { recursive: true, force: true }); });
   const input = (waitId: string, text = 'wake'): AgentInput => ({ id: waitId, parentRunId: id, source: 'lifecycle', text, createdAt: new Date().toISOString() });
-  const reopen = () => { store.close(); store = RunStore.open(directory, { keepLive: true }); return store.getRun(id)!; };
+  const reopen = () => { store.close(); store = openTestRunStore(directory, { keepLive: true }); return store.getRun(id)!; };
 
   it('commitWait upserts by wait id and appends its input once', () => {
     const wait = ciEntry();
@@ -227,7 +228,7 @@ describe('wait checkpoints', () => {
     const records = readPersistedRuns(directory);
     records[0].lastWaitsError = 'Wait unavailable — a saved wait is unreadable; register a new wait.';
     seedRuns(directory, records);
-    store = RunStore.open(directory, { keepLive: true });
+    store = openTestRunStore(directory, { keepLive: true });
     store.commitWait(id, ciEntry());
     expect(store.getRun(id)?.lastWaitsError).toBeUndefined();
     expect(() => store.commitWait(id, ciEntry({ phase: 'delivered', deliveredAt: iso(0) }))).toThrow(/settled/);
@@ -238,7 +239,7 @@ describe('wait checkpoints', () => {
 
   it('publishes nothing if the durable replacement fails', () => {
     const events = vi.fn(); store.on('run', events);
-    vi.spyOn(store as unknown as { writeIndex(): void }, 'writeIndex').mockImplementation(() => { throw new Error('read only'); });
+    vi.spyOn(runPersistence(store), 'persist').mockImplementation(() => { throw new Error('read only'); });
     expect(() => store.commitWait(id, ciEntry())).toThrow('read only');
     expect(store.getRun(id)?.waits).toBeUndefined();
     expect(events).not.toHaveBeenCalled();
@@ -276,7 +277,7 @@ describe('wait checkpoints', () => {
     store.commitWait(id, first, input(first.id));
     store.commitWait(id, second, input(second.id));
     store.commitWait(id, open);
-    const commits = vi.spyOn(store as unknown as { commitIndex(): void }, 'commitIndex');
+    const commits = vi.spyOn(runPersistence(store), 'persist');
     store.commitOutcome(id, { kind: 'delivered', inputIds: [first.id, open.id], at: iso(1_000) });
     expect(commits).toHaveBeenCalledTimes(1);
     for (const run of [store.getRun(id)!, reopen()]) {
@@ -294,7 +295,7 @@ describe('wait checkpoints', () => {
     const resolved = timerEntry({ phase: 'resolved', resolvedAt: iso(0) });
     store.commitWait(id, resolved, input(resolved.id));
     store.updateRun(id, { automaticWakes: 6, waitDeliveryFailures: 2 });
-    const commits = vi.spyOn(store as unknown as { commitIndex(): void }, 'commitIndex');
+    const commits = vi.spyOn(runPersistence(store), 'persist');
     store.commitOutcome(id, [{ kind: 'delivered', inputIds: [resolved.id], at: iso(1_000) }, { kind: 'charged', automaticWakes: 7 }, { kind: 'counted', waitDeliveryFailures: undefined }]);
     expect(commits).toHaveBeenCalledTimes(1);
     for (const run of [store.getRun(id)!, reopen()]) {
@@ -312,7 +313,7 @@ describe('wait checkpoints', () => {
     const resolved = timerEntry({ phase: 'resolved', resolvedAt: iso(0) });
     store.commitWait(runId, resolved, { ...input(resolved.id), parentRunId: runId });
     store.commitParked(runId, stepId);
-    const commits = vi.spyOn(store as unknown as { commitIndex(): void }, 'commitIndex');
+    const commits = vi.spyOn(runPersistence(store), 'persist');
     store.commitOutcome(runId, { kind: 'delivered', inputIds: [resolved.id], at: iso(1_000) }, { patch: { status: RUN_STATUS.running }, resumeStepId: stepId });
     expect(commits).toHaveBeenCalledTimes(1);
     const before = store.getRun(runId)!;
@@ -362,7 +363,7 @@ describe('wait checkpoints', () => {
     records[0].automaticWakes = 'many';
     records[0].waitDeliveryFailures = -1;
     seedRuns(directory, records);
-    store = RunStore.open(directory, { keepLive: true });
+    store = openTestRunStore(directory, { keepLive: true });
     const run = store.getRun(id)!;
     expect(run.status).toBe('waiting');
     expect(run.automaticWakes).toBeUndefined();
@@ -395,7 +396,7 @@ describe('opening a v3 store', () => {
       ciWait: { ...legacyCi, phase: 'wake-pending', result, wakeId: legacyCi.id },
       agentInputs: [lifecycleInput(legacyCi.id)],
     })]);
-    const store = RunStore.open(directory, { keepLive: true });
+    const store = openTestRunStore(directory, { keepLive: true });
     try {
       const run = store.getRun(RUN_ID)!;
       expect(run.status).toBe('waiting');
@@ -419,7 +420,7 @@ describe('opening a v3 store', () => {
     } finally {
       db.close();
     }
-    const again = RunStore.open(directory, { keepLive: true });
+    const again = openTestRunStore(directory, { keepLive: true });
     try {
       expect(again.getRun(RUN_ID)?.waits).toHaveLength(1);
       expect(again.getRun(RUN_ID)?.agentInputs).toHaveLength(1);
@@ -620,8 +621,8 @@ describe('upgrade-on-read of agent worker waits', () => {
       registeredAt: iso(0), mode: 'all' as const, workerIds: [WORKER], revisions: [], outcomes: [],
     };
     seedRuns(directory, [rootRow({}, { waits: [entry] })]);
-    let store = RunStore.open(directory, { keepLive: true });
-    const reopen = () => { store.close(); store = RunStore.open(directory, { keepLive: true }); return store.getRun(RUN_ID)!; };
+    let store = openTestRunStore(directory, { keepLive: true });
+    const reopen = () => { store.close(); store = openTestRunStore(directory, { keepLive: true }); return store.getRun(RUN_ID)!; };
     try {
       const reopened = reopen();
       expect(reopened.lastWaitsError).toBeUndefined();
@@ -657,7 +658,7 @@ describe('upgrade-on-read of agent worker waits', () => {
     const directory = mkdtempSync(join(tmpdir(), 'cez-waits-worker-'));
     try {
       seedRuns(directory, [rootRow({ wait: legacyWait() })]);
-      const store = RunStore.open(directory, { keepLive: true });
+      const store = openTestRunStore(directory, { keepLive: true });
       try {
         expect(store.getRun(RUN_ID)!.waits).toEqual([expect.objectContaining({ id: WAIT_ID, kind: 'worker', phase: 'open' })]);
         store.flush();
@@ -667,7 +668,7 @@ describe('upgrade-on-read of agent worker waits', () => {
       const [stored] = readPersistedRuns(directory);
       expect((stored.delegation as Record<string, unknown>)).not.toHaveProperty('wait');
       expect(stored.waits).toEqual([expect.objectContaining({ id: WAIT_ID, kind: 'worker' })]);
-      const again = RunStore.open(directory, { keepLive: true });
+      const again = openTestRunStore(directory, { keepLive: true });
       try {
         expect(again.getRun(RUN_ID)!.waits).toEqual([expect.objectContaining({ id: WAIT_ID })]);
       } finally {
@@ -682,7 +683,7 @@ describe('upgrade-on-read of agent worker waits', () => {
     expect(RUN_DATABASE_SCHEMA_VERSION).toBeGreaterThanOrEqual(7);
     const directory = mkdtempSync(join(tmpdir(), 'cez-waits-schema6-'));
     try {
-      RunStore.open(directory, { keepLive: true }).close();
+      openTestRunStore(directory, { keepLive: true }).close();
       const path = join(directory, RUNS_DB_FILE);
       const raw = new DatabaseSync(path);
       try {
@@ -717,7 +718,7 @@ describe('the summary and live column of an upgraded worker wait', () => {
 
   it('rewrites an agent wait without delegation.wait and keeps the row live', () => {
     seedRuns(directory, [stored(parked)]);
-    const store = RunStore.open(directory, { keepLive: true });
+    const store = openTestRunStore(directory, { keepLive: true });
     try { store.flush(); } finally { store.close(); }
     const db = RunDatabase.openReadOnly(join(directory, RUNS_DB_FILE))!;
     try {
@@ -732,7 +733,7 @@ describe('the summary and live column of an upgraded worker wait', () => {
 
   it('reads the completion wait into the list, and the summary keeps no delegation.wait', () => {
     seedRuns(directory, [stored(parked, { completion: { phase: 'waiting', waitId: WAIT_ID } })]);
-    const store = RunStore.open(directory, { keepLive: true });
+    const store = openTestRunStore(directory, { keepLive: true });
     try { store.flush(); } finally { store.close(); }
     const db = RunDatabase.openReadOnly(join(directory, RUNS_DB_FILE))!;
     try {

@@ -1,3 +1,4 @@
+import { runPersistence } from '../runs/run-store.testkit.ts';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
@@ -140,7 +141,7 @@ describe('verified destruction retains results through explicit history deletion
   });
   it('does not remove child history on a failed deletion metadata checkpoint', async () => {
     const { workerId, files } = await completed(); await f.service.destroy(f.caller, { workerId });
-    const fault = vi.spyOn(f.store as unknown as { writeIndex(): void }, 'writeIndex').mockImplementation(() => { throw Error('index disk failure'); });
+    const fault = vi.spyOn(runPersistence(f.store), 'persist').mockImplementation(() => { throw Error('index disk failure'); });
     expect(f.store.deleteRun(workerId)).toBe(false);
     expect(existsSync(join(files, `${workerId}.ndjson`))).toBe(true);
     expect(existsSync(join(files, `${workerId}-images/worker-context-0.input`))).toBe(true);
@@ -162,11 +163,10 @@ describe('verified destruction retains results through explicit history deletion
   });
   it('collection and destroy cannot erase evidence during an interrupted child deletion', async () => {
     const { workerId, files } = await completed(); await f.service.destroy(f.caller, { workerId });
-    type Changes = { deletes: readonly string[] };
-    const original = (f.store as unknown as { writeIndex(changes: Changes): void }).writeIndex.bind(f.store);
-    const fault = vi.spyOn(f.store as unknown as { writeIndex(changes: Changes): void }, 'writeIndex').mockImplementation(changes => {
+    const original = runPersistence(f.store).persist;
+    const fault = vi.spyOn(runPersistence(f.store), 'persist').mockImplementation((changes, transaction) => {
       if (changes.deletes.includes(workerId)) throw Error('final deletion checkpoint failed');
-      return original(changes);
+      return original(changes, transaction);
     });
     expect(f.store.deleteRun(workerId)).toBe(false);
     expect(existsSync(join(files, `${workerId}.execution.json`))).toBe(false);
@@ -177,11 +177,10 @@ describe('verified destruction retains results through explicit history deletion
   });
   it('retries interrupted parent deletion after its snapshot directory was removed', async () => {
     const { workerId, files } = await completed(); await f.service.destroy(f.caller, { workerId }); expect(f.store.deleteRun(workerId)).toBe(true);
-    type Changes = { deletes: readonly string[] };
-    const original = (f.store as unknown as { writeIndex(changes: Changes): void }).writeIndex.bind(f.store);
-    const fault = vi.spyOn(f.store as unknown as { writeIndex(changes: Changes): void }, 'writeIndex').mockImplementation(changes => {
+    const original = runPersistence(f.store).persist;
+    const fault = vi.spyOn(runPersistence(f.store), 'persist').mockImplementation((changes, transaction) => {
       if (changes.deletes.includes(f.parent.id)) throw Error('final parent checkpoint failed');
-      return original(changes);
+      return original(changes, transaction);
     });
     expect(f.store.deleteRun(f.parent.id)).toBe(false);
     expect(existsSync(join(files, `${f.parent.id}-worker-results`))).toBe(false);
