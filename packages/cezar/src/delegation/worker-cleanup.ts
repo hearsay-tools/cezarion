@@ -10,6 +10,7 @@ import { holdersStillHold, observeDestroy, recordHolders, type DestroyObservatio
 import { DESTROY_ATTENTION_ATTEMPTS, DESTROY_BACKOFF, retryDelayMs, type Backoff } from './retry-backoff.ts';
 import type { DelegationProject } from './service.ts';
 
+/** Tests pass shorter cadences and termination waits through these constructor options. */
 export type WorkerCleanupOptions = {
   now?: () => number;
   backoff?: Backoff;
@@ -44,17 +45,16 @@ export class WorkerCleanup {
     this.clearDestroyRetries(this.project.id);
     this.detached = true;
   }
+
   private destroyRetryTimers = new Map<string, Map<string, NodeJS.Timeout>>();
   private destroyRetryInFlight = new Map<string, Set<string>>();
   /** What each pending destroy's last full attempt observed (hearsay-tools/cezarion#879). */
   private destroyObservations = new Map<string, Map<string, DestroyObservation>>();
   /** Each project's common Git dir, resolved once per registration for the change check. */
   private commonDirs = new Map<string, Promise<string | undefined>>();
-  // Private and overridable so tests need not wait out production cadence.
-  private destroyBackoff: Backoff = DESTROY_BACKOFF;
-  private destroyAttentionAttempts = DESTROY_ATTENTION_ATTEMPTS;
-  /** How long destroy waits for proven termination; private and overridable so tests need not wait it out. */
-  private terminationTimeoutMs = 30_000;
+  private readonly destroyBackoff: Backoff;
+  private readonly destroyAttentionAttempts: number;
+  private readonly terminationTimeoutMs: number;
   private clearDestroyRetries(projectId: string): void {
     for (const timer of this.destroyRetryTimers.get(projectId)?.values() ?? []) clearTimeout(timer);
     this.destroyRetryTimers.delete(projectId);

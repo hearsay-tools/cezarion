@@ -118,8 +118,7 @@ describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker s
       }) as typeof fs.readlinkSync);
       syncBuiltinESMExports();
       store.updateRun(w.id, { status: 'waiting' }); store.flush(); reopenRuntime();
-      const service = new DelegationService(); const detach = service.registerProject({ id: 'project', root, store, manager });
-      Object.assign(service, { terminationTimeoutMs: 4_000 });
+      const service = new DelegationService({ terminationTimeoutMs: 4_000 }); const detach = service.registerProject({ id: 'project', root, store, manager });
       try {
         destroying = true;
         // Destroy waits on the readable holder through its polls, then the unreadable process is no evidence.
