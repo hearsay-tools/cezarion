@@ -83,9 +83,9 @@ public class LauncherTest {
             return web.get() != null;
         });
     }
-    // Runs an async function body in the page and returns its JSON-encoded result.
+    // Runs an async function body in the page and returns its result, JSON-encoded by evaluateJavascript.
     private static String promise(ActivityScenario<MainActivity> activity, String body) throws Exception {
-        script(activity, "window.cezarResult=undefined;(async()=>{" + body + "})().then(v=>window.cezarResult=JSON.stringify(v),e=>window.cezarResult='error: '+e)");
+        script(activity, "window.cezarResult=undefined;(async()=>{" + body + "})().then(v=>window.cezarResult=v,e=>window.cezarResult='error: '+e)");
         AtomicReference<String> value = new AtomicReference<>();
         until(() -> { value.set(script(activity, "window.cezarResult ?? null")); return !"null".equals(value.get()); });
         return value.get();
