@@ -568,6 +568,7 @@ export async function getRunRelationships(id: string, opts?: ReadOptions): Promi
   )
 }
 
+/** Read the addressed project's full record; All tasks needs its steps, which the workspace index omits. */
 export async function getRun({ projectId, runId: id }: RunAddress, opts?: ReadOptions): Promise<ApiRun> {
   return unwrap(
     await cez.api.v1.p[':projectId'].runs[':id'].$get(
@@ -1097,8 +1098,7 @@ export function getRunDiff(id: string, opts?: ReadOptions): Promise<string> {
   return requestText(runPath(id, '/diff'), { method: 'GET', ...defined({ signal: opts?.signal }) })
 }
 
-/** The run's handoff journal (spec 007) as markdown text. `''` until the file is seeded —
- *  the server only 404s for an unknown run, never for a missing file. */
+/** The journal: '' until seeded; only unknown runs 404. All tasks names its project to avoid the boot scope (hearsay-tools/cezarion#1616). */
 export async function getRunHandoff({ projectId, runId: id }: RunAddress, opts?: ReadOptions): Promise<string> {
   const res = await cez.api.v1.p[':projectId'].runs[':id'].handoff.$get(
     { param: { projectId, id: encodeURIComponent(id) } },

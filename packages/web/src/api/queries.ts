@@ -1,5 +1,6 @@
 import { projectAddress, runAddress, type RunAddress, type ProjectAddress } from './run-address'
-import { createRunCacheWriter, type ReadPatch } from './run-cache'
+import type { ReadPatch } from './run-cache'
+import { useRunCacheWriter } from './use-run-cache-writer'
 import { isCockpitE2e } from '@/lib/e2e-mode'
 import { useLiveRead, subscribeLiveRead } from './live-reads'
 import { configureLiveSession, resetLiveSession } from './live-coordinator'
@@ -1517,10 +1518,9 @@ export function usePatchRun(id: string) {
  * for the boot-project cache. Omitted scopes are captured when mutate is called.
  */
 export function useMarkRunSeen(address?: ProjectAddress) {
+  const writer = useRunCacheWriter()
   const projectId = address?.projectId
   const cacheScope = address?.cacheScope
-  const queryClient = useQueryClient()
-  const writer = createRunCacheWriter(queryClient)
   type Receipt = RunAddress & { id: string }
   type Snapshot = ReadPatch
   const mutation = useMutation<RunRecord, Error, Receipt, Snapshot>({
@@ -1563,8 +1563,7 @@ export function useMarkRunSeen(address?: ProjectAddress) {
  * into a record shape the server never writes.
  */
 export function useMarkRunUnseen() {
-  const queryClient = useQueryClient()
-  const writer = createRunCacheWriter(queryClient)
+  const writer = useRunCacheWriter()
   return useMutation({
     mutationFn: (id: string) => setRunRead(runAddress(id), false),
     // Preserve late scope reads: this hook historically follows navigation between callbacks.
@@ -1587,7 +1586,7 @@ export function useMarkRunUnseen() {
  * The address owns the boot alias, so the request project can differ from the list cache key.
  */
 export function usePinRun(address?: ProjectAddress) {
-  const queryClient = useQueryClient()
+  const writer = useRunCacheWriter()
   return useMutation({
     mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) =>
       pinRun(runAddress(id, address), pinned),
@@ -1596,7 +1595,7 @@ export function usePinRun(address?: ProjectAddress) {
     onMutate: () => address ?? projectAddress(),
     // Hierarchical keys: this covers the list AND the open thread's own record.
     onSuccess: (_updated, _variables, context) =>
-      createRunCacheWriter(queryClient).invalidateAfter('runs', context),
+      writer.invalidateAfter('runs', context),
   })
 }
 
@@ -1608,17 +1607,17 @@ export function usePinRun(address?: ProjectAddress) {
  *  the refetch flips the composer to its closed/Continue form instead of leaving it aimed at a
  *  session that will keep refusing. */
 export function useSendMessage(id: string, projectId?: string) {
-  const queryClient = useQueryClient()
+  const writer = useRunCacheWriter()
   return useMutation({
     // `projectId` only where the caller stands OUTSIDE the run's project — the global Tasks page,
     // whose rows span the registry and where `queryScope()` would name the boot project. Absent
     // is the ordinary case and keeps the scoped-by-context spelling.
     mutationFn: (message: MessageInput) =>
       sendMessage(runAddress(id, { projectId }), message),
-    onSuccess: () => createRunCacheWriter(queryClient).invalidateAfter('send', () => projectAddress()),
+    onSuccess: () => writer.invalidateAfter('send', () => projectAddress()),
     onError: (error) => {
       if (error instanceof ApiError && error.status === 409) {
-        void createRunCacheWriter(queryClient).invalidateAfter('send', () => projectAddress())
+        void writer.invalidateAfter('send', () => projectAddress())
       }
     },
   })
@@ -1631,11 +1630,11 @@ export function useSendMessage(id: string, projectId?: string) {
  *  acted. The thread composer keeps its own mutation (`useContinueAction`) because it also owns
  *  the runner/model pills; this hook is the plain "resume on the run's own engine" path. */
 export function useContinueRun(id: string, projectId?: string) {
-  const queryClient = useQueryClient()
+  const writer = useRunCacheWriter()
   return useMutation({
     mutationFn: (opts: ContinueOptions = {}) =>
       continueRun(runAddress(id, { projectId }), opts),
-    onSuccess: () => createRunCacheWriter(queryClient).invalidateAfter('continue', () => projectAddress()),
+    onSuccess: () => writer.invalidateAfter('continue', () => projectAddress()),
   })
 }
 

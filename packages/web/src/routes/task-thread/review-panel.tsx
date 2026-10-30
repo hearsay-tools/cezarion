@@ -1,4 +1,4 @@
-import { createRunCacheWriter } from '@/api/run-cache'
+import { useRunCacheWriter } from '@/api/use-run-cache-writer'
 import { runAddress } from '@/api/run-address'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CornerUpLeftIcon, ExternalLinkIcon, EyeIcon } from 'lucide-react'
@@ -55,6 +55,7 @@ export function ReviewPanel({ run }: { run: ApiRun }) {
 // ---- notes + exits --------------------------------------------------------------------------
 
 function ReviewActions({ run }: { run: ApiRun }) {
+  const writer = useRunCacheWriter()
   const queryClient = useQueryClient()
   const notesRef = useRef<HTMLTextAreaElement>(null)
   const [notes, setNotes] = useState('')
@@ -77,7 +78,7 @@ function ReviewActions({ run }: { run: ApiRun }) {
     onSuccess: (result) => {
       if (result === null) return
       setNotes('')
-      void createRunCacheWriter(queryClient).invalidateAfter('continue', () => runAddress(run.id))
+      void writer.invalidateAfter('continue', () => runAddress(run.id))
     },
     onError: (error: Error) => toast(error.message, { tone: 'danger' }),
   })

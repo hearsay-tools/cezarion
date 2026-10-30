@@ -1,6 +1,6 @@
 import { projectAddress, runAddress } from '@/api/run-address'
-import { createRunCacheWriter } from '@/api/run-cache'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useRunCacheWriter } from '@/api/use-run-cache-writer'
+import { useMutation } from '@tanstack/react-query'
 import { ArchiveRestoreIcon } from 'lucide-react'
 import { useState } from 'react'
 
@@ -31,10 +31,10 @@ import type { ApiRun } from '@open-mercato/cezar-api-client'
  * can stop agreeing.
  */
 export function useArchiveRun(runId: string) {
-  const queryClient = useQueryClient()
+  const writer = useRunCacheWriter()
   return useMutation({
     mutationFn: (archived: boolean) => archiveRun(runAddress(runId), archived),
-    onSuccess: () => createRunCacheWriter(queryClient).invalidateAfter('runs', () => projectAddress()),
+    onSuccess: () => writer.invalidateAfter('runs', () => projectAddress()),
     onError: (error: Error) => toast(error.message, { tone: 'danger' }),
   })
 }

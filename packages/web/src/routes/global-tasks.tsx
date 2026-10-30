@@ -1,7 +1,7 @@
 import { runAddress } from '@/api/run-address'
-import { createRunCacheWriter } from '@/api/run-cache'
+import { useRunCacheWriter } from '@/api/use-run-cache-writer'
 import './task-lists.css'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { ArchiveRestoreIcon, EyeIcon, EyeOffIcon, ListChecksIcon, SearchXIcon } from 'lucide-react'
 import { ArchiveIcon, LayersIcon, PlusIcon, SearchIcon, SlidersHorizontalIcon, XIcon } from '@/components/design-icons'
 import * as React from 'react'
@@ -176,10 +176,10 @@ function useIndexedRunMutation<V extends { task: GlobalTask }>({
   request: (variables: V) => Promise<unknown>
   patch: (variables: V) => (run: RunIndexEntry) => RunIndexEntry
 }) {
-  const queryClient = useQueryClient()
+  const writer = useRunCacheWriter()
   return useMutation({
     mutationFn: request,
-    onMutate: (variables: V) => createRunCacheWriter(queryClient).patchIndex(
+    onMutate: (variables: V) => writer.patchIndex(
       runAddress(variables.task.run.id, { projectId: variables.task.run.projectId }), () => patch(variables),
     ),
     onError: (error: Error, _variables, context) => {
@@ -188,7 +188,7 @@ function useIndexedRunMutation<V extends { task: GlobalTask }>({
     },
     onSettled: (_data, _error, { task }, context) => {
       if (context) context.settle()
-      else createRunCacheWriter(queryClient).invalidateAfter('indexed', runAddress(task.run.id, { projectId: task.run.projectId }))
+      else writer.invalidateAfter('indexed', runAddress(task.run.id, { projectId: task.run.projectId }))
     },
   })
 }

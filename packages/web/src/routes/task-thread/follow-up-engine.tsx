@@ -1,7 +1,7 @@
-import { createRunCacheWriter } from '@/api/run-cache'
+import { useRunCacheWriter } from '@/api/use-run-cache-writer'
 import { runAddress } from '@/api/run-address'
 import { CpuIcon, GaugeIcon, TerminalIcon } from '@/components/design-icons'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
 
 import { hasAccountChoice, useAgentAccounts } from '@/api/agent-accounts'
@@ -54,7 +54,7 @@ export interface ContinueAction {
  * the pills' state lives here.
  */
 export function useContinueAction(run: ApiRun): ContinueAction {
-  const queryClient = useQueryClient()
+  const writer = useRunCacheWriter()
   const available = runActionFlags(run).continueRun
   const config = useConfig()
   // null = "not touched": the pills fall back to the run's current backend/model/account, so an
@@ -158,10 +158,10 @@ export function useContinueAction(run: ApiRun): ContinueAction {
         agentProfile: account ?? undefined,
       })
     },
-    onSuccess: () => createRunCacheWriter(queryClient).invalidateAfter('continue', () => runAddress(run.id)),
+    onSuccess: () => writer.invalidateAfter('continue', () => runAddress(run.id)),
     onError: (error) => {
       if (error instanceof ApiError && error.status === 409) {
-        void createRunCacheWriter(queryClient).invalidateAfter('continue', () => runAddress(run.id))
+        void writer.invalidateAfter('continue', () => runAddress(run.id))
       }
     },
   })
