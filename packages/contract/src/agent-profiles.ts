@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { perRunnerOptionalStrings } from './per-runner-optional-strings.ts';
 import { providerIdSchema, providerStatusSchema } from './workspace.ts';
 
 /**
@@ -95,14 +96,7 @@ export function agentAccountRouteId(profile: Pick<AgentProfile, 'id' | 'provider
 }
 
 /** One project's account choice, per provider. An absent key = the discovered account. */
-export const agentAccountSelectionSchema = z.object({
-  claude: z.string().optional(),
-  codex: z.string().optional(),
-  opencode: z.string().optional(),
-  pi: z.string().optional(),
-  cursor: z.string().optional(),
-  omp: z.string().optional(),
-});
+export const agentAccountSelectionSchema = perRunnerOptionalStrings();
 export type AgentAccountSelection = z.infer<typeof agentAccountSelectionSchema>;
 
 /**

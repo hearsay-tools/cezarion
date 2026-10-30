@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { perRunnerOptionalStrings } from './per-runner-optional-strings.ts';
 import { effortLevelSchema } from './effort.ts';
 import { type Runner, runnerSchema } from './health.ts';
 import { teamSkillRefSchema } from './team-skill-ref.ts';
@@ -61,14 +62,7 @@ export const workspaceConfigResponseSchema = z.object({
    */
   agentDefaults: z.object({
     runner: runnerSchema.optional(),
-    models: z.object({
-      claude: z.string().optional(),
-      codex: z.string().optional(),
-      opencode: z.string().optional(),
-      pi: z.string().optional(),
-      cursor: z.string().optional(),
-      omp: z.string().optional(),
-    }).optional(),
+    models: perRunnerOptionalStrings().optional(),
   }),
 });
 export type WorkspaceConfigResponse = z.infer<typeof workspaceConfigResponseSchema>;
@@ -259,15 +253,7 @@ export const workspaceUiStateSchema = z.looseObject({
   /** Dismissed runtime-auth incident IDs, keyed by provider. An ID is only dismissed until the
    *  provider reports a different incident, so this stays workspace-global with the browser
    *  rather than one project checkout. */
-  dismissedProviderAuthFailures: z
-    .object({
-      claude: z.string().optional(),
-      codex: z.string().optional(),
-      opencode: z.string().optional(),
-      pi: z.string().optional(),
-      cursor: z.string().optional(),
-      omp: z.string().optional(),
-    })
+  dismissedProviderAuthFailures: perRunnerOptionalStrings()
     .optional(),
   /** Settings → Appearance, GLOBAL since step 3.5: accent + density describe the person at the
    *  keyboard, not a repo. */
@@ -350,14 +336,7 @@ export type SetWorkspaceUiStateInput = z.infer<typeof setWorkspaceUiStateInputSc
  *  the runner. Absent = auto (the runner decides). Keyed by runner name rather than derived from
  *  `runnerSchema` because the server's own `defaultModels` object (src/config.ts:92) is spelled
  *  the same way — one key per runner, each independently optional. */
-export const runnerModelsSchema = z.object({
-  claude: z.string().optional(),
-  codex: z.string().optional(),
-  opencode: z.string().optional(),
-  pi: z.string().optional(),
-  cursor: z.string().optional(),
-  omp: z.string().optional(),
-});
+export const runnerModelsSchema = perRunnerOptionalStrings();
 export type RunnerModels = z.infer<typeof runnerModelsSchema>;
 
 /**
