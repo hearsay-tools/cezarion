@@ -307,7 +307,7 @@ async function serveCommand(
   warnServeBind(bindHost, port);
   let server: ReturnType<typeof startServer>;
   const selfUpdate = createServeSelfUpdate({ pkgName, version, store, bindHost }, () => server);
-  const applicationUpdate = createServeApplicationUpdate(repoRoot, update, () => server);
+  const applicationUpdate = createServeApplicationUpdate(repoRoot, update, () => server, undefined, store);
   server = startServer({
     ownership,
     delegation,
@@ -344,8 +344,12 @@ async function serveCommand(
 
   printServeBanner(version, repoRoot, repo, checks, url);
 
+  // One stop per process: a repeated signal must not start a second teardown over the first.
+  let stopping = false;
   const shutdown = (signal: NodeJS.Signals) => {
-    void stopServe(server, signal).finally(() => process.exit(0));
+    if (stopping) return;
+    stopping = true;
+    void stopServe(server, signal, { store }).finally(() => process.exit(0));
   };
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));

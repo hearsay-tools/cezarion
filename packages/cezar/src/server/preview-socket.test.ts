@@ -202,6 +202,36 @@ describe('the preview WebSocket', () => {
   });
 });
 
+// A pane upgrade still resolving its project is not a WebSocket yet, so `closeAllConnections`
+// skips it: unless close() destroys it, the listener never closes and shutdown waits forever.
+describe('an upgrade still resolving its project', () => {
+  it('is destroyed by close(), so the listener closes', async () => {
+    const { host } = fakeHost();
+    let resolving!: () => void;
+    const reached = new Promise<void>(resolve => { resolving = resolve; });
+    const server = createServer((_req, res) => { res.statusCode = 404; res.end(); });
+    const socket = createPreviewSocket({
+      host,
+      verify: () => ({ trusted: true }),
+      resolveProject: () => { resolving(); return new Promise(() => undefined); },
+    });
+    attachUpgradeRouter(server, [socket.route]);
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const { port } = server.address() as AddressInfo;
+    const client = new WebSocket(`ws://127.0.0.1:${port}${SCOPED}`);
+    client.on('error', () => undefined);
+    await reached;
+    socket.close();
+    const closed = new Promise<string>(resolve => server.close(() => resolve('closed')));
+    // bound: the listener closes as soon as the pending socket is gone; the bound reports a hang instead of hitting the test timeout
+    const hung = new Promise<string>(resolve => setTimeout(() => resolve('still open'), 5_000).unref());
+    const outcome = await Promise.race([closed, hung]);
+    client.terminate();
+    if (outcome !== 'closed') server.closeAllConnections();
+    expect(outcome).toBe('closed');
+  });
+});
+
 describe('startServer routes both sockets through one upgrade listener', () => {
   it('serves the bus, the scoped preview path and its boot alias, and destroys the rest', async () => {
     const repoRoot = realpathSync(mkdtempSync(join(tmpdir(), 'cez-preview-boot-')));

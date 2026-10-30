@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_WORKTREE_RETENTION } from './config.ts';
-import { reconcileServeWorktrees, recoverServeProject, warnServeBind, createServeApplicationUpdate, printServeBanner, restartServe } from './serve-boot.ts';
+import { reconcileServeWorktrees, recoverServeProject, warnServeBind, createServeApplicationUpdate, printServeBanner, restartServe, stopServe } from './serve-boot.ts';
 import { spawnSessionLeader } from './core/session-process.ts';
 import type { RunStore } from './runs/store.ts';
 import type { RunManager } from './workflows/run.ts';
@@ -222,5 +222,36 @@ describe.skipIf(process.platform === 'win32')('restartServe', () => {
     } finally {
       if (agent.exitCode === null && agent.signalCode === null) agent.kill('SIGKILL');
     }
+  });
+});
+
+// The stop every serve exit runs. A listener that never closes (a preview upgrade it still holds)
+// or a step that throws must not keep the store open or the agents running.
+describe('stopServe', () => {
+  it('stops waiting at its bound, then closes the store and signals the agents', async () => {
+    const store = { close: vi.fn() };
+    const forward = vi.fn();
+    const server = { shutdownForRestart: vi.fn(() => new Promise<void>(() => undefined)) };
+    await stopServe(server, 'SIGINT', { store, forward, boundMs: 50 });
+    expect(store.close).toHaveBeenCalledOnce();
+    expect(forward).toHaveBeenCalledWith('SIGINT');
+  });
+
+  it('closes the store and signals the agents when a shutdown step throws', async () => {
+    const store = { close: vi.fn() };
+    const forward = vi.fn();
+    const server = { shutdownForRestart: vi.fn(async () => { throw new Error('delegation close failed'); }) };
+    await expect(stopServe(server, 'SIGTERM', { store, forward })).resolves.toBeUndefined();
+    expect(store.close).toHaveBeenCalledOnce();
+    expect(forward).toHaveBeenCalledWith('SIGTERM');
+  });
+
+  it('leaves the store to a shutdown that finished, and still signals the agents last', async () => {
+    const order: string[] = [];
+    const store = { close: vi.fn() };
+    const server = { shutdownForRestart: vi.fn(async () => { order.push('shutdown'); }) };
+    await stopServe(server, 'SIGHUP', { store, forward: (signal) => order.push(`forward ${signal}`) });
+    expect(store.close).not.toHaveBeenCalled();
+    expect(order).toEqual(['shutdown', 'forward SIGHUP']);
   });
 });
