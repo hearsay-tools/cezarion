@@ -15,10 +15,8 @@ import {
 } from './core/provider-auth.ts';
 import { applyProviderEnablement } from './core/provider-availability.ts';
 import { forwardToSessionGroups } from './core/session-process.ts';
-import { pruneOrphans } from './git-worktree.ts';
 import { getRepoInfo } from './server/git.ts';
-import { DEFAULT_WORKTREE_RETENTION, loadConfig, resolveWorktreeRetention } from './config.ts';
-import { reclaimWorktrees } from './runs/retention.ts';
+import { loadConfig } from './config.ts';
 import { SWEEP_MIN_INTERVAL_MS, sweepMergedBranches } from './server/repo-branch-sweep.ts';
 import { previewToolEnabled } from './ci-wait/tools.ts';
 import { PreviewHost } from './preview/host.ts';
@@ -51,6 +49,7 @@ import { restartEndpoint } from './application-update/helper.ts';
 import { readNpmConfiguration } from './application-update/npm-process.ts';
 import { cezarHomeDir } from './paths.ts';
 import { openUrl } from './open-url.ts';
+import { reconcileServeWorktrees } from './serve-boot.ts';
 import { CockpitOwnership } from './server/cockpit-ownership.ts';
 
 const HELP = `cezar — local cockpit for AI agent tasks in your repo
@@ -286,27 +285,7 @@ async function serveCommand(
   const checks = await detectEnvironment();
   const repo = await getRepoInfo(repoRoot);
 
-  // Startup reconcile (spec 006): sweep worktrees whose run no longer exists. Never over a store
-  // that could not open (#779): its runs are unknown, and every worktree would look orphaned.
-  if (repo && !store.unavailable) {
-    const orphans = await pruneOrphans(repoRoot, new Set(store.listRunIds())).catch(
-      () => [] as string[],
-    );
-    if (orphans.length > 0) {
-      console.log(`  cleaned ${orphans.length} orphaned worktree(s): ${orphans.map((id) => id.slice(0, 8)).join(', ')}`);
-    }
-    // Count-based worktree retention (#483): reclaim finished worktrees beyond
-    // the keep-limit (directory only — `cez/<id8>` branch kept, so recoverable).
-    // Best-effort; never blocks boot.
-    const keep = await resolveWorktreeRetention(repoRoot).catch(() => DEFAULT_WORKTREE_RETENTION);
-    const reclaimed = await reclaimWorktrees(repoRoot, store, keep, { previewHost }).catch(() => [] as string[]);
-    if (reclaimed.length > 0) {
-      console.log(`  reclaimed ${reclaimed.length} old worktree(s), branch kept: ${reclaimed.map((id) => id.slice(0, 8)).join(', ')}`);
-    }
-    // Branches whose work landed (hearsay-tools/cezarion#2268). In the background: it may ask
-    // GitHub, and boot never waits on the network.
-    void sweepMergedBranches({ root: repoRoot, store, manager }, { keep });
-  }
+  await reconcileServeWorktrees(repoRoot, repo, store, manager, previewHost);
 
   const recovered = store
     .listRuns()
