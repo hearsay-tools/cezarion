@@ -41,10 +41,12 @@ export class RunLine {
    *  a runnerless record's account the same way (hearsay-tools/cezarion#1236). */
   private configuredDefaultRunner: RunnerId | undefined;
   private pumping = false;
-  /** The scheduler only needs repo presence, stable for this manager's lifetime.
-   * Cache the promise (including null) so every sweep doesn't spawn Git (#364).
+  /** The scheduler only needs repo presence. Cache the promise (including null) so every sweep
+   * doesn't spawn Git (hearsay-tools/cezarion#364); only `rediscoverRepo()` drops a null result.
    * execute() still reads fresh branch/remote metadata for each run. */
-  private pumpRepoInfo?: ReturnType<typeof getRepoInfo>;
+  private pumpRepoInfo?: ReturnType<typeof getRepoInfo> | undefined;
+  /** The cached probe found no usable repository: the one-task fallback applies. */
+  private repoMissing = false;
   /** A pump that arrived while one was in flight — replayed by `pump()`'s own
    *  loop so a slot freed mid-sweep is never a lost wakeup. */
   private pumpAgain = false;
@@ -208,6 +210,7 @@ export class RunLine {
       do {
         this.pumpAgain = false;
         const repo = await (this.pumpRepoInfo ??= getRepoInfo(this.context.repoRoot));
+        this.repoMissing = repo === null;
         const maxParallel = this.context.semaphore.maxParallel();
         // Per-project ceiling (spec 2026-07-22-per-project-concurrency): this
         // project never runs more than its own configured `maxParallel`; absent
@@ -265,6 +268,21 @@ export class RunLine {
     } finally {
       this.pumping = false;
     }
+  }
+
+  /**
+   * Probe Git again when queued work waits only behind the one-task fallback, so a project opened
+   * before its first commit gets normal scheduling without a restart (hearsay-tools/cezarion#2257).
+   * Every other case spawns no Git: a found repository stays cached, as hearsay-tools/cezarion#364 needs.
+   */
+  rediscoverRepo(): void {
+    if (this.context.disposed() || !this.repoMissing || this.entries().length === 0) return;
+    const busy = this.host.busySlots();
+    if (busy < 1 || busy >= this.context.semaphore.projectMaxParallel(this.context.repoRoot)) return;
+    if (this.context.semaphore.busy() >= this.context.semaphore.maxParallel()) return;
+    this.pumpRepoInfo = undefined;
+    this.repoMissing = false;
+    void this.host.pump();
   }
 
   /** Checkpoint before dequeue, while worker cancellation can still find the queued entry. */

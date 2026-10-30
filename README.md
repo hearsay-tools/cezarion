@@ -342,7 +342,7 @@ The moves that make the cockpit worth the browser tab:
 
 - 🗃️ **Queue + orchestration.** Start as many tasks as you like: Cezarion runs up to
   `maxParallel` at once across every project (default **2**; a non-git directory
-  always runs one) and
+  always runs one, until its first commit lifts that limit within a minute) and
   holds the rest in a FIFO queue with visible positions (`#1`, `#2`, …). Cancel a
   queued task before it starts; the queue even survives a cockpit restart —
   everything still `queued` is re-enqueued in order. It's the orchestration layer
