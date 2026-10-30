@@ -195,3 +195,51 @@ test('shouldCreate is false only when no product line changed', () => {
   assert.equal(shouldCreate(wrap(pack({ state: 'skipped', reason: 'x' }))), true);
   assert.equal(shouldCreate(wrap(pack())), true);
 });
+
+const { readEquivalent } = require('./mutants-equivalent.cjs');
+const equivalent = { file: FILE, function: 'hasPendingPermission', mutator: 'ConditionalExpression', original: "run.status === 'waiting' || run.status === 'running'", replacement: 'true', reason: 'fixture example' };
+const withEntries = entries => collectPackage({ name: 'contract', report: fixture, changed: new Map([[FILE, [[80, 100]]]]), durationMs: 16_000, relatedTests: 4, entries });
+
+test('equivalent mutants leave the tables, other counts and total; another mutator stays', () => {
+  const result = withEntries([equivalent]);
+  assert.deepEqual(result.counts, { killed: 3, survived: 1, noCoverage: 1, timeout: 1, error: 0, ignored: 0, equivalent: 1 });
+  assert.equal(result.mutants.length, 6);
+  assert.equal(result.mutants.some(m => m.line === 85 && m.column === 48), false);
+  const body = renderReport(validateArtifact(wrap(result)), ctx);
+  assert.match(body, /6 mutants in 21 changed lines/);
+  assert.match(body, /1 equivalent/);
+  assert.deepEqual(withEntries([{ ...equivalent, mutator: 'BooleanLiteral' }]), collect([[80, 100]]));
+});
+
+test('missing and empty lists keep the fixture artifact and comment byte-identical', () => {
+  const hash = text => require('node:crypto').createHash('sha256').update(text).digest('hex');
+  const missing = readEquivalent('missing', { readFileSync() { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); } });
+  for (const entries of [missing.entries, []]) {
+    const artifact = wrap(withEntries(entries));
+    // Captured from the parent commit before integrating equivalent matching.
+    assert.equal(hash(JSON.stringify(artifact)), 'e12e307426e71fb4b42273c123a9ec1ba48b81ba5db80d08d9292341a397d5d8');
+    assert.equal(hash(renderReport(artifact, ctx)), 'de91e378382bc37b2bcc4891913f7748776a52e866920a460cbe3dc704d113d4');
+  }
+});
+
+test('an unreadable list keeps the report usable and its warning is bounded and escaped', () => {
+  const { entries, warning } = readEquivalent('denied', { readFileSync() { throw new Error('<script> @all | [link](https://example.com)'); } });
+  const artifact = { ...wrap(withEntries(entries)), warning };
+  const clean = validateArtifact(artifact);
+  assert.equal(clean.warning, warning);
+  assert.match(renderReport(clean, ctx), /Warning: Could not read equivalent mutants/);
+  assert.doesNotMatch(renderReport(clean, ctx), /<script>|@all|https:\/\/example.com/);
+  assert.throws(() => validateArtifact({ ...artifact, warning: 'x'.repeat(LIMITS.reason + 1) }), /warning/);
+  assert.throws(() => validateArtifact({ ...artifact, warning: 1 }), /warning/);
+  for (const equivalent of [-1, 0.5, '1']) {
+    assert.throws(() => validateArtifact(wrap(pack({ counts: { ...pack().counts, equivalent } }))), /count equivalent/);
+  }
+});
+
+test('equivalent matching uses full source slices rather than shortened table cells', () => {
+  const original = 'x'.repeat(250) + 'end';
+  const report = { files: { [FILE]: { source: original, mutants: [{ mutatorName: 'StringLiteral', replacement: 'other', status: 'Survived', location: { start: { line: 1, column: 1 }, end: { line: 1, column: original.length + 1 } } }] } } };
+  const collect = text => collectPackage({ name: 'contract', report, changed: new Map([[FILE, [[1, 1]]]]), durationMs: 0, relatedTests: 1, entries: [{ ...equivalent, mutator: 'StringLiteral', original: text, replacement: 'other' }] });
+  assert.equal(collect(original).counts.equivalent, 1);
+  assert.equal(collect('x'.repeat(250) + 'different').counts.survived, 1);
+});

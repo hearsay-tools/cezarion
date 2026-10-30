@@ -8,6 +8,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn, spawnSync, execFileSync } = require('node:child_process');
 const { parseDiff, plan, mutateArgs, readBudget, checkChangedLines, checkRelatedTests } = require('./mutants-scope.cjs');
+const { readEquivalent } = require('./mutants-equivalent.cjs');
 const { VERSION, collectPackage, renderReport } = require('./mutants-report.cjs');
 
 const EVIDENCE = 'mutation-evidence';
@@ -35,8 +36,8 @@ function runUrl(env) {
   return env.GITHUB_RUN_ID && env.GITHUB_REPOSITORY ? `${env.GITHUB_SERVER_URL ?? 'https://github.com'}/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}` : '';
 }
 
-function finish({ deps, env, head }, state, packages) {
-  const artifact = { version: VERSION, state, head, stryker: STRYKER_VERSION, packages };
+function finish({ deps, env, head, warning }, state, packages) {
+  const artifact = { version: VERSION, state, head, stryker: STRYKER_VERSION, packages, ...(warning ? { warning } : {}) };
   deps.writeFile(`${EVIDENCE}/mutants.json`, `${JSON.stringify(artifact, null, 1)}\n`);
   deps.appendSummary(renderReport(artifact, { head, runUrl: runUrl(env) }));
 }
@@ -49,7 +50,7 @@ async function scope(context) {
 }
 
 /** One package: skip it for its size or its tests, else run Stryker on it within the time that is left. */
-async function runPackage(group, { deps, budget, deadline, log }) {
+async function runPackage(group, { deps, budget, deadline, log, entries }) {
   const started = deps.now();
   const tooLarge = checkChangedLines(group.changedLines, budget);
   if (tooLarge) return emptyPackage(group, tooLarge);
@@ -72,7 +73,7 @@ async function runPackage(group, { deps, budget, deadline, log }) {
   if (report) {
     deps.writeFile(`${EVIDENCE}/stryker-${group.name}.json`, JSON.stringify(report));
     const changed = new Map(group.files.map(({ file, ranges }) => [file, ranges]));
-    return collectPackage({ name: group.name, report, changed, durationMs, relatedTests: related });
+    return collectPackage({ name: group.name, report, changed, durationMs, relatedTests: related, entries });
   }
   const reason = result.outcome === 'timed-out'
     ? `did not finish within the ${budget.deadlineMinutes} minute budget`
@@ -81,13 +82,15 @@ async function runPackage(group, { deps, budget, deadline, log }) {
 }
 
 async function run(context) {
+  const { entries, warning } = context.deps.readEquivalent();
+  if (warning) context.deps.log(warning);
   const budget = readBudget(context.env);
   const deadline = context.deps.now() + budget.deadlineMinutes * 60_000;
   const packages = [];
   for (const group of context.groups) {
-    packages.push(await runPackage(group, { deps: context.deps, budget, deadline, log: context.deps.log }));
+    packages.push(await runPackage(group, { deps: context.deps, budget, deadline, log: context.deps.log, entries }));
   }
-  finish(context, 'ran', packages);
+  finish({ ...context, warning }, 'ran', packages);
   return 0;
 }
 
@@ -128,6 +131,7 @@ function countRelated(name, files) {
 function defaultDeps(env) {
   const append = (file, text) => { if (file) fs.appendFileSync(file, text); };
   return {
+    readEquivalent,
     git: args => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }),
     countRelated: async (name, files) => countRelated(name, files),
     stryker: async (name, mutate, ms) => runStryker(name, mutate, ms),

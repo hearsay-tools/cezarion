@@ -1,4 +1,6 @@
 'use strict';
+// The optional equivalent-mutant list (spec Decisions 2), read by the PR job and the
+// whole-file command (hearsay-tools/cezarion#2282). Matching uses full source text.
 const fs = require('node:fs');
 
 const EQUIVALENT_FILE = '.github/mutants/equivalent.json';

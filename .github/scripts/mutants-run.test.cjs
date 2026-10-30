@@ -19,6 +19,7 @@ function harness({ diff = DIFF_CONTRACT, related = () => 4, stryker = async () =
   const outputs = new Map();
   let reportPresent = false;
   const deps = {
+    readEquivalent: () => ({ entries: [], warning: '' }),
     git: args => { calls.push(['git', args.join(' ')]); return diff; },
     countRelated: async (name, list) => { calls.push(['related', name, list.map(f => f.file)]); return related(name); },
     stryker: async (name, args, ms) => {
@@ -191,4 +192,54 @@ test('the real CLI writes the no-lines artifact in a repository with no product 
   assert.equal(fs.readFileSync(out, 'utf8'), 'has_work=false\n');
   const written = JSON.parse(fs.readFileSync(path.join(dir, 'mutation-evidence/mutants.json'), 'utf8'));
   assert.equal(written.state, 'no-mutable-lines');
+});
+
+const { readEquivalent } = require('./mutants-equivalent.cjs');
+const equivalent = { file: FILE, function: 'hasPendingPermission', mutator: 'ConditionalExpression', original: "run.status === 'waiting' || run.status === 'running'", replacement: 'true', reason: 'fixture example' };
+
+test('run reads equivalents once before Stryker and leaves matching mutants out', async () => {
+  const h = harness({ diff: DIFF_BOTH });
+  h.deps.readEquivalent = () => { h.calls.push(['equivalent']); return { entries: [equivalent], warning: '' }; };
+  await main(['run'], env, h.deps);
+  assert.equal(h.calls.filter(c => c[0] === 'equivalent').length, 1);
+  assert.ok(h.calls.findIndex(c => c[0] === 'equivalent') < h.calls.findIndex(c => c[0] === 'stryker'));
+  const pack = artifactOf(h).packages.find(p => p.name === 'contract');
+  assert.equal(pack.counts.equivalent, 1);
+  assert.equal(pack.counts.survived, 1);
+  assert.equal(pack.mutants.length, 6);
+  assert.match(h.files.get('summary'), /1 equivalent/);
+});
+
+test('run keeps a near miss with the same text but another mutator', async () => {
+  const h = harness();
+  h.deps.readEquivalent = () => ({ entries: [{ ...equivalent, mutator: 'BooleanLiteral' }], warning: '' });
+  await main(['run'], env, h.deps);
+  assert.equal(artifactOf(h).packages[0].counts.survived, 2);
+  assert.equal(artifactOf(h).packages[0].counts.equivalent, undefined);
+});
+
+test('missing and empty equivalent files keep the run artifact and summary unchanged', async () => {
+  const baseline = harness();
+  await main(['run'], env, baseline.deps);
+  for (const readFileSync of [() => '[]', () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); }]) {
+    const h = harness();
+    h.deps.readEquivalent = () => readEquivalent('fixture', { readFileSync });
+    await main(['run'], env, h.deps);
+    assert.equal(h.files.get('mutation-evidence/mutants.json'), baseline.files.get('mutation-evidence/mutants.json'));
+    assert.equal(h.files.get('summary'), baseline.files.get('summary'));
+    assert.equal(artifactOf(h).warning, undefined);
+  }
+});
+
+test('an unreadable equivalent file warns in the artifact and log but still posts the summary', async () => {
+  const h = harness();
+  const logs = [];
+  h.deps.log = text => logs.push(text);
+  h.deps.readEquivalent = () => readEquivalent('denied', { readFileSync() { throw Object.assign(new Error('permission denied'), { code: 'EACCES' }); } });
+  assert.equal(await main(['run'], env, h.deps), 0);
+  const artifact = validateArtifact(artifactOf(h));
+  assert.match(artifact.warning, /permission denied/);
+  assert.deepEqual(logs, [artifact.warning]);
+  assert.equal(artifact.packages[0].counts.survived, 2);
+  assert.match(h.files.get('summary'), /Warning: Could not read equivalent mutants/);
 });

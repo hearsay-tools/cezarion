@@ -2,6 +2,7 @@
 // The mutation report: a StrykerJS JSON report becomes a small artifact (collectPackage), the comment
 // job checks that artifact as untrusted input (validateArtifact), and one function renders it as the
 // Markdown comment. Pure functions; the job is advisory and never blocks a merge.
+const { findEquivalent } = require('./mutants-equivalent.cjs');
 const { PACKAGES } = require('./mutants-scope.cjs');
 
 /** The hidden marker that finds the one comment to update. */
@@ -43,18 +44,23 @@ function capped(rows, limit) {
 }
 
 /** One package's result from the StrykerJS report: counts for every mutant, rows for the ones worth reading. */
-function collectPackage({ name, report, changed, durationMs, relatedTests }) {
+function collectPackage({ name, report, changed, durationMs, relatedTests, entries = [] }) {
   const counts = Object.fromEntries(COUNT_KEYS.map(key => [key, 0]));
   const rows = [];
   for (const [file, data] of Object.entries(report.files ?? {})) {
     const ranges = changed.get(file);
     for (const m of ranges ? data.mutants : []) {
       if (!inRanges(m.location.start.line, ranges) || !COUNT_OF[m.status]) continue;
+      const original = sliceSource(data.source ?? '', m.location);
+      if (findEquivalent(entries, { file, mutator: m.mutatorName, original, replacement: m.replacement ?? '' })) {
+        counts.equivalent = (counts.equivalent ?? 0) + 1;
+        continue;
+      }
       counts[COUNT_OF[m.status]] += 1;
       if (!LISTED.includes(m.status)) continue;
       rows.push({
         file, line: m.location.start.line, column: m.location.start.column, mutator: m.mutatorName, status: m.status,
-        original: oneLine(sliceSource(data.source ?? '', m.location)), replacement: oneLine(m.replacement ?? ''),
+        original: oneLine(original), replacement: oneLine(m.replacement ?? ''),
       });
     }
   }
@@ -100,6 +106,7 @@ function checkMutant(m) {
 
 function checkPackage(p) {
   const counts = Object.fromEntries(COUNT_KEYS.map(key => [key, int(p?.counts?.[key], `count ${key}`)]));
+  if (p?.counts?.equivalent !== undefined) counts.equivalent = int(p.counts.equivalent, 'count equivalent');
   if (!Array.isArray(p.mutants) || p.mutants.length > LIMITS.undetected + LIMITS.detected) fail('mutants is not a short list');
   return {
     name: oneOf(p.name, PACKAGES, 'package name'), state: oneOf(p.state, PACKAGE_STATES, 'package state'),
@@ -118,6 +125,7 @@ function validateArtifact(value) {
   return {
     version: VERSION, state: oneOf(value.state, ['ran', 'no-mutable-lines'], 'state'),
     head: /^[0-9a-f]{0,40}$/.test(value.head) ? value.head : fail('head is not a sha'),
+    ...(value.warning === undefined ? {} : { warning: str(value.warning, 'warning', LIMITS.reason) }),
     stryker: str(value.stryker ?? '', 'stryker', 32), packages: value.packages.map(checkPackage),
   };
 }
@@ -159,6 +167,7 @@ function countsLine(p) {
   if (c.timeout) parts.push(`${c.timeout} timed out`);
   if (c.error) parts.push(`${c.error} errors`);
   if (c.ignored) parts.push(`${c.ignored} ignored`);
+  if (c.equivalent) parts.push(`${c.equivalent} equivalent`);
   return `${plural(total, 'mutant')} in ${plural(p.changedLines, 'changed line')}: ${parts.join(', ')}. ${seconds(p.durationMs)}.`;
 }
 
@@ -198,6 +207,7 @@ function compose(artifact, ctx, show) {
   if (left > 0) tail.push(`Left out to fit the comment: ${left} mutant rows.`);
   tail.push('A mutant that only tests in another package can kill shows here as a survivor: the job runs each package\'s own tests.');
   if (incomplete) tail.push('To see a skipped package, run Stryker on this change yourself: `STRYKER_PROJECT=<package> pnpm exec stryker run --mutate \'<file>:<from>-<to>\'`.');
+  if (artifact.warning) tail.push(`Warning: ${esc(artifact.warning)}`);
   return [intro(ctx), ...sections.map(s => s.text), ...tail].join('\n\n') + '\n';
 }
 
