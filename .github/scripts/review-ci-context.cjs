@@ -58,15 +58,24 @@ function assertLiveHead(gh, repo, pullNumber, head, baseRef) {
   return pr;
 }
 
+// GitHub reports a live run as queued (or waiting, pending, requested) while one
+// of its jobs waits for a runner. Only completed means the attempt has ended.
+const live = status => typeof status === 'string' && status !== 'completed';
+
+function assertCallerRun(run, env, message) {
+  const failed = String(run.id) !== env.GITHUB_RUN_ID ? `id ${run.id} is not ${env.GITHUB_RUN_ID}`
+    : String(run.run_attempt) !== env.GITHUB_RUN_ATTEMPT ? `attempt ${run.run_attempt} is not ${env.GITHUB_RUN_ATTEMPT}`
+      : !live(run.status) ? `status is ${run.status}` : null;
+  if (failed) throw new Error(`${message}: ${failed} (id ${run.id}, attempt ${run.run_attempt}, status ${run.status})`);
+}
+
 function nativeContext(gh, env, event, head, pullNumber) {
   assertCaller(env, event, head, pullNumber);
   const repo = env.GITHUB_REPOSITORY;
   const readRun = () => api(gh, repo, `actions/runs/${env.GITHUB_RUN_ID}`);
   const run = readRun();
   assertNativeRun(run, repo, head, assertLiveHead(gh, repo, pullNumber, head, 'main'));
-  if (String(run.id) !== env.GITHUB_RUN_ID || String(run.run_attempt) !== env.GITHUB_RUN_ATTEMPT || run.status !== 'in_progress') {
-    throw new Error('Caller run or attempt changed');
-  }
+  assertCallerRun(run, env, 'Caller run or attempt changed');
   // Native target runs can have an empty pull_requests list (observed run
   // 40903818807). The event and live PR supply identity; official run metadata
   // must match its SHA, branch and head repository.
@@ -81,10 +90,7 @@ function nativeContext(gh, env, event, head, pullNumber) {
     throw new Error('Caller preflight did not succeed');
   }
   assertLiveHead(gh, repo, pullNumber, head, 'main');
-  const final = readRun();
-  if (final.id !== run.id || final.run_attempt !== run.run_attempt || final.status !== 'in_progress') {
-    throw new Error('Caller run changed while collecting preflight');
-  }
+  assertCallerRun(readRun(), env, 'Caller run changed while collecting preflight');
   return `# CI review context\n\nHead: ${head}\nRun: ${run.id}\nAttempt: ${run.run_attempt}\nPreflight: success\n\nHeavy verification: pending behind review. This is not a test pass.\nDo not wait for CI or run the test suite. Review the code now; full verification remains required before merge.\n`;
 }
 
@@ -142,7 +148,8 @@ function manualContext(gh, env, head, pullNumber) {
   const result = resolveCiResults([{ databaseId: run.id, headSha: head, event: run.event, url: run.html_url }], { jobs, headSha: head });
   const final = api(gh, repo, `actions/runs/${run.id}`);
   assertNativeRun(final, repo, head, pr);
-  if (!matchesPullTarget(final, pullNumber, pr.base.ref) || final.id !== run.id || final.run_attempt !== run.run_attempt || final.status !== run.status
+  if (!matchesPullTarget(final, pullNumber, pr.base.ref) || final.id !== run.id || final.run_attempt !== run.run_attempt
+    || (live(final.status) ? !live(run.status) : final.status !== run.status)
     || final.conclusion !== run.conclusion || latestNative(gh, repo, head)?.databaseId !== run.id) {
     throw new Error('Current CI attempt changed while collecting context');
   }
