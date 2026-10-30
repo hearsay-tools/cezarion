@@ -1,8 +1,9 @@
 // @vitest-environment node
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { parse } from 'yaml'
 
 import { merge, partial } from '../../e2e/spec-map/build-map'
 import { Bundle, assertSameJavaScript } from '../../e2e/spec-map/bundle'
@@ -183,7 +184,9 @@ describe('module facts', () => {
   it('names every workspace package the cockpit bundle depends on, with the export pattern it resolves', () => {
     const repo = resolve(import.meta.dirname, '../../../..')
     const manifest = (dir: string) => JSON.parse(readFileSync(join(repo, dir, 'package.json'), 'utf8'))
-    const workspaces = new Map(readdirSync(join(repo, 'packages')).map((dir) => [manifest(`packages/${dir}`).name as string, `packages/${dir}`]))
+    // pnpm-workspace.yaml defines the workspaces: packages/ also holds non-workspace directories.
+    const listed = parse(readFileSync(join(repo, 'pnpm-workspace.yaml'), 'utf8')).packages as string[]
+    const workspaces = new Map(listed.map((dir) => [manifest(dir).name as string, dir]))
     const bundled = ['packages/web', 'packages/api-client']
       .flatMap((dir) => Object.keys(manifest(dir).dependencies ?? {}))
       .filter((name) => workspaces.has(name))
