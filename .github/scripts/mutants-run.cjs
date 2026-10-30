@@ -157,6 +157,13 @@ function countRelated(name, files) {
   return count;
 }
 
+/** Restore Stryker's in-place edits, including executable bits lost by its backup copies. */
+function restoreTree(cwd = process.cwd(), { removeReport = false } = {}) {
+  spawnSync('git', ['checkout', '--', 'packages'], { cwd });
+  fs.rmSync(path.join(cwd, '.stryker-tmp'), { recursive: true, force: true });
+  if (removeReport) fs.rmSync(path.join(cwd, REPORT), { force: true });
+}
+
 function defaultDeps(env) {
   const append = (file, text) => { if (file) fs.appendFileSync(file, text); };
   return {
@@ -168,7 +175,7 @@ function defaultDeps(env) {
     removeReport: () => fs.rmSync(REPORT, { force: true }),
     readReport: () => (fs.existsSync(REPORT) ? JSON.parse(fs.readFileSync(REPORT, 'utf8')) : null),
     // A killed Stryker can leave a mutated file behind; the tree was clean when the job began.
-    restoreTree: () => { spawnSync('git', ['checkout', '--', 'packages']); fs.rmSync('.stryker-tmp', { recursive: true, force: true }); },
+    restoreTree,
     writeFile: (file, text) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text); },
     appendSummary: text => append(env.GITHUB_STEP_SUMMARY, `${text}\n`),
     setOutput: (key, value) => append(env.GITHUB_OUTPUT, `${key}=${value}\n`),
@@ -184,4 +191,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { runStryker, main, parseArgs, EVIDENCE, REPORT };
+module.exports = { restoreTree, runStryker, main, parseArgs, EVIDENCE, REPORT };

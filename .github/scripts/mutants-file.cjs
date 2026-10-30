@@ -7,7 +7,7 @@ const { execFileSync, execFile } = require('node:child_process');
 const os = require('node:os');
 const { promisify } = require('node:util');
 const { sliceSource } = require('./mutants-report.cjs');
-const { runStryker } = require('./mutants-run.cjs');
+const { runStryker, restoreTree } = require('./mutants-run.cjs');
 const { EQUIVALENT_FILE, readEquivalent, matchesEntry } = require('./mutants-equivalent.cjs');
 const { namedRanges, functionRanges, functionOf } = require('./mutants-functions.cjs');
 const TARGETS = require('../mutants/targets.json');
@@ -185,12 +185,16 @@ function summary(result) {
 
 async function strykerReport(deps, cwd, opts, project, extraArgs, signal, onOutput) {
   deps.removeReport(cwd);
-  const result = await deps.stryker(project, [opts.file], 24 * 60 * 60_000, { cwd, extraArgs: ['--concurrency', String(opts.concurrency), ...extraArgs], signal, onOutput });
-  signal.throwIfAborted();
-  if (result.outcome !== 'exited' || result.code !== 0) throw new Error(`Stryker failed: ${result.outcome}, exit ${result.code}`);
-  const report = deps.readReport(cwd);
-  if (!report) throw new Error('Stryker wrote no report');
-  return report;
+  try {
+    const result = await deps.stryker(project, [opts.file], 24 * 60 * 60_000, { cwd, extraArgs: ['--concurrency', String(opts.concurrency), ...extraArgs], signal, onOutput });
+    signal.throwIfAborted();
+    if (result.outcome !== 'exited' || result.code !== 0) throw new Error(`Stryker failed: ${result.outcome}, exit ${result.code}`);
+    const report = deps.readReport(cwd);
+    if (!report) throw new Error('Stryker wrote no report');
+    return report;
+  } finally {
+    deps.reset(cwd);
+  }
 }
 
 /** One committed snapshot, always removed after the active command has stopped. */
@@ -261,6 +265,7 @@ function defaultDeps() {
     },
     command: (bin, args, cwd, signal) => promisify(execFile)(bin, args, { cwd, signal, maxBuffer: 32 * 1024 * 1024 }).then(({ stdout, stderr }) => { process.stdout.write(stdout); process.stderr.write(stderr); }),
     stryker: runStryker,
+    reset: cwd => restoreTree(cwd, { removeReport: true }),
     readReport: cwd => JSON.parse(fs.readFileSync(path.join(cwd, REPORT), 'utf8')),
     removeReport: cwd => fs.rmSync(path.join(cwd, REPORT), { force: true }),
     ranges: functionRanges,

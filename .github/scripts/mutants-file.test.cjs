@@ -121,7 +121,7 @@ function fakeDeps(file = 'packages/contract/src/sample.ts') {
     scratch: () => '/cache/scratch',
     command: async (bin, args) => { calls.push([bin, ...args]); },
     stryker: async (...args) => { calls.push(['stryker', args[0], args[3]]); return { outcome: 'exited', code: 0 }; },
-    readReport: () => report(file), removeReport: () => calls.push(['remove-report']),
+    readReport: () => report(file), reset: cwd => calls.push(['reset', cwd]), removeReport: () => calls.push(['remove-report']),
     ranges: () => [], read: file => file.endsWith('equivalent.json') ? '[]' : "import { x } from '@open-mercato/cezar-contract/sample';",
     readJson: () => ({ vitest: { configFile: 'vitest.stryker.config.ts', pool: 'forks' }, reporters: ['json'], inPlace: true, timeoutMS: 30000 }), write: (file, text) => calls.push(['write', file, text]),
     removeScratch: () => calls.push(['remove-scratch']), log: text => calls.push(['log', text]),
@@ -404,4 +404,35 @@ test('captured Stryker output is delivered before its close result', async () =>
     },
   });
   assert.equal(captured, 'late output\n');
+});
+
+
+test('pass reset restores mock executability before consumers and also runs after consumer failure', async () => {
+  for (const consumerCode of [0, 1]) {
+    const { deps, calls } = fakeDeps();
+    let executable = true;
+    let passes = 0;
+    deps.stryker = async () => {
+      assert.equal(executable, true, 'each pass must see an executable mock');
+      executable = false;
+      return { outcome: 'exited', code: ++passes === 1 ? 0 : consumerCode };
+    };
+    deps.reset = cwd => { executable = true; calls.push(['reset', cwd]); };
+    const result = await m.runMeasurement(m.parseArgs(['packages/contract/src/sample.ts']), deps);
+    assert.equal(passes, 2);
+    assert.equal(calls.filter(c => c[0] === 'reset').length, 2);
+    assert.equal(executable, true);
+    assert.equal(result.consumers.state, consumerCode ? 'failed' : 'merged');
+  }
+});
+
+test('pass reset runs after missing report and thrown Stryker errors', async () => {
+  for (const failure of ['missing', 'throw']) {
+    const { deps, calls } = fakeDeps();
+    if (failure === 'missing') deps.readReport = () => null;
+    else deps.stryker = async () => { throw new Error('spawn failed'); };
+    await assert.rejects(m.runMeasurement(m.parseArgs(['packages/contract/src/sample.ts']), deps));
+    assert.equal(calls.filter(c => c[0] === 'reset').length, 1);
+    assert.ok(calls.findIndex(c => c[0] === 'reset') < calls.findIndex(c => c[2] === 'remove'));
+  }
 });
