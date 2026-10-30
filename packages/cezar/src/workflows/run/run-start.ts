@@ -39,7 +39,7 @@ export class RunStart {
     private readonly continuationAcceptance: ContinuationAcceptance, private readonly workerExecutions: WorkerExecutions) {}
 
   /**
-   * Idempotent start (#504, spec 2026-09-24-cez-task-cli). Lookup and create share one
+   * Idempotent start (hearsay-tools/cezarion#504, spec 2026-09-24-cez-task-cli). Lookup and create share one
    * synchronous path, so the event loop serialises concurrent retries: the first creates, every
    * later one with the same hash gets that run back, and a different hash is a conflict.
    */

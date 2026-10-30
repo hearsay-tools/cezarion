@@ -81,7 +81,7 @@ Each module imports only from its own layer or a lower one. The facade sits on t
 
 | Layer | Phase | Modules |
 |---|---|---|
-| Facade | — | `workflows/run.ts`: constructor (composition root), ordered `dispose`, `activate` and `dropActive`, the public members, test-seam delegators, `execute` and `runContinuation` entry points, `cancel`, `finish`, `startRun`, `continueRun`, `move` |
+| Facade | — | `workflows/run.ts`: constructor (composition root), ordered `dispose`, `activate` and `dropActive`, the public members, test-seam delegators, `execute` and `runContinuation` entry points, `cancel`, `finish`, `startRun` (delegator), `continueRun`, `move` |
 | Orchestrators | 4 | `input-delivery`, `wake-admission`, `turn-nudges`, `turn-settler`, `run-settlement`, `continuation-acceptance`, `step-session`, `step-loop`, `continuation-session`, `run-recovery` |
 | Hubs | 3 | `run-line` (the scheduler line), `queued-revival`, `wait-watches`, `wait-registry`, `family-reconciler`, `human-waits`, `worker-questions`, `completion-gate`, `session-events` |
 | State owners | 2 | `maintenance-claims`, `repo-root-lease`, `attachment-writer`, `cezar-tools`, `worker-orphans`, `worker-executions`, `queued-input`, `launch-context`, `run-skills`, `worktree-autosave`, `turn-bookkeeping`, `wake-retries` (moved to Phase 4), `auto-resume`, `inbox-claims`, `input-receipts` |
@@ -475,6 +475,10 @@ These members stay on the facade with no Phase 4 issue, and their code waits for
 `latchAgentInputError` and `steerWorker`. Finish and completion gate bodies now live in
 `run-finish.ts`; the public `finish` and `acceptDone` delegators stay. None is over 20, so
 the Phase 4 exit still holds.
+
+Phase 5: `launchQueuedRun` and `ownedJob` now live in `run/run-start.ts`, with the bodies of
+`startRun`, `startRunIdempotent` and `enqueueOwnedRun`. Those three public facade delegators stay;
+`startRunIdempotent` calls `startRun` through the facade host so its spies still observe it.
 
 `run.ts` also keeps re-exporting the module-level names that shipped code and tests import:
 `StartRunInput`, `DelegationExecutionSettings`, `AutomationToolService`, `PastedContent`,
