@@ -1,25 +1,12 @@
 import type { RunSummary } from '@open-mercato/cezar-api-client'
 import { isUsageLimitHold } from '@open-mercato/cezar-api-client/contract/waits'
+import { canBeUnread as contractCanBeUnread, isUnread as contractIsUnread } from '@open-mercato/cezar-api-client/contract/run-predicates'
+import type { ReadStateInput } from '@open-mercato/cezar-api-client'
+export type { ReadStateInput } from '@open-mercato/cezar-api-client'
 import { isOwnedWorker } from './task-groups'
-
-/**
- * Pure done-item read/unread rule, separate from attention status. Keep it aligned with the
- * store’s mark-read sweep; receipts must not change the status dot.
- */
 
 /** The terminal statuses a *done item* can be — the sidebar's "Finished" set. */
 const DONE_STATUSES: readonly RunSummary['status'][] = ['done', 'failed', 'cancelled']
-
-/** The subset that can carry an *unread* marker. Cancelled is excluded on purpose: you stopped
- *  the run yourself, so there is nothing you "haven't seen". */
-const UNREAD_ELIGIBLE: readonly RunSummary['status'][] = ['done', 'failed']
-
-/** What the read/unread rule reads — `Pick`ed (like `AttentionInput`) so a test or a partial
- *  record can call it without a full `RunSummary`. */
-export type ReadStateInput = Pick<
-  RunSummary,
-  'status' | 'finishedAt' | 'seenAt' | 'archived' | 'autoResumeAt'
-> & { delegation?: { role?: string } | null | undefined }
 
 /** A finished run — done, failed, or cancelled. These are the rows the read/unread treatment
  *  applies to (the "Finished" bucket); everything else carries its live attention signal instead. */
@@ -27,49 +14,14 @@ export function isDoneItem(status: RunSummary['status']): boolean {
   return DONE_STATUSES.includes(status)
 }
 
-/**
- * Whether a run is *eligible* to wear the unread marker at all — the receipt-independent half
- * of `isUnread`:
- *  - only `done`/`failed` runs qualify (cancelled is self-initiated, so never unread);
- *  - a usage-limit hold (`isUsageLimitHold`, spec 2026-08-03-auto-resume-after-usage-limit) is
- *    not a done item at all: it has an appointment to pick the work back up, so there is no
- *    outcome to have missed yet, and it can neither wear the marker nor be put back into it;
- *  - it must actually have finished (`finishedAt`) — a record caught mid-transition is not yet
- *    a done item;
- *  - archived runs are never unread: archiving is a stronger "I'm done with this" than reading.
- *
- * Split out (#775) because "Mark unread" needs exactly this question minus the receipt: the
- * action is offered for a run that is currently read AND *could* be unread, which is
- * `canBeUnread(run) && !isUnread(run)`. `isReadDoneItem` cannot answer it — that one is true
- * for cancelled and archived rows too, neither of which can ever go unread. Exported rather
- * than restated in `run-actions.ts` so the eligibility rule keeps exactly one definition.
- */
+/** Receipt-independent eligibility, shared with the store's mark-read sweep. */
 export function canBeUnread(run: ReadStateInput): boolean {
-  if (run.archived) return false
-  if (isUsageLimitHold(run)) return false
-  if (!UNREAD_ELIGIBLE.includes(run.status)) return false
-  return run.finishedAt !== undefined
+  return contractCanBeUnread(run)
 }
 
-/**
- * Whether a done item is *unread*: a finished run you have not opened since it finished.
- *
- * Eligible (`canBeUnread` above) and unread until seen SINCE it finished. Comparing
- * `seenAt < finishedAt` (not merely "has a receipt") is what makes a resumed-and-re-finished
- * run go unread again for free — its `finishedAt` moves past the old receipt. An explicit
- * "Mark unread" (#775) takes the other road: it *clears* the receipt, and an absent one is
- * unread by this same clause.
- *
- * ISO-8601 strings compare lexicographically because every timestamp cezar writes is UTC
- * (`toISOString()` → trailing `Z`), so `<` on the strings is `<` on the instants.
- */
+/** A finished eligible outcome not seen since it finished. */
 export function isUnread(run: ReadStateInput): boolean {
-  // Read into a local so the narrowing survives the `canBeUnread` call, which checks the same
-  // clause but cannot narrow the caller's field.
-  const finishedAt = run.finishedAt
-  if (finishedAt === undefined) return false
-  if (!canBeUnread(run)) return false
-  return run.seenAt === undefined || run.seenAt < finishedAt
+  return contractIsUnread(run)
 }
 
 /**

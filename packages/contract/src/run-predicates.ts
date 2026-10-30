@@ -8,6 +8,13 @@ import { isUsageLimitHold } from './waits.ts';
  * (hearsay-tools/cezarion#1434). `isUsageLimitHold` lives beside `computeWaitingOn` in `waits.ts`.
  */
 
+const LIVE_STATUSES: ReadonlySet<string> = new Set(['queued', 'running', 'waiting']);
+
+/** Status-only live predicate: queued, running or waiting. */
+export function isLiveStatus(status: string): boolean {
+  return LIVE_STATUSES.has(status);
+}
+
 type OwnershipInput = Pick<RunRecord, 'status'> & Partial<Pick<RunRecord, 'autoResumeAt'>>;
 
 /**
@@ -49,14 +56,14 @@ export function isSweepable(run: SweepInput, scope?: ArchiveFinishedScope, autom
 
 /** The subset that can carry an *unread* marker. Cancelled is excluded on purpose: you stopped
  *  the run yourself, so there is nothing you "haven't seen". */
-const UNREAD_ELIGIBLE: readonly RunRecord['status'][] = ['done', 'failed']
+const UNREAD_ELIGIBLE: readonly RunRecord['status'][] = ['done', 'failed'];
 
 /** What the read/unread rule reads — `Pick`ed (like `AttentionInput`) so a test or a partial
  *  record can call it without a full `RunRecord`. */
 export type ReadStateInput = Pick<
   RunRecord,
   'status' | 'finishedAt' | 'seenAt' | 'archived' | 'autoResumeAt'
-> & { delegation?: { role?: string } | null | undefined }
+> & { delegation?: { role?: string } | null | undefined };
 
 /**
  * Whether a run is *eligible* to wear the unread marker at all — the receipt-independent half
@@ -76,10 +83,10 @@ export type ReadStateInput = Pick<
  * than restated in `run-actions.ts` so the eligibility rule keeps exactly one definition.
  */
 export function canBeUnread(run: ReadStateInput): boolean {
-  if (run.archived) return false
-  if (isUsageLimitHold(run)) return false
-  if (!UNREAD_ELIGIBLE.includes(run.status)) return false
-  return run.finishedAt !== undefined
+  if (run.archived) return false;
+  if (isUsageLimitHold(run)) return false;
+  if (!UNREAD_ELIGIBLE.includes(run.status)) return false;
+  return run.finishedAt !== undefined;
 }
 
 /**
@@ -97,16 +104,15 @@ export function canBeUnread(run: ReadStateInput): boolean {
 export function isUnread(run: ReadStateInput): boolean {
   // Read into a local so the narrowing survives the `canBeUnread` call, which checks the same
   // clause but cannot narrow the caller's field.
-  const finishedAt = run.finishedAt
-  if (finishedAt === undefined) return false
-  if (!canBeUnread(run)) return false
-  return run.seenAt === undefined || run.seenAt < finishedAt
+  const finishedAt = run.finishedAt;
+  if (finishedAt === undefined) return false;
+  if (!canBeUnread(run)) return false;
+  return run.seenAt === undefined || run.seenAt < finishedAt;
 }
-
 
 /** History retention excludes live tasks, delegation families and pinned runs. */
 export function isRetentionCandidate(run: Pick<RunRecord, 'status' | 'delegation' | 'pinned'>): boolean {
-  return !(run.status === 'queued' || run.status === 'running' || run.status === 'waiting') && !run.delegation && !run.pinned;
+  return !isLiveStatus(run.status) && !run.delegation && !run.pinned;
 }
 
 /** Whether a record names a referenced PR or issue; repository scoping remains separate. */
