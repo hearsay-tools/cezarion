@@ -770,7 +770,6 @@ export class RunManager {
 
   builtinSkills(): Skill[] { return launchContext.builtinSkills(this.cockpit); }
 
-
   private readonly launchSettingsHost: launchContext.LaunchSettingsHost = {
     active: this.active, setCockpit: address => { this.cockpit = address; },
     delegationProvisioner: () => this.delegationProvisioner, setProvisioner: provisioner => { this.delegationProvisioner = provisioner; },
@@ -778,7 +777,6 @@ export class RunManager {
   };
   private delegationProvisioner?: DelegationProvisioner | undefined;
   setDelegationProvisioner(provisioner: DelegationProvisioner): () => void { return launchContext.setDelegationProvisioner(this.launchSettingsHost, provisioner); }
-
 
   /**
    * The trusted callbacks behind one session's cezar tools (hearsay-tools/cezarion#1233). Both
@@ -1172,8 +1170,6 @@ export class RunManager {
     return this.continuationSession.launchContinuation(runId, stepId, sessionId, backend, prompt,
       images, persistedImages, persistedAttachments, state, record, workspace.rematerialized);
   }
-
-
 
   // ---- execution -----------------------------------------------------------
 
