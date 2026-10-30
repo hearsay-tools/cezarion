@@ -1,3 +1,4 @@
+import { InputDelivery } from './run/input-delivery.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
@@ -68,7 +69,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         agentInputs: [...row.agentInputs ?? [], { id: replyId, source: 'agent', parentRunId: p.id, text: body, createdAt: new Date().toISOString(),
           conversation: { senderRunId: w.id, recipientRunId: p.id, kind: 'reply', requestId: randomUUID() } }] };
     });
-    const submit = vi.spyOn(RunManager.prototype as unknown as { submitAgentInput(...args: unknown[]): boolean }, 'submitAgentInput');
+    const submit = vi.spyOn(InputDelivery.prototype, 'submitAgentInput');
     await restart(false, disk);
     await until(() => store.getRun(p.id)?.lastWaits?.some(found => found.id === wait.id && found.phase === 'delivered') === true);
     const sent = submit.mock.calls.map(([, , content]) => (content as Array<{ text: string }>).map(part => part.text).join('\n'));

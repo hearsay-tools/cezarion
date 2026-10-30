@@ -86,8 +86,6 @@ const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?
 function engine() {
   return manager as unknown as {
     active: Map<string, { session: AgentSession & { end(): void }; ciGeneration: string }>;
-    deferredMessages: Map<string, Array<{ content: Array<{ type: 'text'; text: string }>; messageId?: string }>>;
-    flushDeferred(id: string): void;
   };
 }
 // The delivery bound, not the backoff, is what these cells pin: retries start at once.
@@ -1418,17 +1416,17 @@ function baseCells(runners: RunnerId[]): void {
       const [wait] = humanOpen(run.id);
       const message = { id: randomUUID(), text: answerOf(run.id), createdAt: new Date().toISOString() };
       store.commitHumanMessageBesideWaits(run.id, message);
-      engine().deferredMessages.set(run.id, [{ content: [{ type: 'text', text: message.text }], messageId: message.id }]);
+      runInternals(manager).queuedInput.deferredMessages.set(run.id, [{ content: [{ type: 'text', text: message.text }], messageId: message.id }]);
       store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES, waitDeliveryFailures: 2 });
       const commits = recordCommits(join(root, '.ai/cezar'));
-      engine().flushDeferred(run.id);
+      runInternals(manager).queuedInput.flushDeferred(run.id);
       commits.stop();
       commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(entry => entry.id === wait!.id && entry.phase === 'delivered') ||
         (row.automaticWakes === 0 && row.waitDeliveryFailures === undefined), 'a deferred answer and its reset wake budget');
       expect(commits.rows(run.id).some(row => row?.lastWaits?.some(entry => entry.id === wait!.id && entry.phase === 'delivered'))).toBe(true);
       await until(() => settled(run.id, wait!.id)?.phase === 'delivered' && answered(run.id, wait!.askSeq!));
       expect(store.getRun(run.id)?.queuedMessages ?? []).toEqual([]);
-      expect(engine().deferredMessages.has(run.id)).toBe(false);
+      expect(runInternals(manager).queuedInput.deferredMessages.has(run.id)).toBe(false);
       commits.expectEveryCommit(run.id, row => !!row.lastWaits?.some(entry => entry.id === wait!.id && entry.phase === 'delivered') === !row.queuedMessages?.some(entry => entry.id === message.id),
         'a deferred answer and its queue entry');
       expect(manager.finish(run.id)).toBe(true);
@@ -1444,7 +1442,7 @@ function baseCells(runners: RunnerId[]): void {
       const message = { id: randomUUID(), text: answerOf(run.id), createdAt: new Date().toISOString() };
       if (deferred) {
         store.commitHumanMessageBesideWaits(run.id, message);
-        engine().deferredMessages.set(run.id, [{ content: [{ type: 'text', text: message.text }], messageId: message.id }]);
+        runInternals(manager).queuedInput.deferredMessages.set(run.id, [{ content: [{ type: 'text', text: message.text }], messageId: message.id }]);
       }
       const commit = store.commitOutcome.bind(store);
       let refused = false;
@@ -1458,7 +1456,7 @@ function baseCells(runners: RunnerId[]): void {
         return commit(id, outcomes, deps, options);
       });
       const commits = recordCommits(join(root, '.ai/cezar'));
-      if (deferred) engine().flushDeferred(run.id);
+      if (deferred) runInternals(manager).queuedInput.flushDeferred(run.id);
       else expect(manager.sendMessage(run.id, [{ type: 'text', text: message.text }])).toBe(true);
       commits.stop();
       expect(refused).toBe(true);
@@ -1489,7 +1487,7 @@ function baseCells(runners: RunnerId[]): void {
       const message = { id: randomUUID(), text: answerOf(run.id), createdAt: new Date().toISOString() };
       store.commitHumanMessageBesideWaits(run.id, message);
       store.updateRun(run.id, { automaticWakes: spent, waitDeliveryFailures: 2 });
-      engine().deferredMessages.set(run.id, [{ content: [{ type: 'text', text: message.text }], messageId: message.id }]);
+      runInternals(manager).queuedInput.deferredMessages.set(run.id, [{ content: [{ type: 'text', text: message.text }], messageId: message.id }]);
       const commit = store.commitOutcome.bind(store);
       vi.spyOn(console, 'warn').mockImplementation(() => {});
       vi.spyOn(store, 'commitOutcome').mockImplementation((id, outcomes, deps, options) => {
@@ -1498,7 +1496,7 @@ function baseCells(runners: RunnerId[]): void {
         try { return commit(id, outcomes, deps, options); } finally { unblock(); }
       });
       const commits = recordCommits(join(root, '.ai/cezar'));
-      engine().flushDeferred(run.id);
+      runInternals(manager).queuedInput.flushDeferred(run.id);
       commits.stop();
       expect(store.getRun(run.id)?.queuedMessages?.some(entry => entry.id === message.id)).toBe(true);
       expect(humanOpen(run.id).some(wait => wait.id === human!.id)).toBe(true);
@@ -2862,8 +2860,7 @@ function workersCells(runners: RunnerId[]): void {
       };
       expect(unanswered()).toEqual([expect.objectContaining({ workerId: w.id })]);
       const text = 'automatic steer U25';
-      expect((manager as unknown as { deliverMessage(id: string, content: unknown[], userAuthored: boolean): boolean })
-        .deliverMessage(w.id, [{ type: 'text', text }], false)).toBe(true);
+      expect(runInternals(manager).inputDelivery.deliverMessage(w.id, [{ type: 'text', text }], false)).toBe(true);
       await until(() => prompted(runner, text).length > 0);
       expect(store.readEvents(w.id).filter(event => event.type === 'human-ask-closed'))
         .toEqual([expect.objectContaining({ askSeq, reason: 'superseded' })]);

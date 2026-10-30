@@ -85,6 +85,8 @@ export class InputDelivery {
     else if (!this.host.recoveringRun(runId)) this.flushAgentInputs(runId);
   }
 
+  /** The parent's reply answers the routed question like a human answer would: through the
+   * live session's native answer seam, or by reopening a session that is gone (#505). */
   answerRoutedQuestion(runId: string, admitted = false): void {
     const answer = this.pendingRoutedAnswer(runId);
     if (!answer) return;
@@ -139,6 +141,9 @@ export class InputDelivery {
     this.resumeParkedRun(runId, state);
   }
 
+  /** Accepted input may be temporarily refused while a backend HTTP ack is
+   * outstanding. That is not an empty queue and must not trigger automatic DONE. `except` leaves
+   * out inputs already submitted, such as an acknowledgement still in flight. */
   hasQueuedAgentInputs(runId: string, except: readonly string[] = []): boolean {
     const run = this.context.store.getRun(runId);
     return !!run && ['queued', 'running', 'waiting'].includes(run.status) &&
@@ -178,6 +183,9 @@ export class InputDelivery {
     return false;
   }
 
+  /** #505 liveness bound: a harness that accepted input and then neither read it nor ran
+   * another turn must not hold the run and its slot forever. After a quiet grace window the
+   * input is resubmitted once; after a second it is left delivered but unconfirmed. */
   armUnreadInputTimer(runId: string, state: ActiveRun): void {
     clearUnreadInputTimer(state);
     const session = state.session;
@@ -210,6 +218,7 @@ export class InputDelivery {
     state.unreadInputTimer = timer;
   }
 
+  /** #486: a turn-end deferred close/park only because the harness still held a human follow-up. */
   armHeldHumanInputTimer(runId: string, state: ActiveRun): void {
     clearHeldHumanInputTimer(state, false);
     const session = state.session;
@@ -254,6 +263,7 @@ export class InputDelivery {
       !session.open || state.idleClosed || state.cancelled || state.finishRequested || state.agentInputError || state.agentSessionError);
   }
 
+  /** A callback from an old/replaced/disposed session carries no authority. */
   handleAgentInputReady(runId: string, state: ActiveRun, session: AgentSession | undefined): void {
     if (!this.inputReadyAuthorized(runId, state, session)) return;
     // Durable input always gets the first opportunity. Only the same refused,
@@ -276,6 +286,7 @@ export class InputDelivery {
     if (idle) this.settleIdleBoundary(runId, state, session);
   }
 
+  /** Reservation is synchronous; only an acknowledged transport may checkpoint delivery. */
   submitAgentInput(runId: string, state: ActiveRun, content: ContentBlock[], inputIds: readonly string[] = [], beforeHumanReset?: HumanAnswerBudget): boolean {
     const session = state.session;
     if (!session?.open || state.agentInputFlight || state.cancelled || state.finishRequested || state.agentInputError) return false;
@@ -387,6 +398,9 @@ export class InputDelivery {
     this.host.reconcileWorkerWaits();
   }
 
+  /** False leaves the durable entry untouched. The answer commits its reset before this flush,
+   *  but this one synchronous flush keeps the budget decisions it made before that reset
+   *  (hearsay-tools/cezarion#1906). Later acknowledgements read the restarted budget normally. */
   flushAgentInputs(runId: string, beforeHumanReset?: HumanAnswerBudget): boolean {
     const state = this.host.active.get(runId);
     let run = this.context.store.getRun(runId);
@@ -461,6 +475,8 @@ export class InputDelivery {
     return this.host.submitAgentInput(runId, state, [{ type: 'text', text }], batch.inputs.map(input => input.id), beforeHumanReset);
   }
 
+  /** Restore active lifecycle/accounting when either Cezar or the backend
+   * resumes work in a parked session. */
   resumeParkedRun(runId: string, state: ActiveRun, beforeHumanReset?: HumanAnswerBudget): void {
     clearHeldHumanInputTimer(state);
     state.autonomousNudgePending = undefined;
@@ -481,6 +497,8 @@ export class InputDelivery {
     }
   }
 
+  /** Shared live-session delivery. Synthetic scheduler prompts reuse lifecycle
+   * bookkeeping without masquerading as user-authored transcript messages. */
   deliverMessage(runId: string, content: PastedContent[], userAuthored: boolean, messageId?: string): boolean {
     const state = this.host.active.get(runId);
     if (!state?.session?.open || state.cancelled || state.pendingPermissions?.size) return false;

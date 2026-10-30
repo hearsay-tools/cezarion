@@ -6,7 +6,7 @@ export { repositoryRootLockDisabled } from './run/repo-root-lease.ts';
 import { isUntouchedCancelledRun } from './run/run-guards.ts';
 export { isUntouchedCancelledRun } from './run/run-guards.ts';
 import { WorkerOrphanAliveError, admissionError } from './run/worker-orphans.ts';
-import type { HumanAnswerBudget, PersistedAttachments } from './run/types.ts';
+import type { PersistedAttachments } from './run/types.ts';
 import { ContinuationSession } from './run/continuation-session.ts';
 import { StepLoop as WorkflowStepLoop } from './run/step-loop.ts';
 import { RunRecovery } from './run/run-recovery.ts';
@@ -190,17 +190,17 @@ export class RunManager {
   private readonly workerQuestions: WorkerQuestions;
   private get recoveryFactsPending() { return this.familyReconciler.recoveryFactsPending; }
   private readonly inputReceiptSteps: inputReceipts.InputReceiptSteps = {
-    clearUnread: state => this.clearUnreadInputTimer(state), clearHeld: state => this.clearHeldHumanInputTimer(state),
+    clearUnread: state => clearUnreadInputTimer(state), clearHeld: state => clearHeldHumanInputTimer(state),
     noteActivity: (id, state, event) => this.turnNudges.noteNoWaitNudgeContent(id, state, event),
-    persistAttachment: (id, mediaType, data) => this.persistAttachment(id, mediaType, data),
-    ready: (id, state, session) => this.handleAgentInputReady(id, state, session),
+    persistAttachment: (id, mediaType, data) => this.attachments.persistAttachment(id, mediaType, data),
+    ready: (id, state, session) => this.inputDelivery.handleAgentInputReady(id, state, session),
     pid: (id, pid) => { replaceRunProcess(id, pid); this.recordWorkerProcess(id, pid); },
     ui: (id, state, sink, event) => this.handleRunnerUiEvent(id, state, sink, event),
-    flushDeferred: id => this.flushDeferred(id), recordProcess: (id, pid) => this.recordWorkerProcess(id, pid),
+    flushDeferred: id => this.queuedInput.flushDeferred(id), recordProcess: (id, pid) => this.recordWorkerProcess(id, pid),
   };
   private readonly inputReceiptHost: inputReceipts.InputReceiptsHost = {
     reconcileWorkerWaits: () => this.reconcileWorkerWaits(),
-    flushAgentInputs: id => this.flushAgentInputs(id),
+    flushAgentInputs: id => this.inputDelivery.flushAgentInputs(id),
     isCurrentState: (id, state) => this.active.get(id) === state,
   };
   private readonly line: RunLine;
@@ -263,9 +263,6 @@ export class RunManager {
   private ciSupervisor: Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
   private readonly inboxClaims: InboxClaims;
   private readonly recovery: RunRecovery;
-  /** Quiet window before unread input is resubmitted or left unconfirmed (#505). */
-  private readonly unreadInputGraceMs: number;
-  /** Quiet window after a final-message nudge before a still-silent session parks (#544). */
   private disposed = false;
 
   /** Whether any recovery is in progress: one at a time (`recover`), and `pump` waits for it. */
@@ -301,11 +298,7 @@ export class RunManager {
   private readonly inputDelivery: InputDelivery;
   private readonly runSkills: RunSkills;
   private readonly attachments: AttachmentWriter;
-  private get queuedImageSeq(): Map<string, number> { return this.attachments.queuedImageSeq; }
-  /** Messages after hydration in the dequeue → session-open gap (#472).
-   * Wait-withdrawing entries also retain a durable queue ID until delivered. */
   private readonly queuedInput: QueuedInput;
-  private get deferredMessages() { return this.queuedInput.deferredMessages; }
   private readonly autoResumeScheduler: AutoResumeScheduler;
   private get autoResumeTimers() { return this.autoResumeScheduler.autoResumeTimers; }
   private readonly repoRootLease: RepoRootLease;
@@ -344,7 +337,8 @@ export class RunManager {
     this.cezarPort = options.cezarPort;
     // #774: `serve` knows its bound origin before it recovers, so recovered runs carry it too.
     if (options.cockpit) this.setCockpitAddress(options.cockpit);
-    this.unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
+    /** Quiet window before unread input is resubmitted or left unconfirmed (#505). */
+    const unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
     this.context = { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed, work: options.work ?? new TrackedWork() };
     this.retries = new WakeRetries(this.context, {
@@ -355,7 +349,7 @@ export class RunManager {
       move: (id, exit, patch) => this.move(id, exit, patch), isActive: id => this.isActive(id),
       workerExecutionStopped: id => this.workerExecutionStopped(id), ownedJob: run => this.ownedJob(run),
       resumableSessionId: (id, step) => this.resumableSessionId(id, step), workerStep: (id, step) => this.workerStep(id, step),
-      toQueuedMessage: (id, content) => this.toQueuedMessage(id, content), hydrateQueuedInput: (id, input) => this.hydrateQueuedInput(id, input),
+      toQueuedMessage: (id, content) => this.queuedInput.toQueuedMessage(id, content), hydrateQueuedInput: (id, input) => this.queuedInput.hydrateQueuedInput(id, input),
       enqueueJob: (id, job) => this.line.enqueueJob(id, job), enqueueContinuation: (id, continuation) => this.line.enqueueContinuation(id, continuation),
       isSyntheticContinuation: (run, step) => isSyntheticContinuation(run, step), restartContinuationPrompt: RESTART_CONTINUATION_PROMPT,
       reviveQueuedRun: (run, reason) => this.reviveQueuedRun(run, reason), reviveWorkflow: run => queuedRevival.reviveWorkflow(this.context, this.queuedRevivalHost, run),
@@ -377,8 +371,8 @@ export class RunManager {
     });
     this.workerQuestions = new WorkerQuestions(this.context, {
       active: id => this.active.get(id), deliverConversationInput: id => this.deliverConversationInput(id),
-      chargeAutomaticWake: id => this.wakeAdmission.chargeAutomaticWake(id), hasQueuedAgentInputs: id => this.hasQueuedAgentInputs(id),
-      providerOwnsInboxInput: (id, inputId) => this.providerOwnsInboxInput(id, inputId), reconcileWorkerWaits: id => this.reconcileWorkerWaits(id),
+      chargeAutomaticWake: id => this.wakeAdmission.chargeAutomaticWake(id), hasQueuedAgentInputs: id => this.inputDelivery.hasQueuedAgentInputs(id),
+      providerOwnsInboxInput: (id, inputId) => this.inboxClaims.providerOwnsInboxInput(id, inputId), reconcileWorkerWaits: id => this.reconcileWorkerWaits(id),
       openHumanAlias: (id, state, via, card) => this.humanWaits.openHumanAlias(id, state, via, card), prepareHumanAsk: state => this.humanWaits.prepareHumanAsk(state),
       markHumanWaitSurfaced: (id, wait, card) => this.humanWaits.markHumanWaitSurfaced(id, wait, card), withdrawCezarHumanWaits: id => this.humanWaits.withdrawCezarHumanWaits(id),
       routeWorkerQuestion: id => this.routeWorkerQuestion(id), noticeParkedWorker: id => this.noticeParkedWorker(id),
@@ -424,8 +418,8 @@ export class RunManager {
       agentEnvForStep: (...args) => this.agentEnvForStep(...args),
       sessionContextFor: (...args) => this.sessionContextFor(...args),
       automationsPart: () => this.automationsPart(),
-      flushAgentInputs: id => this.flushAgentInputs(id),
-      resumeParkedRun: (...args) => this.resumeParkedRun(...args),
+      flushAgentInputs: id => this.inputDelivery.flushAgentInputs(id),
+      resumeParkedRun: (...args) => this.inputDelivery.resumeParkedRun(...args),
       noteNoWaitNudgeContent: (...args) => this.turnNudges.noteNoWaitNudgeContent(...args),
       parkedOnWorkers: id => this.wakeAdmission.parkedOnWorkers(id),
       releaseSlot: () => this.line.releaseSlot(),
@@ -434,8 +428,8 @@ export class RunManager {
     this.turnNudges = new TurnNudges(this.context, this.humanWaits, this.line, this.completionGateHost, {
       active: this.active, move: (id, exit, patch) => this.move(id, exit, patch),
       workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
-      countAutomaticWakes: id => this.wakeAdmission.automaticWakes(id), hasQueuedAgentInputs: id => this.hasQueuedAgentInputs(id),
-      submitAgentInput: (id, state, content) => this.submitAgentInput(id, state, content), resumeParkedRun: (id, state) => this.resumeParkedRun(id, state),
+      countAutomaticWakes: id => this.wakeAdmission.automaticWakes(id), hasQueuedAgentInputs: id => this.inputDelivery.hasQueuedAgentInputs(id),
+      submitAgentInput: (id, state, content) => this.inputDelivery.submitAgentInput(id, state, content), resumeParkedRun: (id, state) => this.inputDelivery.resumeParkedRun(id, state),
       chargeAutomaticWake: id => this.wakeAdmission.chargeAutomaticWake(id), retryWaitAdmission: id => this.retries.retryWaitAdmission(id), armIdleTimer: (id, state) => this.turnSettler.armIdleTimer(id, state),
       openTurnEndHumanWait: (id, state, step, via, note) => this.turnSettler.openTurnEndHumanWait(id, state, step, via, note),
       settledTurnOutcome: (id, entry, outcome) => this.settledTurnOutcome(id, entry, outcome), queueWaitWake: id => this.wakeAdmission.queueWaitWake(id),
@@ -468,14 +462,14 @@ export class RunManager {
         holdForMaintenance: ids => this.holdForMaintenance(ids) },
     );
     this.attachments = new AttachmentWriter(this.context,
-      { persistAttachment: (id, mediaType, data, prefix) => this.persistAttachment(id, mediaType, data, prefix) },
+      { persistAttachment: (id, mediaType, data, prefix) => this.attachments.persistAttachment(id, mediaType, data, prefix) },
     );
     this.queuedInput = new QueuedInput(this.context,
       { hasJob: id => this.line.hasJob(id), hasContinuation: id => this.line.hasContinuation(id), job: id => this.line.job(id),
         canProceedWithRun: (id, run): run is RunRecord => this.canProceedWithRun(id, run),
         activeGet: id => this.active.get(id), startingHas: id => this.line.hasStarting(id),
-        persistPastedAttachments: (id, content) => this.persistPastedAttachments(id, content),
-        toQueuedMessage: (id, content) => this.toQueuedMessage(id, content),
+        persistPastedAttachments: (id, content) => this.attachments.persistPastedAttachments(id, content),
+        toQueuedMessage: (id, content) => this.queuedInput.toQueuedMessage(id, content),
         sendMessage: (id, content, messageId) => this.sendMessage(id, content, messageId) },
     );
     this.inboxClaims = new InboxClaims(this.context,
@@ -485,9 +479,9 @@ export class RunManager {
         reconcileWorkerWaits: () => this.reconcileWorkerWaits(), retireEmptyWake: id => this.wakeAdmission.retireEmptyWake(id),
         deliverConversationInput: id => this.deliverConversationInput(id),
         settleIdleBoundary: (id, state, session) => this.inputDelivery.settleIdleBoundary(id, state, session),
-        releaseSlot: () => this.line.releaseSlot(), providerOwnsInboxInput: (id, inputId) => this.providerOwnsInboxInput(id, inputId),
+        releaseSlot: () => this.line.releaseSlot(), providerOwnsInboxInput: (id, inputId) => this.inboxClaims.providerOwnsInboxInput(id, inputId),
         canClaimInboxInput: (id, inputId) => this.canClaimInboxInput(id, inputId),
-        armInboxClaimExpiry: id => this.armInboxClaimExpiry(id) },
+        armInboxClaimExpiry: id => this.inboxClaims.armInboxClaimExpiry(id) },
     );
     this.repoRootLease = new RepoRootLease(this.context,
       { park: id => { this.line.park(id); }, unpark: id => { this.line.unpark(id); },
@@ -499,7 +493,7 @@ export class RunManager {
     );
     this.runSkills = new RunSkills(this.context,
       { discoverSkills: () => this.discoverSkills(), workerExecutionStopped: id => this.workerExecutionStopped(id),
-        isCurrentState: (id, state) => this.active.get(id) === state, flushAgentInputs: id => this.flushAgentInputs(id) },
+        isCurrentState: (id, state) => this.active.get(id) === state, flushAgentInputs: id => this.inputDelivery.flushAgentInputs(id) },
     );
     this.stepSession = new StepSession(this.context, {
       workerExecutionStopped: id => this.workerExecutionStopped(id),
@@ -527,7 +521,7 @@ export class RunManager {
         requeueInterruptedRun: (...args) => queuedRevival.requeueInterruptedRun(this.context, this.queuedRevivalHost, ...args),
         checkpointRestartContext: (...args) => queuedRevival.checkpointRestartContext(this.context, this.queuedRevivalHost, ...args),
         deliverConversationInput: (...args) => this.deliverConversationInput(...args),
-        answerRoutedQuestion: (...args) => this.answerRoutedQuestion(...args),
+        answerRoutedQuestion: (...args) => this.inputDelivery.answerRoutedQuestion(...args),
         queueWaitWake: (...args) => this.wakeAdmission.queueWaitWake(...args),
         owesWake: (...args) => this.wakeAdmission.owesWake(...args),
         cancelOpenWaits: (...args) => this.wakeAdmission.cancelOpenWaits(...args),
@@ -547,7 +541,7 @@ export class RunManager {
       continueRun: (id, opts, defer) => this.continueRun(id, opts, defer), disarmWait: id => this.disarmWait(id),
       reconcileWorkerWaits: id => this.reconcileWorkerWaits(id), releaseSlot: () => this.line.releaseSlot(),
       parkForUser: (id, state, step) => this.turnSettler.parkForUser(id, state, step), armIdleTimer: (id, state) => this.turnSettler.armIdleTimer(id, state),
-      flushAgentInputs: id => this.flushAgentInputs(id), answerRoutedQuestion: (id, flush) => this.answerRoutedQuestion(id, flush),
+      flushAgentInputs: id => this.inputDelivery.flushAgentInputs(id), answerRoutedQuestion: (id, flush) => this.inputDelivery.answerRoutedQuestion(id, flush),
       queueWaitWake: id => this.wakeAdmission.queueWaitWake(id), retryWaitAdmission: id => this.retries.retryWaitAdmission(id),
       countAutomaticWakes: (id, budget) => this.wakeAdmission.automaticWakes(id, budget),
       workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
@@ -609,9 +603,9 @@ export class RunManager {
       move: (id, exit) => this.move(id, exit), releaseSlot: () => this.line.releaseSlot(), completionGate: id => this.completionGate(id),
       cancelOpenWaits: id => this.wakeAdmission.cancelOpenWaits(id), countAutomaticWakes: id => this.wakeAdmission.automaticWakes(id),
       workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
-      submitAgentInput: (id, state, content) => this.submitAgentInput(id, state, content), flushAgentInputs: id => this.flushAgentInputs(id),
-      hasQueuedAgentInputs: (id, except) => this.hasQueuedAgentInputs(id, except), armUnreadInputTimer: (id, state) => this.armUnreadInputTimer(id, state),
-      armHeldHumanInputTimer: (id, state) => this.armHeldHumanInputTimer(id, state), parkOnWaits: (id, state) => this.wakeAdmission.parkOnWaits(id, state),
+      submitAgentInput: (id, state, content) => this.inputDelivery.submitAgentInput(id, state, content), flushAgentInputs: id => this.inputDelivery.flushAgentInputs(id),
+      hasQueuedAgentInputs: (id, except) => this.inputDelivery.hasQueuedAgentInputs(id, except), armUnreadInputTimer: (id, state) => this.inputDelivery.armUnreadInputTimer(id, state),
+      armHeldHumanInputTimer: (id, state) => this.inputDelivery.armHeldHumanInputTimer(id, state), parkOnWaits: (id, state) => this.wakeAdmission.parkOnWaits(id, state),
       queueWaitWake: id => this.wakeAdmission.queueWaitWake(id), leaveMonitoringPool: id => this.wakeAdmission.leaveMonitoringPool(id), chargeAutomaticWake: id => this.wakeAdmission.chargeAutomaticWake(id),
       canAutoContinue: (id, state) => this.turnNudges.canAutoContinue(id, state), tryAutonomousNudge: (id, state, step, ask) => this.turnNudges.tryAutonomousNudge(id, state, step, ask),
       sendTurnEndNudge: (id, state, step, text) => this.turnNudges.sendTurnEndNudge(id, state, step, text),
@@ -636,8 +630,8 @@ export class RunManager {
       pendingConversationWakes: (run, budget) => this.wakeAdmission.pendingConversationWakes(run, budget), routedAnswer: id => this.wakeAdmission.routedAnswer(id),
       spendWakeAdmission: (id, state, owed) => this.wakeAdmission.spendWakeAdmission(id, state, owed), cancelAutomaticAtCap: (id, waits) => this.wakeAdmission.cancelAutomaticAtCap(id, waits),
       reparkWithoutWaits: (id, state) => this.wakeAdmission.reparkWithoutWaits(id, state), holdPeerWakesAtCap: id => this.wakeAdmission.holdPeerWakesAtCap(id),
-      reconcileWorkerWaits: () => this.reconcileWorkerWaits(), unreadInputGraceMs: () => this.unreadInputGraceMs,
-      submitAgentInput: (id, state, content, inputs, budget) => this.submitAgentInput(id, state, content, inputs, budget),
+      reconcileWorkerWaits: () => this.reconcileWorkerWaits(), unreadInputGraceMs: () => unreadInputGraceMs,
+      submitAgentInput: (id, state, content, inputs, budget) => this.inputDelivery.submitAgentInput(id, state, content, inputs, budget),
     }, MAX_AUTO_CONTINUES, ROUTED_QUESTION_REFUSAL);
     this.ciResources = acquireCiResources(this.semaphore);
     this.ciSupervisor = this.ciResources.supervisor;
@@ -983,7 +977,7 @@ export class RunManager {
       // from these URLs when a recovered run eventually starts — and for a file (#950)
       // this write is the ONLY copy, since it never had a block to be rebuilt from.
       if (input.images?.length) {
-        const persisted = this.persistPastedAttachments(run.id, input.images);
+        const persisted = this.attachments.persistPastedAttachments(run.id, input.images);
         if (persisted.length) {
           this.store.updateRun(run.id, { taskImages: persisted.map((saved) => saved.url) });
         }
@@ -1038,12 +1032,11 @@ export class RunManager {
     };
   }
 
-
   /** Read and hydrate mutable queued input in the same synchronous tick as dequeue. */
   private launchQueuedRun(runId: string, job: PendingJob | undefined, continuation: PendingContinuation | undefined): void {
     if (continuation) {
       void (async () => {
-        const hydrated = this.hydrateQueuedContinuation(runId, continuation);
+        const hydrated = this.queuedInput.hydrateQueuedContinuation(runId, continuation);
         await this.context.work.track('runContinuation', this.runContinuation(
           runId,
           hydrated.stepId,
@@ -1064,7 +1057,7 @@ export class RunManager {
     // in the same synchronous tick as the `pendingJobs.delete` above, so no
     // handler can observe a half-dequeued run.
     void (async () => {
-      const input = this.hydrateQueuedInput(runId, job.input);
+      const input = this.queuedInput.hydrateQueuedInput(runId, job.input);
       await this.context.work.track('execute', this.execute(runId, job.workflow, input, job.startAt));
     })().catch((err: unknown) => {
       const message = err instanceof Error ? err.message : String(err);
@@ -1291,9 +1284,6 @@ export class RunManager {
   claimForPublish(runId: string): (() => void) | null { return this.claims.claimForPublish(runId); }
   claimForBranchCleanup(runIds: readonly string[]): (() => void) | null { return this.claims.claimForBranchCleanup(runIds); }
 
-  private hydrateQueuedInput(runId: string, input: StartRunInput): StartRunInput { return this.queuedInput.hydrateQueuedInput(runId, input); }
-  private hydrateQueuedContinuation(runId: string, value: PendingContinuation) { return this.queuedInput.hydrateQueuedContinuation(runId, value); }
-  private toQueuedMessage(runId: string, content: PastedContent[]): QueuedMessage { return this.queuedInput.toQueuedMessage(runId, content); }
   enqueueMessage(runId: string, content: PastedContent[]): QueuedMessage | null { return this.queuedInput.enqueueMessage(runId, content); }
   editQueuedMessage(runId: string, msgId: string, edit: { text?: string; images?: PastedContent[] }): QueuedMessage | null { return this.queuedInput.editQueuedMessage(runId, msgId, edit); }
   removeQueuedMessage(runId: string, msgId: string): boolean { return this.queuedInput.removeQueuedMessage(runId, msgId); }
@@ -1368,10 +1358,6 @@ export class RunManager {
     return pendingAskFacts.hasUnansweredHumanAsk(runId, this.active, id => this.pendingHumanAskSeq(id));
   }
 
-  private providerOwnsInboxInput(runId: string, id: string): boolean {
-    return this.inboxClaims.providerOwnsInboxInput(runId, id);
-  }
-
   canClaimInboxInput(runId: string, id: string): boolean {
     return this.inboxClaims.canClaimInboxInput(runId, id);
   }
@@ -1388,10 +1374,6 @@ export class RunManager {
     return this.inboxClaims.releaseInbox(runId, generation, receiptId);
   }
 
-  private armInboxClaimExpiry(runId: string): void {
-    this.inboxClaims.armInboxClaimExpiry(runId);
-  }
-
   /** Accepted conversation input uses the existing scheduler admission for idle recipients. */
   deliverConversationInput(runId: string): void { return this.inputDelivery.deliverConversationInput(runId); }
 
@@ -1402,10 +1384,6 @@ export class RunManager {
   private noticeParkedWorkers(rootId: string): void { return this.workerQuestions.noticeParkedWorkers(rootId); }
 
   private routedAsk(runId: string): { askSeq: number; message: ConversationMessage } | undefined { return this.workerQuestions.routedAsk(runId); }
-
-  /** The parent's reply answers the routed question like a human answer would: through the
-   * live session's native answer seam, or by reopening a session that is gone (#505). */
-  private answerRoutedQuestion(runId: string, admitted = false): void { return this.inputDelivery.answerRoutedQuestion(runId, admitted); }
 
   private retireSettledQuestions(parentId: string): void { return this.workerQuestions.retireSettledQuestions(parentId); }
 
@@ -1489,7 +1467,7 @@ export class RunManager {
     const queue = enqueueAgentInput(run, input);
     this.store.commitAgentInputs(runId, queue);
     this.store.appendEvent(runId, { type: 'agent-input', input: queue[queue.length - 1] });
-    this.flushAgentInputs(runId);
+    this.inputDelivery.flushAgentInputs(runId);
     const error = this.active.get(runId)?.agentInputError;
     if (error) throw new DelegationPolicyError('incompatible_state', error);
     return this.store.getRun(runId)?.agentInputs?.find(entry => entry.id === input.id)?.deliveredAt ? 'delivered' : 'queued';
@@ -1539,44 +1517,13 @@ export class RunManager {
     return pendingAskFacts.hasPendingHumanAsk(runId, id => this.pendingHumanAskSeq(id));
   }
 
-  /** Accepted input may be temporarily refused while a backend HTTP ack is
-   * outstanding. That is not an empty queue and must not trigger automatic DONE. `except` leaves
-   * out inputs already submitted, such as an acknowledgement still in flight. */
-  private hasQueuedAgentInputs(runId: string, except: readonly string[] = []): boolean { return this.inputDelivery.hasQueuedAgentInputs(runId, except); }
-
-  /** #505 liveness bound: a harness that accepted input and then neither read it nor ran
-   * another turn must not hold the run and its slot forever. After a quiet grace window the
-   * input is resubmitted once; after a second it is left delivered but unconfirmed. */
-  private armUnreadInputTimer(runId: string, state: ActiveRun): void { return this.inputDelivery.armUnreadInputTimer(runId, state); }
-
-  // Keep both launch paths' session-event handlers unchanged until Phase 3's
-  // run/session-events.ts merges them (epic hearsay-tools/cezarion#2051).
-  private clearUnreadInputTimer(state: ActiveRun): void { clearUnreadInputTimer(state); }
-  private clearHeldHumanInputTimer(state: ActiveRun, resetClock = true): void { clearHeldHumanInputTimer(state, resetClock); }
-
-  /** #486: a turn-end deferred close/park only because the harness still held a human follow-up. */
-  private armHeldHumanInputTimer(runId: string, state: ActiveRun): void { return this.inputDelivery.armHeldHumanInputTimer(runId, state); }
-
-  /** A callback from an old/replaced/disposed session carries no authority. */
-  private handleAgentInputReady(runId: string, state: ActiveRun, session: AgentSession | undefined): void { return this.inputDelivery.handleAgentInputReady(runId, state, session); }
-
-  /** Reservation is synchronous; only an acknowledged transport may checkpoint delivery. */
-  private submitAgentInput(runId: string, state: ActiveRun, content: ContentBlock[], inputIds: readonly string[] = [], beforeHumanReset?: HumanAnswerBudget): boolean { return this.inputDelivery.submitAgentInput(runId, state, content, inputIds, beforeHumanReset); }
-
-  /** False leaves the durable entry untouched. The answer commits its reset before this flush,
-   *  but this one synchronous flush keeps the budget decisions it made before that reset
-   *  (hearsay-tools/cezarion#1906). Later acknowledgements read the restarted budget normally. */
-  private flushAgentInputs(runId: string, beforeHumanReset?: HumanAnswerBudget): boolean { return this.inputDelivery.flushAgentInputs(runId, beforeHumanReset); }
-
-  private flushDeferred(runId: string): void { this.queuedInput.flushDeferred(runId); }
-
   /**
    * Deliver a user message into the run's live claude session (mid-turn or
    * while `waiting`). Returns false when there is no open session — the GUI
    * then offers "Continue" instead.
    */
   sendMessage(runId: string, content: PastedContent[], messageId?: string): boolean {
-    const delivered = this.deliverMessage(runId, content, true, messageId);
+    const delivered = this.inputDelivery.deliverMessage(runId, content, true, messageId);
     if (delivered) {
       const state = this.active.get(runId);
       if (state) state.monitoringCapNoted = undefined;
@@ -1592,14 +1539,6 @@ export class RunManager {
         !state.pendingPermissions?.has(requestId)) return false;
     return state.session.respondPermission?.(requestId, optionId) ?? false;
   }
-
-  /** Restore active lifecycle/accounting when either Cezar or the backend
-   * resumes work in a parked session. */
-  private resumeParkedRun(runId: string, state: ActiveRun, beforeHumanReset?: HumanAnswerBudget): void { return this.inputDelivery.resumeParkedRun(runId, state, beforeHumanReset); }
-
-  /** Shared live-session delivery. Synthetic scheduler prompts reuse lifecycle
-   * bookkeeping without masquerading as user-authored transcript messages. */
-  private deliverMessage(runId: string, content: PastedContent[], userAuthored: boolean, messageId?: string): boolean { return this.inputDelivery.deliverMessage(runId, content, userAuthored, messageId); }
 
   /** Close the open session gracefully — the run then completes as `done`
    *  (or rests at `review` when the worktree holds changes, spec 009).
@@ -1883,13 +1822,6 @@ export class RunManager {
    */
   private async settleSuccess(runId: string, durableRootFinish = false, keepStepId?: string): Promise<void> { return this.runSettlement.settleSuccess(runId, durableRootFinish, keepStepId); }
 
-  private persistPastedAttachments(runId: string, content: readonly PastedContent[]): PersistedAttachment[] {
-    return this.attachments.persistPastedAttachments(runId, content);
-  }
-
-  private persistAttachment(runId: string, mediaType: string, data: string, namePrefix: string = 'screenshot'): PersistedAttachment | null {
-    return this.attachments.persistAttachment(runId, mediaType, data, namePrefix);
-  }
 
   /** The outcome a settled turn reached, for the parity cells that prove which path ran
    *  (hearsay-tools/cezarion#1809, which removed the handoff heartbeat line that recorded it). No

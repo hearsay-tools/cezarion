@@ -521,7 +521,6 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const engine = manager as unknown as {
       active: Map<string, { session: { sendAgentMessage(...args: unknown[]): false | Promise<void> } }>;
       settleSuccess(id: string, durable?: boolean): Promise<void>;
-      deliverMessage(id: string, content: { type: 'text'; text: string }[], human: boolean): boolean;
     };
     const state = engine.active.get(w.id)!;
     const send = vi.spyOn(state.session, 'sendAgentMessage');
@@ -539,7 +538,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         expect({ ...store.getRun(w.id), monitoringWakeAt: monitoringWakeOf(store.getRun(w.id)) }).toMatchObject({ status: 'waiting', monitoringWakeAt: deadline });
         expect(runInternals(manager).line.monitoring.has(w.id)).toBe(true);
         expect(store.readEvents(w.id).some(event => event.type === 'note' && typeof event.message === 'string' && event.message.includes('automatic monitoring wake-up'))).toBe(false);
-        expect(engine.deliverMessage(w.id, [{ type: 'text', text: 'synthetic retry' }], false)).toBe(false);
+        expect(runInternals(manager).inputDelivery.deliverMessage(w.id, [{ type: 'text', text: 'synthetic retry' }], false)).toBe(false);
         expect(send).not.toHaveBeenCalled();
       } else {
         expect(send).toHaveBeenCalledTimes(1);

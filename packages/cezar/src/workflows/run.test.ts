@@ -2734,23 +2734,17 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
 
 /**
  * #472 — `persistAttachment` must work with no `ActiveRun`, because a queued run has
- * none. The counter moved to `RunManager.queuedImageSeq`, seeded from the highest
+ * none. The counter moved to `AttachmentWriter.queuedImageSeq`, seeded from the highest
  * numeric suffix on disk rather than the file count.
  */
-describe('RunManager.persistAttachment without a session (#472)', () => {
+describe('AttachmentWriter.persistAttachment without a session (#472)', () => {
   let repoRoot: string;
   let store: RunStore;
   let manager: RunManager;
   const PNG = Buffer.from('fake-png-bytes').toString('base64');
 
-  type PersistFn = (
-    runId: string,
-    mediaType: string,
-    data: string,
-    namePrefix?: string,
-  ) => { name: string; url: string; path: string } | null;
   const persist = (id: string, prefix?: string) =>
-    (manager as unknown as { persistAttachment: PersistFn }).persistAttachment(id, 'image/png', PNG, prefix);
+    runInternals(manager).attachments.persistAttachment(id, 'image/png', PNG, prefix);
   const imagesDir = (id: string) => join(repoRoot, '.ai/cezar', 'runs', `${id}-images`);
 
   beforeEach(() => {
@@ -2794,7 +2788,7 @@ describe('RunManager.persistAttachment without a session (#472)', () => {
     mkdirSync(imagesDir('run-d'), { recursive: true });
     // Force a stale counter: the map says 0, but pasted-1 already exists.
     writeFileSync(join(imagesDir('run-d'), 'pasted-1.png'), 'original');
-    (manager as unknown as { queuedImageSeq: Map<string, number> }).queuedImageSeq.set('run-d', 0);
+    runInternals(manager).attachments.queuedImageSeq.set('run-d', 0);
 
     const saved = persist('run-d', 'pasted');
     expect(saved?.name).toBe('pasted-2.png');
@@ -3067,7 +3061,7 @@ describe('RunManager queued-stack mutators (#472)', () => {
     starting.add(r.id);
     expect(manager.deferMessage(r.id, text('buffer me'))).toBe(true);
     expect(
-      (manager as unknown as { deferredMessages: Map<string, ContentBlock[][]> }).deferredMessages.get(
+      runInternals(manager).queuedInput.deferredMessages.get(
         r.id,
       ),
     ).toHaveLength(1);
@@ -3095,15 +3089,14 @@ describe('RunManager queued-stack mutators (#472)', () => {
   it('re-buffers a deferred message the session refuses, instead of dropping it', () => {
     const r = seedQueued();
     const starting = runInternals(manager).line.starting;
-    const buffer = (manager as unknown as { deferredMessages: Map<string, ContentBlock[][]> })
-      .deferredMessages;
+    const buffer = runInternals(manager).queuedInput.deferredMessages;
 
     starting.add(r.id);
     manager.deferMessage(r.id, text('buffer me'));
     expect(buffer.get(r.id)).toHaveLength(1);
 
     // Flush with no open session — `sendMessage` refuses.
-    ;(manager as unknown as { flushDeferred(id: string): void }).flushDeferred(r.id);
+    ;runInternals(manager).queuedInput.flushDeferred(r.id);
     expect(buffer.get(r.id)).toHaveLength(1);
 
     // Now a session that accepts it: the buffer drains.
@@ -3115,7 +3108,7 @@ describe('RunManager queued-stack mutators (#472)', () => {
       delivered.push(content);
       return true;
     };
-    ;(manager as unknown as { flushDeferred(id: string): void }).flushDeferred(r.id);
+    ;runInternals(manager).queuedInput.flushDeferred(r.id);
     expect(delivered).toHaveLength(1);
     expect(buffer.has(r.id)).toBe(false);
   });
@@ -3135,18 +3128,13 @@ describe('RunManager queued-stack mutators (#472)', () => {
  * of truth for a queued run's prompt, and the guards that keep it from
  * compounding on restart.
  */
-describe('RunManager.hydrateQueuedInput (#472)', () => {
+describe('QueuedInput.hydrateQueuedInput (#472)', () => {
   let repoRoot: string;
   let store: RunStore;
   let manager: RunManager;
 
-  type Hydrate = (runId: string, input: { task: string }) => {
-    task: string;
-    images?: ContentBlock[];
-    stackedImages?: ContentBlock[];
-  };
   const hydrate = (id: string, task: string) =>
-    (manager as unknown as { hydrateQueuedInput: Hydrate }).hydrateQueuedInput(id, { task });
+    runInternals(manager).queuedInput.hydrateQueuedInput(id, { task });
 
   const stack = (id: string, ...messages: Array<{ text: string; images?: string[] }>) =>
     store.updateRun(id, {

@@ -36,7 +36,9 @@ interface TurnNudgesHost {
 export class TurnNudges {
   constructor(private readonly context: RunModuleContext, private readonly humanWaits: HumanWaits,
     private readonly line: RunLine, private readonly completionGateHost: completionGateReads.CompletionGateHost,
-    private readonly host: TurnNudgesHost, private readonly maxAutoContinues: number, private readonly completionWillWait: string, public noWaitNudgeReplyMs: number) {}
+    private readonly host: TurnNudgesHost, private readonly maxAutoContinues: number, private readonly completionWillWait: string,
+    /** Quiet window after a final-message nudge before a still-silent session parks (#544). */
+    public noWaitNudgeReplyMs: number) {}
   /** The session just took a refusal nudge, live or queued (hearsay-tools/cezarion#1301): its turn is
    *  the nudge's, and its reply is bounded by the no-wait nudge's reply timer, so a harness that
    *  reads the refusal and says nothing parks on Cezar's human wait instead of holding the slot. */

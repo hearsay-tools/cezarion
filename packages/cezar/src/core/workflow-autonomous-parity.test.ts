@@ -89,7 +89,7 @@ describe('autonomous turn-end parity — #426', () => {
                 expect(store.getRun(runId)?.status).toBe('running');
                 // The mock delays SIGTERM exit: neither end() nor late readiness
                 // may release the slot or resurrect the timed-out boundary.
-                manager['handleAgentInputReady'](runId, state, session);
+                runInternals(manager).inputDelivery.handleAgentInputReady(runId, state, session);
                 // bound: observe the real mock's delayed SIGTERM-exit boundary for 50 ms; the active session must retain its busy slot until native exit.
                 await new Promise(resolve => setTimeout(resolve, 50));
                 expect(manager.isActive(runId)).toBe(true);
@@ -112,7 +112,7 @@ describe('autonomous turn-end parity — #426', () => {
               expect(store.readEvents(runId).some(e => e.type === 'lifecycle' && String(e.message).includes('of inactivity'))).toBe(true);
               expect(manager.continueRun(runId, { text: promptFor(backend, 'done') }).ok).toBe(true);
               await waitFor(() => !manager.isActive(runId) && store.getRun(runId)?.status === 'done');
-              manager['handleAgentInputReady'](runId, state, session);
+              runInternals(manager).inputDelivery.handleAgentInputReady(runId, state, session);
               expect(sent).not.toHaveBeenCalled();
               sent.mockRestore();
             }, { autonomous: retainedAck && !continuation });

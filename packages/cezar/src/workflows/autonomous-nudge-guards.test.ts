@@ -110,7 +110,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
   it.each(guards)('%s blocks a readiness retry', guard => {
     pendingBoundary();
     applyGuard(guard);
-    manager['handleAgentInputReady'](id, state, session);
+    runInternals(manager).inputDelivery.handleAgentInputReady(id, state, session);
     expect(session.sendMessage).not.toHaveBeenCalled();
     expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
     if (guard === 'queued-input') {
@@ -132,7 +132,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
         case 'closed-by-idle': state.idleClosed = true; break;
         case 'session-error': state.agentSessionError = 'provider failed'; break;
       }
-      manager['handleAgentInputReady'](id, state, session);
+      runInternals(manager).inputDelivery.handleAgentInputReady(id, state, session);
       expect(session.sendMessage).not.toHaveBeenCalled();
       expect(session.sendAgentMessage).not.toHaveBeenCalled();
       expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
@@ -148,7 +148,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
     expect(store.getRun(id)?.status).toBe('running');
     expect(runInternals(manager).line.waiting.has(id)).toBe(false);
-    manager['handleAgentInputReady'](id, state, session);
+    runInternals(manager).inputDelivery.handleAgentInputReady(id, state, session);
     expect(session.sendAgentMessage).toHaveBeenLastCalledWith([{ type: 'text', text: AUTONOMOUS_NUDGE }], []);
     expect(state.autonomousNudgePending).toBeUndefined();
     expect(state.idleTimer).toBeUndefined();
@@ -164,7 +164,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     vi.runOnlyPendingTimers();
     expect(session.end).toHaveBeenCalledOnce();
     expect(state.idleClosed).toBe(true);
-    manager['handleAgentInputReady'](id, state, session);
+    runInternals(manager).inputDelivery.handleAgentInputReady(id, state, session);
     expect(session.sendAgentMessage).toHaveBeenCalledOnce();
     expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
   });
@@ -177,7 +177,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     expect(state.autonomousNudgePending).toBeUndefined();
     expect(state.atTurnBoundary).toBeUndefined();
     expect(state.idleTimer).toBeUndefined();
-    manager['handleAgentInputReady'](id, state, session);
+    runInternals(manager).inputDelivery.handleAgentInputReady(id, state, session);
     expect(session.sendAgentMessage).toHaveBeenCalledOnce();
   });
 
@@ -231,7 +231,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
   it('user-authored delivery resets the no-wait nudge latch', () => {
     state.noWaitNudged = session;
     manager['active'].set(id, state);
-    expect(manager['deliverMessage'](id, [{ type: 'text', text: 'please continue' }], true)).toBe(true);
+    expect(runInternals(manager).inputDelivery.deliverMessage(id, [{ type: 'text', text: 'please continue' }], true)).toBe(true);
     expect(state.noWaitNudged).toBeUndefined();
   });
 
@@ -270,7 +270,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     expect(state.agentInputError).toContain('failed transport');
     expect(state.autonomousNudgePending).toBeUndefined();
     expect(state.idleTimer).toBeUndefined();
-    manager['handleAgentInputReady'](id, state, session);
+    runInternals(manager).inputDelivery.handleAgentInputReady(id, state, session);
     expect(session.sendAgentMessage).toHaveBeenCalledOnce();
   });
 

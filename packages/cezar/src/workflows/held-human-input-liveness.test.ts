@@ -55,7 +55,7 @@ describe('held human input liveness bound (#486)', () => {
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = createFixtureManager(store, repoRoot);
+    manager = createFixtureManager(store, repoRoot, { unreadInputGraceMs: 300 });
   });
 
   afterEach(async () => {
@@ -132,7 +132,6 @@ describe('held human input liveness bound (#486)', () => {
       },
     };
 
-    (manager as unknown as { unreadInputGraceMs: number }).unreadInputGraceMs = 300;
     const record = manager.startRun(SINGLE_STEP, { task: 'hold forever', runner: 'claude', worktree: false });
     await until(() => ['done', 'review', 'failed', 'waiting'].includes(store.getRun(record.id)?.status ?? ''), () => `run stuck ${store.getRun(record.id)?.status}`);
     expect(['done', 'review']).toContain(store.getRun(record.id)?.status);
@@ -172,7 +171,6 @@ describe('held human input liveness bound (#486)', () => {
       },
     };
 
-    (manager as unknown as { unreadInputGraceMs: number }).unreadInputGraceMs = 300;
     const record = manager.startRun(SINGLE_STEP, { task: 'hold two forever', runner: 'claude', worktree: false });
     await until(() => ['done', 'review', 'failed', 'waiting'].includes(store.getRun(record.id)?.status ?? ''), () => `run stuck ${store.getRun(record.id)?.status}`);
     expect(['done', 'review']).toContain(store.getRun(record.id)?.status);
