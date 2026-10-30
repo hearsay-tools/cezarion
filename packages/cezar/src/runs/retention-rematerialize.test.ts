@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { branchFor, createWorktree, removeWorktree } from '../git-worktree.ts';
 import {
   isReclaimable,
@@ -96,7 +97,7 @@ describe('rematerializeReclaimedWorktree (#483)', () => {
     await removeWorktree(repo, wt.path);
     await run('git', ['branch', '-D', wt.branch], { cwd: repo });
     const record = {
-      id: runId, status: 'done', createdAt: '2026-07-01T00:00:00.000Z', worktreePath: wt.path,
+      id: runId, status: RUN_STATUS.done, createdAt: '2026-07-01T00:00:00.000Z', worktreePath: wt.path,
       branch: wt.branch, baseBranch: 'main', worktreeReclaimedAt: '2026-07-18T00:00:00.000Z', steps: [],
     } as unknown as RunRecord;
 
