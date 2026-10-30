@@ -283,9 +283,7 @@ function pollWindow(definition: GithubAutomationDefinition, state: AutomationRun
     ? new Date(Math.max(Date.parse(historyStart), mode === 'preview' ? 0 : Date.parse(state.baselineAt ?? historyStart))).toISOString()
     : state.baselineAt;
   const since = mode === 'preview' ? baseline : state.cursor?.timestamp ?? baseline;
-  let overlapSince = mode === 'preview' && historyStart ? historyStart : since
-    ? new Date(Date.parse(since) - 120_000).toISOString()
-    : undefined;
+  let overlapSince = since ? new Date(Date.parse(since) - 120_000).toISOString() : undefined;
   if (historyStart && (!overlapSince || Date.parse(overlapSince) < Date.parse(historyStart))) overlapSince = historyStart;
   return { baseline, overlapSince };
 }
