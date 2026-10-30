@@ -42,37 +42,39 @@ describe('the completion gate outside a turn end', () => {
       end: vi.fn(), interrupt: vi.fn(), discardQueuedMessages: vi.fn(), holdsHumanInput: () => false,
     };
     state = { cwd: root, cancelled: false, interrupt: () => {}, pendingHumanAsk: false, session, currentStepId: 'task' };
-    manager['active'].set(id, state);
-    vi.spyOn(manager as unknown as { completionGate: () => unknown }, 'completionGate').mockReturnValue(refusal);
+    runInternals(manager).active.set(id, state);
+    vi.spyOn(runInternals(manager).runFinish, 'completionGate').mockReturnValue(refusal);
   });
   afterEach(() => { clearIdleTimer(state); manager.dispose(); store.close(); rmSync(root, { recursive: true, force: true }); });
 
   describe('the real root gate', () => {
     beforeEach(() => {
-      vi.mocked(manager['completionGate']).mockRestore();
+      vi.mocked(runInternals(manager).runFinish.completionGate).mockRestore();
       store.commitDelegation([{ id, delegation: { role: 'root', permissions: ['wait'], receipts: [] } }]);
     });
 
     it.each(['done', 'review', 'failed', 'cancelled'] as const)('holds a stopped root at %s without reopening it', status => {
       store.updateRun(id, { status });
       const queue = vi.spyOn(runInternals(manager).turnNudges, 'queueCompletionRefusal');
-      expect(manager['completionGate'](id)).toBe('held');
+      expect(runInternals(manager).runFinish.completionGate(id)).toBe('held');
       expect(store.getRun(id)?.status).toBe(status);
       expect(queue).not.toHaveBeenCalled();
     });
 
     it('retires a legacy Finish intent before refusing a live session', () => {
       store.commitDelegation([{ id, delegation: { role: 'root', permissions: ['wait'], receipts: [], finishRequestedAt: new Date().toISOString() } }]);
-      vi.spyOn(manager, 'parentCompletionBlockers' as never).mockReturnValue([{ workerId, reason: 'outstanding' }] as never);
-      expect(manager['completionGate'](id)).toMatchObject({ code: 'workers_outstanding' });
+      vi.spyOn(manager, 'parentCompletionBlockers' as never);
+      vi.mocked(manager['parentCompletionBlockers']).mockReturnValue([{ workerId, reason: 'outstanding' }]);
+      expect(runInternals(manager).runFinish.completionGate(id)).toMatchObject({ code: 'workers_outstanding' });
       expect(store.getRun(id)?.delegation).not.toHaveProperty('finishRequestedAt');
     });
 
     it('queues a refusal for a closed session', () => {
-      session.open = false;
-      vi.spyOn(manager, 'parentCompletionBlockers' as never).mockReturnValue([{ workerId, reason: 'outstanding' }] as never);
+      Object.assign(session, { open: false });
+      vi.spyOn(manager, 'parentCompletionBlockers' as never);
+      vi.mocked(manager['parentCompletionBlockers']).mockReturnValue([{ workerId, reason: 'outstanding' }]);
       const queue = vi.spyOn(runInternals(manager).turnNudges, 'queueCompletionRefusal').mockImplementation(() => true);
-      expect(manager['completionGate'](id)).toBe('held');
+      expect(runInternals(manager).runFinish.completionGate(id)).toBe('held');
       expect(queue).toHaveBeenCalledWith(id, expect.objectContaining({ code: 'workers_outstanding' }));
     });
 
@@ -85,7 +87,7 @@ describe('the completion gate outside a turn end', () => {
         expect(state.idleTimer).toBeUndefined();
         expect(runInternals(manager).line.waiting.has(id)).toBe(true);
       });
-      expect(manager['completionGate'](id)).toBe('held');
+      expect(runInternals(manager).runFinish.completionGate(id)).toBe('held');
       expect(release).toHaveBeenCalledOnce();
       expect(store.readEvents(id)).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'note', message: 'Completion blocked: answer the pending human question.' })]));
     });
@@ -99,7 +101,8 @@ describe('the completion gate outside a turn end', () => {
 
   it.each([['queued input', queueInput], ['an open agent wait', openWorkerWait]])('mid-turn, %s leaves the refusal to the live turn end', (_name, setup) => {
     setup();
-    expect(manager['deferParentCompletion'](id)).toBe(true);
+    expect(runInternals(manager).runFinish.deferParentCompletion(id)).toBe(true);
+    expect(runInternals(manager).runFinish.completionGate).toHaveBeenCalled();
     expect(store.getRun(id)?.status).toBe('running');
     expect(runInternals(manager).line.waiting.has(id)).toBe(false);
     expect(sent()).toBe(0);
@@ -108,7 +111,8 @@ describe('the completion gate outside a turn end', () => {
   it('at the boundary, queued input runs before the run parks', () => {
     state.atTurnBoundary = session;
     queueInput();
-    expect(manager['deferParentCompletion'](id)).toBe(true);
+    expect(runInternals(manager).runFinish.deferParentCompletion(id)).toBe(true);
+    expect(runInternals(manager).runFinish.completionGate).toHaveBeenCalled();
     expect(sent()).toBe(1);
     expect(store.getRun(id)?.status).toBe('running');
     expect(runInternals(manager).line.waiting.has(id)).toBe(false);
@@ -117,7 +121,8 @@ describe('the completion gate outside a turn end', () => {
   it('at the boundary, an open agent wait parks the run', () => {
     state.atTurnBoundary = session;
     openWorkerWait();
-    expect(manager['deferParentCompletion'](id)).toBe(true);
+    expect(runInternals(manager).runFinish.deferParentCompletion(id)).toBe(true);
+    expect(runInternals(manager).runFinish.completionGate).toHaveBeenCalled();
     expect(store.getRun(id)?.status).toBe('waiting');
     expect(sent()).toBe(0);
   });
@@ -138,8 +143,10 @@ describe('the completion gate outside a turn end', () => {
     state.atTurnBoundary = session;
     openWorkerWait();
     const release = vi.spyOn(runInternals(manager).line, 'releaseSlot');
-    expect(manager['deferParentCompletion'](id)).toBe(true);
-    expect(manager['deferParentCompletion'](id)).toBe(true);
+    expect(runInternals(manager).runFinish.deferParentCompletion(id)).toBe(true);
+    expect(runInternals(manager).runFinish.completionGate).toHaveBeenCalled();
+    expect(runInternals(manager).runFinish.deferParentCompletion(id)).toBe(true);
+    expect(runInternals(manager).runFinish.completionGate).toHaveBeenCalled();
     expect(release).toHaveBeenCalledOnce();
     expect(store.getRun(id)?.status).toBe('waiting');
   });
@@ -154,7 +161,7 @@ describe('the completion gate outside a turn end', () => {
       ask: null, askNudged: false, done: true, nudgedLastTurn: false });
     const ack = () => runInternals(manager).turnSettler.settleTurn(id, state, 'ack', runInternals(manager).turnSettler.boundaryTurn(id, state, session, true));
     beforeEach(() => {
-      vi.mocked(manager['completionGate']).mockReturnValue('held');
+      vi.mocked(runInternals(manager).runFinish.completionGate).mockReturnValue('held');
       seedHandoffFile(join(root, '.ai/cezar'), store.getRun(id)!);
       seeded = handoff();
       state.atTurnBoundary = session;
@@ -164,6 +171,7 @@ describe('the completion gate outside a turn end', () => {
 
     it('a turn end and an acknowledgement write nothing to the handoff file', () => {
       expect(turnEnd()).toBe(true);
+      expect(runInternals(manager).runFinish.completionGate).toHaveBeenCalled();
       expect(ack()).toBe(true);
       expect(handoff()).toBe(seeded);
     });
@@ -171,6 +179,7 @@ describe('the completion gate outside a turn end', () => {
     it('a turn end keeps the done at the boundary, resets the held-input clock and settles the park', () => {
       const turns = watchTurnOutcomes();
       expect(turnEnd()).toBe(true);
+      expect(runInternals(manager).runFinish.completionGate).toHaveBeenCalled();
       expect(state.doneAtBoundary).toBe(session);
       expect(state.doneClose).toEqual({ via: 'done-line' });
       expect(state.heldHumanInputSince).toBeUndefined();

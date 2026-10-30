@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { RUN_STATUS, STEP_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
@@ -19,7 +20,7 @@ function obligation(senderRunId: string, recipientRunId: string, kind: 'request'
     createdAt: new Date().toISOString(), deadline: new Date(Date.now() + 600_000).toISOString(), state: 'accepted' as const, requestHash: 'a'.repeat(64) };
 }
 function gate() {
-  return manager as unknown as { completionRefusal(id: string): { code: string; message: string } | undefined; completionGate(id: string): string; settleRequestedRootFinish(id: string): Promise<void> };
+  return runInternals(manager).runFinish;
 }
 
 describe('root request completion without a live session', () => {

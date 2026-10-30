@@ -145,7 +145,7 @@ Paths are under `packages/cezar/src/workflows/run/`. A path that starts with ano
 | `step-loop.ts` | 4 | hearsay-tools/cezarion#2203 | Twelve methods behind `execute`: start, worktree, the step loop, check steps, `requeueWhileHeld`. `execute` stays on the facade | — | 7, plus the `run-settlement` and `step-session` instances | 480 |
 | `continuation-session.ts` | 4 | hearsay-tools/cezarion#2204 | The part of `runContinuation` after `unmarkStarting`, under a new name: workspace, repository-root lease, worktree, settings and skills, prelaunch stops, start, await and release. `runContinuation` keeps its head on the facade | — | 15, plus the `run-settlement` instance | 540 |
 | `tracked-work.ts` | 5 | hearsay-tools/cezarion#2226 | Records the 12 operations that `fixture-cleanup.testkit.ts` wraps, where each promise is made; `RunModuleContext.work` | the tracked promises and sessions | 0 | 0 |
-| `run-finish.ts` | 5 | hearsay-tools/cezarion#2238 | `completionGate`, `deferParentCompletion`, `acceptDone`, `finish`, `acceptRootRequestFinish`, `closeQuestionOnFinish`, `settleRequestedRootFinish`, `holdContinuationForRootFinish`. `finish` and `acceptDone` delegators stay | — | 5, plus four instances | 175 |
+| `run-finish.ts` | 5 | hearsay-tools/cezarion#2238 | `completionGate`, `deferParentCompletion`, `acceptDone`, `finish`, `acceptRootRequestFinish`, `closeQuestionOnFinish`, `settleRequestedRootFinish`, `holdContinuationForRootFinish`. `finish` and `acceptDone` delegators stay | — | 6, plus four instances and the read host | 217 |
 | `run-start.ts` | 5 | hearsay-tools/cezarion#2239 | `startRun`, `startRunIdempotent`, `enqueueOwnedRun`, `ownedJob`, `launchQueuedRun`. The three public delegators stay | — | 5 | 150 |
 | `run-cancel.ts` | 5 | hearsay-tools/cezarion#2241 | `cancel`, `cancelActiveRun`, `cancelWorkerExecution`, `cancelQueuedRun`, `cancelRunWithoutSession`, `requestWorkerStop`, `cancelWorkerWait`. The three public delegators stay | — | — | 95 |
 | `compose.ts` | 5 | hearsay-tools/cezarion#2243 | The constructor's wiring: builds every module from `RunModuleContext` and one `FacadeHost`, and returns one record of module instances | — | `FacadeHost` | 430 |
@@ -320,7 +320,7 @@ Each order below is load-bearing: other code reaches a correct state because of 
 | `releaseContinuationSession` | Revoke the CI tools and the delegation, record usage peaks, clear the idle and autosave timers, await `saveWorktree`, check for a late cancel, `dropActive`, queue the workflow remainder, then `pump` | `continuation-session` |
 | Session `onEvent` (both launch paths) | Disposed check, image, text (clear timers, note nudge content, append, strip markers), unconsumed input, tool events, raw event, cost, error (then return), the session-error short-circuit, session id, token usage, `ScheduleWakeup`, turn end. The return points decide what is persisted | `session-events` |
 | `queueCompletionRefusal` | The refusal is enqueued with its charge in one commit, before `queueWaitWake` | `turn-nudges` (hearsay-tools/cezarion#2195) |
-| `finish` | Cancel open waits, persist the root finish request, close the question, set `finishRequested`, clear the idle timer, the lifecycle event, then end the session | facade |
+| `finish` | Cancel open waits, persist the root finish request, close the question, set `finishRequested`, clear the idle timer, the lifecycle event, then end the session | `run-finish` |
 | `dispose` | `disposed = true` first; orphan state cleared before termination waiters settle; wait records stay for a later manager to re-arm | facade |
 
 ## Guards and reader sweep
@@ -386,9 +386,20 @@ until Phase 5. The list was checked against `main` at `97335b352`:
   rejection behavior. The harness bookkeeping drain reads only tracked `recordTurnEnd` work.
   The five remaining HumanWaits one-liners are removed; callers use `.humanWaits`.
   `settledTurnOutcome` stays on the facade for the prototype spy in `turn-outcomes.testkit.ts`;
-  `parentCompletionBlockers` stays for `human-waits.test.ts`. `completionGate`,
-  `deferParentCompletion`, `completionRefusal`, `finishDecision` and `completionMayPass` wait
-  for hearsay-tools/cezarion#2238.
+  `parentCompletionBlockers` stays for `human-waits.test.ts`. Finish seams moved in
+  hearsay-tools/cezarion#2238 as listed below.
+
+Phase 5 Finish seams (hearsay-tools/cezarion#2238): `completionGate`,
+`deferParentCompletion`, `completionRefusal` and `settleRequestedRootFinish` use
+`runInternals(manager).runFinish`. The gate spy and the detached settlement spy assert
+product-path reach. `finishDecision`, `completionMayPass`, `acceptRootRequestFinish`,
+`closeQuestionOnFinish` and `holdContinuationForRootFinish` also live in `RunFinish`.
+Public `finish` and `acceptDone` keep one-line facade delegators. The cezar-tools
+callback still calls facade `acceptDone` for the R13, R17 and U22 parity spies. The read-only
+`parentCompletionBlockers` seam stays on the facade. `executionBlockedByRootFinish`
+and `hasUnansweredHumanAsk` stay host callbacks to preserve function-module spies.
+`settleRequestedRootFinish` keeps its async tracking wrapper; its dropped caller
+in `finish` receives the untracked outer promise, as before.
 
 Function modules have no instance: `launch-context.ts`, `session-events.ts`, `completion-gate.ts`,
 `queued-revival.ts`, `input-receipts.ts`, `usage-accounting.ts`, `run-guards.ts`,
@@ -460,9 +471,9 @@ keeps their names and signatures:
   `accountHolds`.
 
 These members stay on the facade with no Phase 4 issue, and their code waits for Phase 5:
-`completionGate` (complexity 20), `deferParentCompletion`, `acceptDone`, `finish`, `cancel`,
-`launchQueuedRun`, `onDelegationRun` (complexity 20), `settleRequestedRootFinish`,
-`holdContinuationForRootFinish`, `latchAgentInputError` and `steerWorker`. None is over 20, so
+`cancel`, `launchQueuedRun`, `onDelegationRun` (complexity 20),
+`latchAgentInputError` and `steerWorker`. Finish and completion gate bodies now live in
+`run-finish.ts`; the public `finish` and `acceptDone` delegators stay. None is over 20, so
 the Phase 4 exit still holds.
 
 `run.ts` also keeps re-exporting the module-level names that shipped code and tests import:
