@@ -84,7 +84,7 @@ public class SiteDataResetTest {
     }
 
     private File put(File root, String path) throws IOException {
-        File file = new File(root, path); file.getParentFile().mkdirs(); Files.writeString(file.toPath(), "x"); return file;
+        File file = new File(root, path); file.getParentFile().mkdirs(); Files.write(file.toPath(), new byte[] { (byte) 120 }); return file;
     }
 
     @Test public void deletesAbandonedProfilesButKeepsDefaultAndCurrent() {
