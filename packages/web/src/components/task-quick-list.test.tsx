@@ -197,6 +197,37 @@ describe('status section folding (#811)', () => {
     expect(row('a')).toBeNull()
   })
 
+  it('shows "shown of total" on a cut open section and links to that section on the Tasks page', () => {
+    const runs = Array.from({ length: 4 }, (_, i) => run({ id: `f${i}`, createdAt: ago(60_000 + i) }))
+    renderList({ runs, rowLimit: 2 })
+    const link = screen.getByRole('link', { name: 'Finished: showing 2 of 4, see all' })
+    expect(link.textContent).toBe('2 of 4')
+    expect(link.getAttribute('href')).toBe('/?origin=direct&section=finished')
+    expect(link.getAttribute('title')).toContain('Settings → Sidebar')
+    // The toggle keeps the full count, and the link stays out of the heading the sweep reads.
+    expect(screen.getByRole('button', { name: 'Finished 4' })).toBeTruthy()
+    expect(link.closest('h2')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Finished 4' }))
+    expect(document.querySelector('[data-slot="section-cut-link"]')).toBeNull()
+  })
+
+  it('links an automations section to the automations origin, and says 0 of N when the budget is spent', () => {
+    renderList({ runs: [auto({ id: 'd' }), auto({ id: 'w1', status: 'running' }), auto({ id: 'w2', status: 'running' })], view: 'automations', rowLimit: 1 })
+    const link = screen.getByRole('link', { name: 'Working: showing 0 of 2, see all' })
+    expect(link.getAttribute('href')).toBe('/?origin=automations&section=working')
+    expect(screen.queryByRole('link', { name: /^Finished:/ })).toBeNull()
+  })
+
+  it('counts pinned rows as shown, and keeps the plain count on a section the budget does not cut', () => {
+    // The pin bypasses the budget, so 2 of 3 rows show.
+    renderList({ runs: [run({ id: 'a' }), run({ id: 'b', pinned: true }), run({ id: 'c' })], rowLimit: 1 })
+    expect(screen.getByRole('link', { name: 'Finished: showing 2 of 3, see all' })).toBeTruthy()
+    cleanup()
+    renderList({ runs: [run({ id: 'a' }), run({ id: 'b' })] })
+    expect(screen.getByRole('button', { name: 'Finished 2' }).textContent).toBe('Finished 2')
+    expect(document.querySelector('[data-slot="section-cut-link"]')).toBeNull()
+  })
+
   it('offers only the unpinned Finished sweep even when folded and every row is capped', () => {
     const onSweep = vi.fn()
     renderList({ runs: [run({ id: 'plain' }), run({ id: 'pin', pinned: true })], rowLimit: 0, onSweep })

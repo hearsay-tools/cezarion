@@ -28,7 +28,9 @@ import {
   sidebarCounts,
   sidebarRuns,
   loudestMember,
+  sectionTasksPath,
   sidebarActiveRunId,
+  type SidebarSection,
   type SidebarView,
   type QuickListBucket,
   type QuickListRow,
@@ -128,6 +130,7 @@ export function TaskQuickList({
           onSweep={onSweep}
           sweeping={sweeping}
           sweepCounts={sweepCounts}
+          view={view}
         />
       )}
     </div>
@@ -160,6 +163,7 @@ export function QuickListBuckets({
   projectName,
   allBuckets = buckets,
   sectionProjectId = scope,
+  view = 'active',
 }: {
   buckets: QuickListBucket[]
   /** Full sections retain honest task counts/attention even when the row budget is exhausted. */
@@ -176,6 +180,8 @@ export function QuickListBuckets({
   sweepCounts?: { unpinned: number; pinned: number } | undefined
   /** Names the project in a group button's accessible name, where several lists share a page. */
   projectName?: string | undefined
+  /** The sidebar tab, so a cut section's "3 of 24" opens the Tasks page on the same origin. */
+  view?: SidebarView
 }) {
   const headingId = React.useId()
   const sections = useSidebarSections(sectionProjectId)
@@ -214,27 +220,16 @@ export function QuickListBuckets({
         const archived = bucket.label === 'Archived'
         const collapsed = sections.isCollapsed(bucket.label)
         const rows = buckets.find(({ label }) => label === bucket.label)?.rows ?? []
-        const members = bucket.rows.map(row => row.run)
-        const count = archived ? bucket.rows.length : members.length
-        const attention = members.length ? deriveAttention(loudestMember(members)) : null
-        const unread = members.some(isUnread)
+        const count = bucket.rows.length
+        // The row budget cut this open section: the count says so and links to the rest.
+        const cut = !archived && !collapsed && rows.length < count
         const id = `${headingId}-${bucket.label.replaceAll(' ', '-')}`
-        const Disclosure = collapsed ? ChevronRightIcon : ChevronDownIcon
         return (
         <div key={bucket.label} data-slot="quick-list-bucket" data-bucket={bucket.label}>
           <div className="flex items-center justify-between gap-2 pr-[6px]">
-            <h2 id={id} className="min-w-0 flex-1 text-[11px] font-medium text-soft-foreground">
-              {archived ? <span className="px-[10px] pt-[2px] pb-[4px]">{bucket.label} {count}</span> : (
-                <button type="button" data-slot="section-toggle" aria-expanded={!collapsed} aria-controls={`${id}-rows`}
-                  aria-label={`${bucket.label} ${count}`} onClick={() => sections.toggle(bucket.label as Exclude<QuickListBucket['label'], 'Archived'>)}
-                  className="flex min-h-[44px] w-full items-center gap-1.5 rounded-[4px] px-[10px] text-left hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-link-foreground md:min-h-[26px] no-hover:min-h-[44px]">
-                  <Disclosure className="size-[12px] shrink-0" aria-hidden="true" />
-                  <span>{bucket.label}</span>{' '}<span className="font-normal tabular-nums">{count}</span>
-                  {attention && (bucket.label === 'Needs you' || collapsed) ? <StatusDot tone={attention.tone} shape={attention.shape} pulse={attention.pulse} role="img" aria-label={attention.label} title={attention.label} /> : null}
-                  {collapsed && unread ? <span role="img" aria-label="unread" title="Unread tasks" className="size-[5px] shrink-0 rounded-full bg-foreground" /> : null}
-                </button>
-              )}
-            </h2>
+            <SectionHeading id={id} bucket={bucket} collapsed={collapsed} cut={cut} onToggle={sections.toggle} />
+            {/* Outside the heading for the same reason as the sweep button below. */}
+            {cut ? <SectionCutLink section={bucket.label as SidebarSection} shown={rows.length} total={count} scope={scope} view={view} /> : null}
             {/* A sibling of the heading, so its accessible name stays `Finished 3`. */}
             {onSweep && sweepCounts ? <GroupSweepButton label={bucket.label} headingId={id} projectName={projectName} counts={sweepCounts} onSweep={onSweep} sweeping={sweeping} /> : null}
           </div>
@@ -248,6 +243,64 @@ export function QuickListBuckets({
         </div>
       )})}
     </div>
+  )
+}
+
+/**
+ * A cut section's count, `3 of 24`: the sidebar shows 3 of the section's 24 tasks. It opens the
+ * Tasks page with only this section unfolded; the tooltip names the setting that sets the cut.
+ */
+function SectionCutLink({ section, shown, total, scope, view }: {
+  section: SidebarSection
+  shown: number
+  total: number
+  scope: string | null
+  view: SidebarView
+}) {
+  const onNavigate = useSidebarNavigate()
+  return (
+    <Link
+      to={scopeTo(scope, sectionTasksPath(section, view))}
+      onClick={onNavigate}
+      data-slot="section-cut-link"
+      aria-label={`${section}: showing ${shown} of ${total}, see all`}
+      title={`The sidebar shows ${shown} of ${total} ${section} tasks. Click to see all of them. Change the limit in Settings → Sidebar.`}
+      className="mr-auto -ml-1 flex min-h-[44px] min-w-[44px] shrink-0 items-center rounded-[4px] px-1 text-[11px] font-normal text-soft-foreground tabular-nums underline decoration-dotted underline-offset-[3px] hover:text-foreground focus-visible:outline-2 focus-visible:outline-link-foreground md:min-h-[26px] md:min-w-0 no-hover:min-h-[44px] no-hover:min-w-[44px]"
+    >
+      {shown} of {total}
+    </Link>
+  )
+}
+
+/** A section's heading: Archived is a plain label; a status section is its fold toggle. */
+function SectionHeading({ id, bucket, collapsed, cut, onToggle }: {
+  id: string
+  bucket: QuickListBucket
+  collapsed: boolean
+  /** The count moves out to `SectionCutLink`, beside the heading. */
+  cut: boolean
+  onToggle: (label: SidebarSection) => void
+}) {
+  const count = bucket.rows.length
+  if (bucket.label === 'Archived') {
+    return <h2 id={id} className="min-w-0 flex-1 text-[11px] font-medium text-soft-foreground"><span className="px-[10px] pt-[2px] pb-[4px]">{bucket.label} {count}</span></h2>
+  }
+  const label = bucket.label
+  const members = bucket.rows.map(row => row.run)
+  const attention = members.length ? deriveAttention(loudestMember(members)) : null
+  const unread = members.some(isUnread)
+  const Disclosure = collapsed ? ChevronRightIcon : ChevronDownIcon
+  return (
+    <h2 id={id} className={cn('min-w-0 text-[11px] font-medium text-soft-foreground', cut ? 'shrink-0' : 'flex-1')}>
+      <button type="button" data-slot="section-toggle" aria-expanded={!collapsed} aria-controls={`${id}-rows`}
+        aria-label={`${label} ${count}`} onClick={() => onToggle(label)}
+        className={cn('flex min-h-[44px] items-center gap-1.5 rounded-[4px] px-[10px] text-left hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-link-foreground md:min-h-[26px] no-hover:min-h-[44px]', cut ? 'pr-[4px]' : 'w-full')}>
+        <Disclosure className="size-[12px] shrink-0" aria-hidden="true" />
+        <span>{label}</span>{cut ? null : <>{' '}<span className="font-normal tabular-nums">{count}</span></>}
+        {attention && (label === 'Needs you' || collapsed) ? <StatusDot tone={attention.tone} shape={attention.shape} pulse={attention.pulse} role="img" aria-label={attention.label} title={attention.label} /> : null}
+        {collapsed && unread ? <span role="img" aria-label="unread" title="Unread tasks" className="size-[5px] shrink-0 rounded-full bg-foreground" /> : null}
+      </button>
+    </h2>
   )
 }
 
