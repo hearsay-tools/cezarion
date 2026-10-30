@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
-import { getHealth, getSelfUpdate } from '@/api/client'
+import { getHealth } from '@/api/client'
+import { getSelfUpdate } from '@/api/self-update-client'
 import {
+  selfUpdateQueryKeys,
   useApplySelfUpdate,
   useRefreshSelfUpdate,
   useSelfUpdate,
   useSetSelfUpdateChannel,
-  workspaceQueryKeys,
-} from '@/api/queries'
+} from '@/api/self-update-queries'
 import type { SelfUpdateStatus, UpdateChannel } from '@open-mercato/cezar-api-client'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -44,7 +45,7 @@ export function SelfUpdateDialog({
    *  "Update cezar" button): the dialog then only shows progress. Fires once per mount, and
    *  ONLY when no task is running — a restart interrupts running tasks, so with any in flight
    *  the dialog opens to its warning and waits for "Update & restart" like every other entry. */
-  autoApply?: string
+  autoApply?: string | undefined
 }) {
   const status = useSelfUpdate(open)
   const refresh = useRefreshSelfUpdate()
@@ -460,7 +461,7 @@ function JobPanel({ data }: { data: SelfUpdateStatus }) {
     const startedAt = Date.now()
     const back = () => {
       setComeback('back')
-      queryClient.removeQueries({ queryKey: workspaceQueryKeys.selfUpdate })
+      queryClient.removeQueries({ queryKey: selfUpdateQueryKeys.status })
       window.setTimeout(() => window.location.reload(), 400)
     }
     const tick = async () => {

@@ -3,14 +3,15 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { SelfUpdateDevelopment, SelfUpdateStatus } from '@open-mercato/cezar-api-client'
-import { workspaceQueryKeys } from '@/api/queries'
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import { selfUpdateQueryKeys } from '@/api/self-update-queries'
 import { SelfUpdateDialog } from '@/components/self-update-dialog'
 import { pullOfVersion } from '@/components/self-update-development'
 
 const applySelfUpdate = vi.hoisted(() => vi.fn())
 const setSelfUpdateChannel = vi.hoisted(() => vi.fn())
-vi.mock('@/api/client', async (original) => ({
-  ...(await original<typeof import('@/api/client')>()),
+vi.mock('@/api/self-update-client', async (original) => ({
+  ...(await original<typeof import('@/api/self-update-client')>()),
   applySelfUpdate,
   setSelfUpdateChannel,
 }))
@@ -50,7 +51,7 @@ const development: SelfUpdateDevelopment = {
       commit: { sha: 'a1b2c3d', subject: 'fix(self-update): label worktrees', at: '2026-09-29T08:00:00.000Z' },
       builtAt: '2026-09-29T08:05:00.000Z',
       stale: false,
-      task: { id: 'abc', title: 'Switch the desktop app to a worktree', status: 'review' },
+      task: { id: 'abc', title: 'Switch the desktop app to a worktree', status: RUN_STATUS.review },
       pr: 1170,
     },
     {
@@ -63,7 +64,7 @@ const development: SelfUpdateDevelopment = {
       commit: { sha: 'd4e5f6a', subject: 'feat: landing check', at: '2026-09-29T07:00:00.000Z' },
       builtAt: '2026-09-29T06:00:00.000Z',
       stale: true,
-      task: { id: 'def', title: 'Landing check core', status: 'done' },
+      task: { id: 'def', title: 'Landing check core', status: RUN_STATUS.done },
       pr: null,
     },
     {
@@ -117,8 +118,8 @@ function renderDialog(
   props: { autoApply?: string; onOpenChange?: (open: boolean) => void; development?: SelfUpdateDevelopment } = {},
 ) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
-  queryClient.setQueryData(workspaceQueryKeys.selfUpdate, { ...status, ...overrides })
-  queryClient.setQueryData(workspaceQueryKeys.selfUpdateDevelopment, props.development ?? development)
+  queryClient.setQueryData(selfUpdateQueryKeys.status, { ...status, ...overrides })
+  queryClient.setQueryData(selfUpdateQueryKeys.development, props.development ?? development)
   return render(
     <QueryClientProvider client={queryClient}>
       <SelfUpdateDialog open onOpenChange={props.onOpenChange ?? (() => {})} autoApply={props.autoApply} />
@@ -159,6 +160,8 @@ describe('SelfUpdateDialog', () => {
   // The title strip's one-click update. A restart interrupts running tasks, so the shortcut is
   // only a shortcut when there is nothing to interrupt.
   describe('autoApply', () => {
+    // A self-update job status, not a run status.
+    // ast-grep-ignore: test-enum-literal-tsx
     const running = { status: 'running' as const, target: '0.12.1', startedAt: '2026-09-28T09:00:00.000Z', finishedAt: null, log: [] }
 
     it('starts the install at once when no task is running', async () => {
@@ -174,6 +177,7 @@ describe('SelfUpdateDialog', () => {
       renderDialog({ activeRuns: 2 }, { autoApply: '0.12.1' })
       const dialog = await screen.findByRole('dialog')
       expect(dialog.textContent).toContain('2 tasks are running')
+      // bound: autoApply would fire from the effect that rendered the warning above; one more macrotask lets any such call land
       await new Promise((resolve) => setTimeout(resolve, 20))
       expect(applySelfUpdate).not.toHaveBeenCalled()
     })
@@ -355,6 +359,8 @@ describe('SelfUpdateDialog', () => {
 
   it('can close after an update fails', async () => {
     const onOpenChange = vi.fn()
+    // A self-update job status, not a run status.
+    // ast-grep-ignore: test-enum-literal-tsx
     renderDialog({ job: { status: 'failed', target: '0.12.1', startedAt: '2026-09-28T09:00:00Z', finishedAt: null, log: [], error: 'offline' } }, { onOpenChange })
     fireEvent.click(await screen.findByRole('button', { name: /close/i }))
     expect(onOpenChange).toHaveBeenCalledWith(false)

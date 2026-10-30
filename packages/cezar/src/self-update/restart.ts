@@ -14,8 +14,7 @@
  * or resumes their runs on the next start. The dialog warns before that happens.
  */
 
-import { spawn } from 'node:child_process';
-
+import { spawnDetached } from '../detached-process.ts';
 import { currentEntry } from './layout.ts';
 
 /** The slice of `http.Server` a restart needs — `@hono/node-server`'s `ServerType` is a union
@@ -68,8 +67,8 @@ export function restartProcess(opts: RestartOptions): void {
       process.exit(RESTART_EXIT_CODE);
     }
     const entry = opts.entry ?? currentEntry(opts.env);
-    const child = spawn(process.execPath, [...process.execArgv, entry, ...restartArgs(opts.args, opts.port)], {
-      detached: true,
+    // The replacement cockpit outlives this process and is never stopped by it.
+    const child = spawnDetached(process.execPath, [...process.execArgv, entry, ...restartArgs(opts.args, opts.port)], {
       stdio: 'inherit',
       cwd: process.cwd(),
       env: { ...(opts.env ?? process.env), CEZ_RESTARTED_FROM: process.pid.toString() },

@@ -36,8 +36,7 @@ import {
   providersRequiredByWorkflow,
   unavailableProviderMessage,
 } from './server/provider-action-gate.ts';
-import { SelfUpdateService } from './self-update/service.ts';
-import { runSelfUpdateCommand } from './self-update/cli.ts';
+import { runManagedCommand } from './self-update/cli.ts';
 import { watchSupervisor } from './self-update/supervisor.ts';
 import { checkForUpdate } from './update-check.ts';
 import { loadWorkspaceConfig } from './workspace/config.ts';
@@ -102,14 +101,9 @@ Skills live in .ai/skills/, .ai/cezar/skills/ and your team skills repos
 workflows in .ai/cezar/workflows/.`;
 
 async function main(): Promise<void> {
-  const managedCommand = process.argv[2];
-  if (managedCommand && ['install', 'update', 'versions', 'use', 'link', 'unlink'].includes(managedCommand)) {
-    const { values, positionals } = parseArgs({ args: process.argv.slice(3), allowPositionals: true,
-      options: { channel: { type: 'string' }, version: { type: 'string' }, use: { type: 'boolean' }, 'no-modify-path': { type: 'boolean' } } });
-    process.exitCode = await runSelfUpdateCommand(managedCommand, positionals, {
-      service: new SelfUpdateService({ pkgName: readOwnName(), version: readOwnVersion(), entry: resolve(process.argv[1] ?? ''), restart: () => {} }),
-      channel: values.channel, version: values.version, use: values.use, modifyPath: !values['no-modify-path'],
-    });
+  const managedExit = await runManagedCommand(process.argv.slice(2), { pkgName: readOwnName(), version: readOwnVersion(), entry: resolve(process.argv[1] ?? '') });
+  if (managedExit !== undefined) {
+    process.exitCode = managedExit;
     return;
   }
   // Subcommands with flags of their own run before the global parseArgs (#504, #774, #1576).

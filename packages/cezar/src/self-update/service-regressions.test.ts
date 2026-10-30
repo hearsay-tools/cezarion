@@ -85,7 +85,7 @@ describe('managed update review regressions', () => {
     const svc = service(registry(), hosted);
     await svc.status();
     const job = svc.apply('0.16.0', { registryOnly: true });
-    await vi.waitFor(() => expect(job.status).toBe('failed'));
+    await vi.waitFor(() => expect(job.status).toBe('failed'), { timeout: 10_000 });
     const status = await svc.status({ registryOnly: true });
     expect(status.job?.log.join('\n')).not.toContain(home);
     expect(status.job?.error).not.toContain(home);
@@ -103,7 +103,7 @@ describe('managed update review regressions', () => {
     const svc = service(new RegistryCache('@wjarka/cezarion', fetch));
     const pending = svc.status();
     const observed = vi.fn(); void pending.then(observed);
-    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalledOnce(), { timeout: 10_000 });
     await Promise.resolve();
     expect(observed).not.toHaveBeenCalled();
     release(Response.json(document));

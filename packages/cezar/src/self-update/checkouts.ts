@@ -14,6 +14,7 @@ import { promisify } from 'node:util';
 
 import { workspaceConfigPath } from '../paths.ts';
 import { loadWorkspaceConfig } from '../workspace/config.ts';
+import { findColdRunByCheckout } from '../runs/run-index.ts';
 import { runNpm } from './installer.ts';
 import { linkId, listLinks, PACKAGE_NAME, readManifest, suffixedLinkId } from './layout.ts';
 
@@ -94,33 +95,6 @@ async function hasUncommittedChanges(worktree: string): Promise<boolean> {
   }
 }
 
-interface TaskRow {
-  id: string;
-  title: string;
-  status: string;
-  worktree: string | null;
-  branch: string | null;
-}
-
-/** The display fields of a repo's run index (`.ai/cezar/runs.json`), read leniently: this is a
- *  label lookup, not the store — a row it cannot read is simply not a label. */
-function tasksOf(root: string): TaskRow[] {
-  try {
-    const rows = JSON.parse(readFileSync(join(root, '.ai', 'cezar', 'runs.json'), 'utf8')) as unknown;
-    if (!Array.isArray(rows)) return [];
-    const str = (value: unknown) => (typeof value === 'string' && value ? value : null);
-    return rows.flatMap((row: Record<string, unknown>) => {
-      const id = str(row?.id);
-      const title = str(row?.titleSummary) ?? str(row?.title) ?? str(row?.task);
-      if (!id || !title) return [];
-      const worktree = str(row.worktreePath);
-      return [{ id, title, status: str(row.status) ?? 'unknown', worktree: worktree ? real(worktree) : null, branch: str(row.branch) }];
-    });
-  } catch {
-    return [];
-  }
-}
-
 /** `git worktree list --porcelain` → [path, branch]. Never throws: not a repo is no worktrees. */
 async function worktreesOf(root: string): Promise<{ path: string; branch: string | null }[]> {
   try {
@@ -171,8 +145,8 @@ export async function discoverCheckouts(env: NodeJS.ProcessEnv = process.env): P
   for (const root of roots) {
     if (!existsSync(root) || !cezarPackageRoot(root)) continue;
     const trees = await worktreesOf(root);
-    // Task worktrees live under the main checkout, whose run index names them.
-    const tasks = trees.length > 0 ? tasksOf(trees[0]!.path) : [];
+    // Task worktrees live under the main checkout, whose run store names them.
+    const dataDir = trees.length > 0 ? join(trees[0]!.path, '.ai', 'cezar') : null;
     for (const tree of trees) {
       const worktree = real(tree.path);
       if (seen.has(worktree)) continue;
@@ -182,7 +156,7 @@ export async function discoverCheckouts(env: NodeJS.ProcessEnv = process.env): P
       if (!packageRoot || !version) continue;
       const branch = tree.branch ?? worktree.split(/[\\/]/).filter(Boolean).pop() ?? 'checkout';
       const link = links.find((entry) => entry.checkout === packageRoot);
-      const task = tasks.find((row) => row.worktree === worktree) ?? (tree.branch ? tasks.find((row) => row.branch === tree.branch) : undefined);
+      const task = dataDir ? findColdRunByCheckout(dataDir, { worktreePaths: [...new Set([tree.path, worktree])], branch: tree.branch }) : undefined;
       const built = isBuilt(packageRoot);
       found.push({
         packageRoot,
@@ -192,7 +166,7 @@ export async function discoverCheckouts(env: NodeJS.ProcessEnv = process.env): P
         built,
         builtAt: built ? builtAtOf(packageRoot) : null,
         stale: false,
-        task: task ? { id: task.id, title: task.title, status: task.status } : null,
+        task: task ? { id: task.id, title: task.titleSummary ?? task.title, status: task.status } : null,
         id: link?.id ?? '',
         linked: !!link,
       });
@@ -220,7 +194,7 @@ export async function discoverCheckouts(env: NodeJS.ProcessEnv = process.env): P
  * first unlinked checkout on a slug keeps the plain id, later ones get `linkCheckout`'s
  * path-hash suffix — which `linkDiscovered` then passes back so the link lands under it.
  */
-function assignUniqueIds(found: Omit<CezarCheckout, 'commit'>[], links: { id: string; checkout?: string }[], env: NodeJS.ProcessEnv): void {
+function assignUniqueIds(found: Omit<CezarCheckout, 'commit'>[], links: { id: string; checkout?: string | undefined }[], env: NodeJS.ProcessEnv): void {
   const owner = new Map<string, string>();
   for (const link of links) owner.set(link.id, link.checkout ?? '');
   for (const checkout of found) {

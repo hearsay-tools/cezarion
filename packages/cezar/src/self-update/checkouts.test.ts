@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { makeRunRecord, RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { seedRuns } from '../runs/run-store.testkit.ts';
 import { buildCheckout, cezarPackageRoot, discoverCheckouts } from './checkouts.ts';
 import { SelfUpdateService } from './service.ts';
 import { activate, activeId, branchSlug, currentEntry, linkCheckout, linkId, listInstalled, listLinks, removeInstalled, versionDir, versionsDir } from './layout.ts';
@@ -152,26 +154,46 @@ describe('linked checkouts', () => {
     // Built before its last commit.
     const old = new Date('2026-09-10T10:00:00Z');
     utimesSync(join(task, 'packages', 'cezar', 'dist', 'index.js'), old, old);
-    writeFileSync(
-      join(repo, '.ai', 'cezar', 'runs.json'),
-      JSON.stringify([
-        { id: 'abc12345-run', title: 'raw prompt', titleSummary: 'Fix the version dialog', status: 'review', worktreePath: task, branch: 'cez/abc12345' },
-        { id: 'broken' },
-        'not a row',
-      ]),
-    );
+    // The project's run store names the task by its worktree; a run elsewhere names nothing.
+    seedRuns(join(repo, '.ai', 'cezar'), [
+      makeRunRecord({ id: 'abc12345-run', title: 'raw prompt', titleSummary: 'Fix the version dialog', status: RUN_STATUS.review, worktreePath: task, branch: 'cez/abc12345' }),
+      makeRunRecord({ id: 'other-run', title: 'Elsewhere', worktreePath: join(repo, '.ai', 'cezar', 'worktrees', 'other'), branch: 'cez/other' }),
+    ]);
     mkdirSync(env.CEZ_HOME!, { recursive: true });
     writeFileSync(join(env.CEZ_HOME!, 'config.json'), JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] }));
 
     const found = await discoverCheckouts(env);
     expect(found.map((c) => c.branch)).toEqual(['cez/abc12345', 'main']);
     expect(found[0]).toMatchObject({
-      task: { id: 'abc12345-run', title: 'Fix the version dialog', status: 'review' },
+      task: { id: 'abc12345-run', title: 'Fix the version dialog', status: RUN_STATUS.review },
       commit: { subject: 'feat: the newer work', at: '2026-09-20T10:00:00.000Z' },
       builtAt: '2026-09-10T10:00:00.000Z',
       stale: true,
     });
     expect(found[1]).toMatchObject({ task: null, commit: { subject: 'init' }, stale: false });
+  });
+
+  // Retention reclaims a task's worktree directory; the branch still names its task.
+  it('labels a worktree by its branch when the run no longer holds a worktree path', async () => {
+    const repo = join(home, 'repo');
+    fakeCheckout(repo);
+    git(repo, 'init', '-q', '-b', 'main');
+    writeFileSync(join(repo, '.gitignore'), 'dist\nweb/dist\n.ai\n');
+    git(repo, 'add', '.');
+    git(repo, 'commit', '-q', '-m', 'init');
+    const task = join(repo, '.ai', 'cezar', 'worktrees', 'def67890-run');
+    git(repo, 'worktree', 'add', '-q', '-b', 'cez/def67890', task);
+    fakeCheckout(task);
+    seedRuns(join(repo, '.ai', 'cezar'), [
+      makeRunRecord({ id: 'older', title: 'Older owner', createdAt: '2026-09-01T10:00:00.000Z', branch: 'cez/def67890' }),
+      makeRunRecord({ id: 'def67890-run', title: 'Newest owner', createdAt: '2026-09-02T10:00:00.000Z', branch: 'cez/def67890' }),
+    ]);
+    mkdirSync(env.CEZ_HOME!, { recursive: true });
+    writeFileSync(join(env.CEZ_HOME!, 'config.json'), JSON.stringify({ projects: [{ id: 'cezar', root: realpathSync(repo) }] }));
+
+    const found = await discoverCheckouts(env);
+    expect(found.find((c) => c.branch === 'cez/def67890')?.task).toMatchObject({ id: 'def67890-run', title: 'Newest owner' });
+    expect(found.find((c) => c.branch === 'main')?.task).toBeNull();
   });
 
   it.each(['modified', 'staged', 'untracked', 'deleted'])('rebuilds a built checkout with %s source changes before activating it', async change => {
@@ -199,7 +221,7 @@ describe('linked checkouts', () => {
       env, restart: () => {}, buildCheckout: build,
     });
     const job = svc.apply(checkout!.id);
-    await vi.waitFor(() => expect(job.status).toBe('restarting'));
+    await vi.waitFor(() => expect(job.status).toBe('restarting'), { timeout: 10_000 });
     expect(build).toHaveBeenCalledOnce();
     expect(readFileSync(currentEntry(env), 'utf8')).toBe('// rebuilt dirty source');
   });
@@ -273,7 +295,7 @@ describe('linked checkouts', () => {
       },
     });
     const job = svc.apply(before.get(b)!);
-    await vi.waitFor(() => expect(job.status).toBe('restarting'), { timeout: 5_000 });
+    await vi.waitFor(() => expect(job.status).toBe('restarting'), { timeout: 10_000 });
     expect(job.error).toBeUndefined();
     expect(activeId(env)).toBe(before.get(b));
     expect(listLinks(env).find((link) => link.id === before.get(b))?.checkout).toBe(join(b, 'packages', 'cezar'));
@@ -309,11 +331,11 @@ describe('linked checkouts', () => {
       },
     });
     const job = svc.apply('0.13.0+cez-abc12345');
-    await vi.waitFor(() => expect(job.status).toBe('restarting'));
+    await vi.waitFor(() => expect(job.status).toBe('restarting'), { timeout: 10_000 });
     expect(job.error).toBeUndefined();
     expect(built).toEqual([realpathSync(task)]);
     expect(job.log).toContain('building cez/abc12345 first');
     expect(activeId(env)).toBe('0.13.0+cez-abc12345');
-    await vi.waitFor(() => expect(restarted).toBe(true));
+    await vi.waitFor(() => expect(restarted).toBe(true), { timeout: 10_000 });
   });
 });

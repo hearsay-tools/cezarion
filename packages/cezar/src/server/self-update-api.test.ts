@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { versionEntry, writeManifest } from '../self-update/layout.ts';
 import type { Hono } from 'hono';
-import { selfUpdateStatusSchema } from '@open-mercato/cezar-contract';
+import { selfUpdateStatusSchema } from '@open-mercato/cezar-contract/self-update';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { RegistryCache } from '../self-update/registry.ts';
@@ -16,7 +16,7 @@ import { createApp } from './server.ts';
  * `/api/v1/workspace/self-update` (self-update PoC). The load-bearing security property: a
  * HOSTED cockpit (`CEZ_REMOTE`) may only apply a version that is forward IN TIME. Installing a
  * published package cannot inject code, but installing an older one can — every hosted guard
- * (the `/api/*` request-origin check #426, the `localHandoff` 409 on agent-config writes that
+ * (the `/api/*` request-origin check open-mercato/cezar#426, the `localHandoff` 409 on agent-config writes that
  * closes the hooks RCE path) lives in the running version, so moving back to a release that
  * predates them re-opens exactly what they close. A local cockpit keeps the whole picker.
  *
@@ -120,12 +120,14 @@ describe('the self-update API', () => {
     try {
       const received = vi.fn();
       const response = apply('0.13.0').then(res => { received(res); return res; });
+      // bound: each fake-timer check advances 50 ms; staying under the 750 ms restart delay keeps the not-yet-restarted assertion below meaningful
       await vi.waitFor(() => expect(received).toHaveBeenCalledOnce(), { timeout: 500 });
       const res = await response;
       expect(res.status).toBe(200);
       expect(selfUpdateStatusSchema.parse(await res.json()).job).toMatchObject({ status: 'restarting', target: '0.13.0' });
       const polled = vi.fn();
       const poll = apiRequest(app, '/api/v1/workspace/self-update').then(res => { polled(res); return res; });
+      // bound: the same 750 ms restart budget as above, after the apply's own checks
       await vi.waitFor(() => expect(polled).toHaveBeenCalledOnce(), { timeout: 100 });
       expect(selfUpdateStatusSchema.parse(await (await poll).json()).job?.status).toBe('restarting');
       expect(restart).not.toHaveBeenCalled();

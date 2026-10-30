@@ -5,6 +5,7 @@
  */
 
 import { resolve } from 'node:path';
+import { parseArgs } from 'node:util';
 import { cezarHomeDir } from '../paths.ts';
 
 import { branchOf, cezarPackageRoot, discoverCheckouts } from './checkouts.ts';
@@ -13,7 +14,7 @@ import { ensurePathHook, isOnPath, writeLaunchers } from './launcher.ts';
 import { installFromRegistry } from './installer.ts';
 import { distTagFor, RegistryCache } from './registry.ts';
 import { compareVersions } from './semver.ts';
-import type { SelfUpdateService } from './service.ts';
+import { SelfUpdateService } from './service.ts';
 
 export interface SelfUpdateCliOptions {
   service: SelfUpdateService;
@@ -22,6 +23,24 @@ export interface SelfUpdateCliOptions {
   modifyPath: boolean;
   /** `link --use`: activate the linked checkout right away. */
   use?: boolean;
+}
+
+const MANAGED_COMMANDS = ['install', 'update', 'versions', 'use', 'link', 'unlink'];
+
+/** Run `argv[0]` when it names a managed-install command and answer its exit code; anything else
+ *  is not ours. Runs before the global parseArgs: these flags are not cockpit flags. */
+export async function runManagedCommand(argv: string[], identity: { pkgName: string; version: string; entry: string }): Promise<number | undefined> {
+  const [command, ...rest] = argv;
+  if (!command || !MANAGED_COMMANDS.includes(command)) return undefined;
+  const { values, positionals } = parseArgs({ args: rest, allowPositionals: true,
+    options: { channel: { type: 'string' }, version: { type: 'string' }, use: { type: 'boolean' }, 'no-modify-path': { type: 'boolean' } } });
+  return runSelfUpdateCommand(command, positionals, {
+    service: new SelfUpdateService({ ...identity, restart: () => {} }),
+    ...(values.channel !== undefined ? { channel: values.channel } : {}),
+    ...(values.version !== undefined ? { version: values.version } : {}),
+    ...(values.use !== undefined ? { use: values.use } : {}),
+    modifyPath: !values['no-modify-path'],
+  });
 }
 
 export async function runSelfUpdateCommand(command: string, args: string[], opts: SelfUpdateCliOptions): Promise<number> {
