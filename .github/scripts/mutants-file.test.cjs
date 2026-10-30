@@ -122,7 +122,7 @@ function fakeDeps(file = 'packages/contract/src/sample.ts') {
     command: async (bin, args) => { calls.push([bin, ...args]); },
     stryker: async (...args) => { calls.push(['stryker', args[0], args[3]]); return { outcome: 'exited', code: 0 }; },
     readReport: () => report(file), removeReport: () => calls.push(['remove-report']),
-    ranges: () => [], read: () => "import { x } from '@open-mercato/cezar-contract/sample';",
+    ranges: () => [], read: file => file.endsWith('equivalent.json') ? '[]' : "import { x } from '@open-mercato/cezar-contract/sample';",
     readJson: () => ({ vitest: { configFile: 'vitest.stryker.config.ts', pool: 'forks' }, reporters: ['json'], inPlace: true, timeoutMS: 30000 }), write: (file, text) => calls.push(['write', file, text]),
     removeScratch: () => calls.push(['remove-scratch']), log: text => calls.push(['log', text]),
   };
@@ -279,4 +279,58 @@ test('runStryker passes the config as a positional argument and keeps cwd and pr
   assert.equal(emitted.options.cwd, '/cache/tree');
   assert.equal(emitted.options.env.STRYKER_PROJECT, 'contract');
   assert.equal(emitted.options.detached, true);
+});
+
+
+const equivalentEntry = (overrides = {}) => ({ file: 'packages/contract/src/sample.ts', function: '(module)', mutator: 'BooleanLiteral', original: 'true', replacement: 'false', reason: 'fixture equivalence', ...overrides });
+
+test('equivalents use full function identity, leave raw scores intact, and report only this file stale entries', () => {
+  const file = 'packages/contract/src/sample.ts';
+  const entries = [equivalentEntry({ original: ' true \n' }), equivalentEntry({ function: 'other' }), equivalentEntry({ file: 'packages/contract/src/other.ts' })];
+  const result = m.measure(report(file), file, 'sha', [], {}, entries);
+  assert.equal(result.equivalentCount, 1);
+  assert.equal(result.mutants.length, 0);
+  assert.equal(result.survivors.length, 0);
+  assert.equal(result.counts.survived, 0);
+  assert.equal(result.score, 100);
+  assert.equal(result.rawScore, 0);
+  assert.equal(result.rawCounts.survived, 1);
+  assert.deepEqual(result.staleEquivalent, [entries[1]]);
+  assert.match(m.summary(result), /Equivalent mutants excluded: 1/);
+});
+
+test('a matched guard equivalent passes its guard; same source in another function is not excluded', () => {
+  const file = 'packages/contract/src/sample.ts';
+  const ranges = [{ name: 'guard', range: { start: { line: 0, column: 0 }, end: { line: 1, column: 0 } } }];
+  const targets = { [file]: { tier: 'logic', guards: ['guard'] } };
+  const entry = equivalentEntry({ function: 'guard' });
+  assert.equal(m.measure(report(file), file, 'sha', ranges, targets, [entry]).guards[0].pass, true);
+  const other = m.measure(report(file), file, 'sha', ranges, targets, [equivalentEntry()]);
+  assert.equal(other.equivalentCount, 0);
+  assert.equal(other.guards[0].pass, false);
+});
+
+test('command keeps missing and empty equivalent lists behavior and warns on invalid lists', async () => {
+  const file = 'packages/contract/src/sample.ts';
+  const run = async contents => {
+    const { deps } = fakeDeps(file);
+    deps.read = name => {
+      if (!name.endsWith('equivalent.json')) return '';
+      if (contents === undefined) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      return contents;
+    };
+    return m.runMeasurement(m.parseArgs([file]), deps);
+  };
+  const missing = await run(undefined);
+  const empty = await run('[]');
+  assert.deepEqual(missing, empty);
+  assert.equal(empty.equivalentCount, 0);
+  assert.equal(empty.warning, '');
+  const invalid = await run('{');
+  assert.deepEqual(invalid.counts, empty.counts);
+  assert.match(invalid.warning, /Could not read equivalent mutants/);
+  assert.match(m.summary(invalid), /Could not read equivalent mutants/);
+  const matched = await run(JSON.stringify([equivalentEntry()]));
+  assert.equal(matched.equivalentCount, 1);
+  assert.equal(matched.survivors.length, 0);
 });

@@ -8,6 +8,7 @@ const os = require('node:os');
 const { promisify } = require('node:util');
 const { sliceSource } = require('./mutants-report.cjs');
 const { runStryker } = require('./mutants-run.cjs');
+const { EQUIVALENT_FILE, readEquivalent, matchesEntry } = require('./mutants-equivalent.cjs');
 const TARGETS = require('../mutants/targets.json');
 const REPORT = 'reports/mutation/mutation.json';
 const STATUS = { Killed: 'killed', Timeout: 'timeout', Survived: 'survived', NoCoverage: 'noCoverage', CompileError: 'error', RuntimeError: 'error', Ignored: 'ignored' };
@@ -182,7 +183,7 @@ function mergeReports(first, second, file) {
   return { ...first, files: { ...first.files, [file]: { ...a, mutants: [...merged.values()] } } };
 }
 
-function measure(report, file, head, ranges, targets = TARGETS) {
+function measure(report, file, head, ranges, targets = TARGETS, entries = []) {
   const data = report.files?.[file];
   if (!data) throw new Error(`Report does not contain ${file}`);
   const mutants = data.mutants.map(m => {
@@ -190,7 +191,10 @@ function measure(report, file, head, ranges, targets = TARGETS) {
     return { ...row, kind: kindOf(row, file) };
   });
   const target = tierOf(file, targets);
-  return { version: 1, file, head, tier: target.tier, mutants, ...evaluate(mutants, target, ranges), staleEquivalent: [] };
+  const kept = mutants.filter(m => !entries.some(entry => matchesEntry(entry, m)));
+  const staleEquivalent = entries.filter(entry => entry.file === file && !mutants.some(m => matchesEntry(entry, m)));
+  return { version: 1, file, head, tier: target.tier, mutants: kept, equivalentCount: mutants.length - kept.length,
+    ...evaluate(kept, target, ranges), rawCounts: countsOf(mutants), rawScore: scoreOf(countsOf(mutants)), staleEquivalent };
 }
 
 function summary(result) {
@@ -203,7 +207,8 @@ function summary(result) {
   }
   for (const guard of result.guards) lines.push(`Guard ${guard.name}: ${guard.found ? `${guard.survivors.length} undetected` : 'NOT FOUND'}`);
   for (const target of result.targets) lines.push(`${target.pass ? 'PASS' : 'FAIL'}: ${target.name}`);
-  lines.push(`Stale equivalent entries: ${JSON.stringify(result.staleEquivalent)}`);
+  lines.push(`Equivalent mutants excluded: ${result.equivalentCount}`, `Stale equivalent entries: ${JSON.stringify(result.staleEquivalent)}`);
+  if (result.warning) lines.push(result.warning);
   if (result.comparison) lines.push(`Change: ${JSON.stringify(result.comparison)}`);
   return lines.join('\n');
 }
@@ -230,7 +235,8 @@ async function runMeasurement(opts, deps, signal = new AbortController().signal)
     const ranges = deps.ranges(opts.file, cwd);
     let report = await strykerReport(deps, cwd, opts, opts.file.split('/')[1], [], signal);
     if (opts.file.startsWith('packages/contract/')) report = await runConsumers(opts, deps, cwd, report, signal);
-    const result = measure(report, opts.file, head, ranges);
+    const equivalent = readEquivalent(path.join(cwd, EQUIVALENT_FILE), { readFileSync: deps.read });
+    const result = { ...measure(report, opts.file, head, ranges, TARGETS, equivalent.entries), warning: equivalent.warning };
     if (opts.compare) result.comparison = compareResults(deps.readJson(opts.compare), result);
     if (opts.out) deps.write(opts.out, `${JSON.stringify(result, null, 2)}\n`);
     deps.log(summary(result));
