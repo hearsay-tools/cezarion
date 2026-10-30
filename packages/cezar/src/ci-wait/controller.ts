@@ -260,8 +260,9 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
       await next();
     }, jsonZodValidator(scheduleTaskRequestSchema, { invalid: (c, error) => c.json(scheduleRefusal('invalid_request', scheduleInvalidInput(error))) }), async c => {
       const capability = c.get('capability');
-      if (!capability.scheduleTask) return c.json(scheduleRefusal('unavailable'));
-      return capabilityAnswer(c, capability, async () => scheduleTaskAnswerSchema.parse(await capability.scheduleTask!(c.req.valid('json'), capability.lifetime.signal)), answer => c.json(answer), () => c.json(scheduleRefusal('unavailable')));
+      const scheduleTask = capability.scheduleTask;
+      if (!scheduleTask) return c.json(scheduleRefusal('unavailable'));
+      return capabilityAnswer(c, capability, async () => scheduleTaskAnswerSchema.parse(await scheduleTask.call(capability, c.req.valid('json'), capability.lifetime.signal)), answer => c.json(answer), () => c.json(scheduleRefusal('unavailable')));
     })
     .use('/api/v1/tools/scheduled-tasks', requireCapability)
     .post('/api/v1/tools/scheduled-tasks', bodyLimit({ maxSize: SCHEDULED_TASK_LIMITS.wireBytes, onError: c => c.json(scheduleRefusal('invalid_request', 'The arguments exceed 1 MiB.')) }), async (c, next) => {
@@ -269,8 +270,9 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
       await next();
     }, jsonZodValidator(scheduledTasksRequestSchema, { invalid: (c, error) => c.json(scheduleRefusal('invalid_request', scheduleInvalidInput(error))) }), async c => {
       const capability = c.get('capability');
-      if (!capability.scheduledTasks) return c.json(scheduleRefusal('unavailable'));
-      return capabilityAnswer(c, capability, async () => scheduledTasksAnswerSchema.parse(await capability.scheduledTasks!(c.req.valid('json'), capability.lifetime.signal)), answer => c.json(answer), () => c.json(scheduleRefusal('unavailable')));
+      const scheduledTasks = capability.scheduledTasks;
+      if (!scheduledTasks) return c.json(scheduleRefusal('unavailable'));
+      return capabilityAnswer(c, capability, async () => scheduledTasksAnswerSchema.parse(await scheduledTasks.call(capability, c.req.valid('json'), capability.lifetime.signal)), answer => c.json(answer), () => c.json(scheduleRefusal('unavailable')));
     });
 }
 export type CiToolApp = ReturnType<typeof ciToolRoutes>;
