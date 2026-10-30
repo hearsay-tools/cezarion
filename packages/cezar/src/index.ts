@@ -15,10 +15,8 @@ import {
 } from './core/provider-auth.ts';
 import { applyProviderEnablement } from './core/provider-availability.ts';
 import { forwardToSessionGroups } from './core/session-process.ts';
-import { pruneOrphans } from './git-worktree.ts';
 import { getRepoInfo } from './server/git.ts';
-import { DEFAULT_WORKTREE_RETENTION, loadConfig, resolveWorktreeRetention } from './config.ts';
-import { reclaimWorktrees } from './runs/retention.ts';
+import { loadConfig } from './config.ts';
 import { SWEEP_MIN_INTERVAL_MS, sweepMergedBranches } from './server/repo-branch-sweep.ts';
 import { previewToolEnabled } from './ci-wait/tools.ts';
 import { PreviewHost } from './preview/host.ts';
@@ -33,7 +31,6 @@ import { loadWorkflows } from './workflows/load.ts';
 import { cockpitOriginFor, startServer, WorkspaceEventBus } from './server/server.ts';
 import {
   ProviderRuntimeAuthObserver,
-  recoverWithProviderRuntimeAuthObservation,
 } from './server/provider-auth-runtime.ts';
 import {
   providersRequiredByWorkflow,
@@ -45,12 +42,8 @@ import { runMigrations } from './workspace/migrations.ts';
 import { registerProject, shouldRegisterProject } from './workspace/projects.ts';
 import { runProjectsCommand } from './workspace/projects-cli.ts';
 import { WorkspaceSemaphore } from './workspace/semaphore.ts';
-import { ApplicationUpdateService } from './application-update/service.ts';
-import { armRestartHelper } from './application-update/launcher.ts';
-import { restartEndpoint } from './application-update/helper.ts';
-import { readNpmConfiguration } from './application-update/npm-process.ts';
-import { cezarHomeDir } from './paths.ts';
 import { openUrl } from './open-url.ts';
+import { reconcileServeWorktrees, recoverServeProject, warnServeBind, createServeApplicationUpdate, printServeBanner } from './serve-boot.ts';
 import { CockpitOwnership } from './server/cockpit-ownership.ts';
 
 const HELP = `cezar — local cockpit for AI agent tasks in your repo
@@ -286,42 +279,9 @@ async function serveCommand(
   const checks = await detectEnvironment();
   const repo = await getRepoInfo(repoRoot);
 
-  // Startup reconcile (spec 006): sweep worktrees whose run no longer exists. Never over a store
-  // that could not open (#779): its runs are unknown, and every worktree would look orphaned.
-  if (repo && !store.unavailable) {
-    const orphans = await pruneOrphans(repoRoot, new Set(store.listRunIds())).catch(
-      () => [] as string[],
-    );
-    if (orphans.length > 0) {
-      console.log(`  cleaned ${orphans.length} orphaned worktree(s): ${orphans.map((id) => id.slice(0, 8)).join(', ')}`);
-    }
-    // Count-based worktree retention (#483): reclaim finished worktrees beyond
-    // the keep-limit (directory only — `cez/<id8>` branch kept, so recoverable).
-    // Best-effort; never blocks boot.
-    const keep = await resolveWorktreeRetention(repoRoot).catch(() => DEFAULT_WORKTREE_RETENTION);
-    const reclaimed = await reclaimWorktrees(repoRoot, store, keep, { previewHost }).catch(() => [] as string[]);
-    if (reclaimed.length > 0) {
-      console.log(`  reclaimed ${reclaimed.length} old worktree(s), branch kept: ${reclaimed.map((id) => id.slice(0, 8)).join(', ')}`);
-    }
-    // Branches whose work landed (hearsay-tools/cezarion#2268). In the background: it may ask
-    // GitHub, and boot never waits on the network.
-    void sweepMergedBranches({ root: repoRoot, store, manager }, { keep });
-  }
+  await reconcileServeWorktrees(repoRoot, repo, store, manager, previewHost);
 
-  const recovered = store
-    .listRuns()
-    .filter((r) => ['queued', 'waiting', 'running'].includes(r.status)).length;
-  if (!store.unavailable) {
-    await recoverWithProviderRuntimeAuthObservation(
-      store,
-      () => manager.recover(),
-      providerRuntimeAuth,
-    );
-    // Boot project never enters ProjectContexts.build(); same sweep that path runs after recover.
-    store.compressArchivedHistory();
-    delegation.service.armDestroyRetries(bootProjectId ?? 'default');
-  }
-  if (recovered > 0) console.log(`  recovered ${recovered} run(s) from the previous session`);
+  await recoverServeProject(store, manager, providerRuntimeAuth, delegation, bootProjectId);
 
   // Update discovery (#368) — fire-and-forget; the banner prints whenever the
   // registry answers and /api/v1/health picks it up for the GUI chip.
@@ -334,32 +294,9 @@ async function serveCommand(
   });
 
   const port = preferredPort;
-  // SECURITY: cezar executes agents. A non-loopback bind exposes that box to
-  // whatever can reach the interface, and cezar itself has NO auth — it is only
-  // for a deliberate hosted setup where a reverse proxy in front provides TLS +
-  // auth (see `server-install --external-proxy`). Say so, loudly, every start.
-  if (bindHost && !['127.0.0.1', 'localhost', '::1'].includes(bindHost)) {
-    console.log(
-      `\n  ⚠ binding ${bindHost}:${port} — cezar has no built-in auth.\n` +
-        `    Only do this behind a reverse proxy that enforces authentication,\n` +
-        `    and make sure this interface is not reachable from the internet.\n`,
-    );
-  }
-  // Discovery reads npm metadata only; a missing npm or source checkout degrades to manual update.
-  const npm = readNpmConfiguration();
-  const npmPrefix = npm?.prefix;
-  const npmCache = npm?.cache;
+  warnServeBind(bindHost, port);
   let server: ReturnType<typeof startServer>;
-  const applicationUpdate = (npmPrefix && npmCache) || process.env.CEZ_DRY_RUN === '1'
-    ? new ApplicationUpdateService({
-      packageRoot: join(dirname(fileURLToPath(import.meta.url)), '..'),
-      launchEntry: resolve(process.argv[1] ?? ''),
-      npmPrefix: npmPrefix ?? join(cezarHomeDir(), 'dry-prefix'),
-      npmCache: npmCache ?? join(cezarHomeDir(), 'dry-cache'), npmBin: npm?.npmBin, home: cezarHomeDir(), targetVersion: () => update.latest,
-      dryRun: process.env.CEZ_DRY_RUN === '1',
-      armRestart: (plan) => armRestartHelper(plan, { repoRoot, ...restartEndpoint(server.address()), npmBin: npm?.npmBin ?? 'npm' }),
-      handoff: () => { void server.shutdownForRestart().then(() => process.exit(0)); },
-    }) : undefined;
+  const applicationUpdate = createServeApplicationUpdate(repoRoot, update, () => server);
   server = startServer({
     ownership,
     delegation,
@@ -393,14 +330,7 @@ async function serveCommand(
 
   ownership.publishUrl(url);
 
-  console.log(`\n  cezar v${version} — ${repoRoot}`);
-  console.log(`  ${repo ? `branch ${repo.branch}` : 'not a git repository (tasks run in place, one at a time; repo view is empty)'}`);
-  for (const check of checks) {
-    const mark = check.available ? '✓' : '✗';
-    const detail = check.available ? (check.version ?? 'ok') : (check.hint ?? 'missing');
-    console.log(`  ${mark} ${check.name.padEnd(6)} ${detail}`);
-  }
-  console.log(`\n  cockpit → ${url}\n`);
+  printServeBanner(version, repoRoot, repo, checks, url);
 
   const shutdown = (signal: NodeJS.Signals) => {
     // Dev servers run in their own process groups: stop them before this process exits.
