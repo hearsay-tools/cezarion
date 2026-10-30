@@ -248,7 +248,9 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           # compgen -G expands the glob into one path per line, and nothing when it matches none.
-          mapfile -t files < <(compgen -G "$GLOB")
+          # A read loop, not mapfile: the macOS runners ship Bash 3.2.
+          files=()
+          while IFS= read -r file; do files+=("$file"); done < <(compgen -G "$GLOB" | sort)
           if [ ${#files[@]} -eq 0 ]; then echo "::error::no bundle matched $GLOB"; exit 1; fi
           cp "${files[0]}" "$STABLE"
           # `shasum` on macOS, `sha256sum` on Linux and in the Windows runner's bash.
