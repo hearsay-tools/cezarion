@@ -81,7 +81,8 @@ Each module imports only from its own layer or a lower one. The facade sits on t
 
 | Layer | Phase | Modules |
 |---|---|---|
-| Facade | — | `workflows/run.ts`: constructor (composition root), ordered `dispose`, `activate` and `dropActive`, the public members, test-seam delegators, `execute` and `runContinuation` entry points, `cancel`, `finish`, `startRun` (delegator), `continueRun`, `move` |
+| Facade | — | `workflows/run.ts`: constructor (one `composeRunModules` call), ordered `dispose`, `activate` and `dropActive`, the public members, test-seam delegators, `execute` and `runContinuation` entry points, `cancel`, `finish`, `startRun` (delegator), `continueRun`, `move` |
+| Composition | 5 | `workflows/run/compose.ts`: `composeRunModules(RunModuleContext, FacadeHost)`, all module construction and host wiring; returns one module record; never imports the facade |
 | Orchestrators | 4 | `input-delivery`, `wake-admission`, `turn-nudges`, `turn-settler`, `run-settlement`, `continuation-acceptance`, `step-session`, `step-loop`, `continuation-session`, `run-recovery` |
 | Hubs | 3 | `run-line` (the scheduler line), `queued-revival`, `wait-watches`, `wait-registry`, `family-reconciler`, `human-waits`, `worker-questions`, `completion-gate`, `session-events` |
 | State owners | 2 | `maintenance-claims`, `repo-root-lease`, `attachment-writer`, `cezar-tools`, `worker-orphans`, `worker-executions`, `queued-input`, `launch-context`, `run-skills`, `worktree-autosave`, `turn-bookkeeping`, `wake-retries` (moved to Phase 4), `auto-resume`, `inbox-claims`, `input-receipts` |
@@ -278,6 +279,15 @@ hearsay-tools/cezarion#2232. These wrappers still stay host calls: `executionBlo
    Stop (hearsay-tools/cezarion#2241) and the lifecycle leftovers (hearsay-tools/cezarion#2242).
 6. `compose.ts` takes the constructor's wiring and meets the exit (hearsay-tools/cezarion#2243,
    last).
+
+Phase 5 composition result (hearsay-tools/cezarion#2243, 2026-10-30): against `main`
+`1350174b2` (1,155 lines / 79,294 bytes), `run.ts` is 703 lines / 43,175 bytes;
+`compose.ts` is 541 lines / 44,396 bytes. `FILE_LENGTH_UPDATE=1` removes the `run.ts`
+entry from `file-length.baseline.json`. The constructor calls composition once;
+`runInternals(manager)` reads its module record and keeps a live `disposed` read.
+Module construction and disposal keep their dependency order. The constructor sets
+its cockpit address just after composition, before CI resources, listeners or recovery;
+module constructors never read the cockpit address. ADR 0053 stays unchanged.
 
 ## Rules for a move pull request
 

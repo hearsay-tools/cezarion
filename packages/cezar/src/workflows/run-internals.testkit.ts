@@ -29,6 +29,7 @@ import { ContinuationSession } from './run/continuation-session.ts';
 import { StepLoop as WorkflowStepLoop } from './run/step-loop.ts';
 import { TurnSettler } from './run/turn-settler.ts';
 import { InputDelivery } from './run/input-delivery.ts';
+import type { RunModules } from './run/compose.ts';
 import type { SessionHelperHost } from './run/session-events.ts';
 import type { RunManager } from './run.ts';
 import type { RunModuleContext } from './run/types.ts';
@@ -74,5 +75,18 @@ type RunInternals = { [K in keyof typeof RUN_MODULE_CLASSES]: InstanceType<(type
 
 /** The single typed test read of facade-owned module instances and shared state. */
 export function runInternals(manager: RunManager): RunInternals {
-  return manager as unknown as RunInternals;
+  const facade = manager as unknown as {
+    modules: RunModules;
+    context: RunModuleContext;
+    cezarPort?: (() => number | undefined) | undefined;
+    active: Map<string, ActiveRun>;
+    disposed: boolean;
+  };
+  return {
+    ...facade.modules,
+    context: facade.context,
+    active: facade.active,
+    cezarPort: facade.cezarPort,
+    get disposed() { return facade.disposed; },
+  };
 }
