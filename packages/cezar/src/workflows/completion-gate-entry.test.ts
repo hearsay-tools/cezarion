@@ -47,6 +47,50 @@ describe('the completion gate outside a turn end', () => {
   });
   afterEach(() => { clearIdleTimer(state); manager.dispose(); store.close(); rmSync(root, { recursive: true, force: true }); });
 
+  describe('the real root gate', () => {
+    beforeEach(() => {
+      vi.mocked(manager['completionGate']).mockRestore();
+      store.commitDelegation([{ id, delegation: { role: 'root', permissions: ['wait'], receipts: [] } }]);
+    });
+
+    it.each(['done', 'review', 'failed', 'cancelled'] as const)('holds a stopped root at %s without reopening it', status => {
+      store.updateRun(id, { status });
+      const queue = vi.spyOn(runInternals(manager).turnNudges, 'queueCompletionRefusal');
+      expect(manager['completionGate'](id)).toBe('held');
+      expect(store.getRun(id)?.status).toBe(status);
+      expect(queue).not.toHaveBeenCalled();
+    });
+
+    it('retires a legacy Finish intent before refusing a live session', () => {
+      store.commitDelegation([{ id, delegation: { role: 'root', permissions: ['wait'], receipts: [], finishRequestedAt: new Date().toISOString() } }]);
+      vi.spyOn(manager, 'parentCompletionBlockers' as never).mockReturnValue([{ workerId, reason: 'outstanding' }] as never);
+      expect(manager['completionGate'](id)).toMatchObject({ code: 'workers_outstanding' });
+      expect(store.getRun(id)?.delegation).not.toHaveProperty('finishRequestedAt');
+    });
+
+    it('queues a refusal for a closed session', () => {
+      session.open = false;
+      vi.spyOn(manager, 'parentCompletionBlockers' as never).mockReturnValue([{ workerId, reason: 'outstanding' }] as never);
+      const queue = vi.spyOn(runInternals(manager).turnNudges, 'queueCompletionRefusal').mockImplementation(() => true);
+      expect(manager['completionGate'](id)).toBe('held');
+      expect(queue).toHaveBeenCalledWith(id, expect.objectContaining({ code: 'workers_outstanding' }));
+    });
+
+    it('parks a root with a human question and releases its slot after the step waits', () => {
+      state.pendingHumanAsk = true;
+      state.idleTimer = setTimeout(() => {}, 60_000);
+      const release = vi.spyOn(runInternals(manager).line, 'releaseSlot').mockImplementation(() => {
+        expect(store.getRun(id)?.status).toBe('waiting');
+        expect(store.getRun(id)?.steps[0]?.status).toBe('waiting');
+        expect(state.idleTimer).toBeUndefined();
+        expect(runInternals(manager).line.waiting.has(id)).toBe(true);
+      });
+      expect(manager['completionGate'](id)).toBe('held');
+      expect(release).toHaveBeenCalledOnce();
+      expect(store.readEvents(id)).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'note', message: 'Completion blocked: answer the pending human question.' })]));
+    });
+  });
+
   const queueInput = () => store.commitAgentInputs(id, [{ id: randomUUID(), source: 'agent', parentRunId: randomUUID(), text: 'Read this first', createdAt: new Date().toISOString() }]);
   const openWorkerWait = () => store.commitWait(id, { kind: 'worker', id: randomUUID(), source: 'agent', via: 'cezar_wait', registeredAt: new Date().toISOString(),
     deadline: new Date(Date.now() + 60_000).toISOString(), timeoutSeconds: 60, phase: 'open', turnId: 'turn', mode: 'all',
