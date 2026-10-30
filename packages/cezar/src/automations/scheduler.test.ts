@@ -1345,3 +1345,33 @@ describe('scheduler dependency failures', () => {
     expect(store.state(definition.id)?.lastSuccessAt).toBeUndefined();
   });
 });
+
+it('an explicit preview without a launcher does not reschedule execution', async () => {
+  const { store, definition } = await setup();
+  const state = { cursor: { timestamp: candidate.timestamp, tieBreaker: 'saved' },
+    nextCheckAt: '2026-07-27T00:00:00.000Z', consecutiveFailures: 2 };
+  store.setState(definition.id, () => state);
+  const scheduler = schedulerFixture(store, emptyPoll, { launch: undefined });
+  await scheduler.check(definition, 'preview');
+  expect(store.state(definition.id)).toEqual(state);
+  expect(store.receipts()).toEqual([]);
+  expect(store.logs({ automationId: definition.id })[0]).toMatchObject({ result: 'preview' });
+});
+
+it('PR events are not collapsed onto issue receipts', async () => {
+  const { store, definition } = await setup();
+  const issueReceipt = store.reserveReceipt({ automationId: definition.id, revision: definition.revision,
+    eventId: candidate.eventId, candidate })!;
+  const pullRequest: GithubCandidate = { ...candidate, event: 'pull_request.opened', eventId: 'pr-opened' };
+  const launch = vi.fn(async () => ({ runId: 'pr-run' }));
+  await schedulerFixture(store, async options => {
+    expect(options.accept!(pullRequest)).toBe(true);
+    return { candidates: [pullRequest], truncated: false, pages: 1 };
+  }, { launch }).check(definition);
+  expect(launch).toHaveBeenCalledTimes(1);
+  expect([...store.latestReceipts().values()]).toEqual([
+    issueReceipt,
+    expect.objectContaining({ status: 'launched', runId: 'pr-run', eventId: pullRequest.eventId, candidate: pullRequest }),
+  ]);
+  expect(store.logs({ automationId: definition.id }).filter(row => row.result === 'duplicate')).toEqual([]);
+});
