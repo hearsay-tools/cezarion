@@ -1,12 +1,33 @@
 package tools.hearsay.cezarion;
 
+import android.content.SharedPreferences;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
-/** File and name rules for removing site data. No Android types, so JVM tests cover them. */
+/** Rules for removing site data. Only Android interfaces, so JVM tests cover them. */
 public final class SiteDataReset {
+    static final String WIPE_WEBVIEW = "wipeWebView", NOTICE = "notice";
     private SiteDataReset() {}
+
+    /**
+     * Writes a connection change, the wipe request and the notice in one commit, so a process
+     * death can never keep the change without the wipe. False when nothing was written.
+     */
+    public static boolean recordWipe(SharedPreferences prefs, Consumer<SharedPreferences.Editor> change, String notice) {
+        SharedPreferences.Editor editor = prefs.edit();
+        change.accept(editor);
+        return editor.putBoolean(WIPE_WEBVIEW, true).putString(NOTICE, notice).commit();
+    }
+
+    /** At app start, before any WebView exists: deletes the WebView files when a reset asked for it. */
+    public static boolean wipeIfRequested(SharedPreferences prefs, File dataDir, File cacheDir) {
+        if (!prefs.getBoolean(WIPE_WEBVIEW, false)) return false;
+        wipeWebViewFiles(dataDir, cacheDir);
+        prefs.edit().remove(WIPE_WEBVIEW).commit();
+        return true;
+    }
 
     /** Profiles to delete at app start: every one except the default and the current one. */
     public static List<String> unusedProfiles(List<String> names, String keep, String defaultName) {

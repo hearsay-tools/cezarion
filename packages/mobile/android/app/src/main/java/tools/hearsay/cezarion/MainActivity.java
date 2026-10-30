@@ -17,9 +17,13 @@ import android.webkit.*;
 import android.widget.*;
 import androidx.webkit.WebStorageCompat;
 import androidx.webkit.WebViewFeature;
+import java.util.function.Consumer;
 
 public final class MainActivity extends Activity {
     private static final String CLEARED = "Connection and sign-in cleared.";
+    // Test seams: LauncherTest forces the restart path and records the restart instead of exiting.
+    public static Boolean inProcessResetOverride = null;
+    public static Consumer<Activity> restart = MainActivity::restartProcess;
     private static final int NAVY = Color.rgb(11, 16, 28), AMBER = Color.rgb(255, 186, 56);
     private SharedPreferences prefs;
     private LinearLayout root;
@@ -96,13 +100,13 @@ public final class MainActivity extends Activity {
             .setTitle("Forget this connection?").setMessage("This clears the saved address, cookies, and website data from this app.")
             .setNegativeButton("Cancel", null).setPositiveButton("Forget", (dialog, which) -> {
                 busy(true);
-                clearSession(() -> prefs.edit().remove("endpoint").remove("auth").apply(),
+                clearSession(editor -> editor.remove("endpoint").remove("auth"),
                     () -> { showLauncher(); status.setText(CLEARED); }, CLEARED);
             }).show()); form.addView(forget);
         Connection saved = saved();
         if (saved != null) { endpoint.setText(saved.endpoint); auth.setText(saved.signInOrigin); }
-        String notice = prefs.getString(CezarionApp.NOTICE, null);
-        if (notice != null) { status.setText(notice); prefs.edit().remove(CezarionApp.NOTICE).apply(); }
+        String notice = prefs.getString(SiteDataReset.NOTICE, null);
+        if (notice != null) { status.setText(notice); prefs.edit().remove(SiteDataReset.NOTICE).apply(); }
     }
 
     private void busy(boolean value) { connect.setEnabled(!value); forget.setEnabled(!value); }
@@ -110,10 +114,10 @@ public final class MainActivity extends Activity {
         try {
             Connection selected = new Connection(endpoint.getText().toString(), auth.getText().toString());
             ((android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(endpoint.getWindowToken(), 0);
-            Runnable save = () -> prefs.edit().putString("endpoint", selected.endpoint).putString("auth", selected.signInOrigin).apply();
+            Consumer<SharedPreferences.Editor> save = editor -> editor.putString("endpoint", selected.endpoint).putString("auth", selected.signInOrigin);
             if (!selected.equals(saved())) {
                 busy(true); clearSession(save, () -> openCockpit(selected), "Browser data cleared. Tap Connect to open the new connection.");
-            } else { save.run(); openCockpit(selected); }
+            } else { SharedPreferences.Editor editor = prefs.edit(); save.accept(editor); editor.apply(); openCockpit(selected); }
         } catch (IllegalArgumentException error) { status.setText(error.getMessage()); }
     }
 
@@ -121,15 +125,19 @@ public final class MainActivity extends Activity {
     // With profiles (BrowserProfile) or DELETE_BROWSING_DATA this happens in process. Otherwise the
     // calls below leave service workers and Cache Storage, so the app restarts and CezarionApp
     // deletes the WebView files before any WebView exists; the launcher then shows the notice.
-    private void clearSession(Runnable save, Runnable show, String restartNotice) {
+    private void clearSession(Consumer<SharedPreferences.Editor> change, Runnable show, String restartNotice) {
         disposeWeb();
-        boolean inProcess = BrowserProfile.resetsInProcess();
+        boolean inProcess = inProcessResetOverride != null ? inProcessResetOverride : BrowserProfile.resetsInProcess();
         Runnable finish = () -> {
-            BrowserProfile.rotate(prefs); save.run();
-            if (inProcess) { show.run(); return; }
-            prefs.edit().putBoolean(CezarionApp.WIPE_WEBVIEW, true).putString(CezarionApp.NOTICE, restartNotice).commit();
-            startActivity(Intent.makeRestartActivityTask(new android.content.ComponentName(this, MainActivity.class)));
-            Runtime.getRuntime().exit(0);
+            if (inProcess) {
+                BrowserProfile.rotate(prefs);
+                SharedPreferences.Editor editor = prefs.edit(); change.accept(editor); editor.apply();
+                show.run(); return;
+            }
+            if (!SiteDataReset.recordWipe(prefs, change, restartNotice)) {
+                busy(false); status.setText("Could not save the change, so nothing was cleared. Try again."); return;
+            }
+            restart.accept(this);
         };
         CookieManager jar = BrowserProfile.cookies(prefs);
         WebStorage storage = BrowserProfile.storage(prefs);
@@ -139,6 +147,11 @@ public final class MainActivity extends Activity {
         WebView cleaner = new WebView(this); BrowserProfile.use(cleaner, prefs); cleaner.clearCache(true); cleaner.clearHistory();
         storage.deleteAllData();
         jar.removeAllCookies(removed -> { jar.flush(); cleaner.destroy(); finish.run(); });
+    }
+
+    private static void restartProcess(Activity activity) {
+        activity.startActivity(Intent.makeRestartActivityTask(new android.content.ComponentName(activity, MainActivity.class)));
+        Runtime.getRuntime().exit(0);
     }
 
     private void openCockpit(Connection selected) {

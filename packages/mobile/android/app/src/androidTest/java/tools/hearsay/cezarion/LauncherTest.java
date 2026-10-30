@@ -24,6 +24,7 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.webkit.Profile;
 import androidx.webkit.ProfileStore;
 import androidx.webkit.WebViewFeature;
+import org.junit.After;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import java.util.concurrent.CountDownLatch;
@@ -40,6 +41,16 @@ import static org.junit.Assume.assumeTrue;
 
 @RunWith(AndroidJUnit4.class)
 public class LauncherTest {
+    private static final java.util.function.Consumer<android.app.Activity> RESTART = MainActivity.restart;
+    @After public void restoreResetSeams() { MainActivity.inProcessResetOverride = null; MainActivity.restart = RESTART; }
+
+    // Forces the restart path and records the restart instead of ending the process.
+    private static CountDownLatch forceRestartPath() {
+        CountDownLatch restarted = new CountDownLatch(1);
+        MainActivity.inProcessResetOverride = false;
+        MainActivity.restart = activity -> restarted.countDown();
+        return restarted;
+    }
     // The most recently added WebView: a probe when one is open, else the cockpit.
     private static WebView findWeb(View view) {
         if (view instanceof WebView web) return web;
@@ -270,5 +281,37 @@ public class LauncherTest {
             serveSiteData(activity);
             assertEquals("\"0 workers, 0 caches\"", promise(activity, COUNT));
         }
+    }
+
+    @Test public void manifestRunsCezarionAppBeforeAnyActivity() {
+        assertTrue(InstrumentationRegistry.getInstrumentation().getTargetContext().getApplicationContext() instanceof CezarionApp);
+    }
+
+    @Test public void forgetWithoutInProcessResetCommitsTheWipeAndRestarts() throws Exception {
+        var prefs = InstrumentationRegistry.getInstrumentation().getTargetContext().getSharedPreferences("connection", 0);
+        prefs.edit().putString("endpoint", "https://example.com").putString("auth", "").commit();
+        CountDownLatch restarted = forceRestartPath();
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            onView(withText("Forget connection & sign out")).perform(scrollTo(), click());
+            onView(withText("Forget")).perform(click());
+            assertTrue(restarted.await(10, TimeUnit.SECONDS));
+            assertFalse(prefs.contains("endpoint"));
+            assertTrue(prefs.getBoolean("wipeWebView", false));
+            assertEquals("Connection and sign-in cleared.", prefs.getString("notice", null));
+        } finally { prefs.edit().remove("wipeWebView").remove("notice").commit(); }
+    }
+
+    @Test public void trustedPairChangeWithoutInProcessResetCommitsTheWipeAndRestarts() throws Exception {
+        var prefs = InstrumentationRegistry.getInstrumentation().getTargetContext().getSharedPreferences("connection", 0);
+        prefs.edit().putString("endpoint", "https://127.0.0.1:65534").putString("auth", "").commit();
+        CountDownLatch restarted = forceRestartPath();
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            onView(withContentDescription("Trusted sign-in origin")).perform(replaceText("https://auth.example.com"), closeSoftKeyboard());
+            onView(withText("Connect")).perform(scrollTo(), click());
+            assertTrue(restarted.await(10, TimeUnit.SECONDS));
+            assertEquals("https://auth.example.com", prefs.getString("auth", null));
+            assertTrue(prefs.getBoolean("wipeWebView", false));
+            activity.onActivity(app -> assertNull("No cockpit opens before the restart", findWeb(app.findViewById(android.R.id.content))));
+        } finally { prefs.edit().remove("wipeWebView").remove("notice").commit(); }
     }
 }
