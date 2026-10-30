@@ -1,7 +1,9 @@
+import { randomUUID } from 'node:crypto';
+import type { HumanWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import { hasLiveInboxClaim } from '../../delegation/input.ts';
 import { transition, type RunExitId } from '../run-states.ts';
-import { holdsOwedResults, openWaits } from '../waits.ts';
+import { holdsOwedResults, isCezarHumanWait, openWaits } from '../waits.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
 import type { WorkerScratchCleanup } from '../../delegation/scratch-cleanup.ts';
 import type { HumanWaits } from './human-waits.ts';
@@ -32,7 +34,6 @@ interface RunRecoveryHost {
   settleOrphanedWorkerExecution(id: string): boolean; settleRequestedRootFinish(id: string): Promise<void>;
   settleSuccess(id: string): Promise<void>; reconcileWorkerWaits(family?: string): void;
   pump(): Promise<void>; recover(family?: string): Promise<void>;
-  adoptTranscriptAsk(id: string): boolean; settleAnsweredLegacyAsk(id: string): boolean;
 }
 
 export class RunRecovery {
@@ -245,6 +246,42 @@ export class RunRecovery {
     return parent.status === 'review' || Boolean(parent.delegation.finishRequestedAt);
   }
 
+  /** An unanswered `ask.requested` with no open human wait (a row written before every ask opened
+   *  one) gets an open agent wait shown as that ask. Answer delivery still reads the transcript.
+   *  Cezar's own wait not shown as that ask is replaced, as the live ask does: a crash between
+   *  saving the ask and replacing it leaves that wait open (review of #1437). */
+  private adoptTranscriptAsk(runId: string): boolean {
+    const askSeq = pendingHumanAskSeq(this.context.store, runId);
+    const human = openWaits(this.context.store.getRun(runId) ?? {}).filter((wait): wait is HumanWaitEntry => wait.kind === 'human');
+    if (askSeq === undefined || !this.context.store.getRun(runId) || human.some(wait => !isCezarHumanWait(wait) || wait.askSeq === askSeq)) return false;
+    this.host.humanWaits.withdrawCezarHumanWaits(runId);
+    if (openWaits(this.context.store.getRun(runId) ?? {}).some(wait => wait.kind === 'human')) return false;
+    try {
+      this.context.store.commitWait(runId, { id: randomUUID(), kind: 'human', source: 'agent', via: 'ask-line', registeredAt: new Date().toISOString(), phase: 'open', turnId: 'recovered', askSeq });
+      return true;
+    } catch (error) {
+      console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
+  }
+
+  /** The human wait upgraded from a stored `hasPendingHumanAsk` (`turnId: 'legacy'`, never shown)
+   *  is settled as answered when the transcript's facts are known and hold no unanswered ask: that
+   *  flag was read from the transcript, so its ask was answered after the row was last saved.
+   *  Unknown facts are no evidence, and the wait stays open. */
+  private settleAnsweredLegacyAsk(runId: string): boolean {
+    const legacy = this.context.store.getRun(runId)?.waits?.filter(wait => wait.kind === 'human' && wait.phase === 'open' && wait.turnId === 'legacy' && wait.askSeq === undefined) ?? [];
+    // Only facts read from a non-empty transcript are evidence of the answer (review of #1437).
+    const facts = this.context.store.knownTranscriptFacts(runId);
+    if (!legacy.length || !facts || facts.bytes === 0 || facts.pendingGateSeq !== undefined) return false;
+    try {
+      return this.context.store.commitOutcome(runId, { kind: 'answered', waitIds: legacy.map(wait => wait.id) }).answered.length > 0;
+    } catch (error) {
+      console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
+  }
+
   /** The run as recovery reads it after it reconciles the run's question state. */
   private reconcileRecoveredAsk(found: RunRecord): RunRecord {
     let run = found;
@@ -253,10 +290,10 @@ export class RunRecovery {
     if (run.delegation?.role === 'worker' && run.status === 'waiting' && this.workerQuestions.supersedeWorkerFallback(run.id)) run = this.context.store.getRun(run.id)!;
     // Phase 4b (hearsay-tools/cezarion#1236): attention reads the human wait, so an unanswered ask
     // an older cezar left without one gets one now, attached to that ask.
-    if (this.host.adoptTranscriptAsk(run.id)) run = this.context.store.getRun(run.id)!;
+    if (this.adoptTranscriptAsk(run.id)) run = this.context.store.getRun(run.id)!;
     // A stored pending-question flag can be stale: the answer's receipt reached the transcript and
     // the row's save did not. The wait read from it is answered (review of #1437).
-    if (this.host.settleAnsweredLegacyAsk(run.id)) run = this.context.store.getRun(run.id)!;
+    if (this.settleAnsweredLegacyAsk(run.id)) run = this.context.store.getRun(run.id)!;
     return run;
   }
 
