@@ -1,3 +1,4 @@
+import { RunCancel } from './run/run-cancel.ts';
 import { IDLE_TIMEOUT_MS, ROUTED_QUESTION_REFUSAL, UNREAD_INPUT_GRACE_MS, NO_WAIT_NUDGE_REPLY_MS, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, SCHEDULE_WAKEUP_MAX_SECONDS, MAX_WAKE_DELIVERY_ATTEMPTS, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WAITS_DISCARDED_NOTE, REFUSAL_DISCARDED_NOTE, QUEUE_WATCHDOG_MS, RESTART_CONTINUATION_PROMPT } from './run/constants.ts';
 export { IDLE_TIMEOUT_MS, UNREAD_INPUT_GRACE_MS, NO_WAIT_NUDGE_REPLY_MS, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WAITS_DISCARDED_NOTE, REFUSAL_DISCARDED_NOTE, QUEUE_WATCHDOG_MS } from './run/constants.ts';
 import { isSyntheticContinuation } from './run/workflow-position.ts';
@@ -46,7 +47,7 @@ export type { TurnTail, DelegationExecutionSettings, StartRunInput, WorkerTermin
 import { repairFailedRootFinish, startCompletionCycle, settledRootFinishPatch } from './completion-policy.ts';
 import type { ContinueRunOptions } from './continuation-admission.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
-import { type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
+import { type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitVia, type WorkerWaitEntry, computeWaitingOn, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
@@ -71,7 +72,7 @@ import { clearUnreadInputTimer, clearHeldHumanInputTimer, clearIdleTimer, clearA
 import * as stepDecisions from './run/step-decisions.ts';
 import * as pendingAskFacts from './run/pending-ask-facts.ts';
 import * as workflowPosition from './run/workflow-position.ts';
-import { RUN_EXITS, transition, transitionVia, type RunExitId } from './run-states.ts';
+import { RUN_EXITS, transition, type RunExitId } from './run-states.ts';
 import { deriveAccountHolds } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
 import { holdsOwedResults, isCezarHumanWait, openWaits, resolvedWaits } from './waits.ts';
@@ -177,6 +178,7 @@ export class RunManager {
   private readonly turnNudges: TurnNudges;
   private readonly runSettlement: RunSettlement;
   private readonly runFinish: RunFinish;
+  private readonly runCancel: RunCancel;
   private readonly waitRegistry: WaitRegistry;
   private readonly waitWatches: WaitWatches;
   private readonly familyReconciler: FamilyReconciler;
@@ -203,12 +205,7 @@ export class RunManager {
   settleOrphanedWorkerExecution(runId: string, opts: { admitting?: boolean; fresh?: boolean; cwds?: CwdSource } = {}): boolean { return this.orphans.settleOrphanedWorkerExecution(runId, opts); }
   takeWorkerTerminationBlocker(runId: string): { blocker: WorkerTerminationBlocker; changed: boolean } | undefined { return this.orphans.takeWorkerTerminationBlocker(runId); }
 
-  requestWorkerStop(runId: string): WorkerStopResult {
-    if (this.store.getRun(runId)?.delegation?.role !== 'worker') throw new Error('Worker not found');
-    if (!this.workerExecutions.has(runId) && !this.isActive(runId) && ['done', 'failed', 'cancelled', 'review'].includes(this.store.getRun(runId)!.status) && this.store.readWorkerExecution(runId)?.phase === 'complete') return { workerId: runId, state: 'terminated' };
-    this.cancel(runId);
-    return { workerId: runId, state: !this.workerExecutions.has(runId) && this.store.readWorkerExecution(runId)?.phase === 'complete' ? 'terminated' : 'stopping' };
-  }
+  requestWorkerStop(runId: string): WorkerStopResult { return this.runCancel.requestWorkerStop(runId); }
 
   async awaitRunTermination(runId: string, timeoutMs: number, opts: { reapOrphans?: boolean } = {}): Promise<boolean> {
     const terminated = await this.workerExecutions.proveRunTermination(runId, timeoutMs, opts);
@@ -592,6 +589,12 @@ export class RunManager {
       cancelOpenWaits: id => this.wakeAdmission.cancelOpenWaits(id), reconcileWorkerWaits: id => this.reconcileWorkerWaits(id),
       executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run), hasUnansweredHumanAsk: id => this.hasUnansweredHumanAsk(id),
     });
+    this.runCancel = new RunCancel(this.context, this.line, this.workerExecutions, this.wakeAdmission, this.turnNudges, {
+      active: this.active, cancel: id => this.cancel(id), isActive: id => this.isActive(id),
+      cancelAutoResume: id => this.cancelAutoResume(id), rootFinishRequested: id => this.rootFinishRequested(id),
+      historyDeletionPending: id => this.historyDeletionPending(id), disarmWait: id => this.disarmWait(id),
+      move: (id, exit, patch) => this.move(id, exit, patch),
+    });
     this.inputDelivery = new InputDelivery(this.context, {
       active: this.active, line: this.line, workerExecutions: this.workerExecutions, runSkills: this.runSkills,
       attachments: this.attachments, humanWaits: this.humanWaits, workerQuestions: this.workerQuestions,
@@ -961,79 +964,15 @@ export class RunManager {
   private readonly turnBookkeeper: TurnBookkeeper;
   /** Test seam: the module owns this same map for its whole lifetime. */
 
-  cancel(runId: string): boolean {
-    // Another process's run (#779, plan step 3): only its owner can stop it.
-    if (this.store.writeRefusal(runId)) return false;
-    this.cancelWorkerExecution(runId);
-    const hadWaits = !!this.store.getRun(runId)?.waits?.length;
-    this.wakeAdmission.cancelOpenWaits(runId);
-    const retiredRefusal = this.turnNudges.retireCompletionRefusal(runId);
-    const cancelledFinish = transitionVia('cancel', () => this.store.getRun(runId), () => this.store.commitRootFinishCancellation(runId));
-    // Still waiting in the queue: just drop it there.
-    const queuedAt = this.line.indexOf(runId);
-    if (queuedAt >= 0) {
-      this.cancelQueuedRun(runId, queuedAt);
-      return true;
-    }
-    const state = this.active.get(runId);
-    if (!state) return this.cancelRunWithoutSession(runId, hadWaits, retiredRefusal, cancelledFinish);
-    this.cancelActiveRun(runId, state);
-    return true;
-  }
+  cancel(runId: string): boolean { return this.runCancel.cancel(runId); }
 
-  private cancelActiveRun(runId: string, state: ActiveRun): void {
-    state.cancelled = true;
-    this.store.updateRun(runId, { stopping: true });
-    this.store.flush();
-    state.revokeCiTools?.(); state.revokeCiTools = undefined;
-    state.revokeDelegation?.(); state.revokeDelegation = undefined;
-    clearIdleTimer(state);
-    state.interrupt();
-  }
 
-  private cancelWorkerExecution(runId: string): void {
-    if (this.store.getRun(runId)?.delegation?.role === 'worker') {
-      const proof = this.store.readWorkerExecution(runId);
-      transitionVia('stop-worker', () => this.store.getRun(runId), () => this.store.commitWorkerCancellation(runId));
-      this.workerExecutions.markStopped(runId);
-      if (!this.workerExecutions.has(runId) && !this.active.has(runId) && !this.line.hasStarting(runId) && proof?.phase === 'queued') {
-        this.store.commitWorkerExecutionComplete(runId, proof.generation);
-      }
-    }
-  }
 
-  private cancelQueuedRun(runId: string, queuedAt: number): void {
-    this.line.takeAt(queuedAt);
-    this.line.takePending(runId);
-    this.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
-    this.store.appendEvent(runId, { type: 'lifecycle', message: 'cancelled while queued' });
-    this.store.flush();
-    if (this.workerExecutions.admitted(runId) === false) void this.workerExecutions.finishWorkerExecution(runId);
-  }
 
-  private cancelRunWithoutSession(runId: string, hadWaits: boolean, retiredRefusal: boolean, cancelledFinish: boolean): boolean {
-    if (this.line.hasStarting(runId)) {
-      this.store.updateRun(runId, { stopping: true });
-      this.store.flush();
-      return true;
-    }
-    if (cancelledFinish) return true;
-    const run = this.store.getRun(runId);
-    // Stop on a failed run that held wait results discards them, and the automatic resume that
-    // would start a session on it later; the run stays failed. A usage-limit hold is that failed
-    // run waiting for its resume (hearsay-tools/cezarion#1236), and settles failed the same way.
-    if ((hadWaits || retiredRefusal) && (run?.status === 'failed' || isUsageLimitHold(run ?? {}))) {
-      this.store.appendEvent(runId, { type: 'note', message: hadWaits ? WAITS_DISCARDED_NOTE : REFUSAL_DISCARDED_NOTE });
-      this.cancelAutoResume(runId);
-      this.store.flush();
-      return true;
-    }
-    if (run && (run.delegation || hadWaits) && ['queued', 'running', 'waiting'].includes(run.status)) {
-      this.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
-      return true;
-    }
-    return false;
-  }
+
+
+
+
 
   isActive(runId: string): boolean {
     return this.workerExecutions.has(runId) || this.active.has(runId) || this.line.hasStarting(runId) || this.line.hasQueued(runId);
@@ -1099,24 +1038,7 @@ export class RunManager {
    * nothing. A resolved wait is owed: it is returned as its `wake-pending` receipt and arrives with
    * the next wake. A settled one returns its receipt; an unknown id is `incompatible_state`.
    */
-  cancelWorkerWait(parentId: string, waitId: string): WorkerWait {
-    const run = this.store.getRun(parentId);
-    if (!run?.delegation || run.delegation.role === 'invalid') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
-    const entry = run.waits?.find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === waitId && wait.kind === 'worker' && hasWorkerDeadline(wait));
-    if (!entry) {
-      const settled = run.lastWaits?.filter((wait): wait is DeadlinedWorkerWaitEntry => wait.id === waitId && wait.kind === 'worker' && hasWorkerDeadline(wait)).at(-1);
-      if (settled) return workerWaitEntryToLegacy(settled);
-      throw new DelegationPolicyError('incompatible_state', 'Worker wait is no longer current');
-    }
-    if (entry.phase !== 'open') return workerWaitEntryToLegacy(entry);
-    if (this.disposed || !['queued', 'running', 'waiting'].includes(run.status) || this.rootFinishRequested(parentId) || this.historyDeletionPending(parentId)) {
-      throw new DelegationPolicyError('incompatible_state', 'Parent cannot cancel a worker wait');
-    }
-    this.store.commitOutcome(parentId, { kind: 'cancelled', waitIds: [waitId] });
-    this.disarmWait(waitId);
-    const cancelled = this.store.getRun(parentId)?.lastWaits?.filter((wait): wait is DeadlinedWorkerWaitEntry => wait.id === waitId && wait.kind === 'worker' && hasWorkerDeadline(wait)).at(-1);
-    return workerWaitEntryToLegacy(cancelled ?? { ...entry, phase: 'cancelled', cancelledAt: new Date().toISOString() });
-  }
+  cancelWorkerWait(parentId: string, waitId: string): WorkerWait { return this.runCancel.cancelWorkerWait(parentId, waitId); }
 
   private rootFinishRequested(runId: string): boolean {
     return rootFinishRequested(this.store, runId);
