@@ -425,6 +425,18 @@ and delegators, plus `terminateFinishedWorkerGroups`, `holdForMaintenance`,
 completion-gate and run-guards have no instance. Public controls and `dropActive` keep their
 facade seams. No expected outcome changes.
 
+Phase 5 launch seams (hearsay-tools/cezarion#2236): `handleRunnerUiEvent` and `makeUiSink`
+call `session-events.ts` with the shared context and helper host; usage calls use
+`usage-accounting.ts`. `discoverSkills` spies use `runInternals(manager).runSkills`,
+as do `loadRunSkills` and `enabledSkills`. Autosave calls and blocker reads use
+`.worktreeAutosave`; `clearAutosaveTimer` uses `input-timers.ts`. Worktree setup and
+held requeue use `.stepLoop`, and root acquisition uses `.repoRootLease`.
+`WorktreeAutosave.saveWorktree` stays async so dropped calls keep their rejection
+behavior. Preview callbacks call `preview/run-tools.ts` directly. `agentEnvForStep`,
+`agentEnv`, `execute`, `runContinuation`, `continueRun`, `workerStep`, the host
+builders and public `cezarToolHandlers` stay on the facade; its cleanup blocker
+becomes private.
+
 ## Facade surface
 
 Shipped code calls these 48 members from outside `run.ts`; Phase 5 may narrow their types but

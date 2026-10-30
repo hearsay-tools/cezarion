@@ -48,9 +48,9 @@ describe('launch disposal routes', { timeout: 30_000 }, () => {
     let entered!: () => void, release!: () => void;
     const saving = new Promise<void>(resolve => { entered = resolve; });
     const gate = new Promise<void>(resolve => { release = resolve; });
-    const manager = f.manager as unknown as { saveWorktree(...args: unknown[]): Promise<void> };
+    const manager = runInternals(f.manager).worktreeAutosave;
     const save = manager.saveWorktree.bind(manager);
-    vi.spyOn(manager, 'saveWorktree').mockImplementation(async (...args) => {
+    const saveSpy = vi.spyOn(manager, 'saveWorktree').mockImplementation(async (...args) => {
       if (args[2] === 'run finalize') { entered(); await gate; }
       await save(...args);
     });
@@ -60,6 +60,7 @@ describe('launch disposal routes', { timeout: 30_000 }, () => {
       f.manager.dispose();
     } finally { release(); }
     await fixtureWorkSettled(f.root);
+    expect(saveSpy).toHaveBeenCalled();
     const record = f.store.getRun(run.id)!;
     expect(record.status).toBe('running');
     expect(record.steps.map(step => step.status)).toEqual(['done']);

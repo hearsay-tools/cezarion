@@ -1,3 +1,6 @@
+import { runInternals } from './run-internals.testkit.ts';
+import { createActiveRun } from './active-run.ts';
+import type { WorktreeAutosave } from './run/worktree-autosave.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile, execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -5,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createWorktree, type AutosaveReason } from '../git-worktree.ts';
+import { createWorktree } from '../git-worktree.ts';
 import { handoffPath, readHandoff, seedHandoffFile } from '../handoff.ts';
 import { RunStore } from '../runs/store.ts';
 
@@ -13,11 +16,6 @@ const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 // The fixture reads Git directly, so a test's PATH shim reaches only the save.
 const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
-
-/** The slice of ActiveRun that saveWorktree reads. */
-interface SaveSeam {
-  saveWorktree(runId: string, state: { cwd: string }, reason: AutosaveReason): Promise<void>;
-}
 
 /**
  * hearsay-tools/cezarion#1004: a resumed session reads the handoff, not
@@ -33,7 +31,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
   let repoRoot: string;
   let dataDir: string;
   let store: RunStore;
-  let manager: SaveSeam;
+  let manager: WorktreeAutosave;
   let runId: string;
   let worktreePath: string;
   let branch: string;
@@ -71,7 +69,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     dataDir = join(repoRoot, '.ai/cezar');
     store = RunStore.open(dataDir);
-    manager = createFixtureManager(store, repoRoot) as unknown as SaveSeam;
+    manager = runInternals(createFixtureManager(store, repoRoot)).worktreeAutosave;
     runId = store.createRun({ title: 't', workflow: 'quick-task', task: 't', steps: [] }).id;
     const wt = await createWorktree(repoRoot, runId, 'main');
     worktreePath = wt.path;
@@ -93,7 +91,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
   it('reports a turn-end commit on the task branch with its sha and the fold-back command', async () => {
     writeFileSync(join(worktreePath, 'work.txt'), 'progress\n');
 
-    await manager.saveWorktree(runId, { cwd: worktreePath }, 'turn end');
+    await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'turn end');
 
     const sha = await out(['rev-parse', '--short', 'HEAD']);
     expect(await out(['log', '-1', '--format=%s'])).toBe('cezar autosave (turn end)');
@@ -114,7 +112,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     vi.stubEnv('PATH', `${bin}:${process.env.PATH}`);
     writeFileSync(join(worktreePath, 'work.txt'), 'progress\n');
 
-    await manager.saveWorktree(runId, { cwd: worktreePath }, 'turn end');
+    await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'turn end');
 
     expect(await out(['log', '-1', '--format=%s'])).toBe('cezar autosave (turn end)');
     const message = `turn end: cezar autosave committed on ${branch} (sha unavailable); to fold it into your own commits while it is HEAD, run \`git reset --soft HEAD~1\``;
@@ -127,7 +125,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     const tip = await out(['rev-parse', 'HEAD']);
     writeFileSync(join(worktreePath, 'work.txt'), 'progress\n');
 
-    await manager.saveWorktree(runId, { cwd: worktreePath }, 'run finalize');
+    await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'run finalize');
 
     expect(await out(['rev-parse', 'HEAD'])).toBe(tip);
     expect((await git(['status', '--porcelain'])).stdout).toBe('?? work.txt\n');
@@ -140,7 +138,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     await git(['checkout', '-q', '--detach']);
     writeFileSync(join(worktreePath, 'work.txt'), 'progress\n');
 
-    await manager.saveWorktree(runId, { cwd: worktreePath }, 'turn end');
+    await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'turn end');
 
     const message = `turn end: 1 changed path(s) left uncommitted on detached HEAD; cezar does not autosave on a branch other than the task branch ${branch}`;
     expectReported(message);
@@ -159,11 +157,11 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
   // work, the closing flush found a clean tree, and nothing told a resumed session.
   it('reports a periodic commit that leaves the closing turn-end flush nothing to save', async () => {
     writeFileSync(join(worktreePath, 'work.txt'), 'progress\n');
-    await manager.saveWorktree(runId, { cwd: worktreePath }, 'periodic');
+    await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'periodic');
     expect(await out(['log', '-1', '--format=%s'])).toBe('cezar autosave (periodic)');
     const sha = await out(['rev-parse', '--short', 'HEAD']);
 
-    await manager.saveWorktree(runId, { cwd: worktreePath }, 'turn end');
+    await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'turn end');
 
     expect(await out(['rev-parse', '--short', 'HEAD'])).toBe(sha);
     expectReported(periodicLine(1, sha, sha));
@@ -175,10 +173,10 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
 
   it('coalesces consecutive periodic commits into one line', async () => {
     writeFileSync(join(worktreePath, 'one.txt'), 'progress\n');
-    await manager.saveWorktree(runId, { cwd: worktreePath }, 'periodic');
+    await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'periodic');
     const first = await out(['rev-parse', '--short', 'HEAD']);
     writeFileSync(join(worktreePath, 'two.txt'), 'progress\n');
-    await manager.saveWorktree(runId, { cwd: worktreePath }, 'periodic');
+    await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'periodic');
     const latest = await out(['rev-parse', '--short', 'HEAD']);
     expect(latest).not.toBe(first);
 
@@ -189,13 +187,13 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
 
   it('starts a new periodic line after a turn-end report', async () => {
     writeFileSync(join(worktreePath, 'one.txt'), 'progress\n');
-    await manager.saveWorktree(runId, { cwd: worktreePath }, 'periodic');
+    await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'periodic');
     const one = await out(['rev-parse', '--short', 'HEAD']);
     writeFileSync(join(worktreePath, 'two.txt'), 'progress\n');
-    await manager.saveWorktree(runId, { cwd: worktreePath }, 'turn end');
+    await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'turn end');
     const two = await out(['rev-parse', '--short', 'HEAD']);
     writeFileSync(join(worktreePath, 'three.txt'), 'progress\n');
-    await manager.saveWorktree(runId, { cwd: worktreePath }, 'periodic');
+    await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'periodic');
     const three = await out(['rev-parse', '--short', 'HEAD']);
 
     const lines = autosaveLines();
@@ -212,11 +210,11 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
   // rewrite without the section lost them, and an edited periodic line restarted the count.
   it('keeps a report when the agent rewrites the handoff without it', async () => {
     writeFileSync(join(worktreePath, 'one.txt'), 'progress\n');
-    await manager.saveWorktree(runId, { cwd: worktreePath }, 'turn end');
+    await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'turn end');
     const one = await out(['rev-parse', '--short', 'HEAD']);
     editHandoff(() => '# My own handoff\n\n## Progress log\n\n- 10:00 — rewrote it\n');
     writeFileSync(join(worktreePath, 'two.txt'), 'progress\n');
-    await manager.saveWorktree(runId, { cwd: worktreePath }, 'turn end');
+    await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'turn end');
     const two = await out(['rev-parse', '--short', 'HEAD']);
 
     const text = readHandoff(dataDir, runId);
@@ -227,11 +225,11 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
 
   it('counts on after the agent edits the periodic line', async () => {
     writeFileSync(join(worktreePath, 'one.txt'), 'progress\n');
-    await manager.saveWorktree(runId, { cwd: worktreePath }, 'periodic');
+    await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'periodic');
     const first = await out(['rev-parse', '--short', 'HEAD']);
     editHandoff(text => text.replace(/^(- \S+ — periodic: .*)$/m, '$1 (seen)'));
     writeFileSync(join(worktreePath, 'two.txt'), 'progress\n');
-    await manager.saveWorktree(runId, { cwd: worktreePath }, 'periodic');
+    await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'periodic');
     const latest = await out(['rev-parse', '--short', 'HEAD']);
 
     expect(readHandoff(dataDir, runId)).toContain(periodicLine(2, first, latest));
@@ -239,7 +237,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
 
   it('reports a periodic commit only in the handoff, and a periodic skip nowhere', async () => {
     writeFileSync(join(worktreePath, 'work.txt'), 'progress\n');
-    await manager.saveWorktree(runId, { cwd: worktreePath }, 'periodic');
+    await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'periodic');
     expect(await out(['log', '-1', '--format=%s'])).toBe('cezar autosave (periodic)');
     const sha = await out(['rev-parse', '--short', 'HEAD']);
     expect(autosaveLines()).toEqual([expect.stringContaining(periodicLine(1, sha, sha))]);
@@ -247,7 +245,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
 
     await git(['checkout', '-q', '-b', 'fix/1004-x']);
     writeFileSync(join(worktreePath, 'more.txt'), 'progress\n');
-    await manager.saveWorktree(runId, { cwd: worktreePath }, 'periodic');
+    await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'periodic');
     // Same rule as the closing flushes: nothing lands on the agent's branch. The skip
     // stays silent: the closing flush reports it with the final path count.
     expect((await git(['status', '--porcelain'])).stdout).toBe('?? more.txt\n');
@@ -267,7 +265,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     const tip = await out(['rev-parse', branch]);
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    await manager.saveWorktree(runId, { cwd: worktreePath }, 'turn end');
+    await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'turn end');
 
     expect(await out(['rev-parse', branch])).toBe(tip);
     expect(notes()).toContain(`turn end autosave refused: unresolved conflicts or an unfinished merge, cherry-pick or revert; working files remain in ${worktreePath}`);
@@ -276,7 +274,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
   it('writes nothing when there is nothing to save', async () => {
     const before = readHandoff(dataDir, runId);
 
-    await manager.saveWorktree(runId, { cwd: worktreePath }, 'turn end');
+    await manager.saveWorktree(runId, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'turn end');
 
     expect(readHandoff(dataDir, runId)).toBe(before);
     expect(notes()).toEqual([]);
@@ -289,7 +287,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     await git(['checkout', '-q', '-b', 'fix/1004-x']);
     writeFileSync(join(worktreePath, 'work.txt'), 'progress\n');
 
-    await manager.saveWorktree(legacy, { cwd: worktreePath }, 'run finalize');
+    await manager.saveWorktree(legacy, createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }), 'run finalize');
 
     expect(await out(['log', '-1', '--format=%s', 'fix/1004-x'])).toBe('cezar autosave (run finalize)');
     const sha = await out(['rev-parse', '--short', 'HEAD']);

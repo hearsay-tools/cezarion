@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 /**
  * #790 review follow-ups: Continue must revalidate after skill materialize,
  * wait briefly for the team-skill cache, keep extra-only worker inheritance,
@@ -19,7 +20,6 @@ import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { workerWorkflowHash } from '../delegation/execution-identity.ts';
 import { RunStore } from '../runs/store.ts';
-import * as skills from '../skills.ts';
 import type { Skill } from '../skills.ts';
 import * as skillsRemote from '../skills-remote.ts';
 import { seedTeamSkillsClone, writeSkillsReposConfig } from '../skills-remote.testkit.ts';
@@ -121,6 +121,8 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     await drainFixtureManagers(repoRoot);
     manager.dispose();
     store.flush();
+    const discover = runInternals(manager).runSkills.discoverSkills;
+    if (vi.isMockFunction(discover)) expect(discover).toHaveBeenCalled();
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
     rmSync(repoRoot, { recursive: true, force: true });
@@ -161,7 +163,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
 
   it('Stop during materializeSkillDir never launches the continued session', async () => {
     const skill = teamDirSkill();
-    vi.spyOn(skills, 'discoverSkills').mockResolvedValue([skill]);
+    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockResolvedValue([skill]);
     let release!: (written: string[]) => void;
     const held = new Promise<string[]>((resolve) => { release = resolve; });
     const materialize = vi.spyOn(skillsRemote, 'materializeSkillDir').mockReturnValue(held);
@@ -181,7 +183,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
 
   it('Stop during materializeSkillToCache never launches a continued session without a worktree (#1024)', async () => {
     const skill = teamDirSkill();
-    vi.spyOn(skills, 'discoverSkills').mockResolvedValue([skill]);
+    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockResolvedValue([skill]);
     let release!: (dir: string | null) => void;
     const held = new Promise<string | null>((resolve) => { release = resolve; });
     const materialize = vi.spyOn(skillsRemote, 'materializeSkillToCache').mockReturnValue(held);
@@ -201,7 +203,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
   });
 
   it('bounds the team-skill wait when the continued skill is missing', async () => {
-    vi.spyOn(skills, 'discoverSkills').mockResolvedValue([]);
+    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockResolvedValue([]);
     const wait = vi.spyOn(skillsRemote, 'waitForTeamSkills').mockReturnValue(new Promise(() => {}));
     const id = terminalSkillRun(TEAM_SKILL);
     const started = Date.now();
@@ -218,7 +220,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
 
   it('re-discovers a team skill that arrives during the bounded wait', async () => {
     const skill = teamDirSkill();
-    const discover = vi.spyOn(skills, 'discoverSkills');
+    const discover = vi.spyOn(runInternals(manager).runSkills, 'discoverSkills');
     discover.mockResolvedValueOnce([]);
     discover.mockResolvedValue([skill]);
     vi.spyOn(skillsRemote, 'waitForTeamSkills').mockResolvedValue([skill]);
@@ -289,7 +291,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
 
   it('Continue of a team directory skill rematerializes without a note', async () => {
     const skill = teamDirSkill();
-    vi.spyOn(skills, 'discoverSkills').mockResolvedValue([skill]);
+    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockResolvedValue([skill]);
     // Provisioning stages the copies in the worktree's git dir, then places them (hearsay-tools/cezarion#1814).
     const materialize = vi.spyOn(skillsRemote, 'materializeSkillDir').mockImplementation(async (root) => {
       for (const dir of writtenSkillDirs(root)) {
@@ -315,7 +317,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
   it('Continue without a worktree names the cache copy of a team directory skill, without a note (#1024)', async () => {
     const skill = teamDirSkill();
     const filesDir = '/cache/skill-files/org__skills/abc/team-playbook';
-    vi.spyOn(skills, 'discoverSkills').mockResolvedValue([skill]);
+    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockResolvedValue([skill]);
     const intoCheckout = vi.spyOn(skillsRemote, 'materializeSkillDir');
     const toCache = vi.spyOn(skillsRemote, 'materializeSkillToCache').mockResolvedValue(filesDir);
     const id = terminalSkillRun(TEAM_SKILL);

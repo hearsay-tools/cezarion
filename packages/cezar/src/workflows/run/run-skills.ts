@@ -4,7 +4,7 @@ import { relative } from 'node:path';
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import type { ContentBlock } from '../../core/agent-runner.ts';
 import { enqueueAgentInput } from '../../delegation/input.ts';
-import { filterDisabledTeamSkills, readDisabledTeamSkills, type Skill } from '../../skills.ts';
+import { discoverSkills, filterDisabledTeamSkills, readDisabledTeamSkills, type Skill } from '../../skills.ts';
 import { getTeamSkillsCached, materializeSkillToCache, TEAM_SKILL_AGENT_DIRS } from '../../skills-remote.ts';
 import { MAX_SKILL_CLOSURE, namesSkillCommand, provisionSkills } from '../../skills-provision.ts';
 import { readProjectUiState, readProjectUiStateSync } from '../../ui-state.ts';
@@ -13,7 +13,7 @@ import { leadingSlashSkillName } from './prompts.ts';
 import type { RunModuleContext } from './types.ts';
 
 interface RunSkillsHost {
-  discoverSkills(): Promise<Skill[]>;
+  builtinSkills(): Skill[];
   workerExecutionStopped(runId: string): boolean;
   isCurrentState(runId: string, state: ActiveRun): boolean;
   flushAgentInputs(runId: string): void;
@@ -21,6 +21,11 @@ interface RunSkillsHost {
 
 export class RunSkills {
   constructor(private readonly context: RunModuleContext, private readonly host: RunSkillsHost) {}
+
+  /** Every skill lookup in this manager goes through here, so the built-ins reach all of them. */
+  discoverSkills(): Promise<Skill[]> {
+    return discoverSkills(this.context.repoRoot, { builtin: this.host.builtinSkills() });
+  }
 
   /**
    * Load the run's skill registry: the ONLY writer of `state.skills` (hearsay-tools/cezarion#1806).
@@ -32,7 +37,7 @@ export class RunSkills {
   async loadRunSkills(state: ActiveRun, onFailure: 'throw' | 'ignore'): Promise<void> {
     // Only a rejected discovery is a failure to ignore; a synchronous throw escaped the old
     // `.catch` too, and still fails the caller.
-    const discovery = this.host.discoverSkills();
+    const discovery = this.discoverSkills();
     try {
       state.skills = await discovery;
     } catch (error) {

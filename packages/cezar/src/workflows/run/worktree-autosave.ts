@@ -53,7 +53,7 @@ export class WorktreeAutosave {
    *  note; a periodic save records only a commit, with no note, merged with the
    *  periodic commits right before it. A run with no recorded branch keeps committing on
    *  whatever HEAD is. */
-  saveWorktree(runId: string, state: ActiveRun, reason: AutosaveReason): Promise<void> {
+  async saveWorktree(runId: string, state: ActiveRun, reason: AutosaveReason): Promise<void> {
     return this.context.work.track('saveWorktree', this.saveWorktreeWork(runId, state, reason));
   }
 

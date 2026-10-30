@@ -1,3 +1,7 @@
+import { clearAutosaveTimer } from './run/input-timers.ts';
+import { runInternals } from './run-internals.testkit.ts';
+import { createActiveRun } from './active-run.ts';
+import type { WorktreeAutosave } from './run/worktree-autosave.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -12,19 +16,6 @@ import { AUTOSAVE_INTERVAL_MS, periodicAutosaveEnabled } from './run.ts';
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 
-/** The slice of ActiveRun that armAutosave/clearAutosaveTimer read and write. */
-interface TimerState {
-  cancelled: boolean;
-  interrupt: () => void;
-  cwd: string;
-  autosaveTimer?: NodeJS.Timeout;
-}
-
-interface TimerSeam {
-  armAutosave(runId: string, state: TimerState): void;
-  clearAutosaveTimer(state: TimerState): void;
-}
-
 /**
  * The periodic autosave timer is opt-in via CEZ_AUTOSAVE=1 (#471). armAutosave is
  * driven directly (the recordTurnEnd precedent) because a live agent session is the
@@ -34,7 +25,7 @@ interface TimerSeam {
 describe('periodic autosave gate (#471)', () => {
   let repoRoot: string;
   let store: RunStore;
-  let manager: TimerSeam;
+  let manager: WorktreeAutosave;
   let worktreePath: string;
   let runId: string;
   const savedEnv = process.env.CEZ_AUTOSAVE;
@@ -48,7 +39,7 @@ describe('periodic autosave gate (#471)', () => {
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    manager = createFixtureManager(store, repoRoot) as unknown as TimerSeam;
+    manager = runInternals(createFixtureManager(store, repoRoot)).worktreeAutosave;
     const record = store.createRun({ title: 't', workflow: 'quick-task', task: 't', steps: [] });
     runId = record.id;
     worktreePath = (await createWorktree(repoRoot, record.id, 'main')).path;
@@ -76,21 +67,21 @@ describe('periodic autosave gate (#471)', () => {
 
   it('does not arm the timer when the env is off (default)', () => {
     delete process.env.CEZ_AUTOSAVE;
-    const state: TimerState = { cancelled: false, interrupt: () => undefined, cwd: worktreePath };
+    const state = createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false });
     manager.armAutosave(runId, state);
     expect(state.autosaveTimer).toBeUndefined();
   });
 
   it('arms the timer when CEZ_AUTOSAVE=1, but never for a repo-root run', () => {
     process.env.CEZ_AUTOSAVE = '1';
-    const state: TimerState = { cancelled: false, interrupt: () => undefined, cwd: worktreePath };
+    const state = createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false });
     manager.armAutosave(runId, state);
     expect(state.autosaveTimer).toBeDefined();
     manager.armAutosave(runId, state); // idempotent — the second call must not double-arm
-    manager.clearAutosaveTimer(state);
+    clearAutosaveTimer(state);
     expect(state.autosaveTimer).toBeUndefined();
 
-    const rootState: TimerState = { cancelled: false, interrupt: () => undefined, cwd: repoRoot };
+    const rootState = createActiveRun({ cwd: repoRoot, pendingHumanAsk: false, autonomous: false });
     manager.armAutosave(runId, rootState);
     expect(rootState.autosaveTimer).toBeUndefined();
   });
@@ -103,7 +94,7 @@ describe('periodic autosave gate (#471)', () => {
     delete process.env.CEZ_AUTOSAVE;
     writeFileSync(join(worktreePath, 'work.txt'), 'progress\n');
     expect(await autosaveCommit(worktreePath, 'turn end')).toBe('committed');
-    const { stdout } = await run('git', ['log', '-1', '--format=%s'], { cwd: worktreePath });
+    const { stdout } = await run('git', ['log', '-1', '--format=%s'], createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }));
     // Keeps the `cezar autosave` prefix so existing log greps still match, and
     // names the reason so an opted-out user can tell this flush apart from the
     // periodic timer they disabled (#471 follow-up).
@@ -115,7 +106,7 @@ describe('periodic autosave gate (#471)', () => {
     for (const reason of ['periodic', 'turn end', 'run finalize', 'pre-PR'] as const) {
       writeFileSync(join(worktreePath, 'work.txt'), `progress ${reason}\n`);
       expect(await autosaveCommit(worktreePath, reason)).toBe('committed');
-      const { stdout } = await run('git', ['log', '-1', '--format=%s'], { cwd: worktreePath });
+      const { stdout } = await run('git', ['log', '-1', '--format=%s'], createActiveRun({ cwd: worktreePath, pendingHumanAsk: false, autonomous: false }));
       expect(stdout.trim()).toBe(`cezar autosave (${reason})`);
     }
   });

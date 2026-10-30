@@ -1,3 +1,7 @@
+import { handleRunnerUiEvent, makeUiSink } from './run/session-events.ts';
+import { beginUsageInvocation } from './run/usage-accounting.ts';
+import { createActiveRun } from './active-run.ts';
+import { UiEventSink } from '../runs/ui-event-sink.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
@@ -43,16 +47,6 @@ vi.mock('../core/runner-factory.ts', async (importOriginal) => {
     createRunner: (...args: Parameters<typeof actual.createRunner>) => runnerHook.runner ?? actual.createRunner(...args),
   };
 });
-
-type UsageAccountingHarness = {
-  beginUsageInvocation(runId: string, state: Record<string, unknown>, stepId: string): void;
-  handleRunnerUiEvent(
-    runId: string,
-    state: Record<string, unknown>,
-    sink: { handle(event: UiEvent): void },
-    event: UiEvent,
-  ): void;
-};
 
 // Naming has its own suite; no background LLM call may outlive these fixtures. The mocks answer
 // Cezar's no-wait nudge in plain text (hearsay-tools/cezarion#1234), so a turn end with no wait
@@ -123,7 +117,6 @@ describe('RunManager directional usage accounting', () => {
   let repoRoot: string;
   let store: RunStore;
   let manager: RunManager;
-  let internal: UsageAccountingHarness;
 
   beforeEach(() => {
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-usage-accounting-'));
@@ -131,7 +124,6 @@ describe('RunManager directional usage accounting', () => {
     manager = createFixtureManager(store, repoRoot, {
       semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }),
     });
-    internal = manager as unknown as UsageAccountingHarness;
   });
 
   afterEach(async () => {
@@ -149,27 +141,27 @@ describe('RunManager directional usage accounting', () => {
       steps: [{ id: 'work', name: 'Work', kind: 'agent' }],
     });
     store.updateStep(run.id, 'work', { iterations: 1, status: 'running' });
-    const state: Record<string, unknown> = { cancelled: false, interrupt: () => undefined, cwd: repoRoot };
-    const sink = { handle: (_event: UiEvent) => undefined };
+    const state = createActiveRun({ cwd: repoRoot, pendingHumanAsk: false, autonomous: false });
+    const sink = new UiEventSink({ persist: () => undefined, emitLive: () => undefined });
     return { run, state, sink };
   }
 
   it('deduplicates starts and completions while summing multiple turns in one invocation', () => {
     const { run, state, sink } = fixture();
-    internal.beginUsageInvocation(run.id, state, 'work');
+    beginUsageInvocation(runInternals(manager).context.store, run.id, state, 'work');
     const started: UiEvent = { type: 'turn.started', turnId: 'turn_1' };
-    internal.handleRunnerUiEvent(run.id, state, sink, started);
-    internal.handleRunnerUiEvent(run.id, state, sink, started);
+    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, started);
+    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, started);
     const completed: UiEvent = {
       type: 'turn.completed',
       turnId: 'turn_1',
       stopReason: 'end_turn',
       usage: { input: 10, output: 2, total: 12 },
     };
-    internal.handleRunnerUiEvent(run.id, state, sink, completed);
-    internal.handleRunnerUiEvent(run.id, state, sink, completed);
-    internal.handleRunnerUiEvent(run.id, state, sink, { type: 'turn.started', turnId: 'turn_2' });
-    internal.handleRunnerUiEvent(run.id, state, sink, {
+    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, completed);
+    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, completed);
+    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, { type: 'turn.started', turnId: 'turn_2' });
+    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, {
       type: 'turn.completed',
       turnId: 'turn_2',
       stopReason: 'end_turn',
@@ -189,11 +181,11 @@ describe('RunManager directional usage accounting', () => {
 
   it('keeps the run aggregate absent after a pre-turn failure even when a later invocation is metered', () => {
     const { run, state, sink } = fixture();
-    internal.beginUsageInvocation(run.id, state, 'work');
+    beginUsageInvocation(runInternals(manager).context.store, run.id, state, 'work');
     // The first startSession attempt fails before emitting turn.started.
-    internal.beginUsageInvocation(run.id, state, 'work');
-    internal.handleRunnerUiEvent(run.id, state, sink, { type: 'turn.started', turnId: 'turn_1' });
-    internal.handleRunnerUiEvent(run.id, state, sink, {
+    beginUsageInvocation(runInternals(manager).context.store, run.id, state, 'work');
+    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, { type: 'turn.started', turnId: 'turn_1' });
+    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, {
       type: 'turn.completed',
       turnId: 'turn_1',
       stopReason: 'end_turn',
@@ -216,20 +208,19 @@ describe('RunManager directional usage accounting', () => {
     const { run, state } = fixture();
     store.flush();
 
-    internal.beginUsageInvocation(run.id, state, 'work');
+    beginUsageInvocation(runInternals(manager).context.store, run.id, state, 'work');
     expect(RunStore.open(join(repoRoot, '.ai/cezar')).getRun(run.id)?.steps[0]).toMatchObject({
       usageInvocationsStarted: 1,
     });
 
     const persistedAtSink: StepState[] = [];
-    const sink = {
-      handle: (_event: UiEvent) => {
+    const sink = new UiEventSink({ persist: () => undefined, emitLive: () => undefined });
+    vi.spyOn(sink, 'handle').mockImplementation((_event: UiEvent) => {
         const persisted = RunStore.open(join(repoRoot, '.ai/cezar')).getRun(run.id)?.steps[0];
         if (persisted) persistedAtSink.push(persisted);
-      },
-    };
-    internal.handleRunnerUiEvent(run.id, state, sink, { type: 'turn.started', turnId: 'turn_1' });
-    internal.handleRunnerUiEvent(run.id, state, sink, {
+    });
+    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, { type: 'turn.started', turnId: 'turn_1' });
+    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, {
       type: 'turn.completed',
       turnId: 'turn_1',
       stopReason: 'end_turn',
@@ -249,15 +240,15 @@ describe('RunManager directional usage accounting', () => {
 
   it('tracks an unmetered turn without recording it and ignores a completion that never started', () => {
     const { run, state, sink } = fixture();
-    internal.beginUsageInvocation(run.id, state, 'work');
-    internal.handleRunnerUiEvent(run.id, state, sink, {
+    beginUsageInvocation(runInternals(manager).context.store, run.id, state, 'work');
+    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, {
       type: 'turn.completed',
       turnId: 'ghost',
       stopReason: 'end_turn',
       usage: { input: 99, output: 9, total: 108 },
     });
-    internal.handleRunnerUiEvent(run.id, state, sink, { type: 'turn.started', turnId: 'turn_1' });
-    internal.handleRunnerUiEvent(run.id, state, sink, {
+    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, { type: 'turn.started', turnId: 'turn_1' });
+    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, run.id, state, sink, {
       type: 'turn.completed',
       turnId: 'turn_1',
       stopReason: 'end_turn',
@@ -1444,23 +1435,14 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
 
-    const internals = manager as unknown as {
-      active: Map<string, Record<string, unknown>>;
-      makeUiSink(runId: string, stepId: string): { handle(event: UiEvent): void };
-      handleRunnerUiEvent(
-        runId: string,
-        state: Record<string, unknown>,
-        sink: { handle(event: UiEvent): void },
-        event: UiEvent,
-      ): void;
-    };
+    const internals = runInternals(manager);
     const state = internals.active.get(record.id);
     if (!state) throw new Error('active run state missing');
     const wakeTimer = monitoringTimerOf(manager, record.id);
-    internals.handleRunnerUiEvent(
+    handleRunnerUiEvent(internals.context, internals.sessionHelperHost, 
       record.id,
       state,
-      internals.makeUiSink(record.id, 'task'),
+      makeUiSink(internals.context, internals.sessionHelperHost, record.id, 'task'),
       { type: 'session.error', message: 'late non-fatal diagnostic', fatal: false },
     );
 
@@ -1491,22 +1473,13 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
 
-    const internals = manager as unknown as {
-      active: Map<string, Record<string, unknown>>;
-      makeUiSink(runId: string, stepId: string): { handle(event: UiEvent): void };
-      handleRunnerUiEvent(
-        runId: string,
-        state: Record<string, unknown>,
-        sink: { handle(event: UiEvent): void },
-        event: UiEvent,
-      ): void;
-    };
+    const internals = runInternals(manager);
     const state = internals.active.get(record.id);
     if (!state) throw new Error('active run state missing');
     const wakeTimer = monitoringTimerOf(manager, record.id);
     const deadline = monitoringWakeOf(store.getRun(record.id));
-    const sink = internals.makeUiSink(record.id, 'task');
-    const inject = (event: UiEvent) => internals.handleRunnerUiEvent(record.id, state, sink, event);
+    const sink = makeUiSink(internals.context, internals.sessionHelperHost, record.id, 'task');
+    const inject = (event: UiEvent) => handleRunnerUiEvent(internals.context, internals.sessionHelperHost, record.id, state, sink, event);
 
     inject({
       type: 'item.completed',
@@ -1574,22 +1547,13 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
 
-    const internals = manager as unknown as {
-      active: Map<string, Record<string, unknown>>;
-      makeUiSink(runId: string, stepId: string): { handle(event: UiEvent): void };
-      handleRunnerUiEvent(
-        runId: string,
-        state: Record<string, unknown>,
-        sink: { handle(event: UiEvent): void },
-        event: UiEvent,
-      ): void;
-    };
+    const internals = runInternals(manager);
     const state = internals.active.get(record.id);
     if (!state) throw new Error('active run state missing');
-    internals.handleRunnerUiEvent(
+    handleRunnerUiEvent(internals.context, internals.sessionHelperHost, 
       record.id,
       state,
-      internals.makeUiSink(record.id, 'task'),
+      makeUiSink(internals.context, internals.sessionHelperHost, record.id, 'task'),
       { type: 'turn.started', turnId: 'turn_parent_resume' },
     );
 
@@ -1812,9 +1776,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
       deadline: new Set(['claude:default']),
       inFlight: new Set(),
     });
-    const held = (manager as unknown as {
-      requeueWhileHeld(id: string, definition: WorkflowDef, input: { task: string }, runner: 'claude', state: undefined, startAt: number): boolean;
-    }).requeueWhileHeld(record.id, workflow, { task: record.task }, 'claude', undefined, 1);
+    const held = runInternals(manager).stepLoop.requeueWhileHeld(record.id, workflow, { task: record.task }, 'claude', undefined, 1);
 
     expect(held).toBe(true);
     expect(store.getRun(record.id)).toMatchObject({ status: 'queued', startedAt });

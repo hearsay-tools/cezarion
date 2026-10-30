@@ -122,15 +122,16 @@ it.each(['root', 'continuation'] as const)('keeps the repo until a real %s sessi
   expect(track.mock.calls.some(([label]) => label === 'session')).toBe(true);
   // Delay the real final autosave at its filesystem boundary, after the real
   // session has been interrupted. Removal must not race this closing write.
-  const engine = manager as unknown as { saveWorktree(...args: unknown[]): Promise<void> };
-  const save = engine.saveWorktree.bind(manager);
+  const engine = runInternals(manager).worktreeAutosave;
+  const save = engine.saveWorktree.bind(engine);
   let release!: () => void;
   let entered!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   const saving = new Promise<void>(resolve => { entered = resolve; });
-  engine.saveWorktree = async (...args) => { entered(); await gate; writeFileSync(join(root, 'late'), 'final write'); await save(...args); };
+  const saveSpy = vi.spyOn(engine, 'saveWorktree').mockImplementation(async (...args) => { entered(); await gate; writeFileSync(join(root, 'late'), 'final write'); await save(...args); });
   manager.cancel(id);
   await saving;
+  expect(saveSpy).toHaveBeenCalled();
   const removing = removeFixtureRepo(root);
   try {
     await new Promise(resolve => setImmediate(resolve));
