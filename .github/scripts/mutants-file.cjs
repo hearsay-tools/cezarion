@@ -177,17 +177,20 @@ function summary(result) {
   for (const guard of result.guards) lines.push(`Guard ${guard.name}: ${guard.found ? `${guard.survivors.length} undetected` : 'NOT FOUND'}`);
   for (const target of result.targets) lines.push(`${target.pass ? 'PASS' : 'FAIL'}: ${target.name}`);
   lines.push(`Equivalent mutants excluded: ${result.equivalentCount}`, `Stale equivalent entries: ${JSON.stringify(result.staleEquivalent)}`);
+  if (result.consumers) lines.push(result.consumers.state === 'failed' ? `FAIL: consumer tests: failed — ${result.consumers.reason}` : `PASS: consumer tests: merged (${result.consumers.tests.length} files)`);
   if (result.warning) lines.push(result.warning);
   if (result.comparison) lines.push(`Change: ${JSON.stringify(result.comparison)}`);
   return lines.join('\n');
 }
 
-async function strykerReport(deps, cwd, opts, project, extraArgs, signal) {
+async function strykerReport(deps, cwd, opts, project, extraArgs, signal, onOutput) {
   deps.removeReport(cwd);
-  const result = await deps.stryker(project, [opts.file], 24 * 60 * 60_000, { cwd, extraArgs: ['--concurrency', String(opts.concurrency), ...extraArgs], signal });
+  const result = await deps.stryker(project, [opts.file], 24 * 60 * 60_000, { cwd, extraArgs: ['--concurrency', String(opts.concurrency), ...extraArgs], signal, onOutput });
   signal.throwIfAborted();
   if (result.outcome !== 'exited' || result.code !== 0) throw new Error(`Stryker failed: ${result.outcome}, exit ${result.code}`);
-  return deps.readReport(cwd);
+  const report = deps.readReport(cwd);
+  if (!report) throw new Error('Stryker wrote no report');
+  return report;
 }
 
 /** One committed snapshot, always removed after the active command has stopped. */
@@ -202,10 +205,12 @@ async function runMeasurement(opts, deps, signal = new AbortController().signal)
     await deps.command('npm', ['run', 'build:server'], cwd, signal);
     signal.throwIfAborted();
     const ranges = deps.ranges(opts.file, cwd);
-    let report = await strykerReport(deps, cwd, opts, opts.file.split('/')[1], [], signal);
-    if (opts.file.startsWith('packages/contract/')) report = await runConsumers(opts, deps, cwd, report, signal);
+    const first = await strykerReport(deps, cwd, opts, opts.file.split('/')[1], [], signal);
+    const consumer = opts.file.startsWith('packages/contract/')
+      ? await runConsumers(opts, deps, cwd, first, signal) : { report: first };
+    const { report, consumers } = consumer;
     const equivalent = readEquivalent(path.join(cwd, EQUIVALENT_FILE), { readFileSync: deps.read });
-    const result = { ...measure(report, opts.file, head, ranges, TARGETS, equivalent.entries), warning: equivalent.warning };
+    const result = { ...measure(report, opts.file, head, ranges, TARGETS, equivalent.entries), warning: equivalent.warning, ...(consumers ? { consumers } : {}) };
     if (opts.compare) result.comparison = compareResults(deps.readJson(opts.compare), result);
     if (opts.out) deps.write(opts.out, `${JSON.stringify(result, null, 2)}\n`);
     deps.log(summary(result));
@@ -223,13 +228,27 @@ async function runMeasurement(opts, deps, signal = new AbortController().signal)
 async function runConsumers(opts, deps, cwd, first, signal) {
   const files = deps.git(['ls-files'], cwd).trim().split('\n');
   const tests = consumerTests(opts.file, files, file => deps.read(path.join(cwd, file)), opts.tests);
-  if (tests.length === 0) return first;
+  if (tests.length === 0) return { report: first };
   deps.write(path.join(cwd, 'vitest.mutants-consumers.config.ts'), consumerConfig(tests));
   const config = deps.readJson(path.join(cwd, 'stryker.config.json'));
   const scratchConfig = { ...config, vitest: { ...config.vitest, configFile: 'vitest.mutants-consumers.config.ts' } };
   deps.write(path.join(cwd, 'stryker.mutants-consumers.config.json'), `${JSON.stringify(scratchConfig, null, 2)}\n`);
-  const second = await strykerReport(deps, cwd, opts, 'contract', ['stryker.mutants-consumers.config.json'], signal);
-  return mergeReports(first, second, opts.file);
+  let output = '';
+  try {
+    const second = await strykerReport(deps, cwd, opts, 'contract', ['stryker.mutants-consumers.config.json'], signal, chunk => { output = (output + chunk).slice(-1024 * 1024); });
+    return { report: mergeReports(first, second, opts.file), consumers: { state: 'merged', tests } };
+  } catch (error) {
+    signal.throwIfAborted();
+    return { report: first, consumers: { state: 'failed', reason: consumerFailure(output, error), tests } };
+  }
+}
+
+/** Keep Stryker's failing test names, without mistaking indented assertion text for names. */
+function consumerFailure(output, error) {
+  const marker = 'One or more tests failed in the initial test run:';
+  const tail = output.slice(output.indexOf(marker) + marker.length);
+  const names = output.includes(marker) ? tail.split('\n').filter(line => /^\t[^\t\s]/.test(line)).map(line => line.trim()) : [];
+  return names.length ? `${error.message}: ${names.join('; ')}` : error.message;
 }
 
 function defaultDeps() {
@@ -262,8 +281,8 @@ async function cli(argv, deps = defaultDeps(), events = process) {
   events.on('SIGINT', interrupt);
   events.on('SIGTERM', terminate);
   try {
-    await runMeasurement(opts, deps, controller.signal);
-    return exitCode;
+    const result = await runMeasurement(opts, deps, controller.signal);
+    return exitCode || (result.consumers?.state === 'failed' ? 2 : 0);
   } catch (error) {
     if (exitCode) return exitCode;
     throw error;
@@ -273,5 +292,5 @@ async function cli(argv, deps = defaultDeps(), events = process) {
   }
 }
 
-module.exports = { classText, kindOf, namedRanges, functionRanges, functionOf, tierOf, countsOf, scoreOf, evaluate, compareResults, parseArgs, importsModule, consumerTests, consumerConfig, mergeReports, measure, summary, strykerReport, runMeasurement, runConsumers, defaultDeps, cli };
+module.exports = { classText, kindOf, namedRanges, functionRanges, functionOf, tierOf, countsOf, scoreOf, evaluate, compareResults, parseArgs, importsModule, consumerTests, consumerConfig, mergeReports, measure, summary, strykerReport, runMeasurement, runConsumers, consumerFailure, defaultDeps, cli };
 if (require.main === module) cli(process.argv.slice(2)).then(code => { process.exitCode = code; }, error => { console.error(error.message); process.exitCode = 1; });

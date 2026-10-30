@@ -348,3 +348,60 @@ test('comparison and equivalent stale checks preserve exact source text, includi
   assert.equal(result.equivalentCount, 0);
   assert.deepEqual(result.staleEquivalent, [spaced]);
 });
+
+test('failed consumer pass writes own-package result and failing names, prints FAIL, exits 2', async () => {
+  const { deps, calls } = fakeDeps();
+  let runs = 0;
+  deps.stryker = async (project, mutate, ms, options) => {
+    if (++runs === 1) return { outcome: 'exited', code: 0 };
+    options.onOutput('One or more tests failed in the initial test run:\n\tSuite fails one\n\t\texpected undefined to be +0\n\tSuite fails two\n');
+    return { outcome: 'exited', code: 1 };
+  };
+  const code = await m.cli(['packages/contract/src/sample.ts', '--out', '/tmp/partial.json'], deps, new EventEmitter());
+  assert.equal(code, 2);
+  const result = JSON.parse(calls.find(c => c[0] === 'write' && c[1] === '/tmp/partial.json')[2]);
+  assert.equal(result.counts.survived, 1);
+  assert.equal(result.consumers.state, 'failed');
+  assert.deepEqual(result.consumers.tests, ['packages/cezar/src/sample.test.ts']);
+  assert.match(result.consumers.reason, /Suite fails one; Suite fails two/);
+  assert.doesNotMatch(result.consumers.reason, /expected undefined/);
+  assert.match(calls.find(c => c[0] === 'log')[1], /FAIL: consumer tests: failed/);
+  assert.equal(calls.at(-2)[2], 'prune');
+});
+
+test('missing consumer report keeps own-package result and records the exit or read reason', async () => {
+  const { deps } = fakeDeps();
+  let reads = 0;
+  deps.readReport = () => ++reads === 1 ? report('packages/contract/src/sample.ts') : null;
+  const result = await m.runMeasurement(m.parseArgs(['packages/contract/src/sample.ts']), deps);
+  assert.equal(result.consumers.state, 'failed');
+  assert.match(result.consumers.reason, /no report/);
+  assert.equal(result.rawCounts.survived, 1);
+  assert.equal(m.consumerFailure('unrelated output', new Error('exit 1')), 'exit 1');
+});
+
+test('successful consumer pass records selected test paths and CLI exits zero', async () => {
+  const { deps, calls } = fakeDeps();
+  assert.equal(await m.cli(['packages/contract/src/sample.ts', '--out', '/tmp/merged.json'], deps, new EventEmitter()), 0);
+  const result = JSON.parse(calls.find(c => c[0] === 'write' && c[1] === '/tmp/merged.json')[2]);
+  assert.deepEqual(result.consumers, { state: 'merged', tests: ['packages/cezar/src/sample.test.ts'] });
+  assert.match(m.summary(result), /PASS: consumer tests: merged/);
+});
+
+test('captured Stryker output is delivered before its close result', async () => {
+  const { runStryker } = require('./mutants-run.cjs');
+  const child = new EventEmitter();
+  child.pid = 123;
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  let captured = '';
+  await runStryker('contract', ['file.ts'], 1000, {
+    onOutput: chunk => { captured += chunk; }, kill: () => {},
+    spawn: (bin, argv, options) => {
+      assert.deepEqual(options.stdio, ['inherit', 'pipe', 'pipe']);
+      queueMicrotask(() => { child.emit('exit', 1); child.stdout.emit('data', Buffer.from('late output\n')); child.emit('close', 1); });
+      return child;
+    },
+  });
+  assert.equal(captured, 'late output\n');
+});

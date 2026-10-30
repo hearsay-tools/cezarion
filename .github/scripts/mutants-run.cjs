@@ -124,8 +124,12 @@ async function main(argv, env, deps) {
 function runStryker(name, mutate, ms, options = {}) {
   return new Promise(resolve => {
     const child = (options.spawn ?? spawn)(STRYKER, ['run', '--mutate', mutate.join(','), ...(options.extraArgs ?? [])], {
-      cwd: options.cwd, detached: true, stdio: 'inherit', env: { ...process.env, STRYKER_PROJECT: name },
+      cwd: options.cwd, detached: true, stdio: options.onOutput ? ['inherit', 'pipe', 'pipe'] : 'inherit', env: { ...process.env, STRYKER_PROJECT: name },
     });
+    if (options.onOutput) {
+      child.stdout.on('data', chunk => { process.stdout.write(chunk); options.onOutput(String(chunk)); });
+      child.stderr.on('data', chunk => { process.stderr.write(chunk); options.onOutput(String(chunk)); });
+    }
     let timedOut = false;
     const stop = signal => { try { (options.kill ?? process.kill)(-child.pid, signal); } catch { /* the group is already gone */ } };
     const timer = setTimeout(() => {
@@ -137,7 +141,9 @@ function runStryker(name, mutate, ms, options = {}) {
     options.signal?.addEventListener('abort', abort, { once: true });
     if (options.signal?.aborted) abort();
     const clear = () => { clearTimeout(timer); options.signal?.removeEventListener('abort', abort); };
-    child.on('exit', code => { clear(); stop('SIGKILL'); resolve({ outcome: timedOut ? 'timed-out' : 'exited', code }); });
+    const result = code => ({ outcome: timedOut ? 'timed-out' : 'exited', code });
+    child.on('exit', code => { clear(); stop('SIGKILL'); if (!options.onOutput) resolve(result(code)); });
+    if (options.onOutput) child.on('close', code => resolve(result(code)));
     child.on('error', () => { clear(); resolve({ outcome: 'exited', code: 'spawn-error' }); });
   });
 }
