@@ -208,5 +208,39 @@ describe('branch deletion with a controlled mutation lock', () => {
       });
       expect(await git(root, 'rev-parse', name)).toBe(tip);
     });
+
+    it('uses the next complete retention witness after a row with no tip', async () => {
+      await git(root, 'checkout', '-q', '-b', 'topic');
+      writeFileSync(join(root, 'topic.txt'), 'unmerged\n');
+      await git(root, 'add', '-A');
+      await git(root, 'commit', '-q', '-m', 'topic');
+      const tip = await git(root, 'rev-parse', 'HEAD');
+      await git(root, 'checkout', '-q', 'main');
+      const name = 'cez/aaaaaaaa';
+      await git(root, 'branch', name, 'topic');
+      hook.command = (args) => args[0] === 'for-each-ref'
+        ? Promise.resolve({ ok: true, stdout: `refs/heads/missing-tip\nrefs/heads/topic\0${tip}\n`, stderr: '' })
+        : undefined;
+      const runs = owners([runRecord('aaaaaaaa-1', 'done', { baseBranch: tip })]);
+      expect(await deleteBranches({ ...input(), runs }, [name])).toEqual({ deleted: [name], refused: [] });
+      expect(await git(root, 'rev-parse', 'topic')).toBe(tip);
+    });
+
+    it('returns empty fields for incomplete dropped-log rows', async () => {
+      const name = 'cez/orphan';
+      await git(root, 'checkout', '-q', '-b', name);
+      writeFileSync(join(root, 'work.txt'), 'work\n');
+      await git(root, 'add', '-A');
+      await git(root, 'commit', '-q', '-m', 'work');
+      const tip = await git(root, 'rev-parse', 'HEAD');
+      await git(root, 'checkout', '-q', 'main');
+      hook.command = (args) => args[0] === 'log'
+        ? Promise.resolve({ ok: true, stdout: `${tip}\n`, stderr: '' })
+        : undefined;
+      expect(await deleteBranches(input(), [name], name)).toEqual({
+        deleted: [name], refused: [], dropped: [{ sha: tip, subject: '' }],
+      });
+    });
+
   });
 });

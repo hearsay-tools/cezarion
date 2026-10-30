@@ -14,6 +14,7 @@ import {
   classifyBranches,
   deleteBranches,
   forgetRepoBranches,
+  readRepoBranches,
   forkPoints,
   type BranchForge,
   type ClassifyInput,
@@ -459,6 +460,84 @@ describe('the branch classifier (issue 08 §A)', () => {
           deleted: ['cez/aaaaaaaa'], refused: [], dropped: [{ sha: tip, subject: 'cez/aaaaaaaa work 0' }],
         });
         expect(await git(root, 'config', '--local', '--list')).not.toContain('branch.cez/aaaaaaaa.');
+      });
+
+      it('does not mistake a porcelain worktree path for a checked-out branch', async () => {
+        const path = join(root, 'checkout');
+        const name = `worktree ${path}`.slice('branch refs/heads/'.length);
+        await git(root, 'branch', name);
+        await git(root, 'worktree', 'add', '-q', '--detach', path, 'main');
+        expect(await deleteBranches(input(), [name])).toEqual({
+          deleted: [], refused: [{ name, reason: 'not a cezar task branch' }],
+        });
+      });
+
+      it('invalidates cached PR evidence after deleting and recreating the same ref', async () => {
+        const tip = await taskBranch(root, 'cez/aaaaaaaa', 1);
+        const merge = await commit(root, 'squash.txt', 'landed');
+        await git(root, 'branch', 'cez/bbbbbbbb');
+        const safeTip = await git(root, 'rev-parse', 'cez/bbbbbbbb');
+        const prs: ForgePr[] = [{ ...mergedPr(7, 'cez/aaaaaaaa', tip, merge), state: 'open', mergeCommitOid: null }];
+        const { forge } = fakeForge({ prs });
+        const request = input({ forge });
+        expect((await readRepoBranches(request)).branches.find((b) => b.name === 'cez/aaaaaaaa')?.class).toBe('orphan');
+        expect(await deleteBranches(request, ['cez/bbbbbbbb'])).toEqual({ deleted: ['cez/bbbbbbbb'], refused: [] });
+        await git(root, 'branch', 'cez/bbbbbbbb', safeTip);
+        prs[0] = mergedPr(7, 'cez/aaaaaaaa', tip, merge);
+        expect((await readRepoBranches(request)).branches.find((b) => b.name === 'cez/aaaaaaaa')?.class).toBe('merged');
+      });
+
+      it('keeps the read cache when every requested branch is refused', async () => {
+        const tip = await taskBranch(root, 'cez/aaaaaaaa', 1);
+        const merge = await commit(root, 'squash.txt', 'landed');
+        const prs: ForgePr[] = [{ ...mergedPr(7, 'cez/aaaaaaaa', tip, merge), state: 'open', mergeCommitOid: null }];
+        const { forge } = fakeForge({ prs });
+        const request = input({ forge });
+        expect((await readRepoBranches(request)).branches.find((b) => b.name === 'cez/aaaaaaaa')?.class).toBe('orphan');
+        expect(await deleteBranches(request, ['missing'])).toEqual({
+          deleted: [], refused: [{ name: 'missing', reason: 'no such local branch' }],
+        });
+        prs[0] = mergedPr(7, 'cez/aaaaaaaa', tip, merge);
+        expect((await readRepoBranches(request)).branches.find((b) => b.name === 'cez/aaaaaaaa')?.class).toBe('orphan');
+      });
+
+      it('asks the cleanup claim even for a branch with no recorded owner', async () => {
+        const name = 'cez/unowned';
+        await git(root, 'branch', name);
+        const claimRuns = vi.fn(() => null);
+        expect(await deleteBranches(input({ claimRuns }), [name])).toEqual({
+          deleted: [], refused: [{ name, reason: 'its task is running or being continued — try again once it settles' }],
+        });
+        expect(claimRuns).toHaveBeenCalledWith([]);
+        expect(await git(root, 'rev-parse', name)).toBe(await git(root, 'rev-parse', 'main'));
+      });
+
+      it('keeps remote-only retention witnesses outside the deletion request', async () => {
+        const tip = await taskBranch(root, 'topic', 1);
+        const name = 'cez/aaaaaaaa';
+        await git(root, 'branch', name, 'topic');
+        await git(root, 'update-ref', 'refs/remotes/origin/keep', tip);
+        await git(root, 'branch', '-D', 'topic');
+        const runs = [runRecord('aaaaaaaa-1', 'done', { baseBranch: tip })];
+        expect(await deleteBranches(input({ runs }), [name])).toEqual({ deleted: [name], refused: [] });
+        expect(await git(root, 'rev-parse', 'refs/remotes/origin/keep')).toBe(tip);
+      });
+
+      it('deletes confirmed work with a missing base and reports every dropped commit', async () => {
+        const tip = await taskBranch(root, 'cez/aaaaaaaa', 1);
+        const base = await git(root, 'rev-parse', 'main');
+        expect(await deleteBranches(input({ configuredBase: 'missing' }), ['cez/aaaaaaaa'], 'cez/aaaaaaaa')).toEqual({
+          deleted: ['cez/aaaaaaaa'], refused: [],
+          dropped: [{ sha: tip, subject: 'cez/aaaaaaaa work 0' }, { sha: base, subject: 'base' }],
+        });
+      });
+
+      it('deletes against a pinned base SHA without verifying a ref name', async () => {
+        const base = await git(root, 'rev-parse', 'main');
+        await git(root, 'branch', 'cez/aaaaaaaa');
+        expect(await deleteBranches(input({ configuredBase: base }), ['cez/aaaaaaaa'])).toEqual({
+          deleted: ['cez/aaaaaaaa'], refused: [],
+        });
       });
 
       it('claims all branch owners and releases successful claims when another branch is refused', async () => {
