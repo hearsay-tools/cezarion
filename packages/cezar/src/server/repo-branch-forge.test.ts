@@ -110,7 +110,7 @@ describe('the default forge, against a repository with more than 500 PRs', () =>
   });
 });
 
-/** 600 PRs, #1 the oldest: the merged PR of `FAKE_GH_HEAD`. Answers `repo view`, `pr list` (newest
+/** 600 PRs, number 1 the oldest: the merged PR of `FAKE_GH_HEAD`. Answers `repo view`, `pr list` (newest
  *  first, up to `--limit`) and per-head GraphQL. */
 const FAKE_GH = `#!/usr/bin/env node
 const args = process.argv.slice(2);

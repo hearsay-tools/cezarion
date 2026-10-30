@@ -45,7 +45,7 @@ describe('branch lifecycle classification (hearsay-tools/cezarion#2268)', () => 
     return { ...result, cls };
   };
 
-  /** One task branch merged into main by ancestry, one squash-merged as PR #7; both pushed. */
+  /** One task branch merged into main by ancestry, one squash-merged as fixture PR 7; both pushed. */
   async function landedOnOrigin() {
     await taskBranch(root, 'cez/aaaaaaaa', 1);
     await git(root, 'merge', '-q', '--no-ff', '-m', 'Merge cez/aaaaaaaa', 'cez/aaaaaaaa');
@@ -142,7 +142,7 @@ describe('branch lifecycle classification (hearsay-tools/cezarion#2268)', () => 
   describe('a run\'s PR branch outside cez/*', () => {
     const PR = 'https://github.com/acme/demo/pull/9';
 
-    /** `fix/y` squash-merged as PR #9; the run's own starter `cez/aaaaaaaa` never moved. */
+    /** `fix/y` squash-merged as fixture PR 9; the run's own starter `cez/aaaaaaaa` never moved. */
     async function namedPr() {
       await git(root, 'branch', 'cez/aaaaaaaa');
       const tip = await taskBranch(root, 'fix/y', 1);
