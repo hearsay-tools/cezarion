@@ -121,8 +121,9 @@ trusted origin. Redirects never add trust automatically.
   On Android each connection gets its own WebView profile, so Forget and a new
   server/auth pair start with no cookies, storage, caches or service workers from
   the previous one. The previous profile's files are deleted on the next app start.
-  An Android System WebView too old for profiles clears only cookies, storage and
-  the HTTP cache; update it from Google Play.
+  An Android System WebView too old for profiles instead restarts the app, which
+  deletes all WebView files before it opens a page again; tap **Connect** after it
+  reopens.
   The shell stores addresses; it does not collect or separately store passwords.
 - Remote pages get no JavaScript-to-native bridge, filesystem API, or local-agent
   process access. File uploads use the platform's explicit file picker.

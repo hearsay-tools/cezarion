@@ -19,6 +19,7 @@ import androidx.webkit.WebStorageCompat;
 import androidx.webkit.WebViewFeature;
 
 public final class MainActivity extends Activity {
+    private static final String CLEARED = "Connection and sign-in cleared.";
     private static final int NAVY = Color.rgb(11, 16, 28), AMBER = Color.rgb(255, 186, 56);
     private SharedPreferences prefs;
     private LinearLayout root;
@@ -94,10 +95,14 @@ public final class MainActivity extends Activity {
         forget = button("Forget connection & sign out", () -> new AlertDialog.Builder(this)
             .setTitle("Forget this connection?").setMessage("This clears the saved address, cookies, and website data from this app.")
             .setNegativeButton("Cancel", null).setPositiveButton("Forget", (dialog, which) -> {
-                busy(true); clearSession(() -> { prefs.edit().remove("endpoint").remove("auth").apply(); showLauncher(); status.setText("Connection and sign-in cleared."); });
+                busy(true);
+                clearSession(() -> prefs.edit().remove("endpoint").remove("auth").apply(),
+                    () -> { showLauncher(); status.setText(CLEARED); }, CLEARED);
             }).show()); form.addView(forget);
         Connection saved = saved();
         if (saved != null) { endpoint.setText(saved.endpoint); auth.setText(saved.signInOrigin); }
+        String notice = prefs.getString(CezarionApp.NOTICE, null);
+        if (notice != null) { status.setText(notice); prefs.edit().remove(CezarionApp.NOTICE).apply(); }
     }
 
     private void busy(boolean value) { connect.setEnabled(!value); forget.setEnabled(!value); }
@@ -105,20 +110,27 @@ public final class MainActivity extends Activity {
         try {
             Connection selected = new Connection(endpoint.getText().toString(), auth.getText().toString());
             ((android.view.inputmethod.InputMethodManager)getSystemService(INPUT_METHOD_SERVICE)).hideSoftInputFromWindow(endpoint.getWindowToken(), 0);
-            Runnable open = () -> {
-                prefs.edit().putString("endpoint", selected.endpoint).putString("auth", selected.signInOrigin).apply();
-                openCockpit(selected);
-            };
-            if (!selected.equals(saved())) { busy(true); clearSession(open); } else open.run();
+            Runnable save = () -> prefs.edit().putString("endpoint", selected.endpoint).putString("auth", selected.signInOrigin).apply();
+            if (!selected.equals(saved())) {
+                busy(true); clearSession(save, () -> openCockpit(selected), "Browser data cleared. Tap Connect to open the new connection.");
+            } else { save.run(); openCockpit(selected); }
         } catch (IllegalArgumentException error) { status.setText(error.getMessage()); }
     }
 
-    private void clearSession(Runnable done) {
+    // Clears all site data before either trusted origin changes, then saves and shows the result.
+    // With profiles (BrowserProfile) or DELETE_BROWSING_DATA this happens in process. Otherwise the
+    // calls below leave service workers and Cache Storage, so the app restarts and CezarionApp
+    // deletes the WebView files before any WebView exists; the launcher then shows the notice.
+    private void clearSession(Runnable save, Runnable show, String restartNotice) {
         disposeWeb();
-        // Clear the current profile, then move to an empty one (BrowserProfile) before either
-        // trusted origin changes. Without profile support the legacy calls below leave
-        // service workers and Cache Storage behind.
-        Runnable finish = () -> { BrowserProfile.rotate(prefs); done.run(); };
+        boolean inProcess = BrowserProfile.resetsInProcess();
+        Runnable finish = () -> {
+            BrowserProfile.rotate(prefs); save.run();
+            if (inProcess) { show.run(); return; }
+            prefs.edit().putBoolean(CezarionApp.WIPE_WEBVIEW, true).putString(CezarionApp.NOTICE, restartNotice).commit();
+            startActivity(Intent.makeRestartActivityTask(new android.content.ComponentName(this, MainActivity.class)));
+            Runtime.getRuntime().exit(0);
+        };
         CookieManager jar = BrowserProfile.cookies(prefs);
         WebStorage storage = BrowserProfile.storage(prefs);
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DELETE_BROWSING_DATA)) {

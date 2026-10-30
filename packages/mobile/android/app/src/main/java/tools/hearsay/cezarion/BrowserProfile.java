@@ -15,6 +15,7 @@ import java.util.UUID;
  * storage, HTTP cache, Cache Storage and service workers. A new connection starts with an
  * empty profile, so nothing from a previous account reaches it. Chromium refuses to delete
  * a profile this process has loaded, so the previous one is deleted on the next app start.
+ * A WebView without profiles resets by deleting its files on a restart (CezarionApp).
  */
 public final class BrowserProfile {
     private static final String KEY = "profile";
@@ -41,6 +42,11 @@ public final class BrowserProfile {
         return ProfileStore.getInstance().getOrCreateProfile(name).getWebStorage();
     }
 
+    /** True when the current process can reset site data without a restart. */
+    public static boolean resetsInProcess() {
+        return WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE) || WebViewFeature.isFeatureSupported(WebViewFeature.DELETE_BROWSING_DATA);
+    }
+
     /** Switches to a new, empty profile when this WebView supports profiles. */
     public static void rotate(SharedPreferences prefs) {
         if (WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE))
@@ -51,9 +57,7 @@ public final class BrowserProfile {
     public static void deleteUnused(SharedPreferences prefs) {
         if (!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) return;
         ProfileStore store = ProfileStore.getInstance();
-        String keep = current(prefs);
-        for (String name : store.getAllProfileNames()) {
-            if (name.equals(Profile.DEFAULT_PROFILE_NAME) || name.equals(keep)) continue;
+        for (String name : SiteDataReset.unusedProfiles(store.getAllProfileNames(), current(prefs), Profile.DEFAULT_PROFILE_NAME)) {
             // Loaded earlier in this process (only in tests, which reuse one process): next start.
             try { store.deleteProfile(name); } catch (IllegalStateException ignored) {}
         }

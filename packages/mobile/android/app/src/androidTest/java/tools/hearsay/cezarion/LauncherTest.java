@@ -36,12 +36,14 @@ import static androidx.test.espresso.assertion.ViewAssertions.*;
 import static androidx.test.espresso.matcher.ViewMatchers.*;
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.Assert.*;
+import static org.junit.Assume.assumeTrue;
 
 @RunWith(AndroidJUnit4.class)
 public class LauncherTest {
+    // The most recently added WebView: a probe when one is open, else the cockpit.
     private static WebView findWeb(View view) {
         if (view instanceof WebView web) return web;
-        if (view instanceof ViewGroup group) for (int i = 0; i < group.getChildCount(); i++) {
+        if (view instanceof ViewGroup group) for (int i = group.getChildCount() - 1; i >= 0; i--) {
             WebView web = findWeb(group.getChildAt(i)); if (web != null) return web;
         }
         return null;
@@ -84,28 +86,51 @@ public class LauncherTest {
     }
     // Serves a page and a service worker script on the cockpit origin of the open WebView.
     private static void serveSiteData(ActivityScenario<MainActivity> activity) throws Exception {
+        activity.onActivity(app -> serve(app, findWeb(app.findViewById(android.R.id.content))));
+        until(() -> "\"Site data\"".equals(script(activity, "document.getElementById('page')?.textContent")));
+    }
+    // A WebView on the current profile that the app did not open: reads site data without any app reset.
+    private static void probeSiteData(ActivityScenario<MainActivity> activity) throws Exception {
         activity.onActivity(app -> {
-            workers(app.getSharedPreferences("connection", 0)).setServiceWorkerClient(new ServiceWorkerClient() {
-                @Override public WebResourceResponse shouldInterceptRequest(WebResourceRequest request) {
-                    if (!request.getUrl().toString().equals("https://127.0.0.1:65534/sw.js")) return null;
-                    return new WebResourceResponse("text/javascript", "UTF-8", new ByteArrayInputStream("self.oninstall=()=>self.skipWaiting()".getBytes(StandardCharsets.UTF_8)));
-                }
-            });
-            WebView web = findWeb(app.findViewById(android.R.id.content));
-            WebViewClient original = web.getWebViewClient();
-            web.setWebViewClient(new WebViewClient() {
-                @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                    if (request.getUrl().toString().startsWith("https://127.0.0.1:65534/"))
-                        return new WebResourceResponse("text/html", "UTF-8", new ByteArrayInputStream("<p id='page'>Site data</p>".getBytes(StandardCharsets.UTF_8)));
-                    return original.shouldInterceptRequest(view, request);
-                }
-                @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) { return original.shouldOverrideUrlLoading(view, request); }
-                @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) { original.onPageStarted(view, url, favicon); }
-                @Override public void onPageFinished(WebView view, String url) { original.onPageFinished(view, url); }
-            });
-            web.loadUrl("https://127.0.0.1:65534/site-data");
+            WebView probe = new WebView(app); BrowserProfile.use(probe, app.getSharedPreferences("connection", 0));
+            probe.getSettings().setJavaScriptEnabled(true); probe.getSettings().setDomStorageEnabled(true);
+            probe.setWebViewClient(new WebViewClient());
+            ((ViewGroup)app.findViewById(android.R.id.content)).addView(probe, new ViewGroup.LayoutParams(1, 1));
+            serve(app, probe);
         });
         until(() -> "\"Site data\"".equals(script(activity, "document.getElementById('page')?.textContent")));
+    }
+    private static void serve(MainActivity app, WebView web) {
+        workers(app.getSharedPreferences("connection", 0)).setServiceWorkerClient(new ServiceWorkerClient() {
+            @Override public WebResourceResponse shouldInterceptRequest(WebResourceRequest request) {
+                if (!request.getUrl().toString().equals("https://127.0.0.1:65534/sw.js")) return null;
+                return new WebResourceResponse("text/javascript", "UTF-8", new ByteArrayInputStream("self.oninstall=()=>self.skipWaiting()".getBytes(StandardCharsets.UTF_8)));
+            }
+        });
+        WebViewClient original = web.getWebViewClient();
+        web.setWebViewClient(new WebViewClient() {
+            @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                if (request.getUrl().toString().startsWith("https://127.0.0.1:65534/"))
+                    return new WebResourceResponse("text/html", "UTF-8", new ByteArrayInputStream("<p id='page'>Site data</p>".getBytes(StandardCharsets.UTF_8)));
+                return original.shouldInterceptRequest(view, request);
+            }
+            @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) { return original.shouldOverrideUrlLoading(view, request); }
+            @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) { original.onPageStarted(view, url, favicon); }
+            @Override public void onPageFinished(WebView view, String url) { original.onPageFinished(view, url); }
+        });
+        web.loadUrl("https://127.0.0.1:65534/site-data");
+    }
+    private static final String COUNT = "return (await navigator.serviceWorker.getRegistrations()).length + ' workers, ' + (await caches.keys()).length + ' caches'";
+    private static void seedSiteData(ActivityScenario<MainActivity> activity) throws Exception {
+        serveSiteData(activity);
+        assertEquals("\"installed\"", promise(activity, "await navigator.serviceWorker.register('/sw.js'); await navigator.serviceWorker.ready; await (await caches.open('cezar-test')).put('/cached', new Response('cached')); return 'installed'"));
+        assertEquals("\"1 workers, 1 caches\"", promise(activity, COUNT));
+    }
+    // Without profiles or DELETE_BROWSING_DATA a reset restarts the process, which ends the test run.
+    private static void assumeInProcessReset() {
+        AtomicReference<Boolean> supported = new AtomicReference<>();
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> supported.set(BrowserProfile.resetsInProcess()));
+        assumeTrue("This WebView resets site data by restarting the app", supported.get());
     }
     private static void forget() throws Exception {
         onView(withText("Forget connection & sign out")).perform(scrollTo(), click());
@@ -192,6 +217,7 @@ public class LauncherTest {
     }
 
     @Test public void forgetRemovesStoredAddressAndCookies() throws Exception {
+        assumeInProcessReset();
         CountDownLatch seeded = new CountDownLatch(1);
         AtomicReference<CookieManager> before = new AtomicReference<>();
         try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
@@ -212,18 +238,37 @@ public class LauncherTest {
     }
 
     @Test public void forgetRemovesServiceWorkersAndCacheStorage() throws Exception {
-        String count = "return (await navigator.serviceWorker.getRegistrations()).length + ' workers, ' + (await caches.keys()).length + ' caches'";
+        assumeInProcessReset();
         try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
             connect(activity);
-            serveSiteData(activity);
-            assertEquals("\"installed\"", promise(activity, "await navigator.serviceWorker.register('/sw.js'); await navigator.serviceWorker.ready; await (await caches.open('cezar-test')).put('/cached', new Response('cached')); return 'installed'"));
-            assertEquals("\"1 workers, 1 caches\"", promise(activity, count));
+            seedSiteData(activity);
             onView(withContentDescription("Browser controls")).perform(click());
             onView(withText("Connection settings")).perform(click());
             forget();
+            // Read the profile Forget left, before Connect could clear anything itself.
+            probeSiteData(activity);
+            assertEquals("\"0 workers, 0 caches\"", promise(activity, COUNT));
+        }
+    }
+
+    @Test public void changingTheTrustedPairRemovesServiceWorkersAndCacheStorage() throws Exception {
+        assumeInProcessReset();
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
             connect(activity);
+            seedSiteData(activity);
+            onView(withContentDescription("Browser controls")).perform(click());
+            onView(withText("Connection settings")).perform(click());
+            onView(withContentDescription("Trusted sign-in origin")).perform(replaceText("https://auth.example.com"), closeSoftKeyboard());
+            onView(withText("Connect")).perform(scrollTo(), click());
+            var prefs = InstrumentationRegistry.getInstrumentation().getTargetContext().getSharedPreferences("connection", 0);
+            until(() -> "https://auth.example.com".equals(prefs.getString("auth", "")));
+            until(() -> {
+                AtomicReference<WebView> web = new AtomicReference<>();
+                activity.onActivity(app -> web.set(findWeb(app.findViewById(android.R.id.content))));
+                return web.get() != null;
+            });
             serveSiteData(activity);
-            assertEquals("\"0 workers, 0 caches\"", promise(activity, count));
+            assertEquals("\"0 workers, 0 caches\"", promise(activity, COUNT));
         }
     }
 }
