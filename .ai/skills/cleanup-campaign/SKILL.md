@@ -1,7 +1,6 @@
 ---
 name: cleanup-campaign
-description: Coordinates a batch of behavior-neutral issues (refactors, complexity splits, flaky-test fixes) through governed workers to merged PRs. Batch mode for a label or a list; epic mode for a phased epic.
-disable-model-invocation: true
+description: Campaign over many issues of one kind that must keep behavior. Confirms each issue is behavior-neutral, then runs them in waves of governed workers to merged PRs. Use when asked to work on all issues with a label or of one type (code quality, complexity, refactors, flaky tests), on every open sub-issue of an epic or phase, or on a list of issues in waves.
 ---
 
 # Cleanup campaign
@@ -50,15 +49,30 @@ resume, read it before anything else.
 
 ## Steps
 
-### 1. Inventory
+### 1. Inventory and confirm
 
 List the issues. For each one, read the body and the comments, and list the open
 PRs that touch its files (`gh pr list`, then `gh pr diff <n> --name-only`).
 Measure each target on current main:
 `node .ai/skills/check-code-quality/scripts/metrics.mjs <file> --json`.
 
-Done when every issue has its target measured at a named main SHA, or is closed
-with evidence that main already fixed it, or carries a named blocker.
+Then confirm that each issue is behavior-neutral. Read its done line and
+acceptance criteria, and classify it:
+
+- **Neutral:** it changes structure, tests or test waits only. Every expected
+  test outcome, API shape, CLI output, UI and stored state stays the same.
+- **Changes behavior:** some criterion changes one of those.
+- **Unclear:** the issue does not say enough to decide.
+
+Quote the line that decides each classification in `state.json`. When every
+issue is neutral, continue. Otherwise, show the owner each issue that changes
+behavior or is unclear, with its deciding line, and ask with `cezar_ask` which
+of them stay in the campaign. In a task an automation started, nobody answers:
+leave them out and list them in the final message.
+
+Done when every issue in the campaign is confirmed neutral and has its target
+measured at a named main SHA. Each other issue is left out with its reason, is
+closed with evidence that main already fixed it, or carries a named blocker.
 
 ### 2. Map regions
 
