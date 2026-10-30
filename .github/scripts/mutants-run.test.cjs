@@ -19,6 +19,7 @@ function harness({ diff = DIFF_CONTRACT, related = () => 4, stryker = async () =
   const outputs = new Map();
   let reportPresent = false;
   const deps = {
+    functionRanges: () => [{ name: 'hasPendingPermission', range: { start: { line: 83, column: 0 }, end: { line: 86, column: 0 } } }],
     readEquivalent: () => ({ entries: [], warning: '' }),
     git: args => { calls.push(['git', args.join(' ')]); return diff; },
     countRelated: async (name, list) => { calls.push(['related', name, list.map(f => f.file)]); return related(name); },
@@ -242,4 +243,21 @@ test('an unreadable equivalent file warns in the artifact and log but still post
   assert.deepEqual(logs, [artifact.warning]);
   assert.equal(artifact.packages[0].counts.survived, 2);
   assert.match(h.files.get('summary'), /Warning: Could not read equivalent mutants/);
+});
+
+test('sg failure leaves every mutant counted and records a warning in artifact, log and summary', async () => {
+  const h = harness();
+  let lookups = 0;
+  h.deps.readEquivalent = () => ({ entries: [equivalent], warning: '' });
+  h.deps.functionRanges = () => { lookups++; throw new Error('sg failed'); };
+  const logs = [];
+  h.deps.log = text => logs.push(text);
+  await main(['run'], env, h.deps);
+  const artifact = validateArtifact(artifactOf(h));
+  assert.equal(lookups, 1);
+  assert.equal(artifact.packages[0].counts.survived, 2);
+  assert.equal(artifact.packages[0].counts.equivalent, undefined);
+  assert.match(artifact.warning, /Could not identify functions/);
+  assert.deepEqual(logs, [artifact.warning]);
+  assert.match(h.files.get('summary'), /Warning: Could not identify functions/);
 });

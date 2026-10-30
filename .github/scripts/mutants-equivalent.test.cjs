@@ -38,38 +38,22 @@ test('readEquivalent warns without throwing on unreadable or malformed input', t
   assert.match(result.warning, /permission denied/);
 });
 
-test('matchesEntry normalizes whitespace, compares full text and checks a supplied function', () => {
+test('matching requires function identity and exact full source text', () => {
   const long = 'x'.repeat(250);
-  const row = { ...entry, original: ` ${long}\n +  value `, replacement: ' false\n' };
-  const mutant = { ...entry, original: `${long} + value` };
-  assert.equal(matchesEntry(row, mutant), true);
-  const { function: ignored, ...withoutFunction } = mutant;
-  assert.equal(matchesEntry(row, withoutFunction), true);
-  for (const changed of [{ file: 'other' }, { mutator: 'StringLiteral' }, { function: 'other' }, { original: `${long} + other` }, { replacement: 'true' }]) {
-    assert.equal(matchesEntry(row, { ...mutant, ...changed }), false);
+  const row = { ...entry, original: long };
+  assert.equal(matchesEntry(row, { ...row }), true);
+  const { function: ignored, ...withoutFunction } = row;
+  assert.equal(matchesEntry(row, withoutFunction), false);
+  for (const changed of [{ file: 'other' }, { mutator: 'StringLiteral' }, { function: 'other' }, { original: long + 'x' }, { replacement: 'true' }]) {
+    assert.equal(matchesEntry(row, { ...row, ...changed }), false);
   }
-  assert.equal(findEquivalent([row, { ...row }], mutant), row);
-  assert.equal(findEquivalent([], mutant), undefined);
+  assert.equal(findEquivalent([row], row), row);
+  assert.equal(findEquivalent([], row), undefined);
 });
 
-const { normalizeSource, equivalentMutants } = require('./mutants-equivalent.cjs');
-
-test('source normalization preserves string and template contents and escaped quotes', () => {
-  for (const quote of ["'", '"', '`']) {
-    const original = `${quote}a b${quote}`;
-    assert.equal(matchesEntry({ ...entry, original }, { ...entry, original: `${quote}a  b${quote}` }), false);
-    const escaped = `${quote}a\\${quote}  b${quote}`;
-    assert.equal(normalizeSource(`  ${escaped}  `), escaped);
+test('string, template, regex whitespace and source formatting remain exact', () => {
+  for (const [original, different] of [["'a b'", "'a  b'"], ['"a b"', '"a  b"'], ['`a b`', '`a  b`'], ['/a b/', '/a  b/'], ['return\nvalue', 'return value'], ['{\n  return true;\n}', '{\n    return true;\n}']]) {
+    assert.equal(matchesEntry({ ...entry, original }, { ...entry, original: different }), false);
+    assert.equal(matchesEntry({ ...entry, replacement: original }, { ...entry, replacement: different }), false);
   }
-  assert.equal(normalizeSource('{\n  return  true;\n}'), '{ return true; }');
-  assert.equal(matchesEntry({ ...entry, original: '{\n  return true;\n}' }, { ...entry, original: '{\n    return true;\n}' }), true);
-});
-
-test('only an unambiguous file match is hidden, with function names when available', () => {
-  const first = { ...entry };
-  const second = { ...entry, function: 'other' };
-  assert.deepEqual([...equivalentMutants([entry], [first, second])], [first]);
-  const { function: ignored, ...blind } = first;
-  assert.deepEqual([...equivalentMutants([entry], [blind])], [blind]);
-  assert.equal(equivalentMutants([entry], [blind, { ...blind }]).size, 0);
 });

@@ -198,7 +198,9 @@ test('shouldCreate is false only when no product line changed', () => {
 
 const { readEquivalent } = require('./mutants-equivalent.cjs');
 const equivalent = { file: FILE, function: 'hasPendingPermission', mutator: 'ConditionalExpression', original: "run.status === 'waiting' || run.status === 'running'", replacement: 'true', reason: 'fixture example' };
-const withEntries = entries => collectPackage({ name: 'contract', report: fixture, changed: new Map([[FILE, [[80, 100]]]]), durationMs: 16_000, relatedTests: 4, entries });
+const fixtureRanges = [{ name: 'hasPendingPermission', range: { start: { line: 83, column: 0 }, end: { line: 86, column: 0 } } }];
+const rangesByFile = new Map([[FILE, fixtureRanges]]);
+const withEntries = entries => collectPackage({ name: 'contract', report: fixture, changed: new Map([[FILE, [[80, 100]]]]), durationMs: 16_000, relatedTests: 4, entries, rangesByFile });
 
 test('equivalent mutants leave the tables, other counts and total; another mutator stays', () => {
   const result = withEntries([equivalent]);
@@ -239,24 +241,22 @@ test('an unreadable list keeps the report usable and its warning is bounded and 
 test('equivalent matching uses full source slices rather than shortened table cells', () => {
   const original = 'x'.repeat(250) + 'end';
   const report = { files: { [FILE]: { source: original, mutants: [{ mutatorName: 'StringLiteral', replacement: 'other', status: 'Survived', location: { start: { line: 1, column: 1 }, end: { line: 1, column: original.length + 1 } } }] } } };
-  const collect = text => collectPackage({ name: 'contract', report, changed: new Map([[FILE, [[1, 1]]]]), durationMs: 0, relatedTests: 1, entries: [{ ...equivalent, mutator: 'StringLiteral', original: text, replacement: 'other' }] });
+  const collect = text => collectPackage({ name: 'contract', report, changed: new Map([[FILE, [[1, 1]]]]), durationMs: 0, relatedTests: 1, entries: [{ ...equivalent, function: '(module)', mutator: 'StringLiteral', original: text, replacement: 'other' }], rangesByFile: new Map([[FILE, []]]) });
   assert.equal(collect(original).counts.equivalent, 1);
   assert.equal(collect('x'.repeat(250) + 'different').counts.survived, 1);
 });
 
-test('identical source in two functions stays counted, even when only one is on changed lines', () => {
+test('same mutation text in two functions excludes only the listed function', () => {
   const source = 'function first() { return true; }\nfunction second() { return true; }';
   const mutants = [1, 2].map(line => ({ mutatorName: 'BooleanLiteral', replacement: 'false', status: 'Survived', location: { start: { line, column: line === 1 ? 27 : 28 }, end: { line, column: line === 1 ? 31 : 32 } } }));
   const report = { files: { [FILE]: { source, mutants } } };
   const entries = [{ ...equivalent, function: 'first', mutator: 'BooleanLiteral', original: 'true', replacement: 'false' }];
-  for (const to of [1, 2]) {
-    const result = collectPackage({ name: 'contract', report, changed: new Map([[FILE, [[1, to]]]]), durationMs: 0, relatedTests: 1, entries });
-    assert.equal(result.counts.survived, to);
-    assert.equal(result.counts.equivalent, undefined);
-    assert.equal(result.mutants.length, to);
-  }
-  const single = { files: { [FILE]: { source, mutants: [mutants[0]] } } };
-  const result = collectPackage({ name: 'contract', report: single, changed: new Map([[FILE, [[1, 2]]]]), durationMs: 0, relatedTests: 1, entries });
+  const functions = ['first', 'second'].map((name, line) => ({ name, range: { start: { line, column: 0 }, end: { line, column: 100 } } }));
+  const result = collectPackage({ name: 'contract', report, changed: new Map([[FILE, [[1, 2]]]]), durationMs: 0, relatedTests: 1, entries, rangesByFile: new Map([[FILE, functions]]) });
+  assert.equal(result.counts.survived, 1);
   assert.equal(result.counts.equivalent, 1);
-  assert.equal(result.counts.survived, 0);
+  assert.equal(result.mutants[0].line, 2);
+  const unavailable = collectPackage({ name: 'contract', report, changed: new Map([[FILE, [[1, 2]]]]), durationMs: 0, relatedTests: 1, entries });
+  assert.equal(unavailable.counts.survived, 2);
+  assert.equal(unavailable.counts.equivalent, undefined);
 });

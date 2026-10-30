@@ -8,6 +8,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn, spawnSync, execFileSync } = require('node:child_process');
 const { parseDiff, plan, mutateArgs, readBudget, checkChangedLines, checkRelatedTests } = require('./mutants-scope.cjs');
+const { functionRanges } = require('./mutants-functions.cjs');
 const { readEquivalent } = require('./mutants-equivalent.cjs');
 const { VERSION, collectPackage, renderReport } = require('./mutants-report.cjs');
 
@@ -50,7 +51,7 @@ async function scope(context) {
 }
 
 /** One package: skip it for its size or its tests, else run Stryker on it within the time that is left. */
-async function runPackage(group, { deps, budget, deadline, log, entries }) {
+async function runPackage(group, { deps, budget, deadline, log, entries, warnings }) {
   const started = deps.now();
   const tooLarge = checkChangedLines(group.changedLines, budget);
   if (tooLarge) return emptyPackage(group, tooLarge);
@@ -73,7 +74,17 @@ async function runPackage(group, { deps, budget, deadline, log, entries }) {
   if (report) {
     deps.writeFile(`${EVIDENCE}/stryker-${group.name}.json`, JSON.stringify(report));
     const changed = new Map(group.files.map(({ file, ranges }) => [file, ranges]));
-    return collectPackage({ name: group.name, report, changed, durationMs, relatedTests: related, entries });
+    const rangesByFile = new Map();
+    for (const file of entries.length ? Object.keys(report.files ?? {}) : []) {
+      try {
+        rangesByFile.set(file, deps.functionRanges(file));
+      } catch {
+        const warning = `Could not identify functions in ${file}; no equivalent mutants excluded in that file.`;
+        warnings.push(warning);
+        log(warning);
+      }
+    }
+    return collectPackage({ name: group.name, report, changed, durationMs, relatedTests: related, entries, rangesByFile });
   }
   const reason = result.outcome === 'timed-out'
     ? `did not finish within the ${budget.deadlineMinutes} minute budget`
@@ -84,13 +95,14 @@ async function runPackage(group, { deps, budget, deadline, log, entries }) {
 async function run(context) {
   const { entries, warning } = context.deps.readEquivalent();
   if (warning) context.deps.log(warning);
+  const warnings = warning ? [warning] : [];
   const budget = readBudget(context.env);
   const deadline = context.deps.now() + budget.deadlineMinutes * 60_000;
   const packages = [];
   for (const group of context.groups) {
-    packages.push(await runPackage(group, { deps: context.deps, budget, deadline, log: context.deps.log, entries }));
+    packages.push(await runPackage(group, { deps: context.deps, budget, deadline, log: context.deps.log, entries, warnings }));
   }
-  finish({ ...context, warning }, 'ran', packages);
+  finish({ ...context, warning: warnings.join(' ').slice(0, 300) }, 'ran', packages);
   return 0;
 }
 
@@ -132,6 +144,7 @@ function defaultDeps(env) {
   const append = (file, text) => { if (file) fs.appendFileSync(file, text); };
   return {
     readEquivalent,
+    functionRanges,
     git: args => execFileSync('git', args, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }),
     countRelated: async (name, files) => countRelated(name, files),
     stryker: async (name, mutate, ms) => runStryker(name, mutate, ms),
