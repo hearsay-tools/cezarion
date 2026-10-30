@@ -76,8 +76,7 @@ import * as workflowPosition from './run/workflow-position.ts';
 import { RUN_EXITS, transition, type RunExitId } from './run-states.ts';
 import { deriveAccountHolds } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
-import { holdsOwedResults, isCezarHumanWait, openWaits, resolvedWaits } from './waits.ts';
-import { runsAwaitingPeer } from './wait-scope.ts';
+import { isCezarHumanWait, openWaits, resolvedWaits } from './waits.ts';
 import { type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
@@ -119,7 +118,7 @@ import { readAgentModelSettings } from '../agent-config/models.ts';
 import { resolveWorktreeRetention } from '../config.ts';
 import { getRepoInfo } from '../server/git.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
-import { projectConversationEvents, settledRunFamilies } from '../delegation/conversations.ts';
+import { projectConversationEvents } from '../delegation/conversations.ts';
 import * as queuedRevival from './run/queued-revival.ts';
 import type { RunOutcome } from '../runs/outcome-commit.ts';
 import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
@@ -243,21 +242,7 @@ export class RunManager {
 
 
   private readonly onDelegationRun = (run: RunRecord, source?: CommitSource): void => {
-    // Delegation metadata checkpoints do not change task status.
-    // A republish changed nothing durable: there is nothing to reap, cancel or reconcile.
-    if (source === 'live-release') return;
-    if (!this.disposed && source === undefined) this.reapTerminalScratch(run.id);
-    if (!this.disposed && !['queued', 'running', 'waiting'].includes(run.status) && !holdsOwedResults(run)) this.wakeAdmission.cancelOpenWaits(run.id);
-    if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.active.get(run.id)?.revokeDelegation?.();
-    // Cleanup checkpoints emit terminal records too. With delegation disabled,
-    // these observations must not replay the project's conversation histories.
-    if (this.disposed || this.recovery.recoveringRun(run) || (source === 'delegation-checkpoint' && process.env.CEZ_DELEGATION !== '1')) return;
-    // A destroy retry changes nothing the family reconcile reads (#880).
-    if (source === 'delegation-destroy-progress') return;
-    if (run.delegation && run.delegation.role !== 'invalid' && !['queued', 'running', 'waiting'].includes(run.status)) {
-      for (const id of settledRunFamilies(this.store, run)) this.reconcileWorkerWaits(id);
-    }
-    this.waitRegistry.resolvePeerWaits(runsAwaitingPeer(run, () => this.store.listRuns())); // never in recovery: an interrupted peer fails, then continues
+    this.familyReconciler.onDelegationRun(run, source);
   };
   private readonly continuationAcceptance: ContinuationAcceptance;
   private readonly turnSettler: TurnSettler;
@@ -345,6 +330,8 @@ export class RunManager {
       updatePendingHumanAsk: (id, value) => { const state = this.active.get(id); if (state) state.pendingHumanAsk = value; },
     }, MAX_AUTO_CONTINUES);
     this.familyReconciler = new FamilyReconciler(this.context, {
+      reapTerminalScratch: id => this.reapTerminalScratch(id), cancelOpenWaits: id => this.wakeAdmission.cancelOpenWaits(id),
+      resolvePeerWaits: runs => this.waitRegistry.resolvePeerWaits(runs),
       active: id => this.active.get(id), isActive: id => this.isActive(id), recoveringRun: run => this.recovery.recoveringRun(run),
       cancel: id => this.cancel(id), armWait: (id, wait) => this.waitWatches.armWait(id, wait),
       armWorkerDeadline: (id, wait, delay) => this.waitWatches.armWorkerDeadline(id, wait, delay), disarmWait: id => this.disarmWait(id),
