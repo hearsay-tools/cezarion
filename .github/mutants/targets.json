@@ -12,10 +12,10 @@
     "tier": "logic",
     "guards": [
       "PreviewHost.stopPreview",
-      "heldByAnotherTab",
-      "heldByOther",
-      "portOwner",
-      "ownsBrowser",
+      "PreviewHost.heldByAnotherTab",
+      "PreviewHost.heldByOther",
+      "PreviewHost.portOwner",
+      "PreviewHost.ownsBrowser",
       "sameOrigin"
     ]
   },
@@ -59,7 +59,7 @@
     "guards": [
       "ProjectAutomationScheduler.check",
       "ProjectAutomationScheduler.launch",
-      "launchCandidates",
+      "ProjectAutomationScheduler.launchCandidates",
       "candidateAcceptor",
       "afterBaseline",
       "pollWindow"
