@@ -50,6 +50,36 @@ for (const patch of [{ path: '.github/workflows/evil.yml' }, { event: 'workflow_
     assert.throws(() => reviewCiContext(f), /evidence|attempt changed/);
   });
 }
+// GitHub reports a live run as queued while one of its jobs waits for a runner.
+for (const status of ['queued', 'waiting', 'pending', 'requested']) {
+  test(`native context accepts the live caller run reported as ${status}`, () => {
+    const f = fixture(); f.run.status = status;
+    assert.match(reviewCiContext(f), /Preflight: success/);
+  });
+  test(`native context accepts a live status change to ${status} during collection`, () => {
+    const f = fixture(); const gh = f.gh; let reads = 0;
+    f.gh = args => {
+      if (args.at(-1).endsWith('/runs/42') && ++reads === 2) f.run.status = status;
+      return gh(args);
+    };
+    assert.match(reviewCiContext(f), /Preflight: success/);
+  });
+}
+test('native context names the failed caller run condition and the values it read', () => {
+  for (const [patch, condition] of [[{ id: 41 }, 'id 41 is not 42'], [{ run_attempt: 1 }, 'attempt 1 is not 2'],
+    [{ status: 'completed' }, 'status is completed'], [{ status: undefined }, 'status is undefined']]) {
+    const f = fixture(); Object.assign(f.run, patch);
+    const read = `id ${f.run.id}, attempt ${f.run.run_attempt}, status ${f.run.status}`;
+    assert.throws(() => reviewCiContext(f), { message: `Caller run or attempt changed: ${condition} (${read})` });
+  }
+  const f = fixture(); const gh = f.gh; let reads = 0;
+  f.gh = args => {
+    if (args.at(-1).endsWith('/runs/42') && ++reads === 2) f.run.run_attempt = 3;
+    return gh(args);
+  };
+  assert.throws(() => reviewCiContext(f),
+    { message: 'Caller run changed while collecting preflight: attempt 3 is not 2 (id 42, attempt 3, status in_progress)' });
+});
 for (const preflight of [[], [{ name: 'Review preflight', status: 'completed', conclusion: 'failure' }],
   [{ name: 'Review preflight', status: 'in_progress', conclusion: null }]]) {
   test(`native context refuses unavailable preflight ${JSON.stringify(preflight)}`, () => {
@@ -322,6 +352,23 @@ test('manual context rechecks current run provenance and target after reading jo
     };
     assert.throws(() => reviewCiContext(f), /evidence|attempt changed/);
   }
+});
+
+test('manual context accepts a live run whose status changes between live states', () => {
+  const f = manualFixture(); f.run.status = 'queued'; f.run.conclusion = null;
+  const gh = f.gh; let reads = 0;
+  f.gh = args => {
+    if (args.at(-1).endsWith('/runs/42') && ++reads === 2) f.run.status = 'in_progress';
+    return gh(args);
+  };
+  assert.match(reviewCiContext(f), /Workflow status: queued/);
+  const done = manualFixture(); done.run.status = 'queued'; done.run.conclusion = null;
+  const doneGh = done.gh; let doneReads = 0;
+  done.gh = args => {
+    if (args.at(-1).endsWith('/runs/42') && ++doneReads === 2) Object.assign(done.run, { status: 'completed', conclusion: 'success' });
+    return doneGh(args);
+  };
+  assert.throws(() => reviewCiContext(done), /attempt changed/);
 });
 
 function fourCellFixture(form) {
