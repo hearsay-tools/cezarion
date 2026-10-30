@@ -1,22 +1,19 @@
-import { ArrowDownToLineIcon, LoaderCircleIcon, SearchXIcon } from 'lucide-react'
-import { ArrowDownIcon, ArrowLeftIcon, BotIcon, GitCommitHorizontalIcon, GitMergeIcon, TriangleAlertIcon } from '@/components/design-icons'
-import { useMemo, useRef, useState } from 'react'
+import { ArrowDownToLineIcon, LoaderCircleIcon } from 'lucide-react'
+import { ArrowDownIcon, BotIcon, GitCommitHorizontalIcon, GitMergeIcon } from '@/components/design-icons'
+import { useMemo, useRef } from 'react'
 import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { useParams } from 'react-router'
 
 import { Link } from '@/lib/project-router'
 
-import { ApiError } from '@/api/client'
 import { useRepoCommit } from '@/api/queries'
 import type { LogEntry, RepoInfo, RepoResponse, RepoTracking } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
-import { Diff, type DiffMode } from '@/components/diff'
-import { DiffStatLabel } from '@/components/diff-stat'
+import { CommitDiffPanel } from '@/components/diff/commit-diff-panel'
 import { Button } from '@/components/ui/button'
 import { useIsDesktop } from '@/lib/use-desktop'
 import { cn } from '@/lib/utils'
 
-import { DiffViewToggles } from '../task-git/diff-controls'
 
 import { PullConfirmDialog } from './git-checkout-block'
 import { checkoutTracking, GIT_PHONE_MAIN_PATH, groupCommitsByDay, shortGitAge } from './git-sections'
@@ -148,66 +145,14 @@ function IncomingBar({ info, tracking }: { info: RepoInfo; tracking: RepoTrackin
 function CommitDiffView({ sha }: { sha: string }) {
   const commit = useRepoCommit(sha)
   const desktop = useIsDesktop()
-  const [mode, setMode] = useState<DiffMode>('unified')
-  const [wrap, setWrap] = useState(false)
 
-  // 409 = the server's answer (unknown sha, not a hash) — a dead link, not an outage.
-  const refused = commit.isError && commit.error instanceof ApiError && commit.error.status === 409
-
-  const effectiveMode: DiffMode = desktop ? mode : 'unified'
-  const effectiveWrap = desktop ? wrap : true
-
-  return (
-    <section data-slot="repo-commit" data-sha={sha} className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-border px-4 py-2 md:px-6">
-        <Button asChild variant="ghost" size="sm" data-slot="commit-back">
-          <Link to={desktop ? '/git' : GIT_PHONE_MAIN_PATH}>
-            <ArrowLeftIcon size={16} aria-hidden="true" />
-            All recent commits
-          </Link>
-        </Button>
-        {commit.data ? <DiffStatLabel stat={commit.data.stat} /> : null}
-        <span className="ml-auto hidden items-center gap-1 md:flex">
-          <DiffViewToggles mode={mode} wrap={wrap} onModeChange={setMode} onWrapChange={setWrap} />
-        </span>
-      </div>
-
-      {commit.isPending ? (
-        <p data-slot="commit-loading" className="px-4 py-6 text-center text-xs text-soft-foreground md:px-6">
-          Loading commit…
-        </p>
-      ) : commit.isError ? (
-        <CenteredState
-          icon={refused ? <SearchXIcon /> : <TriangleAlertIcon size={16} />}
-          tone={refused ? 'neutral' : 'danger'}
-          heading="h2"
-          title={refused ? 'Commit not found' : 'Could not load the commit'}
-          subtitle={commit.error.message}
-        />
-      ) : (
-        <>
-          <div data-slot="commit-meta" className="border-b border-border px-4 py-3 md:px-6">
-            <h2 className="text-sm font-semibold">{commit.data.subject}</h2>
-            <p className="mt-0.5 text-[11px] text-soft-foreground">
-              {commit.data.author} · {commit.data.when} ·{' '}
-              <span className="font-mono select-all">{commit.data.sha}</span>
-            </p>
-          </div>
-          {commit.data.files.length === 0 ? (
-            <CenteredState
-              icon={<GitCommitHorizontalIcon size={16} />}
-              tone="neutral"
-              heading="h2"
-              title="No file changes"
-              subtitle="This commit carries no diff of its own — a merge commit's changes live on the commits it merged."
-            />
-          ) : (
-            <div className="px-4 py-4 [--diff-sticky-top:1rem] md:px-6">
-              <Diff files={commit.data.files} mode={effectiveMode} wrap={effectiveWrap} className="min-w-0" />
-            </div>
-          )}
-        </>
-      )}
-    </section>
-  )
+  return <CommitDiffPanel
+    commit={commit}
+    sha={sha}
+    backTo={desktop ? '/git' : GIT_PHONE_MAIN_PATH}
+    backLabel="All recent commits"
+    slot="repo-commit"
+    className="flex min-h-0 flex-1 flex-col"
+    diffClassName="px-4 py-4 [--diff-sticky-top:1rem] md:px-6"
+  />
 }
