@@ -261,3 +261,20 @@ test('sg failure leaves every mutant counted and records a warning in artifact, 
   assert.deepEqual(logs, [artifact.warning]);
   assert.match(h.files.get('summary'), /Warning: Could not identify functions/);
 });
+
+test('duplicate method and nested function names stay counted with one warning per file and name', async () => {
+  const h = harness();
+  h.deps.readEquivalent = () => ({ entries: [equivalent, { ...equivalent }], warning: '' });
+  const first = h.deps.functionRanges()[0];
+  h.deps.functionRanges = () => [first, { ...first }, { ...first }];
+  const logs = [];
+  h.deps.log = text => logs.push(text);
+  await main(['run'], env, h.deps);
+  const artifact = validateArtifact(artifactOf(h));
+  assert.equal(artifact.packages[0].counts.survived, 2);
+  assert.equal(artifact.packages[0].counts.equivalent, undefined);
+  assert.equal(logs.length, 1);
+  assert.equal(artifact.warning, logs[0]);
+  assert.match(artifact.warning, /Ambiguous function hasPendingPermission in packages\/contract\/src\/attention.ts/);
+  assert.match(h.files.get('summary'), /Warning: Ambiguous function/);
+});

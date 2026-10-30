@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn, spawnSync, execFileSync } = require('node:child_process');
 const { parseDiff, plan, mutateArgs, readBudget, checkChangedLines, checkRelatedTests } = require('./mutants-scope.cjs');
-const { functionRanges } = require('./mutants-functions.cjs');
+const { functionRanges, duplicateNames } = require('./mutants-functions.cjs');
 const { readEquivalent } = require('./mutants-equivalent.cjs');
 const { VERSION, collectPackage, renderReport } = require('./mutants-report.cjs');
 
@@ -77,7 +77,14 @@ async function runPackage(group, { deps, budget, deadline, log, entries, warning
     const rangesByFile = new Map();
     for (const file of entries.length ? Object.keys(report.files ?? {}) : []) {
       try {
-        rangesByFile.set(file, deps.functionRanges(file));
+        const ranges = deps.functionRanges(file);
+        rangesByFile.set(file, ranges);
+        for (const name of duplicateNames(ranges)) {
+          if (!entries.some(entry => entry.file === file && entry.function === name)) continue;
+          const warning = `Ambiguous function ${name} in ${file}; no equivalent mutants excluded for that name.`;
+          warnings.push(warning);
+          log(warning);
+        }
       } catch {
         const warning = `Could not identify functions in ${file}; no equivalent mutants excluded in that file.`;
         warnings.push(warning);

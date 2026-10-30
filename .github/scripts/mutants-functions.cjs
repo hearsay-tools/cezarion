@@ -35,4 +35,15 @@ function functionOf(location, ranges) {
   return ranges.filter(r => contains(r.range, point)).sort((a, b) => position(b.range.start) - position(a.range.start))[0]?.name ?? '(module)';
 }
 
-module.exports = { position, contains, namedRanges, functionRanges, functionOf };
+/** Existing names remain stable; repeated names cannot identify one function safely. */
+function duplicateNames(ranges) {
+  const seen = new Set();
+  const duplicates = new Set();
+  for (const { name } of ranges) {
+    if (seen.has(name)) duplicates.add(name);
+    seen.add(name);
+  }
+  return duplicates;
+}
+
+module.exports = { position, contains, namedRanges, functionRanges, functionOf, duplicateNames };

@@ -260,3 +260,10 @@ test('same mutation text in two functions excludes only the listed function', ()
   assert.equal(unavailable.counts.survived, 2);
   assert.equal(unavailable.counts.equivalent, undefined);
 });
+
+test('duplicate derived names never hide mutants even when their text matches exactly', () => {
+  const duplicate = { ...fixtureRanges[0], range: { start: { line: 1, column: 0 }, end: { line: 2, column: 0 } } };
+  const result = collectPackage({ name: 'contract', report: fixture, changed: new Map([[FILE, [[80, 100]]]]), durationMs: 0, relatedTests: 1, entries: [equivalent], rangesByFile: new Map([[FILE, [...fixtureRanges, duplicate]]]) });
+  assert.equal(result.counts.survived, 2);
+  assert.equal(result.counts.equivalent, undefined);
+});

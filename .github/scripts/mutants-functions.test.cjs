@@ -34,3 +34,27 @@ test('ast-grep assigns nested names, methods, anonymous callbacks, and module co
   assert.equal(at(10), 'arrow');
 });
 
+
+test('duplicate method and nested function names stay stable and nested classes choose the nearest owner', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mutants-names-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'sample.ts');
+  fs.writeFileSync(file, [
+    'const a = { shared() { return true; } };',
+    'const b = { shared() { return true; } };',
+    'function outer() {',
+    '  function shared() { return true; }',
+    '}',
+    'class Outer {',
+    '  method() {',
+    '    class Inner { method() { return true; } }',
+    '  }',
+    '}',
+    'function unique() { return true; }',
+  ].join('\n'));
+  const ranges = m.functionRanges(file, root);
+  assert.equal(ranges.filter(r => r.name === 'shared').length, 3);
+  assert.deepEqual([...m.duplicateNames(ranges)], ['shared']);
+  assert.equal(m.functionOf({ start: { line: 8, column: 35 } }, ranges), 'Inner.method');
+  assert.equal(m.functionOf({ start: { line: 11, column: 30 } }, ranges), 'unique');
+});

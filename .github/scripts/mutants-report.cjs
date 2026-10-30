@@ -3,7 +3,7 @@
 // job checks that artifact as untrusted input (validateArtifact), and one function renders it as the
 // Markdown comment. Pure functions; the job is advisory and never blocks a merge.
 const { findEquivalent } = require('./mutants-equivalent.cjs');
-const { functionOf } = require('./mutants-functions.cjs');
+const { functionOf, duplicateNames } = require('./mutants-functions.cjs');
 const { PACKAGES } = require('./mutants-scope.cjs');
 
 /** The hidden marker that finds the one comment to update. */
@@ -51,12 +51,13 @@ function collectPackage({ name, report, changed, durationMs, relatedTests, entri
   for (const [file, data] of Object.entries(report.files ?? {})) {
     const ranges = changed.get(file);
     const functions = rangesByFile.get(file);
+    const ambiguous = duplicateNames(functions ?? []);
     for (const m of ranges ? data.mutants : []) {
       if (!inRanges(m.location.start.line, ranges) || !COUNT_OF[m.status]) continue;
       const original = sliceSource(data.source ?? '', m.location);
       const identity = { file, mutator: m.mutatorName, original, replacement: m.replacement ?? '',
         function: functions ? functionOf(m.location, functions) : undefined };
-      if (findEquivalent(entries, identity)) {
+      if (!ambiguous.has(identity.function) && findEquivalent(entries, identity)) {
         counts.equivalent = (counts.equivalent ?? 0) + 1;
         continue;
       }
