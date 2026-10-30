@@ -253,8 +253,7 @@ export const workspaceUiStateSchema = z.looseObject({
   /** Dismissed runtime-auth incident IDs, keyed by provider. An ID is only dismissed until the
    *  provider reports a different incident, so this stays workspace-global with the browser
    *  rather than one project checkout. */
-  dismissedProviderAuthFailures: perRunnerOptionalStrings()
-    .optional(),
+  dismissedProviderAuthFailures: perRunnerOptionalStrings().optional(),
   /** Settings → Appearance, GLOBAL since step 3.5: accent + density describe the person at the
    *  keyboard, not a repo. */
   appearance: appearanceSchema.optional(),
