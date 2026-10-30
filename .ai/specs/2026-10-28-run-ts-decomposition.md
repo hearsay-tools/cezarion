@@ -577,3 +577,11 @@ hearsay-tools/cezarion#2050 split `submitAgentInput`, `flushAgentInputs` and `dr
 | `settleIdleBoundary` | 22 | hearsay-tools/cezarion#2196, after the move in hearsay-tools/cezarion#2192 |
 | `handleAgentInputReady` | 22 | hearsay-tools/cezarion#2196, after the move in hearsay-tools/cezarion#2192 |
 | `registerProcessWait` | 21 | `wait-registry`, Phase 3 |
+
+Phase 5 Stop (hearsay-tools/cezarion#2241): `cancel`, `cancelActiveRun`,
+`cancelWorkerExecution`, `cancelQueuedRun`, `cancelRunWithoutSession`,
+`requestWorkerStop` and `cancelWorkerWait` live in `run/run-cancel.ts`.
+Public `cancel`, `requestWorkerStop` and `cancelWorkerWait` stay facade delegators.
+The host preserves manager calls for `cancel`, `isActive`, `cancelAutoResume`,
+`rootFinishRequested`, `historyDeletionPending`, `disarmWait` and `move`, plus
+the facade-owned active map. No test seam or expected outcome changes.
