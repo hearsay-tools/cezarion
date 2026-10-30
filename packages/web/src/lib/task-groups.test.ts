@@ -13,9 +13,12 @@ import {
   groupRuns,
   listCounts,
   loudestMember,
+  parseSectionParam,
   queuePositions,
   refPrefixMatches,
   runTitle,
+  sectionTasksPath,
+  SIDEBAR_SECTIONS,
   sidebarActiveRunId,
   sidebarCounts,
   sidebarRuns,
@@ -702,5 +705,19 @@ describe('sidebar Active and Automations (#1332)', () => {
   it('counts each tab and its own attention, without workers or archived tasks', () => {
     expect(sidebarCounts(fixture())).toEqual({ active: 2, automations: 2, activeWaiting: 0, automationsWaiting: 1 })
     expect(sidebarCounts([])).toEqual({ active: 0, automations: 0, activeWaiting: 0, automationsWaiting: 0 })
+  })
+})
+
+describe('sectionTasksPath / parseSectionParam', () => {
+  it('opens each section on the origin of its sidebar tab, and reads it back', () => {
+    expect(sectionTasksPath('Needs you', 'active')).toBe('/?origin=direct&section=needs-you')
+    expect(sectionTasksPath('Working', 'automations')).toBe('/?origin=automations&section=working')
+    for (const section of SIDEBAR_SECTIONS) {
+      const param = new URLSearchParams(sectionTasksPath(section, 'active').slice(2)).get('section')
+      expect(parseSectionParam(param)).toBe(section)
+    }
+    expect(parseSectionParam(null)).toBeNull()
+    expect(parseSectionParam('Finished')).toBeNull()
+    expect(parseSectionParam('archived')).toBeNull()
   })
 })

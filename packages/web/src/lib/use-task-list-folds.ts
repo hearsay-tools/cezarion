@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { readStoredCollapsed, writeStoredCollapsed, type SidebarCollapsed } from './sidebar-collapse'
-import type { BucketLabel, ListView } from './task-groups'
+import { parseSectionParam, SECTION_PARAM, SIDEBAR_SECTIONS, type BucketLabel, type ListView } from './task-groups'
+import { useSearchParamsWriter } from './use-search-params-writer'
 
 /** Browser-local, like the sidebar's section folds, and in its own key: folding Finished on the
  *  Tasks page must not fold it in the sidebar (hearsay-tools/cezarion#1616). */
@@ -49,5 +50,36 @@ export function useTaskListFolds(scope: string, view: ListView, revealed: Readon
   /** Expand groups / Collapse groups: visibility only, never a filter. */
   const setAll = (labels: readonly BucketLabel[], collapsed: boolean) =>
     write((current) => ({ ...current, ...Object.fromEntries(labels.map((label) => [keyOf(label), collapsed])) }))
-  return { isFolded, isCollapsed, toggle, setAll }
+  /** Unfold `open` and fold the rest of `labels`, in one saved write. */
+  const only = useCallback((open: BucketLabel, labels: readonly BucketLabel[]) =>
+    write((current) => ({ ...current, ...Object.fromEntries(labels.map((label) => [keyOf(label), label !== open])) })), [write, keyOf])
+  return { isFolded, isCollapsed, toggle, setAll, only }
+}
+
+/**
+ * `useTaskListFolds`, plus the sidebar's "3 of 24" link (`?section=`). On arrival the named
+ * section opens and the other status sections fold. The choice is saved, as if the reader had
+ * clicked each disclosure, and the parameter leaves the URL so a reload keeps their later folds.
+ *
+ * `onSection` runs on arrival too. The page clears its search there: the link promises the whole
+ * section, and a search typed just before the click would otherwise still filter it.
+ */
+export function useTaskListFoldsFromUrl(scope: string, view: ListView, revealed?: ReadonlySet<BucketLabel>, onSection?: () => void) {
+  const folds = useTaskListFolds(scope, view, revealed)
+  const arrived = useRef(onSection)
+  arrived.current = onSection
+  const [params, write] = useSearchParamsWriter()
+  // The link carries no `archived`, so a reader on the Archived tab lands on Active first.
+  const section = view === 'active' ? parseSectionParam(params.get(SECTION_PARAM)) : null
+  const { only } = folds
+  useEffect(() => {
+    if (section === null) return
+    only(section, SIDEBAR_SECTIONS)
+    arrived.current?.()
+    write((current) => {
+      current.delete(SECTION_PARAM)
+      return current
+    })
+  }, [section, only, write])
+  return folds
 }

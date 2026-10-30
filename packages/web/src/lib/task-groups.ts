@@ -364,6 +364,29 @@ export function sidebarRuns(runs: readonly RunSummary[], view: SidebarView): Run
   return runs.filter((run) => !run.archived && isAutomationTask(run) === automations)
 }
 
+/** The sidebar's status sections, the ones a row budget can cut. */
+export type SidebarSection = Exclude<BucketLabel, 'Archived'>
+
+const SECTION_SLUGS: Record<SidebarSection, string> = { 'Needs you': 'needs-you', Finished: 'finished', Working: 'working' }
+
+export const SIDEBAR_SECTIONS = Object.keys(SECTION_SLUGS) as SidebarSection[]
+
+/** The Tasks page query parameter that opens one section with the others folded. */
+export const SECTION_PARAM = 'section'
+
+/**
+ * Where a cut sidebar section's "3 of 24" goes: the Tasks page, filtered to the tab's origin so it
+ * lists the same 24 tasks, with only that section unfolded.
+ */
+export function sectionTasksPath(section: SidebarSection, view: SidebarView): string {
+  const origin = view === 'automations' ? 'automations' : 'direct'
+  return `/?origin=${origin}&${SECTION_PARAM}=${SECTION_SLUGS[section]}`
+}
+
+export function parseSectionParam(value: string | null): SidebarSection | null {
+  return SIDEBAR_SECTIONS.find((section) => SECTION_SLUGS[section] === value) ?? null
+}
+
 /** The sidebar tab counts, and each tab's own "needs you" count for its attention dot. */
 export function sidebarCounts(runs: readonly RunSummary[]): {
   active: number

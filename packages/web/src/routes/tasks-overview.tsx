@@ -55,7 +55,7 @@ import {
   type TaskStatusGroup,
 } from '@/lib/task-origin'
 import { useSearchParamsWriter, type SearchParamsUpdate } from '@/lib/use-search-params-writer'
-import { useTaskListFolds } from '@/lib/use-task-list-folds'
+import { useTaskListFoldsFromUrl } from '@/lib/use-task-list-folds'
 import {
   filterRuns,
   finishedRunCount,
@@ -190,7 +190,7 @@ export function TasksOverview({
   const columns = taskColumnsForCapabilities({ tokens: showTokens, cost: showCost })
   // A search shows every group holding a match, folded or not, without saving that choice.
   const revealed = new Set<BucketLabel>(needle ? groups.map((group) => group.label) : [])
-  const folds = useTaskListFolds(foldScope, view, revealed)
+  const folds = useTaskListFoldsFromUrl(foldScope, view, revealed, () => setQuery(''))
   // The archived view withholds the pin, the same call `runActionFlags` makes for the thread
   // header (`pin: !run.archived`): `sortRuns` skips the pin comparator there and `bucketOf`
   // answers `Archived` before it ever reads `run.pinned`, so the button would be an action with
@@ -554,7 +554,7 @@ function ProjectTaskResults({ view, query, origin, onShowAll, caption, captionOn
    *  more: a search's matches, or a list not fully loaded. */
   captionOnPhones: boolean
   groups: TaskStatusGroup<RunSummary>[]
-  folds: ReturnType<typeof useTaskListFolds>
+  folds: ReturnType<typeof useTaskListFoldsFromUrl>
   /** Everything each group's rows take besides the group itself. */
   grouped: Omit<React.ComponentProps<typeof GroupedTasks>, 'group'>
 }) {

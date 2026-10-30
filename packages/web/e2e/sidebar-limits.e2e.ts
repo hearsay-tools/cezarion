@@ -84,5 +84,17 @@ for (const width of [1440, 360]) for (const theme of ['light', 'dark']) {
     expect(rows).toEqual(['limit-0-0', 'limit-1-0', 'limit-2-0'])
     waitForSettledSample(browser, `document.querySelector('${container}').getBoundingClientRect().width`)
     browser.screenshot(join(artifacts, `sidebar-${width}-${theme}.png`), { viewport: true })
+    // Each cut section says how much it shows, and its count opens that section alone on the Tasks page.
+    const cut = browser.waitForValue(`Array.from(document.querySelectorAll('${container} [data-slot="section-cut-link"]')).map(el => el.textContent)`, value => Array.isArray(value) && value.length === 3)
+    expect(cut).toEqual(['1 of 4', '1 of 4', '1 of 4'])
+    // The 360px drawer's list scrolls, and Finished starts below its fold.
+    const finishedLink = `${container} [data-bucket="Finished"] [data-slot="section-cut-link"]`
+    browser.evaluate(`document.querySelector('${finishedLink}').scrollIntoView({ block: 'center' })`)
+    waitForSettledSample(browser, `document.querySelector('${finishedLink}').getBoundingClientRect().top`)
+    browser.click(finishedLink)
+    const folds = browser.waitForValue(`location.search === '?origin=direct' && Object.fromEntries([...document.querySelectorAll('[data-slot="task-status-group"]')]
+      .filter(el => el.checkVisibility()).map(el => [el.dataset.bucket, el.querySelector('[data-slot="status-group-toggle"]').getAttribute('aria-expanded')]))`,
+    value => typeof value === 'object' && value !== null && Object.keys(value).length === 3)
+    expect(folds).toEqual({ 'Needs you': 'false', Finished: 'true', Working: 'false' })
   }, 120_000)
 }

@@ -14,6 +14,7 @@ import { ReferenceStatusProvider, ReferenceStatusRegistry } from '@/components/r
 import { QuickListBuckets, SidebarSessionScope, TaskQuickList, TaskQuickListContainer } from '@/components/task-quick-list'
 import { resetSwipeStore } from '@/components/use-swipe-to-archive'
 import { groupRuns } from '@/lib/task-groups'
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { timerWait, workerWait } from '@/test/wait-fixtures'
 
 const NOW = Date.parse('2026-07-14T12:00:00.000Z')
@@ -195,6 +196,37 @@ describe('status section folding (#811)', () => {
     renderList({ runs: [...runs, run({ id: 'new', status: 'review' })], rowLimit: 1 })
     expect(screen.getByRole('button', { name: 'Needs you 3' }).getAttribute('aria-expanded')).toBe('false')
     expect(row('a')).toBeNull()
+  })
+
+  it('shows "shown of total" on a cut open section and links to that section on the Tasks page', () => {
+    const runs = Array.from({ length: 4 }, (_, i) => run({ id: `f${i}`, createdAt: ago(60_000 + i) }))
+    renderList({ runs, rowLimit: 2 })
+    const link = screen.getByRole('link', { name: 'Finished: showing 2 of 4, see all' })
+    expect(link.textContent).toBe('2 of 4')
+    expect(link.getAttribute('href')).toBe('/?origin=direct&section=finished')
+    expect(link.getAttribute('title')).toContain('Settings → Sidebar')
+    // The toggle keeps the full count, and the link stays out of the heading the sweep reads.
+    expect(screen.getByRole('button', { name: 'Finished 4' })).toBeTruthy()
+    expect(link.closest('h2')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Finished 4' }))
+    expect(document.querySelector('[data-slot="section-cut-link"]')).toBeNull()
+  })
+
+  it('links an automations section to the automations origin, and says 0 of N when the budget is spent', () => {
+    renderList({ runs: [auto({ id: 'd' }), auto({ id: 'w1', status: RUN_STATUS.running }), auto({ id: 'w2', status: RUN_STATUS.running })], view: 'automations', rowLimit: 1 })
+    const link = screen.getByRole('link', { name: 'Working: showing 0 of 2, see all' })
+    expect(link.getAttribute('href')).toBe('/?origin=automations&section=working')
+    expect(screen.queryByRole('link', { name: /^Finished:/ })).toBeNull()
+  })
+
+  it('counts pinned rows as shown, and keeps the plain count on a section the budget does not cut', () => {
+    // The pin bypasses the budget, so 2 of 3 rows show.
+    renderList({ runs: [run({ id: 'a' }), run({ id: 'b', pinned: true }), run({ id: 'c' })], rowLimit: 1 })
+    expect(screen.getByRole('link', { name: 'Finished: showing 2 of 3, see all' })).toBeTruthy()
+    cleanup()
+    renderList({ runs: [run({ id: 'a' }), run({ id: 'b' })] })
+    expect(screen.getByRole('button', { name: 'Finished 2' }).textContent).toBe('Finished 2')
+    expect(document.querySelector('[data-slot="section-cut-link"]')).toBeNull()
   })
 
   it('offers only the unpinned Finished sweep even when folded and every row is capped', () => {
