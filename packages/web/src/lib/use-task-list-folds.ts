@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { readStoredCollapsed, writeStoredCollapsed, type SidebarCollapsed } from './sidebar-collapse'
 import { parseSectionParam, SECTION_PARAM, SIDEBAR_SECTIONS, type BucketLabel, type ListView } from './task-groups'
@@ -60,9 +60,14 @@ export function useTaskListFolds(scope: string, view: ListView, revealed: Readon
  * `useTaskListFolds`, plus the sidebar's "3 of 24" link (`?section=`). On arrival the named
  * section opens and the other status sections fold. The choice is saved, as if the reader had
  * clicked each disclosure, and the parameter leaves the URL so a reload keeps their later folds.
+ *
+ * `onSection` runs on arrival too. The page clears its search there: the link promises the whole
+ * section, and a search typed just before the click would otherwise still filter it.
  */
-export function useTaskListFoldsFromUrl(scope: string, view: ListView, revealed?: ReadonlySet<BucketLabel>) {
+export function useTaskListFoldsFromUrl(scope: string, view: ListView, revealed?: ReadonlySet<BucketLabel>, onSection?: () => void) {
   const folds = useTaskListFolds(scope, view, revealed)
+  const arrived = useRef(onSection)
+  arrived.current = onSection
   const [params, write] = useSearchParamsWriter()
   // The link carries no `archived`, so a reader on the Archived tab lands on Active first.
   const section = view === 'active' ? parseSectionParam(params.get(SECTION_PARAM)) : null
@@ -70,6 +75,7 @@ export function useTaskListFoldsFromUrl(scope: string, view: ListView, revealed?
   useEffect(() => {
     if (section === null) return
     only(section, SIDEBAR_SECTIONS)
+    arrived.current?.()
     write((current) => {
       current.delete(SECTION_PARAM)
       return current

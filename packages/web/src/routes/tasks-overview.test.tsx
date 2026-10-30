@@ -1223,6 +1223,34 @@ describe('TasksOverviewRoute — wired to the app', () => {
     await waitFor(() => expect(box.value).toBe('Needle'))
   })
 
+  it('drops a search still waiting for its debounce when the sidebar opens one section', async () => {
+    let navigate!: ReturnType<typeof useNavigate>
+    let search = ''
+    function Navigator() { navigate = useNavigate(); search = useLocation().search; return null }
+    fetchMock.mockImplementation(async () => json([run({ id: 'f1', title: 'Alpha' }), run({ id: 'f2', title: 'Beta' })]))
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter><ListViewProvider><Navigator /><TasksOverviewRoute /></ListViewProvider></MemoryRouter>
+      </QueryClientProvider>,
+    )
+    const box = await screen.findByRole('textbox', { name: 'Search tasks' }) as HTMLInputElement
+    vi.useFakeTimers()
+    try {
+      fireEvent.change(box, { target: { value: 'matches nothing' } })
+      // The sidebar's "2 of 2" link, followed before the 250 ms search debounce fires.
+      act(() => { void navigate('/?origin=direct&section=finished') })
+      act(() => vi.advanceTimersByTime(250))
+      expect(search).toBe('?origin=direct')
+      expect(box.value).toBe('')
+      expect(screen.queryAllByText('Alpha').length).toBeGreaterThan(0)
+      expect(screen.queryAllByText('Beta').length).toBeGreaterThan(0)
+    } finally {
+      vi.useRealTimers()
+      // The link saved folds for this list; later tests start with every group open.
+      localStorage.clear()
+    }
+  })
+
   it('keeps a cleared search when the real debounced writer lands late (hearsay-tools/cezarion#2081)', async () => {
     // Hold the router commit, not the writer callback: the input must recognise the real
     // writer's echo after another keystroke. CI run 40763004045 attempt 1, job 123079799508

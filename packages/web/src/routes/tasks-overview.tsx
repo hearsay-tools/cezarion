@@ -190,7 +190,7 @@ export function TasksOverview({
   const columns = taskColumnsForCapabilities({ tokens: showTokens, cost: showCost })
   // A search shows every group holding a match, folded or not, without saving that choice.
   const revealed = new Set<BucketLabel>(needle ? groups.map((group) => group.label) : [])
-  const folds = useTaskListFoldsFromUrl(foldScope, view, revealed)
+  const folds = useTaskListFoldsFromUrl(foldScope, view, revealed, () => setQuery(''))
   // The archived view withholds the pin, the same call `runActionFlags` makes for the thread
   // header (`pin: !run.archived`): `sortRuns` skips the pin comparator there and `bucketOf`
   // answers `Archived` before it ever reads `run.pinned`, so the button would be an action with
