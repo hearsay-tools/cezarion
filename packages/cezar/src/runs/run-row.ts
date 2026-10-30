@@ -4,12 +4,8 @@ import type { RunRowInput } from './run-database.ts';
 // Type-only: the store imports this module, so a value import back would be a cycle.
 import type { RunRecord } from './store.ts';
 
-const LIVE_STATUSES: ReadonlySet<string> = new Set(['queued', 'running', 'waiting']);
-
-/** Status-only live predicate: queued, running or waiting. */
-export function isLiveStatus(status: string): boolean {
-  return LIVE_STATUSES.has(status);
-}
+import { isLiveStatus } from '@open-mercato/cezar-contract/run-predicates';
+export { isLiveStatus } from '@open-mercato/cezar-contract/run-predicates';
 
 /**
  * Persisted live predicate used for loading and recovery. The store separately adds pinned runs
@@ -17,7 +13,7 @@ export function isLiveStatus(status: string): boolean {
  * the live column.
  */
 export function isLiveRecord(run: RunRecord): boolean {
-  if (LIVE_STATUSES.has(run.status)) return true;
+  if (isLiveStatus(run.status)) return true;
   // Any resume time, not `isUsageLimitHold`: an older row can keep one on a finished status, and
   // the store's open must load that row to correct it.
   if (run.autoResumeAt !== undefined || run.waits?.some((wait) => wait.phase === 'open' || wait.phase === 'resolved')) return true;

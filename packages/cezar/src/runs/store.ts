@@ -42,7 +42,7 @@ import {
   TIMER_MIN_SECONDS,
   WAIT_LIMIT,
 } from '@open-mercato/cezar-contract/waits';
-import { engineOwnsRun, isSweepable } from '@open-mercato/cezar-contract/run-predicates';
+import { engineOwnsRun, isSweepable, UNREAD_RUN_RULE, SWEEPABLE_RUN_RULE, RETENTION_RUN_RULE, REFERENCED_RUN_RULE } from '@open-mercato/cezar-contract/run-predicates';
 import type { ArchiveFinishedScope, ArchivedRunsResponse, ArchivePullRequestIdentity, CiWait, PrWaitEntry, ConversationState, AgentInput, InboxClaim, DelegationState, MergedPullRequest, RunPullRequest, RunSummary, Wait, WorkerCollectedResult, WorkerDestroyRetry, WorkerWait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { matchesRunSearch, sqlPrefilterTokens, type AutomationNames } from '@open-mercato/cezar-contract/run-search';
 import { storedDelegationStateSchema } from './delegation-state.ts';
@@ -1050,20 +1050,6 @@ const AUTOMATION_ORIGIN_HEAL_SQL =
   "instr(data, '\"automation') > 0 AND json_extract(summary, '$.automationId') IS NULL" +
   " AND (json_extract(data, '$.automation.automationId') IS NOT NULL OR json_extract(data, '$.automationTrigger.automationId') IS NOT NULL)";
 
-/** Mark-all-read's rule (see `RunStore.markAllRead`) over the columns and the stored summary. */
-const MARK_ALL_READ_SQL = "archived = 0 AND status IN ('done', 'failed') AND finished_at IS NOT NULL" +
-  " AND (json_extract(summary, '$.seenAt') IS NULL OR json_extract(summary, '$.seenAt') < finished_at)";
-
-/** History retention's candidates among the given ids (a JSON array): finished, without
- *  delegation, and not pinned. */
-const RETENTION_CANDIDATES_SQL = "id IN (SELECT value FROM json_each(?)) AND status NOT IN ('queued', 'running', 'waiting')" +
-  " AND parent_run_id IS NULL AND json_extract(summary, '$.delegation') IS NULL" +
-  " AND json_extract(summary, '$.pinned') IS NOT 1";
-
-/** Rows whose stored summary names a referenced PR or issue: what a repository handle can veto. */
-const REFERENCED_SQL =
-  "json_extract(summary, '$.referencedPullRequestUrl') IS NOT NULL OR json_extract(summary, '$.referencedIssueUrl') IS NOT NULL";
-
 /** What branch cleanup and git-log attribution read about a run (`RunStore.listBranchOwners`). */
 export interface BranchOwner {
   id: string;
@@ -1805,7 +1791,7 @@ export class RunStore extends EventEmitter {
     let healed = false;
     const own = `${handle.owner}/${handle.name}`.toLowerCase();
     const foreign = (url: string | undefined) => url !== undefined && refUrlRepo(url) !== own;
-    const stored = this.db?.listWhere(REFERENCED_SQL).filter((row) => {
+    const stored = this.db?.listWhere(REFERENCED_RUN_RULE.sql).filter((row) => {
       if (this.held.has(row.id) || this.deleted.has(row.id)) return false;
       const summary = parseStoredSummary(row.summary);
       return !summary || foreign(summary.referencedPullRequestUrl) || foreign(summary.referencedIssueUrl);
@@ -3360,12 +3346,12 @@ export class RunStore extends EventEmitter {
     // has to be read before `applyArchived` clears it. Runs not in memory are picked off their
     // stored summary, which carries every field `isSweepable` reads.
     const picked: Array<readonly [Parameters<typeof isSweepable>[0] & { id: string }, ListOrder]> =
-      [...this.held.values()].filter((run) => isSweepable({ ...run, automationId: automationIdOf(run) }, scope, automation))
+      [...this.held.values()].filter((run) => SWEEPABLE_RUN_RULE.matches({ ...run, automationId: automationIdOf(run) }, scope, automation))
         .map((run) => [run, this.listOrder(run)]);
-    for (const row of this.db?.listWhere("archived = 0 AND status IN ('done', 'failed', 'cancelled') AND parent_run_id IS NULL") ?? []) {
+    for (const row of this.db?.listWhere(SWEEPABLE_RUN_RULE.sql) ?? []) {
       if (this.held.has(row.id) || this.deleted.has(row.id)) continue;
       const summary = parseStoredSummary(row.summary);
-      if (summary && isSweepable(summary, scope, automation)) picked.push([summary, row]);
+      if (summary && SWEEPABLE_RUN_RULE.matches(summary, scope, automation)) picked.push([summary, row]);
     }
     // Another process's runs are not this store's to archive (#779, plan step 3): they stay out.
     // A sweepable run is never a worker (`isSweepable`), so each is its own family.
@@ -3427,7 +3413,7 @@ export class RunStore extends EventEmitter {
     // Runs not in memory are picked by the same rule over their stored summary, then re-checked
     // on the record before they are stamped.
     const candidates = [...this.held.values()];
-    const stored = (this.db?.listWhere(MARK_ALL_READ_SQL) ?? []).filter((row) => !this.held.has(row.id) && !this.deleted.has(row.id));
+    const stored = (this.db?.listWhere(UNREAD_RUN_RULE.sql) ?? []).filter((row) => !this.held.has(row.id) && !this.deleted.has(row.id));
     // One claim transaction for them all; another process's runs are skipped (`record` refuses).
     this.claimFamilies(stored.map(rowFamily));
     for (const row of stored) {
@@ -3435,11 +3421,7 @@ export class RunStore extends EventEmitter {
       if (run) candidates.push(run);
     }
     for (const run of candidates) {
-      const unread =
-        !run.archived &&
-        (run.status === 'done' || run.status === 'failed') &&
-        run.finishedAt !== undefined &&
-        (run.seenAt === undefined || run.seenAt < run.finishedAt);
+      const unread = UNREAD_RUN_RULE.matches(run);
       if (!unread) continue;
       if (automation !== undefined && (automationIdOf(run) !== undefined) !== automation) continue;
       run.seenAt = now;
@@ -4267,12 +4249,12 @@ export class RunStore extends EventEmitter {
       const run = this.held.get(id);
       // Retention must not archive a live task between turns, a pinned run, or a delegation
       // family whose history is promised until explicit deletion.
-      return run && !isLiveStatus(run.status) && !run.delegation && !run.pinned ? [id] : [];
+      return run && RETENTION_RUN_RULE.matches(run) ? [id] : [];
     });
     const cold = overflow.filter((id) => !this.held.has(id));
     if (cold.length > 0) {
       // Another process's runs are its own to keep or archive (#779, plan step 3).
-      const rows = this.db!.listWhere(RETENTION_CANDIDATES_SQL, [JSON.stringify(cold)]);
+      const rows = this.db!.listWhere(RETENTION_RUN_RULE.sql, [JSON.stringify(cold)]);
       const writable = this.claimFamilies(rows.map(rowFamily));
       for (const row of rows) if (writable.has(rowFamily(row))) stale.push(row.id);
     }
