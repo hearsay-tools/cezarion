@@ -25,7 +25,8 @@ import { WaitRegistry } from './run/wait-registry.ts';
 import { WakeRetries } from './run/wake-retries.ts';
 import { WaitWatches } from './run/wait-watches.ts';
 import { HumanWaits } from './run/human-waits.ts';
-import { RunLine, type PendingJob } from './run/run-line.ts';
+import { RunStart } from './run/run-start.ts';
+import { RunLine } from './run/run-line.ts';
 import { WorktreeAutosave } from './run/worktree-autosave.ts';
 import { RunSkills } from './run/run-skills.ts';
 import { InboxClaims } from './run/inbox-claims.ts';
@@ -63,7 +64,6 @@ import { openingInputs } from './run/opening.ts';
 import { releaseActiveResources } from './run/drop-active.ts';
 import { delegationExecutionSettings, selectDelegationExecutionSettings } from '../delegation/execution-settings.ts';
 import { stepLabel } from './run/steps.ts';
-import { makeRunTitle } from '../runs/run-title.ts';
 export { agentDirectories, composeSystemPrompt, expandRegistrySlashSkill, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt } from './run/prompts.ts';
 export { stepLabel } from './run/steps.ts';
 export { makeRunTitle } from '../runs/run-title.ts';
@@ -72,7 +72,7 @@ import * as stepDecisions from './run/step-decisions.ts';
 import * as pendingAskFacts from './run/pending-ask-facts.ts';
 import * as workflowPosition from './run/workflow-position.ts';
 import { RUN_EXITS, transition, transitionVia, type RunExitId } from './run-states.ts';
-import { deriveAccountHolds, queuedRecoveryInput } from './run-scheduling.ts';
+import { deriveAccountHolds } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
 import { holdsOwedResults, isCezarHumanWait, openWaits, resolvedWaits } from './waits.ts';
 import { runsAwaitingPeer } from './wait-scope.ts';
@@ -80,7 +80,7 @@ import { previewCdpSession, previewRunContext, type PreviewHostLike } from '../p
 import { acquireCiResources } from '../ci-wait/resources.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import type { CezarToolHandlers } from '../ci-wait/controller.ts';
-import { workerIdentity, continuationDefStep, ownedWorkflow, workerStepIdentity, WorkerIdentityError, type WorkerAccountBinding, type WorkerStepIdentity } from '../delegation/execution-identity.ts';
+import { workerIdentity, continuationDefStep, workerStepIdentity, WorkerIdentityError, type WorkerAccountBinding, type WorkerStepIdentity } from '../delegation/execution-identity.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -91,7 +91,6 @@ import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
 import { type CwdSource } from '../delegation/process-liveness.ts';
 import { parseUsageLimit } from '../core/usage-limit.ts';
 import type { RunnerId } from '../core/agent-runner.ts';
-import { agentModelsLocked } from '../core/agent-model-policy.ts';
 import {
   handoffPath,
   seedHandoffFile,
@@ -105,7 +104,6 @@ import {
   type WorkerStopResult,
   type WorkerWait,
   type WorkerWaitRequest,
-  delegationStateSchema,
 } from '@open-mercato/cezar-contract/delegation';
 import type { ConversationState, RunEvent } from '@open-mercato/cezar-contract';
 import {
@@ -129,11 +127,10 @@ import { reclaimWorktrees } from '../runs/retention.ts';
 import {
   removeAgentTmpDir,
 } from '../runs/agent-tmpdir.ts';
-import { extractTaskRefs, refineTaskRefs } from '../runs/task-refs.ts';
 import { resolveProfileEnvForRoot } from '../workspace/agent-profiles.ts';
 import { WorkspaceSemaphore, type AccountHolds } from '../workspace/semaphore.ts';
 import {
-  QUICK_TASK_WORKFLOW, stepKind, type WorkflowDef, type WorkflowStepDef,
+  type WorkflowDef, type WorkflowStepDef,
 } from './types.ts';
 
 import { PROSE_HUMAN_GATE } from '../runs/transcript-facts.ts';
@@ -161,6 +158,7 @@ export { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NO
 export class RunManager {
   private readonly active = new Map<string, ActiveRun>();
   private readonly context: RunModuleContext;
+  private readonly runStart: RunStart;
   private readonly stepSession: StepSession;
   private readonly continuationSession: ContinuationSession;
   private readonly stepLoop: WorkflowStepLoop;
@@ -318,7 +316,7 @@ export class RunManager {
     });
     this.queuedRevivalHost = {
       move: (id, exit, patch) => this.move(id, exit, patch), isActive: id => this.isActive(id),
-      workerExecutionStopped: id => this.workerExecutionStopped(id), ownedJob: run => this.ownedJob(run),
+      workerExecutionStopped: id => this.workerExecutionStopped(id), ownedJob: run => this.runStart.ownedJob(run),
       resumableSessionId: (id, step) => this.resumableSessionId(id, step), workerStep: (id, step) => this.workerStep(id, step),
       toQueuedMessage: (id, content) => this.queuedInput.toQueuedMessage(id, content), hydrateQueuedInput: (id, input) => this.queuedInput.hydrateQueuedInput(id, input),
       enqueueJob: (id, job) => this.line.enqueueJob(id, job), enqueueContinuation: (id, continuation) => this.line.enqueueContinuation(id, continuation),
@@ -336,7 +334,7 @@ export class RunManager {
       move: (id, patch) => this.move(id, 'fail-start', patch), beginWorkerExecution: id => this.workerExecutions.beginWorkerExecution(id),
       admissionError: (error, fallback) => admissionError(error, fallback),
       admitQueuedWaitWake: id => this.wakeAdmission.admitQueuedWaitWake(id),
-      launchQueuedRun: (id, job, continuation) => this.launchQueuedRun(id, job, continuation),
+      launchQueuedRun: (id, job, continuation) => this.runStart.launchQueuedRun(id, job, continuation),
       reviveQueuedRun: (run, reason) => this.reviveQueuedRun(run, reason), pump: () => this.line.pump(),
       busySlots: () => this.line.busySlots(),
     });
@@ -518,7 +516,7 @@ export class RunManager {
     }, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS);
     this.continuationAcceptance = new ContinuationAcceptance(this.context, {
       isActive: id => this.isActive(id), move: (id, exit, patch) => this.move(id, exit, patch),
-      ownedJob: run => this.ownedJob(run), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
+      ownedJob: run => this.runStart.ownedJob(run), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
       finishWorkerExecution: id => this.workerExecutions.finishWorkerExecution(id), clearWakeBackoff: id => this.retries.clearWakeBackoff(id),
       dropActive: id => this.dropActive(id), pump: () => this.line.pump(),
       runContinuation: (...args) => this.runContinuation(...args), workerStep: (id, step) => this.workerStep(id, step),
@@ -567,6 +565,12 @@ export class RunManager {
       executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
     }, this.line, this.worktreeAutosave, this.humanWaits, this.runSettlement, this.stepSession,
     this.completionGateHost, WAKE_SESSION_CLOSED_ERROR);
+    this.runStart = new RunStart(this.context, {
+      active: this.active, startRun: (...args) => this.startRun(...args),
+      execute: (...args) => this.execute(...args), runContinuation: (...args) => this.runContinuation(...args),
+      move: (...args) => this.move(...args), dropActive: id => this.dropActive(id),
+      historyDeletionPending: id => this.historyDeletionPending(id),
+    }, this.line, this.attachments, this.turnBookkeeper, this.queuedInput, this.continuationAcceptance, this.workerExecutions);
     this.turnSettler = new TurnSettler(this.context, {
       humanWaits: this.humanWaits, line: this.line, waitWatches: this.waitWatches, waitRegistry: this.waitRegistry,
       workerQuestions: this.workerQuestions, completionGateHost: this.completionGateHost,
@@ -847,165 +851,12 @@ export class RunManager {
    * synchronous path, so the event loop serialises concurrent retries: the first creates, every
    * later one with the same hash gets that run back, and a different hash is a conflict.
    */
-  startRunIdempotent(
-    workflow: WorkflowDef,
-    input: StartRunInput,
-    request: { id: string; hash: string },
-  ): { run: RunRecord; created: boolean } | { conflict: true } {
-    const existing = this.store.findRunByClientRequestId(request.id);
-    if (existing) {
-      return existing.clientRequestHash === request.hash ? { run: existing, created: false } : { conflict: true };
-    }
-    return { run: this.startRun(workflow, input, request), created: true };
-  }
+  startRunIdempotent(workflow: WorkflowDef, input: StartRunInput, request: { id: string; hash: string }): { run: RunRecord; created: boolean } | { conflict: true } { return this.runStart.startRunIdempotent(workflow, input, request); }
 
-  startRun(
-    workflow: WorkflowDef,
-    input: StartRunInput,
-    clientRequest?: { id: string; hash: string },
-  ): RunRecord {
-    // Sanitize at the manager boundary so CLI runs, workflows, and
-    // direct callers cannot bypass the HTTP policy.
-    const effectiveInput = agentModelsLocked(this.repoRoot)
-      ? { ...input, model: undefined, effort: undefined }
-      : input;
-    const run = this.store.createRun({
-      title: makeRunTitle(input.task, workflow),
-      workflow: workflow.name,
-      task: input.task,
-      systemPrompt: input.systemPrompt,
-      model: effectiveInput.model,
-      effort: effectiveInput.effort,
-      runner: input.runner,
-      // The composer's per-task account (spec 2026-07-29-agent-profiles). Persisted at creation
-      // so a queued run picks it up at dequeue and every later resume reads the same answer.
-      agentProfile: input.agentProfile,
-      // Persist autonomy on the record (#489) so the terminal review gate
-      // (`settleSuccess`) can honor it — mid-run
-      // auto-nudge reads `input.autonomous` (`execute`), but the record is the
-      // only source those after-the-fact consumers have.
-      autonomous: input.autonomous === true,
-      archiveWhenDone: input.archiveWhenDone,
-      autoMergePr: input.autoMergePr,
-      notify: input.notify === true,
-      // Persist the explicit opt-out so queued-run restart recovery and the
-      // session Git routes can distinguish it from a removed isolated worktree.
-      worktree: input.worktree === false ? false : undefined,
-      clientRequestId: clientRequest?.id,
-      clientRequestHash: clientRequest?.hash,
-      automation: input.automation,
-      automationTrigger: input.automationTrigger,
-      steps: workflow.steps.map((s) => ({ id: s.id, name: s.name ?? s.id, kind: stepKind(s) })),
-    });
-    // The row exists from here on. A later write that throws still queues the job, so the caller
-    // that sees the throw finds a run that starts now, not one only a restart would start (#1465).
-    try {
-      // Persist the full definition so a queued run survives a restart (#367) —
-      // ad-hoc "(planned)" chains exist nowhere else to re-resolve from.
-      this.store.updateRun(run.id, { workflowDef: workflow });
-      // Initial pasted attachments must be visible while the run is still queued (#612),
-      // and must survive a restart before a slot opens. Persist them before the job
-      // enters `pendingJobs`; `hydrateQueuedInput` reconstructs their content blocks
-      // from these URLs when a recovered run eventually starts — and for a file (#950)
-      // this write is the ONLY copy, since it never had a block to be rebuilt from.
-      if (input.images?.length) {
-        const persisted = this.attachments.persistPastedAttachments(run.id, input.images);
-        if (persisted.length) {
-          this.store.updateRun(run.id, { taskImages: persisted.map((saved) => saved.url) });
-        }
-      }
-      // Step-0 reference extraction (task auto-naming spec): the regex layer's
-      // numbers persist immediately; the namer may add the kind it verified later.
-      const skillHint = workflow.steps.find((s) => stepKind(s) === 'agent' && s.skill)?.skill?.trim();
-      const refs = refineTaskRefs(extractTaskRefs(input.task), skillHint);
-      if (refs.prNumber !== undefined || refs.issueNumber !== undefined) {
-        this.store.updateRun(run.id, {
-          ...(refs.prNumber !== undefined ? { prNumber: refs.prNumber } : {}),
-          ...(refs.issueNumber !== undefined ? { issueNumber: refs.issueNumber } : {}),
-        });
-      }
-      // Fire-and-forget LLM naming (task auto-naming spec): the heuristic title
-      // above shows instantly; the namer's short title replaces it when (and if)
-      // the model answers. Never awaited, never fails the run.
-      void this.turnBookkeeper.autoNameRun(run.id, skillHint, input.task);
-    } finally {
-      this.line.enqueueJob(run.id, { workflow, input: effectiveInput });
-      void this.line.pump();
-    }
-    return run;
-  }
+  startRun(workflow: WorkflowDef, input: StartRunInput, clientRequest?: { id: string; hash: string }): RunRecord { return this.runStart.startRun(workflow, input, clientRequest); }
 
   /** Accept only the store's already-durable owned creation, never caller-supplied paths/workflows. */
-  enqueueOwnedRun(runId: string): void {
-    const run = this.store.getRun(runId);
-    if (!run) throw new DelegationPolicyError('incompatible_state', 'Owned queued run not found');
-    const job = this.ownedJob(run);
-    if (this.line.hasQueued(runId) || this.line.hasStarting(runId) || this.active.has(runId)) return;
-    this.line.enqueueJob(runId, job);
-    void this.line.pump();
-  }
-
-  private ownedJob(run: RunRecord): { workflow: WorkflowDef; input: StartRunInput } {
-    const delegation = delegationStateSchema.safeParse(run.delegation);
-    if (this.historyDeletionPending(run.id) || run.status !== 'queued' || !delegation.success || delegation.data.role !== 'worker' ||
-        delegation.data.workspace.ownerRunId !== run.id || delegation.data.destroy) {
-      throw new DelegationPolicyError('incompatible_state', 'Run is not an executable owned creation');
-    }
-    // Accepted permissions are private immutable evidence. Only explicit internal
-    // primitive records retain the public-definition compatibility path.
-    const grants = workerIdentity(this.store, this.repoRoot, run.id)?.grants
-      ?? run.workflowDef?.steps.find(step => step.id === QUICK_TASK_WORKFLOW.steps[0]!.id);
-    return {
-      workflow: ownedWorkflow(run, this.store.readWorkerIdentity(run.id)) ?? { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!,
-        ...(grants?.allowedTools === undefined ? {} : { allowedTools: [...grants.allowedTools] }),
-        ...(grants?.bashAllowlist === undefined ? {} : { bashAllowlist: [...grants.bashAllowlist] }),
-      }] },
-      input: { ...queuedRecoveryInput(run), worktree: true },
-    };
-  }
-
-  /** Read and hydrate mutable queued input in the same synchronous tick as dequeue. */
-  private launchQueuedRun(runId: string, job: PendingJob | undefined, continuation: PendingContinuation | undefined): void {
-    if (continuation) {
-      void (async () => {
-        const hydrated = this.queuedInput.hydrateQueuedContinuation(runId, continuation);
-        await this.context.work.track('runContinuation', this.runContinuation(
-          runId,
-          hydrated.stepId,
-          hydrated.sessionId,
-          hydrated.backend,
-          hydrated.prompt,
-          hydrated.images,
-          hydrated.persistedImages,
-          hydrated.persistedAttachments,
-        ));
-      })().catch((err: unknown) => this.continuationAcceptance.failCrashedContinuation(runId, err))
-        .finally(() => this.workerExecutions.finishWorkerExecution(runId));
-      return;
-    }
-    if (!job) return;
-    // Rebuild the prompt from the store at the last instant (open-mercato/cezar#472), so an edit
-    // or a stacked message that landed while the run waited is honored. Entered
-    // in the same synchronous tick as the `pendingJobs.delete` above, so no
-    // handler can observe a half-dequeued run.
-    void (async () => {
-      const input = this.queuedInput.hydrateQueuedInput(runId, job.input);
-      await this.context.work.track('execute', this.execute(runId, job.workflow, input, job.startAt));
-    })().catch((err: unknown) => {
-      const message = err instanceof Error ? err.message : String(err);
-      this.move(runId, 'fail-crash', {
-        error: `engine crashed: ${message}`,
-        finishedAt: new Date().toISOString(),
-      });
-      const state = this.active.get(runId);
-      if (state) {
-        clearIdleTimer(state);
-        clearAutosaveTimer(state);
-      }
-      this.line.unmarkStarting(runId);
-      this.dropActive(runId);
-    }).finally(() => this.workerExecutions.finishWorkerExecution(runId));
-  }
+  enqueueOwnedRun(runId: string): void { this.runStart.enqueueOwnedRun(runId); }
 
   private async reviveQueuedRun(run: RunRecord, reason: string): Promise<void> { return queuedRevival.reviveQueuedRun(this.context, this.queuedRevivalHost, run, reason); }
 
