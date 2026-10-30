@@ -28,7 +28,8 @@ export interface ForgePr {
 }
 
 /** The PRs of some heads. `incomplete` names each head whose PRs GitHub did not return in full:
- *  its batch failed, or it has more PRs than one page holds. */
+ *  its batch failed, or it has more PRs than one page holds. `available` is false once any batch
+ *  failed: GitHub did not answer, which a classification must report as unknown PR state. */
 export interface HeadPrs {
   available: boolean;
   prs: ForgePr[];
@@ -99,29 +100,33 @@ function toForgePr(row: z.infer<typeof prNodeSchema>): ForgePr {
 }
 
 /** One query for up to `HEADS_PER_QUERY` heads. A head comes back complete with its PRs, or is
- *  named incomplete; a failed or unreadable reply makes every head of the batch incomplete. */
+ *  named incomplete; a failed or unreadable reply makes every head of the batch incomplete and
+ *  the batch `failed`. */
 export async function fetchHeadBatch(
   run: GraphqlRunner,
   owner: string,
   name: string,
   heads: readonly string[],
-): Promise<{ complete: Map<string, ForgePr[]>; incomplete: string[] }> {
+): Promise<{ complete: Map<string, ForgePr[]>; incomplete: string[]; failed: boolean }> {
   const variables: Record<string, string> = { owner, name };
   heads.forEach((head, i) => { variables[`h${i}`] = head; });
   const complete = new Map<string, ForgePr[]>();
-  let repository: Record<string, z.infer<typeof headConnectionSchema> | null> | null;
+  let repository: Record<string, z.infer<typeof headConnectionSchema> | null> | null = null;
   try {
     repository = headReplySchema.parse(JSON.parse(await run(headQuery(heads.length), variables))).data.repository;
   } catch {
-    return { complete, incomplete: [...heads] };
+    // An unreadable reply answers nothing, like no reply.
   }
+  // `repository: null` says the handle did not resolve: GitHub answered none of these heads.
+  if (!repository) return { complete, incomplete: [...heads], failed: true };
+  const found = repository;
   const incomplete: string[] = [];
   heads.forEach((head, i) => {
-    const connection = repository?.[`h${i}`];
+    const connection = found[`h${i}`];
     if (!connection || connection.pageInfo.hasNextPage) incomplete.push(head);
     else complete.set(head, connection.nodes.map(toForgePr).filter((pr) => pr.headRefName === head));
   });
-  return { complete, incomplete };
+  return { complete, incomplete, failed: false };
 }
 
 export interface GithubBranchForgeDeps {
@@ -169,8 +174,10 @@ export function createGithubBranchForge(deps: GithubBranchForgeDeps = {}): Branc
       if (!handle) return { available: false, prs: [], incomplete: new Set(wanted) };
       const run = graphql(repoRoot);
       const incomplete = new Set<string>();
+      let failed = false;
       for (let i = 0; i < misses.length; i += HEADS_PER_QUERY) {
         const batch = await fetchHeadBatch(run, handle.owner, handle.name, misses.slice(i, i + HEADS_PER_QUERY));
+        failed ||= batch.failed;
         for (const head of batch.incomplete) incomplete.add(head);
         for (const [head, found] of batch.complete) {
           prs.push(...found);
@@ -179,7 +186,7 @@ export function createGithubBranchForge(deps: GithubBranchForgeDeps = {}): Branc
         }
       }
       while (headCache.size > HEAD_CACHE_MAX) headCache.delete(headCache.keys().next().value as string);
-      return { available: true, prs, incomplete };
+      return { available: !failed, prs, incomplete };
     },
   };
 }

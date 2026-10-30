@@ -33,11 +33,38 @@ describe('per-head PR lookup (hearsay-tools/cezarion#2268)', () => {
     expect(result.incomplete).toEqual(['cez/busy']);
   });
 
-  it('names every head of a failed or unreadable batch incomplete', async () => {
+  it('names every head of a failed or unreadable batch incomplete, and the batch failed', async () => {
     const heads = ['a', 'b'];
-    expect((await fetchHeadBatch(async () => { throw new Error('rate limited'); }, 'o', 'n', heads)).incomplete).toEqual(heads);
-    expect((await fetchHeadBatch(async () => 'not json', 'o', 'n', heads)).incomplete).toEqual(heads);
-    expect((await fetchHeadBatch(async () => JSON.stringify({ data: { repository: null } }), 'o', 'n', heads)).incomplete).toEqual(heads);
+    for (const reply of [async () => { throw new Error('rate limited'); }, async () => 'not json', async () => JSON.stringify({ data: { repository: null } })]) {
+      expect(await fetchHeadBatch(reply, 'o', 'n', heads)).toMatchObject({ failed: true, incomplete: heads });
+    }
+    const paged = await fetchHeadBatch(async () => JSON.stringify({ data: { repository: { h0: { pageInfo: { hasNextPage: true }, nodes: [] } } } }), 'o', 'n', ['a']);
+    expect(paged).toMatchObject({ failed: false, incomplete: ['a'] });
+  });
+
+  it('is unavailable when a batch fails, so the classifier reports PR state unknown', async () => {
+    vi.stubEnv('CEZ_DRY_RUN', '');
+    const forge = createGithubBranchForge({
+      handle: async () => ({ owner: 'acme', name: 'demo' }),
+      graphql: () => async () => { throw new Error('GitHub unreachable'); },
+    });
+    const answer = await forge.prsForHeads('/unreachable', ['cez/aaaaaaaa']);
+    expect(answer.available).toBe(false);
+    expect([...answer.incomplete]).toEqual(['cez/aaaaaaaa']);
+
+    const root = mkdtempSync(join(tmpdir(), 'cez-forge-down-'));
+    try {
+      await git(root, 'init', '-q', '-b', 'main');
+      await commit(root, 'base.txt', 'base');
+      await taskBranch(root, 'cez/aaaaaaaa', 1);
+      const { payload } = await classifyBranches({
+        root, runs: owners([runRecord('aaaaaaaa-1', 'done')]), isActive: () => false, currentBranch: 'main', hasRemote: true, forge,
+      });
+      expect(payload.prStateKnown).toBe(false);
+      expect(payload.branches.find((b) => b.name === 'cez/aaaaaaaa')?.class).toBe('not-landed');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('asks in batches, serves a repeat from the cache, and is unavailable without a repository handle', async () => {
