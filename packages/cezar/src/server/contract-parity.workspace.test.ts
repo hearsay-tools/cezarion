@@ -37,6 +37,8 @@ import type {
   providerStatusResponseSchema,
   runnerModelCatalogResponseSchema,
   setConfigResponseSchema,
+  selfUpdateStatusSchema,
+  selfUpdateDevelopmentSchema,
   uiStateSchema,
   workspaceConfigResponseSchema,
   workspaceUiStateSchema,
@@ -115,6 +117,12 @@ describe('src/contract projects/workspace schemas match the routes exactly', () 
   type SetWorkspaceUiState200 = InferResponseType<(typeof client.api.v1.workspace)['ui-state']['$put'], 200>;
   type Config200 = InferResponseType<typeof client.api.v1.config.$get, 200>;
   type SetConfig200 = InferResponseType<typeof client.api.v1.config.$put, 200>;
+
+  // ---- self-update (PoC) --------------------------------------------------------------------
+  type SelfUpdate200 = InferResponseType<(typeof client.api.v1.workspace)['self-update']['$get'], 200>;
+  type SelfUpdateRefresh200 = InferResponseType<(typeof client.api.v1.workspace)['self-update']['refresh']['$post'], 200>;
+  type SelfUpdateChannel200 = InferResponseType<(typeof client.api.v1.workspace)['self-update']['channel']['$put'], 200>;
+  type SelfUpdateApply200 = InferResponseType<(typeof client.api.v1.workspace)['self-update']['apply']['$post'], 200>;
 
   // ---- providers, models, open targets ----------------------------------------------------
   type ProviderStatus200 = InferResponseType<typeof client.api.v1.providers.status.$get, 200>;
@@ -208,6 +216,12 @@ describe('src/contract projects/workspace schemas match the routes exactly', () 
     Assert<ExactOpen<z.infer<typeof workspaceUiStateSchema>, SetWorkspaceUiState200>>,
     Assert<Exact<z.infer<typeof configResponseSchema>, Config200>>,
     Assert<Exact<z.infer<typeof setConfigResponseSchema>, SetConfig200>>,
+    // self-update
+    Assert<Exact<z.infer<typeof selfUpdateDevelopmentSchema>, InferResponseType<(typeof client.api.v1.workspace)['self-update']['development']['$get'], 200>>>,
+    Assert<Exact<z.infer<typeof selfUpdateStatusSchema>, SelfUpdate200>>,
+    Assert<Exact<z.infer<typeof selfUpdateStatusSchema>, SelfUpdateRefresh200>>,
+    Assert<Exact<z.infer<typeof selfUpdateStatusSchema>, SelfUpdateChannel200>>,
+    Assert<Exact<z.infer<typeof selfUpdateStatusSchema>, SelfUpdateApply200>>,
     // providers, models, open targets
     Assert<Exact<z.infer<typeof providerStatusResponseSchema>, ProviderStatus200>>,
     Assert<Exact<z.infer<typeof providerStatusResponseSchema>, ProviderEnabled200>>,

@@ -263,6 +263,10 @@ const workspaceConfigSchema = z
      *  when *changed*, never at load. */
     projectsDir: workspacePathSchema('CEZ_PROJECTS_DIR', '~/cezar/projects'),
     archiveOnMerge: z.boolean().optional().catch(undefined),
+    /** Release channel the self-updater follows (`stable` → npm `latest`, `nightly` → `nightly`,
+     *  `development` → none: a worktree or PR preview picked by hand). Absent inherits
+     *  `CEZ_UPDATE_CHANNEL`, then stable. */
+    updateChannel: z.enum(['stable', 'nightly', 'development']).optional().catch(undefined),
     /** Global opt-in model policy. The native coding-agent model becomes
      * authoritative while runner choice remains available. */
     modelsLocked: z.boolean().optional().catch(undefined),

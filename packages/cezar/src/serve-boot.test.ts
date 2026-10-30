@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_WORKTREE_RETENTION } from './config.ts';
-import { reconcileServeWorktrees, recoverServeProject, warnServeBind, createServeApplicationUpdate, printServeBanner } from './serve-boot.ts';
+import { reconcileServeWorktrees, recoverServeProject, warnServeBind, createServeApplicationUpdate, printServeBanner, restartServe, stopServe } from './serve-boot.ts';
+import { spawnSessionLeader } from './core/session-process.ts';
 import type { RunStore } from './runs/store.ts';
 import type { RunManager } from './workflows/run.ts';
 import type { getRepoInfo } from './server/git.ts';
@@ -184,9 +185,8 @@ describe('createServeApplicationUpdate', () => {
     expect(armRestartHelper).toHaveBeenCalledWith(plan, { repoRoot: '/repo', host: '127.0.0.1', port: 4321, npmBin: '/bin/npm' });
     const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
     options.handoff!();
-    await shutdownForRestart.mock.results[0]!.value;
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0), { timeout: 10_000 });
     expect(shutdownForRestart).toHaveBeenCalledOnce();
-    expect(exit).toHaveBeenCalledWith(0);
   });
 
   it('uses dry-run defaults when npm is missing', () => {
@@ -196,5 +196,63 @@ describe('createServeApplicationUpdate', () => {
     expect(options.dryRun).toBe(true);
     expect(options.npmPrefix).toMatch(/dry-prefix$/);
     expect(options.npmCache).toMatch(/dry-cache$/);
+  });
+});
+
+// Agents lead their own process groups, so the server's shutdown does not reach them. A restart
+// that left one running would hand its run and worktree to the replacement while it still writes.
+describe.skipIf(process.platform === 'win32')('restartServe', () => {
+  it('signals every live agent session group after the server shut down, then restarts', async () => {
+    const agent = spawnSessionLeader('sh', ['-c', 'trap "exit 0" TERM; echo ready; while :; do sleep 1; done'], { cwd: process.cwd(), env: process.env });
+    const exited = new Promise<NodeJS.Signals | number | null>((resolve) => agent.once('exit', (code, signal) => resolve(signal ?? code)));
+    // The stub prints only after its trap is set, so a SIGTERM before then cannot kill it outright.
+    await new Promise<void>((resolve) => agent.stdout.on('data', (chunk: Buffer) => { if (chunk.toString().includes('ready')) resolve(); }));
+    const order: string[] = [];
+    const server = {
+      address: () => ({ address: '127.0.0.1', family: 'IPv4', port: 4321 }),
+      shutdownForRestart: vi.fn(async () => { order.push(`shutdown, agent running: ${agent.exitCode === null && agent.signalCode === null}`); }),
+    };
+    const restart = vi.fn(() => { order.push('restart'); });
+    try {
+      await restartServe(server, restart);
+      // bound: the stub exits within milliseconds of its SIGTERM; the bound lets `finally` reap it when none came
+      const outcome = await Promise.race([exited, new Promise<string>((resolve) => setTimeout(() => resolve('still running'), 10_000))]);
+      expect(outcome).toBe(0);
+      expect(order).toEqual(['shutdown, agent running: true', 'restart']);
+      expect(restart).toHaveBeenCalledWith(expect.objectContaining({ server: null, port: 4321 }));
+    } finally {
+      if (agent.exitCode === null && agent.signalCode === null) agent.kill('SIGKILL');
+    }
+  });
+});
+
+// The stop every serve exit runs. A listener that never closes (a preview upgrade it still holds)
+// or a step that throws must not keep the store open or the agents running.
+describe('stopServe', () => {
+  it('stops waiting at its bound, then closes the store and signals the agents', async () => {
+    const store = { close: vi.fn() };
+    const forward = vi.fn();
+    const server = { shutdownForRestart: vi.fn(() => new Promise<void>(() => undefined)) };
+    await stopServe(server, 'SIGINT', { store, forward, boundMs: 50 });
+    expect(store.close).toHaveBeenCalledOnce();
+    expect(forward).toHaveBeenCalledWith('SIGINT');
+  });
+
+  it('closes the store and signals the agents when a shutdown step throws', async () => {
+    const store = { close: vi.fn() };
+    const forward = vi.fn();
+    const server = { shutdownForRestart: vi.fn(async () => { throw new Error('delegation close failed'); }) };
+    await expect(stopServe(server, 'SIGTERM', { store, forward })).resolves.toBeUndefined();
+    expect(store.close).toHaveBeenCalledOnce();
+    expect(forward).toHaveBeenCalledWith('SIGTERM');
+  });
+
+  it('leaves the store to a shutdown that finished, and still signals the agents last', async () => {
+    const order: string[] = [];
+    const store = { close: vi.fn() };
+    const server = { shutdownForRestart: vi.fn(async () => { order.push('shutdown'); }) };
+    await stopServe(server, 'SIGHUP', { store, forward: (signal) => order.push(`forward ${signal}`) });
+    expect(store.close).not.toHaveBeenCalled();
+    expect(order).toEqual(['shutdown', 'forward SIGHUP']);
   });
 });

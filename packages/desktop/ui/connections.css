@@ -1,0 +1,428 @@
+/* Native connection shell: sidebar tokens from packages/web/src/styles/index.css.
+   Keep this offline surface independent of the cockpit build and network. */
+@font-face {
+  font-family: Poppins;
+  src: url("fonts/poppins-400.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: Poppins;
+  src: url("fonts/poppins-500.woff2") format("woff2");
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: Poppins;
+  src: url("fonts/poppins-600.woff2") format("woff2");
+  font-weight: 600;
+  font-display: swap;
+}
+:root {
+  color-scheme: dark;
+  --base: #0b0f17;
+  --raised: #121722;
+  --muted: #202535;
+  --border: #2c3142;
+  --text: #f8fafc;
+  --secondary: #afb5c5;
+  --quiet: #8992a6;
+  --hover: #1b2130;
+  --selected: #262c3e;
+  --action: #f4c542;
+  --teal: #5eead4;
+  --error: #f87171;
+  font:
+    13px/1.6 Poppins,
+    system-ui,
+    sans-serif;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: var(--base);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+button,
+input {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+button:focus-visible,
+input:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 3px;
+}
+button {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  background: var(--muted);
+  color: var(--text);
+}
+button:hover {
+  background: var(--hover);
+}
+.hidden {
+  display: none !important;
+}
+#connection-shell {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  min-height: 100vh;
+}
+aside {
+  padding: 26px 14px 18px;
+  background: var(--raised);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 10px 32px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.4px;
+}
+.brand img {
+  width: 36px;
+  height: 36px;
+}
+.brand small {
+  display: block;
+  color: var(--quiet);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.section-label {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 1.2px;
+  color: var(--quiet);
+  padding: 0 12px 10px;
+}
+nav {
+  display: grid;
+  gap: 5px;
+  max-height: 58vh;
+  overflow: auto;
+}
+.empty {
+  color: var(--quiet);
+  font-size: 12px;
+  margin: 4px 12px 18px;
+  line-height: 1.8;
+}
+.nav-button,
+.saved-connection {
+  border: 0;
+  width: 100%;
+  background: transparent;
+  text-align: left;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.nav-button {
+  color: var(--secondary);
+  font-size: 12px;
+  margin-top: 8px;
+}
+.nav-button > span:first-child {
+  font-size: 20px;
+  line-height: 20px;
+}
+.nav-button:hover,
+.saved-connection:hover {
+  background: var(--hover);
+}
+.saved-connection[aria-pressed="true"] {
+  background: var(--selected);
+}
+.saved-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 500;
+}
+.saved-label small {
+  display: block;
+  color: var(--quiet);
+  font-weight: 400;
+  font-size: 10px;
+}
+.server-icon {
+  color: var(--teal);
+  font-size: 21px;
+}
+.sidebar-bottom {
+  margin-top: auto;
+  padding-top: 30px;
+}
+.sidebar-bottom p {
+  margin: 7px 12px;
+  color: var(--quiet);
+  font-size: 10px;
+}
+.arrow {
+  margin-left: auto;
+}
+header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 28px 34px;
+}
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 1.25px;
+  color: var(--quiet);
+}
+.badge {
+  font-size: 9px;
+  color: var(--secondary);
+  letter-spacing: 1px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 7px;
+}
+.editor {
+  max-width: 510px;
+  margin: 22px auto 36px;
+  padding: 0 34px;
+}
+.connection-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--raised);
+  color: var(--teal);
+  font-size: 24px;
+}
+h1 {
+  font-size: 24px;
+  letter-spacing: -0.8px;
+  line-height: 1.35;
+  font-weight: 500;
+  margin: 18px 0 8px;
+}
+.intro {
+  color: var(--secondary);
+  font-size: 12px;
+  margin: 0 0 28px;
+}
+label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 500;
+  margin: 21px 0 8px;
+}
+label > span:not(:only-child) {
+  color: var(--quiet);
+  font-size: 10px;
+  font-weight: 400;
+}
+input[type="url"] {
+  width: 100%;
+  padding: 12px 13px;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12px;
+  user-select: text;
+}
+input::placeholder {
+  color: var(--quiet);
+}
+.hint {
+  font-size: 10px;
+  line-height: 1.8;
+  color: var(--quiet);
+  margin: 7px 0;
+}
+.remember {
+  justify-content: flex-start;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 25px 0 16px;
+  cursor: pointer;
+}
+.remember input {
+  width: 16px;
+  height: 16px;
+  margin: 3px 0;
+  accent-color: var(--action);
+}
+.remember > span {
+  color: var(--text) !important;
+  font-size: 12px !important;
+}
+.remember small {
+  display: block;
+  font-size: 10px;
+  color: var(--quiet);
+  margin-top: 3px;
+}
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+}
+.primary {
+  background: var(--action);
+  color: var(--base);
+  border-color: var(--action);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 11px 20px;
+}
+.primary:hover {
+  background: var(--action);
+  filter: brightness(1.08);
+}
+.primary span {
+  margin-left: 18px;
+}
+.quiet {
+  border: 0;
+  background: transparent;
+  color: var(--secondary);
+  font-size: 10px;
+  padding: 8px 0;
+}
+.quiet:hover {
+  color: var(--text);
+  background: transparent;
+}
+#error {
+  color: var(--error);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+#error:empty {
+  display: none;
+}
+footer {
+  margin-top: 34px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+  color: var(--quiet);
+  font-size: 10px;
+  line-height: 1.9;
+}
+.shield {
+  color: var(--teal);
+  margin-right: 4px;
+}
+dialog {
+  max-width: 440px;
+  background: var(--raised);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 26px;
+}
+dialog::backdrop {
+  background: #0b0f17bb;
+}
+dialog h2 {
+  font-size: 18px;
+  font-weight: 500;
+  margin: 0;
+}
+dialog p {
+  color: var(--secondary);
+  font-size: 12px;
+}
+#startup {
+  max-width: 520px;
+  margin: 10vh auto;
+  padding: 30px;
+  text-align: center;
+}
+.mark {
+  width: 56px;
+  height: 56px;
+}
+#detail {
+  color: var(--secondary);
+}
+pre {
+  text-align: left;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font:
+    11px/1.7 ui-monospace,
+    monospace;
+  background: var(--raised);
+  padding: 16px;
+  border-radius: 8px;
+  max-height: 30vh;
+  overflow: auto;
+}
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border);
+  border-top-color: var(--action);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+  margin: 24px auto;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+a {
+  color: var(--teal);
+}
+@media (max-width: 760px) {
+  #connection-shell {
+    grid-template-columns: 210px minmax(0, 1fr);
+  }
+  header {
+    padding: 24px;
+  }
+  .editor {
+    padding: 0 24px;
+    margin-top: 12px;
+  }
+  h1 {
+    font-size: 22px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}
+
+.titlebar {
+  position: fixed;
+  inset: 0 0 auto;
+  height: 28px;
+  z-index: 1;
+}

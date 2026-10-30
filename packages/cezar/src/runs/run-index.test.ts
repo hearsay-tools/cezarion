@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toRunSummary } from '@open-mercato/cezar-contract/runs';
-import { readRunIndexFromDisk, searchRunIndexFromDisk } from './run-index.ts';
+import { findColdRunByCheckout, readRunIndexFromDisk, searchRunIndexFromDisk } from './run-index.ts';
 import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase } from './run-database.ts';
 import { encodeRunRow } from './run-row.ts';
 import { readPersistedRuns, seedRuns } from './run-store.testkit.ts';
@@ -154,6 +154,21 @@ describe.each(Object.entries(sources))('repository scoping of cold disk records 
     expect(searchRunIndexFromDisk(dir, 'bound lists', { limit: 50 }).runs.map((run) => run.id)).toEqual(['oldest']);
     expect(searchRunIndexFromDisk(dir, '#864', { limit: 50 }).runs.map((run) => run.id)).toEqual(['oldest']);
     expect(searchRunIndexFromDisk(dir, 'research', { limit: 2 })).toMatchObject({ runs: [{ id: 'newer-4' }, { id: 'newer-3' }], truncated: true });
+  });
+});
+
+// The desktop version picker names each cezar checkout by the task that owns it.
+describe.each(Object.entries(sources))('the run that owns a checkout (%s)', (_, source) => {
+  it('finds the run by its worktree first, else the newest owner of the branch', () => {
+    source.put([
+      record({ id: 'by-worktree', title: 'Worktree owner', worktreePath: '/repo/.ai/cezar/worktrees/a', branch: 'cez/a' }),
+      record({ id: 'older', title: 'Older owner', createdAt: '2026-09-01T00:00:00Z', branch: 'cez/b' }),
+      record({ id: 'newer', title: 'Newer owner', createdAt: '2026-09-02T00:00:00Z', branch: 'cez/b' }),
+    ]);
+    expect(findColdRunByCheckout(dir, { worktreePaths: ['/elsewhere', '/repo/.ai/cezar/worktrees/a'], branch: 'cez/b' })?.id).toBe('by-worktree');
+    expect(findColdRunByCheckout(dir, { worktreePaths: ['/repo/.ai/cezar/worktrees/b'], branch: 'cez/b' })?.title).toBe('Newer owner');
+    expect(findColdRunByCheckout(dir, { worktreePaths: ['/repo'], branch: 'main' })).toBeUndefined();
+    expect(findColdRunByCheckout(dir, { worktreePaths: ['/repo'], branch: null })).toBeUndefined();
   });
 });
 

@@ -1,9 +1,23 @@
 import { ChevronRightIcon, CornerLeftUpIcon, FolderIcon } from 'lucide-react'
 import type { ReactNode } from 'react'
 
+import { ApiError } from '@/api/client'
 import { useFsBrowse } from '@/api/queries'
 import type { FsBrowseDir } from '@open-mercato/cezar-api-client'
 import { cn } from '@/lib/utils'
+
+/** System Settings ▸ Privacy & Security ▸ Files & Folders. */
+const PRIVACY_SETTINGS_URL = 'x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders'
+const errorAction =
+  'inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-foreground hover:bg-muted'
+
+/** The folder a failed listing can step back to — the same path minus its last segment. */
+function parentOf(path: string): string | null {
+  const trimmed = path.replace(/[\\/]+$/, '')
+  const cut = Math.max(trimmed.lastIndexOf('/'), trimmed.lastIndexOf('\\'))
+  if (cut < 0) return null
+  return cut === 0 ? trimmed.slice(0, 1) : trimmed.slice(0, cut)
+}
 
 /**
  * The server-side folder picker, shared by "Add project" and "Add agent account".
@@ -62,9 +76,7 @@ export function FolderBrowser({
       </p>
 
       {listing.isError ? (
-        <p data-slot="fs-error" className="min-w-0 break-words text-[13px] text-danger">
-          {listing.error instanceof Error ? listing.error.message : 'could not list that folder'}
-        </p>
+        <BrowseError error={listing.error} path={path} onEnter={onEnter} onRetry={() => void listing.refetch()} />
       ) : (
         <ul
           data-slot="fs-listing"
@@ -127,6 +139,50 @@ export function FolderBrowser({
         </p>
       ) : null}
     </>
+  )
+}
+
+/** A listing that failed: the server's message verbatim, Back when there is a parent, and the
+ *  macOS privacy hint, settings link and retry for a 403. */
+function BrowseError({ error, path, onEnter, onRetry }: {
+  error: unknown
+  path: string | null
+  onEnter: (path: string) => void
+  onRetry: () => void
+}) {
+  const privacyBlocked = error instanceof ApiError && error.status === 403
+  const up = path === null ? null : parentOf(path)
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <p data-slot="fs-error" className="min-w-0 break-words text-[13px] text-danger">
+        {error instanceof Error ? error.message : 'could not list that folder'}
+      </p>
+      {/* macOS remembers a "Don't Allow" and never asks again — the switch is in System
+          Settings. The desktop shell hands a `_blank` link to `open`, which opens the pane. */}
+      {privacyBlocked ? (
+        <p data-slot="fs-privacy-hint" className="text-[12.5px] text-soft-foreground">
+          Allow it under Privacy &amp; Security ▸ Files &amp; Folders, then try again.
+        </p>
+      ) : null}
+      <div className="flex flex-wrap gap-2 text-[12.5px]">
+        {up !== null ? (
+          <button type="button" data-slot="fs-error-back" onClick={() => onEnter(up)} className={errorAction}>
+            <CornerLeftUpIcon className="size-3.5" aria-hidden />
+            Back
+          </button>
+        ) : null}
+        {privacyBlocked ? (
+          <>
+            <a data-slot="fs-privacy-settings" href={PRIVACY_SETTINGS_URL} target="_blank" rel="noreferrer" className={errorAction}>
+              Open Privacy Settings
+            </a>
+            <button type="button" data-slot="fs-retry" onClick={onRetry} className={errorAction}>
+              Try again
+            </button>
+          </>
+        ) : null}
+      </div>
+    </div>
   )
 }
 
