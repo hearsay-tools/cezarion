@@ -6,14 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
 import { RunManager } from './run.ts';
-import type { RunSettlement } from './run/run-settlement.ts';
-import type { StepLoop } from './run/step-loop.ts';
+import { runInternals } from './run-internals.testkit.ts';
 import type { Execution, ExecutionLaunch, StepLoop as LoopOutcome } from './run/types.ts';
 import { UiEventSink } from '../runs/ui-event-sink.ts';
-
-function runInternals(manager: RunManager) {
-  return manager as unknown as { runSettlement: RunSettlement; stepLoop: StepLoop; active: Map<string, ActiveRun> };
-}
 
 const step = { id: 'work', prompt: 'work' };
 const next = { id: 'tail', prompt: 'tail' };
