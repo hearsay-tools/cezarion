@@ -6,7 +6,7 @@ No Node or coding-agent runtime runs on the phone.
 
 See [installation, testing, and distribution instructions](../../docs/mobile.md).
 
-This directory is independent of the npm workspaces. It does not change desktop,
+This directory is outside the pnpm workspaces (`pnpm-workspace.yaml`). It does not change desktop,
 server, or browser behavior. `ios/Cezarion.xcodeproj` and the Android Gradle wrapper
 are checked in so a new checkout builds with the standard platform SDKs.
 
