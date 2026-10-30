@@ -532,7 +532,7 @@ export class RunManager {
         generation: id => this.continuationAcceptance.generation(id), isActive: id => this.isActive(id),
         move: (id, exit, patch) => this.move(id, exit, patch), dropActive: id => this.dropActive(id),
         saveWorktree: (id, state, reason) => this.worktreeAutosave.saveWorktree(id, state, reason),
-        settleSuccess: (id, durable, keep) => this.settleSuccess(id, durable, keep),
+        settleSuccess: (id, durable, keep) => this.runSettlement.settleSuccess(id, durable, keep),
         deferParentCompletion: id => this.deferParentCompletion(id),
         closingWakeDecision: (id, holds, cancelled, error) => this.wakeAdmission.closingWakeDecision(id, holds, cancelled, error),
         owesDelivery: id => this.wakeAdmission.owesDelivery(id), preserveRunAfterDisposal: (id, state) => preserveRunAfterDisposal(this.store, () => this.disposed, id, state),
