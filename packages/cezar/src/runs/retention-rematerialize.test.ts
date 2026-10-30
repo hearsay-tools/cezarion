@@ -87,6 +87,26 @@ describe('rematerializeReclaimedWorktree (#483)', () => {
     expect(isReclaimable(record)).toBe(true);
   });
 
+  it('re-creates the task branch from the base after the branch sweep deleted it (hearsay-tools/cezarion#2268)', async () => {
+    // The sweep deletes only a branch whose work is on the base, so Continue loses nothing by
+    // starting again from it: what retention kept the branch for, local-only commits, never existed.
+    const repo = await fixtureRepo();
+    const runId = '44444444-4444-4444-8444-444444444444';
+    const wt = await createWorktree(repo, runId, 'main');
+    await removeWorktree(repo, wt.path);
+    await run('git', ['branch', '-D', wt.branch], { cwd: repo });
+    const record = {
+      id: runId, status: 'done', createdAt: '2026-07-01T00:00:00.000Z', worktreePath: wt.path,
+      branch: wt.branch, baseBranch: 'main', worktreeReclaimedAt: '2026-07-18T00:00:00.000Z', steps: [],
+    } as unknown as RunRecord;
+
+    expect(await rematerializeReclaimedWorktree(repo, fakeStore(record), runId)).toBe(true);
+    expect(existsSync(wt.path)).toBe(true);
+    const head = (await run('git', ['rev-parse', 'HEAD'], { cwd: wt.path })).stdout.trim();
+    expect(head).toBe((await run('git', ['rev-parse', 'main'], { cwd: repo })).stdout.trim());
+    expect((await run('git', ['symbolic-ref', '--short', 'HEAD'], { cwd: wt.path })).stdout.trim()).toBe(wt.branch);
+  });
+
   it('is a no-op when the worktree was never reclaimed (dir present, no stamp)', async () => {
     const repo = await fixtureRepo();
     const runId = '22222222-2222-4222-8222-222222222222';

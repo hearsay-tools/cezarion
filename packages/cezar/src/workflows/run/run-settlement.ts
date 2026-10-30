@@ -76,7 +76,8 @@ export class RunSettlement {
   }
 
   /** Reclaim finished worktrees beyond the keep-limit (#483) — directory only,
-   *  `cez/<id8>` branch kept. Best-effort; a failure never affects run
+   *  `cez/<id8>` branch kept — then sweep the branches whose work landed
+   *  (hearsay-tools/cezarion#2268). Best-effort; a failure never affects run
    *  lifecycle. `review`/live runs are excluded by the selector. */
   async enforceRetention(): Promise<void> {
     return this.context.work.track('enforceRetention', this.enforceRetentionWork());
@@ -86,6 +87,7 @@ export class RunSettlement {
     try {
       const keep = await resolveWorktreeRetention(this.context.repoRoot);
       await reclaimWorktrees(this.context.repoRoot, this.context.store, keep, { claim: (run) => this.host.claimWorktreeReclaim(run.id), previewHost: this.host.preview });
+      if (!this.context.store.unavailable) this.context.sweepBranches?.(keep);
     } catch {
       // retention is best-effort; swallow so terminal transitions never break.
     }

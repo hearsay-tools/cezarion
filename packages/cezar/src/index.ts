@@ -19,6 +19,7 @@ import { pruneOrphans } from './git-worktree.ts';
 import { getRepoInfo } from './server/git.ts';
 import { DEFAULT_WORKTREE_RETENTION, loadConfig, resolveWorktreeRetention } from './config.ts';
 import { reclaimWorktrees } from './runs/retention.ts';
+import { SWEEP_MIN_INTERVAL_MS, sweepMergedBranches } from './server/repo-branch-sweep.ts';
 import { previewToolEnabled } from './ci-wait/tools.ts';
 import { PreviewHost } from './preview/host.ts';
 import { armRepoHandle } from './runs/arm-repo-handle.ts';
@@ -267,7 +268,10 @@ async function serveCommand(
   const cockpit = listenerAddress && typeof listenerAddress === 'object'
     ? { origin: cockpitOriginFor(bindHost, listenerAddress.port), projectId: bootProjectId ?? 'default' }
     : undefined;
-  const manager = new RunManager(store, repoRoot, { semaphore, preview: previewHost, cezarPort, cockpit });
+  const manager: RunManager = new RunManager(store, repoRoot, {
+    semaphore, preview: previewHost, cezarPort, cockpit,
+    sweepBranches: (keep) => void sweepMergedBranches({ root: repoRoot, store, manager }, { keep, minIntervalMs: SWEEP_MIN_INTERVAL_MS }),
+  });
   const delegation = await DelegationController.start();
   delegation.attachProject({ id: bootProjectId ?? 'default', root: repoRoot, store, manager });
   const providerAuth = new ProviderAuthService();
@@ -299,6 +303,9 @@ async function serveCommand(
     if (reclaimed.length > 0) {
       console.log(`  reclaimed ${reclaimed.length} old worktree(s), branch kept: ${reclaimed.map((id) => id.slice(0, 8)).join(', ')}`);
     }
+    // Branches whose work landed (hearsay-tools/cezarion#2268). In the background: it may ask
+    // GitHub, and boot never waits on the network.
+    void sweepMergedBranches({ root: repoRoot, store, manager }, { keep });
   }
 
   const recovered = store

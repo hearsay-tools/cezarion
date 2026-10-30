@@ -214,6 +214,9 @@ export interface RunModuleContext {
   dataDir: string;
   semaphore: import('../../workspace/semaphore.ts').WorkspaceSemaphore;
   disposed(): boolean;
+  /** Sweeps the project's merged branches after a retention pass (hearsay-tools/cezarion#2268).
+   *  `serve` supplies it; `cez run` and tests leave it out. */
+  sweepBranches?: ((keep: number) => void) | undefined;
 }
 
 /** What a turn end said, as the entry that settles it reads it (hearsay-tools/cezarion#1525). The
