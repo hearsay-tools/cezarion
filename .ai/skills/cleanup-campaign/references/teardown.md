@@ -11,12 +11,13 @@ worktree. Tear each one down in this order:
    identity check refuses any other branch), then
    `.ai/scripts/test-env-down.sh` when `.ai/qa/test-env.json` exists, then
    `squeal stop`, guarded with `test -d <worktree>`.
-4. Delete the dead-pid rows in `<worktree>/.ai/qa/test-env-lease.sqlite`.
-   Remove the file when it has 0 rows and no `test-env.json` sits beside it.
+4. Leave `<worktree>/.ai/qa/test-env-lease.sqlite` to `cez worker destroy`. It
+   reclaims a lease only when the holder's process and process group have both
+   exited (hearsay-tools/cezarion#2161), and keeps the worktree otherwise.
 5. `cez worker destroy <id>`. On "worktree mutation lock is busy", retry after
    another worker's spawn or Git operation ends.
 6. When destroy still reports that resource identity could not be verified,
-   find what holds the worktree: a process with its cwd there (`ps`, `/proc`),
+   or keeps a lease, find what holds the worktree: a process with its cwd there (`ps`, `/proc`),
    an orphaned `packages/cezar/src/ci-wait/mcp.ts`, or a QA server. Stop only a
    process whose cwd and argv you confirmed belong to that worktree, then retry.
 7. Delete the merged PR's local and remote branch.

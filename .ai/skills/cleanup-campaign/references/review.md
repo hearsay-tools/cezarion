@@ -41,7 +41,8 @@ answers held across epic 2051:
 
 ## Merge gate
 
-Run every item on the exact head `H` of PR `P` before the merge:
+Run `git fetch origin`, then every item on the exact head `H` of PR `P` before
+the merge:
 
 1. **Files:** `gh pr diff P --name-only` lists only the issue's files, the
    length baseline and the test files the issue names.
@@ -67,4 +68,4 @@ Run every item on the exact head `H` of PR `P` before the merge:
 10. **Main:** main CI is green, or it fails only in "Publish npm snapshot".
 
 Required checks are not strict. A green PR that `git merge-tree` shows clean
-against current main, with no semantic overlap, merges without a rebase.
+against freshly fetched `origin/main`, with no semantic overlap, merges without a rebase.

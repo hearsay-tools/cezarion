@@ -32,7 +32,7 @@ Read each control from the prompt. When the prompt is silent, use the default.
 | Worker model | Codex `gpt-6.1-sol-fast`, after a fresh `discover models` | In epic 2051 Phase 4, sol-fast finished 9 of 9; terra-fast handed back 3 of 7 starts before any change |
 | Live workers | 4 | Load on this host; six independent workers also worked (12afbac2) |
 | Hot-file cap | 2 open PRs per hot file, and the second PR opens after the first merges | Each conflicting pair cost a rebase and a second full CI run |
-| Merge | You merge on the gate | If the prompt says the owner merges, stop at a gate-passing PR and ask |
+| Merge | The owner merges | You merge on the gate only when the prompt grants it in words, as every past campaign prompt did; tasks otherwise end at a review gate |
 
 A **hot file** is a file that two or more queued issues edit. A PR that the
 auto-merge check flags as "gate or test harness", or that edits `AGENTS.md`,
@@ -51,7 +51,8 @@ resume, read it before anything else.
 
 ### 1. Inventory and confirm
 
-List the issues. For each one, read the body and the comments, and list the open
+Run `git fetch origin` and record the `origin/main` SHA. List the issues. For
+each one, read the body and the comments, and list the open
 PRs that touch its files (`gh pr list`, then `gh pr diff <n> --name-only`).
 Measure each target on current main:
 `node .ai/skills/check-code-quality/scripts/metrics.mjs <file> --json`.
@@ -97,8 +98,9 @@ For each free slot:
 
 1. Move the issue to In progress and assign it, as the Board binding in
    `AGENTS.md` says.
-2. Bring your worktree to `origin/main` (`git merge --ff-only origin/main`), so
-   `--baseline parent-head` is fresh main.
+2. Bring your worktree to fresh main (`git fetch origin` and then
+   `git merge --ff-only origin/main`), so `--baseline parent-head` is the main
+   that the gate will merge into. Record that SHA for the worker.
 3. Write the brief: the per-issue facts (regions, callers, the seams to keep,
    the order gate), then the text of
    [references/worker-brief.md](references/worker-brief.md) with its
@@ -132,11 +134,14 @@ Done when every commit is read and each finding is sent as one request.
 
 When the worker reports a draft PR with green checks, run
 [references/review.md § Merge gate](references/review.md#merge-gate) on its
-exact head. Then:
+exact head. When the prompt grants you the merge, run:
 
 ```bash
 gh pr merge <P> --squash --match-head-commit <H>
 ```
+
+Otherwise, send the owner the PR, its head and the gate result, and wait for
+the owner's merge before the teardown.
 
 Keep the PR title as the squash subject. `pr-readiness.yml` owns draft state
 and marks the PR ready when its checks pass.
@@ -146,8 +151,9 @@ Done when the PR is merged at the reviewed head and its issue shows closed.
 ### 6. Teardown and refill
 
 1. Record the metric on main (lines, bytes or complexity) in `state.json`.
-2. Run `git merge-tree origin/main <head>` for the other open PR in the same
-   hot file. Tell its worker to rebase only when it conflicts.
+2. Run `git fetch origin`, then `git merge-tree origin/main <head>` for the
+   other open PR in the same hot file. Tell its worker to rebase only when it
+   conflicts.
 3. Tell this worker to finish. Wait until it shows settled, collect its latest
    revision, then tear it down with
    [references/teardown.md](references/teardown.md).
