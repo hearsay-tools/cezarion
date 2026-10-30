@@ -1,6 +1,4 @@
-import { SearchXIcon } from 'lucide-react'
-import { ArrowLeftIcon, FileCodeIcon, GitCommitHorizontalIcon, TriangleAlertIcon } from '@/components/design-icons'
-import { useState } from 'react'
+import { FileCodeIcon, GitCommitHorizontalIcon } from '@/components/design-icons'
 import { useParams } from 'react-router'
 
 import { Link } from '@/lib/project-router'
@@ -9,16 +7,12 @@ import { ApiError } from '@/api/client'
 import { useRun, useRunChanges, useRunCommit, useRunCommits } from '@/api/queries'
 import type { ApiRun, RunCommit } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
-import { Diff, type DiffMode } from '@/components/diff'
-import { DiffStatLabel } from '@/components/diff-stat'
-import { Button } from '@/components/ui/button'
-import { useIsDesktop } from '@/lib/use-desktop'
+import { CommitDiffPanel } from '@/components/diff/commit-diff-panel'
 
 import { engineOwnsRun } from '@open-mercato/cezar-api-client/contract/run-predicates'
 import { RunHeader } from '../task-thread/run-header'
 import { CommitList } from './commit-list'
 import { GitTabLoadError, GitTabLoading } from './git-tab-loading'
-import { DiffViewToggles } from './diff-controls'
 
 /**
  * `/tasks/:id/commits` — the run's own commits (`<base>..HEAD`), each opening its structured diff
@@ -88,67 +82,16 @@ function CommitsView({ run }: { run: ApiRun }) {
 
 function CommitDiffView({ runId, sha }: { runId: string; sha: string }) {
   const commit = useRunCommit(runId, sha)
-  const desktop = useIsDesktop()
-  const [mode, setMode] = useState<DiffMode>('unified')
-  const [wrap, setWrap] = useState(false)
 
-  const refused = commit.isError && commit.error instanceof ApiError && commit.error.status === 409
-  const effectiveMode: DiffMode = desktop ? mode : 'unified'
-  const effectiveWrap = desktop ? wrap : true
-
-  return (
-    <section data-slot="task-commit" data-sha={sha} className="mx-auto flex min-h-0 w-full max-w-[var(--measure)] flex-1 flex-col">
-      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 border-b border-border px-4 py-2 md:px-6">
-        <Button asChild variant="ghost" size="sm" data-slot="commit-back">
-          <Link to={`/tasks/${runId}/commits`}>
-            <ArrowLeftIcon size={16} aria-hidden="true" />
-            All commits
-          </Link>
-        </Button>
-        {commit.data ? <DiffStatLabel stat={commit.data.stat} /> : null}
-        <span className="ml-auto hidden items-center gap-1 md:flex">
-          <DiffViewToggles mode={mode} wrap={wrap} onModeChange={setMode} onWrapChange={setWrap} />
-        </span>
-      </div>
-
-      {commit.isPending ? (
-        <p data-slot="commit-loading" className="px-4 py-6 text-center text-xs text-soft-foreground md:px-6">
-          Loading commit…
-        </p>
-      ) : commit.isError ? (
-        <CenteredState
-          icon={refused ? <SearchXIcon /> : <TriangleAlertIcon size={16} />}
-          tone={refused ? 'neutral' : 'danger'}
-          heading="h2"
-          title={refused ? 'Commit not found' : 'Could not load the commit'}
-          subtitle={commit.error.message}
-        />
-      ) : (
-        <>
-          <div data-slot="commit-meta" className="border-b border-border px-4 py-3 md:px-6">
-            <h2 className="text-sm font-semibold">{commit.data.subject}</h2>
-            <p className="mt-0.5 text-[11px] text-soft-foreground">
-              {commit.data.author} · {commit.data.when} ·{' '}
-              <span className="font-mono select-all">{commit.data.sha}</span>
-            </p>
-          </div>
-          {commit.data.files.length === 0 ? (
-            <CenteredState
-              icon={<GitCommitHorizontalIcon size={16} />}
-              tone="neutral"
-              heading="h2"
-              title="No file changes"
-              subtitle="This commit carries no diff of its own — a merge commit's changes live on the commits it merged."
-            />
-          ) : (
-            <div className="px-4 py-4 [--diff-sticky-top:0px] md:[--diff-sticky-top:1rem] md:px-6">
-              <Diff files={commit.data.files} mode={effectiveMode} wrap={effectiveWrap} className="min-w-0" />
-            </div>
-          )}
-        </>
-      )}
-    </section>
-  )
+  return <CommitDiffPanel
+    commit={commit}
+    sha={sha}
+    backTo={`/tasks/${runId}/commits`}
+    backLabel="All commits"
+    slot="task-commit"
+    className="mx-auto flex min-h-0 w-full max-w-[var(--measure)] flex-1 flex-col"
+    diffClassName="px-4 py-4 [--diff-sticky-top:0px] md:[--diff-sticky-top:1rem] md:px-6"
+  />
 }
 
 /** Reuses the task diff payload; paths lead to the existing structured Changes view. */
