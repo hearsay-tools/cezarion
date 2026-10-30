@@ -444,9 +444,22 @@ as do `loadRunSkills` and `enabledSkills`. Autosave calls and blocker reads use
 held requeue use `.stepLoop`, and root acquisition uses `.repoRootLease`.
 `WorktreeAutosave.saveWorktree` stays async so dropped calls keep their rejection
 behavior. Preview callbacks call `preview/run-tools.ts` directly. `agentEnvForStep`,
-`agentEnv`, `execute`, `runContinuation`, `continueRun`, `workerStep`, the host
+`agentEnv`, `execute`, `runContinuation`, `continueRun`, the host
 builders and public `cezarToolHandlers` stay on the facade; its cleanup blocker
 becomes private.
+
+Phase 5 input and launch bodies (hearsay-tools/cezarion#2240): `steerWorker`,
+`sendMessage`, `respondPermission` and `latchAgentInputError` live in `InputDelivery`.
+The first three stay public facade delegators. `workerStep`, cockpit address copies,
+`setDelegationProvisioner` and `provisionSession` live in `launch-context.ts`;
+`provisionCiSession` lives in `cezar-tools.ts`. The facade keeps `cockpit` and
+`delegationProvisioner`; module hosts read them at use time. `agentEnv` and
+`agentEnvForStep` remain replaceable facade seams. Unspied private delegators
+`workerStep`, `sessionContextFor`, `agentWebhooksPart`, `automationsPart`,
+`awaitAutomationTools`, `provisionSession` and `provisionCiSession` are removed;
+their hosts call the modules. Public `builtinSkills`, `setAutomationTools`,
+`setCockpitAddress`, `cockpitAddress`, `setDelegationProvisioner` and
+`cezarToolHandlers` keep one-line facade delegators. No test seam or expected outcome changes.
 
 ## Facade surface
 
@@ -470,9 +483,8 @@ keeps their names and signatures:
 - The semaphore registers five callbacks (the scheduler four now target `RunLine`): `busySlots`, `oldestWakeAt`, `pump`, `oldestQueuedAt`,
   `accountHolds`.
 
-These members stay on the facade with no Phase 4 issue, and their code waits for Phase 5:
-`cancel`, `launchQueuedRun`, `onDelegationRun` (complexity 20),
-`latchAgentInputError` and `steerWorker`. Finish and completion gate bodies now live in
+At the Phase 4 exit, these members awaited Phase 5: `cancel`, `launchQueuedRun`,
+`onDelegationRun` (complexity 20), `latchAgentInputError` and `steerWorker`. Finish and completion gate bodies now live in
 `run-finish.ts`; the public `finish` and `acceptDone` delegators stay. None is over 20, so
 the Phase 4 exit still holds.
 

@@ -1,3 +1,6 @@
+import { randomUUID } from 'node:crypto';
+import type { acquireCiResources } from '../../ci-wait/resources.ts';
+import { previewCdpSession, previewRunContext, type PreviewHostLike } from '../../preview/registration.ts';
 import type { RunStore, RunRecord } from '../../runs/store.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { AutomationToolService, RunModuleContext } from './types.ts';
@@ -30,7 +33,7 @@ export class AutomationToolsSlot {
   }
 }
 
-type ToolHost = {
+export type ToolHost = {
   store: RunStore;
   registerWait(runId: string, request: CezarWaitRequestInput, via: WaitVia, generation: string, signal?: AbortSignal): Promise<PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry | PeerWaitEntry>;
   registerAsk(runId: string, request: CezarAskRequest, generation: string, signal?: AbortSignal): Promise<HumanWaitEntry>;
@@ -103,3 +106,26 @@ export function toolSessionRefusal(run: RunRecord | undefined, state: ActiveRun 
   return undefined;
 }
 
+
+export interface CiSessionHost {
+  active: ReadonlyMap<string, ActiveRun>;
+  ciResources(): ReturnType<typeof acquireCiResources>;
+  cezarToolHandlers(runId: string, generation: string): CezarToolHandlers;
+  preview(): PreviewHostLike | undefined;
+  cockpit(): { origin: string; projectId: string } | undefined;
+}
+
+/** Provision the same capability and descriptor on every start, Continue and recovered launch. */
+export async function provisionCiSession(context: RunModuleContext, host: CiSessionHost, runId: string, state: ActiveRun) {
+  state.revokeCiTools?.();
+  state.revokeCiTools = undefined;
+  state.ciGeneration = randomUUID();
+  state.ciTurnId = randomUUID();
+  const generation = state.ciGeneration;
+  const controller = await host.ciResources().controller();
+  state.toolless = !controller;
+  if (!controller || context.disposed() || state.cancelled || host.active.get(runId) !== state) return;
+  const provisioned = previewCdpSession(controller.provision(host.cezarToolHandlers(runId, generation)), { host: host.preview(), cockpitOrigin: host.cockpit()?.origin, runId, worktree: !!context.store.getRun(runId)?.worktreePath, context: () => previewRunContext(context.store, context.dataDir, runId) });
+  state.revokeCiTools = provisioned.revoke;
+  return provisioned;
+}
