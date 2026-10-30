@@ -640,7 +640,7 @@ jobs:
           (cd alias-cezarion && npm pack --dry-run --ignore-scripts)
 
   vitest:
-    name: Vitest shard ${{ matrix.shard }}/3
+    name: Vitest shard ${{ matrix.shard }}/4
     # Docs-only and infra-only changes, and verified manifest-only bot release
     # bumps, do not need to repeat the suites already covered by the relevant
     # release or docs gate; infra-only diffs cannot reach the package sources
@@ -655,7 +655,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3]
+        shard: [1, 2, 3, 4]
     runs-on: ubuntu-24.04
     # Coverage now shares the required test run on PRs and dispatches. Keep the
     # previous coverage job bound there; main and merge groups retain 15 minutes.
@@ -701,7 +701,7 @@ jobs:
 
       - name: Run server and cockpit unit suites
         id: collect
-        run: npm test -- --shard=${{ matrix.shard }}/3 --maxWorkers=4 ${{ (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && '--coverage.enabled' || '' }}
+        run: npm test -- --shard=${{ matrix.shard }}/4 --maxWorkers=4 ${{ (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && '--coverage.enabled' || '' }}
 
       - name: Upload shard coverage
         id: upload
@@ -728,10 +728,10 @@ jobs:
           else
             reason="the upload ended as $UPLOAD"
           fi
-          echo "::warning title=Vitest coverage shard $SHARD/3 missing::No coverage report from shard $SHARD: $reason. The test verdict comes from the Vitest shard job."
-          echo "Vitest coverage shard $SHARD/3: no report, $reason." >> "$GITHUB_STEP_SUMMARY"
+          echo "::warning title=Vitest coverage shard $SHARD/4 missing::No coverage report from shard $SHARD: $reason. The test verdict comes from the Vitest shard job."
+          echo "Vitest coverage shard $SHARD/4: no report, $reason." >> "$GITHUB_STEP_SUMMARY"
 
-  # Merges the three shard reports into one repo-relative Istanbul `coverage-final.json` and
+  # Merges the four shard reports into one repo-relative Istanbul `coverage-final.json` and
   # uploads it as `vitest-coverage-<head SHA>`. See docs/sdlc/ci.md § Vitest coverage artifact.
   vitest-coverage-merge:
     name: Merge Vitest coverage
@@ -779,7 +779,7 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
-          node .github/scripts/merge-vitest-coverage.mjs --input shards --output merged --shards 3 --root "$GITHUB_WORKSPACE" \
+          node .github/scripts/merge-vitest-coverage.mjs --input shards --output merged --shards 4 --root "$GITHUB_WORKSPACE" \
             --meta "headSha=$HEAD_SHA" --meta "testedRef=$TESTED_REF" --meta "baseSha=$BASE_SHA" \
             --meta "runId=$RUN_ID" --meta "runAttempt=$RUN_ATTEMPT" 2> merge.err || { cat merge.err >&2; exit 1; }
 

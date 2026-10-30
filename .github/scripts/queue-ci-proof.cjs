@@ -6,7 +6,7 @@ const REVIEW = 'Automated Code Review';
 // Workflow parity tests expand matrices and compare this complete roster.
 const REQUIRED_QUEUE_JOBS = [
   'Classify pull request change surface', 'Classify PR shape', 'Check function complexity', 'Check new code clones', 'Review preflight', 'Typecheck', 'Unit, build, and package',
-  ...[1, 2, 3].map(n => `Vitest shard ${n}/3`),
+  ...[1, 2, 3, 4].map(n => `Vitest shard ${n}/4`),
   ...[1, 2, 3, 4].map(n => `Cockpit browser E2E shard ${n}/4`), VERIFY, REVIEW, 'Validate reviewed queue entry',
 ];
 const validSha = value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);

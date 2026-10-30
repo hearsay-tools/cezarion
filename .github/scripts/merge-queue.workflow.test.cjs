@@ -46,6 +46,8 @@ test('proof roster expands every verification matrix and queue admission', () =>
       return j.strategy ? j.strategy.matrix.shard.map(n => j.name.replace('${{ matrix.shard }}', String(n))) : [j.name];
     });
   names.push(evaluate(ci.jobs['queue-review-result'].name, context()));
+  assert.deepEqual(names.filter(name => name.startsWith('Vitest shard ')),
+    ['Vitest shard 1/4', 'Vitest shard 2/4', 'Vitest shard 3/4', 'Vitest shard 4/4']);
   assert.deepEqual(names.sort(), [...REQUIRED_QUEUE_JOBS].sort());
 });
 test('queue always runs the complete immutable combined revision and no paid review or publication', () => {
