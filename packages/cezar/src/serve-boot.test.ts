@@ -95,7 +95,7 @@ describe('recoverServeProject', () => {
     await recoverServeProject(f.store, f.manager, f.observer, f.delegation, projectId, f.recover);
     expect(f.recover).toHaveBeenCalledWith(f.store, expect.any(Function), f.observer);
     expect(f.manager.recover).toHaveBeenCalledOnce();
-    expect(f.manager.recover).toHaveBeenCalledBefore(f.store.compressArchivedHistory);
+    expect(f.manager.recover).toHaveBeenCalledBefore(vi.mocked(f.store.compressArchivedHistory));
     expect(f.store.compressArchivedHistory).toHaveBeenCalledBefore(f.armDestroyRetries);
     expect(f.armDestroyRetries).toHaveBeenCalledWith(projectId ?? 'default');
     expect(f.armDestroyRetries).toHaveBeenCalledBefore(log);
@@ -143,16 +143,16 @@ describe('printServeBanner', () => {
   it.each([null, { branch: 'main' }])('prints environment details with repo %j', (repo) => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const checks = [
-      { name: 'one', available: true, version: 'v1' },
-      { name: 'two', available: true },
-      { name: 'three', available: false, hint: 'install it' },
-      { name: 'four', available: false },
+      { name: 'claude', available: true, version: 'v1' },
+      { name: 'codex', available: true },
+      { name: 'git', available: false, hint: 'install it' },
+      { name: 'gh', available: false },
     ] as Awaited<ReturnType<typeof detectEnvironment>>;
     printServeBanner('1.2.3', '/repo', repo as Awaited<ReturnType<typeof getRepoInfo>>, checks, 'http://localhost:4321');
     expect(log.mock.calls).toEqual([
       ['\n  cezar v1.2.3 — /repo'],
       [repo ? '  branch main' : '  not a git repository (tasks run in place, one at a time; repo view is empty)'],
-      ['  ✓ one    v1'], ['  ✓ two    ok'], ['  ✗ three  install it'], ['  ✗ four   missing'],
+      ['  ✓ claude v1'], ['  ✓ codex  ok'], ['  ✗ git    install it'], ['  ✗ gh     missing'],
       ['\n  cockpit → http://localhost:4321\n'],
     ]);
   });
@@ -161,7 +161,7 @@ describe('printServeBanner', () => {
 describe('createServeApplicationUpdate', () => {
   it('degrades to manual update without npm metadata', () => {
     vi.stubEnv('CEZ_DRY_RUN', '0');
-    expect(createServeApplicationUpdate('/repo', {}, vi.fn(), () => null)).toBeUndefined();
+    expect(createServeApplicationUpdate('/repo', {}, vi.fn(), () => undefined)).toBeUndefined();
     expect(ApplicationUpdateService).not.toHaveBeenCalled();
   });
 
@@ -180,10 +180,10 @@ describe('createServeApplicationUpdate', () => {
     const server = { address: () => ({ address: '127.0.0.1', port: 4321 }), shutdownForRestart } as unknown as ReturnType<typeof startServer>;
     getServer.mockReturnValue(server);
     const plan = {} as Parameters<typeof armRestartHelper>[0];
-    await options.armRestart(plan);
+    await options.armRestart!(plan);
     expect(armRestartHelper).toHaveBeenCalledWith(plan, { repoRoot: '/repo', host: '127.0.0.1', port: 4321, npmBin: '/bin/npm' });
     const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
-    options.handoff();
+    options.handoff!();
     await shutdownForRestart.mock.results[0]!.value;
     expect(shutdownForRestart).toHaveBeenCalledOnce();
     expect(exit).toHaveBeenCalledWith(0);
@@ -191,7 +191,7 @@ describe('createServeApplicationUpdate', () => {
 
   it('uses dry-run defaults when npm is missing', () => {
     vi.stubEnv('CEZ_DRY_RUN', '1');
-    createServeApplicationUpdate('/repo', {}, vi.fn(), () => null);
+    createServeApplicationUpdate('/repo', {}, vi.fn(), () => undefined);
     const options = vi.mocked(ApplicationUpdateService).mock.calls[0]![0];
     expect(options.dryRun).toBe(true);
     expect(options.npmPrefix).toMatch(/dry-prefix$/);
