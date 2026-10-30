@@ -176,14 +176,38 @@ function NotLandedRow({ entry, finishedAt, onDelete }: {
   finishedAt: string | undefined
   onDelete: () => void
 }) {
+  return (
+    <li data-slot="not-landed-row" data-branch={entry.name} data-branch-class={entry.class} className="flex min-h-[56px] items-center gap-[12px] rounded-[6px] px-[10px] py-[6px] hover:bg-sidebar-row-hover">
+      <NotLandedTitleAndMeta entry={entry} finishedAt={finishedAt} />
+      <NotLandedPr entry={entry} />
+      <NotLandedActions entry={entry} onDelete={onDelete} />
+    </li>
+  )
+}
+
+function NotLandedPr({ entry }: { entry: RepoBranchEntry }) {
+  return (
+    <>
+      {entry.pr ? (
+        <span data-slot="not-landed-pr" className="hidden shrink-0 items-center gap-[4px] text-[11.5px] text-muted-foreground md:flex">
+          <ReferenceChip
+            plain
+            reference={{ kind: 'PR', number: entry.pr.number, url: entry.pr.url }}
+            taskTitle={entry.title ?? entry.name}
+            status={entry.pr.state === 'draft' ? 'draft' : entry.pr.state === 'closed' ? 'closed' : undefined}
+          />
+          <PrStateWords entry={entry} />
+        </span>
+      ) : null}
+    </>
+  )
+}
+
+function NotLandedActions({ entry, onDelete }: { entry: RepoBranchEntry; onDelete: () => void }) {
   const queryClient = useQueryClient()
   const orphan = entry.class === 'orphan'
   const openPr = entry.pr && (entry.pr.state === 'open' || entry.pr.state === 'draft') ? entry.pr : null
   const canCreatePr = !orphan && entry.runId !== null && !openPr
-  const title = orphan ? `No task · last commit “${entry.lastCommit.subject}”` : entry.title ?? entry.name
-  // "done 3d ago" is the task's own finish when the runs list has it, else the last commit's age.
-  const age = shortAge(finishedAt ?? entry.lastCommit.at)
-  const when = orphan || !entry.runStatus ? (age ? `${age} ago` : '') : `${entry.runStatus}${age ? ` ${age} ago` : ''}`
 
   const draftPr = useMutation({
     mutationFn: () => createRunPr(entry.runId!),
@@ -203,46 +227,7 @@ function NotLandedRow({ entry, finishedAt, onDelete }: {
 
   const button = 'inline-flex h-[28px] shrink-0 items-center gap-[5px] rounded-[6px] px-[10px] text-[12px] font-medium text-foreground focus-visible:outline-2 focus-visible:outline-ring disabled:opacity-50 [&>svg]:size-[12px]'
   return (
-    <li data-slot="not-landed-row" data-branch={entry.name} data-branch-class={entry.class} className="flex min-h-[56px] items-center gap-[12px] rounded-[6px] px-[10px] py-[6px] hover:bg-sidebar-row-hover">
-      <span className="flex size-[12px] shrink-0 items-center justify-center">
-        {orphan ? (
-          <CircleDashedIcon aria-label="Task deleted" className="size-[12px] text-soft-foreground" />
-        ) : (
-          <StatusDot tone={(entry.runStatus && STATUS_TONE[entry.runStatus]) || 'neutral'} aria-label={entry.runStatus ?? undefined} />
-        )}
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col gap-[3px]">
-        {entry.runId ? (
-          <Link to={`/tasks/${entry.runId}`} data-slot="not-landed-title" className="min-w-0 truncate rounded-[2px] text-[13px] text-foreground hover:underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring">
-            {title}
-          </Link>
-        ) : (
-          <span data-slot="not-landed-title" className="min-w-0 truncate text-[13px] text-muted-foreground" title={title}>{title}</span>
-        )}
-        <span data-slot="not-landed-meta" className="flex min-w-0 items-center gap-[6px] text-[11px] text-soft-foreground">
-          <span className="shrink-0 font-mono text-muted-foreground">{entry.name}</span>
-          <span className="shrink-0">· {entry.ahead} commit{entry.ahead === 1 ? '' : 's'}</span>
-          {entry.diffStat ? (
-            <span className="flex shrink-0 gap-[4px] tabular-nums">
-              <span className="text-success">+{entry.diffStat.additions}</span>
-              <span className="text-danger">−{entry.diffStat.deletions}</span>
-            </span>
-          ) : null}
-          {when ? <span className="truncate">· {when}</span> : null}
-        </span>
-        <BranchKeptReason entry={entry} />
-      </div>
-      {entry.pr ? (
-        <span data-slot="not-landed-pr" className="hidden shrink-0 items-center gap-[4px] text-[11.5px] text-muted-foreground md:flex">
-          <ReferenceChip
-            plain
-            reference={{ kind: 'PR', number: entry.pr.number, url: entry.pr.url }}
-            taskTitle={entry.title ?? entry.name}
-            status={entry.pr.state === 'draft' ? 'draft' : entry.pr.state === 'closed' ? 'closed' : undefined}
-          />
-          <PrStateWords entry={entry} />
-        </span>
-      ) : null}
+    <>
       {entry.runId ? (
         <Link to={`/tasks/${entry.runId}`} data-action="not-landed-open" className={cn(button, 'hidden border border-border hover:bg-muted md:inline-flex')}>
           Open task
@@ -283,7 +268,51 @@ function NotLandedRow({ entry, finishedAt, onDelete }: {
           <DropdownMenuItem data-action="not-landed-delete" variant="destructive" onSelect={onDelete}>Delete branch…</DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-    </li>
+    </>
+  )
+}
+
+function NotLandedTitleAndMeta({ entry, finishedAt }: {
+  entry: RepoBranchEntry
+  finishedAt: string | undefined
+}) {
+  const orphan = entry.class === 'orphan'
+  const title = orphan ? `No task · last commit “${entry.lastCommit.subject}”` : entry.title ?? entry.name
+  // "done 3d ago" is the task's own finish when the runs list has it, else the last commit's age.
+  const age = shortAge(finishedAt ?? entry.lastCommit.at)
+  const when = orphan || !entry.runStatus ? (age ? `${age} ago` : '') : `${entry.runStatus}${age ? ` ${age} ago` : ''}`
+
+  return (
+    <>
+      <span className="flex size-[12px] shrink-0 items-center justify-center">
+        {orphan ? (
+          <CircleDashedIcon aria-label="Task deleted" className="size-[12px] text-soft-foreground" />
+        ) : (
+          <StatusDot tone={(entry.runStatus && STATUS_TONE[entry.runStatus]) || 'neutral'} aria-label={entry.runStatus ?? undefined} />
+        )}
+      </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-[3px]">
+        {entry.runId ? (
+          <Link to={`/tasks/${entry.runId}`} data-slot="not-landed-title" className="min-w-0 truncate rounded-[2px] text-[13px] text-foreground hover:underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring">
+            {title}
+          </Link>
+        ) : (
+          <span data-slot="not-landed-title" className="min-w-0 truncate text-[13px] text-muted-foreground" title={title}>{title}</span>
+        )}
+        <span data-slot="not-landed-meta" className="flex min-w-0 items-center gap-[6px] text-[11px] text-soft-foreground">
+          <span className="shrink-0 font-mono text-muted-foreground">{entry.name}</span>
+          <span className="shrink-0">· {entry.ahead} commit{entry.ahead === 1 ? '' : 's'}</span>
+          {entry.diffStat ? (
+            <span className="flex shrink-0 gap-[4px] tabular-nums">
+              <span className="text-success">+{entry.diffStat.additions}</span>
+              <span className="text-danger">−{entry.diffStat.deletions}</span>
+            </span>
+          ) : null}
+          {when ? <span className="truncate">· {when}</span> : null}
+        </span>
+        <BranchKeptReason entry={entry} />
+      </div>
+    </>
   )
 }
 
