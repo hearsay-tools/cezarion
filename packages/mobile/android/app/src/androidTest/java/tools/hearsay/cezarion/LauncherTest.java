@@ -1,6 +1,9 @@
 package tools.hearsay.cezarion;
 
+import android.content.SharedPreferences;
 import android.webkit.CookieManager;
+import android.webkit.ServiceWorkerClient;
+import android.webkit.ServiceWorkerController;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.webkit.WebResourceRequest;
@@ -18,6 +21,9 @@ import androidx.test.espresso.action.Tap;
 import androidx.test.core.app.ActivityScenario;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.platform.app.InstrumentationRegistry;
+import androidx.webkit.Profile;
+import androidx.webkit.ProfileStore;
+import androidx.webkit.WebViewFeature;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import java.util.concurrent.CountDownLatch;
@@ -63,6 +69,50 @@ public class LauncherTest {
             activity.onActivity(app -> web.set(findWeb(app.findViewById(android.R.id.content))));
             return web.get() != null;
         });
+    }
+    // Runs an async function body in the page and returns its JSON-encoded result.
+    private static String promise(ActivityScenario<MainActivity> activity, String body) throws Exception {
+        script(activity, "window.cezarResult=undefined;(async()=>{" + body + "})().then(v=>window.cezarResult=JSON.stringify(v),e=>window.cezarResult='error: '+e)");
+        AtomicReference<String> value = new AtomicReference<>();
+        until(() -> { value.set(script(activity, "window.cezarResult ?? null")); return !"null".equals(value.get()); });
+        return value.get();
+    }
+    private static ServiceWorkerController workers(SharedPreferences prefs) {
+        String name = BrowserProfile.current(prefs);
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE) || Profile.DEFAULT_PROFILE_NAME.equals(name)) return ServiceWorkerController.getInstance();
+        return ProfileStore.getInstance().getOrCreateProfile(name).getServiceWorkerController();
+    }
+    // Serves a page and a service worker script on the cockpit origin of the open WebView.
+    private static void serveSiteData(ActivityScenario<MainActivity> activity) throws Exception {
+        activity.onActivity(app -> {
+            workers(app.getSharedPreferences("connection", 0)).setServiceWorkerClient(new ServiceWorkerClient() {
+                @Override public WebResourceResponse shouldInterceptRequest(WebResourceRequest request) {
+                    if (!request.getUrl().toString().equals("https://127.0.0.1:65534/sw.js")) return null;
+                    return new WebResourceResponse("text/javascript", "UTF-8", new ByteArrayInputStream("self.oninstall=()=>self.skipWaiting()".getBytes(StandardCharsets.UTF_8)));
+                }
+            });
+            WebView web = findWeb(app.findViewById(android.R.id.content));
+            WebViewClient original = web.getWebViewClient();
+            web.setWebViewClient(new WebViewClient() {
+                @Override public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                    if (request.getUrl().toString().startsWith("https://127.0.0.1:65534/"))
+                        return new WebResourceResponse("text/html", "UTF-8", new ByteArrayInputStream("<p id='page'>Site data</p>".getBytes(StandardCharsets.UTF_8)));
+                    return original.shouldInterceptRequest(view, request);
+                }
+                @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) { return original.shouldOverrideUrlLoading(view, request); }
+                @Override public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) { original.onPageStarted(view, url, favicon); }
+                @Override public void onPageFinished(WebView view, String url) { original.onPageFinished(view, url); }
+            });
+            web.loadUrl("https://127.0.0.1:65534/site-data");
+        });
+        until(() -> "\"Site data\"".equals(script(activity, "document.getElementById('page')?.textContent")));
+    }
+    private static void forget() throws Exception {
+        onView(withText("Forget connection & sign out")).perform(scrollTo(), click());
+        onView(withText("Forget")).perform(click());
+        var prefs = InstrumentationRegistry.getInstrumentation().getTargetContext().getSharedPreferences("connection", 0);
+        // Forget removes the address only after the browser data is cleared.
+        until(() -> !prefs.contains("endpoint"));
     }
     private static CoordinatesProvider point(float x, float y) {
         return view -> { int[] location = new int[2]; view.getLocationOnScreen(location); return new float[]{location[0] + view.getWidth() * x, location[1] + view.getHeight() * y}; };
@@ -143,22 +193,37 @@ public class LauncherTest {
 
     @Test public void forgetRemovesStoredAddressAndCookies() throws Exception {
         CountDownLatch seeded = new CountDownLatch(1);
+        AtomicReference<CookieManager> before = new AtomicReference<>();
         try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
             activity.onActivity(app -> {
-                app.getSharedPreferences("connection", 0).edit().putString("endpoint", "https://example.com").putString("auth", "").commit();
-                CookieManager.getInstance().setAcceptCookie(true);
-                CookieManager.getInstance().setCookie("https://example.com", "cezar_test=present; Secure; Path=/", ignored -> seeded.countDown());
+                SharedPreferences prefs = app.getSharedPreferences("connection", 0);
+                prefs.edit().putString("endpoint", "https://example.com").putString("auth", "").commit();
+                CookieManager jar = BrowserProfile.cookies(prefs); before.set(jar);
+                jar.setAcceptCookie(true);
+                jar.setCookie("https://example.com", "cezar_test=present; Secure; Path=/", ignored -> seeded.countDown());
             });
             assertTrue(seeded.await(5, TimeUnit.SECONDS));
-            assertTrue(CookieManager.getInstance().getCookie("https://example.com").contains("cezar_test"));
-            onView(withText("Forget connection & sign out")).perform(scrollTo(), click());
-            onView(withText("Forget")).perform(click());
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-            var context = InstrumentationRegistry.getInstrumentation().getTargetContext();
-            while (context.getSharedPreferences("connection", 0).contains("endpoint") && System.nanoTime() < deadline) Thread.sleep(50);
-            assertFalse(context.getSharedPreferences("connection", 0).contains("endpoint"));
-            assertNull(CookieManager.getInstance().getCookie("https://example.com"));
+            assertTrue(before.get().getCookie("https://example.com").contains("cezar_test"));
+            forget();
+            assertNull(before.get().getCookie("https://example.com"));
+            activity.onActivity(app -> assertNull(BrowserProfile.cookies(app.getSharedPreferences("connection", 0)).getCookie("https://example.com")));
             onView(withContentDescription("Cockpit address")).check(matches(withText("")));
+        }
+    }
+
+    @Test public void forgetRemovesServiceWorkersAndCacheStorage() throws Exception {
+        String count = "return (await navigator.serviceWorker.getRegistrations()).length + ' workers, ' + (await caches.keys()).length + ' caches'";
+        try (ActivityScenario<MainActivity> activity = ActivityScenario.launch(MainActivity.class)) {
+            connect(activity);
+            serveSiteData(activity);
+            assertEquals("\"installed\"", promise(activity, "await navigator.serviceWorker.register('/sw.js'); await navigator.serviceWorker.ready; await (await caches.open('cezar-test')).put('/cached', new Response('cached')); return 'installed'"));
+            assertEquals("\"1 workers, 1 caches\"", promise(activity, count));
+            onView(withContentDescription("Browser controls")).perform(click());
+            onView(withText("Connection settings")).perform(click());
+            forget();
+            connect(activity);
+            serveSiteData(activity);
+            assertEquals("\"0 workers, 0 caches\"", promise(activity, count));
         }
     }
 }

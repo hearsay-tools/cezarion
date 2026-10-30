@@ -15,6 +15,8 @@ import android.view.View;
 import android.view.WindowInsets;
 import android.webkit.*;
 import android.widget.*;
+import androidx.webkit.WebStorageCompat;
+import androidx.webkit.WebViewFeature;
 
 public final class MainActivity extends Activity {
     private static final int NAVY = Color.rgb(11, 16, 28), AMBER = Color.rgb(255, 186, 56);
@@ -24,6 +26,7 @@ public final class MainActivity extends Activity {
     private TextView status;
     private Button connect, forget;
     private WebView web;
+    private CookieManager cookies;
     private CockpitFrame cockpit;
     private Connection connection;
     private boolean failed;
@@ -32,6 +35,7 @@ public final class MainActivity extends Activity {
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         prefs = getSharedPreferences("connection", MODE_PRIVATE);
+        BrowserProfile.deleteUnused(prefs);
         showLauncher();
     }
 
@@ -90,7 +94,7 @@ public final class MainActivity extends Activity {
         forget = button("Forget connection & sign out", () -> new AlertDialog.Builder(this)
             .setTitle("Forget this connection?").setMessage("This clears the saved address, cookies, and website data from this app.")
             .setNegativeButton("Cancel", null).setPositiveButton("Forget", (dialog, which) -> {
-                busy(true); clearSession(() -> { prefs.edit().clear().apply(); showLauncher(); status.setText("Connection and sign-in cleared."); });
+                busy(true); clearSession(() -> { prefs.edit().remove("endpoint").remove("auth").apply(); showLauncher(); status.setText("Connection and sign-in cleared."); });
             }).show()); form.addView(forget);
         Connection saved = saved();
         if (saved != null) { endpoint.setText(saved.endpoint); auth.setText(saved.signInOrigin); }
@@ -111,18 +115,24 @@ public final class MainActivity extends Activity {
 
     private void clearSession(Runnable done) {
         disposeWeb();
-        // A single app-wide browser profile. Clear it before changing either trusted origin.
-        WebView cleaner = new WebView(this); cleaner.clearCache(true); cleaner.clearHistory();
-        WebStorage.getInstance().deleteAllData();
-        CookieManager.getInstance().removeAllCookies(removed -> {
-            CookieManager.getInstance().flush(); cleaner.destroy(); done.run();
-        });
+        // Clear the current profile, then move to an empty one (BrowserProfile) before either
+        // trusted origin changes. Without profile support the legacy calls below leave
+        // service workers and Cache Storage behind.
+        Runnable finish = () -> { BrowserProfile.rotate(prefs); done.run(); };
+        CookieManager jar = BrowserProfile.cookies(prefs);
+        WebStorage storage = BrowserProfile.storage(prefs);
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DELETE_BROWSING_DATA)) {
+            WebStorageCompat.deleteBrowsingData(storage, finish); return;
+        }
+        WebView cleaner = new WebView(this); BrowserProfile.use(cleaner, prefs); cleaner.clearCache(true); cleaner.clearHistory();
+        storage.deleteAllData();
+        jar.removeAllCookies(removed -> { jar.flush(); cleaner.destroy(); finish.run(); });
     }
 
     private void openCockpit(Connection selected) {
         connection = selected; failed = false; setRoot();
         status = text("", 13); status.setTextColor(AMBER); status.setVisibility(View.GONE); root.addView(status);
-        web = new WebView(this);
+        web = new WebView(this); BrowserProfile.use(web, prefs); cookies = BrowserProfile.cookies(prefs);
         web.setContentDescription("Cockpit");
         cockpit = new CockpitFrame(this, web, this::refresh, this::showControls);
         WebSettings settings = web.getSettings();
@@ -131,8 +141,8 @@ public final class MainActivity extends Activity {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         settings.setSupportMultipleWindows(true);
         settings.setJavaScriptCanOpenWindowsAutomatically(false);
-        CookieManager.getInstance().setAcceptCookie(true);
-        CookieManager.getInstance().setAcceptThirdPartyCookies(web, false);
+        cookies.setAcceptCookie(true);
+        cookies.setAcceptThirdPartyCookies(web, false);
         // Deliberately no addJavascriptInterface: the server gets no native capabilities.
         web.setWebViewClient(new WebViewClient() {
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -147,7 +157,7 @@ public final class MainActivity extends Activity {
                 if (!selected.allows(url)) { view.stopLoading(); blocked(url); return; }
                 status.setVisibility(View.GONE); cockpit.loading(true); failed = false;
             }
-            @Override public void onPageFinished(WebView view, String url) { if (web == view && cockpit != null) cockpit.loading(false); CookieManager.getInstance().flush(); }
+            @Override public void onPageFinished(WebView view, String url) { if (web == view && cockpit != null) cockpit.loading(false); cookies.flush(); }
             @Override public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request.isForMainFrame()) { failed = true; showError("Could not connect. Check your network or VPN, then choose Refresh in ⋯."); }
             }
@@ -164,7 +174,7 @@ public final class MainActivity extends Activity {
         web.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message message) {
                 if (!isUserGesture) return false;
-                WebView popup = new WebView(MainActivity.this);
+                WebView popup = new WebView(MainActivity.this); BrowserProfile.use(popup, prefs);
                 popup.setWebViewClient(new WebViewClient() {
                     @Override public boolean shouldOverrideUrlLoading(WebView child, WebResourceRequest request) {
                         String target = request.getUrl().toString();
@@ -229,7 +239,7 @@ public final class MainActivity extends Activity {
         cockpit = null;
     }
     @Override public void onBackPressed() { if (web != null && web.canGoBack()) web.goBack(); else if (web != null) showLauncher(); else super.onBackPressed(); }
-    @Override protected void onPause() { if (web != null) { web.onPause(); CookieManager.getInstance().flush(); } super.onPause(); }
+    @Override protected void onPause() { if (web != null) { web.onPause(); cookies.flush(); } super.onPause(); }
     @Override protected void onResume() { super.onResume(); if (web != null) { web.onResume(); if (failed) reload(); } }
     @Override protected void onDestroy() { disposeWeb(); super.onDestroy(); }
     @Override protected void onActivityResult(int request, int result, Intent data) {

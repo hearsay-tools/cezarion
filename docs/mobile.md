@@ -118,9 +118,16 @@ trusted origin. Redirects never add trust automatically.
 - One remembered server/auth pair per app installation. Connecting with a different
   pair clears the previous browser session before opening the new one.
 - Cookies and website data are stored in the operating system's app sandbox.
+  On Android each connection gets its own WebView profile, so Forget and a new
+  server/auth pair start with no cookies, storage, caches or service workers from
+  the previous one. The previous profile's files are deleted on the next app start.
+  An Android System WebView too old for profiles clears only cookies, storage and
+  the HTTP cache; update it from Google Play.
   The shell stores addresses; it does not collect or separately store passwords.
 - Remote pages get no JavaScript-to-native bridge, filesystem API, or local-agent
   process access. File uploads use the platform's explicit file picker.
+  On iPhone the picker can take a photo or video, so iOS asks once for camera and
+  microphone access the first time you choose that. The app uses neither otherwise.
 - HTTPS certificate verification remains enabled. Android blocks mixed content and
   third-party cookies; full-page SSO redirects work within the trusted origin pair.
 - No background execution of agents on the phone, offline cockpit, push
@@ -145,7 +152,8 @@ cd packages/mobile/android
 
 The APK is `packages/mobile/android/app/build/outputs/apk/debug/app-debug.apk`.
 Tests cover HTTPS validation, exact origin matching, credential rejection,
-sign-in-origin changes, the connection form, and actual cookie deletion.
+sign-in-origin changes, the connection form, and that Forget actually deletes
+cookies, service workers and Cache Storage.
 
 iOS builds with the checked-in Xcode project:
 
