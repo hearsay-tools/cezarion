@@ -358,7 +358,8 @@ until Phase 5. The list was checked against `main` at `97335b352`:
   `settleSuccess`, `settleRequestedRootFinish`, `rescueStalledQueue`, `trackWorkerSessionResult`.
   The fixture reads one `TrackedWork` per repository root. It does not replace manager methods.
   `runInternals(manager)` provides the typed module, context, active-map and disposal reads; its
-  instance test pins every class-module field. The 12 facade members remain in this PR, while
+  instance test pins every class-module field. In hearsay-tools/cezarion#2242, retention calls
+  in `fixture-cleanup.test.ts` move to `runInternals(manager).runSettlement.enforceRetention`;
   cleanup ownership also covers a module calling its own methods.
 - Spied: `awaitRunTermination`, `reconcileWorkerWaits`, `startRun`, `recover`,
   `deliverConversationInput`, `continueRun`, `settledTurnOutcome`,
@@ -491,6 +492,16 @@ the Phase 4 exit still holds.
 Phase 5: `launchQueuedRun` and `ownedJob` now live in `run/run-start.ts`, with the bodies of
 `startRun`, `startRunIdempotent` and `enqueueOwnedRun`. Those three public facade delegators stay;
 `startRunIdempotent` calls `startRun` through the facade host so its spies still observe it.
+
+In hearsay-tools/cezarion#2242, `enforceMemoryLimit` and `memoryPausing` move to
+`run/memory-guard.ts`. The facade keeps `enforceMemoryLimit` for the three
+`server/project-context.test.ts` spies; `onUsage` still calls it through the manager.
+The store listener field stays on the facade for `on`/`off` identity; its synchronous
+`onDelegationRun` body lives in `FamilyReconciler`. `adoptTranscriptAsk` and
+`settleAnsweredLegacyAsk` live in `RunRecovery`. `reapTerminalScratch`,
+`enforceRetention` and `enforceRetentionWork` live in `RunSettlement`; their private
+facade delegators and recovery host entries are removed. The retention tracking
+wrapper stays async, including the dropped call in `RunSettlement.dropActive`.
 
 `run.ts` also keeps re-exporting the module-level names that shipped code and tests import:
 `StartRunInput`, `DelegationExecutionSettings`, `AutomationToolService`, `PastedContent`,
