@@ -105,8 +105,8 @@ export interface InstalledEntry extends InstallManifest {
   active: boolean;
 }
 
-/** Every complete install under `versions/` (a manifest AND an entry file), newest first. */
-export function listInstalled(env: NodeJS.ProcessEnv = process.env): InstalledEntry[] {
+/** Every entry under `versions/` with a manifest that `keep` accepts, in directory order. */
+function listEntries(env: NodeJS.ProcessEnv, keep: (id: string, manifest: InstallManifest) => boolean): InstalledEntry[] {
   const dir = versionsDir(env);
   if (!existsSync(dir)) return [];
   const active = activeId(env);
@@ -114,10 +114,15 @@ export function listInstalled(env: NodeJS.ProcessEnv = process.env): InstalledEn
   for (const name of readdirSync(dir)) {
     if (name === CURRENT_LINK || name.startsWith('.')) continue;
     const manifest = readManifest(name, env);
-    if (!manifest || !existsSync(versionEntry(name, env))) continue;
-    out.push({ ...manifest, id: name, active: name === active });
+    if (manifest && keep(name, manifest)) out.push({ ...manifest, id: name, active: name === active });
   }
-  return out.sort((a, b) => b.installedAt.localeCompare(a.installedAt));
+  return out;
+}
+
+/** Every complete install under `versions/` (a manifest AND an entry file), newest first. */
+export function listInstalled(env: NodeJS.ProcessEnv = process.env): InstalledEntry[] {
+  return listEntries(env, (id) => existsSync(versionEntry(id, env)))
+    .sort((a, b) => b.installedAt.localeCompare(a.installedAt));
 }
 
 /** Resolve an apply target to an installed entry: an exact id (`0.11.1+local`) first, else a
@@ -257,16 +262,7 @@ export function linkCheckout(packageRoot: string, branch: string, env: NodeJS.Pr
 /** Every linked checkout, dangling ones included (a worktree that was removed) — `listInstalled`
  *  hides those, but they still need finding to be pruned or replaced. */
 export function listLinks(env: NodeJS.ProcessEnv = process.env): InstalledEntry[] {
-  const dir = versionsDir(env);
-  if (!existsSync(dir)) return [];
-  const active = activeId(env);
-  const out: InstalledEntry[] = [];
-  for (const name of readdirSync(dir)) {
-    if (name === CURRENT_LINK || name.startsWith('.')) continue;
-    const manifest = readManifest(name, env);
-    if (manifest?.source === 'link') out.push({ ...manifest, id: name, active: name === active });
-  }
-  return out;
+  return listEntries(env, (_id, manifest) => manifest.source === 'link');
 }
 
 /** The id a checkout gets when `base` already belongs to another checkout or install. */
