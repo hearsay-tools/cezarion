@@ -247,8 +247,8 @@ jobs:
           GLOB: ${{ matrix.glob }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          shopt -s nullglob
-          files=( $GLOB )
+          # compgen -G expands the glob into one path per line, and nothing when it matches none.
+          mapfile -t files < <(compgen -G "$GLOB")
           if [ ${#files[@]} -eq 0 ]; then echo "::error::no bundle matched $GLOB"; exit 1; fi
           cp "${files[0]}" "$STABLE"
           # `shasum` on macOS, `sha256sum` on Linux and in the Windows runner's bash.
