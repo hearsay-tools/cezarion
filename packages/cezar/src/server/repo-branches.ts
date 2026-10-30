@@ -8,8 +8,6 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join as joinPath, resolve as resolvePath } from 'node:path';
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { z } from 'zod';
 import type { BranchClass, BranchPrState, RepoBranchCountsResponse, RepoBranchEntry, RepoBranchesResponse } from '@open-mercato/cezar-contract';
 import { isSafeGitRef } from '../git-refs.ts';
 import { withWorktreeMutation } from '../git-worktree-lock.ts';
@@ -17,10 +15,11 @@ import { ownedCleanupProtection, parseShortstat } from '../git-worktree.ts';
 import { loadConfig } from '../config.ts';
 import type { BranchOwner, RunStatus, RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
-import { fetchGithubRefStatus, GH_REF_STATUS_MAX, refNumberFromUrl, type ReferenceStatus } from './github.ts';
+import { refNumberFromUrl } from './github.ts';
 import { getBranches, getRepoInfo, type LogEntryWithParents } from './git.ts';
+import type { BranchForge, ForgePr } from './repo-branch-forge.ts';
 
-const exec = promisify(execFile);
+export { __clearPrListCacheForTests, githubBranchForge, type BranchForge, type ForgePr } from './repo-branch-forge.ts';
 
 interface GitResult { ok: boolean; stdout: string; stderr: string }
 
@@ -58,106 +57,6 @@ async function git(cwd: string, args: string[]): Promise<GitResult> {
 const TASK_PREFIX = 'cez/';
 const FINISHED: ReadonlySet<RunStatus> = new Set<RunStatus>(['done', 'failed', 'cancelled']);
 const FULL_SHA = /^[0-9a-f]{40}$/;
-
-// ---- the forge seam ------------------------------------------------------------------------
-
-export interface ForgePr {
-  number: number;
-  url: string;
-  headRefName: string;
-  /** The branch the PR targets, and its head commit — at merge time, for a merged PR. Together
-   *  they are what proves a merged PR landed THIS tip on THIS base. */
-  baseRefName: string;
-  headRefOid: string;
-  /** The commit the merge put on the base (a squash commit, or the merge commit), null until merged. */
-  mergeCommitOid: string | null;
-  state: BranchPrState;
-}
-
-/**
- * What the classifier asks GitHub. Both calls degrade to `available: false` instead of throwing;
- * the classifier then falls back to ancestry and reports `prStateKnown: false`.
- */
-export interface BranchForge {
-  /** States of the PRs runs CREATED (`pullRequestUrl`), by number — the ref-status cache. */
-  prStates(repoRoot: string, numbers: number[]): Promise<{ available: boolean; states: Record<number, BranchPrState> }>;
-  /** Every PR of the repository — one cached list. It names each branch with no
-   *  `pullRequestUrl`, and carries the base and head that a `merged` verdict is checked against. */
-  listPrs(repoRoot: string): Promise<{ available: boolean; prs: ForgePr[] }>;
-}
-
-function prStateOf(status: ReferenceStatus): BranchPrState {
-  if (status === 'merged') return 'merged';
-  if (status === 'closed') return 'closed';
-  if (status === 'draft') return 'draft';
-  return 'open';
-}
-
-const ghPrListSchema = z.array(
-  z.object({
-    number: z.number(),
-    url: z.string(),
-    headRefName: z.string(),
-    baseRefName: z.string(),
-    headRefOid: z.string(),
-    mergeCommit: z.object({ oid: z.string() }).nullable().optional(),
-    state: z.string(),
-    isDraft: z.boolean().optional(),
-  }),
-);
-
-const PR_LIST_TTL_MS = 60_000;
-const PR_LIST_LIMIT = 500;
-const prListCache = new Map<string, { at: number; value: { available: boolean; prs: ForgePr[] } }>();
-
-/** The default forge: the existing ref-status cache for created PRs, plus one `gh pr list` per
- *  minute per repository for everything else. `CEZ_DRY_RUN=1` never shells out. */
-export const githubBranchForge: BranchForge = {
-  async prStates(repoRoot, numbers) {
-    const states: Record<number, BranchPrState> = {};
-    for (let i = 0; i < numbers.length; i += GH_REF_STATUS_MAX) {
-      const data = await fetchGithubRefStatus(repoRoot, { prs: numbers.slice(i, i + GH_REF_STATUS_MAX) });
-      if (!data.available) return { available: false, states };
-      for (const [n, status] of Object.entries(data.prs)) states[Number(n)] = prStateOf(status);
-    }
-    return { available: true, states };
-  },
-  async listPrs(repoRoot) {
-    if (process.env.CEZ_DRY_RUN === '1') return { available: true, prs: [] };
-    const hit = prListCache.get(repoRoot);
-    if (hit && Date.now() - hit.at < PR_LIST_TTL_MS) return hit.value;
-    let value: { available: boolean; prs: ForgePr[] };
-    try {
-      const { stdout } = await exec(
-        'gh',
-        ['pr', 'list', '--state', 'all', '--limit', String(PR_LIST_LIMIT), '--json', 'number,headRefName,baseRefName,headRefOid,mergeCommit,state,isDraft,url'],
-        { cwd: repoRoot, timeout: 15_000, maxBuffer: 16 * 1024 * 1024 },
-      );
-      const rows = ghPrListSchema.parse(JSON.parse(stdout));
-      value = {
-        available: true,
-        prs: rows.map((row) => ({
-          number: row.number,
-          url: row.url,
-          headRefName: row.headRefName,
-          baseRefName: row.baseRefName,
-          headRefOid: row.headRefOid,
-          mergeCommitOid: row.mergeCommit?.oid ?? null,
-          state: row.state === 'MERGED' ? 'merged' : row.state === 'CLOSED' ? 'closed' : row.isDraft ? 'draft' : 'open',
-        })),
-      };
-    } catch {
-      value = { available: false, prs: [] };
-    }
-    prListCache.set(repoRoot, { at: Date.now(), value });
-    return value;
-  },
-};
-
-/** Test-only: forget cached `gh pr list` answers. */
-export function __clearPrListCacheForTests(): void {
-  prListCache.clear();
-}
 
 // ---- classification ------------------------------------------------------------------------
 
@@ -339,26 +238,32 @@ export async function forkPoints(
   return out;
 }
 
+/** A resolved base: the name shown, the fully qualified ref a delete verifies (null for a pinned
+ *  sha or no base), its commit, and the branch name a merged PR must target (null when no PR can
+ *  target it: a sha, a detached checkout, no base). */
+interface ResolvedBase { ref: string; fullRef: string | null; sha: string | null; prBase: string | null }
+
 /**
  * The base as a FULLY QUALIFIED ref and its commit. `freshestBaseRef`'s rule (origin/<base> when
  * the local branch is behind it), but never through an unqualified name: git resolves `main` to a
  * tag `refs/tags/main` before `refs/heads/main`, and a tag at an unlanded tip would make its work
  * read as merged — bulk-deletable. A pinned sha stays a sha.
  */
-async function resolveBase(root: string, base: string): Promise<{ ref: string; fullRef: string | null; sha: string | null }> {
+async function resolveBase(root: string, base: string): Promise<ResolvedBase> {
   const at = async (ref: string) => {
     const res = await git(root, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
     return res.ok ? res.stdout.trim() || null : null;
   };
-  if (FULL_SHA.test(base)) return { ref: base, fullRef: null, sha: await at(base) };
+  const none = { ref: base, fullRef: null, sha: null, prBase: null };
+  if (FULL_SHA.test(base)) return { ...none, sha: await at(base) };
   // A detached main checkout with no configured base: `RepoInfo.branch` is the literal `HEAD`, which
   // names no branch. The base is then the checkout's commit, and a delete verifies HEAD still holds
   // it (`--no-deref`: a HEAD switched back onto a branch is symbolic again, and refuses).
   if (base === 'HEAD') {
     const sha = (await git(root, ['symbolic-ref', '-q', 'HEAD'])).ok ? null : await at('HEAD');
-    return { ref: 'HEAD', fullRef: sha ? 'HEAD' : null, sha };
+    return { ...none, ref: 'HEAD', fullRef: sha ? 'HEAD' : null, sha };
   }
-  if (!isSafeGitRef(base)) return { ref: base, fullRef: null, sha: null };
+  if (!isSafeGitRef(base)) return none;
   const name = base.startsWith('origin/') ? base.slice('origin/'.length) : base;
   // A symbolic base is an alias for some other branch — possibly one about to be deleted — and a
   // `--no-deref` verify of the alias protects nothing it points at. It resolves to nothing, so
@@ -368,10 +273,30 @@ async function resolveBase(root: string, base: string): Promise<{ ref: string; f
   const remote = await direct(`refs/remotes/origin/${name}`);
   // Exits 0 iff local is equal to or ahead of origin — local then carries unpushed base commits.
   if (local && (!remote || (await git(root, ['merge-base', '--is-ancestor', remote, local])).ok)) {
-    return { ref: name, fullRef: `refs/heads/${name}`, sha: local };
+    return { ref: name, fullRef: `refs/heads/${name}`, sha: local, prBase: name };
   }
-  if (remote) return { ref: `origin/${name}`, fullRef: `refs/remotes/origin/${name}`, sha: remote };
-  return { ref: base, fullRef: null, sha: null };
+  if (remote) return { ref: `origin/${name}`, fullRef: `refs/remotes/origin/${name}`, sha: remote, prBase: name };
+  if (base === 'origin' || base === 'origin/HEAD') return remoteDefault(root, base, at);
+  return none;
+}
+
+/**
+ * `origin` (or `origin/HEAD`) as a base: what git itself reads it as when a worktree forks from it
+ * (`resolveBaseRef`), the branch `refs/remotes/origin/HEAD` points at. The alias is read once and
+ * its TARGET is the base, so a delete verifies the concrete ref, never the alias. A ref git would
+ * pick before the alias (`refs/origin`, a tag `origin`) makes the name ambiguous: no base, so
+ * nothing reads as merged (hearsay-tools/cezarion#2268).
+ */
+async function remoteDefault(root: string, base: string, at: (ref: string) => Promise<string | null>): Promise<ResolvedBase> {
+  const none = { ref: base, fullRef: null, sha: null, prBase: null };
+  if (base === 'origin' && ((await at('refs/origin')) || (await at('refs/tags/origin')))) return none;
+  const alias = await git(root, ['symbolic-ref', '-q', 'refs/remotes/origin/HEAD']);
+  const target = alias.ok ? alias.stdout.trim() : '';
+  const name = target.startsWith('refs/remotes/origin/') ? target.slice('refs/remotes/origin/'.length) : '';
+  if (!name || name === 'HEAD' || !isSafeGitRef(name)) return none;
+  if ((await git(root, ['symbolic-ref', '-q', target])).ok) return none;
+  const sha = await at(target);
+  return sha ? { ref: `origin/${name}`, fullRef: target, sha, prBase: name } : none;
 }
 
 /** A local or remote-tracking ref OUTSIDE `excluded` (full ref names) that also reaches `sha`, with
@@ -483,40 +408,48 @@ function selectDisplayedPrs(rows: Draft[], byHead: Map<string, ForgePr[]>, prByB
   }
 }
 
-async function mergedPrBranches(root: string, base: string, baseSha: string | null, pending: Draft[], byHead: Map<string, ForgePr[]>) {
-  const merged = new Set<string>();
+/** Each branch's merged PRs that prove its tip landed: the PR targets `prBase`, merged this exact
+ *  tip, and its merge commit is on the base as read. */
+async function mergedPrBranches(root: string, prBase: string | null, baseSha: string | null, rows: Draft[], byHead: Map<string, ForgePr[]>) {
+  const merged = new Map<string, ForgePr[]>();
   const onBase = async (sha: string | null) =>
     !!sha && !!baseSha && FULL_SHA.test(sha) && (await git(root, ['merge-base', '--is-ancestor', sha, baseSha])).ok;
-  for (const d of pending) {
+  for (const d of rows) {
     for (const pr of byHead.get(d.head.name) ?? []) {
-      if (pr.state !== 'merged' || pr.baseRefName !== base.replace(/^origin\//, '') || pr.headRefOid !== d.head.sha) continue;
-      if (await onBase(pr.mergeCommitOid)) {
-        merged.add(d.head.name);
-        break;
-      }
+      if (pr.state !== 'merged' || prBase === null || pr.baseRefName !== prBase || pr.headRefOid !== d.head.sha) continue;
+      if (await onBase(pr.mergeCommitOid)) merged.set(d.head.name, [...(merged.get(d.head.name) ?? []), pr]);
     }
   }
   return merged;
 }
 
-async function branchPrState(input: ClassifyInput, drafts: Draft[], pending: Draft[], base: string, baseSha: string | null) {
-  const empty = { prByBranch: new Map<string, RepoBranchEntry['pr']>(), mergedByPr: new Set<string>() };
-  if (pending.length === 0) return { ...empty, prStateKnown: true };
+/** PR state for the rows ancestry left open (`pending`) and for the non-task branches that may be
+ *  a run's PR branch (`named`). Every head is asked on its own, so evidence never falls off the end
+ *  of a list; `incomplete` names each head GitHub did not answer in full. */
+async function branchPrState(input: ClassifyInput, drafts: Draft[], pending: Draft[], named: Draft[], prBase: string | null, baseSha: string | null) {
+  const empty = { prByBranch: new Map<string, RepoBranchEntry['pr']>(), mergedByPr: new Map<string, ForgePr[]>(), incomplete: new Set<string>() as ReadonlySet<string> };
+  if (pending.length === 0 && named.length === 0) return { ...empty, prStateKnown: true };
   if (!input.hasRemote) return { ...empty, prStateKnown: false };
   const taskRows = drafts.filter((d) => d.head.name.startsWith(TASK_PREFIX));
   const { created, needList, prByBranch, available } = await recordedPrs(input, taskRows);
-  // Settled recorded PRs need the list for both the merge verdict and replacement display.
+  // Settled recorded PRs need the lookup for both the merge verdict and replacement display.
   const recordedSettled = pending.filter((d) => created.size > 0 && settled(prByBranch.get(d.head.name)?.state));
-  const list = needList.length > 0 || recordedSettled.length > 0
-    ? await input.forge.listPrs(input.root)
-    : { available: true, prs: [] as ForgePr[] };
+  const asked = [...needList, ...recordedSettled, ...named].map((d) => d.head.name);
+  const list = asked.length > 0
+    ? await input.forge.prsForHeads(input.root, asked)
+    : { available: true, prs: [] as ForgePr[], incomplete: new Set<string>() };
   const byHead = new Map<string, ForgePr[]>();
   for (const pr of list.prs) byHead.set(pr.headRefName, [...(byHead.get(pr.headRefName) ?? []), pr]);
   selectDisplayedPrs([...needList, ...recordedSettled], byHead, prByBranch);
-  // A merged PR must target this base and tip, and its merge commit must be on the base.
-  const mergedByPr = await mergedPrBranches(input.root, base, baseSha, pending, byHead);
-  return { prByBranch, mergedByPr, prStateKnown: available && list.available };
+  const mergedByPr = await mergedPrBranches(input.root, prBase, baseSha, [...pending, ...named], byHead);
+  return { prByBranch, mergedByPr, incomplete: list.incomplete, prStateKnown: available && list.available };
 }
+
+/** The same PR, whatever case or trailing slash its URL was recorded with. */
+const prKey = (url: string) => url.trim().replace(/\/+$/, '').toLowerCase();
+
+/** What a kept row says when GitHub did not return its PR history in full. */
+export const INCOMPLETE_PR_LOOKUP = "Kept: GitHub did not return this branch's full pull request history";
 
 export interface ClassifyOptions {
   /** Compute each not-landed row's diff stat (the default). Off for the counts and for a delete,
@@ -527,7 +460,7 @@ export interface ClassifyOptions {
 export async function classifyBranches(input: ClassifyInput, options?: ClassifyOptions): Promise<Classification> {
   const { root } = input;
   const base = input.configuredBase ?? input.currentBranch;
-  const { ref: baseRef, fullRef: baseFullRef, sha: baseSha } = await resolveBase(root, base);
+  const { ref: baseRef, fullRef: baseFullRef, sha: baseSha, prBase } = await resolveBase(root, base);
 
   const [heads, checkedOut, protection] = await Promise.all([
     localHeads(root),
@@ -576,12 +509,26 @@ export async function classifyBranches(input: ClassifyInput, options?: ClassifyO
   );
   for (const d of drafts) if (d.cls === null && d.ahead === 0) d.cls = 'merged';
 
-  // PR state only decides the rows ancestry left open; everything else is display.
+  // PR state only decides the rows ancestry left open, and the non-task branches a run's PR may
+  // have used (hearsay-tools/cezarion#2268); everything else is display.
   const pending = drafts.filter((d) => d.cls === null);
-  const { prByBranch, mergedByPr, prStateKnown } = await branchPrState(input, drafts, pending, base, baseSha);
+  const byPrUrl = new Map<string, BranchOwner>();
+  for (const run of input.runs) if (run.pullRequestUrl) byPrUrl.set(prKey(run.pullRequestUrl), run);
+  const named = byPrUrl.size > 0 ? drafts.filter((d) => d.cls === 'other' && !d.head.symbolic) : [];
+  const { prByBranch, mergedByPr, incomplete, prStateKnown } = await branchPrState(input, drafts, pending, named, prBase, baseSha);
   for (const d of pending) {
     if (mergedByPr.has(d.head.name)) d.cls = 'merged';
     else d.cls = d.run ? 'not-landed' : 'orphan';
+  }
+  // A named branch is cleanable only as the exact merged PR a finished run recorded. Any other
+  // branch stays the user's, however merged it looks.
+  for (const d of named) {
+    const pr = mergedByPr.get(d.head.name)?.find((candidate) => byPrUrl.has(prKey(candidate.url)));
+    const run = pr ? byPrUrl.get(prKey(pr.url)) : undefined;
+    if (!pr || !run || liveRun(run)) continue;
+    d.cls = 'merged';
+    d.run = run;
+    prByBranch.set(d.head.name, { number: pr.number, url: pr.url, state: pr.state });
   }
 
   const statOf = diffStatReader(root, baseSha);
@@ -601,6 +548,7 @@ export async function classifyBranches(input: ClassifyInput, options?: ClassifyO
         lastCommit: { sha: d.head.sha, subject: d.head.subject, at: d.head.at },
         diffStat: stat,
         pr: prByBranch.get(d.head.name) ?? null,
+        ...(incomplete.has(d.head.name) && cls !== 'merged' && cls !== 'empty' ? { keptReason: INCOMPLETE_PR_LOOKUP } : {}),
       };
     }),
   );
@@ -714,7 +662,7 @@ export interface DeleteBranchesResult {
 
 const DROPPED_CAP = 100;
 
-type DeleteCandidate = { name: string; tip: string; drops: boolean; keptElsewhere?: true };
+type DeleteCandidate = { name: string; tip: string; drops: boolean; runId?: string | null; keptElsewhere?: true };
 
 function deletionVerdicts(
   names: string[], payload: Awaited<ReturnType<typeof classifyBranches>>['payload'],
@@ -745,7 +693,7 @@ function deletionVerdicts(
         else candidates.push({ name, tip, drops: true });
         break;
       case 'merged':
-        candidates.push({ name, tip, drops: false });
+        candidates.push({ name, tip, drops: false, runId: entry.runId });
         break;
       case 'empty':
         // Ahead of the base yet empty: another ref holds its commits, which must outlive this delete.
@@ -762,11 +710,19 @@ function claimDeletionRuns(
   // Claimed before the lock and held through the ref transaction, so no Continue is admitted
   // between the verdict and the delete.
   const releases: Array<() => void> = [];
+  // A run's PR branch and its starter share the run: it is claimed once, for both.
+  const held = new Set<string>();
   for (const candidate of [...candidates]) {
     if (!input.claimRuns) break;
-    const owners = input.runs.filter((run) => runBranch(run) === candidate.name).map((run) => run.id);
-    const release = input.claimRuns(owners);
+    // A run's PR branch outside `cez/*` is owned through its PR, not its `branch`.
+    const all = [...new Set([
+      ...input.runs.filter((run) => runBranch(run) === candidate.name).map((run) => run.id),
+      ...(candidate.runId ? [candidate.runId] : []),
+    ])];
+    const owners = all.filter((id) => !held.has(id));
+    const release = all.length > 0 && owners.length === 0 ? () => undefined : input.claimRuns(owners);
     if (release) {
+      for (const id of owners) held.add(id);
       releases.push(release);
       continue;
     }

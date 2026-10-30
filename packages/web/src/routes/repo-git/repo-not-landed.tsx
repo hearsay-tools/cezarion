@@ -6,6 +6,7 @@ import { ApiError, createRunPr, deleteRepoBranches } from '@/api/client'
 import { queryKeys, useProjectRepoBase, useRepoBranches, useRuns } from '@/api/queries'
 import type { RepoBranchEntry } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
+import { BranchKeptReason } from './branch-kept-reason'
 import { CopyIcon, EllipsisIcon, TriangleAlertIcon } from '@/components/design-icons'
 import { ReferenceChip } from '@/components/reference-chip'
 import { ReferenceStatusProvider, useReferenceStatus } from '@/components/reference-status'
@@ -229,6 +230,7 @@ function NotLandedRow({ entry, finishedAt, onDelete }: {
           ) : null}
           {when ? <span className="truncate">· {when}</span> : null}
         </span>
+        <BranchKeptReason entry={entry} />
       </div>
       {entry.pr ? (
         <span data-slot="not-landed-pr" className="hidden shrink-0 items-center gap-[4px] text-[11.5px] text-muted-foreground md:flex">

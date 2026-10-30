@@ -11,6 +11,7 @@ import { reconcileAgentMarkers } from '../preview/agent-marker.ts';
 import { armRepoHandle } from '../runs/arm-repo-handle.ts';
 import { ensureDataGitignore } from '../data-gitignore.ts';
 import { reclaimWorktrees } from '../runs/retention.ts';
+import { SWEEP_MIN_INTERVAL_MS, sweepMergedBranches } from './repo-branch-sweep.ts';
 import { RunStore } from '../runs/store.ts';
 import { RunDatabase, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY } from '../runs/run-database.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -435,7 +436,10 @@ export class ProjectContexts {
     reconcileAutomationReceipts(automationStore, store);
     this.notifyStoreCreated(store);
     armPreview(store, dataDir, this.deps.preview);
-    const manager = new RunManager(store, project.root, { semaphore: this.semaphore, preview: this.deps.preview, cezarPort: this.deps.cezarPort });
+    const manager: RunManager = new RunManager(store, project.root, {
+      semaphore: this.semaphore, preview: this.deps.preview, cezarPort: this.deps.cezarPort,
+      sweepBranches: (keep) => void sweepMergedBranches({ root: project.root, store, manager }, { keep, minIntervalMs: SWEEP_MIN_INTERVAL_MS }),
+    });
     this.buildingManagers.set(projectId, manager);
     try {
       const cleanup = this.deps.prepareManager?.({ id: project.id, root: project.root, store, manager });
@@ -452,6 +456,9 @@ export class ProjectContexts {
           () => DEFAULT_WORKTREE_RETENTION,
         );
         await reclaimWorktrees(project.root, store, keep, { previewHost: this.deps.preview }).catch(() => [] as string[]);
+        // In the background: the sweep may ask GitHub (hearsay-tools/cezarion#2268). Never over a
+        // store that could not open: its runs are unknown, and every branch would look ownerless.
+        if (!store.unavailable) void sweepMergedBranches({ root: project.root, store, manager }, { keep });
       }
       await manager.recover();
       // Archived transcripts left plain (or both-present after a crash) — fire-and-forget,

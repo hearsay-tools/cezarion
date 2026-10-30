@@ -63,7 +63,7 @@ describe('deleting an empty branch whose commits another ref keeps (issue 08)', 
       createdAt: '2026-09-01T00:00:00.000Z', archived: false, branch: 'cez/aaaaaaaa', baseBranch: 'topic',
     } as unknown as RunRecord].flatMap((run) => branchOwnerOf(run) ?? []);
     const result = await deleteBranches(
-      { root, runs, isActive: () => false, currentBranch: 'main', hasRemote: false, forge: { prStates: async () => ({ available: true, states: {} }), listPrs: async () => ({ available: true, prs: [] }) } },
+      { root, runs, isActive: () => false, currentBranch: 'main', hasRemote: false, forge: { prStates: async () => ({ available: true, states: {} }), prsForHeads: async () => ({ available: true, prs: [], incomplete: new Set<string>() }) } },
       ['cez/aaaaaaaa'],
     );
     expect(result.deleted).toEqual([]);

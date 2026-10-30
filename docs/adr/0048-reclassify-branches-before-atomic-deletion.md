@@ -13,6 +13,8 @@ classification snapshot. If an empty branch depends on another ref retaining its
 that ref must be outside the deletion request; two requested branches cannot vouch for each
 other and both disappear.
 
+The automatic sweep in ADR 0054 deletes only the bulk-safe classes, through the same delete path.
+
 Forge failure degrades classification to ancestry evidence with unknown PR state. The browser
 renders that result and cannot grant itself a safer classification.
 

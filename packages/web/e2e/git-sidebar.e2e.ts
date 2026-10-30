@@ -78,6 +78,10 @@ beforeAll(async () => {
   commitOn('cez/nl-task', 'feat: work that never landed')
   commitOn('cez/orphan1', 'feat: work whose task was deleted')
   execFileSync('git', ['-C', root, 'branch', 'cez/merged1', 'main~1'])
+  // Retention 0 keeps the boot-time branch sweep (hearsay-tools/cezarion#2268) off: it would delete
+  // `cez/merged1` before this spec lists it and deletes it by hand.
+  mkdirSync(join(root, '.ai/cezar'), { recursive: true })
+  writeFileSync(join(root, '.ai/cezar/config.json'), JSON.stringify({ worktreeRetention: 0 }))
   writeFileSync(join(root, 'dirty.txt'), 'uncommitted\n')
   seed(rootB, 'b-main', ['fixture: b'])
 
