@@ -5,10 +5,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { automationLogRecordSchema as contractLogRecordSchema } from '@open-mercato/cezar-contract/automations';
 import { AutomationCoordinator } from './coordinator.ts';
 import { AutomationStore } from './store.ts';
-import { GithubPoller } from './github-poller.ts';
+import { AutomationCandidateChangedError, GithubPoller, type GithubCandidate, type GithubPollOptions, type GithubPollResult } from './github-poller.ts';
 import type { GithubAutomationDefinition, ScheduleAutomationDefinition } from './types.ts';
 import * as scheduleRunner from './schedule-runner.ts';
-import { LeaseHeldError, ProjectAutomationScheduler, WORKSPACE_TIMER_CAP_MS, WorkspaceAutomationScheduler } from './scheduler.ts';
+import { type ProjectAutomationHandle, LeaseHeldError, ProjectAutomationScheduler, WORKSPACE_TIMER_CAP_MS, WorkspaceAutomationScheduler } from './scheduler.ts';
 
 const dirs: string[] = [];
 afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
@@ -21,6 +21,112 @@ async function setup() {
 const candidate = { eventId: 'event', event: 'issue.opened' as const, timestamp: '2026-07-26T02:00:00.000Z', tieBreaker: 'I', repo: 'acme/demo', nodeId: 'I', number: 7, title: 'Issue', url: 'https://github.com/acme/demo/issues/7', author: 'alice', assignees: [], labels: [] };
 
 describe('ProjectAutomationScheduler', () => {
+  it.each([false, true])('rechecks current labels before reserving a task (matches=%s)', async matches => {
+    const { store, definition } = await setup();
+    const rule = { ...definition, filters: { ...definition.filters, requireCurrentLabels: true } };
+    const launch = vi.fn(async () => ({ runId: 'current-labels' }));
+    const matchesCurrentLabels = vi.fn(async () => matches);
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC',
+      github: { owner: 'acme', repo: 'demo', poller: {
+        poll: async () => ({ candidates: [candidate], truncated: false, pages: 1 }), matchesCurrentLabels,
+      } as never }, launch });
+    await scheduler.check(rule);
+    expect(matchesCurrentLabels).toHaveBeenCalledWith(candidate, rule);
+    expect(launch).toHaveBeenCalledTimes(matches ? 1 : 0);
+    expect([...store.latestReceipts().values()]).toHaveLength(matches ? 1 : 0);
+    expect(store.logs({ automationId: rule.id })).toContainEqual(expect.objectContaining(matches
+      ? { result: 'launched', runId: 'current-labels', githubNumber: 7 }
+      : { result: 'skipped', reason: 'Automation item is closed or no longer matches current labels; no receipt or task was created.', githubNumber: 7 }));
+  });
+
+  it('releases a changed candidate receipt and records its refusal', async () => {
+    const { store, definition } = await setup();
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC',
+      github: { owner: 'acme', repo: 'demo', poller: { poll: async () => ({ candidates: [candidate], truncated: false, pages: 1 }) } as never },
+      launch: async () => { throw new AutomationCandidateChangedError(); },
+    });
+    await scheduler.check(definition);
+    expect([...store.latestReceipts().values()]).toEqual([
+      expect.objectContaining({ status: 'released', error: 'Automation item is closed or no longer matches current labels; no task was created.', eventId: candidate.eventId }),
+    ]);
+    expect(store.logs({ automationId: definition.id })).toContainEqual(expect.objectContaining({
+      result: 'skipped', reason: 'Automation item is closed or no longer matches current labels; no task was created.', githubNumber: 7, receiptId: expect.any(String),
+    }));
+    expect(store.state(definition.id)?.consecutiveFailures).toBe(0);
+  });
+
+  it('records an existing task as skipped while retaining its receipt', async () => {
+    const { store, definition } = await setup();
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC',
+      github: { owner: 'acme', repo: 'demo', poller: { poll: async () => ({ candidates: [candidate], truncated: false, pages: 1 }) } as never },
+      launch: async () => ({ runId: 'existing-run', existing: true }),
+    });
+    await scheduler.check(definition);
+    expect([...store.latestReceipts().values()]).toEqual([expect.objectContaining({ status: 'launched', runId: 'existing-run' })]);
+    expect(store.logs({ automationId: definition.id })).toContainEqual(expect.objectContaining({
+      result: 'skipped', reason: 'Issue already has non-archived task existing-run.', runId: 'existing-run',
+      githubNumber: 7, githubTitle: candidate.title, githubUrl: candidate.url, event: candidate.event,
+    }));
+  });
+
+  it.each(['preview', 'execute'] as const)('refuses a backed-off automation before polling in %s mode', async mode => {
+    const { store, definition } = await setup();
+    const now = Date.parse('2026-07-26T05:00:00.000Z');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    const backoffUntil = new Date(now + 60_000).toISOString();
+    store.setState(definition.id, () => ({ backoffUntil }));
+    const poll = vi.fn(async () => ({ candidates: [], truncated: false, pages: 1 }));
+    const launch = vi.fn(async () => ({ runId: 'unexpected' }));
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC',
+      github: { owner: 'acme', repo: 'demo', poller: { poll } as never }, launch });
+    try {
+      await expect(scheduler.check(definition, mode)).rejects.toThrow(`automation is backed off until ${backoffUntil}`);
+      expect(poll).not.toHaveBeenCalled();
+      expect(launch).not.toHaveBeenCalled();
+      expect(store.receipts()).toEqual([]);
+      expect(store.logs({ automationId: definition.id })).toEqual([
+        expect.objectContaining({ result: 'error', reason: `automation is backed off until ${backoffUntil}` }),
+      ]);
+    } finally { clock.mockRestore(); }
+  });
+
+  it.each([0, -1])('polls when backoff expired %s milliseconds ago', async elapsed => {
+    const { store, definition } = await setup();
+    const now = Date.parse('2026-07-26T05:00:00.000Z');
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    store.setState(definition.id, () => ({ backoffUntil: new Date(now + elapsed).toISOString() }));
+    const poll = vi.fn(async () => ({ candidates: [], truncated: false, pages: 1 }));
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC',
+      github: { owner: 'acme', repo: 'demo', poller: { poll } as never }, launch: async () => ({ runId: 'unused' }) });
+    try {
+      await scheduler.check(definition);
+      expect(poll).toHaveBeenCalledTimes(1);
+      expect(store.state(definition.id)?.backoffUntil).toBeUndefined();
+    } finally { clock.mockRestore(); }
+  });
+
+  it.each([false, true])('applies includeExisting=%s to an event exactly at the baseline', async includeExisting => {
+    const { store, definition } = await setup();
+    const rule = { ...definition, filters: { ...definition.filters, includeExisting } };
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse(candidate.timestamp));
+    store.setState(rule.id, () => ({ baselineAt: candidate.timestamp }));
+    const accepted: boolean[] = [];
+    const poll = vi.fn(async (_owner: string, _repo: string, _rule: GithubAutomationDefinition, options: { accept: (row: typeof candidate) => boolean }) => {
+      accepted.push(options.accept(candidate));
+      // Return the event independently too: check must also enforce the baseline on results.
+      return { candidates: [candidate], truncated: false, pages: 1 };
+    });
+    const launch = vi.fn(async () => ({ runId: 'at-baseline' }));
+    const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC',
+      github: { owner: 'acme', repo: 'demo', poller: { poll } as never }, launch });
+    try {
+      expect((await scheduler.check(rule)).candidates).toEqual(includeExisting ? [candidate] : []);
+      expect(accepted).toEqual([includeExisting]);
+      expect(launch).toHaveBeenCalledTimes(includeExisting ? 1 : 0);
+      expect(store.receipts()).toHaveLength(includeExisting ? 2 : 0);
+    } finally { clock.mockRestore(); }
+  });
+
   it.each([false, true])('previews the selected window independently of the execution cursor (includeExisting=%s)', async (includeExisting) => {
     const { store, definition } = await setup();
     const rule = { ...definition, filters: { ...definition.filters, includeExisting } };
@@ -753,9 +859,489 @@ describe('WorkspaceAutomationScheduler', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('stop prevents an in-flight coordinator refresh from arming a timer', async () => {
+    vi.useFakeTimers();
+    const { store } = await setup();
+    let finishRefresh!: () => void;
+    const refresh = new Promise<void>(resolve => { finishRefresh = resolve; });
+    const poll = vi.fn(async () => ({ candidates: [], truncated: false, pages: 1 }));
+    const scheduler = new WorkspaceAutomationScheduler({
+      coordinator: { refresh: () => refresh, enabledProjectIds: () => ['p'], store: () => store } as never,
+      handle: () => ({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll } as never } }),
+    });
+    try {
+      const started = scheduler.start();
+      scheduler.stop();
+      finishRefresh();
+      await started;
+      expect(scheduler.hasTimer()).toBe(false);
+      await vi.advanceTimersByTimeAsync(WORKSPACE_TIMER_CAP_MS);
+      expect(poll).not.toHaveBeenCalled();
+      await scheduler.reschedule();
+      expect(scheduler.hasTimer()).toBe(false);
+    } finally { scheduler.stop(); vi.useRealTimers(); }
+  });
+
+  it('a newer reschedule replaces the pending refresh without arming two polls', async () => {
+    vi.useFakeTimers();
+    const { store } = await setup();
+    let finishFirst!: () => void;
+    const first = new Promise<void>(resolve => { finishFirst = resolve; });
+    const refresh = vi.fn().mockImplementationOnce(() => first).mockResolvedValue(undefined);
+    const poll = vi.fn(async () => ({ candidates: [], truncated: false, pages: 1 }));
+    const scheduler = new WorkspaceAutomationScheduler({
+      coordinator: { refresh, enabledProjectIds: () => ['p'], store: () => store } as never,
+      handle: () => ({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll } as never } }),
+    });
+    try {
+      const started = scheduler.start();
+      await scheduler.reschedule();
+      finishFirst();
+      await started;
+      await vi.advanceTimersByTimeAsync(1);
+      expect(poll).toHaveBeenCalledTimes(1);
+      scheduler.stop();
+      await vi.advanceTimersByTimeAsync(WORKSPACE_TIMER_CAP_MS);
+      expect(poll).toHaveBeenCalledTimes(1);
+      expect(scheduler.hasTimer()).toBe(false);
+    } finally { scheduler.stop(); vi.useRealTimers(); }
+  });
+
   it('check refuses a project without a GitHub remote', async () => {
     const { store, definition } = await setup();
     const scheduler = new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC' });
     await expect(scheduler.check(definition)).rejects.toThrow('No GitHub remote is configured');
+  });
+});
+
+
+function schedulerFixture(store: AutomationStore, poll: (options: GithubPollOptions) => Promise<GithubPollResult>, overrides: Partial<ProjectAutomationHandle> = {}) {
+  return new ProjectAutomationScheduler({ projectId: 'p', store, timeZone: 'UTC',
+    github: { owner: 'acme', repo: 'demo', poller: { poll: (_owner: string, _repo: string, _definition: GithubAutomationDefinition, options: GithubPollOptions) => poll(options) } as never },
+    launch: async () => ({ runId: 'new-run' }), ...overrides,
+  });
+}
+const emptyPoll = async (): Promise<GithubPollResult> => ({ candidates: [], truncated: false, pages: 1 });
+
+describe('scheduler mutation boundaries', () => {
+  it.each(['preview', 'execute'] as const)('passes history scans only for execution (%s)', async mode => {
+    const { store, definition } = await setup();
+    const historyScan = { since: '2026-07-20T00:00:00.000Z', until: '2026-07-26T00:00:00.000Z', source: 0, page: 2, item: 3, event: 0 };
+    store.setState(definition.id, () => ({ historyScan }));
+    const poll = vi.fn(emptyPoll);
+    await schedulerFixture(store, poll).check(definition, mode);
+    expect(poll).toHaveBeenCalledWith(mode === 'execute'
+      ? { since: undefined, accept: expect.any(Function), historyScan }
+      : { since: undefined, accept: expect.any(Function) });
+    expect(store.state(definition.id)?.historyScan).toEqual(mode === 'execute' ? undefined : historyScan);
+  });
+
+  it('detects without a launcher using preview eligibility and preserves the execution cursor', async () => {
+    const { store, definition } = await setup();
+    const now = Date.parse(candidate.timestamp);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    const cursor = { timestamp: candidate.timestamp, tieBreaker: 'previous' };
+    store.setState(definition.id, () => ({ cursor, consecutiveFailures: 2 }));
+    const receipt = store.reserveReceipt({ automationId: definition.id, revision: 1, eventId: candidate.eventId, candidate })!;
+    const poll = vi.fn(async (options: GithubPollOptions) => {
+      expect(options.accept?.(candidate)).toBe(true);
+      return { candidates: [candidate], truncated: false, pages: 1 };
+    });
+    try {
+      expect((await schedulerFixture(store, poll, { launch: undefined }).check(definition)).candidates).toEqual([candidate]);
+      expect(store.state(definition.id)).toEqual({ cursor, consecutiveFailures: 2, revision: 1,
+        nextCheckAt: new Date(now + 300_000).toISOString() });
+      expect([...store.latestReceipts().values()]).toEqual([receipt]);
+      expect(store.logs({ automationId: definition.id })).toEqual([expect.objectContaining({ result: 'preview' })]);
+    } finally { clock.mockRestore(); }
+  });
+
+  it.each([
+    { mode: 'execute' as const, baseline: '2026-07-25T12:00:00.000Z', cursor: undefined, since: '2026-07-25T11:58:00.000Z' },
+    { mode: 'execute' as const, baseline: '2026-07-24T00:00:00.000Z', cursor: undefined, since: '2026-07-25T00:00:00.000Z' },
+    { mode: 'execute' as const, baseline: undefined, cursor: '', since: '2026-07-25T00:00:00.000Z' },
+    { mode: 'execute' as const, baseline: undefined, cursor: '2026-07-25T06:00:00.000Z', since: '2026-07-25T05:58:00.000Z' },
+    { mode: 'preview' as const, baseline: '2026-07-25T12:00:00.000Z', cursor: '2026-07-26T00:00:00.000Z', since: '2026-07-25T00:00:00.000Z' },
+  ])('uses the bounded history window for $mode with baseline $baseline and cursor $cursor', async ({ mode, baseline, cursor, since }) => {
+    const { store, definition } = await setup();
+    const rule = { ...definition, filters: { ...definition.filters, includeExisting: true, lookbackDays: 1 } };
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.parse('2026-07-26T00:00:00.000Z'));
+    store.setState(rule.id, () => ({ baselineAt: baseline, cursor: cursor === undefined ? undefined : { timestamp: cursor } }));
+    const poll = vi.fn(emptyPoll);
+    try {
+      await schedulerFixture(store, poll).check(rule, mode);
+      expect(poll).toHaveBeenCalledWith({ since, accept: expect.any(Function) });
+    } finally { clock.mockRestore(); }
+  });
+
+  it.each(['preview', 'execute'] as const)('handles repeated candidates according to %s mode', async mode => {
+    const { store, definition } = await setup();
+    const accepted: boolean[] = [];
+    await schedulerFixture(store, async options => {
+      accepted.push(options.accept!(candidate), options.accept!({ ...candidate, eventId: 'second', event: 'issue.labeled', repo: 'ACME/DEMO' }));
+      return { candidates: [], truncated: false, pages: 1 };
+    }).check(definition, mode);
+    expect(accepted).toEqual(mode === 'preview' ? [true, true] : [true, false]);
+    expect(store.logs({ automationId: definition.id }).filter(row => row.result === 'duplicate')).toEqual(mode === 'preview' ? [] : [
+      expect.objectContaining({ githubNumber: 7, reason: 'Another matching event for this issue was selected in this check.' }),
+    ]);
+  });
+
+  it.each([0, 2])('records the bounded preview count for %s matches', async count => {
+    const { store, definition } = await setup();
+    const rows = Array.from({ length: count }, (_, i) => ({ ...candidate, number: i + 1 }));
+    await schedulerFixture(store, async () => ({ candidates: rows, truncated: false, pages: 1 })).check(definition, 'preview');
+    expect(store.logs({ automationId: definition.id })[0]).toMatchObject({ result: 'preview',
+      reason: `Bounded preview found ${count} filter matches; no tasks were launched. Counts can include closed items and previously processed events.` });
+  });
+
+  it('records elapsed check duration and compacts before releasing the lease even if compaction fails', async () => {
+    const { store, definition } = await setup();
+    let now = Date.parse(candidate.timestamp);
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const compact = vi.spyOn(store, 'maybeCompact').mockImplementation(async () => {
+      expect(store.acquireLease()).toBeUndefined();
+      throw new Error('cannot compact');
+    });
+    try {
+      await schedulerFixture(store, async () => { now += 75; return emptyPoll(); }).check(definition);
+      expect(compact).toHaveBeenCalledTimes(1);
+      expect(store.logs({ automationId: definition.id })[0]).toMatchObject({ durationMs: 75, result: 'no-match', reason: 'Scheduled check completed.' });
+      const next = store.acquireLease();
+      expect(next).toBeDefined();
+      next?.release();
+    } finally { clock.mockRestore(); }
+  });
+
+  it('does not compact without a lease', async () => {
+    const { store, definition } = await setup();
+    const lease = store.acquireLease();
+    const compact = vi.spyOn(store, 'maybeCompact');
+    try {
+      await expect(schedulerFixture(store, emptyPoll).check(definition)).rejects.toBeInstanceOf(LeaseHeldError);
+      expect(compact).not.toHaveBeenCalled();
+    } finally { lease?.release(); }
+  });
+
+  it('does not ask for project readiness when there are no candidates', async () => {
+    const { store, definition } = await setup();
+    const ready = vi.fn(async () => { throw new Error('project unavailable'); });
+    await schedulerFixture(store, emptyPoll, { ready }).check(definition);
+    expect(ready).not.toHaveBeenCalled();
+  });
+
+  it('refuses an obsolete definition before querying the provider', async () => {
+    const { store, definition } = await setup();
+    store.update(definition.id, definition.revision, { ...definition, name: 'Edited' });
+    const poll = vi.fn(emptyPoll);
+    expect(await schedulerFixture(store, poll).check(definition)).toEqual({ candidates: [], truncated: false, pages: 0 });
+    expect(poll).not.toHaveBeenCalled();
+    expect(store.logs({ automationId: definition.id })).toEqual([expect.objectContaining({ result: 'skipped' })]);
+  });
+
+  it('does not ask readiness for results of an obsolete provider request', async () => {
+    const { store, definition } = await setup();
+    const ready = vi.fn(async () => undefined);
+    expect(await schedulerFixture(store, async () => {
+      store.update(definition.id, definition.revision, { ...definition, name: 'Edited' });
+      return { candidates: [candidate], truncated: false, pages: 1 };
+    }, { ready }).check(definition)).toEqual({ candidates: [], truncated: false, pages: 0 });
+    expect(ready).not.toHaveBeenCalled();
+  });
+
+  it('does not launch if readiness deletes the automation', async () => {
+    const { store, definition } = await setup();
+    const launch = vi.fn(async () => ({ runId: 'unexpected' }));
+    await schedulerFixture(store, async () => ({ candidates: [candidate], truncated: false, pages: 1 }), {
+      ready: async () => { store.delete(definition.id); }, launch,
+    }).check(definition);
+    expect(launch).not.toHaveBeenCalled();
+    expect(store.receipts()).toEqual([]);
+  });
+
+  it('does not launch if the current-label recheck deletes the automation', async () => {
+    const { store, definition } = await setup();
+    const rule = { ...definition, filters: { ...definition.filters, requireCurrentLabels: true } };
+    const launch = vi.fn(async () => ({ runId: 'unexpected' }));
+    const github = { owner: 'acme', repo: 'demo', poller: {
+      poll: async () => ({ candidates: [candidate], truncated: false, pages: 1 }),
+      matchesCurrentLabels: async () => { store.delete(rule.id); return true; },
+    } as never };
+    await schedulerFixture(store, emptyPoll, { github, launch }).check(rule);
+    expect(launch).not.toHaveBeenCalled();
+    expect(store.receipts()).toEqual([]);
+  });
+
+  it.each([1, 4, 11])('persists exact exponential backoff after %s previous failures', async failures => {
+    const { store, definition } = await setup();
+    const now = Date.parse(candidate.timestamp);
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+    store.setState(definition.id, () => ({ consecutiveFailures: failures }));
+    const onChange = vi.fn();
+    try {
+      await expect(schedulerFixture(store, async () => { throw 'provider refused'; }, { onChange }).check(definition)).rejects.toBe('provider refused');
+      const until = new Date(now + Math.min(21_600_000, 60_000 * 2 ** failures)).toISOString();
+      expect(store.state(definition.id)).toEqual({ consecutiveFailures: failures + 1, backoffUntil: until, nextCheckAt: until });
+      expect(store.logs({ automationId: definition.id })[0]).toMatchObject({ result: 'error', reason: 'provider refused' });
+      expect(onChange).toHaveBeenCalledWith(definition.id, definition.revision);
+    } finally { clock.mockRestore(); }
+  });
+
+  it.each(['string', 'error'] as const)('records a preview %s failure without changing execution state', async kind => {
+    const { store, definition } = await setup();
+    const error = kind === 'error' ? new Error('preview refused') : 'preview refused';
+    await expect(schedulerFixture(store, async () => { throw error; }).check(definition, 'preview')).rejects.toBe(error);
+    expect(store.state(definition.id)).toBeUndefined();
+    expect(store.logs({ automationId: definition.id })[0]).toMatchObject({ result: 'error', reason: 'preview refused' });
+  });
+});
+
+
+describe('scheduler receipt guards', () => {
+  it.each([undefined, 'previous-run'])('audits an issue receipt with runId=%s before refusing a second launch', async runId => {
+    const { store, definition } = await setup();
+    const old = store.reserveReceipt({ automationId: definition.id, revision: 1, eventId: 'old-event', candidate: { ...candidate, eventId: 'old-event' } })!;
+    store.appendReceipt({ ...old, status: 'launched', ...(runId ? { runId } : {}), updatedAt: candidate.timestamp });
+    const launch = vi.fn(async () => ({ runId: 'unexpected' }));
+    await schedulerFixture(store, async () => ({ candidates: [candidate], truncated: false, pages: 1 }), { launch }).check(definition);
+    expect(launch).not.toHaveBeenCalled();
+    const duplicate = store.logs({ automationId: definition.id }).find(row => row.result === 'duplicate');
+    expect(duplicate).toMatchObject({ githubNumber: 7, githubTitle: candidate.title, githubUrl: candidate.url, event: candidate.event,
+      reason: `A durable receipt already exists for this automation and issue.${runId ? ` Task: ${runId}.` : ''}` });
+    expect(duplicate?.runId).toBe(runId);
+  });
+
+  it('audits an already reserved PR event without launching it again', async () => {
+    const { store, definition } = await setup();
+    const row: GithubCandidate = { ...candidate, event: 'pull_request.opened' };
+    store.reserveReceipt({ automationId: definition.id, revision: 1, eventId: row.eventId, candidate: row });
+    const launch = vi.fn(async () => ({ runId: 'unexpected' }));
+    await schedulerFixture(store, async () => ({ candidates: [row], truncated: false, pages: 1 }), { launch }).check(definition);
+    expect(launch).not.toHaveBeenCalled();
+    expect(store.logs({ automationId: definition.id })).toContainEqual(expect.objectContaining({
+      result: 'duplicate', reason: 'A durable receipt already exists for this automation and event.',
+      event: 'pull_request.opened', githubNumber: 7, githubTitle: row.title, githubUrl: row.url,
+    }));
+  });
+
+  it.each(['legacy', 'other repo', 'pull request'] as const)('allows an issue when an earlier receipt is for %s', async kind => {
+    const { store, definition } = await setup();
+    const earlier = { ...candidate, eventId: 'other-event', ...(kind === 'other repo' ? { repo: 'acme/other' } : {}),
+      ...(kind === 'pull request' ? { event: 'pull_request.opened' as const } : {}) };
+    store.reserveReceipt({ automationId: definition.id, revision: 1, eventId: earlier.eventId,
+      ...(kind === 'legacy' ? {} : { candidate: earlier }) });
+    const launch = vi.fn(async () => ({ runId: 'new-run' }));
+    await schedulerFixture(store, async () => ({ candidates: [candidate], truncated: false, pages: 1 }), { launch }).check(definition);
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(store.logs({ automationId: definition.id })).toContainEqual(expect.objectContaining({ result: 'launched', runId: 'new-run' }));
+  });
+
+  it('keeps separate PR events and issue identities in the same provider result', async () => {
+    const { store, definition } = await setup();
+    const rows: GithubCandidate[] = [candidate, { ...candidate, event: 'pull_request.opened' },
+      { ...candidate, event: 'pull_request.opened', eventId: 'different-pr-event' }];
+    const accepted: boolean[] = [];
+    await schedulerFixture(store, async options => {
+      for (const row of rows) accepted.push(options.accept!(row));
+      return { candidates: [], truncated: false, pages: 1 };
+    }).check(definition);
+    expect(accepted).toEqual([true, true, true]);
+  });
+
+  it('attributes duplicate audit to the live receipt instead of released or foreign receipts', async () => {
+    const { store, definition } = await setup();
+    for (const [automationId, status, runId] of [[definition.id, 'launched', 'owner'], [definition.id, 'released', 'released-run'], ['other', 'launched', 'foreign-run']] as const) {
+      const receipt = store.reserveReceipt({ automationId, revision: 1, eventId: runId, candidate: { ...candidate, eventId: runId } })!;
+      store.appendReceipt({ ...receipt, status, runId, updatedAt: candidate.timestamp });
+    }
+    await schedulerFixture(store, async options => {
+      expect(options.accept!(candidate)).toBe(false);
+      return emptyPoll();
+    }).check(definition);
+    expect(store.logs({ automationId: definition.id }).find(row => row.result === 'duplicate')).toMatchObject({
+      runId: 'owner', reason: 'A durable receipt already exists for this automation and item. Task: owner.',
+    });
+  });
+
+  it('does not store success after an automation is deleted during duplicate logging', async () => {
+    const { store, definition } = await setup();
+    store.reserveReceipt({ automationId: definition.id, revision: 1, eventId: candidate.eventId, candidate });
+    const log = store.appendLog.bind(store);
+    vi.spyOn(store, 'appendLog').mockImplementation(async row => {
+      const written = await log(row);
+      if (row.result === 'duplicate') store.delete(definition.id);
+      return written;
+    });
+    const onChange = vi.fn();
+    const result = await schedulerFixture(store, async options => {
+      options.accept!(candidate);
+      return emptyPoll();
+    }, { onChange }).check(definition);
+    expect(result).toEqual({ candidates: [], truncated: false, pages: 0 });
+    expect(store.state(definition.id)?.lastSuccessAt).toBeUndefined();
+    expect(onChange).not.toHaveBeenCalled();
+    expect(store.logs({ automationId: definition.id }).some(row => row.result === 'no-match')).toBe(false);
+  });
+});
+
+
+describe('scheduler durable outcomes', () => {
+  it('leaves an interrupted state-first edit untouched during preview', async () => {
+    const { store, definition } = await setup();
+    const state = { revision: 2, baselineAt: candidate.timestamp };
+    store.setState(definition.id, () => state);
+    const poll = vi.fn(emptyPoll);
+    expect(await schedulerFixture(store, poll).check(definition, 'preview')).toEqual({ candidates: [], truncated: false, pages: 0 });
+    expect(poll).not.toHaveBeenCalled();
+    expect(store.state(definition.id)).toEqual(state);
+  });
+
+  it('retains the frozen high watermark and partial scan after a truncated poll', async () => {
+    const { store, definition } = await setup();
+    const cursor = { timestamp: candidate.timestamp, tieBreaker: 'last-item' };
+    const historyScan = { since: candidate.timestamp, until: candidate.timestamp, source: 1, page: 1, item: 2, event: 0 };
+    await schedulerFixture(store, async () => ({ candidates: [], truncated: true, pages: 2, cursor, historyScan })).check(definition);
+    expect(store.state(definition.id)).toMatchObject({ cursor, frozenHighWatermark: cursor, historyScan });
+  });
+
+  it.each([
+    { current: { timestamp: '2026-07-26T02:00:00.000Z', tieBreaker: 'z' }, observed: { timestamp: '2026-07-26T01:00:00.000Z', tieBreaker: 'zz' }, winner: 'current' },
+    { current: { timestamp: candidate.timestamp, tieBreaker: 'z' }, observed: { timestamp: candidate.timestamp, tieBreaker: 'a' }, winner: 'current' },
+    { current: { timestamp: candidate.timestamp }, observed: { timestamp: candidate.timestamp, tieBreaker: 'a' }, winner: 'observed' },
+    { current: { timestamp: candidate.timestamp, tieBreaker: 'a' }, observed: { timestamp: candidate.timestamp, tieBreaker: 'z' }, winner: 'observed' },
+  ])('keeps $winner cursor with current $current and observed $observed', async ({ current, observed, winner }) => {
+    const { store, definition } = await setup();
+    store.setState(definition.id, () => ({ cursor: current }));
+    await schedulerFixture(store, async () => ({ candidates: [], truncated: false, pages: 1, cursor: observed })).check(definition);
+    expect(store.state(definition.id)?.cursor).toEqual(winner === 'current' ? current : observed);
+  });
+
+  it('preserves a policy edit between error validation and failure persistence', async () => {
+    const { store, definition } = await setup();
+    const setState = store.setState.bind(store);
+    vi.spyOn(store, 'setState').mockImplementationOnce((id, update) => {
+      store.update(definition.id, definition.revision, { ...definition, name: 'Edited' });
+      setState(id, () => ({ revision: 2, baselineAt: candidate.timestamp }));
+      return setState(id, update);
+    });
+    await expect(schedulerFixture(store, async () => { throw new Error('provider refused'); }).check(definition)).rejects.toThrow('Automation changed');
+    expect(store.state(definition.id)).toEqual({ revision: 2, baselineAt: candidate.timestamp });
+  });
+});
+
+describe('workspace timer boundaries', () => {
+  it('stop cancels the pending timer and a stopped reschedule does not refresh', async () => {
+    vi.useFakeTimers();
+    const { store, definition } = await setup();
+    store.setState(definition.id, () => ({ nextCheckAt: new Date(Date.now() + 30_000).toISOString() }));
+    const refresh = vi.fn(async () => undefined);
+    const scheduler = new WorkspaceAutomationScheduler({
+      coordinator: { refresh, enabledProjectIds: () => ['p'], store: () => store } as never,
+      handle: () => ({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll: emptyPoll } as never } }),
+    });
+    try {
+      await scheduler.start();
+      expect(vi.getTimerCount()).toBe(1);
+      scheduler.stop();
+      expect(vi.getTimerCount()).toBe(0);
+      await scheduler.reschedule();
+      expect(refresh).toHaveBeenCalledTimes(1);
+    } finally { scheduler.stop(); vi.useRealTimers(); }
+  });
+
+  it('skips a throwing schedule dueAt and still fires a healthy poll', async () => {
+    vi.useFakeTimers();
+    const { store } = await setup();
+    store.create({ name: 'Schedule', kind: 'schedule', enabled: true, schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'Review' } }, 'schedule');
+    const dueAt = vi.spyOn(scheduleRunner.ScheduleRunner.prototype, 'dueAt').mockImplementation(() => { throw new Error('unwritable state'); });
+    const poll = vi.fn(emptyPoll);
+    const scheduler = new WorkspaceAutomationScheduler({
+      coordinator: { refresh: async () => undefined, enabledProjectIds: () => ['p'], store: () => store } as never,
+      handle: () => ({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll } as never } }),
+    });
+    try {
+      await scheduler.start();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(dueAt).toHaveBeenCalled();
+      expect(poll).toHaveBeenCalledTimes(1);
+    } finally { scheduler.stop(); dueAt.mockRestore(); vi.useRealTimers(); }
+  });
+
+  it('passes the project clock and change notification to its schedule runner', async () => {
+    vi.useFakeTimers();
+    const now = Date.parse('2026-09-14T04:00:00Z');
+    vi.setSystemTime(now);
+    const { store, definition } = await setup();
+    store.update(definition.id, definition.revision, { ...definition, enabled: false });
+    store.create({ name: 'Daily', kind: 'schedule', enabled: true, schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'Review' } }, 'daily');
+    store.setState('daily', () => ({ nextRunAt: new Date(now).toISOString() }));
+    const clock = vi.fn(() => now);
+    const onChange = vi.fn();
+    const scheduler = new WorkspaceAutomationScheduler({
+      coordinator: { refresh: async () => undefined, enabledProjectIds: () => ['p'], store: () => store } as never,
+      handle: () => ({ projectId: 'p', store, timeZone: 'UTC', now: clock, onChange, launchSchedule: async () => ({ runId: 'scheduled' }) }),
+    });
+    try {
+      await scheduler.start();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(clock).toHaveBeenCalled();
+      expect(store.state('daily')?.nextRunAt).toBe('2026-09-15T04:00:00.000Z');
+      expect(onChange).toHaveBeenCalledWith('daily', 1);
+    } finally { scheduler.stop(); vi.useRealTimers(); }
+  });
+
+  it('clears a removed automation retry floor before it is enabled again', async () => {
+    vi.useFakeTimers();
+    const { store, definition } = await setup();
+    const poll = vi.fn().mockRejectedValueOnce(new Error('provider refused')).mockImplementation(emptyPoll);
+    const scheduler = new WorkspaceAutomationScheduler({
+      coordinator: { refresh: async () => undefined, enabledProjectIds: () => ['p'], store: () => store, hasProjects: () => true } as never,
+      handle: () => ({ projectId: 'p', store, timeZone: 'UTC', github: { owner: 'acme', repo: 'demo', poller: { poll } as never }, launch: async () => ({ runId: 'unused' }) }),
+    });
+    try {
+      await scheduler.start();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(poll).toHaveBeenCalledTimes(1);
+      const paused = store.update(definition.id, definition.revision, { ...definition, enabled: false });
+      await scheduler.reschedule();
+      store.update(paused.id, paused.revision, { ...paused, enabled: true });
+      store.setState(definition.id, () => ({ nextCheckAt: new Date(Date.now()).toISOString() }));
+      await scheduler.reschedule();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(poll).toHaveBeenCalledTimes(2);
+    } finally { scheduler.stop(); vi.useRealTimers(); }
+  });
+});
+
+describe('scheduler dependency failures', () => {
+  it('reports the held lease even if the requested definition became obsolete', async () => {
+    const { store, definition } = await setup();
+    const lease = store.acquireLease();
+    store.delete(definition.id);
+    try {
+      await expect(schedulerFixture(store, emptyPoll).check(definition)).rejects.toBeInstanceOf(LeaseHeldError);
+      expect(store.logs({ automationId: definition.id })[0]).toMatchObject({ result: 'skipped', reason: 'automation polling lease is held by another process' });
+    } finally { lease?.release(); }
+  });
+
+  it('propagates a store reload error instead of treating it as an obsolete check', async () => {
+    const { store, definition } = await setup();
+    const error = new Error('cannot reload definitions');
+    vi.spyOn(store, 'reloadIfChanged').mockImplementation(() => { throw error; });
+    await expect(schedulerFixture(store, emptyPoll).check(definition)).rejects.toBe(error);
+    expect(store.logs({ automationId: definition.id })).toEqual([]);
+  });
+
+  it('does not audit duplicates after launch deletes the automation', async () => {
+    const { store, definition } = await setup();
+    store.reserveReceipt({ automationId: definition.id, revision: 1, eventId: candidate.eventId, candidate });
+    const fresh = { ...candidate, number: 8, eventId: 'new-item' };
+    await schedulerFixture(store, async options => {
+      expect(options.accept!(candidate)).toBe(false);
+      expect(options.accept!(fresh)).toBe(true);
+      return { candidates: [fresh], truncated: false, pages: 1 };
+    }, { launch: async () => { store.delete(definition.id); return { runId: 'already-launched' }; } }).check(definition);
+    expect(store.logs({ automationId: definition.id }).filter(row => row.result === 'duplicate')).toEqual([]);
+    expect(store.state(definition.id)?.lastSuccessAt).toBeUndefined();
   });
 });

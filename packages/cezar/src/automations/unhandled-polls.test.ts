@@ -191,3 +191,20 @@ it('audits a later matching event for a handled issue without charging the new-w
   ]);
   expect(reopened.latestReceipts().size).toBe(2);
 });
+
+it.each(['released', 'other automation'] as const)('launches a matching issue when its earlier receipt belongs to %s', async owner => {
+  const { store, rule } = await setup(false, 1);
+  const candidate = { repo: 'ACME/DEMO', nodeId: 'I_1', number: 1, title: 'Issue', url: issue(1).html_url,
+    eventId: 'old-opened', event: 'issue.opened' as const, timestamp: at(10), tieBreaker: 'I_1',
+    author: 'alice', assignees: [], labels: ['bug'] };
+  const receipt = store.reserveReceipt({ automationId: owner === 'other automation' ? 'other' : rule.id,
+    revision: rule.revision, eventId: candidate.eventId, candidate })!;
+  store.appendReceipt({ ...receipt, status: owner === 'released' ? 'released' : 'launched', runId: 'old-run', updatedAt: at(20) });
+  const { poller } = provider([issue(1)]);
+  const launched: number[] = [];
+  await scheduler(store, poller, launched).check(rule);
+  expect(launched).toEqual([1]);
+  expect(store.logs({ automationId: rule.id }).filter(row => row.result === 'duplicate')).toEqual([]);
+  expect([...store.latestReceipts().values()].filter(row => row.automationId === rule.id && row.status === 'launched'))
+    .toEqual([expect.objectContaining({ runId: 'run-1', candidate: expect.objectContaining({ number: 1 }) })]);
+});
