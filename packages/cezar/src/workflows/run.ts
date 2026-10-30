@@ -33,7 +33,7 @@ import { RunSkills } from './run/run-skills.ts';
 import { InboxClaims } from './run/inbox-claims.ts';
 import { WorkerExecutions } from './run/worker-executions.ts';
 import { TurnBookkeeper } from './run/turn-bookkeeping.ts';
-import { AutomationToolsSlot, cezarToolHandlers } from './run/cezar-tools.ts';
+import { AutomationToolsSlot, cezarToolHandlers, provisionCiSession, type ToolHost, type CiSessionHost } from './run/cezar-tools.ts';
 import { registerPreviewServer, stopPreviewServer } from '../preview/run-tools.ts';
 import { AttachmentWriter } from './run/attachment-writer.ts';
 import { QueuedInput } from './run/queued-input.ts';
@@ -77,11 +77,11 @@ import { deriveAccountHolds } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
 import { holdsOwedResults, isCezarHumanWait, openWaits, resolvedWaits } from './waits.ts';
 import { runsAwaitingPeer } from './wait-scope.ts';
-import { previewCdpSession, previewRunContext, type PreviewHostLike } from '../preview/registration.ts';
+import { type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import type { CezarToolHandlers } from '../ci-wait/controller.ts';
-import { workerIdentity, continuationDefStep, workerStepIdentity, WorkerIdentityError, type WorkerAccountBinding, type WorkerStepIdentity } from '../delegation/execution-identity.ts';
+import { workerIdentity, continuationDefStep, WorkerIdentityError, type WorkerAccountBinding } from '../delegation/execution-identity.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -96,7 +96,6 @@ import {
   handoffPath,
   seedHandoffFile,
 } from '../handoff.ts';
-import type { SessionContext } from '../session-context.ts';
 // Contract VALUES, like `workspaceUiStateSchema` in workspace/migrations.ts: the attachment
 // vocabulary the routes validate with is the same one the engine stores and re-reads by, so the
 // wire and the disk can never disagree about what counts as an image (#950).
@@ -118,6 +117,7 @@ import { type Skill } from '../skills.ts';
 import { readAgentModelSettings } from '../agent-config/models.ts';
 import { resolveWorktreeRetention } from '../config.ts';
 import { getRepoInfo } from '../server/git.ts';
+import { DelegationPolicyError } from '../delegation/policy.ts';
 import { projectConversationEvents, settledRunFamilies } from '../delegation/conversations.ts';
 import * as queuedRevival from './run/queued-revival.ts';
 import type { RunOutcome } from '../runs/outcome-commit.ts';
@@ -312,7 +312,7 @@ export class RunManager {
     this.queuedRevivalHost = {
       move: (id, exit, patch) => this.move(id, exit, patch), isActive: id => this.isActive(id),
       workerExecutionStopped: id => this.workerExecutionStopped(id), ownedJob: run => this.runStart.ownedJob(run),
-      resumableSessionId: (id, step) => this.resumableSessionId(id, step), workerStep: (id, step) => this.workerStep(id, step),
+      resumableSessionId: (id, step) => this.resumableSessionId(id, step), workerStep: (id, step) => launchContext.workerStep(this.context, id, step),
       toQueuedMessage: (id, content) => this.queuedInput.toQueuedMessage(id, content), hydrateQueuedInput: (id, input) => this.queuedInput.hydrateQueuedInput(id, input),
       enqueueJob: (id, job) => this.line.enqueueJob(id, job), enqueueContinuation: (id, continuation) => this.line.enqueueContinuation(id, continuation),
       isSyntheticContinuation: (run, step) => isSyntheticContinuation(run, step), restartContinuationPrompt: RESTART_CONTINUATION_PROMPT,
@@ -380,8 +380,8 @@ export class RunManager {
       workerExecutionStopped: id => this.workerExecutionStopped(id),
       executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
       agentEnvForStep: (...args) => this.agentEnvForStep(...args),
-      sessionContextFor: (...args) => this.sessionContextFor(...args),
-      automationsPart: () => this.automationsPart(),
+      sessionContextFor: (...args) => launchContext.sessionContextFor(this.context, ...args),
+      automationsPart: () => launchContext.automationsPart(this.cockpit),
       flushAgentInputs: id => this.inputDelivery.flushAgentInputs(id),
       resumeParkedRun: (...args) => this.inputDelivery.resumeParkedRun(...args),
       noteNoWaitNudgeContent: (...args) => this.turnNudges.noteNoWaitNudgeContent(...args),
@@ -462,7 +462,7 @@ export class RunManager {
       workerExecutionStopped: id => this.workerExecutionStopped(id),
       executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
       trackWorkerSessionResult: (...args) => this.workerExecutions.trackWorkerSessionResult(...args),
-      workerStep: (...args) => this.workerStep(...args),
+      workerStep: (...args) => launchContext.workerStep(this.context, ...args),
       beginUsageInvocation: (...args) => beginUsageInvocation(this.store, ...args),
       recordUsagePeaks: id => recordUsagePeaks(this.store, { isDisposedDelegatedRun: id => isDisposedDelegatedRun(this.store, () => this.disposed, id) }, id),
     }, this.sessionEventHost(), this.launchPreambleHost(), this.sessionHelperHost, this.line,
@@ -515,7 +515,7 @@ export class RunManager {
       ownedJob: run => this.runStart.ownedJob(run), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
       finishWorkerExecution: id => this.workerExecutions.finishWorkerExecution(id), clearWakeBackoff: id => this.retries.clearWakeBackoff(id),
       dropActive: id => this.dropActive(id), pump: () => this.line.pump(),
-      runContinuation: (...args) => this.runContinuation(...args), workerStep: (id, step) => this.workerStep(id, step),
+      runContinuation: (...args) => this.runContinuation(...args), workerStep: (id, step) => launchContext.workerStep(this.context, id, step),
       isUntouchedCancelledRun: run => isUntouchedCancelledRun(run), admissionError: (error, fallback) => admissionError(error, fallback),
       isSyntheticContinuation: (run, step) => isSyntheticContinuation(run, step),
     }, this.claims, this.line, this.workerExecutions, this.queuedInput, this.autoResumeScheduler,
@@ -546,7 +546,7 @@ export class RunManager {
       makeUiSink: (...args) => sessionEvents.makeUiSink(this.context, this.sessionHelperHost, ...args),
       repositoryRootLockDisabled: () => repositoryRootLockDisabled(),
       prepareWorktree: (...args) => this.stepLoop.prepareWorktree(...args),
-      workerStep: (...args) => this.workerStep(...args),
+      workerStep: (...args) => launchContext.workerStep(this.context, ...args),
       latchAgentInputError: (...args) => this.inputDelivery.latchAgentInputError(...args),
       reconcileWorkerWaits: () => this.reconcileWorkerWaits(),
       holdContinuationForRootFinish: (...args) => this.runFinish.holdContinuationForRootFinish(...args),
@@ -614,6 +614,11 @@ export class RunManager {
       reconcileWorkerWaits: () => this.reconcileWorkerWaits(), unreadInputGraceMs: () => unreadInputGraceMs,
       submitAgentInput: (id, state, content, inputs, budget) => this.inputDelivery.submitAgentInput(id, state, content, inputs, budget),
     }, MAX_AUTO_CONTINUES, ROUTED_QUESTION_REFUSAL);
+    this.cezarToolsHost = { store: this.store,
+      registerWait: (...args) => this.registerWait(...args), registerAsk: (...args) => this.waitRegistry.registerAsk(...args),
+      cancelWait: (...args) => this.cancelWait(...args), acceptDone: (...args) => this.acceptDone(...args),
+      registerPreviewServer: (...args) => registerPreviewServer(this.store, this.preview, this.cezarPort, () => this.disposed, ...args), stopPreviewServer: (...args) => stopPreviewServer(this.store, this.preview, this.cezarPort, () => this.disposed, ...args),
+      awaitAutomationTools: signal => this.automationToolsSlot.awaitAutomationTools(signal) };
     this.ciResources = acquireCiResources(this.semaphore);
     this.ciSupervisor = this.ciResources.supervisor;
     this.offSemaphore = this.semaphore.register({
@@ -723,16 +728,7 @@ export class RunManager {
   }
 
   private agentEnv(runId: string): Record<string, string> {
-    return launchContext.agentEnv({ store: this.store, repoRoot: this.repoRoot, dataDir: this.dataDir }, this.cockpit, runId);
-  }
-
-  /** The pinned identity one agent step of an owned worker runs under; undefined for ordinary and internal runs. */
-  private workerStep(runId: string, stepId: string | undefined): WorkerStepIdentity | undefined {
-    const identity = workerIdentity(this.store, this.repoRoot, runId, stepId);
-    if (!identity) return undefined;
-    return stepId === undefined
-      ? { account: identity.account, grants: identity.grants, ...(identity.model === undefined ? {} : { model: identity.model }), ...(identity.effort === undefined ? {} : { effort: identity.effort }) }
-      : workerStepIdentity(identity, stepId);
+    return launchContext.agentEnv(this.context, this.cockpit, runId);
   }
 
   private agentEnvForStep(
@@ -740,9 +736,9 @@ export class RunManager {
     backend: RunnerId,
     options: { recordedProfileId?: string | undefined; stepId?: string | undefined } = {},
   ): Promise<{ env: Record<string, string>; profileId: string; accountBinding?: WorkerAccountBinding | undefined }> {
-    return launchContext.agentEnvForStep({ store: this.store, repoRoot: this.repoRoot, dataDir: this.dataDir }, {
+    return launchContext.agentEnvForStep(this.context, {
       agentEnv: (id) => this.agentEnv(id),
-      workerStep: (id, stepId) => this.workerStep(id, stepId),
+      workerStep: (id, stepId) => launchContext.workerStep(this.context, id, stepId),
     }, runId, backend, options);
   }
 
@@ -753,12 +749,14 @@ export class RunManager {
    * sets it, so it is also the "a cockpit is attached" signal for the automations gate.
    */
   private cockpit?: { origin: string; projectId: string } | undefined;
-  setCockpitAddress(address: { origin: string; projectId: string } | undefined): void {
-    this.cockpit = address ? { ...address } : undefined;
-  }
-  cockpitAddress(): { origin: string; projectId: string } | undefined {
-    return this.cockpit ? { ...this.cockpit } : undefined;
-  }
+  setCockpitAddress(address: { origin: string; projectId: string } | undefined): void { return launchContext.setCockpitAddress(this.launchSettingsHost, address); }
+  cockpitAddress(): { origin: string; projectId: string } | undefined { return launchContext.cockpitAddress(this.cockpit); }
+  private readonly ciSessionHost: CiSessionHost = {
+    active: this.active, ciResources: () => this.ciResources, cezarToolHandlers: (...args) => this.cezarToolHandlers(...args),
+    preview: () => this.preview, cockpit: () => this.cockpit,
+  };
+  private readonly cezarToolsHost: ToolHost;
+
   /**
    * hearsay-tools/cezarion#1465: the project's one-time schedule service behind
    * `cezar_schedule_task` and `cezar_scheduled_tasks`, set by `startServer` beside the cockpit
@@ -769,57 +767,25 @@ export class RunManager {
    */
   private readonly automationToolsSlot: AutomationToolsSlot;
   setAutomationTools(tools: AutomationToolService | undefined): void { this.automationToolsSlot.setAutomationTools(tools); }
-  private awaitAutomationTools(signal: AbortSignal): Promise<AutomationToolService | undefined> { return this.automationToolsSlot.awaitAutomationTools(signal); }
+
   builtinSkills(): Skill[] { return launchContext.builtinSkills(this.cockpit); }
-  private automationsPart(): string | undefined { return launchContext.automationsPart(this.cockpit); }
-  private agentWebhooksPart(): Promise<string | undefined> { return launchContext.agentWebhooksPart({ store: this.store, repoRoot: this.repoRoot, dataDir: this.dataDir }, this.cockpit); }
-  private sessionContextFor(runId: string, state: ActiveRun, stepId: string, openingPrompt: string): SessionContext {
-    return launchContext.sessionContextFor({ store: this.store, repoRoot: this.repoRoot, dataDir: this.dataDir }, runId, state, stepId, openingPrompt);
-  }
 
+
+  private readonly launchSettingsHost: launchContext.LaunchSettingsHost = {
+    active: this.active, setCockpit: address => { this.cockpit = address; },
+    delegationProvisioner: () => this.delegationProvisioner, setProvisioner: provisioner => { this.delegationProvisioner = provisioner; },
+    historyDeletionPending: id => this.historyDeletionPending(id),
+  };
   private delegationProvisioner?: DelegationProvisioner | undefined;
-  setDelegationProvisioner(provisioner: DelegationProvisioner): () => void {
-    this.delegationProvisioner = provisioner;
-    return () => {
-      if (this.delegationProvisioner === provisioner) this.delegationProvisioner = undefined;
-      for (const state of this.active.values()) { state.revokeDelegation?.(); state.revokeDelegation = undefined; }
-    };
-  }
-  private provisionSession(runId: string, state: ActiveRun) {
-    state.revokeDelegation?.(); state.revokeDelegation = undefined;
-    if (this.historyDeletionPending(runId)) return;
-    const session = this.delegationProvisioner?.(runId);
-    state.revokeDelegation = session?.revoke;
-    return session;
-  }
+  setDelegationProvisioner(provisioner: DelegationProvisioner): () => void { return launchContext.setDelegationProvisioner(this.launchSettingsHost, provisioner); }
 
-  /** Provision the same capability and descriptor on every start, Continue and recovered launch. */
-  private async provisionCiSession(runId: string, state: ActiveRun) {
-    state.revokeCiTools?.();
-    state.revokeCiTools = undefined;
-    state.ciGeneration = randomUUID();
-    state.ciTurnId = randomUUID();
-    const generation = state.ciGeneration;
-    const controller = await this.ciResources.controller();
-    state.toolless = !controller;
-    if (!controller || this.disposed || state.cancelled || this.active.get(runId) !== state) return;
-    const provisioned = previewCdpSession(controller.provision(this.cezarToolHandlers(runId, generation)), { host: this.preview, cockpitOrigin: this.cockpit?.origin, runId, worktree: !!this.store.getRun(runId)?.worktreePath, context: () => previewRunContext(this.store, this.dataDir, runId) });
-    state.revokeCiTools = provisioned.revoke;
-    return provisioned;
-  }
 
   /**
    * The trusted callbacks behind one session's cezar tools (hearsay-tools/cezarion#1233). Both
    * answers list the waits still open; a coded refusal answers with its fixed message, never the
    * thrower's text, and anything else is left to the tool server's `unavailable`.
    */
-  cezarToolHandlers(runId: string, generation: string): CezarToolHandlers {
-    return cezarToolHandlers(runId, generation, { store: this.store,
-      registerWait: (...args) => this.registerWait(...args), registerAsk: (...args) => this.waitRegistry.registerAsk(...args),
-      cancelWait: (...args) => this.cancelWait(...args), acceptDone: (...args) => this.acceptDone(...args),
-      registerPreviewServer: (...args) => registerPreviewServer(this.store, this.preview, this.cezarPort, () => this.disposed, ...args), stopPreviewServer: (...args) => stopPreviewServer(this.store, this.preview, this.cezarPort, () => this.disposed, ...args),
-      awaitAutomationTools: signal => this.awaitAutomationTools(signal) });
-  }
+  cezarToolHandlers(runId: string, generation: string): CezarToolHandlers { return cezarToolHandlers(runId, generation, this.cezarToolsHost); }
 
   acceptDone(runId: string, generation: string, request: CezarDoneRequest, signal?: AbortSignal): CezarDoneAnswer { return this.runFinish.acceptDone(runId, generation, request, signal); }
 
@@ -1285,9 +1251,9 @@ export class RunManager {
 
   private launchPreambleHost(): import('./run/session-events.ts').LaunchPreambleHost {
     return {
-      provisionSession: (...args) => this.provisionSession(...args),
-      agentWebhooksPart: () => this.agentWebhooksPart(),
-      provisionCiSession: (...args) => this.provisionCiSession(...args),
+      provisionSession: (...args) => launchContext.provisionSession(this.launchSettingsHost, ...args),
+      agentWebhooksPart: () => launchContext.agentWebhooksPart(this.context, this.cockpit),
+      provisionCiSession: (...args) => provisionCiSession(this.context, this.ciSessionHost, ...args),
       launchStale: (...args) => sessionEvents.launchStale(this.context, this.sessionHelperHost, ...args),
     };
   }

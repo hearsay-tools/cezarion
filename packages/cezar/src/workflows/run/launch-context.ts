@@ -1,9 +1,10 @@
+import type { DelegationProvisioner } from '../../delegation/provision.ts';
 import type { RunnerId } from '../../core/agent-runner.ts';
 import { buildChildEnv } from '../../core/agent-env.ts';
 import { provisionArtifactDirectory } from '../../artifacts/lifecycle.ts';
 import { handoffPath, refreshHandoffRecords } from '../../handoff.ts';
 import { agentTmpEnv } from '../../runs/agent-tmpdir.ts';
-import { boundWorkerAccountEnv, captureWorkerAccount, WorkerIdentityError, type WorkerAccountBinding, type WorkerStepIdentity } from '../../delegation/execution-identity.ts';
+import { workerIdentity, workerStepIdentity, boundWorkerAccountEnv, captureWorkerAccount, WorkerIdentityError, type WorkerAccountBinding, type WorkerStepIdentity } from '../../delegation/execution-identity.ts';
 import { resolveProfileEnvForRoot } from '../../workspace/agent-profiles.ts';
 import { resolveCapabilities } from '../../server/capabilities.ts';
 import { automationCliCommand, automationsPrompt } from '../../automations/prompts.ts';
@@ -19,6 +20,14 @@ import type { RunModuleContext } from './types.ts';
 
 type LaunchContext = Pick<RunModuleContext, 'store' | 'repoRoot' | 'dataDir'>;
 type CockpitAddress = { origin: string; projectId: string } | undefined;
+
+export interface LaunchSettingsHost {
+  active: ReadonlyMap<string, ActiveRun>;
+  setCockpit(address: CockpitAddress): void;
+  delegationProvisioner(): DelegationProvisioner | undefined;
+  setProvisioner(provisioner: DelegationProvisioner | undefined): void;
+  historyDeletionPending(runId: string): boolean;
+}
 
 export interface LaunchContextHost {
   agentEnv(runId: string): Record<string, string>;
@@ -129,4 +138,37 @@ export function sessionContextFor({ store, repoRoot, dataDir }: LaunchContext, r
     });
   store.appendEvent(runId, { type: 'lifecycle', message: formatSessionContextReport(context.reports) });
   return context;
+}
+
+/** The pinned identity one agent step of an owned worker runs under; undefined for ordinary and internal runs. */
+export function workerStep({ store, repoRoot }: LaunchContext, runId: string, stepId: string | undefined): WorkerStepIdentity | undefined {
+  const identity = workerIdentity(store, repoRoot, runId, stepId);
+  if (!identity) return undefined;
+  return stepId === undefined
+    ? { account: identity.account, grants: identity.grants, ...(identity.model === undefined ? {} : { model: identity.model }), ...(identity.effort === undefined ? {} : { effort: identity.effort }) }
+    : workerStepIdentity(identity, stepId);
+}
+
+export function setCockpitAddress(host: LaunchSettingsHost, address: CockpitAddress): void {
+  host.setCockpit(address ? { ...address } : undefined);
+}
+
+export function cockpitAddress(cockpit: CockpitAddress): CockpitAddress {
+  return cockpit ? { ...cockpit } : undefined;
+}
+
+export function setDelegationProvisioner(host: LaunchSettingsHost, provisioner: DelegationProvisioner): () => void {
+  host.setProvisioner(provisioner);
+  return () => {
+    if (host.delegationProvisioner() === provisioner) host.setProvisioner(undefined);
+    for (const state of host.active.values()) { state.revokeDelegation?.(); state.revokeDelegation = undefined; }
+  };
+}
+
+export function provisionSession(host: LaunchSettingsHost, runId: string, state: ActiveRun) {
+  state.revokeDelegation?.(); state.revokeDelegation = undefined;
+  if (host.historyDeletionPending(runId)) return;
+  const session = host.delegationProvisioner()?.(runId);
+  state.revokeDelegation = session?.revoke;
+  return session;
 }
