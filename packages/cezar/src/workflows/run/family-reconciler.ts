@@ -1,16 +1,21 @@
+import { holdsOwedResults } from '../waits.ts';
+import { runsAwaitingPeer } from '../wait-scope.ts';
 import type { RunModuleContext } from './types.ts';
 import type { ActiveRun } from '../active-run.ts';
-import type { RunRecord } from '../../runs/store.ts';
+import type { CommitSource, RunRecord } from '../../runs/store.ts';
 import type { Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { historyDeletionPending, executionBlockedByRootFinish } from './run-guards.ts';
 import { repairFailedRootFinish } from '../completion-policy.ts';
 import { transitionVia } from '../run-states.ts';
-import { reconcileConversationState, projectConversationEvents } from '../../delegation/conversations.ts';
+import { reconcileConversationState, projectConversationEvents, settledRunFamilies } from '../../delegation/conversations.ts';
 import { reconcileWorkerEntry } from '../../delegation/wait.ts';
 import { workerOutcome } from '../../runs/delegation-state.ts';
 import { workerOutcomeKey } from '../../runs/transcript-facts.ts';
 
 interface FamilyReconcilerHost {
+  reapTerminalScratch(id: string): void;
+  cancelOpenWaits(id: string): void;
+  resolvePeerWaits(runs: readonly string[]): void;
   active(id: string): ActiveRun | undefined;
   isActive(id: string): boolean;
   recoveringRun(run: RunRecord | string | undefined): boolean;
@@ -27,6 +32,24 @@ interface FamilyReconcilerHost {
 type WorkerObservations = ReturnType<FamilyReconciler['workerObservations']>;
 
 export class FamilyReconciler {
+  readonly onDelegationRun = (run: RunRecord, source?: CommitSource): void => {
+    // Delegation metadata checkpoints do not change task status.
+    // A republish changed nothing durable: there is nothing to reap, cancel or reconcile.
+    if (source === 'live-release') return;
+    if (!this.context.disposed() && source === undefined) this.host.reapTerminalScratch(run.id);
+    if (!this.context.disposed() && !['queued', 'running', 'waiting'].includes(run.status) && !holdsOwedResults(run)) this.host.cancelOpenWaits(run.id);
+    if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.host.active(run.id)?.revokeDelegation?.();
+    // Cleanup checkpoints emit terminal records too. With delegation disabled,
+    // these observations must not replay the project's conversation histories.
+    if (this.context.disposed() || this.host.recoveringRun(run) || (source === 'delegation-checkpoint' && process.env.CEZ_DELEGATION !== '1')) return;
+    // A destroy retry changes nothing the family reconcile reads (#880).
+    if (source === 'delegation-destroy-progress') return;
+    if (run.delegation && run.delegation.role !== 'invalid' && !['queued', 'running', 'waiting'].includes(run.status)) {
+      for (const id of settledRunFamilies(this.context.store, run)) this.host.reconcileWorkerWaits(id);
+    }
+    this.host.resolvePeerWaits(runsAwaitingPeer(run, () => this.context.store.listRuns())); // never in recovery: an interrupted peer fails, then continues
+  };
+
   private readonly workerResolveRetries = new Set<string>();
   private readonly requestDeadlineTimers = new Map<string, NodeJS.Timeout>();
   private reconcilingWorkers = false;

@@ -163,7 +163,7 @@ it('keeps draining while owned work settles one operation at a time past one bou
     pass.enter(); await pass.held;
     return [];
   });
-  const engine = manager as unknown as { enforceRetention(): Promise<void> };
+  const engine = runInternals(manager).runSettlement;
   const retained = Promise.allSettled([engine.enforceRetention(), engine.enforceRetention(), engine.enforceRetention()]);
   await Promise.all(passes.map(pass => pass.entered));
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
@@ -213,7 +213,7 @@ const ownedOperations: Array<{ label: string; invoke(manager: RunManager, id: st
     return worktreeAutosave.saveWorktree(id, createActiveRun({ cwd: context.repoRoot, pendingHumanAsk: false, autonomous: false }), 'turn end');
   } },
   { label: 'settleSuccess', invoke: (manager, id) => runInternals(manager).runSettlement.settleSuccess(id) },
-  { label: 'enforceRetention', invoke: manager => manager['enforceRetention']() },
+  { label: 'enforceRetention', invoke: manager => runInternals(manager).runSettlement.enforceRetention() },
   { label: 'settleRequestedRootFinish', invoke: (manager, id) => runInternals(manager).runFinish.settleRequestedRootFinish(id) },
 ];
 

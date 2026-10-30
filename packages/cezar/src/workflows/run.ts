@@ -1,3 +1,4 @@
+import { MemoryGuard } from './run/memory-guard.ts';
 import { RunCancel } from './run/run-cancel.ts';
 import { IDLE_TIMEOUT_MS, ROUTED_QUESTION_REFUSAL, UNREAD_INPUT_GRACE_MS, NO_WAIT_NUDGE_REPLY_MS, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, SCHEDULE_WAKEUP_MAX_SECONDS, MAX_WAKE_DELIVERY_ATTEMPTS, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WAITS_DISCARDED_NOTE, REFUSAL_DISCARDED_NOTE, QUEUE_WATCHDOG_MS, RESTART_CONTINUATION_PROMPT } from './run/constants.ts';
 export { IDLE_TIMEOUT_MS, UNREAD_INPUT_GRACE_MS, NO_WAIT_NUDGE_REPLY_MS, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WAITS_DISCARDED_NOTE, REFUSAL_DISCARDED_NOTE, QUEUE_WATCHDOG_MS } from './run/constants.ts';
@@ -46,7 +47,6 @@ import type {
 export type { TurnTail, DelegationExecutionSettings, StartRunInput, WorkerTerminationBlocker, AutomationToolService } from './run/types.ts';
 import { repairFailedRootFinish, startCompletionCycle, settledRootFinishPatch } from './completion-policy.ts';
 import type { ContinueRunOptions } from './continuation-admission.ts';
-import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitVia, type WorkerWaitEntry, computeWaitingOn, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
@@ -75,8 +75,7 @@ import * as workflowPosition from './run/workflow-position.ts';
 import { RUN_EXITS, transition, type RunExitId } from './run-states.ts';
 import { deriveAccountHolds } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
-import { holdsOwedResults, isCezarHumanWait, openWaits, resolvedWaits } from './waits.ts';
-import { runsAwaitingPeer } from './wait-scope.ts';
+import { openWaits, resolvedWaits } from './waits.ts';
 import { type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
@@ -115,17 +114,12 @@ import type { ContentBlock, ToolGrant } from '../core/agent-runner.ts';
 import { readProjectUiState } from '../ui-state.ts';
 import { type Skill } from '../skills.ts';
 import { readAgentModelSettings } from '../agent-config/models.ts';
-import { resolveWorktreeRetention } from '../config.ts';
 import { getRepoInfo } from '../server/git.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
-import { projectConversationEvents, settledRunFamilies } from '../delegation/conversations.ts';
+import { projectConversationEvents } from '../delegation/conversations.ts';
 import * as queuedRevival from './run/queued-revival.ts';
 import type { RunOutcome } from '../runs/outcome-commit.ts';
 import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
-import { reclaimWorktrees } from '../runs/retention.ts';
-import {
-  removeAgentTmpDir,
-} from '../runs/agent-tmpdir.ts';
 import { resolveProfileEnvForRoot } from '../workspace/agent-profiles.ts';
 import { WorkspaceSemaphore, type AccountHolds } from '../workspace/semaphore.ts';
 import {
@@ -242,21 +236,7 @@ export class RunManager {
 
 
   private readonly onDelegationRun = (run: RunRecord, source?: CommitSource): void => {
-    // Delegation metadata checkpoints do not change task status.
-    // A republish changed nothing durable: there is nothing to reap, cancel or reconcile.
-    if (source === 'live-release') return;
-    if (!this.disposed && source === undefined) this.reapTerminalScratch(run.id);
-    if (!this.disposed && !['queued', 'running', 'waiting'].includes(run.status) && !holdsOwedResults(run)) this.wakeAdmission.cancelOpenWaits(run.id);
-    if (run.delegation && !['queued', 'running', 'waiting'].includes(run.status)) this.active.get(run.id)?.revokeDelegation?.();
-    // Cleanup checkpoints emit terminal records too. With delegation disabled,
-    // these observations must not replay the project's conversation histories.
-    if (this.disposed || this.recovery.recoveringRun(run) || (source === 'delegation-checkpoint' && process.env.CEZ_DELEGATION !== '1')) return;
-    // A destroy retry changes nothing the family reconcile reads (#880).
-    if (source === 'delegation-destroy-progress') return;
-    if (run.delegation && run.delegation.role !== 'invalid' && !['queued', 'running', 'waiting'].includes(run.status)) {
-      for (const id of settledRunFamilies(this.store, run)) this.reconcileWorkerWaits(id);
-    }
-    this.waitRegistry.resolvePeerWaits(runsAwaitingPeer(run, () => this.store.listRuns())); // never in recovery: an interrupted peer fails, then continues
+    this.familyReconciler.onDelegationRun(run, source);
   };
   private readonly continuationAcceptance: ContinuationAcceptance;
   private readonly turnSettler: TurnSettler;
@@ -270,9 +250,7 @@ export class RunManager {
   /** `.ai/cezar` — where the per-task handoff files live. */
   private readonly dataDir: string;
 
-  /** Runs currently being paused by the memory guard — dedupes the ~2 s samples so one breach
-   *  triggers one pause, not a burst. Cleared in dropActive when the run leaves the registry. */
-  private readonly memoryPausing = new Set<string>();
+  private readonly memoryGuard: MemoryGuard;
 
   /** Unsubscribe handle for the constructor's `onUsage` subscription — released
    *  by dispose() so a torn-down manager stops receiving sampler ticks. */
@@ -305,6 +283,7 @@ export class RunManager {
     const unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
     this.context = { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed, work: options.work ?? new TrackedWork() };
+    this.memoryGuard = new MemoryGuard(this.context, { active: this.active });
     this.retries = new WakeRetries(this.context, {
       owesWake: run => this.wakeAdmission.owesWake(run), queueWaitWake: id => this.wakeAdmission.queueWaitWake(id),
       retryWaitAdmission: id => this.retries.retryWaitAdmission(id),
@@ -345,6 +324,8 @@ export class RunManager {
       updatePendingHumanAsk: (id, value) => { const state = this.active.get(id); if (state) state.pendingHumanAsk = value; },
     }, MAX_AUTO_CONTINUES);
     this.familyReconciler = new FamilyReconciler(this.context, {
+      reapTerminalScratch: id => this.runSettlement.reapTerminalScratch(id), cancelOpenWaits: id => this.wakeAdmission.cancelOpenWaits(id),
+      resolvePeerWaits: runs => this.waitRegistry.resolvePeerWaits(runs),
       active: id => this.active.get(id), isActive: id => this.isActive(id), recoveringRun: run => this.recovery.recoveringRun(run),
       cancel: id => this.cancel(id), armWait: (id, wait) => this.waitWatches.armWait(id, wait),
       armWorkerDeadline: (id, wait, delay) => this.waitWatches.armWorkerDeadline(id, wait, delay), disarmWait: id => this.disarmWait(id),
@@ -400,20 +381,20 @@ export class RunManager {
     }, MAX_AUTO_CONTINUES, COMPLETION_WILL_WAIT, options.noWaitNudgeReplyMs ?? NO_WAIT_NUDGE_REPLY_MS);
     this.worktreeAutosave = new WorktreeAutosave(this.context,
       { holdForMaintenance: ids => this.claims.holdForMaintenance(ids),
-        reapTerminalScratch: id => this.reapTerminalScratch(id), releaseSlot: () => this.line.releaseSlot(),
+        reapTerminalScratch: id => this.runSettlement.reapTerminalScratch(id), releaseSlot: () => this.line.releaseSlot(),
         saveWorktree: (id, state, reason) => this.worktreeAutosave.saveWorktree(id, state, reason),
         trackTurn: (id, task) => this.workerExecutions.trackTurn(id, task) },
     );
     this.orphans = new WorkerOrphans(this.context,
       { holds: (id, admitting) => this.workerExecutions.has(id) || this.active.has(id) || this.line.hasStarting(id) || (!admitting && this.line.hasQueued(id)),
-        reapTerminalScratch: id => this.reapTerminalScratch(id),
+        reapTerminalScratch: id => this.runSettlement.reapTerminalScratch(id),
         settleOrphanedWorkerExecution: (id, opts) => this.settleOrphanedWorkerExecution(id, opts) },
     );
     this.workerExecutions = new WorkerExecutions(this.context, this.orphans,
       { maintenance: id => this.claims.has(id) || !!this.autosaveCleanupBlocker(id),
         admissionError: message => new WorkerOrphanAliveError(message),
         settleOrphanedWorkerExecution: (id, opts) => this.settleOrphanedWorkerExecution(id, opts),
-        reapTerminalScratch: id => this.reapTerminalScratch(id), queueWaitWake: id => this.wakeAdmission.queueWaitWake(id),
+        reapTerminalScratch: id => this.runSettlement.reapTerminalScratch(id), queueWaitWake: id => this.wakeAdmission.queueWaitWake(id),
         retryWaitAdmission: id => this.retries.retryWaitAdmission(id), releaseSlot: () => this.line.releaseSlot() },
     );
     this.automationToolsSlot = new AutomationToolsSlot(this.context,
@@ -494,8 +475,6 @@ export class RunManager {
         reconcileWorkerWaits: (...args) => this.reconcileWorkerWaits(...args),
         pump: (...args) => this.line.pump(...args),
         recover: (...args) => this.recover(...args),
-        adoptTranscriptAsk: (...args) => this.adoptTranscriptAsk(...args),
-        settleAnsweredLegacyAsk: (...args) => this.settleAnsweredLegacyAsk(...args),
       }, RESTART_CONTINUATION_PROMPT);
     this.wakeAdmission = new WakeAdmission(this.context, {
       active: this.active, retries: this.retries, line: this.line, waitWatches: this.waitWatches, waitRegistry: this.waitRegistry,
@@ -533,8 +512,10 @@ export class RunManager {
         owesDelivery: id => this.wakeAdmission.owesDelivery(id), preserveRunAfterDisposal: (id, state) => preserveRunAfterDisposal(this.store, () => this.disposed, id, state),
         isDisposedDelegatedRun: id => isDisposedDelegatedRun(this.store, () => this.disposed, id), queueWaitWake: id => this.wakeAdmission.queueWaitWake(id),
         reconcileWorkerWaits: id => this.reconcileWorkerWaits(id), releaseSlot: () => this.line.releaseSlot(),
-        enforceRetention: () => this.enforceRetention(), reapTerminalScratch: id => this.reapTerminalScratch(id),
-        forgetMemoryPause: id => { this.memoryPausing.delete(id); },
+        workerScratchCleanup: this.workerScratchCleanup, hasClaim: id => this.claims.has(id),
+        autosaveCleanupBlocker: id => this.autosaveCleanupBlocker(id),
+        claimWorktreeReclaim: id => this.claimWorktreeReclaim(id), preview: this.preview,
+        forgetMemoryPause: id => this.memoryGuard.forgetMemoryPause(id),
       }, WAKE_SESSION_CLOSED_ERROR, WAKE_DELIVERY_CAP_NOTE);
     this.continuationSession = new ContinuationSession(this.context, {
       move: (...args) => this.move(...args), dropActive: id => this.dropActive(id),
@@ -678,53 +659,13 @@ export class RunManager {
     this.autoResumeScheduler.dispose();
     this.active.clear();
     this.line.dispose();
-    this.memoryPausing.clear();
+    this.memoryGuard.dispose();
     this.turnBookkeeper.clear();
     this.worktreeAutosave.dispose();
   }
 
-  /**
-   * Pause any active run whose whole process tree exceeds the WORKSPACE
-   * `resources.memoryLimitMb`, freeing its slot so the queue advances
-   * (#memory-guard). "Pause" closes the session — freeing the tree's
-   * memory — and leaves the run resumable via Continue; a loud warning explains why. No-op when
-   * no limit is set or the sampler has no data (e.g. `ps`/PowerShell unavailable).
-   */
   private async enforceMemoryLimit(snapshot: Record<string, ProcessUsage>): Promise<void> {
-    // The sampler is module-global (one `ps` for the whole process), so with
-    // multiple projects a snapshot carries EVERY project's runs. Act only on
-    // rows this manager owns (multi-project spec, step 2.4).
-    const runIds = Object.keys(snapshot).filter((runId) => this.active.has(runId));
-    if (runIds.length === 0) return;
-    // Workspace limit from the shared semaphore's in-memory cache (step 2.5:
-    // refreshed at boot and on PUT /api/workspace/config — never N per-tick
-    // file reads across N projects). Legacy per-repo `memoryLimitMb` keys are
-    // ignored post-migration.
-    const limitMb = this.semaphore.memoryLimitMb();
-    if (!limitMb || limitMb <= 0) return;
-    const limitBytes = limitMb * 1024 * 1024;
-    for (const runId of runIds) {
-      const usage = snapshot[runId];
-      if (!usage || usage.rssBytes <= limitBytes) continue;
-      if (this.memoryPausing.has(runId)) continue;
-      const state = this.active.get(runId);
-      if (!state?.session?.open || state.cancelled) continue;
-      this.memoryPausing.add(runId);
-      const usedMb = Math.round(usage.rssBytes / (1024 * 1024));
-      this.store.appendEvent(runId, {
-        type: 'note',
-        message: `⚠ memory limit exceeded — this task's process tree is using ${usedMb} MiB (limit ${limitMb} MiB). Pausing it and letting the next queued task run; resume it with Continue.`,
-      });
-      this.store.appendEvent(runId, {
-        type: 'lifecycle',
-        message: `paused — memory limit exceeded (${usedMb} MiB > ${limitMb} MiB)`,
-      });
-      // Closing the session frees the tree and lets the normal exit path settle the run and
-      // pump the queue. Suppress autonomous auto-continue so the pause actually holds.
-      state.autonomous = false;
-      clearIdleTimer(state);
-      state.session.end();
-    }
+    return this.memoryGuard.enforceMemoryLimit(snapshot);
   }
 
   private agentEnv(runId: string): Record<string, string> {
@@ -887,18 +828,6 @@ export class RunManager {
 
   claimWorkerCleanup(runId: string): (() => void) | undefined { return this.claims.claimWorkerCleanup(runId); }
 
-  /** Scratch belongs to the task, not its current agent process (#515).
-   * Terminal status alone is not process-exit proof: an active session or an
-   * unfinished private worker generation must retain its files until exit. */
-  private reapTerminalScratch(runId: string): void {
-    const run = this.store.getRun(runId);
-    if (!run || ['queued', 'running', 'waiting'].includes(run.status)) return;
-    if (this.active.has(runId) || this.line.hasStarting(runId) || this.line.hasQueued(runId) || this.claims.has(runId) || !!this.autosaveCleanupBlocker(runId)) return;
-    const privateWorkers = workerEvidenceRunIds(this.dataDir);
-    if (run.delegation?.role === 'worker' || run.delegation?.role === 'invalid' || !privateWorkers || privateWorkers.includes(runId)) { this.workerScratchCleanup.schedule(runId); return; }
-    removeAgentTmpDir(this.dataDir, runId);
-  }
-
   // ---- usage-limit auto-resume (spec 2026-08-03-auto-resume-after-usage-limit) --------------
 
 
@@ -907,22 +836,6 @@ export class RunManager {
   }
 
   cancelAutoResume(runId: string): boolean { return this.autoResumeScheduler.cancelAutoResume(runId); }
-
-  /** Reclaim finished worktrees beyond the keep-limit (#483) — directory only,
-   *  `cez/<id8>` branch kept. Best-effort; a failure never affects run
-   *  lifecycle. `review`/live runs are excluded by the selector. */
-  private async enforceRetention(): Promise<void> {
-    return this.context.work.track('enforceRetention', this.enforceRetentionWork());
-  }
-
-  private async enforceRetentionWork(): Promise<void> {
-    try {
-      const keep = await resolveWorktreeRetention(this.repoRoot);
-      await reclaimWorktrees(this.repoRoot, this.store, keep, { claim: (run) => this.claimWorktreeReclaim(run.id), previewHost: this.preview });
-    } catch {
-      // retention is best-effort; swallow so terminal transitions never break.
-    }
-  }
 
   private readonly turnBookkeeper: TurnBookkeeper;
   /** Test seam: the module owns this same map for its whole lifetime. */
@@ -1023,42 +936,6 @@ export class RunManager {
 
   private pendingHumanAskSeq(runId: string): number | undefined {
     return pendingAskFacts.pendingHumanAskSeq(this.store, runId);
-  }
-
-  /** An unanswered `ask.requested` with no open human wait (a row written before every ask opened
-   *  one) gets an open agent wait shown as that ask. Answer delivery still reads the transcript.
-   *  Cezar's own wait not shown as that ask is replaced, as the live ask does: a crash between
-   *  saving the ask and replacing it leaves that wait open (review of #1437). */
-  private adoptTranscriptAsk(runId: string): boolean {
-    const askSeq = this.pendingHumanAskSeq(runId);
-    const human = openWaits(this.store.getRun(runId) ?? {}).filter((wait): wait is HumanWaitEntry => wait.kind === 'human');
-    if (askSeq === undefined || !this.store.getRun(runId) || human.some(wait => !isCezarHumanWait(wait) || wait.askSeq === askSeq)) return false;
-    this.humanWaits.withdrawCezarHumanWaits(runId);
-    if (openWaits(this.store.getRun(runId) ?? {}).some(wait => wait.kind === 'human')) return false;
-    try {
-      this.store.commitWait(runId, { id: randomUUID(), kind: 'human', source: 'agent', via: 'ask-line', registeredAt: new Date().toISOString(), phase: 'open', turnId: 'recovered', askSeq });
-      return true;
-    } catch (error) {
-      console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
-      return false;
-    }
-  }
-
-  /** The human wait upgraded from a stored `hasPendingHumanAsk` (`turnId: 'legacy'`, never shown)
-   *  is settled as answered when the transcript's facts are known and hold no unanswered ask: that
-   *  flag was read from the transcript, so its ask was answered after the row was last saved.
-   *  Unknown facts are no evidence, and the wait stays open. */
-  private settleAnsweredLegacyAsk(runId: string): boolean {
-    const legacy = this.store.getRun(runId)?.waits?.filter(wait => wait.kind === 'human' && wait.phase === 'open' && wait.turnId === 'legacy' && wait.askSeq === undefined) ?? [];
-    // Only facts read from a non-empty transcript are evidence of the answer (review of #1437).
-    const facts = this.store.knownTranscriptFacts(runId);
-    if (!legacy.length || !facts || facts.bytes === 0 || facts.pendingGateSeq !== undefined) return false;
-    try {
-      return this.store.commitOutcome(runId, { kind: 'answered', waitIds: legacy.map(wait => wait.id) }).answered.length > 0;
-    } catch (error) {
-      console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
-      return false;
-    }
   }
 
   private hasPendingHumanAsk(runId: string): boolean {

@@ -1,3 +1,4 @@
+import { MemoryGuard } from './run/memory-guard.ts';
 import { RunFinish } from './run/run-finish.ts';
 import { WakeRetries } from './run/wake-retries.ts';
 import { RunLine } from './run/run-line.ts';
@@ -34,6 +35,7 @@ import type { RunModuleContext } from './run/types.ts';
 import type { ActiveRun } from './active-run.ts';
 
 export const RUN_MODULE_CLASSES = {
+  memoryGuard: MemoryGuard,
   runFinish: RunFinish,
   retries: WakeRetries,
   line: RunLine,

@@ -1,3 +1,9 @@
+import { workerEvidenceRunIds } from '../../runs/worker-execution.ts';
+import { removeAgentTmpDir } from '../../runs/agent-tmpdir.ts';
+import { resolveWorktreeRetention } from '../../config.ts';
+import { reclaimWorktrees } from '../../runs/retention.ts';
+import type { PreviewHostLike } from '../../preview/registration.ts';
+import type { WorkerScratchCleanup } from '../../delegation/scratch-cleanup.ts';
 import { existsSync } from 'node:fs';
 import type { RunRecord, RunStore, StepState } from '../../runs/store.ts';
 import type { UiEventSink } from '../../runs/ui-event-sink.ts';
@@ -43,8 +49,11 @@ interface RunSettlementHost {
   queueWaitWake(id: string): void;
   reconcileWorkerWaits(id?: string): void;
   releaseSlot(): void;
-  enforceRetention(): Promise<void>;
-  reapTerminalScratch(id: string): void;
+  workerScratchCleanup: WorkerScratchCleanup;
+  hasClaim(id: string): boolean;
+  autosaveCleanupBlocker(id: string): string | undefined;
+  claimWorktreeReclaim(id: string): (() => void) | null;
+  preview: PreviewHostLike | undefined;
   forgetMemoryPause(id: string): void;
 }
 export class RunSettlement {
@@ -54,6 +63,34 @@ export class RunSettlement {
     private readonly autoResumeScheduler: AutoResumeScheduler, private readonly workerExecutions: WorkerExecutions,
     private readonly completionGateHost: completionGateReads.CompletionGateHost, private readonly host: RunSettlementHost,
     private readonly wakeSessionClosedError: string, private readonly wakeDeliveryCapNote: string) {}
+  /** Scratch belongs to the task, not its current agent process (#515).
+   * Terminal status alone is not process-exit proof: an active session or an
+   * unfinished private worker generation must retain its files until exit. */
+  reapTerminalScratch(runId: string): void {
+    const run = this.context.store.getRun(runId);
+    if (!run || ['queued', 'running', 'waiting'].includes(run.status)) return;
+    if (this.host.active.has(runId) || this.line.hasStarting(runId) || this.line.hasQueued(runId) || this.host.hasClaim(runId) || !!this.host.autosaveCleanupBlocker(runId)) return;
+    const privateWorkers = workerEvidenceRunIds(this.context.dataDir);
+    if (run.delegation?.role === 'worker' || run.delegation?.role === 'invalid' || !privateWorkers || privateWorkers.includes(runId)) { this.host.workerScratchCleanup.schedule(runId); return; }
+    removeAgentTmpDir(this.context.dataDir, runId);
+  }
+
+  /** Reclaim finished worktrees beyond the keep-limit (#483) — directory only,
+   *  `cez/<id8>` branch kept. Best-effort; a failure never affects run
+   *  lifecycle. `review`/live runs are excluded by the selector. */
+  async enforceRetention(): Promise<void> {
+    return this.context.work.track('enforceRetention', this.enforceRetentionWork());
+  }
+
+  private async enforceRetentionWork(): Promise<void> {
+    try {
+      const keep = await resolveWorktreeRetention(this.context.repoRoot);
+      await reclaimWorktrees(this.context.repoRoot, this.context.store, keep, { claim: (run) => this.host.claimWorktreeReclaim(run.id), previewHost: this.host.preview });
+    } catch {
+      // retention is best-effort; swallow so terminal transitions never break.
+    }
+  }
+
   private waitingWorkflowStepIndex(run: RunRecord): number {
     return waitingWorkflowStepIndex(run, this.host.isSyntheticContinuation, ciWorkflowResumeStepIndex);
   }
@@ -528,7 +565,7 @@ export class RunSettlement {
     // Enforce count-based retention (#483) here so a single hook covers every
     // terminal path. Fire-and-forget: retention must never delay or throw into
     // the lifecycle.
-    void this.host.enforceRetention();
-    this.host.reapTerminalScratch(runId);
+    void this.enforceRetention();
+    this.reapTerminalScratch(runId);
   }
 }
