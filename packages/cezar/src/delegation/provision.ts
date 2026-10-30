@@ -8,7 +8,7 @@ import { createDelegationRoutes } from './routes.ts';
 import { createDelegationApp, startDelegationTransport } from './transport.ts';
 import { delegationEndpoint } from './cli.ts';
 
-export type DelegationSession = { restrictNativeDelegation: true; env: Record<string, string>; instructions: string; revoke(): void };
+export type DelegationSession = { restrictCrossSessionMessaging: true; env: Record<string, string>; instructions: string; revoke(): void };
 export type DelegationProvisioner = (runId: string) => DelegationSession | undefined;
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
 export function bundledWorkerInvocation(command: 'worker' | 'discover' | 'message' = 'worker'): string {
@@ -43,6 +43,11 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
     `Controller persistence prevents duplicate queue entries; a crash between provider acceptance and its delivery checkpoint can still make delivery ambiguous.`,
     `Credentials stay in the environment: never read, echo, forward, or persist them.`,
   ].join(' ');
+  // hearsay-tools/cezarion#2279: native subagents are allowed; tasks talk only through cez message.
+  const subagentMessaging = [
+    `You may message your own native subagents with your runner's tools.`,
+    `Reach another Cezar task only through ${messaging}; never use your runner's native tools for that.`,
+  ].join(' ');
 
   // No metadata on ordinary off/unavailable paths. Root authority is durable before a token exists.
   if (!run.delegation) options.store.commitDelegation([{ id: run.id, delegation: rootDelegation() }]);
@@ -50,23 +55,25 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
   const token = options.credentials.issue(options.projectId, run.id, generation);
   options.store.registerSessionSecret(token);
   return {
-    restrictNativeDelegation: true,
+    restrictCrossSessionMessaging: true,
     env: { CEZ_DELEGATION_URL: options.url, CEZ_DELEGATION_TOKEN: token },
     instructions: run.delegation?.role === 'worker'
       ? [
         `You are an owned cezar worker. Your parent run ID is ${run.delegation.parentRunId}.`,
         conversationGuidance,
-        `You cannot delegate, control peers, merge automatically, or accept your own review.`,
+        `You cannot spawn Cezar workers. You cannot control peers, merge automatically, or accept your own review.`,
         `Follow your assigned task and selected input context. Your questions — cezar_ask, or a native question — go to your parent, which answers or asks the human; do not wait for a human.`,
-        `Native workers are not tracked by cezar: do not spawn them.`,
-        `Per-run controls suppress verified native entry points only; custom extensions, Claude forked skills (context: fork) and same-user unrestricted shell are not hard isolation.`,
+        `You may use native subagents for research, code reading and focused analysis.`,
+        subagentMessaging,
         `Commit reviewed work before your parent deliberately integrates it; report the summary, commits, tests and remaining concerns.`,
         `When you park before finishing while your parent waits on you, Cezar tells your parent what you wait on and quotes your last message: end such a turn by saying what you wait on and what you have done.`,
       ].join(' ')
       : [
-        `Prefer governed cezar workers for delegation.`,
-        `Native workers are not tracked by cezar; do not spawn them.`,
-        `Per-run controls suppress verified native entry points only; custom extensions, Claude forked skills (context: fork) and same-user unrestricted shell are not hard isolation.`,
+        `Use native subagents for work that needs no separate worktree: research, code reading and focused analysis.`,
+        `For example, a subagent reads the parser and summarizes how it handles errors.`,
+        `Use Cezar workers for work that needs its own worktree, its own commits or a lifecycle Cezar tracks.`,
+        `Native subagents need no Cezar worker, worktree, collection or destruction.`,
+        subagentMessaging,
         `Owned workers are available through the bundled command ${invocation}.`,
         `Commands return JSON.`,
         `Before choosing a runner or model, use ${bundledWorkerInvocation('discover')} runners, then ${bundledWorkerInvocation('discover')} models --runner=<name>.`,
@@ -106,7 +113,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
         `Review is a human gate.`,
         `Destruction may be incomplete; inspect remaining resources and retry explicitly.`,
         `Credentials are supplied only in the environment: never read, echo, forward or include them in commands, messages, prompts, events or files.`,
-        `Workers cannot delegate or message peers.`,
+        `Workers cannot spawn Cezar workers or message peers.`,
         `This is cooperative local supervision, not process isolation.`,
       ].join(' '),
     revoke: () => options.credentials.revoke(run.id, generation),

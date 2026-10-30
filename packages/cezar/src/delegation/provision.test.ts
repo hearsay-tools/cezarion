@@ -73,7 +73,7 @@ describe('session provisioning', () => {
     vi.stubEnv('CEZ_DELEGATION', '1'); f.store.updateRun(ordinary.id, { delegation: { role: 'invalid' } });
     expect(provision(ordinary.id)).toBeUndefined();
     const { workerId } = await f.service.spawn(f.caller, { task: 'worker', baseline: 'HEAD', requestId: randomUUID() });
-    const worker = provision(workerId)!; expect(worker.instructions).toContain('cannot delegate'); expect(worker.instructions).toContain('wait --request'); expect(worker.instructions).toContain(f.parent.id); expect(worker.instructions).toContain('message reply');
+    const worker = provision(workerId)!; expect(worker.instructions).toContain('You cannot spawn Cezar workers'); expect(worker.instructions).toContain('wait --request'); expect(worker.instructions).toContain(f.parent.id); expect(worker.instructions).toContain('message reply');
     // #505: a worker's questions go to its parent, which replies or asks the human.
     expect(worker.instructions).toContain('Your questions — cezar_ask, or a native question — go to your parent');
     expect(worker.instructions).not.toContain('only a human can answer');
@@ -90,6 +90,26 @@ describe('session provisioning', () => {
     expect(root.instructions).toContain("one '<header>: <answer>' line per question (an option's label, or your own words for a question without options)");
     expect(f.store.getRun(workerId)?.delegation).toMatchObject({ role: 'worker', permissions: [] });
     await expect(f.service.spawn(f.credentials.authenticate(worker.env.CEZ_DELEGATION_TOKEN!)!, { task: 'no', baseline: 'HEAD', requestId: randomUUID() })).rejects.toMatchObject({ code: 'denied_scope' });
+  });
+  // hearsay-tools/cezarion#2279: both roles may use native subagents; each mechanism has its own
+  // purpose, and `cez message` is the only channel to another Cezar task.
+  it('gives native subagents and Cezar workers distinct purposes, for roots and workers', async () => {
+    const { workerId } = await f.service.spawn(f.caller, { task: 'worker', baseline: 'HEAD', requestId: randomUUID() });
+    const worker = provision(workerId)!.instructions;
+    const root = provision()!.instructions;
+    expect(root).toContain('Use native subagents for work that needs no separate worktree: research, code reading and focused analysis.');
+    expect(root).toContain('For example, a subagent reads the parser and summarizes how it handles errors.');
+    expect(root).toContain('Use Cezar workers for work that needs its own worktree, its own commits or a lifecycle Cezar tracks.');
+    expect(root).toContain('Native subagents need no Cezar worker, worktree, collection or destruction.');
+    expect(worker).toContain('You may use native subagents for research, code reading and focused analysis.');
+    expect(worker).toContain('You cannot spawn Cezar workers.');
+    for (const text of [root, worker]) {
+      expect(text).toContain('You may message your own native subagents with your runner\'s tools.');
+      expect(text).toMatch(/Reach another Cezar task only through .* message; never use your runner's native tools for that\./);
+      for (const old of ['Prefer governed cezar workers', 'Native workers are not tracked', 'do not spawn them', 'Per-run controls suppress', 'cannot delegate']) {
+        expect(text).not.toContain(old);
+      }
+    }
   });
   it('starts no listener off; one failed listener leaves ordinary execution unprovisioned and logs once without secrets', async () => {
     const listen = vi.spyOn(transport, 'startDelegationTransport'); const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});

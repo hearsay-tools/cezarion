@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { inspectCursorPrintCapabilities } from './cursor-print-capabilities.ts';
 import { cursorArgs, resetCursorAutoUpdateFlagCache } from './cursor-cli-flags.ts';
-import { CORE_CURSOR_PRINT_TOOLS, SAFE_CURSOR_PRINT_TOOLS, NATIVE_CURSOR_DELEGATION_TOOLS } from './cursor-print-tool-catalog.ts';
+import { CORE_CURSOR_PRINT_TOOLS } from './cursor-print-tool-catalog.ts';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 const dirs: string[] = [];
@@ -13,10 +13,10 @@ afterEach(() => {
   resetCursorAutoUpdateFlagCache();
 });
 
-const QUALIFIED_TOOLS = [...SAFE_CURSOR_PRINT_TOOLS, ...NATIVE_CURSOR_DELEGATION_TOOLS];
 /** The live `Expected one of:` list of 2026.10.16-e3cb207, captured 2026-10-19. */
 const TOOLS_2026_10_16 = readFileSync(new URL('./__fixtures__/cursor/print-tools-2026.10.16-e3cb207.txt', import.meta.url), 'utf8')
   .split(',').map(name => name.trim()).filter(Boolean);
+const QUALIFIED_TOOLS = TOOLS_2026_10_16;
 
 function bin(version: string, catalog?: string, fail = false, rejectFlag = false): { path: string; log: string } {
   const dir = mkdtempSync(join(tmpdir(), 'cez-cursor-cap-')); dirs.push(dir);
@@ -32,29 +32,15 @@ const argv = (log: string): string[][] => readFileSync(log, 'utf8').trim().split
 
 const spec = { cwd: '/tmp', userPrompt: 'hello', toolGrant: UNSET_TOOL_GRANT };
 describe('Cursor print capability preflight', () => {
-  it('accepts the originally qualified build and allows its whole safe catalog', async () => {
+  // hearsay-tools/cezarion#2279: print sends no tool allowlist, so the preflight returns none.
+  it('accepts the originally qualified build', async () => {
     await expect(inspectCursorPrintCapabilities(bin('2026.10.01-e373342').path, spec))
-      .resolves.toEqual({ supported: true, allowedTools: [...SAFE_CURSOR_PRINT_TOOLS] });
+      .resolves.toEqual({ supported: true });
   });
-  it('accepts 2026.10.16-e3cb207, dropping safe tools it removed and denying tools it added', async () => {
-    const result = await inspectCursorPrintCapabilities(bin('2026.10.16-e3cb207', TOOLS_2026_10_16.join(', ')).path, spec);
-    expect(result).toMatchObject({ supported: true });
-    const allowed = result.supported ? result.allowedTools ?? [] : [];
-    expect(allowed).toEqual(SAFE_CURSOR_PRINT_TOOLS.filter(name => TOOLS_2026_10_16.includes(name)));
-    expect(allowed).not.toContain('get_pr_code_tour_tool_call');
-    for (const added of ['create_project_tool_call', 'x_search_tool_call', 'get_origin_pr_code_tour_tool_call']) {
-      expect(allowed).not.toContain(added);
-    }
-    for (const delegation of NATIVE_CURSOR_DELEGATION_TOOLS) expect(allowed).not.toContain(delegation);
-  });
-  it('accepts an unknown newer build and keeps its new native entries denied', async () => {
+  it('accepts an unknown newer build whatever native entries it adds or removes', async () => {
     const catalog = [...QUALIFIED_TOOLS.filter(name => name !== 'web_search_tool_call'), 'spawn_swarm_tool_call'];
-    const result = await inspectCursorPrintCapabilities(bin('2027.03.14-0a1b2c3', catalog.join(', ')).path, spec);
-    expect(result).toMatchObject({ supported: true });
-    const allowed = result.supported ? result.allowedTools ?? [] : [];
-    expect(allowed).not.toContain('spawn_swarm_tool_call');
-    expect(allowed).not.toContain('web_search_tool_call');
-    expect(allowed).toContain('read_tool_call');
+    await expect(inspectCursorPrintCapabilities(bin('2027.03.14-0a1b2c3', catalog.join(', ')).path, spec))
+      .resolves.toEqual({ supported: true });
   });
   it('reports a build older than the qualified baseline as unsupported before inference', async () => {
     await expect(inspectCursorPrintCapabilities(bin('2026.09.01-old').path, spec)).resolves.toMatchObject({ supported: false });

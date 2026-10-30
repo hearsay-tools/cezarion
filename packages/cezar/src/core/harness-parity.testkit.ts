@@ -964,20 +964,16 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion: 'U20h', backend: 'opencode', kind: 'capability-absent',
     reason: 'OpenCode runs one prompt per turn: a human prompt waits for the busy turn to go idle, and a refusal acknowledged without a turn never goes idle, so the human message the cell sends after the bound is never posted. U20m delivers a worker message, which steers the busy turn.',
   },
-  // D2 (hearsay-tools/cezarion#1284): a forked skill starts no native subagent in a
-  // restricted session. Each reason was checked against the installed CLI on 2026-10-20.
-  {
-    criterion: 'D2', backend: 'claude', kind: 'capability-absent',
-    reason: 'Claude Code 2.1.303 starts a `context: fork` skill\'s subagent from the Skill tool or a typed /name without consulting the Agent/Task deny rules; no Skill(...) rule, setting or hook can stop it while ordinary skills keep working (AGENT_PROTOCOL.md D1 forked-skill gap).',
-  },
+  // D1 (hearsay-tools/cezarion#2279): a governed session keeps native subagents, and cezar adds a
+  // control only where a runner's cross-session tool is separate from subagent messaging. Each
+  // reason was checked against the installed CLI on 2026-10-30.
   ...([
-    ['codex', 'Codex 0.160.1 injects a selected skill into the same thread; its SKILL.md frontmatter (name, description, metadata) and agents/openai.yaml (interface, dependencies, policy) have no fork field. Native subagents start only through the multi-agent tools D1 disables.'],
-    ['opencode', 'OpenCode 1.18.35 skips the task permission only for a subtask part, which only POST /session/{id}/command creates, or after a user agent part. cezar posts text parts through prompt_async and never calls /command; the skill tool returns the skill\'s content in the same session.'],
-    ['pi', 'pi 1.0.4 reads skill frontmatter name, description and disable-model-invocation, and prompt-template description and argument-hint; both expand to text in the same session. pi has no native subagent primitive (D1 excludes the subagent extension), and /fork forks the conversation.'],
-    ['cursor', 'Cursor 2026.10.16-e3cb207 turns skill frontmatter (name, description, alwaysApply, disable-model-invocation, environments) into a rule the agent reads in the same conversation; no field forks. Native subagents start only through task_tool_call, which D1 leaves out of --allowed-tools.'],
-    ['omp', 'OMP 18.8.0 renders an invoked skill\'s SKILL.md body into a message in the same session, and slash-command frontmatter reads only description and argument-hint. Native subagents start only through task and eval, which D1 denies and drops from --tools.'],
+    ['claude', 'Claude Code 2.1.312 SendMessage and ListAgents also reach the session\'s own subagents, so no outbound tool is separate from subagent messaging; inbound messages from other sessions are refused on every launch (D3).'],
+    ['pi', 'pi 1.4.0 has no built-in cross-session tool; an extension may add one, and its name cannot be discovered as messaging.'],
+    ['cursor', 'Cursor 2026.10.22-27dcf5f send_message (to cloud agents) has no CLI handler, and its native agent tools reach the session\'s own subagents.'],
+    ['omp', 'OMP 18.13.1 has no cross-session tool in its default set; its irc tool is an in-process bus that reaches only agents inside the same OMP process.'],
   ] as const).map(([backend, reason]) => ({
-    criterion: 'D2', backend, kind: 'scenario-unconstructible' as const, reason,
+    criterion: 'D1', backend, kind: 'capability-absent' as const, reason,
   })),
   // D3 (hearsay-tools/cezarion#1994): no native cross-session messaging control at shipped
   // defaults. Each reason was checked against the installed CLI on 2026-10-27.

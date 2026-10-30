@@ -318,13 +318,13 @@ describe('Cursor print logical session', () => {
     await session.result;
   });
 
-  it('starts every turn with --disable-auto-update and the preflight allowlist (hearsay-tools/cezarion#1257)', async () => {
+  // hearsay-tools/cezarion#2279: a governed print turn keeps the native agent tools.
+  it('starts every turn with --disable-auto-update and no tool allowlist under delegation', async () => {
     const { spec, log } = fixture();
-    spec.restrictNativeDelegation = true;
-    const allowedTools = ['read_tool_call', 'shell_tool_call', 'mcp_tool_call'];
+    spec.restrictCrossSessionMessaging = true;
     let turnEnded!: () => void;
     let ended = new Promise<void>(resolve => { turnEnded = resolve; });
-    const session = new CursorPrintRunner({ bin: mock, allowedTools, processOptions: { drainMs: 20 } })
+    const session = new CursorPrintRunner({ bin: mock, processOptions: { drainMs: 20 } })
       .startSession(spec, event => { if (event.type === 'turn-end') turnEnded(); });
     await ended;
     ended = new Promise<void>(resolve => { turnEnded = resolve; });
@@ -336,16 +336,16 @@ describe('Cursor print logical session', () => {
     expect(turns).toHaveLength(2);
     for (const turn of turns) {
       expect(turn.args[0]).toBe('--disable-auto-update');
-      expect(turn.args[turn.args.indexOf('--allowed-tools') + 1]).toBe(allowedTools.join(','));
+      expect(turn.args).not.toContain('--allowed-tools');
     }
   });
 
-  it('passes qualified delegation, MCP, image, root and advertised effort fields on each turn', async () => {
+  it('passes delegation, MCP, image, root and advertised effort fields on each turn', async () => {
     const { spec, log } = fixture();
     const extraRoot = mkdtempSync(join(tmpdir(), 'cez-print-extra-root-'));
     scratch.push(extraRoot);
     const syntheticToken = 'synthetic-tool-token-590';
-    spec.restrictNativeDelegation = true;
+    spec.restrictCrossSessionMessaging = true;
     spec.cezarTools = { name: 'cezar', command: 'node', args: ['/safe/mock-mcp.mjs'] };
     spec.env = { ...spec.env, CEZ_TOOL_TOKEN: syntheticToken, CEZ_TOOL_SOCKET: '/tmp/synthetic-tool-socket' };
     spec.additionalDirectories = [extraRoot];
@@ -382,10 +382,7 @@ describe('Cursor print logical session', () => {
       expect(turn.args).toContain('--add-dir');
       expect(turn.args[turn.args.indexOf('--add-dir') + 1]).toBe(extraRoot);
       expect(turn.args[turn.args.indexOf('--model') + 1]).toBe('gpt-5.4-mini-low');
-      const allowed = turn.args[turn.args.indexOf('--allowed-tools') + 1] ?? '';
-      expect(allowed).toContain('read_tool_call');
-      expect(allowed).not.toContain('task_tool_call');
-      expect(allowed).not.toContain('create_agent_tool_call');
+      expect(turn.args).not.toContain('--allowed-tools');
       expect(turn.args).toContain('--plugin-dir');
       expect(JSON.stringify(turn.args)).not.toContain(syntheticToken);
     }

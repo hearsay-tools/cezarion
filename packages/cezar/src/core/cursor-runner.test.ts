@@ -83,20 +83,6 @@ describe('Cursor transport facade', () => {
     expect(specs[0]).toMatchObject({ model: 'model-a', effort: 'low' });
   });
 
-  it('passes the preflight allowlist into print for fresh and resumed sessions (hearsay-tools/cezarion#1257)', async () => {
-    const allowedTools = ['read_tool_call', 'shell_tool_call'];
-    for (const options of [{}, { sessionTransport: 'cursor-print' as const }]) {
-      const seen: unknown[] = [];
-      const { specs, runner } = setup({
-        ...options,
-        inspect: async () => ({ supported: true, allowedTools }),
-        makePrint: (_models, _resolved, allowed) => { seen.push(allowed); return fakeRunner('cursor-print', [], specs); },
-      });
-      await runner.startSession(spec).result;
-      expect(seen).toEqual([allowedTools]);
-    }
-  });
-
   it('chooses ACP with one limitation note when print is unsupported', async () => {
     const { starts, runner } = setup({ inspect: async () => ({ supported: false, reason: 'old CLI' }) });
     const events: AgentEvent[] = [];

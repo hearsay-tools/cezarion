@@ -50,7 +50,7 @@ test('the release tarball installs and runs the dry-run CLI workflow', { timeout
   try {
     const { record, consumerDir, packageRoot } = await installTarball(root);
     const packagedPaths = new Set(record.files.map((file) => file.path));
-    for (const requiredPath of ['dist/index.js', 'dist/runs/transcript-facts-worker.js', 'web/dist/index.html', 'scripts/mock-claude.mjs', 'scripts/mock-codex-app-server.mjs', 'scripts/mock-opencode-serve.mjs', 'dist/ci-wait/controller.js', 'dist/ci-wait/client.js', 'dist/ci-wait/mcp.js', 'dist/ci-wait/tools.js', 'scripts/pi-ci-wait.mjs', 'scripts/omp-ci-wait.mjs', 'scripts/omp-restrict-delegation.yml', 'scripts/mock-omp-rpc.mjs', 'README.md']) {
+    for (const requiredPath of ['dist/index.js', 'dist/runs/transcript-facts-worker.js', 'web/dist/index.html', 'scripts/mock-claude.mjs', 'scripts/mock-codex-app-server.mjs', 'scripts/mock-opencode-serve.mjs', 'dist/ci-wait/controller.js', 'dist/ci-wait/client.js', 'dist/ci-wait/mcp.js', 'dist/ci-wait/tools.js', 'scripts/pi-ci-wait.mjs', 'scripts/omp-ci-wait.mjs', 'scripts/opencode-task-scope.mjs', 'scripts/mock-omp-rpc.mjs', 'README.md']) {
       assert.ok(packagedPaths.has(requiredPath), `release tarball should contain ${requiredPath}`);
     }
     assert.equal(packagedPaths.has('src/index.ts'), false, 'release tarball should not contain TypeScript sources');

@@ -586,9 +586,9 @@ const CONTROL_CRITERIA = [
   { id: 'R89', scenario: 'provider-error' },
   { id: 'R90', scenario: 'done' },
   { id: 'R91', scenario: 'done' },
+  // hearsay-tools/cezarion#2279: a governed session keeps native subagents; only a separate
+  // cross-session tool gets a control.
   { id: 'D1', scenario: 'baseline' },
-  // hearsay-tools/cezarion#1284: a forked skill starts no native subagent in a restricted session.
-  { id: 'D2', scenario: 'forked-skill' },
   // hearsay-tools/cezarion#1994: a session at shipped defaults refuses native cross-session messages.
   { id: 'D3', scenario: 'baseline' },
   { id: 'S5', scenario: 'baseline' },
@@ -916,7 +916,7 @@ const SPEC_FIELD_PROBES: Readonly<Record<AgentRunSpecField, SpecFieldProbe>> = {
   cwd: { kind: 'process' },
   // `without` is the drive's unset grant; the tool-grant cells pin every kind, bashAllowlist included.
   toolGrant: { kind: 'boundary', without: {}, with: { toolGrant: explicitToolGrant(['Read', 'Grep']) } },
-  restrictNativeDelegation: { kind: 'boundary', without: {}, with: { restrictNativeDelegation: true } },
+  restrictCrossSessionMessaging: { kind: 'boundary', without: {}, with: { restrictCrossSessionMessaging: true } },
   additionalDirectories: { kind: 'boundary', without: {}, with: { additionalDirectories: ['/tmp/parity-probe-extra'] } },
   env: { kind: 'process' },
   model: { kind: 'boundary', without: {}, with: { model: 'parity-probe/model-sentinel' } },
@@ -2219,22 +2219,27 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
     });
   }
 
-  // D1: inspect the actual argv/RPC/HTTP boundary of the real runners. Expectations
-  // come from installed CLI help, generated Codex schemas and OpenCode /doc; see §7.
-  describe('harness parity — D1 governed native delegation', () => {
+  // D1 (hearsay-tools/cezarion#2279): inspect the real argv/RPC/HTTP boundary of a governed
+  // launch against an ordinary one. Native subagents and messages to them stay; a control is
+  // added only where a runner's cross-session tool is separate from subagent messaging (Codex's
+  // message board, OpenCode's task_id). Every other runner is a named `capability-absent`
+  // exemption, pinned the other way round: its governed wire equals the ordinary one.
+  describeRunners('harness parity — D1 governed cross-session controls', () => {
     for (const backend of runners) {
+      const exempt = exemptionFor('D1', backend);
       for (const resume of [false, true]) {
-        it(`${backend} restricts verified native delegation on ${resume ? 'Continue' : 'start'} without widening ordinary settings`, async () => {
+        const when = resume ? 'Continue' : 'start';
+        it(exempt ? `${backend} is exempt from D1 on ${when} — ${exempt.reason}` : `${backend} D1 keeps subagents and controls only cross-session reach on ${when}`, async () => {
           const dir = mkdtempSync(join(tmpdir(), 'cez-native-wire-'));
           try {
             const launches = [];
-            for (const restricted of [false, true]) {
-              const path = join(dir, `${restricted}.ndjson`);
+            for (const governed of [false, true]) {
+              const path = join(dir, `${governed}.ndjson`);
               if (backend === 'opencode' && resume) seedOpencodeMockSession(path);
               const obs = await driveSeam(backend, 'baseline', { spec: {
                 cwd: dir, resume, toolGrant: explicitToolGrant(['Read', 'Bash'], ['git status']),
-                systemPrompt: 'Use cezar workers. Native workers are not tracked by cezar.',
-                ...(restricted ? { restrictNativeDelegation: true } : {}),
+                systemPrompt: 'Use native subagents for research; use cezar workers for work that needs a worktree.',
+                ...(governed ? { restrictCrossSessionMessaging: true } : {}),
                 env: { CEZ_MOCK_ARGS_FILE: path, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' },
               } });
               expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
@@ -2242,73 +2247,40 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
               // Argv arrays or JSON-RPC rows, by runner, as JSON.parse returned them before.
               launches.push(readMockRecords<any>(path));
             }
-            const [ordinary, restricted] = launches;
-            if (backend === 'claude' || backend === 'pi') {
-              const flag = backend === 'claude' ? '--disallowedTools' : '--exclude-tools';
-              const names = backend === 'claude' ? 'Agent,Task,Workflow,SendMessage,ListAgents' : 'subagent';
-              const args = restricted![0] as string[];
-              const index = args.indexOf(flag);
-              expect(index).toBeGreaterThanOrEqual(0);
-              expect(args[index + 1]).toBe(names);
-              expect(args.filter((_, i) => i !== index && i !== index + 1)).toEqual(ordinary![0]);
-              // Pi has no native delegate primitive: arbitrary custom extension names
-              // cannot be discovered as delegation. Preserve unrelated tools/extensions.
-              if (backend === 'pi') expect(args).not.toContain('--no-extensions');
+            const [ordinary, governed] = launches;
+            if (exempt) {
+              expect(exempt.kind).toBe('capability-absent');
+              expect(governed).toEqual(ordinary);
+              expect(JSON.stringify(governed)).not.toMatch(/disallowedTools|exclude-tools|allowed-tools|omp-restrict-delegation/);
             } else if (backend === 'codex') {
-              const normal = ordinary!.find(row => row.method === (resume ? 'thread/resume' : 'thread/start'));
-              const controlled = restricted!.find(row => row.method === (resume ? 'thread/resume' : 'thread/start'));
-              expect(controlled.params.config).toEqual({ 'features.multi_agent': false, 'features.multi_agent_v2': false });
+              const method = resume ? 'thread/resume' : 'thread/start';
+              const normal = ordinary!.find(row => row.method === method);
+              const controlled = governed!.find(row => row.method === method);
+              expect(controlled.params.config).toEqual({ 'features.agent_message_board': false });
               const { config: _config, ...rest } = controlled.params;
               expect(rest).toEqual(normal.params);
               expect(normal.params).not.toHaveProperty('config');
-            } else if (backend === 'omp') {
-              // A static `--config` overlay denies `task`; the tool list was already narrowed by
-              // the bash allowlist, so nothing else in the argv moves.
-              const args = restricted![0] as string[];
-              const index = args.indexOf('--config');
-              expect(index).toBeGreaterThanOrEqual(0);
-              expect(args[index + 1]).toMatch(/omp-restrict-delegation\.yml$/);
-              expect(args.filter((_, i) => i !== index && i !== index + 1)).toEqual(ordinary![0]);
-              expect(ordinary![0]).not.toContain('--config');
-              // The `task` strip from the default tool list is proven in omp-runner.test.ts (D1).
-            } else if (backend === 'cursor') {
-              const normal: string[] = ordinary![0];
-              const controlled: string[] = restricted![0];
-              expect(normal).not.toContain('--allowed-tools');
-              const index = controlled.indexOf('--allowed-tools');
-              expect(index).toBeGreaterThanOrEqual(0);
-              expect(controlled[index + 1]).toContain('read_tool_call');
-              expect(controlled[index + 1]).not.toContain('task_tool_call');
-              expect(controlled.filter((_, i) => i !== index && i !== index + 1)).toEqual(normal);
-              expect(normal.includes('--resume')).toBe(resume);
-            } else if (resume) {
-              const sessionUrl = `/session/${PINNED_SESSION_ID}`;
-              const deny = { permission: [{ permission: 'task', pattern: '*', action: 'deny' }] };
-              for (const rows of [ordinary, restricted]) {
-                expect(rows!.some(row => row.method === 'GET' && row.url === sessionUrl)).toBe(true);
-                expect(rows!.filter(row => row.method === 'POST' && row.url === '/session')).toEqual([]);
-              }
-              expect(restricted!.find(row => row.method === 'PATCH' && row.url === sessionUrl)?.body).toEqual(deny);
-              expect(ordinary!.filter(row => row.method === 'PATCH')).toEqual([]);
-              expect(restricted!.filter(row => row.url.includes('prompt_async')).every(row => row.body.tools === undefined)).toBe(true);
             } else {
-              const normal = ordinary!.find(row => row.method === 'POST' && row.url === '/session');
-              const controlled = restricted!.find(row => row.method === 'POST' && row.url === '/session');
-              expect(controlled.body.permission).toEqual([{ permission: 'task', pattern: '*', action: 'deny' }]);
-              const { permission: _permission, ...rest } = controlled.body;
-              expect(rest).toEqual(normal.body);
-              expect(normal.body).not.toHaveProperty('permission');
-              // Later prompts must not replace the session rules with a tools map.
-              expect(restricted!.filter(row => row.url !== '/session')).toEqual(ordinary!.filter(row => row.url !== '/session'));
-              expect(restricted!.filter(row => row.url.includes('prompt_async')).every(row => row.body.tools === undefined)).toBe(true);
+              // OpenCode: the task-scope plugin rides the runtime config; no session rule is sent.
+              const config = governed!.find(row => row.type === 'runtime-config')?.config;
+              expect(config?.plugin).toEqual([expect.stringMatching(/scripts\/opencode-task-scope\.mjs$/)]);
+              expect(ordinary!.some(row => row.type === 'runtime-config')).toBe(false);
+              const requests = (rows: any[]) => rows.filter(row => row.type !== 'runtime-config');
+              expect(requests(governed!)).toEqual(requests(ordinary!));
+              expect(governed!.filter(row => row.method === 'PATCH')).toEqual([]);
+              expect(governed!.filter(row => row.method === 'POST' && row.url === '/session').every(row => row.body.permission === undefined)).toBe(true);
             }
           } finally { rmSync(dir, { recursive: true, force: true }); }
         }, 45000);
       }
     }
+  });
 
-    if (scope === 'once') {
-      it('opencode restricted Continue does not PATCH when the session already denies task', async () => {
+  if (scope === 'once') {
+    describe('harness parity — D1 OpenCode sessions an older cezar restricted', () => {
+      // OpenCode appends permission rules and has no remove, so a `task` deny an older cezar
+      // added stays on its session; cezar neither PATCHes it again nor tries to lift it.
+      it('opencode governed Continue sends no PATCH when the session already denies task', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'cez-native-wire-sticky-'));
         const path = join(dir, 'wire.ndjson');
         try {
@@ -2316,7 +2288,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             permission: [{ permission: 'task', pattern: '*', action: 'deny' }],
           });
           const obs = await driveSeam('opencode', 'baseline', { spec: {
-            cwd: dir, resume: true, restrictNativeDelegation: true,
+            cwd: dir, resume: true, restrictCrossSessionMessaging: true,
             env: { CEZ_MOCK_ARGS_FILE: path, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' },
           } });
           expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
@@ -2327,25 +2299,25 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         } finally { rmSync(dir, { recursive: true, force: true }); }
       }, 45000);
 
-      it('opencode restricted Continue POSTs the deny when GET /session/{id} 404s', async () => {
+      it('opencode governed Continue POSTs a session with no task deny when GET /session/{id} 404s', async () => {
         const dir = mkdtempSync(join(tmpdir(), 'cez-native-wire-fallback-'));
         const path = join(dir, 'wire.ndjson');
         try {
           const obs = await driveSeam('opencode', 'baseline', { spec: {
-            cwd: dir, resume: true, restrictNativeDelegation: true,
+            cwd: dir, resume: true, restrictCrossSessionMessaging: true,
             env: { CEZ_MOCK_ARGS_FILE: path, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' },
           } });
           expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
           const rows = readMockRecords<OpencodeRequestRow>(path);
           expect(rows.some(row => row.method === 'GET' && row.url === `/session/${PINNED_SESSION_ID}`)).toBe(true);
-          expect(rows.find(row => row.method === 'POST' && row.url === '/session')?.body?.permission).toEqual(
-            [{ permission: 'task', pattern: '*', action: 'deny' }],
-          );
+          const created = rows.find(row => row.method === 'POST' && row.url === '/session');
+          expect(created).toBeDefined();
+          expect(created?.body?.permission).toBeUndefined();
           expect(rows.filter(row => row.method === 'PATCH')).toEqual([]);
         } finally { rmSync(dir, { recursive: true, force: true }); }
       }, 45000);
-    }
-  });
+    });
+  }
 
   // D3 (hearsay-tools/cezarion#1994): at shipped defaults (no D1) a session refuses the
   // runner's native cross-session messages, which bypass cezar's recorded conversations.
@@ -2381,50 +2353,6 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           } finally { rmSync(dir, { recursive: true, force: true }); }
         }, 45_000);
       }
-    }
-  });
-
-  // D2 (hearsay-tools/cezarion#1284): a restricted session's forked skill starts no native
-  // subagent. Only Claude's wire constructs the scenario, and Claude 2.1.303 starts the fork
-  // whatever its deny rules say (AGENT_PROTOCOL.md, Claude forked-skill gap), so its row is
-  // pinned the other way round: the day Claude can block forks, it fails and must go live.
-  describeRunners('harness parity — D2 forked skill in a restricted session', () => {
-    for (const backend of runners) {
-      const exempt = exemptionFor('D2', backend);
-      if (exempt?.kind === 'scenario-unconstructible') {
-        it(`${backend} is exempt from D2 — ${exempt.reason}`, () => {
-          expect(HARNESS_ADAPTERS[backend].scenarios['forked-skill']).toBeUndefined();
-        });
-        continue;
-      }
-      it(exempt ? `${backend} is exempt from D2 — ${exempt.reason}` : `${backend} D2 starts no native subagent from a forked skill in a restricted session`, async () => {
-        const dir = mkdtempSync(join(tmpdir(), 'cez-forked-skill-'));
-        const argsFile = join(dir, 'args.ndjson');
-        try {
-          const obs = await driveSeam(backend, 'forked-skill', { spec: {
-            restrictNativeDelegation: true,
-            env: { CEZ_MOCK_ARGS_FILE: argsFile, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' },
-          } });
-          expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
-          expect(obs.v1.at(-1)?.type).toBe('done');
-          const items = obs.v2.flatMap(event => event.type === 'item.started' || event.type === 'item.completed' ? [event.item] : []);
-          const nested = items.filter(item => item.parentItemId !== undefined);
-          if (!exempt) {
-            expect(nested).toEqual([]);
-            return;
-          }
-          // The exact absent capability, not "some assertion threw": the session was
-          // restricted, and the forked child still ran nested under the Skill call.
-          expect(exempt.kind).toBe('capability-absent');
-          const args = JSON.parse(readFileSync(argsFile, 'utf8').trim().split('\n')[0]!) as string[];
-          expect(args).toContain('--disallowedTools');
-          expect(args[args.indexOf('--disallowedTools') + 1]).toBe('Agent,Task,Workflow,SendMessage,ListAgents');
-          const skill = items.find(item => item.kind === 'tool' && item.name === 'Skill');
-          expect(skill).toBeDefined();
-          expect(new Set(nested.map(item => item.parentItemId))).toEqual(new Set([skill!.id]));
-          expect(nested.some(item => item.kind === 'tool' && item.name === 'Bash' && item.status === 'completed')).toBe(true);
-        } finally { rmSync(dir, { recursive: true, force: true }); }
-      }, 45_000);
     }
   });
 

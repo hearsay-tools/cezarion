@@ -326,6 +326,10 @@ is rethrown, never hidden behind a missing `dist`.
 
 ### Delegation restriction (D1)
 
+> **Superseded (hearsay-tools/cezarion#2279):** governed OMP sessions keep `task`, `wait` and
+> `eval`, and the overlay is deleted. `irc` reaches only agents in the same OMP process, so OMP
+> gets no cross-session control. See `AGENT_PROTOCOL.md` D1.
+
 Under `restrictNativeDelegation`: the `--config omp-restrict-delegation.yml` overlay denies
 `task` (user `deny` is absolute in every approval mode), and `task`/`wait` are dropped from
 `--tools`. OMP's `eval` tool has `agent()`/`workpool()` helpers that can still spawn agents, and

@@ -26,7 +26,7 @@ describe('Cursor pre-inference model rejection retry', () => {
     const { spec, runner, log } = fixture('model-rejection-once');
     spec.systemPrompt = 'Keep the exact selection';
     spec.images = [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'aGVsbG8=' } }];
-    spec.restrictNativeDelegation = true;
+    spec.restrictCrossSessionMessaging = true;
     const events: AgentEvent[] = [];
     const result = await runner.run(spec, event => events.push(event));
     expect(result.text).toContain('first');

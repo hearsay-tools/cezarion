@@ -52,7 +52,7 @@ export const CURSOR_SPEC_SUPPORT: AgentRunSpecSupport = {
   images: { honored: true, via: 'ACP image content blocks' },
   cwd: { honored: true, via: 'spawn cwd and session/new or session/load cwd' },
   toolGrant: { honored: false, reason: 'Cursor ACP has no per-session tool or command-prefix allowlist; --force follows the existing auto permission preset' },
-  restrictNativeDelegation: { honored: true, via: 'initialize clientCapabilities._meta.subagents=false; Cursor 2026.09.15 negotiates native delegation from this capability' },
+  restrictCrossSessionMessaging: { honored: false, reason: 'Cursor 2026.10.22-27dcf5f ACP reaches no other session: send_message (cloud agents) has no CLI handler; subagents stay on (hearsay-tools/cezarion#2279)' },
   additionalDirectories: { honored: true, via: '--add-dir per additional workspace root' },
   env: { honored: true, via: 'buildChildEnv cursor backend with per-run env' },
   model: { honored: true, via: '--model pins initial selection; ACP model config option for advertised IDs, legacy session/set_model fallback' },
@@ -337,7 +337,7 @@ class CursorSession implements AgentSession {
   }
   private async initialize(): Promise<void> {
     const init = await this.request('initialize', { protocolVersion: 1, clientInfo: { name: 'cezar', version: '1' },
-      clientCapabilities: { _meta: { subagents: !this.spec.restrictNativeDelegation, parameterizedModelPicker: true } } });
+      clientCapabilities: { _meta: { subagents: true, parameterizedModelPicker: true } } });
     if (!this.open) return;
     if (init.protocolVersion !== 1) throw new Error('Cursor ACP protocol version is unsupported');
     if (this.spec.resume && this.spec.sessionId && object(init.agentCapabilities).loadSession !== true) throw new Error('Cursor CLI does not support session resume');

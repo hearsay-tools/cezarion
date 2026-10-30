@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { AgentRunSpec } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
-import { CORE_CURSOR_PRINT_TOOLS, SAFE_CURSOR_PRINT_TOOLS } from './cursor-print-tool-catalog.ts';
+import { CORE_CURSOR_PRINT_TOOLS } from './cursor-print-tool-catalog.ts';
 import { cursorArgs, noteCursorAutoUpdateFlagRejected, rejectsCursorAutoUpdateFlag,
   usesCursorAutoUpdateFlag } from './cursor-cli-flags.ts';
 import { discoverCursorParameterizedModels, parseCursorModels } from './cursor-model-catalog.ts';
@@ -15,9 +15,7 @@ const QUALIFIED_BASELINE = '2026.10.01-e373342';
 const BUILD_VERSION = /^(\d{4})\.(\d{2})\.(\d{2})-[0-9a-z]+$/;
 const INVALID_TOOL = '__cezar_probe_invalid__';
 export type CursorPrintCapabilityResult =
-  | { supported: true; models?: readonly ModelOption[]; model?: string; resolvedModel?: string;
-    /** The safe tools this build advertises: a restricted turn's whole allowlist. */
-    allowedTools?: readonly string[] }
+  | { supported: true; models?: readonly ModelOption[]; model?: string; resolvedModel?: string }
   | { supported: false; reason: string };
 
 /** `YYYYMMDD` of a Cursor build version, or undefined for a format cezar does not know. */
@@ -78,9 +76,7 @@ export async function inspectCursorPrintCapabilities(
   if (missing.length) {
     return { supported: false, reason: `Cursor native tool catalog lacks core print tools: ${missing.join(', ')}` };
   }
-  // An allowlist is fail-closed: an entry this build adds and cezar never listed stays denied.
-  const allowedTools = SAFE_CURSOR_PRINT_TOOLS.filter(name => advertised.has(name));
-  if (!spec.model && !spec.effort) return { supported: true, allowedTools };
+  if (!spec.model && !spec.effort) return { supported: true };
   let models: ModelOption[];
   try { models = parseCursorModels((await execute(bin, cursorArgs(bin, ['--list-models']), options)).stdout); }
   catch { throw new Error('Cursor print capability preflight could not read selected-account models'); }
@@ -121,7 +117,7 @@ export async function inspectCursorPrintCapabilities(
       resolvedModel = `${selection[1]}[${[...embedded].sort(([a], [b]) => a.localeCompare(b))
         .map(([id, value]) => `${id}=${value}`).join(',')}]`;
     }
-    return { supported: true, model, resolvedModel, allowedTools };
+    return { supported: true, model, resolvedModel };
   }
   if (spec.effort) {
     const base = model.replace(/-(?:none|low|medium|high|xhigh|extra-high|max)$/, '');
@@ -130,5 +126,5 @@ export async function inspectCursorPrintCapabilities(
       throw new Error('Cursor print requested effort is not advertised for the selected account');
     }
   }
-  return { supported: true, models, model, allowedTools };
+  return { supported: true, models, model };
 }

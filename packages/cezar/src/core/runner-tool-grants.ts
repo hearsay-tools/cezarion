@@ -53,16 +53,15 @@ export function cursorPrintToolGrantArgs(grant: ToolGrant): string[] {
 
 /**
  * The names a grant asks OMP for, or undefined for OMP's own default set. That set includes
- * task, wait, eval and unrestricted bash: D1 and a bash allowlist each have to name a list
- * (`defaults`, OMP's default set) to leave something out.
+ * unrestricted bash, so a bash allowlist has to name a list (`defaults`, OMP's default set) to
+ * leave it out.
  */
 export function ompRequestedTools(
   grant: ToolGrant,
   defaults: readonly string[],
-  restrictNativeDelegation: boolean | undefined,
 ): readonly string[] | undefined {
   switch (grant.kind) {
-    case 'unset': return restrictNativeDelegation || (grant.bashAllowlist?.length ?? 0) > 0 ? defaults : undefined;
+    case 'unset': return (grant.bashAllowlist?.length ?? 0) > 0 ? defaults : undefined;
     case 'step-default':
     case 'inherited': return grant.tools;
     // `--tools` filters OMP's built-ins only, so a narrowed list leaves every MCP and extension

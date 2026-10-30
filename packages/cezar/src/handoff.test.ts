@@ -314,7 +314,7 @@ describe('handoffInstructions', () => {
     expect(text).toContain("Never use your runner's native cross-session tools to reach another task or agent session, for example Claude's SendMessage or ListAgents for other sessions.");
     expect(text).toContain('Without `CEZ_DELEGATION=1` no agent channel to another task exists: tell the user instead.');
     expect(text).toContain('`cez task send` is human input and refuses to run inside a task.');
-    expect(text).toContain('Native subagents inside your own session are not tasks.');
+    expect(text).toContain("Native subagents inside your own session are not tasks: you may start them and message them with your runner's tools.");
   });
 
   it('the marker variant is unchanged', () => {
