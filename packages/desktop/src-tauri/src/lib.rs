@@ -873,13 +873,7 @@ fn run_cockpit(app: &AppHandle, shell: &Arc<Shell>, window: &WebviewWindow) -> b
 /// A cockpit that never answered health: stop it if the shell still owns it, and say why unless a
 /// quit or a restart request made it go away.
 fn failed_start(shell: &Shell, window: &WebviewWindow, pid: u32, url: &str, log: &Mutex<VecDeque<String>>) -> bool {
-    let owned = {
-        let mut guard = shell.child.lock().unwrap();
-        if guard.as_ref().map(|child| child.id()) == Some(pid) { guard.take() } else { None }
-    };
-    if let Some(mut child) = owned {
-        sidecar::stop(&mut child, sidecar::STOP_GRACE);
-    }
+    stop_published(shell, pid);
     if shell.quitting.load(Ordering::SeqCst) {
         return false;
     }
@@ -890,6 +884,38 @@ fn failed_start(shell: &Shell, window: &WebviewWindow, pid: u32, url: &str, log:
     let tail = log.lock().unwrap().iter().cloned().collect::<Vec<_>>().join("\n");
     fail(window, "cezar did not come up", &format!("No answer on {url} within {}s (pid {pid}).", HEALTH_TIMEOUT.as_secs()), &tail);
     false
+}
+
+/// Stop the cockpit with `pid` while it stays in the shell's slot: closing stdin, then a
+/// force-kill after `STOP_GRACE`; the slot is cleared only once it has exited. Quit in the
+/// meantime still finds it and stops it itself before installing anything.
+fn stop_published(shell: &Shell, pid: u32) {
+    let deadline = Instant::now() + sidecar::STOP_GRACE;
+    if let Some(child) = shell.child.lock().unwrap().as_mut().filter(|child| child.id() == pid) {
+        sidecar::request_stop(child);
+    }
+    loop {
+        let mut guard = shell.child.lock().unwrap();
+        let step = match guard.as_mut().filter(|child| child.id() == pid) {
+            Some(child) => sidecar::published_stop_step(true, !matches!(child.try_wait(), Ok(None)), Instant::now() >= deadline),
+            None => sidecar::published_stop_step(false, false, false),
+        };
+        match step {
+            sidecar::StopStep::LeftToQuit => return,
+            sidecar::StopStep::Exited => {
+                *guard = None;
+                return;
+            }
+            sidecar::StopStep::Kill => {
+                if let Some(child) = guard.as_mut() {
+                    let _ = child.kill();
+                }
+            }
+            sidecar::StopStep::Wait => {}
+        }
+        drop(guard);
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 /// Registry check for the legacy strip's button: now, then every half hour, while the cockpit

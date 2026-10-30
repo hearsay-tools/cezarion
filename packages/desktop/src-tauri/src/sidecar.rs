@@ -90,6 +90,29 @@ pub fn supervisor_next(quitting: bool, relaunch: bool) -> Next {
     }
 }
 
+/// One step of stopping a cockpit that stays published in the shell's slot while it stops, so a
+/// quit in the meantime still finds it (and installs nothing until it is gone).
+#[derive(Debug, PartialEq, Eq)]
+pub enum StopStep {
+    /// The slot no longer holds it: quit took it and stops it itself. Touch nothing.
+    LeftToQuit,
+    /// It exited: clear the slot.
+    Exited,
+    /// Still running past the grace period: force-kill it, then wait for the exit.
+    Kill,
+    /// Still running inside the grace period: wait.
+    Wait,
+}
+
+pub fn published_stop_step(owned: bool, exited: bool, past_deadline: bool) -> StopStep {
+    match (owned, exited, past_deadline) {
+        (false, _, _) => StopStep::LeftToQuit,
+        (true, true, _) => StopStep::Exited,
+        (true, false, true) => StopStep::Kill,
+        (true, false, false) => StopStep::Wait,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -135,6 +158,23 @@ mod tests {
     fn a_quitting_app_starts_no_new_cockpit() {
         assert_eq!(supervisor_next(true, true), Next::Quit);
         assert_eq!(supervisor_next(true, false), Next::Quit);
+    }
+
+    // Quit during a failed start's stop: quit took the cockpit from the slot and stops it
+    // itself, so the failed start leaves it alone; before, the stopper held it outside the slot
+    // and quit installed the shell update while it still ran.
+    #[test]
+    fn a_failed_start_stop_leaves_a_cockpit_quit_took() {
+        assert_eq!(published_stop_step(false, false, false), StopStep::LeftToQuit);
+        assert_eq!(published_stop_step(false, false, true), StopStep::LeftToQuit);
+    }
+
+    #[test]
+    fn a_failed_start_stop_waits_kills_then_clears_the_slot() {
+        assert_eq!(published_stop_step(true, false, false), StopStep::Wait);
+        assert_eq!(published_stop_step(true, false, true), StopStep::Kill);
+        assert_eq!(published_stop_step(true, true, false), StopStep::Exited);
+        assert_eq!(published_stop_step(true, true, true), StopStep::Exited);
     }
 
     #[cfg(unix)]
