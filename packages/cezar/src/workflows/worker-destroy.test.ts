@@ -181,8 +181,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     // The schema refuses the flag outside `complete`, so this generation's termination is never proven.
     writeFileSync(join(root, '.ai/cezar/runs', `${w.id}.execution.json`), JSON.stringify({ generation: randomUUID(), phase: 'starting', neverMaterialized: true }), { mode: 0o600 });
     const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
-    const service = new DelegationService(); const detach = service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
-    Object.assign(service, { terminationTimeoutMs: 50 });
+    const service = new DelegationService({ terminationTimeoutMs: 50 }); const detach = service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
     try {
       expect(reopened.readWorkerExecution(w.id)).toBeUndefined();
       expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
@@ -682,7 +681,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       const prior = store.readWorkerExecution(w.id);
       store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
       const other = new RunManager(reopened, root);
-      const service = new DelegationService(); service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
+      // Neither holder exits on its own, so each destroy waits out its deadline (hearsay-tools/cezarion#469).
+      const service = new DelegationService({ terminationTimeoutMs: 1_500 }); service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
       type ScanRead = { cwd?: string | undefined; readlinkError?: string | undefined };
       const scanReads = new Map<number, ScanRead>();
       const observed = (pid: number) => {
@@ -733,8 +733,6 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
           }
           return taken;
         });
-        // Neither holder exits on its own, so each destroy waits out its deadline (#469).
-        (service as unknown as { terminationTimeoutMs: number }).terminationTimeoutMs = 1_500;
         await other.recover();
         expect(mutatingSignals()).toEqual([]);
         expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
@@ -931,8 +929,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       manager.dispose(); store.close(); rmSync(recordPath(w.id)); // an absent legacy ledger leaves the scan as the only evidence
       const holder = await nonDumpableHolder(workspace(w).path);
       const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
-      const service = new DelegationService(); const detach = service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
-      Object.assign(service, { terminationTimeoutMs: 1_500 });
+      const service = new DelegationService({ terminationTimeoutMs: 1_500 }); const detach = service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
       try {
         expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'complete', remaining: [] });
         expect(reopened.readWorkerExecution(w.id)).toMatchObject({ phase: 'complete' });

@@ -17,7 +17,7 @@ import type { RunManager } from '../workflows/run.ts';
 import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import type { Caller } from './credentials.ts';
 
-import { fixture, scheduledDestroyAttempts, seedWorkerWait } from './service.testkit.ts';
+import { fixture, scheduledDestroyAttempts, seedWorkerWait, workerCleanupInternals } from './service.testkit.ts';
 import { ensureOwnedWorkspace, gitCommonDir, WORKTREE_LOCK_BUSY_ERROR } from './workspace.ts';
 import { DelegationService } from './service.ts';
 import { withWorktreeMutation } from '../git-worktree-lock.ts';
@@ -359,7 +359,8 @@ describe('delegation service durable authority', () => {
   });
 
   it('retries a persisted incomplete destroy after termination becomes proven', async () => {
-    Object.assign(f.service, { destroyBackoff: { fastMs: 50, fastCount: 100, capMs: 50 } });
+    await f.close();
+    f = fixture({ backoff: { fastMs: 50, fastCount: 100, capMs: 50 } });
     const { workerId } = await f.service.spawn(f.caller, input());
     f.store.commitWorkerExecutionStart(workerId);
     const worker = f.store.getRun(workerId)!;
@@ -388,8 +389,7 @@ describe('delegation service durable authority', () => {
       requestedAt: new Date().toISOString(), phase: 'incomplete', remaining: ['worktree', 'branch'],
     } } }]);
 
-    const restarted = new DelegationService();
-    Object.assign(restarted, { destroyBackoff: { fastMs: 50, fastCount: 100, capMs: 50 } });
+    const restarted = new DelegationService({ backoff: { fastMs: 50, fastCount: 100, capMs: 50 } });
     const detach = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
     restarted.armDestroyRetries('project');
     detach();
@@ -416,7 +416,8 @@ describe('delegation service durable authority', () => {
     attach();
   });
   it.each([false, true])('revokes an in-flight retry after project replacement when termination resolves %s', async terminated => {
-    Object.assign(f.service, { destroyBackoff: { fastMs: 50, fastCount: 100, capMs: 50 } });
+    await f.close();
+    f = fixture({ backoff: { fastMs: 50, fastCount: 100, capMs: 50 } });
     const { workerId } = await f.service.spawn(f.caller, input());
     const worker = f.store.getRun(workerId)!;
     const generation = f.store.commitWorkerExecutionStart(workerId);
@@ -634,9 +635,11 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   afterEach(async () => { await f?.close(); vi.restoreAllMocks(); syncBuiltinESMExports(); vi.unstubAllEnvs(); });
   const linux = process.platform === 'linux';
   const input = () => ({ task: 'do work', baseline: 'parent-head', requestId: randomUUID() });
-  /** Test cadence; the old fixed delay is set too, so the code before hearsay-tools/cezarion#879 visibly loops instead of idling. */
-  const cadence = (backoff = { fastMs: 40, fastCount: 3, capMs: 300 }, attention = 5) =>
-    Object.assign(f.service, { destroyBackoff: backoff, destroyAttentionAttempts: attention, destroyRetryDelayMs: backoff.fastMs });
+  /** Each fixture receives its test cadence at construction. */
+  const cadence = async (backoff = { fastMs: 40, fastCount: 3, capMs: 300 }, attention = 5) => {
+    await f.close();
+    f = fixture({ backoff, attentionAttempts: attention });
+  };
 
   /** A settled worker with a real worktree and complete execution, optionally held by a real process. */
   async function settled(hold = true) {
@@ -655,7 +658,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   const listings = () => vi.mocked(fs.readdirSync).mock.calls.filter(([path]) => path === '/proc').length;
 
   it.runIf(linux)('a held destroy runs one full attempt, then skips the ticks that would see the same', async () => {
-    cadence();
+    await cadence();
     const { workerId } = await settled();
     expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
     // That attempt stopped the fixture's queued worker and wrote the removal's checkpoint before it met
@@ -687,8 +690,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
       // bound: not a wait on the product. It holds each termination open for 150 ms, so a second attempt that started at the same 40 ms tick would overlap it and raise `most` above 1.
       try { await sleep(150); return await termination(...args); } finally { inFlight--; }
     });
-    const restarted = new DelegationService();
-    Object.assign(restarted, { destroyBackoff: { fastMs: 40, fastCount: 3, capMs: 300 }, destroyAttentionAttempts: 5 });
+    const restarted = new DelegationService({ backoff: { fastMs: 40, fastCount: 3, capMs: 300 }, attentionAttempts: 5 });
     const detach = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
     try {
       restarted.armDestroyRetries('project');
@@ -699,7 +701,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   });
 
   it.runIf(linux)('asks for attention at the threshold, then waits at least the cap', async () => {
-    cadence();
+    await cadence();
     const { workerId } = await settled();
     // When each retry state was written: the wait is measured from there, not from whenever a poll notices it.
     const written: Array<{ at: number; attempts: number; nextAt: string; needsAttention?: true | undefined }> = [];
@@ -718,7 +720,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   });
 
   it.runIf(linux)('a holder that exits inside the fast window lets the destroy complete within it', async () => {
-    cadence({ fastMs: 200, fastCount: 5, capMs: 2_000 });
+    await cadence({ fastMs: 200, fastCount: 5, capMs: 2_000 });
     const { workerId, workspace, holder } = await settled();
     await f.service.destroy(f.caller, { workerId });
     // Past the fixture's one real change (review -> cancelled): from here every tick skips, so
@@ -745,7 +747,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   });
 
   it.runIf(linux)("an explicit destroy cut off by project replacement leaves the replacement's retry armed", async () => {
-    cadence();
+    await cadence();
     const { workerId } = await settled();
     let release!: (value: boolean) => void;
     const gate = new Promise<boolean>(resolve => { release = resolve; });
@@ -754,7 +756,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     await vi.waitFor(() => expect(destroyOf(workerId)?.phase).toBe('terminating'), { timeout: 10_000 });
     const replacementManager = createFixtureManager(f.store, f.root);
     const detachReplacement = f.service.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
-    const armed = () => (f.service as unknown as { destroyRetryTimers: Map<string, Map<string, unknown>> }).destroyRetryTimers.get('project')?.has(workerId);
+    const armed = () => [...workerCleanupInternals(f.service)].some(cleanup => cleanup.destroyRetryTimers.get('project')?.has(workerId));
     try {
       f.service.armDestroyRetries('project');
       expect(armed()).toBe(true);
@@ -765,7 +767,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   });
 
   it.runIf(linux)('lock contention is retried in full once it clears, never skipped as unchanged', async () => {
-    cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
+    await cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
     const { workerId, workspace } = await settled(false);
     let unlock!: () => void, locked!: () => void;
     const held = new Promise<void>(done => { unlock = done; }), ready = new Promise<void>(done => { locked = done; });
@@ -782,7 +784,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   });
 
   it.runIf(linux)('an in-place repair of the ownership marker ends the skipping', async () => {
-    cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
+    await cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
     const { workerId, workspace } = await settled(false);
     const admin = resolve(workspace.path, /^gitdir: (.+)$/m.exec(readFileSync(join(workspace.path, '.git'), 'utf8'))![1]!.trim());
     const marker = join(admin, 'cezar-owned-resource'), original = readFileSync(marker, 'utf8');
@@ -796,7 +798,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   });
 
   it.runIf(linux)('a holder that moves out of the worktree ends the skipping', async () => {
-    cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
+    await cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
     const { workerId, workspace } = await settled(false);
     const child = spawn(process.execPath, ['-e', "console.log('ready'); process.stdin.on('data', () => { process.chdir('/'); console.log('moved'); })"],
       { cwd: workspace.path, stdio: ['pipe', 'pipe', 'ignore'] });
@@ -812,7 +814,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   });
 
   it.runIf(linux)("a holder only the removal's own last check saw still ends the skipping when it exits", async () => {
-    cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
+    await cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
     const { workerId, workspace } = await settled(false);
     // A locked worktree fails Git's removal after both holder checks pass, so ticks settle into skipping.
     execFileSync('git', ['worktree', 'lock', workspace.path], { cwd: f.root });
@@ -838,7 +840,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   });
 
   it('a holder check that names no process is retried in full once its evidence is repaired, never skipped', async () => {
-    cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
+    await cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
     const { workerId, workspace } = await settled(false);
     // A malformed fallback pointer leaves scratch ownership unproven: held, with no process to name and
     // nothing in the scratch directory's own stamp to show the repair.
@@ -853,7 +855,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   });
 
   it.runIf(linux)('a worktree whose HEAD points at another branch is retried in full once restored, never skipped', async () => {
-    cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
+    await cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
     const { workerId, workspace } = await settled(false);
     // In place, as an editor or a script would: the admin directory's own stamp does not move.
     const admin = resolve(workspace.path, /^gitdir: (.+)$/m.exec(readFileSync(join(workspace.path, '.git'), 'utf8'))![1]!.trim());
@@ -869,7 +871,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   });
 
   it.runIf(linux)('a receipt-gone destroy that a stray admin marker refuses is retried in full once the marker is repaired', async () => {
-    cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
+    await cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
     const { workerId, workspace } = await settled(false);
     const common = await gitCommonDir(f.root);
     // #878's shape: worktree, branch and receipt gone, but a leftover admin directory still names this resource.
@@ -888,7 +890,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   });
 
   it.runIf(linux)('Clean up resets the backoff: a full attempt now, and the next tick at the fast cadence', async () => {
-    cadence({ fastMs: 1_000, fastCount: 0, capMs: 5_000 }, 1);
+    await cadence({ fastMs: 1_000, fastCount: 0, capMs: 5_000 }, 1);
     const { workerId } = await settled();
     await f.service.destroy(f.caller, { workerId });
     // The first tick reaches attention at once; the next one is four seconds out.
@@ -903,7 +905,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   });
 
   it('a thrown attempt records why, and the next tick attempts in full', async () => {
-    cadence();
+    await cadence();
     const { workerId } = await settled(false);
     vi.spyOn(f.store, 'readEventsAsync').mockRejectedValueOnce(new Error('transcript unreadable'));
     await expect(f.service.destroy(f.caller, { workerId })).rejects.toThrow('transcript unreadable');
@@ -913,7 +915,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   });
 
   it.runIf(linux)('a failed Git step with no holder to name is retried in full once it clears, never skipped', async () => {
-    cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
+    await cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
     const { workerId, workspace } = await settled(false);
     // A stale ref lock: the branch delete fails after every check passed, and nothing the key reads changes when it goes.
     const lock = join(await gitCommonDir(f.root), 'refs/heads', `${workspace.branch}.lock`);
@@ -933,8 +935,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     f.store.commitDelegation([{ id: workerId, delegation: { ...run.delegation, destroy: { requestedAt: new Date().toISOString(), phase: 'incomplete',
       remaining: ['worktree', 'branch'] } } }]);
     f.store.commitDestroyRetry(workerId, { attempts: 7, nextAt: new Date(Date.now() + 2_000).toISOString() });
-    const restarted = new DelegationService();
-    Object.assign(restarted, { destroyBackoff: { fastMs: 40, fastCount: 3, capMs: 5_000 } });
+    const restarted = new DelegationService({ backoff: { fastMs: 40, fastCount: 3, capMs: 5_000 } });
     const detach = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
     try {
       restarted.armDestroyRetries('project');
@@ -946,7 +947,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   });
 
   it.runIf(linux)('two stuck workers of one parent keep one result pointer each', async () => {
-    cadence();
+    await cadence();
     const a = await settled(), b = await settled();
     for (const { workerId } of [a, b]) await f.service.destroy(f.caller, { workerId });
     await vi.waitFor(() => { for (const { workerId } of [a, b]) expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(3); }, { timeout: 10_000 });
@@ -957,7 +958,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   });
 
   it.runIf(linux)('keeps retry state beside the worker delegation, so the stored delegation is what an older cezar parses', async () => {
-    cadence();
+    await cadence();
     const { workerId } = await settled();
     await f.service.destroy(f.caller, { workerId });
     await vi.waitFor(() => expect(f.store.getRun(workerId)?.destroyRetry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
@@ -970,7 +971,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   });
 
   it.runIf(linux)('a tick cut off by project replacement writes nothing afterwards (guard)', async () => {
-    cadence();
+    await cadence();
     const { workerId, holder } = await settled();
     await f.service.destroy(f.caller, { workerId });
     let release!: (value: boolean) => void;

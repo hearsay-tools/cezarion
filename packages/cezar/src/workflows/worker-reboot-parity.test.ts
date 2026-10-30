@@ -71,14 +71,13 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (#738
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const credentials = new CredentialRegistry();
     const caller = credentials.authenticate(credentials.issue('project', p.id, 'test'))!;
-    let service = new DelegationService(); let detach = service.registerProject({ id: 'project', root, store, manager });
+    let service = new DelegationService(settleVia === 'destroy' ? { terminationTimeoutMs: 100 } : {}); let detach = service.registerProject({ id: 'project', root, store, manager });
     let holderClosed = false;
     try {
       expect(await service.collect(caller, { workerId: twin.id })).toMatchObject({ settled: true, status: 'done' });
       expect(manager.finishBlockedReason(p.id)).toContain(orphan.id);
       expect(manager.finish(p.id)).toBe(false);
       if (settleVia === 'destroy') {
-        Object.assign(service, { terminationTimeoutMs: 100 });
         // The damaged location receipt, not the holder, retains both resources.
         expect(await service.destroyForHuman('project', orphan.id)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
       }

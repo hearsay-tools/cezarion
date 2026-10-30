@@ -9,7 +9,8 @@ import { expect, vi } from 'vitest';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { CredentialRegistry, type Caller } from './credentials.ts';
-import { DelegationService } from './service.ts';
+import { DelegationService, type DelegationProject } from './service.ts';
+import type { WorkerCleanupOptions } from './worker-cleanup.ts';
 
 export async function waitForOwnedWork(manager: RunManager, store: RunStore): Promise<void> {
   // A manager a restart disposed owns nothing any more: the recovered one does (#779).
@@ -44,21 +45,31 @@ export function seedWorkerWait(store: RunStore, parentId: string, workerIds: str
   return id;
 }
 
+type CleanupInternals = {
+  destroyRetryTimers: Map<string, Map<string, NodeJS.Timeout>>;
+  destroyAttempt: (project: DelegationProject, workerId: string, check: () => RunRecord, mode: 'manual' | 'scheduled') => Promise<unknown>;
+};
+
+/** The single typed test read of the service's project cleanup instances. */
+export function workerCleanupInternals(service: DelegationService): Iterable<CleanupInternals> {
+  return (Reflect.get(service, 'cleanups') as Map<string, CleanupInternals>).values();
+}
+
 export function scheduledDestroyAttempts(service: DelegationService): Array<Promise<unknown>> {
   const started: Array<Promise<unknown>> = [];
-  type Attempt = (project: unknown, workerId: string, check: unknown, mode: 'manual' | 'scheduled') => Promise<unknown>;
-  const target = service as unknown as { destroyAttempt: Attempt };
-  const original = target.destroyAttempt.bind(service);
-  target.destroyAttempt = (...args) => {
-    const attempt = original(...args);
-    // Settled either way: a thrown attempt is still the one the test waited for.
-    if (args[3] === 'scheduled') started.push(attempt.then(result => result, (error: unknown) => error));
-    return attempt;
-  };
+  for (const target of workerCleanupInternals(service)) {
+    const original = target.destroyAttempt.bind(target);
+    target.destroyAttempt = (...args) => {
+      const attempt = original(...args);
+      // Settled either way: a thrown attempt is still the one the test waited for.
+      if (args[3] === 'scheduled') started.push(attempt.then(result => result, (error: unknown) => error));
+      return attempt;
+    };
+  }
   return started;
 }
 
-export function fixture(): { root: string; sha: string; store: RunStore; manager: RunManager; parent: RunRecord; credentials: CredentialRegistry; caller: Caller; token: string; service: DelegationService; close(): Promise<void> } {
+export function fixture(options: WorkerCleanupOptions = {}): { root: string; sha: string; store: RunStore; manager: RunManager; parent: RunRecord; credentials: CredentialRegistry; caller: Caller; token: string; service: DelegationService; close(): Promise<void> } {
   const root = mkdtempSync(join(tmpdir(), 'cez-delegation-service-'));
   execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
   // Auto-gc detaches after commit and writes into `.git` while recursive removal walks it.
@@ -76,7 +87,7 @@ export function fixture(): { root: string; sha: string; store: RunStore; manager
   const token = credentials.issue('project', parent.id, randomUUID());
   const caller = credentials.authenticate(token)!;
   vi.spyOn(manager, 'delegationExecutionSettings').mockReturnValue({ cwd: root, runner: 'claude', model: 'opus', effort: 'high', agentProfile: 'default', accountBinding: { provider: 'claude', profileId: 'default', homePath: root, claudeLayout: { kind: 'relocated' } } });
-  const service = new DelegationService();
+  const service = new DelegationService(options);
   const spawn = service.spawn.bind(service);
   vi.spyOn(service, 'spawn').mockImplementation(async (...args) => {
     const result = await spawn(...args);

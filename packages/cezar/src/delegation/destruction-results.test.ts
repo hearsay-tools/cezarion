@@ -60,7 +60,8 @@ describe('verified destruction retains results through explicit history deletion
   // the worker setup: about twice the Git work of this suite's other cases, so twice its 15 s budget.
   // With every owned-workspace Git call slowed by 100 ms it needs ~10 s (hearsay-tools/cezarion#1109).
   it('retries a locked owned worktree after the Git lock is removed', { timeout: 30_000 }, async () => {
-    Object.assign(f.service, { destroyBackoff: { fastMs: 50, fastCount: 100, capMs: 50 } });
+    await f.close();
+    f = fixture({ backoff: { fastMs: 50, fastCount: 100, capMs: 50 } });
     const { workerId, workspace } = await completed();
     execFileSync('git', ['worktree', 'lock', workspace.path], { cwd: f.root });
     expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
