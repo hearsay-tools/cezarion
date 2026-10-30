@@ -1,10 +1,10 @@
 import { RunCancel } from './run-cancel.ts';
-import { IDLE_TIMEOUT_MS, ROUTED_QUESTION_REFUSAL, UNREAD_INPUT_GRACE_MS, NO_WAIT_NUDGE_REPLY_MS, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, SCHEDULE_WAKEUP_MAX_SECONDS, MAX_WAKE_DELIVERY_ATTEMPTS, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WAITS_DISCARDED_NOTE, REFUSAL_DISCARDED_NOTE, QUEUE_WATCHDOG_MS, RESTART_CONTINUATION_PROMPT } from './constants.ts';
+import { IDLE_TIMEOUT_MS, ROUTED_QUESTION_REFUSAL, NO_WAIT_NUDGE_REPLY_MS, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, SCHEDULE_WAKEUP_MAX_SECONDS, MAX_WAKE_DELIVERY_ATTEMPTS, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, RESTART_CONTINUATION_PROMPT } from './constants.ts';
 import { isSyntheticContinuation } from './workflow-position.ts';
 import { repositoryRootLockDisabled } from './repo-root-lease.ts';
 import { isUntouchedCancelledRun } from './run-guards.ts';
 import { WorkerOrphanAliveError, admissionError } from './worker-orphans.ts';
-import type { PersistedAttachments } from './types.ts';
+
 import { ContinuationSession } from './continuation-session.ts';
 import { StepLoop as WorkflowStepLoop } from './step-loop.ts';
 import { RunRecovery } from './run-recovery.ts';
@@ -37,89 +37,58 @@ import { QueuedInput } from './queued-input.ts';
 import { RepoRootLease } from './repo-root-lease.ts';
 import { MaintenanceClaims } from './maintenance-claims.ts';
 import { WorkerOrphans } from './worker-orphans.ts';
-import type {
-  DelegationExecutionSettings, StartRunInput, PendingContinuation, Execution, StepLoop, WorkerTerminationBlocker, AutomationToolService,
-} from './types.ts';
-import { repairFailedRootFinish, startCompletionCycle, settledRootFinishPatch } from '../completion-policy.ts';
+import type { StartRunInput } from './types.ts';
+
 import type { ContinueRunOptions } from '../continuation-admission.ts';
-import { workerEvidenceRunIds } from '../../runs/worker-execution.ts';
-import { type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitVia, type WorkerWaitEntry, computeWaitingOn, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
-import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, type TurnEndOutcome } from '../turn-end.ts';
-import { createActiveRun, type ActiveRun } from '../active-run.ts';
+
+import { type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type TimerWaitEntry, type WaitVia, type WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
+import { type TurnEndOutcome } from '../turn-end.ts';
+import { type ActiveRun } from '../active-run.ts';
 import { canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested, isDisposedDelegatedRun, preserveRunAfterDisposal } from './run-guards.ts';
 import { beginUsageInvocation, recordUsagePeaks } from './usage-accounting.ts';
-import { REPOSITORY_ROOT_LOCK_DISABLED_NOTE } from './run-workspace.ts';
+
 import * as inputReceipts from './input-receipts.ts';
 import { ContinuationAcceptance } from './continuation-acceptance.ts';
 import { AutoResumeScheduler } from './auto-resume.ts';
-import { TrackedWork } from './tracked-work.ts';
+
 import type { RunModuleContext } from './types.ts';
 import * as launchContext from './launch-context.ts';
-import { openingInputs } from './opening.ts';
-import { releaseActiveResources } from './drop-active.ts';
-import { delegationExecutionSettings, selectDelegationExecutionSettings } from '../../delegation/execution-settings.ts';
-import { stepLabel } from './steps.ts';
-import { clearUnreadInputTimer, clearHeldHumanInputTimer, clearIdleTimer, clearAutosaveTimer } from './input-timers.ts';
-import * as stepDecisions from './step-decisions.ts';
-import * as pendingAskFacts from './pending-ask-facts.ts';
-import * as workflowPosition from './workflow-position.ts';
-import { RUN_EXITS, transition, type RunExitId } from '../run-states.ts';
-import { deriveAccountHolds } from '../run-scheduling.ts';
-import { holdsOwedResults, isCezarHumanWait, openWaits, resolvedWaits } from '../waits.ts';
-import { runsAwaitingPeer } from '../wait-scope.ts';
+
+import { clearUnreadInputTimer, clearHeldHumanInputTimer } from './input-timers.ts';
+
+import { type RunExitId } from '../run-states.ts';
+
 import { type PreviewHostLike } from '../../preview/registration.ts';
 import { acquireCiResources } from '../../ci-wait/resources.ts';
 import type { CiWatcherSupervisor } from '../../ci-wait/supervisor.ts';
 import type { CezarToolHandlers } from '../../ci-wait/controller.ts';
-import { workerIdentity, continuationDefStep, WorkerIdentityError, type WorkerAccountBinding } from '../../delegation/execution-identity.ts';
+import { type WorkerAccountBinding } from '../../delegation/execution-identity.ts';
 import type { DelegationProvisioner } from '../../delegation/provision.ts';
-import { randomUUID } from 'node:crypto';
-import { join } from 'node:path';
-import type { AskRequest } from '../../core/ask.ts';
-import { type AgentSession } from '../../core/claude-cli-runner.ts';
-import { onUsage, replaceRunProcess, type ProcessUsage } from '../../core/process-usage.ts';
+
+import { replaceRunProcess } from '../../core/process-usage.ts';
 import { WorkerScratchCleanup } from '../../delegation/scratch-cleanup.ts';
 import { type CwdSource } from '../../delegation/process-liveness.ts';
-import { parseUsageLimit } from '../../core/usage-limit.ts';
+
 import type { RunnerId } from '../../core/agent-runner.ts';
-import {
-  handoffPath,
-  seedHandoffFile,
-} from '../../handoff.ts';
-import {
-  type AgentInput,
-  type WorkerStopResult,
-  type WorkerWait,
-  type WorkerWaitRequest,
-} from '@open-mercato/cezar-contract/delegation';
-import type { ConversationState, RunEvent } from '@open-mercato/cezar-contract';
-import {
-  type RequestWaitRequest,
-} from '@open-mercato/cezar-contract/conversations';
-import { contentBlocksOf, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from '../pasted-content.ts';
-import type { ContentBlock, ToolGrant } from '../../core/agent-runner.ts';
-import { readProjectUiState } from '../../ui-state.ts';
+
+import { type PastedContent, type PersistedAttachment } from '../pasted-content.ts';
+import type { ContentBlock } from '../../core/agent-runner.ts';
+
 import { type Skill } from '../../skills.ts';
-import { readAgentModelSettings } from '../../agent-config/models.ts';
-import { resolveWorktreeRetention } from '../../config.ts';
-import { getRepoInfo } from '../../server/git.ts';
-import { DelegationPolicyError } from '../../delegation/policy.ts';
-import { projectConversationEvents, settledRunFamilies } from '../../delegation/conversations.ts';
+
 import * as queuedRevival from './queued-revival.ts';
-import type { RunOutcome } from '../../runs/outcome-commit.ts';
-import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../../runs/store.ts';
-import { reclaimWorktrees } from '../../runs/retention.ts';
-import {
-  removeAgentTmpDir,
-} from '../../runs/agent-tmpdir.ts';
-import { resolveProfileEnvForRoot } from '../../workspace/agent-profiles.ts';
-import { WorkspaceSemaphore, type AccountHolds } from '../../workspace/semaphore.ts';
-import {
-  type WorkflowDef, type WorkflowStepDef,
-} from '../types.ts';
-import { PROSE_HUMAN_GATE } from '../../runs/transcript-facts.ts';
+
+import { type RunRecord, type RunStore, type StepState } from '../../runs/store.ts';
+
+import { type WorkflowDef } from '../types.ts';
 
 export interface RunModules {
+  workerScratchCleanup: WorkerScratchCleanup;
+  completionGateHost: completionGateReads.CompletionGateHost;
+  inputReceiptSteps: inputReceipts.InputReceiptSteps;
+  inputReceiptHost: inputReceipts.InputReceiptsHost;
+  ciSessionHost: CiSessionHost;
+  launchSettingsHost: launchContext.LaunchSettingsHost;
   retries: WakeRetries;
   queuedRevivalHost: queuedRevival.QueuedRevivalHost;
   line: RunLine;
@@ -134,6 +103,8 @@ export interface RunModules {
   orphans: WorkerOrphans;
   workerExecutions: WorkerExecutions;
   automationToolsSlot: AutomationToolsSlot;
+  /** Runs whose worktree a reclaim, or whose branch a delete, is removing right now
+   *  (`claimWorktreeReclaim`, `claimForBranchCleanup`). `continueRun` refuses them. */
   claims: MaintenanceClaims;
   attachments: AttachmentWriter;
   queuedInput: QueuedInput;
@@ -158,6 +129,12 @@ export interface RunModules {
 }
 
 export interface FacadeHost {
+  pendingHumanAskSeq(runId: string): number | undefined;
+  waitingBeforeFinalWorkflowStep(run: RunRecord): boolean;
+  parentCompletionBlockers(runId: string): ReturnType<typeof completionGateReads.parentCompletionBlockers>;
+  ciResources: ReturnType<typeof acquireCiResources>;
+  cezarToolHandlers(runId: string, generation: string): CezarToolHandlers;
+  delegationProvisioner?: DelegationProvisioner | undefined;
   move(runId: string, exit: RunExitId, patch?: Omit<Parameters<RunStore['updateRun']>[1], 'status'>): RunRecord | undefined;
   isActive(runId: string): boolean;
   workerExecutionStopped(runId: string): boolean;
@@ -172,20 +149,14 @@ export interface FacadeHost {
   canProceedWithRun(runId: string, run: RunRecord | undefined): run is RunRecord;
   ciSupervisor: Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
   executionBlockedByRootFinish(run: RunRecord): boolean;
-  inputReceiptHost: inputReceipts.InputReceiptsHost;
   agentEnvForStep(runId: string, backend: RunnerId, options?: { recordedProfileId?: string | undefined; stepId?: string | undefined }): Promise<{ env: Record<string, string>; profileId: string; accountBinding?: WorkerAccountBinding | undefined }>;
   cockpit?: { origin: string; projectId: string } | undefined;
-  completionGateHost: completionGateReads.CompletionGateHost;
   settledTurnOutcome(runId: string, entry: 'turn-end' | 'ack' | 'ready' | 'gate' | 'reply-timer', outcome: TurnEndOutcome): TurnEndOutcome | undefined;
   reapTerminalScratch(runId: string): void;
   settleOrphanedWorkerExecution(runId: string, opts?: { admitting?: boolean; fresh?: boolean; cwds?: CwdSource }): boolean;
-  workerScratchCleanup: WorkerScratchCleanup;
   sendMessage(runId: string, content: PastedContent[], messageId?: string): boolean;
   canClaimInboxInput(runId: string, id: string): boolean;
   builtinSkills(): Skill[];
-  sessionEventHost(): import('./session-events.ts').SessionEventHost;
-  launchPreambleHost(): import('./session-events.ts').LaunchPreambleHost;
-  inputReceiptSteps: inputReceipts.InputReceiptSteps;
   continueRun(runId: string, opts?: ContinueRunOptions, deferForCapacity?: boolean, conversation?: Parameters<RunStore['commitWorkerContinuation']>[3]): { ok: boolean; error?: string };
   recover(familyRootId?: string): Promise<void>;
   adoptTranscriptAsk(runId: string): boolean;
@@ -211,6 +182,60 @@ export interface FacadeHost {
 export function composeRunModules(context: RunModuleContext, host: FacadeHost, options: { noWaitNudgeReplyMs?: number | undefined; unreadInputGraceMs: number }): RunModules {
   const modules = {} as RunModules;
   const unreadInputGraceMs = options.unreadInputGraceMs;
+  modules.workerScratchCleanup = new WorkerScratchCleanup(context.store, context.dataDir, id => host.isActive(id) || modules.workerExecutions.has(id) || modules.claims.has(id) || !!host.autosaveCleanupBlocker(id));
+  modules.completionGateHost = {
+    active: host.active,
+    pendingHumanAskSeq: id => host.pendingHumanAskSeq(id),
+    isActive: id => host.isActive(id),
+    holdsAgentWaits: id => modules.humanWaits.holdsAgentWaits(id),
+    waitingBeforeFinalWorkflowStep: run => host.waitingBeforeFinalWorkflowStep(run),
+    parentCompletionBlockers: id => host.parentCompletionBlockers(id),
+    unansweredQuestions: id => modules.workerQuestions.unansweredQuestions(id),
+  };
+  modules.inputReceiptSteps = {
+    clearUnread: state => clearUnreadInputTimer(state), clearHeld: state => clearHeldHumanInputTimer(state),
+    noteActivity: (id, state, event) => modules.turnNudges.noteNoWaitNudgeContent(id, state, event),
+    persistAttachment: (id, mediaType, data) => modules.attachments.persistAttachment(id, mediaType, data),
+    ready: (id, state, session) => modules.inputDelivery.handleAgentInputReady(id, state, session),
+    pid: (id, pid) => { replaceRunProcess(id, pid); modules.workerExecutions.recordWorkerProcess(id, pid); },
+    ui: (id, state, sink, event) => sessionEvents.handleRunnerUiEvent(context, modules.sessionHelperHost, id, state, sink, event),
+    flushDeferred: id => modules.queuedInput.flushDeferred(id), recordProcess: (id, pid) => modules.workerExecutions.recordWorkerProcess(id, pid),
+  };
+  modules.inputReceiptHost = {
+    reconcileWorkerWaits: () => host.reconcileWorkerWaits(),
+    flushAgentInputs: id => modules.inputDelivery.flushAgentInputs(id),
+    isCurrentState: (id, state) => host.active.get(id) === state,
+  };
+  modules.ciSessionHost = {
+    active: host.active, ciResources: () => host.ciResources, cezarToolHandlers: (...args) => host.cezarToolHandlers(...args),
+    preview: () => host.preview, cockpit: () => host.cockpit,
+  };
+  modules.launchSettingsHost = {
+    active: host.active, setCockpit: address => { host.cockpit = address; },
+    delegationProvisioner: () => host.delegationProvisioner, setProvisioner: provisioner => { host.delegationProvisioner = provisioner; },
+    historyDeletionPending: id => host.historyDeletionPending(id),
+  };
+
+  function sessionEventHost(): import('./session-events.ts').SessionEventHost {
+    return {
+      disposedSessionEvent: (...args) => sessionEvents.disposedSessionEvent(context, modules.sessionHelperHost, ...args),
+      handleReceiptEvent: (...args) => inputReceipts.handleReceiptEvent(context, modules.inputReceiptHost, modules.inputReceiptSteps, ...args),
+      recordSessionFault: (...args) => sessionEvents.recordSessionFault(context, modules.sessionHelperHost, ...args),
+      markTurnBoundary: (...args) => sessionEvents.markTurnBoundary(context, modules.sessionHelperHost, ...args),
+      trackTurnEnd: (...args) => modules.turnBookkeeper.trackTurnEnd(...args),
+      endTurn: (...args) => modules.turnSettler.endTurn(...args),
+    };
+  }
+
+  function launchPreambleHost(): import('./session-events.ts').LaunchPreambleHost {
+    return {
+      provisionSession: (...args) => launchContext.provisionSession(modules.launchSettingsHost, ...args),
+      agentWebhooksPart: () => launchContext.agentWebhooksPart(context, host.cockpit),
+      provisionCiSession: (...args) => provisionCiSession(context, modules.ciSessionHost, ...args),
+      launchStale: (...args) => sessionEvents.launchStale(context, modules.sessionHelperHost, ...args),
+    };
+  }
+
     modules.retries = new WakeRetries(context, {
       owesWake: run => modules.wakeAdmission.owesWake(run), queueWaitWake: id => modules.wakeAdmission.queueWaitWake(id),
       retryWaitAdmission: id => modules.retries.retryWaitAdmission(id),
@@ -281,7 +306,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost, o
     }, MAX_AUTO_CONTINUES);
     modules.humanWaits = new HumanWaits(context, { routeWorkerQuestion: id => modules.workerQuestions.routeWorkerQuestion(id) }, MAX_AUTO_CONTINUES);
     modules.sessionHelperHost = {
-      active: host.active, line: modules.line, humanWaits: modules.humanWaits, inputReceiptHost: host.inputReceiptHost,
+      active: host.active, line: modules.line, humanWaits: modules.humanWaits, inputReceiptHost: modules.inputReceiptHost,
       move: (...args) => host.move(...args),
       workerExecutionStopped: id => host.workerExecutionStopped(id),
       executionBlockedByRootFinish: run => host.executionBlockedByRootFinish(run),
@@ -295,7 +320,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost, o
       releaseSlot: () => modules.line.releaseSlot(),
       routeWorkerQuestion: id => modules.workerQuestions.routeWorkerQuestion(id),
     };
-    modules.turnNudges = new TurnNudges(context, modules.humanWaits, modules.line, host.completionGateHost, {
+    modules.turnNudges = new TurnNudges(context, modules.humanWaits, modules.line, modules.completionGateHost, {
       active: host.active, move: (id, exit, patch) => host.move(id, exit, patch),
       workerExecutionStopped: id => host.workerExecutionStopped(id), executionBlockedByRootFinish: run => host.executionBlockedByRootFinish(run),
       countAutomaticWakes: id => modules.wakeAdmission.automaticWakes(id), hasQueuedAgentInputs: id => modules.inputDelivery.hasQueuedAgentInputs(id),
@@ -327,7 +352,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost, o
     );
     modules.claims = new MaintenanceClaims(context,
       { isActive: id => host.isActive(id), autosaveCleanupBlocker: id => host.autosaveCleanupBlocker(id),
-        hasExecution: id => modules.workerExecutions.has(id), scheduleScratchCleanup: id => host.workerScratchCleanup.schedule(id),
+        hasExecution: id => modules.workerExecutions.has(id), scheduleScratchCleanup: id => modules.workerScratchCleanup.schedule(id),
         holdForMaintenance: ids => modules.claims.holdForMaintenance(ids) },
     );
     modules.attachments = new AttachmentWriter(context,
@@ -371,15 +396,15 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost, o
       workerStep: (...args) => launchContext.workerStep(context, ...args),
       beginUsageInvocation: (...args) => beginUsageInvocation(context.store, ...args),
       recordUsagePeaks: id => recordUsagePeaks(context.store, { isDisposedDelegatedRun: id => isDisposedDelegatedRun(context.store, () => context.disposed(), id) }, id),
-    }, host.sessionEventHost(), host.launchPreambleHost(), modules.sessionHelperHost, modules.line,
-    modules.runSkills, modules.humanWaits, host.inputReceiptHost, host.inputReceiptSteps);
+    }, sessionEventHost(), launchPreambleHost(), modules.sessionHelperHost, modules.line,
+    modules.runSkills, modules.humanWaits, modules.inputReceiptHost, modules.inputReceiptSteps);
     modules.autoResumeScheduler = new AutoResumeScheduler(context,
       { move: (id, exit, patch) => host.move(id, exit, patch),
         continueRun: (id, opts, defer) => host.continueRun(id, opts, defer), pump: () => modules.line.pump() },
     );
     modules.recovery = new RunRecovery(context, modules.familyReconciler,
       modules.workerQuestions, modules.autoResumeScheduler, {
-        workerScratchCleanup: host.workerScratchCleanup, humanWaits: modules.humanWaits,
+        workerScratchCleanup: modules.workerScratchCleanup, humanWaits: modules.humanWaits,
         waitWatches: modules.waitWatches, inboxClaims: modules.inboxClaims, orphans: modules.orphans,
         isActive: (...args) => host.isActive(...args),
         workerExecutionStopped: (...args) => host.workerExecutionStopped(...args),
@@ -428,7 +453,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost, o
     modules.worktreeAutosave, modules.workerQuestions, ROUTED_QUESTION_REFUSAL, RESTART_CONTINUATION_PROMPT);
     modules.runSettlement = new RunSettlement(context, modules.humanWaits, modules.workerQuestions,
       modules.worktreeAutosave, modules.turnBookkeeper, modules.line, modules.autoResumeScheduler, modules.workerExecutions,
-      host.completionGateHost, {
+      modules.completionGateHost, {
         active: host.active, isSyntheticContinuation: (run, step) => isSyntheticContinuation(run, step),
         generation: id => modules.continuationAcceptance.generation(id), isActive: id => host.isActive(id),
         move: (id, exit, patch) => host.move(id, exit, patch), dropActive: id => host.dropActive(id),
@@ -457,7 +482,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost, o
       reconcileWorkerWaits: () => host.reconcileWorkerWaits(),
       holdContinuationForRootFinish: (...args) => modules.runFinish.holdContinuationForRootFinish(...args),
     }, modules.line, modules.sessionHelperHost, modules.repoRootLease, modules.worktreeAutosave, modules.runSkills,
-    host.sessionEventHost(), host.launchPreambleHost(), host.inputReceiptHost, host.inputReceiptSteps,
+    sessionEventHost(), launchPreambleHost(), modules.inputReceiptHost, modules.inputReceiptSteps,
     modules.humanWaits, modules.queuedInput, modules.workerQuestions, modules.runSettlement);
     modules.stepLoop = new WorkflowStepLoop(context, {
       active: host.active, move: (id, exit, patch) => host.move(id, exit, patch), dropActive: id => host.dropActive(id),
@@ -466,7 +491,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost, o
       workerExecutionStopped: id => host.workerExecutionStopped(id),
       executionBlockedByRootFinish: run => host.executionBlockedByRootFinish(run),
     }, modules.line, modules.worktreeAutosave, modules.humanWaits, modules.runSettlement, modules.stepSession,
-    host.completionGateHost, WAKE_SESSION_CLOSED_ERROR);
+    modules.completionGateHost, WAKE_SESSION_CLOSED_ERROR);
     modules.runStart = new RunStart(context, {
       active: host.active, startRun: (...args) => host.startRun(...args),
       execute: (...args) => host.execute(...args), runContinuation: (...args) => host.runContinuation(...args),
@@ -475,7 +500,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost, o
     }, modules.line, modules.attachments, modules.turnBookkeeper, modules.queuedInput, modules.continuationAcceptance, modules.workerExecutions);
     modules.turnSettler = new TurnSettler(context, {
       humanWaits: modules.humanWaits, line: modules.line, waitWatches: modules.waitWatches, waitRegistry: modules.waitRegistry,
-      workerQuestions: modules.workerQuestions, completionGateHost: host.completionGateHost,
+      workerQuestions: modules.workerQuestions, completionGateHost: modules.completionGateHost,
       move: (id, exit) => host.move(id, exit), releaseSlot: () => modules.line.releaseSlot(), completionGate: id => modules.runFinish.completionGate(id),
       cancelOpenWaits: id => modules.wakeAdmission.cancelOpenWaits(id), countAutomaticWakes: id => modules.wakeAdmission.automaticWakes(id),
       workerExecutionStopped: id => host.workerExecutionStopped(id), executionBlockedByRootFinish: run => host.executionBlockedByRootFinish(run),
@@ -489,7 +514,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost, o
       noticeParkedWorker: id => modules.workerQuestions.noticeParkedWorker(id), routeWorkerQuestion: id => modules.workerQuestions.routeWorkerQuestion(id),
       settledTurnOutcome: (id, entry, outcome) => host.settledTurnOutcome(id, entry, outcome),
     }, IDLE_TIMEOUT_MS, MAX_AUTO_CONTINUES, COMPLETION_WILL_WAIT, SCHEDULE_WAKEUP_MAX_SECONDS);
-    modules.runFinish = new RunFinish(context, host.completionGateHost, modules.runSettlement, modules.turnSettler, modules.turnNudges, modules.line, {
+    modules.runFinish = new RunFinish(context, modules.completionGateHost, modules.runSettlement, modules.turnSettler, modules.turnNudges, modules.line, {
       move: (id, exit, patch) => host.move(id, exit, patch), dropActive: id => host.dropActive(id),
       cancelOpenWaits: id => modules.wakeAdmission.cancelOpenWaits(id), reconcileWorkerWaits: id => host.reconcileWorkerWaits(id),
       executionBlockedByRootFinish: run => host.executionBlockedByRootFinish(run), hasUnansweredHumanAsk: id => host.hasUnansweredHumanAsk(id),
@@ -503,7 +528,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost, o
     modules.inputDelivery = new InputDelivery(context, {
       active: host.active, line: modules.line, workerExecutions: modules.workerExecutions, runSkills: modules.runSkills,
       attachments: modules.attachments, humanWaits: modules.humanWaits, workerQuestions: modules.workerQuestions,
-      waitRegistry: modules.waitRegistry, inputReceiptHost: host.inputReceiptHost,
+      waitRegistry: modules.waitRegistry, inputReceiptHost: modules.inputReceiptHost,
       isActive: id => host.isActive(id), move: (id, exit) => host.move(id, exit),
       canProceedWithRun: (id, run) => host.canProceedWithRun(id, run),
       workerExecutionStopped: id => host.workerExecutionStopped(id), executionBlockedByRootFinish: run => host.executionBlockedByRootFinish(run),

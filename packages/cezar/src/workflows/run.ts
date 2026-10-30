@@ -1,63 +1,30 @@
 import { composeRunModules, type RunModules } from './run/compose.ts';
-import { RunCancel } from './run/run-cancel.ts';
-import { IDLE_TIMEOUT_MS, ROUTED_QUESTION_REFUSAL, UNREAD_INPUT_GRACE_MS, NO_WAIT_NUDGE_REPLY_MS, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, SCHEDULE_WAKEUP_MAX_SECONDS, MAX_WAKE_DELIVERY_ATTEMPTS, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WAITS_DISCARDED_NOTE, REFUSAL_DISCARDED_NOTE, QUEUE_WATCHDOG_MS, RESTART_CONTINUATION_PROMPT } from './run/constants.ts';
+
+import { IDLE_TIMEOUT_MS, UNREAD_INPUT_GRACE_MS, NO_WAIT_NUDGE_REPLY_MS, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WAITS_DISCARDED_NOTE, REFUSAL_DISCARDED_NOTE, QUEUE_WATCHDOG_MS } from './run/constants.ts';
 export { IDLE_TIMEOUT_MS, UNREAD_INPUT_GRACE_MS, NO_WAIT_NUDGE_REPLY_MS, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WAITS_DISCARDED_NOTE, REFUSAL_DISCARDED_NOTE, QUEUE_WATCHDOG_MS } from './run/constants.ts';
 import { isSyntheticContinuation } from './run/workflow-position.ts';
 import { repositoryRootLockDisabled } from './run/repo-root-lease.ts';
 export { repositoryRootLockDisabled } from './run/repo-root-lease.ts';
 import { isUntouchedCancelledRun } from './run/run-guards.ts';
 export { isUntouchedCancelledRun } from './run/run-guards.ts';
-import { WorkerOrphanAliveError, admissionError } from './run/worker-orphans.ts';
-import type { PersistedAttachments } from './run/types.ts';
-import { ContinuationSession } from './run/continuation-session.ts';
-import { StepLoop as WorkflowStepLoop } from './run/step-loop.ts';
-import { RunRecovery } from './run/run-recovery.ts';
-import { TurnSettler } from './run/turn-settler.ts';
-import { StepSession } from './run/step-session.ts';
-import * as sessionEvents from './run/session-events.ts';
-import { WakeAdmission } from './run/wake-admission.ts';
-import { RunFinish } from './run/run-finish.ts';
-import { RunSettlement } from './run/run-settlement.ts';
-import { InputDelivery } from './run/input-delivery.ts';
-import { TurnNudges } from './run/turn-nudges.ts';
-import { WorkerQuestions } from './run/worker-questions.ts';
-import { FamilyReconciler } from './run/family-reconciler.ts';
+
 import * as completionGateReads from './run/completion-gate.ts';
-import { WaitRegistry } from './run/wait-registry.ts';
-import { WakeRetries } from './run/wake-retries.ts';
-import { WaitWatches } from './run/wait-watches.ts';
-import { HumanWaits } from './run/human-waits.ts';
-import { RunStart } from './run/run-start.ts';
-import { RunLine } from './run/run-line.ts';
-import { WorktreeAutosave } from './run/worktree-autosave.ts';
-import { RunSkills } from './run/run-skills.ts';
-import { InboxClaims } from './run/inbox-claims.ts';
-import { WorkerExecutions } from './run/worker-executions.ts';
-import { TurnBookkeeper } from './run/turn-bookkeeping.ts';
-import { AutomationToolsSlot, cezarToolHandlers, provisionCiSession, type ToolHost, type CiSessionHost } from './run/cezar-tools.ts';
-import { registerPreviewServer, stopPreviewServer } from '../preview/run-tools.ts';
-import { AttachmentWriter } from './run/attachment-writer.ts';
-import { QueuedInput } from './run/queued-input.ts';
-import { RepoRootLease } from './run/repo-root-lease.ts';
-import { MaintenanceClaims } from './run/maintenance-claims.ts';
-import { WorkerOrphans } from './run/worker-orphans.ts';
-import type {
-  DelegationExecutionSettings, StartRunInput, PendingContinuation, Execution, StepLoop, WorkerTerminationBlocker, AutomationToolService,
-} from './run/types.ts';
+
+import { cezarToolHandlers } from './run/cezar-tools.ts';
+
+import type { DelegationExecutionSettings, StartRunInput, Execution, WorkerTerminationBlocker, AutomationToolService } from './run/types.ts';
 export type { TurnTail, DelegationExecutionSettings, StartRunInput, WorkerTerminationBlocker, AutomationToolService } from './run/types.ts';
-import { repairFailedRootFinish, startCompletionCycle, settledRootFinishPatch } from './completion-policy.ts';
+import { settledRootFinishPatch } from './completion-policy.ts';
 import type { ContinueRunOptions } from './continuation-admission.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
-import { type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitVia, type WorkerWaitEntry, computeWaitingOn, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
+import { type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitVia, type WorkerWaitEntry, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
-import { canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested, isDisposedDelegatedRun, preserveRunAfterDisposal } from './run/run-guards.ts';
-import { beginUsageInvocation, recordUsagePeaks } from './run/usage-accounting.ts';
+import { canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested } from './run/run-guards.ts';
+
 import { REPOSITORY_ROOT_LOCK_DISABLED_NOTE } from './run/run-workspace.ts';
-import * as inputReceipts from './run/input-receipts.ts';
-import { ContinuationAcceptance } from './run/continuation-acceptance.ts';
-import { AutoResumeScheduler } from './run/auto-resume.ts';
+
 export { AUTO_RESUME_GRACE_MS, MAX_AUTO_RESUMES, AUTO_RESUME_MISSED_WINDOW_MS } from './run/auto-resume.ts';
 import { TrackedWork } from './run/tracked-work.ts';
 import type { RunModuleContext } from './run/types.ts';
@@ -69,34 +36,30 @@ import { stepLabel } from './run/steps.ts';
 export { agentDirectories, composeSystemPrompt, expandRegistrySlashSkill, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt } from './run/prompts.ts';
 export { stepLabel } from './run/steps.ts';
 export { makeRunTitle } from '../runs/run-title.ts';
-import { clearUnreadInputTimer, clearHeldHumanInputTimer, clearIdleTimer, clearAutosaveTimer } from './run/input-timers.ts';
-import * as stepDecisions from './run/step-decisions.ts';
+import { clearHeldHumanInputTimer, clearIdleTimer, clearAutosaveTimer } from './run/input-timers.ts';
+
 import * as pendingAskFacts from './run/pending-ask-facts.ts';
 import * as workflowPosition from './run/workflow-position.ts';
-import { RUN_EXITS, transition, type RunExitId } from './run-states.ts';
+import { transition, type RunExitId } from './run-states.ts';
 import { deriveAccountHolds } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
-import { holdsOwedResults, isCezarHumanWait, openWaits, resolvedWaits } from './waits.ts';
+import { holdsOwedResults, isCezarHumanWait, openWaits } from './waits.ts';
 import { runsAwaitingPeer } from './wait-scope.ts';
 import { type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import type { CezarToolHandlers } from '../ci-wait/controller.ts';
-import { workerIdentity, continuationDefStep, WorkerIdentityError, type WorkerAccountBinding } from '../delegation/execution-identity.ts';
+import { workerIdentity, type WorkerAccountBinding } from '../delegation/execution-identity.ts';
 import type { DelegationProvisioner } from '../delegation/provision.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import type { AskRequest } from '../core/ask.ts';
-import { type AgentSession } from '../core/claude-cli-runner.ts';
-import { onUsage, replaceRunProcess, type ProcessUsage } from '../core/process-usage.ts';
-import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
+
+import { onUsage, type ProcessUsage } from '../core/process-usage.ts';
+
 import { type CwdSource } from '../delegation/process-liveness.ts';
-import { parseUsageLimit } from '../core/usage-limit.ts';
+
 import type { RunnerId } from '../core/agent-runner.ts';
-import {
-  handoffPath,
-  seedHandoffFile,
-} from '../handoff.ts';
+import { seedHandoffFile } from '../handoff.ts';
 // Contract VALUES, like `workspaceUiStateSchema` in workspace/migrations.ts: the attachment
 // vocabulary the routes validate with is the same one the engine stores and re-reads by, so the
 // wire and the disk can never disagree about what counts as an image (#950).
@@ -106,34 +69,30 @@ import {
   type WorkerWait,
   type WorkerWaitRequest,
 } from '@open-mercato/cezar-contract/delegation';
-import type { ConversationState, RunEvent } from '@open-mercato/cezar-contract';
+
 import {
   type RequestWaitRequest,
 } from '@open-mercato/cezar-contract/conversations';
 import { contentBlocksOf, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from './pasted-content.ts';
 export { contentBlocksOf, highestImageSeq, mediaTypeFor, pastedAttachmentsNote, pastedAttachmentsText, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from './pasted-content.ts';
-import type { ContentBlock, ToolGrant } from '../core/agent-runner.ts';
-import { readProjectUiState } from '../ui-state.ts';
+import type { ContentBlock } from '../core/agent-runner.ts';
+
 import { type Skill } from '../skills.ts';
-import { readAgentModelSettings } from '../agent-config/models.ts';
+
 import { resolveWorktreeRetention } from '../config.ts';
-import { getRepoInfo } from '../server/git.ts';
-import { DelegationPolicyError } from '../delegation/policy.ts';
-import { projectConversationEvents, settledRunFamilies } from '../delegation/conversations.ts';
+
+import { settledRunFamilies } from '../delegation/conversations.ts';
 import * as queuedRevival from './run/queued-revival.ts';
-import type { RunOutcome } from '../runs/outcome-commit.ts';
+
 import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
 import { reclaimWorktrees } from '../runs/retention.ts';
 import {
   removeAgentTmpDir,
 } from '../runs/agent-tmpdir.ts';
-import { resolveProfileEnvForRoot } from '../workspace/agent-profiles.ts';
-import { WorkspaceSemaphore, type AccountHolds } from '../workspace/semaphore.ts';
-import {
-  type WorkflowDef, type WorkflowStepDef,
-} from './types.ts';
 
-import { PROSE_HUMAN_GATE } from '../runs/transcript-facts.ts';
+import { WorkspaceSemaphore, type AccountHolds } from '../workspace/semaphore.ts';
+import { type WorkflowDef } from './types.ts';
+
 export { CHECK_KILL_GRACE_MS, CHECK_TERMINATION_CONFIRM_MS } from './grouped-command.ts';
 export { periodicAutosaveEnabled, AUTOSAVE_INTERVAL_MS } from './run/worktree-autosave.ts';
 /** #486: recheck a turn-end that deferred close/park only because the harness still held a human follow-up. */
@@ -162,44 +121,6 @@ export class RunManager {
 
   
 
-  
-
-  private readonly completionGateHost: completionGateReads.CompletionGateHost = {
-    active: this.active,
-    pendingHumanAskSeq: id => this.pendingHumanAskSeq(id),
-    isActive: id => this.isActive(id),
-    holdsAgentWaits: id => this.modules.humanWaits.holdsAgentWaits(id),
-    waitingBeforeFinalWorkflowStep: run => this.waitingBeforeFinalWorkflowStep(run),
-    parentCompletionBlockers: id => this.parentCompletionBlockers(id),
-    unansweredQuestions: id => this.modules.workerQuestions.unansweredQuestions(id),
-  };
-
-  
-
-  
-
-  
-
-  
-
-  
-  private readonly inputReceiptSteps: inputReceipts.InputReceiptSteps = {
-    clearUnread: state => clearUnreadInputTimer(state), clearHeld: state => clearHeldHumanInputTimer(state),
-    noteActivity: (id, state, event) => this.modules.turnNudges.noteNoWaitNudgeContent(id, state, event),
-    persistAttachment: (id, mediaType, data) => this.modules.attachments.persistAttachment(id, mediaType, data),
-    ready: (id, state, session) => this.modules.inputDelivery.handleAgentInputReady(id, state, session),
-    pid: (id, pid) => { replaceRunProcess(id, pid); this.modules.workerExecutions.recordWorkerProcess(id, pid); },
-    ui: (id, state, sink, event) => sessionEvents.handleRunnerUiEvent(this.context, this.modules.sessionHelperHost, id, state, sink, event),
-    flushDeferred: id => this.modules.queuedInput.flushDeferred(id), recordProcess: (id, pid) => this.modules.workerExecutions.recordWorkerProcess(id, pid),
-  };
-  private readonly inputReceiptHost: inputReceipts.InputReceiptsHost = {
-    reconcileWorkerWaits: () => this.reconcileWorkerWaits(),
-    flushAgentInputs: id => this.modules.inputDelivery.flushAgentInputs(id),
-    isCurrentState: (id, state) => this.active.get(id) === state,
-  };
-
-  
-
   settleOrphanedWorkerExecution(runId: string, opts: { admitting?: boolean; fresh?: boolean; cwds?: CwdSource } = {}): boolean { return this.modules.orphans.settleOrphanedWorkerExecution(runId, opts); }
   takeWorkerTerminationBlocker(runId: string): { blocker: WorkerTerminationBlocker; changed: boolean } | undefined { return this.modules.orphans.takeWorkerTerminationBlocker(runId); }
 
@@ -221,11 +142,6 @@ export class RunManager {
       (!!run.delegation.destroy || this.modules.workerExecutions.isStopped(runId)));
   }
 
-  /** Runs whose worktree a reclaim, or whose branch a delete, is removing right now
-   *  (`claimWorktreeReclaim`, `claimForBranchCleanup`). `continueRun` refuses them. */
-
-  
-
   private readonly ciResources: ReturnType<typeof acquireCiResources>;
   /** #781: the workspace-wide preview host. Absent (`cez run`, tests) means every registration is `headless`. */
   private readonly preview?: PreviewHostLike | undefined;
@@ -237,7 +153,6 @@ export class RunManager {
   private readonly cezarPort?: (() => number | undefined) | undefined;
   private ciSupervisor: Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
 
-  
   private disposed = false;
 
   private readonly onDelegationRun = (run: RunRecord, source?: CommitSource): void => {
@@ -257,14 +172,6 @@ export class RunManager {
     }
     this.modules.waitRegistry.resolvePeerWaits(runsAwaitingPeer(run, () => this.store.listRuns())); // never in recovery: an interrupted peer fails, then continues
   };
-
-  
-
-  
-
-  
-
-  
 
   /** `.ai/cezar` — where the per-task handoff files live. */
   private readonly dataDir: string;
@@ -295,17 +202,21 @@ export class RunManager {
     options: { work?: TrackedWork; semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined } = {},
   ) {
     this.dataDir = join(repoRoot, '.ai/cezar');
-    this.workerScratchCleanup = new WorkerScratchCleanup(store, this.dataDir, id => this.isActive(id) || this.modules.workerExecutions.has(id) || this.modules.claims.has(id) || !!this.autosaveCleanupBlocker(id));
     this.preview = options.preview;
     this.cezarPort = options.cezarPort;
-    // #774: `serve` knows its bound origin before it recovers, so recovered runs carry it too.
-    if (options.cockpit) this.setCockpitAddress(options.cockpit);
     /** Quiet window before unread input is resubmitted or left unconfirmed (#505). */
     const unreadInputGraceMs = options.unreadInputGraceMs ?? UNREAD_INPUT_GRACE_MS;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
     this.context = { store, repoRoot, dataDir: this.dataDir, semaphore: this.semaphore, disposed: () => this.disposed, work: options.work ?? new TrackedWork() };
     const facade = this;
     this.modules = composeRunModules(this.context, {
+      pendingHumanAskSeq: (...args) => this.pendingHumanAskSeq(...args),
+      waitingBeforeFinalWorkflowStep: (...args) => this.waitingBeforeFinalWorkflowStep(...args),
+      parentCompletionBlockers: (...args) => this.parentCompletionBlockers(...args),
+      get ciResources() { return facade.ciResources; },
+      cezarToolHandlers: (...args) => this.cezarToolHandlers(...args),
+      get delegationProvisioner() { return facade.delegationProvisioner; },
+      set delegationProvisioner(value) { facade.delegationProvisioner = value; },
       move: (...args) => this.move(...args),
       isActive: (...args) => this.isActive(...args),
       workerExecutionStopped: (...args) => this.workerExecutionStopped(...args),
@@ -320,20 +231,15 @@ export class RunManager {
       canProceedWithRun: (id, run): run is RunRecord => this.canProceedWithRun(id, run),
       get ciSupervisor() { return facade.ciSupervisor; },
       executionBlockedByRootFinish: (...args) => this.executionBlockedByRootFinish(...args),
-      get inputReceiptHost() { return facade.inputReceiptHost; },
       agentEnvForStep: (...args) => this.agentEnvForStep(...args),
       get cockpit() { return facade.cockpit; },
-      get completionGateHost() { return facade.completionGateHost; },
+      set cockpit(value) { facade.cockpit = value; },
       settledTurnOutcome: (...args) => this.settledTurnOutcome(...args),
       reapTerminalScratch: (...args) => this.reapTerminalScratch(...args),
       settleOrphanedWorkerExecution: (...args) => this.settleOrphanedWorkerExecution(...args),
-      get workerScratchCleanup() { return facade.workerScratchCleanup; },
       sendMessage: (...args) => this.sendMessage(...args),
       canClaimInboxInput: (...args) => this.canClaimInboxInput(...args),
       builtinSkills: (...args) => this.builtinSkills(...args),
-      sessionEventHost: (...args) => this.sessionEventHost(...args),
-      launchPreambleHost: (...args) => this.launchPreambleHost(...args),
-      get inputReceiptSteps() { return facade.inputReceiptSteps; },
       continueRun: (...args) => this.continueRun(...args),
       recover: (...args) => this.recover(...args),
       adoptTranscriptAsk: (...args) => this.adoptTranscriptAsk(...args),
@@ -354,6 +260,8 @@ export class RunManager {
       get preview() { return facade.preview; },
       get cezarPort() { return facade.cezarPort; },
     }, { noWaitNudgeReplyMs: options.noWaitNudgeReplyMs, unreadInputGraceMs });
+    // #774: `serve` knows its bound origin before it recovers, so recovered runs carry it too.
+    if (options.cockpit) this.setCockpitAddress(options.cockpit);
     this.ciResources = acquireCiResources(this.semaphore);
     this.ciSupervisor = this.ciResources.supervisor;
     this.offSemaphore = this.semaphore.register({
@@ -384,7 +292,7 @@ export class RunManager {
    */
   dispose(): void {
     this.disposed = true;
-    this.workerScratchCleanup.pause();
+    this.modules.workerScratchCleanup.pause();
     this.modules.waitWatches.disposeWatches();
     this.modules.waitRegistry.dispose();
     this.modules.waitWatches.disposeRetries();
@@ -484,12 +392,8 @@ export class RunManager {
    * sets it, so it is also the "a cockpit is attached" signal for the automations gate.
    */
   private cockpit?: { origin: string; projectId: string } | undefined;
-  setCockpitAddress(address: { origin: string; projectId: string } | undefined): void { return launchContext.setCockpitAddress(this.launchSettingsHost, address); }
+  setCockpitAddress(address: { origin: string; projectId: string } | undefined): void { return launchContext.setCockpitAddress(this.modules.launchSettingsHost, address); }
   cockpitAddress(): { origin: string; projectId: string } | undefined { return launchContext.cockpitAddress(this.cockpit); }
-  private readonly ciSessionHost: CiSessionHost = {
-    active: this.active, ciResources: () => this.ciResources, cezarToolHandlers: (...args) => this.cezarToolHandlers(...args),
-    preview: () => this.preview, cockpit: () => this.cockpit,
-  };
 
   /**
    * hearsay-tools/cezarion#1465: the project's one-time schedule service behind
@@ -504,13 +408,8 @@ export class RunManager {
 
   builtinSkills(): Skill[] { return launchContext.builtinSkills(this.cockpit); }
 
-  private readonly launchSettingsHost: launchContext.LaunchSettingsHost = {
-    active: this.active, setCockpit: address => { this.cockpit = address; },
-    delegationProvisioner: () => this.delegationProvisioner, setProvisioner: provisioner => { this.delegationProvisioner = provisioner; },
-    historyDeletionPending: id => this.historyDeletionPending(id),
-  };
   private delegationProvisioner?: DelegationProvisioner | undefined;
-  setDelegationProvisioner(provisioner: DelegationProvisioner): () => void { return launchContext.setDelegationProvisioner(this.launchSettingsHost, provisioner); }
+  setDelegationProvisioner(provisioner: DelegationProvisioner): () => void { return launchContext.setDelegationProvisioner(this.modules.launchSettingsHost, provisioner); }
 
   /**
    * The trusted callbacks behind one session's cezar tools (hearsay-tools/cezarion#1233). Both
@@ -611,10 +510,9 @@ export class RunManager {
     this.modules.runSettlement.afterDropActive(runId);
   }
 
-  private readonly workerScratchCleanup: WorkerScratchCleanup;
   /** Project detach cancels autonomous cleanup; reattach reconstructs the durable intents. */
-  pauseWorkerCleanup(): void { this.workerScratchCleanup.pause(); }
-  recoverWorkerCleanup(): void { if (!this.disposed) this.workerScratchCleanup.recover(); }
+  pauseWorkerCleanup(): void { this.modules.workerScratchCleanup.pause(); }
+  recoverWorkerCleanup(): void { if (!this.disposed) this.modules.workerScratchCleanup.recover(); }
 
   claimWorkerCleanup(runId: string): (() => void) | undefined { return this.modules.claims.claimWorkerCleanup(runId); }
 
@@ -626,7 +524,7 @@ export class RunManager {
     if (!run || ['queued', 'running', 'waiting'].includes(run.status)) return;
     if (this.active.has(runId) || this.modules.line.hasStarting(runId) || this.modules.line.hasQueued(runId) || this.modules.claims.has(runId) || !!this.autosaveCleanupBlocker(runId)) return;
     const privateWorkers = workerEvidenceRunIds(this.dataDir);
-    if (run.delegation?.role === 'worker' || run.delegation?.role === 'invalid' || !privateWorkers || privateWorkers.includes(runId)) { this.workerScratchCleanup.schedule(runId); return; }
+    if (run.delegation?.role === 'worker' || run.delegation?.role === 'invalid' || !privateWorkers || privateWorkers.includes(runId)) { this.modules.workerScratchCleanup.schedule(runId); return; }
     removeAgentTmpDir(this.dataDir, runId);
   }
 
@@ -672,9 +570,9 @@ export class RunManager {
   editTask(runId: string, task: string): boolean { return this.modules.queuedInput.editTask(runId, task); }
   deferMessage(runId: string, content: PastedContent[]): boolean { return this.modules.queuedInput.deferMessage(runId, content); }
 
-  private parentCompletionBlockers(runId: string) { return completionGateReads.parentCompletionBlockers(this.context, this.completionGateHost, runId); }
+  private parentCompletionBlockers(runId: string) { return completionGateReads.parentCompletionBlockers(this.context, this.modules.completionGateHost, runId); }
 
-  finishBlockedReason(runId: string): string | undefined { return completionGateReads.finishBlockedReason(this.context, this.completionGateHost, runId); }
+  finishBlockedReason(runId: string): string | undefined { return completionGateReads.finishBlockedReason(this.context, this.modules.completionGateHost, runId); }
 
   registerWorkerWait(parentId: string, request: WorkerWaitRequest): WorkerWait { return this.modules.waitRegistry.registerWorkerWait(parentId, request); }
   registerWorkerListWait(runId: string, request: { workerIds?: string[]; requestIds?: string[] | undefined; mode?: WorkerWaitRequest['mode']; timeoutSeconds: number }, via: 'cezar_wait' | 'cez-worker-wait'): DeadlinedWorkerWaitEntry { return this.modules.waitRegistry.registerWorkerListWait(runId, request, via); }
@@ -939,26 +837,6 @@ export class RunManager {
   }
 
   private settleFailedRun(runId: string, runError: string, deliveryCapped: boolean): void { this.modules.runSettlement.settleFailedRun(runId, runError, deliveryCapped); }
-
-  private sessionEventHost(): import('./run/session-events.ts').SessionEventHost {
-    return {
-      disposedSessionEvent: (...args) => sessionEvents.disposedSessionEvent(this.context, this.modules.sessionHelperHost, ...args),
-      handleReceiptEvent: (...args) => inputReceipts.handleReceiptEvent(this.context, this.inputReceiptHost, this.inputReceiptSteps, ...args),
-      recordSessionFault: (...args) => sessionEvents.recordSessionFault(this.context, this.modules.sessionHelperHost, ...args),
-      markTurnBoundary: (...args) => sessionEvents.markTurnBoundary(this.context, this.modules.sessionHelperHost, ...args),
-      trackTurnEnd: (...args) => this.modules.turnBookkeeper.trackTurnEnd(...args),
-      endTurn: (...args) => this.modules.turnSettler.endTurn(...args),
-    };
-  }
-
-  private launchPreambleHost(): import('./run/session-events.ts').LaunchPreambleHost {
-    return {
-      provisionSession: (...args) => launchContext.provisionSession(this.launchSettingsHost, ...args),
-      agentWebhooksPart: () => launchContext.agentWebhooksPart(this.context, this.cockpit),
-      provisionCiSession: (...args) => provisionCiSession(this.context, this.ciSessionHost, ...args),
-      launchStale: (...args) => sessionEvents.launchStale(this.context, this.modules.sessionHelperHost, ...args),
-    };
-  }
 
   /** The outcome a settled turn reached, for the parity cells that prove which path ran
    *  (hearsay-tools/cezarion#1809, which removed the handoff heartbeat line that recorded it). No
