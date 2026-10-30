@@ -45,7 +45,7 @@ import { registerProject, shouldRegisterProject } from './workspace/projects.ts'
 import { runProjectsCommand } from './workspace/projects-cli.ts';
 import { WorkspaceSemaphore } from './workspace/semaphore.ts';
 import { openUrl } from './open-url.ts';
-import { reconcileServeWorktrees, recoverServeProject, warnServeBind, createServeApplicationUpdate, createServeSelfUpdate, printServeBanner } from './serve-boot.ts';
+import { reconcileServeWorktrees, recoverServeProject, warnServeBind, createServeApplicationUpdate, createServeSelfUpdate, printServeBanner, stopServe } from './serve-boot.ts';
 import { CockpitOwnership } from './server/cockpit-ownership.ts';
 
 const HELP = `cezar — local cockpit for AI agent tasks in your repo
@@ -345,16 +345,7 @@ async function serveCommand(
   printServeBanner(version, repoRoot, repo, checks, url);
 
   const shutdown = (signal: NodeJS.Signals) => {
-    // Dev servers run in their own process groups: stop them before this process exits.
-    void Promise.all([delegation.close(), previewHost?.close()]).finally(() => {
-      server.close();
-      store.close();
-      // Agent sessions lead their own process groups (hearsay-tools/cezarion#890), so the
-      // terminal's Ctrl-C no longer reaches them. Forward the signal last: with the store
-      // closed, an agent it ends cannot settle its run, and restart recovery resumes it.
-      forwardToSessionGroups(signal);
-      process.exit(0);
-    });
+    void stopServe(server, signal).finally(() => process.exit(0));
   };
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));

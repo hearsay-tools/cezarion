@@ -10,7 +10,8 @@ import { restartEndpoint } from './application-update/helper.ts';
 import { armRestartHelper } from './application-update/launcher.ts';
 import { ApplicationUpdateService } from './application-update/service.ts';
 import { SelfUpdateService } from './self-update/service.ts';
-import { isSupervised, restartProcess } from './self-update/restart.ts';
+import { isSupervised, restartProcess, type RestartOptions } from './self-update/restart.ts';
+import { forwardToSessionGroups } from './core/session-process.ts';
 import { resolveCapabilities } from './server/capabilities.ts';
 import { pruneOrphans } from './git-worktree.ts';
 import { DEFAULT_WORKTREE_RETENTION, resolveWorktreeRetention } from './config.ts';
@@ -110,8 +111,35 @@ export function createServeApplicationUpdate(
       npmCache: npmCache ?? join(cezarHomeDir(), 'dry-cache'), npmBin: npm?.npmBin, home: cezarHomeDir(), targetVersion: () => update.latest,
       dryRun: process.env.CEZ_DRY_RUN === '1',
       armRestart: (plan) => armRestartHelper(plan, { repoRoot, ...restartEndpoint(getServer().address()), npmBin: npm?.npmBin ?? 'npm' }),
-      handoff: () => { void getServer().shutdownForRestart().then(() => process.exit(0)); },
+      handoff: () => { void stopServe(getServer()).then(() => process.exit(0)); },
     }) : undefined;
+}
+
+type StoppableServer = Pick<ReturnType<typeof startServer>, 'shutdownForRestart'>;
+
+/**
+ * The one teardown every exit from `serve` runs: a signal, the desktop shell closing stdin, and
+ * both updaters' restarts. The server's own shutdown stops dev servers, delegation, the listener
+ * and the store; agent sessions lead their own process groups (hearsay-tools/cezarion#890), so
+ * none of that reaches them. Forward the signal last: with the store closed, an agent it ends
+ * cannot settle its run, and the next process's recovery resumes it.
+ */
+export async function stopServe(server: StoppableServer, signal: NodeJS.Signals = 'SIGTERM'): Promise<void> {
+  try {
+    await server.shutdownForRestart();
+  } finally {
+    forwardToSessionGroups(signal);
+  }
+}
+
+/** Stop this serve (`stopServe`), then re-exec it on the same port or exit 75 to its supervisor. */
+export async function restartServe(
+  server: StoppableServer & Pick<ReturnType<typeof startServer>, 'address'>,
+  restart: (opts: RestartOptions) => void = restartProcess,
+): Promise<void> {
+  const port = restartEndpoint(server.address()).port;
+  await stopServe(server);
+  restart({ server: null, args: process.argv.slice(2), port, supervised: isSupervised() });
 }
 
 /** The managed desktop updater; a restart re-execs this serve on the same port. */
@@ -123,11 +151,7 @@ export function createServeSelfUpdate(
     pkgName: opts.pkgName, version: opts.version, entry: resolve(process.argv[1] ?? ''), supervised: isSupervised(),
     activeRuns: () => opts.store.listRuns().filter(r => ['queued', 'waiting', 'running'].includes(r.status)).length,
     trimPaths: () => !resolveCapabilities(process.env, opts.bindHost).localHandoff,
-    restart: () => {
-      const server = getServer();
-      const restartPort = restartEndpoint(server.address()).port;
-      void server.shutdownForRestart().then(() => restartProcess({ server: null, args: process.argv.slice(2), port: restartPort, supervised: isSupervised() }));
-    },
+    restart: () => { void restartServe(getServer()); },
   });
 }
 
