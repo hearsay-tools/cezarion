@@ -104,8 +104,11 @@ export type RepoBranchResponse = z.infer<typeof repoBranchResponseSchema>;
  * - `orphan` — a `cez/*` branch no run names, with commits the base does not and no merged PR.
  *   Same deletion rule as `not-landed`: the branch may be the only copy of the work.
  * - `merged` — its tip is reachable from the base, or a PR from it merged (squash merges are not
- *   ancestors). Bulk-deletable.
+ *   ancestors). Bulk-deletable, and swept automatically once no worktree checks it out. A branch
+ *   outside `cez/*` is `merged` only as the exact merged PR a finished run recorded; `runId` then
+ *   names that run.
  * - `empty` — its run exists and the tip is still the run's fork point. Bulk-deletable.
+ * - `empty` and `merged` are what the automatic branch sweep deletes (hearsay-tools/cezarion#2268).
  * - `other` — not `cez/*`: the user's own branch. Never deletable from this surface.
  */
 export const branchClassSchema = z.enum(['active', 'not-landed', 'orphan', 'merged', 'empty', 'other']);
@@ -126,6 +129,9 @@ export const repoBranchEntrySchema = z.object({
   /** `--shortstat <base>...<branch>`, for `not-landed` and `orphan` rows only. */
   diffStat: z.object({ additions: z.number(), deletions: z.number() }).nullable(),
   pr: z.object({ number: z.number(), url: z.string(), state: branchPrStateSchema }).nullable(),
+  /** Why a branch that might be merged is kept: present only when GitHub did not return its full
+   *  PR history, so no merged PR could be ruled in. */
+  keptReason: z.string().optional(),
 });
 export type RepoBranchEntry = z.infer<typeof repoBranchEntrySchema>;
 

@@ -28,7 +28,7 @@ let runs: RunRecord[];
 
 const noForge: BranchForge = {
   async prStates() { return { available: true, states: {} }; },
-  async listPrs() { return { available: true, prs: [] }; },
+  async prsForHeads() { return { available: true, prs: [], incomplete: new Set<string>() }; },
 };
 
 function sh(cwd: string, args: string[], input?: string): string {

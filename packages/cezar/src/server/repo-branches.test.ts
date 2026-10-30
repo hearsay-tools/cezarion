@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BranchClass } from '@open-mercato/cezar-contract';
 import { createOwnedWorkspace } from '../delegation/workspace.ts';
-import { branchOwnerOf, type RunRecord, type RunStatus } from '../runs/store.ts';
+import type { RunRecord } from '../runs/store.ts';
 import { getTracking } from './git.ts';
 import {
   attributeLog,
@@ -20,78 +20,7 @@ import {
   type ForgePr,
 } from './repo-branches.ts';
 import { getLogWithParents } from './git.ts';
-
-/** Records as the branch owners `RunStore.listBranchOwners` would list. */
-const owners = (runs: readonly RunRecord[]) => runs.flatMap((run) => branchOwnerOf(run) ?? []);
-
-const exec = promisify(execFile);
-const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
-
-async function git(cwd: string, ...args: string[]): Promise<string> {
-  return (await exec('git', [...GIT_ID, ...args], { cwd })).stdout.trim();
-}
-
-async function commit(cwd: string, file: string, message: string): Promise<string> {
-  writeFileSync(join(cwd, file), `${message}\n`);
-  await git(cwd, 'add', '-A');
-  await git(cwd, 'commit', '-q', '-m', message);
-  return git(cwd, 'rev-parse', 'HEAD');
-}
-
-/** A task branch forked from `from` with `commits` commits of its own; leaves `main` checked out. */
-async function taskBranch(cwd: string, name: string, commits: number, from = 'main'): Promise<string> {
-  await git(cwd, 'checkout', '-q', '-b', name, from);
-  for (let i = 0; i < commits; i++) await commit(cwd, `${name.replace('/', '-')}-${i}.txt`, `${name} work ${i}`);
-  const tip = await git(cwd, 'rev-parse', 'HEAD');
-  await git(cwd, 'checkout', '-q', 'main');
-  return tip;
-}
-
-function runRecord(id: string, status: RunStatus, extra: Partial<RunRecord> = {}): RunRecord {
-  return {
-    id,
-    title: `task ${id.slice(0, 4)}`,
-    workflow: 'quick-task',
-    task: 't',
-    status,
-    steps: [],
-    createdAt: '2026-09-01T00:00:00.000Z',
-    archived: false,
-    branch: `cez/${id.slice(0, 8)}`,
-    ...extra,
-  } as RunRecord;
-}
-
-/** A forge that answers from fixed tables and records what it was asked. */
-function fakeForge(opts: { states?: Record<number, ForgePr['state']>; prs?: ForgePr[]; available?: boolean } = {}) {
-  const calls = { prStates: 0, listPrs: 0 };
-  const forge: BranchForge = {
-    async prStates(_root, numbers) {
-      calls.prStates++;
-      if (opts.available === false) return { available: false, states: {} };
-      return { available: true, states: Object.fromEntries(numbers.flatMap((n) => (opts.states?.[n] ? [[n, opts.states[n]]] : []))) };
-    },
-    async listPrs() {
-      calls.listPrs++;
-      if (opts.available === false) return { available: false, prs: [] };
-      return { available: true, prs: opts.prs ?? [] };
-    },
-  };
-  return { forge, calls };
-}
-
-/** A PR merged into main at `tip`; `onMain` is the commit the merge put on the base. */
-function mergedPr(number: number, branch: string, tip: string, onMain: string): ForgePr {
-  return {
-    number,
-    url: `https://github.com/acme/demo/pull/${number}`,
-    headRefName: branch,
-    baseRefName: 'main',
-    headRefOid: tip,
-    mergeCommitOid: onMain,
-    state: 'merged',
-  };
-}
+import { commit, fakeForge, git, mergedPr, owners, runRecord, taskBranch } from './repo-branches.testkit.ts';
 
 describe('the branch classifier (issue 08 §A)', () => {
   let root: string;
@@ -177,7 +106,7 @@ describe('the branch classifier (issue 08 §A)', () => {
     const { forge, calls } = fakeForge({ prs: [mergedPr(9, 'cez/bbbbbbbb', tip, squash)] });
     const { cls } = await classesOf({ forge });
     expect(cls['cez/bbbbbbbb']).toBe('merged');
-    expect(calls.listPrs).toBe(1);
+    expect(calls.prsForHeads).toBe(1);
   });
 
   it('a merged PR proves only the tip it merged, and only into this base', async () => {
@@ -301,7 +230,7 @@ describe('the branch classifier (issue 08 §A)', () => {
     const noRemote = await classesOf({ runs, hasRemote: false, forge });
     expect(noRemote.cls['cez/dddddddd']).toBe('not-landed');
     expect(noRemote.payload.prStateKnown).toBe(false);
-    expect(calls.prStates + calls.listPrs).toBe(0);
+    expect(calls.prStates + calls.prsForHeads).toBe(0);
   });
 
   it('does not report work merged on origin as not landed when the local base is stale', async () => {
@@ -529,10 +458,10 @@ describe('the branch classifier (issue 08 §A)', () => {
       await taskBranch(root, 'cez/aaaaaaaa', 1); // pending, so the forge is asked mid-classification
       const forge: BranchForge = {
         prStates: async () => ({ available: true, states: {} }),
-        async listPrs() {
+        async prsForHeads() {
           // main is reset after its sha was read, before the delete: the merge is gone from it.
           await git(root, 'update-ref', 'refs/heads/main', before);
-          return { available: true, prs: [] };
+          return { available: true, prs: [], incomplete: new Set<string>() };
         },
       };
       const runs = [runRecord('cccccccc-1', 'done'), runRecord('aaaaaaaa-1', 'done')];

@@ -229,6 +229,9 @@ function NotLandedRow({ entry, finishedAt, onDelete }: {
           ) : null}
           {when ? <span className="truncate">· {when}</span> : null}
         </span>
+        {entry.keptReason ? (
+          <span data-slot="branch-kept-reason" className="min-w-0 text-[11px] text-soft-foreground">{entry.keptReason}</span>
+        ) : null}
       </div>
       {entry.pr ? (
         <span data-slot="not-landed-pr" className="hidden shrink-0 items-center gap-[4px] text-[11.5px] text-muted-foreground md:flex">

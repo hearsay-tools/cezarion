@@ -105,6 +105,9 @@ export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: 
                   )}
                   {entry ? <BranchClassLabel entry={entry} /> : null}
                 </span>
+                {entry?.keptReason ? (
+                  <span data-slot="branch-kept-reason" className="min-w-0 text-[11px] text-soft-foreground">{entry.keptReason}</span>
+                ) : null}
                 {name.startsWith('cez/') && !current ? null : current ? (
                   <span
                     data-slot="branch-current"

@@ -37,9 +37,9 @@ describe('the repo branches API', () => {
       forgeCalls++;
       return { available: true, states: {} };
     },
-    async listPrs() {
+    async prsForHeads() {
       forgeCalls++;
-      return { available: true, prs: [] };
+      return { available: true, prs: [], incomplete: new Set<string>() };
     },
   };
 

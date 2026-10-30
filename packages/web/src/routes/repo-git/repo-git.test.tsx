@@ -677,6 +677,21 @@ describe('the Git view Not landed section', () => {
       rows: [...group.querySelectorAll('[data-slot="not-landed-row"]')].map((row) => row.getAttribute('data-branch')),
     }))
 
+  it('says why a branch is kept when GitHub did not return its full PR history (hearsay-tools/cezarion#2268)', async () => {
+    const reason = "Kept: GitHub did not return this branch's full pull request history"
+    stubFetch({
+      'GET /api/v1/repo/branches': () => jsonResponse({
+        ...BRANCHES,
+        branches: BRANCHES.branches.map((entry) => (entry.name === 'cez/51ab2d7e' ? { ...entry, keptReason: reason } : entry)),
+      }),
+    })
+    renderAt('/git/not-landed')
+    await waitFor(() => expect(document.querySelectorAll('[data-slot="not-landed-row"]')).toHaveLength(3))
+    const kept = document.querySelector('[data-slot="not-landed-row"][data-branch="cez/51ab2d7e"] [data-slot="branch-kept-reason"]')
+    expect(kept?.textContent).toBe(reason)
+    expect(document.querySelectorAll('[data-slot="branch-kept-reason"]')).toHaveLength(1)
+  })
+
   it('groups the finished tasks by what the user can do: no PR, a PR open, or the task deleted', async () => {
     stubFetch()
     renderAt('/git/not-landed')
