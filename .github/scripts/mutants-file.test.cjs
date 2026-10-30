@@ -123,7 +123,7 @@ function fakeDeps(file = 'packages/contract/src/sample.ts') {
     stryker: async (...args) => { calls.push(['stryker', args[0], args[3]]); return { outcome: 'exited', code: 0 }; },
     readReport: () => report(file), removeReport: () => calls.push(['remove-report']),
     ranges: () => [], read: () => "import { x } from '@open-mercato/cezar-contract/sample';",
-    readJson: () => ({}), write: (file, text) => calls.push(['write', file, text]),
+    readJson: () => ({ vitest: { configFile: 'vitest.stryker.config.ts', pool: 'forks' }, reporters: ['json'], inPlace: true, timeoutMS: 30000 }), write: (file, text) => calls.push(['write', file, text]),
     removeScratch: () => calls.push(['remove-scratch']), log: text => calls.push(['log', text]),
   };
   return { deps, calls };
@@ -182,8 +182,10 @@ test('command installs, builds, measures own tests then consumers, writes versio
   assert.equal(runs[0][1], 'contract');
   assert.equal(runs[0][2].cwd, '/cache/scratch');
   assert.deepEqual(runs[0][2].extraArgs, ['--concurrency', '4']);
-  assert.deepEqual(runs[1][2].extraArgs.slice(2), ['--vitest.configFile', 'vitest.mutants-consumers.config.ts']);
+  assert.deepEqual(runs[1][2].extraArgs.slice(2), ['stryker.mutants-consumers.config.json']);
   assert.ok(calls.find(c => c[0] === 'write' && c[1] === '/tmp/result.json'));
+  const configWrite = calls.find(c => c[0] === 'write' && c[1].endsWith('stryker.mutants-consumers.config.json'));
+  assert.deepEqual(JSON.parse(configWrite[2]), { ...deps.readJson(), vitest: { pool: 'forks', configFile: 'vitest.mutants-consumers.config.ts' } });
   assert.deepEqual(calls.slice(-3), [['git', 'worktree', 'remove', '--force', '/cache/scratch'], ['git', 'worktree', 'prune'], ['remove-scratch']]);
   assert.match(m.summary(result), /FAIL: logic score/);
 });
@@ -260,4 +262,21 @@ test('qualified guard names find actual methods without matching another class',
   const target = { tier: 'logic', guards: ['One.check'] };
   const result = m.evaluate([mutant({ function: 'Two.check' })], target, [{ name: 'One.check' }]);
   assert.equal(result.guards[0].pass, true);
+});
+
+
+test('runStryker passes the config as a positional argument and keeps cwd and project', async () => {
+  const { runStryker } = require('./mutants-run.cjs');
+  const child = new EventEmitter();
+  child.pid = 123;
+  let emitted;
+  await runStryker('contract', ['packages/contract/src/sample.ts'], 1000, {
+    cwd: '/cache/tree', extraArgs: ['--concurrency', '4', 'stryker.mutants-consumers.config.json'],
+    spawn: (bin, argv, options) => { emitted = { bin, argv, options }; queueMicrotask(() => child.emit('exit', 0)); return child; },
+    kill: () => {},
+  });
+  assert.deepEqual(emitted.argv, ['run', '--mutate', 'packages/contract/src/sample.ts', '--concurrency', '4', 'stryker.mutants-consumers.config.json']);
+  assert.equal(emitted.options.cwd, '/cache/tree');
+  assert.equal(emitted.options.env.STRYKER_PROJECT, 'contract');
+  assert.equal(emitted.options.detached, true);
 });

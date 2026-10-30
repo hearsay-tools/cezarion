@@ -3,8 +3,13 @@
 // Whole-file mutation facts. Unlisted mutators are Value, including arithmetic and unary changes.
 const fs = require('node:fs');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, execFile } = require('node:child_process');
+const os = require('node:os');
+const { promisify } = require('node:util');
+const { sliceSource } = require('./mutants-report.cjs');
+const { runStryker } = require('./mutants-run.cjs');
 const TARGETS = require('../mutants/targets.json');
+const REPORT = 'reports/mutation/mutation.json';
 const STATUS = { Killed: 'killed', Timeout: 'timeout', Survived: 'survived', NoCoverage: 'noCoverage', CompileError: 'error', RuntimeError: 'error', Ignored: 'ignored' };
 const undetected = m => ['Survived', 'NoCoverage'].includes(m.status);
 const flat = text => text.replace(/\s+/g, ' ').trim();
@@ -112,15 +117,6 @@ function compareResults(before, after) {
     counts: Object.fromEntries(Object.keys(after.counts).map(key => [key, after.counts[key] - before.counts[key]])),
     added: after.survivors.filter(m => !oldKeys.has(survivorKey(m))), removed: before.survivors.filter(m => !newKeys.has(survivorKey(m))) };
 }
-
-module.exports = { classText, kindOf, namedRanges, functionRanges, functionOf, tierOf, countsOf, scoreOf, evaluate, compareResults };
-
-const os = require('node:os');
-const { execFile } = require('node:child_process');
-const { promisify } = require('node:util');
-const { sliceSource } = require('./mutants-report.cjs');
-const { runStryker } = require('./mutants-run.cjs');
-const REPORT = 'reports/mutation/mutation.json';
 
 function parseArgs(argv) {
   const [file, ...rest] = argv;
@@ -254,7 +250,10 @@ async function runConsumers(opts, deps, cwd, first, signal) {
   const tests = consumerTests(opts.file, files, file => deps.read(path.join(cwd, file)), opts.tests);
   if (tests.length === 0) return first;
   deps.write(path.join(cwd, 'vitest.mutants-consumers.config.ts'), consumerConfig(tests));
-  const second = await strykerReport(deps, cwd, opts, 'contract', ['--vitest.configFile', 'vitest.mutants-consumers.config.ts'], signal);
+  const config = deps.readJson(path.join(cwd, 'stryker.config.json'));
+  const scratchConfig = { ...config, vitest: { ...config.vitest, configFile: 'vitest.mutants-consumers.config.ts' } };
+  deps.write(path.join(cwd, 'stryker.mutants-consumers.config.json'), `${JSON.stringify(scratchConfig, null, 2)}\n`);
+  const second = await strykerReport(deps, cwd, opts, 'contract', ['stryker.mutants-consumers.config.json'], signal);
   return mergeReports(first, second, opts.file);
 }
 
@@ -299,5 +298,5 @@ async function cli(argv, deps = defaultDeps(), events = process) {
   }
 }
 
-Object.assign(module.exports, { parseArgs, importsModule, consumerTests, consumerConfig, mergeReports, measure, summary, strykerReport, runMeasurement, runConsumers, defaultDeps, cli });
+module.exports = { classText, kindOf, namedRanges, functionRanges, functionOf, tierOf, countsOf, scoreOf, evaluate, compareResults, parseArgs, importsModule, consumerTests, consumerConfig, mergeReports, measure, summary, strykerReport, runMeasurement, runConsumers, defaultDeps, cli };
 if (require.main === module) cli(process.argv.slice(2)).then(code => { process.exitCode = code; }, error => { console.error(error.message); process.exitCode = 1; });

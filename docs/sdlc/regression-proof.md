@@ -71,11 +71,21 @@ Cite the comment in the PR body: the commit, then the file, line and mutator of 
 The report does **not** stand in when the fix is outside `packages/*/src` (scripts, workflows,
 configuration, documents), when the change only deletes code or only edits a module-level constant
 (the job skips static mutants), when the change is test-only or removes a hidden dependency, when the
-test pins timing or load, or when no pull request exists yet. Use the matching recipe then. To measure a whole file, run
-`node .github/scripts/mutants-file.cjs packages/<package>/src/<file>.ts --out /tmp/result.json`.
+test pins timing or load, or when no pull request exists yet. Use the matching recipe then. To run
+the job by hand, do it in a scratch worktree where Squeal does not run, because Stryker edits files in
+place: `STRYKER_PROJECT=<package> pnpm exec stryker run --mutate 'packages/<package>/src/<file>.ts:<from>-<to>'`.
+
+To measure a whole file, run:
+
+```bash
+node .github/scripts/mutants-file.cjs packages/<package>/src/<file>.ts \
+  --out ~/.cache/cez/mutants/result.json
+```
+
 The command creates and removes its own disposable worktree, so Stryker never edits the worktree
 that Squeal validates. Contract files also run their direct server and web consumer tests; add
-`--tests <test files>` for more contract consumers. Use `--compare /tmp/earlier.json` to compare runs.
+`--tests <test files>` for more contract consumers. Use `--compare ~/.cache/cez/mutants/earlier.json`
+to compare runs.
 
 ## Test-only change that removes a hidden dependency
 
