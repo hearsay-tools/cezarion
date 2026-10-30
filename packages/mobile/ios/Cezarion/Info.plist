@@ -22,6 +22,10 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSCameraUsageDescription</key>
+	<string>Cezarion uses the camera only when you choose to take a photo or video to attach in the cockpit.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Cezarion uses the microphone only when you record a video to attach in the cockpit.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -31,6 +31,8 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UIRequiresFullScreen: false
         ITSAppUsesNonExemptEncryption: false
+        NSCameraUsageDescription: Cezarion uses the camera only when you choose to take a photo or video to attach in the cockpit.
+        NSMicrophoneUsageDescription: Cezarion uses the microphone only when you record a video to attach in the cockpit.
   CezarionTests:
     type: bundle.unit-test
     platform: iOS
