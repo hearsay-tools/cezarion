@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -5,7 +6,6 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
-import * as skills from '../skills.ts';
 import type { Skill } from '../skills.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
@@ -61,9 +61,7 @@ describe('loading a run\'s skill registry', () => {
   let store: RunStore;
   let manager: RunManager;
   const skill = (name: string): Skill => ({ name, description: name, body: `${name} body`, path: `/skills/${name}.md`, source: 'cezar' });
-  type Loader = (state: ActiveRun, onFailure: 'throw' | 'ignore') => Promise<void>;
-  type Internals = { loadRunSkills: Loader; enabledSkills(state: ActiveRun): Skill[] };
-  const internals = () => manager as unknown as Internals;
+  const internals = () => runInternals(manager).runSkills;
   const freshState = () => createActiveRun({ cwd: repoRoot, pendingHumanAsk: false, autonomous: false });
 
   beforeEach(() => {
@@ -74,20 +72,22 @@ describe('loading a run\'s skill registry', () => {
 
   afterEach(async () => {
     await drainFixtureManagers(repoRoot);
+    const discover = runInternals(manager).runSkills.discoverSkills;
+    if (vi.isMockFunction(discover)) expect(discover).toHaveBeenCalled();
     vi.restoreAllMocks();
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
   it('stores the discovered registry', async () => {
-    vi.spyOn(skills, 'discoverSkills').mockResolvedValue([skill('a')]);
+    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockResolvedValue([skill('a')]);
     const state = freshState();
     await internals().loadRunSkills(state, 'throw');
     expect(internals().enabledSkills(state).map((s) => s.name)).toEqual(['a']);
   });
 
   it("a failed discovery with 'throw' rejects and leaves the registry as it was (a fresh run fails, as before)", async () => {
-    vi.spyOn(skills, 'discoverSkills').mockResolvedValueOnce([skill('a')]).mockRejectedValueOnce(new Error('boom'));
+    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockResolvedValueOnce([skill('a')]).mockRejectedValueOnce(new Error('boom'));
     const state = freshState();
     await internals().loadRunSkills(state, 'throw');
     await expect(internals().loadRunSkills(state, 'throw')).rejects.toThrow('boom');
@@ -95,7 +95,7 @@ describe('loading a run\'s skill registry', () => {
   });
 
   it("a failed discovery with 'ignore' resolves and keeps the registry it had (a Continue never breaks)", async () => {
-    vi.spyOn(skills, 'discoverSkills').mockResolvedValueOnce([skill('a')]).mockRejectedValueOnce(new Error('boom'));
+    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockResolvedValueOnce([skill('a')]).mockRejectedValueOnce(new Error('boom'));
     const state = freshState();
     await internals().loadRunSkills(state, 'ignore');
     await expect(internals().loadRunSkills(state, 'ignore')).resolves.toBeUndefined();
@@ -103,7 +103,7 @@ describe('loading a run\'s skill registry', () => {
   });
 
   it("a failed first discovery with 'ignore' leaves an empty registry", async () => {
-    vi.spyOn(skills, 'discoverSkills').mockRejectedValue(new Error('boom'));
+    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockRejectedValue(new Error('boom'));
     const state = freshState();
     await expect(internals().loadRunSkills(state, 'ignore')).resolves.toBeUndefined();
     expect(internals().enabledSkills(state)).toEqual([]);
@@ -145,6 +145,8 @@ describe('every entry path loads the registry, with no live session before it (o
   afterEach(async () => {
     await drainFixtureManagers(repoRoot);
     if (runId) manager.cancel(runId);
+    const discover = runInternals(manager).runSkills.discoverSkills;
+    if (vi.isMockFunction(discover)) expect(discover).toHaveBeenCalled();
     vi.restoreAllMocks();
     if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
     else process.env.CEZ_DRY_RUN = savedDryRun;
@@ -218,7 +220,7 @@ describe('every entry path loads the registry, with no live session before it (o
   }, 60_000);
 
   it('a failed discovery fails a fresh run, as before the loader', async () => {
-    vi.spyOn(skills, 'discoverSkills').mockRejectedValue(new Error('discovery boom'));
+    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockRejectedValue(new Error('discovery boom'));
     const record = manager.startRun(SINGLE_STEP, { task: 'do the first thing', worktree: false });
     runId = record.id;
     await waitFor(() => store.getRun(record.id)?.status === 'failed');
@@ -232,7 +234,7 @@ describe('every entry path loads the registry, with no live session before it (o
     expect(manager.finish(record.id)).toBe(true);
     await waitFor(() => ['done', 'review'].includes(store.getRun(record.id)?.status ?? ''));
 
-    vi.spyOn(skills, 'discoverSkills').mockRejectedValue(new Error('discovery boom'));
+    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockRejectedValue(new Error('discovery boom'));
     expect(manager.continueRun(record.id, { text: 'keep going' })).toEqual({ ok: true });
     await waitFor(() => store.getRun(record.id)?.status === 'waiting');
     expect(store.getRun(record.id)?.error).toBeUndefined();

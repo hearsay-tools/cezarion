@@ -1776,9 +1776,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
       deadline: new Set(['claude:default']),
       inFlight: new Set(),
     });
-    const held = (manager as unknown as {
-      requeueWhileHeld(id: string, definition: WorkflowDef, input: { task: string }, runner: 'claude', state: undefined, startAt: number): boolean;
-    }).requeueWhileHeld(record.id, workflow, { task: record.task }, 'claude', undefined, 1);
+    const held = runInternals(manager).stepLoop.requeueWhileHeld(record.id, workflow, { task: record.task }, 'claude', undefined, 1);
 
     expect(held).toBe(true);
     expect(store.getRun(record.id)).toMatchObject({ status: 'queued', startedAt });

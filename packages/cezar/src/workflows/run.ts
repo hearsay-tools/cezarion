@@ -115,10 +115,9 @@ import { contentBlocksOf, toPastedContent, type FileBlock, type PastedContent, t
 export { contentBlocksOf, highestImageSeq, mediaTypeFor, pastedAttachmentsNote, pastedAttachmentsText, toPastedContent, type FileBlock, type PastedContent, type PersistedAttachment } from './pasted-content.ts';
 import type { ContentBlock, ToolGrant } from '../core/agent-runner.ts';
 import { readProjectUiState } from '../ui-state.ts';
-import { discoverSkills, type Skill } from '../skills.ts';
+import { type Skill } from '../skills.ts';
 import { readAgentModelSettings } from '../agent-config/models.ts';
 import { resolveWorktreeRetention } from '../config.ts';
-import { type AutosaveReason } from '../git-worktree.ts';
 import { getRepoInfo } from '../server/git.ts';
 import { enqueueAgentInput } from '../delegation/input.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
@@ -408,7 +407,7 @@ export class RunManager {
     this.worktreeAutosave = new WorktreeAutosave(this.context,
       { holdForMaintenance: ids => this.claims.holdForMaintenance(ids),
         reapTerminalScratch: id => this.reapTerminalScratch(id), releaseSlot: () => this.line.releaseSlot(),
-        saveWorktree: (id, state, reason) => this.saveWorktree(id, state, reason),
+        saveWorktree: (id, state, reason) => this.worktreeAutosave.saveWorktree(id, state, reason),
         trackTurn: (id, task) => this.workerExecutions.trackTurn(id, task) },
     );
     this.orphans = new WorkerOrphans(this.context,
@@ -458,11 +457,11 @@ export class RunManager {
         releaseSlot: () => this.line.releaseSlot() },
     );
     this.turnBookkeeper = new TurnBookkeeper(this.context,
-      { isDisposedDelegatedRun: id => isDisposedDelegatedRun(this.store, () => this.disposed, id), discoverSkills: () => this.discoverSkills(),
+      { isDisposedDelegatedRun: id => isDisposedDelegatedRun(this.store, () => this.disposed, id), discoverSkills: () => this.runSkills.discoverSkills(),
         reviveWorkflow: run => queuedRevival.reviveWorkflow(this.context, this.queuedRevivalHost, run), trackTurn: (id, task) => this.workerExecutions.trackTurn(id, task) },
     );
     this.runSkills = new RunSkills(this.context,
-      { discoverSkills: () => this.discoverSkills(), workerExecutionStopped: id => this.workerExecutionStopped(id),
+      { builtinSkills: () => this.builtinSkills(), workerExecutionStopped: id => this.workerExecutionStopped(id),
         isCurrentState: (id, state) => this.active.get(id) === state, flushAgentInputs: id => this.inputDelivery.flushAgentInputs(id) },
     );
     this.stepSession = new StepSession(this.context, {
@@ -532,8 +531,8 @@ export class RunManager {
         active: this.active, isSyntheticContinuation: (run, step) => isSyntheticContinuation(run, step),
         generation: id => this.continuationAcceptance.generation(id), isActive: id => this.isActive(id),
         move: (id, exit, patch) => this.move(id, exit, patch), dropActive: id => this.dropActive(id),
-        saveWorktree: (id, state, reason) => this.saveWorktree(id, state, reason),
-        settleSuccess: (id, durable, keep) => this.runSettlement.settleSuccess(id, durable, keep),
+        saveWorktree: (id, state, reason) => this.worktreeAutosave.saveWorktree(id, state, reason),
+        settleSuccess: (id, durable, keep) => this.settleSuccess(id, durable, keep),
         deferParentCompletion: id => this.deferParentCompletion(id),
         closingWakeDecision: (id, holds, cancelled, error) => this.wakeAdmission.closingWakeDecision(id, holds, cancelled, error),
         owesDelivery: id => this.wakeAdmission.owesDelivery(id), preserveRunAfterDisposal: (id, state) => preserveRunAfterDisposal(this.store, () => this.disposed, id, state),
@@ -548,10 +547,10 @@ export class RunManager {
       beginUsageInvocation: (...args) => beginUsageInvocation(this.store, ...args),
       trackWorkerSessionResult: (...args) => this.workerExecutions.trackWorkerSessionResult(...args),
       recordUsagePeaks: id => recordUsagePeaks(this.store, { isDisposedDelegatedRun: id => isDisposedDelegatedRun(this.store, () => this.disposed, id) }, id),
-      saveWorktree: (...args) => this.saveWorktree(...args), pump: () => this.line.pump(),
+      saveWorktree: (...args) => this.worktreeAutosave.saveWorktree(...args), pump: () => this.line.pump(),
       makeUiSink: (...args) => sessionEvents.makeUiSink(this.context, this.sessionHelperHost, ...args),
       repositoryRootLockDisabled: () => repositoryRootLockDisabled(),
-      prepareWorktree: (...args) => this.prepareWorktree(...args),
+      prepareWorktree: (...args) => this.stepLoop.prepareWorktree(...args),
       workerStep: (...args) => this.workerStep(...args),
       latchAgentInputError: (...args) => this.latchAgentInputError(...args),
       reconcileWorkerWaits: () => this.reconcileWorkerWaits(),
@@ -655,7 +654,7 @@ export class RunManager {
       state.revokeCiTools?.(); state.revokeCiTools = undefined;
       state.revokeDelegation?.(); state.revokeDelegation = undefined;
       clearIdleTimer(state);
-      this.clearAutosaveTimer(state);
+      clearAutosaveTimer(state);
       state.releaseRepoRoot?.();
       state.releaseRepoRoot = undefined;
     }
@@ -765,12 +764,6 @@ export class RunManager {
   private sessionContextFor(runId: string, state: ActiveRun, stepId: string, openingPrompt: string): SessionContext {
     return launchContext.sessionContextFor({ store: this.store, repoRoot: this.repoRoot, dataDir: this.dataDir }, runId, state, stepId, openingPrompt);
   }
-  /** Every skill lookup in this manager goes through here, so the built-ins reach all of them. */
-  private discoverSkills(): Promise<Skill[]> {
-    return discoverSkills(this.repoRoot, { builtin: this.builtinSkills() });
-  }
-  private loadRunSkills(state: ActiveRun, onFailure: 'throw' | 'ignore'): Promise<void> { return this.runSkills.loadRunSkills(state, onFailure); }
-  private enabledSkills(state: ActiveRun): Skill[] { return this.runSkills.enabledSkills(state); }
 
   private delegationProvisioner?: DelegationProvisioner | undefined;
   setDelegationProvisioner(provisioner: DelegationProvisioner): () => void {
@@ -1033,7 +1026,7 @@ export class RunManager {
       const state = this.active.get(runId);
       if (state) {
         clearIdleTimer(state);
-        this.clearAutosaveTimer(state);
+        clearAutosaveTimer(state);
       }
       this.line.unmarkStarting(runId);
       this.dropActive(runId);
@@ -1087,7 +1080,7 @@ export class RunManager {
     releaseActiveResources(this.store, runId, state);
     if (state) {
       clearIdleTimer(state);
-      this.clearAutosaveTimer(state);
+      clearAutosaveTimer(state);
       clearHeldHumanInputTimer(state);
     }
     this.line.forget(runId);
@@ -1117,14 +1110,6 @@ export class RunManager {
 
   // ---- usage-limit auto-resume (spec 2026-08-03-auto-resume-after-usage-limit) --------------
 
-  private requeueWhileHeld(
-    runId: string,
-    workflow: WorkflowDef,
-    input: StartRunInput,
-    runner: RunnerId,
-    state?: ActiveRun,
-    startAt?: number,
-  ): boolean { return this.stepLoop.requeueWhileHeld(runId, workflow, input, runner, state, startAt); }
 
   accountHolds(now = Date.now()): AccountHolds {
     return deriveAccountHolds(this.store.listRuns(), run => this.wakeAdmission.withExecutionAccount(run), now);
@@ -1150,10 +1135,6 @@ export class RunManager {
 
   private readonly turnBookkeeper: TurnBookkeeper;
   /** Test seam: the module owns this same map for its whole lifetime. */
-
-  private async acquireRepoRoot(runId: string, state: ActiveRun): Promise<boolean> {
-    return this.repoRootLease.acquireRepoRoot(runId, state);
-  }
 
   cancel(runId: string): boolean {
     // Another process's run (#779, plan step 3): only its owner can stop it.
@@ -1382,7 +1363,7 @@ export class RunManager {
     this.line.enqueueContinuation(runId, continuation, true);
     this.store.updateStep(runId, continuation.stepId, { status: 'pending' });
     this.move(runId, 'requeue', { currentStepId: undefined });
-    if (state) this.clearAutosaveTimer(state);
+    if (state) clearAutosaveTimer(state);
     this.line.unmarkStarting(runId); this.dropActive(runId);
     return true;
   }
@@ -1689,7 +1670,7 @@ export class RunManager {
         // A cancel during the wait leaves the lease ungranted; the step loop
         // below breaks on `cancelled` before touching the tree and settles the
         // run through the usual path.
-        await this.acquireRepoRoot(runId, state);
+        await this.repoRootLease.acquireRepoRoot(runId, state);
       }
       // THE window that matters for an in-place run. Waiting for the exclusive tree can take
       // minutes, and a run parked on that lease holds no slot (#347) — so the queue keeps
@@ -1711,7 +1692,7 @@ export class RunManager {
 
     // Every entry path loads the registry — `runContinuation` loads its own, and the one that
     // skipped this leaked raw `/skill` text to the backend (open-mercato/cezar#811). A failed discovery fails the run.
-    await this.loadRunSkills(state, 'throw');
+    await this.runSkills.loadRunSkills(state, 'throw');
     const loop = await this.stepLoop.runWorkflowSteps(execution, launch, { ...openingInputs(this.store, this.dataDir, execution), setupNote });
     if (loop) await this.runSettlement.settleExecution(runId, state, loop);
   }
@@ -1755,24 +1736,8 @@ export class RunManager {
     return this.store.updateRun(runId, { ...patch, ...(status === 'failed' ? settledRootFinishPatch(this.store, runId) : {}), status });
   }
 
-  autosaveCleanupBlocker(runId: string): string | undefined {
+  private autosaveCleanupBlocker(runId: string): string | undefined {
     return this.worktreeAutosave.autosaveCleanupBlocker(runId);
-  }
-
-  private async saveWorktree(runId: string, state: ActiveRun, reason: AutosaveReason): Promise<void> {
-    return this.worktreeAutosave.saveWorktree(runId, state, reason);
-  }
-
-  private armAutosave(runId: string, state: ActiveRun): void {
-    this.worktreeAutosave.armAutosave(runId, state);
-  }
-
-  private clearAutosaveTimer(state: ActiveRun): void {
-    clearAutosaveTimer(state);
-  }
-
-  private async prepareWorktree(...args: Parameters<WorkflowStepLoop['prepareWorktree']>): Promise<string | undefined> {
-    return this.stepLoop.prepareWorktree(...args);
   }
 
 }

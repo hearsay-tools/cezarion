@@ -1,3 +1,4 @@
+import { runInternals } from '../workflows/run-internals.testkit.ts';
 import childProcess, { execFileSync, spawn, type ChildProcess, type ExecFileOptions, type SpawnOptions } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
@@ -321,7 +322,7 @@ churn();`], { cwd: dir, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
               const notes = store.readEvents(runId).filter(event => event.type === 'note').map(event => String(event.message));
               expect(notes.filter(note => /autosave (failed|unsuccessful)|termination not confirmed|cleanup/.test(note))).toEqual([]);
               expect(execFileSync('git', ['show', 'HEAD:progress.txt'], { cwd: dir, encoding: 'utf8' })).toBe('save me\n');
-              expect(manager.autosaveCleanupBlocker(runId)).toBeUndefined();
+              expect(runInternals(manager).worktreeAutosave.autosaveCleanupBlocker(runId)).toBeUndefined();
               const release = manager.claimForPublish(runId);
               expect(release).not.toBeNull(); release?.();
               expect(unrelated.exitCode).toBeNull();

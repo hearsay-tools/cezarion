@@ -37,7 +37,7 @@ type PreviewCallback = (request: PreviewServeRequest, signal?: AbortSignal) => P
  * The preview capability rides the CI tool session, so every start, Continue and recovered launch
  * must hand the controller the same callback (#811's class: `ActiveRun` has two construction sites).
  */
-describe('RunManager.registerPreviewServer (#781)', { timeout: 30_000 }, () => {
+describe('preview registration (open-mercato/cezar#781)', { timeout: 30_000 }, () => {
   let repoRoot: string;
   let store: RunStore;
   let manager: RunManager | undefined;
