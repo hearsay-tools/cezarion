@@ -431,6 +431,70 @@ describe('the branch classifier (issue 08 §A)', () => {
     expect(await stat()).toEqual(text);
   });
 
+  describe('branch deletion guard regressions (hearsay-tools/cezarion#2291)', () => {
+    it('returns the exact refusal for each protected or missing branch', async () => {
+      await taskBranch(root, 'cez/aaaaaaaa', 2);
+      await git(root, 'branch', 'mine');
+      const runs = [runRecord('aaaaaaaa-1', 'done')];
+      expect(await deleteBranches(input({ runs }), ['main', 'mine', 'missing', 'cez/aaaaaaaa'])).toEqual({
+        deleted: [],
+        refused: [
+          { name: 'main', reason: 'in use — a live or reviewable task, a checkout, or the base branch' },
+          { name: 'mine', reason: 'not a cezar task branch' },
+          { name: 'missing', reason: 'no such local branch' },
+          { name: 'cez/aaaaaaaa', reason: 'has 2 commit(s) not on main — delete it on its own, with confirmation' },
+        ],
+      });
+      expect(await deleteBranches(input({ runs }), ['cez/aaaaaaaa'], 'wrong')).toEqual({
+        deleted: [], refused: [{ name: 'cez/aaaaaaaa', reason: 'type the branch name to confirm deleting work that is not on the base' }],
+      });
+    });
+
+    it('deduplicates a confirmed request and returns exact dropped commit hashes', async () => {
+      const tip = await taskBranch(root, 'cez/aaaaaaaa', 1);
+      const runs = [runRecord('aaaaaaaa-1', 'done')];
+      await git(root, 'config', 'branch.cez/aaaaaaaa.description', 'task branch');
+      expect(await deleteBranches(input({ runs }), ['cez/aaaaaaaa', 'cez/aaaaaaaa'], 'cez/aaaaaaaa')).toEqual({
+        deleted: ['cez/aaaaaaaa'], refused: [], dropped: [{ sha: tip, subject: 'cez/aaaaaaaa work 0' }],
+      });
+      expect(await git(root, 'config', '--local', '--list')).not.toContain('branch.cez/aaaaaaaa.');
+    });
+
+    it('claims all branch owners and releases successful claims when another branch is refused', async () => {
+      await git(root, 'branch', 'cez/aaaaaaaa');
+      await git(root, 'branch', 'cez/bbbbbbbb');
+      const runs = [
+        runRecord('aaaaaaaa-1', 'done'),
+        runRecord('aaaaaaaa-2', 'done'),
+        runRecord('bbbbbbbb-1', 'done'),
+      ];
+      const release = vi.fn();
+      const claimRuns = vi.fn((ids: readonly string[]) => ids.includes('bbbbbbbb-1') ? null : release);
+      expect(await deleteBranches(input({ runs, claimRuns }), ['cez/aaaaaaaa', 'cez/bbbbbbbb'])).toEqual({
+        deleted: ['cez/aaaaaaaa'],
+        refused: [{ name: 'cez/bbbbbbbb', reason: 'its task is running or being continued — try again once it settles' }],
+      });
+      expect(claimRuns.mock.calls).toEqual([[['aaaaaaaa-1', 'aaaaaaaa-2']], [['bbbbbbbb-1']]]);
+      expect(release).toHaveBeenCalledOnce();
+      expect(await git(root, 'rev-parse', 'cez/bbbbbbbb')).toBe(await git(root, 'rev-parse', 'main'));
+    });
+
+    it('claims a run once when both its starter and recorded PR branch are deleted', async () => {
+      await git(root, 'branch', 'cez/aaaaaaaa');
+      const tip = await taskBranch(root, 'fix/landed', 1);
+      const merged = await commit(root, 'squash.txt', 'landed work');
+      const runs = [runRecord('aaaaaaaa-1', 'done', { pullRequestUrl: 'https://github.com/acme/demo/pull/7' })];
+      const { forge } = fakeForge({ prs: [mergedPr(7, 'fix/landed', tip, merged)] });
+      const release = vi.fn();
+      const claimRuns = vi.fn(() => release);
+      expect(await deleteBranches(input({ runs, forge, claimRuns }), ['cez/aaaaaaaa', 'fix/landed'])).toEqual({
+        deleted: ['cez/aaaaaaaa', 'fix/landed'], refused: [],
+      });
+      expect(claimRuns.mock.calls).toEqual([[['aaaaaaaa-1']]]);
+      expect(release).toHaveBeenCalledOnce();
+    });
+  });
+
   describe('deleteBranches', () => {
     it('never lets two empty branches vouch for each other in one bulk delete', async () => {
       // Both fork from an unmerged topic tip with no commits of their own; then the topic goes.
