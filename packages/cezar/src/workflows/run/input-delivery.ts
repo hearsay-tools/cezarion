@@ -11,7 +11,8 @@ import { contentBlocksOf, pastedAttachmentsNote } from '../pasted-content.ts';
 import { startCompletionCycle } from '../completion-policy.ts';
 import { chargesBudget, hasPrWait, isMonitoringTimer, openWaitsFooter, resolvedWaits, waitInputId } from '../waits.ts';
 import { transition, type RunExitId } from '../run-states.ts';
-import { agentInputBatch } from '../../delegation/input.ts';
+import { DelegationPolicyError } from '../../delegation/policy.ts';
+import { enqueueAgentInput, agentInputBatch } from '../../delegation/input.ts';
 import { answersQuestion } from '../../delegation/questions.ts';
 import { acknowledgedBatch } from '../outcome-batches.ts';
 import { analyseAcknowledgedInput, type AcknowledgedInput } from '../input-acknowledgement.ts';
@@ -44,7 +45,7 @@ interface InputDeliveryHost {
   workerExecutionStopped(id: string): boolean; executionBlockedByRootFinish(run: RunRecord): boolean;
   hasUnansweredHumanAsk(id: string): boolean; countAutomaticWakes(id: string, budget?: HumanAnswerBudget): number;
   recoveringRun(id: string): boolean; continueRun(id: string, opts: ContinueRunOptions, defer: boolean): { ok: boolean; error?: string };
-  latchAgentInputError(id: string, state: ActiveRun, session: AgentSession, message: string): void;
+  canProceedWithRun(id: string, run: RunRecord | undefined): boolean;
   parkForUser(id: string, state: ActiveRun, step: string | undefined): void;
   settleTurn(id: string, state: ActiveRun, entry: 'ack' | 'ready', turn: SettledTurn): boolean;
   boundaryTurn(id: string, state: ActiveRun, session: AgentSession, done: boolean): SettledTurn;
@@ -64,6 +65,47 @@ function unreadInputUnconfirmedNote(count: number): string {
 
 export class InputDelivery {
   constructor(private readonly context: RunModuleContext, private readonly host: InputDeliveryHost, private readonly maxAutoContinues: number, private readonly routedQuestionRefusal: string) {}
+
+  steerWorker(runId: string, input: AgentInput): 'queued' | 'delivered' {
+    const run = this.context.store.getRun(runId);
+    if (!run || run.delegation?.role !== 'worker' || run.delegation.parentRunId !== input.parentRunId) {
+      throw new DelegationPolicyError('denied_scope', 'not an owned worker');
+    }
+    if (this.host.executionBlockedByRootFinish(run)) throw new DelegationPolicyError('incompatible_state', 'parent finish is pending');
+    const queue = enqueueAgentInput(run, input);
+    this.context.store.commitAgentInputs(runId, queue);
+    this.context.store.appendEvent(runId, { type: 'agent-input', input: queue[queue.length - 1] });
+    this.flushAgentInputs(runId);
+    const error = this.host.active.get(runId)?.agentInputError;
+    if (error) throw new DelegationPolicyError('incompatible_state', error);
+    return this.context.store.getRun(runId)?.agentInputs?.find(entry => entry.id === input.id)?.deliveredAt ? 'delivered' : 'queued';
+  }
+
+  sendMessage(runId: string, content: PastedContent[], messageId?: string): boolean {
+    const delivered = this.deliverMessage(runId, content, true, messageId);
+    if (delivered) {
+      const state = this.host.active.get(runId);
+      if (state) state.monitoringCapNoted = undefined;
+    }
+    return delivered;
+  }
+
+  respondPermission(runId: string, requestId: string, optionId: string): boolean {
+    const state = this.host.active.get(runId);
+    const run = this.context.store.getRun(runId);
+    if (this.context.disposed() || !state?.session?.open || state.cancelled || state.finishRequested || !this.host.canProceedWithRun(runId, run) ||
+        !state.pendingPermissions?.has(requestId)) return false;
+    return state.session.respondPermission?.(requestId, optionId) ?? false;
+  }
+
+  /** Latch an agent input error, then interrupt: a transport failure the interrupt causes is secondary. */
+  latchAgentInputError(runId: string, state: ActiveRun, session: AgentSession, message: string): void {
+    state.agentInputError = message;
+    try { session.interrupt(); } finally {
+      try { this.context.store.appendEvent(runId, { type: 'error', message }); }
+      catch { console.error(`[cez] ${message}`); }
+    }
+  }
 
   deliverConversationInput(runId: string): void {
     if (this.context.disposed()) return;
@@ -335,7 +377,7 @@ export class InputDelivery {
       !!this.context.store.getRun(runId) && !this.host.executionBlockedByRootFinish(this.context.store.getRun(runId)!);
     const fail = (error: unknown, checkpoint: boolean): void => {
       if (!current() || state.agentSessionError || state.agentInputError) return;
-      this.host.latchAgentInputError(runId, state, session, `${checkpoint ? 'agent input delivery checkpoint failed' : 'agent input delivery failed'}: ${error instanceof Error ? error.message : String(error)}`);
+      this.latchAgentInputError(runId, state, session, `${checkpoint ? 'agent input delivery checkpoint failed' : 'agent input delivery failed'}: ${error instanceof Error ? error.message : String(error)}`);
     };
     let acknowledgement: false | Promise<void>;
     // A wake beside a pending question tells the runner so: native wires refuse agent input while a portable CEZ:ASK is pending, and this input is not its answer. The question stays Cezar's and its card stays answerable; the provider's acknowledgement is still the checkpoint, and a rejected one fails the session like any other, leaving the waits resolved for a continuation.

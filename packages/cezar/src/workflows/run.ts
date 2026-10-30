@@ -118,8 +118,6 @@ import { type Skill } from '../skills.ts';
 import { readAgentModelSettings } from '../agent-config/models.ts';
 import { resolveWorktreeRetention } from '../config.ts';
 import { getRepoInfo } from '../server/git.ts';
-import { enqueueAgentInput } from '../delegation/input.ts';
-import { DelegationPolicyError } from '../delegation/policy.ts';
 import { projectConversationEvents, settledRunFamilies } from '../delegation/conversations.ts';
 import * as queuedRevival from './run/queued-revival.ts';
 import type { RunOutcome } from '../runs/outcome-commit.ts';
@@ -502,7 +500,8 @@ export class RunManager {
     this.wakeAdmission = new WakeAdmission(this.context, {
       active: this.active, retries: this.retries, line: this.line, waitWatches: this.waitWatches, waitRegistry: this.waitRegistry,
       inboxClaims: this.inboxClaims, workerQuestions: this.workerQuestions, humanWaits: this.humanWaits,
-      isActive: id => this.isActive(id), move: (id, exit) => this.move(id, exit), recoveringRun: run => this.recovery.recoveringRun(run),
+      isActive: id => this.isActive(id), move: (id, exit) => this.move(id, exit),
+      recoveringRun: run => this.recovery.recoveringRun(run),
       continueRun: (id, opts, defer) => this.continueRun(id, opts, defer), disarmWait: id => this.disarmWait(id),
       reconcileWorkerWaits: id => this.reconcileWorkerWaits(id), releaseSlot: () => this.line.releaseSlot(),
       parkForUser: (id, state, step) => this.turnSettler.parkForUser(id, state, step), armIdleTimer: (id, state) => this.turnSettler.armIdleTimer(id, state),
@@ -548,7 +547,7 @@ export class RunManager {
       repositoryRootLockDisabled: () => repositoryRootLockDisabled(),
       prepareWorktree: (...args) => this.stepLoop.prepareWorktree(...args),
       workerStep: (...args) => this.workerStep(...args),
-      latchAgentInputError: (...args) => this.latchAgentInputError(...args),
+      latchAgentInputError: (...args) => this.inputDelivery.latchAgentInputError(...args),
       reconcileWorkerWaits: () => this.reconcileWorkerWaits(),
       holdContinuationForRootFinish: (...args) => this.runFinish.holdContinuationForRootFinish(...args),
     }, this.line, this.sessionHelperHost, this.repoRootLease, this.worktreeAutosave, this.runSkills,
@@ -600,10 +599,10 @@ export class RunManager {
       attachments: this.attachments, humanWaits: this.humanWaits, workerQuestions: this.workerQuestions,
       waitRegistry: this.waitRegistry, inputReceiptHost: this.inputReceiptHost,
       isActive: id => this.isActive(id), move: (id, exit) => this.move(id, exit),
+      canProceedWithRun: (id, run) => this.canProceedWithRun(id, run),
       workerExecutionStopped: id => this.workerExecutionStopped(id), executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
       hasUnansweredHumanAsk: id => this.hasUnansweredHumanAsk(id), countAutomaticWakes: (id, budget) => this.wakeAdmission.automaticWakes(id, budget),
       recoveringRun: id => this.recovery.recoveringRun(id), continueRun: (id, opts, defer) => this.continueRun(id, opts, defer),
-      latchAgentInputError: (id, state, session, message) => this.latchAgentInputError(id, state, session, message),
       parkForUser: (id, state, step) => this.turnSettler.parkForUser(id, state, step), settleTurn: (id, state, entry, turn) => this.turnSettler.settleTurn(id, state, entry, turn),
       boundaryTurn: (id, state, session, done) => this.turnSettler.boundaryTurn(id, state, session, done),
       canAutoContinue: (id, state) => this.turnNudges.canAutoContinue(id, state), armNoWaitNudgeReplyTimer: (id, state) => this.turnNudges.armNoWaitNudgeReplyTimer(id, state),
@@ -1056,20 +1055,7 @@ export class RunManager {
   reconcileWorkerWaits(familyRootId?: string): void { this.familyReconciler.reconcileWorkerWaits(familyRootId); }
 
   /** Durable queue is the single hydration source for fresh, continuing and recovered runs. */
-  steerWorker(runId: string, input: AgentInput): 'queued' | 'delivered' {
-    const run = this.store.getRun(runId);
-    if (!run || run.delegation?.role !== 'worker' || run.delegation.parentRunId !== input.parentRunId) {
-      throw new DelegationPolicyError('denied_scope', 'not an owned worker');
-    }
-    if (this.executionBlockedByRootFinish(run)) throw new DelegationPolicyError('incompatible_state', 'parent finish is pending');
-    const queue = enqueueAgentInput(run, input);
-    this.store.commitAgentInputs(runId, queue);
-    this.store.appendEvent(runId, { type: 'agent-input', input: queue[queue.length - 1] });
-    this.inputDelivery.flushAgentInputs(runId);
-    const error = this.active.get(runId)?.agentInputError;
-    if (error) throw new DelegationPolicyError('incompatible_state', error);
-    return this.store.getRun(runId)?.agentInputs?.find(entry => entry.id === input.id)?.deliveredAt ? 'delivered' : 'queued';
-  }
+  steerWorker(runId: string, input: AgentInput): 'queued' | 'delivered' { return this.inputDelivery.steerWorker(runId, input); }
 
   private pendingHumanAskSeq(runId: string): number | undefined {
     return pendingAskFacts.pendingHumanAskSeq(this.store, runId);
@@ -1120,23 +1106,10 @@ export class RunManager {
    * while `waiting`). Returns false when there is no open session — the GUI
    * then offers "Continue" instead.
    */
-  sendMessage(runId: string, content: PastedContent[], messageId?: string): boolean {
-    const delivered = this.inputDelivery.deliverMessage(runId, content, true, messageId);
-    if (delivered) {
-      const state = this.active.get(runId);
-      if (state) state.monitoringCapNoted = undefined;
-    }
-    return delivered;
-  }
+  sendMessage(runId: string, content: PastedContent[], messageId?: string): boolean { return this.inputDelivery.sendMessage(runId, content, messageId); }
 
   /** Only an explicit option from the permission card may answer a native grant. */
-  respondPermission(runId: string, requestId: string, optionId: string): boolean {
-    const state = this.active.get(runId);
-    const run = this.store.getRun(runId);
-    if (this.disposed || !state?.session?.open || state.cancelled || state.finishRequested || !this.canProceedWithRun(runId, run) ||
-        !state.pendingPermissions?.has(requestId)) return false;
-    return state.session.respondPermission?.(requestId, optionId) ?? false;
-  }
+  respondPermission(runId: string, requestId: string, optionId: string): boolean { return this.inputDelivery.respondPermission(runId, requestId, optionId); }
 
   finish(runId: string): boolean { return this.runFinish.finish(runId); }
 
@@ -1234,14 +1207,7 @@ export class RunManager {
       images, persistedImages, persistedAttachments, state, record, workspace.rematerialized);
   }
 
-  /** Latch an agent input error, then interrupt: a transport failure the interrupt causes is secondary. */
-  private latchAgentInputError(runId: string, state: ActiveRun, session: AgentSession, message: string): void {
-    state.agentInputError = message;
-    try { session.interrupt(); } finally {
-      try { this.store.appendEvent(runId, { type: 'error', message }); }
-      catch { console.error(`[cez] ${message}`); }
-    }
-  }
+
 
   // ---- execution -----------------------------------------------------------
 
