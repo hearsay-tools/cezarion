@@ -1,7 +1,9 @@
 import type { RunSummary } from '@open-mercato/cezar-api-client'
 import { isUsageLimitHold } from '@open-mercato/cezar-api-client/contract/waits'
-import { canBeUnread as contractCanBeUnread, isUnread as contractIsUnread } from '@open-mercato/cezar-api-client/contract/run-predicates'
+import { isUnread } from '@open-mercato/cezar-api-client/contract/run-predicates'
 import type { ReadStateInput } from '@open-mercato/cezar-api-client'
+// Read receipts must not change the status dot.
+export { canBeUnread, isUnread } from '@open-mercato/cezar-api-client/contract/run-predicates'
 export type { ReadStateInput } from '@open-mercato/cezar-api-client'
 import { isOwnedWorker } from './task-groups'
 
@@ -12,16 +14,6 @@ const DONE_STATUSES: readonly RunSummary['status'][] = ['done', 'failed', 'cance
  *  applies to (the "Finished" bucket); everything else carries its live attention signal instead. */
 export function isDoneItem(status: RunSummary['status']): boolean {
   return DONE_STATUSES.includes(status)
-}
-
-/** Receipt-independent eligibility, shared with the store's mark-read sweep. */
-export function canBeUnread(run: ReadStateInput): boolean {
-  return contractCanBeUnread(run)
-}
-
-/** A finished eligible outcome not seen since it finished. */
-export function isUnread(run: ReadStateInput): boolean {
-  return contractIsUnread(run)
 }
 
 /**
