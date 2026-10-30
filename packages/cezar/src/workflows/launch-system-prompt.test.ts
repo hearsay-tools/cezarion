@@ -93,7 +93,7 @@ describe('launch system prompt at both sites (#1632)', () => {
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     manager = createFixtureManager(store, repoRoot);
     manager.setCockpitAddress({ origin: 'http://127.0.0.1:5555', projectId });
-    manager.setDelegationProvisioner(() => ({ env: {}, instructions: DELEGATION, restrictNativeDelegation: true, revoke: () => {} }));
+    manager.setDelegationProvisioner(() => ({ env: {}, instructions: DELEGATION, restrictCrossSessionMessaging: true, revoke: () => {} }));
   });
 
   afterEach(async () => {

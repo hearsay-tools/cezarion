@@ -95,7 +95,7 @@ export const CODEX_SPEC_SUPPORT: AgentRunSpecSupport = {
   images: { honored: false, reason: 'the adapter sends text input items only; image blocks are dropped' },
   cwd: { honored: true, via: 'spawn cwd, and the thread/start / thread/resume cwd' },
   toolGrant: { honored: false, reason: 'no per-tool allowlist on the app-server, so no command-prefix restriction either; managed permissions and approval policy belong to Codex' },
-  restrictNativeDelegation: { honored: true, via: 'thread/start and thread/resume config features.multi_agent=false, features.multi_agent_v2=false (D1)' },
+  restrictCrossSessionMessaging: { honored: true, via: 'thread/start and thread/resume config features.agent_message_board=false; multi-agent tools reach only the session\'s own agents and stay as configured (hearsay-tools/cezarion#2279)' },
   additionalDirectories: { honored: false, reason: 'no extra-root mapping; managed filesystem permissions belong to Codex' },
   env: { honored: true, via: 'merged over the child env through buildCodexAppServerEnv' },
   model: { honored: true, via: 'thread/start and thread/resume model' },
@@ -654,11 +654,11 @@ class CodexSession implements AgentSession {
       cwd: this.spec.cwd,
       ...codexToolGrantFields(this.spec.toolGrant),
       ...codexPermissionOverrides(requirements, restrictNetwork),
-      // ThreadStartParams AND ThreadResumeParams accept dotted config overrides.
-      // Both feature generations exist in Codex 0.153.4; no global config write.
-      ...((restrictNetwork || this.spec.restrictNativeDelegation || this.spec.cezarTools) ? { config: {
+      // Start and resume accept dotted config overrides; no global config write. Governed sessions
+      // keep multi-agent and lose only the cross-thread message board (hearsay-tools/cezarion#2279).
+      ...((restrictNetwork || this.spec.restrictCrossSessionMessaging || this.spec.cezarTools) ? { config: {
         ...(restrictNetwork ? { 'sandbox_workspace_write.network_access': false } : {}),
-        ...(this.spec.restrictNativeDelegation ? { 'features.multi_agent': false, 'features.multi_agent_v2': false } : {}),
+        ...(this.spec.restrictCrossSessionMessaging ? { 'features.agent_message_board': false } : {}),
         // hearsay-tools/cezarion#1294: Codex asks before every MCP tool call unless the
         // server's mode is `approve`, and cezar's own tools must never wait on that.
         // approval_policy stays the user's (#381); older Codex ignores the unknown key.

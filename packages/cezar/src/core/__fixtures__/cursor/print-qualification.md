@@ -46,6 +46,10 @@ was unchanged, and no native worker was requested. The allowlisted summary
 and exact 59-name permitted list are in
 [`print-delegation.json`](print-delegation.json).
 
+> Historical since hearsay-tools/cezarion#2279: governed print turns no longer
+> pass this allowlist, so native subagent tools stay callable. The probe and
+> `print-delegation.json` stay as the record of the qualification.
+
 This proves the per-invocation allowlist is enforced across fresh and
 resumed print turns for the native tool schema. The omitted proto entries
 are the verified native entry points for this build. It does **not** isolate

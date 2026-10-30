@@ -227,7 +227,7 @@ export class StepSession {
           additionalDirectories: agentDirectories(join(this.context.dataDir, 'runs'), profile.env),
           env: { ...profile.env, ...delegation?.env, ...ciTools?.env },
           ...(ciTools ? { cezarTools: ciTools.descriptor } : {}),
-          ...(delegation ? { restrictNativeDelegation: delegation.restrictNativeDelegation } : {}),
+          ...(delegation ? { restrictCrossSessionMessaging: delegation.restrictCrossSessionMessaging } : {}),
           model: launch.model.backendModel,
           effort: launch.model.effectiveEffort,
           sessionId: launch.sessionId,

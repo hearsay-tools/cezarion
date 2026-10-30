@@ -1078,9 +1078,12 @@ describe('pi tool selection (hearsay-tools/cezarion#1305)', () => {
     expect(args[args.indexOf('--cezar-builtin-tools') + 1]!.split(',').filter((name) => name.startsWith('cezar_'))).toEqual([]);
   });
 
-  it('keeps --exclude-tools subagent on the default path under restrictNativeDelegation', () => {
-    const args = buildPiArgs({ ...base, toolGrant: { kind: 'step-default', tools: stepDefault }, restrictNativeDelegation: true });
-    expect(args).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--exclude-tools', 'subagent', ...defaultToolArgs('read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait')]);
+  // hearsay-tools/cezarion#2279: governed sessions keep the subagent extension.
+  it('sends the ordinary argv under restrictCrossSessionMessaging', () => {
+    const args = buildPiArgs({ ...base, toolGrant: { kind: 'step-default', tools: stepDefault }, restrictCrossSessionMessaging: true });
+    expect(args).not.toContain('--exclude-tools');
+    expect(args).toEqual(buildPiArgs({ ...base, toolGrant: { kind: 'step-default', tools: stepDefault } }));
+    expect(args).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, ...defaultToolArgs('read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait')]);
   });
 
   it('keeps the --tools allowlist for a narrowed list', () => {

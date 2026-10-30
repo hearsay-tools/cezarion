@@ -12,7 +12,6 @@ import { buildChildEnv } from './agent-env.ts';
 import { parseAskMarker } from './ask.ts';
 import { cezarToolEnvNames } from '../ci-wait/tools.ts';
 import type { ModelOption } from './runner-model-catalog.ts';
-import { SAFE_CURSOR_PRINT_TOOLS } from './cursor-print-tool-catalog.ts';
 import { cursorArgs } from './cursor-cli-flags.ts';
 import { sanitizeCursorProviderError } from './cursor-provider-error.ts';
 import { summarizeRunnerStderr } from './runner-stderr.ts';
@@ -28,7 +27,7 @@ export const CURSOR_PRINT_SPEC_SUPPORT: AgentRunSpecSupport = {
   images: { honored: true, via: 'private temporary image files passed with --image' },
   cwd: { honored: true, via: 'spawn cwd' },
   toolGrant: { honored: false, reason: 'No general Cezar tool-name to native Cursor tool-name mapping exists, and Cursor print has no per-command prefix allowlist' },
-  restrictNativeDelegation: { honored: true, via: 'strict --allowed-tools native catalog omitting delegation entries on every turn' },
+  restrictCrossSessionMessaging: { honored: false, reason: 'Cursor 2026.10.22-27dcf5f print reaches no other session: send_message (cloud agents) has no CLI handler, and the native agent tools reach the session\'s own subagents (hearsay-tools/cezarion#2279)' },
   additionalDirectories: { honored: true, via: '--add-dir per workspace root on every turn' },
   env: { honored: true, via: 'buildChildEnv with per-run env' },
   model: { honored: true, via: '--model opaque ID' },
@@ -46,9 +45,6 @@ export interface CursorPrintRunnerOptions {
   models?: readonly ModelOption[] | undefined;
   /** Exact canonical selection validated by the selected-account preflight. */
   resolvedModel?: string | undefined;
-  /** The safe native tools the installed build advertises, from the capability preflight.
-   * A restricted turn allows exactly these; absent, the whole qualified safe catalog. */
-  allowedTools?: readonly string[] | undefined;
   /** Test override; production retains the shared 30-minute no-progress cap. */
   noProgressTimeoutMs?: number;
   processOptions?: Pick<CursorPrintProcessOptions, 'drainMs' | 'termGraceMs' | 'killGraceMs'>;
@@ -228,9 +224,6 @@ class CursorPrintSession implements AgentSession {
     if (this.model) args.push('--model', this.model);
     if (this.nativeId) args.push('--resume', this.nativeId);
     args.push(...cursorPrintToolGrantArgs(this.spec.toolGrant));
-    if (this.spec.restrictNativeDelegation) {
-      args.push('--allowed-tools', (this.options.allowedTools ?? SAFE_CURSOR_PRINT_TOOLS).join(','));
-    }
     for (const dir of this.spec.additionalDirectories ?? []) args.push('--add-dir', dir);
     if (this.pluginDir) args.push('--plugin-dir', this.pluginDir);
     for (const path of imagePaths) args.push('--image', path);

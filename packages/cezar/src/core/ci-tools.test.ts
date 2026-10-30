@@ -148,7 +148,7 @@ describe('CI tool injection', () => {
       try {
         const file = join(dir, 'wire');
         if (backend === 'opencode' && resume) seedOpencodeMockSession(file);
-        const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: descriptor, resume, restrictNativeDelegation: true, env: { CEZ_MOCK_ARGS_FILE: file, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
+        const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: descriptor, resume, restrictCrossSessionMessaging: true, env: { CEZ_MOCK_ARGS_FILE: file, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
         expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
         const rows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
         if (backend === 'claude') expect(rows[0]).toContain('--mcp-config');
@@ -156,7 +156,8 @@ describe('CI tool injection', () => {
         if (backend === 'omp') expect(rows[0].filter((item: string) => item === '--extension')).toHaveLength(1);
         if (backend === 'codex') {
           const config = rows.find(row => row.method === (resume ? 'thread/resume' : 'thread/start')).params.config;
-          expect(config['features.multi_agent']).toBe(false);
+          expect(config['features.agent_message_board']).toBe(false);
+          expect(config).not.toHaveProperty('features.multi_agent');
           // hearsay-tools/cezarion#1294: Codex asks before every MCP tool call unless the
           // server's mode is `approve`; approval_policy stays the user's (#381).
           expect(config[`mcp_servers.${descriptor.name}`]).toEqual({ command: descriptor.command, args: descriptor.args, env_vars: ['CEZ_TOOL_TOKEN', 'CEZ_TOOL_SOCKET'], default_tools_approval_mode: 'approve' });
@@ -166,12 +167,16 @@ describe('CI tool injection', () => {
           const args: string[] = rows[0];
           expect(args).toContain('--plugin-dir');
           expect(args.includes('--resume')).toBe(resume);
-          expect(args).toContain('--allowed-tools');
+          expect(args).not.toContain('--allowed-tools');
           const plugin = rows.find(row => row.type === 'cursor-print-plugin');
           expect(plugin.mcpServers[descriptor.name]).toEqual({ type: 'stdio', command: descriptor.command,
             args: descriptor.args, env: {} });
         }
-        if (backend === 'opencode') expect(rows.find(row => row.type === 'runtime-config').config.mcp[descriptor.name].command).toEqual([descriptor.command, ...descriptor.args]);
+        if (backend === 'opencode') {
+          const config = rows.find(row => row.type === 'runtime-config').config;
+          expect(config.mcp[descriptor.name].command).toEqual([descriptor.command, ...descriptor.args]);
+          expect(config.plugin).toEqual([expect.stringMatching(/scripts\/opencode-task-scope\.mjs$/)]);
+        }
       } finally { rmSync(dir, { recursive: true, force: true }); }
     }, 20_000);
   }
@@ -268,7 +273,7 @@ describe('U0 wait tools on every native wire', () => {
         const resultFile = join(dir, 'result');
         const file = join(dir, 'wire');
         if (backend === 'opencode' && resume) seedOpencodeMockSession(file);
-        const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, resume, toolGrant, restrictNativeDelegation: true, userPrompt: call(tool, args), env: { ...session.env, CEZ_MOCK_ARGS_FILE: file, CEZ_MOCK_CI_RESULT: resultFile, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
+        const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, resume, toolGrant, restrictCrossSessionMessaging: true, userPrompt: call(tool, args), env: { ...session.env, CEZ_MOCK_ARGS_FILE: file, CEZ_MOCK_CI_RESULT: resultFile, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
         expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
         const result = JSON.parse(readFileSync(resultFile, 'utf8'));
         expect(result.names).toEqual(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
@@ -296,7 +301,7 @@ describe('U0 wait tools on every native wire', () => {
         if (backend === 'claude') expect(argv![argv!.indexOf('--allowedTools') + 1]!.split(',')).toEqual(expect.arrayContaining(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'].map(name => `mcp__${session.descriptor.name}__${name}`)));
         if (backend === 'pi' && !argv!.includes('--tools')) expect(argv).toContain('--no-builtin-tools');
         else if (backend === 'pi' || backend === 'omp') expect(argv![argv!.indexOf('--tools') + 1]!.split(',')).toEqual(expect.arrayContaining(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']));
-        if (backend === 'cursor') expect(argv![argv!.indexOf('--allowed-tools') + 1]!.split(',')).toContain('mcp_tool_call');
+        if (backend === 'cursor') expect(argv).not.toContain('--allowed-tools');
         expect(readFileSync(file, 'utf8')).not.toContain(session.env.CEZ_TOOL_TOKEN);
       } finally { await controller.close(); rmSync(dir, { recursive: true, force: true }); }
     }, 20000);

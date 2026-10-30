@@ -569,7 +569,7 @@ export class ContinuationSession {
           additionalDirectories: agentDirectories(join(this.context.dataDir, 'runs'), settings.profile.env),
           env: { ...settings.profile.env, ...delegation?.env, ...ciTools?.env },
           ...(ciTools ? { cezarTools: ciTools.descriptor } : {}),
-          ...(delegation ? { restrictNativeDelegation: delegation.restrictNativeDelegation } : {}),
+          ...(delegation ? { restrictCrossSessionMessaging: delegation.restrictCrossSessionMessaging } : {}),
           model: settings.backendModel,
           effort: settings.effort,
           sessionId: launch.sessionId,

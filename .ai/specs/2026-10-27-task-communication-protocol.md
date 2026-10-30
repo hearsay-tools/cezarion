@@ -542,6 +542,11 @@ request --resume` is refused and names `cez worker resume`.
 
 ## 11. Runner-native messaging and other channels
 
+> **Superseded in part (hearsay-tools/cezarion#2279):** governed sessions keep native
+> subagents, and the first bullet's Claude deny is gone. `restrictCrossSessionMessaging`
+> now turns off only a separate cross-session tool (Codex's message board, an OpenCode
+> `task_id` outside the session tree). See `AGENT_PROTOCOL.md` D1.
+
 - With `CEZ_DELEGATION=1`, every runner's `restrictNativeDelegation` blocks its native
   delegation entry points. For the Claude CLI runner that includes `SendMessage` and
   `ListAgents` (`--disallowedTools Agent,Task,Workflow,SendMessage,ListAgents`,

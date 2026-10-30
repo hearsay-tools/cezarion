@@ -82,12 +82,6 @@ const OMP_TOOL_MAP: Readonly<Record<string, string>> = {
 };
 
 /**
- * D1: tools that let the agent spawn agents outside cezar's governance. `wait` only joins `task`
- * work; `eval` has `agent()`/`workpool()` helpers and no v18.4.11 setting turns them off (Ruling 6).
- */
-const OMP_DELEGATION_TOOLS: ReadonlySet<string> = new Set(['task', 'wait', 'eval']);
-
-/**
  * What the omp CLI receives from each `AgentRunSpec` field (#284, spec § Spawn and spec
  * support). Held against the mock's recorded argv and RPC by the harness parity matrix.
  */
@@ -98,9 +92,9 @@ export const OMP_SPEC_SUPPORT: AgentRunSpecSupport = {
   images: { honored: true, via: "RPC prompt.images ({type:'image', data, mimeType})" },
   cwd: { honored: true, via: 'spawn cwd' },
   toolGrant: { honored: true, via: "--tools, mapped onto OMP names; unmapped names dropped (fail closed); a bashAllowlist has no prefix equivalent, so bash is dropped from --tools (Pi's rule), and an unset grant names OMP's default set first so bash can be left out" },
-  restrictNativeDelegation: {
-    honored: true,
-    via: '--config overlay denying task, and task/wait left out of --tools (D1); eval is left out too, since OMP v18.4.11 has no setting that disables its agent()/workpool() helpers; with an unset grant D1 passes an explicit --tools list (OMP\'s default set minus those), failing closed rather than widening to the defaults',
+  restrictCrossSessionMessaging: {
+    honored: false,
+    reason: 'OMP 18.13.1 has no cross-session tool in its default set; its irc tool is an in-process bus that reaches only agents inside the same OMP process, so subagent messaging and task stay (hearsay-tools/cezarion#2279)',
   },
   additionalDirectories: { honored: true, via: '--add-dir per directory; an omp build that rejects --add-dir is respawned once without it, with a v1 note (Ruling 22)' },
   env: { honored: true, via: 'merged over the child env through buildChildEnv' },
@@ -123,12 +117,11 @@ export interface OmpToolSelection {
 /**
  * Maps a grant's cezar tool names onto OMP's `--tools` allowlist (spec § Tools). Fails closed: a
  * non-empty request that maps to nothing disables every built-in rather than widening to OMP's
- * defaults, and every narrowing (`bashAllowlist`, D1) only ever removes names.
+ * defaults, and every narrowing (`bashAllowlist`, user exclusions) only ever removes names.
  */
 export function ompTools(
   grant: ToolGrant,
   opts: {
-    restrictNativeDelegation?: boolean | undefined;
     cezarTools?: boolean;
     /** Env the extension will read: `CEZ_PREVIEW=1` there decides which cezar tools it registers. */
     env?: NodeJS.ProcessEnv | undefined;
@@ -136,7 +129,7 @@ export function ompTools(
     exclude?: readonly string[] | undefined;
   },
 ): OmpToolSelection {
-  const requested = ompRequestedTools(grant, OMP_DEFAULT_TOOL_NAMES, opts.restrictNativeDelegation);
+  const requested = ompRequestedTools(grant, OMP_DEFAULT_TOOL_NAMES);
   if (requested === undefined) return { flag: null, tools: [], dropped: [] };
   const tools = new Set<string>();
   const dropped = new Set<string>();
@@ -151,7 +144,6 @@ export function ompTools(
   }
   // OMP can allow or deny the whole bash tool but has no command-prefix equivalent.
   if (grant.bashAllowlist && grant.bashAllowlist.length > 0) tools.delete('bash');
-  if (opts.restrictNativeDelegation) for (const name of OMP_DELEGATION_TOOLS) tools.delete(name);
   if (tools.size === 0) return { flag: 'no-tools', tools: [], dropped: [...dropped] };
   // Narrow before the CI tool joins: a refusal never leaves a CI-only list where --no-tools belongs.
   for (const name of opts.exclude ?? []) tools.delete(name);
@@ -203,9 +195,7 @@ export function buildOmpArgs(
   const effort = parseEffort(spec.effort);
   if (effort) args.push('--thinking', effort);
   if (!opts.omitAddDir) for (const dir of spec.additionalDirectories ?? []) args.push('--add-dir', dir);
-  if (spec.restrictNativeDelegation) args.push('--config', ompScriptPath('omp-restrict-delegation.yml'));
   const selection = ompTools(spec.toolGrant, {
-    restrictNativeDelegation: spec.restrictNativeDelegation,
     cezarTools: spec.cezarTools !== undefined,
     env: spec.env,
     exclude: excludeTools,
@@ -463,9 +453,7 @@ export class OmpRunner implements AgentRunner {
       interruptKillTimer.unref?.();
     };
 
-    const dropped = ompTools(spec.toolGrant, {
-      restrictNativeDelegation: spec.restrictNativeDelegation,
-    }).dropped;
+    const dropped = ompTools(spec.toolGrant, {}).dropped;
     if (dropped.length > 0) {
       onEvent?.({ type: 'note', message: `omp: dropped tools with no OMP equivalent: ${dropped.join(', ')}` });
     }

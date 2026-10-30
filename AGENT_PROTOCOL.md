@@ -463,10 +463,12 @@ Notable fields (full doc-comments in the source):
   a rule for that permission, and shows any other ask as a cockpit permission
   card (hearsay-tools/cezarion#1266). Configurable restrictive modes are
   specified by `2026-07-17-permission-modes` (open-mercato/cezar#475).
-- `restrictNativeDelegation?` — optional per-invocation intent, mapped only inside
-  adapters; absent preserves ordinary settings. Governed session provisioning
-  supplies it on initial steps, Continue and recovery. See D1 below for precise
-  controls and exemptions; this is not a shell sandbox.
+- `restrictCrossSessionMessaging?` — optional per-invocation intent, mapped only
+  inside adapters; absent preserves ordinary settings. Governed session
+  provisioning supplies it on initial steps, Continue and recovery. It turns off
+  native tools that reach another session where a runner keeps them separate from
+  subagent messaging; native subagents stay. See D1 below for precise controls and
+  exemptions; this is not a shell sandbox.
 - `sessionId?` / `resume?` — stable session id for interactive takeover and for
   `--resume` ("Continue" after a run ends).
 
@@ -492,7 +494,7 @@ real boundary in both directions. As declared at hearsay-tools/cezarion#284, a r
 | `cwd` | spawn cwd | spawn cwd, `thread/start` cwd | spawn cwd | spawn cwd |
 | `toolGrant` | `--allowedTools`; a `bashAllowlist` as `Bash(<prefix>:*)` | **dropped** | **dropped** | `--tools`, mapped names; a `bashAllowlist` drops `bash` (fail closed) |
 | `additionalDirectories` | `--add-dir` | **dropped** | **dropped** | **dropped** |
-| `restrictNativeDelegation` | D1 | D1 | D1 | D1 |
+| `restrictCrossSessionMessaging` | **dropped** (D1) | D1 | D1 | **dropped** (D1) |
 | `env` | child env | child env | child env | child env |
 | `model` | `--model` | `thread/start` model | `prompt_async` model | `--model` |
 | `effort` | `--effort` | `turn/start` effort | `prompt_async` variant | `--thinking` |
@@ -722,11 +724,10 @@ to ACP with a visible note that marketplace plugins are unavailable.
 
 The print invocation supplies the run's Cezar tools through a private temporary
 plugin directory and accepts the user's existing Cursor marketplace plugins.
-Governed runs pass a strict `--allowed-tools` list: the qualified safe catalog,
-narrowed to the entries the installed build still advertises. Native delegation
-tools are never in it, and an entry a newer build adds stays denied until a
-change adds it to the catalog. The list is computed afresh against each CLI
-build before every print session, Continue included. `CEZ:ASK` is parsed by Cezar and remains
+Governed runs pass no `--allowed-tools` list, so native subagent tools stay
+callable (hearsay-tools/cezarion#2279; D1). The capability preflight still reads
+the build's native tool catalog before every print session, Continue included,
+and keeps a build that lacks a core tool off print. `CEZ:ASK` is parsed by Cezar and remains
 answerable; this Cursor build auto-skips native questions from plugins, which
 is a visible limitation. Print mode has no child-session transcript or
 qualified token usage. Project-local Claude settings do not reliably disable
@@ -2418,85 +2419,45 @@ the cockpit as a clean end of turn.
 
 ### Governed delegation controls (D1)
 
-D1 inspects real runner argv, JSON-RPC and HTTP boundaries on ordinary versus
-restricted start/Continue launches. These controls add no tool grants and write
-no global harness configuration. Per-backend knowledge remains inside adapters.
-`provision-workflows.test.ts` covers every backend's initial, nonfinal, Continue,
-recovery and disabled paths, plus mixed-backend workers retaining their own
-accepted identity, empty grants and distinct per-session delegation credentials.
+hearsay-tools/cezarion#2279. With `CEZ_DELEGATION=1`, root tasks and owned workers may
+use the native subagents their runner supports, subject to the user's tool settings.
+The two mechanisms have separate purposes: a native subagent does work that needs no
+separate worktree (research, code reading, focused analysis) and needs no Cezar worker,
+worktree, collection or destruction; a Cezar worker does work that needs its own
+worktree, its own commits or a lifecycle Cezar tracks. Workers may use native subagents
+but cannot spawn Cezar workers. An agent may message its own subagents with its runner's
+tools; it reaches another Cezar task only through `cez message`, which the provisioned
+root and worker instructions say.
+
+D1 inspects real runner argv, JSON-RPC and HTTP boundaries on ordinary versus governed
+start/Continue launches. A governed launch carries `restrictCrossSessionMessaging`, and
+an adapter adds a control only where the runner's native tool for reaching another
+session is separate from subagent messaging. These controls add no tool grants and
+write no global harness configuration. `provision-workflows.test.ts` covers every
+backend's initial, nonfinal, Continue, recovery and disabled paths.
 
 | Backend (locally verified version) | Per-invocation control | Evidence and limitation |
 | --- | --- | --- |
-| Claude Code 2.1.311 | `--disallowedTools Agent,Task,Workflow,SendMessage,ListAgents` | `claude --help` documents the deny flag; installed `sdk-tools.d.ts` names `AgentInput`. `Task` covers the legacy name in recorded fixtures. `Workflow` runs a script that starts subagents: a free 2.1.303 probe (`/reload-plugins` as the only stream-json line, no model call) lists it in the init `tools` under `--disallowedTools Agent,Task` and drops it under `Agent,Task,Workflow` (hearsay-tools/cezarion#1284). `Skill` stays listed under both. Other tools and permission modes are preserved. Forked skills are not blocked; see the gap below. |
-| Codex 0.153.4 | `thread/start` and `thread/resume` `config: { "features.multi_agent": false, "features.multi_agent_v2": false }` | `codex features list` names both flags; `codex --help` documents dotted config overrides; `codex app-server generate-json-schema` confirms both request config fields. Existing sandbox, approval, account and model settings remain unchanged. |
-| OpenCode 1.18.33 | `POST /session` `permission: [{ permission: "task", pattern: "*", action: "deny" }]` on a fresh session; `PATCH /session/{id}` `permission` on resume when that deny is absent (installed `/doc` `session.update` accepts `PermissionRuleset`) | Installed server `/doc` declares `PermissionRuleset`; its embedded `TaskTool.execute` checks `task`. Live 1.18.33: `PATCH` with `{permission:[X]}` **appends** X (no replace, no dedupe); a title-only PATCH leaves permission alone; GET returns the session including `permission`. The deny therefore persists on the session once added — a later unrestricted Continue cannot remove it (fails closed). Continue GETs `/session/{id}` and PATCHes the deny only when `restrictNativeDelegation` is set and the rule is not already present; a 404 fallback POSTs a fresh session with the same rule. It still does not map general `allowedTools`. OpenCode 1.18.35's `task` tool skips the `task` permission ask when `extra.bypassAgentCheck` is set: for a `subtask` part, which only the `POST /session/{id}/command` handler creates (a command with `subtask: true`, or one whose agent is a subagent), and when the last user message carries an `agent` part (a client `@agent` mention). cezar's wire never takes that path: it posts only `text` parts through `prompt_async`, never calls `/command`, and `prompt_async` turns no text into either part. OpenCode's `skill` tool returns the skill's content as tool output in the same session. |
-| Cursor 2026.09.15-d2fe57e | `initialize.clientCapabilities._meta.subagents = false` | Installed `src/acp/agent.ts` negotiates native delegation from this capability; `src/acp/session.ts` passes it to the agent. Ordinary runs advertise `true`; start and Continue use the same handshake. Custom tools and unrestricted shell remain outside hard isolation. |
-| OMP 18.4.11 | `--config` overlay `tools.approval.task: deny`, plus `task`, `wait` and `eval` left out of `--tools` | OMP's user `deny` is absolute in every approval mode (`approval-mode.md`). OMP has no `--exclude-tools`, and no setting disables `eval`'s `agent()`/`workpool()` helpers, so `eval` is dropped from the list. With no workflow `allowedTools`, D1 passes an explicit list (OMP's default set minus those three) instead of no `--tools`, failing closed. Verified with `get_state.dumpTools` on the real binary. |
-| pi 0.85.1 | `--exclude-tools subagent` | Installed `pi --help` applies exclusions to built-in/extension/custom names; the shipped `examples/extensions/subagent/index.ts` registers `subagent`. Other extension discovery and ordinary tool settings remain unchanged. |
+| Claude Code 2.1.312 | None (`honored: false`) | `SendMessage` and `ListAgents` also reach the session's own subagents, background agents and teammates, so no outbound tool is separate from subagent messaging. Inbound messages from other sessions are refused on every launch (`crossSessionInbound: refuse`, D3), so a native send from one Cezar task to another ends as not sent. **Known limitation:** a session Cezar starts can still list and message Claude sessions that Cezar did not start, and sessions on other machines. |
+| Codex 0.164.0 | `thread/start` and `thread/resume` `config: { "features.agent_message_board": false }` | The `multi_agent` tools (`spawn_agent`, `send_input`, `wait`) reach only agents of the same session and stay as the user configured them. The cross-thread `agent_message_board` feature is "under development" and off by default; a governed session keeps it off even when the user's config turns it on. `codex -c features.<unknown>=false features list` exits 0, so a renamed key does not fail a launch. Existing sandbox, approval, account and model settings remain unchanged. |
+| OpenCode 1.19.4 | `scripts/opencode-task-scope.mjs`, appended to the `plugin` list of `OPENCODE_CONFIG_CONTENT` | The `task` tool starts the session's own subagents, and with `task_id` it resumes any session by ID without a parent check (installed `TaskTool.execute`), which can reach another Cezar task's session. The plugin's `tool.execute.before` hook walks `session.get` parent links and refuses a `task_id` whose session tree differs from the caller's, pointing at `cez message`; a `task_id` that names no session passes (OpenCode starts a fresh subagent), and a failed lookup is refused. OpenCode appends runtime plugins to the ones its config files name, so the user's plugins keep loading. A live 1.19.4 `opencode serve` with throwaway data directories loaded the plugin next to a second plugin; its client's `session.get` returned a child's `parentID`, and 404 for an unknown ID. No session permission rule is sent. **Known limitation:** an OpenCode session that an older Cezar created or resumed under delegation carries a `task` deny, and keeps it on Continue and restart recovery: OpenCode appends permission rules and has no remove. New OpenCode sessions allow subagents. The same-user shell can still reach another session directly (`opencode run --session <id>`). |
+| Cursor 2026.10.22-27dcf5f | None (`honored: false`); ACP advertises `_meta.subagents: true`, print sends no `--allowed-tools` | The agent protocol defines `send_message` (to cloud agents); the CLI never sets `sendMessageEnabled` and has no handler. The native agent tools reach the session's own subagents. |
+| OMP 18.13.1 | None (`honored: false`) | The default set (`get_state.dumpTools`) holds no cross-session tool. `irc` is an in-process bus (`irc/bus.ts`) that resolves recipients from the process's own agent registry, so it reaches only agents inside the same OMP process. `task`, `wait` and `eval` stay. |
+| pi 1.4.0 | None (`honored: false`) | No built-in cross-session tool. An extension may add one, and its name cannot be discovered as messaging. The `subagent` extension stays. |
 
-Claude native peer messaging is suppressed for **both governed root tasks and
-owned workers** whenever `restrictNativeDelegation` applies
-(hearsay-tools/cezarion#557). `ListAgents` lists other native sessions and
-`SendMessage` contacts them outside cezar's recorded conversations. Neither
-`dontAsk` nor a narrow `--allowedTools` grant blocks these tools; the explicit
-deny removes them even when a grant names them. Ordinary runner specs with the
-restriction absent retain their native settings.
+Each runner without a control carries a named `capability-absent` exemption in the D1
+parity cell, pinned the other way round: its governed wire equals the ordinary one,
+with no `--disallowedTools`, `--exclude-tools`, `--allowed-tools` or OMP overlay. The
+day cezar adds a control for one, its exemption must go.
 
-A bounded Claude Code 2.1.311 probe on 2026-10-27 sent only `/reload-plugins` as a
-stream-json user message, with `--permission-mode dontAsk`,
-`--allowedTools Read,Edit,Write,Grep,Glob,Bash` and no session persistence.
-The init `tools` listed `SendMessage` and `ListAgents` under the old
-`Agent,Task,Workflow` deny. Adding both names removed exactly those two tools.
-A third probe explicitly allowed `Read,SendMessage,ListAgents` while denying
-all five names: `Read` remained and both peer tools were absent. Each probe
-reported zero model turns and zero cost; none listed or contacted another
-session. These probes attest the tool catalog, not a messaging call.
-
-**Explicit D1 pi exemption:** pi's RPC has no native delegation primitive or
-capability identifying arbitrary custom delegation extensions. Only the verified
-`subagent` entry point is excluded. Renamed/custom extensions remain outside that
-restriction; D1 pins the exact exclusion and preserves unrelated extension/tool
-settings. Guidance directs agents to cezar workers but must never be represented
-as enforcement of this unsupported capability. Custom tools on other backends
-and unrestricted same-user shell likewise remain outside hard isolation. Native
-workers are not cezar-owned, collected, waited on or cleaned up by this protocol.
-Older harness versions are not attested by this versioned capability check.
-
-**Explicit D1 Claude forked-skill gap:** a Claude skill or command whose
-frontmatter sets `context: fork` runs in a forked subagent. That covers project,
-personal and plugin skills, and team skills cezar copies into `.claude/skills`.
-On Claude Code 2.1.303 both entry points, the model's `Skill` tool and a typed
-`/name`, reach the forked-skill launcher, which picks the agent from the session's
-agent list and never consults the `Agent`/`Task` deny rules. No per-invocation
-control blocks a fork while ordinary skills keep working. The `Skill(...)` deny
-matcher matches names, aliases and globs only, with no `context: fork` attribute,
-so only a blanket `Skill` deny would stop forks, and it would stop every skill.
-`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH` has a minimum of 1 and a fork runs at depth
-1; `CLAUDE_CODE_FORK_SUBAGENT` is an unrelated conversation-fork feature; a
-`SubagentStart` hook's output has only `additionalContext`, so a hook cannot stop
-the subagent. Restricted Claude sessions therefore do not block forked skills.
-Two haiku runs with a project skill under cezar's restricted argv
-(`--permission-mode dontAsk`, `--disallowedTools Agent,Task,Workflow`) emitted
-`system/task_started` with `subagent_type: general-purpose` and `spawn_depth: 1`
-from both entry points, and the child ran `Bash`; the result's
-`subagent_stats.spawned` stayed 0. The subagent is a native worker that cezar does
-not own, wait on or clean up. D2 pins this gap.
-
-**D2** (hearsay-tools/cezarion#1284), in `core/harness-parity.test.ts`, requires
-that a forked skill start no native subagent in a restricted session
-(`restrictNativeDelegation: true`). Only Claude's wire constructs the
-`forked-skill` scenario. Its mock replays the `Skill` tool path of a real 2.1.303
-capture (golden fixture `__fixtures__/claude/forked-skill.ndjson`) whatever
-`--disallowedTools` says, as real Claude does. Claude's `capability-absent`
-exemption is pinned by the inverted assertion: the restricted argv carries
-`--disallowedTools Agent,Task,Workflow,SendMessage,ListAgents`, and the child `Bash` call still nests
-under the `Skill` item. The day Claude can block forks, that cell fails and the
-row must go live. A typed `/name` takes the same launcher, but its task frames
-arrive before `init` and its children name a synthetic `forked-command-<name>`
-parent with no tool item; the mock replays only the `Skill` tool path. The other
-runners carry `scenario-unconstructible` exemptions naming the version inspected:
-none starts a native subagent from skill or command frontmatter outside its D1
-control.
+**Replaced guarantee.** Before hearsay-tools/cezarion#2279, D1 also suppressed native
+subagents (Claude `Agent`/`Task`/`Workflow`, Codex multi-agent, OpenCode `task`, pi
+`subagent`, Cursor native agent entries, OMP `task`/`wait`/`eval`), and D2 pinned the one
+gap in that ban: a Claude skill with `context: fork` started a subagent anyway. The issue
+dropped the subagent ban on purpose, and D2 with it. The other half of the old guarantee,
+no unrecorded cross-task messages, is held by the controls above, Claude's inbound
+refusal and the instructions. Native subagents are not Cezar tasks: Cezar does not own,
+collect, wait on or clean them up.
 
 ### Native cross-session messaging at shipped defaults (D3)
 
@@ -2511,12 +2472,12 @@ installed versions on 2026-10-27.
 
 | Runner (inspected version) | Native cross-session entry points | Shipped default (`CEZ_DELEGATION` unset) | Under D1 |
 | --- | --- | --- | --- |
-| Claude Code 2.1.311 | Outbound: `SendMessage` and `ListAgents`. They reach other local sessions, cloud and Remote Control sessions, and also the session's own subagents, background agents and teammates. Inbound: other sessions' `SendMessage`, governed by the `crossSessionInbound` setting (`accept`, `hold`, `refuse`; unset delivers when the sender's permission-mode class matches). | Inbound refused: every launch passes `--settings {"crossSessionInbound":"refuse"}`. Outbound tools stay callable, because a deny would also stop follow-ups to the session's own subagents and teammates, and break plugin agents and skills that call `SendMessage`. | Inbound refused, as at defaults. Outbound denied by `--disallowedTools Agent,Task,Workflow,SendMessage,ListAgents` (hearsay-tools/cezarion#1975). |
-| Codex 0.164.0 | None at defaults. The `multi_agent` tools (`spawn_agent`, `send_input`, `wait`) reach only agents of the same session. The cross-thread `agent_message_board` feature is "under development" and off by default. | No control: cezar sends no flag for an unstable feature key. | `features.multi_agent` and `features.multi_agent_v2` off (D1). |
-| OpenCode 1.19.4 | No messaging tool and no inbound channel. The `task` tool with `task_id` resumes any session by ID without checking its parent. | No control. The `task` permission pattern matches only `subagent_type`, so no session rule blocks a foreign `task_id`, and a deny on `task` removes native subagents. Only the shell finds another session's ID, and the shell reaches that session directly (`opencode run --session <id>`); the same-user shell is outside hard isolation (spec § Out of scope). Blocking `task_id` alone would need a new OpenCode plugin and would not close the shell path. | `task` denied (D1). |
-| pi 1.4.0 | None built in. An extension may add a messaging tool. | No control: an extension's name cannot be discovered as messaging. | `subagent` excluded (D1). |
-| Cursor 2026.10.22-27dcf5f | The agent protocol defines `send_message` (to cloud agents); the CLI never sets `sendMessageEnabled` and has no handler. | Unreachable; no control needed. | `task_tool_call` left out of `--allowed-tools` (D1). |
-| OMP 18.13.1 | None in the default set (`get_state.dumpTools`: read, bash, edit, eval, glob, grep, find, task, wait, todo, web_search, write). `vibe_*` and `irc` are opt-in in the user's own config. | No control. | `task`, `wait` and `eval` removed (D1). |
+| Claude Code 2.1.311 | Outbound: `SendMessage` and `ListAgents`. They reach other local sessions, cloud and Remote Control sessions, and also the session's own subagents, background agents and teammates. Inbound: other sessions' `SendMessage`, governed by the `crossSessionInbound` setting (`accept`, `hold`, `refuse`; unset delivers when the sender's permission-mode class matches). | Inbound refused: every launch passes `--settings {"crossSessionInbound":"refuse"}`. Outbound tools stay callable, because a deny would also stop follow-ups to the session's own subagents and teammates, and break plugin agents and skills that call `SendMessage`. | Inbound refused, as at defaults. Outbound `SendMessage` and `ListAgents` stay callable, as at defaults, because they also reach the session's own subagents (hearsay-tools/cezarion#2279). |
+| Codex 0.164.0 | None at defaults. The `multi_agent` tools (`spawn_agent`, `send_input`, `wait`) reach only agents of the same session. The cross-thread `agent_message_board` feature is "under development" and off by default. | No control: cezar sends no flag for an unstable feature key. | `features.agent_message_board` off (D1); multi-agent tools stay. |
+| OpenCode 1.19.4 | No messaging tool and no inbound channel. The `task` tool with `task_id` resumes any session by ID without checking its parent. | No control. The `task` permission pattern matches only `subagent_type`, so no session rule blocks a foreign `task_id`, and a deny on `task` removes native subagents. Only the shell finds another session's ID, and the shell reaches that session directly (`opencode run --session <id>`); the same-user shell is outside hard isolation (spec § Out of scope). Blocking `task_id` alone would need a new OpenCode plugin and would not close the shell path. | The task-scope plugin refuses a `task_id` outside the caller's session tree (D1); `task` stays for the session's own subagents. |
+| pi 1.4.0 | None built in. An extension may add a messaging tool. | No control: an extension's name cannot be discovered as messaging. | No control (D1 exemption). |
+| Cursor 2026.10.22-27dcf5f | The agent protocol defines `send_message` (to cloud agents); the CLI never sets `sendMessageEnabled` and has no handler. | Unreachable; no control needed. | No control (D1 exemption). |
+| OMP 18.13.1 | None in the default set (`get_state.dumpTools`: read, bash, edit, eval, glob, grep, find, task, wait, todo, web_search, write). `vibe_*` and `irc` are opt-in in the user's own config. | No control. | No control (D1 exemption); `irc` reaches only agents in the same OMP process. |
 
 **Verification limits.** A bounded Claude Code 2.1.311 probe on 2026-10-27 sent only
 `/reload-plugins` as a stream-json user message (no model turn) with
@@ -2537,7 +2498,7 @@ or `cez task send`.
 
 **D3** (hearsay-tools/cezarion#1994), in the per-runner `core/harness-*-parity.test.ts`
 files, drives each runner's `baseline` scenario on start and Continue with no
-`restrictNativeDelegation`. Claude's row is live: the argv carries the
+`restrictCrossSessionMessaging`. Claude's row is live: the argv carries the
 `crossSessionInbound: refuse` settings and no `--disallowedTools`. The other runners
 carry `capability-absent` exemptions naming the version inspected, pinned the other way
 round: their default wire carries no cross-session control. The day cezar adds one,
@@ -2549,7 +2510,7 @@ the user's other Claude sessions can no longer send `SendMessage` text into a ce
 That path was never a cezar surface: the text bypassed the cockpit, the ledger and the
 handling of human questions. Human input still reaches a task through the cockpit and
 `cez task send` outside a task. Outbound `SendMessage` and `ListAgents` stay callable at
-shipped defaults, and D1 still denies them. No runner's MCP servers, plugins or tool
+shipped defaults and, since hearsay-tools/cezarion#2279, under D1 too. No runner's MCP servers, plugins or tool
 grants change, and the other runners send no new flag. The "Messaging other tasks"
 section is prose, not a marker: an older cezar never parses it. The setting is per launch
 and writes no file, so a revert restores the old behavior on the next launch, and no state

@@ -24,6 +24,7 @@ import { isSignalTerminationExit, prependSystemPrompt, trackChildExit } from './
 import { opencodeToolGrantFields } from './runner-tool-grants.ts';
 import { signalSession, spawnSessionLeader } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';
+import { opencodeTaskScopeEnv } from './opencode-task-scope.ts';
 import { ciOpenCodeEnv } from '../ci-wait/injection.ts';
 import { parseAskRequest, type AskQuestion } from './ask.ts';
 import { boundOutputDrainAfterExit, AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS } from './runner-runtime.ts';
@@ -146,7 +147,7 @@ export const OPENCODE_SPEC_SUPPORT: AgentRunSpecSupport = {
   images: { honored: false, reason: 'the adapter posts text parts only; image blocks are dropped' },
   cwd: { honored: true, via: 'opencode serve spawn cwd; the session is bound to it' },
   toolGrant: { honored: false, reason: 'OpenCode permission config governs tool access and bash; cezar answers its built-in default asks and routes configured asks to the cockpit, but maps no per-tool allowlist, so no command-prefix restriction either' },
-  restrictNativeDelegation: { honored: true, via: 'POST /session permission rule denying task (D1); PATCH /session/{id} permission on resume when the deny is absent — the deny persists on the session once added (a later unrestricted Continue cannot remove it; fails closed)' },
+  restrictCrossSessionMessaging: { honored: true, via: 'the opencode-task-scope.mjs plugin appended to the OPENCODE_CONFIG_CONTENT plugin list; its tool.execute.before hook refuses a task call whose task_id names a session outside the caller\'s session tree, and keeps subagents (hearsay-tools/cezarion#2279)' },
   additionalDirectories: { honored: false, reason: 'the server works from cwd; no extra-root mapping' },
   env: { honored: true, via: 'merged over the child env through buildChildEnv' },
   model: { honored: true, via: 'prompt_async model { providerID, modelID }, split from provider/model' },
@@ -608,7 +609,7 @@ class OpencodeSession implements AgentSession {
     try {
       child = spawnSessionLeader(this.bin, ['serve', '--hostname', '127.0.0.1', '--port', String(port)], {
         cwd: this.spec.cwd,
-        env: buildChildEnv({ backend: 'opencode', extraEnv: ciOpenCodeEnv(this.spec) }),
+        env: buildChildEnv({ backend: 'opencode', extraEnv: opencodeTaskScopeEnv(ciOpenCodeEnv(this.spec), this.spec.restrictCrossSessionMessaging) }),
       });
     } catch (err) {
       throw wrapSpawnError(err, this.bin);
@@ -718,10 +719,6 @@ class OpencodeSession implements AgentSession {
     });
   }
 
-  private nativeDelegationPermission(): { permission: Array<{ permission: string; pattern: string; action: string }> } {
-    return { permission: [{ permission: 'task', pattern: '*', action: 'deny' }] };
-  }
-
   /** 404 → `'missing'`. Any other non-OK status fails bootstrap (no fallback). */
   private async tryGetSession(id: string): Promise<Record<string, unknown> | 'missing'> {
     if (!this.baseUrl) throw new Error('opencode server not ready');
@@ -741,13 +738,10 @@ class OpencodeSession implements AgentSession {
     }
   }
 
-  private async attachSession(id: string, applyDelegationRule: boolean): Promise<void> {
+  private attachSession(id: string): void {
     this.sessionId = id;
     this.emit({ type: 'session', sessionId: id });
     this.emitUi((state) => opencodeSessionStarted(id, state));
-    if (applyDelegationRule) {
-      await this.http('PATCH', `/session/${encodeURIComponent(id)}`, this.nativeDelegationPermission());
-    }
   }
 
   private async bootstrap(): Promise<void> {
@@ -761,9 +755,9 @@ class OpencodeSession implements AgentSession {
           message: `OpenCode session ${requested} no longer exists; the continuation runs in a fresh session without the earlier conversation.`,
         });
       } else {
-        const applyDelegationRule = Boolean(this.spec.restrictNativeDelegation)
-          && !hasNativeDelegationDeny(existing.permission);
-        await this.attachSession(stringField(existing, 'id') ?? requested, applyDelegationRule);
+        // A `task` deny an older cezar added stays on the session: OpenCode appends permission
+        // rules and has no remove (hearsay-tools/cezarion#2279, AGENT_PROTOCOL.md D1).
+        this.attachSession(stringField(existing, 'id') ?? requested);
         resumed = true;
       }
     }
@@ -771,13 +765,10 @@ class OpencodeSession implements AgentSession {
       const created = await this.http('POST', '/session', {
         title: 'cezar task',
         ...opencodeToolGrantFields(this.spec.toolGrant),
-        // OpenCode 1.18.33 /doc: session.create permission rules. The native task
-        // tool checks this permission; other agent/project permissions stay intact.
-        ...(this.spec.restrictNativeDelegation ? this.nativeDelegationPermission() : {}),
       });
       const sessionId = stringField(created, 'id');
       if (!sessionId) throw new Error('opencode did not return a session id');
-      await this.attachSession(sessionId, false);
+      this.attachSession(sessionId);
     }
 
     // The SSE subscription must be LIVE before the first prompt posts —
@@ -1648,17 +1639,6 @@ function clippedString(value: unknown, max: number): string | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** OpenCode 1.18.33 PATCHes permission by append (no replace, no dedupe). */
-function hasNativeDelegationDeny(permission: unknown): boolean {
-  if (!Array.isArray(permission)) return false;
-  return permission.some((rule) =>
-    isRecord(rule)
-    && rule.permission === 'task'
-    && rule.pattern === '*'
-    && rule.action === 'deny',
-  );
 }
 
 function sleep(ms: number): Promise<void> {

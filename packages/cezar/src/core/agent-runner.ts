@@ -39,12 +39,12 @@ export interface AgentRunSpec {
    *  carries a `bashAllowlist`, so treat it as full shell access in `cwd`, not
    *  a sandboxed allowlist (#430). */
   toolGrant: ToolGrant;
-  /** Prefer governed cezar workers: suppress verified native delegation entry
-   * points for this invocation only. Adapters map this intent; absent preserves
-   * ordinary harness settings. Custom tools, unrestricted shell and Claude
-   * forked skills (`context: fork`) are not hard-isolated. See
-   * AGENT_PROTOCOL.md's D1 capability limits. */
-  restrictNativeDelegation?: boolean;
+  /** A governed session (CEZ_DELEGATION=1): turn off native tools that reach another
+   * session where a runner keeps them separate from subagent messaging, for this
+   * invocation only. Native subagents stay. Adapters map this intent; absent preserves
+   * ordinary harness settings. Custom tools and unrestricted shell are not
+   * hard-isolated. See AGENT_PROTOCOL.md's D1 (hearsay-tools/cezarion#2279). */
+  restrictCrossSessionMessaging?: boolean;
   /** Extra directories the agent may read/write besides `cwd`. */
   additionalDirectories?: string[];
   /** Extra env vars for the agent process (merged over `process.env`) —
@@ -88,7 +88,7 @@ const AGENT_RUN_SPEC_FIELD_SET: Readonly<Record<keyof AgentRunSpec, true>> = {
   images: true,
   cwd: true,
   toolGrant: true,
-  restrictNativeDelegation: true,
+  restrictCrossSessionMessaging: true,
   additionalDirectories: true,
   env: true,
   model: true,

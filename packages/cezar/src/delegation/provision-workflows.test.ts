@@ -115,10 +115,10 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     }
     const spec = sessions.at(-1)!.spec;
     if (mode === 'off') {
-      expect(spec.restrictNativeDelegation).toBeUndefined();
+      expect(spec.restrictCrossSessionMessaging).toBeUndefined();
       expect(spec.env?.CEZ_DELEGATION_TOKEN).toBeUndefined();
     } else {
-      expect(spec.restrictNativeDelegation).toBe(true);
+      expect(spec.restrictCrossSessionMessaging).toBe(true);
       expect(spec.systemPrompt).toContain('cezar');
       expect(spec.systemPrompt).toContain('--effort');
       expect(spec.systemPrompt).toContain('--workflow');
@@ -244,7 +244,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
       sessions[1]!.finish(); expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
       expect(f.manager.continueRun(a.child.workerId, { text: 'again' }).ok).toBe(true); await until(() => sessions.length === 3);
     }
-    expect(sessions.at(-1)!.spec).toMatchObject({ restrictNativeDelegation: true, model: 'gpt-5.1-codex', toolGrant: { kind: 'inherited', tools: [], bashAllowlist: [] } });
+    expect(sessions.at(-1)!.spec).toMatchObject({ restrictCrossSessionMessaging: true, model: 'gpt-5.1-codex', toolGrant: { kind: 'inherited', tools: [], bashAllowlist: [] } });
     expect(sessions.at(-1)!.spec.effort).toBeUndefined();
     expect(sessions.at(-1)!.spec.env?.CODEX_HOME).toBe(home);
     expect(sessions.at(-1)!.spec.env?.CEZ_DELEGATION_TOKEN).not.toBe(sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN);

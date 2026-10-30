@@ -115,16 +115,15 @@ describe('buildClaudeArgs approval gate', () => {
 describe('buildClaudeArgs governed native messaging', () => {
   const spec = { userPrompt: 'do it', cwd: '/tmp', sessionId: 'governed-session' };
 
+  // hearsay-tools/cezarion#2279: governed sessions keep native subagents and messages to them.
+  // SendMessage and ListAgents also reach the session's own subagents, so no deny applies.
   describe.each([false, true])('resume=%s', resume => {
     describe.each(['dontAsk', 'acceptEdits', 'bypass'])('permission mode=%s', mode => {
-      it.each(TOOL_GRANT_CASES)('denies native delegation and peer messaging for $id without changing grants', entry => {
+      it.each(TOOL_GRANT_CASES)('sends the ordinary argv for $id under delegation', entry => {
         const ordinary = buildClaudeArgs({ ...spec, resume, toolGrant: entry.grant('claude') }, { CEZ_CLAUDE_PERMISSION_MODE: mode });
-        const restricted = buildClaudeArgs({ ...spec, resume, toolGrant: entry.grant('claude'), restrictNativeDelegation: true }, { CEZ_CLAUDE_PERMISSION_MODE: mode });
-        const index = restricted.indexOf('--disallowedTools');
-        expect(index).toBeGreaterThanOrEqual(0);
-        expect(restricted[index + 1]).toBe('Agent,Task,Workflow,SendMessage,ListAgents');
-        expect(ordinary).not.toContain('--disallowedTools');
-        expect(restricted.filter((_, i) => i !== index && i !== index + 1)).toEqual(ordinary);
+        const governed = buildClaudeArgs({ ...spec, resume, toolGrant: entry.grant('claude'), restrictCrossSessionMessaging: true }, { CEZ_CLAUDE_PERMISSION_MODE: mode });
+        expect(governed).not.toContain('--disallowedTools');
+        expect(governed).toEqual(ordinary);
       });
     });
   });
@@ -132,9 +131,9 @@ describe('buildClaudeArgs governed native messaging', () => {
   // hearsay-tools/cezarion#1994: other Claude sessions must not inject untracked text into a
   // task, at shipped defaults and under D1 alike. Outbound SendMessage stays at defaults
   // because it also follows up the session's own subagents.
-  describe.each([false, true])('restrictNativeDelegation=%s', restrictNativeDelegation => {
+  describe.each([false, true])('restrictCrossSessionMessaging=%s', restrictCrossSessionMessaging => {
     it.each(TOOL_GRANT_CASES)('refuses inbound cross-session messages for $id', entry => {
-      const args = buildClaudeArgs({ ...spec, toolGrant: entry.grant('claude'), restrictNativeDelegation }, {});
+      const args = buildClaudeArgs({ ...spec, toolGrant: entry.grant('claude'), restrictCrossSessionMessaging }, {});
       const index = args.indexOf('--settings');
       expect(index).toBeGreaterThanOrEqual(0);
       expect(JSON.parse(args[index + 1]!)).toEqual({ crossSessionInbound: 'refuse' });
@@ -146,12 +145,12 @@ describe('buildClaudeArgs governed native messaging', () => {
     expect(buildClaudeArgs({ ...spec, toolGrant: UNSET_TOOL_GRANT }, {})).not.toContain('--disallowedTools');
   });
 
-  it('keeps the native messaging deny when an explicit grant names both tools', () => {
-    const args = buildClaudeArgs({ ...spec, restrictNativeDelegation: true,
-      toolGrant: { kind: 'explicit', tools: ['Read', 'SendMessage', 'ListAgents'] },
+  it('passes an explicit grant naming the subagent tools through under delegation', () => {
+    const args = buildClaudeArgs({ ...spec, restrictCrossSessionMessaging: true,
+      toolGrant: { kind: 'explicit', tools: ['Read', 'Agent', 'SendMessage', 'ListAgents'] },
     }, {});
-    expect(args[args.indexOf('--allowedTools') + 1]).toBe('Read,SendMessage,ListAgents');
-    expect(args[args.indexOf('--disallowedTools') + 1]).toBe('Agent,Task,Workflow,SendMessage,ListAgents');
+    expect(args[args.indexOf('--allowedTools') + 1]).toBe('Read,Agent,SendMessage,ListAgents');
+    expect(args).not.toContain('--disallowedTools');
   });
 });
 

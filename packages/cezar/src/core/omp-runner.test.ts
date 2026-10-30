@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ChildProcess } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { parse as parseYaml } from 'yaml';
 import { explicitToolGrant, UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 // Pass-through: every test spawns the real child; a test that needs the child's own streams
@@ -131,24 +130,20 @@ describe('ompTools', () => {
     expect(ompTools(explicitToolGrant(['Read']), { cezarTools: true, env: { CEZ_AUTOMATIONS: '0' } }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
   });
 
-  it('bashAllowlist drops bash; D1 drops task, wait and eval; cezarTools appends the cezar tools', () => {
+  it('bashAllowlist drops bash; cezarTools appends the cezar tools', () => {
     expect(ompTools(explicitToolGrant(['Read', 'Bash'], ['npm test']), {}).tools).toEqual(['read']);
     expect(ompTools(explicitToolGrant(['Read', 'Bash'], []), {}).tools).toEqual(['read', 'bash']);
-    expect(ompTools(explicitToolGrant(['Read', 'Subagent', 'wait', 'eval']), { restrictNativeDelegation: true }).tools).toEqual(['read']);
     expect(ompTools(explicitToolGrant(['Read']), { cezarTools: true }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
   });
 
   it('fails closed when every granted tool is narrowed away, and adds no cezar tool to --no-tools', () => {
     expect(ompTools(explicitToolGrant(['Bash'], ['npm test']), { cezarTools: true })).toEqual({ flag: 'no-tools', tools: [], dropped: [] });
-    expect(ompTools(explicitToolGrant(['Subagent']), { restrictNativeDelegation: true }).flag).toBe('no-tools');
   });
 
-  it('D1 without allowedTools names OMP’s default set minus the delegation tools', () => {
-    expect(ompTools(UNSET_TOOL_GRANT, { restrictNativeDelegation: true })).toEqual({
-      flag: 'tools',
-      tools: ['read', 'bash', 'edit', 'glob', 'grep', 'todo', 'web_search', 'write'],
-      dropped: [],
-    });
+  // hearsay-tools/cezarion#2279: governed sessions keep OMP's subagent tools.
+  it('keeps task, wait and eval in a grant that names them, and sends no list for an unset grant', () => {
+    expect(ompTools(explicitToolGrant(['Read', 'Subagent', 'wait', 'eval']), {}).tools).toEqual(['read', 'task', 'wait', 'eval']);
+    expect(ompTools(UNSET_TOOL_GRANT, {})).toEqual({ flag: null, tools: [], dropped: [] });
   });
 });
 
@@ -167,7 +162,7 @@ describe('buildOmpArgs', () => {
   });
 
   it('resume uses --resume and never --session-id or --exclude-tools', () => {
-    const resumed = buildOmpArgs({ ...base, sessionId: '0199-abc', resume: true, restrictNativeDelegation: true });
+    const resumed = buildOmpArgs({ ...base, sessionId: '0199-abc', resume: true, restrictCrossSessionMessaging: true });
     expect(resumed.slice(0, 4)).toEqual(['--mode', 'rpc', '--resume', '0199-abc']);
     const fresh = buildOmpArgs({ ...base, sessionId: '0199-abc' });
     expect(fresh).not.toContain('--resume');
@@ -179,11 +174,12 @@ describe('buildOmpArgs', () => {
     }
   });
 
-  it('D1 adds --config omp-restrict-delegation.yml', () => {
-    const args = buildOmpArgs({ ...base, toolGrant: explicitToolGrant(['Read', 'Subagent']), restrictNativeDelegation: true });
-    expect(args).toEqual(['--mode', 'rpc', '--config', expect.stringMatching(/scripts\/omp-restrict-delegation\.yml$/), '--tools', 'read']);
-    const overlay = parseYaml(readFileSync(args[3]!, 'utf8')) as unknown;
-    expect(overlay).toEqual({ tools: { approval: { task: 'deny' } } });
+  it('sends the ordinary argv under restrictCrossSessionMessaging', () => {
+    for (const toolGrant of [explicitToolGrant(['Read', 'Subagent']), UNSET_TOOL_GRANT]) {
+      const args = buildOmpArgs({ ...base, toolGrant, restrictCrossSessionMessaging: true });
+      expect(args).not.toContain('--config');
+      expect(args).toEqual(buildOmpArgs({ ...base, toolGrant }));
+    }
   });
 
   it('cezarTools adds --extension omp-ci-wait.mjs before other flags', () => {
@@ -204,7 +200,7 @@ describe('buildOmpArgs', () => {
 describe('OMP_SPEC_SUPPORT', () => {
   it('honors every field, including the extra roots Pi drops', () => {
     for (const [field, support] of Object.entries(OMP_SPEC_SUPPORT)) {
-      if (field === 'resumeFallbackSystemPrompt') {
+      if (field === 'resumeFallbackSystemPrompt' || field === 'restrictCrossSessionMessaging') {
         expect(support.honored).toBe(false);
         continue;
       }
@@ -214,10 +210,8 @@ describe('OMP_SPEC_SUPPORT', () => {
       honored: true,
       via: '--add-dir per directory; an omp build that rejects --add-dir is respawned once without it, with a v1 note (Ruling 22)',
     });
-    expect(OMP_SPEC_SUPPORT.restrictNativeDelegation).toMatchObject({ via: expect.stringContaining('eval') });
-    // Ruling 14: D1 with no allowedTools names a list, so it never widens to OMP's defaults.
-    expect(OMP_SPEC_SUPPORT.restrictNativeDelegation).toMatchObject({ via: expect.stringContaining('with an unset grant') });
-    expect(OMP_SPEC_SUPPORT.restrictNativeDelegation).toMatchObject({ via: expect.stringContaining('failing closed') });
+    // irc reaches only agents inside the same OMP process (hearsay-tools/cezarion#2279).
+    expect(OMP_SPEC_SUPPORT.restrictCrossSessionMessaging).toMatchObject({ honored: false, reason: expect.stringContaining('irc') });
   });
 });
 
