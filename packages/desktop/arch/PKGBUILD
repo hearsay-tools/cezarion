@@ -17,7 +17,7 @@ license=('MIT')
 depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator')
 # Not a hard dependency: the shell finds Node through the login shell, so an nvm, volta or fnm
 # install counts. With none at all it shows a page that says so.
-optdepends=('nodejs: Node.js 20 or newer, required to run cezar (any install on PATH works)'
+optdepends=('nodejs: Node.js 24.21.0 or newer, required to run cezar (any install on PATH works)'
             'npm: installs and updates cezar itself')
 provides=('cezarion-desktop')
 conflicts=('cezarion-desktop')

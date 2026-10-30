@@ -30,7 +30,7 @@ signed release succeeds.
 
 ## Local mode
 
-Click **Start local cockpit**. Node.js 20+ and npm must be installed; the shell
+Click **Start local cockpit**. Node.js 24.21.0+ and npm must be installed; the shell
 finds tools through your login shell on macOS/Linux. When Node is absent, it
 shows a download link and retry. Remote mode remains available from the app menu.
 The first local start installs `@wjarka/cezarion` under `~/.cezar/versions`.
@@ -112,7 +112,7 @@ the server’s loopback cockpit port; SSH provides the authentication.
 From a fresh worktree, install dependencies there first:
 
 ```sh
-npm ci
+pnpm install --frozen-lockfile
 npm run build
 npm ci --prefix packages/desktop
 cargo test --manifest-path packages/desktop/src-tauri/Cargo.toml --locked --lib
@@ -121,13 +121,13 @@ npm run build --prefix packages/desktop -- --debug --bundles app,dmg # macOS
 
 Rust and the platform's Tauri build prerequisites are required to compile. They
 are not required to run an installed app. The desktop package intentionally sits
-outside the npm workspaces so normal CLI builds do not require Rust.
+outside the pnpm workspaces so normal CLI builds do not require Rust.
 
 For an isolated local smoke test on macOS, launch the built executable directly
 so it receives the test environment:
 
 ```sh
-CEZ_HOME="$(mktemp -d)" CEZ_DRY_RUN=1 CEZ_SKILLS_AUTO_UPDATE=0 \
+CEZ_HOME="$(mktemp -d)" CEZ_DRY_RUN=1 \
 CEZ_DESKTOP_ENTRY="$PWD/packages/cezar/dist/index.js" \
 CEZ_DESKTOP_CWD="$PWD" CEZ_DESKTOP_NO_UPDATE=1 \
 "$PWD/packages/desktop/src-tauri/target/debug/bundle/macos/Cezarion.app/Contents/MacOS/cezar-desktop"

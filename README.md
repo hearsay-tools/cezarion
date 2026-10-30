@@ -1362,7 +1362,7 @@ can slot in the same way.
 Cezarion Desktop is a Tauri 2 app for macOS, Windows and Linux. Start a local cockpit
 or connect to a remote HTTPS cockpit (loopback HTTP supports SSH tunnels). Remote
 windows have no native command permissions and need no local Node or agent install.
-Local mode needs Node.js 20+ and npm, then installs cezarion on first use.
+Local mode needs Node.js 24.21.0+ and npm, then installs cezarion on first use.
 
 See [desktop installation, development and testing](docs/desktop.md). PR builds
 provide test installers; public releases require platform signing and notarization.

@@ -708,7 +708,7 @@ fn supervise(app: AppHandle, shell: Arc<Shell>) {
         std::thread::sleep(Duration::from_millis(50));
     };
 
-    // Everything below needs Node 20+: the install, the sidecar, the update check. Without it
+    // Everything below needs the Node floor: the install, the sidecar, the update check. Without it
     // the honest answer is a page that says so, with the download link and a retry — not npm's
     // "command not found" three layers down.
     if !require_node(&window) {
@@ -837,7 +837,22 @@ fn npm_program() -> &'static str {
     }
 }
 
-/// Node 20+ reachable on the user's PATH? Returns its version, or the reason it is not.
+/// The oldest Node the managed cockpit runs on: `engines.node` in packages/cezar/package.json
+/// (`node:sqlite` needs it).
+const MIN_NODE: (u32, u32, u32) = (24, 21, 0);
+const MIN_NODE_LABEL: &str = "24.21.0";
+
+/// Whether a `process.versions.node` string is at least `MIN_NODE`. Unparsable reads as too old.
+fn node_meets_floor(version: &str) -> bool {
+    let mut parts = version.trim().trim_start_matches('v').split('.').map(|part| part.parse::<u32>());
+    match (parts.next(), parts.next(), parts.next()) {
+        (Some(Ok(major)), Some(Ok(minor)), Some(Ok(patch))) => (major, minor, patch) >= MIN_NODE,
+        _ => false,
+    }
+}
+
+/// A Node at least `MIN_NODE` reachable on the user's PATH? Returns its version, or the reason
+/// it is not.
 fn check_node() -> Result<String, String> {
     let mut command = tool_command(&node_program(), &["-p", "process.versions.node"]);
     command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
@@ -846,9 +861,8 @@ fn check_node() -> Result<String, String> {
     if !output.status.success() || version.is_empty() {
         return Err("Node.js was not found on your PATH.".into());
     }
-    let major = version.split('.').next().and_then(|m| m.parse::<u32>().ok()).unwrap_or(0);
-    if major < 20 {
-        return Err(format!("Node.js {version} is installed, but cezar needs 20 or newer."));
+    if !node_meets_floor(&version) {
+        return Err(format!("Node.js {version} is installed, but cezar needs {MIN_NODE_LABEL} or newer."));
     }
     Ok(version)
 }
@@ -910,7 +924,7 @@ fn update_cezar(app: &AppHandle, shell: &Shell, title: &str) -> bool {
             &["install", "--prefix", &prefix, "--omit=dev", "--no-audit", "--no-fund", "--no-package-lock", "--loglevel=notice", &spec],
         );
         command.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-        let mut child = command.spawn().map_err(|error| format!("could not start npm: {error}. Is Node 20+ on your PATH?"))?;
+        let mut child = command.spawn().map_err(|error| format!("could not start npm: {error}. Is Node {MIN_NODE_LABEL}+ on your PATH?"))?;
         for reader in [
             child.stdout.take().map(|out| Box::new(out) as Box<dyn Read + Send>),
             child.stderr.take().map(|err| Box::new(err) as Box<dyn Read + Send>),
@@ -926,7 +940,7 @@ fn update_cezar(app: &AppHandle, shell: &Shell, title: &str) -> bool {
         }
         match child.wait() {
             Ok(status) if status.success() => Ok(()),
-            Ok(status) => Err(format!("npm exited with {status}. Is Node 20+ on your PATH?")),
+            Ok(status) => Err(format!("npm exited with {status}. Is Node {MIN_NODE_LABEL}+ on your PATH?")),
             Err(error) => Err(error.to_string()),
         }
     });
@@ -1495,7 +1509,7 @@ fn fail_needs_node(window: &WebviewWindow, reason: &str) {
         "{}?needs_node=1&error={}&title={}",
         app_origin(),
         urlencode(reason),
-        urlencode("cezar needs Node.js 20 or newer")
+        urlencode(&format!("cezar needs Node.js {MIN_NODE_LABEL} or newer"))
     )) {
         let _ = window.navigate(url);
     }
@@ -1534,6 +1548,21 @@ mod tests {
         assert_eq!(channel_tag(Some("nightly")), Some("nightly"));
         assert_eq!(channel_tag(Some("stable")), Some("latest"));
         assert_eq!(channel_tag(None), Some("latest"));
+    }
+
+    /// The managed cockpit needs `node:sqlite`; an older Node gets the download page, not a
+    /// sidecar that dies on start.
+    #[test]
+    fn the_node_floor_matches_the_cockpit_engines() {
+        assert!(node_meets_floor("24.21.0"));
+        assert!(node_meets_floor("v24.22.1"));
+        assert!(node_meets_floor("25.0.0"));
+        assert!(!node_meets_floor("24.20.9"));
+        assert!(!node_meets_floor("22.12.0"));
+        assert!(!node_meets_floor("20.18.0"));
+        assert!(!node_meets_floor("not a version"));
+        let engines = include_str!("../../../cezar/package.json");
+        assert!(engines.contains(&format!("\"node\": \">={MIN_NODE_LABEL}\"")), "packages/cezar engines moved; update MIN_NODE");
     }
 
     #[test]
@@ -1757,8 +1786,8 @@ mod tests {
     #[test]
     #[ignore = "needs Node.js on PATH"]
     fn finds_the_node_on_path() {
-        let version = check_node().expect("Node 20+ on PATH");
-        assert!(version.split('.').next().unwrap().parse::<u32>().unwrap() >= 20, "{version}");
+        let version = check_node().expect("Node at the floor on PATH");
+        assert!(node_meets_floor(&version), "{version}");
     }
 
     /// The sidecar's whole launch: node is started with the entry and the arguments cezar
