@@ -1,3 +1,4 @@
+import type { Dirent } from 'node:fs';
 import { readdir, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { expandTilde } from '../paths.ts';
@@ -35,7 +36,7 @@ export interface FsBrowseResponse {
 
 export type BrowseResult =
   | { ok: true; body: FsBrowseResponse }
-  | { ok: false; status: 400 | 404; error: string };
+  | { ok: false; status: 400 | 403 | 404; error: string };
 
 /**
  * Entry cap. A picker cannot usefully render more, and an unbounded listing
@@ -43,6 +44,19 @@ export type BrowseResult =
  * resolution) on e.g. a node_modules parent.
  */
 const MAX_ENTRIES = 1000;
+
+/**
+ * Home folders macOS guards with a privacy prompt (Files & Folders, Media & Apple Music,
+ * Photos, Full Disk Access). Opening the picker at `~` must not LOOK INSIDE them: the `.git`
+ * probe below is a read inside the folder, and in the desktop app it made macOS ask "Cezar
+ * would like to access Apple Music…" (and Documents, Desktop, Downloads…) before the user
+ * clicked anything. They are still listed; opening one is the user's choice, and so is the
+ * prompt that follows. Their `isRepo` is simply `false`.
+ */
+const PRIVACY_PROTECTED_HOME_DIRS = new Set(['Desktop', 'Documents', 'Downloads', 'Library', 'Movies', 'Music', 'Pictures']);
+
+/** The 403 a macOS privacy denial answers with; the picker offers System Settings beside it. */
+export const MACOS_PRIVACY_BLOCKED = 'macOS privacy settings do not allow cezar to read this folder.';
 
 /**
  * Expand the configured browse root. The workspace owns this independently
@@ -170,10 +184,8 @@ export async function browseDirectory(opts: {
   // existence of a file the caller was never shown.
   if (!info?.isDirectory()) return { ok: false, status: 404, error: 'no such directory' };
 
-  const entries = await readdir(real, { withFileTypes: true }).catch(() => null);
-  // Unreadable (mode 0300, permission-denied mount) — indistinguishable from
-  // absent, on purpose.
-  if (entries === null) return { ok: false, status: 404, error: 'no such directory' };
+  const entries = await readEntries(real);
+  if (!Array.isArray(entries)) return entries;
 
   const showHidden = opts.showHidden === true;
   const candidates = entries
@@ -183,9 +195,48 @@ export async function browseDirectory(opts: {
     .filter((entry) => entry.isDirectory() || entry.isSymbolicLink())
     .sort((a, b) => a.name.localeCompare(b.name));
   const truncated = candidates.length > MAX_ENTRIES;
+  const inHome = real === (await realpathOrNull(expandTilde('~')));
 
+  const dirs = await listDirs(root, real, candidates.slice(0, MAX_ENTRIES), inHome);
+
+  return {
+    ok: true,
+    body: {
+      path: real,
+      // Never above the root, even when the real parent exists — `dirname('/')`
+      // is `/`, and the root's parent is simply not part of this surface.
+      parent: real === root ? null : dirname(real),
+      dirs,
+      truncated,
+    },
+  };
+}
+
+/** The entries of `real`, or the failure to answer when it cannot be read. */
+async function readEntries(real: string): Promise<Dirent[] | Extract<BrowseResult, { ok: false }>> {
+  let readError: NodeJS.ErrnoException | null = null;
+  const entries = await readdir(real, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+    readError = error;
+    return null;
+  });
+  if (entries === null) {
+    // macOS privacy (TCC) refuses with EPERM — a folder the parent listing already showed, that
+    // the user can unblock in System Settings. Saying "no such directory" there left them stuck.
+    if (process.platform === 'darwin' && (readError as NodeJS.ErrnoException | null)?.code === 'EPERM') {
+      return { ok: false, status: 403, error: MACOS_PRIVACY_BLOCKED };
+    }
+    // Unreadable otherwise (mode 0300, permission-denied mount) — indistinguishable from
+    // absent, on purpose.
+    return { ok: false, status: 404, error: 'no such directory' };
+  }
+
+  return entries;
+}
+
+/** The listed directories among `entries`, each with whether it is a git repository. */
+async function listDirs(root: string, real: string, entries: Dirent[], inHome: boolean): Promise<FsBrowseDir[]> {
   const dirs: FsBrowseDir[] = [];
-  for (const entry of candidates.slice(0, MAX_ENTRIES)) {
+  for (const entry of entries) {
     const childPath = join(real, entry.name);
     if (entry.isSymbolicLink()) {
       const childReal = await realpathOrNull(childPath);
@@ -203,19 +254,9 @@ export async function browseDirectory(opts: {
       // way the operator's filesystem reads, and navigating into it re-runs
       // the containment check from scratch.
       path: childPath,
-      isRepo: await exists(join(childPath, '.git')),
+      isRepo: inHome && PRIVACY_PROTECTED_HOME_DIRS.has(entry.name) ? false : await exists(join(childPath, '.git')),
     });
   }
 
-  return {
-    ok: true,
-    body: {
-      path: real,
-      // Never above the root, even when the real parent exists — `dirname('/')`
-      // is `/`, and the root's parent is simply not part of this surface.
-      parent: real === root ? null : dirname(real),
-      dirs,
-      truncated,
-    },
-  };
+  return dirs;
 }

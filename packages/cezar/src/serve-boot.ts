@@ -9,6 +9,10 @@ import { readNpmConfiguration } from './application-update/npm-process.ts';
 import { restartEndpoint } from './application-update/helper.ts';
 import { armRestartHelper } from './application-update/launcher.ts';
 import { ApplicationUpdateService } from './application-update/service.ts';
+import { SelfUpdateService } from './self-update/service.ts';
+import { isSupervised, restartProcess, type RestartOptions } from './self-update/restart.ts';
+import { forwardToSessionGroups } from './core/session-process.ts';
+import { resolveCapabilities } from './server/capabilities.ts';
 import { pruneOrphans } from './git-worktree.ts';
 import { DEFAULT_WORKTREE_RETENTION, resolveWorktreeRetention } from './config.ts';
 import { reclaimWorktrees } from './runs/retention.ts';
@@ -94,6 +98,7 @@ export function createServeApplicationUpdate(
   update: { latest?: string },
   getServer: () => ReturnType<typeof startServer>,
   readNpm = readNpmConfiguration,
+  store?: Pick<RunStore, 'close'>,
 ): ApplicationUpdateService | undefined {
   // Discovery reads npm metadata only; a missing npm or source checkout degrades to manual update.
   const npm = readNpm();
@@ -107,8 +112,74 @@ export function createServeApplicationUpdate(
       npmCache: npmCache ?? join(cezarHomeDir(), 'dry-cache'), npmBin: npm?.npmBin, home: cezarHomeDir(), targetVersion: () => update.latest,
       dryRun: process.env.CEZ_DRY_RUN === '1',
       armRestart: (plan) => armRestartHelper(plan, { repoRoot, ...restartEndpoint(getServer().address()), npmBin: npm?.npmBin ?? 'npm' }),
-      handoff: () => { void getServer().shutdownForRestart().then(() => process.exit(0)); },
+      handoff: () => { void stopServe(getServer(), 'SIGTERM', { store }).then(() => process.exit(0)); },
     }) : undefined;
+}
+
+type StoppableServer = Pick<ReturnType<typeof startServer>, 'shutdownForRestart'>;
+
+/** How long a stop waits for the server's own shutdown. A socket the listener still holds, or a
+ *  step that hangs, must not keep this process, its store or its agents alive. */
+export const STOP_SERVE_BOUND_MS = 5_000;
+
+export interface StopServeOptions {
+  /** The boot store: closed here when the server's shutdown failed or did not finish in time. */
+  store?: Pick<RunStore, 'close'> | undefined;
+  boundMs?: number;
+  forward?: (signal: NodeJS.Signals) => void;
+}
+
+/**
+ * The one teardown every exit from `serve` runs: a signal, the desktop shell closing stdin, and
+ * both updaters' restarts. The server's own shutdown stops dev servers, delegation, the listener
+ * and the store, waited for at most `boundMs`. Whatever happened there, the store is closed and
+ * the signal goes to every agent session group: agents lead their own process groups
+ * (hearsay-tools/cezarion#890), so nothing above reaches them. The signal goes last: with the store
+ * closed, an agent it ends cannot settle its run, and the next process's recovery resumes it.
+ */
+export async function stopServe(server: StoppableServer, signal: NodeJS.Signals = 'SIGTERM', opts: StopServeOptions = {}): Promise<void> {
+  const { store, boundMs = STOP_SERVE_BOUND_MS, forward = forwardToSessionGroups } = opts;
+  let finished = false;
+  const shutdown = Promise.resolve().then(() => server.shutdownForRestart()).then(() => { finished = true; });
+  let timer: NodeJS.Timeout | undefined;
+  // Not unref'd: the bound is what ends this wait when nothing else keeps the process alive.
+  const bound = new Promise<void>((resolve) => { timer = setTimeout(resolve, boundMs); });
+  try {
+    await Promise.race([shutdown, bound]);
+  } catch {
+    // A failed step must not skip the rest; the finally block below runs it.
+  } finally {
+    clearTimeout(timer);
+    shutdown.catch(() => undefined);
+    if (!finished) {
+      try { store?.close(); } catch { /* the step that failed may have closed it already */ }
+    }
+    forward(signal);
+  }
+}
+
+/** Stop this serve (`stopServe`), then re-exec it on the same port or exit 75 to its supervisor. */
+export async function restartServe(
+  server: StoppableServer & Pick<ReturnType<typeof startServer>, 'address'>,
+  restart: (opts: RestartOptions) => void = restartProcess,
+  opts: StopServeOptions = {},
+): Promise<void> {
+  const port = restartEndpoint(server.address()).port;
+  await stopServe(server, 'SIGTERM', opts);
+  restart({ server: null, args: process.argv.slice(2), port, supervised: isSupervised() });
+}
+
+/** The managed desktop updater; a restart re-execs this serve on the same port. */
+export function createServeSelfUpdate(
+  opts: { pkgName: string; version: string; store: RunStore; bindHost: string | undefined },
+  getServer: () => ReturnType<typeof startServer>,
+): SelfUpdateService {
+  return new SelfUpdateService({
+    pkgName: opts.pkgName, version: opts.version, entry: resolve(process.argv[1] ?? ''), supervised: isSupervised(),
+    activeRuns: () => opts.store.listRuns().filter(r => ['queued', 'waiting', 'running'].includes(r.status)).length,
+    trimPaths: () => !resolveCapabilities(process.env, opts.bindHost).localHandoff,
+    restart: () => { void restartServe(getServer(), restartProcess, { store: opts.store }); },
+  });
 }
 
 export function printServeBanner(

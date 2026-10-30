@@ -161,6 +161,7 @@ import {
 } from '../workflows/types.ts';
 import { planChain, slugify } from '../planner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
+import { createSelfUpdateRoutes, type SelfUpdateServerDeps } from './self-update-routes.ts';
 import { getTeamSkillsCached, refreshTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
 import { readHandoff, renderHandoffRecords } from '../handoff.ts';
 import { ARCHIVED_WINDOW, type RepoHandle, type RunEvent, type RunRecord, type RunStatus, type RunStore } from '../runs/store.ts';
@@ -310,7 +311,7 @@ import {
   resolveGetRequest,
 } from './static-ui.ts';
 
-export interface ServerDeps {
+export interface ServerDeps extends SelfUpdateServerDeps {
   /** CLI lifetime ownership, shared with secondary project contexts. */
   ownership?: CockpitOwnership;
   /** The task-webhook subscribers (#589). Boot creates it and attaches the boot store BEFORE
@@ -5371,14 +5372,11 @@ export function createApp(deps: ServerDeps) {
 
   // Workspace-level families answer for the whole workspace, so they are single-mount: never a
   // project-scoped spelling, which would be a second surface to protect with no consumer.
-  const liveRoutes = createLiveRoutes({
-    serverGeneration, resolveBootProject,
-    resolveProject: async (id) => {
-      const bootId = await resolveBootProject();
-      if (id === 'default' || id === bootId) return { ...bootContext, id: bootId };
-      return contexts.context(id);
-    },
-  });
+  const liveRoutes = createLiveRoutes({ serverGeneration, resolveBootProject, resolveProject: async (id) => {
+    const bootId = await resolveBootProject();
+    if (id === 'default' || id === bootId) return { ...bootContext, id: bootId };
+    return contexts.context(id);
+  } });
   const workspaceV1 = new Hono()
     .route('/', liveRoutes)
     .route('/', healthRoutes)
@@ -5386,6 +5384,7 @@ export function createApp(deps: ServerDeps) {
     .route('/', providersRoutes)
     .route('/', projectsRoutes)
     .route('/', agentProfilesRoutes)
+    .route('/', createSelfUpdateRoutes(deps, () => capabilities().localHandoff, () => [deps.store, ...contexts.ids().flatMap((id) => contexts.peek(id)?.store ?? [])]))
     .route('/', applicationUpdateRoutes)
     .route('/', workspaceConfigRoutes)
     .route('/', fsBrowseRoutes)

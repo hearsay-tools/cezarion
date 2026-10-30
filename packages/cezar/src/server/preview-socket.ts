@@ -69,6 +69,9 @@ export function createPreviewSocket(deps: PreviewSocketDeps): PreviewSocket {
   const log = deps.log ?? ((line: string) => console.warn(line));
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES });
   const open = new Set<WebSocket>();
+  /** Upgrades still resolving their project: not WebSockets yet, so `closeAllConnections` skips
+   *  them, and an undestroyed one would hold the listener open through shutdown. */
+  const pending = new Set<Duplex>();
   let closed = false;
 
   const connected = (ws: WebSocket, req: IncomingMessage, ctx: RunContext | undefined): void => {
@@ -121,7 +124,9 @@ export function createPreviewSocket(deps: PreviewSocketDeps): PreviewSocket {
     if (!verdict || !verdict.trusted) return reject(socket, 403);
     const { projectId, id } = params;
     if (projectId !== undefined && !PROJECT_ID_RE.test(projectId)) return reject(socket, 404);
-    const project = await deps.resolveProject(projectId).catch(() => undefined);
+    pending.add(socket);
+    const project = await deps.resolveProject(projectId).catch(() => undefined).finally(() => pending.delete(socket));
+    if (closed) return void socket.destroy();
     const run = id === undefined ? undefined : project?.store.getRun(id);
     if (!project || !run) return reject(socket, 404);
     if (socket.destroyed) return;
@@ -139,6 +144,7 @@ export function createPreviewSocket(deps: PreviewSocketDeps): PreviewSocket {
     close() {
       if (closed) return;
       closed = true;
+      for (const socket of [...pending]) socket.destroy();
       for (const ws of [...open]) ws.terminate();
       wss.close();
     },

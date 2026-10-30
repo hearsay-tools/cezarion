@@ -36,6 +36,8 @@ import {
   providersRequiredByWorkflow,
   unavailableProviderMessage,
 } from './server/provider-action-gate.ts';
+import { runManagedCommand } from './self-update/cli.ts';
+import { watchSupervisor } from './self-update/supervisor.ts';
 import { checkForUpdate } from './update-check.ts';
 import { loadWorkspaceConfig } from './workspace/config.ts';
 import { runMigrations } from './workspace/migrations.ts';
@@ -43,7 +45,7 @@ import { registerProject, shouldRegisterProject } from './workspace/projects.ts'
 import { runProjectsCommand } from './workspace/projects-cli.ts';
 import { WorkspaceSemaphore } from './workspace/semaphore.ts';
 import { openUrl } from './open-url.ts';
-import { reconcileServeWorktrees, recoverServeProject, warnServeBind, createServeApplicationUpdate, printServeBanner } from './serve-boot.ts';
+import { reconcileServeWorktrees, recoverServeProject, warnServeBind, createServeApplicationUpdate, createServeSelfUpdate, printServeBanner, stopServe } from './serve-boot.ts';
 import { CockpitOwnership } from './server/cockpit-ownership.ts';
 
 const HELP = `cezar — local cockpit for AI agent tasks in your repo
@@ -65,6 +67,9 @@ Usage:
   cez server-install        interactive wizard to host cezar on a server
   cez server-deploy         redeploy a new version (reload the service) + verify
   cez server-uninstall      reverse a server-install
+  cez install | update      manage the desktop installation under ~/.cezar/versions
+  cez versions | use <id>   list or switch managed versions
+  cez link [dir] [--use]    link a built development checkout (unlink <id> removes it)
 
 Options:
   -p, --port <n>              cockpit port (default 4321; server-install: this
@@ -96,6 +101,11 @@ Skills live in .ai/skills/, .ai/cezar/skills/ and your team skills repos
 workflows in .ai/cezar/workflows/.`;
 
 async function main(): Promise<void> {
+  const managedExit = await runManagedCommand(process.argv.slice(2), { pkgName: readOwnName(), version: readOwnVersion(), entry: resolve(process.argv[1] ?? '') });
+  if (managedExit !== undefined) {
+    process.exitCode = managedExit;
+    return;
+  }
   // Subcommands with flags of their own run before the global parseArgs (#504, #774, #1576).
   const subcommandExit = await runSubcommand(process.argv.slice(2), process.env);
   if (subcommandExit !== undefined) {
@@ -296,7 +306,8 @@ async function serveCommand(
   const port = preferredPort;
   warnServeBind(bindHost, port);
   let server: ReturnType<typeof startServer>;
-  const applicationUpdate = createServeApplicationUpdate(repoRoot, update, () => server);
+  const selfUpdate = createServeSelfUpdate({ pkgName, version, store, bindHost }, () => server);
+  const applicationUpdate = createServeApplicationUpdate(repoRoot, update, () => server, undefined, store);
   server = startServer({
     ownership,
     delegation,
@@ -306,6 +317,7 @@ async function serveCommand(
     version,
     update,
     applicationUpdate,
+    selfUpdate,
     bootProjectId,
     semaphore,
     bindHost,
@@ -332,22 +344,18 @@ async function serveCommand(
 
   printServeBanner(version, repoRoot, repo, checks, url);
 
+  // One stop per process: a repeated signal must not start a second teardown over the first.
+  let stopping = false;
   const shutdown = (signal: NodeJS.Signals) => {
-    // Dev servers run in their own process groups: stop them before this process exits.
-    void Promise.all([delegation.close(), previewHost?.close()]).finally(() => {
-      server.close();
-      store.close();
-      // Agent sessions lead their own process groups (hearsay-tools/cezarion#890), so the
-      // terminal's Ctrl-C no longer reaches them. Forward the signal last: with the store
-      // closed, an agent it ends cannot settle its run, and restart recovery resumes it.
-      forwardToSessionGroups(signal);
-      process.exit(0);
-    });
+    if (stopping) return;
+    stopping = true;
+    void stopServe(server, signal, { store }).finally(() => process.exit(0));
   };
   process.on('SIGINT', () => shutdown('SIGINT'));
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   if (onTerminal()) process.on('SIGHUP', () => shutdown('SIGHUP'));
   else ignoreHangupOffTerminal();
+  watchSupervisor(() => shutdown('SIGTERM'));
 
   // Open the browser only once the server actually answers, so the first
   // paint is the cockpit and never a connection error.

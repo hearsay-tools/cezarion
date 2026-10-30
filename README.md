@@ -1143,6 +1143,10 @@ Useful environment variables:
 |---|---|
 | `CEZ_DELEGATION=1` | Enable owned workers and the private loopback listener for this controller. Off by default; works with the cockpit and headless `cez run`. When disabled, terminal cleanup checkpoints skip conversation/wait history reconciliation; explicit recovery and cleanup termination safeguards remain active. Session instructions and credentials are automatic. |
 | `CEZ_DELEGATION_URL`, `CEZ_DELEGATION_TOKEN` | Internal generated session values; do not configure or copy them. Tokens rotate on Continue/restart and are revoked when the session/controller closes. |
+| `CEZ_UPDATE_CHANNEL` | Managed desktop channel: stable (default), nightly, or development. The version dialog's saved choice takes precedence. |
+| `CEZ_DESKTOP_ENTRY` / `CEZ_DESKTOP_CWD` / `CEZ_DESKTOP_NODE` | Desktop development overrides for the built entry, boot directory and Node executable; otherwise discovered automatically. |
+| `CEZ_DESKTOP_NO_UPDATE` | Exact `1` disables native shell updates; debug builds already disable them. |
+| `CEZ_DESKTOP_DEBUG_IPC` | Debug-only native title-bar probe. |
 | `CEZ_URL` | Cockpit origin for `cez task` and operator `cez discover` (e.g. a hosted `CEZ_REMOTE` cockpit). Unset, they find the local cockpit serving this checkout on ports 4321–4370. Parent discovery uses its delegation controller instead. |
 | `CEZ_COCKPIT_URL`, `CEZ_PROJECT_ID` | Set by the cockpit in every agent's environment once it listens: the bound origin and the run's project. `cez automation` calls that address; a headless `cez run` sets neither. Do not configure them. |
 | `CEZ_DRY_RUN=1` | Use bundled mocks for all five agent backends — the cockpit works offline for demos and development. Explicit backend binary overrides still win. |
@@ -1356,6 +1360,16 @@ a stream of normalized events. Other CLIs — pi, aider, whatever ships next —
 can slot in the same way.
 
 ---
+
+## Desktop app
+
+Cezarion Desktop is a Tauri 2 app for macOS, Windows and Linux. Start a local cockpit
+or connect to a remote HTTPS cockpit (loopback HTTP supports SSH tunnels). Remote
+windows have no native command permissions and need no local Node or agent install.
+Local mode needs Node.js 24.21.0+ and npm, then installs cezarion on first use.
+
+See [desktop installation, development and testing](docs/desktop.md). PR builds
+provide test installers; public releases require platform signing and notarization.
 
 ## Remote access (host Cezarion on a server)
 
