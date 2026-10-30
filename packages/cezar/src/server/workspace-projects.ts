@@ -9,10 +9,16 @@ import { CockpitAlreadyRunningError } from './cockpit-ownership.ts';
 import type { ServerDeps } from './server.ts';
 import { ProjectContextError, ProjectContexts, type ProjectContext, type ProjectContextDeps } from './project-context.ts';
 
+type ContextServices = Pick<ServerDeps, 'contexts' | 'semaphore' | 'previewHost'> & {
+  delegation?: Pick<NonNullable<ServerDeps['delegation']>, 'attachProject'> & {
+    service: Pick<NonNullable<ServerDeps['delegation']>['service'], 'armDestroyRetries'>;
+  };
+};
+
 /** Assemble the shared lazy-context wiring once; entry points supply only their differences. */
 export function createWorkspaceProjectContexts(
-  deps: Pick<ServerDeps, 'contexts' | 'semaphore' | 'previewHost' | 'delegation'>,
-  taskWebhooks: TaskWebhooks,
+  deps: ContextServices,
+  taskWebhooks: Pick<TaskWebhooks, 'attach'>,
   options: Pick<ProjectContextDeps, 'listProjects' | 'ownership' | 'automationStore' | 'cezarPort'> & {
     addressManager?: (project: Parameters<NonNullable<ProjectContextDeps['prepareManager']>>[0]) => void;
   },
@@ -101,6 +107,10 @@ export function createWorkspaceProjects(options: { bootRoot: string; bootProject
     const id = await canonicalProjectId(projectId);
     return (await loadWorkspaceConfig()).projects.find((entry) => entry.id === id);
   };
+  const resolveRegistryEntry = async (raw: string): Promise<WorkspaceProject | undefined> => {
+    if (!validProjectId(raw)) return undefined;
+    return registryEntry(raw).catch(() => undefined);
+  };
   // Identity precedes the lazy context supplier; createApp binds its completed contexts once.
   let boundBoot: ProjectContext;
   let boundContexts: Pick<ProjectContexts, 'context'>;
@@ -138,7 +148,7 @@ export function createWorkspaceProjects(options: { bootRoot: string; bootProject
     return { error: failure.error.message, status: failure.kind === 'unknown-project' ? 404 : 409 };
   };
   return { resolveBootProject, canonicalProjectId, resolveProjectId, singleProject, visibleProjects: visibleRegistry,
-    listVisibleProjects, registryEntry, resolveProject, bindContexts, lookupProject, resolveLiveProject, httpFailure, liveFailure };
+    listVisibleProjects, registryEntry, resolveRegistryEntry, resolveProject, bindContexts, lookupProject, resolveLiveProject, httpFailure, liveFailure };
 }
 
 export type WorkspaceProjects = ReturnType<typeof createWorkspaceProjects>;

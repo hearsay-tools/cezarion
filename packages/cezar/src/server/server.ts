@@ -23,6 +23,10 @@ import { CompletionActionCoordinator } from './completion-actions.ts';
 import { discoverRepoHandle, lookupMergedPullRequests } from './forge/github.ts';
 import { resolveArchiveOnMerge, resolveGlobalArchiveOnMerge } from '../archive-on-merge-setting.ts';
 import type {
+  ProjectsResponse,
+  RegisterProjectResponse,
+  RemoveProjectResponse,
+  UpdateProjectResponse,
   AgentWebhooksResponse,
   ProjectWebhookResponse,
   SendAgentReportResponse,
@@ -491,43 +495,8 @@ const AUTOMATIONS_OFF = 'Automations are disabled — set CEZ_AUTOMATIONS=1 to e
 /** 404 body for a run whose row is in runs.db but whose record this cezar cannot decode (#779). */
 const UNREADABLE_RUN_ERROR = 'this run could not be read by this cezar: its record in runs.db does not fit this version (a newer cezar may have written it). It is left in the database untouched.';
 
-/** `GET /api/projects` (multi-project spec) — the workspace registry with
- *  per-root status probes. Absolute `root`s belong HERE (same-origin, behind
- *  the cockpit) and are deliberately never mirrored into the CORS-open
- *  `/api/health` payload (#431 — see the health route). Never 404s. */
-export interface ProjectsResponse {
-  projects: ProjectListEntry[];
-  bootProject: string;
-  projectsDir: string;
-}
-
-/** `POST /api/projects` (multi-project spec, step 4.2) — the folder-browser
- *  dialog's commit step. The entry carries the same `status`/`branch` probe
- *  `GET /api/projects` attaches, so the cockpit sees one project shape.
- *  `error` is present ONLY on the 409 (already registered), where `project` is
- *  the EXISTING entry — the dialog navigates to it instead of dead-ending. */
-export interface RegisterProjectResponse {
-  project: ProjectListEntry;
-  error?: string;
-}
-
-/** `DELETE /api/projects/:projectId` (multi-project spec, step 4.4) — the
- *  Projects settings pane's Remove. DEREGISTRATION ONLY: the entry leaves
- *  `~/.cezar/config.json` and nothing under the project root is read, moved or
- *  deleted. `removed` is always true on a 200 (the failure paths are 404/409). */
-export interface RemoveProjectResponse {
-  removed: true;
-  id: string;
-}
-
-/** `PATCH /api/projects/:projectId` (spec 2026-07-22-per-project-concurrency)
- *  — sets or clears a project's per-project `maxParallel`. The entry carries
- *  the same `status`/`branch` probe `GET /api/projects` attaches, so the
- *  cockpit sees one project shape. `null` in the request clears the override
- *  back to "inherit the workspace cap". */
-export interface UpdateProjectResponse {
-  project: ProjectListEntry;
-}
+// These response shapes belong to the contract; keep the server's existing type exports.
+export type { ProjectsResponse, RegisterProjectResponse, RemoveProjectResponse, UpdateProjectResponse } from '@open-mercato/cezar-contract';
 
 // ---- workspace SSE (multi-project spec, step 2.8) --------------------------
 
@@ -2234,9 +2203,7 @@ export function createApp(deps: ServerDeps) {
         return c.json(singleProjectRefusal('editing projects'), 409);
       }
       const raw = c.req.param('projectId');
-      const resolved = await workspaceProjects.resolveProjectId(raw);
-      if ('error' in resolved) return c.json(resolved, 404);
-      const entry = await projectRegistryEntry(resolved.id).catch(() => undefined);
+      const entry = await workspaceProjects.resolveRegistryEntry(raw);
       if (!entry) return c.json({ error: `unknown project: ${raw}` }, 404);
       // Since #1576: the first webhook with task notifications on.
       const webhook = taskWebhookList(entry)[0];
@@ -2297,9 +2264,7 @@ export function createApp(deps: ServerDeps) {
         return c.json(singleProjectRefusal('editing projects'), 409);
       }
       const { projectId, webhookId } = c.req.valid('param');
-      const resolved = await workspaceProjects.resolveProjectId(projectId);
-      if ('error' in resolved) return c.json(resolved, 404);
-      const entry = await projectRegistryEntry(resolved.id).catch(() => undefined);
+      const entry = await workspaceProjects.resolveRegistryEntry(projectId);
       if (!entry) return c.json({ error: `unknown project: ${projectId}` }, 404);
       const webhook = projectWebhooks(entry).find((candidate) => candidate.id === webhookId);
       if (!webhook) return c.json({ error: `unknown webhook: ${webhookId}` }, 404);
@@ -2403,7 +2368,7 @@ export function createApp(deps: ServerDeps) {
       // creating a registered project whose folder had been deleted produces. The user asked for
       // that project and it is there, so both are a success. (An if/else chain, not a helper:
       // only narrowing `registered` keeps the error bodies out of the route's 200 type.)
-      let project: ProjectListEntry;
+      let project: CreateProjectResponse['project'];
       if (registered.status === 200) project = registered.body.project;
       else if (registered.status === 409 && 'project' in registered.body) project = registered.body.project;
       else {

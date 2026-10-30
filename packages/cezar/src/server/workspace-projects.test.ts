@@ -5,7 +5,7 @@ import { listProjects } from '../workspace/projects.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { CockpitAlreadyRunningError } from './cockpit-ownership.ts';
 import { ProjectContextError, ProjectContexts, type ProjectContext, type ProjectContextDeps } from './project-context.ts';
-import type { DelegationController } from '../delegation/provision.ts';
+import type { TaskWebhook } from '../runs/webhook.ts';
 import { createTaskWebhooks, createWorkspaceProjectContexts, createWorkspaceProjects } from './workspace-projects.ts';
 
 const { constructed } = vi.hoisted(() => ({ constructed: [] as ProjectContextDeps[] }));
@@ -130,18 +130,19 @@ it('keeps injected context and webhook services and builds absent services once'
   expect(createWorkspaceProjectContexts({ contexts }, createTaskWebhooks({}), options)).toBe(contexts);
   expect(createWorkspaceProjectContexts({}, createTaskWebhooks({}), options)).toBeInstanceOf(ProjectContexts);
   const webhooks = createTaskWebhooks({}, '');
+  expect(webhooks.currentOrigin()).toBe('');
+  expect(createTaskWebhooks({}).currentOrigin()).toBeUndefined();
   expect(createTaskWebhooks({ taskWebhooks: webhooks })).toBe(webhooks);
 });
 
 it('assembles shared context options and keeps prepare/recovery side effects in order', () => {
   const order: string[] = [];
   const detach = vi.fn();
-  const webhooks = createTaskWebhooks({});
-  vi.spyOn(webhooks, 'attach').mockImplementation(() => { order.push('webhooks'); });
+  const webhooks = { attach: () => { order.push('webhooks'); return {} as TaskWebhook; } };
   const delegation = {
     attachProject: () => { order.push('delegation'); return detach; },
     service: { armDestroyRetries: () => { order.push('destroy retries'); } },
-  } as DelegationController;
+  };
   const list = vi.fn();
   createWorkspaceProjectContexts({ delegation }, webhooks, {
     listProjects: list,
