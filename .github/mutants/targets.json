@@ -1,0 +1,174 @@
+{
+  "packages/cezar/src/task-cli/cli.ts": {
+    "tier": "logic",
+    "guards": [
+      "validateFlags",
+      "parseOperation",
+      "positiveInt",
+      "nonNegativeInt"
+    ]
+  },
+  "packages/cezar/src/preview/host.ts": {
+    "tier": "logic",
+    "guards": [
+      "PreviewHost.stopPreview",
+      "heldByAnotherTab",
+      "heldByOther",
+      "portOwner",
+      "ownsBrowser",
+      "sameOrigin"
+    ]
+  },
+  "packages/cezar/src/server/repo-branches.ts": {
+    "tier": "logic",
+    "guards": [
+      "deleteBranches",
+      "deletionVerdicts",
+      "claimDeletionRuns",
+      "retainingRef",
+      "classifyBranches",
+      "mergedPrBranches",
+      "recordedPrs"
+    ]
+  },
+  "packages/web/src/routes/task-thread/preview/use-preview-pane-transport.ts": {
+    "tier": "logic",
+    "guards": []
+  },
+  "packages/web/src/routes/repo-git/repo-not-landed.tsx": {
+    "tier": "component",
+    "guards": [
+      "DeleteBranchDialog"
+    ]
+  },
+  "packages/contract/src/waits.ts": {
+    "tier": "logic",
+    "guards": [
+      "workerWaitView",
+      "computeWaitingOn",
+      "workerEntryOwed",
+      "oneModeTakesOneId"
+    ]
+  },
+  "packages/web/src/routes/task-thread/run-relationships.tsx": {
+    "tier": "component",
+    "guards": []
+  },
+  "packages/cezar/src/automations/scheduler.ts": {
+    "tier": "logic",
+    "guards": [
+      "ProjectAutomationScheduler.check",
+      "ProjectAutomationScheduler.launch",
+      "launchCandidates",
+      "candidateAcceptor",
+      "afterBaseline",
+      "pollWindow"
+    ]
+  },
+  "packages/cezar/src/preview/session.ts": {
+    "tier": "logic",
+    "guards": []
+  },
+  "packages/cezar/src/automations/github-poller.ts": {
+    "tier": "logic",
+    "guards": [
+      "matchesFilters",
+      "GithubPoller.matchesCurrentLabels",
+      "incompleteHistory"
+    ]
+  },
+  "packages/web/src/routes/task-thread/preview/preview-toolbar.tsx": {
+    "tier": "component",
+    "guards": []
+  },
+  "packages/web/src/routes/task-thread/preview/preview-states.tsx": {
+    "tier": "component",
+    "guards": []
+  },
+  "packages/web/src/routes/task-thread/preview/preview-pane.tsx": {
+    "tier": "component",
+    "guards": []
+  },
+  "packages/web/src/routes/task-thread/conversation-card.tsx": {
+    "tier": "component",
+    "guards": []
+  },
+  "packages/web/src/routes/task-thread/ask-card.tsx": {
+    "tier": "component",
+    "guards": []
+  },
+  "packages/web/src/routes/task-thread/preview/preview-state.ts": {
+    "tier": "logic",
+    "guards": []
+  },
+  "packages/web/src/routes/task-thread/preview/preview-split.tsx": {
+    "tier": "component",
+    "guards": []
+  },
+  "packages/web/src/routes/task-thread/run-waits.tsx": {
+    "tier": "component",
+    "guards": []
+  },
+  "packages/web/src/routes/task-git/task-changes.tsx": {
+    "tier": "component",
+    "guards": []
+  },
+  "packages/contract/src/delegation.ts": {
+    "tier": "logic",
+    "guards": [
+      "parentFileRefusal"
+    ]
+  },
+  "packages/web/src/components/application-update-control.tsx": {
+    "tier": "component",
+    "guards": []
+  },
+  "packages/cezar/src/preview/browser-launch.ts": {
+    "tier": "logic",
+    "guards": []
+  },
+  "packages/web/src/routes/task-thread/conversation-presentation.ts": {
+    "tier": "logic",
+    "guards": []
+  },
+  "packages/contract/src/tool-display.ts": {
+    "tier": "logic",
+    "guards": []
+  },
+  "packages/web/src/routes/task-thread/preview/preview-memory.ts": {
+    "tier": "logic",
+    "guards": []
+  },
+  "packages/contract/src/attention.ts": {
+    "tier": "logic",
+    "guards": []
+  },
+  "packages/contract/src/conversations.ts": {
+    "tier": "logic",
+    "guards": []
+  },
+  "packages/web/src/lib/use-search-params-writer.ts": {
+    "tier": "logic",
+    "guards": []
+  },
+  "packages/cezar/src/serve-boot.ts": {
+    "tier": "logic",
+    "guards": []
+  },
+  "packages/cezar/src/server/open-in-targets.ts": {
+    "tier": "logic",
+    "guards": []
+  },
+  "packages/web/src/routes/task-thread/preview/task-preview-layout.tsx": {
+    "tier": "component",
+    "guards": []
+  },
+  "packages/web/src/routes/task-thread/preview/use-agent-page-live.ts": {
+    "tier": "logic",
+    "guards": []
+  },
+  "packages/web/src/routes/task-thread/counterpart-task.tsx": {
+    "tier": "component",
+    "guards": []
+  }
+}
