@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
 import { Link } from '@/lib/project-router'
+import { BranchKeptReason } from './branch-kept-reason'
 import { cn, isHttpUrl } from '@/lib/utils'
 
 /**
@@ -105,9 +106,7 @@ export function RepoBranchesSection({ repo, info }: { repo: RepoResponse; info: 
                   )}
                   {entry ? <BranchClassLabel entry={entry} /> : null}
                 </span>
-                {entry?.keptReason ? (
-                  <span data-slot="branch-kept-reason" className="min-w-0 text-[11px] text-soft-foreground">{entry.keptReason}</span>
-                ) : null}
+                {entry ? <BranchKeptReason entry={entry} /> : null}
                 {name.startsWith('cez/') && !current ? null : current ? (
                   <span
                     data-slot="branch-current"

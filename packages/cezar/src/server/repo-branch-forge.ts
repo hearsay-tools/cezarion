@@ -129,8 +129,12 @@ export interface GithubBranchForgeDeps {
   handle?: (repoRoot: string) => Promise<{ owner: string; name: string } | null>;
 }
 
-const defaultGraphql = (repoRoot: string): GraphqlRunner => async (query, variables) =>
-  (await exec('gh', ghGraphqlArgs(query, variables), { cwd: repoRoot, timeout: 30_000, maxBuffer: 16 * 1024 * 1024 })).stdout;
+function defaultGraphql(repoRoot: string): GraphqlRunner {
+  return async (query, variables) => {
+    const { stdout } = await exec('gh', ghGraphqlArgs(query, variables), { cwd: repoRoot, timeout: 30_000, maxBuffer: 16 * 1024 * 1024 });
+    return stdout;
+  };
+}
 
 const headCache = new Map<string, { at: number; prs: ForgePr[] }>();
 

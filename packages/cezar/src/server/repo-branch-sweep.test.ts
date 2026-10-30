@@ -31,12 +31,21 @@ describe('the branch sweep', () => {
     rmSync(origin, { recursive: true, force: true });
   });
 
-  const project = (runs: readonly RunRecord[], claim: (ids: readonly string[]) => (() => void) | null = () => () => undefined): ClassifyProject => ({
-    root,
-    store: { listBranchOwners: () => owners(runs) },
-    manager: { isActive: () => false, claimForBranchCleanup: claim },
-  });
-  const branches = async () => (await git(root, 'branch', '--format=%(refname:short)')).split('\n').sort();
+  const release = () => undefined;
+  function claimAll(): () => void {
+    return release;
+  }
+  function project(runs: readonly RunRecord[], claim: (ids: readonly string[]) => (() => void) | null = claimAll): ClassifyProject {
+    return {
+      root,
+      store: { listBranchOwners: () => owners(runs) },
+      manager: { isActive: () => false, claimForBranchCleanup: claim },
+    };
+  }
+  async function branches(): Promise<string[]> {
+    const listed = await git(root, 'branch', '--format=%(refname:short)');
+    return listed.split('\n').sort();
+  }
   const log = () => undefined;
 
   /** Every case the sweep decides, none with a worktree directory except `cez/checkout`. */
