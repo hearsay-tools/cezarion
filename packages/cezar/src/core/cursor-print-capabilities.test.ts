@@ -74,6 +74,14 @@ describe('Cursor print capability preflight', () => {
     await expect(inspectCursorPrintCapabilities(bin('2026.10.01-e373342').path, { ...spec, effort: 'low', env: { CEZ_TEST_ACCOUNT: 'scoped' } }))
       .resolves.toMatchObject({ supported: true, model: 'model-a', models: [{ id: 'model-a' }, { id: 'model-a-low' }] });
   });
+  it('rejects an effort the selected account advertises no legacy variant for', async () => {
+    await expect(inspectCursorPrintCapabilities(bin('2026.10.01-e373342').path, { ...spec, effort: 'high', env: { CEZ_TEST_ACCOUNT: 'scoped' } }))
+      .rejects.toThrow(/requested effort is not advertised/);
+  });
+  it('fails closed when the selected account model catalog cannot be read', async () => {
+    await expect(inspectCursorPrintCapabilities(bin('2026.10.01-e373342').path, { ...spec, effort: 'low' }))
+      .rejects.toThrow(/could not read selected-account models/);
+  });
   it('rejects an unknown explicit model before launching inference', async () => {
     await expect(inspectCursorPrintCapabilities(bin('2026.10.01-e373342').path, { ...spec, model: 'not-listed', env: { CEZ_TEST_ACCOUNT: 'scoped' } }))
       .rejects.toThrow(/not advertised/);
