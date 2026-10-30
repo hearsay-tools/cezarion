@@ -357,7 +357,10 @@ The moves that make the cockpit worth the browser tab:
   cockpit would otherwise grow without limit. Cezarion keeps only the last
   `worktreeRetention` **finished** worktrees on disk (default **10**; `0` =
   unlimited) and reclaims the rest — directory only, the `cez/<id8>` branch is
-  always kept, so the work stays recoverable. Settings → Resources shows every
+  kept, so the work stays recoverable. Once a branch's work is on the base, or
+  its exact PR merged, a background sweep deletes the local branch (a task's
+  merged PR branch and its unused starter too); unmerged work, open PRs and
+  your own branches stay. Settings → Resources shows every
   worktree's disk use with per-row delete and a **Reclaim now** button.
 - 🛡️ **You control merging.** Read a finished run's diff, type notes that go
   straight back into the agent's session, or push a `gh pr create --draft`.
@@ -1440,7 +1443,7 @@ never blocks startup):
   // path as `./name`, not a bare `name`. Pin `ref` to a full commit SHA to freeze
   // the source against a moving branch head — cezar verifies it resolves to
   // exactly that commit, and reports it as `team.commit`.
-  "worktreeRetention": 10,   // keep the last N finished worktrees on disk; 0 = unlimited (branch always kept)
+  "worktreeRetention": 10,   // keep the last N finished worktrees on disk; 0 = unlimited (no reclaim, no branch sweep)
   "defaultRunner": "claude", // agent backend: "claude" (default) · "codex" · "opencode" · "cursor" · "pi" · "omp"
   "modelsLocked": true,      // optional: native per-runner model is fixed/read-only; runner stays selectable
   "plannerModel": "sonnet",  // model the "Plan first" button uses to draft chains

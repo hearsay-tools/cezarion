@@ -227,6 +227,25 @@ explicit `aria-label`s and a confirm step; respects existing light/dark theming.
   path; `removeWorktree` (`--force` + `prune`) and a repeated stamp are
   idempotent, so no corruption results.
 
+## Branch lifecycle (hearsay-tools/cezarion#2268)
+
+Retention keeps the branch of a reclaimed worktree, and before hearsay-tools/cezarion#2268
+nothing removed it later, so local branches accumulated by the thousand. A branch sweep now
+follows retention (ADR 0054):
+
+- **When:** at startup and at project open, after the retention pass, in the background; and
+  after each post-terminal retention pass, at most once every five minutes per repository. With
+  `worktreeRetention: 0`, it does not run.
+- **What goes:** `merged` and `empty` branches only (ADR 0048), found from `refs/heads`, with or
+  without a worktree directory. That includes a run's merged PR branch outside `cez/*`, and its
+  unused starter `cez/<id8>`.
+- **What stays:** commits that are not on the base, open PRs, checkouts, live runs and runs at
+  `review`, receipt-owned workers (hearsay-tools/cezarion#911), user branches, and any branch
+  whose PR history GitHub did not return in full. Such a row says why it is kept.
+- **Recovery:** Continue on a run whose branch was swept recreates `cez/<id8>` from the base. The
+  swept branch held no local-only commits, so this guarantee from the Edge Cases above still
+  holds for every branch that has some.
+
 ## Risks & Impact Review
 
 - **Blast radius:** additive config key + optional RunRecord field + two new
