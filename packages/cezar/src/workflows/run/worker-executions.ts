@@ -47,7 +47,7 @@ export class WorkerExecutions {
     this.stoppedWorkers.delete(runId);
   }
 
-  finishWorkerExecution(runId: string): Promise<void> {
+  async finishWorkerExecution(runId: string): Promise<void> {
     return this.context.work.track('finishWorkerExecution', this.finishWorkerExecutionWork(runId));
   }
 

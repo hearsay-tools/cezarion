@@ -1,7 +1,7 @@
 import type { RunModuleContext, WorkerTerminationBlocker } from './types.ts';
 import { agentTmpDirLocationEvidence } from '../../runs/agent-tmpdir.ts';
 import { processGroupAlive, processGroupOf, signalProcessGroup } from '../../core/session-process.ts';
-import { noJitter, retryDelayMs, type Backoff } from '../../delegation/retry-backoff.ts';
+import { noJitter, ORPHAN_BACKOFF, retryDelayMs, type Backoff } from '../../delegation/retry-backoff.ts';
 import { inspectExecutionGeneration, isCurrentProcess, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive, sharedCwdScan, type CwdSource, type GenerationProbe, type RecordedProcess, type WorkerProcessRecord } from '../../delegation/process-liveness.ts';
 
 /** How long a non-gone orphan probe stands before the next scan. */
@@ -12,11 +12,11 @@ interface WorkerOrphansHost {
   holds(runId: string, admitting: boolean): boolean;
   reapTerminalScratch(runId: string): void;
   settleOrphanedWorkerExecution(runId: string, opts?: OrphanOptions): boolean;
-  orphanBackoff(): Backoff;
-  orphanTermGraceMs(): number;
 }
 
 export class WorkerOrphans {
+  orphanBackoff: Backoff = ORPHAN_BACKOFF;
+  orphanTermGraceMs = 10_000;
   constructor(private readonly context: RunModuleContext, private readonly host: WorkerOrphansHost) {}
 
   forgetBlockers(runId: string): void {
@@ -96,7 +96,7 @@ export class WorkerOrphans {
   armOrphanReprobe(runId: string): void {
     const armed = this.orphanedWorkerGeneration(runId);
     if (this.context.disposed() || this.orphanDue.has(runId) || !armed) return;
-    this.orphanDue.set(runId, { generation: armed.generation, at: Date.now() + retryDelayMs(0, this.host.orphanBackoff(), noJitter), attempts: 0 });
+    this.orphanDue.set(runId, { generation: armed.generation, at: Date.now() + retryDelayMs(0, this.orphanBackoff, noJitter), attempts: 0 });
     this.wakeOrphanReprobes();
   }
 
@@ -116,7 +116,7 @@ export class WorkerOrphans {
     // Orphans due within 5 % of the fast cadence ride along, so near neighbours share the scan, and
     // every orphan this tick keeps is re-armed from the same instant, so they stay together.
     const now = Date.now();
-    const dueBy = Math.max(this.orphanArmedFor, now) + this.host.orphanBackoff().fastMs / 20;
+    const dueBy = Math.max(this.orphanArmedFor, now) + this.orphanBackoff.fastMs / 20;
     const cwds = sharedCwdScan();
     for (const [runId, pending] of [...this.orphanDue]) {
       if (pending.at > dueBy) continue;
@@ -129,7 +129,7 @@ export class WorkerOrphans {
           this.host.settleOrphanedWorkerExecution(runId, { fresh: true, cwds })) continue;
         attempts++;
       }
-      this.orphanDue.set(runId, { ...pending, attempts, at: now + retryDelayMs(attempts, this.host.orphanBackoff(), noJitter) });
+      this.orphanDue.set(runId, { ...pending, attempts, at: now + retryDelayMs(attempts, this.orphanBackoff, noJitter) });
     }
     this.wakeOrphanReprobes();
   }
@@ -215,7 +215,7 @@ export class WorkerOrphans {
     };
     if (!living()) return;
     signal('SIGTERM');
-    const killAt = Math.min(deadline, Date.now() + this.host.orphanTermGraceMs());
+    const killAt = Math.min(deadline, Date.now() + this.orphanTermGraceMs);
     while (Date.now() < killAt && living()) await pause();
     if (living()) signal('SIGKILL');
   }

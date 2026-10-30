@@ -30,8 +30,6 @@ function signal<T = void>() {
 
 type BoundaryHarness = {
   active: Map<string, ActiveRun>;
-  recordWorkerProcess(id: string, pid: number): void;
-  trackWorkerSessionResult(id: string, session: AgentSession): Promise<void>;
 };
 let root: string;
 let store: RunStore;
@@ -115,7 +113,7 @@ function throwSetupAt(failure: string) {
     case 'deferred': return vi.spyOn(runInternals(manager).queuedInput, 'flushDeferred').mockImplementation(error);
     case 'inputs': return vi.spyOn(runInternals(manager).inputDelivery, 'flushAgentInputs').mockImplementation(error);
     case 'register': return vi.spyOn(processes, 'registerRunProcess').mockImplementation(error);
-    case 'record': return vi.spyOn(engine, 'recordWorkerProcess').mockImplementation(error);
+    case 'record': return vi.spyOn(runInternals(manager).workerExecutions, 'recordWorkerProcess').mockImplementation(error);
   }
 }
 
@@ -124,7 +122,8 @@ for (const mode of ['fresh', 'continuation'] as const) {
     const runner = controlledRunner();
     Object.defineProperty(runner.session, 'pid', { value: 12345 });
     vi.spyOn(processes, 'registerRunProcess').mockImplementation(() => undefined);
-    const track = engine.trackWorkerSessionResult.bind(engine);
+    const executions = runInternals(manager).workerExecutions;
+    const track = executions.trackWorkerSessionResult.bind(executions);
     const resultSpies: ReturnType<typeof vi.spyOn>[] = [];
     const boundary = signal<'termination' | 'error'>();
     const append = store.appendEvent.bind(store);
@@ -132,7 +131,7 @@ for (const mode of ['fresh', 'continuation'] as const) {
       if (event.type === 'session.error') boundary.resolve('error');
       return append(id, event);
     });
-    vi.spyOn(engine, 'trackWorkerSessionResult').mockImplementation((id, session) => {
+    vi.spyOn(runInternals(manager).workerExecutions, 'trackWorkerSessionResult').mockImplementation((id, session) => {
       resultSpies.push(vi.spyOn(session.result, 'finally'));
       const closed = track(id, session);
       // Observe when the caller waits for process termination.
@@ -145,6 +144,7 @@ for (const mode of ['fresh', 'continuation'] as const) {
     expect(await boundary.promise).toBe('termination');
     expect(setupFailure).toHaveBeenCalled();
     expect(resultSpies).toHaveLength(1);
+    if (failure === 'record') expect(setupFailure).toHaveBeenCalledWith(id, 12345);
     expect(runner.session.interrupt).toHaveBeenCalledOnce();
     expect(manager.isActive(id)).toBe(true);
     expect(saved(id).status).toBe('running');
@@ -157,14 +157,14 @@ for (const mode of ['fresh', 'continuation'] as const) {
 it.each(['fresh', 'continuation'] as const)('%s replaces a changed PID before recording the worker process', async mode => {
   const runner = controlledRunner(); const calls: string[] = [];
   vi.spyOn(processes, 'replaceRunProcess').mockImplementation(() => { calls.push('replace'); });
-  vi.spyOn(engine, 'recordWorkerProcess').mockImplementation(() => { calls.push('record'); });
+  vi.spyOn(runInternals(manager).workerExecutions, 'recordWorkerProcess').mockImplementation(() => { calls.push('record'); });
   const setup = signal(); const flush = vi.spyOn(runInternals(manager).queuedInput, 'flushDeferred').mockImplementation(() => { setup.resolve(); });
   const id = launch(mode); const opts = await runner.started.promise; await setup.promise;
   expect(flush).toHaveBeenCalled();
   opts.onPidChange?.(23456);
   expect(calls).toEqual(['replace', 'record']);
   expect(processes.replaceRunProcess).toHaveBeenCalledWith(id, 23456);
-  expect(engine.recordWorkerProcess).toHaveBeenCalledWith(id, 23456);
+  expect(runInternals(manager).workerExecutions.recordWorkerProcess).toHaveBeenCalledWith(id, 23456);
   runner.close(); await fixtureWorkSettled(root);
 });
 

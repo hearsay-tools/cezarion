@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,7 +15,6 @@ import { seedSettledFamily } from './delegation-reconcile.testkit.ts';
 import { delegatingParent, manager as liveManager, store as liveStore, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
 
 const questions = [{ header: 'Pick', question: 'Which one?', options: [{ label: 'A' }, { label: 'B' }] }];
-type Private = { routedAsk(runId: string): unknown };
 
 /** The commit, reconcile and delivery paths answer from the transcript facts index (#880). */
 describe('delegation paths read no transcript (#880)', () => {
@@ -61,7 +61,7 @@ describe('delegation paths read no transcript (#880)', () => {
     const before = store.readEvents(family.workerId).filter((event) => event.type === 'conversation-message').length;
     const reads = countTranscriptReads(familyPaths);
     projectConversationEvents(store, store.getRun(family.parentId)!);
-    (manager as unknown as Private).routedAsk(family.workerId);
+    runInternals(manager).workerQuestions.routedAsk(family.workerId);
     expect(reads.counts).toEqual({ files: [], decompress: 0 });
     restoreTranscriptReads();
     expect(store.readEvents(family.workerId).filter((event) => event.type === 'conversation-message')).toHaveLength(before);

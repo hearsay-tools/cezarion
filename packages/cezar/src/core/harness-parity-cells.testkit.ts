@@ -2701,7 +2701,6 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
                 repoRoot: string;
                 active: Map<string, { idleTimer?: NodeJS.Timeout }>;
                 semaphore: { busy(): number };
-                settleSuccess(id: string, durable?: boolean): Promise<void>;
               };
               const idleClose = async () => {
                 const timer = internal.active.get(runId)?.idleTimer as NodeJS.Timeout & { _onTimeout(): void };
@@ -2715,12 +2714,13 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
               let release: ((diff: string) => void) | undefined;
               const diff = vi.spyOn(gitWorktree, 'worktreeDiff').mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
               // Observe the real fire-and-forget settlement, including its config I/O.
-              const settlement = vi.spyOn(internal, 'settleSuccess');
+              const settlement = vi.spyOn(runInternals(manager).runSettlement, 'settleSuccess');
               // Hold only scheduler capacity; the run and its idle close use native wires.
               const capacity = queued ? vi.spyOn(internal.semaphore, 'busy').mockReturnValue(Number.MAX_SAFE_INTEGER) : undefined;
               try {
                 expect(manager.finish(runId)).toBe(true);
                 await waitFor(() => release !== undefined);
+                expect(settlement).toHaveBeenCalledWith(runId);
                 const pending = settlement.mock.results[0]!.value as Promise<void>;
                 expect(manager.continueRun(runId, { text: promptFor(backend, 'baseline') }, queued).ok).toBe(true);
                 if (!queued) {

@@ -1,3 +1,4 @@
+import { runInternals } from './run-internals.testkit.ts';
 import { describe, expect, it } from 'vitest';
 import { manager, parent, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
 
@@ -17,7 +18,7 @@ describe('a held worker\'s human Continue', () => {
 
     expect(manager.continueRun(child.id, { text: 'mock:done carry on' })).toEqual({ ok: true });
     expect(store.getRun(child.id)?.status).toBe('queued');
-    const engine = manager as unknown as { executions: Map<string, { admitted: boolean }> };
+    const engine = runInternals(manager).workerExecutions;
     expect(engine.executions.get(child.id)?.admitted).toBe(false);
 
     // The hold lifts: the pump admits the continuation and it runs.

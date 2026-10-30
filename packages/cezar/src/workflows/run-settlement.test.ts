@@ -28,7 +28,7 @@ describe('successful run settlement (#473)', () => {
     root = mkdtempSync(join(tmpdir(), 'cez-settlement-'));
     store = RunStore.open(join(root, '.ai/cezar'));
     manager = new RunManager(store, root);
-    settle = (manager as unknown as { settleSuccess(id: string, durable?: boolean): Promise<void> }).settleSuccess.bind(manager);
+    settle = runInternals(manager).runSettlement.settleSuccess.bind(runInternals(manager).runSettlement);
     vi.mocked(worktreeDiff).mockResolvedValue('a changed file');
     vi.stubEnv('CEZ_REVIEW_GATE', '0');
   });

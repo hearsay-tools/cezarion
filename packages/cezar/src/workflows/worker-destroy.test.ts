@@ -23,7 +23,6 @@ import * as runners from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { RunManager } from './run.ts';
 import { DelegationService } from '../delegation/service.ts';
-import type { Backoff } from '../delegation/retry-backoff.ts';
 import { processesWithCwdUnder, processStartToken } from '../delegation/process-liveness.ts';
 import { signalSession, spawnSessionLeader } from '../core/session-process.ts';
 import { blockRunWrites } from '../runs/run-store.testkit.ts';
@@ -527,7 +526,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   it('synchronous dequeue hydration failure still finalizes the admitted generation', async () => {
     const w = await worker();
     const hydrate = vi.spyOn(runInternals(manager).queuedInput, 'hydrateQueuedInput').mockImplementation(() => { throw Error('fixture hydration failed'); });
-    releases.push(() => { void manager['finishWorkerExecution'](w.id); });
+    releases.push(() => { void runInternals(manager).workerExecutions.finishWorkerExecution(w.id); });
     manager.enqueueOwnedRun(w.id);
     await vi.waitFor(() => expect(store.getRun(w.id)?.status).toBe('failed'), { timeout: HANG_GUARD_MS });
     expect(await manager.awaitRunTermination(w.id, 100)).toBe(true);
@@ -645,7 +644,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
     it('destroy reaps a recorded child that ignores SIGTERM, then completes', async () => {
       const { w, child, prior, reopened, other, service } = await crashed('failed');
-      (other as unknown as { orphanTermGraceMs: number }).orphanTermGraceMs = 500;
+      runInternals(other).orphans.orphanTermGraceMs = 500;
       // A leader spawned outside spawnSessionLeader records no group (hearsay-tools/cezarion#890): pid-only reaping.
       expect(readRecord(w.id).processes.map(entry => 'pgid' in entry)).toEqual([false]);
       try {
@@ -858,7 +857,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
     it.each(['inside', 'after'] as const)('a parked parent wait resolves once a survivor dies %s the fast re-probe window', async window => {
       const { w, child, reopened, other } = await crashed('failed');
-      const cadence = other as unknown as { orphanBackoff: Backoff };
+      const cadence = runInternals(other).orphans;
       // After the fast window a slow probe remains the wake source; it never gives up.
       cadence.orphanBackoff = window === 'inside' ? { fastMs: 100, fastCount: 60, capMs: 3_600_000 } : { fastMs: 600_000, fastCount: 0, capMs: 100 };
       // The parent's worker wait is a wait-list entry (hearsay-tools/cezarion#1301).
@@ -887,8 +886,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         rmSync(recordPath(w.id), { force: true }); // legacy: the cwd scan is the only evidence
         holders.push(await spawnReady(created.path)); ids.push(w.id);
       }
-      type Cadence = { orphanBackoff: Backoff; orphanDue: Map<string, { at: number; attempts: number }>; armOrphanReprobe(id: string): void };
-      const cadence = manager as unknown as Cadence;
+      const cadence = runInternals(manager).orphans;
       cadence.orphanBackoff = { fastMs: 400, fastCount: 2, capMs: 1_600 };
       const listings = () => vi.mocked(fs.readdirSync).mock.calls.filter(([path]) => path === '/proc').length;
       // The clock is fake too, so arming the two orphans one after the other cannot drift them apart
@@ -1086,7 +1084,7 @@ console.log(String(m.pid)); ${opts.leader === 'exit' ? "m.unref(); process.stdin
     });
 
     const service = (projectStore: RunStore, projectManager: RunManager) => {
-      (projectManager as unknown as { orphanTermGraceMs: number }).orphanTermGraceMs = 500;
+      runInternals(projectManager).orphans.orphanTermGraceMs = 500;
       const delegation = new DelegationService(); delegation.registerProject({ id: 'p', root, store: projectStore, manager: projectManager });
       return delegation;
     };

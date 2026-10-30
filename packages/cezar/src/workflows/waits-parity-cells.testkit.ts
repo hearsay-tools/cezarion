@@ -2856,7 +2856,7 @@ function workersCells(runners: RunnerId[]): void {
       const askSeq = asks(w.id)[0]!.seq;
       const requestId = String(routed()!.messageId);
       const unanswered = () => {
-        return (manager as unknown as { unansweredQuestions(id: string): { workerId: string; messageId: string }[] }).unansweredQuestions(p.id);
+        return runInternals(manager).workerQuestions.unansweredQuestions(p.id);
       };
       expect(unanswered()).toEqual([expect.objectContaining({ workerId: w.id })]);
       const text = 'automatic steer U25';

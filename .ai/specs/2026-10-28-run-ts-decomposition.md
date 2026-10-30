@@ -41,7 +41,8 @@ Methods are named, never cited by line number: every move shifts the lines.
    `orphanTermGraceMs`, `noWaitNudgeReplyMs` and `unreadInputGraceMs` on the instance, and the CI
    wait tests replace `ciSupervisor` with `Object.assign`. A module reads them through the host when
    it uses them; a copy taken at construction ignores the test. Phase 5 moves
-   `wakeRetryBackoff` into `WakeRetries` and tests set that instance field directly.
+   `wakeRetryBackoff` into `WakeRetries`, and `orphanBackoff` and `orphanTermGraceMs` into
+   `WorkerOrphans`; tests set those instance fields directly.
 8. **Teardown keeps its order.** Each module owns a `dispose()` for its own timers and maps. The
    facade's `dispose` calls them in today's order, with `disposed = true` first. Maps that
    `dispose` does not clear today stay uncleared until hearsay-tools/cezarion#2064 decides.
@@ -361,15 +362,14 @@ until Phase 5. The list was checked against `main` at `97335b352`:
   cleanup ownership also covers a module calling its own methods.
 - Spied: `awaitRunTermination`, `reconcileWorkerWaits`, `startRun`, `recover`,
   `deliverConversationInput`, `continueRun`, `settledTurnOutcome`,
-  `releaseSlot`, `noticeParkedWorker`, `completionGate`, `dropActive`, `reviveQueuedRun`,
-  `retireUnreadParentQuestion`, `armNoWaitNudgeReplyTimer`,
+  `completionGate`, `dropActive`, `reviveQueuedRun`,
   `executionBlockedByRootFinish`, `hasUnansweredHumanAsk`, `workerExecutionStopped`, `isActive`,
-  `cancel`, `settleSuccess` (`harness-parity-cells.testkit.ts`), `settleOrphanedWorkerExecution`,
-  `routeWorkerQuestion`, `unansweredQuestions`, `parentCompletionBlockers`, `acceptDone`,
+  `cancel`, `settleOrphanedWorkerExecution`,
+  `parentCompletionBlockers`, `acceptDone`,
   `sendMessage`, `discoverSkills`, `agentEnv`.
 - Replaced on the instance: `agentEnvForStep`, `execute`
   (`worker-destroy.test.ts`), `recordTurnEnd` (4 files), `pump` and `runContinuation`
-  (`run.test.ts`), `settleSuccess` (`worker-wait-capacity.test.ts`), and the field `ciSupervisor` (Decision 7).
+  (`run.test.ts`), and the field `ciSupervisor` (Decision 7).
 - Wait seams moved in hearsay-tools/cezarion#2232: `queueWaitWake`, `automaticWakes`,
   `owesWake`, `parkOnWaits` and `wakeHeld` use `runInternals(manager).wakeAdmission`;
   `resolveWait` uses `.waitRegistry`. Timer and CI-watch reads use `.waitWatches`;
@@ -407,6 +407,23 @@ The same instance owns the `releaseSlot`, `pump`, `busySlots`, `oldestQueuedAt`,
 for the function-module spy in `scoped-recovery.test.ts`; other queued-revival
 calls go directly to `queued-revival.ts`. `pump` and `rescueStalledQueue` keep
 async tracking wrappers so dropped calls retain their rejection behavior.
+
+Phase 5 worker and settlement seams (hearsay-tools/cezarion#2237): execution reads use
+`.workerExecutions`; orphan reads and tuning use `.orphans`; question and notice spies use
+`.workerQuestions`; family reconciliation and recovery facts use `.familyReconciler`;
+claim reads use `.claims`. Settlement spies and replacements use `.runSettlement`, including
+its own host callback; its tracking wrapper and `finishWorkerExecution` stay async.
+Recovery reads use `.recovery`, auto-resume reads use `.autoResumeScheduler`, and crashed
+continuations call `.continuationAcceptance`. The facade removes those compatibility getters
+and delegators, plus `terminateFinishedWorkerGroups`, `holdForMaintenance`,
+`noticeParkedWorkers`, `retireSettledQuestions` and `fallbackRoutedQuestions`.
+`reconcileAllWorkerFamilies` is internal to `.familyReconciler`.
+`delegationExecutionSettings` stays public as the per-manager synthetic-parent fixture seam
+(coordinator decision); live-state reads in `provision-workflows.test.ts` use the pure
+`delegation/execution-settings.ts` function. `parentCompletionBlockers`,
+`workerExecutionStopped` and `executionBlockedByRootFinish` keep their facade spies because
+completion-gate and run-guards have no instance. Public controls and `dropActive` keep their
+facade seams. No expected outcome changes.
 
 ## Facade surface
 
