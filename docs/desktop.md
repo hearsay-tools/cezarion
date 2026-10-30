@@ -135,7 +135,9 @@ CEZ_DESKTOP_CWD="$PWD" CEZ_DESKTOP_NO_UPDATE=1 \
 
 Click Local cockpit, check the project list and task view, then open
 Versions & updates. Create a dry-run task if desired. Quit the app (Cmd+Q on macOS; closing its window keeps it running) and confirm
-its owned server exits. Try connecting to `http://example.com` (must reject),
+its owned server exits. The shell closes the server's stdin and gives it 10 seconds
+to shut down on its own (store flush, agent and preview cleanup) before it
+force-kills it; a version switch stops the running server the same way. Try connecting to `http://example.com` (must reject),
 and to a separate local cockpit over loopback (must open a separate remote
 window). Remote pages must not be able to invoke native update/connect commands.
 Use the ordinary app launch without these variables for your real projects.
@@ -167,5 +169,7 @@ Bump `packages/desktop/package.json`, `src-tauri/Cargo.toml` and
 `src-tauri/tauri.conf.json` together, refresh lockfiles, then push the matching
 `desktop-v<version>` tag. Manual workflow dispatch defaults to **dry run** and
 only uploads artifacts. Public release requires explicitly turning it off.
-The shell downloads signed updates on launch and applies them on the next launch;
-it never forcibly restarts a running cockpit to update itself.
+The shell downloads and verifies a signed update on launch, but installs it only
+when you quit the app, after the cockpit has stopped; the next launch runs the new
+shell. It never installs or restarts under a running cockpit (on Windows the
+installer would end the process), and it does not relaunch itself after the install.

@@ -32,6 +32,7 @@ use std::time::{Duration, Instant};
 
 mod remote;
 mod disclaim;
+mod sidecar;
 pub use disclaim::disclaim_exec_if_asked;
 
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
@@ -66,6 +67,8 @@ struct Shell {
     update_available: Mutex<Option<String>>,
     /// True while a supervisor thread is alive; the splash's "Try again" starts one when none is.
     supervising: AtomicBool,
+    /// A verified shell update downloaded at launch, installed only when the user quits.
+    shell_update: Mutex<Option<(tauri_plugin_updater::Update, Vec<u8>)>>,
 }
 
 /// Runs at document start on EVERY page the window loads — the splash and, after navigation,
@@ -389,7 +392,7 @@ fn refresh_versions_menu(app: &AppHandle, shell: &Shell) {
 }
 
 /// Point `current` at an installed id (atomic rename over the old link) and relaunch.
-fn switch_version(shell: &Shell, id: &str) -> bool {
+fn switch_version(app: &AppHandle, shell: &Arc<Shell>, id: &str) -> bool {
     let dir = cezar_home().join("versions");
     if !dir.join(id).join("node_modules").join("@wjarka").join("cezarion").join("dist").join("index.js").is_file() {
         return false;
@@ -397,12 +400,46 @@ fn switch_version(shell: &Shell, id: &str) -> bool {
     if activate(&dir, id).is_err() {
         return false;
     }
-    let mut guard = shell.child.lock().unwrap();
-    if let Some(child) = guard.as_mut() {
-        shell.restart_requested.store(true, Ordering::SeqCst);
-        let _ = child.kill();
-    }
+    after_new_version(app, shell);
     true
+}
+
+/// A new version is current: restart the running cockpit on it, or start a supervisor when none
+/// is alive (the launcher, or after a failed start), so the splash never waits forever.
+fn after_new_version(app: &AppHandle, shell: &Arc<Shell>) {
+    let running = shell.child.lock().unwrap().is_some();
+    match sidecar::after_new_version(running, shell.supervising.load(Ordering::SeqCst)) {
+        sidecar::AfterNewVersion::RestartRunning => restart_running(shell),
+        sidecar::AfterNewVersion::StartSupervisor => {
+            let app = app.clone();
+            let shell = shell.clone();
+            std::thread::spawn(move || supervise(app, shell));
+        }
+        sidecar::AfterNewVersion::LeaveToSupervisor => {}
+    }
+}
+
+/// Ask the running cockpit to shut down; its supervisor sees the exit and relaunches the current
+/// version. A cockpit still running after `STOP_GRACE` (an older cezar ignores the request) is
+/// force-killed.
+fn restart_running(shell: &Arc<Shell>) {
+    let pid = {
+        let mut guard = shell.child.lock().unwrap();
+        let Some(child) = guard.as_mut() else { return };
+        shell.restart_requested.store(true, Ordering::SeqCst);
+        sidecar::request_stop(child);
+        child.id()
+    };
+    let shell = shell.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(sidecar::STOP_GRACE);
+        let mut guard = shell.child.lock().unwrap();
+        if let Some(child) = guard.as_mut().filter(|child| child.id() == pid) {
+            if matches!(child.try_wait(), Ok(None)) {
+                let _ = child.kill();
+            }
+        }
+    });
 }
 
 /// The legacy strip's "Update cezar" button lands here (capability: `allow-update-cezar` for
@@ -531,6 +568,7 @@ pub fn run() {
         running_version: Mutex::new(None),
         update_available: Mutex::new(None),
         supervising: AtomicBool::new(false),
+        shell_update: Mutex::new(None),
     });
     let shell_for_setup = shell.clone();
     let shell_for_menu = shell.clone();
@@ -542,8 +580,7 @@ pub fn run() {
     let shell_for_signal = shell.clone();
     let _ = ctrlc::set_handler(move || {
         if let Some(mut child) = shell_for_signal.child.lock().unwrap().take() {
-            let _ = child.kill();
-            let _ = child.wait();
+            sidecar::stop(&mut child, sidecar::STOP_GRACE);
         }
         std::process::exit(0);
     });
@@ -570,9 +607,11 @@ pub fn run() {
                 }
             });
             // The shell updates ITSELF rarely (spec 2026-09-25-desktop-distribution): check the
-            // release manifest once per launch, in the background, and install silently — the
-            // new shell takes over on the next launch. Never blocks startup; offline is a no-op.
-            tauri::async_runtime::spawn(async move { check_shell_update(handle).await });
+            // release manifest once per launch and download in the background; the update is
+            // installed when the user quits, and the new shell takes over on the next launch.
+            // Never blocks startup; offline is a no-op.
+            let update_shell = shell_for_setup.clone();
+            tauri::async_runtime::spawn(async move { check_shell_update(handle, update_shell).await });
             Ok(())
         })
         .on_menu_event(move |app, event| match event.id().as_ref() {
@@ -584,7 +623,7 @@ pub fn run() {
                     if let Some(window) = app.get_webview_window("main") {
                         splash_reset(&window, "Switching cezar…", &format!("Activating {target}."));
                     }
-                    if !switch_version(&shell, &target) {
+                    if !switch_version(&app, &shell, &target) {
                         refresh_versions_menu(&app, &shell);
                     }
                 });
@@ -665,27 +704,39 @@ pub fn run() {
                 if let Some(window) = app.get_webview_window("main") {
                     save_geometry(&window);
                 }
+                // Let the cockpit shut down on its own (store flush, agent cleanup), then install
+                // a shell update downloaded at launch: nothing runs any more that it could close.
                 if let Some(mut child) = shell_for_run.child.lock().unwrap().take() {
-                    let _ = child.kill();
-                    let _ = child.wait();
+                    sidecar::stop(&mut child, sidecar::STOP_GRACE);
                 }
+                install_shell_update(&shell_for_run);
             }
             _ => {}
         });
 }
 
 /// Silent self-update of the shell. `CEZ_DESKTOP_NO_UPDATE=1` disables it (development builds
-/// point at a checkout and must not replace themselves). Installed updates apply on the next
-/// launch rather than restarting under the user, so a running task is never interrupted by
-/// the shell — only the cockpit's own updater does that, and it asks first.
-async fn check_shell_update(app: AppHandle) {
+/// point at a checkout and must not replace themselves). This only DOWNLOADS and verifies: the
+/// Windows installer exits the process, so installing while the app is live could close a
+/// running cockpit. `install_shell_update` installs at quit, and the next launch runs it.
+async fn check_shell_update(app: AppHandle, shell: Arc<Shell>) {
     use tauri_plugin_updater::UpdaterExt;
     if std::env::var("CEZ_DESKTOP_NO_UPDATE").as_deref() == Ok("1") || cfg!(debug_assertions) {
         return;
     }
     let Ok(updater) = app.updater() else { return };
     let Ok(Some(update)) = updater.check().await else { return };
-    let _ = update.download_and_install(|_, _| {}, || {}).await;
+    let Ok(bytes) = update.download(|_, _| {}, || {}).await else { return };
+    *shell.shell_update.lock().unwrap() = Some((update, bytes));
+}
+
+/// At quit, after the cockpit stopped: install the shell update downloaded at launch. On Windows
+/// the installer runs and this process exits; it does not relaunch the app.
+fn install_shell_update(shell: &Shell) {
+    let pending = shell.shell_update.lock().unwrap().take();
+    if let Some((update, bytes)) = pending {
+        let _ = update.restart_after_install(false).install(bytes);
+    }
 }
 
 /// Spawn → wait for health → show cockpit → wait for exit → relaunch on 75 (or on a requested
@@ -780,7 +831,7 @@ fn supervise(app: AppHandle, shell: Arc<Shell>) {
         } else {
             let tail = log.lock().unwrap().iter().cloned().collect::<Vec<_>>().join("\n");
             fail(&window, "cezar did not come up", &format!("No answer on {url} within {}s (pid {pid}).", HEALTH_TIMEOUT.as_secs()), &tail);
-            let _ = child.kill();
+            sidecar::stop(&mut child, sidecar::STOP_GRACE);
             return;
         }
 
@@ -895,9 +946,9 @@ fn require_node(window: &WebviewWindow) -> bool {
 
 /// Install the channel's newest cezar into the managed layout and make it current — the same
 /// layout and manifest the cockpit's own updater writes, so the two never disagree. Streams
-/// npm's output to the splash. On success with a sidecar running, asks the supervisor loop to
-/// relaunch. Returns whether the install succeeded.
-fn update_cezar(app: &AppHandle, shell: &Shell, title: &str) -> bool {
+/// npm's output to the splash. On success, restarts a running sidecar or starts a supervisor
+/// when none is alive (`after_new_version`). Returns whether the install succeeded.
+fn update_cezar(app: &AppHandle, shell: &Arc<Shell>, title: &str) -> bool {
     // The development channel never replaces the build picked by hand; only a machine with no
     // cezar at all gets the newest release, so the app can start.
     let tag = match release_tag() {
@@ -956,12 +1007,7 @@ fn update_cezar(app: &AppHandle, shell: &Shell, title: &str) -> bool {
     };
     shell.updating.store(false, Ordering::SeqCst);
     if ok {
-        // A running sidecar is the OLD version: ask the loop to relaunch, then stop it.
-        let mut guard = shell.child.lock().unwrap();
-        if let Some(child) = guard.as_mut() {
-            shell.restart_requested.store(true, Ordering::SeqCst);
-            let _ = child.kill();
-        }
+        after_new_version(app, shell);
     }
     ok
 }
@@ -997,7 +1043,9 @@ fn spawn_sidecar(entry: &Path, port: u16, cwd: &Path, log: Arc<Mutex<VecDeque<St
         // cezar polls this pid and exits when it is gone — a force-quit of the shell never
         // leaves a headless cockpit behind (the Exit handler only runs on a clean quit).
         .env("CEZ_SUPERVISOR_PID", std::process::id().to_string())
-        .stdin(Stdio::null())
+        // The shell holds this pipe; closing it asks cezar to shut down (`sidecar.rs`).
+        .env("CEZ_SUPERVISOR_STDIN", "1")
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     // cezar starts agents through this binary so macOS privacy prompts name the agent, not the
@@ -1791,7 +1839,9 @@ mod tests {
     }
 
     /// The sidecar's whole launch: node is started with the entry and the arguments cezar
-    /// expects, in the right folder and environment, and its health answers on the port.
+    /// expects, in the right folder and environment, and its health answers on the port. Then
+    /// the shell's stop: closing stdin ends it without a force-kill, as cezar's
+    /// `watchSupervisor` does.
     #[test]
     #[ignore = "needs Node.js on PATH"]
     fn starts_a_sidecar_and_hears_its_health() {
@@ -1808,6 +1858,7 @@ require('node:http').createServer((req, res) => {
   res.writeHead(ok ? 200 : 500, { 'content-type': 'application/json' });
   res.end(JSON.stringify({ version: '9.9.9-test' }));
 }).listen(port, '127.0.0.1');
+if (process.env.CEZ_SUPERVISOR_STDIN === '1') process.stdin.on('end', () => process.exit(0)).resume();
 "#,
         )
         .unwrap();
@@ -1815,9 +1866,9 @@ require('node:http').createServer((req, res) => {
         let log = Arc::new(Mutex::new(VecDeque::new()));
         let mut child = spawn_sidecar(&entry, port, &scratch.0, log.clone()).expect("node starts");
         let version = wait_for_health(port, &mut child, Duration::from_secs(20));
-        let _ = child.kill();
-        let _ = child.wait();
+        let stopped = sidecar::stop(&mut child, Duration::from_secs(10));
         assert_eq!(version.as_deref(), Some("9.9.9-test"), "sidecar output: {:?}", log.lock().unwrap());
+        assert_eq!(stopped, sidecar::Stopped::Exited, "sidecar output: {:?}", log.lock().unwrap());
     }
 
     /// npm itself, through the same command the shell builds: a real (small) install into a
