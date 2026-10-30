@@ -6,5 +6,45 @@
     "original": "Date.parse(overlapSince) < Date.parse(historyStart)",
     "replacement": "Date.parse(overlapSince) <= Date.parse(historyStart)",
     "reason": "At equality both values are normalized ISO timestamps, so assigning historyStart keeps the identical string."
+  },
+  {
+    "file": "packages/cezar/src/server/repo-branches.ts",
+    "function": "deleteBranches",
+    "mutator": "ObjectLiteral",
+    "original": "{ diffStats: false }",
+    "replacement": "{}",
+    "reason": "Deletion never reads diffStat from the payload; this option only avoids computing unused stats."
+  },
+  {
+    "file": "packages/cezar/src/server/repo-branches.ts",
+    "function": "deleteBranches",
+    "mutator": "BooleanLiteral",
+    "original": "false",
+    "replacement": "true",
+    "reason": "Deletion never reads diffStat from the payload; this option only avoids computing unused stats."
+  },
+  {
+    "file": "packages/cezar/src/server/repo-branches.ts",
+    "function": "deleteBranches",
+    "mutator": "ConditionalExpression",
+    "original": "commits",
+    "replacement": "true",
+    "reason": "Only a single-name request drops commits, so assigning undefined here only replaces undefined."
+  },
+  {
+    "file": "packages/cezar/src/server/repo-branches.ts",
+    "function": "deleteBranches",
+    "mutator": "StringLiteral",
+    "original": "''",
+    "replacement": "\"Stryker was here!\"",
+    "reason": "The sha fallback is unreachable because split always yields a first item; the subject fallback has the same text and is killed by the partial-log test."
+  },
+  {
+    "file": "packages/cezar/src/server/repo-branches.ts",
+    "function": "deletionVerdicts",
+    "mutator": "LogicalOperator",
+    "original": "!entry || !tip",
+    "replacement": "!entry && !tip",
+    "reason": "The payload branches and tips are built one-to-one from the same heads, so entry exists exactly when tip exists."
   }
 ]
