@@ -83,15 +83,17 @@ function CommitsView({ run }: { run: ApiRun }) {
 function CommitDiffView({ runId, sha }: { runId: string; sha: string }) {
   const commit = useRunCommit(runId, sha)
 
-  return <CommitDiffPanel
-    commit={commit}
-    sha={sha}
-    backTo={`/tasks/${runId}/commits`}
-    backLabel="All commits"
-    slot="task-commit"
-    className="mx-auto flex min-h-0 w-full max-w-[var(--measure)] flex-1 flex-col"
-    diffClassName="px-4 py-4 [--diff-sticky-top:0px] md:[--diff-sticky-top:1rem] md:px-6"
-  />
+  return (
+    <CommitDiffPanel
+      commit={commit}
+      sha={sha}
+      backTo={`/tasks/${runId}/commits`}
+      backLabel="All commits"
+      slot="task-commit"
+      className="mx-auto flex min-h-0 w-full max-w-[var(--measure)] flex-1 flex-col"
+      diffClassName="px-4 py-4 [--diff-sticky-top:0px] md:[--diff-sticky-top:1rem] md:px-6"
+    />
+  )
 }
 
 /** Reuses the task diff payload; paths lead to the existing structured Changes view. */

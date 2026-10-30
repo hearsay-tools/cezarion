@@ -14,7 +14,6 @@ import { Button } from '@/components/ui/button'
 import { useIsDesktop } from '@/lib/use-desktop'
 import { cn } from '@/lib/utils'
 
-
 import { PullConfirmDialog } from './git-checkout-block'
 import { checkoutTracking, GIT_PHONE_MAIN_PATH, groupCommitsByDay, shortGitAge } from './git-sections'
 import { useGitCheckout } from './use-git-checkout'
@@ -146,13 +145,15 @@ function CommitDiffView({ sha }: { sha: string }) {
   const commit = useRepoCommit(sha)
   const desktop = useIsDesktop()
 
-  return <CommitDiffPanel
-    commit={commit}
-    sha={sha}
-    backTo={desktop ? '/git' : GIT_PHONE_MAIN_PATH}
-    backLabel="All recent commits"
-    slot="repo-commit"
-    className="flex min-h-0 flex-1 flex-col"
-    diffClassName="px-4 py-4 [--diff-sticky-top:1rem] md:px-6"
-  />
+  return (
+    <CommitDiffPanel
+      commit={commit}
+      sha={sha}
+      backTo={desktop ? '/git' : GIT_PHONE_MAIN_PATH}
+      backLabel="All recent commits"
+      slot="repo-commit"
+      className="flex min-h-0 flex-1 flex-col"
+      diffClassName="px-4 py-4 [--diff-sticky-top:1rem] md:px-6"
+    />
+  )
 }
