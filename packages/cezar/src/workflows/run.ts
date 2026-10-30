@@ -1,5 +1,5 @@
 import { composeRunModules, type RunModules } from './run/compose.ts';
-import { UNREAD_INPUT_GRACE_MS, QUEUE_WATCHDOG_MS } from './run/constants.ts';
+import { UNREAD_INPUT_GRACE_MS, QUEUE_WATCHDOG_MS, REPO_REDISCOVERY_MS } from './run/constants.ts';
 export { IDLE_TIMEOUT_MS, UNREAD_INPUT_GRACE_MS, NO_WAIT_NUDGE_REPLY_MS, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WAITS_DISCARDED_NOTE, REFUSAL_DISCARDED_NOTE, QUEUE_WATCHDOG_MS } from './run/constants.ts';
 import { isSyntheticContinuation } from './run/workflow-position.ts';
 import { repositoryRootLockDisabled } from './run/repo-root-lease.ts';
@@ -137,6 +137,8 @@ export class RunManager {
 
   /** The stalled-queue watchdog (see `rescueStalledQueue`). */
   private readonly queueWatchdog: ReturnType<typeof setInterval>;
+  /** The missing-repository re-probe (see `RunLine.rediscoverRepo`). */
+  private readonly repoRediscovery: ReturnType<typeof setInterval>;
 
   /** The workspace-wide parallel-cap semaphore + cached resource config
    *  (spec 2026-07-20, step 2.5). Boot constructs ONE and every manager shares
@@ -225,6 +227,8 @@ export class RunManager {
     this.offUsage = onUsage((snapshot) => void this.enforceMemoryLimit(snapshot));
     this.queueWatchdog = setInterval(() => void this.modules.line.rescueStalledQueue(), QUEUE_WATCHDOG_MS);
     this.queueWatchdog.unref?.();
+    this.repoRediscovery = setInterval(() => this.modules.line.rediscoverRepo(), REPO_REDISCOVERY_MS);
+    this.repoRediscovery.unref?.();
     this.store.on('run', this.onDelegationRun);
     this.store.on('deleted', this.modules.wakeAdmission.onRunDeleted);
   }
@@ -259,6 +263,7 @@ export class RunManager {
     this.offUsage();
     this.offSemaphore();
     clearInterval(this.queueWatchdog);
+    clearInterval(this.repoRediscovery);
     for (const [runId, state] of this.active) {
       state.revokeCiTools?.(); state.revokeCiTools = undefined;
       state.revokeDelegation?.(); state.revokeDelegation = undefined;
