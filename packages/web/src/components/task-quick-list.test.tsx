@@ -14,6 +14,7 @@ import { ReferenceStatusProvider, ReferenceStatusRegistry } from '@/components/r
 import { QuickListBuckets, SidebarSessionScope, TaskQuickList, TaskQuickListContainer } from '@/components/task-quick-list'
 import { resetSwipeStore } from '@/components/use-swipe-to-archive'
 import { groupRuns } from '@/lib/task-groups'
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { timerWait, workerWait } from '@/test/wait-fixtures'
 
 const NOW = Date.parse('2026-07-14T12:00:00.000Z')
@@ -212,7 +213,7 @@ describe('status section folding (#811)', () => {
   })
 
   it('links an automations section to the automations origin, and says 0 of N when the budget is spent', () => {
-    renderList({ runs: [auto({ id: 'd' }), auto({ id: 'w1', status: 'running' }), auto({ id: 'w2', status: 'running' })], view: 'automations', rowLimit: 1 })
+    renderList({ runs: [auto({ id: 'd' }), auto({ id: 'w1', status: RUN_STATUS.running }), auto({ id: 'w2', status: RUN_STATUS.running })], view: 'automations', rowLimit: 1 })
     const link = screen.getByRole('link', { name: 'Working: showing 0 of 2, see all' })
     expect(link.getAttribute('href')).toBe('/?origin=automations&section=working')
     expect(screen.queryByRole('link', { name: /^Finished:/ })).toBeNull()
