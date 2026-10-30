@@ -1,3 +1,5 @@
+import { createRunCacheWriter } from '@/api/run-cache'
+import { runAddress } from '@/api/run-address'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CornerUpLeftIcon, ExternalLinkIcon, EyeIcon } from 'lucide-react'
 import { CheckIcon, CopyIcon, GitPullRequestIcon } from '@/components/design-icons'
@@ -67,7 +69,7 @@ function ReviewActions({ run }: { run: ApiRun }) {
   const sendBack = useMutation({
     mutationFn: async (text: string) => {
       if (!continuation.canContinue) return null
-      return continueRun(run.id, {
+      return continueRun(runAddress(run.id), {
         text: `Review feedback:\n${text}`,
         runner: continuation.runnerOverride,
       })
@@ -75,7 +77,7 @@ function ReviewActions({ run }: { run: ApiRun }) {
     onSuccess: (result) => {
       if (result === null) return
       setNotes('')
-      invalidate()
+      void createRunCacheWriter(queryClient).invalidateAfter('continue', () => runAddress(run.id))
     },
     onError: (error: Error) => toast(error.message, { tone: 'danger' }),
   })

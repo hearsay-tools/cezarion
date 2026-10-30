@@ -1,9 +1,11 @@
+import { projectAddress, runAddress, type ProjectAddress } from '@/api/run-address'
+import { createRunCacheWriter } from '@/api/run-cache'
 import { useQueryClient } from '@tanstack/react-query'
 import * as React from 'react'
 
 import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import type { ArchiveFinishedScope, RunSummary } from '@open-mercato/cezar-api-client'
-import { archiveProjectFinished, archiveProjectRun, archiveRun, archiveFinished, pinProjectRun, pinRun } from '@/api/client'
+import { archiveRun, archiveFinished, pinRun } from '@/api/client'
 import { toast } from '@/components/ui/toaster'
 import { runTitle } from '@/lib/task-groups'
 
@@ -39,8 +41,8 @@ export async function undoArchive(
   const pinned = new Set(pinnedIds)
   const results = await Promise.allSettled(
     ids.map(async (id) => {
-      await (projectId === undefined ? archiveRun(id, false) : archiveProjectRun(projectId, id, false))
-      if (pinned.has(id)) await (projectId === undefined ? pinRun(id, true) : pinProjectRun(projectId, id, true))
+      await (archiveRun(runAddress(id, { projectId }), false))
+      if (pinned.has(id)) await (pinRun(runAddress(id, { projectId }), true))
     }),
   )
   const failed = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
@@ -96,15 +98,17 @@ function rowElement(runId: string): Element | null {
 const linkOf = (row: Element | undefined) => row?.querySelector('a') ?? null
 
 /**
- * The sidebar's archive actions for one project's list. `projectId`/`cacheScope` are the pair
+ * The sidebar's archive actions for one project's list. The address is the same one
  * `usePinRun` takes: the request goes to the row's own project, and the invalidated cache is the
  * one that project's list is stored under (`'default'` for the boot project).
  */
-export function useSidebarArchive(projectId: string | undefined, cacheScope: string | undefined, onArchived?: () => void) {
+export function useSidebarArchive(address: ProjectAddress | undefined, onArchived?: () => void) {
+  const projectId = address?.projectId
+  const cacheScope = address?.cacheScope
   const queryClient = useQueryClient()
   const [sweeping, setSweeping] = React.useState<ArchiveFinishedScope | null>(null)
 
-  const refresh = (scope: string) => queryClient.invalidateQueries({ queryKey: [scope, 'runs'] as const })
+  const refresh = (scope: string) => createRunCacheWriter(queryClient).invalidateAfter('runs', projectAddress({ projectId, cacheScope: scope }))
   const offerUndo = (message: string, scope: string, ids: readonly string[], pinnedIds: readonly string[]) =>
     toast(message, {
       action: {
@@ -134,7 +138,7 @@ export function useSidebarArchive(projectId: string | undefined, cacheScope: str
       },
       row?.closest('[data-slot="quick-list-bucket"]')?.parentElement ?? null,
     )
-    const request = (projectId === undefined ? archiveRun(run.id, true) : archiveProjectRun(projectId, run.id, true))
+    const request = (archiveRun(runAddress(run.id, { projectId }), true))
       .then(
         () => {
           void refresh(scope)
@@ -165,7 +169,7 @@ export function useSidebarArchive(projectId: string | undefined, cacheScope: str
       (el) => linkOf(el.closest('[data-slot="quick-list-bucket"]')?.nextElementSibling?.querySelector('[data-slot="task-row"]') ?? undefined),
       button?.closest('[data-slot="quick-list-bucket"]')?.parentElement ?? null,
     )
-    void (projectId === undefined ? archiveFinished(scopeOfSweep, automation) : archiveProjectFinished(projectId, scopeOfSweep, automation))
+    void (archiveFinished(projectAddress({ projectId }), scopeOfSweep, automation))
       .then(
         ({ ids, pinnedIds }) => {
           void refresh(scope)

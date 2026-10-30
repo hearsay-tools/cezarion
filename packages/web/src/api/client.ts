@@ -1,3 +1,4 @@
+import type { ProjectAddress, RunAddress } from './run-address'
 import { defined } from '@open-mercato/cezar-api-client/contract/defined'
 import { invalidateLiveReads } from './live-coordinator'
 import type {
@@ -518,9 +519,9 @@ export async function browseFs(
 /** The authoritative run list — slim summaries (#817), sorted newest-first by the server. Detail
  *  views read the full record through `getRun`. The window (#864): every unarchived run, plus the
  *  newest archived ones; older archived runs page in through `getArchivedRuns`. */
-export async function getRuns(opts?: ReadOptions): Promise<RunSummary[]> {
+export async function getRuns(address: ProjectAddress, opts?: ReadOptions): Promise<RunSummary[]> {
   return unwrap(
-    await cez.api.v1.p[':projectId']['run-summaries'].$get({ param: { projectId: queryScope() }, query: { archived: 'recent' } }, init(opts)),
+    await cez.api.v1.p[':projectId']['run-summaries'].$get({ param: { projectId: address.projectId }, query: { archived: 'recent' } }, init(opts)),
     '/run-summaries',
   )
 }
@@ -542,14 +543,6 @@ export async function getArchivedRuns(
     await cez.api.v1.p[':projectId']['run-summaries'].archived.$get({ param: { projectId: queryScope() }, query }, init(opts)),
     '/run-summaries/archived', archivedRunsResponseSchema,
   )
-}
-
-/** One project's run list by EXPLICIT id (`GET /api/p/:projectId/run-summaries`, step 3.3): the
- *  sidebar reads non-active projects' tasks, which the active-scope `send()` prefix cannot reach.
- *  An already-`/api/p/`-prefixed path passes through `apiPath` untouched, so this stays
- *  correct whatever scope is mounted. */
-export async function getProjectRuns(projectId: string, opts?: ReadOptions): Promise<RunSummary[]> {
-  return unwrap(await cez.api.v1.p[':projectId']['run-summaries'].$get({ param: { projectId }, query: { archived: 'recent' } }, init(opts)), '/run-summaries')
 }
 
 /** The cross-project task index (`GET /api/v1/workspace/runs-index`) — what lets ⌘K find a task
@@ -575,25 +568,7 @@ export async function getRunRelationships(id: string, opts?: ReadOptions): Promi
   )
 }
 
-export async function getRun(id: string, opts?: ReadOptions): Promise<ApiRun> {
-  return unwrap(
-    await cez.api.v1.p[':projectId'].runs[':id'].$get(
-      { param: { projectId: queryScope(), id: encodeURIComponent(id) } },
-      init(opts),
-    ),
-    runPath(id),
-  )
-}
-
-/**
- * The same read by EXPLICIT project — the twin of `getRun`, for the reason `archiveProjectRun`
- * spells out: the global Tasks page stands outside every `/p/:projectId`, so `queryScope()` would
- * name the BOOT project for a row that belongs to another one. It is also the only way that page
- * can learn a run's steps: its own index ships a deliberately slim entry (no `steps`, no
- * `runner`), and whether a finished task can be reopened is a question only the full record
- * answers.
- */
-export async function getProjectRun(projectId: string, id: string, opts?: ReadOptions): Promise<ApiRun> {
+export async function getRun({ projectId, runId: id }: RunAddress, opts?: ReadOptions): Promise<ApiRun> {
   return unwrap(
     await cez.api.v1.p[':projectId'].runs[':id'].$get(
       { param: { projectId, id: encodeURIComponent(id) } },
@@ -995,7 +970,7 @@ export async function getGithubSearch(
 
 /**
  * Batched status for the PR/issue chips on screen. Takes its project EXPLICITLY, like
- * `getProjectRuns` and `archiveProjectRun` and for the same reason: the global Tasks page stands
+ * `getRuns` and `archiveRun` and for the same reason: the global Tasks page stands
  * outside every `/p/:projectId`, and its rows belong to different projects — `queryScope()` would
  * ask the boot project about another project's PR number and get a confident wrong answer.
  * Callers standing in one project pass their own id.
@@ -1124,13 +1099,7 @@ export function getRunDiff(id: string, opts?: ReadOptions): Promise<string> {
 
 /** The run's handoff journal (spec 007) as markdown text. `''` until the file is seeded —
  *  the server only 404s for an unknown run, never for a missing file. */
-export function getRunHandoff(id: string, opts?: ReadOptions): Promise<string> {
-  return requestText(runPath(id, '/handoff'), { method: 'GET', ...defined({ signal: opts?.signal }) })
-}
-
-/** Another project's handoff journal, for a row of All tasks (hearsay-tools/cezarion#1616): the
- *  project is named explicitly, since `queryScope()` is the boot project there. */
-export async function getProjectRunHandoff(projectId: string, id: string, opts?: ReadOptions): Promise<string> {
+export async function getRunHandoff({ projectId, runId: id }: RunAddress, opts?: ReadOptions): Promise<string> {
   const res = await cez.api.v1.p[':projectId'].runs[':id'].handoff.$get(
     { param: { projectId, id: encodeURIComponent(id) } },
     { init: { ...defined({ signal: opts?.signal }) }, headers: { accept: 'text/plain' } },
@@ -1462,10 +1431,10 @@ export async function destroyWorker(id: string): Promise<WorkerDestroyResult> {
 }
 
 /** Archives by default; pass `false` to bring a run back into the live list. */
-export async function archiveRun(id: string, archived = true): Promise<RunRecord> {
+export async function archiveRun({ projectId, runId: id }: RunAddress, archived = true): Promise<RunRecord> {
   return unwrap(
     await cez.api.v1.p[':projectId'].runs[':id'].archive.$post({
-      param: { projectId: queryScope(), id: encodeURIComponent(id) },
+      param: { projectId, id: encodeURIComponent(id) },
       json: { archived },
     }),
     runPath(id, '/archive'),
@@ -1473,23 +1442,7 @@ export async function archiveRun(id: string, archived = true): Promise<RunRecord
 }
 
 /** Pins by default; pass `false` to drop the task back into its ordinary bucket (#935). */
-export async function pinRun(id: string, pinned = true): Promise<RunRecord> {
-  return unwrap(
-    await cez.api.v1.p[':projectId'].runs[':id'].pin.$post({
-      param: { projectId: queryScope(), id: encodeURIComponent(id) },
-      json: { pinned },
-    }),
-    runPath(id, '/pin'),
-  )
-}
-
-/**
- * The same pin by EXPLICIT project — the twin of `archiveProjectRun` below, and needed for the
- * same reason one step closer to home: the multi-project sidebar paints a quick-list per
- * REGISTERED project, so a pin toggle on another project's row would otherwise be sent with the
- * scope of whichever project the URL happens to name.
- */
-export async function pinProjectRun(projectId: string, id: string, pinned = true): Promise<RunRecord> {
+export async function pinRun({ projectId, runId: id }: RunAddress, pinned = true): Promise<RunRecord> {
   return unwrap(
     await cez.api.v1.p[':projectId'].runs[':id'].pin.$post({
       param: { projectId, id: encodeURIComponent(id) },
@@ -1500,34 +1453,12 @@ export async function pinProjectRun(projectId: string, id: string, pinned = true
 }
 
 /**
- * The same route by EXPLICIT project — the twin of `getProjectRuns`, and for the same reason:
- * the global Tasks page stands outside every `/p/:projectId`, so `queryScope()` would send the
- * BOOT project's id for a row that belongs to another project, and the archive would either 404
- * or (with a colliding id) land on the wrong task. Every caller that is already standing in the
- * run's own project keeps using `archiveRun`.
- */
-export async function archiveProjectRun(
-  projectId: string,
-  id: string,
-  archived = true,
-): Promise<RunRecord> {
-  return unwrap(
-    await cez.api.v1.p[':projectId'].runs[':id'].archive.$post({
-      param: { projectId, id: encodeURIComponent(id) },
-      json: { archived },
-    }),
-    runPath(id, '/archive'),
-  )
-}
-
-/**
- * The read receipt by EXPLICIT project — the twin of `archiveProjectRun`, and for the same
+ * The read receipt in its addressed project, for the same
  * reason: the global Tasks page stands outside every `/p/:projectId`, so `queryScope()` would
  * stamp the receipt on the boot project. `read: false` is the inverse route (#775).
  */
-export async function setProjectRunRead(
-  projectId: string,
-  id: string,
+export async function setRunRead(
+  { projectId, runId: id }: RunAddress,
   read: boolean,
 ): Promise<RunRecord> {
   const route = read ? 'read' : 'unread'
@@ -1558,18 +1489,8 @@ export async function cancelAutoResume(id: string): Promise<CancelAutoResumeResp
 /** Sweep finished runs into the archive in one call — the Tasks header's "Archive finished"
  *  button (no scope) or one sidebar group (`unpinned` / `pinned`). What it takes is
  *  the contract's `isSweepable` (`run-predicates`): owned workers are skipped. */
-export async function archiveFinished(scope?: ArchiveFinishedScope, automation?: boolean): Promise<ArchiveFinishedResponse> {
-  return archiveProjectFinished(queryScope(), scope, automation)
-}
-
-/**
- * The same sweep by EXPLICIT project — the twin of `pinProjectRun`, for the sidebar rail that
- * archives in a row's own project rather than the one `queryScope()` names. Without a scope the
- * body stays `{}`, which is the Tasks page's sweep. `automation` is the sidebar tab's filter
- * (hearsay-tools/cezarion#1332): `true` on Automations, `false` on Active.
- */
-export async function archiveProjectFinished(
-  projectId: string,
+export async function archiveFinished(
+  { projectId }: ProjectAddress,
   scope?: ArchiveFinishedScope,
   automation?: boolean,
 ): Promise<ArchiveFinishedResponse> {
@@ -1579,29 +1500,6 @@ export async function archiveProjectFinished(
       json: { ...(scope ? { scope } : {}), ...(automation !== undefined ? { automation } : {}) },
     }),
     '/runs/archive-finished',
-  )
-}
-
-/** Read receipt (#unread-done-items): opening a task's thread marks it read. Bodyless —
- *  the server stamps `seenAt = now` and answers with the updated record. */
-export async function markRunSeen(id: string, projectId = queryScope()): Promise<RunRecord> {
-  return unwrap(
-    await cez.api.v1.p[':projectId'].runs[':id'].read.$post({
-      param: { projectId, id: encodeURIComponent(id) },
-    }),
-    runPath(id, '/read'),
-  )
-}
-
-/** Put a finished task back to unread (#775): the inverse of `markRunSeen`. Bodyless — the
- *  server CLEARS `seenAt` (an absent receipt is what every reader already treats as unread)
- *  and answers with the updated record. */
-export async function markRunUnseen(id: string): Promise<RunRecord> {
-  return unwrap(
-    await cez.api.v1.p[':projectId'].runs[':id'].unread.$post({
-      param: { projectId: queryScope(), id: encodeURIComponent(id) },
-    }),
-    runPath(id, '/unread'),
   )
 }
 
@@ -1646,7 +1544,7 @@ export interface ContinueOptions {
 /** Reopen a finished run's session. 409 (with the reason) when it cannot be resumed. An optional
  *  runner/model override lets the follow-up choose the engine; omitted keeps the run's current
  *  backend (backward compat). */
-export async function continueRun(id: string, opts: ContinueOptions = {}): Promise<ContinueResponse> {
+export async function continueRun({ projectId, runId: id }: RunAddress, opts: ContinueOptions = {}): Promise<ContinueResponse> {
   const body = {
     ...(opts.text !== undefined ? { text: opts.text } : {}),
     ...(opts.images !== undefined ? { images: opts.images } : {}),
@@ -1657,30 +1555,8 @@ export async function continueRun(id: string, opts: ContinueOptions = {}): Promi
   }
   return unwrap(
     await cez.api.v1.p[':projectId'].runs[':id'].continue.$post({
-      param: { projectId: queryScope(), id: encodeURIComponent(id) },
-      json: body,
-    }),
-    runPath(id, '/continue'),
-  )
-}
-
-/** The same reopen by EXPLICIT project — see `archiveProjectRun`. */
-export async function continueProjectRun(
-  projectId: string,
-  id: string,
-  opts: ContinueOptions = {},
-): Promise<ContinueResponse> {
-  return unwrap(
-    await cez.api.v1.p[':projectId'].runs[':id'].continue.$post({
       param: { projectId, id: encodeURIComponent(id) },
-      json: {
-        ...(opts.text !== undefined ? { text: opts.text } : {}),
-        ...(opts.images !== undefined ? { images: opts.images } : {}),
-        ...(opts.runner !== undefined ? { runner: opts.runner } : {}),
-        ...(opts.model !== undefined ? { model: opts.model } : {}),
-        ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
-        ...(opts.agentProfile !== undefined ? { agentProfile: opts.agentProfile } : {}),
-      },
+      json: body,
     }),
     runPath(id, '/continue'),
   )
@@ -1820,23 +1696,7 @@ export async function decidePermission(id: string, decision: PermissionDecision)
 }
 
 /** Deliver text and/or pasted screenshots into a run's live session. 409 once it has closed. */
-export async function sendMessage(id: string, message: MessageInput): Promise<MessageResponse> {
-  return unwrap(
-    await cez.api.v1.p[':projectId'].runs[':id'].messages.$post({
-      param: { projectId: queryScope(), id: encodeURIComponent(id) },
-      json: { text: message.text ?? '', images: message.images ?? [] },
-    }),
-    runPath(id, '/messages'),
-  )
-}
-
-/** The same delivery by EXPLICIT project — see `archiveProjectRun`. What lets a chip on the
- *  global Tasks page speak to a run in a project this page is not standing in. */
-export async function sendProjectRunMessage(
-  projectId: string,
-  id: string,
-  message: MessageInput,
-): Promise<MessageResponse> {
+export async function sendMessage({ projectId, runId: id }: RunAddress, message: MessageInput): Promise<MessageResponse> {
   return unwrap(
     await cez.api.v1.p[':projectId'].runs[':id'].messages.$post({
       param: { projectId, id: encodeURIComponent(id) },

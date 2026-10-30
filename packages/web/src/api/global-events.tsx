@@ -1,3 +1,4 @@
+import { projectAddress } from './run-address'
 import { LiveWorkspaceSource } from './live-workspace-source'
 import { onLiveReconcile } from './live-coordinator'
 import { useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query'
@@ -266,7 +267,7 @@ function bootProjectOf(queryClient: QueryClient): string | undefined {
  *  group uses its registry id. A stamped run must land in that same entry, not in whatever
  *  scope is currently mounted (#129). */
 function runListCacheKey(project: string, bootProject: string | undefined): readonly [string, 'runs', 'list'] {
-  return [project === bootProject ? 'default' : project, 'runs', 'list'] as const
+  return [projectAddress({ projectId: project, boot: project === bootProject }).cacheScope, 'runs', 'list'] as const
 }
 
 /** Archive cascades can send dozens of full records before a frame paints. Keep their list writes

@@ -1,3 +1,4 @@
+import { projectAddress } from '@/api/run-address'
 import { defined } from '@open-mercato/cezar-api-client/contract/defined'
 import { useMutation } from '@tanstack/react-query'
 import { CheckCheckIcon, CopyIcon, EllipsisIcon, ExternalLinkIcon, SettingsIcon } from 'lucide-react'
@@ -106,7 +107,7 @@ export function ProjectMenu({ projectId, onNavigate, triggerRef, triggerClassNam
   const [marking, setMarking] = useState(false)
   const bootId = registry.data?.bootProject ?? health.data?.bootProject
   const runs = useProjectRuns(projectId ?? 'default', projectId !== null, projectId === bootId)
-  const seen = useMarkRunSeen(projectId ?? 'default', projectId === bootId ? 'default' : projectId ?? 'default')
+  const seen = useMarkRunSeen(projectAddress({ projectId: projectId ?? 'default', boot: projectId === bootId }))
   const currentProject = useRef(projectId)
   currentProject.current = projectId
   const project = registry.data?.projects.find((entry) => entry.id === projectId)

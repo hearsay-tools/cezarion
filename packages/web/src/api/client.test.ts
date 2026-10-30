@@ -1,11 +1,11 @@
+import { projectAddress, runAddress } from './run-address'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   ApiError,
-  markRunSeen,
+  setRunRead,
   openProjectIn,
   archiveFinished,
-  archiveProjectFinished,
   archiveRun,
   cancelRun,
   connectProvider,
@@ -147,11 +147,11 @@ describe('request shapes', () => {
     { name: 'getRunnerModels', call: () => getRunnerModels('codex'), path: '/api/v1/models?runner=codex', method: 'GET' },
     { name: 'getRunnerModels(opencode)', call: () => getRunnerModels('opencode'), path: '/api/v1/models?runner=opencode', method: 'GET' },
     { name: 'getRunnerModels(pi)', call: () => getRunnerModels('pi'), path: '/api/v1/models?runner=pi', method: 'GET' },
-    { name: 'getRuns', call: () => getRuns(), path: '/api/v1/run-summaries?archived=recent', method: 'GET' },
+    { name: 'getRuns', call: () => getRuns(projectAddress()), path: '/api/v1/run-summaries?archived=recent', method: 'GET' },
     { name: 'getArchivedRuns', call: () => getArchivedRuns({ before: 'c1', limit: 200, q: '#864' }), path: '/api/v1/run-summaries/archived?before=c1&limit=200&q=%23864', method: 'GET' },
-    { name: 'getRun', call: () => getRun('run-1'), path: '/api/v1/runs/run-1', method: 'GET' },
+    { name: 'getRun', call: () => getRun(runAddress('run-1')), path: '/api/v1/runs/run-1', method: 'GET' },
     { name: 'getRunDiff', call: () => getRunDiff('run-1'), path: '/api/v1/runs/run-1/diff', method: 'GET' },
-    { name: 'getRunHandoff', call: () => getRunHandoff('run-1'), path: '/api/v1/runs/run-1/handoff', method: 'GET' },
+    { name: 'getRunHandoff', call: () => getRunHandoff(runAddress('run-1')), path: '/api/v1/runs/run-1/handoff', method: 'GET' },
     { name: 'getUiState', call: () => getUiState(), path: '/api/v1/ui-state', method: 'GET' },
     { name: 'getWorkflows', call: () => getWorkflows(), path: '/api/v1/workflows', method: 'GET' },
     { name: 'getSkills', call: () => getSkills(), path: '/api/v1/skills', method: 'GET' },
@@ -231,42 +231,42 @@ describe('request shapes', () => {
     { name: 'cancelRun', call: () => cancelRun('run-1'), path: '/api/v1/runs/run-1/cancel', method: 'POST' },
     {
       name: 'archiveRun (default)',
-      call: () => archiveRun('run-1'),
+      call: () => archiveRun(runAddress('run-1')),
       path: '/api/v1/runs/run-1/archive',
       method: 'POST',
       body: { archived: true },
     },
     {
       name: 'archiveRun (unarchive)',
-      call: () => archiveRun('run-1', false),
+      call: () => archiveRun(runAddress('run-1'), false),
       path: '/api/v1/runs/run-1/archive',
       method: 'POST',
       body: { archived: false },
     },
     {
       name: 'archiveFinished',
-      call: () => archiveFinished(),
+      call: () => archiveFinished(projectAddress()),
       path: '/api/v1/runs/archive-finished',
       method: 'POST',
       body: {},
     },
     {
       name: 'archiveFinished (scope)',
-      call: () => archiveFinished('pinned'),
+      call: () => archiveFinished(projectAddress(), 'pinned'),
       path: '/api/v1/runs/archive-finished',
       method: 'POST',
       body: { scope: 'pinned' },
     },
     {
       name: 'archiveProjectFinished (explicit project, scope)',
-      call: () => archiveProjectFinished('other', 'unpinned'),
+      call: () => archiveFinished(projectAddress({ projectId: 'other' }), 'unpinned'),
       path: '/api/v1/p/other/runs/archive-finished',
       method: 'POST',
       body: { scope: 'unpinned' },
     },
     {
       name: 'archiveProjectFinished (sidebar tab filter, #1332)',
-      call: () => archiveProjectFinished('other', 'unpinned', true),
+      call: () => archiveFinished(projectAddress({ projectId: 'other' }), 'unpinned', true),
       path: '/api/v1/p/other/runs/archive-finished',
       method: 'POST',
       body: { scope: 'unpinned', automation: true },
@@ -274,21 +274,21 @@ describe('request shapes', () => {
     { name: 'finishRun', call: () => finishRun('run-1'), path: '/api/v1/runs/run-1/finish', method: 'POST' },
     {
       name: 'continueRun (no text)',
-      call: () => continueRun('run-1'),
+      call: () => continueRun(runAddress('run-1')),
       path: '/api/v1/runs/run-1/continue',
       method: 'POST',
       body: {},
     },
     {
       name: 'continueRun (with text)',
-      call: () => continueRun('run-1', { text: 'keep going' }),
+      call: () => continueRun(runAddress('run-1'), { text: 'keep going' }),
       path: '/api/v1/runs/run-1/continue',
       method: 'POST',
       body: { text: 'keep going' },
     },
     {
       name: 'continueRun (runner + model override, #401)',
-      call: () => continueRun('run-1', { runner: 'codex', model: 'gpt-5.1-codex' }),
+      call: () => continueRun(runAddress('run-1'), { runner: 'codex', model: 'gpt-5.1-codex' }),
       path: '/api/v1/runs/run-1/continue',
       method: 'POST',
       body: { runner: 'codex', model: 'gpt-5.1-codex' },
@@ -316,7 +316,7 @@ describe('request shapes', () => {
     },
     {
       name: 'sendMessage',
-      call: () => sendMessage('run-1', { text: 'hi' }),
+      call: () => sendMessage(runAddress('run-1'), { text: 'hi' }),
       path: '/api/v1/runs/run-1/messages',
       method: 'POST',
       // The server's schema defaults both, but an absent `images` and `[]` are the same
@@ -325,7 +325,7 @@ describe('request shapes', () => {
     },
     {
       name: 'sendMessage (images only)',
-      call: () => sendMessage('run-1', { images: [{ mediaType: 'image/png', data: 'AAA' }] }),
+      call: () => sendMessage(runAddress('run-1'), { images: [{ mediaType: 'image/png', data: 'AAA' }] }),
       path: '/api/v1/runs/run-1/messages',
       method: 'POST',
       body: { text: '', images: [{ mediaType: 'image/png', data: 'AAA' }] },
@@ -361,7 +361,7 @@ describe('request shapes', () => {
   it('forwards an abort signal to fetch', async () => {
     reply([])
     const controller = new AbortController()
-    await getRuns({ signal: controller.signal })
+    await getRuns(projectAddress(), { signal: controller.signal })
     expect((fetchMock.mock.calls.at(-1)?.[1] as RequestInit).signal).toBe(controller.signal)
   })
 })
@@ -378,7 +378,7 @@ describe('project scope (multi-project spec, step 3.1)', () => {
     setApiScope('proj-a')
 
     reply({ ok: true })
-    await getRuns()
+    await getRuns(projectAddress())
     expect(lastCall().path).toBe('/api/v1/p/proj-a/run-summaries?archived=recent')
 
     reply({ ok: true })
@@ -489,7 +489,7 @@ describe('response parsing', () => {
 
   it('returns the run list', async () => {
     reply([{ id: 'run-1', title: 'Fix it', status: 'running' }])
-    const runs = await getRuns()
+    const runs = await getRuns(projectAddress())
     expect(runs).toHaveLength(1)
     expect(runs[0]?.id).toBe('run-1')
   })
@@ -506,7 +506,7 @@ describe('response parsing', () => {
     fetchMock.mockResolvedValue(
       new Response('', { status: 200, headers: { 'content-type': 'text/markdown; charset=utf-8' } }),
     )
-    await expect(getRunHandoff('run-1')).resolves.toBe('')
+    await expect(getRunHandoff(runAddress('run-1'))).resolves.toBe('')
   })
 
   it('passes an unavailable GitHub through as data — it is a hint, not a failure', async () => {
@@ -560,7 +560,7 @@ describe('errors', () => {
 
   it('turns a non-JSON 500 into a sane ApiError rather than a parse error', async () => {
     fail(500, '<html><body>502 Bad Gateway</body></html>', 'text/html')
-    const error = await getRuns().catch((e: unknown) => e)
+    const error = await getRuns(projectAddress()).catch((e: unknown) => e)
     expect(error).toBeInstanceOf(ApiError)
     expect((error as ApiError).status).toBe(500)
     // Says what we know; does not paste a page of HTML into a toast.
@@ -570,14 +570,14 @@ describe('errors', () => {
 
   it('survives an empty error body', async () => {
     fail(404, '')
-    const error = (await getRun('nope').catch((e: unknown) => e)) as ApiError
+    const error = (await getRun(runAddress('nope')).catch((e: unknown) => e)) as ApiError
     expect(error.status).toBe(404)
     expect(error.message).toBe('404 Not Found')
   })
 
   it('ignores a non-string error field instead of stringifying junk', async () => {
     fail(400, JSON.stringify({ error: { issues: ['bad'] } }))
-    const error = (await getRuns().catch((e: unknown) => e)) as ApiError
+    const error = (await getRuns(projectAddress()).catch((e: unknown) => e)) as ApiError
     // No statusText either — the fallback still has to read as a sentence.
     expect(error.message).toBe('400 request failed')
   })
@@ -594,7 +594,7 @@ describe('errors', () => {
 
   it('lets an abort through as an AbortError, not an ApiError', async () => {
     fetchMock.mockRejectedValue(new DOMException('The operation was aborted.', 'AbortError'))
-    const error = await getRuns().catch((e: unknown) => e)
+    const error = await getRuns(projectAddress()).catch((e: unknown) => e)
     // Query cancellation is not a server failure and must not be reported as one.
     expect(error).not.toBeInstanceOf(ApiError)
     expect((error as DOMException).name).toBe('AbortError')
@@ -602,7 +602,7 @@ describe('errors', () => {
 
   it('rejects a 200 that is not JSON on a JSON endpoint', async () => {
     fetchMock.mockResolvedValue(new Response('not json', { status: 200 }))
-    const error = (await getRuns().catch((e: unknown) => e)) as ApiError
+    const error = (await getRuns(projectAddress()).catch((e: unknown) => e)) as ApiError
     expect(error).toBeInstanceOf(ApiError)
     expect(error.message).toContain('non-JSON')
   })
@@ -728,7 +728,7 @@ describe('explicit project actions', () => {
   it('addresses receipt and open actions to the explicit project, independent of active scope', async () => {
     setApiScope('other')
     fetchMock.mockResolvedValue(new Response('{}', { headers: { 'content-type': 'application/json' } }))
-    await markRunSeen('run-1', 'selected')
+    await setRunRead(runAddress('run-1', { projectId: 'selected' }), true)
     fetchMock.mockResolvedValue(new Response('{}', { headers: { 'content-type': 'application/json' } }))
     await openProjectIn('vscode', 'selected')
     expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([

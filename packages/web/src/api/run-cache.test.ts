@@ -53,3 +53,45 @@ describe('run cache ownership', () => {
     ])
   })
 })
+
+it('unseen follows late scope reads and restores the full snapshot', async () => {
+  setApiScope('before')
+  const client = new QueryClient()
+  const writer = createRunCacheWriter(client)
+  const original = makeRunRecord({ id: 'r', seenAt: 'old', title: 'before' })
+  const key = ['before', 'runs', 'detail', 'r']
+  client.setQueryData(key, original)
+  const patch = await writer.patchRead(() => runAddress('r'), false)
+  expect(client.getQueryData(key)).toEqual(expect.not.objectContaining({ seenAt: expect.anything() }))
+  setApiScope('after')
+  const lateKey = ['after', 'runs', 'detail', 'r']
+  client.setQueryData(lateKey, { ...original, title: 'stream' })
+  patch.rollback()
+  expect(client.getQueryData(lateKey)).toEqual(original)
+  patch.settle({ ...original, title: 'old response' })
+  expect(client.getQueryData(lateKey)).toEqual({ ...original, seenAt: undefined })
+  expect(Object.hasOwn(client.getQueryData(lateKey) as object, 'seenAt')).toBe(false)
+  client.clear()
+})
+
+it('index writes match both project and run and settle the original three keys', async () => {
+  setApiScope('before')
+  const client = new QueryClient()
+  const invalidate = vi.spyOn(client, 'invalidateQueries')
+  const entry = { ...summaryOf(makeRunRecord({ id: 'r' })), projectId: 'owner' }
+  const previous = { runs: [entry, { ...entry, projectId: 'other' }], referenceStatuses: {}, perProjectLimit: 10, truncated: [] }
+  const key = ['workspace', 'runs-index']
+  client.setQueryData(key, previous)
+  const patch = await createRunCacheWriter(client).patchIndex(runAddress('r', { projectId: 'owner' }), () => run => ({ ...run, archived: true }))
+  expect(client.getQueryData(key)).toEqual({ ...previous, runs: [{ ...entry, archived: true }, previous.runs[1]] })
+  patch.rollback()
+  expect(client.getQueryData(key)).toEqual(previous)
+  setApiScope('after')
+  patch.settle()
+  expect(invalidate.mock.calls).toEqual([
+    [{ queryKey: ['workspace', 'runs-index'] }],
+    [{ queryKey: ['after', 'runs'] }],
+    [{ queryKey: ['owner', 'runs', 'list'] }],
+  ])
+  client.clear()
+})

@@ -1,8 +1,9 @@
+import { runAddress } from '@/api/run-address'
 import {
   ApiError,
   getGithubItem,
   getAutomations,
-  getProjectRun,
+  getRun,
   getRunCommit,
   getRepoCommit,
   getWorkflows,
@@ -73,7 +74,7 @@ type EntityChecker = (check: EntityCheck) => Promise<boolean | null>
 
 /** The task's run record. Every task page needs the run before anything it holds. */
 const taskRun = (check: EntityCheck) =>
-  getProjectRun(check.opts.projectId, check.params.id ?? '', { signal: check.opts.signal })
+  getRun(runAddress(check.params.id ?? '', { projectId: check.opts.projectId }), { signal: check.opts.signal })
 
 /** An issue/PR number from a route segment; null unless it is a positive safe integer. */
 function itemNumber(segment: string | undefined): number | null {

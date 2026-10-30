@@ -13,11 +13,11 @@
     "packages/cezar/src/server/server.ts": 5880,
     "packages/contract/src/runs.ts": 1014,
     "packages/web/e2e/agent-browser.ts": 1263,
-    "packages/web/src/api/client.ts": 2366,
-    "packages/web/src/api/queries.ts": 2470,
+    "packages/web/src/api/client.ts": 2226,
+    "packages/web/src/api/queries.ts": 2361,
     "packages/web/src/components/composer/composer.tsx": 1095,
     "packages/web/src/routes/github/github.tsx": 1244,
-    "packages/web/src/routes/global-tasks.tsx": 1139,
+    "packages/web/src/routes/global-tasks.tsx": 1120,
     "packages/web/src/routes/tasks-overview.tsx": 1651,
     "packages/web/src/routes/workflows/workflows.tsx": 1175
   }

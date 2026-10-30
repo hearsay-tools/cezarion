@@ -1,10 +1,11 @@
+import { createRunCacheWriter } from '@/api/run-cache'
+import { projectAddress } from '@/api/run-address'
 import './task-lists.css'
 import { useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { CheckCheckIcon, ChevronsLeftIcon, ChevronsRightIcon, Clock3Icon, CoinsIcon, DollarSignIcon, ListChecksIcon, LinkIcon, MemoryStickIcon, MoreHorizontalIcon, PencilIcon, SearchXIcon } from 'lucide-react'
 import { ArchiveIcon, CpuIcon, FileDiffIcon, GitBranchIcon, PlusIcon, SearchIcon, WorkflowIcon } from '@/components/design-icons'
 import * as React from 'react'
 import { Link, useNavigate } from '@/lib/project-router'
-
 import { archiveFinished, markAllRunsSeen, patchRun } from '@/api/client'
 import { useRunUsage } from '@/api/global-events'
 import { queryKeys, useArchivedRuns, useAutomationNames, useHealth, usePinRun, useProjects, useProjectRepoBase, useReferenceProjectId, useRuns } from '@/api/queries'
@@ -70,7 +71,6 @@ import { usageMetricVisibility } from '@/lib/token-metrics'
 import { useTaskTableColumns } from '@/lib/use-task-table-columns'
 import { useNow } from '@/lib/use-now'
 import { cn } from '@/lib/utils'
-
 /** Archived runs older than the run list's window, a page at a time (#864). */
 export type ArchivedPages = {
   runs: readonly RunSummary[]
@@ -1462,8 +1462,8 @@ export function TasksOverviewRoute() {
   const queryClient = useQueryClient()
   const archived = useArchivedPages(runs.data, view)
   const archive = useMutation({
-    mutationFn: (automation?: boolean) => archiveFinished(undefined, automation),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.runs.all }),
+    mutationFn: (automation?: boolean) => archiveFinished(projectAddress(), undefined, automation),
+    onSuccess: () => createRunCacheWriter(queryClient).invalidateAfter('runs', () => projectAddress()),
     onError: (error: Error) => toast(error.message, { tone: 'danger' }),
   })
   // "Mark all read" (#unread-done-items): one call stamps every unread finished run; the

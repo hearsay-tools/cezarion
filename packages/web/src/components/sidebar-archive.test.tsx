@@ -1,3 +1,4 @@
+import { projectAddress, runAddress, type RunAddress } from '@/api/run-address'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook } from '@testing-library/react'
 import type { ReactNode } from 'react'
@@ -8,11 +9,8 @@ import type { RunRecord, RunSummary } from '@open-mercato/cezar-api-client'
 
 const api = vi.hoisted(() => ({
   archiveRun: vi.fn(),
-  archiveProjectRun: vi.fn(),
   pinRun: vi.fn(),
-  pinProjectRun: vi.fn(),
   archiveFinished: vi.fn(),
-  archiveProjectFinished: vi.fn(),
 }))
 vi.mock('@/api/client', async (importOriginal) => ({ ...(await importOriginal<typeof import('@/api/client')>()), ...api }))
 const toastMock = vi.hoisted(() => vi.fn())
@@ -47,40 +45,40 @@ describe('undoArchive', () => {
   it('unarchives every id, and re-pins a pinned one only after its unarchive resolved', async () => {
     const order: string[] = []
     let releaseB!: () => void
-    api.archiveProjectRun.mockImplementation(async (_p: string, id: string) => {
+    api.archiveRun.mockImplementation(async ({ runId: id }: RunAddress) => {
       if (id === 'b') await new Promise<void>((r) => { releaseB = r })
       order.push(`unarchive ${id}`)
       return {}
     })
-    api.pinProjectRun.mockImplementation(async (_p: string, id: string) => { order.push(`pin ${id}`); return {} })
+    api.pinRun.mockImplementation(async ({ runId: id }: RunAddress) => { order.push(`pin ${id}`); return {} })
     const done = undoArchive('proj', ['a', 'b'], ['b'])
     await vi.waitFor(() => expect(order).toEqual(['unarchive a']))
-    expect(api.pinProjectRun).not.toHaveBeenCalled()
+    expect(api.pinRun).not.toHaveBeenCalled()
     releaseB()
     await done
     expect(order).toEqual(['unarchive a', 'unarchive b', 'pin b'])
-    expect(api.archiveProjectRun).toHaveBeenCalledWith('proj', 'a', false)
-    expect(api.pinProjectRun).toHaveBeenCalledWith('proj', 'b', true)
+    expect(api.archiveRun).toHaveBeenCalledWith(runAddress('a', { projectId: 'proj' }), false)
+    expect(api.pinRun).toHaveBeenCalledWith(runAddress('b', { projectId: 'proj' }), true)
   })
 
   it('lets the other ids finish when one fails, and toasts once with the server message', async () => {
-    api.archiveProjectRun.mockImplementation(async (_p: string, id: string) => {
+    api.archiveRun.mockImplementation(async ({ runId: id }: RunAddress) => {
       if (id === 'a') throw new Error('Run a is gone')
       return {}
     })
     await undoArchive('proj', ['a', 'b', 'c'], ['a', 'c'])
-    expect(api.archiveProjectRun).toHaveBeenCalledTimes(3)
+    expect(api.archiveRun).toHaveBeenCalledTimes(3)
     // a failed to unarchive, so its pin is not attempted; c is re-pinned.
-    expect(api.pinProjectRun).toHaveBeenCalledTimes(1)
-    expect(api.pinProjectRun).toHaveBeenCalledWith('proj', 'c', true)
+    expect(api.pinRun).toHaveBeenCalledTimes(1)
+    expect(api.pinRun).toHaveBeenCalledWith(runAddress('c', { projectId: 'proj' }), true)
     expect(toastMock).toHaveBeenCalledTimes(1)
     expect(toastMock).toHaveBeenCalledWith('Run a is gone', { tone: 'danger' })
   })
 
   it('without a project id uses the scope-free calls', async () => {
     await undoArchive(undefined, ['a'], ['a'])
-    expect(api.archiveRun).toHaveBeenCalledWith('a', false)
-    expect(api.pinRun).toHaveBeenCalledWith('a', true)
+    expect(api.archiveRun).toHaveBeenCalledWith(runAddress('a'), false)
+    expect(api.pinRun).toHaveBeenCalledWith(runAddress('a'), true)
   })
 })
 
@@ -88,45 +86,47 @@ describe('useSidebarArchive', () => {
   const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={createQueryClient()}>{children}</QueryClientProvider>
 
   it('archives one row in its own project and offers Undo bound to that project', async () => {
-    const { result, rerender } = renderHook(({ project }: { project: string }) => useSidebarArchive(project, project), { wrapper, initialProps: { project: 'p1' } })
+    const { result, rerender } = renderHook(({ project }: { project: string }) => useSidebarArchive(projectAddress({ projectId: project })), { wrapper, initialProps: { project: 'p1' } })
     act(() => { void result.current.archiveOne(record({ id: 'r1', pinned: true })) })
     await vi.waitFor(() => expect(toastMock).toHaveBeenCalledTimes(1))
-    expect(api.archiveProjectRun).toHaveBeenCalledWith('p1', 'r1', true)
+    expect(api.archiveRun).toHaveBeenCalledWith(runAddress('r1', { projectId: 'p1' }), true)
     expect(toastMock.mock.calls[0]![0]).toBe('Archived "Fix the thing"')
     // The user navigates to another project before pressing Undo (Review Focus 5).
     rerender({ project: 'p2' })
-    api.archiveProjectRun.mockClear()
+    api.archiveRun.mockClear()
     await act(async () => { toastMock.mock.calls[0]![1].action.onAction() })
-    await vi.waitFor(() => expect(api.pinProjectRun).toHaveBeenCalledWith('p1', 'r1', true))
-    expect(api.archiveProjectRun).toHaveBeenCalledWith('p1', 'r1', false)
+    // bound: hang guard; the mock resolves on the next microtask
+    await vi.waitFor(() => expect(api.pinRun).toHaveBeenCalledWith(runAddress('r1', { projectId: 'p1' }), true), { timeout: 3000 })
+    expect(api.archiveRun).toHaveBeenCalledWith(runAddress('r1', { projectId: 'p1' }), false)
   })
 
   it('sweeps with the response ids, not the visible rows, and undoes with pinnedIds', async () => {
-    api.archiveProjectFinished.mockResolvedValue({ archived: 3, ids: ['x', 'y', 'ghost'], pinnedIds: ['y'] })
-    const { result } = renderHook(() => useSidebarArchive('p1', 'p1'), { wrapper })
+    api.archiveFinished.mockResolvedValue({ archived: 3, ids: ['x', 'y', 'ghost'], pinnedIds: ['y'] })
+    const { result } = renderHook(() => useSidebarArchive(projectAddress({ projectId: 'p1' })), { wrapper })
     act(() => result.current.sweep('unpinned'))
     expect(result.current.sweeping).toBe('unpinned')
     await vi.waitFor(() => expect(toastMock).toHaveBeenCalledTimes(1))
-    expect(api.archiveProjectFinished).toHaveBeenCalledWith('p1', 'unpinned', undefined)
+    expect(api.archiveFinished).toHaveBeenCalledWith(projectAddress({ projectId: 'p1' }), 'unpinned', undefined)
     expect(toastMock.mock.calls[0]![0]).toBe('Archived 3 tasks')
     await vi.waitFor(() => expect(result.current.sweeping).toBeNull())
     await act(async () => { toastMock.mock.calls[0]![1].action.onAction() })
-    await vi.waitFor(() => expect(api.pinProjectRun).toHaveBeenCalledWith('p1', 'y', true))
-    expect(api.archiveProjectRun).toHaveBeenCalledWith('p1', 'ghost', false)
-    expect(api.pinProjectRun).toHaveBeenCalledTimes(1)
+    // bound: hang guard; the mock resolves on the next microtask
+    await vi.waitFor(() => expect(api.pinRun).toHaveBeenCalledWith(runAddress('y', { projectId: 'p1' }), true), { timeout: 3000 })
+    expect(api.archiveRun).toHaveBeenCalledWith(runAddress('ghost', { projectId: 'p1' }), false)
+    expect(api.pinRun).toHaveBeenCalledTimes(1)
   })
 
   it('toasts nothing when a sweep took nothing', async () => {
-    api.archiveProjectFinished.mockResolvedValue({ archived: 0, ids: [], pinnedIds: [] })
-    const { result } = renderHook(() => useSidebarArchive('p1', 'p1'), { wrapper })
+    api.archiveFinished.mockResolvedValue({ archived: 0, ids: [], pinnedIds: [] })
+    const { result } = renderHook(() => useSidebarArchive(projectAddress({ projectId: 'p1' })), { wrapper })
     act(() => result.current.sweep('pinned'))
     await vi.waitFor(() => expect(result.current.sweeping).toBeNull())
     expect(toastMock).not.toHaveBeenCalled()
   })
 
   it('surfaces a failed archive as a danger toast', async () => {
-    api.archiveProjectRun.mockRejectedValue(new Error('Nope'))
-    const { result } = renderHook(() => useSidebarArchive('p1', 'p1'), { wrapper })
+    api.archiveRun.mockRejectedValue(new Error('Nope'))
+    const { result } = renderHook(() => useSidebarArchive(projectAddress({ projectId: 'p1' })), { wrapper })
     act(() => { void result.current.archiveOne(record()) })
     await vi.waitFor(() => expect(toastMock).toHaveBeenCalledWith('Nope', { tone: 'danger' }))
   })
@@ -137,29 +137,30 @@ describe('useSidebarArchive guards and focus (#780)', () => {
 
   it('a repeat while in flight follows the first request to its real outcome', async () => {
     let reject!: (error: Error) => void
-    api.archiveProjectRun.mockImplementation(() => new Promise((_r, j) => { reject = j }))
-    const { result } = renderHook(() => useSidebarArchive('p1', 'p1'), { wrapper })
+    api.archiveRun.mockImplementation(() => new Promise((_r, j) => { reject = j }))
+    const { result } = renderHook(() => useSidebarArchive(projectAddress({ projectId: 'p1' })), { wrapper })
     let first!: Promise<boolean>
     let second!: Promise<boolean>
     act(() => { first = result.current.archiveOne(record({ id: 'r1' })); second = result.current.archiveOne(record({ id: 'r1' })) })
     await act(async () => reject(new Error('Nope')))
     await expect(first).resolves.toBe(false)
     await expect(second).resolves.toBe(false)
-    expect(api.archiveProjectRun).toHaveBeenCalledTimes(1)
+    expect(api.archiveRun).toHaveBeenCalledTimes(1)
   })
 
   it('ignores a repeat click on a row whose archive is still in flight', async () => {
     let resolve!: (value: unknown) => void
-    api.archiveProjectRun.mockImplementation(() => new Promise((r) => { resolve = r }))
-    const { result } = renderHook(() => useSidebarArchive('p1', 'p1'), { wrapper })
+    api.archiveRun.mockImplementation(() => new Promise((r) => { resolve = r }))
+    const { result } = renderHook(() => useSidebarArchive(projectAddress({ projectId: 'p1' })), { wrapper })
     act(() => { void result.current.archiveOne(record({ id: 'r1' })); void result.current.archiveOne(record({ id: 'r1' })) })
     await act(async () => resolve({}))
     await vi.waitFor(() => expect(toastMock).toHaveBeenCalledTimes(1))
-    expect(api.archiveProjectRun).toHaveBeenCalledTimes(1)
+    expect(api.archiveRun).toHaveBeenCalledTimes(1)
     // Settled: the same row may be archived again (after an Undo, say).
-    api.archiveProjectRun.mockResolvedValue({})
+    api.archiveRun.mockResolvedValue({})
     act(() => { void result.current.archiveOne(record({ id: 'r1' })) })
-    await vi.waitFor(() => expect(api.archiveProjectRun).toHaveBeenCalledTimes(2))
+    // bound: hang guard; the mock resolves on the next microtask
+    await vi.waitFor(() => expect(api.archiveRun).toHaveBeenCalledTimes(2), { timeout: 3000 })
   })
 
   function mountBucket(ids: string[]) {
@@ -173,7 +174,7 @@ describe('useSidebarArchive guards and focus (#780)', () => {
   }
 
   async function archiveAndRemove(ui: ReturnType<typeof mountBucket>, id: string) {
-    const { result } = renderHook(() => useSidebarArchive('p1', 'p1'), { wrapper })
+    const { result } = renderHook(() => useSidebarArchive(projectAddress({ projectId: 'p1' })), { wrapper })
     ui.button(id).focus()
     act(() => { void result.current.archiveOne(record({ id })) })
     await vi.waitFor(() => expect(toastMock).toHaveBeenCalled())
@@ -203,7 +204,7 @@ describe('useSidebarArchive guards and focus (#780)', () => {
     const ui = mountBucket(['a', 'b'])
     const elsewhere = document.createElement('input')
     document.body.append(elsewhere)
-    const { result } = renderHook(() => useSidebarArchive('p1', 'p1'), { wrapper })
+    const { result } = renderHook(() => useSidebarArchive(projectAddress({ projectId: 'p1' })), { wrapper })
     ui.button('a').focus()
     act(() => { void result.current.archiveOne(record({ id: 'a' })) })
     elsewhere.focus()
@@ -214,12 +215,12 @@ describe('useSidebarArchive guards and focus (#780)', () => {
   })
 
   it('moves focus out of a swept group once its button is gone', async () => {
-    api.archiveProjectFinished.mockResolvedValue({ archived: 1, ids: ['a'], pinnedIds: [] })
+    api.archiveFinished.mockResolvedValue({ archived: 1, ids: ['a'], pinnedIds: [] })
     const host = document.createElement('div')
     host.innerHTML = `<div data-slot="quick-list-bucket" data-bucket="Finished"><button data-action="archive-group" data-scope="unpinned">Archive all</button><div data-slot="task-row" data-run-id="a"><a href="#a">a</a></div></div><div data-slot="quick-list-bucket" data-bucket="Archived"><div data-slot="task-row" data-run-id="z"><a href="#z">z</a></div></div>`
     document.body.append(host)
     const button = host.querySelector<HTMLElement>('[data-action="archive-group"]')!
-    const { result } = renderHook(() => useSidebarArchive('p1', 'p1'), { wrapper })
+    const { result } = renderHook(() => useSidebarArchive(projectAddress({ projectId: 'p1' })), { wrapper })
     button.focus()
     act(() => result.current.sweep('unpinned'))
     await vi.waitFor(() => expect(toastMock).toHaveBeenCalled())

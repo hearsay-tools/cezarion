@@ -1,3 +1,4 @@
+import { runAddress } from '@/api/run-address'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, useNavigate } from 'react-router'
@@ -24,7 +25,7 @@ import { PROJECT_LOCATIONS_STORAGE_KEY } from '@/lib/last-location'
 
 vi.mock('@/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/client')>()),
-  getProjectRun: vi.fn(),
+  getRun: vi.fn(),
 }))
 
 const entry = (id: string) => ({
@@ -147,8 +148,8 @@ describe('switch intent', () => {
 
   beforeEach(() => {
     pending.clear()
-    vi.mocked(client.getProjectRun).mockImplementation(
-      (_project, id) =>
+    vi.mocked(client.getRun).mockImplementation(
+      ({ runId: id }) =>
         new Promise((resolve, reject) => {
           pending.set(id, { resolve: () => resolve({} as never), reject })
         }),
@@ -171,9 +172,9 @@ describe('switch intent', () => {
     expect(document.querySelector('[data-slot="project-rail"]')?.getAttribute('data-expanded')).toBe('true')
 
     fireEvent.click(document.querySelector('[data-slot="rail-project"][data-project-id="other"] a') as HTMLElement)
-    await waitFor(() => expect(client.getProjectRun).toHaveBeenCalledWith('other', 'b', expect.anything()))
+    await waitFor(() => expect(client.getRun).toHaveBeenCalledWith(runAddress('b', { projectId: 'other' }), expect.anything()))
     expect(at()).toBe('/p/boot/skills')
-    vi.mocked(client.getProjectRun).mockClear()
+    vi.mocked(client.getRun).mockClear()
     pending.get('b')?.reject(new client.ApiError(404, 'gone'))
     await waitFor(() => expect(at()).toBe('/p/other/'))
   })
