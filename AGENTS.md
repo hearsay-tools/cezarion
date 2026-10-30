@@ -465,7 +465,7 @@ Then do these three things:
    its reason, or pending and for how long). Also record the load average
    (`uptime`), the logical CPU count (`nproc`), and each command with its passed
    and skipped counts.
-3. Let CI's three Vitest shards give the file's full verdict. A focused pass is
+3. Let CI's four Vitest shards give the file's full verdict. A focused pass is
    not a full pass, and the PR does not merge until the shards pass.
 
 A file that gets a verdict must pass: the bound covers a missing verdict, never
@@ -626,8 +626,8 @@ The scan cannot see a shrunk product budget, so review checks that one.
 gate, `squeal run --all`, or the full Vitest or browser suite just to finish a
 task, commit, open a PR, or complete a review. Run a full local suite only when
 explicitly requested or needed to investigate a CI failure. A full local Vitest
-run is CI's three shards, one after another: `npm test -- --shard=1/3 --maxWorkers=4`,
-then `--shard=2/3` and `--shard=3/3` with the same flags. An unsharded `npm test`
+run is CI's four shards: `npm test -- --shard=N/4 --maxWorkers=4`,
+for N=1..4, one after another. An unsharded `npm test`
 is not the local full gate: on a host with about 30 GiB free it can be OOM-killed
 (exit 137). Squeal's `baseline.onStart: "lookup-then-run-missing"` reuses cached
 results and runs missing tests at startup; Stop requires neither a full nor a slow suite.
@@ -641,7 +641,7 @@ CI's final gate covers:
 
 ```bash
 npm run typecheck   # refresh server declarations, then check all four workspaces
-npm test -- --shard=N/3 --maxWorkers=4  # vitest, N=1..3 — server + cockpit unit suites
+npm test -- --shard=N/4 --maxWorkers=4  # vitest, N=1..4 — server + cockpit unit suites
 npm run test:unit   # node:test — fast core-module coverage (packages/cezar/test/unit/)
 npm run build       # tsc → dist/, vite → packages/cezar/web/dist/, then the check:pack tarball gate
 npm run test:package # pack/install the release tarball and exercise the built CLI (packages/cezar/test/e2e/)
@@ -688,7 +688,7 @@ row's value when the thing it names changes, rather than its label.
 | CI provider | GitHub Actions |
 | Issue tracker | GitHub Issues |
 | Stack | TypeScript (Node ≥24.21.0), pnpm workspaces (npm script metadata retained); Hono + Zod server; React 19 + Vite + Tailwind v4 cockpit |
-| Verification | Local: Squeal when installed and validating, otherwise focused npm checks. Full gate in CI: `npm run typecheck`, `npm test -- --shard=N/3 --maxWorkers=4` (N=1..3), `npm run test:unit`, `npm run build`, `npm run test:package`, `npm run test:e2e` |
+| Verification | Local: Squeal when installed and validating, otherwise focused npm checks. Full gate in CI: `npm run typecheck`, `npm test -- --shard=N/4 --maxWorkers=4` (N=1..4), `npm run test:unit`, `npm run build`, `npm run test:package`, `npm run test:e2e` |
 | Automated reviewer | `AUTOMATED_REVIEWER=codex`. A pushback-only round needs a manual dispatch of `automated-code-review.yml` with `pr_number`, then a re-run of **Review / review-round** in the CI run. Re-running the CI run's failed jobs alone does not re-judge. |
 | Automated review rounds | The `AUTOMATED_REVIEW_ROUNDS` repository variable, read with `gh variable get AUTOMATED_REVIEW_ROUNDS`; the review workflow falls back to 3 only when the variable is unset or empty |
 | Commit convention | Conventional Commits |

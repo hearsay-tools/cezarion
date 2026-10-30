@@ -1722,7 +1722,7 @@ worktree first. The full `npm run typecheck` starts with the web check, so it
 prepares declarations once before checking the remaining workspaces. Calling
 `tsc --noEmit` directly skips this preparation and can consume stale declarations.
 
-CI runs three duration-balanced Vitest shards alongside the build and package checks.
+CI runs four duration-balanced Vitest shards alongside the build and package checks.
 See [CI verification](docs/sdlc/ci.md) for the job graph and local commands.
 
 The stack is deliberately small: **TypeScript** (strict, ESM), **Hono** + SSE for

@@ -128,13 +128,13 @@ The path-filtered `Windows test environment lease` workflow also runs the worker
 cleanup regression on native Windows when its cleanup code changes. It checks the pre-fix
 failure and the fixed result, including lease and checkout isolation.
 
-Required verification has nine verification jobs, plus the complexity and clone
+Required verification has ten verification jobs, plus the complexity and clone
 gates. Typecheck, workflow lint, citations, classification and policy ratchets
-feed the `Review preflight` gate. On PRs into main, the other eight jobs wait for
-the protected review result. Other events keep their existing test inventory. Seven test jobs use the current Node LTS; typecheck and build/package use
+feed the `Review preflight` gate. On PRs into main, the other nine jobs wait for
+the protected review result. Other events keep their existing test inventory. Eight test jobs use the current Node LTS; typecheck and build/package use
 exactly the `engines.node` minimum (Node 24.21.0):
 
-- Three Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/3 --maxWorkers=4` for N=1..3.
+- Four Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/4 --maxWorkers=4` for N=1..4.
 - The required typecheck job uses `blacksmith-2vcpu-ubuntu-2404` (2 vCPU, 8 GB) for PRs and manual dispatches, and `ubuntu-24.04` for pushes and merge groups. It runs pinned workflow lint, issue-citation checking and `npm run typecheck` for all change surfaces, including docs, infrastructure and release bumps. It keeps the minimum-Node setup and its bounded retry.
 - The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It builds server declarations, then runs Node unit tests, the full application build, packaged CLI E2E tests, and release-package dry-run packing. The explicit server build preserves the preparation that typecheck supplied before the split. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
 - Four cockpit browser E2E shards on `ubicloud-standard-2` (2 vCPU, 8 GB RAM, Ubuntu 24.04 x64) each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
@@ -156,13 +156,20 @@ itself took 30 seconds on Blacksmith versus 22 seconds on the same-head GitHub
 control, so no execution-speed gain is claimed. Rounding and other organization
 usage are unknown; this is an allocation estimate, not a guaranteed free bill. See the [allocation report](../benchmarks/ci-runner-allocation-2026-10.md).
 
-The full Vitest suite runs once across the three LTS shards. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once current LTS moves on. Its Node setup retains a three-minute step timeout and one retry for stalled downloads (hearsay-tools/cezarion#1214). The LTS sequencer keeps its measured weights, median fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
+The full Vitest suite runs once across the four LTS shards. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once current LTS moves on. Its Node setup retains a three-minute step timeout and one retry for stalled downloads (hearsay-tools/cezarion#1214). The LTS sequencer keeps its measured weights, median fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
+
+The [four-shard measurement](../benchmarks/vitest-four-shards.md) records the fixed-source
+comparison, runner cost, failures and coverage investigation. Four workers per shard,
+coverage settings, duration weights and all required gates remain unchanged. Manual
+review context still recognizes exact skipped three-shard names from older native
+base workflows. Queue reuse requires the complete current four-shard roster; old
+three-shard proof falls back to full verification.
 
 The legacy floor config, sequencer, reporter and duration manifest remain for PR compatibility. PR CI loads `ci.yml` from the target branch, whose old floor jobs still read these files from the PR checkout. The new workflow has no floor jobs and does not use these helpers. Remove the helpers only after the new workflow reaches the target branch.
 
 The required check keeps its name, **Unit, build, E2E, and package**. It requires
 typecheck and build/package on every change surface. Full-matrix changes also
-require all three Vitest shards and all four cockpit browser shards. Pull requests
+require all four Vitest shards and all four cockpit browser shards. Pull requests
 and merge groups require the complexity and clone gates. Packaged CLI E2E and
 cockpit browser E2E stay separate named checks. The aggregate and snapshot jobs
 remain on GitHub-hosted Ubuntu. Develop snapshot publishing still waits for this aggregate. Same-repository
@@ -370,8 +377,8 @@ dispatch proves the job too.
 
 ### Vitest coverage artifact
 
-Eligible pull request runs and manual dispatches collect V8 coverage in the three required
-`Vitest shard N/3` jobs (hearsay-tools/cezarion#1958). Each shard runs its tests once, with
+Eligible pull request runs and manual dispatches collect V8 coverage in the four required
+`Vitest shard N/4` jobs (hearsay-tools/cezarion#1958). Each shard runs its tests once, with
 `--coverage.enabled`; there is no separate coverage test matrix. Main pushes and merge groups
 keep the command without coverage. Docs-only, infra-only, verified queue-proof and bump-PR
 runs keep their existing skips.
@@ -676,7 +683,7 @@ target workflow before opening PRs against it.
 ## Merge queue and exact-commit reuse
 
 CI accepts `merge_group: checks_requested` for `main`. It tests the immutable
-combined commit with all nine verification jobs, including the function complexity
+combined commit with all ten verification jobs, including the function complexity
 gate, the minimum-version typecheck and build/package jobs and browser E2E. Queue runs never use docs/infra or release-bump exemptions. They have no
 model keys, npm credentials, publishing jobs or OIDC permission.
 

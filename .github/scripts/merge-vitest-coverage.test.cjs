@@ -106,3 +106,25 @@ test('the command runs, and does not quietly succeed, when it is started through
   assert.ok(fs.existsSync(path.join(w.output, 'coverage-final.json')), 'a successful run must write the report');
   assert.equal(run(2).status, 1, 'a missing shard must fail through a symlink too');
 });
+
+test('four shard merge retains fourth-only coverage and sums all contributions', async (t) => {
+  const { mergeShardReports } = await load();
+  const fourth = `${ROOT}/packages/cezar/src/fourth.test.ts`;
+  const w = workspace(t, {
+    1: keyed(src, [1, 0]), 2: keyed(src, [2, 0]), 3: keyed(src, [4, 0]),
+    4: { ...keyed(src, [8, 16]), ...keyed(fourth, [32]) },
+  });
+  const { report } = mergeShardReports({ input: w.input, shards: 4, root: ROOT });
+  assert.deepEqual(report['packages/cezar/src/run.ts'].s, { 0: 15, 1: 16 });
+  assert.deepEqual(report['packages/cezar/src/run.ts'].f, { 0: 15 });
+  assert.deepEqual(report['packages/cezar/src/fourth.test.ts'].s, { 0: 32 });
+});
+
+test('four shard merge rejects absent or malformed fourth input', async (t) => {
+  const { mergeShardReports } = await load();
+  const reports = { 1: keyed(src, [1]), 2: keyed(src, [2]), 3: keyed(src, [4]) };
+  const missing = workspace(t, reports);
+  assert.throws(() => mergeShardReports({ input: missing.input, shards: 4, root: ROOT }), /Missing coverage for shard 4\./);
+  const malformed = workspace(t, { ...reports, 4: '{truncated' });
+  assert.throws(() => mergeShardReports({ input: malformed.input, shards: 4, root: ROOT }), /Shard 4 report is not valid JSON/);
+});

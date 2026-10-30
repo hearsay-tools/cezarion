@@ -116,7 +116,8 @@ function blockedByReview(run, jobs) {
     && completedWith('Automated Code Review', 'failure')
     && completedWith('Unit, build, E2E, and package', 'failure')
     && completedWith('Unit, build, and package', 'skipped')
-    && skippedMatrix(jobs, 'Vitest shard ', 3)
+    // Legacy native bases can still skip three cells; neither form proves test success.
+    && (skippedMatrix(jobs, 'Vitest shard ', 4) || skippedMatrix(jobs, 'Vitest shard ', 3))
     && skippedMatrix(jobs, 'Cockpit browser E2E shard ', 4);
 }
 

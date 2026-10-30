@@ -152,13 +152,13 @@ test('literal matrix names never hide actual heavy outcomes or unfinished jobs',
 });
 
 test('skipped matrices still require unique complete names or one exact placeholder', () => {
-  for (const [prefix, count] of [['Vitest shard ', 3], ['Cockpit browser E2E shard ', 4]]) {
+  for (const [prefix, count] of [['Vitest shard ', 3], ['Vitest shard ', 4], ['Cockpit browser E2E shard ', 4]]) {
     const literal = `${prefix}${'${{ matrix.shard }}'}/${count}`;
     const expanded = Array.from({ length: count }, (_, i) => `${prefix}${i + 1}/${count}`);
     for (const names of [[], [literal, literal], [literal, `${prefix}/${count}`], [literal, ...expanded],
       [literal, expanded[0]], expanded.slice(1), expanded.map(() => expanded[0]),
       [`${prefix}${'${{ matrix.other }}'}/${count}`], [`${prefix}${'${{matrix.shard}}'}/${count}`],
-      [`${literal} extra`], [`${prefix}${'${{ matrix.shard }}'}/${count + 1}`]]) {
+      [`${literal} extra`], [`${prefix}${'${{ matrix.shard }}'}/${5}`]]) {
       const f = literalMatrixFixture();
       f.jobs = f.jobs.filter(job => !job.name.startsWith(prefix));
       f.jobs.push(...names.map(name => ({ name, status: 'completed', conclusion: 'skipped' })));
@@ -322,4 +322,44 @@ test('manual context rechecks current run provenance and target after reading jo
     };
     assert.throws(() => reviewCiContext(f), /evidence|attempt changed/);
   }
+});
+
+function fourCellFixture(form) {
+  const f = blockedFixture();
+  const names = form === 'expanded'
+    ? ['Vitest shard 1/4', 'Vitest shard 2/4', 'Vitest shard 3/4', 'Vitest shard 4/4']
+    : [form === 'empty' ? 'Vitest shard /4' : 'Vitest shard ${{ matrix.shard }}/4'];
+  f.jobs = f.jobs.filter(job => !job.name.startsWith('Vitest shard '));
+  f.jobs.push(...names.map(name => ({ name, status: 'completed', conclusion: 'skipped' })));
+  return f;
+}
+for (const form of ['expanded', 'empty', 'literal']) {
+  test(`four-cell ${form} skip reports review blocking without claiming tests passed`, () => {
+    const text = reviewCiContext(fourCellFixture(form));
+    assert.match(text, /Heavy verification: not started: blocked by review/);
+    assert.match(text, /Verification aggregate: failure/);
+    assert.doesNotMatch(text, /## Failed jobs/);
+  });
+  test(`four-cell ${form} cannot hide execution or unfinished states`, () => {
+    for (const conclusion of ['failure', 'timed_out', 'cancelled', 'success', null]) {
+      const f = fourCellFixture(form);
+      f.jobs.find(job => job.name.startsWith('Vitest shard ')).conclusion = conclusion;
+      assert.doesNotMatch(reviewCiContext(f), /blocked by review/, String(conclusion));
+    }
+    for (const status of ['queued', 'in_progress']) {
+      const f = fourCellFixture(form);
+      f.jobs.find(job => job.name.startsWith('Vitest shard ')).status = status;
+      assert.doesNotMatch(reviewCiContext(f), /blocked by review/, status);
+    }
+  });
+}
+test('mixed legacy and current skipped names never form a complete matrix', () => {
+  for (const form of ['expanded', 'empty', 'literal']) {
+    const extra = fourCellFixture(form);
+    extra.jobs.push({ name: 'Vitest shard 1/3', status: 'completed', conclusion: 'skipped' });
+    assert.doesNotMatch(reviewCiContext(extra), /blocked by review/);
+  }
+  const mixed = fourCellFixture('expanded');
+  mixed.jobs.find(job => job.name === 'Vitest shard 4/4').name = 'Vitest shard 3/3';
+  assert.doesNotMatch(reviewCiContext(mixed), /blocked by review/);
 });

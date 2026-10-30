@@ -106,13 +106,13 @@ local run is reserved for an explicit request or investigating a CI failure.
 CI's final gate covers:
 
 - `npm run typecheck`
-- `npm test -- --shard=1/3 --maxWorkers=4`, then `2/3` and `3/3`
+- `npm test -- --shard=N/4 --maxWorkers=4` for N=1..4, sequentially
 - `npm run test:unit`
 - `npm run build`
 - `npm run test:package`
 - `npm run test:e2e`
 
-Any non-zero exit fails the gate and blocks merge. `npm test` selects the four unit Vitest projects and remains the fast server + cockpit unit/component suite; the gate runs it as CI's three shards, because an unsharded run can be OOM-killed (exit 137) on a host with about 30 GiB free; `npm run test:unit` covers the node:test core modules and root scripts. The build includes the `check:pack` tarball gate, and `npm run test:package` builds a release tarball, installs it into an isolated consumer, and exercises the offline CLI workflow. Packaged CLI E2E (`npm run test:package`) and cockpit browser E2E (`npm run test:e2e`) are separate checks; pull request CI rejects a skipped or failed cockpit suite. The command list lives in `.ai/agentic.config.json`; when it changes, update it there and in this section together. It records the complete CI gate, not a requirement to run every command locally before opening a PR.
+Any non-zero exit fails the gate and blocks merge. `npm test` selects the four unit Vitest projects and remains the fast server + cockpit unit/component suite; the gate runs it as CI's four shards, because an unsharded run can be OOM-killed (exit 137) on a host with about 30 GiB free; `npm run test:unit` covers the node:test core modules and root scripts. The build includes the `check:pack` tarball gate, and `npm run test:package` builds a release tarball, installs it into an isolated consumer, and exercises the offline CLI workflow. Packaged CLI E2E (`npm run test:package`) and cockpit browser E2E (`npm run test:e2e`) are separate checks; pull request CI rejects a skipped or failed cockpit suite. The command list lives in `.ai/agentic.config.json`; when it changes, update it there and in this section together. It records the complete CI gate, not a requirement to run every command locally before opening a PR.
 
 Reuse successful evidence for the same tested tree across commit, PR creation,
 and review; those actions do not themselves require another run. Record the tested

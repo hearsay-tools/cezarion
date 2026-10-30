@@ -233,7 +233,7 @@ the stopped collection are removed.
 
 ### Coverage from CI
 
-CI's required `Vitest shard N/3` jobs collect V8 coverage during their single test run
+CI's required `Vitest shard N/4` jobs collect V8 coverage during their single test run
 on eligible pull requests and dispatches. The optional `Merge Vitest coverage` job uploads one artifact for the head:
 `vitest-coverage-<head SHA>`, holding `coverage-final.json` (paths relative to the
 repository root, test files included) and `provenance.json`. It runs on every pull request

@@ -15,6 +15,10 @@ const suite = job => (job.steps || []).find(step => /\bnpm test\b/.test(step.run
 test('nightly shards the suite exactly as ci.yml does', () => {
   const nightly = read('nightly.yml'), ci = read('ci.yml');
   const shards = nightly.jobs.vitest;
+  assert.deepEqual(shards.strategy.matrix.shard, [1, 2, 3, 4]);
+  assert.equal(shards.name, 'Vitest shard ${{ matrix.shard }}/4');
+  assert.equal(shards.strategy['fail-fast'], false);
+  assert.equal(suite(shards), 'npm test -- --shard=${{ matrix.shard }}/4 --maxWorkers=4');
   assert.deepEqual(shards.strategy.matrix.shard, ci.jobs.vitest.strategy.matrix.shard);
   assert.equal(shards['runs-on'], ci.jobs.vitest['runs-on']);
   // Nightly keeps the non-coverage path: same shards, command and 15-minute bound.

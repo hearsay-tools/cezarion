@@ -96,13 +96,17 @@ test('invalid reserved work cannot silently corrupt shard assignment', async () 
   }
 });
 
-test('the actual LTS workflow command loads all unit projects and a sequencer constructor', async () => {
+test('the actual LTS workflow command loads all unit projects and a sequencer constructor', async (t) => {
   const { createVitest, parseCLI } = await import('vitest/node');
   const root = join(__dirname, '..', '..');
   const workflow = parse(readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8'));
   const job = workflow.jobs.vitest;
   const step = job.steps.find(step => step.name === 'Run server and cockpit unit suites');
   const npmTest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts.test;
+  assert.deepEqual(job.strategy.matrix.shard, [1, 2, 3, 4]);
+  let specifications;
+  const selected = [];
+  const identity = spec => JSON.stringify([spec.project.name, spec.moduleId]);
   for (const index of job.strategy.matrix.shard) {
     const command = step.run.replace('npm test --', npmTest).replaceAll('${{ matrix.shard }}', String(index))
       .replace(/\$\{\{.*?\}\}/g, '--coverage.enabled');
@@ -111,12 +115,22 @@ test('the actual LTS workflow command loads all unit projects and a sequencer co
     try {
       const Sequencer = vitest.config.sequence.sequencer;
       assert.equal(typeof Sequencer, 'function', 'Vitest must receive a constructor, not a CLI path string');
-      assert.deepEqual(vitest.config.shard, { index, count: 3 });
-      assert.equal(vitest.projects.length, 4, 'LTS retains all four unit projects');
+      assert.deepEqual(vitest.config.shard, { index, count: 4 });
+      assert.equal(vitest.config.maxWorkers, 4);
+      assert.deepEqual(vitest.projects.map(project => project.name).sort(), ['api-client', 'contract', 'server', 'web']);
+      specifications ??= await vitest.globTestSpecifications();
+      const slice = await new Sequencer(vitest).shard(specifications);
+      assert.ok(slice.length > 0);
+      selected.push(...slice);
+      t.diagnostic(`shard ${index}/4: ${slice.length} of ${specifications.length} discovered specifications`);
     } finally {
       await vitest.close();
     }
   }
+  assert.ok(specifications.length > 0);
+  assert.equal(new Set(specifications.map(identity)).size, specifications.length, 'current project-qualified discovery is unique');
+  assert.deepEqual(selected.map(identity).sort(), specifications.map(identity).sort(), 'exact full discovery multiset, without omissions or duplicates');
+  assert.equal(new Set(selected).size, selected.length, 'no specification executes on two shards');
 });
 
 test('sequencer shards cover every specification including duplicate module ids', async () => {
