@@ -24,6 +24,10 @@ import {
   waitingOnSchema,
   waitSchema,
   completionWaitView,
+  completionWaitEntry,
+  workerCompletionWaitProjection,
+  requestsToPeers,
+  withRootLedger,
   workerWaitView,
   workerWaitEntrySchema,
   workerWaitEntryToLegacy,
@@ -834,5 +838,125 @@ describe('peer waits', () => {
     for (const kind of [WAIT_KIND.peer, 'request'] as const) {
       expect(cezarWaitAnswerSchema.parse({ ok: true, wait_id: WORKER_WAIT_ID, kind, deadline: open.deadline, open_waits: [open] }).ok).toBe(true);
     }
+  });
+});
+
+// Callers render the newest eligible wait, rather than a delivered or cancelled entry.
+describe('worker wait guard selection', () => {
+  const delegation = makeRunRecord().delegation ?? { role: 'root' as const, permissions: [], receipts: [] };
+
+  it('requires valid delegation and an eligible entry', () => {
+    const waits = [openWorkerWait()];
+    expect(workerWaitView({ waits })).toBeUndefined();
+    expect(workerWaitView({ waits, delegation: { role: 'invalid' } })).toBeUndefined();
+    expect(workerWaitView({ delegation })).toBeUndefined();
+    expect(workerWaitView({ waits: [], delegation })).toBeUndefined();
+  });
+
+  it('keeps the newest open or resolved worker entry with a deadline', () => {
+    const first = openWorkerWait();
+    const newest = openRequestWait({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2', phase: WAIT_PHASE.resolved, result: { reason: 'timeout' } });
+    const ignored = [openTimer(), openWorkerWait({ phase: WAIT_PHASE.delivered }), openWorkerWait({ phase: WAIT_PHASE.cancelled }), ...completionWaits()];
+    expect(workerWaitView({ waits: [first, newest, ...ignored], delegation }))
+      .toEqual(workerWaitEntryToLegacy(newest));
+    expect(workerWaitView({ waits: ignored, delegation })).toBeUndefined();
+  });
+
+  it('parks only open waits on a waiting run without a human wait', () => {
+    const entry = openWorkerWait();
+    const legacy = workerWaitEntryToLegacy(entry);
+    expect(workerWaitView({ waits: [entry], delegation, status: RUN_STATUS.waiting })).toEqual({ ...legacy, phase: 'parked' });
+    expect(workerWaitView({ waits: [entry], delegation, status: RUN_STATUS.running })).toEqual(legacy);
+    expect(workerWaitView({ waits: [entry, openHuman()], delegation, status: RUN_STATUS.waiting })).toEqual(legacy);
+    const resolved = openWorkerWait({ phase: WAIT_PHASE.resolved, result: { reason: 'outcome' } });
+    expect(workerWaitView({ waits: [resolved], delegation, status: RUN_STATUS.waiting })).toEqual(workerWaitEntryToLegacy(resolved));
+  });
+});
+
+describe('wait guard outputs', () => {
+  it.each(['worker', 'request'] as const)('names the mode error for a multi-id %s request', kind => {
+    const target = kind === 'worker' ? { worker_ids: [W1, W2] } : { request_ids: [R1, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2'] };
+    const result = cezarWaitRequestSchema.safeParse({ kind, ...target, mode: 'one' });
+    expect(result.error?.issues).toContainEqual({ code: 'custom', message: 'one mode requires exactly one id', path: ['mode'] });
+    for (const mode of [undefined, 'all', 'any']) {
+      expect(cezarWaitRequestSchema.safeParse({ kind, ...target, mode }).success).toBe(true);
+    }
+    const single = kind === 'worker' ? { worker_ids: [W1] } : { request_ids: [R1] };
+    expect(cezarWaitRequestSchema.safeParse({ kind, ...single, mode: 'one' }).success).toBe(true);
+  });
+
+  it('counts only matching outcomes, including fully answered and sparse streamed entries', () => {
+    const observedAt = '2026-10-19T10:02:00.000Z';
+    const wait = openWorkerWait({ outcomes: [{ workerId: W1, status: RUN_STATUS.done, observedAt }, { workerId: '99999999-9999-4999-8999-999999999993', status: RUN_STATUS.done, observedAt }] });
+    expect(computeWaitingOn({ waits: [wait] })).toEqual({ kind: 'workers', count: 1 });
+    expect(computeWaitingOn({ waits: [openRequestWait({ requestIds: [R1, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2'], requestOutcomes: [{ requestId: R1, status: 'replied', observedAt }] })] }))
+      .toEqual({ kind: 'workers', count: 1, replies: true });
+    expect(computeWaitingOn({ waits: [openWorkerWait({ outcomes: [W1, W2].map(workerId => ({ workerId, status: RUN_STATUS.done, observedAt })) })] }))
+      .toEqual({ kind: 'workers', count: 0 });
+    expect(computeWaitingOn({ waits: [{ ...wait, outcomes: undefined }] })).toEqual({ kind: 'workers', count: 2 });
+    expect(computeWaitingOn({ waits: [{ ...wait, workerIds: undefined, outcomes: undefined }] })).toEqual({ kind: 'workers', count: 0 });
+    expect(computeWaitingOn({ waits: [{ ...openRequestWait(), requestOutcomes: undefined }] })).toEqual({ kind: 'workers', count: 1, replies: true });
+  });
+
+  it('ignores malformed wait collections and exposes the complete earliest process or timer', () => {
+    expect(computeWaitingOn({ waits: 'unparsed' as never })).toBeUndefined();
+    expect(computeWaitingOn({ waits: [null, undefined] as never })).toBeUndefined();
+    const process = openProcess({ note: '' });
+    const later = openProcess({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2', deadline: '2026-10-18T00:00:00.000Z', pid: 9999 });
+    expect(computeWaitingOn({ waits: [later, process] })).toEqual({ kind: WAIT_KIND.process, waitId: process.id, pid: process.pid, deadline: process.deadline, note: '' });
+    const timer = openTimer({ note: '' });
+    expect(computeWaitingOn({ waits: [openTimer({ deadline: later.deadline }), timer] })).toEqual({ kind: WAIT_KIND.timer, waitId: timer.id, at: timer.deadline, note: '' });
+    expect(computeWaitingOn({ waits: [openHuman({ askSeq: 0 })] })).toEqual({ kind: WAIT_KIND.human, shown: true });
+  });
+});
+
+
+describe('completion projection boundaries', () => {
+  it('selects only the newest eligible completion entry for the requested worker', () => {
+    const first = completionWaits()[0]!;
+    const newest = { ...first, id: R1, workerIds: [W1] };
+    const excluded = [openTimer(), openWorkerWait({ via: WAIT_VIA.completion }),
+      { ...newest, via: WAIT_VIA.cezar_wait }, { ...newest, phase: WAIT_PHASE.delivered }, { ...newest, phase: WAIT_PHASE.cancelled }];
+    expect(completionWaitEntry([first, newest, ...excluded])).toEqual(newest);
+    expect(completionWaitEntry([first, newest], W1)).toEqual(newest);
+    expect(completionWaitEntry([first, newest], W2)).toBeUndefined();
+    expect(completionWaitEntry(undefined)).toBeUndefined();
+    expect(completionWaitEntry([{ ...newest, phase: WAIT_PHASE.resolved }])).toEqual({ ...newest, phase: WAIT_PHASE.resolved });
+  });
+
+  it('preserves completion evidence and omits absent optional fields', () => {
+    const entry = { ...completionWaits()[0]!, workerIds: [W1], mode: 'any' as const,
+      revisions: [{ workerId: W1, revision: 3 }], outcomes: [{ workerId: W1, status: RUN_STATUS.done, observedAt: '2026-10-30T12:00:00Z' }], wakeInputId: WAKE_INPUT };
+    const expected = { id: entry.id, via: WAIT_VIA.completion, workerIds: [W1], mode: 'any', revisions: entry.revisions,
+      outcomes: entry.outcomes, wakeId: WAKE_INPUT, phase: 'registered' };
+    expect(workerCompletionWaitProjection(entry, {})).toEqual(expected);
+    expect(workerCompletionWaitProjection(entry, { status: RUN_STATUS.waiting })).toEqual({ ...expected, phase: 'parked' });
+    expect(workerCompletionWaitProjection(entry, { status: RUN_STATUS.waiting, waits: [openHuman()] })).toEqual(expected);
+    expect(workerCompletionWaitProjection({ ...entry, phase: WAIT_PHASE.cancelled }, {})).toEqual({ ...expected, phase: 'wake-pending', reason: 'cancelled' });
+    expect(workerCompletionWaitProjection({ ...entry, phase: WAIT_PHASE.resolved, result: { reason: 'timeout' } }, {}))
+      .toEqual({ ...expected, phase: 'wake-pending', reason: 'timeout' });
+    const sparse = { ...entry, workerIds: undefined, outcomes: undefined, mode: undefined, revisions: undefined, wakeInputId: undefined };
+    expect(workerCompletionWaitProjection(sparse, {})).toEqual({ id: entry.id, via: WAIT_VIA.completion, workerIds: [], outcomes: [], wakeId: entry.id, phase: 'registered' });
+  });
+});
+
+describe('peer request ledger boundaries', () => {
+  it('uses only string ids on peer requests and retains only a root ledger', () => {
+    const slim = { role: 'root' as const };
+    const conversation = { messages: [null, 7, { id: R1, kind: 'request', relationship: 'peer' },
+      { id: W1, kind: 'progress', relationship: 'peer' }, { id: W2, kind: 'request', relationship: 'family' },
+      { id: 7, kind: 'request', relationship: 'peer' }] };
+    const root = withRootLedger(slim, { role: 'root', conversation });
+    expect(root).toEqual({ ...slim, conversation });
+    expect(requestsToPeers(root, [R1])).toBe(true);
+    expect(requestsToPeers(root, [W1, W2, '7'])).toBe(false);
+    expect(requestsToPeers(root, undefined)).toBe(false);
+    for (const raw of [undefined, null, 'root', { role: 'worker', conversation }]) {
+      expect(withRootLedger(slim, raw)).toEqual(slim);
+      expect(requestsToPeers(withRootLedger(slim, raw), [R1])).toBe(false);
+    }
+    expect(withRootLedger(undefined, { role: 'root', conversation })).toBeUndefined();
+    const invalid = { role: 'invalid' as const };
+    expect(withRootLedger(invalid, { role: 'root', conversation })).toEqual(invalid);
   });
 });

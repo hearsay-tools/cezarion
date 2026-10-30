@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { computeWaitingOn, type WaitingOnInput, type WorkerWaitEntry } from './waits.ts';
 import { ATTENTION_RANK, ATTENTION_RUNGS, DEFAULT_WEBHOOK_TRIGGERS, deriveAttention, deriveWebhookState, WEBHOOK_TRIGGERS, workerWaitLabel, type Attention, type AttentionInput, type AttentionRung } from './attention.ts';
 import type { RunStatus } from './runs.ts';
-import { makePeerWait, RUN_STATUS } from './test-factories.testkit.ts';
+import { makePeerWait, RUN_STATUS, WAIT_PHASE } from './test-factories.testkit.ts';
 
 /**
  * The attention ladder, pinned where it now lives (#553/#609). The cockpit's
@@ -483,5 +483,37 @@ describe('deriveWebhookState', () => {
       if (state !== undefined) expect(WEBHOOK_TRIGGERS).toContain(state);
     }
     expect(DEFAULT_WEBHOOK_TRIGGERS).toEqual(['needs-you', 'failed', 'done', 'cancelled']);
+  });
+});
+
+describe('attention boundary cases', () => {
+  it('labels empty, sparse and fully reported legacy worker waits', () => {
+    expect(workerWaitLabel('root', { workerIds: ['a', 'b'], outcomes: [] })).toBe('waiting on 2 workers');
+    expect(workerWaitLabel('root', { workerIds: ['a', 'b'], outcomes: [{ workerId: 'b', status: RUN_STATUS.done, observedAt: '2026-10-30T12:00:00Z' }] })).toBe('waiting on 1 worker');
+    expect(workerWaitLabel('root', { workerIds: [], outcomes: [] })).toBe('waiting on workers');
+    expect(workerWaitLabel('root', {} as never)).toBe('waiting on workers');
+    expect(workerWaitLabel('root', { workerIds: ['a'], outcomes: undefined } as never)).toBe('waiting on 1 worker');
+    expect(workerWaitLabel('root', { requestIds: [], workerIds: ['a'], outcomes: [] }, true)).toBe('waiting on 1 worker');
+    expect(workerWaitLabel('root', { requestIds: ['r'], workerIds: [], outcomes: [] }, true)).toBe('waiting on replies');
+    expect(workerWaitLabel('worker', { requestIds: ['r'], workerIds: [], outcomes: [] }, true)).toBe('waiting on parent reply');
+  });
+
+  it.each(ALL_STATUSES)('applies native permission attention only to live status %s', status => {
+    const result = deriveAttention({ status, hasPendingPermission: true });
+    expect(result.rung === 'needs-permission').toBe(status === 'running' || status === 'waiting');
+  });
+
+  it('keeps queued worker wakes and usage holds distinct from open queued waits', () => {
+    expect(deriveAttention({ status: RUN_STATUS.queued, waits: [workerEntry({ phase: WAIT_PHASE.resolved })] }).rung).toBe('waiting-for-capacity');
+    expect(deriveAttention({ status: RUN_STATUS.queued, waits: [workerEntry()] }).rung).toBe('queued');
+    expect(deriveAttention({ status: RUN_STATUS.queued, waitingOn: { kind: 'usage-limit', at: '2026-10-30T12:00:00Z' } }).rung).toBe('usage-limit');
+    expect(deriveAttention({ status: RUN_STATUS.waiting, delegation: { role: 'invalid' }, waits: [workerEntry({ phase: WAIT_PHASE.resolved }), workerEntry()] }).rung).toBe('waiting-on-workers');
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: 'malformed' as never }).rung).toBe('needs-you');
+  });
+
+  it.each([0, 1, 2])('labels %i peer tasks and preserves the webhook catch-all', count => {
+    const input: AttentionInput = { status: RUN_STATUS.waiting, waitingOn: { kind: 'peers', count } };
+    expect(deriveAttention(input).label).toBe(['waiting on tasks', 'waiting on 1 task', 'waiting on 2 tasks'][count]);
+    expect(deriveWebhookState(input)).toBe('waiting-other');
   });
 });
