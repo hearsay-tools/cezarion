@@ -203,9 +203,10 @@ describe('createServeApplicationUpdate', () => {
 // that left one running would hand its run and worktree to the replacement while it still writes.
 describe.skipIf(process.platform === 'win32')('restartServe', () => {
   it('signals every live agent session group after the server shut down, then restarts', async () => {
-    const agent = spawnSessionLeader('sh', ['-c', 'trap "exit 0" TERM; while :; do sleep 1; done'], { cwd: process.cwd(), env: process.env });
+    const agent = spawnSessionLeader('sh', ['-c', 'trap "exit 0" TERM; echo ready; while :; do sleep 1; done'], { cwd: process.cwd(), env: process.env });
     const exited = new Promise<NodeJS.Signals | number | null>((resolve) => agent.once('exit', (code, signal) => resolve(signal ?? code)));
-    await new Promise<void>((resolve) => agent.once('spawn', () => resolve()));
+    // The stub prints only after its trap is set, so a SIGTERM before then cannot kill it outright.
+    await new Promise<void>((resolve) => agent.stdout.on('data', (chunk: Buffer) => { if (chunk.toString().includes('ready')) resolve(); }));
     const order: string[] = [];
     const server = {
       address: () => ({ address: '127.0.0.1', family: 'IPv4', port: 4321 }),
