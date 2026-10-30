@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getRequestListener } from '@hono/node-server';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { createMiddleware } from 'hono/factory';
 import { previewStopResult } from '../preview/registration.ts';
@@ -147,6 +147,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
     c.set('capability', capability);
     await next();
   });
+  const capabilityRevoked = (c: Context<{ Variables: { capability: Capability } }>) => c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
   return new Hono<{ Variables: { capability: Capability } }>()
     .use('/api/v1/tools/ci-wait', requireCapability)
     .get('/api/v1/tools/ci-wait', c => {
@@ -168,7 +169,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(cezarWaitAnswerSchema.parse(answer));
       } catch (error) {
-        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
+        if (capability.lifetime.signal.aborted) return capabilityRevoked(c);
         const code = ciRefusalCode(thrownCode(error)) ?? 'unavailable';
         return c.json({ ok: false as const, code, message: ciErrorMessage(code) });
       }
@@ -181,7 +182,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(answer);
       } catch {
-        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
+        if (capability.lifetime.signal.aborted) return capabilityRevoked(c);
         return c.json({ ok: false as const, code: 'unavailable' as const, message: askErrorMessage('unavailable') });
       }
     })
@@ -193,7 +194,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(answer);
       } catch {
-        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
+        if (capability.lifetime.signal.aborted) return capabilityRevoked(c);
         return c.json({ cancelled: false as const, code: 'unavailable' as const, message: ciErrorMessage('unavailable') });
       }
     })
@@ -205,7 +206,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(answer);
       } catch {
-        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
+        if (capability.lifetime.signal.aborted) return capabilityRevoked(c);
         return c.json({ ok: false as const, code: 'unavailable' as const, message: doneErrorMessage('unavailable') });
       }
     })
@@ -221,7 +222,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(result);
       } catch {
-        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
+        if (capability.lifetime.signal.aborted) return capabilityRevoked(c);
         return c.json(previewStopResult('unavailable'));
       }
     })
@@ -239,7 +240,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(result);
       } catch {
-        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
+        if (capability.lifetime.signal.aborted) return capabilityRevoked(c);
         return c.json(previewRefusal('unavailable'));
       }
     })
@@ -257,7 +258,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(answer);
       } catch {
-        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
+        if (capability.lifetime.signal.aborted) return capabilityRevoked(c);
         return c.json(scheduleRefusal('unavailable'));
       }
     })
@@ -273,7 +274,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(answer);
       } catch {
-        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
+        if (capability.lifetime.signal.aborted) return capabilityRevoked(c);
         return c.json(scheduleRefusal('unavailable'));
       }
     });
