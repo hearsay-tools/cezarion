@@ -910,7 +910,6 @@ describe('wait guard outputs', () => {
   });
 });
 
-
 describe('completion projection boundaries', () => {
   it('selects only the newest eligible completion entry for the requested worker', () => {
     const first = completionWaits()[0]!;

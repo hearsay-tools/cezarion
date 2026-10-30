@@ -1,6 +1,6 @@
-import { WAIT_PHASE } from './test-factories.testkit.ts';
 import { describe, expect, it } from 'vitest';
 import { parentFileRefusal, peerWaitViewSchema, workerContextSchema, workerSpawnRequestSchema, workerSteerRequestSchema } from './delegation.ts';
+import { WAIT_PHASE } from './test-factories.testkit.ts';
 
 describe('parent-file context reference', () => {
   const context = (...paths: string[]) => ({ artifacts: paths.map(path => ({ kind: 'parent-file' as const, path })) });
@@ -33,7 +33,6 @@ describe('parent-file context reference', () => {
     expect(workerContextSchema.safeParse({ artifacts: [{ kind: 'baseline-file', path: 'src/x.ts' }] }).success).toBe(true);
   });
 });
-
 
 describe('delegation refusal details', () => {
   it.each(['.gitignore', 'qa/.GITIGNORE', 'nested/path/.gitignore'])('names the refused parent file %s', path => {
