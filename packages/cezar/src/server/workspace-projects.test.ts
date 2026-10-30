@@ -4,8 +4,20 @@ import { loadWorkspaceConfig } from '../workspace/config.ts';
 import { listProjects } from '../workspace/projects.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { CockpitAlreadyRunningError } from './cockpit-ownership.ts';
-import { ProjectContextError, ProjectContexts, type ProjectContext } from './project-context.ts';
+import { ProjectContextError, ProjectContexts, type ProjectContext, type ProjectContextDeps } from './project-context.ts';
+import type { DelegationController } from '../delegation/provision.ts';
 import { createTaskWebhooks, createWorkspaceProjectContexts, createWorkspaceProjects } from './workspace-projects.ts';
+
+const { constructed } = vi.hoisted(() => ({ constructed: [] as ProjectContextDeps[] }));
+vi.mock('./project-context.ts', async (original) => {
+  const actual = await original<typeof import('./project-context.ts')>();
+  return { ...actual, ProjectContexts: class extends actual.ProjectContexts {
+    constructor(options: ProjectContextDeps) {
+      super(options);
+      constructed.push(options);
+    }
+  } };
+});
 
 vi.mock('../workspace/config.ts', async (original) => ({
   ...await original<typeof import('../workspace/config.ts')>(),
@@ -22,6 +34,7 @@ const workspace = () => createWorkspaceProjects({ bootRoot: '/repos/boot', bootP
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.resetAllMocks();
+  constructed.length = 0;
 });
 
 describe('workspace project identity', () => {
@@ -90,21 +103,23 @@ describe('project build failure policies', () => {
     const context = vi.fn().mockRejectedValue(new Error('unexpected'));
     // No boot fields are read here: each request names another project.
     const boot = {} as ProjectContext;
-    expect(await projects.lookupProject('../bad', boot, { context })).toBeUndefined();
+    projects.bindContexts(boot, { context });
+    expect(await projects.lookupProject('../bad')).toBeUndefined();
     expect(context).not.toHaveBeenCalled();
-    expect(await projects.lookupProject('other', boot, { context })).toBeUndefined();
-    await expect(projects.resolveProject('other', boot, { context })).rejects.toThrow('unexpected');
-    await expect(projects.resolveLiveProject('other', boot, { context })).rejects.toThrow('unexpected');
+    expect(await projects.lookupProject('other')).toBeUndefined();
+    await expect(projects.resolveProject('other')).rejects.toThrow('unexpected');
+    await expect(projects.resolveLiveProject('other')).rejects.toThrow('unexpected');
   });
 
   it('preserves boot identity for HTTP and upgrades but canonicalizes live identity', async () => {
     const projects = workspace();
     const boot = { id: 'default' } as ProjectContext;
     const context = vi.fn();
-    expect(await projects.resolveProject('default', boot, { context })).toBe(boot);
-    expect(await projects.resolveProject(undefined, boot, { context })).toBe(boot);
-    expect(await projects.lookupProject('boot', boot, { context })).toBe(boot);
-    expect(await projects.resolveLiveProject('default', boot, { context })).toEqual({ id: 'boot' });
+    projects.bindContexts(boot, { context });
+    expect(await projects.resolveProject('default')).toBe(boot);
+    expect(await projects.resolveProject(undefined)).toBe(boot);
+    expect(await projects.lookupProject('boot')).toBe(boot);
+    expect(await projects.resolveLiveProject('default')).toEqual({ id: 'boot' });
     expect(context).not.toHaveBeenCalled();
   });
 });
@@ -112,8 +127,46 @@ describe('project build failure policies', () => {
 it('keeps injected context and webhook services and builds absent services once', () => {
   const options = { listProjects: vi.fn() };
   const contexts = new ProjectContexts(options);
-  expect(createWorkspaceProjectContexts(contexts, options)).toBe(contexts);
-  expect(createWorkspaceProjectContexts(undefined, options)).toBeInstanceOf(ProjectContexts);
-  const webhooks = createTaskWebhooks(undefined, { origin: '' });
-  expect(createTaskWebhooks(webhooks, {})).toBe(webhooks);
+  expect(createWorkspaceProjectContexts({ contexts }, createTaskWebhooks({}), options)).toBe(contexts);
+  expect(createWorkspaceProjectContexts({}, createTaskWebhooks({}), options)).toBeInstanceOf(ProjectContexts);
+  const webhooks = createTaskWebhooks({}, '');
+  expect(createTaskWebhooks({ taskWebhooks: webhooks })).toBe(webhooks);
+});
+
+it('assembles shared context options and keeps prepare/recovery side effects in order', () => {
+  const order: string[] = [];
+  const detach = vi.fn();
+  const webhooks = createTaskWebhooks({});
+  vi.spyOn(webhooks, 'attach').mockImplementation(() => { order.push('webhooks'); });
+  const delegation = {
+    attachProject: () => { order.push('delegation'); return detach; },
+    service: { armDestroyRetries: () => { order.push('destroy retries'); } },
+  } as DelegationController;
+  const list = vi.fn();
+  createWorkspaceProjectContexts({ delegation }, webhooks, {
+    listProjects: list,
+    addressManager: () => { order.push('address'); },
+  });
+  const options = constructed.at(-1)!;
+  expect(options.listProjects).toBe(list);
+  const project = { id: 'other' } as ProjectContext;
+  expect(options.prepareManager!(project)).toBe(detach);
+  options.afterRecover!(project);
+  expect(order).toEqual(['webhooks', 'address', 'delegation', 'destroy retries']);
+});
+
+it('removal validates first and reads boot identity only once, including a fallback alias', async () => {
+  vi.mocked(loadWorkspaceConfig).mockRejectedValue(new Error('unreadable'));
+  const projects = createWorkspaceProjects({ bootRoot: '/repos/boot' });
+  expect(await projects.resolveProjectId('../bad', true)).toEqual({ error: 'unknown project: ../bad' });
+  expect(loadWorkspaceConfig).not.toHaveBeenCalled();
+  expect(await projects.resolveProjectId('default', true)).toEqual({ id: 'boot', bootId: 'boot' });
+  expect(loadWorkspaceConfig).toHaveBeenCalledTimes(1);
+});
+
+it('health uses its already-resolved boot identity without another registry read', async () => {
+  vi.stubEnv('CEZ_SINGLE_PROJECT', '1');
+  const projects = createWorkspaceProjects({ bootRoot: '/repos/boot' });
+  expect(await projects.visibleProjects([row('boot'), row('other')], 'boot')).toEqual([row('boot')]);
+  expect(loadWorkspaceConfig).not.toHaveBeenCalled();
 });

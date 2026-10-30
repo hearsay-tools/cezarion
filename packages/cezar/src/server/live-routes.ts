@@ -3,10 +3,8 @@ import { streamSSE } from 'hono/streaming';
 import { LIVE_BYTE_LIMIT } from '@open-mercato/cezar-contract/live-limits';
 import { liveRunsRequestSchema, type LiveRunBatchResult, type LiveRunFrame, type LiveRunDemand } from '@open-mercato/cezar-contract/live';
 import { HistoryCursorError } from '../runs/event-history.ts';
-import { CockpitAlreadyRunningError } from './cockpit-ownership.ts';
-import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { isV2WireEventType } from '../runs/ui-event-sink.ts';
-import { ProjectContextError, type ProjectContext } from './project-context.ts';
+import type { ProjectContext } from './project-context.ts';
 import { jsonZodValidator } from './validators.ts';
 import { LiveFeedReset, readFiniteRunFeed, subscribeRunFeed } from './run-event-feed.ts';
 
@@ -15,23 +13,18 @@ interface LiveRouteDeps {
   resolveProject(id: string): Promise<ResolvedProject>;
   serverGeneration: string;
   resolveBootProject(): Promise<string>;
+  projectFailure: (error: unknown) => { error: string; status: 404 | 409 | 503 };
 }
 
-function failure(demand: LiveRunDemand, error: unknown): Exclude<LiveRunBatchResult, { type: 'batch' }> {
+function failure(demand: LiveRunDemand, error: unknown, projectFailure: LiveRouteDeps['projectFailure']): Exclude<LiveRunBatchResult, { type: 'batch' }> {
   const identity = { projectId: demand.projectId, runId: demand.runId };
   if (error instanceof HistoryCursorError || error instanceof LiveFeedReset) {
     return { ...identity, type: 'reset', status: error.status, error: error.message };
   }
-  if (error instanceof ProjectContextError) {
-    return { ...identity, type: 'error', status: error.reason === 'unknown-project' ? 404 : 409, error: error.message };
-  }
-  if (error instanceof RunStoreOpenError || error instanceof CockpitAlreadyRunningError) {
-    return { ...identity, type: 'error', status: 409, error: error.message };
-  }
-  return { ...identity, type: 'error', status: 503, error: 'run feed unavailable' };
+  return { ...identity, type: 'error', ...projectFailure(error) };
 }
 
-export function createLiveRoutes({ resolveProject, serverGeneration, resolveBootProject }: LiveRouteDeps) {
+export function createLiveRoutes({ resolveProject, serverGeneration, resolveBootProject, projectFailure }: LiveRouteDeps) {
   const resolve = async (demand: LiveRunDemand, signal: AbortSignal) => {
     signal.throwIfAborted();
     const project = await resolveProject(demand.projectId);
@@ -60,7 +53,7 @@ export function createLiveRoutes({ resolveProject, serverGeneration, resolveBoot
           } else results.push(await readFiniteRunFeed(resolved.project, demand, c.req.raw.signal));
         } catch (error) {
           c.req.raw.signal.throwIfAborted();
-          results.push(failure(demand, error));
+          results.push(failure(demand, error, projectFailure));
         }
       }
       return c.json({ generation: serverGeneration, results });
@@ -110,7 +103,7 @@ export function createLiveRoutes({ resolveProject, serverGeneration, resolveBoot
               }, controller.signal));
             } catch (error) {
               if (controller.signal.aborted) break;
-              await send(failure(demand, error));
+              await send(failure(demand, error, projectFailure));
             }
           }
           await send({ type: 'ready', generation: serverGeneration });

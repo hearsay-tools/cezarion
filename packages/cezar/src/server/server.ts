@@ -36,6 +36,7 @@ import { autosaveCleanupBlocker } from '../autosave-cleanup.ts';
 import { CheckoutProgressCache } from './checkout-progress.ts';
 import { checkoutProgressParamsSchema, createProjectInputSchema, type CreateProjectResponse, type GithubOwnersResponse } from '@open-mercato/cezar-contract/projects';
 import { createLiveRoutes } from './live-routes.ts';
+import { createWorkspaceProjects, createWorkspaceProjectContexts, createTaskWebhooks, type WorkspaceProjects } from './workspace-projects.ts';
 import { subscribeRunFeed } from './run-event-feed.ts';
 import type { ApiRun, ArchivedRunsResponse, RunSummary, RunsSearchResponse } from '@open-mercato/cezar-contract';
 import { ARCHIVED_RUNS_PAGE_DEFAULT } from '@open-mercato/cezar-contract/run-limits';
@@ -211,7 +212,6 @@ import { listAgentConfig } from '../agent-config/service.ts';
 import { listConfigFiles, type AgentHomePaths } from '../agent-config/catalog.ts';
 import { readAccountIdentity } from '../agent-config/account-identity.ts';
 import {
-  PROJECT_ID_RE,
   defaultWorkspaceConfig,
   loadWorkspaceConfig,
   mergeWriteWorkspaceConfig,
@@ -259,7 +259,7 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { mergeWriteWorkspaceUiState, readWorkspaceUiState } from '../workspace/ui-state.ts';
 import { checkoutRepo, type CloneRunner } from './checkout.ts';
 import { createProject, listGithubOwners, type CommandRunner } from './create-project.ts';
-import { armPreview, ProjectContextError, ProjectContexts, projectWarmupEnabled, sweepRegisteredPreviewLeftovers, type ProjectContext } from './project-context.ts';
+import { armPreview, ProjectContexts, projectWarmupEnabled, sweepRegisteredPreviewLeftovers, type ProjectContext } from './project-context.ts';
 import { reviewGateEnabled } from '../runs/review-gate.ts';
 import { readProjectUiState, readUiState, writeProjectUiState } from '../ui-state.ts';
 import { agentHomePaths, expandTilde } from '../paths.ts';
@@ -273,7 +273,7 @@ import type { PreviewHost } from '../preview/host.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
 import { parseRemote, resolveForge, forgeWebRoot, type ForgeAvailability } from './forge/index.ts';
 import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubCommentCounts, fetchGithubComments, fetchGithubItem, forgetGithubItem, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
-import { CockpitAlreadyRunningError, type CockpitOwnership } from './cockpit-ownership.ts';
+import type { CockpitOwnership } from './cockpit-ownership.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { openInTerminal } from './open-in-terminal.ts';
 import { openRunApp, openRunCli, openRunDefaultApp } from './open-in-targets.ts';
@@ -409,9 +409,8 @@ export interface ServerDeps extends SelfUpdateServerDeps {
   previewHost?: PreviewHost | undefined;
   /** The port the cockpit listens on, once it does: `cezar_preview_serve` refuses it. */
   cezarPort?: () => number | undefined;
-  /** Filled in by `createApp` with the scope middleware's own project lookup, so an upgrade-only
-   *  route (`startServer`'s preview socket) resolves `:projectId` exactly as the HTTP routes do. */
-  projectLookup?: { resolve?: (projectId: string | undefined) => Promise<ProjectContext | undefined> };
+  /** Shared workspace identity and upgrade lookup; direct createApp callers get a local instance. */
+  workspaceProjects?: WorkspaceProjects;
   /** Re-arm the workspace automation timer after definition mutations. */
   automationsChanged?: () => void;
   archiveOnMergeChanged?: () => void;
@@ -422,12 +421,6 @@ export interface ServerDeps extends SelfUpdateServerDeps {
 /** Hono env for the mirrored project-route table: the scope resolver puts the
  *  request's `ProjectContext` on the context, handlers read `c.get('project')`. */
 export type ProjectApiEnv = { Variables: { project: ProjectContext; stoppedOnAdoption?: boolean } };
-
-/** `projectId` gate at the route boundary (spec "Project identity"): the slug
- *  shape or the reserved `default` alias — validated BEFORE touching any map
- *  or path. (`default` matches the slug regex too; the literal keeps the
- *  contract explicit.) */
-const projectIdSchema = z.union([z.literal('default'), z.string().regex(PROJECT_ID_RE)]);
 
 /** The hosted-mode refusal, worded like the agent-config one it mirrors. */
 const HOSTED_GITHUB_CREATE_REFUSAL = 'Creating GitHub repositories is available from a local cockpit only';
@@ -739,29 +732,8 @@ export function createApp(deps: ServerDeps) {
   const { providerStatus, providerActionError, invalidateHostModels } =
     createProviderStatus({ modelCatalog, providerAuth, workspaceConfig });
 
-  // ---- workspace boot-project identity (multi-project spec) ----------------
-  // The boot flow (`initWorkspace` in src/index.ts) registers the boot repo
-  // and plumbs its registry id in via `deps.bootProjectId`. Legacy callers and
-  // tests construct the app without one — then it is derived lazily from the
-  // registry by realpath and cached on a hit. A boot repo that is legitimately
-  // unregistered (task worktree, `$HOME` itself, unreadable workspace) falls
-  // back to its would-be slug, so `bootProject` always names the repo this
-  // server was started in. Strictly non-fatal, zero-config: every failure path
-  // degrades to the slug fallback, never an error.
-  let bootProjectCache = bootProjectId;
-  const resolveBootProject = async (projects?: readonly WorkspaceProject[]): Promise<string> => {
-    if (bootProjectCache) return bootProjectCache;
-    let registry = projects ?? [];
-    try {
-      registry = projects ?? (await loadWorkspaceConfig()).projects;
-      const real = await realpath(bootRoot).catch(() => bootRoot);
-      const match = registry.find((p) => p.root === real || p.root === bootRoot);
-      if (match) bootProjectCache = match.id;
-    } catch {
-      // unreadable workspace — fall through to the slug fallback below
-    }
-    return bootProjectCache ?? allocateProjectSlug(bootRoot, registry.map((project) => project.id));
-  };
+  const workspaceProjects = deps.workspaceProjects ?? createWorkspaceProjects({ bootRoot, bootProjectId, bindHost });
+  const { resolveBootProject } = workspaceProjects;
   // Health's workspace garnish: id+name ONLY — never `root` (#431, see the
   // health route). Reads only the registry file; no per-root status probes,
   // so health stays cheap enough for the bookmarklet's 800 ms port sweep.
@@ -772,9 +744,7 @@ export function createApp(deps: ServerDeps) {
     try {
       const registry = (await loadWorkspaceConfig()).projects;
       const bootProject = await resolveBootProject(registry);
-      const visible = capabilities().singleProject
-        ? registry.filter((project) => project.id === bootProject)
-        : registry;
+      const visible = await workspaceProjects.visibleProjects(registry, bootProject);
       return {
         // Explicit picks, not a spread: the registry schema passes unknown
         // keys through, and `root` must never ride along onto health.
@@ -804,25 +774,13 @@ export function createApp(deps: ServerDeps) {
   // The task webhook (#589): attached before any recovery — the boot store by `index.ts`, lazy
   // projects through `prepareManager` below. Attaching is idempotent, so the calls here only
   // cover an app built without boot's wiring (tests, embedded servers).
-  const taskWebhooks = deps.taskWebhooks ?? new TaskWebhooks({ fetch: deps.taskWebhookFetch, origin: '' });
+  const taskWebhooks = createTaskWebhooks(deps, '');
   taskWebhooks.attach(bootContext);
   // Non-boot projects build lazily on first scoped request; their managers
   // count against the same workspace semaphore as the boot manager (step 2.5).
-  const contexts = deps.contexts ?? new ProjectContexts({
-    listProjects: async () => {
-      const selector = capabilities().singleProject
-        ? { projectId: await resolveBootProject() }
-        : undefined;
-      return listProjects(selector);
-    },
-    semaphore: deps.semaphore,
-    preview: deps.previewHost,
+  const contexts = createWorkspaceProjectContexts(deps, taskWebhooks, {
+    listProjects: () => workspaceProjects.listVisibleProjects(),
     cezarPort: deps.cezarPort,
-    prepareManager: (project) => {
-      taskWebhooks.attach(project);
-      return deps.delegation?.attachProject(project);
-    },
-    afterRecover: (project) => deps.delegation?.service.armDestroyRetries(project.id),
   });
   // Workspace-level SSE bus (step 2.8) — the registry mutators and the
   // checkout flow (Phase 4) emit here; /api/workspace/events relays.
@@ -854,10 +812,8 @@ export function createApp(deps: ServerDeps) {
   // store, so the runs it resumed sent no `run` event. Until a cockpit refetches, its cross-project
   // index keeps the cold read's answer: every run the restart interrupted, shown as failed.
   contexts.onContextBuilt((ctx) => workspaceEvents.emit('project-ready', { project: ctx.id }));
-  const projectRegistryEntry = async (projectId: string): Promise<WorkspaceProject | undefined> => {
-    const id = projectId === 'default' ? await resolveBootProject() : projectId;
-    return (await loadWorkspaceConfig()).projects.find((entry) => entry.id === id);
-  };
+  const projectRegistryEntry = workspaceProjects.registryEntry;
+  workspaceProjects.bindContexts(bootContext, contexts);
 
   /** One `task.test` POST to `webhook`, or a dry run under `CEZ_DRY_RUN=1`. */
   const sendTestDelivery = async (projectId: string, webhook: StoredProjectWebhook): Promise<TestProjectWebhookResponse> => {
@@ -890,8 +846,9 @@ export function createApp(deps: ServerDeps) {
     edit: (webhooks: StoredProjectWebhook[]) => WebhookEdit,
   ): Promise<{ body: ProjectWebhookResponse } | { error: string; status: 400 | 404 | 409 | 500 }> => {
     if (capabilities().singleProject) return { ...singleProjectRefusal('editing projects'), status: 409 };
-    if (!projectIdSchema.safeParse(raw).success) return { error: `unknown project: ${raw}`, status: 404 };
-    const id = raw === 'default' ? await resolveBootProject() : raw;
+    const resolved = await workspaceProjects.resolveProjectId(raw);
+    if ('error' in resolved) return { ...resolved, status: 404 };
+    const { id } = resolved;
     const known = await loadWorkspaceConfig().then((config) => config.projects.some((p) => p.id === id), () => false);
     if (!known) return { error: `unknown project: ${id}`, status: 404 };
     let updated: WorkspaceProject | undefined;
@@ -1001,35 +958,15 @@ export function createApp(deps: ServerDeps) {
 
   // Register project routes once; mount them under scoped and boot-alias prefixes.
   // Resolve default and boot ids to the boot context; unknown/missing projects map to 404/409.
-  if (deps.projectLookup) {
-    deps.projectLookup.resolve = async (raw) => {
-      if (raw === undefined || raw === 'default' || raw === (await resolveBootProject())) return bootContext;
-      if (!projectIdSchema.safeParse(raw).success) return undefined;
-      return contexts.context(raw).catch(() => undefined);
-    };
-  }
   const resolveProjectScope = async (c: Context<ProjectApiEnv>, next: Next): Promise<Response | void> => {
     const raw = c.req.param('projectId');
-    let project = bootContext;
-    if (raw !== undefined) {
-      if (!projectIdSchema.safeParse(raw).success) {
-        return c.json({ error: `unknown project: ${raw}` }, 404);
-      }
-      if (raw !== 'default' && raw !== (await resolveBootProject())) {
-        try {
-          project = await contexts.context(raw);
-        } catch (err) {
-          if (err instanceof CockpitAlreadyRunningError) return c.json({ error: err.message }, 409);
-          // Nothing is cached for a failed build, so the next request opens the store again.
-          if (err instanceof RunStoreOpenError) return c.json({ error: err.message }, 409);
-          if (err instanceof ProjectContextError) {
-            return err.reason === 'missing-root'
-              ? c.json({ error: `project folder not found: ${err.projectId}` }, 409)
-              : c.json({ error: err.message }, 404);
-          }
-          throw err;
-        }
-      }
+    let project: ProjectContext;
+    try {
+      project = await workspaceProjects.resolveProject(raw);
+    } catch (err) {
+      const failure = workspaceProjects.httpFailure(err);
+      if (failure) return c.json({ error: failure.error }, failure.status);
+      throw err;
     }
     // The boot project's store could not open (#779): its runs are unknown, not absent, so its
     // routes answer with why rather than as an empty project. Only its routes: this resolver also
@@ -2002,7 +1939,7 @@ export function createApp(deps: ServerDeps) {
         // checkout. No project to resolve, and therefore no 404 path.
         let root: string | null = null;
         if (projectId !== null) {
-          const resolvedId = projectId === 'default' ? await resolveBootProject() : projectId;
+          const resolvedId = await workspaceProjects.canonicalProjectId(projectId);
           // Keyed by repo ROOT, so the selection survives the registry being rebuilt and needs no
           // cross-reference into config.json. An unknown project is a 404 rather than an orphan
           // entry nobody will ever read.
@@ -2115,10 +2052,7 @@ export function createApp(deps: ServerDeps) {
       let projectsDir = defaultWorkspaceConfig().projectsDir;
       try {
         projectsDir = (await loadWorkspaceConfig()).projectsDir;
-        const selector = capabilities().singleProject
-          ? { projectId: await resolveBootProject() }
-          : undefined;
-        projects = await listProjects(selector);
+        projects = await workspaceProjects.listVisibleProjects();
       } catch {
         // unreadable workspace — degrade to the empty registry + defaults
       }
@@ -2144,13 +2078,11 @@ export function createApp(deps: ServerDeps) {
       const raw = c.req.param('projectId');
       // Same gate the scoped-route resolver applies, and the same 404 wording —
       // a malformed id is an unknown project, not a validation essay.
-      if (!projectIdSchema.safeParse(raw).success) {
-        return c.json({ error: `unknown project: ${raw}` }, 404);
-      }
-      const bootId = await resolveBootProject();
+      const resolved = await workspaceProjects.resolveProjectId(raw, true);
+      if ('error' in resolved) return c.json(resolved, 404);
       // `default` is the boot alias everywhere else in the API; honour it here
       // too rather than 404ing a spelling the cockpit is allowed to use.
-      const id = raw === 'default' ? bootId : raw;
+      const { id, bootId } = resolved;
 
       let entry: WorkspaceProject | undefined;
       try {
@@ -2226,12 +2158,11 @@ export function createApp(deps: ServerDeps) {
       }
       const raw = c.req.param('projectId');
       // Same gate + 404 wording as DELETE: a malformed id is an unknown project.
-      if (!projectIdSchema.safeParse(raw).success) {
-        return c.json({ error: `unknown project: ${raw}` }, 404);
-      }
+      const resolved = await workspaceProjects.resolveProjectId(raw);
+      if ('error' in resolved) return c.json(resolved, 404);
       const parsed = { data: c.req.valid('json') };
       // `default` is the boot alias the cockpit is allowed to use everywhere else.
-      const id = raw === 'default' ? await resolveBootProject() : raw;
+      const { id } = resolved;
       const { maxParallel, tags, webhook } = parsed.data;
 
       // Read-first (mirroring DELETE, server.ts:1252-1258): a well-formed but
@@ -2303,10 +2234,9 @@ export function createApp(deps: ServerDeps) {
         return c.json(singleProjectRefusal('editing projects'), 409);
       }
       const raw = c.req.param('projectId');
-      if (!projectIdSchema.safeParse(raw).success) {
-        return c.json({ error: `unknown project: ${raw}` }, 404);
-      }
-      const entry = await projectRegistryEntry(raw).catch(() => undefined);
+      const resolved = await workspaceProjects.resolveProjectId(raw);
+      if ('error' in resolved) return c.json(resolved, 404);
+      const entry = await projectRegistryEntry(resolved.id).catch(() => undefined);
       if (!entry) return c.json({ error: `unknown project: ${raw}` }, 404);
       // Since #1576: the first webhook with task notifications on.
       const webhook = taskWebhookList(entry)[0];
@@ -2367,10 +2297,9 @@ export function createApp(deps: ServerDeps) {
         return c.json(singleProjectRefusal('editing projects'), 409);
       }
       const { projectId, webhookId } = c.req.valid('param');
-      if (!projectIdSchema.safeParse(projectId).success) {
-        return c.json({ error: `unknown project: ${projectId}` }, 404);
-      }
-      const entry = await projectRegistryEntry(projectId).catch(() => undefined);
+      const resolved = await workspaceProjects.resolveProjectId(projectId);
+      if ('error' in resolved) return c.json(resolved, 404);
+      const entry = await projectRegistryEntry(resolved.id).catch(() => undefined);
       if (!entry) return c.json({ error: `unknown project: ${projectId}` }, 404);
       const webhook = projectWebhooks(entry).find((candidate) => candidate.id === webhookId);
       if (!webhook) return c.json({ error: `unknown webhook: ${webhookId}` }, 404);
@@ -5260,10 +5189,7 @@ export function createApp(deps: ServerDeps) {
   }>> => {
     let projects: ProjectListEntry[] = [];
     try {
-      const selector = capabilities().singleProject
-        ? { projectId: await resolveBootProject() }
-        : undefined;
-      projects = await listProjects(selector);
+      projects = await workspaceProjects.listVisibleProjects();
     } catch {
       // unreadable workspace — no rows, never a 500. The palette degrades to the active
       // project's own run list, which it holds either way.
@@ -5372,11 +5298,10 @@ export function createApp(deps: ServerDeps) {
 
   // Workspace-level families answer for the whole workspace, so they are single-mount: never a
   // project-scoped spelling, which would be a second surface to protect with no consumer.
-  const liveRoutes = createLiveRoutes({ serverGeneration, resolveBootProject, resolveProject: async (id) => {
-    const bootId = await resolveBootProject();
-    if (id === 'default' || id === bootId) return { ...bootContext, id: bootId };
-    return contexts.context(id);
-  } });
+  const liveRoutes = createLiveRoutes({ serverGeneration, resolveBootProject,
+    projectFailure: workspaceProjects.liveFailure,
+    resolveProject: (id) => workspaceProjects.resolveLiveProject(id),
+  });
   const workspaceV1 = new Hono()
     .route('/', liveRoutes)
     .route('/', healthRoutes)
@@ -5446,11 +5371,11 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   // `cezar_preview_serve` refuses the cockpit's own port: the one the listener BOUND (`--port 0`).
   let listeningPort: number | undefined;
   const cezarPort = deps.cezarPort ?? (() => listeningPort);
-  const projectLookup: NonNullable<ServerDeps['projectLookup']> = {};
+  const workspaceProjects = deps.workspaceProjects ?? createWorkspaceProjects({ bootRoot: deps.repoRoot, bootProjectId: deps.bootProjectId, bindHost: deps.bindHost });
   const automationCoordinator = new AutomationCoordinator({ listProjects });
   const bootProjectId = deps.bootProjectId ?? 'default';
   const bootAutomationStore = automationCoordinator.store(bootProjectId, deps.repoRoot)!;
-  const taskWebhooks = deps.taskWebhooks ?? new TaskWebhooks({ fetch: deps.taskWebhookFetch });
+  const taskWebhooks = createTaskWebhooks(deps);
   // #774: the bound origin every agent env carries (`CEZ_COCKPIT_URL`), so `cez automation` calls
   // this cockpit instead of probing ports. Unset until `listening`; a project built after that is
   // addressed in `prepareManager`, before its recovery resumes anything.
@@ -5458,24 +5383,17 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   const addressManager = (project: { id: string; manager: Pick<RunManager, 'setCockpitAddress'> }) => {
     if (cockpitOrigin) project.manager.setCockpitAddress?.({ origin: cockpitOrigin, projectId: project.id });
   };
-  const sharedContexts = deps.contexts ?? new ProjectContexts({
+  const sharedContexts = createWorkspaceProjectContexts(deps, taskWebhooks, {
     ownership: deps.ownership,
     listProjects,
-    semaphore: deps.semaphore,
-    preview: deps.previewHost,
     cezarPort,
     automationStore: (projectId, root) => automationCoordinator.store(projectId, root)!,
-    prepareManager: (project) => {
-      taskWebhooks.attach(project);
-      addressManager(project);
-      return deps.delegation?.attachProject(project);
-    },
-    afterRecover: (project) => deps.delegation?.service.armDestroyRetries(project.id),
+    addressManager,
   });
   const archiveDeps: import('./archive-on-merge.ts').ArchiveOnMergeDeps = {
     projects: async () => {
       const boot = { id: bootProjectId, root: deps.repoRoot, status: 'ok' as const };
-      if (resolveCapabilities(process.env, deps.bindHost).singleProject) return [boot];
+      if (workspaceProjects.singleProject()) return [boot];
       return [boot, ...(await listProjects()).filter(project => project.id !== bootProjectId && project.root !== deps.repoRoot)];
     },
     enabled: async project => resolveArchiveOnMerge(await loadConfig(project.root), await loadWorkspaceConfig()).enabled,
@@ -5518,7 +5436,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     workspaceEvents,
     socketHub,
     cezarPort,
-    projectLookup,
+    workspaceProjects,
     archiveOnMergeChanged: () => archiveOnMerge.invalidate(),
     automationsChanged: () => rescheduleAutomations(),
   });
@@ -5706,7 +5624,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   const previewSockets = createPreviewSockets({
     host: deps.previewHost, cockpitOrigin: () => cockpitOrigin,
     verify: (req) => verifyWsUpgrade(req, deps.bindHost),
-    resolveProject: async (projectId) => projectLookup.resolve?.(projectId),
+    resolveProject: (projectId) => workspaceProjects.lookupProject(projectId),
   });
   server.once('close', () => {
     unsubscribe(); archiveOnMerge.stop(); completionActions.stop(); automationScheduler.stop(); sharedContexts.disposeAll(); void deps.delegation?.close();
