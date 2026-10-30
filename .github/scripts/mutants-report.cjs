@@ -2,7 +2,7 @@
 // The mutation report: a StrykerJS JSON report becomes a small artifact (collectPackage), the comment
 // job checks that artifact as untrusted input (validateArtifact), and one function renders it as the
 // Markdown comment. Pure functions; the job is advisory and never blocks a merge.
-const { findEquivalent } = require('./mutants-equivalent.cjs');
+const { equivalentMutants } = require('./mutants-equivalent.cjs');
 const { PACKAGES } = require('./mutants-scope.cjs');
 
 /** The hidden marker that finds the one comment to update. */
@@ -49,10 +49,15 @@ function collectPackage({ name, report, changed, durationMs, relatedTests, entri
   const rows = [];
   for (const [file, data] of Object.entries(report.files ?? {})) {
     const ranges = changed.get(file);
-    for (const m of ranges ? data.mutants : []) {
+    const candidates = data.mutants.map(m => ({
+      file, mutator: m.mutatorName, original: sliceSource(data.source ?? '', m.location),
+      replacement: m.replacement ?? '',
+    }));
+    const hidden = equivalentMutants(entries, candidates);
+    for (const [index, m] of (ranges ? data.mutants : []).entries()) {
       if (!inRanges(m.location.start.line, ranges) || !COUNT_OF[m.status]) continue;
-      const original = sliceSource(data.source ?? '', m.location);
-      if (findEquivalent(entries, { file, mutator: m.mutatorName, original, replacement: m.replacement ?? '' })) {
+      const { original } = candidates[index];
+      if (hidden.has(candidates[index])) {
         counts.equivalent = (counts.equivalent ?? 0) + 1;
         continue;
       }

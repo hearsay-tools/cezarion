@@ -243,3 +243,20 @@ test('equivalent matching uses full source slices rather than shortened table ce
   assert.equal(collect(original).counts.equivalent, 1);
   assert.equal(collect('x'.repeat(250) + 'different').counts.survived, 1);
 });
+
+test('identical source in two functions stays counted, even when only one is on changed lines', () => {
+  const source = 'function first() { return true; }\nfunction second() { return true; }';
+  const mutants = [1, 2].map(line => ({ mutatorName: 'BooleanLiteral', replacement: 'false', status: 'Survived', location: { start: { line, column: line === 1 ? 27 : 28 }, end: { line, column: line === 1 ? 31 : 32 } } }));
+  const report = { files: { [FILE]: { source, mutants } } };
+  const entries = [{ ...equivalent, function: 'first', mutator: 'BooleanLiteral', original: 'true', replacement: 'false' }];
+  for (const to of [1, 2]) {
+    const result = collectPackage({ name: 'contract', report, changed: new Map([[FILE, [[1, to]]]]), durationMs: 0, relatedTests: 1, entries });
+    assert.equal(result.counts.survived, to);
+    assert.equal(result.counts.equivalent, undefined);
+    assert.equal(result.mutants.length, to);
+  }
+  const single = { files: { [FILE]: { source, mutants: [mutants[0]] } } };
+  const result = collectPackage({ name: 'contract', report: single, changed: new Map([[FILE, [[1, 2]]]]), durationMs: 0, relatedTests: 1, entries });
+  assert.equal(result.counts.equivalent, 1);
+  assert.equal(result.counts.survived, 0);
+});

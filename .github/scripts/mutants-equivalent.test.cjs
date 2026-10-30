@@ -51,3 +51,25 @@ test('matchesEntry normalizes whitespace, compares full text and checks a suppli
   assert.equal(findEquivalent([row, { ...row }], mutant), row);
   assert.equal(findEquivalent([], mutant), undefined);
 });
+
+const { normalizeSource, equivalentMutants } = require('./mutants-equivalent.cjs');
+
+test('source normalization preserves string and template contents and escaped quotes', () => {
+  for (const quote of ["'", '"', '`']) {
+    const original = `${quote}a b${quote}`;
+    assert.equal(matchesEntry({ ...entry, original }, { ...entry, original: `${quote}a  b${quote}` }), false);
+    const escaped = `${quote}a\\${quote}  b${quote}`;
+    assert.equal(normalizeSource(`  ${escaped}  `), escaped);
+  }
+  assert.equal(normalizeSource('{\n  return  true;\n}'), '{ return true; }');
+  assert.equal(matchesEntry({ ...entry, original: '{\n  return true;\n}' }, { ...entry, original: '{\n    return true;\n}' }), true);
+});
+
+test('only an unambiguous file match is hidden, with function names when available', () => {
+  const first = { ...entry };
+  const second = { ...entry, function: 'other' };
+  assert.deepEqual([...equivalentMutants([entry], [first, second])], [first]);
+  const { function: ignored, ...blind } = first;
+  assert.deepEqual([...equivalentMutants([entry], [blind])], [blind]);
+  assert.equal(equivalentMutants([entry], [blind, { ...blind }]).size, 0);
+});
