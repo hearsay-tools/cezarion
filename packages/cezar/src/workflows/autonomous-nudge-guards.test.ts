@@ -1,3 +1,4 @@
+import { handleRunnerUiEvent, makeUiSink } from './run/session-events.ts';
 import { clearIdleTimer } from './run/input-timers.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import type { ActiveRun } from './active-run.ts';
@@ -173,7 +174,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     pendingBoundary();
     vi.mocked(session.sendAgentMessage).mockReturnValue(false);
     runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task', null);
-    manager['handleRunnerUiEvent'](id, state, manager['makeUiSink'](id, 'task'), { type: 'turn.started', turnId: randomUUID() });
+    handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, id, state, makeUiSink(runInternals(manager).context, runInternals(manager).sessionHelperHost, id, 'task'), { type: 'turn.started', turnId: randomUUID() });
     expect(state.autonomousNudgePending).toBeUndefined();
     expect(state.atTurnBoundary).toBeUndefined();
     expect(state.idleTimer).toBeUndefined();

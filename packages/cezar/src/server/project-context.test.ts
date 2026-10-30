@@ -1,3 +1,5 @@
+import { runInternals } from '../workflows/run-internals.testkit.ts';
+import { registerPreviewServer } from '../preview/run-tools.ts';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -124,8 +126,8 @@ describe('ProjectContexts', () => {
       ctx.store.updateRun(run.id, { worktreePath: rootA });
       // Without the host every registration answers `headless`, and without the port getter the
       // cockpit's own port registers.
-      expect((await ctx.manager.registerPreviewServer(run.id, { command: 'npm run dev', port: 4321 })).code).toBe('cezar_port');
-      expect((await ctx.manager.registerPreviewServer(run.id, { command: 'npm run dev', port: 5173 })).code).toBe('registered');
+      expect((await registerPreviewServer(ctx.store, ctx.manager.previewHost, runInternals(ctx.manager).cezarPort, () => runInternals(ctx.manager).disposed, run.id, { command: 'npm run dev', port: 4321 })).code).toBe('cezar_port');
+      expect((await registerPreviewServer(ctx.store, ctx.manager.previewHost, runInternals(ctx.manager).cezarPort, () => runInternals(ctx.manager).disposed, run.id, { command: 'npm run dev', port: 5173 })).code).toBe('registered');
       ctx.store.deleteRun(run.id);
       expect(release).toHaveBeenCalledWith(run.id, { deleteProfile: true, dataDir: ctx.dataDir });
     } finally {

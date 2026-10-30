@@ -1,3 +1,4 @@
+import { handleRunnerUiEvent, makeUiSink } from './run/session-events.ts';
 import { InputDelivery } from './run/input-delivery.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
@@ -575,12 +576,8 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const p = await parent(); const w = await worker(p.id);
     const wait = register(p.id, [w.id]);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    const engine = manager as unknown as {
-      active: Map<string, unknown>;
-      makeUiSink(runId: string, stepId: string): unknown;
-      handleRunnerUiEvent(runId: string, state: unknown, sink: unknown, event: unknown): void;
-    };
-    engine.handleRunnerUiEvent(p.id, engine.active.get(p.id), engine.makeUiSink(p.id, 'task'), {
+    const engine = runInternals(manager);
+    handleRunnerUiEvent(engine.context, engine.sessionHelperHost, p.id, engine.active.get(p.id)!, makeUiSink(engine.context, engine.sessionHelperHost, p.id, 'task'), {
       type: 'turn.started', turnId: randomUUID(),
     });
     expect(store.getRun(p.id)?.status).toBe('running');

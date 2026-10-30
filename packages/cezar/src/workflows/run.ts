@@ -46,7 +46,6 @@ import type { ContinueRunOptions } from './continuation-admission.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { doneErrorMessage } from '../ci-wait/errors.ts';
 import { cezarDoneRequestSchema, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type DoneErrorCode, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
-import { type PreviewStopRequest, type PreviewStopResult, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
@@ -134,8 +133,6 @@ import {
 import { extractTaskRefs, refineTaskRefs } from '../runs/task-refs.ts';
 import { resolveProfileEnvForRoot } from '../workspace/agent-profiles.ts';
 import { WorkspaceSemaphore, type AccountHolds } from '../workspace/semaphore.ts';
-import type { UiEventSink } from '../runs/ui-event-sink.ts';
-import type { UiEvent } from '../core/ui-events.ts';
 import {
   QUICK_TASK_WORKFLOW, stepKind, type WorkflowDef, type WorkflowStepDef,
 } from './types.ts';
@@ -192,7 +189,7 @@ export class RunManager {
     persistAttachment: (id, mediaType, data) => this.attachments.persistAttachment(id, mediaType, data),
     ready: (id, state, session) => this.inputDelivery.handleAgentInputReady(id, state, session),
     pid: (id, pid) => { replaceRunProcess(id, pid); this.workerExecutions.recordWorkerProcess(id, pid); },
-    ui: (id, state, sink, event) => this.handleRunnerUiEvent(id, state, sink, event),
+    ui: (id, state, sink, event) => sessionEvents.handleRunnerUiEvent(this.context, this.sessionHelperHost, id, state, sink, event),
     flushDeferred: id => this.queuedInput.flushDeferred(id), recordProcess: (id, pid) => this.workerExecutions.recordWorkerProcess(id, pid),
   };
   private readonly inputReceiptHost: inputReceipts.InputReceiptsHost = {
@@ -473,8 +470,8 @@ export class RunManager {
       executionBlockedByRootFinish: run => this.executionBlockedByRootFinish(run),
       trackWorkerSessionResult: (...args) => this.workerExecutions.trackWorkerSessionResult(...args),
       workerStep: (...args) => this.workerStep(...args),
-      beginUsageInvocation: (...args) => this.beginUsageInvocation(...args),
-      recordUsagePeaks: id => this.recordUsagePeaks(id),
+      beginUsageInvocation: (...args) => beginUsageInvocation(this.store, ...args),
+      recordUsagePeaks: id => recordUsagePeaks(this.store, { isDisposedDelegatedRun: id => isDisposedDelegatedRun(this.store, () => this.disposed, id) }, id),
     }, this.sessionEventHost(), this.launchPreambleHost(), this.sessionHelperHost, this.line,
     this.runSkills, this.humanWaits, this.inputReceiptHost, this.inputReceiptSteps);
     this.autoResumeScheduler = new AutoResumeScheduler(this.context,
@@ -548,11 +545,11 @@ export class RunManager {
     this.continuationSession = new ContinuationSession(this.context, {
       move: (...args) => this.move(...args), dropActive: id => this.dropActive(id),
       isSyntheticContinuation: (run, step) => isSyntheticContinuation(run, step),
-      beginUsageInvocation: (...args) => this.beginUsageInvocation(...args),
+      beginUsageInvocation: (...args) => beginUsageInvocation(this.store, ...args),
       trackWorkerSessionResult: (...args) => this.workerExecutions.trackWorkerSessionResult(...args),
-      recordUsagePeaks: id => this.recordUsagePeaks(id),
+      recordUsagePeaks: id => recordUsagePeaks(this.store, { isDisposedDelegatedRun: id => isDisposedDelegatedRun(this.store, () => this.disposed, id) }, id),
       saveWorktree: (...args) => this.saveWorktree(...args), pump: () => this.line.pump(),
-      makeUiSink: (...args) => this.makeUiSink(...args),
+      makeUiSink: (...args) => sessionEvents.makeUiSink(this.context, this.sessionHelperHost, ...args),
       repositoryRootLockDisabled: () => repositoryRootLockDisabled(),
       prepareWorktree: (...args) => this.prepareWorktree(...args),
       workerStep: (...args) => this.workerStep(...args),
@@ -815,7 +812,7 @@ export class RunManager {
     return cezarToolHandlers(runId, generation, { store: this.store,
       registerWait: (...args) => this.registerWait(...args), registerAsk: (...args) => this.waitRegistry.registerAsk(...args),
       cancelWait: (...args) => this.cancelWait(...args), acceptDone: (...args) => this.acceptDone(...args),
-      registerPreviewServer: (...args) => this.registerPreviewServer(...args), stopPreviewServer: (...args) => this.stopPreviewServer(...args),
+      registerPreviewServer: (...args) => registerPreviewServer(this.store, this.preview, this.cezarPort, () => this.disposed, ...args), stopPreviewServer: (...args) => stopPreviewServer(this.store, this.preview, this.cezarPort, () => this.disposed, ...args),
       awaitAutomationTools: signal => this.awaitAutomationTools(signal) });
   }
 
@@ -854,12 +851,7 @@ export class RunManager {
 
   private completionRefusal(runId: string): CompletionRefusal | undefined { return completionGateReads.completionRefusal(this.context, this.completionGateHost, runId); }
 
-  async stopPreviewServer(runId: string, request: PreviewStopRequest, signal?: AbortSignal): Promise<PreviewStopResult> {
-    return stopPreviewServer(this.store, this.preview, this.cezarPort, () => this.disposed, runId, request, signal);
-  }
-  async registerPreviewServer(runId: string, request: PreviewServeRequest, signal?: AbortSignal): Promise<PreviewServeResult> {
-    return registerPreviewServer(this.store, this.preview, this.cezarPort, () => this.disposed, runId, request, signal);
-  }
+
 
   async registerWait(runId: string, request: CezarWaitRequestInput, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry | PeerWaitEntry> { return this.waitRegistry.registerWait(runId, request, via, generation, capabilitySignal); }
   cancelWait(runId: string, waitId: string, generation: string) { return this.waitRegistry.cancelWait(runId, waitId, generation); }
@@ -1746,19 +1738,6 @@ export class RunManager {
     };
   }
 
-  private makeUiSink(runId: string, stepId: string): UiEventSink { return sessionEvents.makeUiSink(this.context, this.sessionHelperHost, runId, stepId); }
-
-  private handleRunnerUiEvent(runId: string, state: ActiveRun, sink: UiEventSink, event: UiEvent): void { return sessionEvents.handleRunnerUiEvent(this.context, this.sessionHelperHost, runId, state, sink, event); }
-
-  /** Persist the invocation checkpoint before launching a runner. A throw or
-   * process exit before `turn.started` therefore leaves a durable mismatch. */
-  private beginUsageInvocation(runId: string, state: ActiveRun, stepId: string): void {
-    beginUsageInvocation(this.store, runId, state, stepId);
-  }
-
-  private recordUsagePeaks(runId: string): void {
-    recordUsagePeaks(this.store, { isDisposedDelegatedRun: id => isDisposedDelegatedRun(this.store, () => this.disposed, id) }, runId);
-  }
 
 
   /** The outcome a settled turn reached, for the parity cells that prove which path ran

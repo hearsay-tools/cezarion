@@ -1,3 +1,4 @@
+import { handleRunnerUiEvent, makeUiSink } from './run/session-events.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import type { ActiveRun } from './active-run.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -12,7 +13,7 @@ import { RunManager } from './run.ts';
 type State = ActiveRun;
 describe('human permission lifecycle', () => {
   let root: string, store: RunStore, manager: RunManager, id: string, state: State, session: AgentSession;
-  const emit = (event: UiEvent) => manager['handleRunnerUiEvent'](id, state, manager['makeUiSink'](id, 'task'), event);
+  const emit = (event: UiEvent) => handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, id, state, makeUiSink(runInternals(manager).context, runInternals(manager).sessionHelperHost, id, 'task'), event);
   const request = (requestId: string) => emit({ type: 'permission.requested', requestId, title: 'Run command', options: [{ id: 'deny', label: 'Decline', kind: 'reject_once' }] });
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), 'cez-permission-'));
