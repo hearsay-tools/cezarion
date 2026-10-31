@@ -206,12 +206,16 @@ export class PreviewSession {
     this.disarmWatchdog();
     this.enqueue(async () => {
       await this.cdp.send('Page.stopScreencast').catch(() => {});
-      // Ultra's density lasts while a viewer watches: the page goes back to scale 1, at the same CSS size.
-      if (this.viewer || this.rendered === 1) return;
-      await this.density.place(1);
-      await this.cdp.send('Emulation.setDeviceMetricsOverride', { width: this.viewport.w, height: this.viewport.h, deviceScaleFactor: 1, mobile: false }).catch(() => {});
-      this.rendered = 1;
+      await this.leaveDensity();
     });
+  }
+
+  /** Ultra's density lasts while a viewer watches: with none, the page goes back to scale 1, at the same CSS size. */
+  private async leaveDensity(): Promise<void> {
+    if (this.viewer || this.rendered === 1) return;
+    await this.density.place(1);
+    await this.cdp.send('Emulation.setDeviceMetricsOverride', { width: this.viewport.w, height: this.viewport.h, deviceScaleFactor: 1, mobile: false }).catch(() => {});
+    this.rendered = 1;
   }
 
   /**
@@ -236,10 +240,15 @@ export class PreviewSession {
     await this.cdp.send('Page.navigate', { url });
   }
 
+  /**
+   * Closes the page session. The window position outlives it (screens belong to the browser), so a
+   * page Ultra moved goes back to the primary screen first; at scale 1 this closes at once, as before.
+   */
   close(): void {
     this.viewer = undefined;
     this.disarmWatchdog();
-    this.cdp.close();
+    if (this.rendered === 1) return this.cdp.close();
+    void this.enqueue(() => this.leaveDensity()).catch(() => {}).then(() => this.cdp.close());
   }
 
   /** The whole browser-facing surface. Everything else in CDP stays unreachable. */

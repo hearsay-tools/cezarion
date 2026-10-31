@@ -65,6 +65,16 @@ describe('pixel density (hearsay-tools/cezarion#2069)', () => {
     expect(calls.filter(call => DENSITY.has(call.method)).map(call => call.method)).toEqual(['Emulation.getScreenInfos']);
   });
 
+  it('renders a ratio with more than two decimals exactly', async () => {
+    const { cdp, sent } = browser();
+    const session = await PreviewSession.create(cdp, { quality: () => 'ultra' });
+    session.attach(fakeViewer());
+    await session.handle({ t: 'resize', w: 900, h: 600, dpr: 10 / 9 });
+    await flush();
+    expect(sent('Emulation.addScreen').at(-1)?.params).toMatchObject({ devicePixelRatio: 10 / 9 });
+    expect(sent('Emulation.setDeviceMetricsOverride').at(-1)?.params).toMatchObject({ deviceScaleFactor: 10 / 9 });
+  });
+
   it('renders a fractional ratio exactly, and rounds the stream bound up', async () => {
     const { cdp, sent } = browser();
     const session = await PreviewSession.create(cdp, { quality: () => 'ultra' });
@@ -174,6 +184,34 @@ describe('pixel density (hearsay-tools/cezarion#2069)', () => {
     expect(after).toEqual(['Page.stopScreencast', 'Emulation.getScreenInfos', 'Browser.setWindowBounds', 'Emulation.setDeviceMetricsOverride']);
     expect(sent('Browser.setWindowBounds').at(-1)?.params).toEqual({ windowId: 3, bounds: { left: 0, top: 0 } });
     expect(sent('Emulation.setDeviceMetricsOverride').at(-1)?.params).toEqual({ width: 800, height: 600, deviceScaleFactor: 1, mobile: false });
+  });
+
+  it('closing a session right after an Ultra viewer leaves still puts the window back before the connection closes', async () => {
+    const { cdp, calls } = browser();
+    const session = await PreviewSession.create(cdp, { quality: () => 'ultra' });
+    const viewer = fakeViewer();
+    session.attach(viewer);
+    await session.handle({ t: 'resize', w: 800, h: 600, dpr: 2 });
+    await flush();
+    // As the host drops a followed agent tab: detach, then close at once.
+    session.detach(viewer);
+    session.close();
+    expect(cdp.close).not.toHaveBeenCalled();
+    await flush();
+    await flush();
+    expect(calls.filter(call => call.method === 'Browser.setWindowBounds').at(-1)?.params).toEqual({ windowId: 3, bounds: { left: 0, top: 0 } });
+    expect(cdp.close).toHaveBeenCalledOnce();
+  });
+
+  it('closing a session that never left scale 1 closes the connection at once, as before', async () => {
+    const { cdp } = browser();
+    const session = await PreviewSession.create(cdp, { quality: () => 'high' });
+    const viewer = fakeViewer();
+    session.attach(viewer);
+    await flush();
+    session.detach(viewer);
+    session.close();
+    expect(cdp.close).toHaveBeenCalledOnce();
   });
 
   it.each<PreviewQuality>(['normal', 'high'])('a viewer leaving %s only stops the screencast, as before', async quality => {

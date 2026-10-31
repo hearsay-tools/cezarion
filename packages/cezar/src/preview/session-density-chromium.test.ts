@@ -96,7 +96,7 @@ describe('Ultra streams at the viewer pixel ratio in a real Chromium (hearsay-to
     await fractional;
   }, BUDGET_MS);
 
-  it.skipIf(process.platform === 'win32' || !bin)('streams 2x frames from a tab an agent created and attached to', async () => {
+  it.skipIf(process.platform === 'win32' || !bin)('streams 2x frames from a tab an agent created, and leaves it at ratio 1 when the pane switches away', async () => {
     const profile = mkdtempSync(join(tmpdir(), 'cez-density-tab-'));
     let browser: BrowserHandle | undefined;
     cleanups.push(async () => {
@@ -139,5 +139,21 @@ describe('Ultra streams at the viewer pixel ratio in a real Chromium (hearsay-to
     await ultra;
     const reply = await page.send<{ result: { value: unknown } }>('Runtime.evaluate', { expression: 'devicePixelRatio', returnByValue: true });
     expect(reply.result.value).toBe(2);
+
+    // The pane switches away, as the host drops a followed tab: detach, then close at once. The
+    // window position outlives the session, so a fresh session on the tab must find it at ratio 1.
+    const detached = new Promise<void>(resolve => {
+      const off = browser!.connection.onEvent(msg => {
+        if (msg.method !== 'Target.detachedFromTarget' || (msg.params as { sessionId?: string }).sessionId !== sessionId) return;
+        off();
+        resolve();
+      });
+    });
+    session.detach(viewer);
+    session.close();
+    await detached;
+    const again = await root.send<{ sessionId: string }>('Target.attachToTarget', { targetId, flatten: true });
+    const after = await browser.connection.session(again.sessionId).send<{ result: { value: unknown } }>('Runtime.evaluate', { expression: 'devicePixelRatio', returnByValue: true });
+    expect(after.result.value).toBe(1);
   }, BUDGET_MS);
 });
