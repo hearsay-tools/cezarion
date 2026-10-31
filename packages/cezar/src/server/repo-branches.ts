@@ -46,7 +46,7 @@ async function git(cwd: string, args: string[]): Promise<GitResult> {
   try {
     return await new Promise((resolve) => {
       execFile('git', args, { cwd, maxBuffer: 32 * 1024 * 1024, encoding: 'utf8' }, (err, stdout, stderr) =>
-        resolve({ ok: !err, stdout: stdout ?? '', stderr: stderr ?? '' }),
+        resolve({ ok: !err, stdout, stderr }),
       );
     });
   } finally {
@@ -143,7 +143,7 @@ async function aheadCounts(root: string, heads: HeadRow[], baseSha: string | nul
     const batch = await git(root, ['for-each-ref', 'refs/heads', `--format=%(refname:lstrip=2)%00%(ahead-behind:${baseSha})`]);
     if (batch.ok) {
       for (const line of batch.stdout.split('\n')) {
-        const [name = '', counts = ''] = line.split('\0');
+        const [name, counts = ''] = line.split('\0');
         const ahead = Number(counts.split(' ')[0]);
         if (name && counts && Number.isFinite(ahead)) out.set(name, ahead);
       }
@@ -416,7 +416,7 @@ async function mergedPrBranches(root: string, prBase: string | null, baseSha: st
     !!sha && !!baseSha && FULL_SHA.test(sha) && (await git(root, ['merge-base', '--is-ancestor', sha, baseSha])).ok;
   for (const d of rows) {
     for (const pr of byHead.get(d.head.name) ?? []) {
-      if (pr.state !== 'merged' || prBase === null || pr.baseRefName !== prBase || pr.headRefOid !== d.head.sha) continue;
+      if (pr.state !== 'merged' || pr.baseRefName !== prBase || pr.headRefOid !== d.head.sha) continue;
       if (await onBase(pr.mergeCommitOid)) merged.set(d.head.name, [...(merged.get(d.head.name) ?? []), pr]);
     }
   }
@@ -851,7 +851,7 @@ export async function attributeLog(
     tips ??= git(root, ['for-each-ref', '--format=%(objectname) %(refname:lstrip=2)', 'refs/heads', 'refs/remotes']).then((res) => {
       const map = new Map<string, string[]>();
       for (const line of res.stdout.split('\n')) {
-        const [objectname = '', ref = ''] = line.split(' ');
+        const [objectname, ref = ''] = line.split(' ');
         if (objectname && ref) map.set(objectname, [...(map.get(objectname) ?? []), ref.replace(/^[^/]+\/(?=cez\/)/, '')]);
       }
       return map;
