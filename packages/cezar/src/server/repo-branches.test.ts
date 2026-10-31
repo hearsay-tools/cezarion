@@ -174,6 +174,220 @@ describe('the branch classifier (issue 08 §A)', () => {
     expect(again.payload.branches.find((b) => b.name === 'cez/aaaaaaaa')?.pr).toMatchObject({ number: 2, state: 'open' });
   });
 
+  it.each(['closed', 'merged'] as const)('keeps the recorded PR when a different %s PR is not at the branch tip', async (state) => {
+    const tip = await taskBranch(root, 'cez/aaaaaaaa', 1);
+    const oldTip = await git(root, 'rev-parse', 'main');
+    const recordedUrl = 'https://github.com/acme/demo/pull/11';
+    const forge = fakeForge({
+      states: { 11: 'closed' },
+      prs: [{ ...mergedPr(12, 'cez/aaaaaaaa', oldTip, oldTip), state }],
+    }).forge;
+    const { payload } = await classesOf({
+      runs: [runRecord('aaaaaaaa-1', 'done', { pullRequestUrl: recordedUrl })], forge,
+    });
+    expect(payload.branches.find((row) => row.name === 'cez/aaaaaaaa')).toMatchObject({
+      class: 'not-landed', lastCommit: { sha: tip },
+      pr: { number: 11, url: recordedUrl, state: 'closed' },
+    });
+  });
+
+  it.each([
+    ['closed', true, 12], ['merged', true, 12], ['open', false, 12], ['draft', false, 12],
+  ] as const)('shows a replacement %s PR with current-tip=%s', async (state, atTip, expected) => {
+    const tip = await taskBranch(root, 'cez/aaaaaaaa', 1);
+    const base = await git(root, 'rev-parse', 'main');
+    const forge = fakeForge({ states: { 11: 'closed' }, prs: [
+      { ...mergedPr(12, 'cez/aaaaaaaa', atTip ? tip : base, base), state },
+    ] }).forge;
+    const { payload } = await classesOf({
+      runs: [runRecord('aaaaaaaa-1', 'done', { pullRequestUrl: 'https://github.com/acme/demo/pull/11' })], forge,
+    });
+    expect(payload.branches.find((row) => row.name === 'cez/aaaaaaaa')?.pr).toEqual({
+      number: expected, url: `https://github.com/acme/demo/pull/${expected}`, state,
+    });
+  });
+
+  it.each([
+    ['open', 'closed', false, false], ['draft', 'closed', false, false],
+    ['merged', 'closed', false, false], ['open', 'merged', false, false],
+    ['draft', 'merged', false, false], ['closed', 'open', true, false],
+    ['closed', 'draft', true, false], ['open', 'closed', true, true],
+    ['draft', 'closed', true, true], ['merged', 'closed', true, true],
+  ] as const)('ranks %s over %s with tip flags %s and %s', async (winner, loser, winnerAtTip, loserAtTip) => {
+    const tip = await taskBranch(root, 'cez/aaaaaaaa', 1);
+    const base = await git(root, 'rev-parse', 'main');
+    const forge = fakeForge({ prs: [
+      { ...mergedPr(2, 'cez/aaaaaaaa', loserAtTip ? tip : base, base), state: loser },
+      { ...mergedPr(1, 'cez/aaaaaaaa', winnerAtTip ? tip : base, base), state: winner },
+    ] }).forge;
+    const { payload } = await classesOf({ forge });
+    expect(payload.branches.find((row) => row.name === 'cez/aaaaaaaa')?.pr).toEqual({
+      number: 1, url: 'https://github.com/acme/demo/pull/1', state: winner,
+    });
+  });
+
+  it('shows the newest PR when its state and tip rank tie', async () => {
+    const tip = await taskBranch(root, 'cez/aaaaaaaa', 1);
+    const base = await git(root, 'rev-parse', 'main');
+    const forge = fakeForge({ prs: [3, 9, 5].map((n) => ({
+      ...mergedPr(n, 'cez/aaaaaaaa', tip, base), state: 'closed' as const,
+    })) }).forge;
+    const { payload } = await classesOf({ forge });
+    expect(payload.branches.find((row) => row.name === 'cez/aaaaaaaa')?.pr?.number).toBe(9);
+  });
+
+  it('selects the newest finished owner, the first live owner, and the last owner at an equal timestamp', async () => {
+    await taskBranch(root, 'cez/aaaaaaaa', 1);
+    const older = runRecord('old', 'done', { branch: 'cez/aaaaaaaa', createdAt: '2026-01-01T00:00:00Z' });
+    const newer = runRecord('new', 'done', { branch: older.branch, createdAt: '2026-02-01T00:00:00Z' });
+    for (const runs of [[older, newer], [newer, older]]) {
+      const { payload } = await classesOf({ runs });
+      expect(payload.branches.find((row) => row.name === older.branch)).toMatchObject({
+        class: 'not-landed', runId: 'new', title: 'task new', runStatus: 'done',
+      });
+    }
+    const live = runRecord('live', 'review', { branch: older.branch });
+    const active = await classesOf({ runs: [older, live, newer] });
+    expect(active.payload.branches.find((row) => row.name === older.branch)).toMatchObject({ class: 'active', runId: 'live' });
+    const equal = await classesOf({ runs: [older, { ...newer, createdAt: older.createdAt }] });
+    expect(equal.payload.branches.find((row) => row.name === older.branch)?.runId).toBe('new');
+    const archived = await classesOf({ runs: [{ ...live, archived: true }] });
+    expect(archived.payload.branches.find((row) => row.name === older.branch)?.class).toBe('not-landed');
+  });
+
+  it('does not query recorded states when no task has a valid recorded PR', async () => {
+    await taskBranch(root, 'cez/aaaaaaaa', 1);
+    const forge: BranchForge = {
+      async prStates() { return { available: false, states: {} }; },
+      async prsForHeads() { return { available: true, prs: [], incomplete: new Set() }; },
+    };
+    for (const pullRequestUrl of [undefined, 'https://github.com/acme/demo/issues/no-number']) {
+      const { payload } = await classesOf({ runs: [runRecord('aaaaaaaa-1', 'done', { pullRequestUrl })], forge });
+      expect(payload.prStateKnown).toBe(true);
+      expect(payload.branches.find((row) => row.name === 'cez/aaaaaaaa')).toMatchObject({ class: 'not-landed', pr: null });
+    }
+  });
+
+  it('keeps a missing recorded PR state absent and skips history for an open recorded PR', async () => {
+    await taskBranch(root, 'cez/aaaaaaaa', 1);
+    const runs = [runRecord('aaaaaaaa-1', 'done', { pullRequestUrl: 'https://github.com/acme/demo/pull/11' })];
+    const missing = await classesOf({ runs });
+    expect(missing.payload.branches.find((row) => row.name === 'cez/aaaaaaaa')?.pr).toBeNull();
+    const forge: BranchForge = {
+      async prStates() { return { available: true, states: { 11: 'open' } }; },
+      async prsForHeads() { return { available: false, prs: [], incomplete: new Set(['cez/aaaaaaaa']) }; },
+    };
+    const { payload } = await classesOf({ runs, forge });
+    expect(payload.prStateKnown).toBe(true);
+    expect(payload.branches.find((row) => row.name === 'cez/aaaaaaaa')).toMatchObject({
+      class: 'not-landed', pr: { number: 11, state: 'open' },
+    });
+    expect(payload.branches.find((row) => row.name === 'cez/aaaaaaaa')).not.toHaveProperty('keptReason');
+  });
+
+  it.each(['closed', 'open', 'draft'] as const)('a %s PR cannot prove landing even with exact tip and base evidence', async (state) => {
+    const tip = await taskBranch(root, 'cez/aaaaaaaa', 1);
+    const base = await git(root, 'rev-parse', 'main');
+    const forge = fakeForge({ prs: [{ ...mergedPr(1, 'cez/aaaaaaaa', tip, base), state }] }).forge;
+    expect((await classesOf({ forge })).cls['cez/aaaaaaaa']).toBe('orphan');
+  });
+
+  it('does not accept a short merge SHA as landing proof', async () => {
+    const tip = await taskBranch(root, 'cez/aaaaaaaa', 1);
+    const base = await git(root, 'rev-parse', 'main');
+    const forge = fakeForge({ prs: [mergedPr(1, 'cez/aaaaaaaa', tip, base.slice(0, 12))] }).forge;
+    expect((await classesOf({ forge })).cls['cez/aaaaaaaa']).toBe('orphan');
+  });
+
+  it('keeps symbolic task aliases out of recorded-PR ownership', async () => {
+    const tip = await taskBranch(root, 'topic', 1);
+    await git(root, 'symbolic-ref', 'refs/heads/cez/aaaaaaaa', 'refs/heads/topic');
+    const base = await git(root, 'rev-parse', 'main');
+    const url = 'https://github.com/acme/demo/pull/11';
+    const forge = fakeForge({ prs: [mergedPr(11, 'cez/aaaaaaaa', tip, base)] }).forge;
+    const { payload } = await classesOf({ runs: [runRecord('bbbbbbbb-1', 'done', { pullRequestUrl: url })], forge });
+    expect(payload.branches.find((row) => row.name === 'cez/aaaaaaaa')).toMatchObject({ class: 'other', runId: null, pr: { number: 11, url, state: 'merged' } });
+  });
+
+  it('sorts rows by descending commit date, then ascending branch name', async () => {
+    const base = await git(root, 'rev-parse', 'main');
+    for (const [name, date] of [['cez/z', '2025-01-01T00:00:00Z'], ['cez/a', '2025-01-01T00:00:00Z'], ['cez/new', '2025-02-01T00:00:00Z']]) {
+      const { stdout } = await promisify(execFile)('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit-tree', `${base}^{tree}`, '-p', base, '-m', name!], {
+        cwd: root, env: { ...process.env, GIT_AUTHOR_DATE: date!, GIT_COMMITTER_DATE: date! },
+      });
+      await git(root, 'update-ref', `refs/heads/${name}`, stdout.trim());
+    }
+    const { payload } = await classesOf();
+    const rows = payload.branches.filter((row) => row.name.startsWith('cez/'));
+    expect(rows.map((row) => row.name)).toEqual(['cez/new', 'cez/a', 'cez/z']);
+    expect(rows[0]?.lastCommit).toEqual({ sha: await git(root, 'rev-parse', 'cez/new'), subject: 'cez/new', at: await git(root, 'for-each-ref', '--format=%(committerdate:iso-strict)', 'refs/heads/cez/new') });
+  });
+
+  it('protects a reported current branch even when the checkout is detached', async () => {
+    await taskBranch(root, 'cez/aaaaaaaa', 1);
+    await git(root, 'checkout', '-q', '--detach', 'main');
+    const { cls } = await classesOf({ currentBranch: 'cez/aaaaaaaa', configuredBase: 'main' });
+    expect(cls['cez/aaaaaaaa']).toBe('active');
+  });
+
+  it('protects task branches on unreadable workspace ownership but leaves user branches other', async () => {
+    await taskBranch(root, 'cez/aaaaaaaa', 1);
+    await taskBranch(root, 'topic', 1);
+    const receipts = join(root, '.git', 'cezar-owned-workspaces');
+    mkdirSync(receipts);
+    writeFileSync(join(receipts, 'broken.json'), '{');
+    expect((await classesOf()).cls).toMatchObject({ 'cez/aaaaaaaa': 'active', topic: 'other' });
+  });
+
+  it('does not read diff stats when the caller disables them', async () => {
+    await taskBranch(root, 'cez/aaaaaaaa', 1);
+    const { payload } = await classifyBranches(input(), { diffStats: false });
+    expect(payload.branches.find((row) => row.name === 'cez/aaaaaaaa')).toMatchObject({ class: 'orphan', diffStat: null });
+  });
+
+  it('does not mark empty or merged rows as kept when a forge names their history incomplete', async () => {
+    await git(root, 'branch', 'cez/empty');
+    const tip = await taskBranch(root, 'cez/aaaaaaaa', 1);
+    const base = await git(root, 'rev-parse', 'main');
+    const forge: BranchForge = {
+      async prStates() { return { available: true, states: {} }; },
+      async prsForHeads() { return { available: true, prs: [mergedPr(1, 'cez/aaaaaaaa', tip, base)], incomplete: new Set(['cez/empty', 'cez/aaaaaaaa']) }; },
+    };
+    const { payload, cls } = await classesOf({ runs: [runRecord('empty', 'done', { branch: 'cez/empty' })], forge });
+    expect(cls).toMatchObject({ 'cez/empty': 'empty', 'cez/aaaaaaaa': 'merged' });
+    for (const row of payload.branches) expect(row).not.toHaveProperty('keptReason');
+  });
+
+  it('keeps an active checkout and a live named PR branch active despite merged PR evidence', async () => {
+    const tip = await taskBranch(root, 'cez/aaaaaaaa', 1);
+    const namedTip = await taskBranch(root, 'fix/named', 1);
+    const base = await git(root, 'rev-parse', 'main');
+    const runs = [
+      runRecord('aaaaaaaa-1', 'done', { pullRequestUrl: 'https://github.com/acme/demo/pull/1' }),
+      runRecord('named', 'done', { branch: 'fix/named', pullRequestUrl: 'https://github.com/acme/demo/pull/2' }),
+    ];
+    const forge = fakeForge({ states: { 1: 'merged' }, prs: [
+      mergedPr(1, 'cez/aaaaaaaa', tip, base), mergedPr(2, 'fix/named', namedTip, base),
+    ] }).forge;
+    await git(root, 'checkout', '-q', 'cez/aaaaaaaa');
+    const { cls } = await classesOf({ runs, forge, isActive: (id) => id === 'named' });
+    expect(cls).toMatchObject({ 'cez/aaaaaaaa': 'active', 'fix/named': 'active' });
+  });
+
+  it('does not use merged PR evidence for a pinned commit base with no PR branch name', async () => {
+    const tip = await taskBranch(root, 'cez/aaaaaaaa', 1);
+    const base = await git(root, 'rev-parse', 'main');
+    const forge = fakeForge({ prs: [mergedPr(1, 'cez/aaaaaaaa', tip, base)] }).forge;
+    const { cls } = await classesOf({ configuredBase: base, forge });
+    expect(cls['cez/aaaaaaaa']).toBe('orphan');
+  });
+
+  it('does not turn an active owner at its fork point into an empty branch', async () => {
+    await git(root, 'branch', 'cez/aaaaaaaa');
+    const { payload } = await classesOf({ runs: [runRecord('aaaaaaaa-1', 'review')] });
+    expect(payload.branches.find((row) => row.name === 'cez/aaaaaaaa')).toMatchObject({ class: 'active', runStatus: 'review' });
+  });
+
   it('never classifies by prNumber — the PR a task is ABOUT is display-only', async () => {
     await taskBranch(root, 'cez/aaaaaaaa', 1);
     const { forge } = fakeForge({ states: { 12: 'merged' } });

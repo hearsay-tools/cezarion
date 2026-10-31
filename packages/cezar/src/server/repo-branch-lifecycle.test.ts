@@ -184,6 +184,16 @@ describe('branch lifecycle classification (hearsay-tools/cezarion#2268)', () => 
       expect(result.refused).toEqual([{ name: 'fix/y', reason: 'not a cezar task branch' }]);
     });
 
+    it('matches a recorded PR URL despite whitespace, case and multiple trailing slashes', async () => {
+      const { tip, squash } = await namedPr();
+      const runs = [runRecord('aaaaaaaa-1', 'done', { pullRequestUrl: `  ${PR.toUpperCase()}///  ` })];
+      const forge = fakeForge({ prs: [mergedPr(9, 'fix/y', tip, squash)] }).forge;
+      const { payload } = await classesOf({ runs, forge });
+      expect(payload.branches.find((row) => row.name === 'fix/y')).toMatchObject({
+        class: 'merged', runId: 'aaaaaaaa-1', pr: { number: 9, url: PR, state: 'merged' },
+      });
+    });
+
     it('is not asked about when no run recorded a PR', async () => {
       await namedPr();
       const { forge, calls } = fakeForge();

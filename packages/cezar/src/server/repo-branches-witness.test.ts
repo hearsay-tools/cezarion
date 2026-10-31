@@ -1,12 +1,12 @@
-import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { execFile, execFileSync } from 'node:child_process';
+import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createOwnedWorkspace } from '../delegation/workspace.ts';
 import type { WorktreeGit } from '../git-worktree-lock.ts';
-import { fakeForge, owners, runRecord } from './repo-branches.testkit.ts';
+import { commit, fakeForge, owners, runRecord, taskBranch } from './repo-branches.testkit.ts';
 import { branchOwnerOf, type RunRecord } from '../runs/store.ts';
 
 const exec = promisify(execFile);
@@ -14,8 +14,24 @@ const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 const hook = vi.hoisted(() => ({
   beforeUpdateRef: undefined as (() => Promise<void>) | undefined,
   beforeOperation: undefined as (() => Promise<void>) | undefined,
+  gitResult: undefined as ((args: string[]) => { ok: boolean; stdout: string; stderr: string } | undefined) | undefined,
   command: undefined as ((args: string[]) => ReturnType<WorktreeGit> | undefined) | undefined,
 }));
+
+// Keep fixture setup on the real promisified executable; classification can supply exact output.
+vi.mock('node:child_process', async (original) => {
+  const real = await original<typeof import('node:child_process')>();
+  const { promisify } = await import('node:util');
+  const controlled = (...args: unknown[]) => {
+    const result = args[0] === 'git' && Array.isArray(args[1]) ? hook.gitResult?.(args[1]) : undefined;
+    const callback = args.at(-1);
+    if (!result || typeof callback !== 'function') return Reflect.apply(real.execFile, undefined, args);
+    queueMicrotask(() => callback(result.ok ? null : new Error('controlled git failure'), result.stdout, result.stderr));
+    return undefined;
+  };
+  Object.defineProperty(controlled, promisify.custom, { value: Reflect.get(real.execFile, promisify.custom) });
+  return { ...real, execFile: controlled };
+});
 
 // The lock seam covers two windows: before the locked operation rechecks protection, and after
 // it reads its witness but before the ref transaction. Commands can also return a controlled
@@ -37,7 +53,7 @@ vi.mock('../git-worktree-lock.ts', async (original) => {
   };
 });
 
-const { deleteBranches } = await import('./repo-branches.ts');
+const { attributeLog, classifyBranches, deleteBranches } = await import('./repo-branches.ts');
 
 async function git(cwd: string, ...args: string[]): Promise<string> {
   return (await exec('git', [...GIT_ID, ...args], { cwd })).stdout.trim();
@@ -243,4 +259,174 @@ describe('branch deletion with a controlled mutation lock', () => {
     });
 
   });
+});
+
+/** Controlled git output exercises formats and failures that a real repository seldom produces. */
+describe('classification with controlled git output (hearsay-tools/cezarion#2292)', () => {
+  let root: string;
+  let shim: string;
+  let realGit: string;
+  let savedPath: string | undefined;
+  let tip: string;
+  let base: string;
+
+  beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), 'cez-classification-output-'));
+    shim = join(root, 'bin');
+    mkdirSync(shim);
+    realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+    await git(root, 'init', '-q', '-b', 'main');
+    base = await commit(root, 'base.txt', 'base');
+    tip = await taskBranch(root, 'cez/aaaaaaaa', 2);
+    savedPath = process.env.PATH;
+  });
+
+  afterEach(() => {
+    hook.gitResult = undefined;
+    if (savedPath === undefined) delete process.env.PATH;
+    else process.env.PATH = savedPath;
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  function output(rules: Array<{ prefix: string[]; stdout: string; code?: number }>) {
+    writeFileSync(join(shim, 'responses.json'), JSON.stringify(rules));
+    writeFileSync(join(shim, 'git'), `#!${process.execPath}
+const fs = require('node:fs');
+const cp = require('node:child_process');
+const args = process.argv.slice(2);
+const rules = JSON.parse(fs.readFileSync(${JSON.stringify(join(shim, 'responses.json'))}, 'utf8'));
+const rule = rules.find((item) => item.prefix.every((arg, index) => args[index] === arg));
+if (rule) {
+  process.stdout.write(rule.stdout);
+  process.exit(rule.code ?? 0);
+}
+const result = cp.spawnSync(${JSON.stringify(realGit)}, args, { stdio: 'inherit' });
+process.exit(result.status ?? 1);
+`);
+    chmodSync(join(shim, 'git'), 0o755);
+    process.env.PATH = `${shim}${delimiter}${savedPath ?? ''}`;
+  }
+
+  async function classify(configuredBase = 'main') {
+    return classifyBranches({ root, configuredBase, currentBranch: 'main', runs: [],
+      isActive: () => false, hasRemote: false, forge: fakeForge().forge,
+    });
+  }
+
+  it('ignores failed head enumeration even when git emitted partial rows', async () => {
+    output([{ prefix: ['for-each-ref', 'refs/heads', '--format=%(refname:lstrip=2)%00%(objectname)%00%(committerdate:iso-strict)%00%(symref)%00%(subject)'],
+      stdout: `cez/aaaaaaaa\0${tip}\0date\0\0subject\n`, code: 1 }]);
+    const { payload, tips } = await classify();
+    expect(payload.branches).toEqual([]);
+    expect(payload.counts).toEqual({ cleanup: 0, notLanded: 0 });
+    expect([...tips]).toEqual([]);
+    expect(payload.prStateKnown).toBe(true);
+  });
+
+  it('keeps complete head rows, joins subject fields, and drops rows missing a name or SHA', async () => {
+    output([{ prefix: ['for-each-ref', 'refs/heads', '--format=%(refname:lstrip=2)%00%(objectname)%00%(committerdate:iso-strict)%00%(symref)%00%(subject)'],
+      stdout: `\ncez/aaaaaaaa\0${tip}\0date\0\0first\0second\n\0${tip}\ncez/missing\ncez/nosha\0\n` }]);
+    const { payload } = await classify();
+    expect(payload.branches).toHaveLength(1);
+    expect(payload.branches[0]).toMatchObject({ name: 'cez/aaaaaaaa', class: 'orphan', lastCommit: { sha: tip, at: 'date', subject: 'first\0second' } });
+  });
+
+  it('defaults absent head metadata without inventing a symbolic alias', async () => {
+    output([{ prefix: ['for-each-ref', 'refs/heads', '--format=%(refname:lstrip=2)%00%(objectname)%00%(committerdate:iso-strict)%00%(symref)%00%(subject)'],
+      stdout: `cez/aaaaaaaa\0${tip}\n` }]);
+    const { payload } = await classify();
+    expect(payload.branches).toHaveLength(1);
+    expect(payload.branches[0]).toMatchObject({ name: 'cez/aaaaaaaa', class: 'orphan', lastCommit: { sha: tip, at: '', subject: '' } });
+  });
+
+  it('sorts unordered git rows by date and breaks equal dates by branch name', async () => {
+    const names = ['cez/z', 'cez/new', 'cez/a', 'cez/old'];
+    const dates = ['2025-01-02', '2025-02-01', '2025-01-02', '2025-01-01'];
+    output([{ prefix: ['for-each-ref', 'refs/heads', '--format=%(refname:lstrip=2)%00%(objectname)%00%(committerdate:iso-strict)%00%(symref)%00%(subject)'],
+      stdout: names.map((name, i) => `${name}\0${tip}\0${dates[i]}\0\0subject`).join('\n') }]);
+    expect((await classify()).payload.branches.map((row) => row.name)).toEqual(['cez/new', 'cez/a', 'cez/z', 'cez/old']);
+  });
+
+  it('calls a branch at its fork point empty when it is on the base even without a retention lookup', async () => {
+    await git(root, 'branch', 'cez/empty', base);
+    output([{ prefix: ['for-each-ref', '--contains'], stdout: '', code: 1 }]);
+    const result = await classifyBranches({ root, currentBranch: 'main', runs: owners([runRecord('empty', 'done', { branch: 'cez/empty', baseBranch: base })]),
+      isActive: () => false, hasRemote: false, forge: fakeForge().forge,
+    });
+    expect(result.payload.branches.find((row) => row.name === 'cez/empty')?.class).toBe('empty');
+  });
+
+  it('leaves a merge without a matching second-parent ref unattributed', async () => {
+    expect(await attributeLog(root, [{ hash: tip, subject: 'merge unrelated work', parents: [base, 'f'.repeat(40)], author: 'test', at: '', when: '' }], owners([runRecord('aaaaaaaa-1', 'done')]))).toEqual([null]);
+  });
+
+  it('uses a count fallback for failed or malformed batch counts', async () => {
+    output([{ prefix: ['for-each-ref', 'refs/heads', `--format=%(refname:lstrip=2)%00%(ahead-behind:${base})`],
+      stdout: `cez/aaaaaaaa\0${'0 0'}\n`, code: 1 }]);
+    expect((await classify()).payload.branches.find((row) => row.name === 'cez/aaaaaaaa')?.ahead).toBe(2);
+    output([{ prefix: ['for-each-ref', 'refs/heads', `--format=%(refname:lstrip=2)%00%(ahead-behind:${base})`],
+      stdout: `cez/aaaaaaaa\0not-a-number 0\nmain\0\n` }]);
+    const { payload } = await classify();
+    expect(payload.branches.find((row) => row.name === 'cez/aaaaaaaa')).toMatchObject({ ahead: 2, class: 'orphan' });
+  });
+
+  it('counts all commits when there is no resolved base', async () => {
+    const { payload, baseSha, baseFullRef } = await classify('missing');
+    expect(baseSha).toBeNull();
+    expect(baseFullRef).toBeNull();
+    expect(payload.base).toBe('missing');
+    expect(payload.branches.find((row) => row.name === 'cez/aaaaaaaa')).toMatchObject({ ahead: 3, class: 'orphan', diffStat: null });
+  });
+
+  it.each([{ stdout: '0\n', code: 1 }, { stdout: 'not-a-number\n', code: 0 }])('never calls unreadable counts merged (%j)', async (response) => {
+    output([
+      { prefix: ['for-each-ref', 'refs/heads', `--format=%(refname:lstrip=2)%00%(ahead-behind:${base})`], stdout: '', code: 1 },
+      { prefix: ['rev-list', '--count'], ...response },
+    ]);
+    expect((await classify()).payload.branches.find((row) => row.name === 'cez/aaaaaaaa')).toMatchObject({ ahead: 0, class: 'orphan' });
+  });
+  it('refreshes diff stats when the configured global attribute file changes', async () => {
+    const attributes = join(root, 'global-attributes');
+    writeFileSync(attributes, '');
+    await git(root, 'config', 'core.attributesFile', attributes);
+    expect((await classify()).payload.branches.find((row) => row.name === 'cez/aaaaaaaa')?.diffStat).toEqual({ additions: 2, deletions: 0 });
+    writeFileSync(attributes, '* -diff\n');
+    expect((await classify()).payload.branches.find((row) => row.name === 'cez/aaaaaaaa')?.diffStat).toEqual({ additions: 0, deletions: 0 });
+  });
+
+  it('still computes a diff stat when the local attribute path cannot be read', async () => {
+    hook.gitResult = (args) => args[0] === 'rev-parse' && args[1] === '--git-path'
+      ? { ok: false, stdout: '', stderr: 'unavailable' } : undefined;
+    expect((await classify()).payload.branches.find((row) => row.name === 'cez/aaaaaaaa')?.diffStat).toEqual({ additions: 2, deletions: 0 });
+  });
+
+  it('evicts the oldest diff stat once more than 5000 commit pairs are cached', async () => {
+    const heads = Array.from({ length: 5001 }, (_, i) => ({ name: `cez/cache${i}`, sha: (i + 1).toString(16).padStart(40, '0') }));
+    let selected = heads;
+    let reads = 0;
+    hook.gitResult = (args) => {
+      if (args[0] === 'for-each-ref' && args[1] === 'refs/heads') {
+        const stdout = args[2]?.includes('ahead-behind')
+          ? selected.map((row) => `${row.name}\0${'1 0'}`).join('\n')
+          : selected.map((row) => `${row.name}\0${row.sha}\0date\0\0work`).join('\n');
+        return { ok: true, stdout, stderr: '' };
+      }
+      if (args[0] === 'diff') {
+        reads++;
+        return { ok: true, stdout: '1 file changed, 1 insertion(+)\n', stderr: '' };
+      }
+      return undefined;
+    };
+    const first = await classify();
+    expect(first.payload.branches).toHaveLength(5001);
+    expect(first.payload.branches.every((row) => row.diffStat?.additions === 1)).toBe(true);
+    expect(reads).toBe(5001);
+    selected = heads.slice(1, 2);
+    expect((await classify()).payload.branches[0]?.diffStat).toEqual({ additions: 1, deletions: 0 });
+    expect(reads).toBe(5001);
+    selected = heads.slice(0, 1);
+    expect((await classify()).payload.branches[0]?.diffStat).toEqual({ additions: 1, deletions: 0 });
+    expect(reads).toBe(5002);
+  });
+
 });
