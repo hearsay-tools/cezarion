@@ -575,7 +575,7 @@ export class RunDatabase {
     listWithWorktree: StatementSync;
     findResourceHolders: StatementSync;
     listIds: StatementSync;
-    has: StatementSync;
+    revisionOf: StatementSync;
     listRevisions: StatementSync;
     getMeta: StatementSync;
     upsert: StatementSync;
@@ -615,7 +615,7 @@ export class RunDatabase {
       listWithWorktree: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE worktree_path IS NOT NULL ORDER BY coalesce(finished_at, created_at) DESC, created_at DESC, seq`),
       findResourceHolders: db.prepare('SELECT id FROM runs WHERE branch = :branch UNION SELECT id FROM runs WHERE worktree_path = :worktreePath'),
       listIds: db.prepare('SELECT id FROM runs'),
-      has: db.prepare('SELECT 1 FROM runs WHERE id = ?'),
+      revisionOf: db.prepare('SELECT revision FROM runs WHERE id = ?'),
       listRevisions: db.prepare('SELECT id, revision FROM runs ORDER BY id'),
       getMeta: db.prepare('SELECT value FROM meta WHERE key = ?'),
       upsert: db.prepare(`
@@ -834,9 +834,9 @@ export class RunDatabase {
     return this.run(() => this.statements.listIds.all()).map((row) => row.id as string);
   }
 
-  has(id: string): boolean {
-    return this.run(() => this.statements.has.get(id)) !== undefined;
-  }
+  has(id: string): boolean { return this.revisionOf(id) !== undefined; }
+  /** The row's revision, read without its `data`; undefined when there is no row. */
+  revisionOf(id: string): number | undefined { return this.run(() => this.statements.revisionOf.get(id))?.revision as number | undefined; }
 
   /**
    * Rows matching `where`, newest first — the store's candidate filters (mark all read, archive

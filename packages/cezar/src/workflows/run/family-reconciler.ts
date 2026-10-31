@@ -168,7 +168,13 @@ export class FamilyReconciler {
     }
   }
 
+  /** One pass reads each cold run once (hearsay-tools/cezarion#2378): a family's conversation
+   *  names its sender and recipient on every message. */
   private reconcileWorkerFamily(familyRootId?: string): void {
+    this.context.store.withReadCache(() => this.reconcileFamilyPass(familyRootId));
+  }
+
+  private reconcileFamilyPass(familyRootId?: string): void {
     this.reconcilingWorkers = true;
     this.reconcilingFamily = familyRootId;
     try {
