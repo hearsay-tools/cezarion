@@ -619,10 +619,14 @@ describe('preview session caller contract', () => {
   });
 
   it('updates the viewport without a viewer and recovers the queue after a CDP refusal', async () => {
-    const { cdp, sent } = fakeCdp();
-    const session = await PreviewSession.create(cdp);
     const error = new Error('metrics refused');
-    vi.mocked(cdp.send).mockRejectedValueOnce(error);
+    let refuse = true;
+    const { cdp, sent } = fakeCdp(method => {
+      if (method !== 'Emulation.setDeviceMetricsOverride' || !refuse) return undefined;
+      refuse = false;
+      throw error;
+    });
+    const session = await PreviewSession.create(cdp);
     await expect(session.handle({ t: 'resize', w: 640, h: 480 })).rejects.toBe(error);
     await session.handle({ t: 'resize', w: 700, h: 500 });
     expect(sent('Page.startScreencast')).toHaveLength(0);

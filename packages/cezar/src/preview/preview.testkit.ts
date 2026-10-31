@@ -8,12 +8,14 @@ import type { Viewer } from './session.ts';
 
 /** Fakes shared by the preview session and host tests (#781). */
 
-export function fakeCdp() {
+export function fakeCdp(reply?: (method: string, params: Record<string, unknown>) => unknown) {
   const calls: Array<{ method: string; params: Record<string, unknown> }> = [];
   const listeners = new Map<string, Set<(params: unknown) => void>>();
   const cdp: Cdp = {
     send: vi.fn(async (method: string, params: Record<string, unknown> = {}) => {
       calls.push({ method, params });
+      const answer = reply?.(method, params);
+      if (answer !== undefined) return answer;
       if (method === 'Page.getNavigationHistory') return { currentIndex: 1, entries: [{ id: 10 }, { id: 11 }, { id: 12 }] };
       return {};
     }) as Cdp['send'],
