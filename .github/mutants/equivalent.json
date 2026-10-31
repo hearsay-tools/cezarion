@@ -53,7 +53,8 @@
     "mutator": "StringLiteral",
     "original": "''",
     "replacement": "\"Stryker was here!\"",
-    "reason": "The sha fallback is unreachable because split always yields a first item; the subject fallback has the same text and is killed by the partial-log test."
+    "reason": "The sha fallback is unreachable because split always yields a first item.",
+    "site": "const [sha = "
   },
   {
     "file": "packages/cezar/src/server/repo-branches.ts",
@@ -69,7 +70,17 @@
     "mutator": "StringLiteral",
     "original": "''",
     "replacement": "\"Stryker was here!\"",
-    "reason": "The first selector default exists for the type checker; the matching sha default cannot affect creationSha because an absent sha leaves an empty subject, which always returns null (two matches)."
+    "reason": "The first selector default exists only for the type checker because split always has a first string.",
+    "site": "const [selector = "
+  },
+  {
+    "file": "packages/cezar/src/server/repo-branches.ts",
+    "function": "forkPoints",
+    "mutator": "StringLiteral",
+    "original": "''",
+    "replacement": "\"Stryker was here!\"",
+    "reason": "The sha default cannot affect creationSha because an absent sha leaves an empty subject, which always returns null.",
+    "site": "const [selector = '', sha = "
   },
   {
     "file": "packages/cezar/src/server/repo-branches.ts",
@@ -77,7 +88,8 @@
     "mutator": "StringLiteral",
     "original": "''",
     "replacement": "\"Stryker was here!\"",
-    "reason": "The first-name default exists only for the type checker because split always has a first string; this entry also matches four killed metadata/comparison mutants that the tests still guard (five matches)."
+    "reason": "The first-name default exists only for the type checker because split always has a first string.",
+    "site": "const [name = "
   },
   {
     "file": "packages/cezar/src/server/repo-branches.ts",
@@ -85,7 +97,8 @@
     "mutator": "ArrayDeclaration",
     "original": "[]",
     "replacement": "[\"Stryker was here\"]",
-    "reason": "A fallback string has no merged state and is skipped; this also matches the killed merged-list accumulation mutant that the tests still guard (two matches)."
+    "reason": "A fallback string has no merged state and is skipped.",
+    "site": "for (const pr of byHead.get(d.head.name) ?? "
   },
   {
     "file": "packages/cezar/src/task-cli/cli.ts",
@@ -117,7 +130,8 @@
     "mutator": "StringLiteral",
     "original": "'unseen'",
     "replacement": "\"\"",
-    "reason": "isUnseen never matches, so this reserved rung is unreachable; the text also matches two Ignored mutants at line 136."
+    "reason": "isUnseen never matches, so this reserved rung is unreachable.",
+    "site": "(run) => isUnseen(run) ? "
   },
   {
     "file": "packages/contract/src/delegation.ts",
