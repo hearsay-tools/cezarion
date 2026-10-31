@@ -203,14 +203,61 @@ describe('pixel density (hearsay-tools/cezarion#2069)', () => {
     expect(cdp.close).toHaveBeenCalledOnce();
   });
 
-  it('closing a session that never left scale 1 closes the connection at once, as before', async () => {
-    const { cdp } = browser();
+  it('closing a session during its first Ultra resize waits for the resize, then puts the window back before the connection closes', async () => {
+    let release!: () => void;
+    let hold = false;
+    const screens: Array<Record<string, unknown>> = [{ id: 'P', availLeft: 0, availTop: 0, devicePixelRatio: 1, isPrimary: true }];
+    const { cdp, calls, sent } = fakeCdp((method, params) => {
+      if (method === 'Emulation.getScreenInfos') return { screenInfos: [...screens] };
+      if (method === 'Browser.getWindowForTarget') return { windowId: 3 };
+      if (method === 'Emulation.addScreen') {
+        const info = { id: 'S1', availLeft: params.left, availTop: 0, devicePixelRatio: params.devicePixelRatio, isPrimary: false };
+        screens.push(info);
+        return { screenInfo: info };
+      }
+      if (method === 'Browser.setWindowBounds' && hold) {
+        hold = false;
+        return new Promise<object>(resolve => (release = () => resolve({})));
+      }
+      return undefined;
+    });
+    vi.mocked(cdp.close).mockImplementation(() => void calls.push({ method: 'close', params: {} }));
+    const session = await PreviewSession.create(cdp, { quality: () => 'ultra' });
+    session.attach(fakeViewer());
+    await flush();
+    // The first Ultra resize waits on Chromium to move the window: the page still renders at scale 1.
+    hold = true;
+    const resized = session.handle({ t: 'resize', w: 800, h: 600, dpr: 2 });
+    await flush();
+    expect(sent('Browser.setWindowBounds').at(-1)?.params).toEqual({ windowId: 3, bounds: { left: 100_000, top: 0 } });
+    const before = calls.length;
+    session.close();
+    await flush();
+    expect(cdp.close).not.toHaveBeenCalled();
+    release();
+    await resized;
+    await flush();
+    await flush();
+    // The resize finishes at ratio 2, then the close puts the page back at scale 1, and only then closes.
+    expect(calls.slice(before).map(call => call.method)).toEqual(['Emulation.setDeviceMetricsOverride', 'Emulation.getScreenInfos', 'Browser.setWindowBounds', 'Emulation.setDeviceMetricsOverride', 'close']);
+    expect(sent('Emulation.setDeviceMetricsOverride').slice(-2).map(call => call.params.deviceScaleFactor)).toEqual([2, 1]);
+    expect(sent('Browser.setWindowBounds').at(-1)?.params).toEqual({ windowId: 3, bounds: { left: 0, top: 0 } });
+    expect(cdp.close).toHaveBeenCalledOnce();
+    // No viewer is left, so the resize starts no stream.
+    expect(sent('Page.startScreencast')).toHaveLength(1);
+  });
+
+  it('closing a session that never left scale 1 moves no window and closes the connection', async () => {
+    const { cdp, calls } = browser();
     const session = await PreviewSession.create(cdp, { quality: () => 'high' });
     const viewer = fakeViewer();
     session.attach(viewer);
     await flush();
+    const before = calls.length;
     session.detach(viewer);
     session.close();
+    await flush();
+    expect(calls.slice(before).map(call => call.method)).toEqual(['Page.stopScreencast']);
     expect(cdp.close).toHaveBeenCalledOnce();
   });
 

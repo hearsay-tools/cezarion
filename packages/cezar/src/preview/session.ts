@@ -242,12 +242,13 @@ export class PreviewSession {
 
   /**
    * Closes the page session. The window position outlives it (screens belong to the browser), so a
-   * page Ultra moved goes back to the primary screen first; at scale 1 this closes at once, as before.
+   * page Ultra moved goes back to the primary screen first. The close waits behind viewport work
+   * already queued: a first Ultra resize still waiting on Chromium has not recorded its ratio yet,
+   * and would otherwise move the window after the connection closed. At scale 1 nothing moves.
    */
   close(): void {
     this.viewer = undefined;
     this.disarmWatchdog();
-    if (this.rendered === 1) return this.cdp.close();
     void this.enqueue(() => this.leaveDensity()).catch(() => {}).then(() => this.cdp.close());
   }
 
