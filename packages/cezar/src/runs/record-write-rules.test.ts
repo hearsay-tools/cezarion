@@ -117,15 +117,18 @@ describe('record write paths without a database', () => {
     expect(run).toEqual(before);
   });
 
-  it.each([true, false])('resolves task refs only on the debounced path=%s', debounced => {
+  it.each([true, false])('resolves task refs on both paths, debounced=%s (hearsay-tools/cezarion#2323)', debounced => {
     const run = makeRunRecord({ referencedPrCandidates: [url], referencedIssueCandidates: [issue], autoResumeAt: at });
+    const before = structuredClone(run);
     const log: string[] = [];
     const stage = debounced ? stageDebouncedUpdate : stageDurableUpdate;
     const next = stage(run, { task: 'edited', status: RUN_STATUS.running }, hooks(log)) ?? run;
-    expect(log).toEqual(debounced ? ['collect-pr', 'collect-issue', 'resolve-pr', 'resolve-issue', 'rescope', 'touch'] : []);
-    expect(next.referencedPullRequestUrl).toBe(debounced ? url : undefined);
-    expect(next.issueNumber).toBe(debounced ? 7 : undefined);
+    expect(log).toEqual(['collect-pr', 'collect-issue', 'resolve-pr', 'resolve-issue', 'rescope', ...(debounced ? ['touch'] : [])]);
+    expect(next.referencedPullRequestUrl).toBe(url);
+    expect(next.issueNumber).toBe(7);
+    // The durable path stages a copy: the commit retires the stale resume and replaces the held record.
     expect(next.autoResumeAt).toBe(debounced ? undefined : at);
+    if (!debounced) expect(run).toEqual(before);
   });
 
   it.each([undefined, issue])('revokes or updates a number seeded by task resolution: %s', resolved => {
@@ -150,7 +153,8 @@ describe('record write paths without a database', () => {
     expect(run.manualUnarchivedAt).toBe(archived ? undefined : at);
   });
 
-  it.each(['0', '1'])('preserves the patch and text redaction difference with opt-out=%s', setting => {
+  // hearsay-tools/cezarion#2325: the redact hook owns the opt-out, so patches always reach it.
+  it.each(['0', '1'])('leaves the opt-out to the redact hook on text and patch paths with opt-out=%s', setting => {
     vi.stubEnv('CEZ_REDACT_SECRETS', setting);
     const host = vi.fn(() => ['host-secret-value']);
     const text = redactText('session-secret-value host-secret-value', ['session-secret-value'], host);
@@ -158,8 +162,8 @@ describe('record write paths without a database', () => {
     expect(text.includes('host-secret-value')).toBe(setting === '0');
     const run = makeRunRecord();
     stageDebouncedUpdate(run, { error: 'secret' }, hooks());
-    expect(run.error).toBe(setting === '0' ? 'secret' : '[REDACTED]');
-    expect(stageStepUpdate({ error: 'secret', name: 'secret' }, redact)).toEqual({ error: setting === '0' ? 'secret' : '[REDACTED]', name: 'secret' });
+    expect(run.error).toBe('[REDACTED]');
+    expect(stageStepUpdate({ error: 'secret', name: 'secret' }, redact)).toEqual({ error: '[REDACTED]', name: 'secret' });
   });
 
   it.each([{ initial: [] }, { initial: [{ number: 42, url, source: 'created' as const }] }])('merges PRs without duplicate entries: %j', ({ initial }) => {
