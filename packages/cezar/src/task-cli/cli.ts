@@ -391,7 +391,6 @@ function validateFlags(name: string, values: Values): void {
   }
   if (name === 'log' && values.until !== undefined && !values.follow) usageError('--until needs --follow');
   if (name === 'notify') {
-    if (values.message !== undefined && values['message-file'] !== undefined) usageError('notify takes the note as --message or --message-file, not both');
     if (values.off && (values.message !== undefined || values['message-file'] !== undefined)) usageError('--off takes no note');
   }
   if (name === 'list') { statuses(values.status); positiveInt(values.limit, 'limit', 1_000); }
