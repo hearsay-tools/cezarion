@@ -118,14 +118,15 @@ const report = (file, mutants = [wireMutant()]) => ({ files: { [file]: { source:
 function fakeDeps(file = 'packages/contract/src/sample.ts') {
   const calls = [];
   const deps = {
-    git: (args, cwd) => { calls.push(['git', ...args]); return args[0] === 'rev-parse' ? 'abcdef\n' : 'packages/cezar/src/sample.test.ts\n'; },
-    scratch: () => '/cache/scratch',
-    command: async (bin, args) => { calls.push([bin, ...args]); },
+    git: (args, cwd) => { calls.push(['git', ...args]); return args[0] === 'rev-parse' ? (args[1] === '--show-toplevel' ? '/live/repo\n' : 'abcdef\n') : 'packages/cezar/src/sample.test.ts\n'; },
+    scratch: () => '/cache/scratch', mkdir: dir => calls.push(['mkdir', dir]),
+    env: { PATH: '/bin', CEZ_COCKPIT_URL: 'http://127.0.0.1:4321', CEZ_PROJECT_ID: 'cezar', cez_task_id: 'live', CEZ_HOME: '/home/me/.cezar' },
+    command: async (bin, args, cwd, signal, env) => { calls.push([bin, ...args]); calls.push(['command-env', cwd, env]); },
     stryker: async (...args) => { calls.push(['stryker', args[0], args[3]]); return { outcome: 'exited', code: 0 }; },
     readReport: () => report(file), reset: cwd => calls.push(['reset', cwd]), removeReport: () => calls.push(['remove-report']),
     ranges: () => [], read: file => file.endsWith('equivalent.json') ? '[]' : "import { x } from '@open-mercato/cezar-contract/sample';",
     readJson: () => ({ vitest: { configFile: 'vitest.stryker.config.ts', pool: 'forks' }, reporters: ['json'], inPlace: true, timeoutMS: 30000 }), write: (file, text) => calls.push(['write', file, text]),
-    removeScratch: () => calls.push(['remove-scratch']), log: text => calls.push(['log', text]),
+    removeScratch: dir => calls.push(['remove-scratch', dir]), log: text => calls.push(['log', text]),
   };
   return { deps, calls };
 }
@@ -142,7 +143,7 @@ test('uncovered classes stay excluded; uncovered guard prose counts against its 
   assert.equal(result.guards[0].pass, false);
 });
 
-test('arguments accept contract tests and reject invalid options before creating a worktree', () => {
+test('arguments accept contract tests and reject invalid options before creating a scratch checkout', () => {
   assert.deepEqual(m.parseArgs(['packages/contract/src/a.ts', '--tests', 'one', 'two', '--concurrency', '8']).tests, ['one', 'two']);
   assert.equal(m.parseArgs(['packages/cezar/src/a.ts']).concurrency, 4);
   for (const args of [[], ['../x.ts'], ['packages/cezar/src/a.ts', '--tests', 'x'], ['packages/contract/src/a.ts', '--tests'], ['packages/cezar/src/a.ts', '--out'], ['packages/cezar/src/a.ts', '--bad', 'x'], ['packages/cezar/src/a.ts', '--concurrency', '9']]) assert.throws(() => m.parseArgs(args));
@@ -171,7 +172,7 @@ test('merge uses location, mutator and replacement, with detected statuses winni
   assert.throws(() => m.mergeReports(first, { files: { [file]: { source: 'different' } } }, file), /different source/);
 });
 
-test('command installs, builds, measures own tests then consumers, writes versioned output, and removes worktree', async () => {
+test('command installs, builds, measures own tests then consumers, writes versioned output, and removes the scratch checkout', async () => {
   const { deps, calls } = fakeDeps();
   const opts = m.parseArgs(['packages/contract/src/sample.ts', '--out', '/tmp/result.json']);
   const result = await m.runMeasurement(opts, deps);
@@ -181,13 +182,13 @@ test('command installs, builds, measures own tests then consumers, writes versio
   const runs = calls.filter(c => c[0] === 'stryker');
   assert.equal(runs.length, 2);
   assert.equal(runs[0][1], 'contract');
-  assert.equal(runs[0][2].cwd, '/cache/scratch');
+  assert.equal(runs[0][2].cwd, '/cache/scratch/checkout');
   assert.deepEqual(runs[0][2].extraArgs, ['--concurrency', '4']);
   assert.deepEqual(runs[1][2].extraArgs.slice(2), ['stryker.mutants-consumers.config.json']);
   assert.ok(calls.find(c => c[0] === 'write' && c[1] === '/tmp/result.json'));
   const configWrite = calls.find(c => c[0] === 'write' && c[1].endsWith('stryker.mutants-consumers.config.json'));
   assert.deepEqual(JSON.parse(configWrite[2]), { ...deps.readJson(), vitest: { pool: 'forks', configFile: 'vitest.mutants-consumers.config.ts' } });
-  assert.deepEqual(calls.slice(-3), [['git', 'worktree', 'remove', '--force', '/cache/scratch'], ['git', 'worktree', 'prune'], ['remove-scratch']]);
+  assert.deepEqual(calls.slice(-1), [['remove-scratch', '/cache/scratch']]);
   assert.match(m.summary(result), /FAIL: logic score/);
 });
 
@@ -202,18 +203,79 @@ test('non-contract run uses its own package; no consumers means no second contra
   assert.equal(b.calls.filter(c => c[0] === 'stryker').length, 1);
 });
 
-test('install, build, Stryker and report failures all remove then prune', async () => {
+test('the scratch checkout is a standalone shallow fetch of HEAD, never a linked worktree (hearsay-tools/cezarion#2367)', async () => {
+  const { deps, calls } = fakeDeps('packages/cezar/src/sample.ts');
+  await m.runMeasurement(m.parseArgs(['packages/cezar/src/sample.ts']), deps);
+  const git = calls.filter(c => c[0] === 'git').map(c => c.slice(1));
+  assert.equal(git.some(args => args.includes('worktree')), false);
+  assert.deepEqual(git.slice(0, 5), [
+    ['rev-parse', 'HEAD'], ['rev-parse', '--show-toplevel'],
+    ['init', '--quiet', '/cache/scratch/checkout'],
+    ['fetch', '--quiet', '--depth', '1', '--no-tags', '--no-write-fetch-head', '/live/repo', 'abcdef'],
+    ['checkout', '--quiet', '--detach', 'abcdef'],
+  ]);
+});
+
+test('install, build and Stryker run without CEZ_* variables and with an empty CEZ_HOME', async () => {
+  const { deps, calls } = fakeDeps('packages/cezar/src/sample.ts');
+  let strykerEnv;
+  deps.stryker = async (project, files, ms, options) => { strykerEnv = options.env; return { outcome: 'exited', code: 0 }; };
+  await m.runMeasurement(m.parseArgs(['packages/cezar/src/sample.ts']), deps);
+  const isolated = { PATH: '/bin', CEZ_HOME: '/cache/scratch/cez-home' };
+  assert.ok(calls.some(c => c[0] === 'mkdir' && c[1] === '/cache/scratch/cez-home'));
+  const envs = calls.filter(c => c[0] === 'command-env');
+  assert.equal(envs.length, 2);
+  for (const [, cwd, env] of envs) {
+    assert.equal(cwd, '/cache/scratch/checkout');
+    assert.deepEqual(env, isolated);
+  }
+  assert.deepEqual(strykerEnv, isolated);
+});
+
+test('a real scratch checkout has no route to the source repository', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mutants-scratch-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const run = (cwd, ...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t.invalid', '-c', 'init.defaultBranch=main', ...args], { cwd, encoding: 'utf8' }).trim();
+  const source = path.join(dir, 'source');
+  fs.mkdirSync(source);
+  run(source, 'init', '--quiet');
+  fs.writeFileSync(path.join(source, 'a.txt'), 'a\n');
+  run(source, 'add', 'a.txt');
+  run(source, 'commit', '--quiet', '-m', 'one');
+  run(source, 'branch', 'keep');
+  // The measurement often starts in a task worktree: fetch from a linked one, as it would.
+  const linked = path.join(dir, 'linked');
+  run(source, 'worktree', 'add', '--quiet', '--detach', linked);
+  const head = run(linked, 'rev-parse', 'HEAD');
+  const scratch = path.join(dir, 'scratch');
+  m.standaloneCheckout((args, cwd) => run(cwd ?? dir, ...args), linked, head, scratch);
+
+  assert.equal(run(scratch, 'rev-parse', 'HEAD'), head);
+  assert.equal(fs.realpathSync(run(scratch, 'rev-parse', '--path-format=absolute', '--git-common-dir')), fs.realpathSync(path.join(scratch, '.git')));
+  assert.equal(run(scratch, 'remote'), '');
+  assert.equal(fs.existsSync(path.join(scratch, '.git', 'objects', 'info', 'alternates')), false);
+  assert.equal(fs.existsSync(path.join(scratch, '.git', 'FETCH_HEAD')), false);
+  assert.equal(run(scratch, 'for-each-ref'), '');
+  // A mutant that writes or deletes refs reaches only the scratch repository.
+  run(scratch, 'update-ref', 'refs/heads/keep', head);
+  run(scratch, 'branch', '-D', 'keep');
+  run(scratch, 'update-ref', 'refs/heads/mutant', head);
+  assert.deepEqual(run(source, 'for-each-ref', '--format=%(refname)', 'refs/heads').split('\n'), ['refs/heads/keep', 'refs/heads/main']);
+  assert.deepEqual(run(source, 'worktree', 'list', '--porcelain').split('\n').filter(line => line.startsWith('worktree ')).map(line => fs.realpathSync(line.slice(9))), [source, linked].map(p => fs.realpathSync(p)));
+});
+
+test('install, build, Stryker and report failures all remove the scratch checkout', async () => {
   for (const stage of ['install', 'build:server', 'stryker', 'report']) {
     const { deps, calls } = fakeDeps();
     deps.command = async (bin, args) => { if (args.includes(stage)) throw new Error(stage); };
     if (stage === 'stryker') deps.stryker = async () => ({ outcome: 'exited', code: 1 });
     if (stage === 'report') deps.readReport = () => { throw new Error('report'); };
     await assert.rejects(m.runMeasurement(m.parseArgs(['packages/contract/src/sample.ts']), deps));
-    assert.deepEqual(calls.slice(-3), [['git', 'worktree', 'remove', '--force', '/cache/scratch'], ['git', 'worktree', 'prune'], ['remove-scratch']]);
+    assert.deepEqual(calls.slice(-1), [['remove-scratch', '/cache/scratch']]);
   }
 });
 
-test('SIGINT and SIGTERM stop Stryker group before worktree removal and return signal codes', async () => {
+test('SIGINT and SIGTERM stop Stryker group before scratch removal and return signal codes', async () => {
   const { runStryker } = require('./mutants-run.cjs');
   for (const [signal, expected] of [['SIGINT', 130], ['SIGTERM', 143]]) {
     const { deps, calls } = fakeDeps();
@@ -227,7 +289,7 @@ test('SIGINT and SIGTERM stop Stryker group before worktree removal and return s
     });
     assert.equal(await m.cli(['packages/contract/src/sample.ts'], deps, events), expected);
     const stopped = calls.findIndex(c => c[0] === 'kill');
-    const removed = calls.findIndex(c => c[1] === 'worktree' && c[2] === 'remove');
+    const removed = calls.findIndex(c => c[0] === 'remove-scratch');
     assert.ok(stopped >= 0 && removed > stopped);
     assert.deepEqual(calls[stopped], ['kill', -321, 'SIGKILL']);
     assert.equal(events.listenerCount(signal), 0);
@@ -240,7 +302,7 @@ test('signal during setup cleans after the command settles, before starting Stry
   deps.command = async (bin, args, cwd, signal) => { events.emit('SIGINT'); signal.throwIfAborted(); };
   assert.equal(await m.cli(['packages/contract/src/sample.ts'], deps, events), 130);
   assert.equal(calls.some(c => c[0] === 'stryker'), false);
-  assert.equal(calls.at(-2)[2], 'prune');
+  assert.deepEqual(calls.at(-1), ['remove-scratch', '/cache/scratch']);
 });
 
 test('measurement records source slices, function names and raw counts; compare is printed', () => {
@@ -367,7 +429,7 @@ test('failed consumer pass writes own-package result and failing names, prints F
   assert.match(result.consumers.reason, /Suite fails one; Suite fails two/);
   assert.doesNotMatch(result.consumers.reason, /expected undefined/);
   assert.match(calls.find(c => c[0] === 'log')[1], /FAIL: consumer tests: failed/);
-  assert.equal(calls.at(-2)[2], 'prune');
+  assert.deepEqual(calls.at(-1), ['remove-scratch', '/cache/scratch']);
 });
 
 test('missing consumer report keeps own-package result and records the exit or read reason', async () => {
@@ -434,7 +496,7 @@ test('pass reset runs after missing report and thrown Stryker errors', async () 
     else deps.stryker = async () => { throw new Error('spawn failed'); };
     await assert.rejects(m.runMeasurement(m.parseArgs(['packages/contract/src/sample.ts']), deps));
     assert.equal(calls.filter(c => c[0] === 'reset').length, 1);
-    assert.ok(calls.findIndex(c => c[0] === 'reset') < calls.findIndex(c => c[2] === 'remove'));
+    assert.ok(calls.findIndex(c => c[0] === 'reset') < calls.findIndex(c => c[0] === 'remove-scratch'));
   }
 });
 

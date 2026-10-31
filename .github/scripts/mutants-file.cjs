@@ -206,10 +206,10 @@ function summary(result) {
   return lines.join('\n');
 }
 
-async function strykerReport(deps, cwd, opts, project, extraArgs, signal, onOutput) {
+async function strykerReport(deps, cwd, opts, project, extraArgs, signal, onOutput, env) {
   deps.removeReport(cwd);
   try {
-    const result = await deps.stryker(project, [opts.file], 24 * 60 * 60_000, { cwd, extraArgs: ['--concurrency', String(opts.concurrency), ...extraArgs], signal, onOutput });
+    const result = await deps.stryker(project, [opts.file], 24 * 60 * 60_000, { cwd, env, extraArgs: ['--concurrency', String(opts.concurrency), ...extraArgs], signal, onOutput });
     signal.throwIfAborted();
     if (result.outcome !== 'exited' || result.code !== 0) throw new Error(`Stryker failed: ${result.outcome}, exit ${result.code}`);
     const report = deps.readReport(cwd);
@@ -220,21 +220,40 @@ async function strykerReport(deps, cwd, opts, project, extraArgs, signal, onOutp
   }
 }
 
+/**
+ * A standalone repository holding only `head` (hearsay-tools/cezarion#2367). A linked worktree
+ * shares the live repository's git directory: a mutant's git commands then write its refs, and
+ * checkout-root discovery maps the scratch copy to the live project, which a running cockpit
+ * serves. This copy has its own objects, no remote, no alternates and no fetch record.
+ */
+function standaloneCheckout(git, source, head, cwd) {
+  git(['init', '--quiet', cwd]);
+  git(['fetch', '--quiet', '--depth', '1', '--no-tags', '--no-write-fetch-head', source, head], cwd);
+  git(['checkout', '--quiet', '--detach', head], cwd);
+}
+
+/** No task context, cockpit address or project registry reaches the measured code. */
+function isolatedEnv(env, home) {
+  return { ...Object.fromEntries(Object.entries(env).filter(([key]) => !key.toUpperCase().startsWith('CEZ_'))), CEZ_HOME: home };
+}
+
 /** One committed snapshot, always removed after the active command has stopped. */
 async function runMeasurement(opts, deps, signal = new AbortController().signal) {
   const head = deps.git(['rev-parse', 'HEAD']).trim();
-  const cwd = deps.scratch();
-  let registered = false;
+  const source = deps.git(['rev-parse', '--show-toplevel']).trim();
+  const scratch = deps.scratch();
+  const cwd = path.join(scratch, 'checkout');
+  const env = isolatedEnv(deps.env, path.join(scratch, 'cez-home'));
   try {
-    deps.git(['worktree', 'add', '--detach', cwd, head]);
-    registered = true;
-    await deps.command('pnpm', ['install', '--frozen-lockfile'], cwd, signal);
-    await deps.command('npm', ['run', 'build:server'], cwd, signal);
+    standaloneCheckout(deps.git, source, head, cwd);
+    deps.mkdir(env.CEZ_HOME);
+    await deps.command('pnpm', ['install', '--frozen-lockfile'], cwd, signal, env);
+    await deps.command('npm', ['run', 'build:server'], cwd, signal, env);
     signal.throwIfAborted();
     const ranges = deps.ranges(opts.file, cwd);
-    const first = await strykerReport(deps, cwd, opts, opts.file.split('/')[1], [], signal);
+    const first = await strykerReport(deps, cwd, opts, opts.file.split('/')[1], [], signal, undefined, env);
     const consumer = opts.file.startsWith('packages/contract/')
-      ? await runConsumers(opts, deps, cwd, first, signal) : { report: first };
+      ? await runConsumers(opts, deps, cwd, first, signal, env) : { report: first };
     const { report, consumers } = consumer;
     const equivalent = readEquivalent(path.join(cwd, EQUIVALENT_FILE), { readFileSync: deps.read });
     const result = { ...measure(report, opts.file, head, ranges, TARGETS, equivalent.entries), warning: equivalent.warning, ...(consumers ? { consumers } : {}) };
@@ -243,16 +262,11 @@ async function runMeasurement(opts, deps, signal = new AbortController().signal)
     deps.log(summary(result));
     return result;
   } finally {
-    try {
-      if (registered) deps.git(['worktree', 'remove', '--force', cwd]);
-    } finally {
-      deps.git(['worktree', 'prune']);
-      deps.removeScratch(cwd);
-    }
+    deps.removeScratch(scratch);
   }
 }
 
-async function runConsumers(opts, deps, cwd, first, signal) {
+async function runConsumers(opts, deps, cwd, first, signal, env) {
   const files = deps.git(['ls-files'], cwd).trim().split('\n');
   const tests = consumerTests(opts.file, files, file => deps.read(path.join(cwd, file)), opts.tests);
   if (tests.length === 0) return { report: first };
@@ -262,7 +276,7 @@ async function runConsumers(opts, deps, cwd, first, signal) {
   deps.write(path.join(cwd, 'stryker.mutants-consumers.config.json'), `${JSON.stringify(scratchConfig, null, 2)}\n`);
   let output = '';
   try {
-    const second = await strykerReport(deps, cwd, opts, 'contract', ['stryker.mutants-consumers.config.json'], signal, chunk => { output = (output + chunk).slice(-1024 * 1024); });
+    const second = await strykerReport(deps, cwd, opts, 'contract', ['stryker.mutants-consumers.config.json'], signal, chunk => { output = (output + chunk).slice(-1024 * 1024); }, env);
     return { report: mergeReports(first, second, opts.file), consumers: { state: 'merged', tests } };
   } catch (error) {
     signal.throwIfAborted();
@@ -286,7 +300,9 @@ function defaultDeps() {
       fs.mkdirSync(base, { recursive: true });
       return fs.mkdtempSync(path.join(base, 'file-'));
     },
-    command: (bin, args, cwd, signal) => promisify(execFile)(bin, args, { cwd, signal, maxBuffer: 32 * 1024 * 1024 }).then(({ stdout, stderr }) => { process.stdout.write(stdout); process.stderr.write(stderr); }),
+    mkdir: dir => fs.mkdirSync(dir, { recursive: true }),
+    env: process.env,
+    command: (bin, args, cwd, signal, env) => promisify(execFile)(bin, args, { cwd, signal, env, maxBuffer: 32 * 1024 * 1024 }).then(({ stdout, stderr }) => { process.stdout.write(stdout); process.stderr.write(stderr); }),
     stryker: runStryker,
     reset: cwd => restoreTree(cwd, { removeReport: true }),
     readReport: cwd => JSON.parse(fs.readFileSync(path.join(cwd, REPORT), 'utf8')),
@@ -320,5 +336,5 @@ async function cli(argv, deps = defaultDeps(), events = process) {
   }
 }
 
-module.exports = { classText, kindOf, namedRanges, functionRanges, functionOf, tierOf, countsOf, scoreOf, evaluate, compareResults, parseArgs, importsModule, consumerTests, consumerConfig, mergeReports, measure, summary, strykerReport, runMeasurement, runConsumers, consumerFailure, defaultDeps, cli };
+module.exports = { standaloneCheckout, isolatedEnv, classText, kindOf, namedRanges, functionRanges, functionOf, tierOf, countsOf, scoreOf, evaluate, compareResults, parseArgs, importsModule, consumerTests, consumerConfig, mergeReports, measure, summary, strykerReport, runMeasurement, runConsumers, consumerFailure, defaultDeps, cli };
 if (require.main === module) cli(process.argv.slice(2)).then(code => { process.exitCode = code; }, error => { console.error(error.message); process.exitCode = 1; });
