@@ -95,4 +95,49 @@ describe('Ultra streams at the viewer pixel ratio in a real Chromium (hearsay-to
     await session.handle({ t: 'resize', w: 800, h: 600, dpr: 1.5 });
     await fractional;
   }, BUDGET_MS);
+
+  it.skipIf(process.platform === 'win32' || !bin)('streams 2x frames from a tab an agent created and attached to', async () => {
+    const profile = mkdtempSync(join(tmpdir(), 'cez-density-tab-'));
+    let browser: BrowserHandle | undefined;
+    cleanups.push(async () => {
+      if (browser) {
+        browser.close();
+        await waitForExit(browser);
+      }
+      rmSync(profile, { recursive: true, force: true });
+    });
+    browser = await launchBrowser(profile, process.env);
+    // As an agent does through the CDP proxy: a new target, then a flat page session on it.
+    const root = browser.connection.session(undefined);
+    const { targetId } = await root.send<{ targetId: string }>('Target.createTarget', { url: 'about:blank' });
+    const { sessionId } = await root.send<{ sessionId: string }>('Target.attachToTarget', { targetId, flatten: true });
+    const page = browser.connection.session(sessionId);
+    const session = await PreviewSession.create(page, { quality: () => 'ultra' });
+    cleanups.push(() => session.close());
+    const waiters: Array<{ size: string; resolve(): void }> = [];
+    const viewer: Viewer = {
+      sendFrame(buf) {
+        const size = jpegSize(buf);
+        for (const waiter of waiters.splice(0)) (waiter.size === size ? waiter.resolve() : waiters.push(waiter));
+        void session.handle({ t: 'ack' });
+      },
+      send() {},
+      close() {},
+      userAgent: 'test',
+    };
+    const ultra = new Promise<void>(resolve => waiters.push({ size: '1600x1200', resolve }));
+    const loaded = new Promise<void>(resolve => {
+      const off = page.on('Page.loadEventFired', () => {
+        off();
+        resolve();
+      });
+    });
+    await session.navigate('data:text/html,<p>agent tab</p><script>setInterval(()=>document.title=Date.now(),16)</script>');
+    await loaded;
+    session.attach(viewer);
+    await session.handle({ t: 'resize', w: 800, h: 600, dpr: 2 });
+    await ultra;
+    const reply = await page.send<{ result: { value: unknown } }>('Runtime.evaluate', { expression: 'devicePixelRatio', returnByValue: true });
+    expect(reply.result.value).toBe(2);
+  }, BUDGET_MS);
 });
