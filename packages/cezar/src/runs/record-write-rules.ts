@@ -235,6 +235,8 @@ export function redactPatch(
     const value = out[field];
     if (typeof value === 'string') out[field] = redact(value);
   }
+  // A patched input queue persists as written, so its text is scrubbed like a delivered input.
+  if (out.agentInputs) out.agentInputs = out.agentInputs.map(input => ({ ...input, text: redact(input.text) }));
   return out;
 }
 

@@ -391,6 +391,23 @@ describe('RunStore durable delegation', () => {
     expect(RunStore.open(dataDir, { keepLive: true }).getRun(id)?.agentInputs?.map(entry => entry.text)).toEqual(expected);
   });
 
+  it.each([true, false])('redacts a patched continuation queue, with a delivery=%s', withDelivery => {
+    const run = parent();
+    const metadata = worker(run.id, randomUUID());
+    if (metadata.role !== 'worker') throw new Error('fixture');
+    const id = metadata.workspace.ownerRunId;
+    store.createOwnedRun(input, run.id, randomUUID(), metadata, requestHash);
+    const secret = `session-${randomUUID()}`;
+    store.registerSessionSecret(secret);
+    const agentInput = (text: string) => ({ id: randomUUID(), source: WAIT_SOURCE.agent, parentRunId: run.id, text, createdAt: now });
+    store.commitWorkerContinuation(id, { status: RUN_STATUS.queued, agentInputs: [agentInput(`patched ${secret}`)] }, undefined,
+      withDelivery ? { rootId: run.id, state: { messages: [], outcomes: [] }, input: agentInput(`delivered ${secret}`) } : undefined);
+    store.flush();
+    expect(readPersistedText(dataDir)).not.toContain(secret);
+    const texts = RunStore.open(dataDir, { keepLive: true }).getRun(id)?.agentInputs?.map(entry => entry.text);
+    expect(texts).toEqual(withDelivery ? ['patched [REDACTED]', 'delivered [REDACTED]'] : ['patched [REDACTED]']);
+  });
+
   it('failed atomic writes publish no metadata, receipts, workers or events', () => {
     const run = parent();
     const original = readPersistedText(dataDir);
