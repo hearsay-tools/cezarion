@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
   agentWebhooksResponseSchema,
@@ -8,7 +7,7 @@ import {
 } from '@open-mercato/cezar-contract/projects';
 import { AGENT_REPORT_MESSAGE_MAX_LENGTH } from '@open-mercato/cezar-contract/project-limits';
 import { EXIT } from '../task-cli/cli.ts';
-import { discoverCockpit, type DiscoverOptions } from '../task-cli/discovery.ts';
+import { resolveCockpit, type DiscoverOptions } from '../task-cli/discovery.ts';
 import { invalidResponse, refuse, request, TaskCliError, type Cockpit, type HttpResult } from '../task-cli/http.ts';
 
 /**
@@ -106,22 +105,6 @@ async function reportBody(values: Parsed['values'], env: NodeJS.ProcessEnv, io: 
   };
 }
 
-/** The env address first; discovery only when the caller named a cockpit or a checkout. */
-async function resolveCockpit(env: NodeJS.ProcessEnv, values: Parsed['values'], io: WebhookIo): Promise<Cockpit> {
-  const address = env.CEZ_COCKPIT_URL?.trim();
-  const projectId = env.CEZ_PROJECT_ID?.trim();
-  if (address && projectId) {
-    let origin: string;
-    try { origin = new URL(address).origin; } catch {
-      throw new TaskCliError(EXIT.refused, { code: 'no-cockpit', error: `CEZ_COCKPIT_URL is not a URL: ${address}` });
-    }
-    return { origin, projectId, api: `${origin}/api/v1/p/${encodeURIComponent(projectId)}` };
-  }
-  const url = values.url ?? (env.CEZ_URL?.trim() || undefined);
-  if (url === undefined && values.repo === undefined) throw new TaskCliError(EXIT.refused, { code: 'no-cockpit', error: NO_COCKPIT });
-  return (io.discover ?? discoverCockpit)({ url, repoDir: resolve(values.repo ?? process.cwd()) });
-}
-
 export async function runWebhookCommand(
   argv: string[],
   env: NodeJS.ProcessEnv = process.env,
@@ -136,7 +119,7 @@ export async function runWebhookCommand(
     // Input is judged before any cockpit is looked for: a usage error is 64 with or without one.
     const { command, webhook, values } = parse(argv);
     const body = command === 'send' ? await reportBody(values, env, io) : undefined;
-    const cockpit = await resolveCockpit(env, values, io);
+    const cockpit = await resolveCockpit(env, values, io.discover, NO_COCKPIT);
     const http = io.http ?? request;
     if (command === 'list') {
       const result = await http(cockpit, '/agent-webhooks');

@@ -1,5 +1,4 @@
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
   ONCE_MAX_LATEST_START_MINUTES,
@@ -15,7 +14,7 @@ import { parseDurationMinutes, resolveDelay, SCHEDULED_TASK_NOTE } from '@open-m
 import { isValidTimeZone } from '@open-mercato/cezar-contract/zoned-time';
 import type { AutomationEvent, CreateAutomationInput } from '@open-mercato/cezar-contract';
 import { EXIT } from '../task-cli/cli.ts';
-import { discoverCockpit, type DiscoverOptions } from '../task-cli/discovery.ts';
+import { resolveCockpit, type DiscoverOptions } from '../task-cli/discovery.ts';
 import { fetchJson, refuse, TaskCliError, type Cockpit, type HttpResult } from '../task-cli/http.ts';
 import { AUTOMATION_SCHEMA_REFERENCE } from './prompts.ts';
 
@@ -249,31 +248,6 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 
-/** The env address first; discovery only when the caller named a cockpit or a checkout. */
-async function resolveCockpit(env: NodeJS.ProcessEnv, values: { url?: string; repo?: string }, io: AutomationIo): Promise<Cockpit> {
-  const address = env.CEZ_COCKPIT_URL?.trim();
-  const projectId = env.CEZ_PROJECT_ID?.trim();
-  if (address && projectId) {
-    let origin: string;
-    try { origin = new URL(address).origin; } catch {
-      throw new TaskCliError(EXIT.refused, { code: 'no-cockpit', error: `CEZ_COCKPIT_URL is not a URL: ${address}` });
-    }
-    return { origin, projectId, api: `${origin}/api/v1/p/${encodeURIComponent(projectId)}` };
-  }
-  const url = values.url ?? (env.CEZ_URL?.trim() || undefined);
-  if (url === undefined && values.repo === undefined) throw new TaskCliError(EXIT.refused, { code: 'no-cockpit', error: NO_COCKPIT });
-  try {
-    return await (io.discover ?? discoverCockpit)({ url, repoDir: resolve(values.repo ?? process.cwd()) });
-  } catch (error) {
-    // Discovery's hint says to start a cockpit; this command never suggests that.
-    if (error instanceof TaskCliError) {
-      const { hint: _hint, ...body } = error.body;
-      throw new TaskCliError(error.exitCode, body);
-    }
-    throw error;
-  }
-}
-
 interface Parsed { command: Command; id: string; values: Record<string, unknown> }
 
 function parse(argv: string[]): Parsed {
@@ -323,7 +297,7 @@ export async function runAutomationCommand(
       body = bodyFromAddFlags(flags, prompt, { now }) as Record<string, unknown>;
       // A one-time schedule without --tz resolves in the cockpit's zone, which only the cockpit knows.
       if ((flags.at !== undefined || flags.in !== undefined) && flags.tz === undefined) {
-        const cockpit = await resolveCockpit(env, values as { url?: string; repo?: string }, io);
+        const cockpit = await resolveCockpit(env, values as { url?: string; repo?: string }, io.discover, NO_COCKPIT, { removeDiscoveryHint: true });
         const timeZone = await cockpitTimeZone(cockpit, io);
         body = bodyFromAddFlags(flags, prompt, { timeZone, now }) as Record<string, unknown>;
         return await execute(command, id, values, body, cockpit, io, print);
@@ -331,7 +305,7 @@ export async function runAutomationCommand(
     } else if (command === 'create' || command === 'update') {
       body = await readDefinition(values as { file?: string; json?: string }, io);
     }
-    const cockpit = await resolveCockpit(env, values as { url?: string; repo?: string }, io);
+    const cockpit = await resolveCockpit(env, values as { url?: string; repo?: string }, io.discover, NO_COCKPIT, { removeDiscoveryHint: true });
     return await execute(command, id, values, body, cockpit, io, print);
   } catch (error) {
     if (error instanceof TaskCliError) {
