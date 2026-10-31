@@ -43,7 +43,12 @@ export function createRunCacheWriter(client: QueryClient) {
    */
   const invalidateIndex = () => { void client.invalidateQueries({ queryKey: indexKey }) }
 
-  /** continue/send deliberately invalidate the CURRENT scope, even for explicit-project requests. */
+  /**
+   * continue/send refresh the run's OWN project and the CURRENT scope (hearsay-tools/cezarion#2327).
+   * An explicit-project request comes from All tasks, whose Resolve conflicts button reads the
+   * run under its own project: refreshing only the current scope left that record claiming a
+   * session the server had closed. The current scope stays, read at callback time, as before.
+   */
   function invalidateAfter(action: 'runs' | 'continue' | 'send' | 'index' | 'indexed', address: ProjectAddress | (() => ProjectAddress)) {
     if (action === 'index') return invalidateIndex()
     const target = typeof address === 'function' ? address() : address
@@ -53,10 +58,10 @@ export function createRunCacheWriter(client: QueryClient) {
       void client.invalidateQueries({ queryKey: [target.projectId, 'runs', 'list'] })
       return
     }
-    const scope = action === 'continue' || action === 'send'
-      ? queryScope()
-      : target.cacheScope
-    return client.invalidateQueries({ queryKey: [scope, 'runs'] })
+    if (action === 'runs') return client.invalidateQueries({ queryKey: [target.cacheScope, 'runs'] })
+    const scopes = new Set([target.cacheScope, queryScope()])
+    return Promise.all([...scopes].map(scope => client.invalidateQueries({ queryKey: [scope, 'runs'] })))
+      .then(() => undefined)
   }
 
   async function patchRead(source: AddressSource, read: boolean) {

@@ -1614,10 +1614,10 @@ export function useSendMessage(id: string, projectId?: string) {
     // is the ordinary case and keeps the scoped-by-context spelling.
     mutationFn: (message: MessageInput) =>
       sendMessage(runAddress(id, { projectId }), message),
-    onSuccess: () => writer.invalidateAfter('send', () => projectAddress()),
+    onSuccess: () => writer.invalidateAfter('send', () => projectAddress({ projectId })),
     onError: (error) => {
       if (error instanceof ApiError && error.status === 409) {
-        void writer.invalidateAfter('send', () => projectAddress())
+        void writer.invalidateAfter('send', () => projectAddress({ projectId }))
       }
     },
   })
@@ -1634,7 +1634,7 @@ export function useContinueRun(id: string, projectId?: string) {
   return useMutation({
     mutationFn: (opts: ContinueOptions = {}) =>
       continueRun(runAddress(id, { projectId }), opts),
-    onSuccess: () => writer.invalidateAfter('continue', () => projectAddress()),
+    onSuccess: () => writer.invalidateAfter('continue', () => projectAddress({ projectId })),
   })
 }
 
