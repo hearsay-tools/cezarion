@@ -67,6 +67,14 @@ comment.
 | Not covered | Any mutator on a line that no test runs | Yes |
 | Text | `StringLiteral` whose original is prose (two or more words) | Only in guard functions |
 | Class name | `StringLiteral` of Tailwind classes in a `.tsx` file | No |
+| Static | Any mutator on code that runs when the module is imported (Stryker static coverage) | Yes, by the row of its mutator above |
+
+Static rows rule (hearsay-tools/cezarion#2363): the whole-file command runs the file's own package
+pass with `ignoreStatic` off. Each static mutant is then active before any test file imports the
+module, and runs every related test, so its outcome is measured. The contract consumer pass keeps
+`ignoreStatic` on, because each static mutant there would run every consumer test file (over
+three hours for `waits.ts`). Results of this rule are version 2, and `--compare` refuses a version 1
+result. The pull request job keeps `ignoreStatic` on.
 
 ## Guard functions
 
