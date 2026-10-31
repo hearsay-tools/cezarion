@@ -27,6 +27,8 @@ function serveDelete(reply: () => Response | Promise<Response>) {
   return sent
 }
 
+let repoReads = 0
+
 function DialogHarness({ entry, onClose }: { entry: RepoBranchEntry; onClose: () => void }) {
   const [open, setOpen] = useState(true)
   const repo = useQuery({ queryKey: queryKeys.repo, queryFn: () => Promise.resolve(++repoReads) })
@@ -37,7 +39,6 @@ function DialogHarness({ entry, onClose }: { entry: RepoBranchEntry; onClose: ()
     <Toaster />
   </>
 }
-let repoReads = 0
 
 function showDialog(entry = BRANCH) {
   repoReads = 0
@@ -68,14 +69,11 @@ describe('DeleteBranchDialog', () => {
       const button = screen.getByRole('button', { name: 'Delete branch' })
       expect((button as HTMLButtonElement).disabled).toBe(true)
       fireEvent.click(button)
-      submitName()
+      await act(async () => submitName())
       expect(sent).toEqual([])
       expect(onClose).not.toHaveBeenCalled()
       expect(screen.getByRole('alertdialog')).toBeTruthy()
     }
-    // End the mutation microtask too, so a forbidden request cannot hide behind its scheduling.
-    await act(async () => {})
-    expect(sent).toEqual([])
   })
 
   it.each(['button', 'form'])('deletes only the named branch through the %s with trimmed confirmation', async (via) => {
@@ -262,5 +260,40 @@ describe('not-landed branch decisions', () => {
     expect(screen.getByRole('link', { name: BRANCH.name })).toBeTruthy()
     await openMenu()
     expect(screen.queryByRole('menuitem', { name: 'Create draft PR' }) !== null).toBe(state === 'closed')
+  })
+})
+
+describe('not-landed asynchronous list actions', () => {
+  it('keeps both PR actions disabled while creating, then refreshes the branch and task lists', async () => {
+    let finish!: (value: Response) => void
+    const reply = new Promise<Response>((resolve) => { finish = resolve })
+    showSection([BRANCH], () => reply)
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft PR' }))
+    const creating = await screen.findByRole('button', { name: 'Creating…' })
+    expect((creating as HTMLButtonElement).disabled).toBe(true)
+    await openMenu()
+    expect(screen.getByRole('menuitem', { name: 'Create draft PR' }).getAttribute('aria-disabled')).toBe('true')
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+    await act(async () => finish(response({ url: 'https://github.com/acme/repo/pull/21' })))
+    await screen.findByText('Draft PR created — https://github.com/acme/repo/pull/21', { exact: true })
+    await waitFor(() => {
+      const calls = vi.mocked(fetch).mock.calls.map(([input]) => String(input))
+      expect(calls).toContain('/api/v1/repo/branches')
+      expect(calls).toContain('/api/v1/run-summaries?archived=recent')
+    })
+  })
+
+  it('offers PR creation and copy through the row menu', async () => {
+    const copy = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText: copy } })
+    showSection([BRANCH], () => response({ url: 'https://github.com/acme/repo/pull/22' }))
+    await openMenu()
+    expect(screen.getByRole('menuitem', { name: 'Open task' }).getAttribute('href')).toBe('/tasks/r1')
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy branch' }))
+    await screen.findByText(`Copied ${BRANCH.name}`, { exact: true })
+    expect(copy).toHaveBeenCalledExactlyOnceWith(BRANCH.name)
+    await openMenu()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Create draft PR' }))
+    await screen.findByText('Draft PR created — https://github.com/acme/repo/pull/22', { exact: true })
   })
 })
