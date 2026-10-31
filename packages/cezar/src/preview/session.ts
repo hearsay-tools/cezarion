@@ -230,8 +230,7 @@ export class PreviewSession {
   async handle(msg: PreviewClientMessage): Promise<void> {
     switch (msg.t) {
       case 'resize':
-        // An older cockpit sends no ratio: it streams at 1, as before.
-        return this.setViewport(msg.w, msg.h, msg.dpr ?? 1);
+        return this.setViewport(msg.w, msg.h, msg.dpr);
       case 'ack': {
         if (this.pending === undefined) return;
         const acked = this.pending;
@@ -300,10 +299,12 @@ export class PreviewSession {
     return run;
   }
 
-  private setViewport(w: number, h: number, dpr: number): Promise<void> {
+  /** `dpr` is the viewer's pixel ratio; an older cockpit sends none, and streams at 1 as before. */
+  private setViewport(w: number, h: number, dpr: number | undefined): Promise<void> {
     // Recorded now, so an attach that follows queued resizes starts at the newest size.
-    this.viewport = { w, h, dpr };
-    return this.enqueue(() => this.applyViewport(w, h, dpr));
+    const viewport = { w, h, dpr: dpr ?? 1 };
+    this.viewport = viewport;
+    return this.enqueue(() => this.applyViewport(viewport.w, viewport.h, viewport.dpr));
   }
 
   private quality(): PreviewQuality {

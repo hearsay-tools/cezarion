@@ -84,7 +84,10 @@ describe('pixel density (hearsay-tools/cezarion#2069)', () => {
     await session.handle({ t: 'resize', w: 800, h: 600, dpr: 1 });
     await flush();
     expect(sent('Page.startScreencast').map(call => [call.params.maxWidth, call.params.maxHeight])).toEqual([[1280, 800], [1600, 1200], [800, 600]]);
-    expect(sent('Browser.setWindowBounds').map(call => (call.params.bounds as { left: number }).left)).toEqual([100_000, 0]);
+    const lefts = sent('Browser.setWindowBounds').map(call => {
+      return (call.params.bounds as { left: number }).left;
+    });
+    expect(lefts).toEqual([100_000, 0]);
     // No navigation or reload: the page stays as it is.
     expect(sent('Page.navigate')).toHaveLength(0);
     expect(sent('Page.reload')).toHaveLength(0);

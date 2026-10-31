@@ -64,7 +64,10 @@ describe('Ultra streams at the viewer pixel ratio in a real Chromium (hearsay-to
     // A page that paints all the time, so a restarted stream always has a next frame.
     await session.navigate('data:text/html,<input id=field><script>setInterval(()=>document.title=Date.now(),16)</script>');
     await browser.cdp.send('Runtime.evaluate', { expression: 'document.getElementById("field").value = "kept"' });
-    const evaluate = async (expression: string) => (await browser!.cdp.send<{ result: { value: unknown } }>('Runtime.evaluate', { expression, returnByValue: true })).result.value;
+    const evaluate = async (expression: string) => {
+      const reply = await browser!.cdp.send<{ result: { value: unknown } }>('Runtime.evaluate', { expression, returnByValue: true });
+      return reply.result.value;
+    };
 
     const ultra = frameOf('1600x1200');
     session.attach(viewer);

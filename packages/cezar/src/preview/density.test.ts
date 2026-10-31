@@ -51,7 +51,9 @@ describe('PixelDensity (hearsay-tools/cezarion#2069)', () => {
     await density.place(2);
     expect(screens.map(screen => [screen.availLeft, screen.devicePixelRatio])).toEqual([[0, 1], [100_000, 2], [120_000, 1.5]]);
     await density.place(1);
-    const moves = calls.filter(call => call.method === 'Browser.setWindowBounds').map(call => (call.params.bounds as { left: number }).left);
+    const moves = calls.filter(call => call.method === 'Browser.setWindowBounds').map(call => {
+      return (call.params.bounds as { left: number }).left;
+    });
     expect(moves).toEqual([100_000, 120_000, 100_000, 0]);
     // The window id is read once.
     expect(calls.filter(call => call.method === 'Browser.getWindowForTarget')).toHaveLength(1);
