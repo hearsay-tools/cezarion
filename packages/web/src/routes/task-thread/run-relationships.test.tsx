@@ -6,6 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { ProjectScopeProvider } from '@/api/project-scope-context'
 import { createQueryClient } from '@/api/query-client'
 import type { ApiRun, WorkerInspection } from '@open-mercato/cezar-api-client'
+import { makeWorkerWait } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { WorkerActivitySection, WorkerWaitDetails, hasWorkerWaitDetails } from './run-relationships'
 
 const parentId = '10000000-0000-4000-8000-000000000001'
@@ -344,9 +345,9 @@ it('does not claim an ordinary task has no workers while its lookup is empty', a
 })
 
 type WorkerEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'worker' }>
-const waitEntry = (extra: Partial<WorkerEntry> = {}): WorkerEntry => ({
-  kind: 'worker', id: workerId, source: 'agent', via: 'cez-worker-wait', registeredAt: at,
-  deadline: at, phase: 'open', turnId: 'turn-1', timeoutSeconds: 600, workerIds: [workerId], revisions: [], outcomes: [], ...extra,
+const waitEntry = (extra: Partial<WorkerEntry> = {}): WorkerEntry => makeWorkerWait({
+  id: workerId, registeredAt: at, deadline: at, turnId: 'turn-1', timeoutSeconds: 600,
+  workerIds: [workerId], revisions: [], outcomes: [], ...extra,
 })
 
 it.each([

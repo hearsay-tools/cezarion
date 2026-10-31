@@ -335,22 +335,22 @@ describe('RunWaitDetails', () => {
 
   it('shows a settled CI entry still in waits ahead of an older lastWaits entry', () => {
     renderWaits(run('done', {
-      lastWaits: [ciEntry({ phase: 'delivered', result: observed('passed') })],
-      waits: [ciEntry({ phase: 'resolved', result: observed('failed') })],
+      lastWaits: [ciEntry({ phase: WAIT_PHASE.delivered, result: observed('passed') })],
+      waits: [ciEntry({ phase: WAIT_PHASE.resolved, result: observed('failed') })],
     }))
     expect(screen.getByText('CI checks failed — inspect the PR checks')).toBeTruthy()
     expect(screen.queryByText(/CI checks passed/)).toBeNull()
   })
 
   it('shows unavailable settled CI without a result or timestamp', () => {
-    renderWaits(run('done', { lastWaits: [ciEntry({ phase: 'delivered' })] }))
+    renderWaits(run('done', { lastWaits: [ciEntry({ phase: WAIT_PHASE.delivered })] }))
     expect(screen.getByText('CI wait unavailable')).toBeTruthy()
     expect(screen.queryByText('Observed')).toBeNull()
     expect(document.querySelector('time')).toBeNull()
   })
 
   it('shows an unknown observed head and refuses an unsafe PR link', () => {
-    renderWaits(run('done', { lastWaits: [ciEntry({ phase: 'delivered', prUrl: 'javascript:void(0)',
+    renderWaits(run('done', { lastWaits: [ciEntry({ phase: WAIT_PHASE.delivered, prUrl: 'javascript:void(0)',
       result: { ...observed('head_changed')!, observedHeadSha: undefined },
     })] }))
     expect(screen.getByText('CI head changed — 1234567 → unknown')).toBeTruthy()
@@ -361,7 +361,7 @@ describe('RunWaitDetails', () => {
   it.each([
     ['cancelled', 'Merge wait cancelled'], ['error', 'Merge wait unavailable — inspect access and the PR'],
   ] as const)('names a merge-specific %s outcome', (outcome, label) => {
-    renderWaits(run('done', { lastWaits: [ciEntry({ until: 'merge', phase: 'delivered', result: observed(outcome) })] }))
+    renderWaits(run('done', { lastWaits: [ciEntry({ until: 'merge', phase: WAIT_PHASE.delivered, result: observed(outcome) })] }))
     expect(screen.getByText(label)).toBeTruthy()
   })
 
