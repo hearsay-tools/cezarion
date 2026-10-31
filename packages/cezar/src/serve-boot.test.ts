@@ -189,6 +189,42 @@ describe('createServeApplicationUpdate', () => {
     expect(shutdownForRestart).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    { npmBin: '/npm', prefix: '', cache: '/cache' },
+    { npmBin: '/npm', prefix: '/prefix', cache: '' },
+  ])('requires both npm paths outside dry-run (%j)', (metadata) => {
+    vi.stubEnv('CEZ_DRY_RUN', '0');
+    expect(createServeApplicationUpdate('/repo', {}, vi.fn(), () => metadata)).toBeUndefined();
+    expect(ApplicationUpdateService).not.toHaveBeenCalled();
+  });
+
+  it('uses discovered paths in dry-run and reads the latest version on each call', async () => {
+    vi.stubEnv('CEZ_DRY_RUN', '1');
+    const update: { latest?: string } = {};
+    const getServer = vi.fn(() => ({ address: () => ({ address: '127.0.0.1', port: 5432 }) })) as unknown as () => ReturnType<typeof startServer>;
+    const service = createServeApplicationUpdate('/different-repo', update, getServer,
+      () => ({ npmBin: '/custom/npm', prefix: '/custom/prefix', cache: '/custom/cache' }));
+    expect(service).toBeInstanceOf(ApplicationUpdateService);
+    const options = vi.mocked(ApplicationUpdateService).mock.calls[0]![0];
+    expect(options).toMatchObject({ npmPrefix: '/custom/prefix', npmCache: '/custom/cache', npmBin: '/custom/npm', dryRun: true });
+    expect(options.targetVersion()).toBeUndefined();
+    update.latest = '3.0.0';
+    expect(options.targetVersion()).toBe('3.0.0');
+    const plan = {} as Parameters<typeof armRestartHelper>[0];
+    await options.armRestart!(plan);
+    expect(armRestartHelper).toHaveBeenCalledWith(plan, { repoRoot: '/different-repo', host: '127.0.0.1', port: 5432, npmBin: '/custom/npm' });
+  });
+
+  it('arms the restart helper with the default npm command in dry-run', async () => {
+    vi.stubEnv('CEZ_DRY_RUN', '1');
+    const getServer = vi.fn(() => ({ address: () => ({ address: '127.0.0.1', port: 4321 }) })) as unknown as () => ReturnType<typeof startServer>;
+    createServeApplicationUpdate('/repo', {}, getServer, () => undefined);
+    const options = vi.mocked(ApplicationUpdateService).mock.calls[0]![0];
+    const plan = {} as Parameters<typeof armRestartHelper>[0];
+    await options.armRestart!(plan);
+    expect(armRestartHelper).toHaveBeenCalledWith(plan, { repoRoot: '/repo', host: '127.0.0.1', port: 4321, npmBin: 'npm' });
+  });
+
   it('uses dry-run defaults when npm is missing', () => {
     vi.stubEnv('CEZ_DRY_RUN', '1');
     createServeApplicationUpdate('/repo', {}, vi.fn(), () => undefined);
