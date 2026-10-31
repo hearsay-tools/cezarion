@@ -1,31 +1,42 @@
 import { createServer, type Server } from 'node:http'
 import { connect, createServer as createNetServer } from 'node:net'
+import { spawn } from 'node:child_process'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { afterEach, describe, expect, it } from 'vitest'
-import { refusesConnection, takeOutboundRefusals, throwOutboundRefusals } from './test-outbound-guard.testkit.ts'
+import { refusesConnection, servedKey, takeOutboundRefusals, throwOutboundRefusals } from './test-outbound-guard.testkit.ts'
 
 // The setup file installs the guard (hearsay-tools/cezarion#2367). These tests drive it through
 // real sockets, so a setup that stops installing it fails here.
 
 const REFUSED = 'ERR_TEST_OUTBOUND_REFUSED'
 
-async function listenOn(server: Server, port: number): Promise<boolean> {
+async function listenOn(server: Server, port: number, host: string): Promise<boolean> {
   return new Promise(resolve => {
     server.once('error', () => resolve(false))
-    server.listen(port, '127.0.0.1', () => resolve(true))
+    server.listen(port, host, () => resolve(true))
   })
 }
 
 /** A server on a port from the refused range, so only the served-port record lets a request through. */
-async function serveInRefusedRange(): Promise<{ server: Server; port: number }> {
+async function serveInRefusedRange(host = '127.0.0.1'): Promise<{ server: Server; port: number }> {
   for (let attempt = 0; attempt < 50; attempt++) {
     const port = 20_000 + Math.floor(Math.random() * 10_000)
     const server = createServer((_req, res) => res.end('ok'))
-    if (await listenOn(server, port)) return { server, port }
+    if (await listenOn(server, port, host)) return { server, port }
   }
   throw new Error('no free port between 20000 and 30000')
+}
+
+/** A listener this process does not own: a child process, as a live cockpit would be. */
+async function childListener(port: number, host: string): Promise<() => void> {
+  const child = spawn(process.execPath, ['-e', `require('node:net').createServer(s => s.end()).listen(${port}, '${host}', () => console.log('up'))`])
+  await new Promise<void>((resolve, reject) => {
+    child.stdout.on('data', () => resolve())
+    child.once('exit', code => reject(new Error(`child listener exited with ${code}`)))
+  })
+  return () => child.kill()
 }
 
 const close = (server: Server) => new Promise<void>(resolve => server.close(() => resolve()))
@@ -78,6 +89,29 @@ describe('outbound guard installed by the test setup', () => {
     }
   })
 
+  // Linux routes all of 127.0.0.0/8 to loopback; other hosts may not configure 127.0.0.2.
+  it.skipIf(process.platform !== 'linux')('refuses a port this process serves on another loopback address', async () => {
+    const { server, port } = await serveInRefusedRange('127.0.0.2')
+    const stop = await childListener(port, '127.0.0.1')
+    try {
+      const error = await new Promise<NodeJS.ErrnoException | undefined>(resolve => {
+        const socket = connect(port, '127.0.0.1')
+        socket.on('error', resolve).on('connect', () => { socket.destroy(); resolve(undefined) })
+      })
+      expect(error?.code).toBe(REFUSED)
+      expect(takeOutboundRefusals().map(refusal => refusal.destination)).toEqual([`127.0.0.1:${port}`])
+      // A raw socket, not fetch: an environment proxy may not exempt 127.0.0.2.
+      await new Promise<void>((resolve, reject) => {
+        const socket = connect(port, '127.0.0.2')
+        socket.on('connect', () => { socket.destroy(); resolve() }).on('error', reject)
+      })
+      expect(takeOutboundRefusals()).toEqual([])
+    } finally {
+      stop()
+      await close(server)
+    }
+  })
+
   it('lets a connection reach a unix socket', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cez-guard-'))
     const path = join(dir, 'guard.sock')
@@ -102,7 +136,7 @@ describe('outbound guard installed by the test setup', () => {
 })
 
 describe('refusesConnection', () => {
-  const served = new Set([4321])
+  const served = new Set([servedKey('127.0.0.1', 4321), servedKey('::', 4400), servedKey('127.0.0.1', 4500), servedKey('::1', 4500)])
 
   it.each([
     ['github.com', 443],
@@ -114,12 +148,20 @@ describe('refusesConnection', () => {
     ['0.0.0.0', 8080],
     ['[::1]', 1024],
     ['::ffff:127.0.0.1', 32767],
+    ['127.0.0.2', 4321], // served on 127.0.0.1 only: another process may own 127.0.0.2:4321
+    ['::1', 4321],
+    ['localhost', 4321], // localhost may resolve to ::1, which this process does not serve
   ])('refuses %s:%s', (host, port) => {
     expect(refusesConnection(host, port, served)).toBe(true)
   })
 
   it.each([
     ['127.0.0.1', 4321], // served in this process
+    ['::ffff:127.0.0.1', 4321],
+    ['0.0.0.0', 4321], // connects to 127.0.0.1
+    ['127.0.0.5', 4400], // a wildcard bind owns the port on every loopback address
+    ['localhost', 4400],
+    ['localhost', 4500], // both loopback addresses served
     ['127.0.0.1', 1], // below 1024: nothing unprivileged listens there
     ['localhost', 1023],
     ['127.0.0.1', 32768], // the ephemeral range, where listen(0) and child fixtures land
