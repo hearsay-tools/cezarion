@@ -250,7 +250,6 @@ import { resolveCursorExecutable } from '../core/cursor-model-catalog.ts';
 import { resolveOmpExecutable } from '../core/omp-model-catalog.ts';
 import {
   allocateProjectSlug,
-  listProjects,
   normalizeProjectTags,
   probeProjectStatus,
   toProjectListEntry,
@@ -5325,7 +5324,9 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   let listeningPort: number | undefined;
   const cezarPort = deps.cezarPort ?? (() => listeningPort);
   const workspaceProjects = deps.workspaceProjects ?? createWorkspaceProjects({ bootRoot: deps.repoRoot, bootProjectId: deps.bootProjectId, bindHost: deps.bindHost });
-  const automationCoordinator = new AutomationCoordinator({ listProjects });
+  // Every registry reader below sees what createApp sees: single-project mode hides other projects.
+  const visibleProjects = () => workspaceProjects.listVisibleProjects();
+  const automationCoordinator = new AutomationCoordinator({ listProjects: visibleProjects });
   const bootProjectId = deps.bootProjectId ?? 'default';
   const bootAutomationStore = automationCoordinator.store(bootProjectId, deps.repoRoot)!;
   const taskWebhooks = createTaskWebhooks(deps);
@@ -5338,7 +5339,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   };
   const sharedContexts = createWorkspaceProjectContexts(deps, taskWebhooks, {
     ownership: deps.ownership,
-    listProjects: () => workspaceProjects.listVisibleProjects(),
+    listProjects: visibleProjects,
     cezarPort,
     automationStore: (projectId, root) => automationCoordinator.store(projectId, root)!,
     addressManager,
@@ -5346,8 +5347,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   const archiveDeps: import('./archive-on-merge.ts').ArchiveOnMergeDeps = {
     projects: async () => {
       const boot = { id: bootProjectId, root: deps.repoRoot, status: 'ok' as const };
-      if (workspaceProjects.singleProject()) return [boot];
-      return [boot, ...(await listProjects()).filter(project => project.id !== bootProjectId && project.root !== deps.repoRoot)];
+      return [boot, ...(await visibleProjects()).filter(project => project.id !== bootProjectId && project.root !== deps.repoRoot)];
     },
     enabled: async project => resolveArchiveOnMerge(await loadConfig(project.root), await loadWorkspaceConfig()).enabled,
     repository: async project => {
@@ -5539,7 +5539,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   const startBackgroundServices = () => {
     archiveOnMerge.start();
     completionActions.start();
-    void listProjects().then((projects) => {
+    void visibleProjects().then((projects) => {
       const all = projects.some((project) => project.root === deps.repoRoot)
         ? projects : [{ id: deps.bootProjectId ?? 'default', root: deps.repoRoot, status: 'ok' as const }, ...projects];
       // #781: every registered project's preview leftovers, not only the boot project's.
