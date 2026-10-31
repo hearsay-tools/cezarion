@@ -61,13 +61,21 @@ describe('Ultra streams at the viewer pixel ratio in a real Chromium (hearsay-to
     };
     const frameOf = (size: string) => new Promise<void>(resolve => waiters.push({ size, resolve }));
 
-    // A page that paints all the time, so a restarted stream always has a next frame.
-    await session.navigate('data:text/html,<input id=field><script>setInterval(()=>document.title=Date.now(),16)</script>');
-    await browser.cdp.send('Runtime.evaluate', { expression: 'document.getElementById("field").value = "kept"' });
     const evaluate = async (expression: string) => {
       const reply = await browser!.cdp.send<{ result: { value: unknown } }>('Runtime.evaluate', { expression, returnByValue: true });
       return reply.result.value;
     };
+    // A page that paints all the time, so a restarted stream always has a next frame. `Page.navigate`
+    // answers before the new document loads, so the field is filled only after its load event.
+    const loaded = new Promise<void>(resolve => {
+      const off = browser!.cdp.on('Page.loadEventFired', () => {
+        off();
+        resolve();
+      });
+    });
+    await session.navigate('data:text/html,<input id=field><script>setInterval(()=>document.title=Date.now(),16)</script>');
+    await loaded;
+    expect(await evaluate('document.getElementById("field").value = "kept"')).toBe('kept');
 
     const ultra = frameOf('1600x1200');
     session.attach(viewer);
