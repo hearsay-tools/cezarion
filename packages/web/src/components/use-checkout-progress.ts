@@ -7,9 +7,8 @@ import type { CheckoutProgressEvent } from '@open-mercato/cezar-api-client'
 
 export function useCheckoutProgress(idPrefix: string, isPending: boolean) {
   const [progress, setProgress] = useState<string | null>(null)
-  // One id per mounted dialog. The dialog is mounted only while open (AddProjectMenu), so a
-  // second clone attempt in a second opening is a second id — which is the point: a stale
-  // event from an abandoned clone must never drive this one's progress line.
+  // One id per mounted dialog. Each dialog mounts only while open, so a stale event
+  // from an abandoned attempt never drives this one's progress line.
   const checkoutId = useMemo(() => `${idPrefix}${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`, [])
 
   // Kept in a ref, not state: the listener below must read the CURRENT id without re-subscribing
@@ -39,7 +38,6 @@ export function useCheckoutProgress(idPrefix: string, isPending: boolean) {
     if (signal.aborted || event?.checkoutId !== idRef.current) return
     setProgress(event?.phase === 'cloning' ? event.line ?? null : null)
   }), [isPending, checkoutId])
-
 
   return { checkoutId, progress, setProgress }
 }
