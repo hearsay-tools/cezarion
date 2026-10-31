@@ -413,7 +413,7 @@ function QualityOptions({ quality, onQuality, compact }: { quality: PreviewQuali
   return (
     <DropdownMenuRadioGroup value={quality} onValueChange={value => onQuality(toPreviewQuality(value))}>
       {PREVIEW_QUALITIES.map(option => (
-        <DropdownMenuRadioItem key={option.value} value={option.value} className={cn('items-start', compact && 'min-h-11')}>
+        <DropdownMenuRadioItem key={option.value} value={option.value} data-quality={option.value} className={cn('items-start', compact && 'min-h-11')}>
           <span className="flex flex-col gap-0.5">
             <span>{option.label}</span>
             <span className="text-xs whitespace-normal text-muted-foreground">{option.detail}</span>

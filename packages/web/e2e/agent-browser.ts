@@ -1092,8 +1092,8 @@ export class AgentBrowser {
    *  a `ResizeObserver` (picker-pill prefixes, the quick list's overflow, GitHub's stacked panes):
    *  observers run after frame callbacks and update at default priority, so a spec reading those
    *  still waits on the DOM it reads. */
-  setViewport(width: number, height: number): void {
-    this.run(['set', 'viewport', String(width), String(height)])
+  setViewport(width: number, height: number, scale?: number): void {
+    this.run(['set', 'viewport', String(width), String(height), ...(scale === undefined ? [] : [String(scale)])])
     this.waitForValue<{ width: number; height: number } | null>(
       `new Promise((resolve) => requestAnimationFrame(() => resolve({ width: innerWidth, height: innerHeight })))`,
       (size) => size?.width === width && size?.height === height,
