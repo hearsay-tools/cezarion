@@ -23,7 +23,7 @@ export function createWorkspaceProjectContexts(
     addressManager?: (project: Parameters<NonNullable<ProjectContextDeps['prepareManager']>>[0]) => void;
   },
 ): ProjectContexts {
-  // createApp supplies a filtered registry; startServer deliberately supplies the full registry.
+  // Both entry points supply the visible registry (hearsay-tools/cezarion#2320).
   return deps.contexts ?? new ProjectContexts({
     forgeFactory: deps.forgeFactory,
     ...options,

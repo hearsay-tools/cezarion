@@ -5338,7 +5338,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   };
   const sharedContexts = createWorkspaceProjectContexts(deps, taskWebhooks, {
     ownership: deps.ownership,
-    listProjects,
+    listProjects: () => workspaceProjects.listVisibleProjects(),
     cezarPort,
     automationStore: (projectId, root) => automationCoordinator.store(projectId, root)!,
     addressManager,
