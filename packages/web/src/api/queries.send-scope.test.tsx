@@ -29,10 +29,12 @@ const respond = (status: number) => new Response(JSON.stringify(status === 200 ?
   headers: { 'content-type': 'application/json' },
 })
 
+const SCOPES = ['active', 'boot', 'default', 'next', 'other', 'third']
+
 /** Both project caches seeded, and nothing else refreshes them: no poll, no SSE. */
 function seededClient() {
   const client = createQueryClient()
-  for (const scope of ['active', 'other', 'third']) {
+  for (const scope of SCOPES) {
     client.setQueryData([scope, 'runs', 'list'], [])
     client.setQueryData([scope, 'runs', 'detail', 'r'], { id: 'r' })
   }
@@ -46,7 +48,7 @@ function withClient(client: ReturnType<typeof createQueryClient>) {
 }
 
 const stale = (client: ReturnType<typeof createQueryClient>) =>
-  ['active', 'other', 'third'].filter(scope =>
+  SCOPES.filter(scope =>
     client.getQueryState([scope, 'runs', 'list'])?.isInvalidated
     && client.getQueryState([scope, 'runs', 'detail', 'r'])?.isInvalidated)
 
@@ -100,4 +102,18 @@ it('a 409 send from another project refreshes both scopes, so the record stops c
   act(() => result.current.mutate({ text: 'hi' } as never))
   await waitFor(() => expect(result.current.isError).toBe(true))
   expect(stale(client)).toEqual(['active', 'other'])
+})
+
+it('a send to the boot project that settles after navigation refreshes its slug, its default alias and the new scope', async () => {
+  const client = seededClient()
+  let release!: (response: Response) => void
+  fetchMock.mockReturnValue(new Promise<Response>(resolve => { release = resolve }))
+  const { result } = renderHook(() => useSendMessage('r', 'boot'), { wrapper: withClient(client) })
+  act(() => result.current.mutate({ text: 'hi' } as never))
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+  expect(String(fetchMock.mock.calls[0]?.[0])).toBe('/api/v1/p/boot/runs/r/messages')
+  setApiScope('next')
+  await act(async () => release(respond(200)))
+  await waitFor(() => expect(result.current.isSuccess).toBe(true))
+  expect(stale(client)).toEqual(['boot', 'default', 'next'])
 })

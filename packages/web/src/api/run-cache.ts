@@ -2,6 +2,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import type { RunRecord, RunSummary, RunIndexEntry, RunsIndexResponse } from '@open-mercato/cezar-api-client'
 import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import type { ProjectAddress, RunAddress } from './run-address'
+import { liveBootProject } from './live-coordinator'
 
 const indexKey = ['workspace', 'runs-index'] as const
 const listKey = (address: ProjectAddress) => [address.cacheScope, 'runs', 'list'] as const
@@ -48,6 +49,7 @@ export function createRunCacheWriter(client: QueryClient) {
    * An explicit-project request comes from All tasks, whose Resolve conflicts button reads the
    * run under its own project: refreshing only the current scope left that record claiming a
    * session the server had closed. The current scope stays, read at callback time, as before.
+   * A boot-project target also names its `'default'` alias, which its own mounted thread reads.
    */
   function invalidateAfter(action: 'runs' | 'continue' | 'send' | 'index' | 'indexed', address: ProjectAddress | (() => ProjectAddress)) {
     if (action === 'index') return invalidateIndex()
@@ -59,7 +61,8 @@ export function createRunCacheWriter(client: QueryClient) {
       return
     }
     if (action === 'runs') return client.invalidateQueries({ queryKey: [target.cacheScope, 'runs'] })
-    const scopes = new Set([target.cacheScope, queryScope()])
+    const alias = target.projectId === liveBootProject() ? ['default'] : []
+    const scopes = new Set([target.projectId, target.cacheScope, ...alias, queryScope()])
     return Promise.all([...scopes].map(scope => client.invalidateQueries({ queryKey: [scope, 'runs'] })))
       .then(() => undefined)
   }

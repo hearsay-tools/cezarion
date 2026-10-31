@@ -206,6 +206,8 @@ export function createLiveCoordinator() {
   }
   return {
     resetSession() { stop(); session = undefined; workerFailed = false },
+    /** The project the `'default'` alias names, once health has configured the session. */
+    bootProject: () => session?.bootProject,
     configure(next: LiveSession) {
       if (restoration) return
       if (session && session.local === next.local && session.apiBase === next.apiBase && session.bootProject === next.bootProject) return
@@ -255,5 +257,6 @@ const coordinator = createLiveCoordinator()
 export const configureLiveSession = coordinator.configure
 export const subscribeLive = coordinator.subscribe
 export const invalidateLiveReads = coordinator.invalidateReads
+export const liveBootProject = coordinator.bootProject
 
 export const resetLiveSession = coordinator.resetSession

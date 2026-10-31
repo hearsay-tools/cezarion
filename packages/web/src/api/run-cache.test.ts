@@ -5,6 +5,7 @@ import { makeRunRecord } from '@open-mercato/cezar-api-client/contract/test-fact
 import { summaryOf } from '@/test/run-summary-fixture'
 import { projectAddress, runAddress } from './run-address'
 import { createRunCacheWriter } from './run-cache'
+import { configureLiveSession, resetLiveSession } from './live-coordinator'
 
 afterEach(() => setApiScope(null))
 
@@ -53,6 +54,22 @@ describe('run cache ownership', () => {
       [{ queryKey: ['other', 'runs'] }],
       [{ queryKey: ['after', 'runs'] }],
     ])
+  })
+
+  it('invalidates the boot slug, its default alias and the late current scope for a boot-project send', async () => {
+    configureLiveSession({ local: false, bootProject: 'boot', apiBase: '' })
+    setApiScope(null)
+    const address = runAddress('r', { projectId: 'boot' })
+    const client = new QueryClient()
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    setApiScope('next')
+    await createRunCacheWriter(client).invalidateAfter('send', address)
+    expect(invalidate.mock.calls).toEqual([
+      [{ queryKey: ['boot', 'runs'] }],
+      [{ queryKey: ['default', 'runs'] }],
+      [{ queryKey: ['next', 'runs'] }],
+    ])
+    resetLiveSession()
   })
 
   it('invalidates one scope for continue and send inside the run project', async () => {
