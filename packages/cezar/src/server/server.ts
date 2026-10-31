@@ -929,16 +929,15 @@ export function createApp(deps: ServerDeps) {
   });
 
   // Register project routes once; mount them under scoped and boot-alias prefixes.
-  // Resolve default and boot ids to the boot context; unknown/missing projects map to 404/409.
+  // Resolve default and boot ids to the boot context; context failures map through projectFailure.
   const resolveProjectScope = async (c: Context<ProjectApiEnv>, next: Next): Promise<Response | void> => {
     const raw = c.req.param('projectId');
     let project: ProjectContext;
     try {
       project = await workspaceProjects.resolveProject(raw);
     } catch (err) {
-      const failure = workspaceProjects.httpFailure(err);
-      if (failure) return c.json({ error: failure.error }, failure.status);
-      throw err;
+      const failure = workspaceProjects.projectFailure(err, raw ?? 'default');
+      return c.json({ error: failure.error }, failure.status);
     }
     // The boot project's store could not open (#779): its runs are unknown, not absent, so its
     // routes answer with why rather than as an empty project. Only its routes: this resolver also
@@ -5252,7 +5251,7 @@ export function createApp(deps: ServerDeps) {
   // Workspace-level families answer for the whole workspace, so they are single-mount: never a
   // project-scoped spelling, which would be a second surface to protect with no consumer.
   const liveRoutes = createLiveRoutes({ serverGeneration, resolveBootProject,
-    projectFailure: workspaceProjects.liveFailure,
+    projectFailure: workspaceProjects.projectFailure,
     resolveProject: (id) => workspaceProjects.resolveLiveProject(id),
   });
   const workspaceV1 = new Hono()
