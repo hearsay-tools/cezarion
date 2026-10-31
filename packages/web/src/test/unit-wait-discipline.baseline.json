@@ -1,5 +1,5 @@
 {
-  "$comment": "Bare sleeps, short wait bounds and unbounded poll loops the cockpit unit tests carried when the ratchet landed (hearsay-tools/cezarion#1203). Keyed by file, rule and the line text so a moved line does not churn it. This list only shrinks: fix a site, then run UNIT_WAIT_DISCIPLINE_UPDATE=1 npm test -- unit-wait-discipline. Rules: AGENTS.md § Validation.",
+  "$comment": "Bare sleeps, short wait bounds and unbounded poll loops the cockpit unit tests carried when the ratchet landed (hearsay-tools/cezarion#1203). Keyed by file, rule and the line text so a moved line does not churn it. This list only shrinks: fix a site, then run UNIT_WAIT_DISCIPLINE_UPDATE=1 npm test -- unit-wait-discipline. Rules: AGENTS.md \u00a7 Validation.",
   "sites": [
     {
       "file": "api/client.test.ts",
@@ -35,24 +35,6 @@
       "file": "components/project-rail.test.tsx",
       "rule": "sleep",
       "site": "await new Promise((resolve) => setTimeout(resolve, 300))",
-      "count": 1
-    },
-    {
-      "file": "components/sidebar-archive.test.tsx",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(api.archiveProjectRun).toHaveBeenCalledTimes(2))",
-      "count": 1
-    },
-    {
-      "file": "components/sidebar-archive.test.tsx",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(api.pinProjectRun).toHaveBeenCalledWith('p1', 'r1', true))",
-      "count": 1
-    },
-    {
-      "file": "components/sidebar-archive.test.tsx",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(api.pinProjectRun).toHaveBeenCalledWith('p1', 'y', true))",
       "count": 1
     },
     {

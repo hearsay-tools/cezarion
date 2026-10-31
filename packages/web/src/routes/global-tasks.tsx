@@ -1,13 +1,14 @@
+import { runAddress } from '@/api/run-address'
+import { useRunCacheWriter } from '@/api/use-run-cache-writer'
 import './task-lists.css'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { ArchiveRestoreIcon, EyeIcon, EyeOffIcon, ListChecksIcon, SearchXIcon } from 'lucide-react'
 import { ArchiveIcon, LayersIcon, PlusIcon, SearchIcon, SlidersHorizontalIcon, XIcon } from '@/components/design-icons'
 import * as React from 'react'
 import { Link } from 'react-router'
 
-import { archiveProjectRun, setProjectRunRead } from '@/api/client'
+import { archiveRun, setRunRead } from '@/api/client'
 import {
-  queryKeys,
   rememberReferenceStatuses,
   useAutomationNames,
   useHealth,
@@ -15,7 +16,7 @@ import {
   useRunsIndex,
   workspaceQueryKeys,
 } from '@/api/queries'
-import type { ProjectListEntry, RunIndexEntry, RunsIndexResponse } from '@open-mercato/cezar-api-client'
+import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { FacetFilter, SegmentedControl, ToggleChip } from '@/components/facet-filter'
 import { Pill } from '@/components/pill'
@@ -128,7 +129,7 @@ const ARCHIVABLE_STATUSES: ReadonlySet<string> = new Set(['done', 'failed', 'can
 function useArchiveIndexedRun() {
   return useIndexedRunMutation({
     request: ({ task, archived }: { task: GlobalTask; archived: boolean }) =>
-      archiveProjectRun(task.run.projectId, task.run.id, archived),
+      archiveRun(runAddress(task.run.id, { projectId: task.run.projectId }), archived),
     patch: ({ archived }) => (run) => ({ ...run, archived }),
   })
 }
@@ -144,7 +145,7 @@ function useArchiveIndexedRun() {
 function useReadIndexedRun() {
   return useIndexedRunMutation({
     request: ({ task, read }: { task: GlobalTask; read: boolean }) =>
-      setProjectRunRead(task.run.projectId, task.run.id, read),
+      setRunRead(runAddress(task.run.id, { projectId: task.run.projectId }), read),
     patch:
       ({ read }) =>
       (run) => {
@@ -175,39 +176,19 @@ function useIndexedRunMutation<V extends { task: GlobalTask }>({
   request: (variables: V) => Promise<unknown>
   patch: (variables: V) => (run: RunIndexEntry) => RunIndexEntry
 }) {
-  const queryClient = useQueryClient()
+  const writer = useRunCacheWriter()
   return useMutation({
     mutationFn: request,
-    onMutate: async (variables: V) => {
-      await queryClient.cancelQueries({ queryKey: workspaceQueryKeys.runsIndex })
-      const previous = queryClient.getQueryData<RunsIndexResponse>(workspaceQueryKeys.runsIndex)
-      const apply = patch(variables)
-      const { task } = variables
-      queryClient.setQueryData<RunsIndexResponse>(workspaceQueryKeys.runsIndex, (current) =>
-        current === undefined
-          ? current
-          : {
-              ...current,
-              runs: current.runs.map((run) =>
-                run.projectId === task.run.projectId && run.id === task.run.id ? apply(run) : run,
-              ),
-            },
-      )
-      return { previous }
-    },
+    onMutate: (variables: V) => writer.patchIndex(
+      runAddress(variables.task.run.id, { projectId: variables.task.run.projectId }), () => patch(variables),
+    ),
     onError: (error: Error, _variables, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(workspaceQueryKeys.runsIndex, context.previous)
-      }
+      context?.rollback()
       toast(error.message, { tone: 'danger' })
     },
-    onSettled: (_data, _error, { task }) => {
-      void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.runsIndex })
-      // The run's own project may be the active scope (its list is `queryKeys.runs.all`) or a
-      // sidebar group's explicit key — invalidate both spellings so neither shows a row this
-      // page has just changed.
-      void queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
-      void queryClient.invalidateQueries({ queryKey: [task.run.projectId, 'runs', 'list'] })
+    onSettled: (_data, _error, { task }, context) => {
+      if (context) context.settle()
+      else writer.invalidateAfter('indexed', runAddress(task.run.id, { projectId: task.run.projectId }))
     },
   })
 }

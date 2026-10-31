@@ -1,9 +1,10 @@
+import { runAddress } from '@/api/run-address'
 import type { Capabilities, ProjectsResponse } from '@open-mercato/cezar-api-client'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/client')>()),
-  getProjectRun: vi.fn(),
+  getRun: vi.fn(),
   getRepoCommit: vi.fn(),
   getRunCommit: vi.fn(),
   getGithubItem: vi.fn(),
@@ -105,20 +106,20 @@ describe('resolveProjectSwitch', () => {
     resolveProjectSwitch('other', saved(pathname, extra), ctx)
 
   it('restores a task page that exists, with its query and hash', async () => {
-    vi.mocked(client.getProjectRun).mockResolvedValue({} as never)
+    vi.mocked(client.getRun).mockResolvedValue({} as never)
     await expect(resolve('/p/other/tasks/run-1/changes', { search: '?file=a', hash: '#L2' })).resolves.toBe(
       '/p/other/tasks/run-1/changes?file=a#L2',
     )
-    expect(client.getProjectRun).toHaveBeenCalledWith('other', 'run-1', expect.anything())
+    expect(client.getRun).toHaveBeenCalledWith(runAddress('run-1', { projectId: 'other' }), expect.anything())
   })
 
   it('goes home only for a CONFIRMED missing entity (404)', async () => {
-    vi.mocked(client.getProjectRun).mockRejectedValue(apiError(404))
+    vi.mocked(client.getRun).mockRejectedValue(apiError(404))
     await expect(resolve('/p/other/tasks/gone')).resolves.toBe('/p/other/')
   })
 
   it.each([[500], [0], [403]])('does not infer deletion from an inconclusive answer (%i)', async (status) => {
-    vi.mocked(client.getProjectRun).mockRejectedValue(apiError(status))
+    vi.mocked(client.getRun).mockRejectedValue(apiError(status))
     await expect(resolve('/p/other/tasks/run-1')).resolves.toBe('/p/other/tasks/run-1')
   })
 
@@ -140,12 +141,12 @@ describe('resolveProjectSwitch', () => {
     vi.mocked(client.getRepoCommit).mockRejectedValue(apiError(0, 'offline'))
     await expect(resolve('/p/other/git/commits/abc')).resolves.toBe('/p/other/git/commits/abc')
     // A 409 on any other route is not evidence of absence.
-    vi.mocked(client.getProjectRun).mockRejectedValue(apiError(409, 'unknown revision'))
+    vi.mocked(client.getRun).mockRejectedValue(apiError(409, 'unknown revision'))
     await expect(resolve('/p/other/tasks/run-1')).resolves.toBe('/p/other/tasks/run-1')
   })
 
   it('checks a task\'s child commit and issue/PR, not just the run', async () => {
-    vi.mocked(client.getProjectRun).mockResolvedValue({ prNumber: 7, issueNumber: 7 } as never)
+    vi.mocked(client.getRun).mockResolvedValue({ prNumber: 7, issueNumber: 7 } as never)
     const withRepo = (pathname: string) =>
       resolveProjectSwitch('other', saved(pathname), { ...ctx, repoBaseOf: () => 'https://github.com/acme/widgets' })
     vi.mocked(client.getRunCommit).mockRejectedValue(apiError(409, 'fatal: bad object deadbeef'))
@@ -194,7 +195,7 @@ describe('resolveProjectSwitch', () => {
   it('does no network work for list pages or the home', async () => {
     await expect(resolve('/p/other/git')).resolves.toBe('/p/other/git')
     await expect(resolveProjectSwitch('other', null, ctx)).resolves.toBe('/p/other/')
-    expect(client.getProjectRun).not.toHaveBeenCalled()
+    expect(client.getRun).not.toHaveBeenCalled()
   })
 })
 
@@ -231,15 +232,15 @@ describe('resolveProjectSwitch: the answer for each entity kind', () => {
     '/p/other/tasks/run-1/commits',
   ])('task page %s', (pathname) => {
     it('is kept while the run exists, and asks for nothing else', async () => {
-      vi.mocked(client.getProjectRun).mockResolvedValue({} as never)
+      vi.mocked(client.getRun).mockResolvedValue({} as never)
       expect(await landing(pathname)).toBe('kept')
-      expect(client.getProjectRun).toHaveBeenCalledWith('other', 'run-1', signalOf)
+      expect(client.getRun).toHaveBeenCalledWith(runAddress('run-1', { projectId: 'other' }), signalOf)
       expect(client.getRunCommit).not.toHaveBeenCalled()
       expect(client.getGithubItem).not.toHaveBeenCalled()
     })
 
     it.each(FAILURES)('answers a run lookup that fails with %s', async (_label, error, expected) => {
-      vi.mocked(client.getProjectRun).mockRejectedValue(error)
+      vi.mocked(client.getRun).mockRejectedValue(error)
       expect(await landing(pathname)).toBe(expected)
     })
   })
@@ -248,11 +249,11 @@ describe('resolveProjectSwitch: the answer for each entity kind', () => {
     const pathname = '/p/other/tasks/run-1/commits/abc'
 
     it('asks for the run, then for the commit, in the target project', async () => {
-      vi.mocked(client.getProjectRun).mockResolvedValue({} as never)
+      vi.mocked(client.getRun).mockResolvedValue({} as never)
       vi.mocked(client.getRunCommit).mockResolvedValue({} as never)
       expect(await landing(pathname)).toBe('kept')
       expect(client.getRunCommit).toHaveBeenCalledWith('run-1', 'abc', targetOf)
-      expect(vi.mocked(client.getProjectRun).mock.invocationCallOrder[0]).toBeLessThan(
+      expect(vi.mocked(client.getRun).mock.invocationCallOrder[0]).toBeLessThan(
         vi.mocked(client.getRunCommit).mock.invocationCallOrder[0] ?? 0,
       )
     })
@@ -262,7 +263,7 @@ describe('resolveProjectSwitch: the answer for each entity kind', () => {
       ['500', apiError(500), 'kept'],
       ['a dead connection', apiError(0, 'offline'), 'kept'],
     ] as [string, Error, 'home' | 'kept'][])('never asks for the commit when the run lookup fails with %s', async (_label, error, expected) => {
-      vi.mocked(client.getProjectRun).mockRejectedValue(error)
+      vi.mocked(client.getRun).mockRejectedValue(error)
       expect(await landing(pathname)).toBe(expected)
       expect(client.getRunCommit).not.toHaveBeenCalled()
     })
@@ -273,7 +274,7 @@ describe('resolveProjectSwitch: the answer for each entity kind', () => {
       ['403', apiError(403), 'kept'],
       ['a dead connection', apiError(0, 'offline'), 'kept'],
     ] as [string, Error, 'home' | 'kept'][])('answers a commit lookup that fails with %s', async (_label, error, expected) => {
-      vi.mocked(client.getProjectRun).mockResolvedValue({} as never)
+      vi.mocked(client.getRun).mockResolvedValue({} as never)
       vi.mocked(client.getRunCommit).mockRejectedValue(error)
       expect(await landing(pathname)).toBe(expected)
     })
@@ -284,7 +285,7 @@ describe('resolveProjectSwitch: the answer for each entity kind', () => {
     const otherKind = kind === 'issue' ? { prNumber: 7 } : { issueNumber: 7 }
 
     beforeEach(() => {
-      vi.mocked(client.getProjectRun).mockResolvedValue((kind === 'issue' ? { issueNumber: 7 } : { prNumber: 7 }) as never)
+      vi.mocked(client.getRun).mockResolvedValue((kind === 'issue' ? { issueNumber: 7 } : { prNumber: 7 }) as never)
     })
 
     it('keeps an item the task links and the forge has', async () => {
@@ -312,14 +313,14 @@ describe('resolveProjectSwitch: the answer for each entity kind', () => {
       ['404', apiError(404), 'home'],
       ['500', apiError(500), 'kept'],
     ] as [string, Error, 'home' | 'kept'][])('never asks for the item when the run lookup fails with %s', async (_label, error, expected) => {
-      vi.mocked(client.getProjectRun).mockRejectedValue(error)
+      vi.mocked(client.getRun).mockRejectedValue(error)
       expect(await landing(pathname, withRepo)).toBe(expected)
       expect(client.getGithubItem).not.toHaveBeenCalled()
     })
 
     it.each(BAD_NUMBERS)('goes home for the number %s, after the run lookup and with no item request', async (bad) => {
       expect(await landing(`/p/other/tasks/run-1/${kind}/${bad}`, withRepo)).toBe('home')
-      expect(client.getProjectRun).toHaveBeenCalledTimes(1)
+      expect(client.getRun).toHaveBeenCalledTimes(1)
       expect(client.getGithubItem).not.toHaveBeenCalled()
     })
 
@@ -329,7 +330,7 @@ describe('resolveProjectSwitch: the answer for each entity kind', () => {
     })
 
     it('goes home for a number the task links as the other kind', async () => {
-      vi.mocked(client.getProjectRun).mockResolvedValue(otherKind as never)
+      vi.mocked(client.getRun).mockResolvedValue(otherKind as never)
       expect(await landing(pathname, withRepo)).toBe('home')
       expect(client.getGithubItem).not.toHaveBeenCalled()
     })
@@ -437,14 +438,14 @@ describe('resolveProjectSwitch: the answer for each entity kind', () => {
     // `/compare/:groupId` is the retired page's redirect: it has a param, so it is verified, and
     // nothing in the checker table claims it.
     expect(await landing('/p/other/compare/g1')).toBe('kept')
-    for (const request of [client.getProjectRun, client.getRunCommit, client.getRepoCommit, client.getGithubItem, client.getWorkflows, client.getAutomations]) {
+    for (const request of [client.getRun, client.getRunCommit, client.getRepoCommit, client.getGithubItem, client.getWorkflows, client.getAutomations]) {
       expect(request).not.toHaveBeenCalled()
     }
   })
 
   describe('the abort signal', () => {
     const requestSignals = () => [
-      ...vi.mocked(client.getProjectRun).mock.calls.map(([, , opts]) => opts?.signal),
+      ...vi.mocked(client.getRun).mock.calls.map(([, opts]) => opts?.signal),
       ...vi.mocked(client.getRunCommit).mock.calls.map(([, , opts]) => opts?.signal),
       ...vi.mocked(client.getRepoCommit).mock.calls.map(([, opts]) => opts?.signal),
       ...vi.mocked(client.getGithubItem).mock.calls.map(([, , , opts]) => opts?.signal),
@@ -463,7 +464,7 @@ describe('resolveProjectSwitch: the answer for each entity kind', () => {
       ['/p/other/workflows/deploy', 1],
       ['/p/other/automations/a1', 1],
     ] as [string, number][])('reaches every request for %s', async (pathname, requests) => {
-      vi.mocked(client.getProjectRun).mockResolvedValue({ prNumber: 7, issueNumber: 7 } as never)
+      vi.mocked(client.getRun).mockResolvedValue({ prNumber: 7, issueNumber: 7 } as never)
       vi.mocked(client.getRunCommit).mockResolvedValue({} as never)
       vi.mocked(client.getRepoCommit).mockResolvedValue({} as never)
       vi.mocked(client.getGithubItem).mockResolvedValue({ available: true, item: { number: 1 } } as never)
@@ -480,7 +481,7 @@ describe('resolveProjectSwitch: the answer for each entity kind', () => {
       // Fake timers: the 2 500 ms check timeout is moved past, never waited for.
       vi.useFakeTimers()
       try {
-        vi.mocked(client.getProjectRun).mockResolvedValue({} as never)
+        vi.mocked(client.getRun).mockResolvedValue({} as never)
         vi.mocked(client.getRunCommit).mockImplementation(
           (_id, _sha, opts) =>
             new Promise((_resolve, reject) => {

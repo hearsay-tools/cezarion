@@ -1,3 +1,4 @@
+import { projectAddress } from '@/api/run-address'
 import { ArchiveIcon, ChevronDownIcon, ChevronRightIcon } from '@/components/design-icons'
 import { SendIcon } from 'lucide-react'
 import { useQueries } from '@tanstack/react-query'
@@ -827,8 +828,8 @@ export function TaskQuickListContainer({ showViewControls = true, projectId: exp
   const runs = useProjectRuns(scope, true, boot)
   const uiState = useProjectUiState(scope, true, boot)
   const sidebarLimits = uiState.data?.sidebarLimits ?? {}
-  const pin = usePinRun(scope, boot ? 'default' : scope)
-  const archive = useSidebarArchive(scope, boot ? 'default' : scope, onNavigate)
+  const pin = usePinRun(projectAddress({ projectId: scope, boot }))
+  const archive = useSidebarArchive(projectAddress({ projectId: scope, boot }), onNavigate)
   const health = useHealth()
   const [view, setView] = useListView()
   // Project-prefix-agnostic matches (step 3.2): `/p/<id>/tasks/:id` must light its row too.

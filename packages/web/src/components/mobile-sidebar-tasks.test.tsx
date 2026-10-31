@@ -1,3 +1,4 @@
+import { projectAddress, runAddress } from '@/api/run-address'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router'
@@ -11,15 +12,15 @@ import { ThemeProvider } from '@/components/theme-provider'
 import { resetToasts, Toaster } from '@/components/ui/toaster'
 import { resetSwipeStore } from '@/components/use-swipe-to-archive'
 
-const api = vi.hoisted(() => ({ archiveProjectFinished: vi.fn(), archiveProjectRun: vi.fn() }))
+const api = vi.hoisted(() => ({ archiveFinished: vi.fn(), archiveRun: vi.fn() }))
 vi.mock('@/api/client', async (original) => ({ ...(await original<typeof import('@/api/client')>()), ...api }))
 
 beforeEach(() => {
   vi.stubGlobal('matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }))
   vi.stubGlobal('ResizeObserver', class { observe() {}; unobserve() {}; disconnect() {} })
   vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
-  api.archiveProjectFinished.mockResolvedValue({ ids: ['finished'], pinnedIds: [] })
-  api.archiveProjectRun.mockResolvedValue({})
+  api.archiveFinished.mockResolvedValue({ ids: ['finished'], pinnedIds: [] })
+  api.archiveRun.mockResolvedValue({})
 })
 afterEach(() => { cleanup(); resetToasts(); resetSwipeStore(); localStorage.clear(); vi.clearAllMocks(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
@@ -66,8 +67,8 @@ describe('mobile sidebar tasks (#811)', () => {
     act(() => undo.focus())
     expect(document.activeElement).toBe(undo)
     fireEvent.click(undo)
-    await waitFor(() => expect(api.archiveProjectRun).toHaveBeenCalledWith('boot', 'finished', false))
-    if (action === 'Archive all') expect(api.archiveProjectFinished).toHaveBeenCalledWith('boot', 'unpinned', false)
-    else expect(api.archiveProjectRun).toHaveBeenCalledWith('boot', 'finished', true)
+    await waitFor(() => expect(api.archiveRun).toHaveBeenCalledWith(runAddress('finished', { projectId: 'boot' }), false))
+    if (action === 'Archive all') expect(api.archiveFinished).toHaveBeenCalledWith(projectAddress({ projectId: 'boot' }), 'unpinned', false)
+    else expect(api.archiveRun).toHaveBeenCalledWith(runAddress('finished', { projectId: 'boot' }), true)
   })
 })

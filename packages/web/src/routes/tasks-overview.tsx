@@ -1,10 +1,11 @@
+import { useRunCacheWriter } from '@/api/use-run-cache-writer'
+import { projectAddress } from '@/api/run-address'
 import './task-lists.css'
 import { useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { CheckCheckIcon, ChevronsLeftIcon, ChevronsRightIcon, Clock3Icon, CoinsIcon, DollarSignIcon, ListChecksIcon, LinkIcon, MemoryStickIcon, MoreHorizontalIcon, PencilIcon, SearchXIcon } from 'lucide-react'
 import { ArchiveIcon, CpuIcon, FileDiffIcon, GitBranchIcon, PlusIcon, SearchIcon, WorkflowIcon } from '@/components/design-icons'
 import * as React from 'react'
 import { Link, useNavigate } from '@/lib/project-router'
-
 import { archiveFinished, markAllRunsSeen, patchRun } from '@/api/client'
 import { useRunUsage } from '@/api/global-events'
 import { queryKeys, useArchivedRuns, useAutomationNames, useHealth, usePinRun, useProjects, useProjectRepoBase, useReferenceProjectId, useRuns } from '@/api/queries'
@@ -70,7 +71,6 @@ import { usageMetricVisibility } from '@/lib/token-metrics'
 import { useTaskTableColumns } from '@/lib/use-task-table-columns'
 import { useNow } from '@/lib/use-now'
 import { cn } from '@/lib/utils'
-
 /** Archived runs older than the run list's window, a page at a time (#864). */
 export type ArchivedPages = {
   runs: readonly RunSummary[]
@@ -87,7 +87,6 @@ export type ArchivedPages = {
    *  while no unfiltered page has loaded. */
   plainHasMore?: boolean | undefined
 }
-
 /**
  * The Tasks overview — the table that IS the home at `/` (spec, "Task list & table", per PR
  * #392: the Tasks nav always lands here, there is no list/table presentation toggle). The
@@ -197,7 +196,6 @@ export function TasksOverview({
   // nowhere to show its result — and one that outlives the view, since un-archiving would then
   // drop the task at the top of the active list by a click that looked like it did nothing.
   const pinToggle = view === 'archived' ? undefined : onTogglePin
-
   return (
     <div data-route="tasks" data-presentation={detailedTable ? 'resources' : 'summary'} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
       {/* One set of search/view controls across breakpoints keeps query and selection intact.
@@ -1459,11 +1457,12 @@ export function TasksOverviewRoute() {
   const health = useHealth()
   const metricVisibility = usageMetricVisibility(health.data)
   const { view, setView, origin, setOrigin, urlQuery, writeQuery } = useTasksUrlState()
+  const writer = useRunCacheWriter()
   const queryClient = useQueryClient()
   const archived = useArchivedPages(runs.data, view)
   const archive = useMutation({
-    mutationFn: (automation?: boolean) => archiveFinished(undefined, automation),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.runs.all }),
+    mutationFn: (automation?: boolean) => archiveFinished(projectAddress(), undefined, automation),
+    onSuccess: () => writer.invalidateAfter('runs', () => projectAddress()),
     onError: (error: Error) => toast(error.message, { tone: 'danger' }),
   })
   // "Mark all read" (#unread-done-items): one call stamps every unread finished run; the
@@ -1621,6 +1620,7 @@ function useArchivedPages(runs: readonly RunSummary[] | undefined, view: ListVie
   total: number | undefined
   search: (needle: string) => void
 } {
+  const writer = useRunCacheWriter()
   const queryClient = useQueryClient()
   const [typed, setTyped] = React.useState('')
   const [needle, setNeedle] = React.useState('')

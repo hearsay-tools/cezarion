@@ -1,3 +1,4 @@
+import { projectAddress } from './run-address'
 import { configureLiveSession, resetLiveSession } from './live-coordinator'
 import { focusManager, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
@@ -1415,7 +1416,7 @@ describe('read receipts keep their invocation scope across navigation', () => {
 
   it('keeps receipt callbacks stable for effects and preserves mutateAsync string callbacks', async () => {
     const client = createQueryClient()
-    const { result, rerender } = renderHook(() => useMarkRunSeen('alpha', 'default'), {
+    const { result, rerender } = renderHook(() => useMarkRunSeen(projectAddress({ projectId: 'alpha', cacheScope: 'default' })), {
       wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
     })
     const original = result.current.mutate
@@ -1440,7 +1441,7 @@ describe('read receipts keep their invocation scope across navigation', () => {
     const cancel = vi.spyOn(client, 'cancelQueries').mockImplementationOnce(async () => { await gate.promise })
     fetchMock.mockResolvedValue(json({ ...run, seenAt: receipt }))
     setApiScope(explicit ? 'elsewhere' : 'alpha-cache')
-    const { result } = renderHook(() => useMarkRunSeen(explicit ? 'alpha' : undefined, explicit ? 'alpha-cache' : undefined), {
+    const { result } = renderHook(() => useMarkRunSeen(explicit ? projectAddress({ projectId: 'alpha', cacheScope: 'alpha-cache' }) : undefined), {
       wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
     })
     act(() => result.current.mutate(run.id))

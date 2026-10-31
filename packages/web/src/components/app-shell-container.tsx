@@ -1,3 +1,4 @@
+import { projectAddress } from '@/api/run-address'
 import { useRef, type ReactNode } from 'react'
 import { useLocation } from 'react-router'
 
@@ -111,9 +112,9 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
     />
   ) : /^\/github(?:\/|$)/.test(flatPathname) && forgeAvailable ? (
     // Explicit scope, not `queryScope()`: this subtree sits above the ProjectScopeProvider.
-    <GithubSidebar scope={sidebarBoot ? 'default' : sidebarProjectId} />
+    <GithubSidebar scope={projectAddress({ projectId: sidebarProjectId, boot: sidebarBoot }).cacheScope} />
   ) : /^\/git(?:\/|$)/.test(flatPathname) ? (
-    <GitSidebar scope={sidebarBoot ? 'default' : sidebarProjectId} />
+    <GitSidebar scope={projectAddress({ projectId: sidebarProjectId, boot: sidebarBoot }).cacheScope} />
   ) : undefined
 
   return (

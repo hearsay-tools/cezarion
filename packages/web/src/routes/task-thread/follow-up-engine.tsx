@@ -1,10 +1,12 @@
+import { useRunCacheWriter } from '@/api/use-run-cache-writer'
+import { runAddress } from '@/api/run-address'
 import { CpuIcon, GaugeIcon, TerminalIcon } from '@/components/design-icons'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { useState, type ReactNode } from 'react'
 
 import { hasAccountChoice, useAgentAccounts } from '@/api/agent-accounts'
 import { ApiError, continueRun } from '@/api/client'
-import { queryKeys, useConfig, useRunnerModels } from '@/api/queries'
+import { useConfig, useRunnerModels } from '@/api/queries'
 import { DEFAULT_AGENT_ACCOUNT_ID } from '@open-mercato/cezar-api-client/contract/agent-profiles'
 import type { ApiRun, ContinueResponse, AttachmentInput, Runner } from '@open-mercato/cezar-api-client'
 import { PickerPill, PickerPillGroup, RunnerPill } from '@/components/picker-pill'
@@ -52,7 +54,7 @@ export interface ContinueAction {
  * the pills' state lives here.
  */
 export function useContinueAction(run: ApiRun): ContinueAction {
-  const queryClient = useQueryClient()
+  const writer = useRunCacheWriter()
   const available = runActionFlags(run).continueRun
   const config = useConfig()
   // null = "not touched": the pills fall back to the run's current backend/model/account, so an
@@ -126,7 +128,7 @@ export function useContinueAction(run: ApiRun): ContinueAction {
       if (!canContinue) {
         return Promise.reject(new Error(continuation.reason ?? 'Connect an agent provider to continue.'))
       }
-      return continueRun(run.id, {
+      return continueRun(runAddress(run.id), {
         // An empty draft posts no `text` at all, so the server's default opening prompt
         // ("Continue.") still applies — one-click Continue, unchanged.
         text: text.trim() ? text : undefined,
@@ -156,10 +158,10 @@ export function useContinueAction(run: ApiRun): ContinueAction {
         agentProfile: account ?? undefined,
       })
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.runs.all }),
+    onSuccess: () => writer.invalidateAfter('continue', () => runAddress(run.id)),
     onError: (error) => {
       if (error instanceof ApiError && error.status === 409) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
+        void writer.invalidateAfter('continue', () => runAddress(run.id))
       }
     },
   })

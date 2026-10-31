@@ -1,3 +1,6 @@
+import { projectAddress, runAddress, type RunAddress, type ProjectAddress } from './run-address'
+import type { ReadPatch } from './run-cache'
+import { useRunCacheWriter } from './use-run-cache-writer'
 import { isCockpitE2e } from '@/lib/e2e-mode'
 import { useLiveRead, subscribeLiveRead } from './live-reads'
 import { configureLiveSession, resetLiveSession } from './live-coordinator'
@@ -17,7 +20,6 @@ import {
   getGithubOwners,
   connectProvider,
   continueRun,
-  continueProjectRun,
   createAgentProfile,
   getAgentConfig,
   getAgentConfigFile,
@@ -38,8 +40,6 @@ import {
   getLaunchKey,
   getOpenTargets,
   getProviderStatus,
-  getProjectRun,
-  getProjectRuns,
   getProjects,
   getRunnerModels,
   getRepo,
@@ -58,7 +58,6 @@ import {
   getArtifact,
   getArtifacts,
   getRunHandoff,
-  getProjectRunHandoff,
   getAutomations,
   getRuns,
   getRunsIndex,
@@ -74,10 +73,8 @@ import {
   getWorkspaceUiState,
   getWorktrees,
   editQueuedMessage,
-  markRunSeen,
-  markRunUnseen,
+  setRunRead,
   patchRun,
-  pinProjectRun,
   pinRun,
   notifyRun,
   testProjectWebhook,
@@ -94,7 +91,6 @@ import {
   updateAgentProfile,
   updateProject,
   sendMessage,
-  sendProjectRunMessage,
   putAgentConfigFile,
   retryProviderAuth,
 } from './client'
@@ -970,7 +966,7 @@ export function useOpenTargets() {
 export function useRuns() {
   return useQuery({
     queryKey: queryKeys.runs.list(),
-    queryFn: ({ signal }) => getRuns({ signal }),
+    queryFn: ({ signal }) => getRuns(projectAddress(), { signal }),
   })
 }
 
@@ -1064,8 +1060,8 @@ export function useRunsIndex(enabled = true, refetchIntervalMs?: number) {
  */
 export function useProjectRuns(projectId: string, enabled = true, boot = false) {
   return useQuery({
-    queryKey: [boot ? 'default' : projectId, 'runs', 'list'] as const,
-    queryFn: ({ signal }) => getProjectRuns(projectId, { signal }),
+    queryKey: [projectAddress({ projectId, boot }).cacheScope, 'runs', 'list'] as const,
+    queryFn: ({ signal }) => getRuns(projectAddress({ projectId, boot }), { signal }),
     enabled,
   })
 }
@@ -1095,7 +1091,7 @@ export function useRunRelationships(runId: string, options: { enabled?: boolean 
 export function useRun(id: string | undefined) {
   return useQuery({
     queryKey: queryKeys.runs.detail(id ?? ''),
-    queryFn: ({ signal }) => getRun(id as string, { signal }),
+    queryFn: ({ signal }) => getRun(runAddress(id as string), { signal }),
     enabled: Boolean(id),
   })
 }
@@ -1111,7 +1107,7 @@ export function useRun(id: string | undefined) {
 export function useProjectRun(projectId: string | undefined, id: string | undefined, enabled = true) {
   return useQuery({
     queryKey: [projectId ?? 'default', 'runs', 'detail', id ?? ''] as const,
-    queryFn: ({ signal }) => getProjectRun(projectId as string, id as string, { signal }),
+    queryFn: ({ signal }) => getRun(runAddress(id as string, { projectId: projectId as string }), { signal }),
     enabled: enabled && Boolean(projectId) && Boolean(id),
   })
 }
@@ -1198,7 +1194,7 @@ export function useRunCommit(id: string | undefined, sha: string | undefined) {
 export function useRunHandoff(id: string | undefined, enabled = true) {
   return useQuery({
     queryKey: queryKeys.runs.handoff(id ?? ''),
-    queryFn: ({ signal }) => getRunHandoff(id as string, { signal }),
+    queryFn: ({ signal }) => getRunHandoff(runAddress(id as string), { signal }),
     enabled: Boolean(id) && enabled,
   })
 }
@@ -1209,7 +1205,7 @@ export function useRunHandoff(id: string | undefined, enabled = true) {
 export function useTaskPreviewHandoff(projectId: string | undefined, id: string, enabled: boolean) {
   return useQuery({
     queryKey: projectId === undefined ? queryKeys.runs.handoff(id) : [projectId, 'runs', 'handoff', id] as const,
-    queryFn: ({ signal }) => projectId === undefined ? getRunHandoff(id, { signal }) : getProjectRunHandoff(projectId, id, { signal }),
+    queryFn: ({ signal }) => getRunHandoff(runAddress(id, { projectId }), { signal }),
     enabled,
     staleTime: 15_000,
   })
@@ -1426,7 +1422,7 @@ export function useProjectWorktrees(scope: string) {
  * with routed settings; capture the request scope before any asynchronous work. */
 export function useProjectUiState(projectId: string, enabled = true, boot = false) {
   return useQuery({
-    queryKey: [boot ? 'default' : projectId, 'ui-state'] as const,
+    queryKey: [projectAddress({ projectId, boot }).cacheScope, 'ui-state'] as const,
     queryFn: ({ signal }) => getUiState({ signal }, projectId),
     // Cached state may come from an older server or predate validation. Keep the bag open.
     select: state => state.sidebarLimits === undefined ? state : { ...state, sidebarLimits: normalizeSidebarLimits(state.sidebarLimits) },
@@ -1513,25 +1509,6 @@ export function usePatchRun(id: string) {
 }
 
 /**
- * Mark the WORKSPACE run index stale after a change to one run's read state.
- *
- * The index (`GET /workspace/runs-index`) is a third cache, independent of the project-scoped
- * run list and detail these mutations patch, and it has a 30s staleTime. Without this, opening an
- * unread task from the global Tasks page and coming straight back showed it STILL unread until
- * the next poll or a refresh — which reads as "the click did not work".
- *
- * Invalidate rather than patch, deliberately. Patching would need the run's project id (the index
- * keys on `projectId + id`, because a run id is only unique inside one project), and this
- * mutation knows a run only by id — deriving the project from the router would couple a data hook
- * to a `<Router>` that its own unit tests, and any non-routed caller, do not provide. Nothing is
- * observing the index while you are in a thread, so this costs no request: it simply means the
- * global page's next mount reads the truth instead of a stale snapshot.
- */
-function invalidateRunsIndex(queryClient: QueryClient): void {
-  void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.runsIndex })
-}
-
-/**
  * Mark one run read (#unread-done-items): `POST /api/runs/:id/read`. Opening a finished task's
  * thread fires this so the unread dot clears without waiting for the round-trip — the list and
  * detail caches are stamped with `seenAt` optimistically, then reconciled to the server's exact
@@ -1540,63 +1517,20 @@ function invalidateRunsIndex(queryClient: QueryClient): void {
  * Optional projectId pins the endpoint; cacheScope defaults to it and can be `default`
  * for the boot-project cache. Omitted scopes are captured when mutate is called.
  */
-export function useMarkRunSeen(projectId?: string, cacheScope?: string) {
-  const queryClient = useQueryClient()
-  type Receipt = {
-    id: string
-    projectId: string
-    listKey: ReturnType<typeof queryKeys.runs.list>
-    detailKey: ReturnType<typeof queryKeys.runs.detail>
-  }
-  type Snapshot = { id: string; prevList: RunSummary[] | undefined; prevDetail: RunRecord | undefined }
+export function useMarkRunSeen(address?: ProjectAddress) {
+  const writer = useRunCacheWriter()
+  const projectId = address?.projectId
+  const cacheScope = address?.cacheScope
+  type Receipt = RunAddress & { id: string }
+  type Snapshot = ReadPatch
   const mutation = useMutation<RunRecord, Error, Receipt, Snapshot>({
-    mutationFn: ({ id, projectId: target }) => markRunSeen(id, target),
-    onMutate: async ({ id, listKey, detailKey }) => {
-      // These keys were captured synchronously by mutate/mutateAsync, before React Query
-      // awaits its own callbacks or cancellation. Navigation cannot retarget any phase.
-      await queryClient.cancelQueries({ queryKey: listKey })
-      await queryClient.cancelQueries({ queryKey: detailKey })
-      const prevList = queryClient.getQueryData<RunSummary[]>(listKey)
-      const prevDetail = queryClient.getQueryData<RunRecord>(detailKey)
-      const now = new Date().toISOString()
-      queryClient.setQueryData<RunSummary[]>(listKey, (list) =>
-        list?.map((run) => (run.id === id ? { ...run, seenAt: now } : run)),
-      )
-      queryClient.setQueryData<RunRecord>(detailKey, (run) =>
-        run ? { ...run, seenAt: now } : run,
-      )
-      return { id, prevList, prevDetail }
-    },
-    onError: (_error, { id, listKey, detailKey }, snapshot) => {
-      // Roll back only the receipt. The stream may have advanced unrelated fields or
-      // inserted another run while the request was in flight; those changes belong to it.
-      const restore = <T extends { seenAt?: string | undefined }>(current: T, previous: { seenAt?: string | undefined }): T => {
-        const { seenAt: _receipt, ...rest } = current
-        return (previous.seenAt === undefined ? rest : { ...rest, seenAt: previous.seenAt }) as T
-      }
-      const previous = snapshot?.prevList?.find((run) => run.id === id)
-      if (previous) queryClient.setQueryData<RunSummary[]>(listKey, (list) =>
-        list?.map((run) => run.id === id ? restore(run, previous) : run),
-      )
-      const previousDetail = snapshot?.prevDetail
-      if (previousDetail) queryClient.setQueryData<RunRecord>(detailKey, (run) =>
-        run ? restore(run, previousDetail) : run,
-      )
-    },
-    onSuccess: (updated, { id, listKey, detailKey }) => {
-      // A receipt response is an older snapshot: accept its receipt only, preserving
-      // newer stream fields such as autoResumeAt and token totals (#auto-resume).
-      const stampReceipt = <T extends { id: string; seenAt?: string | undefined }>(run: T): T =>
-        run.id === id ? { ...run, seenAt: updated.seenAt } : run
-      queryClient.setQueryData<RunSummary[]>(listKey, (list) => list?.map(stampReceipt))
-      queryClient.setQueryData<RunRecord>(detailKey, (current) => current ? stampReceipt(current) : updated)
-      invalidateRunsIndex(queryClient)
-    },
+    mutationFn: (address) => setRunRead(address, true),
+    onMutate: (address) => writer.patchRead(address, true),
+    onError: (_error, _address, snapshot) => snapshot?.rollback(),
+    onSuccess: (updated, _address, snapshot) => snapshot?.settle(updated),
   })
   const capture = useCallback((id: string): Receipt => {
-    const target = projectId ?? queryScope()
-    const scope = cacheScope ?? target
-    return { id, projectId: target, listKey: queryKeys.runs.list(scope), detailKey: queryKeys.runs.detail(id, scope) }
+    return { ...runAddress(id, { projectId, cacheScope }), id }
   }, [projectId, cacheScope])
   // Preserve the existing string-variable API, including per-call callbacks and variables.
   type Options = MutateOptions<RunRecord, Error, string, Snapshot>
@@ -1629,50 +1563,14 @@ export function useMarkRunSeen(projectId?: string, cacheScope?: string) {
  * into a record shape the server never writes.
  */
 export function useMarkRunUnseen() {
-  const queryClient = useQueryClient()
+  const writer = useRunCacheWriter()
   return useMutation({
-    mutationFn: (id: string) => markRunUnseen(id),
-    onMutate: async (id: string) => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.runs.list() })
-      await queryClient.cancelQueries({ queryKey: queryKeys.runs.detail(id) })
-      const prevList = queryClient.getQueryData<RunSummary[]>(queryKeys.runs.list())
-      const prevDetail = queryClient.getQueryData<RunRecord>(queryKeys.runs.detail(id))
-      queryClient.setQueryData<RunSummary[]>(queryKeys.runs.list(), (list) =>
-        list?.map((run) => (run.id === id ? withoutReceipt(run) : run)),
-      )
-      queryClient.setQueryData<RunRecord>(queryKeys.runs.detail(id), (run) =>
-        run ? withoutReceipt(run) : run,
-      )
-      return { prevList, prevDetail, id }
-    },
-    onError: (_error, id, context) => {
-      if (context?.prevList) queryClient.setQueryData(queryKeys.runs.list(), context.prevList)
-      if (context?.prevDetail) queryClient.setQueryData(queryKeys.runs.detail(id), context.prevDetail)
-    },
-    onSuccess: (updated) => {
-      // Clear ONLY the receipt on the record already in cache — never write the answer wholesale.
-      //
-      // Same reason as the read twin above: `POST /runs/:id/unread` answers with a SNAPSHOT taken
-      // while the request was in flight, so writing it over the cached record permanently reverts
-      // every field the run stream advanced in that window (nothing refetches afterwards). A
-      // finished run is quieter than a just-finished one, but it is not silent — the janitor still
-      // discovers PR links and titles still get summarized. Clearing the one field this mutation
-      // owns cannot lose any of them.
-      const clearReceipt = <T extends { id: string; seenAt?: string | undefined }>(run: T): T =>
-        run.id === updated.id ? withoutReceipt(run) : run
-      queryClient.setQueryData<RunSummary[]>(queryKeys.runs.list(), (list) => list?.map(clearReceipt))
-      queryClient.setQueryData<RunRecord>(queryKeys.runs.detail(updated.id), (current) =>
-        current ? clearReceipt(current) : updated,
-      )
-      invalidateRunsIndex(queryClient)
-    },
+    mutationFn: (id: string) => setRunRead(runAddress(id), false),
+    // Preserve late scope reads: this hook historically follows navigation between callbacks.
+    onMutate: (id: string) => writer.patchRead(() => runAddress(id), false),
+    onError: (_error, _id, context) => context?.rollback(),
+    onSuccess: (updated, _id, context) => context?.settle(updated),
   })
-}
-
-/** A copy of the record with the read receipt gone — the optimistic half of `useMarkRunUnseen`. */
-function withoutReceipt<T extends { seenAt?: string | undefined }>(run: T): T {
-  const { seenAt: _dropped, ...rest } = run
-  return rest as T
 }
 
 /**
@@ -1683,29 +1581,21 @@ function withoutReceipt<T extends { seenAt?: string | undefined }>(run: T): T {
  * anyway, and a pin is not fired at the busy moment a run finishes (the race that makes the
  * receipt hooks patch a single field instead).
  *
- * Both parameters exist for the multi-project sidebar, which paints a quick-list per REGISTERED
- * project and therefore acts on rows outside the scope the URL names:
- *  - `projectId` sends the request to the run's OWN project (`queryScope()` would name whichever
- *    project the page is standing in, which 404s — or, with a colliding run id, pins the wrong
- *    task). Absent is the ordinary case: the caller is already inside the run's project.
- *  - `cacheScope` is the key that project's run list is cached under. It is NOT always the
- *    project id: `useProjectRuns` caches the boot project under `'default'`, because that is the
- *    scope it mounts unscoped under, and invalidating `[<bootId>, 'runs']` would leave the
- *    sidebar's boot group showing the pre-pin order.
+ * An optional address names the row's request project and its cache scope. The multi-project
+ * sidebar supplies it because its rows can belong to a project outside the mounted route.
+ * The address owns the boot alias, so the request project can differ from the list cache key.
  */
-export function usePinRun(projectId?: string, cacheScope?: string) {
-  const queryClient = useQueryClient()
+export function usePinRun(address?: ProjectAddress) {
+  const writer = useRunCacheWriter()
   return useMutation({
     mutationFn: ({ id, pinned }: { id: string; pinned: boolean }) =>
-      projectId === undefined ? pinRun(id, pinned) : pinProjectRun(projectId, id, pinned),
+      pinRun(runAddress(id, address), pinned),
     onError: (error: Error) => toast(`Could not update pin. ${error.message} Please retry.`, { tone: 'danger' }),
     // Capture before the request: navigation during the round trip must not retarget invalidation.
-    onMutate: () => ({ scope: cacheScope ?? queryScope() }),
+    onMutate: () => address ?? projectAddress(),
     // Hierarchical keys: this covers the list AND the open thread's own record.
     onSuccess: (_updated, _variables, context) =>
-      queryClient.invalidateQueries({
-        queryKey: [context.scope, 'runs'] as const,
-      }),
+      writer.invalidateAfter('runs', context),
   })
 }
 
@@ -1717,17 +1607,17 @@ export function usePinRun(projectId?: string, cacheScope?: string) {
  *  the refetch flips the composer to its closed/Continue form instead of leaving it aimed at a
  *  session that will keep refusing. */
 export function useSendMessage(id: string, projectId?: string) {
-  const queryClient = useQueryClient()
+  const writer = useRunCacheWriter()
   return useMutation({
     // `projectId` only where the caller stands OUTSIDE the run's project — the global Tasks page,
     // whose rows span the registry and where `queryScope()` would name the boot project. Absent
     // is the ordinary case and keeps the scoped-by-context spelling.
     mutationFn: (message: MessageInput) =>
-      projectId === undefined ? sendMessage(id, message) : sendProjectRunMessage(projectId, id, message),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.runs.all }),
+      sendMessage(runAddress(id, { projectId }), message),
+    onSuccess: () => writer.invalidateAfter('send', () => projectAddress()),
     onError: (error) => {
       if (error instanceof ApiError && error.status === 409) {
-        void queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
+        void writer.invalidateAfter('send', () => projectAddress())
       }
     },
   })
@@ -1740,11 +1630,11 @@ export function useSendMessage(id: string, projectId?: string) {
  *  acted. The thread composer keeps its own mutation (`useContinueAction`) because it also owns
  *  the runner/model pills; this hook is the plain "resume on the run's own engine" path. */
 export function useContinueRun(id: string, projectId?: string) {
-  const queryClient = useQueryClient()
+  const writer = useRunCacheWriter()
   return useMutation({
     mutationFn: (opts: ContinueOptions = {}) =>
-      projectId === undefined ? continueRun(id, opts) : continueProjectRun(projectId, id, opts),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.runs.all }),
+      continueRun(runAddress(id, { projectId }), opts),
+    onSuccess: () => writer.invalidateAfter('continue', () => projectAddress()),
   })
 }
 
