@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { PROJECT_NAME_PATTERN } from '@open-mercato/cezar-contract/project-limits';
 import type { GithubOwner, GithubOwnersResponse } from '@open-mercato/cezar-contract';
-import { GH_CREDENTIAL_HELPER_CONFIG, cleanupCheckout, isValidCheckoutName, parseRepoRef, type CheckoutProgressEvent } from './checkout.ts';
+import { ERROR_TAIL_LINES, GH_CREDENTIAL_HELPER_CONFIG, createProgressLineSplitter, checkoutTarget, cleanupCheckout, isValidCheckoutName, parseRepoRef, type CheckoutProgressEvent } from './checkout.ts';
 
 /**
  * Create a local Git project, optionally with an explicitly requested private GitHub repository
@@ -12,7 +12,6 @@ import { GH_CREDENTIAL_HELPER_CONFIG, cleanupCheckout, isValidCheckoutName, pars
  */
 
 const COMMAND_TIMEOUT_MS = 10 * 60_000;
-const ERROR_TAIL_LINES = 6;
 /** How long to wait for GitHub to generate a repo from a template before
  *  cloning anyway. Generation is asynchronous and usually takes a few seconds. */
 const TEMPLATE_WAIT_ATTEMPTS = 15;
@@ -48,7 +47,6 @@ export const spawnCommandRunner: CommandRunner = (cmd, args, opts) =>
       // GH_HOST (GitHub Enterprise) would list owners on, and create the repository on, another server.
       env: { ...process.env, GH_PROMPT_DISABLED: '1', GIT_TERMINAL_PROMPT: '0', ...(cmd === 'gh' ? { GH_HOST: 'github.com' } : {}) },
     });
-    const tail: string[] = [];
     let stdout = '';
     let settled = false;
     const finish = (result: CommandResult): void => {
@@ -64,20 +62,9 @@ export const spawnCommandRunner: CommandRunner = (cmd, args, opts) =>
     opts.signal?.addEventListener('abort', onAbort, { once: true });
 
     // git's progress is carriage-return-separated (see `ghCloneRunner`).
-    let pending = '';
+    const lines = createProgressLineSplitter((line) => opts.onLine?.(line));
     child.stderr?.setEncoding('utf8');
-    child.stderr?.on('data', (chunk: string) => {
-      pending += chunk;
-      const parts = pending.split(/\r\n|\r|\n/);
-      pending = parts.pop() ?? '';
-      for (const part of parts) {
-        const line = part.trim();
-        if (line === '') continue;
-        tail.push(line);
-        if (tail.length > ERROR_TAIL_LINES) tail.shift();
-        opts.onLine?.(line);
-      }
-    });
+    child.stderr?.on('data', lines.consume);
     child.stdout?.setEncoding('utf8');
     child.stdout?.on('data', (chunk: string) => {
       stdout += chunk;
@@ -89,7 +76,7 @@ export const spawnCommandRunner: CommandRunner = (cmd, args, opts) =>
     child.on('close', (code) => {
       opts.signal?.removeEventListener('abort', onAbort);
       if (code === 0) return finish({ ok: true, stdout });
-      const detail = [...tail, pending.trim(), stdout.trim()].filter((s) => s !== '').slice(-ERROR_TAIL_LINES).join('\n');
+      const detail = [...lines.tail, lines.pending.trim(), stdout.trim()].filter((s) => s !== '').slice(-ERROR_TAIL_LINES).join('\n');
       finish({ ok: false, error: detail === '' ? `${cmd} ${args[0] ?? ''} exited with code ${code}` : detail });
     });
   });
@@ -196,11 +183,9 @@ export async function createProject(opts: CreateProjectOptions): Promise<CreateP
       template = ref.slug;
     }
   }
-  if (!opts.projectsDir.startsWith('/')) {
-    return { ok: false, status: 500, error: `checkout root is not an absolute path: ${opts.projectsDir}` };
-  }
-  const root = resolve(opts.projectsDir);
-  const target = join(root, name);
+  const destination = checkoutTarget(opts.projectsDir, name);
+  if (destination.ok === false) return destination;
+  const { root, target } = destination;
 
   const emit = (event: Omit<CheckoutProgressEvent, 'name' | 'checkoutId'>): void =>
     opts.onProgress({ ...event, name, ...(opts.checkoutId ? { checkoutId: opts.checkoutId } : {}) });
