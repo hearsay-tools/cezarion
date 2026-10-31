@@ -84,3 +84,28 @@ test('static function counts distinguish named functions and survive equivalent 
   assert.match(summary(result), /Static mutants inside functions: 2; not measured: guard \(1\), helper \(1\)/);
   assert.match(summary(result), /Guard guard: 0 undetected, 1 static not measured/);
 });
+
+
+test('static outcomes retain import-time kills, survivors and coverage gaps per file and function', () => {
+  const statuses = ['Killed', 'Survived', 'NoCoverage', 'Timeout', 'Ignored', 'CompileError', 'RuntimeError'];
+  const moduleRows = statuses.map((status, id) => wire({ id: String(id), status }));
+  const functionRows = statuses.map((status, id) => wire({ id: String(id + 7), status, location: { start: { line: 2, column: 1 }, end: { line: 2, column: 5 } } }));
+  const ranges = [{ name: 'freshImport', range: { start: { line: 1, column: 0 }, end: { line: 2, column: 0 } } }];
+  const result = run([...moduleRows, ...functionRows, wire({ static: false, status: 'Killed' })], ranges);
+  const counts = { killed: 1, timeout: 1, survived: 1, noCoverage: 1, error: 2, ignored: 1 };
+  assert.deepEqual(result.staticByFunction, [{ name: '(module)', counts }, { name: 'freshImport', counts }]);
+  assert.deepEqual(result.staticCounts, { killed: 2, timeout: 2, survived: 2, noCoverage: 2, error: 4, ignored: 2 });
+  assert.equal(result.counts.killed, 1);
+  assert.equal(result.counts.ignored, 14);
+  const text = summary(result);
+  assert.match(text, /Counted score: 100.0%\nStatic outcomes \(not measured\): .*"killed":2.*"survived":2.*"noCoverage":2/);
+  assert.match(text, /Static outcomes in \(module\) \(not measured\): .*"killed":1.*"survived":1.*"noCoverage":1/);
+  assert.match(text, /Static outcomes in freshImport \(not measured\): .*"killed":1.*"survived":1.*"noCoverage":1/);
+});
+
+test('no static coverage reports zero static outcomes with no function groups', () => {
+  const result = run([wire({ static: false })]);
+  assert.deepEqual(result.staticCounts, { killed: 0, timeout: 0, survived: 0, noCoverage: 0, error: 0, ignored: 0 });
+  assert.deepEqual(result.staticByFunction, []);
+  assert.match(summary(result), /Static outcomes \(not measured\): .*"killed":0.*"survived":0.*"noCoverage":0/);
+});

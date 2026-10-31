@@ -152,6 +152,13 @@ function mergeReports(first, second, file) {
   return { ...first, files: { ...first.files, [file]: { ...a, mutants: [...merged.values()] } } };
 }
 
+/** Keep observed static outcomes visible even though the counted score excludes them. */
+function staticResults(mutants) {
+  const rows = mutants.filter(m => m.static).map(m => ({ ...m, status: m.reportedStatus }));
+  const names = [...new Set(rows.map(m => m.function))];
+  return { staticCounts: countsOf(rows), staticByFunction: names.map(name => ({ name, counts: countsOf(rows.filter(m => m.function === name)) })) };
+}
+
 function measure(report, file, head, ranges, targets = TARGETS, entries = []) {
   const data = report.files?.[file];
   if (!data) throw new Error(`Report does not contain ${file}`);
@@ -169,13 +176,17 @@ function measure(report, file, head, ranges, targets = TARGETS, entries = []) {
   const staleEquivalent = eligible.filter(entry => entry.file === file && !mutants.some(m => matchesEntry(entry, m)));
   const rawCounts = countsOf(data.mutants);
   return { version: 1, file, head, tier: target.tier, mutants: kept, equivalentCount: mutants.length - kept.length,
+    ...staticResults(mutants),
     moduleLevelCount: mutants.filter(m => m.static && m.function === '(module)').length,
     staticFunctions: [...new Set(mutants.filter(m => m.static && m.function !== '(module)').map(m => m.function))].map(name => ({ name, count: mutants.filter(m => m.static && m.function === name).length })),
     ...evaluate(kept, target, ranges, mutants), rawCounts, rawScore: scoreOf(rawCounts), staleEquivalent, ambiguousEquivalent };
 }
 
 function summary(result) {
-  const lines = [`File: ${result.file}`, `HEAD: ${result.head}`, `Tier: ${result.tier}`, `Counts: ${JSON.stringify(result.counts)}`, `Counted score: ${result.score.toFixed(1)}%`, `Raw counts: ${JSON.stringify(result.rawCounts)}`, `Stryker raw score: ${result.rawScore.toFixed(1)}%`];
+  const lines = [`File: ${result.file}`, `HEAD: ${result.head}`, `Tier: ${result.tier}`, `Counts: ${JSON.stringify(result.counts)}`, `Counted score: ${result.score.toFixed(1)}%`];
+  lines.push(`Static outcomes (not measured): ${JSON.stringify(result.staticCounts)}`);
+  for (const group of result.staticByFunction) lines.push(`Static outcomes in ${group.name} (not measured): ${JSON.stringify(group.counts)}`);
+  lines.push(`Raw counts: ${JSON.stringify(result.rawCounts)}`, `Stryker raw score: ${result.rawScore.toFixed(1)}%`);
   lines.push(`Static mutants at module scope: ${result.moduleLevelCount}; not measured, excluded from counted score (raw score unchanged).`);
   lines.push(`Static mutants inside functions: ${result.staticFunctions.reduce((total, f) => total + f.count, 0)}; not measured: ${result.staticFunctions.map(f => `${f.name} (${f.count})`).join(', ') || 'none'}.`);
   lines.push(`Not-covered lines: ${[...new Set(result.survivors.filter(m => m.status === 'NoCoverage').map(m => m.line))].join(', ') || 'none'}`);
