@@ -959,3 +959,41 @@ describe('peer request ledger boundaries', () => {
     expect(withRootLedger(invalid, { role: 'root', conversation })).toEqual(invalid);
   });
 });
+
+describe('waiting-on mixed entries', () => {
+  it('shows a human card if any open human wait has been shown', () => {
+    expect(computeWaitingOn({ waits: [openHuman(), openHuman({ id: R1, askSeq: 0 })] }))
+      .toStrictEqual({ kind: WAIT_KIND.human, shown: true });
+  });
+
+  it('keeps reply markers when other wait kinds or family requests are beside peer requests', () => {
+    const delegation = { role: 'root', permissions: [], receipts: [], conversation: {
+      messages: [{ id: R1, senderRunId: W1, recipientRunId: W2, kind: 'request', relationship: 'peer', text: 'inspect',
+        createdAt: '2026-10-30T12:00:00Z', requestHash: 'a'.repeat(64), state: 'accepted' }], outcomes: [],
+    } } as RunRecord['delegation'];
+    const peer = openRequestWait();
+    const family = openRequestWait({ id: W1, requestIds: [W2] });
+    expect(computeWaitingOn({ waits: [openTimer(), peer], delegation }))
+      .toStrictEqual({ kind: 'workers', count: 1, replies: true, peers: true });
+    expect(computeWaitingOn({ waits: [peer, family], delegation }))
+      .toStrictEqual({ kind: 'workers', count: 2, replies: true, peers: true });
+    expect(computeWaitingOn({ waits: [openRequestWait({ requestIds: [R1, W2] })], delegation }))
+      .toStrictEqual({ kind: 'workers', count: 2, replies: true, peers: true });
+  });
+
+  it('omits absent notes from timer and process projections', () => {
+    const timer = openTimer();
+    expect(computeWaitingOn({ waits: [timer] })).toStrictEqual({ kind: WAIT_KIND.timer, waitId: timer.id, at: timer.deadline });
+    const process = openProcess();
+    expect(computeWaitingOn({ waits: [process] })).toStrictEqual({ kind: WAIT_KIND.process, waitId: process.id, pid: process.pid, deadline: process.deadline });
+  });
+
+  it('ignores unknown streamed wait kinds rather than presenting them as timers', () => {
+    // Streamed records are checked only for their id before projection; the reader tolerates
+    // unknown kinds just as it tolerates a malformed wait collection.
+    const unknown = { ...openTimer(), kind: 'future-kind' } as never;
+    expect(computeWaitingOn({ waits: [unknown] })).toBeUndefined();
+    const timer = openTimer();
+    expect(computeWaitingOn({ waits: [unknown, timer] })).toStrictEqual({ kind: WAIT_KIND.timer, waitId: timer.id, at: timer.deadline });
+  });
+});
