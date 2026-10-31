@@ -176,16 +176,19 @@ async function createWorktreeLocked(
   // A missing directory can leave stale administrative metadata behind.
   // Prune first so the checks below describe the filesystem as it exists now.
   if (protection.paths.size === 0) await git(repoRoot, ['worktree', 'prune']);
-  const canonicalTarget = canonicalPath(absolutePath);
-  let registered = await registeredWorktrees(repoRoot);
-  let atPath = registered.find((item) => canonicalPath(item.path) === canonicalTarget);
-  if (atPath) {
+  function registeredInfo(atPath: RegisteredWorktree): WorktreeInfo {
     if (atPath.branch !== branchRef) {
       throw new Error(
         `managed worktree path is registered to ${atPath.branch ?? 'a detached HEAD'}, expected ${branchRef}`,
       );
     }
     return worktreeInfo(atPath.path, branch, base);
+  }
+  const canonicalTarget = canonicalPath(absolutePath);
+  let registered = await registeredWorktrees(repoRoot);
+  let atPath = registered.find((item) => canonicalPath(item.path) === canonicalTarget);
+  if (atPath) {
+    return registeredInfo(atPath);
   }
 
   // If the directory survived but its administrative entry did not, let Git
@@ -196,12 +199,7 @@ async function createWorktreeLocked(
     registered = await registeredWorktrees(repoRoot);
     atPath = registered.find((item) => canonicalPath(item.path) === canonicalTarget);
     if (atPath) {
-      if (atPath.branch !== branchRef) {
-        throw new Error(
-          `managed worktree path is registered to ${atPath.branch ?? 'a detached HEAD'}, expected ${branchRef}`,
-        );
-      }
-      return worktreeInfo(atPath.path, branch, base);
+      return registeredInfo(atPath);
     }
     const entries = await readdir(absolutePath).catch(() => ['unreadable']);
     if (entries.length > 0) {
@@ -770,6 +768,12 @@ async function withPrivateIndex<T>(worktreePath: string, read: (git: IndexGit) =
   }
 }
 
+async function prepareWholeBranchDiff(git: IndexGit, baseBranch: string): Promise<string> {
+  await git(['add', '-N', '.']); // intent-to-add (private index, hearsay-tools/cezarion#1080): untracked files show up
+  const mergeBase = await git(['merge-base', baseBranch, 'HEAD']);
+  return mergeBase.ok && mergeBase.stdout.trim() ? mergeBase.stdout.trim() : baseBranch;
+}
+
 /**
  * Whole-branch committed, uncommitted and untracked diff against the merge-base. Preserve this
  * anchor for the protected text endpoint and conservative settlement checks.
@@ -781,9 +785,7 @@ export async function worktreeDiff(
 ): Promise<string> {
   if (!isSafeGitRef(baseBranch)) return '(diff failed: refusing option-like base ref)';
   return withPrivateIndex(worktreePath, async (git) => {
-    await git(['add', '-N', '.']); // intent-to-add (private index, #1080): untracked files show up
-    const mergeBase = await git(['merge-base', baseBranch, 'HEAD']);
-    const base = mergeBase.ok && mergeBase.stdout.trim() ? mergeBase.stdout.trim() : baseBranch;
+    const base = await prepareWholeBranchDiff(git, baseBranch);
     const res = await git(['diff', base]);
     if (!res.ok) return `(diff failed: ${res.stderr.trim() || 'unknown git error'})`;
     if (res.stdout.length > cap) return `${res.stdout.slice(0, cap)}\n… (diff truncated)`;
@@ -801,9 +803,7 @@ export async function worktreeDiffStat(
 ): Promise<string> {
   if (!isSafeGitRef(baseBranch)) return '';
   return withPrivateIndex(worktreePath, async (git) => {
-    await git(['add', '-N', '.']); // intent-to-add (private index, #1080): untracked files show up
-    const mergeBase = await git(['merge-base', baseBranch, 'HEAD']);
-    const base = mergeBase.ok && mergeBase.stdout.trim() ? mergeBase.stdout.trim() : baseBranch;
+    const base = await prepareWholeBranchDiff(git, baseBranch);
     const res = await git(['diff', '--stat', base]);
     return res.ok ? res.stdout.trim() : '';
   });
