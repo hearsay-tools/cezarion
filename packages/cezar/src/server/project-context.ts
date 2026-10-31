@@ -1,3 +1,4 @@
+import type { ForgeFactory } from './forge/index.ts';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
 import { setImmediate as yieldToEventLoop } from 'node:timers/promises';
@@ -62,6 +63,7 @@ export function projectWarmupEnabled(env: NodeJS.ProcessEnv = process.env): bool
 }
 
 export interface ProjectContextDeps {
+  forgeFactory?: ForgeFactory | undefined;
   /** CLI process ownership, acquired before opening any secondary store. */
   ownership?: CockpitOwnership | undefined;
   /** Install controller session capabilities before recovery starts any backend. */
@@ -475,7 +477,7 @@ export class ProjectContexts {
       // ended — scheduling a `runs.json` write from a context nobody owns any more.
       const repoHandleController = new AbortController();
       this.repoHandleControllers.set(store, repoHandleController);
-      armRepoHandle(store, project.root, repoHandleController.signal);
+      armRepoHandle(store, project.root, repoHandleController.signal, this.deps.forgeFactory);
       return { id: project.id, root: project.root, dataDir, store, manager, automationStore, launchKey };
     } catch (err) {
       // A failed build must not leak the half-built context's subscriptions.

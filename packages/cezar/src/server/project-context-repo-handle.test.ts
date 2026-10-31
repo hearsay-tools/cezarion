@@ -4,11 +4,9 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readPersistedText } from '../runs/run-store.testkit.ts';
 
-const discoverRepoHandle = vi.hoisted(() => vi.fn());
-vi.mock('./forge/github.ts', async (importOriginal) => ({
-  ...await importOriginal<typeof import('./forge/github.ts')>(),
-  discoverRepoHandle,
-}));
+import { resolveForgeRoot } from './forge/index.ts';
+const discoverRepoHandle = vi.fn();
+const forgeFactory = (root: string) => ({ ...resolveForgeRoot(root), discoverRepository: (signal?: AbortSignal) => discoverRepoHandle(root, signal) });
 
 import { ProjectContexts } from './project-context.ts';
 import type { RepoHandleDiscovery } from './forge/github.ts';
@@ -34,6 +32,7 @@ describe('project repository discovery lifetime', () => {
       discoverRepoHandle.mockReturnValueOnce(new Promise<RepoHandleDiscovery>((resolve) => { release = resolve; }));
       discoverRepoHandle.mockResolvedValue({ status: 'resolved', handle });
       contexts = new ProjectContexts({
+        forgeFactory,
         listProjects: async () => [{ id: 'project', root, status: 'not-git' }],
       });
       // Context construction must finish while the first lookup is still pending.

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-const resolveRepoHandle = vi.hoisted(() => vi.fn());
-vi.mock('./forge/github.ts', () => ({ resolveRepoHandle }));
+import { resolveForgeRoot } from './forge/index.ts';
+const resolveRepoHandle = vi.fn();
+const forgeFactory = (root: string) => ({ ...resolveForgeRoot(root), resolveRepository: (signal?: AbortSignal) => resolveRepoHandle(root, signal) });
 import { ColdRepoHandles } from './cold-repo-handles.ts';
 import type { RepoHandle } from '../runs/store.ts';
 
@@ -14,7 +15,7 @@ describe('bounded cold repository discovery', () => {
   it('returns immediately, deduplicates concurrent demand and retains the discovered identity', async () => {
     let finish!: (value: RepoHandle) => void;
     resolveRepoHandle.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
-    const cache = new ColdRepoHandles();
+    const cache = new ColdRepoHandles(forgeFactory);
     expect(cache.get('/a')).toBeUndefined();
     expect(cache.get('/a')).toBeUndefined();
     expect(resolveRepoHandle).toHaveBeenCalledTimes(1);
@@ -34,7 +35,7 @@ describe('bounded cold repository discovery', () => {
       peak = Math.max(peak, active);
       return new Promise((resolve) => { finish.push((value) => { active--; resolve(value); }); });
     });
-    const cache = new ColdRepoHandles();
+    const cache = new ColdRepoHandles(forgeFactory);
     for (let i = 0; i < 12; i++) {
       cache.get(`/repo-${i}`);
       cache.get(`/repo-${i}`);
@@ -56,7 +57,7 @@ describe('bounded cold repository discovery', () => {
       if (failure === 'reject') resolveRepoHandle.mockRejectedValueOnce(new Error('offline'));
       if (failure === 'throw') resolveRepoHandle.mockImplementationOnce(() => { throw new Error('offline'); });
       resolveRepoHandle.mockResolvedValue(handle);
-      const cache = new ColdRepoHandles();
+      const cache = new ColdRepoHandles(forgeFactory);
       expect(cache.get('/a')).toBeUndefined();
       await settle();
       expect(cache.get('/a')).toBeUndefined();
@@ -76,7 +77,7 @@ describe('bounded cold repository discovery', () => {
       signals.push(signal);
       return new Promise((resolve) => { late = resolve; });
     });
-    const cache = new ColdRepoHandles();
+    const cache = new ColdRepoHandles(forgeFactory);
     for (let i = 0; i < 5; i++) cache.get(`/repo-${i}`);
     const finishOld = late;
     await vi.advanceTimersByTimeAsync(5_000);
@@ -96,7 +97,7 @@ describe('bounded cold repository discovery', () => {
       signals.push(signal);
       return new Promise((resolve) => { finish.push(resolve); });
     });
-    const cache = new ColdRepoHandles();
+    const cache = new ColdRepoHandles(forgeFactory);
     for (let i = 0; i < 5; i++) cache.get(`/repo-${i}`);
     cache.retainRoots(new Set());
     await settle();

@@ -1,4 +1,4 @@
-import { resolveRepoHandle } from './forge/github.ts';
+import { resolveForgeRoot, type ForgeFactory } from './forge/index.ts';
 import type { RepoHandle } from '../runs/store.ts';
 
 const MAX_ACTIVE = 4;
@@ -20,6 +20,8 @@ export class ColdRepoHandles {
   private readonly entries = new Map<string, Entry>();
   private readonly queue = new Map<string, Entry>();
   private active = 0;
+
+  constructor(private readonly forgeFactory?: ForgeFactory) {}
 
   retainRoots(roots: ReadonlySet<string>): void {
     for (const [root, entry] of this.entries) {
@@ -68,7 +70,7 @@ export class ColdRepoHandles {
       controller.signal.addEventListener('abort', onAbort, { once: true });
     });
     try {
-      const handle = await Promise.race([resolveRepoHandle(root, controller.signal), aborted]);
+      const handle = await Promise.race([resolveForgeRoot(root, this.forgeFactory).resolveRepository(controller.signal), aborted]);
       if (!controller.signal.aborted && this.entries.get(root) === entry && handle) {
         entry.handle = handle;
       }

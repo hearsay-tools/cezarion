@@ -3422,6 +3422,10 @@ export function createGithubDriver(repoRoot: string, repoRef: GithubRepoRef | nu
   return {
     kind: 'github',
 
+    discoverRepository: (signal) => discoverRepoHandle(repoRoot, signal),
+    resolveRepository: (signal) => resolveRepoHandle(repoRoot, signal),
+    mergedPullRequests: (identities, signal) => lookupMergedPullRequests(repoRoot, identities, signal),
+
     list: (opts) => fetchGithub(repoRoot, opts?.refresh, opts?.limit, opts),
     projects: (generation) => fetchGithubProjects(repoRoot, generation),
     item: (kind, number, opts) => fetchGithubItem(repoRoot, kind, number, opts?.refresh),

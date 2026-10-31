@@ -20,7 +20,6 @@ import { providerForActiveRun } from '@open-mercato/cezar-contract/active-provid
 import { defined } from '../core/defined.ts';
 import { ArchiveOnMergeCoordinator } from './archive-on-merge.ts';
 import { CompletionActionCoordinator } from './completion-actions.ts';
-import { discoverRepoHandle, lookupMergedPullRequests } from './forge/github.ts';
 import { resolveArchiveOnMerge, resolveGlobalArchiveOnMerge } from '../archive-on-merge-setting.ts';
 import type {
   ProjectsResponse,
@@ -275,7 +274,7 @@ import { attachUpgradeRouter } from './upgrade-router.ts';
 import { createPreviewSockets } from './preview-sockets.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
-import { parseRemote, resolveForge, forgeWebRoot, type ForgeAvailability, type ForgeDriver } from './forge/index.ts';
+import { parseRemote, resolveForge, forgeWebRoot, resolveForgeRoot, type ForgeFactory, type ForgeAvailability } from './forge/index.ts';
 import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubCommentCounts, fetchGithubComments, fetchGithubItem, forgetGithubItem, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
 import type { CockpitOwnership } from './cockpit-ownership.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
@@ -317,7 +316,7 @@ import {
 
 export interface ServerDeps extends SelfUpdateServerDeps {
   /** Per-repository forge injection for embedded servers and tests. */
-  forgeResolver?: (repoInfo: Awaited<ReturnType<typeof getRepoInfo>>) => ForgeDriver | null;
+  forgeFactory?: ForgeFactory;
   /** CLI lifetime ownership, shared with secondary project contexts. */
   ownership?: CockpitOwnership;
   /** The task-webhook subscribers (#589). Boot creates it and attaches the boot store BEFORE
@@ -690,7 +689,7 @@ async function probeWritableDir(dir: string, create: boolean): Promise<string | 
 // with nothing to offer. See the `routed` assembly at the end of the function.
 export function createApp(deps: ServerDeps) {
   const { version, update, bindHost, bootProjectId } = deps;
-  const resolveProjectForge = deps.forgeResolver ?? resolveForge;
+  const resolveProjectForge = (info: Awaited<ReturnType<typeof getRepoInfo>>) => resolveForge(info, deps.forgeFactory);
   // Boot singletons keep DELIBERATELY distinct names (`boot*`): every
   // project-scoped handler must resolve its `{store, manager, root, dataDir,
   // launchKey}` from `c.get('project')` — a bare `store`/`repoRoot` in a
@@ -3011,7 +3010,7 @@ export function createApp(deps: ServerDeps) {
       const forge = resolveProjectForge(await getRepoInfo(root));
       return forge ? forge.detect() : { available: false, reason: 'No GitHub remote is configured' };
     },
-    hasGithubRemote: async (root) => Boolean(resolveForge(await getRepoInfo(root))),
+    hasGithubRemote: async (root) => Boolean(resolveProjectForge(await getRepoInfo(root))),
   });
   // #1465: every project's manager gets the schedule tools over this service. A manager reads
   // them at call time, so a session recovered before its project's context finished building
@@ -5144,7 +5143,7 @@ export function createApp(deps: ServerDeps) {
    * which would build a context, prune worktrees and `recover()` running agents. Typing in a
    * search box must not resume work; see `runs/run-index.ts`.
    */
-  const coldRepoHandles = new ColdRepoHandles();
+  const coldRepoHandles = new ColdRepoHandles(deps.forgeFactory);
 
   /**
    * Every registered project whose runs can be read, and its owned store when this process holds
@@ -5366,7 +5365,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     },
     enabled: async project => resolveArchiveOnMerge(await loadConfig(project.root), await loadWorkspaceConfig()).enabled,
     repository: async project => {
-      const repository = await discoverRepoHandle(project.root);
+      const repository = await resolveForgeRoot(project.root, deps.forgeFactory).discoverRepository();
       return repository.status === 'resolved' ? `https://github.com/${repository.handle.owner}/${repository.handle.name}` : undefined;
     },
     withStore: async (project, work) => {
@@ -5374,7 +5373,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
       return sharedContexts.withMaintenanceStore(project.id, (store, valid) =>
         work(store, id => sharedContexts.peek(project.id)?.manager.isActive(id) ?? false, valid));
     },
-    lookup: lookupMergedPullRequests,
+    lookup: (root, identities, signal) => resolveForgeRoot(root, deps.forgeFactory).mergedPullRequests(identities, signal),
   };
   const archiveOnMerge = new ArchiveOnMergeCoordinator(archiveDeps);
   const completionActions = new CompletionActionCoordinator({
