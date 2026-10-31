@@ -309,7 +309,7 @@ async function retainingRef(
   const res = await run(['for-each-ref', '--contains', sha, '--format=%(refname)%00%(objectname)%00%(symref)', 'refs/heads', 'refs/remotes']);
   if (!res.ok) return null;
   for (const line of res.stdout.split('\n')) {
-    const [ref = '', tip = '', symref = ''] = line.split('\0');
+    const [ref, tip, symref] = line.split('\0');
     // Never an alias (origin/HEAD, a symbolic branch): it may point at the very branch being
     // deleted, and a `--no-deref` verify of its name protects nothing it points at.
     if (ref && tip && !symref && !excluded.has(ref)) return { ref, sha: tip };
