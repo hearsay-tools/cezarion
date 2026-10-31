@@ -1720,7 +1720,7 @@ export class RunStore extends EventEmitter {
     return run && this.coldReads.keep(this.answerCold(run, true), this.coldBase.get(row.id), this.held.has(row.id));
   }
 
-  /** Run `fn` reading each run that is not held at most once (`ColdReadCache`, #2378). */
+  /** Run `fn` reading each run that is not held at most once (`ColdReadCache`, hearsay-tools/cezarion#2378). */
   withReadCache<T>(fn: () => T): T { return this.coldReads.scope(fn); }
 
   /** Whether the run exists, held or not, without decoding it. */

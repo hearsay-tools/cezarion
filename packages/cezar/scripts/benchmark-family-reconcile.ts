@@ -7,7 +7,7 @@
  *
  * Flags: --messages (50,300,1000) --workers (2) --pad-kb (64, bytes added to each record's task so
  * a decode costs what a real record does) --samples (5) --baseline (run every pass without
- * `withReadCache`, as before #2378).
+ * `withReadCache`, as before hearsay-tools/cezarion#2378).
  *
  * Method:
  * - One process per run. For each size it seeds, through the public store API, a settled root
