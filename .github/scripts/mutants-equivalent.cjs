@@ -25,7 +25,7 @@ function readEquivalent(file = EQUIVALENT_FILE, io = fs) {
 
 /** Exact line prefix before the mutant, with indentation removed and trailing spaces kept. */
 function sourceSite(source, { start }) {
-  return source.split('\n')[start.line - 1].slice(0, start.column - 1).trimStart();
+  return source.split('\n')[start.line - 1]?.slice(0, start.column - 1).trimStart();
 }
 
 function matchesEntry(entry, mutant) {

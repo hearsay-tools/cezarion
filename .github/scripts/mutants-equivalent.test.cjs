@@ -82,3 +82,11 @@ test('source prefixes separate identical literals on one line and survive line m
   assert.equal(sourceSite('\n' + line, { start: { line: 2, column: 27 } }), "const [name = '', sha = ");
   assert.equal(sourceSite('true;', { start: { line: 1, column: 1 } }), '');
 });
+
+
+test('a missing source line cannot match a site but preserves site-less matching', () => {
+  const site = sourceSite('', { start: { line: 2, column: 1 } });
+  assert.equal(site, undefined);
+  assert.equal(matchesEntry({ ...entry, site: 'return ' }, { ...entry, site }), false);
+  assert.equal(matchesEntry(entry, { ...entry, site }), true);
+});
