@@ -181,8 +181,10 @@ afterAll(() => removeTestSandboxes([sandboxHome, sandboxUserHome, sandboxTemp]))
 // in even when run.ts caught the throw (hearsay-tools/cezarion#1804). Production never checks.
 strictRunExits()
 afterEach(throwRunExitViolations)
-// No test may reach a server it did not start (hearsay-tools/cezarion#2367): a mutant that ran the
-// real cockpit discovery instead of the injected one started tasks on the live cockpit. The guard
-// refuses the connection before transport, and this hook fails the test that made it.
+// No code in a test worker may reach a server the test did not start (hearsay-tools/cezarion#2367):
+// a mutant that ran the real cockpit discovery instead of the injected one started tasks on the
+// live cockpit. The guard refuses the connection before transport, and this hook fails the test
+// that made it. It patches this process only: a child process a test spawns is not guarded
+// (hearsay-tools/cezarion#2368), and Stryker activates mutants in the worker, never in a child.
 installOutboundGuard()
 afterEach(throwOutboundRefusals)
