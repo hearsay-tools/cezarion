@@ -705,7 +705,7 @@ export async function runTaskCommand(argv: string[], env: NodeJS.ProcessEnv, io:
       ? await textArgument(io, 'start', positionals[0], values['task-file'] as string | undefined, 'task')
       : name === 'send'
         ? await textArgument(io, 'send', positionals[1], values['text-file'] as string | undefined, 'text')
-        : name === 'notify' && (values.message !== undefined || values['message-file'] !== undefined)
+        : values.message !== undefined || values['message-file'] !== undefined
           ? await textArgument(io, 'notify', values.message as string | undefined, values['message-file'] as string | undefined, 'note')
           : undefined;
     validateFlags(name, values);
