@@ -23,7 +23,7 @@ export function createWorkspaceProjectContexts(
     addressManager?: (project: Parameters<NonNullable<ProjectContextDeps['prepareManager']>>[0]) => void;
   },
 ): ProjectContexts {
-  // createApp supplies a filtered registry; startServer deliberately supplies the full registry.
+  // Both entry points supply the visible registry (hearsay-tools/cezarion#2320).
   return deps.contexts ?? new ProjectContexts({
     forgeFactory: deps.forgeFactory,
     ...options,
@@ -126,7 +126,7 @@ export function createWorkspaceProjects(options: { bootRoot: string; bootProject
     return boundContexts.context(raw);
   };
   const lookupProject = async (raw: string | undefined) => {
-    // Upgrades suppress all build failures; HTTP rethrows unexpected failures, live feeds use 503.
+    // Upgrades suppress all build failures; HTTP and live feeds answer them through projectFailure.
     if (raw === undefined || raw === 'default' || raw === (await resolveBootProject())) return boundBoot;
     if (!validProjectId(raw)) return undefined;
     return boundContexts.context(raw).catch(() => undefined);
@@ -136,20 +136,18 @@ export function createWorkspaceProjects(options: { bootRoot: string; bootProject
     if (id === 'default' || id === bootId) return { ...boundBoot, id: bootId };
     return boundContexts.context(id);
   };
-  const httpFailure = (error: unknown): { error: string; status: 404 | 409 } | undefined => {
+  // One answer per context failure for HTTP and live feeds (hearsay-tools/cezarion#2321).
+  const projectFailure = (error: unknown, projectId: string): { error: string; status: 404 | 409 | 503 } => {
     const failure = classifyProjectBuildFailure(error);
-    if (failure.kind === 'unexpected') return undefined;
-    // HTTP calls this a folder; live feeds preserve ProjectContextError's original root wording.
+    if (failure.kind === 'unexpected') {
+      console.error(`[cez] project ${projectId} context build failed:`, error);
+      return { error: 'project unavailable', status: 503 };
+    }
     if (failure.kind === 'missing-root') return { error: `project folder not found: ${failure.error.projectId}`, status: 409 };
     return { error: failure.error.message, status: failure.kind === 'unknown-project' ? 404 : 409 };
   };
-  const liveFailure = (error: unknown): { error: string; status: 404 | 409 | 503 } => {
-    const failure = classifyProjectBuildFailure(error);
-    if (failure.kind === 'unexpected') return { error: 'run feed unavailable', status: 503 };
-    return { error: failure.error.message, status: failure.kind === 'unknown-project' ? 404 : 409 };
-  };
   return { resolveBootProject, canonicalProjectId, resolveProjectId, singleProject, visibleProjects: visibleRegistry,
-    listVisibleProjects, registryEntry, resolveRegistryEntry, resolveProject, bindContexts, lookupProject, resolveLiveProject, httpFailure, liveFailure };
+    listVisibleProjects, registryEntry, resolveRegistryEntry, resolveProject, bindContexts, lookupProject, resolveLiveProject, projectFailure };
 }
 
 export type WorkspaceProjects = ReturnType<typeof createWorkspaceProjects>;

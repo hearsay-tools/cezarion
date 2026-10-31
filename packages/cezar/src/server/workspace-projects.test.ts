@@ -79,23 +79,22 @@ describe('workspace project identity', () => {
 
 describe('project build failure policies', () => {
   const failures = [
-    { error: new ProjectContextError('unknown-project', 'other'), http: 404, live: 404 },
-    { error: new ProjectContextError('missing-root', 'other'), http: 409, live: 409 },
-    { error: new RunStoreOpenError('busy', '/runs.db', 'busy'), http: 409, live: 409 },
-    { error: new CockpitAlreadyRunningError('/repos/other'), http: 409, live: 409 },
+    { error: new ProjectContextError('unknown-project', 'other'), expected: { error: 'unknown project: other', status: 404 } },
+    { error: new ProjectContextError('missing-root', 'other'), expected: { error: 'project folder not found: other', status: 409 } },
+    { error: new RunStoreOpenError('busy', '/runs.db', 'busy'), expected: { status: 409 } },
+    { error: new CockpitAlreadyRunningError('/repos/other'), expected: { status: 409 } },
   ] as const;
 
-  it.each(failures)('keeps HTTP and live status for $error.name / $error.message', ({ error, http, live }) => {
-    const projects = workspace();
-    expect(projects.httpFailure(error)?.status).toBe(http);
-    expect(projects.liveFailure(error)).toEqual({ error: error.message, status: live });
+  it.each(failures)('maps $error.name / $error.message to one answer', ({ error, expected }) => {
+    expect(workspace().projectFailure(error, 'other')).toEqual({ error: error.message, ...expected });
   });
 
-  it('keeps the distinct missing-root wording and unexpected-error behavior', () => {
-    const projects = workspace();
-    expect(projects.httpFailure(new ProjectContextError('missing-root', 'other'))).toEqual({ error: 'project folder not found: other', status: 409 });
-    expect(projects.httpFailure(new Error('unexpected'))).toBeUndefined();
-    expect(projects.liveFailure(new Error('unexpected'))).toEqual({ error: 'run feed unavailable', status: 503 });
+  it('answers an unexpected failure with 503 and logs the original error', () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const cause = new Error('unexpected /secret/path');
+    expect(workspace().projectFailure(cause, 'other')).toEqual({ error: 'project unavailable', status: 503 });
+    expect(log).toHaveBeenCalledWith('[cez] project other context build failed:', cause);
+    log.mockRestore();
   });
 
   it('suppresses context failures only for the upgrade lookup and never builds malformed ids', async () => {
