@@ -1013,9 +1013,16 @@ describe('cez task', () => {
       store.updateRun(a, { status: RUN_STATUS.done, createdAt: '2026-01-01T00:00:00.000Z' });
       store.updateRun(b, { createdAt: '2026-01-03T00:00:00.000Z' });
       store.updateRun(c, { status: RUN_STATUS.done, createdAt: '2026-01-02T00:00:00.000Z' });
-      expect(await run(['list', ...flags, '--status', 'done', '--limit', '1'])).toBe(0);
-      expect(last()).toMatchObject({ runs: [{ id: c }], total: 2 });
-      expect(last().runs).toHaveLength(1);
+      const suffix = flags.length > 0 ? '/runs' : '/run-summaries?archived=recent';
+      const response = await fetch(`${cockpit.api}${suffix}`);
+      const rows = await response.json() as Array<{ createdAt: string }>;
+      // The real server sorts too. Return oldest first to exercise the CLI's own order.
+      const spy = respond(suffix, rows.sort((a, b) => a.createdAt.localeCompare(b.createdAt)));
+      try {
+        expect(await run(['list', ...flags, '--status', 'done', '--limit', '1'])).toBe(0);
+        expect(last()).toMatchObject({ runs: [{ id: c }], total: 2 });
+        expect(last().runs).toHaveLength(1);
+      } finally { spy.mockRestore(); }
     });
 
     it.each([
