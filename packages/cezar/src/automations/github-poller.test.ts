@@ -1,3 +1,6 @@
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildSearchQuery,
@@ -515,9 +518,111 @@ it.each([false, true])('reports the exact label-history request bound (includeEx
   const run = async (_exe: string, args: readonly string[]) => args.some(arg => arg.includes('/timeline'))
     ? JSON.stringify(Array.from({ length: 100 }, () => ({ event: 'commented' })))
     : JSON.stringify({ items: [item] });
-  await expect(new GithubPoller({ run }).poll('acme', 'demo', {
+  const poll = new GithubPoller({ run }).poll('acme', 'demo', {
     ...definition, events: ['issue.labeled'], filters: { ...definition.filters, includeExisting },
-  }, { since: item.created_at })).rejects.toThrow(
-    `GitHub issue acme/demo#7 has more label history than one check reads (${includeExisting ? 900 : 1000} timeline entries); narrow the automation filters or process this item separately.`,
-  );
+  }, { since: item.created_at });
+  await expect(poll).rejects.toMatchObject({
+    message: `GitHub issue acme/demo#7 has more label history than one check reads (${includeExisting ? 900 : 1000} timeline entries); narrow the automation filters or process this item separately.`,
+  });
+});
+
+it('uses native gh arguments and reads provider output larger than the default buffer', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'cezar-poller-'));
+  const since = item.created_at;
+  const args = ['api', '--method', 'GET', '/search/issues', '-f',
+    `q=repo:acme/demo is:issue created:>=${since} created:<=${since}`,
+    '-f', 'per_page=100', '-f', 'page=1', '-f', 'sort=created', '-f', 'order=asc'];
+  const script = `#!${process.execPath}
+const expected = ${JSON.stringify(args)};
+if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(expected)) process.exit(2);
+const item = ${JSON.stringify(item)};
+item.title = 'x'.repeat(1100000);
+process.stdout.write(JSON.stringify({ items: [item] }));
+`;
+  await writeFile(join(directory, 'gh'), script, { mode: 0o755 });
+  vi.stubEnv('PATH', directory + ':' + process.env.PATH);
+  try {
+    const result = await new GithubPoller().poll('acme', 'demo', definition, {
+      historyScan: { since, until: since, source: 0, page: 1, item: 0, event: 0 },
+    });
+    expect(result.candidates).toEqual([expect.objectContaining({ number: 7, title: 'x'.repeat(500) })]);
+  } finally {
+    vi.unstubAllEnvs();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it('searches both opened families together without restricting the item kind', async () => {
+  const run = vi.fn(async () => JSON.stringify({ items: [item, { ...item, node_id: 'PR_one', pull_request: {} }] }));
+  const result = await new GithubPoller({ run }).poll('acme', 'demo', {
+    ...definition, events: ['issue.opened', 'pull_request.opened'],
+  }, { historyScan: { since: item.created_at, until: item.created_at, source: 0, page: 1, item: 0, event: 0 } });
+  expect(result.candidates.map(row => row.event)).toEqual(['issue.opened', 'pull_request.opened']);
+  expect(run).toHaveBeenCalledExactlyOnceWith('gh', [
+    'api', '--method', 'GET', '/search/issues', '-f',
+    `q=repo:acme/demo created:>=${item.created_at} created:<=${item.created_at}`,
+    '-f', 'per_page=100', '-f', 'page=1', '-f', 'sort=created', '-f', 'order=asc',
+  ]);
+});
+
+it('skips pull requests in label searches without reading their timeline', async () => {
+  const run = vi.fn(async () => JSON.stringify({ items: [{ ...item, pull_request: {} }] }));
+  const result = await new GithubPoller({ run }).poll('acme', 'demo', {
+    ...definition, events: ['issue.labeled'],
+  }, { historyScan: { since: item.created_at, until: item.created_at, source: 0, page: 1, item: 0, event: 0 } });
+  expect(result).toEqual({ candidates: [], truncated: false, pages: 1, cursor: undefined });
+  expect(run).toHaveBeenCalledExactlyOnceWith('gh', [
+    'api', '--method', 'GET', '/search/issues', '-f',
+    `q=repo:acme/demo is:issue updated:>=${item.created_at}`,
+    '-f', 'per_page=100', '-f', 'page=1', '-f', 'sort=created', '-f', 'order=asc',
+  ]);
+});
+
+it('reads label timelines with exact provider arguments and ignores non-object entries', async () => {
+  const run = vi.fn(async (_exe: string, args: readonly string[]) => args.some(arg => arg.includes('/timeline'))
+    ? JSON.stringify([null, 1, 'text', true, { event: 'commented' }, { event: 'labeled', created_at: item.created_at, label: { name: 'bug' } }])
+    : JSON.stringify({ items: [item] }));
+  const result = await new GithubPoller({ run }).poll('acme', 'demo', { ...definition, events: ['issue.labeled'] }, {
+    historyScan: { since: item.created_at, until: item.created_at, source: 0, page: 1, item: 0, event: 0 },
+  });
+  expect(result.candidates).toHaveLength(1);
+  expect(run.mock.calls[1]).toEqual(['gh', [
+    'api', '--method', 'GET', 'repos/acme/demo/issues/7/timeline',
+    '-H', 'Accept: application/vnd.github+json', '-f', 'per_page=100', '-f', 'page=1',
+  ]]);
+});
+
+it('starts an unrestricted query with the default family', () => {
+  expect(buildSearchQuery('acme', 'demo', definition)).toMatch(/^repo:acme\/demo created:>=/);
+});
+
+it('resumes a schema-valid timestamp-only cursor and adds the next identity', async () => {
+  const run = async () => JSON.stringify({ items: [item] });
+  const result = await new GithubPoller({ run }).poll('acme', 'demo', definition, {
+    historyScan: { since: item.created_at, until: item.created_at, source: 0, page: 1, item: 0, event: 0,
+      cursor: { timestamp: item.created_at } },
+  });
+  expect(result.cursor).toEqual({ timestamp: item.created_at, tieBreaker: 'I_one' });
+});
+
+it('names the exact field and index of a malformed timeline timestamp', async () => {
+  const run = async (_exe: string, args: readonly string[]) => args.some(arg => arg.includes('/timeline'))
+    ? JSON.stringify([{ event: 'commented' }, { event: 'labeled', created_at: 'bad', label: { name: 'bug' } }])
+    : JSON.stringify({ items: [item] });
+  await expect(new GithubPoller({ run }).poll('acme', 'demo', {
+    ...definition, events: ['issue.labeled'],
+  }, { since: item.created_at })).rejects.toMatchObject({
+    message: 'GitHub returned a malformed label change at acme/demo#7 timeline entry 1 (labeled): created_at: Invalid ISO datetime',
+  });
+});
+
+it('removes newer label additions while reconstructing older label events', () => {
+  const rows = reconstructLabelEvents('acme', 'demo', { ...item, labels: [{ name: 'bug' }, { name: 'triage' }] }, [
+    { id: 2, event: 'labeled', created_at: '2026-07-26T02:00:00.000Z', label: { name: 'triage' } },
+    { id: 1, event: 'labeled', created_at: item.created_at, label: { name: 'bug' } },
+  ]);
+  expect(rows.map(row => ({ changedLabel: row.changedLabel, labels: row.labels }))).toEqual([
+    { changedLabel: 'bug', labels: ['bug'] },
+    { changedLabel: 'triage', labels: ['bug', 'triage'] },
+  ]);
 });
