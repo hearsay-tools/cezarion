@@ -1,3 +1,4 @@
+import { runPersistence } from '../runs/run-store.testkit.ts';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -151,7 +152,7 @@ describe('parent-owned collected worker results', () => {
     const first = await f.service.collect(f.caller, { workerId: run.id });
     f.store.appendEvent(run.id, { type: 'text', text: 'Second evidence' });
     const published = vi.fn(); f.store.on('run', published);
-    const fault = vi.spyOn(f.store as unknown as { writeIndex(): void }, 'writeIndex').mockImplementation(() => { throw Error('disk failure'); });
+    const fault = vi.spyOn(runPersistence(f.store), 'persist').mockImplementation(() => { throw Error('disk failure'); });
     await expect(f.service.collect(f.caller, { workerId: run.id })).rejects.toThrow('disk failure');
     expect(published).not.toHaveBeenCalled();
     expect(f.store.readWorkerResult(f.parent.id, run.id)).toEqual(first); fault.mockRestore();
@@ -204,7 +205,7 @@ describe('parent-owned collected worker results', () => {
     const first = await f.service.collect(f.caller, { workerId: run.id });
     expect(first.diff.state).toBe('available');
     const original = f.store.readWorkerResultDiff(f.parent.id, run.id);
-    const fault = vi.spyOn(f.store as unknown as { writeIndex(): void }, 'writeIndex').mockImplementation(() => { throw Error('disk failure'); });
+    const fault = vi.spyOn(runPersistence(f.store), 'persist').mockImplementation(() => { throw Error('disk failure'); });
     expect(() => f.store.commitWorkerResult(f.parent.id, first, 'replacement')).toThrow();
     expect(f.store.readWorkerResultDiff(f.parent.id, run.id)).toBe(original); fault.mockRestore();
   });

@@ -1,3 +1,4 @@
+import { openTestRunStore, runPersistence } from './run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -179,7 +180,7 @@ describe('RunStore durable delegation', () => {
   let store: RunStore;
   beforeEach(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'cez-delegation-'));
-    store = RunStore.open(dataDir, { keepLive: true });
+    store = openTestRunStore(dataDir, { keepLive: true });
   });
   afterEach(() => {
     store.flush();
@@ -288,12 +289,12 @@ describe('RunStore durable delegation', () => {
     const run = parent(); const { first } = conversationInputs(run.id);
     const claim = { receiptId: randomUUID(), generation: randomUUID(), expiresAt: claimExpiry };
     const beforeClaim = structuredClone(store.getRun(run.id));
-    vi.spyOn(store as unknown as { commitIndex(): void }, 'commitIndex').mockImplementationOnce(() => { throw Error('disk unavailable'); });
+    vi.spyOn(runPersistence(store), 'persist').mockImplementationOnce(() => { throw Error('disk unavailable'); });
     expect(() => store.claimInboxInputs(run.id, [first.id], claim)).toThrow('disk unavailable');
     expect(store.getRun(run.id)).toEqual(beforeClaim);
     store.claimInboxInputs(run.id, [first.id], claim);
     const beforeAck = structuredClone(store.getRun(run.id));
-    vi.spyOn(store as unknown as { commitIndex(): void }, 'commitIndex').mockImplementationOnce(() => { throw Error('disk unavailable'); });
+    vi.spyOn(runPersistence(store), 'persist').mockImplementationOnce(() => { throw Error('disk unavailable'); });
     expect(() => store.ackInboxInputs(run.id, claim.receiptId, claim.generation, ackTime)).toThrow('disk unavailable');
     expect(store.getRun(run.id)).toEqual(beforeAck);
     expect(RunStore.open(dataDir, { keepLive: true }).getRun(run.id)).toEqual(beforeAck);
@@ -336,7 +337,7 @@ describe('RunStore durable delegation', () => {
       expect(notifications).toEqual([]);
     } finally { release(); }
     expect(store.commitRootFinishCancellation(run.id)).toBe(true);
-    const cancelled = RunStore.open(dataDir, { keepLive: true }).getRun(run.id);
+    const cancelled = openTestRunStore(dataDir, { keepLive: true }).getRun(run.id);
     expect(cancelled).toMatchObject({ status: 'cancelled', delegation: root });
     expect(cancelled?.delegation).not.toHaveProperty('finishRequestedAt');
     expect(store.commitRootFinishSuccess(run.id, 'done')).toBe(false);
@@ -420,7 +421,7 @@ describe('RunStore durable delegation', () => {
     expect(created).toMatchObject({ id: workerId, delegation: metadata, status: 'queued', runner: 'codex', model: 'model', agentProfile: 'account' });
     expect(emitted.sort()).toEqual([run.id, workerId].sort());
     store.close();
-    store = RunStore.open(dataDir, { keepLive: true });
+    store = openTestRunStore(dataDir, { keepLive: true });
     // The selector hash is unchanged even if parent HEAD and inherited settings have moved.
     const retry = store.createOwnedRun(input, run.id, requestId, worker(run.id, randomUUID()), requestHash);
     expect(retry).toMatchObject({ id: workerId, delegation: { workspace: { baselineSha } } });
@@ -473,12 +474,12 @@ describe('RunStore durable delegation', () => {
       } }]);
     }
     store.close();
-    store = RunStore.open(dataDir, { keepLive: true });
+    store = openTestRunStore(dataDir, { keepLive: true });
     const thirtyThird = randomUUID();
     expect(store.createOwnedRun(input, run.id, randomUUID(), worker(run.id, thirtyThird), requestHash).id).toBe(thirtyThird);
     expect(store.createOwnedRun(input, run.id, requestId, worker(run.id, randomUUID()), requestHash).delegation).toMatchObject({ destroy: { phase: 'complete' } });
     store.close();
-    store = RunStore.open(dataDir, { keepLive: true });
+    store = openTestRunStore(dataDir, { keepLive: true });
     const reopened = store.getRun(run.id)!.delegation;
     expect(reopened?.role === 'root' ? reopened.receipts.length : 0).toBe(33);
     expect(store.listOwnedWorkers(run.id)).toHaveLength(33);
@@ -504,7 +505,7 @@ describe('RunStore durable delegation', () => {
       if (i < 32) store.commitDelegation([{ id, delegation: { ...metadata, destroy: { requestedAt: now, phase: 'complete', remaining: [] } } }]);
     }
     store.close();
-    store = RunStore.open(dataDir, { keepLive: true });
+    store = openTestRunStore(dataDir, { keepLive: true });
     const blockers = parentReadiness(store.getRun(run.id)!, ids.map(id => ({ workerId: id, run: store.getRun(id), terminated: false })));
     expect(blockers).toHaveLength(33);
     expect(blockers.at(-1)).toEqual({ workerId: ids[32], reason: 'outstanding' });
@@ -515,7 +516,7 @@ describe('RunStore durable delegation', () => {
     store.createOwnedRun(input, run.id, requestId, worker(run.id), requestHash);
     store.close();
     seedRuns(dataDir, disk().filter((r: { id: string }) => r.id !== workerId));
-    store = RunStore.open(dataDir, { keepLive: true });
+    store = openTestRunStore(dataDir, { keepLive: true });
     expect(() => store.createOwnedRun(input, run.id, requestId, worker(run.id, randomUUID()), requestHash)).toThrow(/receipt/i);
     expect(store.listRuns()).toHaveLength(1);
   });
@@ -534,7 +535,7 @@ describe('RunStore durable delegation', () => {
     store.close();
     const rows = disk().map((r: { id: string }) => r.id === broken.id ? { ...r, delegation: { role: 'worker', parentRunId: 'bad' } } : r);
     seedRuns(dataDir, rows);
-    store = RunStore.open(dataDir, { keepLive: true });
+    store = openTestRunStore(dataDir, { keepLive: true });
     expect(runIds(store)).toHaveLength(3);
     expect(store.getRun(legacy.id)?.delegation).toBeUndefined();
     expect(store.getRun(broken.id)?.delegation).toEqual({ role: 'invalid' });

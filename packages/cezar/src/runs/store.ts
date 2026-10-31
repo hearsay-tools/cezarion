@@ -1,3 +1,4 @@
+import { stageCommit, stageLoaded, stageDurableUpdate, stageDebouncedUpdate, stageConversation, stageArchiveFields, stagePullRequests, stageStepUpdate, redactPatch, redactText } from './record-write-rules.ts';
 import { workerDeletionProof } from './worker-deletion-proof.ts';
 import { listPeerTaskSummaries, parseStoredSummary, type PeerTaskPageOptions } from './run-summary-page.ts';
 export { parseStoredSummary } from './run-summary-page.ts';
@@ -53,7 +54,7 @@ import { hasPlainHistory, historyPaths, readHistoryText, readHistoryTextAsync, r
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { capacityError, workerCapacity } from '../delegation/capacity.ts';
 import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
-import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
+import { collectSecretValues, redactDeep } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { archivePullRequests, pullRequestKey, mergePullRequests } from './pull-requests.ts';
 import { extractTaskRefs, isRepoScopedRef, MAX_REF, promptNamesRepo, refUrlRepo } from './task-refs.ts';
@@ -75,6 +76,9 @@ import { collectRawExtras, encodeRawRecord, type RawExtras } from './raw-record.
 import { assertNoLegacyCockpit, assertNoLegacyWriter, backUpLegacyIndex, LEGACY_INDEX_FILE, LegacyWriterError, readLegacyIndex } from './legacy-index.ts';
 import { RunStoreOpenError, toRunStoreOpenError } from './store-open-error.ts';
 import { claimOwnerLive, closeClaimSession, openClaimSession, type ClaimOwner } from './run-claims.ts';
+
+/** Per-store persistence adapter; the second argument is the normal fenced transaction. */
+export type RunStorePersistence = (changes: RunDatabaseChanges, transaction: RunDatabase['transaction']) => RunDatabaseCommit;
 
 export type RunStatus = 'queued' | 'running' | 'waiting' | 'review' | 'done' | 'failed' | 'cancelled';
 export type StepStatus =
@@ -566,21 +570,6 @@ function clearPendingAutoResume(run: RunRecord): void {
 }
 
 /**
- * The write rule (hearsay-tools/cezarion#1496): a resume time is the appointment of a `waiting`
- * run, so every commit takes it off a record that is not `waiting`. A copy, set to `undefined`
- * and never deleted: a caller may stage the held record itself. `autoResumeAttempts` stays, since
- * `MAX_AUTO_RESUMES` counts attempts across resumes.
- */
-function withoutStaleResumes(input: ReadonlyMap<string, RunRecord | null>): ReadonlyMap<string, RunRecord | null> {
-  let staged: Map<string, RunRecord | null> | undefined;
-  for (const [id, run] of input) {
-    if (run?.autoResumeAt === undefined || isUsageLimitHold(run)) continue;
-    (staged ??= new Map(input)).set(id, { ...run, autoResumeAt: undefined });
-  }
-  return staged ?? input;
-}
-
-/**
  * Archiving is resigning from a task, so it retires the pin too (#935) — a pin on a task the
  * user has filed away is stale by definition, and the archived view collapses into one bucket
  * anyway, so a surviving pin would be invisible state waiting to surprise whoever unarchives.
@@ -877,12 +866,8 @@ function failLoadedInterruptedRun(run: RunRecord, opts?: { keepLive?: boolean })
 }
 
 function clearLoadedStaleResume(run: RunRecord): void {
-  // Open waits are left alone at every status: RunManager cancels them when a run ends (spec
-  // 2026-10-17-unified-waits), and recovery reads the ones a crash left behind.
-  // A pending usage-limit resume survives the restart on purpose (the wait can be
-  // hours) — `RunManager.recover()` re-arms it from this field. It can only mean
-  // anything on a `waiting` run, so anywhere else it is stale bookkeeping.
-  if (run.status !== 'waiting') run.autoResumeAt = undefined;
+  // Recovery owns waits; a usage-limit appointment survives while status is waiting.
+  stageLoaded(run);
 }
 
 /**
@@ -1235,7 +1220,6 @@ const recordedProcessSchema = z.object({ pid: z.number().int().positive(), start
 const workerProcessRecordSchema = z.object({ generation: z.string().uuid(), controller: recordedProcessSchema,
   processes: z.array(recordedProcessSchema).max(WORKER_PROCESS_CAP) }).strict();
 const startToken = (pid: number) => { const token = processStartToken(pid); return token === undefined ? {} : { startToken: token }; };
-
 /**
  * Run rows in runs.db plus append-only NDJSON events and an in-process event bus. Hold live,
  * pinned, related and unsettled records only. Optimistic writes debounce; durable commits
@@ -1254,6 +1238,7 @@ export class RunStore extends EventEmitter {
   private db: RunDatabase | null = null;
   /** Why `open` failed, in a `RunStore.unavailable` store. */
   private openFailure: RunStoreOpenError | undefined;
+  private persistence: RunStorePersistence | undefined;
   /** Runs whose held record is ahead of its row; the next save or commit writes them. */
   private readonly dirty = new Set<string>();
   /** Runs gone from memory whose rows the next save or commit deletes. */
@@ -1308,7 +1293,6 @@ export class RunStore extends EventEmitter {
     this.compressor = new HistoryCompressor(dataDir, (id) => this.isHistoryCompressEligible(id),
       (id, plain, archive) => this.facts.adoptArchive(id, plain, stampOf(archive)));
   }
-
   /**
    * Open the project's run store. See `reconcileLoadedRun` for what `keepLive` (#367) decides
    * about live-looking rows.
@@ -1326,13 +1310,13 @@ export class RunStore extends EventEmitter {
    * only a boot passes it, while nothing else runs yet. Without it a busy database fails after
    * one busy timeout.
    */
-  static open(dataDir: string, opts?: { keepLive?: boolean | undefined; retryBusy?: boolean; maintenance?: boolean }): RunStore {
+  static open(dataDir: string, opts?: { keepLive?: boolean | undefined; retryBusy?: boolean; maintenance?: boolean; persist?: RunStorePersistence }): RunStore {
     const path = join(dataDir, RUNS_DB_FILE);
     const delays = opts?.retryBusy ? OPEN_RETRY_DELAYS_MS : [];
     const started = Date.now();
     for (let attempt = 0; ; attempt++) {
       try {
-        return RunStore.openOnce(dataDir, path, opts?.keepLive === true, opts?.maintenance === true);
+        return RunStore.openOnce(dataDir, path, opts?.keepLive === true, opts?.maintenance === true, opts?.persist);
       } catch (error) {
         const transient = error instanceof RunDatabaseBusyError || (error instanceof LegacyWriterError && error.reason === 'cockpit');
         if (!transient || attempt >= delays.length) {
@@ -1342,11 +1326,11 @@ export class RunStore extends EventEmitter {
       }
     }
   }
-
-  private static openOnce(dataDir: string, path: string, keepLive: boolean, maintenance: boolean): RunStore {
+  private static openOnce(dataDir: string, path: string, keepLive: boolean, maintenance: boolean, persist?: RunStorePersistence): RunStore {
     mkdirSync(join(dataDir, 'runs'), { recursive: true });
     const store = new RunStore(dataDir);
     store.keepLive = keepLive;
+    store.persistence = persist;
     const db = RunDatabase.open(path);
     try {
       if (db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) importLegacyIndex(db, dataDir);
@@ -2341,16 +2325,7 @@ export class RunStore extends EventEmitter {
     if (root?.delegation?.role !== 'root') throw new Error('missing conversation root');
     assertConversationIdFree(root, message ?? delivery?.input, id => this.peek(id), (runId, id) => this.hasProjection(runId, id));
     const staged = new Map<string, RunRecord>();
-    staged.set(rootId, { ...root, delegation: delegationStateSchema.parse({ ...root.delegation, conversation: { ...conversation,
-      messages: conversation.messages.map(message => ({ ...message, text: this.redactText(message.text) })),
-    } }) });
-    if (delivery) {
-      const recipient = staged.get(delivery.recipientRunId) ?? this.peek(delivery.recipientRunId);
-      if (!recipient) throw new Error('missing conversation recipient');
-      const input = agentInputSchema.parse({ ...delivery.input, text: this.redactText(delivery.input.text) });
-      const delegation = !recipient.delegation && delivery.recipientDelegation ? { delegation: delegationStateSchema.parse(delivery.recipientDelegation) } : {};
-      staged.set(recipient.id, { ...recipient, ...delegation, agentInputs: [...(recipient.agentInputs ?? []), input] });
-    }
+    stageConversation(staged, root, conversation, delivery, id => this.peek(id), text => this.redactText(text));
     this.commitIndex(staged);
   }
 
@@ -2640,11 +2615,8 @@ export class RunStore extends EventEmitter {
     if (conversation) {
       const root = this.peek(conversation.rootId);
       if (root?.delegation?.role !== 'root' || run.delegation.parentRunId !== root.id) throw new Error('missing conversation ownership');
-      staged.set(root.id, { ...root, delegation: delegationStateSchema.parse({ ...root.delegation, conversation: { ...conversation.state,
-        messages: conversation.state.messages.map(message => ({ ...message, text: this.redactText(message.text) })),
-      } }) });
-      const input = agentInputSchema.parse({ ...conversation.input, text: this.redactText(conversation.input.text) });
-      staged.set(id, { ...staged.get(id)!, agentInputs: [...(run.agentInputs ?? []), input] });
+      stageConversation(staged, root, conversation.state, { recipientRunId: id, input: conversation.input },
+        runId => this.peek(runId), text => this.redactText(text), run.agentInputs ?? []);
     }
     this.commitIndex(staged);
   }
@@ -2803,7 +2775,11 @@ export class RunStore extends EventEmitter {
    * remains best-effort.
    */
   private commitIndex(input: ReadonlyMap<string, RunRecord | null>, source?: CommitSource): void {
-    const staged = this.prepareCompletionActions(withoutStaleResumes(input));
+    const staged = stageCommit(input, {
+      peek: id => this.peek(id),
+      completionArchiveBlocker: run => this.completionArchiveBlocker(run),
+      stageArchive: (staged, run, archived) => this.stageArchive(staged, run, archived),
+    });
     if (!this.db) throw this.openFailure ?? new Error('runs database unavailable: nothing can be saved');
     this.assertWritable(staged);
     this.persist(staged);
@@ -2831,32 +2807,6 @@ export class RunStore extends EventEmitter {
       this.sweepIfSettled(staged.keys());
     }
     for (const [id, next] of staged) if (next?.archived) this.compressor.enqueue(id);
-  }
-
-  /** Completion and its intent/archive share the same committed rows, including root Finish. */
-  private prepareCompletionActions(input: ReadonlyMap<string, RunRecord | null>): Map<string, RunRecord | null> {
-    const staged = new Map(input);
-    for (const [id, candidate] of input) {
-      if (!candidate) continue;
-      const previous = this.peek(id);
-      let next = candidate;
-      const changed = candidate.status === 'done' && !candidate.archived && (
-        previous?.status !== 'done' ||
-        Boolean(previous.archiveWhenDone) !== Boolean(candidate.archiveWhenDone) ||
-        Boolean(previous.autoMergePr) !== Boolean(candidate.autoMergePr));
-      if (changed && (candidate.archiveWhenDone || candidate.autoMergePr)) {
-        next = { ...candidate, completionAction: { id: randomUUID(), phase: 'pending' } };
-        staged.set(id, next);
-        if (next.archiveWhenDone && !next.autoMergePr) {
-          const blocker = this.completionArchiveBlocker(next);
-          next.completionAction = { ...next.completionAction!, phase: blocker ? 'blocked' : 'complete', ...(blocker ? { message: blocker } : {}) };
-          if (!blocker) this.stageArchive(staged, next, true);
-        }
-      } else if (candidate.status !== 'done' || (!candidate.archiveWhenDone && !candidate.autoMergePr)) {
-        if (candidate.completionAction) staged.set(id, { ...candidate, completionAction: undefined });
-      }
-    }
-    return staged;
   }
 
   private completionArchiveBlocker(root: RunRecord): string | undefined {
@@ -2965,117 +2915,36 @@ export class RunStore extends EventEmitter {
   updateRun(id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps'>>): RunRecord | undefined {
     const run = this.record(id);
     if (!run) return undefined;
-    if (Object.prototype.hasOwnProperty.call(patch, 'issueNumber')) {
-      delete run.referencedIssueNumberSeeded;
-    }
-    const normalized = { ...patch };
-    if (normalized.pullRequestUrl !== undefined) {
-      this.accumulatePullRequests(run, [run.pullRequestUrl, normalized.pullRequestUrl].flatMap((url) => {
-        const number = refUrlNumber(url);
-        if (number === undefined) return [];
-        const parsed = runPullRequestSchema.safeParse({ number, url, source: 'created' });
-        return parsed.success ? [parsed.data] : [];
-      }));
-    }
-    // Waits are not cleared here: RunManager cancels them explicitly when a run ends (spec
-    // 2026-10-17-unified-waits), so a terminal patch never retires one as a side effect.
-    const archived = Object.prototype.hasOwnProperty.call(normalized, 'archived')
-      ? Boolean(normalized.archived)
-      : undefined;
-    if (archived !== undefined) {
-      delete normalized.archived;
-      delete normalized.archivedAt;
-    }
-    // Restore before mutating so a throw leaves status and archived unchanged (#818 S3).
-    if (archived === false) restoreHistory(this.dataDir, id);
-    // Opted-in completion and the handoff's records (the file shows only committed ones) take this
-    // transaction. Default-off Finish keeps its best-effort write so a locked database cannot stop cleanup.
-    if ((normalized.status === 'done' && (run.archiveWhenDone || run.autoMergePr)) || normalized.handoffRecords !== undefined ||
-      normalized.archiveWhenDone !== undefined || normalized.autoMergePr !== undefined) {
-      const next = { ...run, ...this.redactPatch(normalized) };
-      if (archived !== undefined) archiveFields(next, archived, new Date().toISOString());
-      this.commitIndex(new Map([[id, next]]));
+    const hooks = {
+      redact: (text: string) => this.redactText(text),
+      refUrlNumber,
+      repoHandle: this.repoHandle,
+      restore: () => restoreHistory(this.dataDir, id),
+      withdrawHold: clearPendingAutoResume,
+      clearPin,
+      hasPrUrl: (text: string) => PR_URL_RE.test(text),
+      hasIssueUrl: (text: string) => ISSUE_URL_RE.test(text),
+      trackReferencedPrs: (record: RunRecord, text: string) => this.trackReferencedPrs(record, text),
+      trackReferencedIssues: (record: RunRecord, text: string) => this.trackReferencedIssues(record, text),
+      resolveReferencedPr: (record: RunRecord) => resolveReferencedRef(
+        record.referencedPrCandidates!, record.task, referencedPrDeclaration(record), this.repoHandle),
+      resolveIssueReference: (record: RunRecord) => resolveIssueReference(record, this.repoHandle),
+      rescopeRun: (record: RunRecord) => rescopeRun(record, this.repoHandle),
+      archive: (record: RunRecord, archived: boolean) => this.applyArchived(record, archived),
+      touch: (record: RunRecord) => this.touch(record),
+    };
+    // Opted-in completion and handoff records require the durable path. Default-off Finish
+    // keeps its best-effort write so a locked database cannot stop cleanup.
+    if ((patch.status === 'done' && (run.archiveWhenDone || run.autoMergePr)) || patch.handoffRecords !== undefined ||
+      patch.archiveWhenDone !== undefined || patch.autoMergePr !== undefined) {
+      this.commitIndex(new Map([[id, stageDurableUpdate(run, patch, hooks)]]));
       return this.record(id);
     }
-    Object.assign(run, this.redactPatch(normalized));
-    // The usage-limit resume is the appointment of a `waiting` run (hearsay-tools/cezarion#1236),
-    // so a run coming back to life or settling retires it. `commitIndex` applies the same rule to
-    // every commit (`withoutStaleResumes`); this debounced path mutates the held record without it.
-    if (run.status !== 'waiting') run.autoResumeAt = undefined;
-    if (normalized.task !== undefined) this.resolveEditedTaskRefs(run);
-    if (archived !== undefined) this.applyArchived(run, archived);
-    else this.touch(run);
+    stageDebouncedUpdate(run, patch, hooks);
     return run;
   }
-
-  /** Prompt edits can both revoke and restore a reference. Resolve the retained working sets
-   *  before notifying readers, using the same ambiguity, marker and repository rules as events. */
-  private resolveEditedTaskRefs(run: RunRecord): void {
-    // An edited prompt is trusted evidence, just like the initial prompt. Collect its new
-    // URLs without discarding earlier evidence before applying the usual resolution rules.
-    if (PR_URL_RE.test(run.task)) this.trackReferencedPrs(run, run.task);
-    if (ISSUE_URL_RE.test(run.task)) this.trackReferencedIssues(run, run.task);
-    if (run.referencedPrCandidates !== undefined) {
-      run.referencedPullRequestUrl = resolveReferencedRef(
-        run.referencedPrCandidates, run.task, referencedPrDeclaration(run), this.repoHandle,
-      );
-    }
-    if (run.referencedIssueCandidates !== undefined) {
-      run.referencedIssueUrl = resolveIssueReference(run, this.repoHandle);
-      const number = refUrlNumber(run.referencedIssueUrl);
-      if (run.referencedIssueNumberSeeded) {
-        // We may change only the number this janitor owns, including clearing an ambiguous one.
-        run.issueNumber = number;
-        if (number === undefined) delete run.referencedIssueNumberSeeded;
-      } else if (number !== undefined && run.issueNumber === undefined &&
-        run.markerRefs?.issue === undefined && ISSUE_URL_RE.test(run.task)) {
-        // A new seed still needs trusted prompt evidence; retained tool output alone is insufficient.
-        run.issueNumber = number;
-        run.referencedIssueNumberSeeded = true;
-      }
-    }
-    // Legacy records may carry a URL without a candidate array. Preserve that evidence when
-    // allowed, while still revoking a foreign URL the edited prompt no longer corroborates.
-    rescopeRun(run, this.repoHandle);
-  }
-
-  /**
-   * Scrub the free-text fields of a record patch (#427 review). Redacting only
-   * events left a hole: `titleSummary` is derived from the RAW first agent turn
-   * and `error` from raw process output, so a token the agent echoed was
-   * `[REDACTED]` in the NDJSON yet verbatim in `runs.json` — the file the "no
-   * secrets in state files" rule names explicitly. These three are the only
-   * patch fields carrying agent/process text; the rest are ids, enums, counters
-   * and URLs, and running the scrubber over them would only risk mangling them.
-   *
-   * `StepState.error` is the step-level counterpart and is scrubbed the same
-   * way in `updateStep` — `run.ts` feeds the SAME `err.message` string to both
-   * calls, so redacting only the run-level copy left the token verbatim one
-   * field away (#456 review).
-   */
-  private redactPatch(
-    patch: Partial<Omit<RunRecord, 'id' | 'steps'>>,
-  ): Partial<Omit<RunRecord, 'id' | 'steps'>> {
-    if (process.env.CEZ_REDACT_SECRETS === '0') return patch;
-    const out = { ...patch };
-    for (const field of ['title', 'titleSummary', 'error'] as const) {
-      const value = out[field];
-      if (typeof value === 'string') out[field] = this.redactText(value);
-    }
-    return out;
-  }
-
-  /**
-   * Step-level counterpart of `redactPatch` (#456 review). `error` is the only
-   * free-text `StepState` field — it is set from raw `err.message` /process
-   * output (`workflows/run/step-loop.ts` `finishStep`), and `touch()` fans the whole record out
-   * over SSE, so an unscrubbed copy leaked to `runs.json` AND to the browser.
-   * The remaining fields are ids, enums, counters and timestamps.
-   */
-  private redactStepPatch(patch: Partial<Omit<StepState, 'id'>>): Partial<Omit<StepState, 'id'>> {
-    if (process.env.CEZ_REDACT_SECRETS === '0') return patch;
-    if (typeof patch.error !== 'string') return patch;
-    return { ...patch, error: this.redactText(patch.error) };
+  private redactPatch(patch: Partial<Omit<RunRecord, 'id' | 'steps'>>): Partial<Omit<RunRecord, 'id' | 'steps'>> {
+    return redactPatch(patch, text => this.redactText(text));
   }
 
   /** Append a step to an existing run (used by "Continue" — spec 003). */
@@ -3085,12 +2954,11 @@ export class RunStore extends EventEmitter {
     run.steps.push({ ...step, status: 'pending', iterations: 0, tokensUsed: 0 });
     this.touch(run);
   }
-
   updateStep(runId: string, stepId: string, patch: Partial<Omit<StepState, 'id'>>): void {
     const run = this.record(runId);
     const step = run?.steps.find((s) => s.id === stepId);
     if (!run || !step) return;
-    Object.assign(step, this.redactStepPatch(patch));
+    Object.assign(step, stageStepUpdate(patch, text => this.redactText(text)));
     run.tokensUsed = run.steps.reduce((sum, s) => sum + s.tokensUsed, 0);
     const startedAgentSteps = run.steps.filter((candidate) => candidate.kind === 'agent' && candidate.iterations > 0);
     const directionalComplete =
@@ -3635,13 +3503,8 @@ export class RunStore extends EventEmitter {
     if (changed) this.touch(run);
     return run;
   }
-
   private accumulatePullRequests(run: RunRecord, entries: readonly RunPullRequest[]): boolean {
-    const next = mergePullRequests(run.pullRequests, entries, this.repoHandle
-      ? `https://github.com/${this.repoHandle.owner}/${this.repoHandle.name}` : undefined);
-    if (isDeepStrictEqual(next, run.pullRequests)) return false;
-    run.pullRequests = next;
-    return true;
+    return stagePullRequests(run, entries, this.repoHandle);
   }
 
   /**
@@ -3680,9 +3543,7 @@ export class RunStore extends EventEmitter {
   /** Best-effort scrub of one free-text string bound for `runs.json`. Honors
    *  the `CEZ_REDACT_SECRETS=0` opt-out itself so every caller inherits it. */
   redactText(text: string): string {
-    const safe = this.sessionSecrets.size ? redactSecrets(text, [...this.sessionSecrets]) : text;
-    if (process.env.CEZ_REDACT_SECRETS === '0') return safe;
-    return redactSecrets(safe, this.hostSecrets());
+    return redactText(text, [...this.sessionSecrets], () => this.hostSecrets());
   }
 
   private hostSecrets(): readonly string[] {
@@ -4279,7 +4140,8 @@ export class RunStore extends EventEmitter {
 
   /** The single database write, so a test can fail it the way a full disk would. */
   private writeIndex(changes: RunDatabaseChanges): RunDatabaseCommit {
-    return this.db!.transaction(changes);
+    const transaction = (changes: RunDatabaseChanges) => this.db!.transaction(changes);
+    return this.persistence ? this.persistence(changes, transaction) : transaction(changes);
   }
 
   /**
@@ -4497,8 +4359,5 @@ function archiveDigest(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 function archiveFields(run: RunRecord, archived: boolean, now: string): void {
-  run.archived = archived;
-  run.archivedAt = archived ? now : undefined;
-  if (archived) { clearPendingAutoResume(run); clearPin(run); }
-  else run.manualUnarchivedAt = now;
+  stageArchiveFields(run, archived, now, clearPendingAutoResume, clearPin);
 }

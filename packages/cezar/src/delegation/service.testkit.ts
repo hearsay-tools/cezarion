@@ -1,3 +1,4 @@
+import { openTestRunStore } from '../runs/run-store.testkit.ts';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers, managerDisposed } from '../workflows/fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
@@ -77,7 +78,7 @@ export function fixture(options: WorkerCleanupOptions = {}): { root: string; sha
   execFileSync('git', ['config', 'maintenance.auto', 'false'], { cwd: root });
   execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: root });
   const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
-  const store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
+  const store = openTestRunStore(join(root, '.ai/cezar'), { keepLive: true });
   const manager = createFixtureManager(store, root);
   // Scheduler admission is deliberately held: service acceptance must be durable before it.
   const pump = vi.spyOn(runInternals(manager).line, 'pump').mockResolvedValue();

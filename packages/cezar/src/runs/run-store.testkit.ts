@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, type RunRowInput } from './run-database.ts';
 import { closeClaimSession } from './run-claims.ts';
 import { encodeRunRow } from './run-row.ts';
-import type { RunRecord, RunStore } from './store.ts';
+import { RunStore, type RunRecord, type RunStorePersistence } from './store.ts';
 
 /**
  * The one way tests put runs on disk and read them back (#779). Every test that seeded or read
@@ -152,4 +152,27 @@ export function crashStore(store: RunStore): void {
  */
 export function hasPendingAsk(store: Pick<RunStore, 'transcriptFacts'>, runId: string): boolean {
   return store.transcriptFacts(runId).pendingAsk !== undefined;
+}
+
+
+const persistenceAdapters = new WeakMap<RunStore, { persist: RunStorePersistence }>();
+
+/** Open with a per-store adapter that tests can observe or fail without spying on internals. */
+export function openTestRunStore(dataDir: string, opts?: Parameters<typeof RunStore.open>[1]): RunStore {
+  const adapter = { persist: ((changes, transaction) => transaction(changes)) as RunStorePersistence };
+  const store = RunStore.open(dataDir, { ...opts, persist: (changes, transaction) => adapter.persist(changes, transaction) });
+  persistenceAdapters.set(store, adapter);
+  return store;
+}
+
+export function runPersistence(store: RunStore): { persist: RunStorePersistence } {
+  const adapter = persistenceAdapters.get(store);
+  if (!adapter) throw new Error('Open the test store with openTestRunStore');
+  return adapter;
+}
+
+/** The one test-only staging reach: pins publication of every row before its first event. */
+export function commitStagedRuns(store: RunStore, staged: Map<string, RunRecord>): void {
+  const commit = Reflect.get(store, 'commitIndex') as (staged: Map<string, RunRecord>) => void;
+  commit.call(store, staged);
 }

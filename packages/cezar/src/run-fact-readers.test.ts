@@ -20,7 +20,8 @@ const HOME = 'packages/contract/src/';
 /** Source files that read or write `autoResumeAt`, each with its reason. Tests build fixtures freely. */
 const RESUME_TIME_READERS: Record<string, string> = {
   'packages/contract/src/waits.ts': 'defines `isUsageLimitHold` and names the usage-limit wait by its time',
-  'packages/cezar/src/runs/store.ts': 'the write rule, load-time healing, and the withdrawal and resume writes',
+  'packages/cezar/src/runs/store.ts': 'the withdrawal and resume writes',
+  'packages/cezar/src/runs/record-write-rules.ts': 'stages the commit, loaded and debounced stale-resume write rules',
   'packages/cezar/src/workflows/run/auto-resume.ts': 'arms, re-arms, withdraws and clears the resume timer at its time',
   'packages/cezar/src/workflows/run-scheduling.ts': 'derives account holds from future resume deadlines',
   'packages/cezar/src/workflows/run/run-line.ts': 'queue rescue reads the resume time',

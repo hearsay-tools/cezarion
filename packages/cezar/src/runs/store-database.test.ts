@@ -1,10 +1,11 @@
+import { openTestRunStore, runPersistence } from './run-store.testkit.ts';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { toRunSummary } from '@open-mercato/cezar-contract/runs';
 
-import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, type RunDatabaseChanges, type RunDatabaseCommit } from './run-database.ts';
+import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase } from './run-database.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
 import { encodeRunRow } from './run-row.ts';
 import { blockRunWrites, readPersistedRuns, runIds, seedRuns } from './run-store.testkit.ts';
@@ -21,18 +22,18 @@ const record = (id: string, over: Partial<RunRecord> = {}): RunRecord => ({
 let dataDir: string;
 const stores: RunStore[] = [];
 const open = (opts?: { keepLive?: boolean | undefined }) => {
-  const store = RunStore.open(dataDir, opts);
+  const store = openTestRunStore(dataDir, opts);
   stores.push(store);
   return store;
 };
 /** The change sets `store` hands the database, in order. */
 const writes = (store: RunStore) => {
-  const target = store as unknown as { writeIndex(changes: RunDatabaseChanges): RunDatabaseCommit };
-  const original = target.writeIndex.bind(store);
+  const target = runPersistence(store);
+  const original = target.persist;
   const seen: Array<{ upserts: string[]; deletes: string[] }> = [];
-  vi.spyOn(target, 'writeIndex').mockImplementation((changes) => {
+  vi.spyOn(target, 'persist').mockImplementation((changes, transaction) => {
     seen.push({ upserts: changes.upserts.map((row) => row.id), deletes: [...changes.deletes] });
-    return original(changes);
+    return original(changes, transaction);
   });
   return seen;
 };
@@ -265,8 +266,8 @@ describe('durable commits', () => {
     const other = store.createRun({ title: 'y', workflow: 'w', task: 't', steps: [] });
     store.flush();
     store.deleteRun(run.id);
-    const target = store as unknown as { writeIndex(changes: RunDatabaseChanges): void };
-    vi.spyOn(target, 'writeIndex').mockImplementationOnce(() => { throw new Error('disk unavailable'); });
+    const target = runPersistence(store);
+    vi.spyOn(target, 'persist').mockImplementationOnce(() => { throw new Error('disk unavailable'); });
     expect(() => store.commitDelegation([{ id: other.id, delegation: { role: 'invalid' } }])).toThrow('disk unavailable');
     store.flush();
     expect(readPersistedRuns(dataDir).map((saved) => saved.id)).toEqual([other.id]);
@@ -307,8 +308,8 @@ describe('durable commits', () => {
     second.flush();
 
     first.updateRun(x.id, { title: 'x pending' });
-    const target = first as unknown as { writeIndex(changes: unknown): void };
-    vi.spyOn(target, 'writeIndex').mockImplementationOnce(() => { throw new Error('disk unavailable'); });
+    const target = runPersistence(first);
+    vi.spyOn(target, 'persist').mockImplementationOnce(() => { throw new Error('disk unavailable'); });
     expect(() => first.commitDelegation([{ id: y.id, delegation: { role: 'invalid' } }])).toThrow('disk unavailable');
     first.flush();
 
@@ -475,7 +476,7 @@ describe('loading normalizes and saves exactly the rows it changed', () => {
 describe('close', () => {
   it('writes what is pending, then saves nothing more and refuses durable commits', () => {
     vi.useFakeTimers();
-    const store = RunStore.open(dataDir);
+    const store = openTestRunStore(dataDir);
     const run = store.createRun({ title: 'x', workflow: 'w', task: 't', steps: [] });
     store.close();
     expect(readPersistedRuns(dataDir).map((saved) => saved.id)).toEqual([run.id]);

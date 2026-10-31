@@ -1,3 +1,4 @@
+import { runPersistence } from '../runs/run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -252,7 +253,7 @@ describe('durable conversations', () => {
     const before = structuredClone(f.store.getRun(w.id));
     const at = new Date().toISOString();
     const inputs = before!.agentInputs!.map(input => input.id === request.id ? { ...input, deliveredAt: at, consumedAt: at } : input);
-    const fault = vi.spyOn(f.store as unknown as { commitIndex(): void }, 'commitIndex').mockImplementationOnce(() => { throw Error('disk unavailable'); });
+    const fault = vi.spyOn(runPersistence(f.store), 'persist').mockImplementationOnce(() => { throw Error('disk unavailable'); });
     expect(() => f.store.commitOutcome(w.id, { kind: 'opening-handled', inputId: request.id, at })).toThrow('disk unavailable');
     expect(f.store.getRun(w.id)).toEqual(before);
     fault.mockRestore();
@@ -271,7 +272,7 @@ describe('durable conversations', () => {
   it('accepts neither a message nor a continuation when the atomic index write fails', async () => {
     const w = await completedWorker();
     const before = structuredClone(f.store.getRun(w.id));
-    vi.spyOn(f.store as unknown as { commitIndex(): void }, 'commitIndex').mockImplementationOnce(() => { throw Error('disk unavailable'); });
+    vi.spyOn(runPersistence(f.store), 'persist').mockImplementationOnce(() => { throw Error('disk unavailable'); });
     await expect(f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'progress', text: 'Retry work', timeoutSeconds: 600, resume: true })).rejects.toThrow(/checkpoint/);
     expect(f.store.getRun(w.id)).toEqual(before);
     expect(f.store.getRun(f.parent.id)?.delegation).not.toHaveProperty('conversation');
@@ -321,7 +322,7 @@ describe('durable conversations', () => {
   });
   it('publishes neither ledger nor input when atomic persistence fails', async () => {
     const w = await worker();
-    vi.spyOn(f.store as unknown as { commitIndex(): void }, 'commitIndex').mockImplementationOnce(() => { throw Error('disk unavailable'); });
+    vi.spyOn(runPersistence(f.store), 'persist').mockImplementationOnce(() => { throw Error('disk unavailable'); });
     await expect(f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'request', text: 'question', timeoutSeconds: 600 })).rejects.toThrow('disk unavailable');
     expect(f.store.getRun(f.parent.id)?.delegation).not.toHaveProperty('conversation');
     expect(f.store.getRun(w.id)?.agentInputs ?? []).toEqual([]);

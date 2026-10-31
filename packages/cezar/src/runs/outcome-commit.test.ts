@@ -1,3 +1,4 @@
+import { openTestRunStore, runPersistence } from './run-store.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,7 +28,7 @@ const human = (): Wait => makeHumanWait({ id: randomUUID(), registeredAt: at });
 
 beforeEach(() => {
   directory = join(mkdtempSync(join(tmpdir(), 'cez-outcome-')), '.ai/cezar');
-  store = RunStore.open(directory, { keepLive: true });
+  store = openTestRunStore(directory, { keepLive: true });
   id = store.createRun({ title: 'outcomes', workflow: 'quick-task', task: 'wait', steps: [{ id: 'main', name: 'main', kind: STEP_KIND.agent }] }).id;
   store.flush();
 });
@@ -44,7 +45,7 @@ describe('commitOutcome', () => {
     store.commitWait(id, wait, input({ id: wait.id }));
     store.commitAgentInputs(id, [...store.getRun(id)!.agentInputs!, message]);
     const refusal = input({ purpose: 'completion-refusal' });
-    const commits = vi.spyOn(store as unknown as { commitIndex(): void }, 'commitIndex');
+    const commits = vi.spyOn(runPersistence(store), 'persist');
     store.commitOutcome(id, [{ kind: 'delivered', inputIds: [wait.id, message.id], at }, { kind: 'charged', automaticWakes: 7 }, { kind: 'counted', waitDeliveryFailures: undefined }],
       { patch: { status: RUN_STATUS.running }, enqueue: [refusal] });
     expect(commits).toHaveBeenCalledTimes(1);
@@ -55,7 +56,7 @@ describe('commitOutcome', () => {
   });
 
   it('writes nothing when no outcome changes the record', () => {
-    const commits = vi.spyOn(store as unknown as { commitIndex(): void }, 'commitIndex');
+    const commits = vi.spyOn(runPersistence(store), 'persist');
     expect(store.commitOutcome(id, [{ kind: 'answered' }, { kind: 'counted', waitDeliveryFailures: undefined }, { kind: 'delivered', inputIds: [randomUUID()], at }]))
       .toEqual({ committed: false, answered: [] });
     expect(commits).not.toHaveBeenCalled();
@@ -110,10 +111,10 @@ describe('commitOutcome', () => {
     const wait = human();
     store.commitWait(id, wait);
     crashStore(store);
-    store = RunStore.open(directory, { keepLive: true });
+    store = openTestRunStore(directory, { keepLive: true });
     expect(store.commitOutcome(id, { kind: 'answered', waitIds: [wait.id] }).answered).toEqual([wait.id]);
     crashStore(store);
-    store = RunStore.open(directory, { keepLive: true });
+    store = openTestRunStore(directory, { keepLive: true });
     expect(store.getRun(id)?.lastWaits).toEqual([expect.objectContaining({ id: wait.id, phase: WAIT_PHASE.delivered })]);
   });
 });
