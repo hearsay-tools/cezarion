@@ -351,7 +351,7 @@ export function DeleteBranchDialog({ entry, onClose }: { entry: RepoBranchEntry 
     onClose()
   }
   const matches = entry !== null && typed.trim() === entry.name
-  const commits = entry ? `${entry.ahead} commit${entry.ahead === 1 ? '' : 's'}` : ''
+  const commits = entry && `${entry.ahead} commit${entry.ahead === 1 ? '' : 's'}`
   return (
     <AlertDialog open={entry !== null} onOpenChange={(open) => !open && !remove.isPending && close()}>
       <AlertDialogContent data-slot="delete-branch-dialog">
@@ -399,7 +399,7 @@ export function DeleteBranchDialog({ entry, onClose }: { entry: RepoBranchEntry 
             disabled={!matches || remove.isPending}
             onClick={(event) => {
               event.preventDefault()
-              if (matches && entry) remove.mutate(entry.name)
+              if (entry) remove.mutate(entry.name)
             }}
           >
             {remove.isPending ? 'Deleting…' : 'Delete branch'}
