@@ -124,7 +124,7 @@ async function main(argv, env, deps) {
 function runStryker(name, mutate, ms, options = {}) {
   return new Promise(resolve => {
     const child = (options.spawn ?? spawn)(STRYKER, ['run', '--mutate', mutate.join(','), ...(options.extraArgs ?? [])], {
-      cwd: options.cwd, detached: true, stdio: options.onOutput ? ['inherit', 'pipe', 'pipe'] : 'inherit', env: { ...process.env, STRYKER_PROJECT: name },
+      cwd: options.cwd, detached: true, stdio: options.onOutput ? ['inherit', 'pipe', 'pipe'] : 'inherit', env: { ...(options.env ?? process.env), STRYKER_PROJECT: name },
     });
     if (options.onOutput) {
       child.stdout.on('data', chunk => { process.stdout.write(chunk); options.onOutput(String(chunk)); });

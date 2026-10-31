@@ -72,8 +72,11 @@ The report does **not** stand in when the fix is outside `packages/*/src` (scrip
 configuration, documents), when the change only deletes code or only edits a module-level constant
 (the job skips static mutants), when the change is test-only or removes a hidden dependency, when the
 test pins timing or load, or when no pull request exists yet. Use the matching recipe then. To run
-the job by hand, do it in a scratch worktree where Squeal does not run, because Stryker edits files in
-place: `STRYKER_PROJECT=<package> pnpm exec stryker run --mutate 'packages/<package>/src/<file>.ts:<from>-<to>'`.
+the job by hand, do it in a standalone scratch clone where Squeal does not run, because Stryker edits
+files in place: `STRYKER_PROJECT=<package> pnpm exec stryker run --mutate 'packages/<package>/src/<file>.ts:<from>-<to>'`.
+Never use a linked worktree for it: a mutant can run the real dependency in place of the injected
+one, and from a linked worktree it reaches the live repository's refs and the cockpit that serves it
+(hearsay-tools/cezarion#2367).
 
 To measure a whole file, run:
 
@@ -82,8 +85,9 @@ node .github/scripts/mutants-file.cjs packages/<package>/src/<file>.ts \
   --out ~/.cache/cez/mutants/result.json
 ```
 
-The command creates and removes its own disposable worktree, so Stryker never edits the worktree
-that Squeal validates. Contract files also run their direct server and web consumer tests; add
+The command creates and removes its own standalone checkout of `HEAD`, with no remote and no
+`CEZ_*` variables, so Stryker never edits the worktree that Squeal validates and a mutant cannot reach
+the live repository or cockpit. Contract files also run their direct server and web consumer tests; add
 `--tests <test files>` for more contract consumers. Use `--compare ~/.cache/cez/mutants/earlier.json`
 to compare runs.
 
