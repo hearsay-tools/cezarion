@@ -64,13 +64,13 @@ function scoreOf(c) {
   return total === 0 ? 100 : 100 * (c.killed + c.timeout) / total;
 }
 
-function evaluate(mutants, target, ranges) {
+function evaluate(mutants, target, ranges, allMutants = mutants) {
   const counted = mutants.filter(m => m.kind !== 'Class name' && (m.kind !== 'Text' || target.guards.includes(m.function)));
   const counts = countsOf(counted);
   const guards = target.guards.map(name => {
     const found = ranges.some(r => r.name === name);
     const survivors = mutants.filter(m => m.function === name && m.kind !== 'Class name' && undetected(m));
-    return { name, found, survivors, pass: found && survivors.length === 0 };
+    return { name, found, survivors, staticCount: allMutants.filter(m => m.function === name && m.static).length, pass: found && survivors.length === 0 };
   });
   const targets = [{ name: `${target.tier} score`, pass: scoreOf(counts) >= (target.tier === 'logic' ? 85 : 75) }];
   if (target.tier === 'logic') targets.push({ name: 'covered lines', pass: counts.noCoverage === 0 });
@@ -152,12 +152,21 @@ function mergeReports(first, second, file) {
   return { ...first, files: { ...first.files, [file]: { ...a, mutants: [...merged.values()] } } };
 }
 
+/** Keep observed static outcomes visible even though the counted score excludes them. */
+function staticResults(mutants) {
+  const rows = mutants.filter(m => m.static).map(m => ({ ...m, status: m.reportedStatus }));
+  const names = [...new Set(rows.map(m => m.function))];
+  return { staticCounts: countsOf(rows), staticByFunction: names.map(name => ({ name, counts: countsOf(rows.filter(m => m.function === name)) })) };
+}
+
 function measure(report, file, head, ranges, targets = TARGETS, entries = []) {
   const data = report.files?.[file];
   if (!data) throw new Error(`Report does not contain ${file}`);
   const mutants = data.mutants.map(m => {
     const row = { file, location: m.location, line: m.location.start.line, mutator: m.mutatorName, original: sliceSource(data.source, m.location), replacement: m.replacement, status: m.status, function: functionOf(m.location, ranges) };
-    return { ...row, kind: kindOf(row, file) };
+    // Static coverage includes hybrid mutants: ignoreStatic still activates those
+    // in beforeAll, after imports. Their outcomes do not measure import-time code.
+    return { ...row, kind: kindOf(row, file), ...(m.static === true ? { static: true, status: 'Ignored', reportedStatus: m.status } : {}) };
   });
   const target = tierOf(file, targets);
   const duplicates = duplicateNames(ranges);
@@ -165,19 +174,29 @@ function measure(report, file, head, ranges, targets = TARGETS, entries = []) {
   const eligible = entries.filter(entry => !duplicates.has(entry.function));
   const kept = mutants.filter(m => !eligible.some(entry => matchesEntry(entry, m)));
   const staleEquivalent = eligible.filter(entry => entry.file === file && !mutants.some(m => matchesEntry(entry, m)));
+  const rawCounts = countsOf(data.mutants);
   return { version: 1, file, head, tier: target.tier, mutants: kept, equivalentCount: mutants.length - kept.length,
-    ...evaluate(kept, target, ranges), rawCounts: countsOf(mutants), rawScore: scoreOf(countsOf(mutants)), staleEquivalent, ambiguousEquivalent };
+    ...staticResults(mutants),
+    moduleLevelCount: mutants.filter(m => m.static && m.function === '(module)').length,
+    staticFunctions: [...new Set(mutants.filter(m => m.static && m.function !== '(module)').map(m => m.function))].map(name => ({ name, count: mutants.filter(m => m.static && m.function === name).length })),
+    ...evaluate(kept, target, ranges, mutants), rawCounts, rawScore: scoreOf(rawCounts), staleEquivalent, ambiguousEquivalent };
 }
 
 function summary(result) {
-  const lines = [`File: ${result.file}`, `HEAD: ${result.head}`, `Tier: ${result.tier}`, `Counts: ${JSON.stringify(result.counts)}`, `Counted score: ${result.score.toFixed(1)}%`, `Raw counts: ${JSON.stringify(result.rawCounts)}`, `Stryker raw score: ${result.rawScore.toFixed(1)}%`];
+  const lines = [`File: ${result.file}`, `HEAD: ${result.head}`, `Tier: ${result.tier}`, `Counts: ${JSON.stringify(result.counts)}`, `Counted score: ${result.score.toFixed(1)}%`];
+  lines.push(`Static outcomes (not measured): ${JSON.stringify(result.staticCounts)}`);
+  for (const group of result.staticByFunction) lines.push(`Static outcomes in ${group.name} (not measured): ${JSON.stringify(group.counts)}`);
+  lines.push(`Raw counts: ${JSON.stringify(result.rawCounts)}`, `Stryker raw score: ${result.rawScore.toFixed(1)}%`);
+  lines.push(`Static mutants at module scope: ${result.moduleLevelCount}; not measured, excluded from counted score (raw score unchanged).`);
+  lines.push(`Static mutants inside functions: ${result.staticFunctions.reduce((total, f) => total + f.count, 0)}; not measured: ${result.staticFunctions.map(f => `${f.name} (${f.count})`).join(', ') || 'none'}.`);
   lines.push(`Not-covered lines: ${[...new Set(result.survivors.filter(m => m.status === 'NoCoverage').map(m => m.line))].join(', ') || 'none'}`);
   const names = [...new Set(result.survivors.map(m => m.function))];
   for (const name of names) {
     lines.push(`Survivors in ${name}:`);
     for (const m of result.survivors.filter(m => m.function === name)) lines.push(`  L${m.line} ${m.kind} / ${m.mutator}: ${flat(m.original)} -> ${flat(m.replacement)}`);
   }
-  for (const guard of result.guards) lines.push(`Guard ${guard.name}: ${guard.found ? `${guard.survivors.length} undetected` : 'NOT FOUND'}`);
+  for (const guard of result.guards) lines.push(`Guard ${guard.name}: ${guard.found ? `${guard.survivors.length} undetected, ${guard.staticCount} static not measured` : 'NOT FOUND'}`);
+  lines.push(`Guards with static mutants not measured: ${result.guards.filter(g => g.staticCount > 0).map(g => g.name).join(', ') || 'none'}`);
   for (const target of result.targets) lines.push(`${target.pass ? 'PASS' : 'FAIL'}: ${target.name}`);
   lines.push(`Equivalent mutants excluded: ${result.equivalentCount}`, `Stale equivalent entries: ${JSON.stringify(result.staleEquivalent)}`);
   if (result.consumers) lines.push(result.consumers.state === 'failed' ? `FAIL: consumer tests: failed — ${result.consumers.reason}` : `PASS: consumer tests: merged (${result.consumers.tests.length} files)`);
