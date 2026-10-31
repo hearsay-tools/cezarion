@@ -114,11 +114,11 @@ export function stageStepUpdate(patch: Partial<Omit<StepState, 'id'>>, redact: (
   return { ...patch, error: redact(patch.error) };
 }
 
-/** Stage the ledger before its recipient input, also when both are the same run.
- * Worker continuation appends to original run.agentInputs even when its patch carries agentInputs. */
+/** Stage the ledger before its recipient input, also when both are the same run. The input
+ * appends to the recipient's staged queue, so a worker continuation keeps a patched agentInputs. */
 export function stageConversation(staged: Map<string, RunRecord>, root: RunRecord, state: ConversationState,
   delivery: { recipientRunId: string; input: AgentInput; recipientDelegation?: DelegationState } | undefined,
-  peek: (id: string) => RunRecord | undefined, redact: (text: string) => string, inputBase?: readonly AgentInput[]): void {
+  peek: (id: string) => RunRecord | undefined, redact: (text: string) => string): void {
   staged.set(root.id, { ...root, delegation: delegationStateSchema.parse({ ...root.delegation, conversation: { ...state,
     messages: state.messages.map(message => ({ ...message, text: redact(message.text) })),
   } }) });
@@ -127,7 +127,7 @@ export function stageConversation(staged: Map<string, RunRecord>, root: RunRecor
     if (!recipient) throw new Error('missing conversation recipient');
     const input = agentInputSchema.parse({ ...delivery.input, text: redact(delivery.input.text) });
     const delegation = !recipient.delegation && delivery.recipientDelegation ? { delegation: delegationStateSchema.parse(delivery.recipientDelegation) } : {};
-    staged.set(recipient.id, { ...recipient, ...delegation, agentInputs: [...(inputBase ?? recipient.agentInputs ?? []), input] });
+    staged.set(recipient.id, { ...recipient, ...delegation, agentInputs: [...(recipient.agentInputs ?? []), input] });
   }
 }
 

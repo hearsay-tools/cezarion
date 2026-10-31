@@ -23,6 +23,7 @@ import {
   workerWorkspaceSchema,
   delegationErrorResponseSchema,
 } from '@open-mercato/cezar-contract/delegation';
+import { RUN_STATUS, WAIT_SOURCE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { agentInputEventSchema } from '@open-mercato/cezar-contract/events';
 import type { DelegationState } from '@open-mercato/cezar-contract';
 import { RunStore, runRecordSchema } from './store.ts';
@@ -364,6 +365,30 @@ describe('RunStore durable delegation', () => {
       });
     }
     expect(RunStore.open(dataDir, { keepLive: true }).getRun(first.id)?.delegation).toEqual(root);
+  });
+
+  // hearsay-tools/cezarion#2326: a delivered input appends to the queue the same write stages,
+  // on both paths. A continuation patch that sets agentInputs is that queue.
+  it.each([
+    { path: 'continuation with a patched queue', patched: ['patched'], expected: ['patched', 'delivered'] },
+    { path: 'continuation with a patched empty queue', patched: [], expected: ['delivered'] },
+    { path: 'continuation without a patched queue', patched: undefined, expected: ['original', 'delivered'] },
+    { path: 'conversation delivery', patched: undefined, expected: ['original', 'delivered'] },
+  ])('appends a delivered input to the staged queue: $path', ({ path, patched, expected }) => {
+    const run = parent();
+    const metadata = worker(run.id, randomUUID());
+    if (metadata.role !== 'worker') throw new Error('fixture');
+    const id = metadata.workspace.ownerRunId;
+    store.createOwnedRun(input, run.id, randomUUID(), metadata, requestHash);
+    const agentInput = (text: string) => ({ id: randomUUID(), source: WAIT_SOURCE.agent, parentRunId: run.id, text, createdAt: now });
+    store.commitAgentInputs(id, [agentInput('original')]);
+    const delivered = agentInput('delivered');
+    const state = { messages: [], outcomes: [] };
+    if (path === 'conversation delivery') store.commitConversation(run.id, state, { recipientRunId: id, input: delivered });
+    else store.commitWorkerContinuation(id, { status: RUN_STATUS.queued, ...(patched ? { agentInputs: patched.map(agentInput) } : {}) },
+      undefined, { rootId: run.id, state, input: delivered });
+    expect(store.getRun(id)?.agentInputs?.map(entry => entry.text)).toEqual(expected);
+    expect(RunStore.open(dataDir, { keepLive: true }).getRun(id)?.agentInputs?.map(entry => entry.text)).toEqual(expected);
   });
 
   it('failed atomic writes publish no metadata, receipts, workers or events', () => {
