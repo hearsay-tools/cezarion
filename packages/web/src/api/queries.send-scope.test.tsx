@@ -39,6 +39,12 @@ function seededClient() {
   return client
 }
 
+function withClient(client: ReturnType<typeof createQueryClient>) {
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  }
+}
+
 const stale = (client: ReturnType<typeof createQueryClient>) =>
   ['active', 'other', 'third'].filter(scope =>
     client.getQueryState([scope, 'runs', 'list'])?.isInvalidated
@@ -64,7 +70,7 @@ describe.each(['send', 'continue'] as const)('%s cache refresh', (name) => {
     const client = seededClient()
     fetchMock.mockResolvedValue(respond(status))
     const { result } = renderHook(() => path.hook(projectId), {
-      wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+      wrapper: withClient(client),
     })
     act(() => path.run(result.current.mutate as (input: never) => void))
     await waitFor(() => expect(result.current.isIdle).toBe(false))
@@ -89,7 +95,7 @@ it('a 409 send from another project refreshes both scopes, so the record stops c
   const client = seededClient()
   fetchMock.mockResolvedValue(respond(409))
   const { result } = renderHook(() => useSendMessage('r', 'other'), {
-    wrapper: ({ children }: { children: ReactNode }) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+    wrapper: withClient(client),
   })
   act(() => result.current.mutate({ text: 'hi' } as never))
   await waitFor(() => expect(result.current.isError).toBe(true))
