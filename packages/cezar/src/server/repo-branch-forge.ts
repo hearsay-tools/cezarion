@@ -130,7 +130,7 @@ export async function fetchHeadBatch(
 }
 
 export interface GithubBranchForgeDeps {
-  forgeFactory?: ForgeFactory;
+  forgeFactory?: ForgeFactory | undefined;
   graphql?: (repoRoot: string) => GraphqlRunner;
   handle?: (repoRoot: string) => Promise<{ owner: string; name: string } | null>;
 }
