@@ -111,6 +111,21 @@ describe('pixel density (hearsay-tools/cezarion#2069)', () => {
     expect(sent('Page.navigate')).toHaveLength(0);
   });
 
+  it('switching to Ultra uses the newest ratio, even one that arrived while High streamed at the same size', async () => {
+    let quality: PreviewQuality = 'high';
+    const { cdp, sent } = browser();
+    const session = await PreviewSession.create(cdp, { quality: () => quality });
+    session.attach(fakeViewer());
+    await session.handle({ t: 'resize', w: 800, h: 600 });
+    // The viewer moves to a ratio-2 display: High has nothing to restart, but the ratio is kept.
+    await session.handle({ t: 'resize', w: 800, h: 600, dpr: 2 });
+    await flush();
+    quality = 'ultra';
+    await session.refreshQuality();
+    expect(sent('Emulation.setDeviceMetricsOverride').at(-1)?.params).toMatchObject({ deviceScaleFactor: 2 });
+    expect(sent('Page.startScreencast').at(-1)?.params).toMatchObject({ quality: 100, maxWidth: 1600, maxHeight: 1200 });
+  });
+
   it('a new viewer (a reconnect) streams at its own ratio from the first frame', async () => {
     const { cdp, sent } = browser();
     const session = await PreviewSession.create(cdp, { quality: () => 'ultra' });

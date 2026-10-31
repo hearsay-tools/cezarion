@@ -319,7 +319,11 @@ export class PreviewSession {
   private async applyViewport(w: number, h: number, dpr: number): Promise<void> {
     // The pane repeats its size at every loading step; a stream already at this size has nothing to redo.
     const scale = this.scale(dpr);
-    if (this.streaming?.w === w && this.streaming.h === h && this.streaming.quality === this.quality() && this.streaming.scale === scale) return;
+    if (this.streaming?.w === w && this.streaming.h === h && this.streaming.quality === this.quality() && this.streaming.scale === scale) {
+      // Nothing to restart, but a mode change later (to Ultra) renders at this ratio, not the one the stream started with.
+      this.streaming.dpr = dpr;
+      return;
+    }
     // The window reaches its screen before the page renders at the ratio, so the first frame is full size.
     const rendered = await this.density.place(scale);
     await this.cdp.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: rendered, mobile: false });
