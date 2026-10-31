@@ -17,12 +17,14 @@ test('hybrid COMMON survivor is not measured; raw Stryker result remains visible
   assert.equal(result.mutants[0].status, 'Ignored');
   assert.equal(result.mutants[0].reportedStatus, 'Survived');
   assert.equal(result.moduleLevelCount, 1);
+  assert.deepEqual(result.staticFunctions, []);
+  assert.match(summary(result), /Guards with static mutants not measured: none/);
   assert.equal(result.counts.ignored, 1);
   assert.equal(result.score, 100);
   assert.equal(result.rawCounts.survived, 1);
   assert.equal(result.rawScore, 0);
   assert.deepEqual(result.survivors, []);
-  assert.match(summary(result), /Module-level mutants .*: 1; not measured, excluded from counted score and guards/);
+  assert.match(summary(result), /Static mutants at module scope: 1; not measured, excluded from counted score/);
 });
 
 test('every static status is unmeasured, including static-only and import-called functions', () => {
@@ -30,7 +32,12 @@ test('every static status is unmeasured, including static-only and import-called
   const mutants = statuses.map((status, i) => wire({ id: String(i), status, coveredBy: [] }));
   const ranges = [{ name: 'guard', range: { start: { line: 0, column: 0 }, end: { line: 1, column: 0 } } }];
   const result = run(mutants, ranges, { [file]: { tier: 'logic', guards: ['guard'] } });
-  assert.equal(result.moduleLevelCount, statuses.length);
+  assert.equal(result.moduleLevelCount, 0);
+  assert.deepEqual(result.staticFunctions, [{ name: 'guard', count: statuses.length }]);
+  assert.equal(result.guards[0].staticCount, statuses.length);
+  assert.match(summary(result), /Guard guard: 0 undetected, 7 static not measured/);
+  assert.match(summary(result), /Guards with static mutants not measured: guard/);
+  assert.match(summary(result), /Static mutants inside functions: 7; not measured: guard \(7\)/);
   assert.equal(result.counts.ignored, statuses.length);
   assert.deepEqual(result.mutants.map(m => m.reportedStatus), statuses);
   assert.equal(result.guards[0].pass, true);
@@ -47,7 +54,7 @@ test('module location alone never excludes runtime or legacy mutants without sta
   assert.equal(result.counts.noCoverage, 1);
   assert.equal(result.survivors.length, 3);
   assert.ok(result.targets.some(t => t.name === 'covered lines' && !t.pass));
-  assert.match(summary(result), /Module-level mutants .*: 0;/);
+  assert.match(summary(result), /Static mutants at module scope: 0;/);
 });
 
 test('mixed results count runtime kills and survivors without counting static survivors', () => {
@@ -58,4 +65,22 @@ test('mixed results count runtime kills and survivors without counting static su
   assert.equal(result.survivors[0].static, undefined);
   assert.equal(result.counts.ignored, 1);
   assert.throws(() => run([wire({ status: 'NewUnknownStatus' })]), /Unknown mutant status/);
+});
+
+
+test('static function counts distinguish named functions and survive equivalent exclusion', () => {
+  const ranges = [
+    { name: 'guard', range: { start: { line: 0, column: 0 }, end: { line: 1, column: 0 } } },
+    { name: 'helper', range: { start: { line: 1, column: 0 }, end: { line: 2, column: 0 } } },
+  ];
+  const mutants = [wire(), wire({ id: '1', location: { start: { line: 2, column: 1 }, end: { line: 2, column: 5 } } })];
+  const data = { files: { [file]: { source: `${source}\ntrue`, mutants } } };
+  const entry = { file, function: 'guard', mutator: 'ObjectLiteral', original: '{ help: true }', replacement: '{}' };
+  const result = measure(data, file, 'head', ranges, { [file]: { tier: 'logic', guards: ['guard'] } }, [entry]);
+  assert.equal(result.equivalentCount, 1);
+  assert.equal(result.moduleLevelCount, 0);
+  assert.deepEqual(result.staticFunctions, [{ name: 'guard', count: 1 }, { name: 'helper', count: 1 }]);
+  assert.equal(result.guards[0].staticCount, 1);
+  assert.match(summary(result), /Static mutants inside functions: 2; not measured: guard \(1\), helper \(1\)/);
+  assert.match(summary(result), /Guard guard: 0 undetected, 1 static not measured/);
 });
