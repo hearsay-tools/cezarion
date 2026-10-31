@@ -3,8 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { historyPaths } from './history-file.ts';
-import { RunStore } from './store.ts';
+import { RunStore, type RunRecord } from './store.ts';
 import { blockRunWrites, readPersistedRuns } from './run-store.testkit.ts';
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
@@ -109,4 +110,45 @@ it('keeps completion visible when transcript facts have not been loaded', () => 
   writeFileSync(historyPaths(dir, id).plain, '{"seq":1,"type":"note","message":"unread history"}\n');
   store.updateRun(id, { status: 'done' });
   expect(readPersistedRuns(dir)[0]).toMatchObject({ status: 'done', archived: false, completionAction: { phase: 'blocked' } });
+});
+
+// hearsay-tools/cezarion#2324: the owner chose one clearing rule for every write path. Only a commit
+// creates an action, because creation and its archive must be durable.
+describe('completion action across write paths', () => {
+  const paths: Record<string, Pick<RunRecord, 'handoffRecords'>> = {
+    debounced: {},
+    durable: { handoffRecords: { autosave: [] } },
+  };
+
+  it.each(Object.entries(paths))('clears an existing action when the %s path leaves Done', (_path, extra) => {
+    const { store, id, dir } = setup({ autoMergePr: true });
+    store.updateRun(id, { status: RUN_STATUS.done });
+    const token = store.getRun(id)!.completionAction!.id;
+    store.updateRun(id, { status: RUN_STATUS.queued, ...extra });
+    store.flush();
+    expect(store.getRun(id)?.completionAction).toBeUndefined();
+    expect(readPersistedRuns(dir).find(run => run.id === id)?.completionAction).toBeUndefined();
+    expect(store.completeAction(id, token, 'complete')).toBe(false);
+    store.updateRun(id, { status: RUN_STATUS.done, ...extra });
+    expect(store.getRun(id)?.completionAction).toMatchObject({ phase: 'pending' });
+    expect(store.getRun(id)?.completionAction?.id).not.toBe(token);
+  });
+
+  it.each([
+    ['Done entry with an option on', { autoMergePr: true }, { status: RUN_STATUS.done }],
+    ['a completion setting change', {}, { autoMergePr: true }],
+  ] as const)('sends %s only through the durable path', (_case, options, patch) => {
+    const { store, id, dir } = setup(options);
+    const release = blockRunWrites(dir);
+    try { expect(() => store.updateRun(id, patch)).toThrow(); } finally { release(); }
+    expect(store.getRun(id)?.completionAction).toBeUndefined();
+  });
+
+  it('clears an action when a Done run turns both options off', () => {
+    const { store, id } = setup({ archiveWhenDone: true, autoMergePr: true });
+    store.updateRun(id, { status: RUN_STATUS.done });
+    expect(store.getRun(id)?.completionAction).toMatchObject({ phase: 'pending' });
+    store.updateRun(id, { archiveWhenDone: false, autoMergePr: false });
+    expect(store.getRun(id)?.completionAction).toBeUndefined();
+  });
 });

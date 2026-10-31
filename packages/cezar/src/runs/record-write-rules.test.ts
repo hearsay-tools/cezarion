@@ -38,7 +38,7 @@ describe('record write paths without a database', () => {
   it.each([
     ['commit', ['stale-resume', 'completion-actions']],
     ['durableUpdate', ['issue-seed', 'pull-requests', 'restore', 'redact-patch', 'archive-fields']],
-    ['debouncedUpdate', ['issue-seed', 'pull-requests', 'restore', 'redact-patch', 'assign', 'stale-resume', 'task-references', 'archive-or-touch']],
+    ['debouncedUpdate', ['issue-seed', 'pull-requests', 'restore', 'redact-patch', 'assign', 'retire-completion-action', 'stale-resume', 'task-references', 'archive-or-touch']],
     ['loaded', ['stale-resume']],
     ['conversation', ['redact-messages', 'parse-delegation', 'redact-input', 'parse-input', 'append-input']],
     ['pullRequests', ['merge-pull-requests']],
