@@ -1,9 +1,9 @@
 import { EventEmitter } from 'node:events';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PreviewServer } from '@open-mercato/cezar-contract';
-import { vi } from 'vitest';
+import { afterEach, beforeEach, vi } from 'vitest';
 import type { DevServerState, DevServerStopReason } from './dev-server.ts';
 import { PreviewHost, type BrowserExit, type BrowserHandle, type PreviewHostDeps, type RunContext } from './host.ts';
 import { fakeCdp, fakeConnection, fakeViewer } from './preview.testkit.ts';
@@ -87,4 +87,21 @@ export const stages = (viewer: ReturnType<typeof fakeViewer>) =>
   viewer.messages.flatMap(msg => (msg.t === 'state' ? [msg.stage] : []));
 export const navigations = (browser: { cdpFake: ReturnType<typeof fakeCdp> }) =>
   browser.cdpFake.sent('Page.navigate').map(call => call.params.url);
-
+/** Host topic suites share cleanup while keeping the original host suite unchanged. */
+export function useHostFixture() {
+  const environments: ReturnType<typeof setup>[] = [];
+  beforeEach(() => { vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] }); });
+  afterEach(async () => {
+    for (const env of environments) {
+      await env.host.close();
+      rmSync(env.dataDir, { recursive: true, force: true });
+    }
+    environments.length = 0;
+    vi.useRealTimers();
+  });
+  return (...args: Parameters<typeof setup>) => {
+    const env = setup(...args);
+    environments.push(env);
+    return env;
+  };
+}

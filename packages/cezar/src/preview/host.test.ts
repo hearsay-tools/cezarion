@@ -48,9 +48,11 @@ describe('PreviewHost', () => {
     { ownerId: undefined, returningId: undefined, sameViewer: false, detached: false, refused: true },
     { ownerId: undefined, returningId: 'new', sameViewer: false, detached: false, refused: true },
     { ownerId: undefined, returningId: undefined, sameViewer: false, detached: true, refused: false },
+    { ownerId: undefined, returningId: 'new', sameViewer: false, detached: true, refused: false },
     { ownerId: 'owner', returningId: 'owner', sameViewer: false, detached: false, refused: false },
     { ownerId: 'owner', returningId: undefined, sameViewer: false, detached: false, refused: true },
     { ownerId: 'owner', returningId: 'other', sameViewer: true, detached: false, refused: true },
+    { ownerId: 'owner', returningId: 'other', sameViewer: false, detached: true, refused: true },
   ])('resumed tab ownership: %j', async ({ ownerId, returningId, sameViewer, detached, refused }) => {
     const { host, ctx } = make();
     const owner = fakeViewer('Owner browser');
@@ -60,7 +62,7 @@ describe('PreviewHost', () => {
     returning.messages.length = 0;
     await host.open(ctx, returning, { port: 5173 }, { viewerId: returningId, resume: true });
     if (refused) {
-      expect(returning.messages).toEqual([{ t: 'replaced', by: 'Owner browser' }]);
+      expect(returning.messages).toEqual([{ t: 'replaced', by: detached ? 'another tab' : 'Owner browser' }]);
       expect(returning.closed).toEqual([{ code: 4001, reason: 'replaced' }]);
     } else {
       expect(returning.messages.at(-1)).toMatchObject({ t: 'state', stage: 'needs-approval' });
@@ -346,6 +348,88 @@ describe('PreviewHost', () => {
     await host.close();
   });
 
+  it('rejects an invalid URL without navigating and exposes the probe result', async () => {
+    const { host, ctx, browsers, answering } = make();
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { url: 'http://localhost:3000/' });
+    await host.open(ctx, viewer, { url: 'javascript:alert(1)' });
+    expect(navigations(browsers[0]!)).toEqual(['http://localhost:3000/']);
+    expect(await host.probe(3000)).toBe(false);
+    answering.add(3000);
+    expect(await host.probe(3000)).toBe(true);
+    await host.close();
+  });
+
+  it('refuses agents while release waits for server teardown', async () => {
+    const { host, ctx, devServers } = make();
+    await host.open(ctx, fakeViewer(), { port: 5173 });
+    await host.run(ctx.runId, 5173);
+    expect(host.ownsServer(ctx.runId, 5173)).toBe(true);
+    let finish!: () => void;
+    devServers[0]!.stop.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    const release = host.release(ctx.runId);
+    const grant = host.grantAgent(ctx.runId, () => ctx);
+    expect(await host.connectAgent(grant.token, fakeAgentClient()))
+      .toEqual({ refused: 'The preview of this task was released' });
+    finish();
+    await release;
+    expect(host.ownsServer(ctx.runId, 5173)).toBe(false);
+  });
+
+  it('a session setup failure closes Chromium and remains failed after downloading', async () => {
+    const cdp = fakeCdp();
+    vi.mocked(cdp.cdp.send).mockRejectedValue(new Error('page setup refused'));
+    const close = vi.fn();
+    const launchBrowser = vi.fn(async () => ({
+      cdp: cdp.cdp, connection: fakeConnection().connection, pageTargetId: 'PANE', close,
+      exited: new Promise<BrowserExit>(() => {}),
+    }));
+    const { host, ctx } = make(undefined, undefined, undefined, { launchBrowser });
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { agent: true });
+    const grant = host.grantAgent(ctx.runId, () => ctx);
+    expect(await host.connectAgent(grant.token, fakeAgentClient()))
+      .toEqual({ refused: 'The preview browser could not start' });
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(host.ownsBrowser(ctx.runId)).toBe(false);
+    await host.handle(ctx, viewer, { t: 'download' });
+    expect(viewer.messages.at(-1)).toMatchObject({ stage: 'browser-exited', stderrTail: 'page setup refused', serverUp: false });
+    expect(launchBrowser).toHaveBeenCalledTimes(1);
+    await host.close();
+  });
+
+  it('checks approval before probing a restart port', async () => {
+    const { host, ctx, devServers, store, probe } = make();
+    await host.open(ctx, fakeViewer(), { port: 5173 });
+    await host.run(ctx.runId, 5173);
+    devServers[0]!.stop.mockImplementationOnce(async () => {
+      devServers[0]!.set('stopped');
+      store.getRun(ctx.runId)!.previewServers = [server(5173, { command: 'changed' })];
+    });
+    probe.mockImplementationOnce(async () => {
+      store.getRun(ctx.runId)!.previewServers = [server(5173)];
+      return false;
+    });
+    expect(await host.stopPreview(ctx.runId, { port: 5173, restart: true })).toMatchObject({ code: 'approval_required' });
+    expect(devServers).toHaveLength(1);
+    await host.close();
+  });
+
+  it('refuses restart when a probe adopts the stopped process port', async () => {
+    const { host, ctx, answering, probe, devServers } = make();
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.run(ctx.runId, 5173);
+    probe.mockImplementationOnce(async () => {
+      answering.add(5173);
+      await host.open(ctx, viewer, { port: 5173 });
+      return false;
+    });
+    expect(await host.stopPreview(ctx.runId, { port: 5173, restart: true })).toMatchObject({ code: 'unavailable' });
+    expect(devServers).toHaveLength(1);
+    await host.close();
+  });
+
   it('agent stop preserves approval through stop and crash and reports Stopped', async () => {
     const { host, ctx, devServers, store } = make();
     const viewer = fakeViewer();
@@ -353,7 +437,7 @@ describe('PreviewHost', () => {
     expect(await host.stopPreview('run-1', { port: 5173, restart: true })).toMatchObject({ ok: false, code: 'approval_required' });
     await host.run('run-1', 5173);
     expect(await host.stopPreview('run-1', { port: 5173 })).toMatchObject({ ok: true, code: 'stopped' });
-    expect(store.stateEvents().at(-1)).toMatchObject({ state: 'stopped' });
+    expect(store.stateEvents().at(-1)).toMatchObject({ state: 'stopped', reason: 'user' });
     expect(stages(viewer).at(-1)).toBe('server-stopped');
     store.getRun('run-1')!.previewServers = [server(5173, { label: 'renamed' })];
     expect(await host.stopPreview('run-1', { port: 5173, restart: true })).toMatchObject({ ok: true, code: 'restarted' });
@@ -445,7 +529,9 @@ describe('PreviewHost', () => {
     expect(dev.stop).toHaveBeenCalledTimes(1);
     finish();
     await cleanup;
-    expect((await restarting).ok).toBe(false);
+    const result = await restarting;
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe(action === 'replace' ? 'approval_required' : 'unavailable');
     expect(devServers).toHaveLength(1);
     expect(dev.state).toBe('stopped');
   });
@@ -474,7 +560,9 @@ describe('PreviewHost', () => {
     }
     const count = devServers.length;
     finish(false);
-    expect((await restarting).ok).toBe(false);
+    const result = await restarting;
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe(action === 'replace' || action === 'concurrent-restart' ? 'approval_required' : action === 'other-owner' ? 'port_held' : 'unavailable');
     expect(devServers).toHaveLength(count);
     if (action === 'other-owner' || action === 'concurrent-restart') expect(devServers[1]!.stop).not.toHaveBeenCalled();
   });
