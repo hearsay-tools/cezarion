@@ -1,12 +1,9 @@
-import { onLiveReconcile } from '@/api/live-coordinator'
-import { getCheckoutProgress } from '@/api/client'
 import { SettingsIcon } from '@/components/design-icons'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link as RouterLink, useNavigate } from 'react-router'
 
-import { onWorkspaceEvent } from '@/api/global-events'
 import { useCheckoutProject, useProjects } from '@/api/queries'
-import type { CheckoutProgressEvent } from '@open-mercato/cezar-api-client'
+import { useCheckoutProgress } from '@/components/use-checkout-progress'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -72,7 +69,6 @@ export function CloneProjectDialog({
 }) {
   const [url, setUrl] = useState('')
   const [name, setName] = useState('')
-  const [progress, setProgress] = useState<string | null>(null)
   const [awaitingSso, setAwaitingSso] = useState(false)
   const ssoRetryArmed = useRef(false)
   const projects = useProjects()
@@ -81,38 +77,7 @@ export function CloneProjectDialog({
   const navigate = useNavigate()
   const ssoUrl = githubSsoUrl(checkout.error)
 
-  // One id per mounted dialog. The dialog is mounted only while open (AddProjectMenu), so a
-  // second clone attempt in a second opening is a second id — which is the point: a stale
-  // event from an abandoned clone must never drive this one's progress line.
-  const checkoutId = useMemo(() => `co-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`, [])
-
-  // Kept in a ref, not state: the listener below must read the CURRENT id without re-subscribing
-  // (a resubscribe per render would drop events between teardown and setup).
-  const idRef = useRef(checkoutId)
-  idRef.current = checkoutId
-
-  useEffect(() => {
-    return onWorkspaceEvent((eventName, payload) => {
-      if (eventName !== 'checkout-progress') return
-      const event = payload as CheckoutProgressEvent
-      if (event?.checkoutId !== idRef.current) return
-      // `error` is surfaced through the mutation's own rejection (the response carries it too),
-      // so the terminal phases only stop the progress line rather than racing it.
-      if (event.phase === 'cloning' && event.line) setProgress(event.line)
-      else if (event.phase !== 'cloning') setProgress(null)
-    })
-  }, [])
-
-  useEffect(() => onLiveReconcile(async signal => {
-    if (!isPending) return
-    // Progress is optional; the checkout mutation owns success/error reporting. A
-    // failed progress refresh must not hold the document's live restoration gate.
-    const response = await getCheckoutProgress(checkoutId, { signal }).catch(() => null)
-    if (!response) return
-    const { progress: event } = response
-    if (signal.aborted || event?.checkoutId !== idRef.current) return
-    setProgress(event?.phase === 'cloning' ? event.line ?? null : null)
-  }), [isPending, checkoutId])
+  const { checkoutId, progress, setProgress } = useCheckoutProgress('co-', isPending)
 
   /** The repo half of whatever was typed, used as the default folder name. Deliberately naive —
    *  it mirrors the server's default, and the server re-derives it anyway when `name` is blank. */
