@@ -6,7 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { ProjectScopeProvider } from '@/api/project-scope-context'
 import { createQueryClient } from '@/api/query-client'
 import type { ApiRun, WorkerInspection } from '@open-mercato/cezar-api-client'
-import { WorkerActivitySection } from './run-relationships'
+import { WorkerActivitySection, WorkerWaitDetails, hasWorkerWaitDetails } from './run-relationships'
 
 const parentId = '10000000-0000-4000-8000-000000000001'
 const workerId = '10000000-0000-4000-8000-000000000002'
@@ -312,4 +312,61 @@ it('offers Retry clean up while a destroy is pending, and plain Clean up otherwi
   expect(retry.textContent).toBe('Retry clean up')
   expect(retry.className).toContain('min-h-11')
   expect(within(group).getByRole('button', cleanUp(fresh.workerId)).textContent).toBe('Clean up')
+})
+
+
+it.each(['running', 'waiting', 'review', 'queued', 'done', 'failed', 'cancelled'] as const)(
+  'shows the %s worker status and uses a running indicator only while active', async status => {
+    setup(root, async () => json({ workers: [{ ...worker, status, destroy: undefined }] }))
+    const group = await section()
+    await within(group).findByText(status.charAt(0).toUpperCase() + status.slice(1))
+    expect(within(group).queryAllByRole('status', { name: 'Worker running' })).toHaveLength(
+      ['running', 'waiting', 'review'].includes(status) ? 1 : 0,
+    )
+  },
+)
+
+it('shows a root without receipts as linking, unavailable and then empty after retry', async () => {
+  let finish!: (response: Response) => void
+  let attempts = 0
+  setup(rootOf([]), () => ++attempts === 1 ? new Promise(resolve => { finish = resolve }) : Promise.resolve(json({ workers: [] })))
+  expect(screen.getByRole('button', { name: /Workers.*Linking/ })).toBeTruthy()
+  await act(async () => finish(json({ error: 'offline' }, 503)))
+  expect(await screen.findByRole('button', { name: /Workers.*Unavailable/ })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Retry relationships' }))
+  expect(await screen.findByRole('button', { name: /Workers.*No workers/ })).toBeTruthy()
+})
+
+it('does not claim an ordinary task has no workers while its lookup is empty', async () => {
+  setup(ordinary)
+  await waitFor(() => expect(screen.queryByText(/Loading relationships/)).toBeNull())
+  expect(within(screen.getByRole('group', { name: 'Task relationships' })).queryByText('No workers')).toBeNull()
+})
+
+type WorkerEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'worker' }>
+const waitEntry = (extra: Partial<WorkerEntry> = {}): WorkerEntry => ({
+  kind: 'worker', id: workerId, source: 'agent', via: 'cez-worker-wait', registeredAt: at,
+  deadline: at, phase: 'open', turnId: 'turn-1', timeoutSeconds: 600, workerIds: [workerId], revisions: [], outcomes: [], ...extra,
+})
+
+it.each([
+  ['running', 'open', false, 'Worker wait registered — the agent is finishing its turn'],
+  ['running', 'resolved', false, 'Worker update queued for the parent'],
+  ['running', 'open', true, 'Request wait registered — the agent is finishing its turn'],
+  ['running', 'resolved', true, 'Conversation update queued for this task'],
+] as const)('shows the %s %s wait note (requests: %s)', (status, phase, requests, text) => {
+  setup({ ...root, status, waits: [waitEntry({ phase, ...(requests ? { workerIds: undefined, requestIds: [workerId] } : {}) })] })
+  const note = screen.getByText(new RegExp(text))
+  expect(note.textContent).toBe(text + '. Deadline: ' + at)
+  expect(note.querySelector('time')?.getAttribute('datetime')).toBe(at)
+})
+
+it.each([
+  [child, 'resolved', true], [child, 'open', false], [child, undefined, false],
+  [root, 'resolved', false], [ordinary, 'resolved', false],
+] as const)('shows worker wake details only for a worker with an owed update ($0.id, %s)', (record, phase, visible) => {
+  const run = { ...record, waits: phase ? [waitEntry({ phase })] : [] }
+  expect(hasWorkerWaitDetails(run)).toBe(visible)
+  const { container } = render(<WorkerWaitDetails run={run} />)
+  expect(container.textContent).toBe(visible ? 'Worker update queued for the parent. Deadline: ' + at : '')
 })
