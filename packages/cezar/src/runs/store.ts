@@ -73,6 +73,7 @@ import {
 import { restoreLostReferencedPullRequest } from './loaded-run-healing.ts';
 import { encodeRunRow, isLiveRecord, isLiveStatus } from './run-row.ts';
 import { collectRawExtras, encodeRawRecord, type RawExtras } from './raw-record.ts';
+import { ColdReadCache, storedRow, type StoredRow } from './cold-reads.ts';
 import { assertNoLegacyCockpit, assertNoLegacyWriter, backUpLegacyIndex, LEGACY_INDEX_FILE, LegacyWriterError, readLegacyIndex } from './legacy-index.ts';
 import { RunStoreOpenError, toRunStoreOpenError } from './store-open-error.ts';
 import { claimOwnerLive, closeClaimSession, openClaimSession, type ClaimOwner } from './run-claims.ts';
@@ -449,20 +450,6 @@ export interface DecodedRun {
   extras: RawExtras | undefined;
   /** The stored JSON still had schema-3 wait fields (`upgradeLegacyWaits`): open rewrites it. */
   upgraded?: true;
-}
-
-/** A row as this store last read or wrote it (see `RunStore.base`). */
-interface StoredRow {
-  revision: number;
-  /** The row's insertion order, where it lists among runs created in the same millisecond. */
-  seq: number;
-  data: string;
-  extras?: RawExtras | undefined;
-}
-
-/** Just the `StoredRow` part of a `coldBase` entry. */
-function storedRow({ revision, seq, data, extras }: StoredRow): StoredRow {
-  return { revision, seq, data, extras };
 }
 
 /** One stored record (a row's `data`) through `parseRunRecords`' salvage and schema, with what the
@@ -1268,6 +1255,7 @@ export class RunStore extends EventEmitter {
    *  the version it was computed from. `owned`: its family was already this store's when read.
    *  Cleared at the next microtask: no commit spans a turn. */
   private readonly coldBase = new Map<string, StoredRow & { owned: boolean }>();
+  private readonly coldReads = new ColdReadCache();
   /** The family of each pending deletion, whose claim the deleting write is fenced against. */
   private readonly deletedFamilies = new Map<string, string>();
   /** Rows a conflicting write excluded: this store refuses to write them until it is reopened. */
@@ -1638,6 +1626,7 @@ export class RunStore extends EventEmitter {
       if (root !== undefined && families.has(root)) continue;
       this.held.delete(id);
       this.base.delete(id);
+      this.coldReads.forget(id);
     }
     this.releaseUnheldClaims();
   }
@@ -1651,6 +1640,7 @@ export class RunStore extends EventEmitter {
   }
 
   private decodeCold(row: RunRow): RunRecord | undefined {
+    this.coldReads.at(row.id, row.revision); // the fence below moves to this revision
     const decoded = decodeRunRow(row.data);
     if (!decoded) {
       this.unreadable.add(row.id);
@@ -1685,7 +1675,7 @@ export class RunStore extends EventEmitter {
     if (held) return held;
     const family = this.db && !this.deleted.has(id) ? this.db.familyOf(id) : undefined;
     if (family === undefined || !this.claimFamilies([family]).has(family)) return undefined;
-    const run = this.loadCold(id);
+    const run = this.coldReads.claimed(id, this.coldBase.get(id), () => this.db?.get(id)?.revision) ?? this.loadCold(id);
     if (!run) return undefined;
     this.holdDecoded(run);
     this.scheduleSave();
@@ -1724,9 +1714,14 @@ export class RunStore extends EventEmitter {
     const held = this.held.get(row.id);
     if (held) return held;
     if (this.deleted.has(row.id)) return undefined;
+    const cached = this.coldReads.at(row.id, row.revision);
+    if (cached) return cached;
     const run = this.decodeCold(row);
-    return run && this.answerCold(run, true);
+    return run && this.coldReads.keep(this.answerCold(run, true), this.coldBase.get(row.id), this.held.has(row.id));
   }
+
+  /** Run `fn` reading each run that is not held at most once (`ColdReadCache`, #2378). */
+  withReadCache<T>(fn: () => T): T { return this.coldReads.scope(fn); }
 
   /** Whether the run exists, held or not, without decoding it. */
   private hasRun(id: string): boolean {
@@ -2004,8 +1999,10 @@ export class RunStore extends EventEmitter {
   getRun(id: string): RunRecord | undefined {
     const held = this.held.get(id);
     if (held) return held;
+    const cached = this.deleted.has(id) ? undefined : this.coldReads.get(id);
+    if (cached) return cached;
     const run = this.loadCold(id);
-    return run && this.answerCold(run, true);
+    return run && this.coldReads.keep(this.answerCold(run, true), this.coldBase.get(id), this.held.has(id));
   }
 
   /** Whether the run's row is in `runs.db` but its record could not be read here: what tells a
@@ -2786,6 +2783,7 @@ export class RunStore extends EventEmitter {
     // Preserve existing record references, but expose the entire transaction before its first event.
     // A finished run joins the held set for the commit and leaves at the next sweep.
     for (const [id, next] of staged) {
+      this.coldReads.forget(id);
       if (!next) { this.held.delete(id); continue; }
       this.committing.add(id);
       const current = this.held.get(id);
@@ -4068,6 +4066,7 @@ export class RunStore extends EventEmitter {
    *  and by the revision this store last saw (kept in `base` until the delete is written). */
   private markDeleted(id: string, family: string): void {
     this.liveItems.forget(id);
+    this.coldReads.forget(id);
     const read = this.coldBase.get(id);
     if (!this.base.has(id) && read) this.base.set(id, storedRow(read));
     this.dirty.delete(id);
@@ -4267,6 +4266,7 @@ export class RunStore extends EventEmitter {
       const family = this.familyOf(conflict.id);
       this.liveItems.forget(conflict.id);
       this.quarantined.add(conflict.id);
+      this.coldReads.forget(conflict.id);
       this.dirty.delete(conflict.id);
       this.deleted.delete(conflict.id);
       this.deletedFamilies.delete(conflict.id);
