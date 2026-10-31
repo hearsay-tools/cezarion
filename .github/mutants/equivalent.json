@@ -88,6 +88,38 @@
     "reason": "A fallback string has no merged state and is skipped; this also matches the killed merged-list accumulation mutant that the tests still guard (two matches)."
   },
   {
+    "file": "packages/contract/src/attention.ts",
+    "function": "(module)",
+    "mutator": "StringLiteral",
+    "original": "'unseen'",
+    "replacement": "\"\"",
+    "reason": "isUnseen never matches, so this reserved rung is unreachable; the text also matches two Ignored mutants at line 136."
+  },
+  {
+    "file": "packages/contract/src/delegation.ts",
+    "function": "parentFileRefusal",
+    "mutator": "OptionalChaining",
+    "original": "path.split('/').at(-1)?.toLowerCase",
+    "replacement": "path.split('/').at(-1).toLowerCase",
+    "reason": "split() always returns a nonempty array, so at(-1) is never undefined; the ?. satisfies the type checker"
+  },
+  {
+    "file": "packages/contract/src/waits.ts",
+    "function": "computeWaitingOn",
+    "mutator": "ArrayDeclaration",
+    "original": "[]",
+    "replacement": "[\"Stryker was here\"]",
+    "reason": "The required fallback handles absent or malformed waits; its string element has no phase, so the open-wait filter drops it (one exact mutant match)."
+  },
+  {
+    "file": "packages/contract/src/waits.ts",
+    "function": "workerWaitView",
+    "mutator": "ArrayDeclaration",
+    "original": "[]",
+    "replacement": "[\"Stryker was here\"]",
+    "reason": "The required fallback handles absent waits; its string element has no kind, so the worker filter drops it (one exact mutant match)."
+  },
+  {
     "file": "packages/web/src/lib/use-search-params-writer.ts",
     "function": "useSearchParamsWriter",
     "mutator": "ConditionalExpression",

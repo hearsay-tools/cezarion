@@ -60,3 +60,63 @@ describe('tool display input boundaries', () => {
     expect(toolDisplay(name, input)).toEqual(expected);
   });
 });
+
+// Partial native wire input must still produce a usable label.
+describe('tool display malformed inputs', () => {
+  it.each([undefined, null, [], 7, false, 'command'])('uses the command verb without a command in %j', input => {
+    expect(toolDisplay('Bash', input)).toEqual({ toolKind: 'execute', title: 'Ran', subtitle: undefined });
+  });
+
+  it.each([{}, { command: [] }, { command: [null, 7] }, { command: ' \n ' }])('omits unusable command in %j', input => {
+    expect(toolDisplay('commandExecution', input)).toEqual({ toolKind: 'execute', title: 'Ran', subtitle: undefined });
+  });
+
+  it('collapses every whitespace run and truncates only labels above 120 characters', () => {
+    expect(toolDisplay('Bash', { command: 'a'.repeat(120) }).title).toBe(`Ran ${'a'.repeat(120)}`);
+    expect(toolDisplay('Bash', { command: 'a'.repeat(121) }).title).toBe(`Ran ${'a'.repeat(119)}…`);
+    expect(toolDisplay('custom', { description: '  a\n b\t c  ' })).toEqual({ toolKind: 'other', title: 'custom', subtitle: 'a b c' });
+  });
+
+  it.each([undefined, null, [], { changes: null }, { changes: {} }, { changes: [] },
+    { changes: [null, [], 7, {}, { path: false }, { path: ' ' }] }])('ignores invalid changes %j', input => {
+    expect(toolDisplay('fileChange', input)).toEqual({ toolKind: 'edit', title: 'Edit' });
+  });
+
+  it('counts only valid change paths', () => {
+    expect(toolDisplay('fileChange', { changes: [null, { path: 'a' }, { path: '' }, { path: 'b' }] }))
+      .toEqual({ toolKind: 'edit', title: 'Edit 2 files' });
+  });
+
+  it.each([
+    ['Edit', { path: 'x' }, 'Edit x'], ['Write', { path: 'x' }, 'Write x'],
+    ['NotebookEdit', { path: 'x' }, 'Edit x'], ['NotebookEdit', { notebookPath: 'x' }, 'Edit x'],
+    ['Read', { filePath: 'x' }, 'Read x'], ['Read', { path: 'x' }, 'Read x'],
+    ['imageView', { path: 'x' }, 'View image x'], ['WebFetch', { url: 'x' }, 'Fetch x'],
+    ['WebSearch', { query: 'x' }, 'Web search x'], ['Grep', { query: 'x' }, 'Search x'],
+  ])('reads the fallback field for %s', (name, input, title) => {
+    expect(toolDisplay(name as string, input).title).toBe(title);
+  });
+
+  it('distinguishes an MCP call with both names from partial names', () => {
+    expect(toolDisplay('mcpToolCall', { server: 's', tool: 't' })).toEqual({ toolKind: 'other', title: 's.t' });
+    expect(toolDisplay('mcpToolCall', { tool: 't', query: 'q' })).toEqual({ toolKind: 'other', title: 'MCP tool', subtitle: 'q' });
+    expect(toolDisplay('mcp____s____t__extra')).toEqual({ toolKind: 'other', title: 's.t__extra' });
+    expect(toolDisplay('mcp__s')).toEqual({ toolKind: 'other', title: 'mcp__s', subtitle: undefined });
+  });
+
+  it('uses the first plausible unknown-tool field and a safe title', () => {
+    expect(toolDisplay(' \n ')).toEqual({ toolKind: 'other', title: 'Tool', subtitle: undefined });
+    expect(toolDisplay(null as never)).toEqual({ toolKind: 'other', title: 'Tool', subtitle: undefined });
+    for (const key of ['query', 'url', 'filePath', 'file_path', 'path', 'pattern', 'name']) {
+      expect(toolDisplay('custom', { description: 7, [key]: 'label' })).toEqual({ toolKind: 'other', title: 'custom', subtitle: 'label' });
+    }
+  });
+
+  it('uses agent type only when no description or prompt is present', () => {
+    expect(toolDisplay('Agent', { subagent_type: 'Explore' })).toEqual({ toolKind: 'task', title: 'Agent: Explore', subtitle: undefined });
+    expect(toolDisplay('Task', { prompt: 'inspect', subagentType: 'Explore' })).toEqual({ toolKind: 'task', title: 'Task: inspect', subtitle: 'Explore' });
+    expect(toolDisplay('Skill', { command: 'review' })).toEqual({ toolKind: 'task', title: 'Skill: review', subtitle: undefined });
+    expect(toolDisplay('Skill')).toEqual({ toolKind: 'task', title: 'Skill', subtitle: undefined });
+    expect(toolDisplay('Agent')).toEqual({ toolKind: 'task', title: 'Agent', subtitle: undefined });
+  });
+});
