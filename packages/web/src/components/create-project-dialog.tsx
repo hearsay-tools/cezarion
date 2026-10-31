@@ -1,14 +1,12 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useCallback, useId, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 
-import { getCheckoutProgress } from '@/api/client'
-import { onWorkspaceEvent } from '@/api/global-events'
-import { onLiveReconcile } from '@/api/live-coordinator'
 import { useCreateProject, useGithubOwners, useProjects } from '@/api/queries'
 import { PROJECT_NAME_PATTERN } from '@open-mercato/cezar-api-client/contract/project-limits'
-import type { CheckoutProgressEvent, GithubOwner } from '@open-mercato/cezar-api-client'
+import type { GithubOwner } from '@open-mercato/cezar-api-client'
 import { TriangleAlertIcon } from '@/components/design-icons'
 import { GithubTemplateInput } from '@/components/github-template-input'
+import { useCheckoutProgress } from '@/components/use-checkout-progress'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -53,7 +51,6 @@ export function CreateProjectDialog({
   const [owner, setOwner] = useState<string | null>(null)
   const [start, setStart] = useState<'empty' | 'template'>('empty')
   const [template, setTemplate] = useState('')
-  const [progress, setProgress] = useState<string | null>(null)
   const [created, setCreated] = useState<{ projectId: string; warning: string } | null>(null)
   const projects = useProjects()
   const owners = useGithubOwners({ enabled: open })
@@ -64,30 +61,7 @@ export function CreateProjectDialog({
   // A second Enter lands before React re-renders with `isPending`; the ref closes that gap.
   const inFlight = useRef(false)
 
-  // One id per mounted dialog (it is mounted only while open), so a stale event from an
-  // abandoned attempt never drives this one's progress line.
-  const checkoutId = useMemo(() => `np-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`, [])
-  const idRef = useRef(checkoutId)
-  idRef.current = checkoutId
-
-  useEffect(() => {
-    return onWorkspaceEvent((eventName, payload) => {
-      if (eventName !== 'checkout-progress') return
-      const event = payload as CheckoutProgressEvent
-      if (event?.checkoutId !== idRef.current) return
-      if (event.phase === 'cloning' && event.line) setProgress(event.line)
-      else if (event.phase !== 'cloning') setProgress(null)
-    })
-  }, [])
-
-  useEffect(() => onLiveReconcile(async (signal) => {
-    if (!isPending) return
-    const response = await getCheckoutProgress(checkoutId, { signal }).catch(() => null)
-    if (!response) return
-    const { progress: event } = response
-    if (signal.aborted || event?.checkoutId !== idRef.current) return
-    setProgress(event?.phase === 'cloning' ? event.line ?? null : null)
-  }), [isPending, checkoutId])
+  const { checkoutId, progress, setProgress } = useCheckoutProgress('np-', isPending)
 
   const available: GithubOwner[] | null = owners.data?.available ? owners.data.owners : null
   const unavailableReason = owners.isError
