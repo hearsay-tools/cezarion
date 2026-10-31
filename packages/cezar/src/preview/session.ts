@@ -87,6 +87,14 @@ export const INJECT = `(() => {
   }, true);
 })();`;
 
+/** The pixel ratio a mode renders at: the viewer's in Ultra, 1 in every other mode (hearsay-tools/cezarion#2069). */
+function scaleFor(quality: PreviewQuality, dpr: number): number {
+  return quality === 'ultra' ? dpr : 1;
+}
+
+/** What a running screencast was started with. Frames are `rendered` times the CSS size; `scale` is the ratio asked for. */
+type Stream = { w: number; h: number; dpr: number; quality: PreviewQuality; scale: number; rendered: number };
+
 type SessionOptions = {
   onFirstFrame?: (viewer: Viewer) => void;
   /** The mode the viewer chose, read at every start. The host owns it; absent streams `normal`. */
@@ -122,7 +130,7 @@ export class PreviewSession {
    * The size and mode the running screencast was started at; unset while stopped. `scale` is the
    * pixel ratio asked for, `rendered` the one Chromium renders at: frames are `rendered` times the size.
    */
-  private streaming?: { w: number; h: number; dpr: number; quality: PreviewQuality; scale: number; rendered: number } | undefined;
+  private streaming?: Stream | undefined;
   private watchdog?: ReturnType<typeof setTimeout> | undefined;
   private silentStarts = 0;
   /** Chromium refused the last start, so no stream runs and no watchdog will start one. */
@@ -208,9 +216,10 @@ export class PreviewSession {
   refreshQuality(): Promise<void> {
     return this.enqueue(async () => {
       const streaming = this.streaming;
-      if (!this.viewer || !streaming || streaming.quality === this.quality()) return;
-      if (streaming.scale !== this.scale(streaming.dpr)) return this.applyViewport(streaming.w, streaming.h, streaming.dpr);
-      await this.restartScreencast(streaming.w, streaming.h, streaming.dpr, streaming.rendered);
+      const quality = this.quality();
+      if (!this.viewer || !streaming || streaming.quality === quality) return;
+      if (streaming.scale !== scaleFor(quality, streaming.dpr)) return this.applyViewport(streaming.w, streaming.h, streaming.dpr);
+      await this.restartScreencast({ ...streaming, quality });
     });
   }
 
@@ -311,15 +320,13 @@ export class PreviewSession {
     return this.opts.quality?.() ?? 'normal';
   }
 
-  /** The pixel ratio to render at: the viewer's in Ultra, 1 in every other mode. The mode is read when the job runs. */
-  private scale(dpr: number): number {
-    return this.quality() === 'ultra' ? dpr : 1;
-  }
-
   private async applyViewport(w: number, h: number, dpr: number): Promise<void> {
+    // The mode is read once: one that changes while this job waits on Chromium is a later job's,
+    // so the stream records what was applied and that job sees the difference.
+    const quality = this.quality();
+    const scale = scaleFor(quality, dpr);
     // The pane repeats its size at every loading step; a stream already at this size has nothing to redo.
-    const scale = this.scale(dpr);
-    if (this.streaming?.w === w && this.streaming.h === h && this.streaming.quality === this.quality() && this.streaming.scale === scale) {
+    if (this.streaming?.w === w && this.streaming.h === h && this.streaming.quality === quality && this.streaming.scale === scale) {
       // Nothing to restart, but a mode change later (to Ultra) renders at this ratio, not the one the stream started with.
       this.streaming.dpr = dpr;
       return;
@@ -328,18 +335,18 @@ export class PreviewSession {
     const rendered = await this.density.place(scale);
     await this.cdp.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: rendered, mobile: false });
     if (!this.viewer) return;
-    await this.restartScreencast(w, h, dpr, rendered);
+    await this.restartScreencast({ w, h, dpr, quality, scale, rendered });
   }
 
-  private async restartScreencast(w: number, h: number, dpr: number, rendered: number): Promise<void> {
+  private async restartScreencast(stream: Stream): Promise<void> {
+    const { w, h, quality, rendered } = stream;
     this.streaming = undefined;
     await this.cdp.send('Page.stopScreencast').catch(() => {});
     // A restarted screencast numbers its frames afresh; the old in-flight frame will never be acked.
     this.pending = undefined;
     this.held = undefined;
     // Set before the start: its first frame can beat the command's reply, and is judged against this size.
-    const quality = this.quality();
-    this.streaming = { w, h, dpr, quality, scale: this.scale(dpr), rendered };
+    this.streaming = stream;
     try {
       // Rounded up: a bound one pixel short of a fractional frame would scale the whole frame down.
       await this.cdp.send('Page.startScreencast', { format: 'jpeg', quality: JPEG_QUALITY[quality], maxWidth: Math.ceil(w * rendered), maxHeight: Math.ceil(h * rendered), everyNthFrame: 1 });

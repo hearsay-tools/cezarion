@@ -126,6 +126,40 @@ describe('pixel density (hearsay-tools/cezarion#2069)', () => {
     expect(sent('Page.startScreencast').at(-1)?.params).toMatchObject({ quality: 100, maxWidth: 1600, maxHeight: 1200 });
   });
 
+  it('a mode change while a resize is in flight still ends at the new mode\'s density', async () => {
+    let quality: PreviewQuality = 'high';
+    let release!: () => void;
+    let hold = false;
+    const screens: Array<Record<string, unknown>> = [{ id: 'P', availLeft: 0, availTop: 0, devicePixelRatio: 1, isPrimary: true }];
+    const { cdp, sent } = fakeCdp((method, params) => {
+      if (method === 'Emulation.getScreenInfos') return { screenInfos: [...screens] };
+      if (method === 'Browser.getWindowForTarget') return { windowId: 3 };
+      if (method === 'Emulation.addScreen') {
+        const info = { id: 'S1', availLeft: params.left, availTop: 0, devicePixelRatio: params.devicePixelRatio, isPrimary: false };
+        screens.push(info);
+        return { screenInfo: info };
+      }
+      if (method === 'Emulation.setDeviceMetricsOverride' && hold) {
+        hold = false;
+        return new Promise<object>(resolve => (release = () => resolve({})));
+      }
+      return undefined;
+    });
+    const session = await PreviewSession.create(cdp, { quality: () => quality });
+    session.attach(fakeViewer());
+    await flush();
+    hold = true;
+    const resized = session.handle({ t: 'resize', w: 800, h: 600, dpr: 2 });
+    await flush();
+    // The owner picks Ultra while the High resize waits on Chromium.
+    quality = 'ultra';
+    const refreshed = session.refreshQuality();
+    release();
+    await Promise.all([resized, refreshed]);
+    expect(sent('Emulation.setDeviceMetricsOverride').at(-1)?.params).toMatchObject({ deviceScaleFactor: 2 });
+    expect(sent('Page.startScreencast').at(-1)?.params).toMatchObject({ quality: 100, maxWidth: 1600, maxHeight: 1200 });
+  });
+
   it('a new viewer (a reconnect) streams at its own ratio from the first frame', async () => {
     const { cdp, sent } = browser();
     const session = await PreviewSession.create(cdp, { quality: () => 'ultra' });
