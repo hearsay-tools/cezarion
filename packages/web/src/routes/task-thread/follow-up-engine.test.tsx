@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
+import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import type {
   AgentProfilesResponse,
   ApiRun,
@@ -221,6 +222,33 @@ describe('follow-up ContinueAction runner/model selection (#401)', () => {
     fireEvent.click(await screen.findByRole('button', { name: /continue/i }))
     await waitFor(() => expect(continueBody()).toBeDefined())
     expect(continueBody()).toEqual({})
+  })
+
+  it('a Continue that settles after navigation refreshes the project it started in', async () => {
+    serve()
+    const base = globalThis.fetch
+    let release!: () => void
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => String(input).endsWith('/continue')
+      ? new Promise<Response>(resolve => { release = () => resolve(base(input, init)) })
+      : base(input, init))
+    const client = createQueryClient()
+    client.setQueryData(['default', 'runs', 'list'], [])
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter>
+          <Harness run={makeRun()} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    fireEvent.click(await screen.findByRole('button', { name: /continue/i }))
+    await waitFor(() => expect(release).toBeDefined())
+    setApiScope('next')
+    try {
+      await act(async () => release())
+      await waitFor(() => expect(client.getQueryState(['default', 'runs', 'list'])?.isInvalidated).toBe(true))
+    } finally {
+      setApiScope(null)
+    }
   })
 
   it('drops a previous run\'s effort pick when the thread switches runs (#45)', async () => {

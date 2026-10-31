@@ -1612,12 +1612,12 @@ export function useSendMessage(id: string, projectId?: string) {
     // `projectId` only where the caller stands OUTSIDE the run's project — the global Tasks page,
     // whose rows span the registry and where `queryScope()` would name the boot project. Absent
     // is the ordinary case and keeps the scoped-by-context spelling.
-    mutationFn: (message: MessageInput) =>
-      sendMessage(runAddress(id, { projectId }), message),
-    onSuccess: () => writer.invalidateAfter('send', () => projectAddress()),
-    onError: (error) => {
-      if (error instanceof ApiError && error.status === 409) {
-        void writer.invalidateAfter('send', () => projectAddress())
+    mutationFn: (message: MessageInput) => sendMessage(runAddress(id, { projectId }), message),
+    onMutate: () => projectAddress({ projectId }),
+    onSuccess: (_result, _message, address) => writer.invalidateAfter('send', address),
+    onError: (error, _message, address) => {
+      if (error instanceof ApiError && error.status === 409 && address) {
+        void writer.invalidateAfter('send', address)
       }
     },
   })
@@ -1632,9 +1632,9 @@ export function useSendMessage(id: string, projectId?: string) {
 export function useContinueRun(id: string, projectId?: string) {
   const writer = useRunCacheWriter()
   return useMutation({
-    mutationFn: (opts: ContinueOptions = {}) =>
-      continueRun(runAddress(id, { projectId }), opts),
-    onSuccess: () => writer.invalidateAfter('continue', () => projectAddress()),
+    mutationFn: (opts: ContinueOptions = {}) => continueRun(runAddress(id, { projectId }), opts),
+    onMutate: () => projectAddress({ projectId }),
+    onSuccess: (_result, _opts, address) => writer.invalidateAfter('continue', address),
   })
 }
 

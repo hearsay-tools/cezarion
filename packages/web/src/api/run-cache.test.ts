@@ -5,6 +5,7 @@ import { makeRunRecord } from '@open-mercato/cezar-api-client/contract/test-fact
 import { summaryOf } from '@/test/run-summary-fixture'
 import { projectAddress, runAddress } from './run-address'
 import { createRunCacheWriter } from './run-cache'
+import { configureLiveSession, resetLiveSession } from './live-coordinator'
 
 afterEach(() => setApiScope(null))
 
@@ -39,7 +40,7 @@ describe('run cache ownership', () => {
     client.clear()
   })
 
-  it('retains late current-scope invalidation for continue and send', async () => {
+  it('invalidates the run project and the late current scope for continue and send', async () => {
     setApiScope('before')
     const address = runAddress('r', { projectId: 'other' })
     const client = new QueryClient()
@@ -48,9 +49,35 @@ describe('run cache ownership', () => {
     await createRunCacheWriter(client).invalidateAfter('continue', address)
     await createRunCacheWriter(client).invalidateAfter('send', address)
     expect(invalidate.mock.calls).toEqual([
+      [{ queryKey: ['other', 'runs'] }],
       [{ queryKey: ['after', 'runs'] }],
+      [{ queryKey: ['other', 'runs'] }],
       [{ queryKey: ['after', 'runs'] }],
     ])
+  })
+
+  it('invalidates the boot slug, its default alias and the late current scope for a boot-project send', async () => {
+    configureLiveSession({ local: false, bootProject: 'boot', apiBase: '' })
+    setApiScope(null)
+    const address = runAddress('r', { projectId: 'boot' })
+    const client = new QueryClient()
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    setApiScope('next')
+    await createRunCacheWriter(client).invalidateAfter('send', address)
+    expect(invalidate.mock.calls).toEqual([
+      [{ queryKey: ['boot', 'runs'] }],
+      [{ queryKey: ['default', 'runs'] }],
+      [{ queryKey: ['next', 'runs'] }],
+    ])
+    resetLiveSession()
+  })
+
+  it('invalidates one scope for continue and send inside the run project', async () => {
+    setApiScope('same')
+    const client = new QueryClient()
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    await createRunCacheWriter(client).invalidateAfter('send', runAddress('r'))
+    expect(invalidate.mock.calls).toEqual([[{ queryKey: ['same', 'runs'] }]])
   })
 })
 
