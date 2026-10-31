@@ -12,6 +12,9 @@ const { EQUIVALENT_FILE, readEquivalent, matchesEntry, sourceSite } = require('.
 const { namedRanges, functionRanges, functionOf, duplicateNames } = require('./mutants-functions.cjs');
 const TARGETS = require('../mutants/targets.json');
 const REPORT = 'reports/mutation/mutation.json';
+// Version 2 counts static rows (hearsay-tools/cezarion#2363); --compare refuses version 1 results.
+const RESULT_VERSION = 2;
+const OWN_CONFIG = 'stryker.mutants-file.config.json';
 const STATUS = { Killed: 'killed', Timeout: 'timeout', Survived: 'survived', NoCoverage: 'noCoverage', CompileError: 'error', RuntimeError: 'error', Ignored: 'ignored' };
 const undetected = m => ['Survived', 'NoCoverage'].includes(m.status);
 const flat = text => text.replace(/\s+/g, ' ').trim();
@@ -152,9 +155,9 @@ function mergeReports(first, second, file) {
   return { ...first, files: { ...first.files, [file]: { ...a, mutants: [...merged.values()] } } };
 }
 
-/** Keep observed static outcomes visible even though the counted score excludes them. */
+/** Static outcomes per file and function; they also count like any other row of their kind. */
 function staticResults(mutants) {
-  const rows = mutants.filter(m => m.static).map(m => ({ ...m, status: m.reportedStatus }));
+  const rows = mutants.filter(m => m.static);
   const names = [...new Set(rows.map(m => m.function))];
   return { staticCounts: countsOf(rows), staticByFunction: names.map(name => ({ name, counts: countsOf(rows.filter(m => m.function === name)) })) };
 }
@@ -164,9 +167,9 @@ function measure(report, file, head, ranges, targets = TARGETS, entries = []) {
   if (!data) throw new Error(`Report does not contain ${file}`);
   const mutants = data.mutants.map(m => {
     const row = { file, site: sourceSite(data.source, m.location), location: m.location, line: m.location.start.line, mutator: m.mutatorName, original: sliceSource(data.source, m.location), replacement: m.replacement, status: m.status, function: functionOf(m.location, ranges) };
-    // Static coverage includes hybrid mutants: ignoreStatic still activates those
-    // in beforeAll, after imports. Their outcomes do not measure import-time code.
-    return { ...row, kind: kindOf(row, file), ...(m.static === true ? { static: true, status: 'Ignored', reportedStatus: m.status } : {}) };
+    // The own-package pass runs with ignoreStatic off: a static mutant is active before
+    // any import and runs every related test, so its outcome is measured.
+    return { ...row, kind: kindOf(row, file), ...(m.static === true ? { static: true } : {}) };
   });
   const target = tierOf(file, targets);
   const duplicates = duplicateNames(ranges);
@@ -178,7 +181,7 @@ function measure(report, file, head, ranges, targets = TARGETS, entries = []) {
     .map(entry => ({ ...entry, matchCount: mutants.filter(m => matchesEntry(entry, m)).length }))
     .filter(entry => entry.matchCount > 1);
   const rawCounts = countsOf(data.mutants);
-  return { version: 1, file, head, tier: target.tier, mutants: kept, equivalentCount: mutants.length - kept.length,
+  return { version: RESULT_VERSION, file, head, tier: target.tier, mutants: kept, equivalentCount: mutants.length - kept.length,
     ...staticResults(mutants),
     moduleLevelCount: mutants.filter(m => m.static && m.function === '(module)').length,
     staticFunctions: [...new Set(mutants.filter(m => m.static && m.function !== '(module)').map(m => m.function))].map(name => ({ name, count: mutants.filter(m => m.static && m.function === name).length })),
@@ -187,19 +190,19 @@ function measure(report, file, head, ranges, targets = TARGETS, entries = []) {
 
 function summary(result) {
   const lines = [`File: ${result.file}`, `HEAD: ${result.head}`, `Tier: ${result.tier}`, `Counts: ${JSON.stringify(result.counts)}`, `Counted score: ${result.score.toFixed(1)}%`];
-  lines.push(`Static outcomes (not measured): ${JSON.stringify(result.staticCounts)}`);
-  for (const group of result.staticByFunction) lines.push(`Static outcomes in ${group.name} (not measured): ${JSON.stringify(group.counts)}`);
+  lines.push(`Static outcomes (counted): ${JSON.stringify(result.staticCounts)}`);
+  for (const group of result.staticByFunction) lines.push(`Static outcomes in ${group.name} (counted): ${JSON.stringify(group.counts)}`);
   lines.push(`Raw counts: ${JSON.stringify(result.rawCounts)}`, `Stryker raw score: ${result.rawScore.toFixed(1)}%`);
-  lines.push(`Static mutants at module scope: ${result.moduleLevelCount}; not measured, excluded from counted score (raw score unchanged).`);
-  lines.push(`Static mutants inside functions: ${result.staticFunctions.reduce((total, f) => total + f.count, 0)}; not measured: ${result.staticFunctions.map(f => `${f.name} (${f.count})`).join(', ') || 'none'}.`);
+  lines.push(`Static mutants at module scope: ${result.moduleLevelCount}; measured with import-time activation and counted.`);
+  lines.push(`Static mutants inside functions: ${result.staticFunctions.reduce((total, f) => total + f.count, 0)}; counted: ${result.staticFunctions.map(f => `${f.name} (${f.count})`).join(', ') || 'none'}.`);
   lines.push(`Not-covered lines: ${[...new Set(result.survivors.filter(m => m.status === 'NoCoverage').map(m => m.line))].join(', ') || 'none'}`);
   const names = [...new Set(result.survivors.map(m => m.function))];
   for (const name of names) {
     lines.push(`Survivors in ${name}:`);
     for (const m of result.survivors.filter(m => m.function === name)) lines.push(`  L${m.line} ${m.kind} / ${m.mutator}: ${flat(m.original)} -> ${flat(m.replacement)}`);
   }
-  for (const guard of result.guards) lines.push(`Guard ${guard.name}: ${guard.found ? `${guard.survivors.length} undetected, ${guard.staticCount} static not measured` : 'NOT FOUND'}`);
-  lines.push(`Guards with static mutants not measured: ${result.guards.filter(g => g.staticCount > 0).map(g => g.name).join(', ') || 'none'}`);
+  for (const guard of result.guards) lines.push(`Guard ${guard.name}: ${guard.found ? `${guard.survivors.length} undetected, ${guard.staticCount} static` : 'NOT FOUND'}`);
+  lines.push(`Guards with static mutants: ${result.guards.filter(g => g.staticCount > 0).map(g => g.name).join(', ') || 'none'}`);
   for (const target of result.targets) lines.push(`${target.pass ? 'PASS' : 'FAIL'}: ${target.name}`);
   lines.push(`Equivalent mutants excluded: ${result.equivalentCount}`, `Stale equivalent entries: ${JSON.stringify(result.staleEquivalent)}`);
   if (result.multipleEquivalent?.length) lines.push(`Equivalent entries matching multiple mutants: ${JSON.stringify(result.multipleEquivalent)}`);
@@ -255,7 +258,9 @@ async function runMeasurement(opts, deps, signal = new AbortController().signal)
     await deps.command('npm', ['run', 'build:server'], cwd, signal, env);
     signal.throwIfAborted();
     const ranges = deps.ranges(opts.file, cwd);
-    const first = await strykerReport(deps, cwd, opts, opts.file.split('/')[1], [], signal, undefined, env);
+    const config = deps.readJson(path.join(cwd, 'stryker.config.json'));
+    deps.write(path.join(cwd, OWN_CONFIG), `${JSON.stringify({ ...config, ignoreStatic: false }, null, 2)}\n`);
+    const first = await strykerReport(deps, cwd, opts, opts.file.split('/')[1], [OWN_CONFIG], signal, undefined, env);
     const consumer = opts.file.startsWith('packages/contract/')
       ? await runConsumers(opts, deps, cwd, first, signal, env) : { report: first };
     const { report, consumers } = consumer;
@@ -276,7 +281,9 @@ async function runConsumers(opts, deps, cwd, first, signal, env) {
   if (tests.length === 0) return { report: first };
   deps.write(path.join(cwd, 'vitest.mutants-consumers.config.ts'), consumerConfig(tests));
   const config = deps.readJson(path.join(cwd, 'stryker.config.json'));
-  const scratchConfig = { ...config, vitest: { ...config.vitest, configFile: 'vitest.mutants-consumers.config.ts' } };
+  // Static mutants stay ignored here: with ignoreStatic off, each would run every consumer test
+  // file, over three hours for waits.ts. The own-package pass has already measured them.
+  const scratchConfig = { ...config, ignoreStatic: true, vitest: { ...config.vitest, configFile: 'vitest.mutants-consumers.config.ts' } };
   deps.write(path.join(cwd, 'stryker.mutants-consumers.config.json'), `${JSON.stringify(scratchConfig, null, 2)}\n`);
   let output = '';
   try {

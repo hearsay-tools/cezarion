@@ -108,6 +108,7 @@ test('comparison ignores line movement, reports changed survivors and counts', (
   assert.equal(delta.counts.killed, 1);
   assert.ok(delta.score > 33);
   assert.throws(() => m.compareResults(before, { ...after, file: 'y.ts' }), /same/);
+  assert.throws(() => m.compareResults(before, { ...after, version: 2 }), /same result version/);
 });
 
 const { EventEmitter } = require('node:events');
@@ -176,18 +177,22 @@ test('command installs, builds, measures own tests then consumers, writes versio
   const { deps, calls } = fakeDeps();
   const opts = m.parseArgs(['packages/contract/src/sample.ts', '--out', '/tmp/result.json']);
   const result = await m.runMeasurement(opts, deps);
-  assert.equal(result.version, 1);
+  assert.equal(result.version, 2);
   assert.equal(result.head, 'abcdef');
   assert.deepEqual(calls.filter(c => ['pnpm', 'npm'].includes(c[0])), [['pnpm', 'install', '--frozen-lockfile'], ['npm', 'run', 'build:server']]);
   const runs = calls.filter(c => c[0] === 'stryker');
   assert.equal(runs.length, 2);
   assert.equal(runs[0][1], 'contract');
   assert.equal(runs[0][2].cwd, '/cache/scratch/checkout');
-  assert.deepEqual(runs[0][2].extraArgs, ['--concurrency', '4']);
+  assert.deepEqual(runs[0][2].extraArgs, ['--concurrency', '4', 'stryker.mutants-file.config.json']);
   assert.deepEqual(runs[1][2].extraArgs.slice(2), ['stryker.mutants-consumers.config.json']);
   assert.ok(calls.find(c => c[0] === 'write' && c[1] === '/tmp/result.json'));
+  // hearsay-tools/cezarion#2363: the own-package pass measures static mutants; the consumer pass skips them.
+  const ownWrite = calls.find(c => c[0] === 'write' && c[1] === '/cache/scratch/checkout/stryker.mutants-file.config.json');
+  assert.deepEqual(JSON.parse(ownWrite[2]), { ...deps.readJson(), ignoreStatic: false });
+  assert.ok(calls.indexOf(ownWrite) < calls.findIndex(c => c[0] === 'stryker'));
   const configWrite = calls.find(c => c[0] === 'write' && c[1].endsWith('stryker.mutants-consumers.config.json'));
-  assert.deepEqual(JSON.parse(configWrite[2]), { ...deps.readJson(), vitest: { pool: 'forks', configFile: 'vitest.mutants-consumers.config.ts' } });
+  assert.deepEqual(JSON.parse(configWrite[2]), { ...deps.readJson(), ignoreStatic: true, vitest: { pool: 'forks', configFile: 'vitest.mutants-consumers.config.ts' } });
   assert.deepEqual(calls.slice(-1), [['remove-scratch', '/cache/scratch']]);
   assert.match(m.summary(result), /FAIL: logic score/);
 });

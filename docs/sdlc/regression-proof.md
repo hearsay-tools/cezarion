@@ -88,8 +88,9 @@ node .github/scripts/mutants-file.cjs packages/<package>/src/<file>.ts \
 The command creates and removes its own standalone checkout of `HEAD`, with no remote and no
 `CEZ_*` variables, so Stryker never edits the worktree that Squeal validates and a mutant cannot reach
 the live repository or cockpit. Contract files also run their direct server and web consumer tests; add
-`--tests <test files>` for more contract consumers. Use `--compare ~/.cache/cez/mutants/earlier.json`
-to compare runs.
+`--tests <test files>` for more contract consumers. The file's own package pass measures static
+mutants (code that runs at import) and counts them; the consumer pass skips them. Use
+`--compare ~/.cache/cez/mutants/earlier.json` to compare runs of the same result version.
 
 ## Test-only change that removes a hidden dependency
 
