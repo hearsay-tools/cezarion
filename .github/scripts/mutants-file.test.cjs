@@ -542,3 +542,33 @@ test('shared reset restores executable modes and preserves the PR report unless 
   m.defaultDeps().reset(dir);
   assert.equal(fs.existsSync(reportFile), false);
 });
+
+
+test('whole-file equivalents report multiple matches and a site restores the killed twin', () => {
+  const file = 'packages/contract/src/sample.ts';
+  const data = report(file);
+  data.files[file].source = 'const first = true; const second = true;';
+  const first = data.files[file].mutants[0];
+  first.location = { start: { line: 1, column: 15 }, end: { line: 1, column: 19 } };
+  data.files[file].mutants.push({ ...first, id: 'twin', status: 'Killed', location: { start: { line: 1, column: 36 }, end: { line: 1, column: 40 } } });
+  const entry = equivalentEntry();
+  const broad = m.measure(data, file, 'sha', [], {}, [entry]);
+  assert.deepEqual(broad.multipleEquivalent, [{ ...entry, matchCount: 2 }]);
+  assert.match(m.summary(broad), /Equivalent entries matching multiple mutants:.*"matchCount":2/);
+  const scoped = m.measure(data, file, 'sha', [], {}, [{ ...entry, site: 'const first = ' }]);
+  assert.deepEqual(scoped.multipleEquivalent, []);
+  assert.equal(scoped.equivalentCount, 1);
+  assert.equal(scoped.counts.killed, 1);
+});
+
+
+test('identical prefixes on separate lines still report multiple matches', () => {
+  const file = 'packages/contract/src/sample.ts';
+  const data = report(file);
+  data.files[file].source = 'const value = true;\n  const value = true;';
+  const first = data.files[file].mutants[0];
+  first.location = { start: { line: 1, column: 15 }, end: { line: 1, column: 19 } };
+  data.files[file].mutants.push({ ...first, id: 'twin', location: { start: { line: 2, column: 17 }, end: { line: 2, column: 21 } } });
+  const result = m.measure(data, file, 'sha', [], {}, [equivalentEntry({ site: 'const value = ' })]);
+  assert.equal(result.multipleEquivalent[0].matchCount, 2);
+});

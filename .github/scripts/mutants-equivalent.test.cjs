@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { EQUIVALENT_FILE, readEquivalent, matchesEntry, findEquivalent } = require('./mutants-equivalent.cjs');
+const { EQUIVALENT_FILE, readEquivalent, matchesEntry, findEquivalent, sourceSite } = require('./mutants-equivalent.cjs');
 
 const entry = { file: 'packages/contract/src/attention.ts', function: 'attention', mutator: 'BooleanLiteral', original: 'true', replacement: 'false', reason: 'same behavior' };
 
@@ -56,4 +56,29 @@ test('string, template, regex whitespace and source formatting remain exact', ()
     assert.equal(matchesEntry({ ...entry, original }, { ...entry, original: different }), false);
     assert.equal(matchesEntry({ ...entry, replacement: original }, { ...entry, replacement: different }), false);
   }
+});
+
+
+test('an optional site selects one exact source prefix', () => {
+  const scoped = { ...entry, site: 'return ' };
+  assert.equal(matchesEntry(scoped, { ...entry, site: 'return ' }), true);
+  assert.equal(matchesEntry(scoped, { ...entry, site: 'const value = ' }), false);
+  assert.equal(matchesEntry(scoped, entry), false);
+  assert.equal(matchesEntry(entry, { ...entry, site: 'any line' }), true);
+});
+
+test('readEquivalent accepts a site and rejects invalid optional sites', t => {
+  const scoped = { ...entry, site: 'return ' };
+  assert.deepEqual(readEquivalent(fixture(t, JSON.stringify([scoped]))), { entries: [scoped], warning: '' });
+  for (const site of ['', ' ', null, 1]) {
+    assert.match(readEquivalent(fixture(t, JSON.stringify([{ ...entry, site }]))).warning, /site/);
+  }
+});
+
+
+test('source prefixes separate identical literals on one line and survive line moves', () => {
+  const line = "  const [name = '', sha = ''] = parts;";
+  assert.equal(sourceSite(line, { start: { line: 1, column: 17 } }), 'const [name = ');
+  assert.equal(sourceSite('\n' + line, { start: { line: 2, column: 27 } }), "const [name = '', sha = ");
+  assert.equal(sourceSite('true;', { start: { line: 1, column: 1 } }), '');
 });

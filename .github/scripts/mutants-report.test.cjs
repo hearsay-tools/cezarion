@@ -267,3 +267,10 @@ test('duplicate derived names never hide mutants even when their text matches ex
   assert.equal(result.counts.survived, 2);
   assert.equal(result.counts.equivalent, undefined);
 });
+
+
+test('PR equivalent matching uses the source prefix at the mutant start', () => {
+  const site = fixture.files[FILE].source.split('\n')[84].slice(0, 47).trimStart();
+  assert.deepEqual(withEntries([{ ...equivalent, site }]), withEntries([equivalent]));
+  assert.deepEqual(withEntries([{ ...equivalent, site: 'different source line' }]), withEntries([]));
+});
