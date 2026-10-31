@@ -2,11 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runRecordSchema as contractRunRecordSchema } from '@open-mercato/cezar-contract/runs';
 import { historyPaths } from './history-file.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
-import { RunDatabase } from './run-database.ts';
+import { RUNS_DB_FILE, RunDatabase } from './run-database.ts';
 import { RunStore, runRecordSchema } from './store.ts';
 import { blockRunWrites, readPersistedRuns, readPersistedText, seedRuns } from './run-store.testkit.ts';
 
@@ -130,6 +131,39 @@ describe('RunStore save lifecycle (#124)', () => {
     store.createRun({ title: 'trigger retention', workflow: 'w', task: 'task', steps: [] });
     expect(store.getRun(pinnedId)).toMatchObject({ archived: false, pinned: true, title: 'held pinned overflow' });
     store.flush();
+  });
+
+  // hearsay-tools/cezarion#2319: the decoded record decides on both paths; the SQL rule only narrows.
+  describe.each(['held', 'cold'] as const)('retention of a %s overflow run', (path) => {
+    const retain = (record: RunRecord, edit?: (raw: DatabaseSync) => void) => {
+      const kept = Array.from({ length: 300 }, () => ({
+        ...LEGACY_RUN, id: randomUUID(), createdAt: '2026-02-01T00:00:00.000Z',
+      }));
+      seedRuns(dataDir, [record, ...kept]);
+      if (edit) {
+        const raw = new DatabaseSync(join(dataDir, RUNS_DB_FILE));
+        try { edit(raw); } finally { raw.close(); }
+      }
+      const store = RunStore.open(dataDir);
+      if (path === 'held') expect(store.pin(record.id, 'active')).toBeDefined();
+      store.createRun({ title: 'trigger retention', workflow: 'w', task: 'task', steps: [] });
+      const run = store.getRun(record.id);
+      store.flush();
+      return run;
+    };
+
+    it('archives an eligible run', () => {
+      const run = retain({ ...LEGACY_RUN, id: randomUUID() } as RunRecord);
+      expect(run?.archived).toBe(true);
+    });
+
+    it('keeps a pinned run whose row summary does not say pinned', () => {
+      const id = randomUUID();
+      // SQL admits the row (its summary has no pinned); the decoded record is pinned.
+      const run = retain({ ...LEGACY_RUN, id, pinned: true, pinnedAt: '2026-01-01T00:00:00.000Z' } as RunRecord,
+        (raw) => raw.prepare("UPDATE runs SET summary = json_remove(summary, '$.pinned') WHERE id = ?").run(id));
+      expect(run).toMatchObject({ archived: false, pinned: true });
+    });
   });
 
   it('retention never deletes archived runs', () => {

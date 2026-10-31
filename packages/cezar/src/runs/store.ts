@@ -4121,7 +4121,7 @@ export class RunStore extends EventEmitter {
     }
     for (const id of stale) {
       const run = this.record(id);
-      if (!run || run.archived) continue;
+      if (!run || run.archived || !RETENTION_RUN_RULE.matches(run)) continue;
       this.applyArchived(run, true);
       removeAgentTmpDir(this.dataDir, id);
     }
