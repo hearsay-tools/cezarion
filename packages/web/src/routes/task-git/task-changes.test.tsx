@@ -559,7 +559,7 @@ describe('Changes tab action and file outcomes', () => {
   })
 
   it.each([
-    { type: 'directory', binary: false, tooLarge: false, content: '# Unavailable' },
+    { type: 'dir', entries: [] },
     { type: 'file', binary: true, tooLarge: false, content: '# Unavailable' },
     { type: 'file', binary: false, tooLarge: true, content: '# Unavailable' },
     { type: 'file', binary: false, tooLarge: false },

@@ -28,12 +28,15 @@ function serveDelete(reply: () => Response | Promise<Response>) {
 }
 
 let repoReads = 0
+let unrelatedReads = 0
 
 function DialogHarness({ entry, onClose }: { entry: RepoBranchEntry; onClose: () => void }) {
   const [open, setOpen] = useState(true)
   const repo = useQuery({ queryKey: queryKeys.repo, queryFn: () => Promise.resolve(++repoReads) })
+  const unrelated = useQuery({ queryKey: ['unrelated-dialog-data'], queryFn: () => Promise.resolve(++unrelatedReads) })
   return <>
     <output aria-label="Repository reads">{repo.data}</output>
+    <output aria-label="Unrelated reads">{unrelated.data}</output>
     <button onClick={() => setOpen(true)}>Reopen</button>
     <DeleteBranchDialog entry={open ? entry : null} onClose={() => { onClose(); setOpen(false) }} />
     <Toaster />
@@ -42,6 +45,7 @@ function DialogHarness({ entry, onClose }: { entry: RepoBranchEntry; onClose: ()
 
 function showDialog(entry = BRANCH) {
   repoReads = 0
+  unrelatedReads = 0
   const onClose = vi.fn()
   render(<QueryClientProvider client={createQueryClient()}><DialogHarness entry={entry} onClose={onClose} /></QueryClientProvider>)
   return onClose
@@ -51,7 +55,9 @@ function typeName(value = BRANCH.name) {
   fireEvent.change(screen.getByRole('textbox'), { target: { value } })
 }
 function submitName() {
-  fireEvent.submit(screen.getByRole('textbox').closest('form')!)
+  const event = new Event('submit', { bubbles: true, cancelable: true })
+  fireEvent(screen.getByRole('textbox').closest('form')!, event)
+  expect(event.defaultPrevented).toBe(true)
 }
 
 afterEach(() => {
@@ -64,6 +70,7 @@ describe('DeleteBranchDialog', () => {
   it('refuses form submit and button deletion without the exact typed confirmation', async () => {
     const sent = serveDelete(() => response({ deleted: [BRANCH.name], refused: [] }))
     const onClose = showDialog()
+    expect((screen.getByRole('textbox') as HTMLInputElement).value).toBe('')
     for (const typed of ['', 'cez/1234567', 'CEZ/12345678', 'cez/12345678 extra']) {
       typeName(typed)
       const button = screen.getByRole('button', { name: 'Delete branch' })
@@ -88,6 +95,7 @@ describe('DeleteBranchDialog', () => {
     expect(onClose).toHaveBeenCalledTimes(1)
     expect(screen.queryByRole('alertdialog')).toBeNull()
     await waitFor(() => expect(screen.getByLabelText('Repository reads').textContent).toBe('2'))
+    expect(screen.getByLabelText('Unrelated reads').textContent).toBe('1')
     fireEvent.click(screen.getByRole('button', { name: 'Reopen' }))
     expect((screen.getByRole('textbox') as HTMLInputElement).value).toBe('')
   })
