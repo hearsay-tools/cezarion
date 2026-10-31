@@ -22,6 +22,12 @@ const openTimer = () => ({
   registeredAt: new Date().toISOString(), deadline: new Date(Date.now() + 600_000).toISOString(), phase: 'open' as const, turnId: 'turn-1', seconds: 600,
 });
 
+/** Reload module initializers while Stryker's selected flag-table mutant is active. */
+async function freshTaskCli() {
+  vi.resetModules();
+  return import('./cli.ts');
+}
+
 describe('cez task', () => {
   let harness: TestCockpit;
   let store: RunStore;
@@ -820,6 +826,10 @@ describe('cez task', () => {
   });
 
   describe('argument contract (hearsay-tools/cezarion#2352)', () => {
+    let runFlags: typeof runTaskCommand;
+    beforeEach(async () => { ({ runTaskCommand: runFlags } = await freshTaskCli()); });
+    const run = (argv: string[], stdin?: string) => runFlags(argv, {}, io(stdin));
+
     const stringFlags = [
       ['start', 'task-file request-id workflow skill runner backend model effort until timeout-seconds'],
       ['list', 'status limit'], ['log', 'since max-chars until timeout-seconds'],
@@ -873,6 +883,8 @@ describe('cez task', () => {
       { argv: ['--help=true', 'list'], error: "option '--help' does not take a value" },
       { argv: ['-h=true', 'list'], error: "option '-h' does not take a value" },
       { argv: ['-x', 'list'], error: "unknown option '-x' before the operation; only --url, --repo and --help go there" },
+      { argv: ['-xurl', 'one', 'list'], error: "unknown option '-xurl' before the operation; only --url, --repo and --help go there" },
+      { argv: ['-xrepo', 'one', 'list'], error: "unknown option '-xrepo' before the operation; only --url, --repo and --help go there" },
       { argv: ['--url=one', '--url=two', 'list'], error: "duplicate option '--url'" },
       { argv: ['--repo=one', 'list', '--repo=two'], error: "duplicate option '--repo'" },
       { argv: ['--help', 'list', '--help'], error: "duplicate option '--help'" },
@@ -895,6 +907,38 @@ describe('cez task', () => {
         }
         expect(await run([operation, '--help=true'])).toBe(64);
         expect(last()).toMatchObject({ code: 'invalid_input', error: `${operation}: Option '--help' does not take an argument` });
+        expect(discoveries).toBe(0);
+      },
+    );
+
+    it.each([
+      { operation: 'start', args: "--task-file <path|-> | '<task>'", max: 1 },
+      { operation: 'list', args: '', max: 0 },
+      { operation: 'status', args: '<id>', max: 1 },
+      { operation: 'log', args: '<id>', max: 1 },
+      { operation: 'wait', args: '<id>...', max: 32 },
+      { operation: 'send', args: "<id> '<text>' | <id> --text-file <path|->", max: 2 },
+      { operation: 'notify', args: "<id> [--message '<note>' | --message-file <path|->]", max: 1 },
+      { operation: 'stop', args: '<id>', max: 1 },
+      { operation: 'finish', args: '<id>', max: 1 },
+      { operation: 'archive', args: '<id>', max: 1 },
+      { operation: 'unarchive', args: '<id>', max: 1 },
+      { operation: 'archive-finished', args: '', max: 0 },
+      { operation: 'diff', args: '<id>', max: 1 },
+      { operation: 'open', args: '<id>', max: 1 },
+    ])('$operation documents and enforces its positional arguments', async ({ operation, args, max }) => {
+      expect(await run([operation, '--help'])).toBe(0);
+      expect(out.at(-1)?.split('\n')).toContain(`  cez task ${operation} ${args}`.trimEnd());
+      expect(await run([operation, ...Array.from({ length: max + 1 }, () => 'x')])).toBe(64);
+      expect(last()).toMatchObject({ code: 'invalid_input', error: `${operation} has an extra argument` });
+      expect(last()).toHaveProperty('usage.operations');
+      expect(discoveries).toBe(0);
+    });
+
+    it.each(['status', 'log', 'wait', 'send', 'notify', 'stop', 'finish', 'archive', 'unarchive', 'diff', 'open'])(
+      '%s refuses a missing task id', async (operation) => {
+        expect(await run([operation])).toBe(64);
+        expect(last()).toMatchObject({ code: 'invalid_input', error: `${operation} is missing a positional` });
         expect(discoveries).toBe(0);
       },
     );
@@ -929,6 +973,23 @@ describe('cez task', () => {
       expect(await run(argv)).toBe(64);
       expect(last()).toMatchObject({ code: 'invalid_input', error, usage: { operations: expect.any(Array) } });
       expect(discoveries).toBe(0);
+    });
+
+    it('ignores an unused start timeout when --wait is absent', async () => {
+      expect(await run(['start', 'no wait', '--timeout-seconds', '0'])).toBe(0);
+      expect(store.getRun(last().id as string)?.task).toBe('no wait');
+      expect(last()).toMatchObject({ created: true, status: RUN_STATUS.queued });
+    });
+
+    it('defaults wait mode to all when terminal runs have mixed results', async () => {
+      const done = await start('done');
+      const failed = await start('failed');
+      store.updateRun(done, { status: RUN_STATUS.done });
+      store.updateRun(failed, { status: RUN_STATUS.failed });
+      expect(await run(['wait', done, failed, '--timeout-seconds', '1800'])).toBe(1);
+      expect(last()).toMatchObject({ until: 'attention', timedOut: false, runs: [
+        { id: done, status: RUN_STATUS.done }, { id: failed, status: RUN_STATUS.failed },
+      ] });
     });
 
     it.each(['attention', 'settled'])('accepts wait --until %s without a dependent flag', async (until) => {
