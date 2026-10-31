@@ -115,7 +115,6 @@ export function stageDebouncedUpdate(run: RunRecord, patch: RecordPatch, hooks: 
 }
 
 export function stageStepUpdate(patch: Partial<Omit<StepState, 'id'>>, redact: (text: string) => string): Partial<Omit<StepState, 'id'>> {
-  if (process.env.CEZ_REDACT_SECRETS === '0') return patch;
   if (typeof patch.error !== 'string') return patch;
   return { ...patch, error: redact(patch.error) };
 }
@@ -227,11 +226,13 @@ export function stagePullRequests(run: RunRecord, entries: readonly RunPullReque
  * way in `updateStep` — `run.ts` feeds the SAME `err.message` string to both
  * calls, so redacting only the run-level copy left the token verbatim one
  * field away (open-mercato/cezar#456 review).
+ *
+ * `redact` owns the `CEZ_REDACT_SECRETS=0` opt-out: it skips host secrets only, so
+ * session secrets are scrubbed here too (hearsay-tools/cezarion#2325).
  */
 export function redactPatch(
   patch: RecordPatch, redact: (text: string) => string,
 ): Partial<Omit<RunRecord, 'id' | 'steps'>> {
-  if (process.env.CEZ_REDACT_SECRETS === '0') return patch;
   const out = { ...patch };
   for (const field of ['title', 'titleSummary', 'error'] as const) {
     const value = out[field];
