@@ -276,16 +276,16 @@ export class PreviewHost implements PreviewHostLike {
     };
     if (!owned(dev)) return previewStopResult('approval_required');
     await this.stopServer(dev, 'user');
-    if (signal?.aborted || entry.released || this.entries.get(runId) !== entry) return previewStopResult('unavailable');
+    if (signal?.aborted || entry.released) return previewStopResult('unavailable');
     if (!restart) return previewStopResult('stopped');
     if (!approved()) return previewStopResult('approval_required');
     // Another process can take the port after stop/crash. Never adopt it or spawn over it.
     const answering = await this.deps.probe(port);
-    if (signal?.aborted || entry.released || this.entries.get(runId) !== entry) return previewStopResult('unavailable');
+    if (signal?.aborted || entry.released) return previewStopResult('unavailable');
     if (!approved()) return previewStopResult('approval_required');
     if (entry.servers.get(port) !== dev) return previewStopResult('unavailable');
     const holder = this.portOwner(port);
-    if (holder && holder.runId !== runId) return previewStopResult('port_held');
+    if (holder) return previewStopResult('port_held');
     if (answering) return previewStopResult('port_in_use');
     await this.run(runId, port);
     return previewStopResult('restarted');
@@ -642,7 +642,7 @@ export class PreviewHost implements PreviewHostLike {
   /** Tells the pane `port-held` when another task's cezar-owned server holds `server.port`. */
   private heldByOther(entry: RunEntry, server: PreviewServer): boolean {
     const owner = this.portOwner(server.port);
-    if (!owner || owner.runId === entry.ctx.runId) return false;
+    if (!owner) return false;
     if (entry.servers.get(server.port) === 'adopted') entry.servers.delete(server.port);
     this.tell(entry, { t: 'state', stage: 'port-held', server, ownerTitle: owner.title });
     return true;

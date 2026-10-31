@@ -1,93 +1,12 @@
-import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PreviewServer } from '@open-mercato/cezar-contract';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DevServerState, DevServerStopReason } from './dev-server.ts';
 import { ChromiumError, installCommand } from './chromium.ts';
-import { ChromiumMissingError, PREVIEW_BROWSER_IDLE_MS, PREVIEW_SERVER_IDLE_MS, PreviewHost, type BrowserExit, type BrowserHandle, type RunContext } from './host.ts';
+import { ChromiumMissingError, PREVIEW_BROWSER_IDLE_MS, PREVIEW_SERVER_IDLE_MS, PreviewHost, type BrowserExit, type PreviewHostDeps, type RunContext } from './host.ts';
 import { fakeAgentClient, fakeCdp, fakeConnection, fakeViewer } from './preview.testkit.ts';
 import type { CdpConnection } from './cdp.ts';
-
-class FakeDevServer extends EventEmitter {
-  state: DevServerState = 'starting';
-  attempts = 0;
-  exitCode?: number;
-  stopReason?: DevServerStopReason;
-  started = false;
-  constructor(readonly opts: { server: PreviewServer; worktreePath: string; dir: string }) { super(); }
-  start() { this.started = true; }
-  keepWaiting() { if (this.state === 'stalled') this.set('starting'); }
-  stop = vi.fn(async (reason: DevServerStopReason) => {
-    if (this.state === 'exited' || this.state === 'stopped') return;
-    this.stopReason = reason;
-    this.set('stopped');
-  });
-  logTail() { return ['ready in 300 ms']; }
-  attempt() { this.attempts += 1; this.emit('attempt', this.attempts); }
-  set(state: DevServerState) { this.state = state; this.emit('state', state); }
-}
-
-const server = (port: number, extra: Partial<PreviewServer> = {}): PreviewServer => ({
-  port, command: 'npm run dev', label: 'web', registeredAt: '2026-10-02T10:00:00.000Z', answeredAtRegistration: false, ...extra,
-});
-
-function fakeStore(servers: PreviewServer[]) {
-  const events: Array<{ runId: string; event: Record<string, unknown> }> = [];
-  // run-2 is a second task that registered the same servers (both registered while the ports were silent).
-  const runs = new Map([['run-1', { id: 'run-1', previewServers: servers }], ['run-2', { id: 'run-2', previewServers: servers }]]);
-  return {
-    events,
-    stateEvents: () => events.filter(entry => entry.event.type === 'preview.server-state').map(entry => entry.event),
-    getRun: (id: string) => runs.get(id),
-    appendEvent: (runId: string, event: Record<string, unknown>) => { events.push({ runId, event }); return event; },
-  };
-}
-
-function setup(servers: PreviewServer[] = [server(5173)], launchError?: () => Error | undefined, launchGate?: () => Promise<void>) {
-  const dataDir = mkdtempSync(join(tmpdir(), 'cez-preview-host-'));
-  const store = fakeStore(servers);
-  const answering = new Set<number>();
-  const devServers: FakeDevServer[] = [];
-  const probe = vi.fn(async (port: number) => answering.has(port));
-  const browsers: Array<BrowserHandle & { cdpFake: ReturnType<typeof fakeCdp>; connectionFake: ReturnType<typeof fakeConnection>; exit(info: BrowserExit): void; profileDir: string }> = [];
-  const host = new PreviewHost({
-    probe,
-    createServer: opts => {
-      const dev = new FakeDevServer(opts);
-      devServers.push(dev);
-      return dev;
-    },
-    launchBrowser: async profileDir => {
-      await launchGate?.();
-      const error = launchError?.();
-      if (error) throw error;
-      const cdpFake = fakeCdp();
-      let exit!: (info: BrowserExit) => void;
-      const exited = new Promise<BrowserExit>(resolve => (exit = resolve));
-      const connectionFake = fakeConnection();
-      const handle = { cdp: cdpFake.cdp, connection: connectionFake.connection, pageTargetId: 'PANE', exited, close: vi.fn(), cdpFake, connectionFake, exit, profileDir };
-      browsers.push(handle);
-      return handle;
-    },
-    download: async ({ onProgress }) => {
-      onProgress(10, 10);
-      return '/cache/chrome-headless-shell';
-    },
-    platform: 'linux',
-    arch: 'arm64',
-    osRelease: () => 'ID=ubuntu\n',
-  });
-  const ctx: RunContext = { runId: 'run-1', title: 'Build the app', worktreePath: '/repo/wt', dataDir, store: store as unknown as RunContext['store'] };
-  return { host, ctx, store, answering, devServers, browsers, dataDir, probe };
-}
-
-const flush = () => vi.advanceTimersByTimeAsync(0);
-const stages = (viewer: ReturnType<typeof fakeViewer>) =>
-  viewer.messages.flatMap(msg => (msg.t === 'state' ? [msg.stage] : []));
-const navigations = (browser: { cdpFake: ReturnType<typeof fakeCdp> }) =>
-  browser.cdpFake.sent('Page.navigate').map(call => call.params.url);
+import { fakeStore, flush, navigations, server, setup, stages } from './host.testkit.ts';
 
 describe('PreviewHost', () => {
   let dirs: string[] = [];
@@ -99,8 +18,8 @@ describe('PreviewHost', () => {
     for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
     dirs = [];
   });
-  const make = (servers?: PreviewServer[], launchError?: () => Error | undefined, launchGate?: () => Promise<void>) => {
-    const env = setup(servers, launchError, launchGate);
+  const make = (servers?: PreviewServer[], launchError?: () => Error | undefined, launchGate?: () => Promise<void>, overrides?: PreviewHostDeps) => {
+    const env = setup(servers, launchError, launchGate, overrides);
     dirs.push(env.dataDir);
     return env;
   };
@@ -124,6 +43,393 @@ describe('PreviewHost', () => {
     await host.close();
   });
 
+  it.each([
+    { ownerId: undefined, returningId: undefined, sameViewer: true, detached: false, refused: false },
+    { ownerId: undefined, returningId: undefined, sameViewer: false, detached: false, refused: true },
+    { ownerId: undefined, returningId: 'new', sameViewer: false, detached: false, refused: true },
+    { ownerId: undefined, returningId: undefined, sameViewer: false, detached: true, refused: false },
+    { ownerId: undefined, returningId: 'new', sameViewer: false, detached: true, refused: false },
+    { ownerId: 'owner', returningId: 'owner', sameViewer: false, detached: false, refused: false },
+    { ownerId: 'owner', returningId: undefined, sameViewer: false, detached: false, refused: true },
+    { ownerId: 'owner', returningId: 'other', sameViewer: true, detached: false, refused: true },
+    { ownerId: 'owner', returningId: 'other', sameViewer: false, detached: true, refused: true },
+  ])('resumed tab ownership: %j', async ({ ownerId, returningId, sameViewer, detached, refused }) => {
+    const { host, ctx } = make();
+    const owner = fakeViewer('Owner browser');
+    await host.open(ctx, owner, { port: 5173 }, { viewerId: ownerId });
+    if (detached) host.detach(ctx.runId, owner);
+    const returning = sameViewer ? owner : fakeViewer();
+    returning.messages.length = 0;
+    await host.open(ctx, returning, { port: 5173 }, { viewerId: returningId, resume: true });
+    if (refused) {
+      expect(returning.messages).toEqual([{ t: 'replaced', by: detached ? 'another tab' : 'Owner browser' }]);
+      expect(returning.closed).toEqual([{ code: 4001, reason: 'replaced' }]);
+    } else {
+      expect(returning.messages.at(-1)).toMatchObject({ t: 'state', stage: 'needs-approval' });
+      expect(returning.closed).toEqual([]);
+    }
+    await host.close();
+  });
+
+  it('reports browser ownership during launch and clears it after launch failure', async () => {
+    let finish!: () => void;
+    const gate = new Promise<void>(resolve => { finish = resolve; });
+    const { host, ctx } = make(undefined, () => new Error('launch refused'), () => gate);
+    await host.open(ctx, fakeViewer(), { port: 5173 });
+    expect(host.ownsBrowser(ctx.runId)).toBe(false);
+    const opening = host.open(ctx, fakeViewer(), { url: 'http://localhost:3000/' });
+    expect(host.ownsBrowser(ctx.runId)).toBe(true);
+    expect(host.ownsBrowser('absent')).toBe(false);
+    finish();
+    await opening;
+    expect(host.ownsBrowser(ctx.runId)).toBe(false);
+    await host.close();
+  });
+
+  it('routes owner ping, stop and keepWaiting controls and ignores an unattached viewer', async () => {
+    const { host, ctx, devServers } = make();
+    const viewer = fakeViewer();
+    const stranger = fakeViewer();
+    await host.handle(ctx, stranger, { t: 'ping', ts: 1 });
+    expect(stranger.messages).toEqual([]);
+    await host.handle(ctx, viewer, { t: 'open', target: { port: 5173 } });
+    await host.handle(ctx, stranger, { t: 'ping', ts: 2 });
+    expect(stranger.messages).toEqual([]);
+    await host.handle(ctx, viewer, { t: 'ping', ts: 3 });
+    expect(viewer.messages.at(-1)).toEqual({ t: 'pong', ts: 3 });
+    await host.handle(ctx, viewer, { t: 'run', port: 5173 });
+    devServers[0]!.set('stalled');
+    await host.handle(ctx, viewer, { t: 'keepWaiting', port: 5173 });
+    expect(devServers[0]!.state).toBe('starting');
+    await host.handle(ctx, viewer, { t: 'stop', port: 5173 });
+    expect(devServers[0]!.stop).toHaveBeenCalledWith('user');
+    expect(viewer.messages.at(-1)).toMatchObject({ t: 'state', stage: 'server-stopped' });
+    await host.handle(ctx, viewer, { t: 'keepWaiting', port: 5173 });
+    expect(devServers[0]!.state).toBe('stopped');
+    await host.close();
+  });
+
+  it('shares a download across panes, throttles progress and relaunches each requested URL', async () => {
+    let finish!: (path: string) => void;
+    let progress!: (received: number, total: number) => void;
+    const download = vi.fn(({ onProgress }: Parameters<NonNullable<PreviewHostDeps['download']>>[0]) => {
+      progress = onProgress;
+      return new Promise<string>(resolve => { finish = resolve; });
+    });
+    const { host, ctx, browsers } = make(undefined, undefined, undefined, { download });
+    const a = fakeViewer(), b = fakeViewer();
+    const other = { ...ctx, runId: 'run-2' };
+    await host.open(ctx, a, { url: 'http://localhost:3000/a' });
+    await host.open(other, b, { url: 'http://localhost:3000/b' });
+    const first = host.handle(ctx, a, { t: 'download' });
+    const second = host.handle(other, b, { t: 'download' });
+    expect(download).toHaveBeenCalledTimes(1);
+    expect(a.messages.at(-1)).toEqual({ t: 'state', stage: 'downloading', received: 0, total: 0 });
+    progress(1, 10);
+    progress(2, 10);
+    await vi.advanceTimersByTimeAsync(249);
+    progress(3, 10);
+    await vi.advanceTimersByTimeAsync(1);
+    progress(4, 10);
+    progress(10, 10);
+    for (const viewer of [a, b]) {
+      expect(viewer.messages.filter(msg => msg.t === 'downloadProgress')).toEqual([
+        { t: 'downloadProgress', received: 1, total: 10 },
+        { t: 'downloadProgress', received: 4, total: 10 },
+        { t: 'downloadProgress', received: 10, total: 10 },
+      ]);
+    }
+    finish('/cache/chrome');
+    await Promise.all([first, second]);
+    expect(navigations(browsers[0]!)).toEqual(['http://localhost:3000/a', 'http://localhost:3000/a']);
+    expect(navigations(browsers[1]!)).toEqual(['http://localhost:3000/b', 'http://localhost:3000/b']);
+    await host.close();
+  });
+
+  it.each([new Error('network refused'), 'download refused'])('reports download failure %s and permits a new download', async error => {
+    const download = vi.fn().mockRejectedValue(error);
+    const { host, ctx } = make(undefined, undefined, undefined, { download });
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.handle(ctx, viewer, { t: 'download' });
+    expect(viewer.messages.at(-1)).toEqual({
+      t: 'state', stage: 'download-failed', error: String(error instanceof Error ? error.message : error),
+      installCommand: installCommand('linux', 'ID=ubuntu\n'),
+    });
+    await flush();
+    await host.handle(ctx, viewer, { t: 'download' });
+    expect(download).toHaveBeenCalledTimes(2);
+    await host.close();
+  });
+
+  it('cancelDownload aborts the shared download and returns to the install prompt', async () => {
+    let signal!: AbortSignal;
+    const download: NonNullable<PreviewHostDeps['download']> = opts => {
+      signal = opts.signal;
+      return new Promise<string>((_, reject) => {
+        signal.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
+      });
+    };
+    const { host, ctx } = make(undefined, undefined, undefined, { download });
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    const pending = host.handle(ctx, viewer, { t: 'download' });
+    await host.handle(ctx, viewer, { t: 'cancelDownload' });
+    await pending;
+    expect(signal.aborted).toBe(true);
+    expect(viewer.messages.at(-1)).toEqual({
+      t: 'state', stage: 'chromium-missing', canDownload: false, installCommand: installCommand('linux', 'ID=ubuntu\n'),
+    });
+    await host.close();
+  });
+
+  it('refuses unknown registrations and absent approvals without creating a server', async () => {
+    const { host, ctx, devServers } = make();
+    expect(await host.stopPreview('absent', { port: 5173 })).toMatchObject({ ok: false, code: 'approval_required' });
+    await host.open(ctx, fakeViewer(), { port: 5173 });
+    expect(await host.stopPreview(ctx.runId, { port: 3000 })).toMatchObject({ ok: false, code: 'not_registered' });
+    expect(await host.stopPreview(ctx.runId, { port: 5173, restart: true })).toMatchObject({ ok: false, code: 'approval_required' });
+    const lifetime = new AbortController();
+    lifetime.abort();
+    expect(await host.stopPreview(ctx.runId, { port: 5173 }, lifetime.signal)).toMatchObject({ ok: false, code: 'unavailable' });
+    expect(devServers).toEqual([]);
+    await host.close();
+  });
+
+  it('forgets an adoption when another task takes ownership of its port', async () => {
+    const { host, ctx, answering, devServers } = make();
+    const viewer = fakeViewer();
+    answering.add(5173);
+    await host.open(ctx, viewer, { port: 5173 });
+    answering.clear();
+    const other = { ...ctx, runId: 'run-2', title: 'Other task' };
+    await host.open(other, fakeViewer(), { port: 5173 });
+    await host.run(other.runId, 5173);
+    await host.open(ctx, viewer, { port: 5173 });
+    expect(viewer.messages.at(-1)).toEqual({ t: 'state', stage: 'port-held', server: server(5173), ownerTitle: 'Other task' });
+    expect(await host.stopPreview(ctx.runId, { port: 5173 })).toMatchObject({ code: 'port_held' });
+    await host.stop(other.runId, 5173, 'user');
+    expect(await host.stopPreview(ctx.runId, { port: 5173 })).toMatchObject({ code: 'approval_required' });
+    expect(devServers).toHaveLength(1);
+    await host.close();
+  });
+
+  it('keeps ownership while stop is pending, then frees the port', async () => {
+    const { host, ctx, devServers } = make();
+    await host.open(ctx, fakeViewer(), { port: 5173 });
+    await host.run(ctx.runId, 5173);
+    let finish!: () => void;
+    devServers[0]!.stop.mockImplementationOnce(async () => {
+      devServers[0]!.set('stopped');
+      await new Promise<void>(resolve => { finish = resolve; });
+    });
+    const stopping = host.stop(ctx.runId, 5173, 'user');
+    expect(host.portOwner(5173)).toEqual({ runId: ctx.runId, title: ctx.title });
+    const viewer = fakeViewer();
+    await host.open({ ...ctx, runId: 'run-2' }, viewer, { port: 5173 });
+    expect(viewer.messages.at(-1)).toMatchObject({ stage: 'port-held', ownerTitle: ctx.title });
+    finish();
+    await stopping;
+    expect(host.portOwner(5173)).toBeUndefined();
+    expect(host.ownsServer(ctx.runId, 5173)).toBe(false);
+    await host.close();
+  });
+
+  it('treats a failed port probe as silent and streams an unregistered port without approval', async () => {
+    const { host, ctx, probe, browsers, devServers } = make();
+    const viewer = fakeViewer();
+    probe.mockRejectedValueOnce(new Error('probe refused'));
+    await host.open(ctx, viewer, { port: 5173 });
+    expect(viewer.messages.at(-1)).toMatchObject({ stage: 'needs-approval', wasRunning: false });
+    await host.open(ctx, viewer, { port: 3000 });
+    expect(navigations(browsers[0]!)).toEqual(['http://localhost:3000/']);
+    expect(devServers).toHaveLength(0);
+    expect(probe).toHaveBeenCalledTimes(1);
+    await host.close();
+  });
+
+  it.each([
+    { last: 'http://localhost:5173/form', expected: 'http://localhost:5173/form' },
+    { last: 'http://localhost:3000/form', expected: 'http://localhost:5173/root' },
+    { last: 'https://localhost:5173/form', expected: 'http://localhost:5173/root' },
+    { last: 'http://other.example:5173/form', expected: 'http://localhost:5173/root' },
+    { last: 'invalid URL', expected: 'http://localhost:5173/root' },
+  ])('restart restores only a page from the registered origin: $last', async ({ last, expected }) => {
+    const { host, ctx, browsers, devServers } = make([server(5173, { path: '/root' })]);
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.run(ctx.runId, 5173);
+    devServers[0]!.set('up');
+    await flush();
+    browsers[0]!.cdpFake.emit('Page.frameNavigated', { frame: { id: 'main', url: last } });
+    await host.stop(ctx.runId, 5173, 'user');
+    await host.run(ctx.runId, 5173);
+    devServers[1]!.set('up');
+    await flush();
+    expect(navigations(browsers[0]!).at(-1)).toBe(expected);
+    await host.close();
+  });
+
+  it('refuses an agent after a failed browser launch without repeated launch attempts', async () => {
+    const { host, ctx, browsers } = make(undefined, () => new Error('launch denied'));
+    const grant = host.grantAgent(ctx.runId, () => ctx);
+    expect(await host.connectAgent(grant.token, fakeAgentClient()))
+      .toEqual({ refused: 'The preview browser could not start' });
+    expect(await host.connectAgent(grant.token, fakeAgentClient()))
+      .toEqual({ refused: 'The preview browser failed; the owner can retry it from the preview pane' });
+    expect(browsers).toEqual([]);
+    await host.close();
+  });
+
+  it('reports a failed agent handshake and closes its idle browser later', async () => {
+    const { host, ctx, browsers } = make();
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { url: 'http://localhost:3000/' });
+    host.detach(ctx.runId, viewer);
+    vi.spyOn(browsers[0]!.connection, 'call').mockResolvedValueOnce({ error: { code: -1, message: 'attach refused' } });
+    const grant = host.grantAgent(ctx.runId, () => ctx);
+    expect(await host.connectAgent(grant.token, fakeAgentClient()))
+      .toEqual({ refused: 'Target.attachToBrowserTarget: attach refused' });
+    expect(host.hasAgents(ctx.runId)).toBe(false);
+    await vi.advanceTimersByTimeAsync(PREVIEW_BROWSER_IDLE_MS);
+    expect(browsers[0]!.close).toHaveBeenCalledTimes(1);
+    await host.close();
+  });
+
+  it.each(['success', 'failure'] as const)('a released pane receives no download %s or progress', async outcome => {
+    let finish!: (path: string) => void;
+    let fail!: (error: Error) => void;
+    let progress!: (received: number, total: number) => void;
+    const download: NonNullable<PreviewHostDeps['download']> = opts => {
+      progress = opts.onProgress;
+      return new Promise<string>((resolve, reject) => { finish = resolve; fail = reject; });
+    };
+    const { host, ctx, browsers } = make(undefined, undefined, undefined, { download });
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    const pending = host.handle(ctx, viewer, { t: 'download' });
+    await host.release(ctx.runId);
+    const messages = [...viewer.messages];
+    progress(10, 10);
+    if (outcome === 'success') finish('/cache/chrome');
+    else fail(new Error('download refused'));
+    await pending;
+    expect(viewer.messages).toEqual(messages);
+    expect(browsers).toHaveLength(0);
+    await host.close();
+  });
+
+  it('downloads without a prior URL start a browser without navigating', async () => {
+    const { host, ctx, browsers } = make();
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.handle(ctx, viewer, { t: 'download' });
+    expect(browsers).toHaveLength(1);
+    expect(navigations(browsers[0]!)).toEqual([]);
+    expect(host.ownsBrowser(ctx.runId)).toBe(true);
+    await host.close();
+  });
+
+  it.each(['viewer', 'port', 'release'] as const)('a stale open probe cannot override a later %s change', async change => {
+    const { host, ctx, probe, browsers } = make([server(5173), server(3000)]);
+    const viewer = fakeViewer();
+    let finish!: (answer: boolean) => void;
+    probe.mockImplementationOnce(() => new Promise<boolean>(resolve => { finish = resolve; }));
+    const opening = host.open(ctx, viewer, { port: 5173 });
+    if (change === 'viewer') await host.open(ctx, fakeViewer(), { port: 3000 });
+    else if (change === 'port') await host.open(ctx, viewer, { port: 3000 });
+    else await host.release(ctx.runId);
+    const messages = [...viewer.messages];
+    finish(true);
+    await opening;
+    expect(viewer.messages).toEqual(messages);
+    expect(browsers).toHaveLength(0);
+    expect(host.portOwner(5173)).toBeUndefined();
+    await host.close();
+  });
+
+  it('rejects an invalid URL without navigating and exposes the probe result', async () => {
+    const { host, ctx, browsers, answering } = make();
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { url: 'http://localhost:3000/' });
+    await host.open(ctx, viewer, { url: 'javascript:alert(1)' });
+    expect(navigations(browsers[0]!)).toEqual(['http://localhost:3000/']);
+    expect(await host.probe(3000)).toBe(false);
+    answering.add(3000);
+    expect(await host.probe(3000)).toBe(true);
+    await host.close();
+  });
+
+  it('refuses agents while release waits for server teardown', async () => {
+    const { host, ctx, devServers } = make();
+    await host.open(ctx, fakeViewer(), { port: 5173 });
+    await host.run(ctx.runId, 5173);
+    expect(host.ownsServer(ctx.runId, 5173)).toBe(true);
+    let finish!: () => void;
+    devServers[0]!.stop.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+    const release = host.release(ctx.runId);
+    const grant = host.grantAgent(ctx.runId, () => ctx);
+    expect(await host.connectAgent(grant.token, fakeAgentClient()))
+      .toEqual({ refused: 'The preview of this task was released' });
+    finish();
+    await release;
+    expect(host.ownsServer(ctx.runId, 5173)).toBe(false);
+  });
+
+  it('a session setup failure closes Chromium and remains failed after downloading', async () => {
+    const cdp = fakeCdp();
+    vi.mocked(cdp.cdp.send).mockRejectedValue(new Error('page setup refused'));
+    const close = vi.fn();
+    const launchBrowser = vi.fn(async () => ({
+      cdp: cdp.cdp, connection: fakeConnection().connection, pageTargetId: 'PANE', close,
+      exited: new Promise<BrowserExit>(() => {}),
+    }));
+    const { host, ctx } = make(undefined, undefined, undefined, { launchBrowser });
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { agent: true });
+    const grant = host.grantAgent(ctx.runId, () => ctx);
+    expect(await host.connectAgent(grant.token, fakeAgentClient()))
+      .toEqual({ refused: 'The preview browser could not start' });
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(host.ownsBrowser(ctx.runId)).toBe(false);
+    await host.handle(ctx, viewer, { t: 'download' });
+    expect(viewer.messages.at(-1)).toMatchObject({ stage: 'browser-exited', stderrTail: 'page setup refused', serverUp: false });
+    expect(launchBrowser).toHaveBeenCalledTimes(1);
+    await host.close();
+  });
+
+  it('checks approval before probing a restart port', async () => {
+    const { host, ctx, devServers, store, probe } = make();
+    await host.open(ctx, fakeViewer(), { port: 5173 });
+    await host.run(ctx.runId, 5173);
+    devServers[0]!.stop.mockImplementationOnce(async () => {
+      devServers[0]!.set('stopped');
+      store.getRun(ctx.runId)!.previewServers = [server(5173, { command: 'changed' })];
+    });
+    probe.mockImplementationOnce(async () => {
+      store.getRun(ctx.runId)!.previewServers = [server(5173)];
+      return false;
+    });
+    expect(await host.stopPreview(ctx.runId, { port: 5173, restart: true })).toMatchObject({ code: 'approval_required' });
+    expect(devServers).toHaveLength(1);
+    await host.close();
+  });
+
+  it('refuses restart when a probe adopts the stopped process port', async () => {
+    const { host, ctx, answering, probe, devServers } = make();
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.run(ctx.runId, 5173);
+    probe.mockImplementationOnce(async () => {
+      answering.add(5173);
+      await host.open(ctx, viewer, { port: 5173 });
+      return false;
+    });
+    expect(await host.stopPreview(ctx.runId, { port: 5173, restart: true })).toMatchObject({ code: 'unavailable' });
+    expect(devServers).toHaveLength(1);
+    await host.close();
+  });
+
   it('agent stop preserves approval through stop and crash and reports Stopped', async () => {
     const { host, ctx, devServers, store } = make();
     const viewer = fakeViewer();
@@ -131,7 +437,7 @@ describe('PreviewHost', () => {
     expect(await host.stopPreview('run-1', { port: 5173, restart: true })).toMatchObject({ ok: false, code: 'approval_required' });
     await host.run('run-1', 5173);
     expect(await host.stopPreview('run-1', { port: 5173 })).toMatchObject({ ok: true, code: 'stopped' });
-    expect(store.stateEvents().at(-1)).toMatchObject({ state: 'stopped' });
+    expect(store.stateEvents().at(-1)).toMatchObject({ state: 'stopped', reason: 'user' });
     expect(stages(viewer).at(-1)).toBe('server-stopped');
     store.getRun('run-1')!.previewServers = [server(5173, { label: 'renamed' })];
     expect(await host.stopPreview('run-1', { port: 5173, restart: true })).toMatchObject({ ok: true, code: 'restarted' });
@@ -152,6 +458,34 @@ describe('PreviewHost', () => {
     expect(devServers[0]!.state).toBe('stopped');
     expect(devServers).toHaveLength(1);
     expect(stages(viewer).at(-1)).toBe('needs-approval');
+  });
+
+  describe.each(['stop', 'probe'] as const)('restart approval recheck after %s', seam => {
+    it.each(['command', 'cwd', 'path', 'registration'] as const)('refuses restart when approved %s changes', async field => {
+      const { host, ctx, devServers, store, probe } = make();
+      await host.open(ctx, fakeViewer(), { port: 5173 });
+      await host.run('run-1', 5173);
+      const changeRegistration = () => {
+        store.getRun('run-1')!.previewServers = field === 'registration' ? [] : [server(5173, { [field]: 'changed' })];
+      };
+      if (seam === 'stop') {
+        devServers[0]!.stop.mockImplementationOnce(async reason => {
+          devServers[0]!.stopReason = reason;
+          devServers[0]!.set('stopped');
+          changeRegistration();
+        });
+      } else {
+        probe.mockImplementationOnce(async () => {
+          changeRegistration();
+          return false;
+        });
+      }
+      expect(await host.stopPreview('run-1', { port: 5173, restart: true }))
+        .toMatchObject({ ok: false, code: 'approval_required' });
+      expect(devServers).toHaveLength(1);
+      expect(devServers[0]!.state).toBe('stopped');
+      await host.close();
+    });
   });
 
   it('agent refuses adopted servers, other runs and a newly occupied restart port', async () => {
@@ -195,7 +529,9 @@ describe('PreviewHost', () => {
     expect(dev.stop).toHaveBeenCalledTimes(1);
     finish();
     await cleanup;
-    expect((await restarting).ok).toBe(false);
+    const result = await restarting;
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe(action === 'replace' ? 'approval_required' : 'unavailable');
     expect(devServers).toHaveLength(1);
     expect(dev.state).toBe('stopped');
   });
@@ -224,7 +560,9 @@ describe('PreviewHost', () => {
     }
     const count = devServers.length;
     finish(false);
-    expect((await restarting).ok).toBe(false);
+    const result = await restarting;
+    expect(result.ok).toBe(false);
+    expect(result.code).toBe(action === 'replace' || action === 'concurrent-restart' ? 'approval_required' : action === 'other-owner' ? 'port_held' : 'unavailable');
     expect(devServers).toHaveLength(count);
     if (action === 'other-owner' || action === 'concurrent-restart') expect(devServers[1]!.stop).not.toHaveBeenCalled();
   });
@@ -1056,6 +1394,32 @@ describe('PreviewHost', () => {
         const browser = made.browsers[0]!;
         return { ...made, link, viewer, browser, conn: browser.connectionFake };
       };
+
+      it('reuses the followed page session on another open and ignores unrelated detach events', async () => {
+        const { host, ctx, link, viewer, conn } = await setup();
+        await drive(link, 1, 'Target.createTarget', { url: 'about:blank' });
+        const page = conn.pages.get('S1')!;
+        conn.emit({ method: 'Target.detachedFromTarget', sessionId: 'B1', params: { sessionId: 'S1' } });
+        conn.emit({ method: 'Target.detachedFromTarget', params: { sessionId: 'other' } });
+        conn.emit({ method: 'Target.targetDestroyed', params: { sessionId: 'S1' } });
+        expect(page.cdp.close).not.toHaveBeenCalled();
+        await host.open(ctx, viewer, { agent: true });
+        expect(conn.requests.filter(r => r.method === 'Target.attachToTarget' && r.sessionId === undefined)).toHaveLength(1);
+        expect(urls(viewer).at(-1)).toBe('http://localhost/NEW');
+        await host.close();
+      });
+
+      it('detaches a followed page whose session fails to initialise and keeps the home stream', async () => {
+        const { host, link, browser, conn } = await setup();
+        const broken = fakeCdp();
+        vi.mocked(broken.cdp.send).mockRejectedValue(new Error('page closed'));
+        vi.spyOn(browser.connection, 'session').mockReturnValueOnce(broken.cdp);
+        await drive(link, 1, 'Target.createTarget', { url: 'about:blank' });
+        expect(conn.requests).toContainEqual({ method: 'Target.detachFromTarget', params: { sessionId: 'S1' }, sessionId: undefined });
+        expect(browser.cdpFake.cdp.close).not.toHaveBeenCalled();
+        expect(browser.cdpFake.sent('Page.startScreencast').length).toBeGreaterThan(0);
+        await host.close();
+      });
 
       it("streams the tab the agent creates, from a session of cezar's own on it", async () => {
         const { link, viewer, conn } = await setup();
