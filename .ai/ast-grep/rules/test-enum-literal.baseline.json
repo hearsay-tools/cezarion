@@ -2300,12 +2300,6 @@
       "count": 1
     },
     {
-      "file": "packages/cezar/src/server/ref-status-invalidation.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'review'",
-      "count": 1
-    },
-    {
       "file": "packages/cezar/src/server/repo-branches-api.test.ts",
       "rule": "test-enum-literal",
       "site": "kind: 'agent'",
@@ -2399,12 +2393,6 @@
       "file": "packages/cezar/src/server/runs-index-api.test.ts",
       "rule": "test-enum-literal",
       "site": "kind: 'human'",
-      "count": 3
-    },
-    {
-      "file": "packages/cezar/src/server/runs-index-api.test.ts",
-      "rule": "test-enum-literal",
-      "site": "kind: 'pr'",
       "count": 3
     },
     {

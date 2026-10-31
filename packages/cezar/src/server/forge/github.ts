@@ -1,7 +1,8 @@
+import { createDraftPr } from './draft-pr.ts';
+export { createDraftPr, buildPrBody } from './draft-pr.ts';
 import { defined } from '../../core/defined.ts';
 import { activeWorkflowRunsArgs, parseActiveWorkflowRuns } from '../../ci-wait/github.ts';
 import type { ArchivePullRequestIdentity, MergedPullRequest } from '@open-mercato/cezar-contract/runs';
-import { exactLineIndex, nextLineIndex } from '@open-mercato/cezar-contract/handoff';
 import { pullRequestKey } from '../../runs/pull-requests.ts';
 import { matchesGithubPullRequest, mergedPullRequestObservations } from '../../merge-observations.ts';
 import { randomUUID } from 'node:crypto';
@@ -11,11 +12,8 @@ import { z } from 'zod';
 import { GITHUB_COMMENT_COUNTS_MAX, GITHUB_SEARCH_MAX, REFERENCE_STATUS_MAX, type GithubCommentCountsData, type GithubItemResponse, type GithubProject, type GithubProjectsData } from '@open-mercato/cezar-contract/github';
 import { fetchIssueProjects, fetchRepositoryProjects, fetchViewerLogin } from './github-filters.ts';
 import { fetchGithubMergeRequirements, type GithubMergeRequirements } from './github-merge-requirements.ts';
-import { autosaveCommit } from '../../git-worktree.ts';
 import { refNumberFromUrl } from '@open-mercato/cezar-contract/run-search';
 import type {
-  DraftPrInput,
-  DraftPrOutcome,
   ForgeAvailability,
   ForgeComment,
   ForgeCommentsData,
@@ -2870,149 +2868,6 @@ function mockGithubComments(kind: 'issue' | 'pr', number?: number): ForgeComment
   return { available: true, comments, events, ...(detail ? { detail } : {}) };
 }
 
-// ---- draft-PR creation (review gate, spec 009) ------------------------------
-// Final autosave-commit → `git push -u origin cez/<id8>` → `gh pr create
-// --draft`, all executed in the task worktree (gh picks the repo up from the
-// worktree's remote). Every failure maps to a one-line human error — the GUI
-// shows it as a toast plus the manual `git merge <branch>` fallback. Never throws.
-
-const PR_URL_RE = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+/;
-const PUSH_TIMEOUT_MS = 60_000;
-const PROGRESS_LINES_MAX = 10;
-
-export async function createDraftPr(input: DraftPrInput): Promise<DraftPrOutcome> {
-  const { run } = input;
-  const worktree = run.worktreePath;
-  const branch = run.branch;
-  if (!worktree || !branch) {
-    return { ok: false, error: 'this task has no worktree/branch to publish' };
-  }
-
-  // Final autosave: the branch must hold everything before it leaves the box.
-  // This is the LAST flush — unlike the turn-end and run-finalize ones there is
-  // no later autosave to pick the work up, so a refusal (conflicted tree) or a
-  // failed commit has to stop the publish instead of silently opening a PR from
-  // a branch that is missing the run's final state.
-  const saved = await autosaveCommit(worktree, 'pre-PR');
-  if (saved === 'refused') {
-    return {
-      ok: false,
-      error: 'worktree has unresolved merge conflicts — resolve them, then publish again',
-    };
-  }
-  if (saved === 'failed') {
-    return { ok: false, error: 'could not commit the final changes — check git status in the worktree' };
-  }
-
-  // DRY-RUN (CEZ_DRY_RUN=1): no push, no gh — simulate success with a fake PR
-  // URL so the whole review → PR flow is testable without GitHub.
-  if (process.env.CEZ_DRY_RUN === '1') {
-    return { ok: true, url: 'https://github.com/open-mercato/demo/pull/777', dryRun: true };
-  }
-
-  const remote = await execTool(['remote', 'get-url', 'origin'], worktree, 'git');
-  if (!remote.ok || !remote.stdout.trim()) {
-    return { ok: false, error: 'no git remote — add one (git remote add origin <url>) or merge the branch locally' };
-  }
-
-  const push = await execTool(['push', '-u', 'origin', branch], worktree, 'git', PUSH_TIMEOUT_MS);
-  if (!push.ok) {
-    return { ok: false, error: `git push failed — ${tail(push.stderr) || 'unknown error'}` };
-  }
-
-  const body = buildPrBody(input.handoffText, run.task);
-  // Target the branch the worktree forked from (config `baseBranch`) — without
-  // --base, gh aims at the repo default (main) even when work started on
-  // develop. `origin/x` normalizes to `x`; a raw sha (detached-HEAD fork
-  // point) can't be a PR base, so gh falls back to the default branch.
-  const prBase = run.baseBranch?.replace(/^origin\//, '');
-  const baseArgs = prBase && !/^[0-9a-f]{7,40}$/i.test(prBase) ? ['--base', prBase] : [];
-  const pr = await execTool(
-    ['pr', 'create', '--draft', '--head', branch, ...baseArgs, '--title', run.title, '--body', body],
-    worktree,
-    'gh',
-    PUSH_TIMEOUT_MS,
-  );
-  if (!pr.ok) {
-    if (pr.notFound) {
-      return { ok: false, error: 'gh not found — install the GitHub CLI and run `gh auth login`, or merge the branch locally' };
-    }
-    const hint = /auth|log ?in|credential/i.test(pr.stderr) ? ' (try `gh auth login`)' : '';
-    return { ok: false, error: `gh pr create failed — ${tail(pr.stderr) || 'unknown error'}${hint}` };
-  }
-
-  // gh prints the PR URL on stdout; some versions echo it to stderr instead.
-  const match = PR_URL_RE.exec(`${pr.stdout}\n${pr.stderr}`);
-  if (!match) {
-    return { ok: false, error: 'gh pr create returned no PR URL — check `gh pr list` manually' };
-  }
-  return { ok: true, url: match[0], dryRun: false };
-}
-
-/**
- * PR body from the handoff journal: the "## Goal" section (task text as
- * fallback) + the first ~10 lines of "## Progress log" (newest first) +
- * the cezar footer.
- */
-export function buildPrBody(handoffText: string, task: string): string {
-  const goal = section(handoffText, '## Goal') || task.trim();
-  const progress = section(handoffText, '## Progress log').split('\n').filter((l) => l.trim()).slice(0, PROGRESS_LINES_MAX).join('\n');
-  const parts = ['## Goal', '', goal];
-  if (progress) parts.push('', '## Progress log', '', progress);
-  parts.push('', '---', '', '🤖 made with cezar');
-  return parts.join('\n');
-}
-
-/** Text of one `## Header` section, up to the next `## ` header, with LF line endings. The header
- *  is a whole line (hearsay-tools/cezarion#1147), so a Goal that quotes one is never taken for it. */
-function section(text: string, header: string): string {
-  const start = exactLineIndex(text, header);
-  if (start < 0) return '';
-  const rest = text.slice(nextLineIndex(text, start)).replaceAll('\r\n', '\n');
-  const next = rest.indexOf('\n## ');
-  return (next >= 0 ? rest.slice(0, next) : rest).trim();
-}
-
-/** Last 3 stderr lines, pipe-joined — enough context, toast-sized. */
-function tail(stderr: string): string {
-  return stderr.trim().split('\n').slice(-3).join(' | ').slice(0, 300);
-}
-
-interface ExecResult {
-  ok: boolean;
-  stdout: string;
-  stderr: string;
-  /** True when the binary itself is missing (ENOENT). */
-  notFound: boolean;
-}
-
-function execTool(args: string[], cwd: string, bin: string, timeoutMs = 30_000): Promise<ExecResult> {
-  return new Promise((resolve) => {
-    execFile(
-      bin,
-      args,
-      {
-        cwd,
-        timeout: timeoutMs,
-        maxBuffer: 4 * 1024 * 1024,
-        encoding: 'utf8',
-        // Nobody can answer a prompt here: git opens /dev/tty directly, so
-        // piped stdio is not enough to stop it. Without this a `git push` that
-        // cannot authenticate hangs for the whole timeout and surfaces as a
-        // blank one-minute stall instead of git's own "could not read Username".
-        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-      },
-      (err, stdout, stderr) =>
-        resolve({
-          ok: !err,
-          stdout: stdout ?? '',
-          stderr: stderr ?? '',
-          notFound: err?.code === 'ENOENT',
-        }),
-    );
-  });
-}
-
 // ---- the driver -------------------------------------------------------------
 
 /**
@@ -3422,6 +3277,27 @@ export function createGithubDriver(repoRoot: string, repoRef: GithubRepoRef | nu
   return {
     kind: 'github',
 
+    discoverRepository: (signal) => discoverRepoHandle(repoRoot, signal),
+    resolveRepository: (signal) => resolveRepoHandle(repoRoot, signal),
+    mergedPullRequests: (identities, signal) => lookupMergedPullRequests(repoRoot, identities, signal),
+
+    list: (opts) => fetchGithub(repoRoot, opts?.refresh, opts?.limit, opts),
+    projects: (generation) => fetchGithubProjects(repoRoot, generation),
+    item: (kind, number, opts) => fetchGithubItem(repoRoot, kind, number, opts?.refresh),
+    comments: (kind, number, opts) => fetchGithubComments(repoRoot, kind, number, opts?.refresh),
+    commentCounts: (kind, numbers, opts) => fetchGithubCommentCounts(repoRoot, kind, numbers, opts?.refresh),
+    checks: (numbers) => fetchGithubChecks(repoRoot, numbers),
+    refStatus: (input) => fetchGithubRefStatus(repoRoot, input),
+    cachedRefStatuses: (numbers) => readCachedRefStatuses(repoRoot, numbers),
+    branchPushed: (numbers) => {
+      // A push is the event that changes what the chips say about this task's pull requests —
+      // its checks start again, and its MERGEABILITY is recomputed from scratch. Both are cached
+      // per number, so without this the cockpit would keep showing the pre-push answer (up to a
+      // minute of "Ready to merge" for a branch that has just been rewritten) about a push the
+      // user watched this server make.
+      for (const number of numbers) forgetRefStatus(repoRoot, number);
+    },
+
     detect: () => detectGithub(repoRoot),
     detectCached: () => detectGithubCached(repoRoot),
 
@@ -3437,7 +3313,17 @@ export function createGithubDriver(repoRoot: string, repoRef: GithubRepoRef | nu
 
     prDiff: (number, opts) => fetchGithubPrDiff(repoRoot, number, opts?.refresh),
 
-    createPR: (input) => createDraftPr(input),
+    createPR: async (input) => {
+      const outcome = await createDraftPr(input);
+      if (outcome.ok) {
+        // A number the cockpit asked about BEFORE the pull request existed is cached as "this
+        // repository has no such number" — which is exactly what a `CEZ:PR=901` marker declared
+        // ahead of the push looks like. It exists now.
+        const createdNumber = refNumberFromUrl(outcome.url);
+        if (createdNumber !== null) forgetRefStatus(repoRoot, createdNumber);
+      }
+      return outcome;
+    },
 
     // Null covers everything from "no PR yet" to "gh missing" — the callers
     // (Create PR → View PR flip) treat all of it as "nothing to link".
@@ -3463,7 +3349,18 @@ export function createGithubDriver(repoRoot: string, repoRef: GithubRepoRef | nu
 
     readyPR: (number, input) => readyPullRequest(repoRoot, repoRef, number, input),
 
-    mergePR: (number, input) => mergePullRequest(repoRoot, repoRef, number, input),
+    mergePR: async (number, input) => {
+      const result = await mergePullRequest(repoRoot, repoRef, number, input);
+      if (result.merged) {
+        // We just changed this pull request, so what the ref-status cache holds about it is now
+        // known-stale — and its TTL would keep every chip showing the PRE-merge status for up to
+        // a minute after the user watched this server merge it. Forget it; the next reader asks
+        // the forge, gets `merged`, and then stops polling it at all.
+        forgetRefStatus(repoRoot, number);
+        forgetGithubItem(repoRoot, 'pr', number);
+      }
+      return result;
+    },
 
     viewUrl: (kind: ForgeRefKind, ref: string | number): string | null => {
       if (!repoRef) return null;

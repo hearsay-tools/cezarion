@@ -1,13 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-// `vi.hoisted` so the mock fn exists before the hoisted `vi.mock` factory closes over it.
-const discoverRepoHandleMock = vi.hoisted(() => vi.fn());
-// The forge module shells out to `gh`. Mocking it is the whole point of this file: what is under
-// test is the WRAPPER's contract — background, never throwing — not the lookup itself, which has
-// its own coverage in `server/forge/github.test.ts`.
-vi.mock('../server/forge/github.ts', () => ({
-  discoverRepoHandle: (...args: unknown[]) => discoverRepoHandleMock(...args),
-}));
+import { resolveForgeRoot } from '../server/forge/index.ts';
+const discoverRepoHandleMock = vi.fn();
+// The fake factory keeps this focused on the wrapper's contract: background, never throwing.
+// The lookup itself has its own coverage in server/forge/github.test.ts.
+const forgeFactory = (root: string) => ({ ...resolveForgeRoot(root), discoverRepository: (signal?: AbortSignal) => discoverRepoHandleMock(root, signal) });
 
 import { armRepoHandle } from './arm-repo-handle.ts';
 
@@ -35,7 +32,7 @@ describe('armRepoHandle (#945)', () => {
     discoverRepoHandleMock.mockResolvedValue({ status: 'resolved', handle: { owner: 'open-mercato', name: 'cezar' } });
     const { store, setRepoHandle } = fakeStore();
 
-    armRepoHandle(store, '/repo');
+    armRepoHandle(store, '/repo', undefined, forgeFactory);
     await settle();
 
     expect(discoverRepoHandleMock).toHaveBeenCalledWith('/repo', undefined);
@@ -48,7 +45,7 @@ describe('armRepoHandle (#945)', () => {
     discoverRepoHandleMock.mockResolvedValue({ status: 'unknown' });
     const { store, setRepoHandle } = fakeStore();
 
-    armRepoHandle(store, '/repo');
+    armRepoHandle(store, '/repo', undefined, forgeFactory);
     await settle();
 
     expect(setRepoHandle).toHaveBeenCalledWith(null);
@@ -62,7 +59,7 @@ describe('armRepoHandle (#945)', () => {
     discoverRepoHandleMock.mockRejectedValue(new Error('gh exploded'));
     const { store, setRepoHandle } = fakeStore();
 
-    expect(() => armRepoHandle(store, '/repo')).not.toThrow();
+    expect(() => armRepoHandle(store, '/repo', undefined, forgeFactory)).not.toThrow();
     await vi.runAllTimersAsync();
 
     expect(setRepoHandle).not.toHaveBeenCalled(); // unscoped, exactly as before #945
@@ -74,7 +71,7 @@ describe('armRepoHandle (#945)', () => {
     discoverRepoHandleMock.mockReturnValue(new Promise((resolve) => { release = resolve; }));
     const { store, setRepoHandle } = fakeStore();
 
-    expect(armRepoHandle(store, '/repo')).toBeUndefined();
+    expect(armRepoHandle(store, '/repo', undefined, forgeFactory)).toBeUndefined();
     expect(setRepoHandle).not.toHaveBeenCalled(); // still pending — and the caller already moved on
 
     release({ status: 'resolved', handle: { owner: 'open-mercato', name: 'cezar' } });

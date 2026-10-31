@@ -11,13 +11,19 @@ import { RunManager } from '../workflows/run.ts';
 import { registerProject, listProjects, clearProjectProbeCache } from '../workspace/projects.ts';
 import { ProjectContexts } from './project-context.ts';
 import { ArchiveOnMergeCoordinator } from './archive-on-merge.ts';
-import { discoverRepoHandle, lookupMergedPullRequests } from './forge/github.ts';
+import { resolveForgeRoot } from './forge/index.ts';
+const discoverRepoHandle = vi.fn();
+const lookupMergedPullRequests = vi.fn(async (_root: string, prs: ArchivePullRequestIdentity[], _signal?: AbortSignal) => prs.filter(pr => pr.repo === 'r').map(pr => ({ ...pr, mergedAt: '2026-01-02T00:00:00Z' })));
+const forgeFactory = (root: string) => ({
+  ...resolveForgeRoot(root),
+  discoverRepository: () => discoverRepoHandle(),
+  mergedPullRequests: (identities: ArchivePullRequestIdentity[], signal: AbortSignal) => lookupMergedPullRequests(root, identities, signal),
+});
 import { startServer } from './server.ts';
 
 /** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
 const HANG_GUARD_MS = 15_000;
 
-vi.mock('./forge/github.ts', async original => ({ ...await original<object>(), discoverRepoHandle: vi.fn(), lookupMergedPullRequests: vi.fn(async (_root: string, prs: ArchivePullRequestIdentity[]) => prs.filter(pr => pr.repo === 'r').map(pr => ({ ...pr, mergedAt: '2026-01-02T00:00:00Z' }))) }));
 const dirs: string[] = [];
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); dirs.splice(0).forEach(d => rmSync(d, { force: true, recursive: true })); clearProjectProbeCache(); });
 function dir() { const path = mkdtempSync(join(tmpdir(), 'cez-merge-boot-')); dirs.push(path); return path; }
@@ -43,7 +49,7 @@ it.each([{ single: false, repository: 'r' }, { single: true, repository: 'r' }, 
   let coordinator: ArchiveOnMergeCoordinator | undefined;
   const tick = ArchiveOnMergeCoordinator.prototype.tick;
   vi.spyOn(ArchiveOnMergeCoordinator.prototype, 'tick').mockImplementation(function (this: ArchiveOnMergeCoordinator) { coordinator = this; return tick.call(this); });
-  const server = startServer({ repoRoot: boot, bootProjectId: bootProject.id, store, manager: { isActive: () => false } as unknown as RunManager, version: 'test', contexts }, 0);
+  const server = startServer({ repoRoot: boot, bootProjectId: bootProject.id, store, manager: { isActive: () => false } as unknown as RunManager, version: 'test', contexts, forgeFactory }, 0);
   try {
     await new Promise<void>(resolve => server.once('listening', () => resolve()));
     await vi.waitFor(() => expect(coordinator).toBeDefined(), { timeout: HANG_GUARD_MS });

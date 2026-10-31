@@ -1,5 +1,5 @@
 import type { RepoInfo } from '../git.ts';
-import { createGithubDriver } from './github.ts';
+import { createGithubDriver, type GithubRepoRef } from './github.ts';
 import type { ForgeDriver, ForgeKind } from './types.ts';
 
 /**
@@ -74,14 +74,29 @@ export function forgeWebRoot(remote: string | undefined): string | null {
 }
 
 /** Remote host → driver | null. GitLab lands here later as one more case. */
-export function resolveForge(repoInfo: RepoInfo | null): ForgeDriver | null {
+export type ForgeFactory = (repoRoot: string, repoRef: GithubRepoRef | null) => ForgeDriver;
+
+/** Root-scoped operations retain gh's own repository discovery and degradation. */
+export function resolveForgeRoot(repoRoot: string, factory: ForgeFactory = createGithubDriver): ForgeDriver {
+  return factory(repoRoot, null);
+}
+
+export function resolveForge(repoInfo: RepoInfo | null, factory: ForgeFactory = createGithubDriver): ForgeDriver | null {
   if (!repoInfo?.remote) return null;
   const parsed = parseRemote(repoInfo.remote);
   if (!parsed) return null;
   if (FORGE_HOSTS[parsed.host] === 'github') {
-    return createGithubDriver(repoInfo.root, { owner: parsed.owner, repo: parsed.repo });
+    return factory(repoInfo.root, { owner: parsed.owner, repo: parsed.repo });
   }
   return null;
 }
 
 export type { ForgeDriver, ForgeAvailability, ForgeItem, ForgeKind, ForgePrStatus, ForgeRefKind } from './types.ts';
+
+/** Web root for an identity verified by the forge itself. */
+export function forgeRepositoryUrl(kind: ForgeKind, owner: string, repo: string): string | undefined {
+  const host = Object.keys(FORGE_HOSTS).find(host => FORGE_HOSTS[host] === kind);
+  return host ? `https://${host}/${owner}/${repo}` : undefined;
+}
+
+export { GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';

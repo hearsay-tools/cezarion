@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { readPersistedRuns, readPersistedText } from './run-store.testkit.ts';
+import { readPersistedRuns, readPersistedText } from '../../runs/run-store.testkit.ts';
 
 const execFileMock = vi.hoisted(() => vi.fn());
 vi.mock('node:child_process', async (importOriginal) => ({
@@ -10,9 +10,9 @@ vi.mock('node:child_process', async (importOriginal) => ({
   execFile: (...args: unknown[]) => execFileMock(...args),
 }));
 
-import { armRepoHandle } from './arm-repo-handle.ts';
-import { RunStore } from './store.ts';
-import { __clearRepoHandleCacheForTests, resolveRepoHandle } from '../server/forge/github.ts';
+import { armRepoHandle } from '../../runs/arm-repo-handle.ts';
+import { RunStore } from '../../runs/store.ts';
+import { __clearRepoHandleCacheForTests, resolveRepoHandle } from './github.ts';
 
 const foreignPr = 'https://github.com/other/repo/pull/42';
 const foreignIssue = 'https://github.com/other/repo/issues/43';

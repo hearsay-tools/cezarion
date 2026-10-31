@@ -1,3 +1,6 @@
+import type { GithubData, GithubProjectsData, GithubItemResponse, GithubCommentCountsData } from '@open-mercato/cezar-contract/github';
+import type { ArchivePullRequestIdentity, MergedPullRequest } from '@open-mercato/cezar-contract/runs';
+import type { GithubChecksData, GithubRefStatusData, ReferenceStatus, RepoHandleDiscovery } from './github.ts';
 import type { RunRecord } from '../../runs/store.ts';
 
 /**
@@ -223,6 +226,20 @@ export interface DraftPrInput {
 }
 
 export interface ForgeDriver {
+  discoverRepository(signal?: AbortSignal): Promise<RepoHandleDiscovery>;
+  resolveRepository(signal?: AbortSignal): Promise<{ owner: string; name: string } | null>;
+  mergedPullRequests(identities: ArchivePullRequestIdentity[], signal: AbortSignal): Promise<MergedPullRequest[]>;
+  /** Combined list envelope preserves pagination, totals and quiet degradation. */
+  list(opts?: ForgeListOptions): Promise<GithubData>;
+  projects(generation: string): Promise<GithubProjectsData>;
+  item(kind: 'issue' | 'pr', number: number, opts?: { refresh?: boolean }): Promise<GithubItemResponse>;
+  comments(kind: 'issue' | 'pr', number: number, opts?: { refresh?: boolean }): Promise<ForgeCommentsData>;
+  commentCounts(kind: 'issue' | 'pr', numbers: number[], opts?: { refresh?: boolean }): Promise<GithubCommentCountsData>;
+  checks(numbers: number[]): Promise<GithubChecksData>;
+  refStatus(input: { prs?: number[]; issues?: number[] }): Promise<GithubRefStatusData>;
+  cachedRefStatuses(numbers: Iterable<number>): { prs: Record<number, ReferenceStatus>; issues: Record<number, ReferenceStatus> };
+  /** Invalidate only the task's own pull requests after a successful push. */
+  branchPushed(numbers: readonly number[]): void;
   readonly kind: ForgeKind;
   /** Cheap, cached availability probe. May shell out (used by the GitHub tab). */
   detect(): Promise<ForgeAvailability>;
@@ -254,3 +271,6 @@ export interface ForgeDriver {
   /** Web URL for a ref on the forge, or null when the remote isn't parseable. */
   viewUrl(kind: ForgeRefKind, ref: string | number): string | null;
 }
+
+export type { GithubData } from '@open-mercato/cezar-contract/github';
+export type { GithubChecksData, GithubRefStatusData, ReferenceStatus, RepoHandleDiscovery } from './github.ts';
