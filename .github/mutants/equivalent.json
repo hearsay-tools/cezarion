@@ -88,6 +88,14 @@
     "reason": "A fallback string has no merged state and is skipped; this also matches the killed merged-list accumulation mutant that the tests still guard (two matches)."
   },
   {
+    "file": "packages/contract/src/attention.ts",
+    "function": "(module)",
+    "mutator": "StringLiteral",
+    "original": "'unseen'",
+    "replacement": "\"\"",
+    "reason": "isUnseen never matches, so this reserved rung is unreachable; the text also matches two Ignored mutants at line 136."
+  },
+  {
     "file": "packages/contract/src/delegation.ts",
     "function": "parentFileRefusal",
     "mutator": "OptionalChaining",
