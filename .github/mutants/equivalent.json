@@ -54,5 +54,13 @@
     "original": "writerSeq !== undefined",
     "replacement": "true",
     "reason": "The check narrows writerSeq for TypeScript; undefined <= latestSeq is already false, so removing this check changes no runtime behavior."
+  },
+  {
+    "file": "packages/web/src/routes/repo-git/repo-not-landed.tsx",
+    "function": "DeleteBranchDialog",
+    "mutator": "ConditionalExpression",
+    "original": "entry",
+    "replacement": "true",
+    "reason": "The disabled button only dispatches a click when matches is true, which implies a non-null entry; this check remains for TypeScript narrowing."
   }
 ]
