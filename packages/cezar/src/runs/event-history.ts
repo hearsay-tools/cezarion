@@ -282,6 +282,21 @@ function streamBytesRead(input: Readable): number {
   return typeof value === 'number' ? value : 0;
 }
 
+async function* reverseLineChunks(source: HistorySource) {
+  let position = source.size;
+  let suffix: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+  let totalBytesRead = 0;
+  while (position > 0) {
+    const length = Math.min(READ_CHUNK_BYTES, position);
+    position -= length;
+    const buffer = await source.read(position, length);
+    totalBytesRead += buffer.length;
+    const split = completeReverseLines(buffer, suffix);
+    suffix = split.prefix;
+    yield { lines: split.lines, position, suffix, totalBytesRead };
+  }
+}
+
 async function reverseEventsUntil(
   source: HistorySource,
   beforeSeq: number,
@@ -302,14 +317,9 @@ async function reverseEventsUntil(
   let reachedStart = false;
   let totalBytesRead = 0;
   let fileHighWater = 0;
-  while (position > 0) {
-    const length = Math.min(READ_CHUNK_BYTES, position);
-    position -= length;
-    const buffer = await source.read(position, length);
-    totalBytesRead += buffer.length;
-    const split = completeReverseLines(buffer, suffix);
-    suffix = split.prefix;
-    const { lines } = split;
+  for await (const chunk of reverseLineChunks(source)) {
+    ({ position, suffix, totalBytesRead } = chunk);
+    const { lines } = chunk;
     for (let index = lines.length - 1; index >= 0; index -= 1) {
       const event = parseLine(lines[index]!);
       if (event) {
@@ -339,17 +349,11 @@ async function reverseEventsUntil(
 async function readFileTail(source: HistorySource): Promise<{ fileSize: number; fileHighWater: number; bytesRead: number }> {
   const fileSize = source.size;
   if (fileSize === 0) return { fileSize, fileHighWater: 0, bytesRead: 0 };
-  let position = fileSize;
   let suffix: Buffer<ArrayBufferLike> = Buffer.alloc(0);
   let totalBytesRead = 0;
-  while (position > 0) {
-    const length = Math.min(READ_CHUNK_BYTES, position);
-    position -= length;
-    const buffer = await source.read(position, length);
-    totalBytesRead += buffer.length;
-    const split = completeReverseLines(buffer, suffix);
-    suffix = split.prefix;
-    const { lines } = split;
+  for await (const chunk of reverseLineChunks(source)) {
+    ({ suffix, totalBytesRead } = chunk);
+    const { lines } = chunk;
     for (let index = lines.length - 1; index >= 0; index -= 1) {
       const event = parseLine(lines[index]!);
       if (event) return { fileSize, fileHighWater: event.seq, bytesRead: totalBytesRead };
