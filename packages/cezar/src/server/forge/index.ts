@@ -91,7 +91,7 @@ export function resolveForge(repoInfo: RepoInfo | null, factory: ForgeFactory = 
   return null;
 }
 
-export type { ForgeDriver, ForgeAvailability, ForgeItem, ForgeKind, ForgePrStatus, ForgeRefKind } from './types.ts';
+export type { ForgeDriver, ForgeAvailability, ForgeItem, ForgeKind, ForgePrStatus, ForgeRefKind, ReferenceStatus } from './types.ts';
 
 /** Web root for an identity verified by the forge itself. */
 export function forgeRepositoryUrl(kind: ForgeKind, owner: string, repo: string): string | undefined {
@@ -99,4 +99,4 @@ export function forgeRepositoryUrl(kind: ForgeKind, owner: string, repo: string)
   return host ? `https://${host}/${owner}/${repo}` : undefined;
 }
 
-export { GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
+export { refNumberFromUrl, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';

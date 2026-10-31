@@ -195,7 +195,8 @@ import { worktreeDiff, worktreeSizeBytes } from '../git-worktree.ts';
 import { releaseThenRemoveWorktree } from '../git-worktree-release.ts';
 import { isReclaimable, reclaimWorktree, reclaimWorktrees, rematerializeReclaimedWorktree, selectReclaimableWorktrees } from '../runs/retention.ts';
 import { getBranches, getCommit, getDiff, getLogWithParents, getBranchHead, getRepoInfo, getStatus, getTracking } from './git.ts';
-import { attributeLog, classifyInputFor, deleteBranches, forgetRepoBranches, githubBranchForge, readRepoBranchCounts, readRepoBranches, type BranchForge, type ClassifyProject } from './repo-branches.ts';
+import { createGithubBranchForge } from './repo-branch-forge.ts';
+import { attributeLog, classifyInputFor, deleteBranches, forgetRepoBranches, readRepoBranchCounts, readRepoBranches, type BranchForge, type ClassifyProject } from './repo-branches.ts';
 import { claimRepoGitMutation, localPullBranches, pullRepoCheckout } from './repo-pull.ts';
 import {
   collectChanges,
@@ -4656,9 +4657,8 @@ export function createApp(deps: ServerDeps) {
     kind: z.enum(['issue', 'pr']),
     number: z.coerce.number().int().positive(),
   });
-
-  const branchClassifyInput = (project: ClassifyProject) => classifyInputFor(project, deps.branchForge ?? githubBranchForge);
-
+  const branchForge = deps.branchForge ?? createGithubBranchForge({ forgeFactory: deps.forgeFactory });
+  const branchClassifyInput = (project: ClassifyProject) => classifyInputFor(project, branchForge);
   // ---- chained family: repo / git (project-scoped) ----
   const repoRoutes = new Hono<ProjectApiEnv>()
     .get('/repo', async (c) => {

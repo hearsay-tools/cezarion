@@ -15,7 +15,7 @@ import { ownedCleanupProtection, parseShortstat } from '../git-worktree.ts';
 import { loadConfig } from '../config.ts';
 import type { BranchOwner, RunStatus, RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
-import { refNumberFromUrl } from './github.ts';
+import { refNumberFromUrl } from './forge/index.ts';
 import { getBranches, getRepoInfo, type LogEntryWithParents } from './git.ts';
 import type { BranchForge, ForgePr } from './repo-branch-forge.ts';
 

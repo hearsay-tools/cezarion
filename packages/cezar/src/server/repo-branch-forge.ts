@@ -8,7 +8,7 @@
 import { z } from 'zod';
 import type { BranchPrState } from '@open-mercato/cezar-contract';
 import { ghGraphqlArgs, resolveRepoHandle, type GraphqlRunner } from './forge/github.ts';
-import { fetchGithubRefStatus, GH_REF_STATUS_MAX, type ReferenceStatus } from './github.ts';
+import { resolveForgeRoot, GH_REF_STATUS_MAX, type ForgeFactory, type ReferenceStatus } from './forge/index.ts';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -130,6 +130,7 @@ export async function fetchHeadBatch(
 }
 
 export interface GithubBranchForgeDeps {
+  forgeFactory?: ForgeFactory | undefined;
   graphql?: (repoRoot: string) => GraphqlRunner;
   handle?: (repoRoot: string) => Promise<{ owner: string; name: string } | null>;
 }
@@ -152,7 +153,7 @@ export function createGithubBranchForge(deps: GithubBranchForgeDeps = {}): Branc
     async prStates(repoRoot, numbers) {
       const states: Record<number, BranchPrState> = {};
       for (let i = 0; i < numbers.length; i += GH_REF_STATUS_MAX) {
-        const data = await fetchGithubRefStatus(repoRoot, { prs: numbers.slice(i, i + GH_REF_STATUS_MAX) });
+        const data = await resolveForgeRoot(repoRoot, deps.forgeFactory).refStatus({ prs: numbers.slice(i, i + GH_REF_STATUS_MAX) });
         if (!data.available) return { available: false, states };
         for (const [n, status] of Object.entries(data.prs)) states[Number(n)] = prStateOf(status);
       }
