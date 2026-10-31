@@ -227,7 +227,7 @@ describe('PreviewToolbar', () => {
     expect(onViewport).toHaveBeenCalledWith({ w: 1440, h: 900 })
   })
 
-  it('the quality menu offers Normal and High, marks the current one and explains the cost of High (hearsay-tools/cezarion#2066)', () => {
+  it('the quality menu offers Normal, High and Ultra, marks the current one and explains each cost (hearsay-tools/cezarion#2066, hearsay-tools/cezarion#2069)', () => {
     const onQuality = vi.fn()
     render(<PreviewToolbar {...props({ onQuality })} />)
     openMenu(screen.getByRole('button', { name: 'Stream quality: Normal' }))
@@ -235,10 +235,22 @@ describe('PreviewToolbar', () => {
     expect(options.map(option => option.textContent)).toEqual([
       'NormalThe default. Lighter on CPU and network.',
       'HighSharper text and fine detail. Uses more CPU and network.',
+      "UltraHigh at your screen's pixel density, up to 2×. Uses the most CPU and network.",
     ])
-    expect(options.map(option => option.getAttribute('aria-checked'))).toEqual(['true', 'false'])
+    expect(options.map(option => option.getAttribute('aria-checked'))).toEqual(['true', 'false', 'false'])
     fireEvent.click(options[1]!)
     expect(onQuality).toHaveBeenCalledWith('high')
+  })
+
+  it('chooses Ultra from the menu and names it on the trigger (hearsay-tools/cezarion#2069)', () => {
+    const onQuality = vi.fn()
+    const { unmount } = render(<PreviewToolbar {...props({ onQuality })} />)
+    openMenu(screen.getByRole('button', { name: 'Stream quality: Normal' }))
+    fireEvent.click(screen.getAllByRole('menuitemradio')[2]!)
+    expect(onQuality).toHaveBeenCalledWith('ultra')
+    unmount()
+    render(<PreviewToolbar {...props({ quality: 'ultra' })} />)
+    expect(screen.getByRole('button', { name: 'Stream quality: Ultra' })).toBeTruthy()
   })
 
   it('names High on the trigger, with its label hidden first in a narrow pane', () => {
@@ -254,7 +266,7 @@ describe('PreviewToolbar', () => {
     openMenu(screen.getByRole('button', { name: 'More' }))
     expect(screen.getByText('Stream quality')).toBeTruthy()
     const options = screen.getAllByRole('menuitemradio')
-    expect(options.map(option => option.getAttribute('aria-checked'))).toEqual(['false', 'true'])
+    expect(options.map(option => option.getAttribute('aria-checked'))).toEqual(['false', 'true', 'false'])
     expect(options.every(option => option.className.includes('min-h-11'))).toBe(true)
     fireEvent.click(options[0]!)
     expect(onQuality).toHaveBeenCalledWith('normal')

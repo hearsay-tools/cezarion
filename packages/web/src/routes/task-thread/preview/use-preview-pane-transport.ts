@@ -11,6 +11,7 @@ import { PREVIEW_PHONE_QUERY, useMediaQuery } from './use-media-query'
 import type { PreviewStateActions } from './preview-states'
 import type { PreviewStageHandle, StageSize } from './preview-stage'
 import { readStoredPreviewQuality, writeStoredPreviewQuality } from './preview-quality'
+import { useDevicePixelRatio } from './use-device-pixel-ratio'
 import type { PreviewTarget } from './preview-memory'
 import type { PreviewOpenRequest } from './preview-state'
 import type { PreviewStatsValue, PreviewViewport } from './preview-toolbar'
@@ -194,11 +195,13 @@ export function usePreviewPaneTransport({ run, servers, request, onTarget, onLiv
   // A takeover closes the socket without a transport event, so it ends the connection here.
   const connected = pageActive && transport.state === 'open' && takenOver === undefined
   const desired = compact || viewport === 'fit' ? stageSize : viewport
+  // Ultra renders at this ratio (hearsay-tools/cezarion#2069). At 1 the message stays as it was, and the server reads its absence as 1.
+  const dpr = useDevicePixelRatio()
   useEffect(() => {
     if (desired && connected && (stage?.stage === 'streaming' || stage?.stage === 'loading')) {
-      send({ t: 'resize', w: desired.w, h: desired.h })
+      send({ t: 'resize', w: desired.w, h: desired.h, ...(dpr !== 1 ? { dpr } : {}) })
     }
-  }, [desired?.w, desired?.h, connected, stage?.stage, stageNonce, send]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [desired?.w, desired?.h, dpr, connected, stage?.stage, stageNonce, send]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep the socket alive and measure the round trip.
   useEffect(() => {

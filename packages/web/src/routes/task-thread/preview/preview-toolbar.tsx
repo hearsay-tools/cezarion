@@ -38,7 +38,7 @@ import {
 import { cn } from '@/lib/utils'
 
 import { ExperimentalBadge } from './experimental-badge'
-import { PREVIEW_QUALITIES, qualityLabel } from './preview-quality'
+import { PREVIEW_QUALITIES, qualityLabel, toPreviewQuality } from './preview-quality'
 import { entryFor, serverStatus } from './preview-state'
 import { displayUrl } from './preview-url'
 import type { ThreadPreviewServer } from '../thread-state'
@@ -408,10 +408,10 @@ function ToolbarViewport({ props }: { props: PreviewToolbarProps }) {
   )
 }
 
-/** Normal and High as one radio group, for the toolbar menu and the phone's More. */
+/** Normal, High and Ultra as one radio group, for the toolbar menu and the phone's More. */
 function QualityOptions({ quality, onQuality, compact }: { quality: PreviewQuality; onQuality: (quality: PreviewQuality) => void; compact: boolean }) {
   return (
-    <DropdownMenuRadioGroup value={quality} onValueChange={value => onQuality(value === 'high' ? 'high' : 'normal')}>
+    <DropdownMenuRadioGroup value={quality} onValueChange={value => onQuality(toPreviewQuality(value))}>
       {PREVIEW_QUALITIES.map(option => (
         <DropdownMenuRadioItem key={option.value} value={option.value} className={cn('items-start', compact && 'min-h-11')}>
           <span className="flex flex-col gap-0.5">
