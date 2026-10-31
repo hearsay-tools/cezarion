@@ -475,3 +475,184 @@ describe('PreviewSession', () => {
     expect(seen).toEqual(['A:0', 'B:0']);
   });
 });
+
+describe('preview session caller contract', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('enables the page and runtime before installing the cursor script', async () => {
+    const { cdp, calls } = fakeCdp();
+    await PreviewSession.create(cdp);
+    expect(calls.map(call => call.method)).toEqual(['Page.enable', 'Page.setLifecycleEventsEnabled', 'Runtime.enable', 'Runtime.addBinding', 'Page.addScriptToEvaluateOnNewDocument']);
+  });
+
+  it('passes every mouse field and supplies defaults only for missing fields', async () => {
+    const { cdp, sent } = fakeCdp();
+    const session = await PreviewSession.create(cdp);
+    await session.handle({ t: 'mouse', type: 'mouseWheel', x: 13, y: 27, button: 'right', buttons: 2, clickCount: 3, deltaX: -4, deltaY: 5, modifiers: 8 });
+    await session.handle({ t: 'mouse', type: 'mouseMoved', x: 0, y: 0 });
+    expect(sent('Input.dispatchMouseEvent').map(call => call.params)).toEqual([
+      { type: 'mouseWheel', x: 13, y: 27, button: 'right', buttons: 2, clickCount: 3, deltaX: -4, deltaY: 5, modifiers: 8 },
+      { type: 'mouseMoved', x: 0, y: 0, button: 'none', buttons: 0, clickCount: 0, deltaX: 0, deltaY: 0, modifiers: 0 },
+    ]);
+  });
+
+  it('passes key fields and commands, defaults missing fields, and omits text on keyUp', async () => {
+    const { cdp, sent } = fakeCdp();
+    const session = await PreviewSession.create(cdp);
+    await session.handle({ t: 'key', type: 'keyDown', key: 'a', code: 'KeyA', text: 'A', modifiers: 2, vk: 65, commands: ['selectAll'] });
+    await session.handle({ t: 'key', type: 'rawKeyDown' });
+    await session.handle({ t: 'key', type: 'keyUp', key: 'a', code: 'KeyA', text: 'ignored', modifiers: 2, vk: 65 });
+    expect(sent('Input.dispatchKeyEvent').map(call => call.params)).toEqual([
+      { type: 'keyDown', key: 'a', code: 'KeyA', text: 'A', modifiers: 2, windowsVirtualKeyCode: 65, commands: ['selectAll'] },
+      { type: 'rawKeyDown', key: '', code: '', text: '', modifiers: 0, windowsVirtualKeyCode: 0 },
+      { type: 'keyUp', key: 'a', code: 'KeyA', modifiers: 2, windowsVirtualKeyCode: 65 },
+    ]);
+  });
+
+  it('forwards text and dialog answers exactly', async () => {
+    const { cdp, sent } = fakeCdp();
+    const session = await PreviewSession.create(cdp);
+    await session.handle({ t: 'insertText', text: 'hello é' });
+    await session.handle({ t: 'dialogResult', accept: true, text: 'answer' });
+    await session.handle({ t: 'dialogResult', accept: false });
+    expect(sent('Input.insertText').map(call => call.params)).toEqual([{ text: 'hello é' }]);
+    expect(sent('Page.handleJavaScriptDialog').map(call => call.params)).toEqual([{ accept: true, promptText: 'answer' }, { accept: false, promptText: '' }]);
+  });
+
+  it.each(['back', 'forward'] as const)('moves %s only when that history entry exists', async direction => {
+    const { cdp, sent } = fakeCdp();
+    const session = await PreviewSession.create(cdp);
+    await session.handle({ t: direction });
+    expect(sent('Page.navigateToHistoryEntry').map(call => call.params)).toEqual([{ entryId: direction === 'back' ? 10 : 12 }]);
+    vi.mocked(cdp.send).mockResolvedValue({ currentIndex: direction === 'back' ? 0 : 2, entries: [{ id: 10 }, { id: 11 }, { id: 12 }] });
+    await session.handle({ t: direction });
+    expect(sent('Page.navigateToHistoryEntry')).toHaveLength(1);
+  });
+
+  it('ignores host messages and duplicate acknowledgements', async () => {
+    const { cdp, calls } = fakeCdp();
+    const session = await PreviewSession.create(cdp);
+    const before = calls.length;
+    await session.handle({ t: 'ack' });
+    await session.handle({ t: 'stop', port: 5173 });
+    expect(calls).toHaveLength(before);
+  });
+
+  it.each([
+    { url: 'https://example.test/path', type: 'prompt', defaultPrompt: 'seed', origin: 'https://example.test', prompt: 'seed' },
+    { url: 'invalid', type: 'prompt', origin: '', prompt: '' },
+    { type: 'alert', origin: '', prompt: undefined },
+  ] as const)('reports dialog origins and prompt defaults: $type/$url', async row => {
+    const { cdp, emit } = fakeCdp();
+    const session = await PreviewSession.create(cdp);
+    const viewer = fakeViewer();
+    session.attach(viewer);
+    emit('Page.javascriptDialogOpening', { type: row.type, message: 'message', ...('url' in row ? { url: row.url } : {}), ...('defaultPrompt' in row ? { defaultPrompt: row.defaultPrompt } : {}) });
+    expect(viewer.messages).toEqual([{ t: 'dialog', type: row.type, message: 'message', origin: row.origin, ...(row.type === 'prompt' ? { defaultPrompt: row.prompt } : {}) }]);
+    session.close();
+  });
+
+  it('uses the current URL for a dialog and ignores other bindings and subframe navigation', async () => {
+    const { cdp, emit } = fakeCdp();
+    const session = await PreviewSession.create(cdp);
+    const viewer = fakeViewer();
+    session.attach(viewer);
+    emit('Page.frameNavigated', { frame: { id: 'main', url: 'https://example.test/first' } });
+    emit('Page.navigatedWithinDocument', { frameId: 'child', url: 'https://child.test/' });
+    emit('Runtime.bindingCalled', { name: 'other', payload: 'ignored' });
+    expect(session.url).toBe('https://example.test/first');
+    emit('Page.navigatedWithinDocument', { frameId: 'main', url: 'https://example.test/second' });
+    emit('Page.javascriptDialogOpening', { type: 'confirm', message: 'Continue?' });
+    expect(session.url).toBe('https://example.test/second');
+    expect(viewer.messages).toEqual([
+      { t: 'url', url: 'https://example.test/first' }, { t: 'url', url: 'https://example.test/second' },
+      { t: 'dialog', type: 'confirm', message: 'Continue?', origin: 'https://example.test' },
+    ]);
+    session.close();
+  });
+
+  it('releases pending and held frames on detach, ignores an old viewer and closes the CDP session', async () => {
+    vi.useFakeTimers();
+    const { cdp, emit, sent } = fakeCdp();
+    const session = await PreviewSession.create(cdp);
+    const viewer = fakeViewer();
+    session.attach(viewer);
+    await vi.advanceTimersByTimeAsync(0);
+    session.detach(fakeViewer());
+    emit('Page.screencastFrame', frame('first', 0));
+    emit('Page.screencastFrame', frame('held', 2));
+    session.detach(viewer);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(viewer.frames).toEqual(['first']);
+    expect(sent('Page.screencastFrameAck').map(call => call.params)).toEqual([{ sessionId: 0 }, { sessionId: 2 }]);
+    await session.handle({ t: 'ack' });
+    expect(sent('Page.screencastFrameAck')).toHaveLength(2);
+    const starts = sent('Page.startScreencast').length;
+    session.close();
+    emit('Page.frameNavigated', { frame: { url: 'https://closed.test/' } });
+    emit('Page.screencastFrame', frame('after close', 3));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(cdp.close).toHaveBeenCalledOnce();
+    expect(sent('Page.startScreencast')).toHaveLength(starts);
+    expect(viewer.frames).toEqual(['first']);
+  });
+
+  it('announces again after navigation and clears held frames on restart', async () => {
+    vi.useFakeTimers();
+    const { cdp, emit, sent } = fakeCdp();
+    const firstFrame = vi.fn();
+    const session = await PreviewSession.create(cdp, { onFirstFrame: firstFrame });
+    const viewer = fakeViewer();
+    session.attach(viewer);
+    await vi.advanceTimersByTimeAsync(0);
+    emit('Page.screencastFrame', frame('before', 1));
+    emit('Page.screencastFrame', frame('old held', 2));
+    await session.handle({ t: 'resize', w: 900, h: 600 });
+    await session.navigate('https://example.test/');
+    expect(sent('Page.navigate').at(-1)?.params).toEqual({ url: 'https://example.test/' });
+    emit('Page.screencastFrame', frame('after', 3));
+    await session.handle({ t: 'ack' });
+    expect(viewer.frames).toEqual(['before', 'after']);
+    expect(firstFrame.mock.calls).toEqual([[viewer], [viewer]]);
+    expect(sent('Page.screencastFrameAck').map(call => call.params)).toEqual([{ sessionId: 3 }]);
+    session.close();
+  });
+
+  it('updates the viewport without a viewer and recovers the queue after a CDP refusal', async () => {
+    const { cdp, sent } = fakeCdp();
+    const session = await PreviewSession.create(cdp);
+    const error = new Error('metrics refused');
+    vi.mocked(cdp.send).mockRejectedValueOnce(error);
+    await expect(session.handle({ t: 'resize', w: 640, h: 480 })).rejects.toBe(error);
+    await session.handle({ t: 'resize', w: 700, h: 500 });
+    expect(sent('Page.startScreencast')).toHaveLength(0);
+    expect(sent('Emulation.setDeviceMetricsOverride').at(-1)?.params).toEqual({ width: 700, height: 500, deviceScaleFactor: 1, mobile: false });
+  });
+
+  it.each([
+    { name: 'progressive', bytes: [255, 216, 255, 194, 0, 17, 8, 3, 32, 5, 0], restart: false },
+    { name: 'fill byte and skipped segment', bytes: [255, 216, 255, 255, 224, 0, 2, 255, 192, 0, 17, 8, 3, 32, 5, 0], restart: false },
+    { name: 'width mismatch', bytes: [255, 216, 255, 192, 0, 17, 8, 3, 32, 5, 1], restart: true },
+    { name: 'height mismatch', bytes: [255, 216, 255, 192, 0, 17, 8, 3, 33, 5, 0], restart: true },
+    { name: 'truncated SOF', bytes: [255, 216, 255, 192, 0, 17, 8, 3, 32, 5], restart: false },
+    { name: 'short header', bytes: [255, 216, 255], restart: false },
+    { name: 'bad SOI first byte', bytes: [0, 216, 255, 192, 0, 17, 8, 0, 1, 0, 1], restart: false },
+    { name: 'bad SOI second byte', bytes: [255, 0, 255, 192, 0, 17, 8, 0, 1, 0, 1], restart: false },
+    { name: 'bad marker prefix', bytes: [255, 216, 0, 192, 0, 17, 8, 0, 1, 0, 1], restart: false },
+    ...[191, 196, 200, 204, 208].map(marker => ({ name: `non-SOF ${marker}`, bytes: [255, 216, 255, marker, 0, 9, 8, 0, 1, 0, 1], restart: false })),
+  ])('interprets $name JPEG dimensions through stream recovery', async ({ bytes, restart }) => {
+    vi.useFakeTimers();
+    const { cdp, emit, sent } = fakeCdp();
+    const session = await PreviewSession.create(cdp);
+    const viewer = fakeViewer();
+    session.attach(viewer);
+    await vi.advanceTimersByTimeAsync(0);
+    emit('Page.screencastFrame', { data: Buffer.from(bytes).toString('base64'), sessionId: 1 });
+    expect(viewer.frames).toEqual([Buffer.from(bytes).toString()]);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(sent('Page.startScreencast')).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sent('Page.startScreencast')).toHaveLength(restart ? 2 : 1);
+    session.close();
+  });
+});
