@@ -100,3 +100,35 @@ export async function discoverCockpit(options: DiscoverOptions): Promise<Cockpit
   }
   throw new TaskCliError(2, { code: 'no-cockpit', error: `no running cockpit serves ${root}`, hint });
 }
+
+/** The env address first; discovery only when the caller named a cockpit or a checkout. */
+export async function resolveCockpit(
+  env: NodeJS.ProcessEnv,
+  values: { url?: string; repo?: string },
+  discover: (options: DiscoverOptions) => Promise<Cockpit>,
+  noCockpit: string,
+  options: { removeDiscoveryHint?: boolean } = {},
+): Promise<Cockpit> {
+  const address = env.CEZ_COCKPIT_URL?.trim();
+  const projectId = env.CEZ_PROJECT_ID?.trim();
+  if (address && projectId) {
+    let origin: string;
+    try { origin = new URL(address).origin; } catch {
+      throw new TaskCliError(2, { code: 'no-cockpit', error: `CEZ_COCKPIT_URL is not a URL: ${address}` });
+    }
+    return { origin, projectId, api: `${origin}/api/v1/p/${encodeURIComponent(projectId)}` };
+  }
+  const url = values.url ?? (env.CEZ_URL?.trim() || undefined);
+  if (url === undefined && values.repo === undefined) throw new TaskCliError(2, { code: 'no-cockpit', error: noCockpit });
+  try {
+    return await discover({ url, repoDir: resolve(values.repo ?? process.cwd()) });
+  } catch (error) {
+    // Discovery's hint says to start a cockpit; this command never suggests that.
+    if (options.removeDiscoveryHint && error instanceof TaskCliError) {
+      const { hint: _hint, ...body } = error.body;
+      throw new TaskCliError(error.exitCode, body);
+    }
+    throw error;
+  }
+}
+
