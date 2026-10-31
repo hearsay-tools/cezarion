@@ -27,6 +27,7 @@ import { RUN_STATUS, WAIT_SOURCE } from '@open-mercato/cezar-contract/test-facto
 import { agentInputEventSchema } from '@open-mercato/cezar-contract/events';
 import type { DelegationState } from '@open-mercato/cezar-contract';
 import { RunStore, runRecordSchema } from './store.ts';
+import { ConversationIdInUseError } from './conversation-identity.ts';
 import { parentReadiness } from '../delegation/readiness.ts';
 import { blockRunWrites, readPersistedRuns, readPersistedText, runIds, seedRuns } from './run-store.testkit.ts';
 
@@ -389,6 +390,19 @@ describe('RunStore durable delegation', () => {
       undefined, { rootId: run.id, state, input: delivered });
     expect(store.getRun(id)?.agentInputs?.map(entry => entry.text)).toEqual(expected);
     expect(RunStore.open(dataDir, { keepLive: true }).getRun(id)?.agentInputs?.map(entry => entry.text)).toEqual(expected);
+  });
+
+  it('refuses a continuation whose patched queue already holds the delivered input ID', () => {
+    const run = parent();
+    const metadata = worker(run.id, randomUUID());
+    if (metadata.role !== 'worker') throw new Error('fixture');
+    const id = metadata.workspace.ownerRunId;
+    store.createOwnedRun(input, run.id, randomUUID(), metadata, requestHash);
+    const delivered = { id: randomUUID(), source: WAIT_SOURCE.agent, parentRunId: run.id, text: 'delivered', createdAt: now };
+    const before = store.getRun(id);
+    expect(() => store.commitWorkerContinuation(id, { status: RUN_STATUS.queued, agentInputs: [{ ...delivered, text: 'patched' }] }, undefined,
+      { rootId: run.id, state: { messages: [], outcomes: [] }, input: delivered })).toThrow(ConversationIdInUseError);
+    expect(store.getRun(id)).toEqual(before);
   });
 
   it.each([true, false])('redacts a patched continuation queue, with a delivery=%s', withDelivery => {

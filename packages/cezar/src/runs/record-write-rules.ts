@@ -5,6 +5,7 @@ import { runPullRequestSchema } from '@open-mercato/cezar-contract/runs';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import type { AgentInput, ConversationState, DelegationState, RunPullRequest } from '@open-mercato/cezar-contract';
 import { redactSecrets } from '../core/secret-redaction.ts';
+import { ConversationIdInUseError } from './conversation-identity.ts';
 import { mergePullRequests } from './pull-requests.ts';
 import type { RepoHandle, RunRecord, StepState } from './store.ts';
 
@@ -130,6 +131,8 @@ export function stageConversation(staged: Map<string, RunRecord>, root: RunRecor
   if (delivery) {
     const recipient = staged.get(delivery.recipientRunId) ?? peek(delivery.recipientRunId);
     if (!recipient) throw new Error('missing conversation recipient');
+    // The staged queue can differ from the stored one: a continuation patch may set it.
+    if (recipient.agentInputs?.some(queued => queued.id === delivery.input.id)) throw new ConversationIdInUseError();
     const input = agentInputSchema.parse({ ...delivery.input, text: redact(delivery.input.text) });
     const delegation = !recipient.delegation && delivery.recipientDelegation ? { delegation: delegationStateSchema.parse(delivery.recipientDelegation) } : {};
     staged.set(recipient.id, { ...recipient, ...delegation, agentInputs: [...(recipient.agentInputs ?? []), input] });
