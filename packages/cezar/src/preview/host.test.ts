@@ -328,6 +328,106 @@ describe('PreviewHost', () => {
     await host.close();
   });
 
+  it.each([
+    { last: 'http://localhost:5173/form', expected: 'http://localhost:5173/form' },
+    { last: 'http://localhost:3000/form', expected: 'http://localhost:5173/root' },
+    { last: 'https://localhost:5173/form', expected: 'http://localhost:5173/root' },
+    { last: 'http://other.example:5173/form', expected: 'http://localhost:5173/root' },
+    { last: 'invalid URL', expected: 'http://localhost:5173/root' },
+  ])('restart restores only a page from the registered origin: $last', async ({ last, expected }) => {
+    const { host, ctx, browsers, devServers } = make([server(5173, { path: '/root' })]);
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.run(ctx.runId, 5173);
+    devServers[0]!.set('up');
+    await flush();
+    browsers[0]!.cdpFake.emit('Page.frameNavigated', { frame: { id: 'main', url: last } });
+    await host.stop(ctx.runId, 5173, 'user');
+    await host.run(ctx.runId, 5173);
+    devServers[1]!.set('up');
+    await flush();
+    expect(navigations(browsers[0]!).at(-1)).toBe(expected);
+    await host.close();
+  });
+
+  it('refuses an agent after a failed browser launch without repeated launch attempts', async () => {
+    const { host, ctx, browsers } = make(undefined, () => new Error('launch denied'));
+    const grant = host.grantAgent(ctx.runId, () => ctx);
+    expect(await host.connectAgent(grant.token, fakeAgentClient()))
+      .toEqual({ refused: 'The preview browser could not start' });
+    expect(await host.connectAgent(grant.token, fakeAgentClient()))
+      .toEqual({ refused: 'The preview browser failed; the owner can retry it from the preview pane' });
+    expect(browsers).toEqual([]);
+    await host.close();
+  });
+
+  it('reports a failed agent handshake and closes its idle browser later', async () => {
+    const { host, ctx, browsers } = make();
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { url: 'http://localhost:3000/' });
+    host.detach(ctx.runId, viewer);
+    vi.spyOn(browsers[0]!.connection, 'call').mockResolvedValueOnce({ error: { code: -1, message: 'attach refused' } });
+    const grant = host.grantAgent(ctx.runId, () => ctx);
+    expect(await host.connectAgent(grant.token, fakeAgentClient()))
+      .toEqual({ refused: 'Target.attachToBrowserTarget: attach refused' });
+    expect(host.hasAgents(ctx.runId)).toBe(false);
+    await vi.advanceTimersByTimeAsync(PREVIEW_BROWSER_IDLE_MS);
+    expect(browsers[0]!.close).toHaveBeenCalledTimes(1);
+    await host.close();
+  });
+
+  it.each(['success', 'failure'] as const)('a released pane receives no download %s or progress', async outcome => {
+    let finish!: (path: string) => void;
+    let fail!: (error: Error) => void;
+    let progress!: (received: number, total: number) => void;
+    const download: NonNullable<PreviewHostDeps['download']> = opts => {
+      progress = opts.onProgress;
+      return new Promise<string>((resolve, reject) => { finish = resolve; fail = reject; });
+    };
+    const { host, ctx, browsers } = make(undefined, undefined, undefined, { download });
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    const pending = host.handle(ctx, viewer, { t: 'download' });
+    await host.release(ctx.runId);
+    const messages = [...viewer.messages];
+    progress(10, 10);
+    if (outcome === 'success') finish('/cache/chrome');
+    else fail(new Error('download refused'));
+    await pending;
+    expect(viewer.messages).toEqual(messages);
+    expect(browsers).toHaveLength(0);
+    await host.close();
+  });
+
+  it('downloads without a prior URL start a browser without navigating', async () => {
+    const { host, ctx, browsers } = make();
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.handle(ctx, viewer, { t: 'download' });
+    expect(browsers).toHaveLength(1);
+    expect(navigations(browsers[0]!)).toEqual([]);
+    expect(host.ownsBrowser(ctx.runId)).toBe(true);
+    await host.close();
+  });
+
+  it.each(['viewer', 'port', 'release'] as const)('a stale open probe cannot override a later %s change', async change => {
+    const { host, ctx, probe, browsers } = make([server(5173), server(3000)]);
+    const viewer = fakeViewer();
+    let finish!: (answer: boolean) => void;
+    probe.mockImplementationOnce(() => new Promise<boolean>(resolve => { finish = resolve; }));
+    const opening = host.open(ctx, viewer, { port: 5173 });
+    if (change === 'viewer') await host.open(ctx, fakeViewer(), { port: 3000 });
+    else if (change === 'port') await host.open(ctx, viewer, { port: 3000 });
+    else await host.release(ctx.runId);
+    const messages = [...viewer.messages];
+    finish(true);
+    await opening;
+    expect(viewer.messages).toEqual(messages);
+    expect(browsers).toHaveLength(0);
+    expect(host.portOwner(5173)).toBeUndefined();
+    await host.close();
+  });
+
   it('agent stop preserves approval through stop and crash and reports Stopped', async () => {
     const { host, ctx, devServers, store } = make();
     const viewer = fakeViewer();
@@ -384,7 +484,6 @@ describe('PreviewHost', () => {
       expect(devServers[0]!.state).toBe('stopped');
       await host.close();
     });
-
   });
 
   it('agent refuses adopted servers, other runs and a newly occupied restart port', async () => {
@@ -1289,6 +1388,32 @@ describe('PreviewHost', () => {
         const browser = made.browsers[0]!;
         return { ...made, link, viewer, browser, conn: browser.connectionFake };
       };
+
+      it('reuses the followed page session on another open and ignores unrelated detach events', async () => {
+        const { host, ctx, link, viewer, conn } = await setup();
+        await drive(link, 1, 'Target.createTarget', { url: 'about:blank' });
+        const page = conn.pages.get('S1')!;
+        conn.emit({ method: 'Target.detachedFromTarget', sessionId: 'B1', params: { sessionId: 'S1' } });
+        conn.emit({ method: 'Target.detachedFromTarget', params: { sessionId: 'other' } });
+        conn.emit({ method: 'Target.targetDestroyed', params: { sessionId: 'S1' } });
+        expect(page.cdp.close).not.toHaveBeenCalled();
+        await host.open(ctx, viewer, { agent: true });
+        expect(conn.requests.filter(r => r.method === 'Target.attachToTarget' && r.sessionId === undefined)).toHaveLength(1);
+        expect(urls(viewer).at(-1)).toBe('http://localhost/NEW');
+        await host.close();
+      });
+
+      it('detaches a followed page whose session fails to initialise and keeps the home stream', async () => {
+        const { host, link, browser, conn } = await setup();
+        const broken = fakeCdp();
+        vi.mocked(broken.cdp.send).mockRejectedValue(new Error('page closed'));
+        vi.spyOn(browser.connection, 'session').mockReturnValueOnce(broken.cdp);
+        await drive(link, 1, 'Target.createTarget', { url: 'about:blank' });
+        expect(conn.requests).toContainEqual({ method: 'Target.detachFromTarget', params: { sessionId: 'S1' }, sessionId: undefined });
+        expect(browser.cdpFake.cdp.close).not.toHaveBeenCalled();
+        expect(browser.cdpFake.sent('Page.startScreencast').length).toBeGreaterThan(0);
+        await host.close();
+      });
 
       it("streams the tab the agent creates, from a session of cezar's own on it", async () => {
         const { link, viewer, conn } = await setup();
