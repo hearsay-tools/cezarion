@@ -192,7 +192,7 @@ it('navigates a live page in place, replaces an agent page and remembers targets
   act(() => hook.result.current.navigate('https://other.com'))
   expect(last().send).toHaveBeenLastCalledWith(expect.objectContaining({ t: 'open', target: { url: 'https://other.com' } }))
   expect(hook.result.current.agent).toBe(false)
-  act(() => hook.result.current.navigate('javascript:alert(1)'))
+  act(() => hook.result.current.navigate('javascript:void 0'))
   expect(hook.result.current.addressError).toEqual(expect.any(String))
   act(() => hook.result.current.navigate('5173'))
   expect(hook.result.current.addressError).toBeUndefined()
@@ -259,7 +259,7 @@ it('reapplies requests while preserving an already streaming target unless appro
   hook.rerender({ ...props, request: { url: '5173' } })
   expect(hook.result.current.port).toBe(5173)
   last().send.mockClear()
-  hook.rerender({ ...props, request: { url: 'javascript:alert(1)' } })
+  hook.rerender({ ...props, request: { url: 'javascript:void 0' } })
   expect(last().send).not.toHaveBeenCalled()
 })
 
@@ -303,7 +303,6 @@ it('clears old frame state on an explicit reconnect so the next frame becomes vi
   expect(hook.result.current.hasFrame).toBe(true)
   expect(last().send).toHaveBeenCalledWith({ t: 'ack' })
 })
-
 
 it.each([
   [undefined, true],
