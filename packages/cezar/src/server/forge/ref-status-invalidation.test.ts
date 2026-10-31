@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -36,7 +37,10 @@ import { createApp } from '../server.ts';
 
 describe('a reference cezar changes itself is forgotten, not waited out', () => {
   let repoRoot: string;
-  const seed = (...numbers: number[]) => __seedRefStatusCacheForTests(repoRoot, numbers.map(number => [number, { kind: 'pr', status: 'ready' }]));
+  const seed = (...numbers: number[]) => __seedRefStatusCacheForTests(repoRoot, numbers.map(number => [number, {
+    // ast-grep-ignore: test-enum-literal — forge reference kind, not a durable wait kind.
+    kind: 'pr', status: 'ready',
+  }]));
   const primeItem = async () => {
     process.env.CEZ_DRY_RUN = '0';
     execFileMock.mockClear();
@@ -133,7 +137,7 @@ describe('a reference cezar changes itself is forgotten, not waited out', () => 
     execFileSync('git', ['config', 'user.name', 'Test'], { cwd: worktree });
     execFileSync('git', ['commit', '--allow-empty', '-m', 'work'], { cwd: worktree });
     const run = store.createRun({ title: 'Ship it', task: 'ship it', workflow: 'quick-task', steps: [] });
-    store.updateRun(run.id, { status: 'review', worktreePath: worktree, branch: 'cez/abc' });
+    store.updateRun(run.id, { status: RUN_STATUS.review, worktreePath: worktree, branch: 'cez/abc' });
 
     const created = await apiRequest(app, `/api/v1/runs/${run.id}/pr`, {
       method: 'POST',

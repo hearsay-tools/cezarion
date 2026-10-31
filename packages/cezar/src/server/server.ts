@@ -4489,11 +4489,9 @@ export function createApp(deps: ServerDeps) {
         }));
       },
     )
-
     .get('/github/projects', queryZodValidator(githubProjectsQuerySchema), async (c) => {
       return c.json(await resolveForgeRoot(c.get('project').root, deps.forgeFactory).projects(c.req.valid('query').generation));
     })
-
     .get('/github/comments/:kind/:number', queryZodValidator(refreshQuery), async (c) => {
       const { root: repoRoot } = c.get('project');
       const parsed = commentsParams.safeParse({
@@ -4505,7 +4503,6 @@ export function createApp(deps: ServerDeps) {
         await resolveForgeRoot(repoRoot, deps.forgeFactory).comments(parsed.data.kind, parsed.data.number, { refresh: c.req.valid('query').refresh === '1' }),
       );
     })
-
     // One issue/PR by number, any state (#692) — the task page's item tabs. Same in-payload
     // degrade as the siblings: `item: null` is "no such number", `available: false` is "could not
     // ask"; never a 5xx.
@@ -4519,7 +4516,6 @@ export function createApp(deps: ServerDeps) {
         return c.json(await resolveForgeRoot(repoRoot, deps.forgeFactory).item(kind, number, { refresh: c.req.valid('query').refresh === '1' }));
       },
     )
-
     // Lazy checks glyphs for on-screen PR rows (#664). Additive sibling of /api/github — the list
     // call dropped `statusCheckRollup` (the dominant cost), so the glyph is hydrated here per
     // visible row. `prs` is a comma-separated list of positive integers, capped at GH_CHECKS_MAX;
@@ -4564,7 +4560,9 @@ export function createApp(deps: ServerDeps) {
       async (c) => {
         const { root: repoRoot } = c.get('project');
         const { kind, q, limit } = c.req.valid('query');
-        return c.json(await resolveForgeRoot(repoRoot, deps.forgeFactory).searchItems!(kind, q, limit === undefined ? {} : { limit }));
+        const forge = resolveForgeRoot(repoRoot, deps.forgeFactory);
+        if (!forge.searchItems) return c.json({ available: false, reason: 'GitHub is unavailable', items: [] });
+        return c.json(await forge.searchItems(kind, q, limit === undefined ? {} : { limit }));
       },
     )
 
@@ -4638,9 +4636,11 @@ export function createApp(deps: ServerDeps) {
       async (c) => {
         const { root: repoRoot } = c.get('project');
         const parsed = { data: c.req.valid('param') };
+        const forge = resolveForgeRoot(repoRoot, deps.forgeFactory);
+        if (!forge.prDiff) return c.json({ available: false, reason: 'GitHub is unavailable' });
         try {
           return c.json(
-            await resolveForgeRoot(repoRoot, deps.forgeFactory).prDiff!(parsed.data.number, { refresh: c.req.valid('query').refresh === '1' }),
+            await forge.prDiff(parsed.data.number, { refresh: c.req.valid('query').refresh === '1' }),
           );
         } catch (err) {
           if (err instanceof GithubPrNotFoundError) return c.json({ error: err.message }, 404);

@@ -245,7 +245,7 @@ export const RUN_TRIGGERS: readonly TriggerRow[] = [
   // hearsay-tools/cezarion#1620: a done waits behind an input the inbox claimed, parked plain.
   { id: 'plain.inbox-ack-step', states: ['waiting:plain'], trigger: 'The inbox ack settles the done a claimed input held, in a step that is not the last', firedBy: 'agent', when: 'a workflow with steps left', behavior: 'The next step starts: running', exit: 'start', to: ['running'], via: ['acknowledgeInbox', 'runWorkflowSteps'], pinnedBy: { file: 'workflows/worker-inbox-liveness.test.ts', test: 'keeps the agent→check recipient live until inbox' } },
   // review
-  { id: 'review.draft-pr', states: ['review'], trigger: 'Draft PR', firedBy: 'human', behavior: 'done', exit: 'accept-review', to: ['done'], via: ['server:createDraftPr'] },
+  { id: 'review.draft-pr', states: ['review'], trigger: 'Draft PR', firedBy: 'human', behavior: 'done', exit: 'accept-review', to: ['done'], via: ['server:createApp'] },
   { id: 'review.finish', states: ['review'], trigger: 'Finish', firedBy: 'human', behavior: 'done', exit: 'accept-review', to: ['done'], via: ['finish'] },
   // A Stop accepted during the final autosave, after success was recorded. No spec table lists it.
   // queued: the Continue's done step queued the workflow remainder before the autosave yielded.

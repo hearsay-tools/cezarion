@@ -1,3 +1,4 @@
+import { resolveForgeRoot } from './forge/index.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -50,4 +51,20 @@ describe('the GitHub PR changes API', () => {
     expect((await apiRequest(app, '/api/v1/github/prs/1/changes?refresh=true')).status).toBe(400);
     expect((await apiRequest(app, '/api/v1/github/prs/1/changes?refresh=1')).status).toBe(200);
   });
+  it('degrades when the driver omits prDiff', async () => {
+    const withoutCapability = createApp({
+      repoRoot, store, manager: {} as RunManager, version: 'test',
+      forgeFactory: (root) => {
+        const driver = resolveForgeRoot(root);
+        delete driver.prDiff;
+        return driver;
+      },
+    });
+    for (const mount of ['/api/v1', '/api/v1/p/default']) {
+      const response = await apiRequest(withoutCapability, `${mount}/github/prs/128/changes`);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ available: false, reason: 'GitHub is unavailable' });
+    }
+  });
+
 });

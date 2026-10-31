@@ -1,3 +1,4 @@
+import { resolveForgeRoot } from './forge/index.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -102,4 +103,20 @@ describe('the github search API', () => {
       ((await res.json()) as ForgeSearchData).items.map((i) => i.number);
     expect(await numbers(scoped)).toEqual(await numbers(plain));
   });
+  it('degrades when the driver omits searchItems', async () => {
+    const withoutCapability = createApp({
+      repoRoot, store, manager: {} as RunManager, version: 'test',
+      forgeFactory: (root) => {
+        const driver = resolveForgeRoot(root);
+        delete driver.searchItems;
+        return driver;
+      },
+    });
+    for (const mount of ['/api/v1', '/api/v1/p/default']) {
+      const response = await apiRequest(withoutCapability, `${mount}/github/search?kind=pr&q=128`);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ available: false, reason: 'GitHub is unavailable', items: [] });
+    }
+  });
+
 });
