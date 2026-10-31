@@ -157,7 +157,9 @@ function measure(report, file, head, ranges, targets = TARGETS, entries = []) {
   if (!data) throw new Error(`Report does not contain ${file}`);
   const mutants = data.mutants.map(m => {
     const row = { file, location: m.location, line: m.location.start.line, mutator: m.mutatorName, original: sliceSource(data.source, m.location), replacement: m.replacement, status: m.status, function: functionOf(m.location, ranges) };
-    return { ...row, kind: kindOf(row, file) };
+    // Static coverage includes hybrid mutants: ignoreStatic still activates those
+    // in beforeAll, after imports. Their outcomes do not measure import-time code.
+    return { ...row, kind: kindOf(row, file), ...(m.static === true ? { static: true, status: 'Ignored', reportedStatus: m.status } : {}) };
   });
   const target = tierOf(file, targets);
   const duplicates = duplicateNames(ranges);
@@ -165,12 +167,15 @@ function measure(report, file, head, ranges, targets = TARGETS, entries = []) {
   const eligible = entries.filter(entry => !duplicates.has(entry.function));
   const kept = mutants.filter(m => !eligible.some(entry => matchesEntry(entry, m)));
   const staleEquivalent = eligible.filter(entry => entry.file === file && !mutants.some(m => matchesEntry(entry, m)));
+  const rawCounts = countsOf(data.mutants);
   return { version: 1, file, head, tier: target.tier, mutants: kept, equivalentCount: mutants.length - kept.length,
-    ...evaluate(kept, target, ranges), rawCounts: countsOf(mutants), rawScore: scoreOf(countsOf(mutants)), staleEquivalent, ambiguousEquivalent };
+    moduleLevelCount: mutants.filter(m => m.static).length,
+    ...evaluate(kept, target, ranges), rawCounts, rawScore: scoreOf(rawCounts), staleEquivalent, ambiguousEquivalent };
 }
 
 function summary(result) {
   const lines = [`File: ${result.file}`, `HEAD: ${result.head}`, `Tier: ${result.tier}`, `Counts: ${JSON.stringify(result.counts)}`, `Counted score: ${result.score.toFixed(1)}%`, `Raw counts: ${JSON.stringify(result.rawCounts)}`, `Stryker raw score: ${result.rawScore.toFixed(1)}%`];
+  lines.push(`Module-level mutants (Stryker static coverage): ${result.moduleLevelCount}; not measured, excluded from counted score and guards (raw score unchanged).`);
   lines.push(`Not-covered lines: ${[...new Set(result.survivors.filter(m => m.status === 'NoCoverage').map(m => m.line))].join(', ') || 'none'}`);
   const names = [...new Set(result.survivors.map(m => m.function))];
   for (const name of names) {
