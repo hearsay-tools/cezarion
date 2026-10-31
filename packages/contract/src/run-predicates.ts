@@ -132,7 +132,6 @@ export const SWEEPABLE_RUN_RULE = {
   matches: isSweepable,
 };
 
-// Retention's cold path currently only re-checks archived after decode; kept pending a behavior decision.
 export const RETENTION_RUN_RULE = {
   sql: "id IN (SELECT value FROM json_each(?)) AND status NOT IN ('queued', 'running', 'waiting')" +
     " AND parent_run_id IS NULL AND json_extract(summary, '$.delegation') IS NULL" +
