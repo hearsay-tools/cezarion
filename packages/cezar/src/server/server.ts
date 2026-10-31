@@ -275,7 +275,7 @@ import { attachUpgradeRouter } from './upgrade-router.ts';
 import { createPreviewSockets } from './preview-sockets.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
-import { parseRemote, resolveForge, forgeWebRoot, type ForgeAvailability } from './forge/index.ts';
+import { parseRemote, resolveForge, forgeWebRoot, type ForgeAvailability, type ForgeDriver } from './forge/index.ts';
 import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubCommentCounts, fetchGithubComments, fetchGithubItem, forgetGithubItem, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
 import type { CockpitOwnership } from './cockpit-ownership.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
@@ -316,6 +316,8 @@ import {
 } from './static-ui.ts';
 
 export interface ServerDeps extends SelfUpdateServerDeps {
+  /** Per-repository forge injection for embedded servers and tests. */
+  forgeResolver?: (repoInfo: Awaited<ReturnType<typeof getRepoInfo>>) => ForgeDriver | null;
   /** CLI lifetime ownership, shared with secondary project contexts. */
   ownership?: CockpitOwnership;
   /** The task-webhook subscribers (#589). Boot creates it and attaches the boot store BEFORE
@@ -688,6 +690,7 @@ async function probeWritableDir(dir: string, create: boolean): Promise<string | 
 // with nothing to offer. See the `routed` assembly at the end of the function.
 export function createApp(deps: ServerDeps) {
   const { version, update, bindHost, bootProjectId } = deps;
+  const resolveProjectForge = deps.forgeResolver ?? resolveForge;
   // Boot singletons keep DELIBERATELY distinct names (`boot*`): every
   // project-scoped handler must resolve its `{store, manager, root, dataDir,
   // launchKey}` from `c.get('project')` — a bare `store`/`repoRoot` in a
@@ -1079,7 +1082,7 @@ export function createApp(deps: ServerDeps) {
     ]);
     // Additive fields only below — the pre-forge shape is the most
     // externally-depended-on JSON in the app (BACKWARD_COMPATIBILITY.md).
-    const forge = resolveForge(repo);
+    const forge = resolveProjectForge(repo);
     const caps = capabilities();
     return {
       version,
@@ -3005,7 +3008,7 @@ export function createApp(deps: ServerDeps) {
     // throws): a "still being checked" answer would leave the cockpit's GitHub option disabled
     // because it does not refetch when the probe completes. `/health` keeps `detectCached`.
     githubAvailability: async (root) => {
-      const forge = resolveForge(await getRepoInfo(root));
+      const forge = resolveProjectForge(await getRepoInfo(root));
       return forge ? forge.detect() : { available: false, reason: 'No GitHub remote is configured' };
     },
     hasGithubRemote: async (root) => Boolean(resolveForge(await getRepoInfo(root))),
@@ -4602,7 +4605,7 @@ export function createApp(deps: ServerDeps) {
       async (c) => {
         const { root: repoRoot } = c.get('project');
         const parsed = { data: c.req.valid('param') };
-        const forge = resolveForge(await getRepoInfo(repoRoot));
+        const forge = resolveProjectForge(await getRepoInfo(repoRoot));
         if (!forge?.prMergeState) return c.json({ available: false, reason: 'GitHub merge state is unavailable' });
         return c.json(await forge.prMergeState(parsed.data.number, { refresh: c.req.valid('query').refresh === '1' }));
       },
@@ -4616,7 +4619,7 @@ export function createApp(deps: ServerDeps) {
         const { root: repoRoot } = c.get('project');
         const parsedNumber = { data: c.req.valid('param') };
         const body = { data: c.req.valid('json') };
-        const forge = resolveForge(await getRepoInfo(repoRoot));
+        const forge = resolveProjectForge(await getRepoInfo(repoRoot));
         if (!forge?.mergePR) return c.json({ error: 'GitHub merge is unavailable' }, 409);
         const result = await forge.mergePR(parsedNumber.data.number, body.data);
         if (result.merged) {

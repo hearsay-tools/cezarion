@@ -223,6 +223,17 @@ export interface DraftPrInput {
 }
 
 export interface ForgeDriver {
+  /** Combined list envelope preserves pagination, totals and quiet degradation. */
+  list(opts?: ForgeListOptions): Promise<import('@open-mercato/cezar-contract').GithubData>;
+  projects(generation: string): Promise<import('@open-mercato/cezar-contract').GithubProjectsData>;
+  item(kind: 'issue' | 'pr', number: number, opts?: { refresh?: boolean }): Promise<import('@open-mercato/cezar-contract').GithubItemResponse>;
+  comments(kind: 'issue' | 'pr', number: number, opts?: { refresh?: boolean }): Promise<ForgeCommentsData>;
+  commentCounts(kind: 'issue' | 'pr', numbers: number[], opts?: { refresh?: boolean }): Promise<import('@open-mercato/cezar-contract').GithubCommentCountsData>;
+  checks(numbers: number[]): Promise<import('./github.ts').GithubChecksData>;
+  refStatus(input: { prs?: number[]; issues?: number[] }): Promise<import('./github.ts').GithubRefStatusData>;
+  cachedRefStatuses(numbers: Iterable<number>): { prs: Record<number, import('./github.ts').ReferenceStatus>; issues: Record<number, import('./github.ts').ReferenceStatus> };
+  /** Invalidate only the task's own pull requests after a successful push. */
+  branchPushed(numbers: readonly number[]): void;
   readonly kind: ForgeKind;
   /** Cheap, cached availability probe. May shell out (used by the GitHub tab). */
   detect(): Promise<ForgeAvailability>;

@@ -3422,6 +3422,18 @@ export function createGithubDriver(repoRoot: string, repoRef: GithubRepoRef | nu
   return {
     kind: 'github',
 
+    list: (opts) => fetchGithub(repoRoot, opts?.refresh, opts?.limit, opts),
+    projects: (generation) => fetchGithubProjects(repoRoot, generation),
+    item: (kind, number, opts) => fetchGithubItem(repoRoot, kind, number, opts?.refresh),
+    comments: (kind, number, opts) => fetchGithubComments(repoRoot, kind, number, opts?.refresh),
+    commentCounts: (kind, numbers, opts) => fetchGithubCommentCounts(repoRoot, kind, numbers, opts?.refresh),
+    checks: (numbers) => fetchGithubChecks(repoRoot, numbers),
+    refStatus: (input) => fetchGithubRefStatus(repoRoot, input),
+    cachedRefStatuses: (numbers) => readCachedRefStatuses(repoRoot, numbers),
+    branchPushed: (numbers) => {
+      for (const number of numbers) forgetRefStatus(repoRoot, number);
+    },
+
     detect: () => detectGithub(repoRoot),
     detectCached: () => detectGithubCached(repoRoot),
 
