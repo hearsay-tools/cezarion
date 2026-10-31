@@ -42,6 +42,16 @@ export function createProgressLineSplitter(onLine: (line: string) => void) {
   };
 }
 
+/** Validate and resolve the checkout target before any filesystem work. */
+export function checkoutTarget(projectsDir: string, name: string) {
+  if (!projectsDir.startsWith('/')) {
+    return { ok: false as const, status: 500 as const, error: `checkout root is not an absolute path: ${projectsDir}` };
+  }
+  const root = resolve(projectsDir);
+  const target = join(root, name);
+  return { root, target };
+}
+
 /** One `checkout-progress` SSE payload (workspace-level event, step 2.8's bus).
  *  `checkoutId` is echoed from the request so a cockpit only renders its own
  *  clone — two tabs cloning at once share the one workspace stream. */
@@ -323,11 +333,9 @@ export async function checkoutRepo(opts: CheckoutOptions): Promise<CheckoutResul
   if (!isValidCheckoutName(name)) {
     return { ok: false, status: 400, error: `not a valid folder name: ${name.slice(0, 200)}` };
   }
-  if (!opts.projectsDir.startsWith('/')) {
-    return { ok: false, status: 500, error: `checkout root is not an absolute path: ${opts.projectsDir}` };
-  }
-  const root = resolve(opts.projectsDir);
-  const target = join(root, name);
+  const destination = checkoutTarget(opts.projectsDir, name);
+  if (destination.ok === false) return destination;
+  const { root, target } = destination;
 
   // The checkout root is created on demand — a fresh install has never had one,
   // and failing "clone" because a directory the user never asked about is

@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { PROJECT_NAME_PATTERN } from '@open-mercato/cezar-contract/project-limits';
 import type { GithubOwner, GithubOwnersResponse } from '@open-mercato/cezar-contract';
-import { ERROR_TAIL_LINES, GH_CREDENTIAL_HELPER_CONFIG, createProgressLineSplitter, cleanupCheckout, isValidCheckoutName, parseRepoRef, type CheckoutProgressEvent } from './checkout.ts';
+import { ERROR_TAIL_LINES, GH_CREDENTIAL_HELPER_CONFIG, createProgressLineSplitter, checkoutTarget, cleanupCheckout, isValidCheckoutName, parseRepoRef, type CheckoutProgressEvent } from './checkout.ts';
 
 /**
  * Create a local Git project, optionally with an explicitly requested private GitHub repository
@@ -183,11 +183,9 @@ export async function createProject(opts: CreateProjectOptions): Promise<CreateP
       template = ref.slug;
     }
   }
-  if (!opts.projectsDir.startsWith('/')) {
-    return { ok: false, status: 500, error: `checkout root is not an absolute path: ${opts.projectsDir}` };
-  }
-  const root = resolve(opts.projectsDir);
-  const target = join(root, name);
+  const destination = checkoutTarget(opts.projectsDir, name);
+  if (destination.ok === false) return destination;
+  const { root, target } = destination;
 
   const emit = (event: Omit<CheckoutProgressEvent, 'name' | 'checkoutId'>): void =>
     opts.onProgress({ ...event, name, ...(opts.checkoutId ? { checkoutId: opts.checkoutId } : {}) });
