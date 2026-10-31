@@ -46,5 +46,13 @@
     "original": "!entry || !tip",
     "replacement": "!entry && !tip",
     "reason": "The payload branches and tips are built one-to-one from the same heads, so entry exists exactly when tip exists."
+  },
+  {
+    "file": "packages/web/src/lib/use-search-params-writer.ts",
+    "function": "useSearchParamsWriter",
+    "mutator": "ConditionalExpression",
+    "original": "writerSeq !== undefined",
+    "replacement": "true",
+    "reason": "The check narrows writerSeq for TypeScript; undefined <= latestSeq is already false, so removing this check changes no runtime behavior."
   }
 ]
