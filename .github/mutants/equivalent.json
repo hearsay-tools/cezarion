@@ -89,6 +89,22 @@
   },
   {
     "file": "packages/cezar/src/task-cli/cli.ts",
+    "function": "execute",
+    "mutator": "ConditionalExpression",
+    "original": "default:\n      return usageError(`unknown operation '${name}'`);",
+    "replacement": "default:",
+    "reason": "Unreachable exhaustiveness default kept for the type checker; parseOperation refuses every name not handled by execute."
+  },
+  {
+    "file": "packages/cezar/src/task-cli/cli.ts",
+    "function": "execute",
+    "mutator": "StringLiteral",
+    "original": "`unknown operation '${name}'`",
+    "replacement": "``",
+    "reason": "Unreachable exhaustiveness default kept for the type checker; parseOperation refuses every name not handled by execute."
+  },
+  {
+    "file": "packages/cezar/src/task-cli/cli.ts",
     "function": "nonNegativeInt",
     "mutator": "ConditionalExpression",
     "original": "typeof value !== 'string'",
@@ -110,6 +126,14 @@
     "original": "typeof value !== 'string'",
     "replacement": "false",
     "reason": "parseArgs supplies string or undefined for numeric flags; the string check narrows for TypeScript and any non-string still fails the integer pattern."
+  },
+  {
+    "file": "packages/cezar/src/task-cli/cli.ts",
+    "function": "start",
+    "mutator": "StringLiteral",
+    "original": "'all'",
+    "replacement": "\"\"",
+    "reason": "Start waits on one run, so all and any other non-any string have the same completion test and exit code."
   },
   {
     "file": "packages/contract/src/attention.ts",
