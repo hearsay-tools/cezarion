@@ -36,10 +36,10 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe('record write paths without a database', () => {
   it.each([
-    ['commit', ['stale-resume:hold', 'completion-actions']],
+    ['commit', ['stale-resume', 'completion-actions']],
     ['durableUpdate', ['issue-seed', 'pull-requests', 'restore', 'redact-patch', 'archive-fields']],
-    ['debouncedUpdate', ['issue-seed', 'pull-requests', 'restore', 'redact-patch', 'assign', 'stale-resume:status', 'task-references', 'archive-or-touch']],
-    ['loaded', ['stale-resume:status']],
+    ['debouncedUpdate', ['issue-seed', 'pull-requests', 'restore', 'redact-patch', 'assign', 'stale-resume', 'task-references', 'archive-or-touch']],
+    ['loaded', ['stale-resume']],
     ['conversation', ['redact-messages', 'parse-delegation', 'redact-input', 'parse-input', 'append-input']],
     ['pullRequests', ['merge-pull-requests']],
     ['archiveFields', ['archive-time', 'store-owned:withdraw-hold', 'store-owned:clear-pin']],
@@ -48,14 +48,30 @@ describe('record write paths without a database', () => {
     expect(WRITE_PATH_RULES[path]).toEqual(rules);
   });
 
-  it.each([RUN_STATUS.waiting, RUN_STATUS.running, RUN_STATUS.done])('keeps only waiting appointments on %s', status => {
-    const original = makeRunRecord({ status, autoResumeAt: at, autoResumeAttempts: 2 });
-    const staged = commit(original);
-    expect(staged.autoResumeAt).toBe(status === RUN_STATUS.waiting ? at : undefined);
-    expect(staged.autoResumeAttempts).toBe(2);
+  // One rule on every path (hearsay-tools/cezarion#2322): a resume time stays only on a `waiting`
+  // run. A `waiting` run with a time is a usage-limit hold, so no waiting run keeps a time without one.
+  const throughLoad = (run: RunRecord) => { stageLoaded(run); return run; };
+  const throughDebounced = (run: RunRecord) => { stageDebouncedUpdate(run, {}, hooks()); return run; };
+  it.each([
+    ['load', throughLoad], ['debounced update', throughDebounced], ['commit', (run: RunRecord) => commit(run)],
+  ] as const)('applies the one stale-resume rule on %s', (_path, stage) => {
+    const cases = [
+      [RUN_STATUS.waiting, at, at],
+      [RUN_STATUS.waiting, undefined, undefined],
+      [RUN_STATUS.running, at, undefined],
+      [RUN_STATUS.done, at, undefined],
+    ] as const;
+    for (const [status, autoResumeAt, kept] of cases) {
+      const staged = stage(makeRunRecord({ status, autoResumeAt, autoResumeAttempts: 2 }));
+      expect(staged.autoResumeAt, `${status} with ${autoResumeAt ?? 'no time'}`).toBe(kept);
+      expect(staged.autoResumeAttempts).toBe(2);
+    }
+  });
+
+  it('stages commit on a copy and leaves the held record untouched', () => {
+    const original = makeRunRecord({ status: RUN_STATUS.done, autoResumeAt: at });
+    expect(commit(original).autoResumeAt).toBeUndefined();
     expect(original.autoResumeAt).toBe(at);
-    stageLoaded(original);
-    expect(original.autoResumeAt).toBe(staged.autoResumeAt);
   });
 
   it('preserves deletions and unchanged records during commit staging', () => {
@@ -101,15 +117,18 @@ describe('record write paths without a database', () => {
     expect(run).toEqual(before);
   });
 
-  it.each([true, false])('resolves task refs only on the debounced path=%s', debounced => {
+  it.each([true, false])('resolves task refs on both paths, debounced=%s (hearsay-tools/cezarion#2323)', debounced => {
     const run = makeRunRecord({ referencedPrCandidates: [url], referencedIssueCandidates: [issue], autoResumeAt: at });
+    const before = structuredClone(run);
     const log: string[] = [];
     const stage = debounced ? stageDebouncedUpdate : stageDurableUpdate;
     const next = stage(run, { task: 'edited', status: RUN_STATUS.running }, hooks(log)) ?? run;
-    expect(log).toEqual(debounced ? ['collect-pr', 'collect-issue', 'resolve-pr', 'resolve-issue', 'rescope', 'touch'] : []);
-    expect(next.referencedPullRequestUrl).toBe(debounced ? url : undefined);
-    expect(next.issueNumber).toBe(debounced ? 7 : undefined);
+    expect(log).toEqual(['collect-pr', 'collect-issue', 'resolve-pr', 'resolve-issue', 'rescope', ...(debounced ? ['touch'] : [])]);
+    expect(next.referencedPullRequestUrl).toBe(url);
+    expect(next.issueNumber).toBe(7);
+    // The durable path stages a copy: the commit retires the stale resume and replaces the held record.
     expect(next.autoResumeAt).toBe(debounced ? undefined : at);
+    if (!debounced) expect(run).toEqual(before);
   });
 
   it.each([undefined, issue])('revokes or updates a number seeded by task resolution: %s', resolved => {

@@ -11,16 +11,15 @@ import type { RepoHandle, RunRecord, StepState } from './store.ts';
 type RecordPatch = Partial<Omit<RunRecord, 'id' | 'steps'>>;
 type Staged = ReadonlyMap<string, RunRecord | null>;
 
-/** Rule order is path-specific. These differences preserve existing behavior:
- * commit tests isUsageLimitHold; loaded/debounced test only status. Durable task edits skip
- * reference resolution. Completion preparation is commit-only. Patch redaction's opt-out also
+/** Rule order is path-specific. These differences preserve existing behavior: durable task edits
+ * skip reference resolution. Completion preparation is commit-only. Patch redaction's opt-out also
  * skips session secrets, while text redaction always scrubs those secrets.
  */
 export const WRITE_PATH_RULES = {
-  commit: ['stale-resume:hold', 'completion-actions'],
+  commit: ['stale-resume', 'completion-actions'],
   durableUpdate: ['issue-seed', 'pull-requests', 'restore', 'redact-patch', 'archive-fields'],
-  debouncedUpdate: ['issue-seed', 'pull-requests', 'restore', 'redact-patch', 'assign', 'stale-resume:status', 'task-references', 'archive-or-touch'],
-  loaded: ['stale-resume:status'],
+  debouncedUpdate: ['issue-seed', 'pull-requests', 'restore', 'redact-patch', 'assign', 'stale-resume', 'task-references', 'archive-or-touch'],
+  loaded: ['stale-resume'],
   conversation: ['redact-messages', 'parse-delegation', 'redact-input', 'parse-input', 'append-input'],
   // updateRun, marker declarations, PR discovery and event observations.
   pullRequests: ['merge-pull-requests'],
@@ -60,7 +59,13 @@ export function stageCommit(input: Staged, hooks: CommitHooks): Map<string, RunR
 
 export function stageLoaded(run: RunRecord): void {
   // Open waits survive at every status; recovery owns their cancellation.
-  if (run.status !== 'waiting') run.autoResumeAt = undefined;
+  if (isStaleResume(run)) run.autoResumeAt = undefined;
+}
+
+/** The one stale-resume rule, on every write path (hearsay-tools/cezarion#2322): a resume time is
+ *  the appointment of a `waiting` run, so any time that is not a usage-limit hold is stale. */
+function isStaleResume(run: RunRecord): boolean {
+  return run.autoResumeAt !== undefined && !isUsageLimitHold(run);
 }
 
 export function redactText(text: string, sessionSecrets: readonly string[], hostSecrets: () => readonly string[]): string {
@@ -92,6 +97,8 @@ function prepareUpdate(run: RunRecord, patch: RecordPatch, hooks: UpdateHooks) {
 export function stageDurableUpdate(run: RunRecord, patch: RecordPatch, hooks: UpdateHooks): RunRecord {
   const { normalized, archived } = prepareUpdate(run, patch, hooks);
   const next = { ...run, ...redactPatch(normalized, hooks.redact) };
+  // Both write paths resolve an edited task the same way (hearsay-tools/cezarion#2323).
+  if (normalized.task !== undefined) resolveEditedTaskRefs(next, hooks);
   if (archived !== undefined) stageArchiveFields(next, archived, new Date().toISOString(), hooks.withdrawHold, hooks.clearPin);
   return next;
 }
@@ -100,8 +107,7 @@ export function stageDebouncedUpdate(run: RunRecord, patch: RecordPatch, hooks: 
   const { normalized, archived } = prepareUpdate(run, patch, hooks);
   Object.assign(run, redactPatch(normalized, hooks.redact));
   // The usage-limit resume is the appointment of a `waiting` run (hearsay-tools/cezarion#1236),
-  // so a run coming back to life or settling retires it. stageCommit applies the hold predicate;
-  // this debounced path mutates the held record with the status-only predicate.
+  // so a run coming back to life or settling retires it. Unlike stageCommit, this mutates the held record.
   stageLoaded(run);
   if (normalized.task !== undefined) resolveEditedTaskRefs(run, hooks);
   if (archived !== undefined) hooks.archive(run, archived);
@@ -140,7 +146,7 @@ export function stageConversation(staged: Map<string, RunRecord>, root: RunRecor
 function withoutStaleResumes(input: ReadonlyMap<string, RunRecord | null>): ReadonlyMap<string, RunRecord | null> {
   let staged: Map<string, RunRecord | null> | undefined;
   for (const [id, run] of input) {
-    if (run?.autoResumeAt === undefined || isUsageLimitHold(run)) continue;
+    if (!run || !isStaleResume(run)) continue;
     (staged ??= new Map(input)).set(id, { ...run, autoResumeAt: undefined });
   }
   return staged ?? input;
