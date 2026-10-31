@@ -323,6 +323,48 @@ describe('RunWaitDetails', () => {
     }
   })
 
+  it('keeps a saved CI error until a new CI wait replaces it', () => {
+    const error = 'Saved CI observation is unreadable'
+    const { unmount } = renderWaits(run('waiting', { lastWaitsError: error, waits: [timerEntry()] }))
+    expect(screen.getByText(error)).toBeTruthy()
+    unmount()
+    renderWaits(run('waiting', { lastWaitsError: error, waits: [ciEntry()] }))
+    expect(screen.queryByText(error)).toBeNull()
+    expect(screen.getByText('Waiting for CI')).toBeTruthy()
+  })
+
+  it('shows a settled CI entry still in waits ahead of an older lastWaits entry', () => {
+    renderWaits(run('done', {
+      lastWaits: [ciEntry({ phase: WAIT_PHASE.delivered, result: observed('passed') })],
+      waits: [ciEntry({ phase: WAIT_PHASE.resolved, result: observed('failed') })],
+    }))
+    expect(screen.getByText('CI checks failed — inspect the PR checks')).toBeTruthy()
+    expect(screen.queryByText(/CI checks passed/)).toBeNull()
+  })
+
+  it('shows unavailable settled CI without a result or timestamp', () => {
+    renderWaits(run('done', { lastWaits: [ciEntry({ phase: WAIT_PHASE.delivered })] }))
+    expect(screen.getByText('CI wait unavailable')).toBeTruthy()
+    expect(screen.queryByText('Observed')).toBeNull()
+    expect(document.querySelector('time')).toBeNull()
+  })
+
+  it('shows an unknown observed head and refuses an unsafe PR link', () => {
+    renderWaits(run('done', { lastWaits: [ciEntry({ phase: WAIT_PHASE.delivered, prUrl: 'javascript:void(0)',
+      result: { ...observed('head_changed')!, observedHeadSha: undefined },
+    })] }))
+    expect(screen.getByText('CI head changed — 1234567 → unknown')).toBeTruthy()
+    expect(screen.getByText('owner/repo#474')).toBeTruthy()
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+
+  it.each([
+    ['cancelled', 'Merge wait cancelled'], ['error', 'Merge wait unavailable — inspect access and the PR'],
+  ] as const)('names a merge-specific %s outcome', (outcome, label) => {
+    renderWaits(run('done', { lastWaits: [ciEntry({ until: 'merge', phase: WAIT_PHASE.delivered, result: observed(outcome) })] }))
+    expect(screen.getByText(label)).toBeTruthy()
+  })
+
   it('renders nothing for a run with no waits at all', () => {
     renderWaits(run('running'))
     expect(document.querySelector('[data-slot="open-waits"]')).toBeNull()
