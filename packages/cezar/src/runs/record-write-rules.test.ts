@@ -184,14 +184,5 @@ describe('record write paths without a database', () => {
     expect(staged.get(recipient.id)?.agentInputs?.[0]?.text).toBe('[REDACTED]');
     expect(recipient.agentInputs).toBeUndefined();
   });
-  it('keeps continuation inputBase when its staged patch has a different queue', () => {
-    const root = makeRunRecord({ id: randomUUID(), delegation: { role: 'root', permissions: [], receipts: [] } });
-    const input: AgentInput = { id: randomUUID(), source: WAIT_SOURCE.agent, parentRunId: root.id, text: 'secret', createdAt: at };
-    const worker = makeRunRecord({ id: randomUUID(), agentInputs: [input] });
-    const staged = new Map([[worker.id, worker]]);
-    stageConversation(staged, root, { messages: [], outcomes: [] }, { recipientRunId: worker.id, input },
-      () => worker, redact, []);
-    expect(staged.get(worker.id)?.agentInputs).toEqual([{ ...input, text: '[REDACTED]' }]);
-  });
 
 });

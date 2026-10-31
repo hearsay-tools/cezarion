@@ -5,6 +5,7 @@ import { runPullRequestSchema } from '@open-mercato/cezar-contract/runs';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import type { AgentInput, ConversationState, DelegationState, RunPullRequest } from '@open-mercato/cezar-contract';
 import { redactSecrets } from '../core/secret-redaction.ts';
+import { ConversationIdInUseError } from './conversation-identity.ts';
 import { mergePullRequests } from './pull-requests.ts';
 import type { RepoHandle, RunRecord, StepState } from './store.ts';
 
@@ -123,20 +124,22 @@ export function stageStepUpdate(patch: Partial<Omit<StepState, 'id'>>, redact: (
   return { ...patch, error: redact(patch.error) };
 }
 
-/** Stage the ledger before its recipient input, also when both are the same run.
- * Worker continuation appends to original run.agentInputs even when its patch carries agentInputs. */
+/** Stage the ledger before its recipient input, also when both are the same run. The input
+ * appends to the recipient's staged queue, so a worker continuation keeps a patched agentInputs. */
 export function stageConversation(staged: Map<string, RunRecord>, root: RunRecord, state: ConversationState,
   delivery: { recipientRunId: string; input: AgentInput; recipientDelegation?: DelegationState } | undefined,
-  peek: (id: string) => RunRecord | undefined, redact: (text: string) => string, inputBase?: readonly AgentInput[]): void {
+  peek: (id: string) => RunRecord | undefined, redact: (text: string) => string): void {
   staged.set(root.id, { ...root, delegation: delegationStateSchema.parse({ ...root.delegation, conversation: { ...state,
     messages: state.messages.map(message => ({ ...message, text: redact(message.text) })),
   } }) });
   if (delivery) {
     const recipient = staged.get(delivery.recipientRunId) ?? peek(delivery.recipientRunId);
     if (!recipient) throw new Error('missing conversation recipient');
+    // The staged queue can differ from the stored one: a continuation patch may set it.
+    if (recipient.agentInputs?.some(queued => queued.id === delivery.input.id)) throw new ConversationIdInUseError();
     const input = agentInputSchema.parse({ ...delivery.input, text: redact(delivery.input.text) });
     const delegation = !recipient.delegation && delivery.recipientDelegation ? { delegation: delegationStateSchema.parse(delivery.recipientDelegation) } : {};
-    staged.set(recipient.id, { ...recipient, ...delegation, agentInputs: [...(inputBase ?? recipient.agentInputs ?? []), input] });
+    staged.set(recipient.id, { ...recipient, ...delegation, agentInputs: [...(recipient.agentInputs ?? []), input] });
   }
 }
 
@@ -247,6 +250,8 @@ export function redactPatch(
     const value = out[field];
     if (typeof value === 'string') out[field] = redact(value);
   }
+  // A patched input queue persists as written, so its text is scrubbed like a delivered input.
+  if (out.agentInputs) out.agentInputs = out.agentInputs.map(input => ({ ...input, text: redact(input.text) }));
   return out;
 }
 
