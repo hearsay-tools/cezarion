@@ -5,6 +5,8 @@ import type { ApiRun } from '@open-mercato/cezar-api-client'
 
 import {
   conversationDeliveryExplanation,
+  conversationDeliveryLabel,
+  isPeerMessage,
   conversationDirection,
   counterpartTitle,
   conversationKindLabel,
@@ -129,5 +131,55 @@ describe('conversation delivery explanations (hearsay-tools/cezarion#1992)', () 
     expect(counterpartTitle('missing', false, {})).toBe('Task')
     expect(counterpartTitle('missing', true, {})).toBe('peer task')
     expect(counterpartTitle('alpha', true, { alpha: 'Alpha' })).toBe('Alpha')
+  })
+})
+
+
+describe('complete conversation vocabulary', () => {
+  it.each([
+    ['request', 'Request'], ['progress', 'Progress'], ['follow-up', 'Follow-up'], ['reply', 'Reply'],
+  ] as const)('labels kind %s', (kind, label) => {
+    expect(conversationKindLabel(kind)).toBe(label)
+  })
+
+  it.each([
+    ['pending', 'Pending'], ['replied', 'Replied'], ['replied-late', 'Replied late'],
+    ['timed-out', 'Timed out'], ['cancelled', 'Cancelled'], ['completed-without-reply', 'Completed without reply'],
+    ['failed', 'Failed'], ['destroyed', 'Destroyed'], ['sender-closed', 'Sender closed'],
+    ['human-fallback', 'Sent to a human'], ['deleted', 'Recipient deleted'],
+  ] as const)('labels outcome %s', (status, label) => {
+    expect(conversationOutcomeLabel(status)).toBe(label)
+  })
+
+  it.each([
+    ['queued', 'Queued'], ['delivered', 'Delivered'], ['consumed', 'Read'], ['not-delivered', 'Not delivered'],
+  ] as const)('labels delivery %s', (delivery, label) => {
+    expect(conversationDeliveryLabel(delivery)).toBe(label)
+    expect(conversationStatusLabel({ messageKind: 'progress', delivery })).toBe(delivery === 'not-delivered' ? 'Not delivered' : undefined)
+  })
+
+  it('treats only explicit peer relationships as peer messages', () => {
+    expect(isPeerMessage(undefined)).toBe(false)
+    expect(isPeerMessage({})).toBe(false)
+    expect(isPeerMessage({ relationship: 'family' })).toBe(false)
+    expect(isPeerMessage({ relationship: 'peer' })).toBe(true)
+  })
+
+  it('preserves empty explicit titles and instructions and falls back for absent maps', () => {
+    expect(taskTitleFor('a', undefined)).toBe('Task')
+    expect(taskTitleFor('a', { a: '' })).toBe('')
+    expect(counterpartTitle('a', true, undefined)).toBe('peer task')
+    expect(counterpartTitle('a', true, { a: '' })).toBe('')
+    expect(counterpartTitle('a', false, undefined)).toBe('Task')
+    expect(conversationDeliveryExplanation({ instruction: '', delivery: 'queued' }, undefined)).toBe('')
+  })
+
+  it('keeps the current run authoritative and supports an absent run list', () => {
+    const current = run({ id: 'a', title: 'Current', runner: 'claude' })
+    expect(titlesFromRuns(current, undefined)).toEqual({ a: 'Current' })
+    expect(titlesFromRuns(current, [summaryOf(run({ id: 'a', title: 'Stale' }))])).toEqual({ a: 'Current' })
+    expect(recipientBackendsFromRuns(current, undefined)).toEqual({ a: 'claude' })
+    const other = summaryOf(run({ id: 'b', title: 'Other', runner: 'codex' }))
+    expect(recipientBackendsFromRuns(current, [{ ...other, currentStepBackend: 'cursor' }])).toEqual({ a: 'claude', b: 'cursor' })
   })
 })
