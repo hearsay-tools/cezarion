@@ -1,3 +1,6 @@
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildSearchQuery,
@@ -362,4 +365,264 @@ it.each([undefined, 'unknown'])('a fresh launch read cannot authorize an item wi
   const candidate = { eventId: 'e', event: 'issue.opened' as const, timestamp: item.created_at, tieBreaker: 'I',
     repo: 'acme/demo', nodeId: 'I', number: 7, title: 'x', url: item.html_url, author: 'alice', assignees: [], labels: ['bug'] };
   await expect(poller.matchesCurrentLabels(candidate, definition)).rejects.toThrow();
+});
+
+const filterCandidate = {
+  eventId: 'e', event: 'issue.labeled' as const, timestamp: item.created_at, tieBreaker: 'I',
+  repo: 'acme/demo', nodeId: 'I', number: 7, title: 'x', url: item.html_url,
+  author: 'ALICE', assignees: ['other', 'BOB'], labels: ['BUG', 'urgent'], changedLabel: 'BUG',
+};
+
+it.each([
+  { authors: ['carol'] },
+  { assignees: ['carol'] },
+  { allLabels: ['bug', 'missing'] },
+  { anyLabels: ['missing'] },
+  { excludeLabels: ['bug'] },
+  { changedLabels: ['missing'] },
+])('refuses a candidate that fails the local filter %j', filters => {
+  expect(matchesFilters(filterCandidate, { ...definition, filters: { ...definition.filters, ...filters } })).toBe(false);
+});
+
+it.each([
+  {},
+  { authors: [], assignees: [], allLabels: [], anyLabels: [], excludeLabels: [], changedLabels: [] },
+  { authors: ['alice'], assignees: ['bob'], allLabels: ['bug'], anyLabels: ['absent', 'URGENT'], excludeLabels: ['absent'], changedLabels: ['bug'] },
+])('accepts case-insensitive filters and empty filter lists %j', filters => {
+  expect(matchesFilters(filterCandidate, { ...definition, filters: { ...definition.filters, ...filters } })).toBe(true);
+});
+
+it('does not apply changed-label filters to an opened event', () => {
+  const { changedLabel: _changedLabel, ...candidate } = filterCandidate;
+  expect(matchesFilters({ ...candidate, event: 'issue.opened' }, {
+    ...definition, filters: { ...definition.filters, changedLabels: ['missing'] },
+  })).toBe(true);
+});
+
+it.each([
+  { state: 'open', labels: ['bug'], allowed: true },
+  { state: 'closed', labels: ['bug'], allowed: false },
+  { state: 'open', labels: ['missing'], allowed: false },
+])('checks fresh state and labels before launch: %j', async ({ state, labels, allowed }) => {
+  const run = vi.fn(async () => JSON.stringify({ state, labels: labels.map(name => ({ name })) }));
+  const candidate = { ...filterCandidate, labels: ['stale'] };
+  const rule = { ...definition, filters: { ...definition.filters, allLabels: ['bug'], authors: ['alice'] } };
+  expect(await new GithubPoller({ run }).matchesCurrentLabels(candidate, rule)).toBe(allowed);
+  expect(run).toHaveBeenCalledExactlyOnceWith('gh', ['api', 'repos/acme/demo/issues/7']);
+  expect(candidate.labels).toEqual(['stale']);
+});
+
+it.each(['mixed', 'issues', 'prs'] as const)('builds an exact %s query and strips unsafe author characters', family => {
+  vi.useFakeTimers({ now: Date.parse('2026-07-27T12:00:00.000Z'), toFake: ['Date'] });
+  try {
+    const rule = { ...definition, filters: { ...definition.filters, authors: ['Ab_1.c-d+ :!/@', 'second'] } };
+    const kind = family === 'mixed' ? '' : family === 'issues' ? ' is:issue' : ' is:pr';
+    expect(buildSearchQuery('acme', 'demo', rule, family))
+      .toBe(`repo:acme/demo${kind} created:>=2026-07-20 author:Ab_1.c-d author:second`);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('normalizes all visible opened-item fields and bounds control-free titles', async () => {
+  const title = '\u0000\u001f\u007f' + 'x'.repeat(501);
+  const run = async () => JSON.stringify({ items: [{ ...item, title, assignees: [{ login: 'first' }, { login: 'second' }], labels: [{ name: 'one' }, { name: 'two' }] }] });
+  const result = await new GithubPoller({ run }).poll('acme', 'demo', definition, {
+    historyScan: { since: item.created_at, until: item.created_at, source: 0, page: 1, item: 0, event: 0 },
+  });
+  expect(result).toEqual({
+    candidates: [{
+      eventId: `acme/demo:I_one:issue.opened:${item.created_at}`, event: 'issue.opened',
+      timestamp: item.created_at, tieBreaker: 'I_one', repo: 'acme/demo', nodeId: 'I_one', number: 7,
+      title: '   ' + 'x'.repeat(497), url: item.html_url, author: 'alice',
+      assignees: ['first', 'second'], labels: ['one', 'two'],
+    }],
+    truncated: false, pages: 1, cursor: { timestamp: item.created_at, tieBreaker: 'I_one' },
+  });
+});
+
+it('reconstructs schema-valid empty node identities and fallback identities in observation order', () => {
+  const at = item.created_at;
+  const rows = reconstructLabelEvents('acme', 'demo', { ...item, labels: [] }, [
+    { node_id: '', id: 5, event: 'unlabeled', created_at: at, label: { name: 'BUG' } },
+    { event: 'labeled', created_at: at, label: { name: 'BUG' } },
+    { id: 9, event: 'unlabeled', created_at: '2026-07-26T02:00:00.000Z', label: { name: 'last' } },
+  ]);
+  expect(rows.map(row => ({ event: row.event, eventId: row.eventId, tieBreaker: row.tieBreaker, labels: row.labels }))).toEqual([
+    { event: 'issue.unlabeled', eventId: 'acme/demo:I_one:issue.unlabeled:', tieBreaker: '', labels: ['last', 'BUG'] },
+    { event: 'issue.labeled', eventId: `acme/demo:I_one:issue.labeled:${at}:bug`, tieBreaker: `${at}:bug`, labels: ['last', 'BUG'] },
+    { event: 'issue.unlabeled', eventId: 'acme/demo:I_one:issue.unlabeled:9', tieBreaker: '9', labels: ['last'] },
+  ]);
+});
+
+it('keeps a resumed scan immutable and filters timestamps at both inclusive bounds', async () => {
+  const since = '2026-07-26T01:00:00.000Z';
+  const until = '2026-07-26T02:00:00.000Z';
+  const historyScan = { since, until, source: 0, page: 2, item: 1, event: 0 };
+  const snapshot = structuredClone(historyScan);
+  const times = ['2026-07-26T00:59:59.999Z', since, until, '2026-07-26T02:00:00.001Z'];
+  const run = vi.fn(async () => JSON.stringify({ items: [item, ...times.map((created_at, index) => ({
+    ...item, node_id: `I_${index}`, created_at,
+  }))] }));
+  const result = await new GithubPoller({ run }).poll('acme', 'demo', definition, { historyScan });
+  expect(result.candidates.map(row => row.nodeId)).toEqual(['I_1', 'I_2']);
+  expect(result.cursor).toEqual({ timestamp: until, tieBreaker: 'I_2' });
+  expect(result.truncated).toBe(false);
+  expect(historyScan).toEqual(snapshot);
+  expect(run).toHaveBeenCalledExactlyOnceWith('gh', [
+    'api', '--method', 'GET', '/search/issues', '-f',
+    `q=repo:acme/demo is:issue created:>=${since} created:<=${until}`,
+    '-f', 'per_page=100', '-f', 'page=2', '-f', 'sort=created', '-f', 'order=asc',
+  ]);
+});
+
+it('keeps the latest cursor and sorts candidates by timestamp then identity', async () => {
+  const later = '2026-07-26T02:00:00.000Z';
+  const run = async () => JSON.stringify({ items: [
+    { ...item, node_id: 'Z', created_at: later },
+    { ...item, node_id: 'B' }, { ...item, node_id: 'A' },
+  ] });
+  const result = await new GithubPoller({ run }).poll('acme', 'demo', definition, {
+    historyScan: { since: item.created_at, until: later, source: 0, page: 1, item: 0, event: 0 },
+  });
+  expect(result.candidates.map(row => row.nodeId)).toEqual(['A', 'B', 'Z']);
+  expect(result.cursor).toEqual({ timestamp: later, tieBreaker: 'Z' });
+});
+
+it('advances a tied cursor by identity and retains an existing higher cursor', async () => {
+  const run = async () => JSON.stringify({ items: [{ ...item, node_id: 'Z' }, { ...item, node_id: 'B' }] });
+  const result = await new GithubPoller({ run }).poll('acme', 'demo', definition, {
+    historyScan: { since: item.created_at, until: item.created_at, source: 0, page: 1, item: 0, event: 0,
+      cursor: { timestamp: item.created_at, tieBreaker: 'A' } },
+  });
+  expect(result.cursor).toEqual({ timestamp: item.created_at, tieBreaker: 'Z' });
+});
+
+it('drains a full search page before requesting the next page', async () => {
+  const run = vi.fn(async (_exe: string, args: readonly string[]) => JSON.stringify({
+    items: args.includes('page=1') ? Array.from({ length: 100 }, (_, index) => ({ ...item, node_id: `I_${index}` })) : [item],
+  }));
+  const poller = new GithubPoller({ run });
+  const rule = { ...definition, filters: { ...definition.filters, maxRecords: 100 } };
+  const first = await poller.poll('acme', 'demo', rule, { since: item.created_at });
+  expect(first.candidates).toHaveLength(100);
+  expect(first.historyScan).toMatchObject({ source: 0, page: 2, item: 0, event: 0 });
+  expect(first.cursor).toBeUndefined();
+  const second = await poller.poll('acme', 'demo', rule, { historyScan: first.historyScan });
+  expect(second.candidates).toHaveLength(1);
+  expect(second.truncated).toBe(false);
+  expect(run.mock.calls.map(([, args]) => args.find(arg => arg.startsWith('page=')))).toEqual(['page=1', 'page=2']);
+});
+
+it.each([false, true])('reports the exact label-history request bound (includeExisting=%s)', async includeExisting => {
+  const run = async (_exe: string, args: readonly string[]) => args.some(arg => arg.includes('/timeline'))
+    ? JSON.stringify(Array.from({ length: 100 }, () => ({ event: 'commented' })))
+    : JSON.stringify({ items: [item] });
+  const poll = new GithubPoller({ run }).poll('acme', 'demo', {
+    ...definition, events: ['issue.labeled'], filters: { ...definition.filters, includeExisting },
+  }, { since: item.created_at });
+  await expect(poll).rejects.toMatchObject({
+    message: `GitHub issue acme/demo#7 has more label history than one check reads (${includeExisting ? 900 : 1000} timeline entries); narrow the automation filters or process this item separately.`,
+  });
+});
+
+it('uses native gh arguments and reads provider output larger than the default buffer', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'cezar-poller-'));
+  const since = item.created_at;
+  const args = ['api', '--method', 'GET', '/search/issues', '-f',
+    `q=repo:acme/demo is:issue created:>=${since} created:<=${since}`,
+    '-f', 'per_page=100', '-f', 'page=1', '-f', 'sort=created', '-f', 'order=asc'];
+  const script = `#!${process.execPath}
+const expected = ${JSON.stringify(args)};
+if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify(expected)) process.exit(2);
+const item = ${JSON.stringify(item)};
+item.title = 'x'.repeat(1100000);
+process.stdout.write(JSON.stringify({ items: [item] }));
+`;
+  await writeFile(join(directory, 'gh'), script, { mode: 0o755 });
+  vi.stubEnv('PATH', directory + ':' + process.env.PATH);
+  try {
+    const result = await new GithubPoller().poll('acme', 'demo', definition, {
+      historyScan: { since, until: since, source: 0, page: 1, item: 0, event: 0 },
+    });
+    expect(result.candidates).toEqual([expect.objectContaining({ number: 7, title: 'x'.repeat(500) })]);
+  } finally {
+    vi.unstubAllEnvs();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it('searches both opened families together without restricting the item kind', async () => {
+  const run = vi.fn(async () => JSON.stringify({ items: [item, { ...item, node_id: 'PR_one', pull_request: {} }] }));
+  const result = await new GithubPoller({ run }).poll('acme', 'demo', {
+    ...definition, events: ['issue.opened', 'pull_request.opened'],
+  }, { historyScan: { since: item.created_at, until: item.created_at, source: 0, page: 1, item: 0, event: 0 } });
+  expect(result.candidates.map(row => row.event)).toEqual(['issue.opened', 'pull_request.opened']);
+  expect(run).toHaveBeenCalledExactlyOnceWith('gh', [
+    'api', '--method', 'GET', '/search/issues', '-f',
+    `q=repo:acme/demo created:>=${item.created_at} created:<=${item.created_at}`,
+    '-f', 'per_page=100', '-f', 'page=1', '-f', 'sort=created', '-f', 'order=asc',
+  ]);
+});
+
+it('skips pull requests in label searches without reading their timeline', async () => {
+  const run = vi.fn(async () => JSON.stringify({ items: [{ ...item, pull_request: {} }] }));
+  const result = await new GithubPoller({ run }).poll('acme', 'demo', {
+    ...definition, events: ['issue.labeled'],
+  }, { historyScan: { since: item.created_at, until: item.created_at, source: 0, page: 1, item: 0, event: 0 } });
+  expect(result).toEqual({ candidates: [], truncated: false, pages: 1, cursor: undefined });
+  expect(run).toHaveBeenCalledExactlyOnceWith('gh', [
+    'api', '--method', 'GET', '/search/issues', '-f',
+    `q=repo:acme/demo is:issue updated:>=${item.created_at}`,
+    '-f', 'per_page=100', '-f', 'page=1', '-f', 'sort=created', '-f', 'order=asc',
+  ]);
+});
+
+it('reads label timelines with exact provider arguments and ignores non-object entries', async () => {
+  const run = vi.fn(async (_exe: string, args: readonly string[]) => args.some(arg => arg.includes('/timeline'))
+    ? JSON.stringify([null, 1, 'text', true, { event: 'commented' }, { event: 'labeled', created_at: item.created_at, label: { name: 'bug' } }])
+    : JSON.stringify({ items: [item] }));
+  const result = await new GithubPoller({ run }).poll('acme', 'demo', { ...definition, events: ['issue.labeled'] }, {
+    historyScan: { since: item.created_at, until: item.created_at, source: 0, page: 1, item: 0, event: 0 },
+  });
+  expect(result.candidates).toHaveLength(1);
+  expect(run.mock.calls[1]).toEqual(['gh', [
+    'api', '--method', 'GET', 'repos/acme/demo/issues/7/timeline',
+    '-H', 'Accept: application/vnd.github+json', '-f', 'per_page=100', '-f', 'page=1',
+  ]]);
+});
+
+it('starts an unrestricted query with the default family', () => {
+  expect(buildSearchQuery('acme', 'demo', definition)).toMatch(/^repo:acme\/demo created:>=/);
+});
+
+it('resumes a schema-valid timestamp-only cursor and adds the next identity', async () => {
+  const run = async () => JSON.stringify({ items: [item] });
+  const result = await new GithubPoller({ run }).poll('acme', 'demo', definition, {
+    historyScan: { since: item.created_at, until: item.created_at, source: 0, page: 1, item: 0, event: 0,
+      cursor: { timestamp: item.created_at } },
+  });
+  expect(result.cursor).toEqual({ timestamp: item.created_at, tieBreaker: 'I_one' });
+});
+
+it('names the exact field and index of a malformed timeline timestamp', async () => {
+  const run = async (_exe: string, args: readonly string[]) => args.some(arg => arg.includes('/timeline'))
+    ? JSON.stringify([{ event: 'commented' }, { event: 'labeled', created_at: 'bad', label: { name: 'bug' } }])
+    : JSON.stringify({ items: [item] });
+  await expect(new GithubPoller({ run }).poll('acme', 'demo', {
+    ...definition, events: ['issue.labeled'],
+  }, { since: item.created_at })).rejects.toMatchObject({
+    message: 'GitHub returned a malformed label change at acme/demo#7 timeline entry 1 (labeled): created_at: Invalid ISO datetime',
+  });
+});
+
+it('removes newer label additions while reconstructing older label events', () => {
+  const rows = reconstructLabelEvents('acme', 'demo', { ...item, labels: [{ name: 'bug' }, { name: 'triage' }] }, [
+    { id: 2, event: 'labeled', created_at: '2026-07-26T02:00:00.000Z', label: { name: 'triage' } },
+    { id: 1, event: 'labeled', created_at: item.created_at, label: { name: 'bug' } },
+  ]);
+  expect(rows.map(row => ({ changedLabel: row.changedLabel, labels: row.labels }))).toEqual([
+    { changedLabel: 'bug', labels: ['bug'] },
+    { changedLabel: 'triage', labels: ['bug', 'triage'] },
+  ]);
 });

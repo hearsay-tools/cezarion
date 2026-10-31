@@ -216,7 +216,7 @@ export class GithubPoller {
         if (kind !== 'labeled' && kind !== 'unlabeled') return;
         const parsed = timelineEventSchema.safeParse(entry);
         if (!parsed.success) {
-          const issues = parsed.error.issues.map((issue) => `${issue.path.join('.') || '(entry)'}: ${issue.message}`).join('; ');
+          const issues = parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ');
           const index = (page - 1) * TIMELINE_PAGE_SIZE + offset;
           throw new Error(`GitHub returned a malformed label change at ${owner}/${repo}#${number} timeline entry ${index} (${kind}): ${issues}`);
         }
