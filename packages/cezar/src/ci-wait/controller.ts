@@ -6,8 +6,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getRequestListener } from '@hono/node-server';
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { createMiddleware } from 'hono/factory';
 import { previewStopResult } from '../preview/registration.ts';
 import { askErrorMessage, askInvalidInput, ciErrorMessage, doneErrorMessage, doneInvalidInput, previewInvalidInput, previewOversized, previewRefusal, scheduleInvalidInput, scheduleRefusal, waitInvalidInput } from './errors.ts';
 import { automationsToolEnabled, previewToolEnabled } from './tools.ts';
@@ -140,13 +141,27 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
     return capability && !capability.lifetime.signal.aborted ? capability : undefined;
   };
   const unauthorized = { code: 'unauthorized' as const, message: ciErrorMessage('unauthorized') };
+  const requireCapability = createMiddleware<{ Variables: { capability: Capability } }>(async (c, next) => {
+    const capability = authorized(c.req.header('authorization'));
+    if (!capability) return c.json(unauthorized, 401);
+    c.set('capability', capability);
+    await next();
+  });
+  const capabilityRevoked = <T extends Response>(c: Context<{ Variables: { capability: Capability } }>, capability: Capability, fallback: () => T) => {
+    if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
+    return fallback();
+  };
+  const capabilityAnswer = async <T, R extends Response, F extends Response>(c: Context<{ Variables: { capability: Capability } }>, capability: Capability, answer: () => Promise<T>, respond: (answer: T) => R, fallback: () => F) => {
+    try {
+      const result = await answer();
+      capability.lifetime.signal.throwIfAborted();
+      return respond(result);
+    } catch {
+      return capabilityRevoked(c, capability, fallback);
+    }
+  };
   return new Hono<{ Variables: { capability: Capability } }>()
-    .use('/api/v1/tools/ci-wait', async (c, next) => {
-      const capability = authorized(c.req.header('authorization'));
-      if (!capability) return c.json(unauthorized, 401);
-      c.set('capability', capability);
-      await next();
-    })
+    .use('/api/v1/tools/ci-wait', requireCapability)
     .get('/api/v1/tools/ci-wait', c => {
       const signal = c.get('capability').lifetime.signal;
       let release = () => {};
@@ -157,12 +172,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         release = () => signal.removeEventListener('abort', close);
       }, cancel() { release(); } }), { headers: { 'content-type': 'text/plain', 'cache-control': 'no-store' } });
     })
-    .use('/api/v1/tools/wait', async (c, next) => {
-      const capability = authorized(c.req.header('authorization'));
-      if (!capability) return c.json(unauthorized, 401);
-      c.set('capability', capability);
-      await next();
-    })
+    .use('/api/v1/tools/wait', requireCapability)
     // The agent fixes a bad call from the message, so refusals answer 200 with a typed result.
     .post('/api/v1/tools/wait', bodyLimit({ maxSize: 16_384, onError: c => c.json({ ok: false as const, code: 'invalid_request' as const, message: 'The arguments exceed 16 KiB.' }) }), jsonZodValidator(cezarWaitRequestSchema, { invalid: (c, error) => c.json({ ok: false as const, code: 'invalid_request' as const, message: waitInvalidInput(error) }) }), async c => {
       const capability = c.get('capability');
@@ -171,17 +181,13 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(cezarWaitAnswerSchema.parse(answer));
       } catch (error) {
-        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
-        const code = ciRefusalCode(thrownCode(error)) ?? 'unavailable';
-        return c.json({ ok: false as const, code, message: ciErrorMessage(code) });
+        return capabilityRevoked(c, capability, () => {
+          const code = ciRefusalCode(thrownCode(error)) ?? 'unavailable';
+          return c.json({ ok: false as const, code, message: ciErrorMessage(code) });
+        });
       }
     })
-    .use('/api/v1/tools/ask', async (c, next) => {
-      const capability = authorized(c.req.header('authorization'));
-      if (!capability) return c.json(unauthorized, 401);
-      c.set('capability', capability);
-      await next();
-    })
+    .use('/api/v1/tools/ask', requireCapability)
     .post('/api/v1/tools/ask', bodyLimit({ maxSize: ASK_BODY_LIMIT, onError: c => c.json({ ok: false as const, code: 'invalid_request' as const, message: 'The arguments exceed 256 KiB.' }) }), jsonZodValidator(cezarAskRequestSchema, { invalid: (c, error) => c.json({ ok: false as const, code: 'invalid_request' as const, message: askInvalidInput(error) }) }), async c => {
       const capability = c.get('capability');
       try {
@@ -189,16 +195,10 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(answer);
       } catch {
-        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
-        return c.json({ ok: false as const, code: 'unavailable' as const, message: askErrorMessage('unavailable') });
+        return capabilityRevoked(c, capability, () => c.json({ ok: false as const, code: 'unavailable' as const, message: askErrorMessage('unavailable') }));
       }
     })
-    .use('/api/v1/tools/cancel-wait', async (c, next) => {
-      const capability = authorized(c.req.header('authorization'));
-      if (!capability) return c.json(unauthorized, 401);
-      c.set('capability', capability);
-      await next();
-    })
+    .use('/api/v1/tools/cancel-wait', requireCapability)
     .post('/api/v1/tools/cancel-wait', bodyLimit({ maxSize: 16_384, onError: c => c.json({ cancelled: false as const, code: 'invalid_request' as const, message: 'The arguments exceed 16 KiB.' }) }), jsonZodValidator(cezarCancelWaitRequestSchema, { invalid: (c, error) => c.json({ cancelled: false as const, code: 'invalid_request' as const, message: waitInvalidInput(error) }) }), async c => {
       const capability = c.get('capability');
       try {
@@ -206,16 +206,10 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(answer);
       } catch {
-        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
-        return c.json({ cancelled: false as const, code: 'unavailable' as const, message: ciErrorMessage('unavailable') });
+        return capabilityRevoked(c, capability, () => c.json({ cancelled: false as const, code: 'unavailable' as const, message: ciErrorMessage('unavailable') }));
       }
     })
-    .use('/api/v1/tools/done', async (c, next) => {
-      const capability = authorized(c.req.header('authorization'));
-      if (!capability) return c.json(unauthorized, 401);
-      c.set('capability', capability);
-      await next();
-    })
+    .use('/api/v1/tools/done', requireCapability)
     .post('/api/v1/tools/done', bodyLimit({ maxSize: 16_384, onError: c => c.json({ ok: false as const, code: 'invalid_request' as const, message: 'The arguments exceed 16 KiB.' }) }), jsonZodValidator(cezarDoneRequestSchema, { invalid: (c, error) => c.json({ ok: false as const, code: 'invalid_request' as const, message: doneInvalidInput(error) }) }), async c => {
       const capability = c.get('capability');
       try {
@@ -223,16 +217,10 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(answer);
       } catch {
-        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
-        return c.json({ ok: false as const, code: 'unavailable' as const, message: doneErrorMessage('unavailable') });
+        return capabilityRevoked(c, capability, () => c.json({ ok: false as const, code: 'unavailable' as const, message: doneErrorMessage('unavailable') }));
       }
     })
-    .use('/api/v1/tools/preview-stop', async (c, next) => {
-      const capability = authorized(c.req.header('authorization'));
-      if (!capability) return c.json(unauthorized, 401);
-      c.set('capability', capability);
-      await next();
-    })
+    .use('/api/v1/tools/preview-stop', requireCapability)
     .post('/api/v1/tools/preview-stop', bodyLimit({ maxSize: 16_384, onError: c => c.json(previewStopResult('invalid_input')) }), async (c, next) => {
       if (!previewToolEnabled()) return c.json(previewStopResult('preview_disabled'));
       await next();
@@ -244,16 +232,10 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(result);
       } catch {
-        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
-        return c.json(previewStopResult('unavailable'));
+        return capabilityRevoked(c, capability, () => c.json(previewStopResult('unavailable')));
       }
     })
-    .use('/api/v1/tools/preview-serve', async (c, next) => {
-      const capability = authorized(c.req.header('authorization'));
-      if (!capability) return c.json(unauthorized, 401);
-      c.set('capability', capability);
-      await next();
-    })
+    .use('/api/v1/tools/preview-serve', requireCapability)
     // The agent fixes a bad call from the hint, so refusals answer 200 with a typed result. The
     // flag gate runs before validation: off means off, whatever the body.
     .post('/api/v1/tools/preview-serve', bodyLimit({ maxSize: 16_384, onError: c => c.json(previewOversized()) }), async (c, next) => {
@@ -267,16 +249,10 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
         capability.lifetime.signal.throwIfAborted();
         return c.json(result);
       } catch {
-        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
-        return c.json(previewRefusal('unavailable'));
+        return capabilityRevoked(c, capability, () => c.json(previewRefusal('unavailable')));
       }
     })
-    .use('/api/v1/tools/schedule-task', async (c, next) => {
-      const capability = authorized(c.req.header('authorization'));
-      if (!capability) return c.json(unauthorized, 401);
-      c.set('capability', capability);
-      await next();
-    })
+    .use('/api/v1/tools/schedule-task', requireCapability)
     // A prompt takes up to 100 000 characters, so these bodies get their own limit. The flag gate
     // runs before validation: off means off, whatever the body.
     .post('/api/v1/tools/schedule-task', bodyLimit({ maxSize: SCHEDULED_TASK_LIMITS.wireBytes, onError: c => c.json(scheduleRefusal('invalid_request', 'The arguments exceed 1 MiB.')) }), async (c, next) => {
@@ -284,36 +260,19 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
       await next();
     }, jsonZodValidator(scheduleTaskRequestSchema, { invalid: (c, error) => c.json(scheduleRefusal('invalid_request', scheduleInvalidInput(error))) }), async c => {
       const capability = c.get('capability');
-      if (!capability.scheduleTask) return c.json(scheduleRefusal('unavailable'));
-      try {
-        const answer = scheduleTaskAnswerSchema.parse(await capability.scheduleTask(c.req.valid('json'), capability.lifetime.signal));
-        capability.lifetime.signal.throwIfAborted();
-        return c.json(answer);
-      } catch {
-        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
-        return c.json(scheduleRefusal('unavailable'));
-      }
+      const scheduleTask = capability.scheduleTask;
+      if (!scheduleTask) return c.json(scheduleRefusal('unavailable'));
+      return capabilityAnswer(c, capability, async () => scheduleTaskAnswerSchema.parse(await scheduleTask.call(capability, c.req.valid('json'), capability.lifetime.signal)), answer => c.json(answer), () => c.json(scheduleRefusal('unavailable')));
     })
-    .use('/api/v1/tools/scheduled-tasks', async (c, next) => {
-      const capability = authorized(c.req.header('authorization'));
-      if (!capability) return c.json(unauthorized, 401);
-      c.set('capability', capability);
-      await next();
-    })
+    .use('/api/v1/tools/scheduled-tasks', requireCapability)
     .post('/api/v1/tools/scheduled-tasks', bodyLimit({ maxSize: SCHEDULED_TASK_LIMITS.wireBytes, onError: c => c.json(scheduleRefusal('invalid_request', 'The arguments exceed 1 MiB.')) }), async (c, next) => {
       if (!automationsToolEnabled()) return c.json(scheduleRefusal('automations_off'));
       await next();
     }, jsonZodValidator(scheduledTasksRequestSchema, { invalid: (c, error) => c.json(scheduleRefusal('invalid_request', scheduleInvalidInput(error))) }), async c => {
       const capability = c.get('capability');
-      if (!capability.scheduledTasks) return c.json(scheduleRefusal('unavailable'));
-      try {
-        const answer = scheduledTasksAnswerSchema.parse(await capability.scheduledTasks(c.req.valid('json'), capability.lifetime.signal));
-        capability.lifetime.signal.throwIfAborted();
-        return c.json(answer);
-      } catch {
-        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
-        return c.json(scheduleRefusal('unavailable'));
-      }
+      const scheduledTasks = capability.scheduledTasks;
+      if (!scheduledTasks) return c.json(scheduleRefusal('unavailable'));
+      return capabilityAnswer(c, capability, async () => scheduledTasksAnswerSchema.parse(await scheduledTasks.call(capability, c.req.valid('json'), capability.lifetime.signal)), answer => c.json(answer), () => c.json(scheduleRefusal('unavailable')));
     });
 }
 export type CiToolApp = ReturnType<typeof ciToolRoutes>;
