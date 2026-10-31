@@ -22,6 +22,7 @@ describe('project context failures over HTTP and live feeds', () => {
   let contexts: ProjectContexts;
   let app: Hono;
   let otherId: string;
+  let bootProjectId: string;
 
   beforeEach(async () => {
     home = mkdtempSync(join(tmpdir(), 'cez-ctx-fail-home-'));
@@ -34,7 +35,7 @@ describe('project context failures over HTTP and live feeds', () => {
     clearProjectProbeCache();
     store = RunStore.open(join(bootRoot, '.ai/cezar'));
     contexts = new ProjectContexts({ listProjects });
-    const bootProjectId = (await registerProject(bootRoot)).id;
+    bootProjectId = (await registerProject(bootRoot)).id;
     otherId = (await registerProject(otherRoot)).id;
     app = createApp({ repoRoot: bootRoot, store, manager: {} as RunManager, version: 'test', bootProjectId, contexts });
   });
@@ -100,5 +101,15 @@ describe('project context failures over HTTP and live feeds', () => {
     otherId = 'no-such-project';
     const expected = { status: 404, error: 'unknown project: no-such-project' };
     expect(await answers()).toEqual({ http: expected, batch: expected, stream: expected });
+  });
+
+  it('keeps a feed read failure in an open project at 503 "run feed unavailable"', async () => {
+    vi.spyOn(store, 'getRun').mockImplementation(() => { throw new Error('history unreadable'); });
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    otherId = bootProjectId;
+    const expected = { status: 503, error: 'run feed unavailable' };
+    const { batch, stream } = await answers();
+    expect({ batch, stream }).toEqual({ batch: expected, stream: expected });
+    expect(log).not.toHaveBeenCalled();
   });
 });
