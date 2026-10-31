@@ -5,6 +5,27 @@ import { flush, server, useHostFixture } from './host.testkit.ts';
 describe('PreviewHost race boundaries', () => {
   const make = useHostFixture();
 
+  it.each(['abort', 'release'] as const)('refuses a stop whose authority ends during teardown: %s', async action => {
+    const { host, ctx, devServers } = make();
+    await host.open(ctx, fakeViewer(), { port: 5173 });
+    await host.run(ctx.runId, 5173);
+    let finish!: () => void;
+    let releasing: Promise<void> | undefined;
+    const lifetime = new AbortController();
+    devServers[0]!.stop.mockImplementationOnce(async () => {
+      // Let stopServer register this teardown before release joins the same promise.
+      await new Promise<void>(resolve => { finish = resolve; });
+      devServers[0]!.set('stopped');
+      if (action === 'abort') lifetime.abort();
+      else releasing = host.release(ctx.runId);
+    });
+    const stopping = host.stopPreview(ctx.runId, { port: 5173, restart: false }, lifetime.signal);
+    finish();
+    expect(await stopping).toMatchObject({ ok: false, code: 'unavailable' });
+    await releasing;
+    expect(devServers).toHaveLength(1);
+  });
+
   it('does not reuse an approval revoked during stop even if registration text stays unchanged', async () => {
     const { host, ctx, devServers } = make();
     await host.open(ctx, fakeViewer(), { port: 5173 });
