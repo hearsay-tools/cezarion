@@ -372,6 +372,18 @@ function waitMode(values: Values): WaitMode {
   return oneOf<WaitMode>(values.mode, 'mode', ['any', 'all'], 'all');
 }
 
+function listLimit(values: Values): number {
+  return positiveInt(values.limit, 'limit', 1_000) ?? 20;
+}
+
+function logSince(values: Values): number {
+  return nonNegativeInt(values.since, 'since') ?? 0;
+}
+
+function logMaxChars(values: Values): number {
+  return positiveInt(values['max-chars'], 'max-chars', 1_000_000) ?? 8_000;
+}
+
 function statuses(value: string | boolean | undefined) {
   if (typeof value !== 'string') return undefined;
   const list = value.split(',').map((entry) => entry.trim()).filter(Boolean);
@@ -397,11 +409,11 @@ function validateFlags(name: string, values: Values): void {
   // Strict parseArgs gives each flag only to the operations that list it.
   if (values.off && (values.message !== undefined || values['message-file'] !== undefined)) usageError('--off takes no note');
   statuses(values.status);
-  positiveInt(values.limit, 'limit', 1_000);
+  listLimit(values);
   waitMode(values);
   waitUntil(values);
-  nonNegativeInt(values.since, 'since');
-  positiveInt(values['max-chars'], 'max-chars', 1_000_000);
+  logSince(values);
+  logMaxChars(values);
   if (name === 'wait' || name === 'log' || values.wait) timeoutMs(values);
 }
 
@@ -482,14 +494,14 @@ async function start(cockpit: Cockpit, io: TaskIo, values: Values, task: string,
       ...(skill === undefined
         ? { workflow: (values.workflow as string | undefined) ?? 'quick-task' }
         : { steps: skillTaskSteps(skill) }),
-      ...(runner === undefined ? {} : { runner }),
-      ...(values.model === undefined ? {} : { model: values.model }),
-      ...(values.effort === undefined ? {} : { effort: values.effort }),
+      runner,
+      model: values.model,
+      effort: values.effort,
       ...(values.autonomous ? { autonomous: true } : {}),
       ...(values['archive-when-done'] ? { archiveWhenDone: true } : {}),
       ...(values['auto-merge-pr'] ? { autoMergePr: true } : {}),
       ...(values['no-worktree'] ? { worktree: false } : {}),
-      ...(notify === undefined ? {} : { notify }),
+      notify,
       clientRequestId: requestId,
     },
   });
@@ -503,8 +515,8 @@ async function start(cockpit: Cockpit, io: TaskIo, values: Values, task: string,
     created: result.status === 201,
     requestId,
     notify: run.data.notify === true,
-    ...(warning === undefined ? {} : { warning }),
-    ...(run.data.branch === undefined ? {} : { branch: run.data.branch }),
+    warning,
+    branch: run.data.branch,
   };
   if (waitMs === undefined) { print(started); return EXIT.ok; }
   const waited = await waitForRuns(cockpit, [run.data.id], { mode: 'all', until: waitUntil(values), timeoutMs: waitMs, pollMs: io.pollMs });
@@ -515,7 +527,7 @@ async function start(cockpit: Cockpit, io: TaskIo, values: Values, task: string,
 
 async function setNotify(cockpit: Cockpit, id: string, notify: boolean, message: string | undefined): Promise<RunRecord> {
   const result = await request(cockpit, `/runs/${encodeURIComponent(id)}/notify`, {
-    body: { notify, ...(message === undefined ? {} : { message }) },
+    body: { notify, message },
   });
   if (result.status !== 200) refuse(result);
   const run = runRecordSchema.safeParse(result.data);
@@ -571,8 +583,8 @@ async function execute(
       return waited.exitCode;
     }
     case 'log': {
-      const since = nonNegativeInt(values.since, 'since') ?? 0;
-      const maxChars = positiveInt(values['max-chars'], 'max-chars', 1_000_000) ?? 8_000;
+      const since = logSince(values);
+      const maxChars = logMaxChars(values);
       // An unknown run is the history route's 404, passed through. Without --follow the replay
       // ends at its boundary; the deadline is only a backstop there.
       return readLog(cockpit, id, {
@@ -590,7 +602,7 @@ async function execute(
     }
     case 'list': {
       const wanted = statuses(values.status);
-      const limit = positiveInt(values.limit, 'limit', 1_000) ?? 20;
+      const limit = listLimit(values);
       const listed = <T extends RunSummary | ApiRun>(runs: T[]): T[] => runs
         .filter((run) => workerParent(run) === undefined)
         .filter((run) => values.all || !run.archived)
