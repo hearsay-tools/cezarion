@@ -9,6 +9,22 @@
   },
   {
     "file": "packages/cezar/src/server/repo-branches.ts",
+    "function": "classifyBranches",
+    "mutator": "ConditionalExpression",
+    "original": "!branch",
+    "replacement": "false",
+    "reason": "The map is read only with nonempty local head names, so undefined or empty branch keys cannot match; the guard remains for TypeScript narrowing."
+  },
+  {
+    "file": "packages/cezar/src/server/repo-branches.ts",
+    "function": "classifyBranches",
+    "mutator": "LogicalOperator",
+    "original": "!pr || !run",
+    "replacement": "!pr && !run",
+    "reason": "The PR find checks has() on the same unchanged map and key that supplies run, so run exists exactly when pr exists; the guard keeps TypeScript narrowing."
+  },
+  {
+    "file": "packages/cezar/src/server/repo-branches.ts",
     "function": "deleteBranches",
     "mutator": "ObjectLiteral",
     "original": "{ diffStats: false }",
@@ -46,6 +62,30 @@
     "original": "!entry || !tip",
     "replacement": "!entry && !tip",
     "reason": "The payload branches and tips are built one-to-one from the same heads, so entry exists exactly when tip exists."
+  },
+  {
+    "file": "packages/cezar/src/server/repo-branches.ts",
+    "function": "forkPoints",
+    "mutator": "StringLiteral",
+    "original": "''",
+    "replacement": "\"Stryker was here!\"",
+    "reason": "The first selector default exists for the type checker; the matching sha default cannot affect creationSha because an absent sha leaves an empty subject, which always returns null (two matches)."
+  },
+  {
+    "file": "packages/cezar/src/server/repo-branches.ts",
+    "function": "localHeads",
+    "mutator": "StringLiteral",
+    "original": "''",
+    "replacement": "\"Stryker was here!\"",
+    "reason": "The first-name default exists only for the type checker because split always has a first string; this entry also matches four killed metadata/comparison mutants that the tests still guard (five matches)."
+  },
+  {
+    "file": "packages/cezar/src/server/repo-branches.ts",
+    "function": "mergedPrBranches",
+    "mutator": "ArrayDeclaration",
+    "original": "[]",
+    "replacement": "[\"Stryker was here\"]",
+    "reason": "A fallback string has no merged state and is skipped; this also matches the killed merged-list accumulation mutant that the tests still guard (two matches)."
   },
   {
     "file": "packages/web/src/lib/use-search-params-writer.ts",
