@@ -320,7 +320,7 @@ describe('the branch classifier (issue 08 §A)', () => {
     const { payload } = await classesOf();
     const rows = payload.branches.filter((row) => row.name.startsWith('cez/'));
     expect(rows.map((row) => row.name)).toEqual(['cez/new', 'cez/a', 'cez/z']);
-    expect(rows[0]?.lastCommit).toEqual({ sha: await git(root, 'rev-parse', 'cez/new'), subject: 'cez/new', at: '2025-02-01T00:00:00+00:00' });
+    expect(rows[0]?.lastCommit).toEqual({ sha: await git(root, 'rev-parse', 'cez/new'), subject: 'cez/new', at: await git(root, 'for-each-ref', '--format=%(committerdate:iso-strict)', 'refs/heads/cez/new') });
   });
 
   it('protects a reported current branch even when the checkout is detached', async () => {
