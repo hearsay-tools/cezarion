@@ -92,6 +92,8 @@ function prepareUpdate(run: RunRecord, patch: RecordPatch, hooks: UpdateHooks) {
 export function stageDurableUpdate(run: RunRecord, patch: RecordPatch, hooks: UpdateHooks): RunRecord {
   const { normalized, archived } = prepareUpdate(run, patch, hooks);
   const next = { ...run, ...redactPatch(normalized, hooks.redact) };
+  // Both write paths resolve an edited task the same way (hearsay-tools/cezarion#2323).
+  if (normalized.task !== undefined) resolveEditedTaskRefs(next, hooks);
   if (archived !== undefined) stageArchiveFields(next, archived, new Date().toISOString(), hooks.withdrawHold, hooks.clearPin);
   return next;
 }

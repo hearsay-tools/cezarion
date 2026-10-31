@@ -101,15 +101,18 @@ describe('record write paths without a database', () => {
     expect(run).toEqual(before);
   });
 
-  it.each([true, false])('resolves task refs only on the debounced path=%s', debounced => {
+  it.each([true, false])('resolves task refs on both paths, debounced=%s (hearsay-tools/cezarion#2323)', debounced => {
     const run = makeRunRecord({ referencedPrCandidates: [url], referencedIssueCandidates: [issue], autoResumeAt: at });
+    const before = structuredClone(run);
     const log: string[] = [];
     const stage = debounced ? stageDebouncedUpdate : stageDurableUpdate;
     const next = stage(run, { task: 'edited', status: RUN_STATUS.running }, hooks(log)) ?? run;
-    expect(log).toEqual(debounced ? ['collect-pr', 'collect-issue', 'resolve-pr', 'resolve-issue', 'rescope', 'touch'] : []);
-    expect(next.referencedPullRequestUrl).toBe(debounced ? url : undefined);
-    expect(next.issueNumber).toBe(debounced ? 7 : undefined);
+    expect(log).toEqual(['collect-pr', 'collect-issue', 'resolve-pr', 'resolve-issue', 'rescope', ...(debounced ? ['touch'] : [])]);
+    expect(next.referencedPullRequestUrl).toBe(url);
+    expect(next.issueNumber).toBe(7);
+    // The durable path stages a copy: the commit retires the stale resume and replaces the held record.
     expect(next.autoResumeAt).toBe(debounced ? undefined : at);
+    if (!debounced) expect(run).toEqual(before);
   });
 
   it.each([undefined, issue])('revokes or updates a number seeded by task resolution: %s', resolved => {

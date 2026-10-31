@@ -1886,6 +1886,49 @@ describe("RunStore — a task never adopts another repository's ref (#945)", () 
       expect(run.referencedIssueUrl).toBe(foreignIssue);
       store.flush();
     });
+
+    // One rule for both write paths (hearsay-tools/cezarion#2323): a durable patch that edits the
+    // task resolves its references exactly as the debounced edit does.
+    const referenceFields = (record: RunRecord | undefined) => ({
+      referencedPullRequestUrl: record?.referencedPullRequestUrl,
+      referencedIssueUrl: record?.referencedIssueUrl,
+      referencedPrCandidates: record?.referencedPrCandidates,
+      referencedIssueCandidates: record?.referencedIssueCandidates,
+      issueNumber: record?.issueNumber,
+      referencedIssueNumberSeeded: record?.referencedIssueNumberSeeded,
+    });
+    const secondPr = 'https://github.com/other/repo/pull/44';
+    const secondIssue = 'https://github.com/other/repo/issues/45';
+    const editCases = [
+      { name: 'an added URL', task: 'fix the bug', evidence: undefined, edit: `review ${foreignPr} and ${foreignIssue}`,
+        expected: { referencedPullRequestUrl: foreignPr, referencedIssueUrl: foreignIssue, referencedPrCandidates: [foreignPr],
+          referencedIssueCandidates: [foreignIssue], issueNumber: 43, referencedIssueNumberSeeded: true } },
+      { name: 'removed corroboration', task: 'review other/repo', evidence: `${foreignPr} ${foreignIssue}`, edit: 'fix the local bug',
+        expected: { referencedPullRequestUrl: undefined, referencedIssueUrl: undefined, referencedPrCandidates: [foreignPr],
+          referencedIssueCandidates: [foreignIssue], issueNumber: undefined, referencedIssueNumberSeeded: undefined } },
+      { name: 'an ambiguous reference', task: 'fix the bug', evidence: undefined,
+        edit: `compare ${foreignPr} ${secondPr} ${foreignIssue} ${secondIssue}`,
+        expected: { referencedPullRequestUrl: undefined, referencedIssueUrl: undefined, referencedPrCandidates: [foreignPr, secondPr],
+          referencedIssueCandidates: [foreignIssue, secondIssue], issueNumber: undefined, referencedIssueNumberSeeded: undefined } },
+    ] as const;
+    const writePaths: Array<{ path: string; extra: Partial<RunRecord> }> = [
+      { path: 'debounced', extra: {} },
+      { path: 'durable', extra: { handoffRecords: { autosave: [] } } },
+    ];
+    it.each(editCases.flatMap(edit => writePaths.map(write => ({ ...edit, ...write }))))(
+      'resolves $name on the $path path', ({ task, evidence, edit, extra, expected }) => {
+        const { store, run } = scopedRun(task);
+        if (evidence) store.appendEvent(run.id, { type: 'result', result: evidence });
+        const seen: Array<ReturnType<typeof referenceFields>> = [];
+        store.on('run', (record: RunRecord) => seen.push(referenceFields(record)));
+
+        store.updateRun(run.id, { task: edit, ...extra });
+        store.flush();
+
+        expect(referenceFields(store.getRun(run.id))).toEqual(expected);
+        expect(seen.at(-1)).toEqual(expected);
+        expect(referenceFields(readPersistedRuns(dataDir)[0])).toEqual(expected);
+      });
   });
 
   describe('prompt repository boundaries', () => {
