@@ -88,6 +88,30 @@
     "reason": "A fallback string has no merged state and is skipped; this also matches the killed merged-list accumulation mutant that the tests still guard (two matches)."
   },
   {
+    "file": "packages/cezar/src/task-cli/cli.ts",
+    "function": "nonNegativeInt",
+    "mutator": "ConditionalExpression",
+    "original": "typeof value !== 'string'",
+    "replacement": "false",
+    "reason": "parseArgs supplies string or undefined for numeric flags; the string check narrows for TypeScript and any non-string still fails the integer pattern."
+  },
+  {
+    "file": "packages/cezar/src/task-cli/cli.ts",
+    "function": "parseOperation",
+    "mutator": "StringLiteral",
+    "original": "'invalid arguments'",
+    "replacement": "\"\"",
+    "reason": "node:util parseArgs throws Error; the unknown catch fallback exists only for TypeScript safety."
+  },
+  {
+    "file": "packages/cezar/src/task-cli/cli.ts",
+    "function": "positiveInt",
+    "mutator": "ConditionalExpression",
+    "original": "typeof value !== 'string'",
+    "replacement": "false",
+    "reason": "parseArgs supplies string or undefined for numeric flags; the string check narrows for TypeScript and any non-string still fails the integer pattern."
+  },
+  {
     "file": "packages/contract/src/attention.ts",
     "function": "(module)",
     "mutator": "StringLiteral",
