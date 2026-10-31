@@ -1,6 +1,9 @@
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_WORKTREE_RETENTION } from './config.ts';
-import { reconcileServeWorktrees, recoverServeProject, warnServeBind, createServeApplicationUpdate, printServeBanner, restartServe, stopServe } from './serve-boot.ts';
+import { reconcileServeWorktrees, recoverServeProject, warnServeBind, createServeApplicationUpdate, printServeBanner, restartServe, stopServe, createServeSelfUpdate } from './serve-boot.ts';
+import * as sessionProcesses from './core/session-process.ts';
 import { spawnSessionLeader } from './core/session-process.ts';
 import type { RunStore } from './runs/store.ts';
 import type { RunManager } from './workflows/run.ts';
@@ -11,6 +14,9 @@ import type { detectEnvironment } from './core/backend-detect.ts';
 import type { startServer } from './server/server.ts';
 import { ApplicationUpdateService } from './application-update/service.ts';
 import { armRestartHelper } from './application-update/launcher.ts';
+import { SelfUpdateService } from './self-update/service.ts';
+import { restartProcess } from './self-update/restart.ts';
+import type { PreviewHost } from './preview/host.ts';
 
 function reconcileFixture(unavailable = false) {
   const store = { unavailable, listRunIds: vi.fn(() => ['live-run']) } as unknown as RunStore;
@@ -72,6 +78,8 @@ describe('reconcileServeWorktrees', () => {
 
 vi.mock('./application-update/service.ts', () => ({ ApplicationUpdateService: vi.fn(class {}) }));
 vi.mock('./application-update/launcher.ts', () => ({ armRestartHelper: vi.fn() }));
+vi.mock('./self-update/service.ts', () => ({ SelfUpdateService: vi.fn(class {}) }));
+vi.mock('./self-update/restart.ts', async (original) => ({ ...await original<typeof import('./self-update/restart.ts')>(), restartProcess: vi.fn() }));
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.clearAllMocks(); });
 
@@ -189,6 +197,42 @@ describe('createServeApplicationUpdate', () => {
     expect(shutdownForRestart).toHaveBeenCalledOnce();
   });
 
+  it.each([
+    { npmBin: '/npm', prefix: '', cache: '/cache' },
+    { npmBin: '/npm', prefix: '/prefix', cache: '' },
+  ])('requires both npm paths outside dry-run (%j)', (metadata) => {
+    vi.stubEnv('CEZ_DRY_RUN', '0');
+    expect(createServeApplicationUpdate('/repo', {}, vi.fn(), () => metadata)).toBeUndefined();
+    expect(ApplicationUpdateService).not.toHaveBeenCalled();
+  });
+
+  it('uses discovered paths in dry-run and reads the latest version on each call', async () => {
+    vi.stubEnv('CEZ_DRY_RUN', '1');
+    const update: { latest?: string } = {};
+    const getServer = vi.fn(() => ({ address: () => ({ address: '127.0.0.1', port: 5432 }) })) as unknown as () => ReturnType<typeof startServer>;
+    const service = createServeApplicationUpdate('/different-repo', update, getServer,
+      () => ({ npmBin: '/custom/npm', prefix: '/custom/prefix', cache: '/custom/cache' }));
+    expect(service).toBeInstanceOf(ApplicationUpdateService);
+    const options = vi.mocked(ApplicationUpdateService).mock.calls[0]![0];
+    expect(options).toMatchObject({ npmPrefix: '/custom/prefix', npmCache: '/custom/cache', npmBin: '/custom/npm', dryRun: true });
+    expect(options.targetVersion()).toBeUndefined();
+    update.latest = '3.0.0';
+    expect(options.targetVersion()).toBe('3.0.0');
+    const plan = {} as Parameters<typeof armRestartHelper>[0];
+    await options.armRestart!(plan);
+    expect(armRestartHelper).toHaveBeenCalledWith(plan, { repoRoot: '/different-repo', host: '127.0.0.1', port: 5432, npmBin: '/custom/npm' });
+  });
+
+  it('arms the restart helper with the default npm command in dry-run', async () => {
+    vi.stubEnv('CEZ_DRY_RUN', '1');
+    const getServer = vi.fn(() => ({ address: () => ({ address: '127.0.0.1', port: 4321 }) })) as unknown as () => ReturnType<typeof startServer>;
+    createServeApplicationUpdate('/repo', {}, getServer, () => undefined);
+    const options = vi.mocked(ApplicationUpdateService).mock.calls[0]![0];
+    const plan = {} as Parameters<typeof armRestartHelper>[0];
+    await options.armRestart!(plan);
+    expect(armRestartHelper).toHaveBeenCalledWith(plan, { repoRoot: '/repo', host: '127.0.0.1', port: 4321, npmBin: 'npm' });
+  });
+
   it('uses dry-run defaults when npm is missing', () => {
     vi.stubEnv('CEZ_DRY_RUN', '1');
     createServeApplicationUpdate('/repo', {}, vi.fn(), () => undefined);
@@ -254,5 +298,125 @@ describe('stopServe', () => {
     await stopServe(server, 'SIGHUP', { store, forward: (signal) => order.push(`forward ${signal}`) });
     expect(store.close).not.toHaveBeenCalled();
     expect(order).toEqual(['shutdown', 'forward SIGHUP']);
+  });
+});
+
+describe('serve boot mutation regressions', () => {
+  it('passes the preview host to worktree reclamation', async () => {
+    const f = reconcileFixture();
+    const previewHost = {} as PreviewHost;
+    await reconcileServeWorktrees('/repo', f.repo, f.store, f.manager, previewHost, f.steps);
+    expect(f.steps.reclaimWorktrees).toHaveBeenCalledWith('/repo', f.store, 7, { previewHost });
+  });
+
+  it('resolves the application package and launch entry, including absent argv', () => {
+    vi.stubEnv('CEZ_DRY_RUN', '1');
+    const argv = process.argv;
+    try {
+      for (const args of [['node', '/custom/entry.js'], []]) {
+        process.argv = args;
+        createServeApplicationUpdate('/repo', {}, vi.fn(), () => undefined);
+        const options = vi.mocked(ApplicationUpdateService).mock.lastCall![0];
+        expect(options.packageRoot).toBe(join(dirname(fileURLToPath(import.meta.url)), '..'));
+        expect(options.launchEntry).toBe(resolve(args[1] ?? ''));
+      }
+    } finally { process.argv = argv; }
+  });
+
+  it.each([false, true])('constructs self-update with live counts and path visibility (remote=%s)', (remote) => {
+    vi.stubEnv('CEZ_REMOTE', remote ? '1' : '0');
+    vi.stubEnv('CEZ_SUPERVISED', '1');
+    const f = recoveryFixture();
+    const getServer = vi.fn();
+    expect(createServeSelfUpdate({ pkgName: 'test-package', version: '1.2.3', store: f.store, bindHost: undefined }, getServer)).toBeInstanceOf(SelfUpdateService);
+    expect(getServer).not.toHaveBeenCalled();
+    const options = vi.mocked(SelfUpdateService).mock.lastCall![0];
+    expect(options).toMatchObject({ pkgName: 'test-package', version: '1.2.3', supervised: true, entry: resolve(process.argv[1] ?? '') });
+    expect(options.activeRuns!()).toBe(3);
+    vi.mocked(f.store.listRuns).mockReturnValue([]);
+    expect(options.activeRuns!()).toBe(0);
+    expect(options.trimPaths!()).toBe(remote);
+  });
+
+  it('uses the working directory when self-update has no launch entry', () => {
+    const argv = process.argv;
+    try {
+      process.argv = [];
+      createServeSelfUpdate({ pkgName: 'test', version: '1', store: recoveryFixture().store, bindHost: undefined }, vi.fn());
+      expect(vi.mocked(SelfUpdateService).mock.lastCall![0].entry).toBe(process.cwd());
+    } finally { process.argv = argv; }
+  });
+
+  it('shuts down the latest server before self-update restarts with the original arguments', async () => {
+    vi.stubEnv('CEZ_SUPERVISED', '0');
+    vi.stubEnv('CEZ_DESKTOP', '0');
+    const f = recoveryFixture();
+    const shutdownForRestart = vi.fn().mockResolvedValue(undefined);
+    const getServer = vi.fn();
+    createServeSelfUpdate({ pkgName: 'test', version: '1', store: f.store, bindHost: '127.0.0.1' }, getServer);
+    const options = vi.mocked(SelfUpdateService).mock.lastCall![0];
+    getServer.mockReturnValue({ address: () => ({ address: '127.0.0.1', port: 5432 }), shutdownForRestart });
+    options.restart();
+    // bound: the restart callback returns void; observe its injected restart dependency after shutdown.
+    await vi.waitFor(() => expect(restartProcess).toHaveBeenCalledOnce(), { timeout: 10_000 });
+    expect(shutdownForRestart).toHaveBeenCalledBefore(vi.mocked(restartProcess));
+    expect(restartProcess).toHaveBeenCalledWith({ server: null, port: 5432, args: process.argv.slice(2), supervised: false });
+  });
+
+  it('keeps the boot store in application restart cleanup when server shutdown fails', async () => {
+    vi.stubEnv('CEZ_DRY_RUN', '1');
+    const close = vi.fn();
+    const forward = vi.spyOn(sessionProcesses, 'forwardToSessionGroups').mockImplementation(() => {});
+    const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    const server = { shutdownForRestart: vi.fn().mockRejectedValue(new Error('shutdown failed')) } as unknown as ReturnType<typeof startServer>;
+    createServeApplicationUpdate('/repo', {}, () => server, () => undefined, { close });
+    vi.mocked(ApplicationUpdateService).mock.lastCall![0].handoff!();
+    // bound: handoff returns void; process.exit is the completion signal after cleanup.
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0), { timeout: 10_000 });
+    expect(close).toHaveBeenCalledOnce();
+    expect(forward).toHaveBeenCalledWith('SIGTERM');
+    expect(close).toHaveBeenCalledBefore(forward);
+    expect(forward).toHaveBeenCalledBefore(exit);
+  });
+
+  it('keeps the boot store in self-update cleanup when server shutdown fails', async () => {
+    const f = recoveryFixture();
+    const close = vi.fn();
+    f.store.close = close;
+    const forward = vi.spyOn(sessionProcesses, 'forwardToSessionGroups').mockImplementation(() => {});
+    const server = { address: () => ({ address: '127.0.0.1', port: 4321 }), shutdownForRestart: vi.fn().mockRejectedValue(new Error('shutdown failed')) } as unknown as ReturnType<typeof startServer>;
+    createServeSelfUpdate({ pkgName: 'test', version: '1', store: f.store, bindHost: undefined }, () => server);
+    vi.mocked(SelfUpdateService).mock.lastCall![0].restart();
+    // bound: restart returns void; the injected restart process signals completed cleanup.
+    await vi.waitFor(() => expect(restartProcess).toHaveBeenCalledOnce(), { timeout: 10_000 });
+    expect(close).toHaveBeenCalledOnce();
+    expect(forward).toHaveBeenCalledWith('SIGTERM');
+    expect(close).toHaveBeenCalledBefore(forward);
+  });
+
+  it('uses SIGTERM by default and cancels its bound after successful shutdown', async () => {
+    vi.useFakeTimers();
+    try {
+      const forward = vi.fn();
+      await stopServe({ shutdownForRestart: vi.fn().mockResolvedValue(undefined) }, undefined, { forward });
+      expect(forward).toHaveBeenCalledWith('SIGTERM');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('allows shutdown to reject after its bound without an unhandled refusal', async () => {
+    vi.useFakeTimers();
+    try {
+      let reject!: (reason: Error) => void;
+      const shutdownForRestart = vi.fn(() => new Promise<void>((_resolve, refuse) => { reject = refuse; }));
+      const forward = vi.fn();
+      const stopping = stopServe({ shutdownForRestart }, 'SIGTERM', { forward, boundMs: 50 });
+      await vi.advanceTimersByTimeAsync(50);
+      await stopping;
+      expect(forward).toHaveBeenCalledWith('SIGTERM');
+      reject(new Error('late shutdown refusal'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
   });
 });

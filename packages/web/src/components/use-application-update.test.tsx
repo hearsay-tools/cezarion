@@ -345,3 +345,99 @@ it('dismisses the keyboard tooltip before Tab blur, while other keys keep it ope
   await waitFor(() => expect(openTooltip()).toBeNull())
   expect(document.activeElement).toBe(trigger)
 })
+
+it('allows another Apply only after the previous callback settles', async () => {
+  let finish!: () => void
+  const apply = vi.fn(() => new Promise<void>(resolve => { finish = resolve }))
+  render(<ApplicationUpdateControl version="1.0.0" latestVersion="2.0.0"
+    state={{ status: 'idle', supported: true }} onApplyUpdate={apply} />)
+  const button = screen.getByRole('button', { name: 'Update application' })
+  fireEvent.click(button)
+  fireEvent.click(button)
+  expect(apply).toHaveBeenCalledTimes(1)
+  await act(async () => finish())
+  fireEvent.click(button)
+  expect(apply).toHaveBeenCalledTimes(2)
+  await act(async () => finish())
+})
+
+it('cancels Restart and restores focus before allowing a confirmed restart', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  const restart = vi.fn().mockResolvedValue(undefined)
+  render(<ApplicationUpdateControl version="1.0.0" latestVersion="2.0.0"
+    state={{ status: 'ready', supported: true }} onRestart={restart} />)
+  const button = screen.getByRole('button', { name: 'Restart application' })
+  fireEvent.click(button)
+  fireEvent.click(screen.getByRole('button', { name: 'Restart Later' }))
+  expect(restart).not.toHaveBeenCalled()
+  await waitFor(() => expect(document.activeElement).toBe(button))
+  fireEvent.click(button)
+  fireEvent.click(screen.getByRole('button', { name: 'Restart Now' }))
+  await act(async () => {})
+  expect(restart).toHaveBeenCalledTimes(1)
+  expect(screen.queryByRole('alertdialog')).toBeNull()
+})
+
+it.each([
+  { status: 'idle', busy: true, offline: false, name: 'Update application' },
+  { status: 'idle', busy: false, offline: true, name: 'Update application' },
+  { status: 'preparing', busy: false, offline: false, name: 'Preparing update' },
+  { status: 'ready', busy: true, offline: false, name: 'Restart application' },
+  { status: 'ready', busy: false, offline: true, name: 'Restart application' },
+  { status: 'restarting', busy: false, offline: false, name: 'Reconnecting after restart' },
+] as const)('disables $name when status=$status busy=$busy offline=$offline', ({ status, busy, offline, name }) => {
+  const apply = vi.fn()
+  const restart = vi.fn()
+  render(<ApplicationUpdateControl version="1.0.0" latestVersion="2.0.0"
+    state={{ status, supported: true }} onApplyUpdate={apply} onRestart={restart} busy={busy} offline={offline} />)
+  const button = screen.getByRole('button', { name }) as HTMLButtonElement
+  expect(button.disabled).toBe(true)
+  fireEvent.click(button)
+  expect(apply).not.toHaveBeenCalled()
+  expect(restart).not.toHaveBeenCalled()
+  expect(screen.queryByRole('alertdialog')).toBeNull()
+})
+
+it.each([
+  { version: null, latestVersion: '2.0.0', supported: true },
+  { version: '1.0.0', latestVersion: null, supported: true },
+  { version: '2.0.0', latestVersion: '2.0.0', supported: true },
+  { version: '2.0.0', latestVersion: '1.0.0', supported: true },
+  { version: '1.0.0', latestVersion: '2.0.0', supported: false },
+])('hides an unavailable update action for %j', ({ version, latestVersion, supported }) => {
+  render(<ApplicationUpdateControl version={version} latestVersion={latestVersion}
+    state={{ status: 'idle', supported }} onApplyUpdate={vi.fn()} />)
+  expect(screen.queryByRole('button')).toBeNull()
+})
+
+it('does not offer Apply without a callback and disables Restart without one', () => {
+  const { rerender } = render(<ApplicationUpdateControl version="1.0.0" latestVersion="2.0.0" state={{ status: 'idle', supported: true }} />)
+  expect(screen.queryByRole('button')).toBeNull()
+  rerender(<ApplicationUpdateControl version="1.0.0" latestVersion="2.0.0" state={{ status: 'ready', supported: true }} />)
+  expect((screen.getByRole('button', { name: 'Restart application' }) as HTMLButtonElement).disabled).toBe(true)
+})
+
+it.each([
+  [{ status: 'error', supported: true }, {}, 'Update failed.'],
+  [{ status: 'error', supported: true, message: 'Preparation refused' }, {}, 'Preparation refused'],
+  [{ status: 'error', supported: true, message: 'Server failure' }, { error: 'Request failure', offline: true }, 'Request failure'],
+  [{ status: 'idle', supported: true }, { offline: true, busy: true }, 'Connection lost. Reconnect to continue.'],
+  [{ status: 'preparing', supported: true }, {}, 'Preparing update.'],
+  [{ status: 'idle', supported: true }, { busy: true }, 'Preparing update.'],
+  [{ status: 'restarting', supported: true }, {}, 'Restarting. Reconnecting to the cockpit.'],
+] as const)('explains the update state %j with %j', (state, props, message) => {
+  render(<ApplicationUpdateFeedback state={state} {...props} />)
+  expect(screen.getByRole('status').textContent).toContain(message)
+})
+
+it.each([undefined, 'Update this installation manually.', 'Use the package manager.'])('explains manual installation with message %s', (message) => {
+  render(<ApplicationUpdateFeedback version="1.0.0" latestVersion="2.0.0" state={{ status: 'idle', supported: false, message }} />)
+  const text = screen.getByRole('status').textContent
+  expect(text).toContain('In-app updates are unavailable for this installation.')
+  expect(text).toContain(message === 'Use the package manager.' ? message : 'Install the newer release using your original installation method, then restart Cezarion.')
+})
+
+it('shows no feedback for a supported idle installation', () => {
+  render(<ApplicationUpdateFeedback version="1.0.0" latestVersion="2.0.0" state={{ status: 'idle', supported: true }} />)
+  expect(screen.queryByRole('status')).toBeNull()
+})

@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -71,6 +71,30 @@ describe('run open-in target dispatch and refusals', () => {
     const res = await post('default', 'image.png');
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: 'no worktree — this task ran directly in the repo working tree' });
+    expect(openFile).not.toHaveBeenCalled();
+  });
+
+  it('preserves the image path when its default app cannot open', async () => {
+    const worktree = join(root, 'worktree');
+    mkdirSync(worktree);
+    writeFileSync(join(worktree, 'image.png'), 'image');
+    store.updateRun(runId, { worktreePath: worktree });
+    openFile.mockResolvedValueOnce(false);
+    const res = await post('default', 'image.png');
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'could not open image.png', path: join(worktree, 'image.png') });
+    expect(openFile).toHaveBeenCalledWith(join(worktree, 'image.png'));
+    expect(openApp).not.toHaveBeenCalled();
+    expect(openTerminal).not.toHaveBeenCalled();
+  });
+
+  it('returns the exact directory refusal without opening the default app', async () => {
+    const worktree = join(root, 'worktree');
+    mkdirSync(join(worktree, 'folder'), { recursive: true });
+    store.updateRun(runId, { worktreePath: worktree });
+    const res = await post('default', 'folder');
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'not a file: folder' });
     expect(openFile).not.toHaveBeenCalled();
   });
 
