@@ -271,3 +271,6 @@ export interface ForgeDriver {
   /** Web URL for a ref on the forge, or null when the remote isn't parseable. */
   viewUrl(kind: ForgeRefKind, ref: string | number): string | null;
 }
+
+export type { GithubData } from '@open-mercato/cezar-contract/github';
+export type { GithubChecksData, GithubRefStatusData, ReferenceStatus, RepoHandleDiscovery } from './github.ts';

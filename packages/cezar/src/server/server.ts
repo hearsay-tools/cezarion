@@ -274,14 +274,14 @@ import { attachUpgradeRouter } from './upgrade-router.ts';
 import { createPreviewSockets } from './preview-sockets.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
-import { parseRemote, resolveForge, forgeWebRoot, resolveForgeRoot, type ForgeFactory, type ForgeAvailability } from './forge/index.ts';
-import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubCommentCounts, fetchGithubComments, fetchGithubItem, forgetGithubItem, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
+import { parseRemote, forgeKindOfRemote, forgeRepositoryUrl, resolveForge, forgeWebRoot, resolveForgeRoot, type ForgeFactory, type ForgeAvailability } from './forge/index.ts';
+import { refNumberFromUrl } from '@open-mercato/cezar-contract/run-search';
+import { GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './forge/index.ts';
 import type { CockpitOwnership } from './cockpit-ownership.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { openInTerminal } from './open-in-terminal.ts';
 import { openRunApp, openRunCli, openRunDefaultApp } from './open-in-targets.ts';
 import { agentCliRunner, detectOpenTargets, openFileInDefaultApp, openInApp } from './open-in-app.ts';
-import { createDraftPr } from './pr.ts';
 import { ProviderRuntimeAuthObserver } from './provider-auth-runtime.ts';
 import {
   providerForExistingRun,
@@ -3112,8 +3112,9 @@ export function createApp(deps: ServerDeps) {
       void (async () => {
         check.status = 'running';
         try {
-          const remote = parseRemote((await getRepoInfo(project.root))?.remote ?? '');
-          if (!remote || remote.host !== 'github.com') throw new Error('No GitHub remote is configured');
+          const repoRemote = (await getRepoInfo(project.root))?.remote;
+          const remote = parseRemote(repoRemote ?? '');
+          if (!remote || forgeKindOfRemote(repoRemote) !== 'github') throw new Error('No GitHub remote is configured');
           const scheduler = new ProjectAutomationScheduler({
             projectId: project.id,
             store,
@@ -4023,14 +4024,8 @@ export function createApp(deps: ServerDeps) {
       if (!worktree) return c.json({ error: NO_WORKTREE }, 409);
       const result = await pushCurrentBranch(worktree);
       if (!result.ok) return c.json({ error: result.error }, 409);
-      // A push is the event that changes what the chips say about this task's pull requests —
-      // its checks start again, and its MERGEABILITY is recomputed from scratch. Both are cached
-      // per number, so without this the cockpit would keep showing the pre-push answer (up to a
-      // minute of "Ready to merge" for a branch that has just been rewritten) about a push the
-      // user watched this server make.
-      const remote = parseRemote((await getRepoInfo(repoRoot))?.remote ?? '');
-      const repoBase = remote?.host === 'github.com' ? `https://github.com/${remote.owner}/${remote.repo}` : undefined;
-      for (const number of ownPullRequestNumbers(run, repoBase)) forgetRefStatus(repoRoot, number);
+      const repoBase = forgeWebRoot((await getRepoInfo(repoRoot))?.remote) ?? undefined;
+      resolveForgeRoot(repoRoot, deps.forgeFactory).branchPushed(ownPullRequestNumbers(run, repoBase));
       return c.json({
         pushed: true,
         branch: result.branch,
@@ -4064,7 +4059,7 @@ export function createApp(deps: ServerDeps) {
             400,
           );
         }
-        const outcome = await createDraftPr({
+        const outcome = await resolveForgeRoot(repoRoot, deps.forgeFactory).createPR({
           repoRoot,
           run,
           handoffText: readHandoff(dataDir, id),
@@ -4072,11 +4067,6 @@ export function createApp(deps: ServerDeps) {
         if (!outcome.ok) {
           return c.json({ error: outcome.error, manual: `git merge ${run.branch}` }, 409);
         }
-        // A number the cockpit asked about BEFORE the pull request existed is cached as "this
-        // repository has no such number" — which is exactly what a `CEZ:PR=901` marker declared
-        // ahead of the push looks like. It exists now.
-        const createdNumber = refNumberFromUrl(outcome.url);
-        if (createdNumber !== null) forgetRefStatus(repoRoot, createdNumber);
         store.updateRun(id, {
           pullRequestUrl: outcome.url,
           status: 'done',
@@ -4489,7 +4479,9 @@ export function createApp(deps: ServerDeps) {
         const { root: repoRoot } = c.get('project');
         const query = c.req.valid('query');
         const limit = Number.parseInt(query.limit ?? '', 10);
-        return c.json(await fetchGithub(repoRoot, query.refresh === '1', Number.isFinite(limit) ? limit : 30, {
+        return c.json(await resolveForgeRoot(repoRoot, deps.forgeFactory).list({
+          refresh: query.refresh === '1',
+          limit: Number.isFinite(limit) ? limit : 30,
           issuesCursor: query.issuesCursor,
           prsCursor: query.prsCursor,
           issuesDone: query.issuesDone === '1',
@@ -4499,7 +4491,7 @@ export function createApp(deps: ServerDeps) {
     )
 
     .get('/github/projects', queryZodValidator(githubProjectsQuerySchema), async (c) => {
-      return c.json(await fetchGithubProjects(c.get('project').root, c.req.valid('query').generation));
+      return c.json(await resolveForgeRoot(c.get('project').root, deps.forgeFactory).projects(c.req.valid('query').generation));
     })
 
     .get('/github/comments/:kind/:number', queryZodValidator(refreshQuery), async (c) => {
@@ -4510,7 +4502,7 @@ export function createApp(deps: ServerDeps) {
       });
       if (!parsed.success) return c.json({ error: 'invalid kind or number' }, 400);
       return c.json(
-        await fetchGithubComments(repoRoot, parsed.data.kind, parsed.data.number, c.req.valid('query').refresh === '1'),
+        await resolveForgeRoot(repoRoot, deps.forgeFactory).comments(parsed.data.kind, parsed.data.number, { refresh: c.req.valid('query').refresh === '1' }),
       );
     })
 
@@ -4524,7 +4516,7 @@ export function createApp(deps: ServerDeps) {
       async (c) => {
         const { root: repoRoot } = c.get('project');
         const { kind, number } = c.req.valid('param');
-        return c.json(await fetchGithubItem(repoRoot, kind, number, c.req.valid('query').refresh === '1'));
+        return c.json(await resolveForgeRoot(repoRoot, deps.forgeFactory).item(kind, number, { refresh: c.req.valid('query').refresh === '1' }));
       },
     )
 
@@ -4546,7 +4538,7 @@ export function createApp(deps: ServerDeps) {
         if (!Number.isInteger(n) || n <= 0 || String(n) !== part) return c.json({ error: 'invalid prs query' }, 400);
         numbers.push(n);
       }
-      return c.json(await fetchGithubChecks(repoRoot, numbers));
+      return c.json(await resolveForgeRoot(repoRoot, deps.forgeFactory).checks(numbers));
     })
 
     // Comment counts for loaded list rows (hearsay-tools/cezarion#1183). The list defers them
@@ -4555,7 +4547,7 @@ export function createApp(deps: ServerDeps) {
     // 400 on anything malformed, never a 5xx.
     .get('/github/comment-counts', queryZodValidator(githubCommentCountsQuerySchema, { message: 'invalid comment-counts query' }), async (c) => {
       const { kind, numbers, refresh } = c.req.valid('query');
-      return c.json(await fetchGithubCommentCounts(c.get('project').root, kind, numbers.split(',').map(Number), refresh === '1'));
+      return c.json(await resolveForgeRoot(c.get('project').root, deps.forgeFactory).commentCounts(kind, numbers.split(',').map(Number), { refresh: refresh === '1' }));
     })
 
     // Search across ALL states (#730). Additive sibling of `/github`, which lists the OPEN set
@@ -4572,7 +4564,7 @@ export function createApp(deps: ServerDeps) {
       async (c) => {
         const { root: repoRoot } = c.get('project');
         const { kind, q, limit } = c.req.valid('query');
-        return c.json(await searchGithubItems(repoRoot, kind, q, limit));
+        return c.json(await resolveForgeRoot(repoRoot, deps.forgeFactory).searchItems!(kind, q, limit === undefined ? {} : { limit }));
       },
     )
 
@@ -4593,7 +4585,7 @@ export function createApp(deps: ServerDeps) {
         if (parsedPrs.length === 0 && parsedIssues.length === 0) {
           return c.json({ error: 'missing prs or issues query' }, 400);
         }
-        return c.json(await fetchGithubRefStatus(repoRoot, { prs: parsedPrs, issues: parsedIssues }));
+        return c.json(await resolveForgeRoot(repoRoot, deps.forgeFactory).refStatus({ prs: parsedPrs, issues: parsedIssues }));
       },
     )
 
@@ -4622,12 +4614,6 @@ export function createApp(deps: ServerDeps) {
         if (!forge?.mergePR) return c.json({ error: 'GitHub merge is unavailable' }, 409);
         const result = await forge.mergePR(parsedNumber.data.number, body.data);
         if (result.merged) {
-          // We just changed this pull request, so what the ref-status cache holds about it is now
-          // known-stale — and its TTL would keep every chip showing the PRE-merge status for up to
-          // a minute after the user watched this server merge it. Forget it; the next reader asks
-          // the forge, gets `merged`, and then stops polling it at all.
-          forgetRefStatus(repoRoot, parsedNumber.data.number);
-          forgetGithubItem(repoRoot, 'pr', parsedNumber.data.number);
           return c.json(result);
         }
         return c.json(
@@ -4654,7 +4640,7 @@ export function createApp(deps: ServerDeps) {
         const parsed = { data: c.req.valid('param') };
         try {
           return c.json(
-            await fetchGithubPrDiff(repoRoot, parsed.data.number, c.req.valid('query').refresh === '1'),
+            await resolveForgeRoot(repoRoot, deps.forgeFactory).prDiff!(parsed.data.number, { refresh: c.req.valid('query').refresh === '1' }),
           );
         } catch (err) {
           if (err instanceof GithubPrNotFoundError) return c.json({ error: err.message }, 404);
@@ -5218,7 +5204,7 @@ export function createApp(deps: ServerDeps) {
           mentioned.push(...mentionedReferenceNumbers(run));
         }
         if (mentioned.length > 0) {
-          const cached = readCachedRefStatuses(project.root, mentioned);
+          const cached = resolveForgeRoot(project.root, deps.forgeFactory).cachedRefStatuses(mentioned);
           // Only when something was actually warm. A project key holding two empty maps is noise
           // that every consumer would have to look past, and it would blur the one rule this
           // payload has: absent means nothing is known.
@@ -5366,7 +5352,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     enabled: async project => resolveArchiveOnMerge(await loadConfig(project.root), await loadWorkspaceConfig()).enabled,
     repository: async project => {
       const repository = await resolveForgeRoot(project.root, deps.forgeFactory).discoverRepository();
-      return repository.status === 'resolved' ? `https://github.com/${repository.handle.owner}/${repository.handle.name}` : undefined;
+      return repository.status === 'resolved' ? forgeRepositoryUrl('github', repository.handle.owner, repository.handle.name) : undefined;
     },
     withStore: async (project, work) => {
       if (project.root === deps.repoRoot) return work(deps.store, id => deps.manager.isActive?.(id) ?? false, () => server.listening);
@@ -5381,7 +5367,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     withStore: (project, work) => archiveDeps.withStore(project, (store, _active, valid) => work(store, valid)),
     forge: async project => {
       const info = await getRepoInfo(project.root);
-      const driver = resolveForge(info);
+      const driver = resolveForge(info, deps.forgeFactory);
       const repository = info?.remote ? forgeWebRoot(info.remote) : null;
       return driver && repository ? { driver, repository } : undefined;
     },
@@ -5448,10 +5434,11 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   // a github.com remote, and only then does the project's handle poll.
   const automationProjects = new Map<string, { root: string; github?: { owner: string; repo: string } }>();
   const rememberAutomationProject = async (id: string, root: string): Promise<void> => {
-    const parsed = parseRemote((await getRepoInfo(root))?.remote ?? '');
+    const repoRemote = (await getRepoInfo(root))?.remote;
+    const parsed = parseRemote(repoRemote ?? '');
     automationProjects.set(id, {
       root,
-      ...(parsed?.host === 'github.com' ? { github: { owner: parsed.owner, repo: parsed.repo } } : {}),
+      ...(parsed && forgeKindOfRemote(repoRemote) === 'github' ? { github: { owner: parsed.owner, repo: parsed.repo } } : {}),
     });
   };
   const emitWorkspaceAutomationChange = (projectId: string) => (automationId: string, revision: number) =>

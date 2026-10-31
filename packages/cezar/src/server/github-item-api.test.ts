@@ -9,21 +9,22 @@ import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 
-// Wrap the two item functions so the route's wiring (refresh flag, cache invalidation on merge)
-// is observable while the real implementation still answers from the dry-run mock pools.
-const spies = vi.hoisted(() => ({ fetch: vi.fn(), forget: vi.fn() }));
-vi.mock('./github.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./github.ts')>();
-  spies.fetch.mockImplementation(actual.fetchGithubItem);
+// Observe route dispatch through the factory while the real driver answers dry-run items.
+import { resolveForgeRoot, resolveForge, forgeRepositoryUrl, type ForgeFactory } from './forge/index.ts';
+const spies = { fetch: vi.fn(), merge: vi.fn() };
+const forgeFactory: ForgeFactory = (root, repoRef) => {
+  const driver = repoRef
+    ? resolveForge({ root, branch: 'main', remote: forgeRepositoryUrl('github', repoRef.owner, repoRef.repo) })!
+    : resolveForgeRoot(root);
   return {
-    ...actual,
-    fetchGithubItem: (...args: Parameters<typeof actual.fetchGithubItem>) => spies.fetch(...args),
-    forgetGithubItem: (...args: Parameters<typeof actual.forgetGithubItem>) => {
-      spies.forget(...args);
-      return actual.forgetGithubItem(...args);
+    ...driver,
+    item: (kind, number, opts) => spies.fetch(root, kind, number, opts?.refresh),
+    mergePR: (number, input) => {
+      spies.merge(root, number, input);
+      return driver.mergePR!(number, input);
     },
   };
-});
+};
 
 import { createApp } from './server.ts';
 
@@ -47,8 +48,8 @@ describe('the github item API', () => {
   });
 
   beforeEach(() => {
-    spies.fetch.mockClear();
-    spies.forget.mockClear();
+    spies.fetch.mockReset().mockImplementation((root, kind, number, refresh) => resolveForgeRoot(root).item(kind, number, { refresh }));
+    spies.merge.mockClear();
     repoRoot = mkdtempSync(join(tmpdir(), 'cez-ghitem-'));
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     execFileSync('git', ['init', '-b', 'main'], { cwd: repoRoot });
@@ -57,7 +58,7 @@ describe('the github item API', () => {
     execFileSync('git', ['commit', '--allow-empty', '-m', 'init'], { cwd: repoRoot });
     execFileSync('git', ['remote', 'add', 'origin', 'https://github.com/acme/demo.git'], { cwd: repoRoot });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
+    app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', forgeFactory });
   });
   afterEach(() => {
     store.flush();
@@ -111,7 +112,7 @@ describe('the github item API', () => {
     expect(await res.json()).toEqual({ available: false, reason: 'gh CLI not found' });
   });
 
-  it('forgets the item cache entry when a merge succeeds', async () => {
+  it('dispatches a successful merge through the driver', async () => {
     const state = (await (await apiRequest(app, '/api/v1/github/prs/128/merge-state?refresh=1')).json()) as {
       mergeState: { headSha: string };
     };
@@ -121,6 +122,6 @@ describe('the github item API', () => {
       body: JSON.stringify({ method: 'squash', expectedHeadSha: state.mergeState.headSha }),
     });
     expect(merge.status).toBe(200);
-    expect(spies.forget).toHaveBeenCalledWith(expect.any(String), 'pr', 128);
+    expect(spies.merge).toHaveBeenCalledWith(expect.any(String), 128, { method: 'squash', expectedHeadSha: state.mergeState.headSha, overrideRules: false });
   });
 });

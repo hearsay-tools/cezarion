@@ -4,11 +4,14 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { runsIndexResponseSchema, runsSearchResponseSchema, type RunsIndexResponse } from '@open-mercato/cezar-contract/runs';
 import { readPersistedText, seedRuns } from '../runs/run-store.testkit.ts';
-const resolveRepoHandle = vi.hoisted(() => vi.fn());
-vi.mock('./forge/github.ts', async (importOriginal) => ({
-  ...await importOriginal<typeof import('./forge/github.ts')>(),
-  resolveRepoHandle,
-}));
+import { resolveForgeRoot } from './forge/index.ts';
+const resolveRepoHandle = vi.fn();
+const cachedRefStatuses = vi.fn(() => ({ prs: {}, issues: {} }));
+const forgeFactory = (root: string) => ({
+  ...resolveForgeRoot(root),
+  resolveRepository: (signal?: AbortSignal) => resolveRepoHandle(root, signal),
+  cachedRefStatuses,
+});
 
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
@@ -16,7 +19,6 @@ import { clearProjectProbeCache, listProjects, registerProject } from '../worksp
 import { ProjectContexts } from './project-context.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { createApp, type ServerDeps } from './server.ts';
-import { __seedRefStatusCacheForTests } from './forge/github.ts';
 
 /**
  * `GET /api/v1/workspace/runs-index` — the ⌘K palette's cross-project task finder.
@@ -52,6 +54,7 @@ describe('workspace runs index API', () => {
 
   beforeEach(() => {
     resolveRepoHandle.mockReset().mockResolvedValue(null);
+    cachedRefStatuses.mockReset().mockReturnValue({ prs: {}, issues: {} });
     home = mkdtempSync(join(realpathSync(tmpdir()), 'cez-runs-index-home-'));
     repoRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-runs-index-boot-'));
     otherRoot = mkdtempSync(join(realpathSync(tmpdir()), 'cez-runs-index-other-'));
@@ -71,7 +74,7 @@ describe('workspace runs index API', () => {
   });
 
   const makeApp = (over: Partial<ServerDeps> = {}) =>
-    createApp({ repoRoot, store, manager: { finishBlockedReason: () => 'no open session' } as unknown as RunManager, version: '0.0.0-test', ...over });
+    createApp({ repoRoot, store, manager: { finishBlockedReason: () => 'no open session' } as unknown as RunManager, version: '0.0.0-test', forgeFactory, ...over });
 
   const getIndex = async (over: Partial<ServerDeps> = {}): Promise<RunsIndexResponse> => {
     const res = await apiRequest(makeApp(over), '/api/v1/workspace/runs-index');
@@ -488,11 +491,8 @@ describe('workspace runs index API', () => {
         pullRequestUrl: 'https://github.com/acme/demo/pull/42',
         issueNumber: 7,
       });
-      // Warm the cache the way the lazy route would have.
-      __seedRefStatusCacheForTests(realpathSync(repoRoot), [
-        [42, { kind: 'pr', status: 'merged' }],
-        [7, { kind: 'issue', status: 'open' }],
-      ]);
+      // The injected driver reports what the lazy route already cached.
+      cachedRefStatuses.mockReturnValue({ prs: { 42: 'merged' }, issues: { 7: 'open' } });
 
       const body = await getIndex();
 
@@ -511,11 +511,7 @@ describe('workspace runs index API', () => {
         referencedPullRequestUrl: 'https://github.com/acme/demo/pull/40',
         referencedIssueUrl: 'https://github.com/acme/demo/issues/12',
       });
-      __seedRefStatusCacheForTests(realpathSync(repoRoot), [
-        [42, { kind: 'pr', status: 'merged' }],
-        [40, { kind: 'pr', status: 'ready' }],
-        [12, { kind: 'issue', status: 'completed' }],
-      ]);
+      cachedRefStatuses.mockReturnValue({ prs: { 42: 'merged', 40: 'ready' }, issues: { 12: 'completed' } });
 
       const body = await getIndex();
 

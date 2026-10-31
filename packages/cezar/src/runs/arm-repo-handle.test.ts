@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { resolveForgeRoot } from '../server/forge/index.ts';
 const discoverRepoHandleMock = vi.fn();
+// The fake factory keeps this focused on the wrapper's contract: background, never throwing.
+// The lookup itself has its own coverage in server/forge/github.test.ts.
 const forgeFactory = (root: string) => ({ ...resolveForgeRoot(root), discoverRepository: (signal?: AbortSignal) => discoverRepoHandleMock(root, signal) });
 
 import { armRepoHandle } from './arm-repo-handle.ts';
