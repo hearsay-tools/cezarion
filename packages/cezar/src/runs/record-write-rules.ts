@@ -5,6 +5,7 @@ import { runPullRequestSchema } from '@open-mercato/cezar-contract/runs';
 import { isUsageLimitHold } from '@open-mercato/cezar-contract/waits';
 import type { AgentInput, ConversationState, DelegationState, RunPullRequest } from '@open-mercato/cezar-contract';
 import { redactSecrets } from '../core/secret-redaction.ts';
+import { ConversationIdInUseError } from './conversation-identity.ts';
 import { mergePullRequests } from './pull-requests.ts';
 import type { RepoHandle, RunRecord, StepState } from './store.ts';
 
@@ -12,13 +13,16 @@ type RecordPatch = Partial<Omit<RunRecord, 'id' | 'steps'>>;
 type Staged = ReadonlyMap<string, RunRecord | null>;
 
 /** Rule order is path-specific. These differences preserve existing behavior: durable task edits
- * skip reference resolution. Completion preparation is commit-only. Patch redaction's opt-out also
- * skips session secrets, while text redaction always scrubs those secrets.
+ * skip reference resolution. Patch redaction's opt-out also skips session secrets, while text
+ * redaction always scrubs those secrets.
+ * Completion actions (hearsay-tools/cezarion#2324): every path clears a retired action, so one
+ * run state stores one action state. Only a commit creates one, because the action and its
+ * archive must be durable; updateRun routes opted-in Done and setting changes to a commit.
  */
 export const WRITE_PATH_RULES = {
   commit: ['stale-resume', 'completion-actions'],
   durableUpdate: ['issue-seed', 'pull-requests', 'restore', 'redact-patch', 'archive-fields'],
-  debouncedUpdate: ['issue-seed', 'pull-requests', 'restore', 'redact-patch', 'assign', 'stale-resume', 'task-references', 'archive-or-touch'],
+  debouncedUpdate: ['issue-seed', 'pull-requests', 'restore', 'redact-patch', 'assign', 'retire-completion-action', 'stale-resume', 'task-references', 'archive-or-touch'],
   loaded: ['stale-resume'],
   conversation: ['redact-messages', 'parse-delegation', 'redact-input', 'parse-input', 'append-input'],
   // updateRun, marker declarations, PR discovery and event observations.
@@ -106,6 +110,7 @@ export function stageDurableUpdate(run: RunRecord, patch: RecordPatch, hooks: Up
 export function stageDebouncedUpdate(run: RunRecord, patch: RecordPatch, hooks: UpdateHooks): void {
   const { normalized, archived } = prepareUpdate(run, patch, hooks);
   Object.assign(run, redactPatch(normalized, hooks.redact));
+  if (run.completionAction && completionActionRetired(run)) run.completionAction = undefined;
   // The usage-limit resume is the appointment of a `waiting` run (hearsay-tools/cezarion#1236),
   // so a run coming back to life or settling retires it. Unlike stageCommit, this mutates the held record.
   stageLoaded(run);
@@ -119,20 +124,22 @@ export function stageStepUpdate(patch: Partial<Omit<StepState, 'id'>>, redact: (
   return { ...patch, error: redact(patch.error) };
 }
 
-/** Stage the ledger before its recipient input, also when both are the same run.
- * Worker continuation appends to original run.agentInputs even when its patch carries agentInputs. */
+/** Stage the ledger before its recipient input, also when both are the same run. The input
+ * appends to the recipient's staged queue, so a worker continuation keeps a patched agentInputs. */
 export function stageConversation(staged: Map<string, RunRecord>, root: RunRecord, state: ConversationState,
   delivery: { recipientRunId: string; input: AgentInput; recipientDelegation?: DelegationState } | undefined,
-  peek: (id: string) => RunRecord | undefined, redact: (text: string) => string, inputBase?: readonly AgentInput[]): void {
+  peek: (id: string) => RunRecord | undefined, redact: (text: string) => string): void {
   staged.set(root.id, { ...root, delegation: delegationStateSchema.parse({ ...root.delegation, conversation: { ...state,
     messages: state.messages.map(message => ({ ...message, text: redact(message.text) })),
   } }) });
   if (delivery) {
     const recipient = staged.get(delivery.recipientRunId) ?? peek(delivery.recipientRunId);
     if (!recipient) throw new Error('missing conversation recipient');
+    // The staged queue can differ from the stored one: a continuation patch may set it.
+    if (recipient.agentInputs?.some(queued => queued.id === delivery.input.id)) throw new ConversationIdInUseError();
     const input = agentInputSchema.parse({ ...delivery.input, text: redact(delivery.input.text) });
     const delegation = !recipient.delegation && delivery.recipientDelegation ? { delegation: delegationStateSchema.parse(delivery.recipientDelegation) } : {};
-    staged.set(recipient.id, { ...recipient, ...delegation, agentInputs: [...(inputBase ?? recipient.agentInputs ?? []), input] });
+    staged.set(recipient.id, { ...recipient, ...delegation, agentInputs: [...(recipient.agentInputs ?? []), input] });
   }
 }
 
@@ -169,11 +176,16 @@ function prepareCompletionActions(input: ReadonlyMap<string, RunRecord | null>, 
         next.completionAction = { ...next.completionAction!, phase: blocker ? 'blocked' : 'complete', ...(blocker ? { message: blocker } : {}) };
         if (!blocker) hooks.stageArchive(staged, next, true);
       }
-    } else if (candidate.status !== 'done' || (!candidate.archiveWhenDone && !candidate.autoMergePr)) {
-      if (candidate.completionAction) staged.set(id, { ...candidate, completionAction: undefined });
+    } else if (candidate.completionAction && completionActionRetired(candidate)) {
+      staged.set(id, { ...candidate, completionAction: undefined });
     }
   }
   return staged;
+}
+
+/** An action has meaning only on a Done run with a completion option on. */
+function completionActionRetired(run: RunRecord): boolean {
+  return run.status !== 'done' || (!run.archiveWhenDone && !run.autoMergePr);
 }
 
 /** Prompt edits can both revoke and restore a reference. Resolve the retained working sets
@@ -238,6 +250,8 @@ export function redactPatch(
     const value = out[field];
     if (typeof value === 'string') out[field] = redact(value);
   }
+  // A patched input queue persists as written, so its text is scrubbed like a delivered input.
+  if (out.agentInputs) out.agentInputs = out.agentInputs.map(input => ({ ...input, text: redact(input.text) }));
   return out;
 }
 

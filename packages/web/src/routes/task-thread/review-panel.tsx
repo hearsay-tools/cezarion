@@ -75,10 +75,12 @@ function ReviewActions({ run }: { run: ApiRun }) {
         runner: continuation.runnerOverride,
       })
     },
-    onSuccess: (result) => {
+    // Capture the run's project at the start: navigation must not retarget the refresh.
+    onMutate: () => runAddress(run.id),
+    onSuccess: (result, _text, address) => {
       if (result === null) return
       setNotes('')
-      void writer.invalidateAfter('continue', () => runAddress(run.id))
+      void writer.invalidateAfter('continue', address)
     },
     onError: (error: Error) => toast(error.message, { tone: 'danger' }),
   })

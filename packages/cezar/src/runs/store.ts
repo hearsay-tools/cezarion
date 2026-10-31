@@ -2613,7 +2613,7 @@ export class RunStore extends EventEmitter {
       const root = this.peek(conversation.rootId);
       if (root?.delegation?.role !== 'root' || run.delegation.parentRunId !== root.id) throw new Error('missing conversation ownership');
       stageConversation(staged, root, conversation.state, { recipientRunId: id, input: conversation.input },
-        runId => this.peek(runId), text => this.redactText(text), run.agentInputs ?? []);
+        runId => this.peek(runId), text => this.redactText(text));
     }
     this.commitIndex(staged);
   }

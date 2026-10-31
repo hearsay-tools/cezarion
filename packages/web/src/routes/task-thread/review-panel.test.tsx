@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
+import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import type { ApiRun, RunStatus } from '@open-mercato/cezar-api-client'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
 
@@ -103,6 +104,7 @@ function renderWithProviders(ui: ReactElement) {
   )
   return {
     ...view,
+    client,
     rerenderWithProviders: (next: ReactElement) =>
       view.rerender(
         <QueryClientProvider client={client}>
@@ -219,6 +221,29 @@ describe('the review gate on the thread', () => {
       })
     })
     await waitFor(() => expect(notes.value).toBe(''))
+  })
+
+  it('Send back that settles after navigation refreshes the project it started in', async () => {
+    stubFetch()
+    const base = globalThis.fetch
+    let release!: () => void
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => String(input).endsWith('/continue')
+      ? new Promise<Response>(resolve => { release = () => resolve(base(input, init)) })
+      : base(input, init))
+    const { client } = renderWithProviders(<ReviewPanel run={run('review')} />)
+    client.setQueryData(['default', 'runs', 'list'], [])
+    fireEvent.change(screen.getByLabelText('Notes for the agent'), { target: { value: 'again' } })
+    const sendBack = screen.getByRole<HTMLButtonElement>('button', { name: /Send back/ })
+    await waitFor(() => expect(sendBack.disabled).toBe(false))
+    fireEvent.click(sendBack)
+    await waitFor(() => expect(release).toBeDefined())
+    setApiScope('next')
+    try {
+      await act(async () => release())
+      await waitFor(() => expect(client.getQueryState(['default', 'runs', 'list'])?.isInvalidated).toBe(true))
+    } finally {
+      setApiScope(null)
+    }
   })
 
   it('⌘↵ in the notes box submits; plain Enter stays a newline', async () => {
