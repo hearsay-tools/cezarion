@@ -97,7 +97,7 @@ const port = z.number().int().min(1).max(65535);
 const clampViewport = (value: number) => Math.min(4000, Math.max(100, Math.round(value)));
 /** The highest pixel ratio Ultra renders at (hearsay-tools/cezarion#2069): 2 keeps a frame at four times the pixels. */
 export const PREVIEW_MAX_PIXEL_RATIO = 2;
-const clampPixelRatio = (value: number) => Math.min(PREVIEW_MAX_PIXEL_RATIO, Math.max(1, Math.round(value * 100) / 100));
+const clampPixelRatio = (value: number) => Math.min(PREVIEW_MAX_PIXEL_RATIO, Math.max(1, value));
 
 /**
  * The stream's mode. `normal` is the original JPEG quality 60; `high` is quality 100, still lossy

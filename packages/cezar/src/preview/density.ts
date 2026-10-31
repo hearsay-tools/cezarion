@@ -20,6 +20,8 @@ const SCREEN_ORIGIN = 100_000;
 const SCREEN_STRIDE = 20_000;
 /** Physical pixels: at ratio 2 this is 8000 CSS pixels square, more than the largest viewport (4000). */
 const SCREEN_SIZE = 16_000;
+/** Chromium may hand a ratio back with float noise (10/9 stored as a float), so a screen at the ratio matches within this. */
+const RATIO_EPSILON = 1e-6;
 
 export class PixelDensity {
   /** The ratio the window was last placed at; undefined until the first placement read the screens. */
@@ -40,7 +42,7 @@ export class PixelDensity {
         this.placed = 1;
         return 1;
       }
-      const screen = scale === 1 ? screenInfos.find(info => info.isPrimary) : (screenInfos.find(info => !info.isPrimary && info.devicePixelRatio === scale) ?? (await this.addScreen(scale, screenInfos)));
+      const screen = scale === 1 ? screenInfos.find(info => info.isPrimary) : (screenInfos.find(info => !info.isPrimary && Math.abs(info.devicePixelRatio - scale) < RATIO_EPSILON) ?? (await this.addScreen(scale, screenInfos)));
       if (!screen) throw new Error('no primary screen');
       this.windowId ??= (await this.cdp.send<{ windowId: number }>('Browser.getWindowForTarget')).windowId;
       await this.cdp.send('Browser.setWindowBounds', { windowId: this.windowId, bounds: { left: screen.availLeft, top: screen.availTop } });

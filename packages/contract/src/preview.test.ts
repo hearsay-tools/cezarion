@@ -139,7 +139,7 @@ describe('previewClientMessageSchema', () => {
   });
 
   // hearsay-tools/cezarion#2069: Ultra renders at the viewer's pixel ratio, capped at 2.
-  it('clamps the pixel ratio to 1..2 and keeps two decimals', () => {
+  it('clamps the pixel ratio to 1..2 and keeps it exact inside that range', () => {
     const dpr = (value: number) => {
       const parsed = previewClientMessageSchema.parse({ t: 'resize', w: 800, h: 600, dpr: value }) as { dpr?: number };
       return parsed.dpr;
@@ -147,7 +147,7 @@ describe('previewClientMessageSchema', () => {
     expect(dpr(3)).toBe(PREVIEW_MAX_PIXEL_RATIO);
     expect(dpr(0.5)).toBe(1);
     expect(dpr(1.5)).toBe(1.5);
-    expect(dpr(1.2500001)).toBe(1.25);
+    expect(dpr(10 / 9)).toBe(10 / 9);
   });
 
   it('leaves the pixel ratio out when an older cockpit sends none', () => {
