@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
 import type { PreviewServer } from '@open-mercato/cezar-api-client'
 
@@ -377,7 +377,7 @@ describe('PreviewToolbar', () => {
     expect(p.onReload).not.toHaveBeenCalled()
   })
 
-  it('focuses and selects the full URL after Type a URL instead, then restores normal server-menu focus', () => {
+  it('focuses the URL after Type a URL instead, then restores normal server-menu focus', () => {
     const p = props({ servers: [web, storybook] })
     render(<PreviewToolbar {...p} />)
     const trigger = screen.getByRole('button', { name: 'Server: web :5173' })
@@ -386,8 +386,6 @@ describe('PreviewToolbar', () => {
     fireEvent.click(screen.getByRole('menuitem', { name: 'Type a URL instead' }))
     act(() => { vi.advanceTimersByTime(20) })
     expect(document.activeElement).toBe(field)
-    expect(field.selectionStart).toBe(0)
-    expect(field.selectionEnd).toBe(p.url.length)
     fireEvent.keyDown(field, { key: 'ArrowLeft' })
     expect(document.activeElement).toBe(field)
     openMenu(trigger)
@@ -395,6 +393,27 @@ describe('PreviewToolbar', () => {
     act(() => { vi.advanceTimersByTime(20) })
     expect(p.onPickServer).toHaveBeenCalledExactlyOnceWith(6006)
     expect(document.activeElement).toBe(trigger)
+  })
+
+  it('selects the full URL on the next animation frame only while the field still has focus', () => {
+    let nextFrame: FrameRequestCallback = () => undefined
+    const animation = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => {
+      nextFrame = callback
+      return 1
+    })
+    onTestFinished(() => animation.mockRestore())
+    const p = props()
+    render(<PreviewToolbar {...p} />)
+    const field = screen.getByRole('textbox', { name: 'Page address' }) as HTMLInputElement
+    act(() => field.focus())
+    act(() => nextFrame(0))
+    expect(field.selectionStart).toBe(0)
+    expect(field.selectionEnd).toBe(p.url.length)
+    act(() => field.blur())
+    field.setSelectionRange(2, 2)
+    act(() => nextFrame(16))
+    expect(field.selectionStart).toBe(2)
+    expect(field.selectionEnd).toBe(2)
   })
 
   it.each([
