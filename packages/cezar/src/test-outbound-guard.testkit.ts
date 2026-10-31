@@ -106,7 +106,7 @@ export function takeOutboundRefusals(): OutboundRefusal[] {
 export function throwOutboundRefusals(): void {
   const taken = takeOutboundRefusals()
   if (taken.length === 0) return
-  const error = new Error(message(taken.map(refusal => refusal.destination)))
+  const error = new Error(message([...new Set(taken.map(refusal => refusal.destination))]))
   error.stack = `${error.message}\nFirst refused at:\n${taken[0]?.stack ?? ''}`
   throw error
 }
