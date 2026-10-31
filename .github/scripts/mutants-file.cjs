@@ -8,7 +8,7 @@ const os = require('node:os');
 const { promisify } = require('node:util');
 const { sliceSource } = require('./mutants-report.cjs');
 const { runStryker, restoreTree } = require('./mutants-run.cjs');
-const { EQUIVALENT_FILE, readEquivalent, matchesEntry } = require('./mutants-equivalent.cjs');
+const { EQUIVALENT_FILE, readEquivalent, matchesEntry, sourceSite } = require('./mutants-equivalent.cjs');
 const { namedRanges, functionRanges, functionOf, duplicateNames } = require('./mutants-functions.cjs');
 const TARGETS = require('../mutants/targets.json');
 const REPORT = 'reports/mutation/mutation.json';
@@ -163,7 +163,7 @@ function measure(report, file, head, ranges, targets = TARGETS, entries = []) {
   const data = report.files?.[file];
   if (!data) throw new Error(`Report does not contain ${file}`);
   const mutants = data.mutants.map(m => {
-    const row = { file, location: m.location, line: m.location.start.line, mutator: m.mutatorName, original: sliceSource(data.source, m.location), replacement: m.replacement, status: m.status, function: functionOf(m.location, ranges) };
+    const row = { file, site: sourceSite(data.source, m.location), location: m.location, line: m.location.start.line, mutator: m.mutatorName, original: sliceSource(data.source, m.location), replacement: m.replacement, status: m.status, function: functionOf(m.location, ranges) };
     // Static coverage includes hybrid mutants: ignoreStatic still activates those
     // in beforeAll, after imports. Their outcomes do not measure import-time code.
     return { ...row, kind: kindOf(row, file), ...(m.static === true ? { static: true, status: 'Ignored', reportedStatus: m.status } : {}) };
@@ -174,12 +174,15 @@ function measure(report, file, head, ranges, targets = TARGETS, entries = []) {
   const eligible = entries.filter(entry => !duplicates.has(entry.function));
   const kept = mutants.filter(m => !eligible.some(entry => matchesEntry(entry, m)));
   const staleEquivalent = eligible.filter(entry => entry.file === file && !mutants.some(m => matchesEntry(entry, m)));
+  const multipleEquivalent = eligible.filter(entry => entry.file === file)
+    .map(entry => ({ ...entry, matchCount: mutants.filter(m => matchesEntry(entry, m)).length }))
+    .filter(entry => entry.matchCount > 1);
   const rawCounts = countsOf(data.mutants);
   return { version: 1, file, head, tier: target.tier, mutants: kept, equivalentCount: mutants.length - kept.length,
     ...staticResults(mutants),
     moduleLevelCount: mutants.filter(m => m.static && m.function === '(module)').length,
     staticFunctions: [...new Set(mutants.filter(m => m.static && m.function !== '(module)').map(m => m.function))].map(name => ({ name, count: mutants.filter(m => m.static && m.function === name).length })),
-    ...evaluate(kept, target, ranges, mutants), rawCounts, rawScore: scoreOf(rawCounts), staleEquivalent, ambiguousEquivalent };
+    ...evaluate(kept, target, ranges, mutants), rawCounts, rawScore: scoreOf(rawCounts), staleEquivalent, ambiguousEquivalent, multipleEquivalent };
 }
 
 function summary(result) {
@@ -199,6 +202,7 @@ function summary(result) {
   lines.push(`Guards with static mutants not measured: ${result.guards.filter(g => g.staticCount > 0).map(g => g.name).join(', ') || 'none'}`);
   for (const target of result.targets) lines.push(`${target.pass ? 'PASS' : 'FAIL'}: ${target.name}`);
   lines.push(`Equivalent mutants excluded: ${result.equivalentCount}`, `Stale equivalent entries: ${JSON.stringify(result.staleEquivalent)}`);
+  if (result.multipleEquivalent?.length) lines.push(`Equivalent entries matching multiple mutants: ${JSON.stringify(result.multipleEquivalent)}`);
   if (result.consumers) lines.push(result.consumers.state === 'failed' ? `FAIL: consumer tests: failed — ${result.consumers.reason}` : `PASS: consumer tests: merged (${result.consumers.tests.length} files)`);
   if (result.ambiguousEquivalent.length) lines.push(`Warning: ambiguous equivalent function names: ${JSON.stringify(result.ambiguousEquivalent)}`);
   if (result.warning) lines.push(result.warning);

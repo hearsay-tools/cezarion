@@ -267,3 +267,22 @@ test('duplicate derived names never hide mutants even when their text matches ex
   assert.equal(result.counts.survived, 2);
   assert.equal(result.counts.equivalent, undefined);
 });
+
+
+test('PR equivalent matching uses the source prefix at the mutant start', () => {
+  const site = fixture.files[FILE].source.split('\n')[84].slice(0, 47).trimStart();
+  assert.deepEqual(withEntries([{ ...equivalent, site }]), withEntries([equivalent]));
+  assert.deepEqual(withEntries([{ ...equivalent, site: 'different source line' }]), withEntries([]));
+});
+
+
+test('missing source lines preserve the advisory report and cannot match sites', () => {
+  const file = 'packages/contract/src/missing.ts';
+  const mutant = { mutatorName: 'BooleanLiteral', replacement: 'false', status: 'Survived', location: { start: { line: 2, column: 1 }, end: { line: 2, column: 5 } } };
+  const entry = { file, function: '(module)', mutator: 'BooleanLiteral', original: '', replacement: 'false' };
+  for (const source of [undefined, '', 'short']) {
+    const collect = entries => collectPackage({ name: 'contract', report: { files: { [file]: { source, mutants: [mutant] } } }, changed: new Map([[file, [[2, 2]]]]), durationMs: 0, relatedTests: 1, entries, rangesByFile: new Map([[file, []]]) });
+    assert.equal(collect([{ ...entry, site: 'return ' }]).counts.survived, 1);
+    assert.equal(collect([entry]).counts.equivalent, 1);
+  }
+});

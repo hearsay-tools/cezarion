@@ -13,6 +13,9 @@ function readEquivalent(file = EQUIVALENT_FILE, io = fs) {
     if (entries.some(entry => !entry || FIELDS.some(key => typeof entry[key] !== 'string' || !entry[key].trim()))) {
       throw new Error('each entry needs non-empty file, function, mutator, original, replacement and reason strings');
     }
+    if (entries.some(entry => entry.site !== undefined && (typeof entry.site !== 'string' || !entry.site.trim()))) {
+      throw new Error('site must be a non-empty source prefix string');
+    }
     return { entries, warning: '' };
   } catch (error) {
     if (error.code === 'ENOENT') return { entries: [], warning: '' };
@@ -20,8 +23,14 @@ function readEquivalent(file = EQUIVALENT_FILE, io = fs) {
   }
 }
 
+/** Exact line prefix before the mutant, with indentation removed and trailing spaces kept. */
+function sourceSite(source, { start }) {
+  return source.split('\n')[start.line - 1]?.slice(0, start.column - 1).trimStart();
+}
+
 function matchesEntry(entry, mutant) {
   return entry.file === mutant.file && entry.mutator === mutant.mutator
+    && (entry.site === undefined || entry.site === mutant.site)
     && entry.original === mutant.original
     && entry.replacement === mutant.replacement
     && (typeof mutant.function === 'string' && entry.function === mutant.function);
@@ -29,4 +38,4 @@ function matchesEntry(entry, mutant) {
 
 const findEquivalent = (entries, mutant) => entries.find(entry => matchesEntry(entry, mutant));
 
-module.exports = { EQUIVALENT_FILE, readEquivalent, matchesEntry, findEquivalent };
+module.exports = { EQUIVALENT_FILE, readEquivalent, matchesEntry, findEquivalent, sourceSite };
