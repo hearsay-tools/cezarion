@@ -228,9 +228,8 @@ async function strykerReport(deps, cwd, opts, project, extraArgs, signal, onOutp
  */
 function standaloneCheckout(git, source, head, cwd) {
   git(['init', '--quiet', cwd]);
-  git(['fetch', '--quiet', '--depth', '1', '--no-tags', source, head], cwd);
+  git(['fetch', '--quiet', '--depth', '1', '--no-tags', '--no-write-fetch-head', source, head], cwd);
   git(['checkout', '--quiet', '--detach', head], cwd);
-  git(['update-ref', '-d', 'FETCH_HEAD'], cwd);
 }
 
 /** No task context, cockpit address or project registry reaches the measured code. */

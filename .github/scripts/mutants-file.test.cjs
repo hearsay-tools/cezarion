@@ -208,12 +208,11 @@ test('the scratch checkout is a standalone shallow fetch of HEAD, never a linked
   await m.runMeasurement(m.parseArgs(['packages/cezar/src/sample.ts']), deps);
   const git = calls.filter(c => c[0] === 'git').map(c => c.slice(1));
   assert.equal(git.some(args => args.includes('worktree')), false);
-  assert.deepEqual(git.slice(0, 6), [
+  assert.deepEqual(git.slice(0, 5), [
     ['rev-parse', 'HEAD'], ['rev-parse', '--show-toplevel'],
     ['init', '--quiet', '/cache/scratch/checkout'],
-    ['fetch', '--quiet', '--depth', '1', '--no-tags', '/live/repo', 'abcdef'],
+    ['fetch', '--quiet', '--depth', '1', '--no-tags', '--no-write-fetch-head', '/live/repo', 'abcdef'],
     ['checkout', '--quiet', '--detach', 'abcdef'],
-    ['update-ref', '-d', 'FETCH_HEAD'],
   ]);
 });
 
