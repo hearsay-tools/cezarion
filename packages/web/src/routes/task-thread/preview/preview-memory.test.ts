@@ -123,7 +123,6 @@ describe('pane width', () => {
   })
 })
 
-
 describe('preview memory validation and eviction', () => {
   it.each([null, 1, 'entry', [], false])('ignores an invalid entry %j', value => {
     localStorage.setItem(PREVIEW_MEMORY_STORAGE_KEY, JSON.stringify({ a: value }))

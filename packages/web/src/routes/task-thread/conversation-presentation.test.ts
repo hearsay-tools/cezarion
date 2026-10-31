@@ -134,7 +134,6 @@ describe('conversation delivery explanations (hearsay-tools/cezarion#1992)', () 
   })
 })
 
-
 describe('complete conversation vocabulary', () => {
   it.each([
     ['request', 'Request'], ['progress', 'Progress'], ['follow-up', 'Follow-up'], ['reply', 'Reply'],

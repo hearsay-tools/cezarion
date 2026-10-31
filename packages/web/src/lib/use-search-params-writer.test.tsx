@@ -168,7 +168,6 @@ describe('useSearchParamsWriter (hearsay-tools/cezarion#1616)', () => {
   })
 })
 
-
 describe('writer navigation acknowledgements', () => {
   function start() {
     router.enabled = true
