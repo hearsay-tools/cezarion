@@ -4657,10 +4657,8 @@ export function createApp(deps: ServerDeps) {
     kind: z.enum(['issue', 'pr']),
     number: z.coerce.number().int().positive(),
   });
-
   const branchForge = deps.branchForge ?? createGithubBranchForge({ forgeFactory: deps.forgeFactory });
   const branchClassifyInput = (project: ClassifyProject) => classifyInputFor(project, branchForge);
-
   // ---- chained family: repo / git (project-scoped) ----
   const repoRoutes = new Hono<ProjectApiEnv>()
     .get('/repo', async (c) => {
