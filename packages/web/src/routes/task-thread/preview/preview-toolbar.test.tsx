@@ -376,4 +376,76 @@ describe('PreviewToolbar', () => {
     expect(p.onCopyUrl).not.toHaveBeenCalled()
     expect(p.onReload).not.toHaveBeenCalled()
   })
+
+  it('focuses and selects the full URL after Type a URL instead, then restores normal server-menu focus', () => {
+    const p = props({ servers: [web, storybook] })
+    render(<PreviewToolbar {...p} />)
+    const trigger = screen.getByRole('button', { name: 'Server: web :5173' })
+    const field = screen.getByRole('textbox', { name: 'Page address' }) as HTMLInputElement
+    openMenu(trigger)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Type a URL instead' }))
+    act(() => { vi.advanceTimersByTime(20) })
+    expect(document.activeElement).toBe(field)
+    expect(field.selectionStart).toBe(0)
+    expect(field.selectionEnd).toBe(p.url.length)
+    fireEvent.keyDown(field, { key: 'ArrowLeft' })
+    expect(document.activeElement).toBe(field)
+    openMenu(trigger)
+    fireEvent.click(screen.getByRole('menuitem', { name: /storybook:6006/ }))
+    act(() => { vi.advanceTimersByTime(20) })
+    expect(p.onPickServer).toHaveBeenCalledExactlyOnceWith(6006)
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  it.each([
+    ['fit', [2, 1, 1, 1]],
+    [{ w: 1440, h: 900 }, [1, 1, 1, 2]],
+    [{ w: 390, h: 900 }, [1, 1, 1, 1]],
+    [{ w: 1440, h: 844 }, [1, 1, 1, 1]],
+  ] as const)('marks only the exact current viewport with a check: %s', (viewport, iconCounts) => {
+    const p = props({ viewport })
+    render(<PreviewToolbar {...p} />)
+    const name = viewport === 'fit' ? 'Viewport size: Fit' : `Viewport size: ${viewport.w} × ${viewport.h}`
+    openMenu(screen.getByRole('button', { name }))
+    expect(screen.getAllByRole('menuitem').map(row => row.querySelectorAll('svg').length)).toEqual(iconCounts)
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Fit/ }))
+    expect(p.onViewport).toHaveBeenCalledExactlyOnceWith('fit')
+  })
+
+  it('marks only the server currently shown with a check', () => {
+    render(<PreviewToolbar {...props({ servers: [web, storybook], current: storybook })} />)
+    openMenu(screen.getByRole('button', { name: 'Server: storybook :6006' }))
+    expect(screen.getByRole('menuitem', { name: /web:5173/ }).querySelector('svg')).toBeNull()
+    expect(screen.getByRole('menuitem', { name: /storybook:6006/ }).querySelector('svg')).not.toBeNull()
+  })
+
+  it.each([
+    [undefined, 'neutral'],
+    [1000, 'neutral'],
+    [999, 'success'],
+  ] as const)('shows the correct idle dot for a last frame %s milliseconds ago', (age, tone) => {
+    const stats = { fps: 3, kbps: 7, ...(age === undefined ? {} : { lastFrameAt: Date.now() - age }) }
+    render(<PreviewToolbar {...props({ stats })} />)
+    const reading = screen.getByRole('img', { name: tone === 'neutral' ? 'idle' : '3 fps · 7 KB/s' })
+    expect(reading.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe(tone)
+  })
+
+  it.each([false, true])('keeps the crowded stream dot and exposes the numbers in More (idle %s)', idle => {
+    const stats = { fps: 3, kbps: 7, lastFrameAt: idle ? Date.now() - 1000 : Date.now() }
+    render(<PreviewToolbar {...props({ stats, servers: [web, storybook] })} />)
+    expect(screen.getByRole('img', { name: 'Preview is live' }).getAttribute('data-tone')).toBe(idle ? 'neutral' : 'success')
+    openMenu(screen.getByRole('button', { name: 'More' }))
+    expect(screen.getByText('3 fps · 7 KB/s')).toBeTruthy()
+  })
+
+  it('sets the full address title only for a nonempty URL and turns spelling checks off', () => {
+    const p = props()
+    const { rerender } = render(<PreviewToolbar {...p} />)
+    const field = screen.getByRole('textbox', { name: 'Page address' })
+    expect(field.getAttribute('title')).toBe(p.url)
+    expect(field.getAttribute('spellcheck')).toBe('false')
+    rerender(<PreviewToolbar {...p} url="" />)
+    expect(field.hasAttribute('title')).toBe(false)
+  })
+
 })
