@@ -158,10 +158,12 @@ export function useContinueAction(run: ApiRun): ContinueAction {
         agentProfile: account ?? undefined,
       })
     },
-    onSuccess: () => writer.invalidateAfter('continue', () => runAddress(run.id)),
-    onError: (error) => {
-      if (error instanceof ApiError && error.status === 409) {
-        void writer.invalidateAfter('continue', () => runAddress(run.id))
+    // Capture the run's project at the start: navigation must not retarget the refresh.
+    onMutate: () => runAddress(run.id),
+    onSuccess: (_result, _input, address) => writer.invalidateAfter('continue', address),
+    onError: (error, _input, address) => {
+      if (error instanceof ApiError && error.status === 409 && address) {
+        void writer.invalidateAfter('continue', address)
       }
     },
   })

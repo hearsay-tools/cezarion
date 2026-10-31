@@ -117,3 +117,22 @@ it('a send to the boot project that settles after navigation refreshes its slug,
   await waitFor(() => expect(result.current.isSuccess).toBe(true))
   expect(stale(client)).toEqual(['boot', 'default', 'next'])
 })
+
+describe.each(['send', 'continue'] as const)('%s started in one project and settled in another', (name) => {
+  it.each([
+    { start: 'active', expected: ['active', 'next'] },
+    { start: null, expected: ['boot', 'default', 'next'] },
+  ])('from $start refreshes the starting project, its boot alias and the new scope', async ({ start, expected }) => {
+    setApiScope(start)
+    const client = seededClient()
+    let release!: (response: Response) => void
+    fetchMock.mockReturnValue(new Promise<Response>(resolve => { release = resolve }))
+    const { result } = renderHook(() => paths[name].hook(), { wrapper: withClient(client) })
+    act(() => paths[name].run(result.current.mutate as (input: never) => void))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+    setApiScope('next')
+    await act(async () => release(respond(200)))
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+    expect(stale(client)).toEqual(expected)
+  })
+})

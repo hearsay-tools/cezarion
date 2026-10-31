@@ -49,7 +49,8 @@ export function createRunCacheWriter(client: QueryClient) {
    * An explicit-project request comes from All tasks, whose Resolve conflicts button reads the
    * run under its own project: refreshing only the current scope left that record claiming a
    * session the server had closed. The current scope stays, read at callback time, as before.
-   * A boot-project target also names its `'default'` alias, which its own mounted thread reads.
+   * Callers capture the target when the request starts. The boot project and its `'default'`
+   * alias are one project under two keys, so naming either refreshes both.
    */
   function invalidateAfter(action: 'runs' | 'continue' | 'send' | 'index' | 'indexed', address: ProjectAddress | (() => ProjectAddress)) {
     if (action === 'index') return invalidateIndex()
@@ -61,8 +62,10 @@ export function createRunCacheWriter(client: QueryClient) {
       return
     }
     if (action === 'runs') return client.invalidateQueries({ queryKey: [target.cacheScope, 'runs'] })
-    const alias = target.projectId === liveBootProject() ? ['default'] : []
-    const scopes = new Set([target.projectId, target.cacheScope, ...alias, queryScope()])
+    const boot = liveBootProject()
+    const named = [target.projectId, target.cacheScope]
+    const aliases = boot !== undefined && named.some(scope => scope === boot || scope === 'default') ? [boot, 'default'] : []
+    const scopes = new Set([...named, ...aliases, queryScope()])
     return Promise.all([...scopes].map(scope => client.invalidateQueries({ queryKey: [scope, 'runs'] })))
       .then(() => undefined)
   }
