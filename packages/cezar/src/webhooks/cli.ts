@@ -7,7 +7,7 @@ import {
 } from '@open-mercato/cezar-contract/projects';
 import { AGENT_REPORT_MESSAGE_MAX_LENGTH } from '@open-mercato/cezar-contract/project-limits';
 import { EXIT } from '../task-cli/cli.ts';
-import { discoverCockpit, resolveCockpit, type DiscoverOptions } from '../task-cli/discovery.ts';
+import { resolveCockpit, type DiscoverOptions } from '../task-cli/discovery.ts';
 import { invalidResponse, refuse, request, TaskCliError, type Cockpit, type HttpResult } from '../task-cli/http.ts';
 
 /**
@@ -105,7 +105,6 @@ async function reportBody(values: Parsed['values'], env: NodeJS.ProcessEnv, io: 
   };
 }
 
-
 export async function runWebhookCommand(
   argv: string[],
   env: NodeJS.ProcessEnv = process.env,
@@ -120,7 +119,7 @@ export async function runWebhookCommand(
     // Input is judged before any cockpit is looked for: a usage error is 64 with or without one.
     const { command, webhook, values } = parse(argv);
     const body = command === 'send' ? await reportBody(values, env, io) : undefined;
-    const cockpit = await resolveCockpit(env, values, io.discover ?? discoverCockpit, NO_COCKPIT);
+    const cockpit = await resolveCockpit(env, values, io.discover, NO_COCKPIT);
     const http = io.http ?? request;
     if (command === 'list') {
       const result = await http(cockpit, '/agent-webhooks');

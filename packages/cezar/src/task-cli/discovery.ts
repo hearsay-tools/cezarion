@@ -105,7 +105,7 @@ export async function discoverCockpit(options: DiscoverOptions): Promise<Cockpit
 export async function resolveCockpit(
   env: NodeJS.ProcessEnv,
   values: { url?: string; repo?: string },
-  discover: (options: DiscoverOptions) => Promise<Cockpit>,
+  discover: ((options: DiscoverOptions) => Promise<Cockpit>) | undefined,
   noCockpit: string,
   options: { removeDiscoveryHint?: boolean } = {},
 ): Promise<Cockpit> {
@@ -121,7 +121,7 @@ export async function resolveCockpit(
   const url = values.url ?? (env.CEZ_URL?.trim() || undefined);
   if (url === undefined && values.repo === undefined) throw new TaskCliError(2, { code: 'no-cockpit', error: noCockpit });
   try {
-    return await discover({ url, repoDir: resolve(values.repo ?? process.cwd()) });
+    return await (discover ?? discoverCockpit)({ url, repoDir: resolve(values.repo ?? process.cwd()) });
   } catch (error) {
     // Discovery's hint says to start a cockpit; this command never suggests that.
     if (options.removeDiscoveryHint && error instanceof TaskCliError) {
@@ -131,4 +131,3 @@ export async function resolveCockpit(
     throw error;
   }
 }
-
