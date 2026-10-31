@@ -5,7 +5,7 @@ import type { PreviewServer } from '@open-mercato/cezar-api-client'
 
 import type { ThreadPreviewServer } from '../thread-state'
 
-import { ConnectionBanner, PreviewEmptyState, PreviewStates, type PreviewStageState, type PreviewStateActions } from './preview-states'
+import { ConnectionBanner, PreviewEmptyState, PreviewStates, describeViewer, type PreviewStageState, type PreviewStateActions } from './preview-states'
 
 afterEach(() => cleanup())
 
@@ -332,5 +332,58 @@ describe('time-dependent copy', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe('preview state details', () => {
+  it.each([
+    ['iPad Safari/', 'Safari on iPad'],
+    ['Android Chrome/ Safari/', 'Chrome on Android'],
+    ['Windows Edg/ Chrome/ Safari/', 'Edge on Windows'],
+    ['Macintosh Firefox/', 'Firefox on Mac'],
+    ['Mac OS X FxiOS', 'Firefox on Mac'],
+    ['Linux Chrome/', 'Chrome on Linux'],
+    ['X11 CriOS', 'Chrome on Linux'],
+    ['Safari/', 'Safari'],
+    ['Windows', 'Windows'],
+    ['', ''],
+  ])('describes viewer %s as %s', (agent, expected) => {
+    expect(describeViewer(agent)).toBe(expected)
+  })
+
+  it.each([
+    ['browser', 'Starting the browser', ['Starting the browser', 'Opened the page', 'First frame']],
+    ['page', 'Opening the page', ['Browser started', 'Opening the page', 'First frame']],
+    ['frame', 'First frame', ['Browser started', 'Opened the page', 'First frame']],
+  ] as const)('marks only the %s loading step current', (step, current, labels) => {
+    show({ t: 'state', stage: 'loading', step })
+    const rows = screen.getAllByRole('listitem')
+    expect(rows.map(row => row.textContent)).toEqual(labels)
+    expect(rows.filter(row => row.getAttribute('aria-current') === 'step').map(row => row.textContent)).toEqual([current])
+  })
+
+  it('estimates download time from the initial sample and caps its progress', () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(1000)
+      const a = actions()
+      const { rerender } = render(<PreviewStates state={{ t: 'state', stage: 'downloading', received: 10_000_000, total: 100_000_000 }} actions={a} />)
+      expect(screen.queryByText(/s left/)).toBeNull()
+      vi.setSystemTime(3000)
+      rerender(<PreviewStates state={{ t: 'state', stage: 'downloading', received: 30_000_000, total: 100_000_000 }} actions={a} />)
+      expect(screen.getByText('about 7 s left')).toBeTruthy()
+      expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('30')
+      rerender(<PreviewStates state={{ t: 'state', stage: 'downloading', received: 101_000_000, total: 100_000_000 }} actions={a} />)
+      expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('100')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps progress at zero when the download total is unknown', () => {
+    show({ t: 'state', stage: 'downloading', received: 1_500_000, total: 0 })
+    expect(screen.getByRole('progressbar').getAttribute('aria-valuenow')).toBe('0')
+    expect(screen.getByText('2 of 0 MB · 0%')).toBeTruthy()
+    expect(screen.queryByText(/s left/)).toBeNull()
   })
 })

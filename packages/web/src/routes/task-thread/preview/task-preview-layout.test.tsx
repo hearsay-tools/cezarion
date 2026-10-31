@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const state = vi.hoisted(() => ({
   preview: true,
+  runLoading: false,
   agentLive: false,
   agentReads: [] as Array<string | undefined>,
   runs: {} as Record<string, Record<string, unknown>>,
@@ -13,7 +14,7 @@ const state = vi.hoisted(() => ({
 }))
 
 vi.mock('@/api/queries', () => ({
-  useRun: (id: string) => ({ data: state.runs[id] ?? { id, worktreePath: '/w', previewServers: [] } }),
+  useRun: (id: string) => ({ data: state.runLoading ? undefined : state.runs[id] ?? { id, worktreePath: '/w', previewServers: [] } }),
   useHealth: () => ({ data: { capabilities: { preview: state.preview } } }),
 }))
 
@@ -92,6 +93,7 @@ function renderAt(path: string) {
 
 describe('TaskPreviewLayout', () => {
   beforeEach(() => {
+    state.runLoading = false
     state.runs = {}
     state.agentLive = false
     state.agentReads = []
@@ -111,6 +113,30 @@ describe('TaskPreviewLayout', () => {
     state.runs.r1 = { id: 'r1', worktreePath: '/w', previewServers: [], ...patch }
     renderAt('/tasks/r1')
     expect(screen.getByTestId('removed').textContent).toBe(String(removed))
+  })
+
+  it('keeps the task usable while run data loads and shows no preview before the run exists', () => {
+    state.preview = true
+    state.runLoading = true
+    renderAt('/tasks/r1')
+    expect(screen.getByTestId('tab').textContent).toBe('session')
+    expect(screen.getByTestId('removed').textContent).toBe('false')
+    fireEvent.click(screen.getByRole('button', { name: 'toggle' }))
+    expect(screen.getByTestId('open').textContent).toBe('true')
+    expect(document.querySelector('[data-slot="preview-pane"]')).toBeNull()
+    expect(screen.queryByRole('separator')).toBeNull()
+  })
+
+  it('updates the agent availability in the provider when the task rerenders', () => {
+    state.preview = true
+    renderAt('/tasks/r1')
+    expect(screen.getByTestId('agent').textContent).toBe('false')
+    state.agentLive = true
+    fireEvent.click(screen.getByRole('button', { name: 'toggle' }))
+    expect(screen.getByTestId('agent').textContent).toBe('true')
+    state.agentLive = false
+    fireEvent.click(screen.getByRole('button', { name: 'toggle' }))
+    expect(screen.getByTestId('agent').textContent).toBe('false')
   })
 
   it('another task keeps the tab mounted and starts with the pane closed', async () => {

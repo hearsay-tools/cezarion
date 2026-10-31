@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 
 import type { PreviewServer } from '@open-mercato/cezar-api-client'
 
@@ -316,4 +316,155 @@ describe('PreviewToolbar', () => {
       expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true)
     }
   })
+
+  it('sends back, forward, normal reload and close to their own callbacks', () => {
+    const p = props()
+    render(<PreviewToolbar {...p} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Forward' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Close preview' }))
+    expect(p.onBack).toHaveBeenCalledTimes(1)
+    expect(p.onForward).toHaveBeenCalledTimes(1)
+    expect(p.onReload).toHaveBeenCalledExactlyOnceWith(false)
+    expect(p.onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows page loading and blocks reload until loading ends', () => {
+    const p = props({ loading: true })
+    const { rerender } = render(<PreviewToolbar {...p} />)
+    const reload = screen.getByRole('button', { name: 'Reload' }) as HTMLButtonElement
+    expect(reload.disabled).toBe(true)
+    expect(reload.getAttribute('aria-busy')).toBe('true')
+    expect(screen.getByRole('progressbar', { name: 'Loading the page' })).toBeTruthy()
+    fireEvent.click(reload)
+    expect(p.onReload).not.toHaveBeenCalled()
+    rerender(<PreviewToolbar {...p} loading={false} />)
+    expect(reload.disabled).toBe(false)
+    expect(reload.hasAttribute('aria-busy')).toBe(false)
+    expect(screen.queryByRole('progressbar')).toBeNull()
+  })
+
+  it('Escape discards an address draft without navigating and Enter submits the current URL', () => {
+    const p = props({ adopted: true })
+    render(<PreviewToolbar {...p} />)
+    const field = screen.getByRole('textbox', { name: 'Page address' }) as HTMLInputElement
+    act(() => field.focus())
+    expect(screen.queryByText('Not started by cezar')).toBeNull()
+    fireEvent.change(field, { target: { value: 'discard me' } })
+    fireEvent.keyDown(field, { key: 'Escape' })
+    expect(document.activeElement).not.toBe(field)
+    expect(field.value).toBe('localhost:5173/members')
+    expect(p.onNavigate).not.toHaveBeenCalled()
+    expect(screen.getByText('Not started by cezar')).toBeTruthy()
+    act(() => field.focus())
+    fireEvent.keyDown(field, { key: 'Enter' })
+    expect(p.onNavigate).toHaveBeenCalledExactlyOnceWith(p.url)
+    expect(document.activeElement).not.toBe(field)
+  })
+
+  it('disables copying an empty URL and reloading a page that is not live', () => {
+    const p = props({ url: '', navEnabled: false })
+    render(<PreviewToolbar {...p} />)
+    openMenu(screen.getByRole('button', { name: 'More' }))
+    const copy = screen.getByRole('menuitem', { name: 'Copy page URL' })
+    const reload = screen.getByRole('menuitem', { name: 'Reload without cache' })
+    expect(copy.getAttribute('aria-disabled')).toBe('true')
+    expect(reload.getAttribute('aria-disabled')).toBe('true')
+    fireEvent.click(copy)
+    fireEvent.click(reload)
+    expect(p.onCopyUrl).not.toHaveBeenCalled()
+    expect(p.onReload).not.toHaveBeenCalled()
+  })
+
+  it('focuses the URL after Type a URL instead, then restores normal server-menu focus', () => {
+    const p = props({ servers: [web, storybook] })
+    render(<PreviewToolbar {...p} />)
+    const trigger = screen.getByRole('button', { name: 'Server: web :5173' })
+    const field = screen.getByRole('textbox', { name: 'Page address' }) as HTMLInputElement
+    openMenu(trigger)
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Type a URL instead' }))
+    act(() => { vi.advanceTimersByTime(20) })
+    expect(document.activeElement).toBe(field)
+    fireEvent.keyDown(field, { key: 'ArrowLeft' })
+    expect(document.activeElement).toBe(field)
+    openMenu(trigger)
+    fireEvent.click(screen.getByRole('menuitem', { name: /storybook:6006/ }))
+    act(() => { vi.advanceTimersByTime(20) })
+    expect(p.onPickServer).toHaveBeenCalledExactlyOnceWith(6006)
+    expect(document.activeElement).toBe(trigger)
+  })
+
+  it('selects the full URL on the next animation frame only while the field still has focus', () => {
+    let nextFrame: FrameRequestCallback = () => undefined
+    const animation = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => {
+      nextFrame = callback
+      return 1
+    })
+    onTestFinished(() => animation.mockRestore())
+    const p = props()
+    render(<PreviewToolbar {...p} />)
+    const field = screen.getByRole('textbox', { name: 'Page address' }) as HTMLInputElement
+    act(() => field.focus())
+    act(() => nextFrame(0))
+    expect(field.selectionStart).toBe(0)
+    expect(field.selectionEnd).toBe(p.url.length)
+    act(() => field.blur())
+    field.setSelectionRange(2, 2)
+    act(() => nextFrame(16))
+    expect(field.selectionStart).toBe(2)
+    expect(field.selectionEnd).toBe(2)
+  })
+
+  it.each([
+    ['fit', [2, 1, 1, 1]],
+    [{ w: 1440, h: 900 }, [1, 1, 1, 2]],
+    [{ w: 390, h: 900 }, [1, 1, 1, 1]],
+    [{ w: 1440, h: 844 }, [1, 1, 1, 1]],
+  ] as const)('marks only the exact current viewport with a check: %s', (viewport, iconCounts) => {
+    const p = props({ viewport })
+    render(<PreviewToolbar {...p} />)
+    const name = viewport === 'fit' ? 'Viewport size: Fit' : `Viewport size: ${viewport.w} × ${viewport.h}`
+    openMenu(screen.getByRole('button', { name }))
+    expect(screen.getAllByRole('menuitem').map(row => row.querySelectorAll('svg').length)).toEqual(iconCounts)
+    fireEvent.click(screen.getByRole('menuitem', { name: /^Fit/ }))
+    expect(p.onViewport).toHaveBeenCalledExactlyOnceWith('fit')
+  })
+
+  it('marks only the server currently shown with a check', () => {
+    render(<PreviewToolbar {...props({ servers: [web, storybook], current: storybook })} />)
+    openMenu(screen.getByRole('button', { name: 'Server: storybook :6006' }))
+    expect(screen.getByRole('menuitem', { name: /web:5173/ }).querySelector('svg')).toBeNull()
+    expect(screen.getByRole('menuitem', { name: /storybook:6006/ }).querySelector('svg')).not.toBeNull()
+  })
+
+  it.each([
+    [undefined, 'neutral'],
+    [1000, 'neutral'],
+    [999, 'success'],
+  ] as const)('shows the correct idle dot for a last frame %s milliseconds ago', (age, tone) => {
+    const stats = { fps: 3, kbps: 7, ...(age === undefined ? {} : { lastFrameAt: Date.now() - age }) }
+    render(<PreviewToolbar {...props({ stats })} />)
+    const reading = screen.getByRole('img', { name: tone === 'neutral' ? 'idle' : '3 fps · 7 KB/s' })
+    expect(reading.querySelector('[data-slot="status-dot"]')?.getAttribute('data-tone')).toBe(tone)
+  })
+
+  it.each([false, true])('keeps the crowded stream dot and exposes the numbers in More (idle %s)', idle => {
+    const stats = { fps: 3, kbps: 7, lastFrameAt: idle ? Date.now() - 1000 : Date.now() }
+    render(<PreviewToolbar {...props({ stats, servers: [web, storybook] })} />)
+    expect(screen.getByRole('img', { name: 'Preview is live' }).getAttribute('data-tone')).toBe(idle ? 'neutral' : 'success')
+    openMenu(screen.getByRole('button', { name: 'More' }))
+    expect(screen.getByText('3 fps · 7 KB/s')).toBeTruthy()
+  })
+
+  it('sets the full address title only for a nonempty URL and turns spelling checks off', () => {
+    const p = props()
+    const { rerender } = render(<PreviewToolbar {...p} />)
+    const field = screen.getByRole('textbox', { name: 'Page address' })
+    expect(field.getAttribute('title')).toBe(p.url)
+    expect(field.getAttribute('spellcheck')).toBe('false')
+    rerender(<PreviewToolbar {...p} url="" />)
+    expect(field.hasAttribute('title')).toBe(false)
+  })
+
 })

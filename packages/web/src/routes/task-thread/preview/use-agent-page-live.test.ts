@@ -51,4 +51,18 @@ describe('useAgentPageLive (hearsay-tools/cezarion#784)', () => {
     history.current = [event(2, { type: 'preview.agent-browser', state: 'connected' }), ...history.visible]
     expect(renderHook(() => useAgentPageLive('r1')).result.current).toBe(true)
   })
+
+  it('updates when the current history changes, including disconnection and an empty history', () => {
+    history.visible = []
+    history.current = [event(1, { type: 'preview.agent-browser', state: 'connected' })]
+    const { result, rerender, unmount } = renderHook(() => useAgentPageLive(undefined))
+    expect(result.current).toBe(true)
+    history.current = [event(2, { type: 'preview.agent-browser', state: 'disconnected' })]
+    rerender()
+    expect(result.current).toBe(false)
+    history.current = []
+    rerender()
+    expect(result.current).toBe(false)
+    unmount()
+  })
 })
