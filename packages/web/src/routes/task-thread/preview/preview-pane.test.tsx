@@ -614,6 +614,51 @@ describe('PreviewSplit', () => {
     expect(document.querySelector('[data-slot="preview-pane"]')).toBeNull()
   })
 
+  it('resizes by exactly two points with arrow keys and leaves other keys alone', async () => {
+    localStorage.clear()
+    render(<Harness open />)
+    const divider = await screen.findByRole('separator', { name: 'Resize preview' })
+    expect(divider.getAttribute('aria-valuenow')).toBe('58')
+    expect(fireEvent.keyDown(divider, { key: 'ArrowRight' })).toBe(false)
+    expect(divider.getAttribute('aria-valuenow')).toBe('56')
+    expect(fireEvent.keyDown(divider, { key: 'ArrowLeft' })).toBe(false)
+    expect(divider.getAttribute('aria-valuenow')).toBe('58')
+    expect(fireEvent.keyDown(divider, { key: 'Home' })).toBe(true)
+    expect(divider.getAttribute('aria-valuenow')).toBe('58')
+  })
+
+  it('drags only while the divider owns the pointer and clamps both edges', async () => {
+    localStorage.clear()
+    render(<Harness open />)
+    const divider = await screen.findByRole('separator', { name: 'Resize preview' })
+    const wrapper = divider.closest('[data-slot="task-split"]')!
+    vi.spyOn(wrapper, 'getBoundingClientRect').mockReturnValue({ left: 100, right: 1100, width: 1000 } as DOMRect)
+    const capture = vi.fn()
+    const ownsPointer = vi.fn(() => false)
+    Object.assign(divider, { setPointerCapture: capture, hasPointerCapture: ownsPointer })
+    fireEvent.pointerMove(divider, { pointerId: 7, clientX: 700 })
+    expect(divider.getAttribute('aria-valuenow')).toBe('58')
+    fireEvent.pointerDown(divider, { pointerId: 7 })
+    expect(capture).toHaveBeenCalledWith(7)
+    ownsPointer.mockReturnValue(true)
+    fireEvent.pointerMove(divider, { pointerId: 7, clientX: 700 })
+    expect(ownsPointer).toHaveBeenLastCalledWith(7)
+    expect(divider.getAttribute('aria-valuenow')).toBe('40')
+    fireEvent.pointerMove(divider, { pointerId: 7, clientX: 1200 })
+    expect(divider.getAttribute('aria-valuenow')).toBe('30')
+    fireEvent.pointerMove(divider, { pointerId: 7, clientX: 0 })
+    expect(divider.getAttribute('aria-valuenow')).toBe('75')
+  })
+
+  it('keeps its width when a captured drag has no measurable width', async () => {
+    localStorage.clear()
+    render(<Harness open />)
+    const divider = await screen.findByRole('separator', { name: 'Resize preview' })
+    Object.assign(divider, { hasPointerCapture: () => true })
+    fireEvent.pointerMove(divider, { pointerId: 7, clientX: 100 })
+    expect(divider.getAttribute('aria-valuenow')).toBe('58')
+  })
+
   it('resizes with the keyboard and keeps the pane within bounds', async () => {
     render(<Harness open />)
     const divider = await screen.findByRole('separator', { name: 'Resize preview' })

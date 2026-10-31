@@ -316,4 +316,65 @@ describe('PreviewToolbar', () => {
       expect((screen.getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true)
     }
   })
+
+  it('sends back, forward, normal reload and close to their own callbacks', () => {
+    const p = props()
+    render(<PreviewToolbar {...p} />)
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Forward' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Close preview' }))
+    expect(p.onBack).toHaveBeenCalledTimes(1)
+    expect(p.onForward).toHaveBeenCalledTimes(1)
+    expect(p.onReload).toHaveBeenCalledExactlyOnceWith(false)
+    expect(p.onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows page loading and blocks reload until loading ends', () => {
+    const p = props({ loading: true })
+    const { rerender } = render(<PreviewToolbar {...p} />)
+    const reload = screen.getByRole('button', { name: 'Reload' }) as HTMLButtonElement
+    expect(reload.disabled).toBe(true)
+    expect(reload.getAttribute('aria-busy')).toBe('true')
+    expect(screen.getByRole('progressbar', { name: 'Loading the page' })).toBeTruthy()
+    fireEvent.click(reload)
+    expect(p.onReload).not.toHaveBeenCalled()
+    rerender(<PreviewToolbar {...p} loading={false} />)
+    expect(reload.disabled).toBe(false)
+    expect(reload.hasAttribute('aria-busy')).toBe(false)
+    expect(screen.queryByRole('progressbar')).toBeNull()
+  })
+
+  it('Escape discards an address draft without navigating and Enter submits the current URL', () => {
+    const p = props({ adopted: true })
+    render(<PreviewToolbar {...p} />)
+    const field = screen.getByRole('textbox', { name: 'Page address' }) as HTMLInputElement
+    act(() => field.focus())
+    expect(screen.queryByText('Not started by cezar')).toBeNull()
+    fireEvent.change(field, { target: { value: 'discard me' } })
+    fireEvent.keyDown(field, { key: 'Escape' })
+    expect(document.activeElement).not.toBe(field)
+    expect(field.value).toBe('localhost:5173/members')
+    expect(p.onNavigate).not.toHaveBeenCalled()
+    expect(screen.getByText('Not started by cezar')).toBeTruthy()
+    act(() => field.focus())
+    fireEvent.keyDown(field, { key: 'Enter' })
+    expect(p.onNavigate).toHaveBeenCalledExactlyOnceWith(p.url)
+    expect(document.activeElement).not.toBe(field)
+  })
+
+  it('disables copying an empty URL and reloading a page that is not live', () => {
+    const p = props({ url: '', navEnabled: false })
+    render(<PreviewToolbar {...p} />)
+    openMenu(screen.getByRole('button', { name: 'More' }))
+    const copy = screen.getByRole('menuitem', { name: 'Copy page URL' })
+    const reload = screen.getByRole('menuitem', { name: 'Reload without cache' })
+    expect(copy.getAttribute('aria-disabled')).toBe('true')
+    expect(reload.getAttribute('aria-disabled')).toBe('true')
+    fireEvent.click(copy)
+    fireEvent.click(reload)
+    expect(p.onCopyUrl).not.toHaveBeenCalled()
+    expect(p.onReload).not.toHaveBeenCalled()
+  })
+
 })
