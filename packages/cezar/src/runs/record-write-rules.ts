@@ -13,13 +13,16 @@ type Staged = ReadonlyMap<string, RunRecord | null>;
 
 /** Rule order is path-specific. These differences preserve existing behavior:
  * commit tests isUsageLimitHold; loaded/debounced test only status. Durable task edits skip
- * reference resolution. Completion preparation is commit-only. Patch redaction's opt-out also
- * skips session secrets, while text redaction always scrubs those secrets.
+ * reference resolution. Patch redaction's opt-out also skips session secrets, while text
+ * redaction always scrubs those secrets.
+ * Completion actions (hearsay-tools/cezarion#2324): every path clears a retired action, so one
+ * run state stores one action state. Only a commit creates one, because the action and its
+ * archive must be durable; updateRun routes opted-in Done and setting changes to a commit.
  */
 export const WRITE_PATH_RULES = {
   commit: ['stale-resume:hold', 'completion-actions'],
   durableUpdate: ['issue-seed', 'pull-requests', 'restore', 'redact-patch', 'archive-fields'],
-  debouncedUpdate: ['issue-seed', 'pull-requests', 'restore', 'redact-patch', 'assign', 'stale-resume:status', 'task-references', 'archive-or-touch'],
+  debouncedUpdate: ['issue-seed', 'pull-requests', 'restore', 'redact-patch', 'assign', 'retire-completion-action', 'stale-resume:status', 'task-references', 'archive-or-touch'],
   loaded: ['stale-resume:status'],
   conversation: ['redact-messages', 'parse-delegation', 'redact-input', 'parse-input', 'append-input'],
   // updateRun, marker declarations, PR discovery and event observations.
@@ -99,6 +102,7 @@ export function stageDurableUpdate(run: RunRecord, patch: RecordPatch, hooks: Up
 export function stageDebouncedUpdate(run: RunRecord, patch: RecordPatch, hooks: UpdateHooks): void {
   const { normalized, archived } = prepareUpdate(run, patch, hooks);
   Object.assign(run, redactPatch(normalized, hooks.redact));
+  if (run.completionAction && completionActionRetired(run)) run.completionAction = undefined;
   // The usage-limit resume is the appointment of a `waiting` run (hearsay-tools/cezarion#1236),
   // so a run coming back to life or settling retires it. stageCommit applies the hold predicate;
   // this debounced path mutates the held record with the status-only predicate.
@@ -164,11 +168,16 @@ function prepareCompletionActions(input: ReadonlyMap<string, RunRecord | null>, 
         next.completionAction = { ...next.completionAction!, phase: blocker ? 'blocked' : 'complete', ...(blocker ? { message: blocker } : {}) };
         if (!blocker) hooks.stageArchive(staged, next, true);
       }
-    } else if (candidate.status !== 'done' || (!candidate.archiveWhenDone && !candidate.autoMergePr)) {
-      if (candidate.completionAction) staged.set(id, { ...candidate, completionAction: undefined });
+    } else if (candidate.completionAction && completionActionRetired(candidate)) {
+      staged.set(id, { ...candidate, completionAction: undefined });
     }
   }
   return staged;
+}
+
+/** An action has meaning only on a Done run with a completion option on. */
+function completionActionRetired(run: RunRecord): boolean {
+  return run.status !== 'done' || (!run.archiveWhenDone && !run.autoMergePr);
 }
 
 /** Prompt edits can both revoke and restore a reference. Resolve the retained working sets
