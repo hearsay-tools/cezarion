@@ -1,8 +1,28 @@
-import { act, render } from '@testing-library/react'
+import { act, render, renderHook } from '@testing-library/react'
 import { MemoryRouter, useLocation, useNavigate } from 'react-router'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { useSearchParamsWriter, type SearchParamsUpdate } from '@/lib/use-search-params-writer'
+
+const router = vi.hoisted(() => ({
+  enabled: false,
+  location: { key: 'initial', search: '', state: null as Record<string, number> | null },
+  type: 'POP' as 'POP' | 'PUSH' | 'REPLACE',
+  navigate: vi.fn(),
+}))
+
+vi.mock('react-router', async importOriginal => {
+  const actual = await importOriginal<typeof import('react-router')>()
+  return {
+    ...actual,
+    useLocation: () => router.enabled ? router.location : actual.useLocation(),
+    useNavigate: () => router.enabled ? router.navigate : actual.useNavigate(),
+    useNavigationType: () => router.enabled ? router.type : actual.useNavigationType(),
+    useSearchParams: () => router.enabled ? [new URLSearchParams(router.location.search)] : actual.useSearchParams(),
+  }
+})
+
+afterEach(() => { router.enabled = false; router.navigate.mockReset() })
 
 function set(key: string, value: string | null): SearchParamsUpdate {
   return (current) => {
@@ -145,5 +165,80 @@ describe('useSearchParamsWriter (hearsay-tools/cezarion#1616)', () => {
     act(() => probe.back!())
     act(() => probe.write!(set('new', '1')))     // compose on ?q=done, not stale ?q=done&f=1
     expect(new URLSearchParams(probe.search)).toEqual(new URLSearchParams('q=done&new=1'))
+  })
+})
+
+describe('writer navigation acknowledgements', () => {
+  function start() {
+    router.enabled = true
+    router.location = { key: 'initial', search: '?base=1', state: null }
+    router.type = 'POP'
+    return renderHook(() => useSearchParamsWriter())
+  }
+
+  function landed(index: number, key: string, type: 'POP' | 'PUSH' | 'REPLACE' = 'REPLACE') {
+    const [to, options] = router.navigate.mock.calls[index]!
+    router.location = { key, search: to.search, state: options.state }
+    router.type = type
+  }
+
+  it('preserves the newest query when an earlier write lands first', () => {
+    const { result, rerender } = start()
+    act(() => {
+      result.current[1](set('a', '1'))
+      result.current[1](set('b', '2'))
+    })
+    expect(router.navigate.mock.calls[0]![1]).toMatchObject({ replace: true, state: { __writerSeq: 1 } })
+    expect(router.navigate.mock.calls[1]![1].state.__writerSeq).toBe(2)
+    landed(0, 'first')
+    rerender()
+    expect(result.current[0].toString()).toBe('base=1&a=1')
+    // A render without navigation must also keep the pending second write.
+    rerender()
+    act(() => result.current[1](set('c', '3')))
+    expect(router.navigate.mock.calls[2]![0]).toEqual({ search: '?base=1&a=1&b=2&c=3' })
+    landed(2, 'latest')
+    rerender()
+    act(() => result.current[1](set('c', '3')))
+    expect(router.navigate).toHaveBeenCalledTimes(3)
+  })
+
+  it.each(['POP', 'PUSH'] as const)('resets on %s even when the navigation carries a writer tag', type => {
+    const { result, rerender } = start()
+    act(() => {
+      result.current[1](set('a', '1'))
+      result.current[1](set('b', '2'))
+    })
+    landed(0, 'external', type)
+    rerender()
+    act(() => result.current[1](set('c', '3')))
+    expect(router.navigate.mock.calls[2]![0]).toEqual({ search: '?base=1&a=1&c=3' })
+  })
+
+  it.each(['foreign session', 'future sequence', 'absent sequence'] as const)('resets a replace from %s', kind => {
+    const { result, rerender } = start()
+    act(() => result.current[1](set('a', '1')))
+    const state = { ...router.navigate.mock.calls[0]![1].state } as Record<string, number>
+    if (kind === 'foreign session') state.__writerSession = -1
+    if (kind === 'future sequence') state.__writerSeq = 100
+    if (kind === 'absent sequence') delete state.__writerSeq
+    router.location = { key: 'external', search: '?outside=1', state }
+    router.type = 'REPLACE'
+    rerender()
+    act(() => result.current[1](set('c', '3')))
+    expect(router.navigate.mock.calls[1]![0]).toEqual({ search: '?outside=1&c=3' })
+  })
+
+  it('gives updates a copy so a no-op cannot change the returned params', () => {
+    const { result } = start()
+    const returned = result.current[0]
+    act(() => result.current[1](current => {
+      current.set('scratch', '1')
+      return new URLSearchParams('base=1')
+    }))
+    expect(returned.toString()).toBe('base=1')
+    expect(router.navigate).not.toHaveBeenCalled()
+    act(() => result.current[1](set('next', '2')))
+    expect(router.navigate.mock.calls[0]![0]).toEqual({ search: '?base=1&next=2' })
   })
 })

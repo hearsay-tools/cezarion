@@ -56,8 +56,6 @@ export function conversationKindLabel(kind: ThreadConversationMessage['messageKi
       return 'Follow-up'
     case 'reply':
       return 'Reply'
-    default:
-      return kind
   }
 }
 
@@ -85,8 +83,6 @@ export function conversationOutcomeLabel(status: NonNullable<ThreadConversationM
       return 'Sent to a human'
     case 'deleted':
       return 'Recipient deleted'
-    default:
-      return status
   }
 }
 
@@ -113,8 +109,6 @@ export function conversationDeliveryLabel(delivery: ThreadConversationMessage['d
       return 'Read'
     case 'not-delivered':
       return 'Not delivered'
-    default:
-      return delivery
   }
 }
 
