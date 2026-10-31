@@ -124,6 +124,8 @@ export class PreviewSession {
   private announced = false;
   private viewport = DEFAULT_VIEWPORT;
   private readonly density: PixelDensity;
+  /** The device scale factor the page renders at now. */
+  private rendered = 1;
   /** Viewport changes and screencast stops run one at a time: overlapping stop/start pairs can leave Chromium without a first frame. */
   private queue: Promise<void> = Promise.resolve();
   /**
@@ -204,6 +206,11 @@ export class PreviewSession {
     this.disarmWatchdog();
     this.enqueue(async () => {
       await this.cdp.send('Page.stopScreencast').catch(() => {});
+      // Ultra's density lasts while a viewer watches: the page goes back to scale 1, at the same CSS size.
+      if (this.viewer || this.rendered === 1) return;
+      await this.density.place(1);
+      await this.cdp.send('Emulation.setDeviceMetricsOverride', { width: this.viewport.w, height: this.viewport.h, deviceScaleFactor: 1, mobile: false }).catch(() => {});
+      this.rendered = 1;
     });
   }
 
@@ -334,6 +341,7 @@ export class PreviewSession {
     // The window reaches its screen before the page renders at the ratio, so the first frame is full size.
     const rendered = await this.density.place(scale);
     await this.cdp.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: rendered, mobile: false });
+    this.rendered = rendered;
     if (!this.viewer) return;
     await this.restartScreencast({ w, h, dpr, quality, scale, rendered });
   }

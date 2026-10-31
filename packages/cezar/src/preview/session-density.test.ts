@@ -160,6 +160,35 @@ describe('pixel density (hearsay-tools/cezarion#2069)', () => {
     expect(sent('Page.startScreencast').at(-1)?.params).toMatchObject({ quality: 100, maxWidth: 1600, maxHeight: 1200 });
   });
 
+  it('the last viewer leaving Ultra puts the page back at scale 1, at the same CSS size', async () => {
+    const { cdp, sent, calls } = browser();
+    const session = await PreviewSession.create(cdp, { quality: () => 'ultra' });
+    const viewer = fakeViewer();
+    session.attach(viewer);
+    await session.handle({ t: 'resize', w: 800, h: 600, dpr: 2 });
+    await flush();
+    const before = calls.length;
+    session.detach(viewer);
+    await flush();
+    const after = calls.slice(before).map(call => call.method);
+    expect(after).toEqual(['Page.stopScreencast', 'Emulation.getScreenInfos', 'Browser.setWindowBounds', 'Emulation.setDeviceMetricsOverride']);
+    expect(sent('Browser.setWindowBounds').at(-1)?.params).toEqual({ windowId: 3, bounds: { left: 0, top: 0 } });
+    expect(sent('Emulation.setDeviceMetricsOverride').at(-1)?.params).toEqual({ width: 800, height: 600, deviceScaleFactor: 1, mobile: false });
+  });
+
+  it.each<PreviewQuality>(['normal', 'high'])('a viewer leaving %s only stops the screencast, as before', async quality => {
+    const { cdp, calls } = browser();
+    const session = await PreviewSession.create(cdp, { quality: () => quality });
+    const viewer = fakeViewer();
+    session.attach(viewer);
+    await session.handle({ t: 'resize', w: 800, h: 600, dpr: 2 });
+    await flush();
+    const before = calls.length;
+    session.detach(viewer);
+    await flush();
+    expect(calls.slice(before).map(call => call.method)).toEqual(['Page.stopScreencast']);
+  });
+
   it('a new viewer (a reconnect) streams at its own ratio from the first frame', async () => {
     const { cdp, sent } = browser();
     const session = await PreviewSession.create(cdp, { quality: () => 'ultra' });
