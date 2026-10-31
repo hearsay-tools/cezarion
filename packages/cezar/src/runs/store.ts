@@ -1675,7 +1675,7 @@ export class RunStore extends EventEmitter {
     if (held) return held;
     const family = this.db && !this.deleted.has(id) ? this.db.familyOf(id) : undefined;
     if (family === undefined || !this.claimFamilies([family]).has(family)) return undefined;
-    const run = this.coldReads.claimed(id, this.coldBase.get(id), () => this.db?.get(id)?.revision) ?? this.loadCold(id);
+    const run = this.coldReads.claimed(id, this.coldBase.get(id), () => this.db?.revisionOf(id)) ?? this.loadCold(id);
     if (!run) return undefined;
     this.holdDecoded(run);
     this.scheduleSave();
@@ -1999,7 +1999,7 @@ export class RunStore extends EventEmitter {
   getRun(id: string): RunRecord | undefined {
     const held = this.held.get(id);
     if (held) return held;
-    const cached = this.deleted.has(id) ? undefined : this.coldReads.get(id);
+    const cached = this.deleted.has(id) || !this.db ? undefined : this.coldReads.at(id, this.db.revisionOf(id));
     if (cached) return cached;
     const run = this.loadCold(id);
     return run && this.coldReads.keep(this.answerCold(run, true), this.coldBase.get(id), this.held.has(id));

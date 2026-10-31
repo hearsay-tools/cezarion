@@ -21,7 +21,7 @@ export function storedRow({ revision, seq, data, extras }: StoredRow): StoredRow
  * scope shares it, so a family reconcile pass decodes each member once, not once per message.
  *
  * The store keeps each entry at its run's `coldBase` revision: a decode of another revision drops
- * it (`at`), and a run that leaves memory or is deleted leaves it (`forget`). A held run is always
+ * it (`at`), every hit is checked against the row's current revision, and a run that leaves memory or is deleted leaves it (`forget`). A held run is always
  * read from memory first, and a write holds its run, so no read after a write sees the copy from
  * before it. Synchronous and re-entrant: the cache ends with the outermost scope, inside the turn
  * that `coldBase` fences.
@@ -35,13 +35,13 @@ export class ColdReadCache {
     try { return fn(); } finally { this.entries = undefined; }
   }
 
-  get(id: string): RunRecord | undefined { return this.entries?.get(id)?.run; }
-
-  /** The cached copy when it was decoded from `revision`; one decoded from another is dropped. */
-  at(id: string, revision: number): RunRecord | undefined {
+  /** The cached copy when it was decoded from `revision`, the row's current one (undefined: the
+   *  row is gone); a copy decoded from another revision is dropped. Another store may write or
+   *  delete the row inside the scope, so every hit is checked against it. */
+  at(id: string, revision: number | undefined): RunRecord | undefined {
     const entry = this.entries?.get(id);
     if (entry && entry.revision !== revision) this.entries!.delete(id);
-    return entry?.revision === revision ? entry.run : undefined;
+    return entry && entry.revision === revision ? entry.run : undefined;
   }
 
   /** Keep a cold answer for the rest of the scope. A held run (`held`) needs none. */

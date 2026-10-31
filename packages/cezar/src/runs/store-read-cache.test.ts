@@ -82,11 +82,30 @@ describe('RunStore.withReadCache', () => {
     });
   });
 
+  it('a run with no row reads as absent in the scope', () => {
+    const store = open();
+    expect(store.withReadCache(() => store.getRun(randomUUID()))).toBeUndefined();
+  });
+
   it('a run deleted in the scope reads as absent', () => {
     const store = open();
     store.withReadCache(() => {
       expect(store.getRun(run.id)).toBeDefined();
       expect(store.deleteRun(run.id)).toBe(true);
+      expect(store.getRun(run.id)).toBeUndefined();
+    });
+  });
+
+  it('a direct read sees another store\'s update and deletion inside the scope', () => {
+    const store = open();
+    const other = open();
+    store.withReadCache(() => {
+      expect(store.getRun(run.id)?.title).toBe('settled');
+      other.updateRun(run.id, { title: 'changed elsewhere' });
+      other.flush();
+      expect(store.getRun(run.id)?.title).toBe('changed elsewhere');
+      expect(other.deleteRun(run.id)).toBe(true);
+      other.flush();
       expect(store.getRun(run.id)).toBeUndefined();
     });
   });
