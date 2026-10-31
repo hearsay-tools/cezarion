@@ -16,7 +16,31 @@ const CLONE_TIMEOUT_MS = 10 * 60_000;
 
 /** Progress lines kept for the error message. `git clone` is chatty and the
  *  useful part of a failure is always at the end. */
-const ERROR_TAIL_LINES = 6;
+export const ERROR_TAIL_LINES = 6;
+
+/** Keep complete progress lines and a bounded error tail; callers choose when to flush. */
+export function createProgressLineSplitter(onLine: (line: string) => void) {
+  const tail: string[] = [];
+  let pending = '';
+  const consume = (chunk: string): void => {
+    pending += chunk;
+    const parts = pending.split(/\r\n|\r|\n/);
+    pending = parts.pop() ?? '';
+    for (const part of parts) {
+      const line = part.trim();
+      if (line === '') continue;
+      tail.push(line);
+      if (tail.length > ERROR_TAIL_LINES) tail.shift();
+      onLine(line);
+    }
+  };
+  return {
+    tail,
+    consume,
+    get pending(): string { return pending; },
+    flush(): void { if (pending !== '') consume('\n'); },
+  };
+}
 
 /** One `checkout-progress` SSE payload (workspace-level event, step 2.8's bus).
  *  `checkoutId` is echoed from the request so a cockpit only renders its own
@@ -202,7 +226,6 @@ export const ghCloneRunner: CloneRunner = (ref, dir, onLine, signal) =>
       // nobody can see.
       env: { ...process.env, GH_PROMPT_DISABLED: '1', GIT_TERMINAL_PROMPT: '0' },
     });
-    const tail: string[] = [];
     let settled = false;
     const finish = (result: { ok: true } | { ok: false; error: string; notFound?: boolean }): void => {
       if (settled) return;
@@ -223,23 +246,11 @@ export const ghCloneRunner: CloneRunner = (ref, dir, onLine, signal) =>
     // splitting on `\n` alone would buffer the whole "Receiving objects" phase
     // into one line delivered at the end, which is exactly the silent spinner
     // this stream exists to avoid.
-    let pending = '';
-    const consume = (chunk: string): void => {
-      pending += chunk;
-      const parts = pending.split(/\r\n|\r|\n/);
-      pending = parts.pop() ?? '';
-      for (const part of parts) {
-        const line = part.trim();
-        if (line === '') continue;
-        tail.push(line);
-        if (tail.length > ERROR_TAIL_LINES) tail.shift();
-        onLine(line);
-      }
-    };
+    const lines = createProgressLineSplitter(onLine);
     child.stderr?.setEncoding('utf8');
-    child.stderr?.on('data', consume);
+    child.stderr?.on('data', lines.consume);
     child.stdout?.setEncoding('utf8');
-    child.stdout?.on('data', consume);
+    child.stdout?.on('data', lines.consume);
 
     child.on('error', (err) => {
       signal?.removeEventListener('abort', onAbort);
@@ -250,7 +261,7 @@ export const ghCloneRunner: CloneRunner = (ref, dir, onLine, signal) =>
     });
     child.on('close', (code) => {
       // gh may exit without a newline after the authorization URL.
-      if (pending !== '') consume('\n');
+      lines.flush();
       signal?.removeEventListener('abort', onAbort);
       if (code === 0) {
         void persistGhCredentialHelper(dir).then((ok) => finish(ok
@@ -261,7 +272,7 @@ export const ghCloneRunner: CloneRunner = (ref, dir, onLine, signal) =>
       // The tail of gh/git's own output IS the error message — `gh` writes
       // "could not find repository", "authentication required" and the network
       // errors itself, and paraphrasing them would only lose detail.
-      const detail = tail.join('\n').trim();
+      const detail = lines.tail.join('\n').trim();
       finish({ ok: false, error: detail === '' ? `gh repo clone exited with code ${code}` : detail });
     });
   });
