@@ -13,23 +13,37 @@ interface LiveRouteDeps {
   resolveProject(id: string): Promise<ResolvedProject>;
   serverGeneration: string;
   resolveBootProject(): Promise<string>;
-  projectFailure: (error: unknown) => { error: string; status: 404 | 409 | 503 };
+  projectFailure: (error: unknown, projectId: string) => ProjectFailureAnswer;
+}
+type ProjectFailureAnswer = { error: string; status: 404 | 409 | 503 };
+
+/** A project setup failure, already answered by the mapping HTTP shares. */
+class ProjectSetupFailure extends Error {
+  constructor(readonly answer: ProjectFailureAnswer) { super(answer.error); }
 }
 
-function failure(demand: LiveRunDemand, error: unknown, projectFailure: LiveRouteDeps['projectFailure']): Exclude<LiveRunBatchResult, { type: 'batch' }> {
+function failure(demand: LiveRunDemand, error: unknown): Exclude<LiveRunBatchResult, { type: 'batch' }> {
   const identity = { projectId: demand.projectId, runId: demand.runId };
   if (error instanceof HistoryCursorError || error instanceof LiveFeedReset) {
     return { ...identity, type: 'reset', status: error.status, error: error.message };
   }
-  return { ...identity, type: 'error', ...projectFailure(error) };
+  if (error instanceof ProjectSetupFailure) return { ...identity, type: 'error', ...error.answer };
+  // The project is open; only this run's feed failed.
+  return { ...identity, type: 'error', status: 503, error: 'run feed unavailable' };
 }
 
 export function createLiveRoutes({ resolveProject, serverGeneration, resolveBootProject, projectFailure }: LiveRouteDeps) {
   const resolve = async (demand: LiveRunDemand, signal: AbortSignal) => {
     signal.throwIfAborted();
-    const project = await resolveProject(demand.projectId);
+    let project: ResolvedProject;
+    try {
+      project = await resolveProject(demand.projectId);
+    } catch (error) {
+      signal.throwIfAborted();
+      throw new ProjectSetupFailure(projectFailure(error, demand.projectId));
+    }
     signal.throwIfAborted();
-    if (project.store.unavailable) throw project.store.unavailable;
+    if (project.store.unavailable) throw new ProjectSetupFailure(projectFailure(project.store.unavailable, demand.projectId));
     return { project, demand: { ...demand, projectId: project.id } };
   };
   const canonicalDemand: MiddlewareHandler<{}, string, { out: { json: { runs: LiveRunDemand[] } } }> = async (c, next) => {
@@ -53,7 +67,7 @@ export function createLiveRoutes({ resolveProject, serverGeneration, resolveBoot
           } else results.push(await readFiniteRunFeed(resolved.project, demand, c.req.raw.signal));
         } catch (error) {
           c.req.raw.signal.throwIfAborted();
-          results.push(failure(demand, error, projectFailure));
+          results.push(failure(demand, error));
         }
       }
       return c.json({ generation: serverGeneration, results });
@@ -103,7 +117,7 @@ export function createLiveRoutes({ resolveProject, serverGeneration, resolveBoot
               }, controller.signal));
             } catch (error) {
               if (controller.signal.aborted) break;
-              await send(failure(demand, error, projectFailure));
+              await send(failure(demand, error));
             }
           }
           await send({ type: 'ready', generation: serverGeneration });
