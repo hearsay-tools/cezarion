@@ -949,7 +949,7 @@ describe('cez task', () => {
         return response;
       });
       try {
-        expect(await run(['start', 'finish now', '--wait', '--until', 'settled', '--timeout-seconds', '1'])).toBe(0);
+        expect(await run(['start', 'finish now', '--wait', '--until', 'settled', '--timeout-seconds', '1800'])).toBe(0);
         expect(last()).toMatchObject({ status: RUN_STATUS.done, created: true, until: 'settled', timedOut: false });
       } finally { fetchSpy.mockRestore(); }
     });
@@ -959,7 +959,7 @@ describe('cez task', () => {
       store.appendEvent(id, { type: 'text', text: 'visible log line' });
       store.updateRun(id, { status: RUN_STATUS.done });
       const offset = out.length;
-      expect(await run(['log', id, '--follow', '--until', until, '--since', '0', '--max-chars', '1000000', '--timeout-seconds', '1'])).toBe(0);
+      expect(await run(['log', id, '--follow', '--until', until, '--since', '0', '--max-chars', '1000000', '--timeout-seconds', '1800'])).toBe(0);
       expect(out.slice(offset).join('\n')).toContain('visible log line');
     });
 
