@@ -493,3 +493,92 @@ describe('GitToolbar renders policy fixtures verbatim', () => {
     expect(onWrapChange).toHaveBeenCalledWith(true)
   })
 })
+
+describe('Changes tab action and file outcomes', () => {
+  it.each([
+    { action: 'push', path: '/api/v1/runs/r1/git/push' },
+    { action: 'create-pr', path: '/api/v1/runs/r1/pr' },
+  ])('reports a failed $action request', async ({ action, path }) => {
+    const sent = stubFetch({ [`POST ${path}`]: () => jsonResponse({ error: 'Remote refused this operation' }, 409) })
+    renderChangesRoute()
+    await waitFor(() => expect(toolbarAction(action)?.disabled).toBe(false))
+    fireEvent.click(toolbarAction(action)!)
+    await screen.findByText('Remote refused this operation', { exact: true })
+    expect(document.querySelector('[data-slot="toast"]')?.getAttribute('data-tone')).toBe('danger')
+    expect(sent.filter((request) => request.method === 'POST').map((request) => request.path)).toEqual([path])
+  })
+
+  it('reports a push without adding the upstream-set suffix when tracking already exists', async () => {
+    stubFetch({ 'POST /api/v1/runs/r1/git/push': () => jsonResponse({ pushed: true, branch: 'topic', remote: 'fork', upstreamSet: false }) })
+    renderChangesRoute()
+    await waitFor(() => expect(toolbarAction('push')?.disabled).toBe(false))
+    fireEvent.click(toolbarAction('push')!)
+    await screen.findByText('Pushed topic to fork', { exact: true })
+  })
+
+  it.each([
+    { command: undefined, copyFails: false, message: 'Terminal is unavailable' },
+    { command: 'cd /worktree && agent resume', copyFails: false, message: 'No terminal found — command copied to clipboard.' },
+    { command: 'cd /worktree && agent resume', copyFails: true, message: 'Run manually: cd /worktree && agent resume' },
+  ])('handles the terminal refusal: $message', async ({ command, copyFails, message }) => {
+    const copy = vi.fn(() => copyFails ? Promise.reject(new Error('Clipboard denied')) : Promise.resolve())
+    vi.stubGlobal('navigator', { clipboard: { writeText: copy } })
+    const sent = stubFetch({ 'POST /api/v1/runs/r1/open-in-cli': () => jsonResponse({ error: 'Terminal is unavailable', command }, 409) })
+    renderChangesRoute()
+    const more = await screen.findByRole('button', { name: 'More git actions' })
+    fireEvent.pointerDown(more, { button: 0, ctrlKey: false, pointerType: 'mouse' })
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Open in terminal' }))
+    await screen.findByText(message, { exact: true })
+    expect(sent.filter((request) => request.method === 'POST').map((request) => request.path)).toEqual(['/api/v1/runs/r1/open-in-cli'])
+    if (command) expect(copy).toHaveBeenCalledExactlyOnceWith(command)
+    else expect(copy).not.toHaveBeenCalled()
+  })
+
+  it.each([true, false])('serves image bytes and gates the app handoff with localHandoff=%s', async (localHandoff) => {
+    const sent = stubFetch({
+      'GET /api/v1/health': () => jsonResponse({ ...HEALTH, capabilities: { localHandoff } }),
+      'GET /api/v1/runs/r1/changes': () => jsonResponse({ files: [{ path: 'art/logo.png', status: 'added', adds: 0, dels: 0, binary: true, image: true, patch: '' }], stat: { adds: 0, dels: 0, files: 1 } }),
+      'POST /api/v1/runs/r1/open-in': () => jsonResponse({ error: 'No application registered' }, 409),
+    })
+    renderChangesRoute()
+    const image = await screen.findByRole('img', { name: 'art/logo.png' })
+    expect(image.getAttribute('src')).toBe('/api/v1/runs/r1/files?path=art%2Flogo.png&raw=1')
+    if (localHandoff) {
+      fireEvent.click(await screen.findByRole('button', { name: 'Open in default app' }))
+      await screen.findByText('No application registered', { exact: true })
+      expect(sent.find((request) => request.method === 'POST')).toMatchObject({ path: '/api/v1/runs/r1/open-in', body: { target: 'default', path: 'art/logo.png' } })
+    } else expect(screen.queryByRole('button', { name: 'Open in default app' })).toBeNull()
+  })
+
+  it('distinguishes an unavailable changes service from a worktree refusal', async () => {
+    stubFetch({ 'GET /api/v1/runs/r1/changes': () => jsonResponse({ error: 'Cannot read changes' }, 403) })
+    renderChangesRoute()
+    await screen.findByRole('heading', { name: 'Could not load the changes' })
+    expect(screen.getByText('Cannot read changes', { exact: true })).toBeTruthy()
+    expect(toolbarAction('push')?.disabled).toBe(false)
+  })
+
+  it.each([
+    { type: 'dir', entries: [] },
+    { type: 'file', binary: true, tooLarge: false, content: '# Unavailable' },
+    { type: 'file', binary: false, tooLarge: true, content: '# Unavailable' },
+    { type: 'file', binary: false, tooLarge: false },
+    { error: 'File disappeared' },
+  ])('falls back to the patch when the full file cannot be served: %j', async (entry) => {
+    const sent = stubFetch({
+      'GET /api/v1/runs/r1/changes': () => jsonResponse({ files: [{ ...CHANGES.files[0], status: 'modified' }], stat: CHANGES.stat }),
+      'GET /api/v1/runs/r1/files?path=notes.md': () => jsonResponse({ path: 'notes.md', size: 10, ...entry }, 'error' in entry ? 404 : 200),
+    })
+    renderChangesRoute()
+    const toggle = await waitFor(() => {
+      const button = document.querySelector<HTMLButtonElement>('[data-slot="markdown-preview-toggle"]')
+      expect(button).not.toBeNull()
+      return button!
+    })
+    fireEvent.click(toggle)
+    await screen.findByText('The full file could not be loaded. Showing the changed sections only.', { exact: true })
+    expect(screen.queryByRole('heading', { name: 'Unavailable' })).toBeNull()
+    expect(document.querySelector('[data-slot="diff-markdown-preview"]')?.textContent).toContain('one')
+    expect(sent.some((request) => request.path === '/api/v1/runs/r1/files?path=notes.md')).toBe(true)
+  })
+})
