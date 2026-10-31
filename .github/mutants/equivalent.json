@@ -8,6 +8,14 @@
     "reason": "At equality both values are normalized ISO timestamps, so assigning historyStart keeps the identical string."
   },
   {
+    "file": "packages/cezar/src/preview/host.ts",
+    "function": "sameOrigin",
+    "mutator": "BlockStatement",
+    "original": "{\n    return false;\n  }",
+    "replacement": "{}",
+    "reason": "Both callers use the result only for truthiness; an invalid URL returning undefined instead of false selects the same fallback."
+  },
+  {
     "file": "packages/cezar/src/server/repo-branches.ts",
     "function": "classifyBranches",
     "mutator": "ConditionalExpression",
