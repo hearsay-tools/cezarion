@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { afterEach, describe, expect, it } from 'vitest'
-import { refusesConnection, servedKey, takeOutboundRefusals, throwOutboundRefusals } from './test-outbound-guard.testkit.ts'
+import { refusesConnection, servedKeys, takeOutboundRefusals, throwOutboundRefusals } from './test-outbound-guard.testkit.ts'
 
 // The setup file installs the guard (hearsay-tools/cezarion#2367). These tests drive it through
 // real sockets, so a setup that stops installing it fails here.
@@ -112,6 +112,22 @@ describe('outbound guard installed by the test setup', () => {
     }
   })
 
+  it.skipIf(process.platform !== 'linux')('refuses ::1 on a port this process serves only through an IPv4 wildcard', async () => {
+    const { server, port } = await serveInRefusedRange('0.0.0.0')
+    const stop = await childListener(port, '::1')
+    try {
+      const error = await new Promise<NodeJS.ErrnoException | undefined>(resolve => {
+        const socket = connect(port, '::1')
+        socket.on('error', resolve).on('connect', () => { socket.destroy(); resolve(undefined) })
+      })
+      expect(error?.code).toBe(REFUSED)
+      expect(takeOutboundRefusals().map(refusal => refusal.destination)).toEqual([`::1:${port}`])
+    } finally {
+      stop()
+      await close(server)
+    }
+  })
+
   it('lets a connection reach a unix socket', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cez-guard-'))
     const path = join(dir, 'guard.sock')
@@ -136,7 +152,13 @@ describe('outbound guard installed by the test setup', () => {
 })
 
 describe('refusesConnection', () => {
-  const served = new Set([servedKey('127.0.0.1', 4321), servedKey('::', 4400), servedKey('127.0.0.1', 4500), servedKey('::1', 4500)])
+  const served = new Set([
+    ...servedKeys('127.0.0.1', 4321),
+    ...servedKeys('::', 4400), // dual-stack wildcard
+    ...servedKeys('127.0.0.1', 4500), ...servedKeys('::1', 4500),
+    ...servedKeys('0.0.0.0', 4600), // IPv4 wildcard
+    ...servedKeys('::', 4700, true), // IPv6-only wildcard
+  ])
 
   it.each([
     ['github.com', 443],
@@ -151,6 +173,9 @@ describe('refusesConnection', () => {
     ['127.0.0.2', 4321], // served on 127.0.0.1 only: another process may own 127.0.0.2:4321
     ['::1', 4321],
     ['localhost', 4321], // localhost may resolve to ::1, which this process does not serve
+    ['::1', 4600], // an IPv4 wildcard leaves ::1 to another process
+    ['localhost', 4600],
+    ['127.0.0.1', 4700], // an IPv6-only wildcard leaves IPv4 to another process
   ])('refuses %s:%s', (host, port) => {
     expect(refusesConnection(host, port, served)).toBe(true)
   })
@@ -162,6 +187,9 @@ describe('refusesConnection', () => {
     ['127.0.0.5', 4400], // a wildcard bind owns the port on every loopback address
     ['localhost', 4400],
     ['localhost', 4500], // both loopback addresses served
+    ['127.0.0.9', 4600], // an IPv4 wildcard covers every IPv4 loopback address
+    ['0.0.0.0', 4600],
+    ['::1', 4700],
     ['127.0.0.1', 1], // below 1024: nothing unprivileged listens there
     ['localhost', 1023],
     ['127.0.0.1', 32768], // the ephemeral range, where listen(0) and child fixtures land

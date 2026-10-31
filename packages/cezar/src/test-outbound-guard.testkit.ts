@@ -9,7 +9,7 @@ import net from 'node:net'
  * the test fails even when the code under test swallowed the error.
  *
  * Allowed: a unix socket path; a loopback address and port that a server in this process listens
- * on (a wildcard bind covers every loopback address); a
+ * on (a wildcard bind covers the loopback addresses of the families it binds); a
  * loopback port below 1024 (nothing unprivileged listens there, and tests use :1 as a closed
  * port); a loopback port from 32768 up, where `listen(0)` lands, including the fixture servers
  * child processes start (the OpenCode mock). Refused: every other host, and loopback ports 1024
@@ -41,8 +41,19 @@ function isLoopbackHost(host: string): boolean {
   return host === 'localhost' || host === '::1' || host === '::' || host === '0.0.0.0' || /^127\.\d+\.\d+\.\d+$/.test(host)
 }
 
-/** One listener's record: the address it bound and its port. */
-export const servedKey = (address: string, port: number): string => `${bareHost(address)}|${port}`
+const familyOf = (address: string): 4 | 6 => (address.includes(':') ? 6 : 4)
+
+/**
+ * One listener's records. A bind to one address covers that address; a wildcard covers every
+ * loopback address of the families it binds: `0.0.0.0` IPv4 only, `::` IPv6 and, unless
+ * `ipv6Only`, IPv4 too. Another process may hold the same port in a family left uncovered.
+ */
+export function servedKeys(address: string, port: number, ipv6Only = false): string[] {
+  const bare = bareHost(address)
+  if (bare === '0.0.0.0') return [`*4|${port}`]
+  if (bare === '::') return ipv6Only ? [`*6|${port}`] : [`*4|${port}`, `*6|${port}`]
+  return [`${bare}|${port}`]
+}
 
 /**
  * The loopback addresses a connection to `host` may reach. `localhost` may resolve to either
@@ -56,13 +67,12 @@ function reachedAddresses(host: string): string[] {
 }
 
 /**
- * Whether this process owns `port` on every address the connection may reach. A wildcard bind
- * owns the port on all loopback addresses: no other process can hold any of them meanwhile.
- * A bind to one address leaves the others to whoever binds them (hearsay-tools/cezarion#2367).
+ * Whether this process owns `port` on every address the connection may reach: the address
+ * itself, or a wildcard of its family. Whoever binds the rest may be a live cockpit
+ * (hearsay-tools/cezarion#2367).
  */
 function servesEvery(host: string, port: number, served: ReadonlySet<string> | ReadonlyMap<string, unknown>): boolean {
-  if (served.has(servedKey('::', port)) || served.has(servedKey('0.0.0.0', port))) return true
-  return reachedAddresses(host).every(address => served.has(servedKey(address, port)))
+  return reachedAddresses(host).every(address => served.has(`${address}|${port}`) || served.has(`*${familyOf(address)}|${port}`))
 }
 
 /** The decision alone: `host` undefined is localhost, as `net` reads it. */
@@ -115,12 +125,15 @@ export function installOutboundGuard(): void {
     this.once('listening', () => {
       const address = this.address()
       if (address === null || typeof address === 'string') return
-      const key = servedKey(address.address, address.port)
-      served.set(key, (served.get(key) ?? 0) + 1)
+      const options = args[0] as { ipv6Only?: unknown } | null | undefined
+      const keys = servedKeys(address.address, address.port, typeof options === 'object' && options?.ipv6Only === true)
+      for (const key of keys) served.set(key, (served.get(key) ?? 0) + 1)
       this.once('close', () => {
-        const left = (served.get(key) ?? 1) - 1
-        if (left > 0) served.set(key, left)
-        else served.delete(key)
+        for (const key of keys) {
+          const left = (served.get(key) ?? 1) - 1
+          if (left > 0) served.set(key, left)
+          else served.delete(key)
+        }
       })
     })
     return listen.apply(this, args)
