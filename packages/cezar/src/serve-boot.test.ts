@@ -301,7 +301,6 @@ describe('stopServe', () => {
   });
 });
 
-
 describe('serve boot mutation regressions', () => {
   it('passes the preview host to worktree reclamation', async () => {
     const f = reconcileFixture();
