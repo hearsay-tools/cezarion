@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { useEffect } from 'react'
@@ -375,23 +375,24 @@ describe('PreviewPane', () => {
     render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onClose={() => undefined} />)
     transport('open')
     const status = () => document.querySelector('[data-slot="preview-status"]')?.textContent
-    const cases: Array<[PreviewServerMessage, string | undefined]> = [
-      [{ t: 'state', stage: 'downloading', received: 1, total: 2 }, 'downloading'],
-      [{ t: 'state', stage: 'download-failed', error: 'offline', installCommand: 'npx install' }, 'download failed'],
-      [{ t: 'state', stage: 'sandbox-failed', stderrTail: '' }, 'browser failed'],
-      [{ t: 'state', stage: 'needs-approval', server: web, wasRunning: false }, 'not started'],
-      [{ t: 'state', stage: 'port-held', server: web, ownerTitle: 'Other task' }, 'port in use'],
-      [{ t: 'state', stage: 'server-starting', server: web, attempt: 1, startedAt: '2026-10-26T00:00:00.000Z', logTail: [] }, 'waiting for :5173'],
-      [{ t: 'state', stage: 'server-stalled', server: web, logTail: '' }, 'waiting · 2 min'],
-      [{ t: 'state', stage: 'server-exited', server: web, exitCode: 1, logTail: '' }, 'server exited'],
-      [{ t: 'state', stage: 'server-stopped', server: web, reason: 'user', lastUrl: 'http://localhost:5173/' }, 'stopped'],
-      [{ t: 'state', stage: 'agent-idle' }, 'agent idle'],
-      [{ t: 'state', stage: 'loading', step: 'page' }, 'connecting…'],
-      [{ t: 'state', stage: 'worktree-removed' }, undefined],
+    const cases: Array<[PreviewServerMessage, string | undefined, string | undefined]> = [
+      [{ t: 'state', stage: 'downloading', received: 1, total: 2 }, 'downloading', 'pending'],
+      [{ t: 'state', stage: 'download-failed', error: 'offline', installCommand: 'npx install' }, 'download failed', 'danger'],
+      [{ t: 'state', stage: 'sandbox-failed', stderrTail: '' }, 'browser failed', 'danger'],
+      [{ t: 'state', stage: 'needs-approval', server: web, wasRunning: false }, 'not started', 'neutral'],
+      [{ t: 'state', stage: 'port-held', server: web, ownerTitle: 'Other task' }, 'port in use', 'danger'],
+      [{ t: 'state', stage: 'server-starting', server: web, attempt: 1, startedAt: '2026-10-26T00:00:00.000Z', logTail: [] }, 'waiting for :5173', 'pending'],
+      [{ t: 'state', stage: 'server-stalled', server: web, logTail: '' }, 'waiting · 2 min', 'pending'],
+      [{ t: 'state', stage: 'server-exited', server: web, exitCode: 1, logTail: '' }, 'server exited', 'danger'],
+      [{ t: 'state', stage: 'server-stopped', server: web, reason: 'user', lastUrl: 'http://localhost:5173/' }, 'stopped', 'neutral'],
+      [{ t: 'state', stage: 'agent-idle' }, 'agent idle', 'neutral'],
+      [{ t: 'state', stage: 'loading', step: 'page' }, 'connecting…', 'neutral'],
+      [{ t: 'state', stage: 'worktree-removed' }, undefined, undefined],
     ]
-    for (const [stage, label] of cases) {
+    for (const [stage, label, tone] of cases) {
       message(stage)
       expect(status(), stage.t === 'state' ? stage.stage : '').toBe(label)
+      expect(document.querySelector('[data-slot="preview-status"] [data-slot="status-dot"]')?.getAttribute('data-tone')).toBe(tone)
     }
   })
 
@@ -503,6 +504,96 @@ describe('PreviewPane', () => {
     fireEvent.keyDown(field, { key: 'Enter' })
     expect(sent().some(m => m.t === 'nav')).toBe(false)
     expect(sent().filter(m => m.t === 'open').at(-1)).toEqual(expect.objectContaining({ target: { url: 'https://example.com' } }))
+  })
+
+  it('distinguishes a first connection from a lost connection and clears status on an open socket', () => {
+    render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onClose={() => undefined} />)
+    const status = () => document.querySelector('[data-slot="preview-status"]')?.textContent
+    expect(status()).toBe('connecting…')
+    transport('reconnecting', 1)
+    expect(status()).toBe('connecting…')
+    expect(screen.queryByText('Lost the connection to the host')).toBeNull()
+    transport('open')
+    expect(status()).toBeUndefined()
+    transport('closed')
+    expect(status()).toBe('offline')
+    expect(screen.getByRole('button', { name: 'Reconnect' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Reconnect now' })).toBeNull()
+  })
+
+  it('shows a blocked connection ahead of takeover and stage status', () => {
+    render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onClose={() => undefined} />)
+    transport('open')
+    message({ t: 'state', stage: 'server-exited', server: web, exitCode: 1, logTail: '' })
+    message({ t: 'replaced', by: '' })
+    expect(screen.getByText('paused')).toBeTruthy()
+    transport('blocked')
+    expect(screen.getByText('not supported')).toBeTruthy()
+    expect(screen.queryByText('paused')).toBeNull()
+  })
+
+  it('sends toolbar navigation and stop commands through the open connection', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { ...navigator, clipboard: { writeText } })
+    render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onClose={() => undefined} />)
+    transport('open')
+    message({ t: 'state', stage: 'streaming', adopted: false })
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Forward' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
+    expect(sent()).toContainEqual({ t: 'back' })
+    expect(sent()).toContainEqual({ t: 'forward' })
+    expect(sent()).toContainEqual({ t: 'reload' })
+    const more = () => fireEvent.pointerDown(screen.getByRole('button', { name: 'More' }), { button: 0, ctrlKey: false, pointerType: 'mouse' })
+    more()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Reload without cache' }))
+    expect(sent()).toContainEqual({ t: 'reload', ignoreCache: true })
+    more()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Copy page URL' }))
+    expect(writeText).toHaveBeenCalledExactlyOnceWith('http://localhost:5173')
+    more()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Stop server · web :5173' }))
+    expect(sent()).toContainEqual({ t: 'stop', port: 5173 })
+  })
+
+  it('switches to the selected server and sizes the page with the chosen viewport', () => {
+    const storybook = { ...web, port: 6006, label: 'storybook' }
+    render(<PreviewPane run={run} servers={[web, storybook]} request={{ port: 5173 }} onClose={() => undefined} />)
+    transport('open')
+    const openMenu = (name: string) => fireEvent.pointerDown(screen.getByRole('button', { name }), { button: 0, ctrlKey: false, pointerType: 'mouse' })
+    openMenu('Server: web :5173')
+    fireEvent.click(screen.getByRole('menuitem', { name: /storybook:6006/ }))
+    expect(sent().filter(m => m.t === 'open').at(-1)).toEqual(expect.objectContaining({ target: { port: 6006 } }))
+    message({ t: 'state', stage: 'streaming', adopted: false })
+    openMenu('Viewport size: Fit')
+    fireEvent.click(screen.getByRole('menuitem', { name: '1440 × 900' }))
+    expect(sent()).toContainEqual({ t: 'resize', w: 1440, h: 900 })
+    expect(document.querySelector('[data-slot="preview-stage"]')?.getAttribute('data-viewport')).toBe('1440x900')
+  })
+
+  it('removes the page input behind states and dialogs, then restores it after each answer', () => {
+    render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onClose={() => undefined} />)
+    transport('open')
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Viewport size: Fit' }), { button: 0, ctrlKey: false, pointerType: 'mouse' })
+    fireEvent.click(screen.getByRole('menuitem', { name: '390 × 844' }))
+    message({ t: 'state', stage: 'streaming', adopted: false })
+    expect(screen.getByRole('application')).toBeTruthy()
+    message({ t: 'state', stage: 'server-stalled', server: web, logTail: '' })
+    expect(screen.queryByRole('application')).toBeNull()
+    message({ t: 'state', stage: 'streaming', adopted: false })
+    expect(screen.getByRole('application')).toBeTruthy()
+    message({ t: 'dialog', type: 'prompt', message: 'Name?', origin: 'localhost:5173' })
+    expect(screen.queryByRole('application')).toBeNull()
+    fireEvent.change(within(screen.getByRole('alertdialog')).getByRole('textbox'), { target: { value: 'Ada' } })
+    fireEvent.click(screen.getByRole('button', { name: 'OK' }))
+    expect(sent()).toContainEqual({ t: 'dialogResult', accept: true, text: 'Ada' })
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(screen.getByRole('application')).toBeTruthy()
+    message({ t: 'dialog', type: 'confirm', message: 'Leave?', origin: 'localhost:5173' })
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(sent()).toContainEqual({ t: 'dialogResult', accept: false })
+    expect(screen.queryByRole('alertdialog')).toBeNull()
+    expect(screen.getByRole('application')).toBeTruthy()
   })
 
   it('an error inside the pane stays inside the pane', () => {

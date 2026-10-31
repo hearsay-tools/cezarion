@@ -65,5 +65,4 @@ describe('useAgentPageLive (hearsay-tools/cezarion#784)', () => {
     expect(result.current).toBe(false)
     unmount()
   })
-
 })

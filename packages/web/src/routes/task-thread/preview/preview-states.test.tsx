@@ -335,7 +335,6 @@ describe('time-dependent copy', () => {
   })
 })
 
-
 describe('preview state details', () => {
   it.each([
     ['iPad Safari/', 'Safari on iPad'],

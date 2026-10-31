@@ -376,5 +376,4 @@ describe('PreviewToolbar', () => {
     expect(p.onCopyUrl).not.toHaveBeenCalled()
     expect(p.onReload).not.toHaveBeenCalled()
   })
-
 })
