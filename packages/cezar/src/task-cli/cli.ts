@@ -368,6 +368,10 @@ function waitUntil(values: Values): WaitUntil {
   return oneOf<WaitUntil>(values.until, 'until', ['settled', 'attention'], DEFAULT_WAIT_UNTIL);
 }
 
+function waitMode(values: Values): WaitMode {
+  return oneOf<WaitMode>(values.mode, 'mode', ['any', 'all'], 'all');
+}
+
 function statuses(value: string | boolean | undefined) {
   if (typeof value !== 'string') return undefined;
   const list = value.split(',').map((entry) => entry.trim()).filter(Boolean);
@@ -390,14 +394,15 @@ function validateFlags(name: string, values: Values): void {
     if (values.until !== undefined && !values.wait) usageError('--until needs --wait');
   }
   if (name === 'log' && values.until !== undefined && !values.follow) usageError('--until needs --follow');
-  if (name === 'notify') {
-    if (values.off && (values.message !== undefined || values['message-file'] !== undefined)) usageError('--off takes no note');
-  }
-  if (name === 'list') { statuses(values.status); positiveInt(values.limit, 'limit', 1_000); }
-  if (name === 'wait') oneOf<WaitMode>(values.mode, 'mode', ['any', 'all'], 'all');
-  if (name === 'wait' || name === 'start' || name === 'log') waitUntil(values);
-  if (name === 'log') { nonNegativeInt(values.since, 'since'); positiveInt(values['max-chars'], 'max-chars', 1_000_000); }
-  if (name === 'wait' || name === 'log' || (name === 'start' && values.wait)) timeoutMs(values);
+  // Strict parseArgs gives each flag only to the operations that list it.
+  if (values.off && (values.message !== undefined || values['message-file'] !== undefined)) usageError('--off takes no note');
+  statuses(values.status);
+  positiveInt(values.limit, 'limit', 1_000);
+  waitMode(values);
+  waitUntil(values);
+  nonNegativeInt(values.since, 'since');
+  positiveInt(values['max-chars'], 'max-chars', 1_000_000);
+  if (name === 'wait' || name === 'log' || values.wait) timeoutMs(values);
 }
 
 async function getRun(cockpit: Cockpit, id: string): Promise<ApiRun> {
@@ -560,7 +565,7 @@ async function execute(
       return EXIT.ok;
     }
     case 'wait': {
-      const mode = oneOf<WaitMode>(values.mode, 'mode', ['any', 'all'], 'all');
+      const mode = waitMode(values);
       const waited = await waitForRuns(cockpit, positionals, { mode, until: waitUntil(values), timeoutMs: timeoutMs(values), pollMs: io.pollMs });
       print({ until: waited.until, runs: waited.runs, timedOut: waited.timedOut });
       return waited.exitCode;
