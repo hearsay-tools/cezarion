@@ -1,6 +1,7 @@
 import { act, cleanup, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { makeRunRecord } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import type { ApiRun, PreviewServer } from '@open-mercato/cezar-api-client'
 import type { ThreadPreviewServer } from '../thread-state'
 import { readPanePercent, readPreviewMemory, rememberPreview } from './preview-memory'
@@ -62,7 +63,7 @@ describe('preview server presentation', () => {
 })
 
 function run(extra: Partial<ApiRun> = {}): ApiRun {
-  return { id: 'task', title: 'Task', task: 'task', workflow: 'quick-task', status: 'running', createdAt: server.registeredAt, tokensUsed: 0, archived: false, steps: [], worktreePath: '/repo/task', ...extra }
+  return makeRunRecord({ worktreePath: '/repo/task', ...extra })
 }
 
 it('detects absent and reclaimed worktrees without treating an ordinary run as removed', () => {
