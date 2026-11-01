@@ -27,6 +27,8 @@ function context(event, { surface = 'full-matrix', bump = 'false', verified = 'f
     github: { event_name: event },
     needs: {
       'queue-proof': { result: 'success', outputs: { verified } },
+      'pr-test-input': { result: 'success', outputs: { sha: '' } },
+      'pr-test-proof': { result: 'skipped', outputs: { verified: 'false' } },
       'change-surface': { result: 'success', outputs: { surface } },
       'classify-pr': { result: 'success', outputs: { bump_pr: bump } },
       vitest: { result: shards },

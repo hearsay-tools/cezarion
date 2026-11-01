@@ -645,17 +645,13 @@ jobs:
     # bumps, do not need to repeat the suites already covered by the relevant
     # release or docs gate; infra-only diffs cannot reach the package sources
     # Vitest covers, and their script tests run under build-and-package.
-    needs: [queue-proof, change-surface, classify-pr, preflight, review-result]
+    needs: [ queue-proof, change-surface, classify-pr, preflight, review-result, pr-test-input, pr-test-proof ]
     if: >-
-      !cancelled() &&
-      needs.preflight.result == 'success' && (github.event_name != 'pull_request_target' || github.event.pull_request.base.ref != 'main' || needs.review-result.result == 'success') &&
-      (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') &&
-      needs.change-surface.outputs.surface == 'full-matrix' &&
-      needs.classify-pr.outputs.bump_pr != 'true'
+      !cancelled() && needs.preflight.result == 'success' && (github.event_name != 'pull_request_target' || github.event.pull_request.base.ref != 'main' || needs.review-result.result == 'success') && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') && needs.change-surface.outputs.surface == 'full-matrix' && needs.classify-pr.outputs.bump_pr != 'true' && (github.event_name != 'pull_request_target' || needs.pr-test-input.result == 'success')
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [ 1, 2, 3, 4 ]
     runs-on: ubuntu-24.04
     # Coverage now shares the required test run on PRs and dispatches. Keep the
     # previous coverage job bound there; main and merge groups retain 15 minutes.
@@ -666,16 +662,22 @@ jobs:
       pull-requests: read
 
     steps:
+      - name: Reuse verified native PR suite
+        if: needs.pr-test-proof.result == 'success' && needs.pr-test-proof.outputs.verified == 'true'
+        env:
+          SOURCE: ${{ needs.pr-test-proof.outputs.source }}
+        run: 'printf "Reused native PR test evidence: %s\n" "$SOURCE" >> "$GITHUB_STEP_SUMMARY"'
       - *resolve-dispatch
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ (github.event.pull_request.number || steps['resolve-dispatch'].outputs.valid == 'true') && format('refs/pull/{0}/merge', github.event.pull_request.number || inputs.pr_number) || github.sha }}
+          ref: ${{ needs.pr-test-input.outputs.sha || (steps['resolve-dispatch'].outputs.valid == 'true' && format('refs/pull/{0}/merge', inputs.pr_number)) || github.sha }}
           allow-unsafe-pr-checkout: true
           persist-credentials: false
+        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true')
 
       - name: Set up pnpm
-        if: hashFiles('pnpm-lock.yaml') != ''
+        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && (hashFiles('pnpm-lock.yaml') != '')
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: '12.11.2'
@@ -686,26 +688,29 @@ jobs:
           node-version: lts/*
           cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
           cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
+        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true')
 
       - name: Install dependencies
-        if: hashFiles('pnpm-lock.yaml') == ''
+        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && (hashFiles('pnpm-lock.yaml') == '')
         run: npm ci
 
       - name: Install pnpm dependencies
-        if: hashFiles('pnpm-lock.yaml') != ''
+        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && (hashFiles('pnpm-lock.yaml') != '')
         run: pnpm install --frozen-lockfile
 
       # TypeScript test imports resolve through the server build, as in the web workspace pretypecheck hook.
       - name: Build server dependencies
         run: npm run build:server
+        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true')
 
       - name: Run server and cockpit unit suites
         id: collect
         run: npm test -- --shard=${{ matrix.shard }}/4 --maxWorkers=4 ${{ (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && '--coverage.enabled' || '' }}
+        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true')
 
       - name: Upload shard coverage
         id: upload
-        if: ${{ !cancelled() && (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') }}
+        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && (!cancelled() && (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch'))
         continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -716,7 +721,7 @@ jobs:
           overwrite: true
 
       - name: Report a missing shard coverage report
-        if: always() && (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && (steps.collect.outcome != 'success' || steps.upload.outcome != 'success')
+        if: always() && (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && (steps.collect.outcome != 'success' || steps.upload.outcome != 'success') && (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true')
         continue-on-error: true
         env:
           SHARD: ${{ matrix.shard }}
@@ -828,17 +833,13 @@ jobs:
   cockpit-browser:
     name: Cockpit browser E2E shard ${{ matrix.shard }}/4
     # Same docs-only, infra-only, and verified bump-PR skips as Vitest.
-    needs: [queue-proof, change-surface, classify-pr, preflight, review-result]
+    needs: [ queue-proof, change-surface, classify-pr, preflight, review-result, pr-test-input, pr-test-proof ]
     if: >-
-      !cancelled() &&
-      needs.preflight.result == 'success' && (github.event_name != 'pull_request_target' || github.event.pull_request.base.ref != 'main' || needs.review-result.result == 'success') &&
-      (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') &&
-      needs.change-surface.outputs.surface == 'full-matrix' &&
-      needs.classify-pr.outputs.bump_pr != 'true'
+      !cancelled() && needs.preflight.result == 'success' && (github.event_name != 'pull_request_target' || github.event.pull_request.base.ref != 'main' || needs.review-result.result == 'success') && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') && needs.change-surface.outputs.surface == 'full-matrix' && needs.classify-pr.outputs.bump_pr != 'true' && (github.event_name != 'pull_request_target' || needs.pr-test-input.result == 'success')
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        shard: [ 1, 2, 3, 4 ]
     runs-on: ubicloud-standard-2
     timeout-minutes: 30
 
@@ -847,16 +848,22 @@ jobs:
       pull-requests: read
 
     steps:
+      - name: Reuse verified native PR suite
+        if: needs.pr-test-proof.result == 'success' && needs.pr-test-proof.outputs.verified == 'true'
+        env:
+          SOURCE: ${{ needs.pr-test-proof.outputs.source }}
+        run: 'printf "Reused native PR test evidence: %s\n" "$SOURCE" >> "$GITHUB_STEP_SUMMARY"'
       - *resolve-dispatch
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ (github.event.pull_request.number || steps['resolve-dispatch'].outputs.valid == 'true') && format('refs/pull/{0}/merge', github.event.pull_request.number || inputs.pr_number) || github.sha }}
+          ref: ${{ needs.pr-test-input.outputs.sha || (steps['resolve-dispatch'].outputs.valid == 'true' && format('refs/pull/{0}/merge', inputs.pr_number)) || github.sha }}
           allow-unsafe-pr-checkout: true
           persist-credentials: false
+        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true')
 
       - name: Set up pnpm
-        if: hashFiles('pnpm-lock.yaml') != ''
+        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && (hashFiles('pnpm-lock.yaml') != '')
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: '12.11.2'
@@ -869,18 +876,20 @@ jobs:
           check-latest: true
           cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
           cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
+        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true')
 
       - name: Run cockpit browser E2E
         run: |
           set -o pipefail
           npm run test:e2e -- --shard=${{ matrix.shard }}/4 2>&1 | tee e2e.log
           node .github/scripts/require-e2e-passed.cjs < e2e.log
+        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true')
 
       # A red spec writes `.ai/qa/failures/<spec>/<test>-<n>/` (screenshot, snapshot, probe)
       # through the e2e seam (#408). Ship it so the flake can be read instead of guessed at;
       # a green shard has no directory and uploads nothing.
       - name: Upload failure bundles
-        if: failure()
+        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && (failure())
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: cockpit-failures-shard-${{ matrix.shard }}
@@ -889,7 +898,7 @@ jobs:
           retention-days: 14
 
       - name: Summarize failure bundles
-        if: failure()
+        if: (needs.pr-test-proof.result != 'success' || needs.pr-test-proof.outputs.verified != 'true') && (failure())
         env:
           SHARD: ${{ matrix.shard }}
         run: |
@@ -1213,3 +1222,78 @@ jobs:
           path: snapshot-artifacts/*.tgz
           if-no-files-found: error
           retention-days: 3
+
+  pr-test-input:
+    name: Resolve immutable PR test inputs
+    if: github.event_name == 'pull_request_target'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    outputs:
+      sha: ${{ steps.input.outputs.sha }}
+      reusable: ${{ steps.input.outputs.reusable }}
+    steps:
+      - name: Check out trusted workflow revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - id: input
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          retries: 0
+          script: |-
+            const { resolvePrTestInput } = require('./.github/scripts/pr-test-input.cjs');
+            const input = await resolvePrTestInput({ github, ...context.repo,
+              pullNumber: context.payload.pull_request.number, head: context.payload.pull_request.head.sha,
+              workflowSha: process.env.WORKFLOW_SHA, headRepository: context.payload.pull_request.head.repo.full_name });
+            core.setOutput('sha', input.sha);
+            core.setOutput('reusable', String(input.reusable));
+        env:
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+
+  pr-test-attestation:
+    name: Attest PR test inputs / ${{ github.workflow_sha }} / ${{ github.event.pull_request.head.sha }}
+    needs:
+      - pr-test-input
+      - vitest
+      - cockpit-browser
+    if: "!cancelled() && github.event_name == 'pull_request_target' && needs.pr-test-input.outputs.reusable == 'true' && needs.pr-test-input.result == 'success' && needs.vitest.result == 'success' && needs.cockpit-browser.result == 'success'"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    permissions: {}
+    steps:
+      - name: Record successful immutable PR suites
+        run: echo "Both full suites passed on the attested immutable head."
+
+  pr-test-proof:
+    name: Verify native PR test evidence
+    if: github.event_name == 'merge_group'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      verified: ${{ steps.proof.outputs.verified }}
+      source: ${{ steps.proof.outputs.source }}
+    steps:
+      - name: Check out trusted queue base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.merge_group.base_sha }}
+          persist-credentials: false
+      - id: proof
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        with:
+          retries: 0
+          script: |-
+            core.setOutput('verified', 'false');
+            const { prTestProof } = require('./.github/scripts/pr-test-proof.cjs');
+            const proof = await prTestProof({ github, ...context.repo,
+              eventName: context.eventName, group: context.payload.merge_group });
+            core.setOutput('verified', String(proof.verified));
+            if (proof.verified) core.setOutput('source', proof.url);
+            await core.summary.addHeading('Native PR test evidence').addRaw(JSON.stringify(proof)).write();

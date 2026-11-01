@@ -17,13 +17,13 @@ const prFixture = () => ({ number: 42, state: 'open', changed_files: 1,
 });
 function evaluate(value, context) {
   return typeof value === 'string' && value.startsWith('${{')
-    ? runInNewContext(value.slice(3, -2), context) : value;
+    ? runInNewContext(value.slice(3, -2).replace(/needs\.([\w-]+)/g, "needs['$1']"), context) : value;
 }
 function classify(jobName, { pr = prFixture(), number = '42', apiFails = false, appLogin = '',
   files = [{ filename: 'packages/cezar/package.json' }], after = { version: '1.2.3' } } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ci-dispatch-'));
   fs.writeFileSync(path.join(dir, 'package.json'), '{"type":"commonjs"}');
-  const context = { github: { event_name: 'workflow_dispatch', sha: HEAD,
+  const context = { needs: { 'pr-test-input': { outputs: { sha: '' } }, 'pr-test-proof': { result: 'skipped', outputs: { verified: 'false' } } }, github: { event_name: 'workflow_dispatch', sha: HEAD,
     repository: 'owner/repo', token: '', head_ref: '', event: { pull_request: { head: {}, base: {}, user: {} } } },
     vars: { RELEASE_APP_BOT_LOGIN: appLogin }, inputs: { pr_number: number }, steps: {}, format: (s, n) => s.replace('{0}', n) };
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, GITHUB_WORKSPACE: dir,
@@ -52,7 +52,7 @@ process.stdout.write(JSON.stringify(value));
     const job = ci().jobs[jobName];
     assert.ok(job.steps.some(s => s.id === 'resolve-dispatch'), 'dispatch must resolve metadata before checkout');
     for (const step of job.steps) {
-      if (step.if && !runInNewContext(step.if, context)) continue;
+      if (step.if && !runInNewContext(step.if.replace(/needs\.([\w-]+)/g, "needs['$1']"), context)) continue;
       if (step.uses?.startsWith('actions/checkout@')) {
         if (['typecheck', 'build-and-package', 'vitest', 'cockpit-browser'].includes(jobName)) return evaluate(step.with.ref, context);
         assert.equal(evaluate(step.with.ref, context), BASE, 'classifier comes from API base, never dispatch head');

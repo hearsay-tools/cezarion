@@ -17,6 +17,8 @@ function context(event = 'merge_group') {
     event: { pull_request: { base: { ref: 'main' } }, merge_group: { base_sha: 'b'.repeat(40) } } },
     steps: { 'resolve-dispatch': { outputs: {} } }, inputs: {},
     needs: { 'queue-proof': { result: 'success', outputs: { verified: 'false' } },
+      'pr-test-input': { result: 'success', outputs: { sha: '' } },
+      'pr-test-proof': { result: 'skipped', outputs: { verified: 'false' } },
       'change-surface': { result: 'success', outputs: { surface: 'full-matrix' } },
       'classify-pr': { result: 'success', outputs: { bump_pr: 'false' } },
       preflight: { result: 'success' }, 'review-result': { result: 'skipped' }, verify: { result: 'success' }, review: { result: 'skipped' }, 'queue-admission': { result: 'success' } },

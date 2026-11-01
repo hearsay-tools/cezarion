@@ -12,6 +12,8 @@ function context(event = 'pull_request_target', base = 'main') {
   return { github: { event_name: event, event: { pull_request: { base: { ref: base } } } },
     needs: { preflight: { result: 'success' }, 'review-result': { result: 'success' },
       'queue-proof': { result: 'success', outputs: { verified: 'false' } },
+      'pr-test-input': { result: 'success', outputs: { sha: '' } },
+      'pr-test-proof': { result: 'skipped', outputs: { verified: 'false' } },
       'change-surface': { outputs: { surface: 'full-matrix' } }, 'classify-pr': { outputs: { bump_pr: 'false' } } },
     cancelled: () => false, always: () => true };
 }
