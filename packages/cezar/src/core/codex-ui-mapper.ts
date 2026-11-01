@@ -118,6 +118,10 @@ export interface CodexUiMapperState {
    * Installed 0.144.6 uses `collabAgentToolCall`; newer protocol revisions use
    * `collabToolCall`. Both carry the receiver ids used for child attribution. */
   readonly collabTasks: ReadonlyMap<string, CodexCollabTask>;
+  /** Background spawn rows still running, keyed by item id (hearsay-tools/cezarion#2431): a
+   *  `subAgentActivity(kind: started)` child outlives the parent turn, so its row stays running
+   *  until the child's `subAgentActivity(kind: completed)`. */
+  readonly backgroundTasks: ReadonlyMap<string, UiToolItem>;
 }
 
 export interface CodexUiMapping {
@@ -137,6 +141,7 @@ export function createCodexUiState(): CodexUiMapperState {
     planFromNotification: false,
     reviewItemId: null,
     collabTasks: new Map(),
+    backgroundTasks: new Map(),
   };
 }
 
@@ -415,24 +420,45 @@ function mapSubAgentActivity(
   id: string,
   state: CodexUiMapperState,
 ): CodexUiMapping {
-  if (str(raw.kind) !== 'started' || state.knownItems.has(id)) return { events: [], state };
+  const kind = str(raw.kind);
+  const agentThreadId = str(raw.agentThreadId);
+  if (kind === 'completed') return mapSubAgentCompleted(agentThreadId, state);
+  if (kind !== 'started' || state.knownItems.has(id)) return { events: [], state };
   const agentPath = str(raw.agentPath);
   const agentName = agentPath?.split('/').filter(Boolean).at(-1)?.replaceAll('_', ' ');
-  const agentThreadId = str(raw.agentThreadId);
   const display = toolDisplay('Task', agentName ? { description: agentName } : undefined);
   const task: CodexCollabTask = { itemId: id, ...(agentName ? { prompt: agentName } : {}) };
   const collabTasks = new Map(state.collabTasks);
   if (agentThreadId) collabTasks.set(agentThreadId, task);
-  return {
-    events: [{
-      type: 'item.started',
-      item: {
-        kind: 'tool', id, name: 'spawnAgent', toolKind: 'task', title: display.title, status: 'running',
-        input: { ...(agentPath ? { agentPath } : {}), ...(agentThreadId ? { agentThreadId } : {}) },
-      },
-    }],
-    state: { ...state, knownItems: new Set(state.knownItems).add(id), collabTasks },
+  // The child runs in its own thread and may outlive the parent turn (hearsay-tools/cezarion#2431).
+  const item: UiToolItem = {
+    kind: 'tool', id, name: 'spawnAgent', toolKind: 'task', title: display.title, status: 'running',
+    input: { ...(agentPath ? { agentPath } : {}), ...(agentThreadId ? { agentThreadId } : {}) },
+    background: true,
   };
+  return {
+    events: [{ type: 'item.started', item }],
+    state: {
+      ...state, knownItems: new Set(state.knownItems).add(id), collabTasks,
+      backgroundTasks: new Map(state.backgroundTasks).set(id, item),
+    },
+  };
+}
+
+/**
+ * A child's end: Codex reports it on the PARENT thread as `subAgentActivity(kind: completed)`,
+ * stamped with the parent turn that spawned it, which may have completed long before. It
+ * completes that spawn's background row once, so a repeat emits nothing. A collaboration
+ * tool-call row is left alone: its `wait` call already reports the child's state. Codex 0.164.0
+ * reports no failed or interrupted child here.
+ */
+function mapSubAgentCompleted(agentThreadId: string | undefined, state: CodexUiMapperState): CodexUiMapping {
+  const task = agentThreadId === undefined ? undefined : state.collabTasks.get(agentThreadId);
+  const running = task === undefined ? undefined : state.backgroundTasks.get(task.itemId);
+  if (!task || !running) return { events: [], state };
+  const backgroundTasks = new Map(state.backgroundTasks);
+  backgroundTasks.delete(task.itemId);
+  return { events: [{ type: 'item.completed', item: { ...running, status: 'completed' } }], state: { ...state, backgroundTasks } };
 }
 
 /** A spawn creates one task row; later send/wait/resume/close calls update the
