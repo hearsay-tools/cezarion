@@ -318,6 +318,17 @@ test('the earlier result is the newest earlier run that holds one for the file, 
   assert.equal(warnings.length, 1);
 });
 
+test('the earlier-result search pages through every run in the 90-day artifact window', async () => {
+  const a = 'packages/cezar/src/a.ts';
+  const newer = Array.from({ length: 140 }, (_, i) => ({ id: 1000 - i, created_at: `2026-11-07T${String(i).padStart(4, '0')}` }));
+  const runs = [...newer, { id: 500, created_at: '2026-09-01' }];
+  const artifacts = [{ id: 1, run_id: 500, name: 'mutants-weekly-results', expired: false, data: combined({ [a]: { ...result(a), head: 'old-page' } }) }];
+  const github = fakeGithub({ runs, artifacts });
+  const earlier = await findEarlier({ github, owner: 'o', repo: 'r', runId: 2000, files: [a], readArchive, warn: () => {}, now: new Date('2026-11-07T12:00:00Z') });
+  assert.equal(earlier.get(a).head, 'old-page');
+  assert.deepEqual(github.state.runQueries.map(q => q.created), ['>=2026-08-09', '>=2026-08-09']);
+});
+
 // One stored entry: the smallest archive unzip reads, like the zip upload-artifact serves.
 function storedZip(name, text) {
   const data = Buffer.from(text);

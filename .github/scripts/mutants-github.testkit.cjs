@@ -4,7 +4,7 @@
 const BOT = 'github-actions[bot]';
 
 function fakeGithub({ pulls = [], comments = [], issues = [], runs = [], artifacts = [] } = {}) {
-  const state = { pulls, comments: [...comments], issues: issues.map(issue => ({ ...issue })), runs, artifacts, nextId: 100, writes: [], reads: 0 };
+  const state = { pulls, comments: [...comments], issues: issues.map(issue => ({ ...issue })), runs, artifacts, nextId: 100, writes: [], reads: 0, runQueries: [] };
   const issue = number => state.issues.find(item => item.number === number);
   const rest = {
     pulls: { get: async ({ pull_number }) => { state.reads += 1; return { data: state.pulls.find(p => p.number === pull_number) }; } },
@@ -37,12 +37,25 @@ function fakeGithub({ pulls = [], comments = [], issues = [], runs = [], artifac
       },
     },
     actions: {
-      listWorkflowRuns: async () => { state.reads += 1; return { data: { workflow_runs: state.runs } }; },
+      // Pages like the REST API: per_page (default 30) and page (from 1).
+      listWorkflowRuns: async ({ owner: _owner, repo: _repo, per_page: perPage = 30, page = 1, ...query } = {}) => {
+        state.reads += 1;
+        state.runQueries.push(query);
+        return { data: { total_count: state.runs.length, workflow_runs: state.runs.slice((page - 1) * perPage, page * perPage) } };
+      },
       listWorkflowRunArtifacts: async ({ run_id, name }) => ({ data: { artifacts: state.artifacts.filter(a => a.run_id === run_id && (!name || a.name === name)) } }),
       downloadArtifact: async ({ artifact_id }) => { state.reads += 1; return { data: state.artifacts.find(a => a.id === artifact_id).data }; },
     },
   };
-  return { state, rest, paginate: async (method, params) => (await method(params)).data };
+  // Octokit's paginate flattens a namespaced list such as workflow_runs across every page.
+  const paginate = async (method, params) => {
+    const first = (await method(params)).data;
+    if (!Array.isArray(first?.workflow_runs)) return first;
+    const all = [...first.workflow_runs];
+    for (let page = 2; all.length < first.total_count; page++) all.push(...(await method({ ...params, page })).data.workflow_runs);
+    return all;
+  };
+  return { state, rest, paginate };
 }
 
 module.exports = { fakeGithub, BOT };

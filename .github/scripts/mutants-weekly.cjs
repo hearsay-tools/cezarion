@@ -20,7 +20,7 @@ const RESULTS_ARTIFACT = 'mutants-weekly-results';
 const MAX_RESULT_BYTES = 256 * 1024 * 1024;
 const MAX_BODY = 60_000;
 const GITHUB_BODY_LIMIT = 65_536;
-const EARLIER_RUNS = 30;
+const ARTIFACT_DAYS = 90;
 const NOTE = '<!-- cez-mutants-weekly:not-measured -->';
 const MARKER = /<!-- cez-mutants-weekly:v1:(\S+) -->/;
 const AREA = { cezar: 'area-cezar', web: 'area-web', contract: 'area-contract', 'api-client': 'area-api-client' };
@@ -275,15 +275,16 @@ function unzipResults(data) {
   }
 }
 
-async function findEarlier({ github, owner, repo, runId, files, readArchive = unzipResults, warn }) {
+async function findEarlier({ github, owner, repo, runId, files, readArchive = unzipResults, warn, now = new Date() }) {
   const found = new Map();
   if (files.length === 0) return found;
-  const { data } = await github.rest.actions.listWorkflowRuns({ owner, repo, workflow_id: WORKFLOW_FILE, per_page: EARLIER_RUNS });
-  const runs = data.workflow_runs.filter(run => run.id < runId).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  const created = `>=${new Date(now.getTime() - ARTIFACT_DAYS * 24 * 60 * 60_000).toISOString().slice(0, 10)}`;
+  const listed = await github.paginate(github.rest.actions.listWorkflowRuns, { owner, repo, workflow_id: WORKFLOW_FILE, per_page: 100, created });
+  const runs = listed.filter(run => run.id < runId).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
   for (const run of runs) {
     if (files.every(file => found.has(file))) break;
-    const { data: listed } = await github.rest.actions.listWorkflowRunArtifacts({ owner, repo, run_id: run.id, name: RESULTS_ARTIFACT });
-    const artifact = listed.artifacts.find(a => a.name === RESULTS_ARTIFACT && !a.expired);
+    const { data: artifacts } = await github.rest.actions.listWorkflowRunArtifacts({ owner, repo, run_id: run.id, name: RESULTS_ARTIFACT });
+    const artifact = artifacts.artifacts.find(a => a.name === RESULTS_ARTIFACT && !a.expired);
     if (!artifact) continue;
     try {
       const { data: archive } = await github.rest.actions.downloadArtifact({ owner, repo, artifact_id: artifact.id, archive_format: 'zip' });
@@ -334,7 +335,7 @@ async function publish({ github, context, core, planDir, filesDir, outDir, root 
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, 'results.json'), JSON.stringify({ version: 1, head: chosen.head, runId: context.runId, runUrl, results }));
   const missed = outcomes.filter(o => o.state === 'missed').map(o => o.file);
-  const earlier = await findEarlier({ github, owner, repo, runId: context.runId, files: missed, readArchive, warn: core.warning });
+  const earlier = await findEarlier({ github, owner, repo, runId: context.runId, files: missed, readArchive, warn: core.warning, now });
   const actions = await syncIssues({ github, owner, repo, outcomes, earlier, head: chosen.head, runUrl,
     exists: exists ?? (file => fs.existsSync(path.join(root, file))), cut: chosen.cut.map(e => e.file), date: now.toISOString().slice(0, 10) });
   await core.summary.addRaw(renderSummary({ plan: chosen, outcomes, actions })).write();
