@@ -397,7 +397,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   });
 
   it('terminal completion and failed session startup both prove finalization, while disposal settles waiters false', async () => {
-    const done = await worker('mock:done'); manager.enqueueOwnedRun(done.id);
+    const done = await worker('mock:cezar-done'); manager.enqueueOwnedRun(done.id);
     await until(() => ['done', 'review'].includes(store.getRun(done.id)!.status));
     expect(await manager.awaitRunTermination(done.id, 15_000)).toBe(true);
     const failure = await worker();
@@ -550,7 +550,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   });
 
   it('destruction intent prevents synthetic monitoring wake bookkeeping before stop is sent', async () => {
-    const w = await worker('mock:monitoring keep going');
+    const w = await worker('mock:cezar-wait keep going');
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); releases.push(() => vi.useRealTimers());
     manager.enqueueOwnedRun(w.id); await until(() => !!monitoringWakeOf(store.getRun(w.id)));
     const deadline = monitoringWakeOf(store.getRun(w.id))!;
@@ -562,7 +562,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   });
 
   it('explicit termination retry can persist finalized same-process evidence after a checkpoint write failure', async () => {
-    const w = await worker('mock:done');
+    const w = await worker('mock:cezar-done');
     const complete = vi.spyOn(store, 'commitWorkerExecutionComplete').mockReturnValueOnce(false);
     manager.enqueueOwnedRun(w.id); await until(() => !manager.isActive(w.id));
     expect(store.readWorkerExecution(w.id)?.phase).toBe('starting');

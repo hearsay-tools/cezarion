@@ -158,11 +158,11 @@ describe('a run stopped by a usage limit resumes itself', () => {
 
     store.updateRun(record.id, {
       autoResumeAt: new Date(Date.now() - 1_000).toISOString(),
-      task: 'mock:done ship it',
+      task: 'mock:cezar-done ship it',
     });
     // A manager that never runs `recover()` — the reconcile rides the ordinary pump.
     manager = createFixtureManager(store, repoRoot);
-    manager.startRun(workflow, { task: 'mock:done unrelated', worktree: false });
+    manager.startRun(workflow, { task: 'mock:cezar-done unrelated', worktree: false });
 
     await expect
       .poll(
@@ -338,7 +338,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     for (const run of runs) {
       store.updateRun(run.id, {
         autoResumeAt: new Date(Date.now() - 1_000).toISOString(),
-        task: 'mock:done pair',
+        task: 'mock:cezar-done pair',
       });
     }
     manager = createFixtureManager(store, repoRoot, { semaphore });
@@ -365,7 +365,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     });
     const limited = manager.startRun(workflow, { task: 'mock:limit holder' });
     await settle(limited.id);
-    const waiting = manager.startRun(workflow, { task: 'mock:done work' });
+    const waiting = manager.startRun(workflow, { task: 'mock:cezar-done work' });
     await expect.poll(() => store.getRun(waiting.id)?.status, { timeout: 10_000 }).toBe('queued');
 
     // While a real appointment is ahead, sitting still is CORRECT and the watchdog must not
@@ -402,7 +402,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     });
     const limited = manager.startRun(workflow, { task: 'mock:limit holder', worktree: false });
     await settle(limited.id);
-    const waiting = manager.startRun(workflow, { task: 'mock:done work', worktree: false });
+    const waiting = manager.startRun(workflow, { task: 'mock:cezar-done work', worktree: false });
     await expect.poll(() => store.getRun(waiting.id)?.status, { timeout: 10_000 }).toBe('queued');
 
     // Wedge it: the holder holds with no deadline anyone is waiting for, and nothing is running.
@@ -462,7 +462,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     // any of them. `pump()` iterates its own queue, so such a run is invisible to it and would
     // sit there for good: neither running, nor failed, nor ever going to happen.
     const first = createFixtureManager(store, repoRoot);
-    const record = first.startRun(workflow, { task: 'mock:done orphan', worktree: false });
+    const record = first.startRun(workflow, { task: 'mock:cezar-done orphan', worktree: false });
     await settle(record.id);
     first.dispose();
     // Back to `queued` with nobody holding the work item — exactly what the engine sees after
@@ -523,7 +523,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     // A second login on the same backend is a second budget (spec 2026-07-29-agent-profiles), so
     // a limit on one must not stall the other. Same shape as a different backend entirely.
     const other = manager.startRun(workflow, {
-      task: 'mock:done other account',
+      task: 'mock:cezar-done other account',
       worktree: false,
       agentProfile: 'second',
     });
@@ -669,7 +669,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     // (which the case below covers).
     store.updateRun(record.id, {
       autoResumeAt: new Date(Date.now() - 1_000).toISOString(),
-      task: 'mock:done ship it',
+      task: 'mock:cezar-done ship it',
     });
     manager = createFixtureManager(store, repoRoot);
     await manager.recover();
@@ -705,10 +705,10 @@ describe('a run stopped by a usage limit resumes itself', () => {
     manager = createFixtureManager(store, repoRoot);
     const record = manager.startRun(workflow, { task: 'mock:limit ship it', worktree: false });
     await settle(record.id);
-    store.updateRun(record.id, { task: 'mock:done ship it' });
+    store.updateRun(record.id, { task: 'mock:cezar-done ship it' });
 
     // The limited run has no session, so the cockpit's message is a Continue, as on a failed run.
-    expect(manager.continueRun(record.id, { text: 'mock:done carry on' })).toEqual({ ok: true });
+    expect(manager.continueRun(record.id, { text: 'mock:cezar-done carry on' })).toEqual({ ok: true });
     expect(store.getRun(record.id)?.autoResumeAt).toBeUndefined();
     await expect
       .poll(() => store.getRun(record.id)?.steps.find((step) => step.id === 'continue-1')?.status, { timeout: 20_000 })
@@ -726,9 +726,9 @@ describe('a run stopped by a usage limit resumes itself', () => {
     const b = manager.startRun(workflow, { task: 'mock:limit probe b', worktree: false });
     await settle(b.id);
     store.updateRun(a.id, { status: 'waiting', finishedAt: undefined, autoResumeAt: new Date(Date.now() + 3_600_000).toISOString() });
-    store.updateRun(b.id, { task: 'mock:done ship it' });
+    store.updateRun(b.id, { task: 'mock:cezar-done ship it' });
 
-    expect(manager.continueRun(b.id, { text: 'mock:done carry on' })).toEqual({ ok: true });
+    expect(manager.continueRun(b.id, { text: 'mock:cezar-done carry on' })).toEqual({ ok: true });
     // Its own appointment is gone; A's deadline keeps it in the line.
     expect(store.getRun(b.id)?.autoResumeAt).toBeUndefined();
     expect(store.getRun(b.id)?.status).toBe('queued');
@@ -762,7 +762,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
 
     // The window reopens: the resume's opening turn delivers the result.
     manager.dispose();
-    store.updateRun(record.id, { task: 'mock:done ship it', autoResumeAt: new Date(Date.now() - 1_000).toISOString() });
+    store.updateRun(record.id, { task: 'mock:cezar-done ship it', autoResumeAt: new Date(Date.now() - 1_000).toISOString() });
     manager = createFixtureManager(store, repoRoot);
     await manager.recover();
     await expect

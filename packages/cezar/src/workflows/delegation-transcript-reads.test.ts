@@ -109,7 +109,7 @@ describe('delivering a message to a worker reads no transcript (#880)', { timeou
   it('refuses a human message on a routed question from the index', async () => {
     const { p } = await delegatingParent({ permissions: ['spawn', 'wait', 'steer'] });
     await until(() => liveStore.getRun(p.id)?.status === 'waiting');
-    const w = await worker(p.id, 'mock:ask'); liveManager.enqueueOwnedRun(w.id);
+    const w = await worker(p.id, 'mock:cezar-ask'); liveManager.enqueueOwnedRun(w.id);
     await until(() => liveStore.readEvents(w.id).some((event) => event.type === 'worker-question-routed') && liveStore.getRun(w.id)?.status === 'waiting');
     const reads = countTranscriptReads((path) => path.includes(w.id));
     expect(liveManager.sendMessage(w.id, [{ type: 'text', text: 'a human answer' }])).toBe(false);

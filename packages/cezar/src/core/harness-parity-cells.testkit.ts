@@ -470,7 +470,7 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
     // on every backend, and that is correct behaviour, not a defect.
     id: 'R1',
     name: 'R1 takes a declared-complete run to its review gate',
-    scenario: 'done',
+    scenario: 'cezar-done',
     settled: (record) => TERMINAL.includes(record?.status ?? ''),
     assert: (obs) => {
       expect(['review', 'done']).toContain(obs.record?.status);
@@ -581,12 +581,12 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
 const CONTROL_CRITERIA = [
   // hearsay-tools/cezarion#1380: workflows/resume-diagnostics-parity.test.ts.
   { id: 'R85', scenario: 'provider-error' },
-  { id: 'R86', scenario: 'done' },
-  { id: 'R87', scenario: 'done' },
+  { id: 'R86', scenario: 'cezar-done' },
+  { id: 'R87', scenario: 'cezar-done' },
   { id: 'R88', scenario: 'provider-error' },
   { id: 'R89', scenario: 'provider-error' },
-  { id: 'R90', scenario: 'done' },
-  { id: 'R91', scenario: 'done' },
+  { id: 'R90', scenario: 'cezar-done' },
+  { id: 'R91', scenario: 'cezar-done' },
   // hearsay-tools/cezarion#2279: a governed session keeps native subagents; only a separate
   // cross-session tool gets a control.
   { id: 'D1', scenario: 'baseline' },
@@ -606,7 +606,7 @@ const CONTROL_CRITERIA = [
   { id: 'R7', scenario: 'ask' },
   { id: 'R8', scenario: 'hold' },
   { id: 'R9', scenario: 'ask-reply-late' },
-  { id: 'R10', scenario: 'done' },
+  { id: 'R10', scenario: 'cezar-done' },
   { id: 'R11', scenario: 'baseline' },
   { id: 'R15', scenario: 'subagent-after-park' },
   // #961: hook items never move run state, mid-turn or after the park.
@@ -664,7 +664,7 @@ const CONTROL_CRITERIA = [
   { id: 'R99', scenario: 'baseline' },
   // hearsay-tools/cezarion#1540: completion-options-parity.test.ts, fresh and Continue.
   { id: 'R100', scenario: 'baseline' },
-  { id: 'R101', scenario: 'done' },
+  { id: 'R101', scenario: 'cezar-done' },
   { id: 'R28', scenario: 'baseline' },
   { id: 'R29', scenario: 'baseline' },
   { id: 'R30', scenario: 'baseline' },
@@ -685,7 +685,7 @@ const CONTROL_CRITERIA = [
   { id: 'R38', scenario: 'split-text' },
   { id: 'R39', scenario: 'split-text' },
   { id: 'R40', scenario: 'baseline' },
-  { id: 'R41', scenario: 'done' },
+  { id: 'R41', scenario: 'cezar-done' },
   { id: 'R42', scenario: 'baseline' },
   // workflows/worker-reboot-parity.test.ts and worker-location-evidence.test.ts: native exit/Continue,
   // independent reboot proof, legacy location uncertainty, readable vs unreadable holders, cleanup retries
@@ -696,9 +696,9 @@ const CONTROL_CRITERIA = [
   // worker-restart-parity.test.ts: cold terminal starting-proof facts readiness.
   { id: 'R60', scenario: 'baseline' },
   // #779: Continue on a run only runs.db holds, through both ActiveRun construction sites.
-  { id: 'R48', scenario: 'done' },
+  { id: 'R48', scenario: 'cezar-done' },
   // #779: restart still repairs a cancelled root's stale Finish intent, so Continue is not refused.
-  { id: 'R49', scenario: 'done' },
+  { id: 'R49', scenario: 'cezar-done' },
   // #779 plan step 3: a headless open beside the owner leaves its parked run alone.
   { id: 'R50', scenario: 'ask' },
   // #779 plan step 3: adopting a dead owner's mid-turn run for a control resumes nothing; Continue does.
@@ -1097,7 +1097,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   describeRunners('harness parity — Continue on a finished run (#779)', () => {
     for (const backend of runners) {
       parityRow<{ pins: string[]; left: boolean; heldWhileContinuing: boolean; leftAgain: boolean; obs: RunObservation }>(backend, {
-        id: 'R48', name: 'R48 Continue loads a finished run into memory and lets it go after it settles', scenario: 'done',
+        id: 'R48', name: 'R48 Continue loads a finished run into memory and lets it go after it settles', scenario: 'cezar-done',
         assert: ({ pins, left, heldWhileContinuing, leftAgain, obs }) => {
           expect(left).toBe(true);
           expect(heldWhileContinuing).toBe(true);
@@ -1110,11 +1110,11 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
       }, async () => {
         const pins: string[] = [];
         let left = false, heldWhileContinuing = false, leftAgain = false;
-        const obs = await driveRun(backend, 'done', record => TERMINAL.includes(record?.status ?? ''), 30_000,
+        const obs = await driveRun(backend, 'cezar-done', record => TERMINAL.includes(record?.status ?? ''), 30_000,
           async ({ store, manager, runId }) => {
             await waitFor(() => !manager.isActive(runId));
             left = await leavesMemory(store, runId);
-            expect(manager.continueRun(runId, { text: promptFor(backend, 'done') }).ok).toBe(true);
+            expect(manager.continueRun(runId, { text: promptFor(backend, 'cezar-done') }).ok).toBe(true);
             heldWhileContinuing = store.heldIds().includes(runId);
             await waitFor(() => TERMINAL.includes(store.getRun(runId)?.status ?? '') && !manager.isActive(runId), 30_000);
             leftAgain = await leavesMemory(store, runId);
@@ -1134,7 +1134,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   describeRunners('harness parity — restart repairs a stale root Finish intent (#779)', () => {
     for (const backend of runners) {
       parityRow<{ repaired: boolean; left: boolean; continued: { ok: boolean; error?: string }; final: RunRecord | undefined }>(backend, {
-        id: 'R49', name: "R49 restart clears a cancelled root's stale Finish intent and Continue resumes it", scenario: 'done',
+        id: 'R49', name: "R49 restart clears a cancelled root's stale Finish intent and Continue resumes it", scenario: 'cezar-done',
         assert: ({ repaired, left, continued, final }) => {
           expect(continued).toEqual({ ok: true });
           expect(repaired).toBe(true);
@@ -1146,7 +1146,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         let repaired = false, left = false;
         let continued: { ok: boolean; error?: string } = { ok: false };
         let final: RunRecord | undefined;
-        await driveRun(backend, 'done', record => TERMINAL.includes(record?.status ?? ''), 30_000,
+        await driveRun(backend, 'cezar-done', record => TERMINAL.includes(record?.status ?? ''), 30_000,
           async ({ store, manager, runId }) => {
             await waitFor(() => !manager.isActive(runId));
             const repoRoot = manager['repoRoot'] as string;
@@ -1165,7 +1165,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
               const root = rebooted.getRun(runId)?.delegation;
               repaired = root?.role === 'root' && root.finishRequestedAt === undefined;
               left = await leavesMemory(rebooted, runId);
-              continued = recovered.continueRun(runId, { text: promptFor(backend, 'done') });
+              continued = recovered.continueRun(runId, { text: promptFor(backend, 'cezar-done') });
               if (continued.ok) await waitFor(() => TERMINAL.includes(rebooted.getRun(runId)?.status ?? '') && !recovered.isActive(runId), 30_000);
               final = structuredClone(rebooted.getRun(runId));
             } finally {
@@ -1213,7 +1213,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             try {
               await recovered.recover();
               afterRestart = rebooted.getRun(runId)?.status;
-              answered = recovered.continueRun(runId, { text: promptFor(backend, 'done') });
+              answered = recovered.continueRun(runId, { text: promptFor(backend, 'cezar-done') });
               if (answered.ok) await waitFor(() => TERMINAL.includes(rebooted.getRun(runId)?.status ?? '') && !recovered.isActive(runId), 30_000);
               final = structuredClone(rebooted.getRun(runId));
             } finally {
@@ -1274,7 +1274,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
               vi.useRealTimers();
               adopting = false;
               settled = structuredClone(cockpit.getRun(runId));
-              continued = recovered.continueRun(runId, { text: promptFor(backend, 'done') });
+              continued = recovered.continueRun(runId, { text: promptFor(backend, 'cezar-done') });
               if (continued.ok) await waitFor(() => startedByContinue.length > 0, 30_000);
               resumed = structuredClone(cockpit.getRun(runId));
             } finally {
@@ -1802,7 +1802,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
 
       it(`${backend} R10 accepted input precedes DONE but explicit termination is never prolonged`, async () => {
         for (const stop of ['finish', 'cancel', 'destroy'] as const) {
-          await withOwnedInputRun(backend, 'done', async ({ store, manager, runId, parentRunId }) => {
+          await withOwnedInputRun(backend, 'cezar-done', async ({ store, manager, runId, parentRunId }) => {
             const accepted = agentInput(parentRunId, 'mock:hold');
             expect(manager.steerWorker(runId, accepted)).toBe('queued');
             manager.enqueueOwnedRun(runId);
@@ -1833,7 +1833,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           // Runs in the worker's own worktree, never the parent checkout.
           { id: 'verify', command: 'test -f a.txt && test "$(git rev-parse --show-toplevel)" = "$PWD" && printf %s "$PWD" > "$CEZ_PARITY_CWD"' },
         ] };
-        await withOwnedInputRun(backend, 'done', async ({ store, manager, repoRoot, runId }) => {
+        await withOwnedInputRun(backend, 'cezar-done', async ({ store, manager, repoRoot, runId }) => {
           const cwdFile = join(repoRoot, 'check-cwd.txt');
           process.env.CEZ_PARITY_CWD = cwdFile;
           try {
@@ -1875,7 +1875,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         const workflowDef = plannedWorkflow(skillTaskSteps('worker-skill').map(step => ({ ...step, runner: backend })));
         const identity: WorkerExecutionIdentity = { kind: 'internal', workflowHash: workerWorkflowHash(workflowDef) };
         const name = 'worker-skill';
-        await withOwnedInputRun(backend, 'done', async ({ store, manager, repoRoot, runId, parentRunId }) => {
+        await withOwnedInputRun(backend, 'cezar-done', async ({ store, manager, repoRoot, runId, parentRunId }) => {
           const skillsDir = join(repoRoot, '.ai/cezar/skills');
           mkdirSync(skillsDir, { recursive: true });
           writeFileSync(join(skillsDir, 'worker-skill.md'), 'WORKER SKILL BODY');
@@ -1907,14 +1907,14 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           return { provider, profileId: 'default', homePath, ...(provider === 'claude' ? { claudeLayout: { kind: 'relocated' } } : {}) };
         };
         const workflowDef: WorkflowDef = { name: 'mixed', source: 'file', path: '.ai/cezar/workflows/mixed.yaml', steps: [
-          { id: 'first', prompt: promptFor(backend, 'done'), runner: backend, agentProfile: 'default' },
-          { id: 'second', prompt: promptFor(other, 'done'), runner: other, agentProfile: 'default' },
+          { id: 'first', prompt: promptFor(backend, 'cezar-done'), runner: backend, agentProfile: 'default' },
+          { id: 'second', prompt: promptFor(other, 'cezar-done'), runner: other, agentProfile: 'default' },
         ] };
         const identity: WorkerExecutionIdentity = { kind: 'accepted', account: binding(backend), grants: {}, workflowHash: workerWorkflowHash(workflowDef), steps: [
           { stepId: 'first', account: binding(backend), grants: {} }, { stepId: 'second', account: binding(other), grants: {} },
         ] };
         try {
-          await withOwnedInputRun(backend, 'done', async ({ store, manager, runId }) => {
+          await withOwnedInputRun(backend, 'cezar-done', async ({ store, manager, runId }) => {
             manager.enqueueOwnedRun(runId);
             await waitFor(() => !manager.isActive(runId), 30_000);
             const run = store.getRun(runId)!;
@@ -2045,7 +2045,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
 
       it.each(['fresh', 'continuation'] as const)('%s late reply acknowledgement plus DONE retries accepted input', async mode => {
         await withOwnedInputRun('opencode', 'baseline', async ({ store, manager, runId, parentRunId }) => {
-          const prompt = 'mock:ask-reply-late-done';
+          const prompt = 'mock:ask-reply-late-cezar-done';
           if (mode === 'fresh') store.updateRun(runId, { task: prompt });
           manager.enqueueOwnedRun(runId);
           let asked = 0;
@@ -3242,7 +3242,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
       it(`${backend} P8 completes a non-final step on its done before a late card can pend`, async () => {
         const workflowDef: WorkflowDef = {
           name: 'permission-late', source: 'built-in',
-          steps: [{ id: 'first', name: 'First', prompt: '{{task}}' }, { id: 'second', name: 'Second', prompt: promptFor(backend, 'done') }],
+          steps: [{ id: 'first', name: 'First', prompt: '{{task}}' }, { id: 'second', name: 'Second', prompt: promptFor(backend, 'cezar-done') }],
         };
         // bound: hang guard for the live mock run; the predicate waits on the run settling, and a stuck card fails here instead of at the test timeout.
         const observation = await driveRun(backend, 'permission-late', run => !!run && ['done', 'review', 'waiting'].includes(run.status), 30_000, undefined, { workflowDef });

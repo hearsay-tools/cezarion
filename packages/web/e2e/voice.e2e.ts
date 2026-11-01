@@ -14,7 +14,7 @@ import { waitForStatus } from './poll'
  * rows are the same path a transcript takes. The fixture server runs with `CEZ_VOICE=1` and the
  * dry-run env that `fixtureServeEnv` sets, so the capability is on without a key and the
  * deterministic fake engine answers (see `packages/cezar/src/voice/fake-engine.ts` for the
- * sentences it reads). `mock:multi-ask` parks a run on a two-question card.
+ * sentences it reads). `mock:multi-cezar-ask` parks a run on a two-question card.
  */
 
 const ROW = '[data-slot="voice-row"]'
@@ -45,7 +45,7 @@ async function createTask(task: string): Promise<string> {
 
 /** A task parked on the two-question card, opened in the browser with the card on screen. */
 async function openAskTask(): Promise<void> {
-  const id = await createTask('mock:multi-ask')
+  const id = await createTask('mock:multi-cezar-ask')
   browser.goto(`${base}/p/${project}/tasks/${id}`)
   browser.waitForFunction(`document.querySelector('${CARD_OPEN}') !== null`)
 }
@@ -197,7 +197,7 @@ afterAll(async () => {
 
 describe('voice mode with the dry-run engine', () => {
   it('opens the first task that needs you', async () => {
-    const id = await createTask('mock:multi-ask')
+    const id = await createTask('mock:multi-cezar-ask')
     browser.goto(`${base}/p/${project}/`)
     // The sidebar lists the run once the runs query has answered; the sentence resolves against it.
     browser.waitForFunction(`document.querySelector('[data-run-id="${id}"]') !== null`)

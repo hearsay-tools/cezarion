@@ -501,7 +501,7 @@ it('steers non-human input behind a queued human turn but never after its CEZ:AS
   const { driveSeam, waitFor } = await import('./harness-parity.testkit.ts');
   await driveSeam('claude', 'hold', {
     whileOpen: async (session, { v1 }) => {
-      expect(session.sendMessage([{ type: 'text', text: 'mock:ask' }])).toBe(true);
+      expect(session.sendMessage([{ type: 'text', text: 'mock:cezar-ask' }])).toBe(true);
       await waitFor(() => v1.filter(event => event.type === 'turn-end').length === 1);
       expect(session.sendAgentMessage([{ type: 'text', text: 'steered while busy' }])).not.toBe(false);
       await waitFor(() => v1.filter(event => event.type === 'turn-end').length === 2);

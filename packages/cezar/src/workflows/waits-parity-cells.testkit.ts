@@ -2320,7 +2320,7 @@ function workersCells(runners: RunnerId[]): void {
       process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
       // Recovery re-queues the worker (`reviveQueuedRun`), which then runs its task and settles
       // done: a store write cannot settle a queued run the scheduler starts (hearsay-tools/cezarion#1804).
-      const { p, w } = await parentWithWorker(runner, undefined, 'mock:done');
+      const { p, w } = await parentWithWorker(runner, undefined, 'mock:cezar-done');
       const entry = await ignoreRefusal(runner, p.id, `Workers are still live: ${w.id}.`, () => workerWaits(p.id)[0]?.phase === 'open');
       store.flush();
       await restart(false, readPersistedRuns(join(root, '.ai/cezar')));
@@ -3341,7 +3341,7 @@ function singleRunnerCells(): void {
   it('workers settled during the nudge turn let the done finish', async () => {
     const release = join(root, 'release-u21');
     process.env.CEZ_MOCK_RELEASE_FILE = release;
-    process.env.CEZ_MOCK_COMPLETION_REPLY = 'mock:hold-done';
+    process.env.CEZ_MOCK_COMPLETION_REPLY = 'mock:hold-cezar-done';
     const { p, w } = await parentWithWorker('claude');
     expect(manager.sendMessage(p.id, [{ type: 'text', text: messagesPrompt('claude', ['All done.\nCEZ:DONE']) }])).toBe(true);
     await until(() => prompted('claude', `Workers are still live: ${w.id}.`).length > 0);

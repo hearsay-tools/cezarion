@@ -140,7 +140,7 @@ const timer = setInterval(() => {
               try {
                 const prompt = HARNESS_ADAPTERS[backend].scenarios['provider-error']!;
                 if (continuation) {
-                  expect(manager.continueRun(runId, { text: outcome === 'failed' ? prompt : outcome === 'cancelled' ? `Library: Vitest. ${HARNESS_ADAPTERS[backend].scenarios.done!}` : 'mock:baseline' }).ok).toBe(true);
+                  expect(manager.continueRun(runId, { text: outcome === 'failed' ? prompt : outcome === 'cancelled' ? `Library: Vitest. ${HARNESS_ADAPTERS[backend].scenarios['cezar-done']!}` : 'mock:baseline' }).ok).toBe(true);
                   if (outcome === 'success') {
                     // bound: the continued native turn must park before Finish.
                     await waitFor(() => store.getRun(runId)?.status === 'waiting', FIXTURE_STEP_MS);

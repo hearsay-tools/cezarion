@@ -29,7 +29,7 @@ describe('unread agent input is resubmitted (#505)', () => {
   it('codex keeps a CEZ:DONE session open until a resubmitted input is read', async () => {
     const adapter = HARNESS_ADAPTERS.codex as { scenarios: Record<string, string> };
     const original = adapter.scenarios['steer-late']!;
-    adapter.scenarios['steer-late'] = 'mock:steer-late mock:done-late';
+    adapter.scenarios['steer-late'] = 'mock:steer-late mock:late-cezar-done';
     try {
       await withOwnedInputRun('codex', 'steer-late', async ({ store, manager, runId, parentRunId }) => {
         manager.enqueueOwnedRun(runId);
@@ -107,7 +107,7 @@ describe('unread agent input is resubmitted (#505)', () => {
   it('codex never closes a CEZ:DONE session as done when requeueing unread input fails (#505 local review)', async () => {
     const adapter = HARNESS_ADAPTERS.codex as { scenarios: Record<string, string> };
     const original = adapter.scenarios['steer-late']!;
-    adapter.scenarios['steer-late'] = 'mock:steer-late mock:done-late';
+    adapter.scenarios['steer-late'] = 'mock:steer-late mock:late-cezar-done';
     try {
       await withOwnedInputRun('codex', 'steer-late', async ({ store, manager, runId, parentRunId }) => {
         const commit = store.commitOutcome.bind(store);

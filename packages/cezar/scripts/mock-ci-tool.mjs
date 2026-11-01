@@ -11,7 +11,7 @@ export async function probeCiTool(backend, wire, pr = process.env.CEZ_MOCK_CI_PR
 }
 
 // Calls one cezar tool the way the real harness would: through the wired MCP server (or Pi/OMP extension).
-export async function probeCezarTool(backend, wire, name, args) {
+export async function probeCezarTool(backend, wire, name, args, record = true) {
   let result;
   if (backend === 'pi' || backend === 'omp') {
     const extensions = wire.flatMap((arg, index) => arg === '--extension' ? [wire[index + 1]] : []);
@@ -61,9 +61,24 @@ export async function probeCezarTool(backend, wire, name, args) {
       result = { names: list.tools.map(tool => tool.name), response: await client.callTool({ name, arguments: args }) };
     } finally { await client.close(); }
   }
-  if (process.env.CEZ_MOCK_CI_RESULT) writeFileSync(process.env.CEZ_MOCK_CI_RESULT, JSON.stringify(result));
+  if (record && process.env.CEZ_MOCK_CI_RESULT) writeFileSync(process.env.CEZ_MOCK_CI_RESULT, JSON.stringify(result));
   return result;
 }
+
+// hearsay-tools/cezarion#2397: a scripted reply that finishes, asks or waits calls the cezar
+// lifecycle tool over the session's own wire before its turn ends, as an agent does. It
+// returns '' (a refusal is the tool's answer, not the mock's failure), or a note for the turn
+// text when the tool could not be reached, so the transcript says why the turn did not settle.
+export async function lifecycleCall(backend, wire, name, args) {
+  try { await probeCezarTool(backend, wire, name, args, false); return ''; }
+  catch (error) { return `\n\n(mock: ${name} failed: ${error?.message ?? error})`; }
+}
+/** The one-question card the portable ask scenarios send. */
+export const LIBRARY_QUESTIONS = [{ header: 'Library', question: 'Which test library?', options: [{ label: 'Vitest' }, { label: 'Node test' }] }];
+export const ASK_CONTEXT = 'A choice is needed before I continue.';
+export const DONE = ['cezar_done', {}];
+export const ask = (questions = LIBRARY_QUESTIONS, context = ASK_CONTEXT) => ['cezar_ask', { context, questions }];
+export const wait = (note = 'Re-check the downstream work.') => ['cezar_wait', { kind: 'timer', seconds: 60, note }];
 
 // pi reads --tools as an allowlist and --no-tools as an empty one; with neither (cezar's default
 // list sends --no-builtin-tools), an extension's tools are active once registered

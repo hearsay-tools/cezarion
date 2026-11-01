@@ -197,14 +197,14 @@ describe('systemPrompt end-to-end (dry run)', () => {
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
-  // Agent step + trailing check. The prompt's `mock:done` makes the mock's turn signal done, which
+  // Agent step + trailing check. The prompt's `mock:cezar-done` makes the mock's turn signal done, which
   // completes the agent step (hearsay-tools/cezarion#1620), so the run reaches a terminal status
   // instead of parking at `waiting`.
   const workflow: WorkflowDef = {
     name: 'sysprompt-test',
     source: 'built-in',
     steps: [
-      { id: 'work', prompt: '{{task}} mock:done' },
+      { id: 'work', prompt: '{{task}} mock:cezar-done' },
       { id: 'verify', command: 'true' },
     ],
   };
@@ -213,7 +213,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
     name: '(planned)',
     source: 'built-in',
     steps: [
-      { id: 'review', name: 'om-auto-review-pr', skill: 'om-auto-review-pr', prompt: '{{task}} mock:done' },
+      { id: 'review', name: 'om-auto-review-pr', skill: 'om-auto-review-pr', prompt: '{{task}} mock:cezar-done' },
       { id: 'verify', command: 'true' },
     ],
   };
@@ -375,7 +375,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
   });
 
   it('mock:refs end to end: markers set the record, silence the wrong chip, and stay out of the transcript', async () => {
-    const id = await runToEnd({ task: 'do the thing mock:refs mock:done' });
+    const id = await runToEnd({ task: 'do the thing mock:refs mock:cezar-done' });
     const after = store.getRun(id);
     expect(after?.prNumber).toBe(4242);
     expect(after?.issueNumber).toBe(17);
@@ -450,8 +450,8 @@ describe('systemPrompt end-to-end (dry run)', () => {
     // than being swallowed by title construction.
     const worktreePath = record?.worktreePath;
     if (!worktreePath) throw new Error('run did not create its worktree');
-    // The step's prompt adds `mock:done` after the task, so the step signals done.
-    expect(readFileSync(join(worktreePath, 'notes.md'), 'utf8')).toContain(': 432 mock:done\n');
+    // The step's prompt adds `mock:cezar-done` after the task, so the step signals done.
+    expect(readFileSync(join(worktreePath, 'notes.md'), 'utf8')).toContain(': 432 mock:cezar-done\n');
   }, 30_000);
 
 });
@@ -538,7 +538,7 @@ describe('generated inbox retirement (dry run)', () => {
     rmSync(todosFile, { force: true });
     rmSync(inheritedTodos, { force: true });
 
-    const id = await runToEnd({ task: 'do the thing mock:done' });
+    const id = await runToEnd({ task: 'do the thing mock:cezar-done' });
 
     expect(capturedSystemPrompt()).toBe(composeSystemPrompt(CONFIG_PROMPT, SESSION_HANDOFF));
     expect(capturedSystemPrompt()).not.toContain('CEZ_TODOS_FILE');
@@ -550,7 +550,7 @@ describe('generated inbox retirement (dry run)', () => {
   }, 30_000);
 
   it('keeps the per-task handoff journal and lifecycle tools', async () => {
-    const id = await runToEnd({ task: 'do the thing mock:done' });
+    const id = await runToEnd({ task: 'do the thing mock:cezar-done' });
     expect(capturedSystemPrompt()).toContain('CEZ_HANDOFF_FILE');
     // hearsay-tools/cezarion#1234: the lifecycle rides in the same contract, as cezar tool calls.
     expect(capturedSystemPrompt()).toContain('call cezar_done');

@@ -41,7 +41,7 @@ describe('intermediate workflow ASK parity — #427', () => {
             expect((run().waits ?? []).some(wait => wait.kind === 'human' && wait.source === 'cezar')).toBe(true);
             expect(run().steps.map(s => s.status)).toEqual(['waiting', 'pending']);
             expect(checks()).toEqual([]);
-            expect(manager.sendMessage(runId, [{ type: 'text', text: 'Carry on. mock:done' }])).toBe(true);
+            expect(manager.sendMessage(runId, [{ type: 'text', text: 'Carry on. mock:cezar-done' }])).toBe(true);
             await complete();
             return;
           }
@@ -79,7 +79,7 @@ describe('intermediate workflow ASK parity — #427', () => {
             expect(run().status).toBe('waiting');
             expect(run().steps.map(s => s.status)).toEqual(['waiting', 'pending']);
             expect(manager.isActive(runId)).toBe(false);
-            expect(manager.continueRun(runId, { text: 'Vitest. mock:done' }).ok).toBe(true);
+            expect(manager.continueRun(runId, { text: 'Vitest. mock:cezar-done' }).ok).toBe(true);
             await complete();
             return;
           }
@@ -114,7 +114,7 @@ describe('intermediate workflow ASK parity — #427', () => {
                 await waitFor(() => !manager.isActive(runId));
                 expect(run().status).toBe('waiting');
                 expect(run().steps.map(s => s.status)).toEqual(['waiting', 'pending', 'waiting']);
-                expect(manager.continueRun(runId, { text: 'Vitest. mock:done' }).ok).toBe(true);
+                expect(manager.continueRun(runId, { text: 'Vitest. mock:cezar-done' }).ok).toBe(true);
                 await complete();
                 return;
               }
@@ -125,7 +125,7 @@ describe('intermediate workflow ASK parity — #427', () => {
               expect(run().status).toBe('done');
             } else {
               if (row.id === 'Q1') expect(manager['active'].get(runId)?.session).toBe(session);
-              expect(manager.sendMessage(runId, [{ type: 'text', text: 'Vitest. mock:done' }])).toBe(true);
+              expect(manager.sendMessage(runId, [{ type: 'text', text: 'Vitest. mock:cezar-done' }])).toBe(true);
               if (row.id === 'Q3') {
                 await waitFor(() => !manager.isActive(runId));
                 expect(run().status).toBe('done');

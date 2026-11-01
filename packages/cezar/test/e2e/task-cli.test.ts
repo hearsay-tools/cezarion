@@ -79,7 +79,7 @@ test('built cez task drives a dry-run cockpit it discovers from the checkout', {
     assert.equal(listed?.code, 0, `cockpit never became discoverable: ${listed?.stdout}`);
 
     const requestId = '3c9d2f1a-7b4e-4c5d-9e8f-0a1b2c3d4e5f';
-    const started = await task(['start', 'mock:done', '--request-id', requestId, '--wait', '--timeout-seconds', '120']);
+    const started = await task(['start', 'mock:cezar-done', '--request-id', requestId, '--wait', '--timeout-seconds', '120']);
     assert.equal(started.code, 0, started.stdout + started.stderr);
     assert.equal(started.json.created, true);
     assert.match(String(started.json.status), /^(done|review)$/);
@@ -91,7 +91,7 @@ test('built cez task drives a dry-run cockpit it discovers from the checkout', {
     assert.equal(leadingUrlList.code, 0, leadingUrlList.stdout + leadingUrlList.stderr);
     assert.deepEqual((leadingUrlList.json.runs as Array<{ id: string }>).map((row) => row.id), [id]);
 
-    const retried = await task(['start', 'mock:done', '--request-id', requestId]);
+    const retried = await task(['start', 'mock:cezar-done', '--request-id', requestId]);
     assert.equal(retried.code, 0);
     assert.equal(retried.json.id, id);
     assert.equal(retried.json.created, false);
@@ -123,7 +123,7 @@ test('built cez task drives a dry-run cockpit it discovers from the checkout', {
     const stopped = await task(['stop', id]);
     assert.equal(stopped.code, 0, stopped.stdout);
 
-    // #553: an ordinary interactive task (no `mock:done`, so the mock agent ends its turn without
+    // #553: an ordinary interactive task (no `mock:cezar-done`, so the mock agent ends its turn without
     // a marker and the run parks as `waiting`) ends the DEFAULT `start --wait` promptly with the
     // cockpit's own attention answer, instead of running out the timeout (exit 3).
     const parkStarted = Date.now();
@@ -169,7 +169,7 @@ test('built cez task drives a dry-run cockpit it discovers from the checkout', {
     assert.deepEqual(followed.json, { id: parked.json.id, status: 'waiting', attention: 'waiting', attentionLabel: 'needs you', until: 'attention', timedOut: false });
     assert.equal((await task(['stop', String(parked.json.id)])).code, 0);
 
-    const headless = await execFile(process.execPath, [cli, 'run', 'mock:done', '--repo', repo], { cwd: repo, env, timeout: 60_000 });
+    const headless = await execFile(process.execPath, [cli, 'run', 'mock:cezar-done', '--repo', repo], { cwd: repo, env, timeout: 60_000 });
     assert.match(headless.stderr, /a cockpit is running at http:\/\/127\.0\.0\.1:\d+; use "cez task start"/);
   } finally {
     await stopChild(server, 'cockpit server');

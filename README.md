@@ -656,13 +656,12 @@ options is open, and the card shows a text box for your answer. The task reads N
 you once the turn ends, and your next message answers it. `cezar_wait` takes PR waits,
 worker waits and timers only, and points an agent that asks it for a human wait to `cezar_ask`. A run
 has one question to you at a time, and the agent cannot cancel it once you have seen
-it. The ask-marker card, a native question and `CEZ:MONITORING` with re-checks off
-open the same kind of wait. When the work is
+it. A native question opens the same kind of wait. When the work is
 done and verified, the agent calls `cezar_done` (an optional `summary`), and the task
 finishes at the end of that turn: its open waits are cancelled and the summary is
 written as a note. `cezar_done` refuses while owned workers are live or uncollected,
 a worker question is unanswered, a question to you is still pending, or the step is not
-the workflow's last, and says what to do first. The `CEZ:DONE` line keeps working and finishes the same way. An
+the workflow's last, and says what to do first. An
 autonomous task does not wait for you until its automatic-wake budget is spent.
 
 A run can have several waits open at once, up to 16. Each answer carries the
@@ -674,8 +673,14 @@ for CI — owner/repo#N** or **Waiting for merge — owner/repo#N** with a PR li
 with its time and note. **CI result ready — waiting for capacity** means the
 observation is owed to the agent and its wake turn has not started yet. A run parked
 on CI or a timer keeps its agent slot, a monitoring slot when one is free, so the
-wake usually starts at once. The older `CEZ:MONITORING` line and Claude's
-`ScheduleWakeup` open a timer in the same list.
+wake usually starts at once. Claude's `ScheduleWakeup` opens a timer in the same list.
+
+Every agent session needs these tools. Cezarion starts a private local socket for them,
+in the system temporary directory, when the first session of a cockpit launches. If it
+cannot start, for example because that directory is full or not writable, the task fails
+before the agent starts. The error names the cause and the fix: free space or fix the
+permissions, then Continue the task. A task woken by a wait retries with the usual backoff.
+The cockpit and other tasks keep working, and the next launch tries again.
 
 Cezarion reports passed, failed, cancelled or skipped checks, no checks, changed head,
 timeout or an operational error. It watches the registered commit: a new PR head
@@ -1277,7 +1282,7 @@ sessions from before Cezarion removed ACP sessions cannot resume: Continue on on
 reports that, and you start a new task to carry the work on.
 A missing CLI leaves the other backends available. `CEZ_DRY_RUN=1` uses the mock.
 Cursor questions from a plugin may be automatically skipped by print mode. Cezarion's
-own `CEZ:ASK` questions remain answerable in the cockpit; plugins that require
+own `cezar_ask` questions remain answerable in the cockpit; plugins that require
 native questions may not work fully. Project-local Claude plugin settings may
 not disable a user or team marketplace copy. A previously confirmed Cursor
 session ID can also lose history inside Cursor without an error; Cezarion resumes
@@ -1306,7 +1311,7 @@ both binaries keeps both, and `CEZ_PI_BIN` never selects OMP. Select **OMP** in 
 picker to use a persistent `--mode rpc` session. A missing CLI leaves the other backends
 available and shows OMP as unavailable. `CEZ_DRY_RUN=1` uses the mock.
 
-Agents ask questions through Cezarion's `CEZ:ASK` marker, and OMP's own sub-agents appear in the
+Agents ask questions through Cezarion's `cezar_ask` tool, and OMP's own sub-agents appear in the
 Agents drawer. Settings → Agent config exposes OMP's `config.yml`, `mcp.json` and
 `AGENTS.md` files. Named OMP profiles and accounts are not supported yet.
 

@@ -1,11 +1,13 @@
 // Shared responses only; each caller encodes its own native runner wire (#426).
+// `lifecycle([name, args])` makes the caller's cezar tool call and returns a note for the text.
+import { DONE, ask } from './mock-ci-tool.mjs';
 let cap = false;
-export function autonomousReply(prompt) {
-  const askCap = prompt.includes('mock:autonomous-ask-cap') || prompt.includes('mock:autonomous-readiness-idle');
+export async function autonomousReply(prompt, lifecycle) {
+  const askCap = prompt.includes('mock:autonomous-cezar-ask-cap') || prompt.includes('mock:autonomous-readiness-idle');
   if (prompt.includes('mock:autonomous-cap') || askCap) cap = true;
-  if (askCap) return 'CEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}';
+  if (askCap) return 'Pick one.' + await lifecycle(ask());
   if (prompt.startsWith('Continue working autonomously until the task is fully complete.')) {
-    return cap ? 'Still working.' : 'Autonomous work finished.\nCEZ:DONE';
+    return cap ? 'Still working.' : 'Autonomous work finished.' + await lifecycle(DONE);
   }
   return 'Still working.';
 }

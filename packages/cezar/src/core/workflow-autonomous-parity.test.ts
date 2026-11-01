@@ -110,7 +110,7 @@ describe('autonomous turn-end parity — #426', () => {
                 expect(readFileSync(handoffPath(manager['dataDir'], runId), 'utf8')).not.toContain('idle-closed');
               }
               expect(store.readEvents(runId).some(e => e.type === 'lifecycle' && String(e.message).includes('of inactivity'))).toBe(true);
-              expect(manager.continueRun(runId, { text: promptFor(backend, 'done') }).ok).toBe(true);
+              expect(manager.continueRun(runId, { text: promptFor(backend, 'cezar-done') }).ok).toBe(true);
               await waitFor(() => !manager.isActive(runId) && store.getRun(runId)?.status === 'done');
               runInternals(manager).inputDelivery.handleAgentInputReady(runId, state, session);
               expect(sent).not.toHaveBeenCalled();

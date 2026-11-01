@@ -87,7 +87,7 @@ beforeAll(async () => {
   // the hook instead of letting sequential probes overrun it.
   const blockerId = await startRun(baseUrl, 'mock:slow occupy the only agent slot')
   await waitForStatus(baseUrl, blockerId, ['running'], { tries: 160, deadline })
-  queuedId = await startRun(baseUrl, 'mock:done the original prompt')
+  queuedId = await startRun(baseUrl, 'mock:cezar-done the original prompt')
   await waitForStatus(baseUrl, queuedId, ['queued'], { tries: 160, deadline })
 
   browser = AgentBrowser.open(sessionId)
@@ -186,7 +186,7 @@ describe('a queued run’s prompt is amendable (#472)', () => {
     await waitForStatus(baseUrl, queuedId, ['done', 'review', 'failed'], { tries: 240 })
 
     const record = await getRun(baseUrl, queuedId)
-    expect(record.task).toBe('mock:done the original prompt')
+    expect(record.task).toBe('mock:cezar-done the original prompt')
     expect(record.queuedMessages?.map((m) => m.text)).toEqual(['STACKEDFINAL check the docs too'])
 
     // The thread still shows one bubble per authored message, and the affordances are gone

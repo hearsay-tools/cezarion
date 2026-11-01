@@ -146,7 +146,7 @@ describe('mid-turn human follow-up parity — #486', () => {
         await withMockLogs(async ({ argsFile, stdinFile, releaseFile, files, release }) => {
           const env = { CEZ_MOCK_ARGS_FILE: argsFile, CEZ_MOCK_STDIN_FILE: stdinFile, CEZ_MOCK_RELEASE_FILE: releaseFile };
           if (row.id === 'H1') {
-            await driveRun(backend, 'hold-done', run =>
+            await driveRun(backend, 'hold-cezar-done', run =>
               ['done', 'review', 'failed'].includes(run?.status ?? ''), 30_000,
               async ({ store, runId }) => {
                 const events = store.readEvents(runId);
@@ -159,7 +159,7 @@ describe('mid-turn human follow-up parity — #486', () => {
                 env,
                 during: async ({ manager, runId, store }) => {
                   await waitFor(() => store.readEvents(runId).some(e => e.type === 'turn.started'));
-                  expect(manager.sendMessage(runId, [{ type: 'text', text: `${KEEP} mock:done` }])).toBe(true);
+                  expect(manager.sendMessage(runId, [{ type: 'text', text: `${KEEP} mock:cezar-done` }])).toBe(true);
                   release();
                 },
               });
@@ -238,7 +238,7 @@ describe('mid-turn human follow-up parity — #486', () => {
             noParkBetween(observed.statuses);
             return;
           }
-          await driveRun(backend, 'hold-ask', run =>
+          await driveRun(backend, 'hold-cezar-ask', run =>
             run?.status === 'waiting' || ['done', 'review', 'failed'].includes(run?.status ?? ''), 30_000,
             async ({ store, runId }) => {
               const events = store.readEvents(runId);
@@ -261,7 +261,7 @@ describe('mid-turn human follow-up parity — #486', () => {
 
   it('codex coalesced steer+completed settles instead of staying running (#486)', async () => {
     await withMockLogs(async ({ argsFile, stdinFile, releaseFile, files, release }) => {
-      const observed = await driveRun('codex', 'hold-done', run =>
+      const observed = await driveRun('codex', 'hold-cezar-done', run =>
         ['done', 'review', 'failed', 'waiting'].includes(run?.status ?? ''), 20_000,
         async ({ store, runId }) => {
           expect(store.getRun(runId)?.status).not.toBe('running');
@@ -279,7 +279,7 @@ describe('mid-turn human follow-up parity — #486', () => {
           env: { CEZ_MOCK_ARGS_FILE: argsFile, CEZ_MOCK_STDIN_FILE: stdinFile, CEZ_MOCK_RELEASE_FILE: releaseFile },
           during: async ({ manager, runId, store }) => {
             await waitFor(() => store.readEvents(runId).some(e => e.type === 'turn.started'));
-            expect(manager.sendMessage(runId, [{ type: 'text', text: `${KEEP} mock:done` }])).toBe(true);
+            expect(manager.sendMessage(runId, [{ type: 'text', text: `${KEEP} mock:cezar-done` }])).toBe(true);
             await waitForHumanSteer(files);
             release();
           },
@@ -290,7 +290,7 @@ describe('mid-turn human follow-up parity — #486', () => {
 
   it('codex reverse-order unread hold-done runs the follow-up as a turn before close (#486)', async () => {
     await withMockLogs(async ({ argsFile, stdinFile, releaseFile, files, release }) => {
-      await driveRun('codex', 'hold-done', run =>
+      await driveRun('codex', 'hold-cezar-done', run =>
         ['done', 'review', 'failed', 'waiting'].includes(run?.status ?? ''), 20_000,
         async ({ store, runId }) => {
           expect(['done', 'review']).toContain(store.getRun(runId)?.status);
@@ -301,7 +301,7 @@ describe('mid-turn human follow-up parity — #486', () => {
           env: { CEZ_MOCK_ARGS_FILE: argsFile, CEZ_MOCK_STDIN_FILE: stdinFile, CEZ_MOCK_RELEASE_FILE: releaseFile },
           during: async ({ manager, runId, store }) => {
             await waitFor(() => store.readEvents(runId).some(e => e.type === 'turn.started'));
-            expect(manager.sendMessage(runId, [{ type: 'text', text: `${KEEP} mock:done` }])).toBe(true);
+            expect(manager.sendMessage(runId, [{ type: 'text', text: `${KEEP} mock:cezar-done` }])).toBe(true);
             await waitForHumanSteer(files);
             release();
           },
@@ -398,7 +398,7 @@ describe('mid-turn human follow-up parity — #486', () => {
 
   it('codex reverse-order delayed turn/started unread hold-done runs the follow-up as a turn before close (#486)', async () => {
     await withMockLogs(async ({ argsFile, stdinFile, releaseFile, files, release }) => {
-      await driveRun('codex', 'hold-done', run =>
+      await driveRun('codex', 'hold-cezar-done', run =>
         ['done', 'review', 'failed', 'waiting'].includes(run?.status ?? ''), 20_000,
         async ({ store, runId }) => {
           expect(['done', 'review']).toContain(store.getRun(runId)?.status);
@@ -412,7 +412,7 @@ describe('mid-turn human follow-up parity — #486', () => {
           },
           during: async ({ manager, runId, store }) => {
             await waitFor(() => store.readEvents(runId).some(e => e.type === 'turn.started'));
-            expect(manager.sendMessage(runId, [{ type: 'text', text: `${KEEP} mock:done` }])).toBe(true);
+            expect(manager.sendMessage(runId, [{ type: 'text', text: `${KEEP} mock:cezar-done` }])).toBe(true);
             await waitForHumanSteer(files);
             release();
           },
@@ -484,7 +484,7 @@ describe('mid-turn human follow-up parity — #486', () => {
     // Steer RPC succeeds while the turn is still active; the mock never echoes the
     // userMessage. Admission is not a read — the follow-up must run as its own turn.
     await withMockLogs(async ({ argsFile, stdinFile, releaseFile, files, release }) => {
-      await driveRun('codex', 'hold-done', run =>
+      await driveRun('codex', 'hold-cezar-done', run =>
         ['done', 'review', 'failed', 'waiting'].includes(run?.status ?? ''), 20_000,
         async ({ store, runId }) => {
           expect(['done', 'review']).toContain(store.getRun(runId)?.status);
@@ -497,7 +497,7 @@ describe('mid-turn human follow-up parity — #486', () => {
           },
           during: async ({ manager, runId, store }) => {
             await waitFor(() => store.readEvents(runId).some(e => e.type === 'turn.started'));
-            expect(manager.sendMessage(runId, [{ type: 'text', text: `${KEEP} mock:done` }])).toBe(true);
+            expect(manager.sendMessage(runId, [{ type: 'text', text: `${KEEP} mock:cezar-done` }])).toBe(true);
             await waitForHumanSteer(files);
             release();
           },
@@ -507,7 +507,7 @@ describe('mid-turn human follow-up parity — #486', () => {
 
   it('codex in-turn echoed steer does not restart as a second turn/start (#486)', async () => {
     await withMockLogs(async ({ argsFile, stdinFile, releaseFile, files, release }) => {
-      await driveRun('codex', 'hold-done', run =>
+      await driveRun('codex', 'hold-cezar-done', run =>
         ['done', 'review', 'failed', 'waiting'].includes(run?.status ?? ''), 20_000,
         async ({ store, runId }) => {
           expect(['done', 'review']).toContain(store.getRun(runId)?.status);
@@ -517,7 +517,7 @@ describe('mid-turn human follow-up parity — #486', () => {
           env: { CEZ_MOCK_ARGS_FILE: argsFile, CEZ_MOCK_STDIN_FILE: stdinFile, CEZ_MOCK_RELEASE_FILE: releaseFile },
           during: async ({ manager, runId, store }) => {
             await waitFor(() => store.readEvents(runId).some(e => e.type === 'turn.started'));
-            expect(manager.sendMessage(runId, [{ type: 'text', text: `${KEEP} mock:done` }])).toBe(true);
+            expect(manager.sendMessage(runId, [{ type: 'text', text: `${KEEP} mock:cezar-done` }])).toBe(true);
             await waitForHumanSteer(files);
             release();
           },
@@ -539,7 +539,7 @@ describe('mid-turn human follow-up parity — #486', () => {
           env: { CEZ_MOCK_ARGS_FILE: argsFile, CEZ_MOCK_STDIN_FILE: stdinFile, CEZ_MOCK_RELEASE_FILE: releaseFile },
           during: async ({ manager, runId, store }) => {
             await waitFor(() => store.readEvents(runId).some(e => e.type === 'tool-call'));
-            expect(manager.sendMessage(runId, [{ type: 'text', text: `${KEEP} mock:done` }])).toBe(true);
+            expect(manager.sendMessage(runId, [{ type: 'text', text: `${KEEP} mock:cezar-done` }])).toBe(true);
             release();
           },
         });

@@ -53,30 +53,29 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `baseline` | one text, one tool call and result, a later visible assistant message, usage, then its terminal turn signal |
  * | `tool-tail` | visible assistant text, a tool call/result, then turn end with no later message |
  * | `mcp-approval` | ask the native client before another MCP server's tool call, then echo the exact answer and end the turn |
- * | `done` | the same, with a trailing `CEZ:DONE` so the run reaches its review gate |
+ * | `cezar-done` | the same, calling `cezar_done` before its final text so the run reaches its review gate |
  * | `hold` | delay the terminal turn signal after the last content event |
- * | `hold-done` | like `hold`, then end with `CEZ:DONE` so a mid-turn follow-up can race the close (#486) |
- * | `hold-ask` | like `hold`, then end with a portable `CEZ:ASK` so a mid-turn follow-up can race the park (#486) |
- * | `split-text` | stream the reply in pieces, ending with a trailing `CEZ:MONITORING` |
+ * | `hold-cezar-done` | like `hold`, then call `cezar_done` so a mid-turn follow-up can race the close (#486) |
+ * | `hold-cezar-ask` | like `hold`, then call `cezar_ask` so a mid-turn follow-up can race the park (#486) |
  * | `provider-error` | a runtime provider rejection in its native error shape |
  * | `approval` | a native permission request cezar routes to the cockpit; no turn end until it is answered |
- * | `permission-default` | a native built-in default permission ask cezar answers itself, then end with `CEZ:DONE` (#1266) |
- * | `approval-resolved` | the `approval` request, which the backend settles itself once `CEZ_MOCK_RELEASE_FILE` exists, then `CEZ:DONE` |
- * | `approval-turn-end` | the `approval` request, still pending when the turn ends with `CEZ:DONE` once `CEZ_MOCK_RELEASE_FILE` exists |
+ * | `permission-default` | a native built-in default permission ask cezar answers itself, then call `cezar_done` (#1266) |
+ * | `approval-resolved` | the `approval` request, which the backend settles itself once `CEZ_MOCK_RELEASE_FILE` exists, then `cezar_done` |
+ * | `approval-turn-end` | the `approval` request, still pending when the turn ends after `cezar_done` once `CEZ_MOCK_RELEASE_FILE` exists |
  * | `approval-reply-fails` | the `approval` request, whose first answer the backend refuses to accept; a later answer ends the turn |
- * | `approval-malformed` | a malformed native permission request; the backend ends the turn with `CEZ:DONE` once it is refused |
+ * | `approval-malformed` | a malformed native permission request; the backend calls `cezar_done` and ends the turn once it is refused |
  * | `permission-classify` | a request the backend settles while cezar reads its config, then a marker request (`CEZ_MOCK_RELEASE_FILE` gates) |
- * | `permission-late` | the turn ends with `CEZ:DONE`, then a native permission request from a run the server started; its answer resumes that run, which ends with `CEZ:DONE` |
- * | `ask` | an ask — native where the wire has one, a `CEZ:ASK` marker otherwise |
- * | `ask-resume` | accept one human answer, then finish with `CEZ:DONE` without another prompt |
+ * | `permission-late` | the turn ends after `cezar_done`, then a native permission request from a run the server started; its answer resumes that run, which calls `cezar_done` |
+ * | `ask` | an ask — native where the wire has one (Codex, OpenCode), a `cezar_ask` call (`mock:cezar-ask`) otherwise |
+ * | `ask-resume` | accept one human answer, then call `cezar_done` without another prompt (`mock:resume-cezar-done`) |
  * | `ask-reply-late` | native ask whose reply acknowledgement can lag the resumed turn |
- * | `ask-bad` | a malformed ask, and then still end the turn |
- * | `subagent` | child work and terminal signal, then parent monitoring text followed by late child text |
+ * | `ask-bad` | a malformed native ask, and then still end the turn (the runners with no native ask have none) |
+ * | `subagent` | child work and terminal signal, then parent text after a `cezar_wait` timer, followed by late child text |
  * | `forked-skill` | a skill call that runs as a native forked subagent: child work nested under the call, then its result and final text |
- * | `hook-after-park` | a mid-turn hook with context, a monitoring park, then a late hook (#961) |
+ * | `hook-after-park` | a mid-turn hook with context, a `cezar_wait` park, then a late hook (#961) |
  * | `steer-tool` | one slow tool; agent input sent while it runs is read before the turn ends (#505) |
  * | `steer-late` | the final text first; agent input sent after it arrives after the last model call (#505) |
- * | `silent-tail` | visible assistant text, a tool, then reasoning that names CEZ:DONE, and no later message |
+ * | `silent-tail` | visible assistant text, a tool, then reasoning that names cezar_done, and no later message |
  * | `silent-tail-again` | the same first turn; a final-message nudge is answered with reasoning only |
  * | `silent-tail-ack-delay` | silent-tail as a follow-up whose transport ACK is held until after turn-end |
  * | `silent-tail-no-reply` | the same first turn; a final-message nudge is ACKed and never opens a turn |
@@ -84,6 +83,10 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `silent-tail-late-turn-start` | the same first turn; after the bound, native turn-start holds before any content |
  * | `silent-tail-slow-done` | the same first turn; a nudge reply starts before the bound and ends after it |
  * | `serve-start-exit` | the backend server's first start exits before listening; the next start answers `baseline` |
+ *
+ * hearsay-tools/cezarion#2397 removed the lifecycle markers. `split-text`, `ask-snapshot`,
+ * `ask-snapshot-bad` and `ask-prose` drove marker parsing only: no mock answers them now, and
+ * they stay listed only until the cells that name them are deleted or ported.
  */
 export const SCENARIOS = [
   'approval',
@@ -110,7 +113,7 @@ export const SCENARIOS = [
   'crash-stderr-single',
   'autonomous',
   'autonomous-cap',
-  'autonomous-ask-cap',
+  'autonomous-cezar-ask-cap',
   'autonomous-readiness-idle',
   'silent-tail',
   'silent-tail-again',
@@ -121,11 +124,11 @@ export const SCENARIOS = [
   'silent-tail-slow-done',
   'tool-tail',
   'baseline',
-  'done',
+  'cezar-done',
   'hold',
   'hold-gated',
-  'hold-done',
-  'hold-ask',
+  'hold-cezar-done',
+  'hold-cezar-ask',
   'no-progress',
   'no-progress-ignore-term',
   'no-progress-held-pipe',
@@ -192,7 +195,7 @@ export const WORKFLOW_ASK_CRITERIA = [
  *  earlier agent step completes only on an accepted done; the tail never starts without one. */
 export const STEP_COMPLETION_CRITERIA = [
   { id: 'C1', scenario: 'baseline', name: 'an earlier step without done is nudged once, then waits for the user; a reply with done runs the tail' },
-  { id: 'C2', scenario: 'done', name: 'the done line completes an earlier step without a nudge and runs the tail' },
+  { id: 'C2', scenario: 'cezar-done', name: 'the done line completes an earlier step without a nudge and runs the tail' },
   { id: 'C3', scenario: 'baseline', name: 'a clean session close without done leaves the earlier step waiting; Continue with done runs the tail' },
   { id: 'C4', scenario: 'baseline', name: 'an idle close leaves the earlier step waiting; a Continue without done parks on it again' },
   { id: 'C5', scenario: 'baseline', name: 'restart recovery keeps the parked earlier step; Continue with done runs the tail' },
@@ -203,11 +206,11 @@ export const STEP_COMPLETION_CRITERIA = [
 // T1, T2 and T5 hold their turn and then signal done, which an earlier step needs
 // since hearsay-tools/cezarion#1620.
 export const WORKFLOW_TIMEOUT_CRITERIA = [
-  { id: 'T1', scenario: 'hold-done', name: 'default non-final steps outlive the runner deadline' },
-  { id: 'T2', scenario: 'hold-done', name: 'explicit zero disables the workflow deadline' },
+  { id: 'T1', scenario: 'hold-cezar-done', name: 'default non-final steps outlive the runner deadline' },
+  { id: 'T2', scenario: 'hold-cezar-done', name: 'explicit zero disables the workflow deadline' },
   { id: 'T3', scenario: 'hold', name: 'authored positive deadlines fail without running trailing checks' },
   { id: 'T4', scenario: 'hold', name: 'standalone sessions retain the default deadline' },
-  { id: 'T5', scenario: 'hold-done', name: 'an authored longer limit replaces the runner default' },
+  { id: 'T5', scenario: 'hold-cezar-done', name: 'an authored longer limit replaces the runner default' },
   { id: 'T6', scenario: 'hold', name: 'default tasks remain unlimited' },
 ] as const;
 
@@ -224,8 +227,8 @@ export const NO_PROGRESS_CRITERIA = [
 
 /** #486: workflow-followup-parity.test.ts, real native wires on both turn-end paths. */
 export const FOLLOWUP_CRITERIA = [
-  { id: 'H1', scenario: 'hold-done', name: 'keeps a mid-turn human follow-up across a DONE turn' },
-  { id: 'H2', scenario: 'hold-ask', name: 'drops a mid-turn human follow-up when the turn parks on ASK' },
+  { id: 'H1', scenario: 'hold-cezar-done', name: 'keeps a mid-turn human follow-up across a DONE turn' },
+  { id: 'H2', scenario: 'hold-cezar-ask', name: 'drops a mid-turn human follow-up when the turn parks on ASK' },
   { id: 'H3', scenario: 'hold-gated', name: 'does not park or nudge between a markerless turn and a mid-turn follow-up' },
   { id: 'H4', scenario: 'hold-gated', name: 'does not park before a held follow-up whose native turn starts late' },
   { id: 'H5', scenario: 'hold-gated', name: 'does not park before a late-acknowledged steer that runs after the turn' },
@@ -240,11 +243,11 @@ export const AUTONOMOUS_CRITERIA = [
   { id: 'A5', scenario: 'autonomous-cap', name: 'parks at the cap with an explicit note' },
   { id: 'A6', scenario: 'autonomous', name: 'keeps non-autonomous parking reachable' },
   { id: 'A7', scenario: 'split-text', name: 'nudges monitoring without a false waiting heartbeat' },
-  { id: 'A8', scenario: 'done', name: 'honors DONE without a nudge' },
+  { id: 'A8', scenario: 'cezar-done', name: 'honors DONE without a nudge' },
   { id: 'A9', scenario: 'ask', name: 'preserves native mid-turn questions' },
   { id: 'A10', scenario: 'ask-snapshot', name: 'never continues past a persisted unanswered question' },
-  { id: 'A11', scenario: 'autonomous-ask-cap', name: 'continues after an unregistered ask line and delayed readiness' },
-  { id: 'A12', scenario: 'autonomous-ask-cap', name: 'continues a resumed unregistered ask line after delayed readiness' },
+  { id: 'A11', scenario: 'autonomous-cezar-ask-cap', name: 'continues after an unregistered ask line and delayed readiness' },
+  { id: 'A12', scenario: 'autonomous-cezar-ask-cap', name: 'continues a resumed unregistered ask line after delayed readiness' },
   { id: 'A13', scenario: 'autonomous-readiness-idle', name: 'settles a root readiness timeout after process exit' },
   { id: 'A14', scenario: 'autonomous-readiness-idle', name: 'settles a continued root readiness timeout after process exit' },
 ] as const;
@@ -255,7 +258,7 @@ export const FINAL_MESSAGE_CRITERIA = [
   { id: 'F2', scenario: 'silent-tail-again', name: 'parks waiting after one still-silent nudge' },
   { id: 'F3', scenario: 'silent-tail-again', name: 'never completes from reasoning that names CEZ:DONE' },
   { id: 'F4', scenario: 'tool-tail', name: 'nudges a markerless message-then-tool tail once' },
-  { id: 'F5', scenario: 'done', name: 'honors DONE without a nudge' },
+  { id: 'F5', scenario: 'cezar-done', name: 'honors DONE without a nudge' },
   { id: 'F6', scenario: 'tool-tail', name: 'keeps an autonomous silent tail running without the no-wait nudge' },
   { id: 'F7', scenario: 'silent-tail-ack-delay', name: 'nudges a silent tail after a delayed ACK' },
   { id: 'F8', scenario: 'silent-tail-no-reply', name: 'parks waiting when a nudge is ACKed without a turn' },
@@ -387,7 +390,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
-      'autonomous-ask-cap': 'mock:autonomous-ask-cap',
+      'autonomous-cezar-ask-cap': 'mock:autonomous-cezar-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-no-reply': 'mock:silent-tail-no-reply',
@@ -401,20 +404,15 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
-      done: 'mock:done',
-      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
-      'split-text': 'mock:split-text',
+      'cezar-done': 'mock:cezar-done',
+      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-cezar-done': 'mock:hold-cezar-done', 'hold-cezar-ask': 'mock:hold-cezar-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
       // Claude's mock has carried an auth-rejection branch since #430.
       'provider-error': 'mock:auth-error',
       'provider-unavailable': 'mock:auth-error',
       'post-success-refusal': 'mock:model-refusal:always',
-      ask: 'mock:ask',
-      'ask-resume': 'mock:ask mock:resume-done',
-      'ask-reply-late': 'mock:ask',
-      'ask-snapshot': 'mock:ask-snapshot',
-      'ask-snapshot-bad': 'mock:ask-snapshot-bad',
-      'ask-prose': 'mock:ask-prose',
-      'ask-bad': 'mock:ask-bad',
+      ask: 'mock:cezar-ask',
+      'ask-resume': 'mock:cezar-ask mock:resume-cezar-done',
+      'ask-reply-late': 'mock:cezar-ask',
       subagent: 'mock:subagents',
       'subagent-after-park': 'mock:subagent-after-park',
       'forked-skill': 'mock:forked-skill',
@@ -446,7 +444,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
-      'autonomous-ask-cap': 'mock:autonomous-ask-cap',
+      'autonomous-cezar-ask-cap': 'mock:autonomous-cezar-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-no-reply': 'mock:silent-tail-no-reply',
@@ -461,19 +459,15 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
-      done: 'mock:done',
-      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
-      'split-text': 'mock:split-text',
+      'cezar-done': 'mock:cezar-done',
+      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-cezar-done': 'mock:hold-cezar-done', 'hold-cezar-ask': 'mock:hold-cezar-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
       // #83: 0.147 reports provider rejection on turn/completed with turn.error.
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:stream-retry',
       'post-success-refusal': 'mock:provider-error',
       ask: 'mock:native-codex-ask',
-      'ask-resume': 'mock:native-codex-ask mock:resume-done',
+      'ask-resume': 'mock:native-codex-ask mock:resume-cezar-done',
       'ask-reply-late': 'mock:native-codex-ask',
-      'ask-snapshot': 'mock:ask-snapshot',
-      'ask-snapshot-bad': 'mock:ask-snapshot-bad',
-      'ask-prose': 'mock:ask-prose',
       'ask-bad': 'mock:ask-bad',
       // #600's repro: a child thread's own turn/completed must not end the parent.
       subagent: 'mock:child-turn',
@@ -503,14 +497,14 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'permission-classify': 'mock:permission-classify',
       'permission-late': 'mock:permission-late',
       'input-closed-live': 'mock:no-progress-input-closed',
-      'skill-warning': 'mock:skill-warning mock:done',
+      'skill-warning': 'mock:skill-warning mock:cezar-done',
       'multi-pr-refs': 'mock:multi-pr-refs', 'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       // The failing start is set by driveSeam's env (no prompt exists before listening).
       'serve-start-exit': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
-      'autonomous-ask-cap': 'mock:autonomous-ask-cap',
+      'autonomous-cezar-ask-cap': 'mock:autonomous-cezar-ask-cap',
       'autonomous-readiness-idle': 'mock:autonomous-readiness-idle',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
@@ -526,18 +520,14 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
-      done: 'mock:done',
-      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
-      'split-text': 'mock:split-text',
+      'cezar-done': 'mock:cezar-done',
+      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-cezar-done': 'mock:hold-cezar-done', 'hold-cezar-ask': 'mock:hold-cezar-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
       'post-success-refusal': 'mock:provider-error',
       ask: 'mock:ask',
-      'ask-resume': 'mock:ask mock:resume-done',
+      'ask-resume': 'mock:ask mock:resume-cezar-done',
       'ask-reply-late': 'mock:ask-reply-late',
-      'ask-snapshot': 'mock:ask-snapshot',
-      'ask-snapshot-bad': 'mock:ask-snapshot-bad',
-      'ask-prose': 'mock:ask-prose',
       'ask-bad': 'mock:ask-bad',
       subagent: 'mock:subagent',
       'subagent-after-park': 'mock:subagent-after-park',
@@ -555,7 +545,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'turn-messages': 'mock:turn-messages', 'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
-      'autonomous-ask-cap': 'mock:autonomous-ask-cap',
+      'autonomous-cezar-ask-cap': 'mock:autonomous-cezar-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-slow-done': 'mock:silent-tail-slow-done',
@@ -565,14 +555,11 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
-      'crash-stderr-single': 'mock:crash-stderr-single', done: 'mock:done', hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
-      'split-text': 'mock:split-text', 'provider-error': 'mock:provider-error',
+      'crash-stderr-single': 'mock:crash-stderr-single', 'cezar-done': 'mock:cezar-done', hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-cezar-done': 'mock:hold-cezar-done', 'hold-cezar-ask': 'mock:hold-cezar-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress', 'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
       'post-success-refusal': 'mock:provider-error',
-      ask: 'mock:ask',
-      'ask-resume': 'mock:ask mock:resume-done',
-      'ask-snapshot': 'mock:ask-snapshot',
-      'ask-snapshot-bad': 'mock:ask-snapshot-bad', 'ask-prose': 'mock:ask-prose', 'ask-bad': 'mock:ask-bad', 'ask-reply-late': 'mock:ask-reply-late' },
+      ask: 'mock:cezar-ask',
+      'ask-resume': 'mock:cezar-ask mock:resume-cezar-done', 'ask-bad': 'mock:ask-bad', 'ask-reply-late': 'mock:cezar-ask-reply-late' },
   },
   pi: {
     backend: 'pi',
@@ -586,7 +573,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
-      'autonomous-ask-cap': 'mock:autonomous-ask-cap',
+      'autonomous-cezar-ask-cap': 'mock:autonomous-cezar-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-no-reply': 'mock:silent-tail-no-reply',
@@ -598,23 +585,18 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
-      done: 'mock:done',
+      'cezar-done': 'mock:cezar-done',
       hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
-      'split-text': 'mock:split-text',
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
       'post-success-refusal': 'mock:provider-error',
-      ask: 'mock:ask',
-      'ask-resume': 'mock:ask mock:resume-done',
-      'ask-reply-late': 'mock:ask',
-      'ask-snapshot': 'mock:ask-snapshot',
-      'ask-snapshot-bad': 'mock:ask-snapshot-bad',
-      'ask-prose': 'mock:ask-prose',
-      'ask-bad': 'mock:ask-bad',
+      ask: 'mock:cezar-ask',
+      'ask-resume': 'mock:cezar-ask mock:resume-cezar-done',
+      'ask-reply-late': 'mock:cezar-ask',
       'steer-tool': 'mock:steer-tool',
       'steer-late': 'mock:steer-late',
-      'hold-done': 'mock:hold-done',
-      'hold-ask': 'mock:hold-ask',
+      'hold-cezar-done': 'mock:hold-cezar-done',
+      'hold-cezar-ask': 'mock:hold-cezar-ask',
       'silent-tail-late-reply': 'mock:silent-tail-late-reply',
       'silent-tail-slow-done': 'mock:silent-tail-slow-done',
       // No `subagent`: see the S9 and R12 entries in PARITY_EXEMPTIONS.
@@ -631,13 +613,13 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'input-closed-live': 'mock:no-progress-input-closed',
       'closed-input': 'mock:closed-input',
       'auto-resumed': BASELINE_PROMPT,
-      'hold-done': 'mock:hold-done',
-      'hold-ask': 'mock:hold-ask',
+      'hold-cezar-done': 'mock:hold-cezar-done',
+      'hold-cezar-ask': 'mock:hold-cezar-ask',
       'multi-pr-refs': 'mock:multi-pr-refs', 'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
-      'autonomous-ask-cap': 'mock:autonomous-ask-cap',
+      'autonomous-cezar-ask-cap': 'mock:autonomous-cezar-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-no-reply': 'mock:silent-tail-no-reply',
@@ -651,19 +633,14 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
-      done: 'mock:done',
+      'cezar-done': 'mock:cezar-done',
       hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
-      'split-text': 'mock:split-text',
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
       'post-success-refusal': 'mock:provider-error',
-      ask: 'mock:ask',
-      'ask-resume': 'mock:ask mock:resume-done',
-      'ask-reply-late': 'mock:ask',
-      'ask-snapshot': 'mock:ask-snapshot',
-      'ask-snapshot-bad': 'mock:ask-snapshot-bad',
-      'ask-prose': 'mock:ask-prose',
-      'ask-bad': 'mock:ask-bad',
+      ask: 'mock:cezar-ask',
+      'ask-resume': 'mock:cezar-ask mock:resume-cezar-done',
+      'ask-reply-late': 'mock:cezar-ask',
       'steer-tool': 'mock:steer-tool',
       'steer-late': 'mock:steer-late',
       subagent: 'mock:subagent',
@@ -1457,7 +1434,7 @@ export async function withSkillParentRun(
     // come exclusively from the parent's actual live native session.
     const caller = controller.credentials.authenticate(controller.credentials.issue('project', parent.id, randomUUID()))!;
     const child = await controller.service.spawn(caller, {
-      task: promptFor(backend, 'done'), baseline: 'HEAD', requestId: randomUUID(),
+      task: promptFor(backend, 'cezar-done'), baseline: 'HEAD', requestId: randomUUID(),
     });
     await body({ repoRoot, parentRunId: parent.id, runId: child.workerId, store, manager });
   } finally {

@@ -41,7 +41,7 @@ setInterval(() => {}, 1000);
   try {
     const result = await exec(process.execPath, [
       '--import', 'tsx', fileURLToPath(new URL('./index.ts', import.meta.url)),
-      'run', 'mock:done', '--repo', root,
+      'run', 'mock:cezar-done', '--repo', root,
     ], {
       cwd: fileURLToPath(new URL('../', import.meta.url)),
       env: { ...process.env, PATH: `${bin}${delimiter}${process.env.PATH}`, CEZ_DRY_RUN: '1', CEZ_HOME: join(root, 'home') },

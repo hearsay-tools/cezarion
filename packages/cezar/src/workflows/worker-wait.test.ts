@@ -59,7 +59,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       }
       const w = await worker(p.id);
       const sent = recordAgentInput(p.id);
-      expect(manager.sendMessage(p.id, [{ type: 'text', text: 'mock:done' }])).toBe(true);
+      expect(manager.sendMessage(p.id, [{ type: 'text', text: 'mock:cezar-done' }])).toBe(true);
       // hearsay-tools/cezarion#1301: the refusal `cezar_done` gives, as one automatic turn.
       await until(() => completionNudges(p.id).length === 1 && store.getRun(p.id)?.status === 'waiting');
       expect(sentTexts(sent, `Workers are still live: ${w.id}.`)).toEqual([expect.stringContaining(COMPLETION_WILL_WAIT)]);
@@ -213,13 +213,13 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const p = await parent();
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id);
-    manager.sendMessage(p.id, [{ type: 'text', text: 'mock:done' }]);
+    manager.sendMessage(p.id, [{ type: 'text', text: 'mock:cezar-done' }]);
     await until(() => completionNudges(p.id).length === 1 && store.getRun(p.id)?.status === 'waiting');
     const timer = store.getRun(p.id)?.waits?.find(wait => wait.kind === 'timer' && wait.via === 'monitoring-line');
     expect(timer).toBeDefined();
     const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
     const engine = manager as unknown as { active: Map<string, { session: AgentSession }> };
-    engine.active.get(p.id)!.session.sendMessage([{ type: 'text', text: 'mock:done' }]);
+    engine.active.get(p.id)!.session.sendMessage([{ type: 'text', text: 'mock:cezar-done' }]);
     const refused = () => store.readEvents(p.id).filter(event => event.type === 'note' && String(event.message).startsWith(`Completion blocked: Workers are still live: ${w.id}.`));
     await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && refused().length === 1 && store.getRun(p.id)?.status === 'waiting');
     expect(completionNudges(p.id)).toHaveLength(1);
@@ -240,7 +240,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const sent = recordAgentInput(p.id);
     const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
     // Straight to the session: a human message would restart the budget.
-    (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!.session.sendMessage([{ type: 'text', text: 'mock:done' }]);
+    (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!.session.sendMessage([{ type: 'text', text: 'mock:cezar-done' }]);
     await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && store.getRun(p.id)?.status === 'waiting');
     expect(completionNudges(p.id)).toEqual([]);
     expect(sentTexts(sent, `Workers are still live: ${w.id}.`)).toEqual([]);
@@ -257,7 +257,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const w = await worker(p.id);
     manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
     const sent = recordAgentInput(p.id);
-    manager.sendMessage(p.id, [{ type: 'text', text: 'mock:done' }]);
+    manager.sendMessage(p.id, [{ type: 'text', text: 'mock:cezar-done' }]);
     await until(() => completionNudges(p.id).length === 1 && store.getRun(p.id)?.status === 'waiting');
     const [nudge, ...more] = sentTexts(sent, `worker collect ${w.id}`);
     expect(more).toEqual([]);
@@ -268,7 +268,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     process.env.CEZ_REVIEW_GATE = '1';
     writeFileSync(join(store.getRun(p.id)!.worktreePath!, 'parent-result.txt'), 'parent result');
     const state = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!;
-    state.session.sendMessage([{ type: 'text', text: 'mock:done' }]);
+    state.session.sendMessage([{ type: 'text', text: 'mock:cezar-done' }]);
     await until(() => !manager.isActive(p.id));
     expect(store.getRun(p.id)?.status).toBe('review');
   });
@@ -349,7 +349,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           }
           checkpoint('worker spawned'); const w = await worker(p.id);
           const sent = recordAgentInput(p.id);
-          manager.sendMessage(p.id, [{ type: 'text', text: 'mock:done' }]);
+          manager.sendMessage(p.id, [{ type: 'text', text: 'mock:cezar-done' }]);
           checkpoint('completion nudge note'); await until(() => completionNudges(p.id).length === 1);
           if (delayedAck) {
             // The nudge's own turn ends before its acknowledgement. The note is written inside that
@@ -378,7 +378,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   }
 
   it('readiness Finish preserves pending parent human questions', async () => {
-    const p = await parent('mock:ask'); await until(() => store.getRun(p.id)?.status === 'waiting');
+    const p = await parent('mock:cezar-ask'); await until(() => store.getRun(p.id)?.status === 'waiting');
     expect(manager.finish(p.id)).toBe(false);
     expect(store.getRun(p.id)?.status).toBe('waiting');
     expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);

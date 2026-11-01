@@ -110,7 +110,7 @@ describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
   // portable question no longer holds conversation input. The messages go beside the card in one
   // submission, and the human's answer still answers it alone, through the answer seam.
   it('delivers messages beside a pending portable question in one submission, never as its answer', async () => {
-    const p = await parent('mock:ask');
+    const p = await parent('mock:cezar-ask');
     await until(() => store.readEvents(p.id).some(event => event.type === 'ask.requested'));
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const askSeq = store.readEvents(p.id).find(event => event.type === 'ask.requested')!.seq;
@@ -142,7 +142,7 @@ describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
   });
 
   it('returns bundled messages to the queue when the answer turn fails (#505 review)', async () => {
-    const p = await parent('mock:ask');
+    const p = await parent('mock:cezar-ask');
     await until(() => store.readEvents(p.id).some(event => event.type === 'ask.requested'));
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id);
@@ -173,7 +173,7 @@ describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
 
   it('flushes held messages that did not fit the answer bundle into the answering turn (#505 local review)', async () => {
     vi.stubEnv('CEZ_MOCK_STEER_MS', '4000');
-    const p = await parent('mock:ask');
+    const p = await parent('mock:cezar-ask');
     await until(() => store.readEvents(p.id).some(event => event.type === 'ask.requested'));
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id);

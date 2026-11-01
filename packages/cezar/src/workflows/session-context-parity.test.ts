@@ -77,7 +77,7 @@ describe('session-start context through every native wire (hearsay-tools/cezario
     it(`${runner} R120 opens a fresh step with the whole handoff and parent rules, then refreshes them on Continue`, async () => {
       const messages = native(runner);
       projectContext();
-      const task = HARNESS_ADAPTERS[runner].scenarios.done!;
+      const task = HARNESS_ADAPTERS[runner].scenarios['cezar-done']!;
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task, runner, worktree: false });
       await finished(run.id);
       const first = messages()[0]!;
@@ -133,7 +133,7 @@ describe('session-start context through every native wire (hearsay-tools/cezario
       const messages = native(runner);
       projectContext();
       const workflow: WorkflowDef = { name: 'retry-1584', source: 'built-in', steps: [
-        { id: 'implement', prompt: HARNESS_ADAPTERS[runner].scenarios.done!, runner },
+        { id: 'implement', prompt: HARNESS_ADAPTERS[runner].scenarios['cezar-done']!, runner },
         { id: 'verify', command: 'node -e "const fs=require(\'node:fs\');if(!fs.existsSync(\'retried-1584\')){fs.writeFileSync(\'retried-1584\',\'\');process.exit(1)}"', onFail: { retry: 'implement', max: 1 } },
       ] };
       const run = manager.startRun(workflow, { task: 'retry task', runner, worktree: false });
@@ -148,7 +148,7 @@ describe('session-start context through every native wire (hearsay-tools/cezario
     it(`${runner} R123 injects into restart recovery with no live session`, async () => {
       const messages = native(runner);
       projectContext();
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.done!, runner, worktree: false });
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['cezar-done']!, runner, worktree: false });
       await finished(run.id);
       store.updateStep(run.id, 'task', { status: 'running', finishedAt: undefined });
       store.updateRun(run.id, { status: 'running', currentStepId: 'task', finishedAt: undefined, continuationMessage: undefined });
@@ -170,7 +170,7 @@ describe('session-start context through every native wire (hearsay-tools/cezario
       const parent = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner });
       store.commitDelegation([{ id: parent.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
       await until(() => store.getRun(parent.id)?.status === 'waiting');
-      const child = await worker(parent.id, HARNESS_ADAPTERS[runner].scenarios.done!, runner);
+      const child = await worker(parent.id, HARNESS_ADAPTERS[runner].scenarios['cezar-done']!, runner);
       manager.enqueueOwnedRun(child.id);
       await until(() => messages().some((message) => message.includes(handoffBlock(child.id))));
       const opening = messages().find((message) => message.includes(handoffBlock(child.id)))!;

@@ -138,8 +138,13 @@ async function handleControlled(command) {
   for (const frame of frames) send(frame);
 }
 
-/** One valid CEZ:ASK payload (spec #473), used by the `mock:ask` scenario. */
-const ASK_MARKER_BODY = "{\"questions\":[{\"header\":\"Library\",\"question\":\"Which test library?\",\"multiSelect\":false,\"options\":[{\"label\":\"Vitest\",\"description\":\"Use the existing test runner\"},{\"label\":\"Node test\",\"description\":\"Use node:test\"}]}]}";
+/** The card the `mock:cezar-ask` scenario sends (spec #473). */
+const ASK_QUESTIONS = [{ header: 'Library', question: 'Which test library?', multiSelect: false, options: [{ label: 'Vitest', description: 'Use the existing test runner' }, { label: 'Node test', description: 'Use node:test' }] }];
+// hearsay-tools/cezarion#2397: a reply that finishes, asks or waits calls that cezar tool through
+// the session's --extension before its turn ends. Returns '' or a note for the text.
+const tools = () => import('./mock-ci-tool.mjs');
+const lifecycle = async (call) => (await tools()).lifecycleCall('pi', process.argv.slice(2), ...call);
+const done = async (text) => text + await lifecycle((await tools()).DONE);
 
 /** The text_start / text_delta* / text_end trio pi streams for one assistant block. */
 function sendText(deltas) {
@@ -208,7 +213,7 @@ async function respondAutonomous(command) {
   send({ id: command.id, type: 'response', command: 'prompt', success: true });
   send({ type: 'agent_start' });
   send({ type: 'turn_start' });
-  sendText([autonomousReply(command.message)]);
+  sendText([await autonomousReply(command.message, lifecycle)]);
   sendTurnEnd();
   return;
 }
@@ -309,7 +314,7 @@ async function respondMultiPrRefs(command) {
   send({ type: 'tool_execution_start', toolCallId: 'multi-read', toolName: 'read', args: { path: 'other.txt' } });
   send({ type: 'tool_execution_end', toolCallId: 'multi-read', toolName: 'read', result: { content: [{ type: 'text', text: unrelatedPr }] }, isError: false });
   send({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'thinking', thinking: unrelatedPr }], stopReason: 'stop' } });
-  const text = multiPrText(command.message);
+  const text = await multiPrText(command.message, lifecycle);
   sendText([text.slice(0, 5), text.slice(5)]);
   sendTurnEnd();
 }
@@ -328,18 +333,6 @@ function respondAgentEcho(command) {
   send({ type: 'agent_start' });
   send({ type: 'turn_start' });
   sendText([command.message]);
-  sendTurnEnd();
-}
-
-function respondSplitText(command) {
-  // Pi streams one text_delta per token (#2's root cause), so the marker is
-  // split across deltas. Only a coalescer reassembles `CEZ:MONITORING`;
-  // one v1 `text` per delta joins them with a newline and the park is lost
-  // (harness parity S8).
-  send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  send({ type: 'agent_start' });
-  send({ type: 'turn_start' });
-  sendText(['parity split text', '\n\n', 'CEZ:', 'MONITORING']);
   sendTurnEnd();
 }
 
@@ -371,7 +364,7 @@ async function respondHoldDone(command) {
   send({ type: 'agent_start' });
   send({ type: 'turn_start' });
   await waitForMockRelease(400);
-  sendText(['parity hold-done: content after the pause\n\nCEZ:DONE']);
+  sendText([await done('parity hold-done: content after the pause')]);
   sendTurnEnd();
 }
 
@@ -380,59 +373,28 @@ async function respondHoldAsk(command) {
   send({ type: 'agent_start' });
   send({ type: 'turn_start' });
   await waitForMockRelease(400);
-  sendText(['Pick one.\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}']);
+  sendText(['Pick one.' + await lifecycle((await tools()).ask())]);
   sendTurnEnd();
 }
 
-function respondDone(command) {
+async function respondDone(command) {
   resumeAfterAsk = false;
-  // Declares the task complete so the run reaches cezar's review gate; a
-  // markerless turn-end correctly parks as `waiting` instead (harness
-  // parity R1).
+  // Calls cezar_done so the run reaches cezar's review gate; a turn-end with
+  // no tool call correctly parks as `waiting` instead (harness parity R1).
   send({ id: command.id, type: 'response', command: 'prompt', success: true });
   send({ type: 'agent_start' });
   send({ type: 'turn_start' });
-  sendText(['parity done: the task is complete\n\nCEZ:DONE']);
+  sendText([await done('parity done: the task is complete')]);
   sendTurnEnd();
 }
 
-function respondAskSnapshot(command) {
-  // #401: authoritative text_end without deltas, using rpc-lifecycle frames.
+async function respondAsk(command) {
+  resumeAfterAsk = command.message.includes('mock:resume-cezar-done');
+  // Pi has no native ask wire, so cezar_ask (through the extension) is its ask path.
   send({ id: command.id, type: 'response', command: 'prompt', success: true });
   send({ type: 'agent_start' });
   send({ type: 'turn_start' });
-  send({ type: 'message_update', message: {}, assistantMessageEvent: { type: 'text_end', contentIndex: 0, content: command.message.includes('mock:ask-snapshot-bad') ? 'CEZ:ASK {not valid json' : 'Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}', partial: {} } });
-  sendTurnEnd();
-}
-
-function respondAskProse(command) {
-  send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  send({ type: 'agent_start' });
-  send({ type: 'turn_start' });
-  sendText(['Use `CEZ:ASK {"questions":[]}` in your reply.\n> CEZ:ASK {not valid json']);
-  sendTurnEnd();
-}
-
-function respondBadAsk(command) {
-  // A marker whose JSON body is invalid. `parseAskMarker` must render no card
-  // and the turn must still end (harness parity R4) — pi has no native ask
-  // wire, so the `CEZ:ASK` marker is its only ask path, same as claude's.
-  send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  send({ type: 'agent_start' });
-  send({ type: 'turn_start' });
-  sendText(['Pick one.\n\nCEZ:ASK {not valid json']);
-  sendTurnEnd();
-}
-
-function respondAsk(command) {
-  resumeAfterAsk = command.message.includes('mock:resume-done');
-  // A well-formed `CEZ:ASK` marker, split so the marker and its JSON body land
-  // in separate deltas — the #2 boundary that used to break assembly, and the
-  // reason an ask row is worth driving through the real coalescer.
-  send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  send({ type: 'agent_start' });
-  send({ type: 'turn_start' });
-  sendText(['Pick one.\n\n', 'CEZ:ASK', ' ', ASK_MARKER_BODY]);
+  sendText(['Pick one.' + await lifecycle((await tools()).ask(ASK_QUESTIONS))]);
   sendTurnEnd();
 }
 
@@ -452,7 +414,7 @@ async function respondProgress(command) {
 
 async function respondBusyProgress() {
   for (let i = 0; i < 24; i++) { send({ type: 'tool_execution_update', toolCallId: 'busy', toolName: 'bash', partialResult: { content: [{ type: 'text', text: 'working' }] } }); await sleep(100); }
-  sendText(['busy complete\n\nCEZ:DONE']);
+  sendText([await done('busy complete')]);
   sendTurnEnd();
 }
 
@@ -481,8 +443,8 @@ async function respondHold(command) {
 }
 
 async function respondDefault(command) {
-  const monitoringMarker = command.message.includes('mock:monitoring') ? '\n\nCEZ:MONITORING' : '';
-  const responseText = `Investigating: ${command.message}${monitoringMarker}`;
+  const waiting = command.message.includes('mock:cezar-wait');
+  const responseText = `Investigating: ${command.message}${waiting ? await lifecycle((await tools()).wait()) : ''}`;
   send({ id: command.id, type: 'response', command: 'prompt', success: true });
   // hearsay-tools/cezarion#1112: the acknowledged prompt opens its native run late. A late-ack
   // steer's run reports agent_start first: pi's mapper reports no turn for it, so the hold
@@ -525,7 +487,7 @@ async function respondDefault(command) {
     result: { content: [{ type: 'text', text: 'mock file' }] },
     isError: false,
   });
-  if (!monitoringMarker) sendText(['Done with the first pass.']);
+  if (!waiting) sendText(['Done with the first pass.']);
   send({
     type: 'message_end',
     message: {
@@ -612,8 +574,8 @@ async function finishFinalNudge(silent, kind) {
   else if (kind === 'slow-done') {
     sendText([silent.SLOW_DONE_PREFIX]);
     await silent.sleep(silent.SLOW_DONE_TAIL_MS);
-    sendText([silent.SILENT_TAIL_DONE]);
-  } else sendText([kind === 'standing' ? silent.FINAL_MESSAGE_STANDING : silent.SILENT_TAIL_DONE]);
+    sendText([await silent.finalNudgeText('done', lifecycle)]);
+  } else sendText([await silent.finalNudgeText(kind, lifecycle)]);
   sendTurnEnd();
 }
 
@@ -647,18 +609,14 @@ const promptScenarios = [
   { matches: command => command.message.includes('mock:multi-pr-refs'), respond: respondMultiPrRefs },
   { matches: command => command.message.includes('mock:turn-messages:'), respond: respondTurnMessages },
   { matches: command => command.message.includes('mock:agent-echo'), respond: respondAgentEcho },
-  { matches: command => command.message.includes('mock:split-text'), respond: respondSplitText },
 ];
 
 // A provider failure takes priority over these trailing scenarios.
 const tailPromptScenarios = [
-  { matches: command => command.message.includes('mock:hold-done'), respond: respondHoldDone },
-  { matches: command => command.message.includes('mock:hold-ask'), respond: respondHoldAsk },
-  { matches: command => (command.message.includes('mock:done') || (resumeAfterAsk && command.message.trim() === 'Library: Vitest')), respond: respondDone },
-  { matches: command => command.message.includes('mock:ask-snapshot'), respond: respondAskSnapshot },
-  { matches: command => command.message.includes('mock:ask-prose'), respond: respondAskProse },
-  { matches: command => command.message.includes('mock:ask-bad'), respond: respondBadAsk },
-  { matches: command => command.message.includes('mock:ask'), respond: respondAsk },
+  { matches: command => command.message.includes('mock:hold-cezar-done'), respond: respondHoldDone },
+  { matches: command => command.message.includes('mock:hold-cezar-ask'), respond: respondHoldAsk },
+  { matches: command => (command.message.includes('mock:cezar-done') || (resumeAfterAsk && command.message.trim() === 'Library: Vitest')), respond: respondDone },
+  { matches: command => command.message.includes('mock:cezar-ask'), respond: respondAsk },
   { matches: command => /mock:(no-progress|busy-progress)/.test(command.message), respond: respondProgress },
   { matches: command => command.message.includes('mock:hold-gated'), respond: respondHoldGated },
   { matches: command => command.message.includes('mock:hold'), respond: respondHold },

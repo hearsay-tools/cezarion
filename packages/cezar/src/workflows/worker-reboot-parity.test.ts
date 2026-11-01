@@ -44,7 +44,7 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (#738
     manager.requestWorkerStop(orphan.id);
     expect(await manager.awaitRunTermination(orphan.id, 15_000)).toBe(true);
 
-    const twin = await worker(p.id, adapter.scenarios.done!);
+    const twin = await worker(p.id, adapter.scenarios['cezar-done']!);
     store.updateRun(twin.id, { runner }); manager.enqueueOwnedRun(twin.id);
     await until(() => store.readWorkerExecution(twin.id)?.phase === 'complete');
     expect(store.getRun(twin.id)?.status).toBe('done');

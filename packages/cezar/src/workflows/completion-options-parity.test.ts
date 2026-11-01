@@ -32,7 +32,7 @@ describe('task completion controls on native harnesses', { timeout: 40_000 }, ()
       process.env.CEZ_DRY_RUN = '0';
       process.env[HARNESS_ADAPTERS[runner].binEnv] = HARNESS_ADAPTERS[runner].mockBin;
       for (const enabled of [false, true]) {
-        const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.done!,
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['cezar-done']!,
           ...(enabled ? { archiveWhenDone: true, autoMergePr: true } : {}) });
         await until(() => store.getRun(run.id)?.status === 'done' && !manager.isActive(run.id));
         const row = readPersistedRuns(join(root, '.ai/cezar')).find(row => row.id === run.id);

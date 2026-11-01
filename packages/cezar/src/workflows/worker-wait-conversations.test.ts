@@ -363,7 +363,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
     const gate = join(root, 'conversation-monitor-gate');
     try {
       const boundaries = turnEnds(f.p.id);
-      expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'mock:monitoring' }])).toBe(true);
+      expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'mock:cezar-wait' }])).toBe(true);
       await until(() => turnEnds(f.p.id) > boundaries && store.getRun(f.p.id)?.status === 'waiting' && !!monitoringWakeOf(store.getRun(f.p.id)));
       // A real in-flight turn occupies the sole slot until this gate opens.
       controlledWire({ firstResultGate: gate });

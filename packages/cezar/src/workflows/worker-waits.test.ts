@@ -350,7 +350,7 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
   });
 
   it("the parent's answer to a worker question leaves the worker's earlier wait open", async () => {
-    const f = await conversing('mock:hold', 'mock:ask');
+    const f = await conversing('mock:hold', 'mock:cezar-ask');
     await until(() => eventsOf(f.w.id, 'worker-question-routed').length === 1 && store.getRun(f.w.id)?.status === 'waiting');
     const question = String(eventsOf(f.w.id, 'worker-question-routed')[0]!.messageId);
     const own = await say(f, 'worker', f.p.id, 'request', 'Which module? mock:hold');
@@ -375,7 +375,7 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
   });
 
   it('a worker message reaches a parent with a pending cezar_ask card beside it; the card stays answerable', async () => {
-    const f = await conversing('mock:ask');
+    const f = await conversing('mock:cezar-ask');
     await until(() => hasPendingAsk(store, f.p.id) === true);
     const askSeq = eventsOf(f.p.id, 'ask.requested')[0]!.seq;
     const send = vi.spyOn(sessionOf(f.p.id), 'sendAgentMessage');
@@ -390,7 +390,7 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
   });
 
   it('a worker with a routed question receives an unrelated parent message beside it', async () => {
-    const f = await conversing('mock:hold', 'mock:ask');
+    const f = await conversing('mock:hold', 'mock:cezar-ask');
     await until(() => eventsOf(f.w.id, 'worker-question-routed').length === 1 && store.getRun(f.w.id)?.status === 'waiting');
     const question = String(eventsOf(f.w.id, 'worker-question-routed')[0]!.messageId);
     const send = vi.spyOn(sessionOf(f.w.id), 'sendAgentMessage');
@@ -434,7 +434,7 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
   // the nudged parent is ordinary input: delivered, with no wait to end.
   it('a parent nudged at a blocked done: a worker request is delivered with no completion wait to end', async () => {
     const f = await conversing();
-    manager.sendMessage(f.p.id, [{ type: 'text', text: 'mock:done' }]);
+    manager.sendMessage(f.p.id, [{ type: 'text', text: 'mock:cezar-done' }]);
     await until(() => store.readEvents(f.p.id).some(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE)) &&
       store.getRun(f.p.id)?.status === 'waiting');
     expect(waitOf(store.getRun(f.p.id))).toBeUndefined();

@@ -181,7 +181,7 @@ try {
     // server.json) to a temp dir — booting the real CLI must never touch the
     // developer's real ~/.cezar.
     const cezHome = join(root, 'cez-home');
-    const run = await execFile(process.execPath, [cliPath, 'run', 'mock:done', '--repo', fixtureRepo], {
+    const run = await execFile(process.execPath, [cliPath, 'run', 'mock:cezar-done', '--repo', fixtureRepo], {
       cwd: consumerDir,
       env: { ...process.env, CEZ_DRY_RUN: '1', CEZ_HOME: cezHome },
       timeout: 60_000,
@@ -214,7 +214,7 @@ try {
     workspace.disabledProviders = ['claude'];
     await writeFile(join(cezHome, 'config.json'), `${JSON.stringify(workspace, null, 2)}\n`, 'utf8');
     await assert.rejects(
-      execFile(process.execPath, [cliPath, 'run', 'mock:done must stay blocked', '--repo', fixtureRepo], {
+      execFile(process.execPath, [cliPath, 'run', 'mock:cezar-done must stay blocked', '--repo', fixtureRepo], {
         cwd: consumerDir,
         env: { ...process.env, CEZ_DRY_RUN: '1', CEZ_HOME: cezHome },
         timeout: 60_000,

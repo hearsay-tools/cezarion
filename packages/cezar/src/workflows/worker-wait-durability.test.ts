@@ -293,7 +293,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   });
 
   for (const mode of ['fresh', 'continuation'] as const) {
-    for (const marker of ['mock:done', 'mock:monitoring', 'mock:ask'] as const) {
+    for (const marker of ['mock:cezar-done', 'mock:cezar-wait', 'mock:cezar-ask'] as const) {
       it(`${mode}: worker wait precedes ${marker} except that a human ask wins`, async () => {
         const p = await parent(mode === 'fresh' ? marker : 'mock:hold');
         if (mode === 'continuation') {
@@ -304,7 +304,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(p.id)?.sessionEverOpened === true);
         }
         const w = await worker(p.id); const wait = register(p.id, [w.id]);
-        if (marker === 'mock:ask') {
+        if (marker === 'mock:cezar-ask') {
           await until(() => store.readEvents(p.id).some(event => event.type === 'ask.requested'));
           expect(waitOf(store.getRun(p.id))?.id).toBe(wait.id);
           expect(store.getRun(p.id)?.agentInputs?.some(input => input.deliveredAt)).not.toBe(true);
@@ -319,7 +319,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   }
 
   it('a parent timeout leaves a waiting child human question unanswered', async () => {
-    const p = await parent(); const w = await worker(p.id, 'mock:ask');
+    const p = await parent(); const w = await worker(p.id, 'mock:cezar-ask');
     const wait = register(p.id, [w.id]); manager.enqueueOwnedRun(w.id);
     await until(() => store.readEvents(w.id).some(event => event.type === 'ask.requested'));
     vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(wait.deadline!);
@@ -341,7 +341,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(Date.parse(wait.deadline!) - Date.now()).toBeGreaterThan(599_000);
     expect(register(p.id, [w.id]).id).toBe(wait.id);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    manager.sendMessage(p.id, [{ type: 'text', text: 'mock:ask' }]);
+    manager.sendMessage(p.id, [{ type: 'text', text: 'mock:cezar-ask' }]);
     await until(() => store.readEvents(p.id).some(e => e.type === 'ask.requested'));
     expect(waitOf(store.getRun(p.id))?.id).toBe(wait.id);
     expect(register(p.id, [w.id]).id).toBe(wait.id);
@@ -524,7 +524,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   });
 
   it('preserves a delegated parent ask across restart and never uses a lifecycle prompt as its answer', async () => {
-    const p = await parent('mock:ask'); const w = await worker(p.id);
+    const p = await parent('mock:cezar-ask'); const w = await worker(p.id);
     await until(() => store.readEvents(p.id).some(e => e.type === 'ask.requested'));
     const delegation = store.getRun(p.id)!.delegation!;
     if (delegation.role !== 'root') throw Error('fixture');

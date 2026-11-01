@@ -129,7 +129,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
   it('requeues a settled wake dequeued after losing its turn boundary', async () => {
     const external = github();
     const gate = join(root, 'ask-boundary'); controlledWire({ firstResultGate: gate });
-    const run = await parent('mock:ask');
+    const run = await parent('mock:cezar-ask');
     await register(run.id);
     writeFileSync(gate, 'end');
     await until(() => store.getRun(run.id)?.status === 'waiting' && store.readEvents(run.id).some(event => event.type === 'ask.requested'));
@@ -355,7 +355,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
   it('accepts CI during an executing approval and after a newer human ask', async () => {
     github(); const release = join(root, 'ci-answer');
     const wire = controlledWire({ humanAnswerGate: release });
-    const p = await parent('mock:ask');
+    const p = await parent('mock:cezar-ask');
     await until(() => store.readEvents(p.id).some(event => event.type === 'ask.requested'));
     await restart();
     expect(manager.continueRun(p.id, { text: 'human answer mock:hold' }).ok).toBe(true);
@@ -396,7 +396,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
   it('a human ask at turn-end keeps CI open and its result leaves the question unanswered', async () => {
     const external = github();
     const gate = join(root, 'ask-boundary'); controlledWire({ firstResultGate: gate });
-    const run = await parent('mock:ask');
+    const run = await parent('mock:cezar-ask');
     const wait = await register(run.id);
     writeFileSync(gate, 'end');
     await until(() => store.getRun(run.id)?.status === 'waiting' && hasPendingAsk(store, run.id) === true);
@@ -437,7 +437,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
     // The wake turn signals nothing; the earlier step completes only on a done (hearsay-tools/cezarion#1620).
     expect(store.getRun(run.id)?.steps.find(step => step.id === 'check')?.status).toBe('pending');
-    expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:done' }])).toBe(true);
+    expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:cezar-done' }])).toBe(true);
     await until(() => !manager.isActive(run.id));
     expect(store.getRun(run.id)?.steps.map(step => step.status)).toEqual(['done', 'done']);
   });

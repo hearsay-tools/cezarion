@@ -329,7 +329,7 @@ describe('RunManager.enqueueOwnedRun', { timeout: WORKSPACE_TEST_TIMEOUT_MS }, (
     const workspace = await planOwnedWorkspace(root, randomUUID(), second);
     const { run, store } = durableRun(root, workspace);
     store.updateRun(run.id, {
-      task: 'mock:done owned task', runner: 'claude', model: 'sonnet', systemPrompt: 'Inherited worker instruction',
+      task: 'mock:cezar-done owned task', runner: 'claude', model: 'sonnet', systemPrompt: 'Inherited worker instruction',
       worktree: false, worktreePath: parentPath, baseBranch: first,
       workflowDef: { name: 'injected', source: 'built-in', steps: [{ id: 'task', command: 'exit 99' }] },
     }); store.flush();
@@ -391,7 +391,7 @@ describe('owned workspace continuation and queued recovery', { timeout: WORKSPAC
     if (failure === 'missing') git(root, 'worktree', 'remove', '--force', workspace.path);
     else await writeFile(join(git(workspace.path, 'rev-parse', '--absolute-git-dir'), 'cezar-owned-resource'), 'wrong');
     const manager = managerFor(store, root);
-    expect(manager.continueRun(run.id, { text: 'mock:done' }).ok).toBe(true);
+    expect(manager.continueRun(run.id, { text: 'mock:cezar-done' }).ok).toBe(true);
     await finished(store, run.id);
     expect(run.status).toBe('failed');
     expect(run.error).toContain('owned workspace unavailable');
@@ -404,7 +404,7 @@ describe('owned workspace continuation and queued recovery', { timeout: WORKSPAC
     const { root, second } = await fixture();
     const workspace = await planOwnedWorkspace(root, randomUUID(), second);
     const { run, store } = durableRun(root, workspace);
-    store.updateRun(run.id, { task: 'mock:done', runner: 'claude', model: 'sonnet', systemPrompt: 'Recovered inherited instruction', startedAt: '2022-01-01T00:00:00.000Z',
+    store.updateRun(run.id, { task: 'mock:cezar-done', runner: 'claude', model: 'sonnet', systemPrompt: 'Recovered inherited instruction', startedAt: '2022-01-01T00:00:00.000Z',
       workflowDef: { name: 'not-worker-workflow', source: 'built-in', steps: [{ id: 'task', command: 'exit 99' }] } });
     store.close(); // a restart: the old store must not still own the queued run
     const recoveredStore = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); stores.push(recoveredStore);

@@ -42,7 +42,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
 
   it("sends a worker's CEZ:ASK question to its active parent as a request", async () => {
     const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
-    const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
+    const w = await worker(p.id, 'mock:cezar-ask'); manager.enqueueOwnedRun(w.id);
     await until(() => eventsOf(w.id, 'worker-question-routed').length === 1);
     const ask = eventsOf(w.id, 'ask.requested')[0]!;
     const routed = eventsOf(w.id, 'worker-question-routed')[0]!;
@@ -72,7 +72,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     const { p, service, callerFor } = await delegatingParent({ permissions: ['spawn', 'wait', 'steer'] });
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const slot = await parentAtLastSlot(service, callerFor, p.id);
-    const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
+    const w = await worker(p.id, 'mock:cezar-ask'); manager.enqueueOwnedRun(w.id);
     await until(() => eventsOf(w.id, 'worker-question-fallback').length === 1);
     expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
     expect(slot.undelivered()).toBe(31);
@@ -87,7 +87,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const routing = runInternals(manager).workerQuestions;
     const route = vi.spyOn(routing, 'routeWorkerQuestion').mockImplementation(() => {});
-    const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
+    const w = await worker(p.id, 'mock:cezar-ask'); manager.enqueueOwnedRun(w.id);
     await until(() => eventsOf(w.id, 'ask.requested').length === 1);
     const askSeq = eventsOf(w.id, 'ask.requested')[0]!.seq;
     const id = uuidFrom(`worker-question:${w.id}:${askSeq}`);
@@ -109,7 +109,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     // 32 undelivered inputs fill the parent's inbox (plain input, so nothing wakes it).
     const now = new Date().toISOString();
     fixtureUpdateRun(p.id, { agentInputs: Array.from({ length: 32 }, () => ({ id: randomUUID(), source: 'agent' as const, parentRunId: p.id, text: 'queued', createdAt: now })) });
-    const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
+    const w = await worker(p.id, 'mock:cezar-ask'); manager.enqueueOwnedRun(w.id);
     await until(() => eventsOf(w.id, 'worker-question-fallback').length === 1);
     expect(eventsOf(w.id, 'worker-question-fallback')[0]).toMatchObject({ askSeq: eventsOf(w.id, 'ask.requested')[0]!.seq });
     expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
@@ -297,7 +297,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
 
   it('leaves the question with the human when the parent may not message its workers', async () => {
     const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting');
-    const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
+    const w = await worker(p.id, 'mock:cezar-ask'); manager.enqueueOwnedRun(w.id);
     await until(() => eventsOf(w.id, 'worker-question-fallback').length === 1);
     expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
   });
@@ -306,7 +306,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
   async function askedPair(parentTask = 'mock:hold') {
     const { p, service, callerFor, close } = await delegatingParent({ task: parentTask, permissions: ['spawn', 'wait', 'steer'] });
     await until(() => store.getRun(p.id)?.status === 'waiting');
-    const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
+    const w = await worker(p.id, 'mock:cezar-ask'); manager.enqueueOwnedRun(w.id);
     await until(() => eventsOf(w.id, 'worker-question-routed').length === 1 && store.getRun(w.id)?.status === 'waiting');
     const questionId = String(eventsOf(w.id, 'worker-question-routed')[0]!.messageId);
     const parentCaller = callerFor(p.id), workerCaller = callerFor(w.id);
@@ -444,8 +444,8 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
   // pending question, which stays the human's to answer.
   it('delivers a worker question beside the parent\'s own pending question, which stays answerable', async () => {
     process.env.CEZ_DELEGATION = '1';
-    const p = await steeringParent('mock:ask'); await until(() => eventsOf(p.id, 'ask.requested').length === 1 && store.getRun(p.id)?.status === 'waiting');
-    const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
+    const p = await steeringParent('mock:cezar-ask'); await until(() => eventsOf(p.id, 'ask.requested').length === 1 && store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id, 'mock:cezar-ask'); manager.enqueueOwnedRun(w.id);
     await until(() => eventsOf(w.id, 'worker-question-routed').length === 1);
     const questionId = String(eventsOf(w.id, 'worker-question-routed')[0]!.messageId);
     const question = () => store.getRun(p.id)?.agentInputs?.find(input => input.id === questionId);
@@ -519,13 +519,13 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       const nudges = () => eventsOf(f.p.id, 'note').filter(event => String(event.message).startsWith(COMPLETION_NUDGE_NOTE));
       const [timer] = store.getRun(f.p.id)?.waits ?? [];
       expect(timer).toMatchObject({ kind: 'timer', via: 'monitoring-line', phase: 'open' });
-      expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'mock:done' }])).toBe(true);
+      expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'mock:cezar-done' }])).toBe(true);
       await until(() => refusedNotes().length === 1 && store.getRun(f.p.id)?.status === 'waiting');
       expect(nudges()).toEqual([]);
       expect(sent.filter(text => text.includes(refusal))).toEqual([]);
       const cancelled = await manager.cezarToolHandlers(f.p.id, engine.active.get(f.p.id)!.ciGeneration).cancelWait({ wait_id: timer!.id }, new AbortController().signal);
       expect(cancelled).toMatchObject({ cancelled: true });
-      expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'mock:done' }])).toBe(true);
+      expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'mock:cezar-done' }])).toBe(true);
       await until(() => nudges().length === 1);
       expect(nudges().map(event => event.message)).toEqual([`${COMPLETION_NUDGE_NOTE} (1/${MAX_AUTO_CONTINUES}): worker_questions`]);
       const nudge = sent.filter(text => text.includes(refusal));
@@ -555,7 +555,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
   it('wakes a parent parked on its worker when the worker asks, within maxParallel', async () => {
     process.env.CEZ_DELEGATION = '1';
     const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
-    const w = await worker(p.id, 'mock:ask');
+    const w = await worker(p.id, 'mock:cezar-ask');
     register(p.id, [w.id]);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
     manager.enqueueOwnedRun(w.id);
@@ -709,7 +709,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
   it('leaves the question with the human when the conversation has no room for its reply', async () => {
     process.env.CEZ_DELEGATION = '1';
     const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
-    const w = await worker(p.id, 'mock:ask');
+    const w = await worker(p.id, 'mock:cezar-ask');
     fillConversation(p.id, w.id, 1023);
     manager.enqueueOwnedRun(w.id);
     await until(() => eventsOf(w.id, 'worker-question-fallback').length === 1);

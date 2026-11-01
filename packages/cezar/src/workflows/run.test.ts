@@ -1009,10 +1009,10 @@ describe('a chain of 2 selected skills runs BOTH steps, in order (#410)', () => 
         { id: 'om-auto-verify-pr-ui', name: 'om-auto-verify-pr-ui', skill: 'om-auto-verify-pr-ui', prompt: '{{task}}' },
       ],
     };
-    // `mock:done` makes the mock's turn end with CEZ:DONE — needed so the
+    // `mock:cezar-done` makes the mock's turn end with CEZ:DONE — needed so the
     // last (interactive) step closes itself and the run reaches a terminal
     // status instead of parking at `waiting` for a real reply.
-    const record = manager.startRun(workflow, { task: 'mock:done fix the PR', worktree: false });
+    const record = manager.startRun(workflow, { task: 'mock:cezar-done fix the PR', worktree: false });
 
     const terminal = new Set(['done', 'review', 'failed', 'cancelled']);
     const deadline = Date.now() + 20_000;
@@ -1100,7 +1100,7 @@ describe('a single agent step plus a check step gets NO chain note (#410)', () =
         { id: 'verify', command: 'true', onFail: { retry: 'implement', max: 2 } },
       ],
     };
-    const record = manager.startRun(workflow, { task: 'mock:done fix the login bug', worktree: false });
+    const record = manager.startRun(workflow, { task: 'mock:cezar-done fix the login bug', worktree: false });
 
     const terminal = new Set(['done', 'review', 'failed', 'cancelled']);
     const deadline = Date.now() + 20_000;
@@ -1118,7 +1118,7 @@ describe('a single agent step plus a check step gets NO chain note (#410)', () =
     // note, no "an earlier step" premise, no skill named as the step's goal.
     const notes = readFileSync(join(repoRoot, 'notes.md'), 'utf8').trim().split('\n');
     expect(notes.length).toBe(1);
-    expect(notes[0]).toContain('mock:done fix the login bug');
+    expect(notes[0]).toContain('mock:cezar-done fix the login bug');
     expect(notes[0]).not.toContain('chain of');
     expect(notes[0]).not.toContain('earlier step');
     expect(notes[0]).not.toContain('project-conventions');
@@ -1130,7 +1130,7 @@ describe('a single agent step plus a check step gets NO chain note (#410)', () =
  * monitoring timer (a non-attention state), while a markerless turn-end still
  * parks as a plain wait. Since hearsay-tools/cezarion#1233 both read `waiting`;
  * the open timer is what makes the first one `monitoring`, and no later message
- * or backend activity withdraws it. Driven dry through the mock (`mock:monitoring`).
+ * or backend activity withdraws it. Driven dry through the mock (`mock:cezar-wait`).
  */
 describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)', () => {
   // Fresh repo + manager per test: these runs PARK (they never reach a terminal
@@ -1243,7 +1243,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
   });
 
   it('a CEZ:MONITORING turn-end parks the run on an open monitoring timer', async () => {
-    const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:cezar-wait keep going', worktree: false });
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
     const parked = store.getRun(record.id);
@@ -1302,7 +1302,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
 
   it('keeps CEZ:DONE ahead of Claude ScheduleWakeup', async () => {
     const record = manager.startRun(SINGLE_STEP, {
-      task: 'mock:schedule-wakeup mock:done finish now',
+      task: 'mock:schedule-wakeup mock:cezar-done finish now',
       runner: 'claude',
       worktree: false,
     });
@@ -1312,7 +1312,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
 
   it('keeps CEZ:ASK ahead of Claude ScheduleWakeup', async () => {
     const record = manager.startRun(SINGLE_STEP, {
-      task: 'mock:schedule-wakeup mock:ask choose',
+      task: 'mock:schedule-wakeup mock:cezar-ask choose',
       runner: 'claude',
       worktree: false,
     });
@@ -1331,7 +1331,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
    * therefore publish a wake deadline: the run has to be able to resume itself.
    */
   it('a parked monitor schedules its own re-check under the zero-config default (#810)', async () => {
-    const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:cezar-wait keep going', worktree: false });
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
     const parked = store.getRun(record.id);
@@ -1350,7 +1350,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     manager = createFixtureManager(store, repoRoot, {
       semaphore: new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: null } }),
     });
-    const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:cezar-wait keep going', worktree: false });
     currentId = record.id;
     // hearsay-tools/cezarion#1233: with re-checks off no timer is registered; the run parks and
     // says why. hearsay-tools/cezarion#1234: it parks on a human wait, not a plain one.
@@ -1365,7 +1365,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     manager.dispose();
     const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.001 } });
     manager = createFixtureManager(store, repoRoot, { semaphore });
-    const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:cezar-wait keep going', worktree: false });
     currentId = record.id;
     await waitFor(record.id, () => {
       const path = join(repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`);
@@ -1387,7 +1387,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.02 } });
     manager = createFixtureManager(store, repoRoot, { semaphore });
     const record = manager.startRun(SINGLE_STEP, {
-      task: `mock:monitoring ${trigger} keep going`,
+      task: `mock:cezar-wait ${trigger} keep going`,
       runner: 'pi',
       worktree: false,
     });
@@ -1431,7 +1431,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     manager.dispose();
     const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.01 } });
     manager = createFixtureManager(store, repoRoot, { semaphore });
-    const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:cezar-wait keep going', worktree: false });
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
 
@@ -1469,7 +1469,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     manager.dispose();
     const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.01 } });
     manager = createFixtureManager(store, repoRoot, { semaphore });
-    const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:cezar-wait keep going', worktree: false });
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
 
@@ -1543,7 +1543,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     manager.dispose();
     const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.02 } });
     manager = createFixtureManager(store, repoRoot, { semaphore });
-    const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:cezar-wait keep going', worktree: false });
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
 
@@ -1829,7 +1829,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
 
   it.each(['fresh', 'continuation'].flatMap(mode => ['zero-config', 'delegated root'].flatMap(delegation => [
     { mode, delegation, name: 'markerless wait', task: 'just do the thing' },
-    { mode, delegation, name: 'CEZ:ASK wait', task: 'mock:ask choose' },
+    { mode, delegation, name: 'CEZ:ASK wait', task: 'mock:cezar-ask choose' },
   ])))('idle-closes a $mode $delegation $name without completing it, matching restart recovery (#280)', async ({ mode, delegation, task }) => {
     const record = manager.startRun(SINGLE_STEP, {
       task: mode === 'fresh' ? task : 'just do the thing',
@@ -1875,7 +1875,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     expect(existsSync(scratch)).toBe(true); // task scratch outlives the idle-closed session (#515)
 
     // The idle-closed run no longer owns the in-place checkout lease.
-    const successor = manager.startRun(SINGLE_STEP, { task: 'mock:done successor', worktree: false });
+    const successor = manager.startRun(SINGLE_STEP, { task: 'mock:cezar-done successor', worktree: false });
     currentId = successor.id;
     await waitFor(successor.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
 
@@ -1886,7 +1886,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     if (mode === 'fresh' && delegation === 'zero-config' && task === 'just do the thing') {
       expect(manager.finish(record.id)).toBe(true);
     } else {
-      expect(manager.continueRun(record.id, { text: 'mock:done resume after idle close' })).toEqual({ ok: true });
+      expect(manager.continueRun(record.id, { text: 'mock:cezar-done resume after idle close' })).toEqual({ ok: true });
     }
     currentId = record.id;
     await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
@@ -1896,7 +1896,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
   it.each(['workflow definition', 'legacy persisted steps'].flatMap(shape =>
     ['zero-config', 'delegated root'].map(delegation => ({ shape, delegation }))))(
   'does not let an inactive $delegation skip later workflow steps using $shape', async ({ shape, delegation }) => {
-    const record = manager.startRun(SINGLE_STEP, { task: 'mock:ask choose', worktree: false });
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:cezar-ask choose', worktree: false });
     if (delegation === 'delegated root') {
       store.commitDelegation([{
         id: record.id,
@@ -1910,7 +1910,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
       store.updateRun(record.id, { workflowDef: {
         name: 'ask-then-later',
         source: 'file',
-        steps: [SINGLE_STEP.steps[0]!, { id: 'later', name: 'Later', prompt: 'mock:done later' }],
+        steps: [SINGLE_STEP.steps[0]!, { id: 'later', name: 'Later', prompt: 'mock:cezar-done later' }],
       } });
     } else {
       store.updateRun(record.id, { workflowDef: undefined });
@@ -1928,7 +1928,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     await manager.recover();
     expect(manager.finish(record.id)).toBe(false);
     if (shape === 'workflow definition') {
-      expect(manager.continueRun(record.id, { text: 'mock:done answer' })).toEqual({ ok: true });
+      expect(manager.continueRun(record.id, { text: 'mock:cezar-done answer' })).toEqual({ ok: true });
       await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
       expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
         expect.objectContaining({ id: 'task', status: 'done' }),
@@ -1956,10 +1956,10 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
       source: 'file',
       steps: [
         { id: 'task', name: 'Task', prompt: '{{task}}' },
-        { id: 'later', name: 'Later', prompt: 'mock:done later' },
+        { id: 'later', name: 'Later', prompt: 'mock:cezar-done later' },
       ],
     };
-    const record = manager.startRun(SINGLE_STEP, { task: 'mock:ask choose', worktree: false });
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:cezar-ask choose', worktree: false });
     store.commitDelegation([{
       id: record.id,
       delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] },
@@ -1988,7 +1988,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
       flushed.push(structuredClone(store.getRun(record.id)!));
       originalFlush();
     });
-    expect(manager.continueRun(record.id, { text: 'mock:done answer' })).toEqual({ ok: true });
+    expect(manager.continueRun(record.id, { text: 'mock:cezar-done answer' })).toEqual({ ok: true });
     await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
     expect(flushed).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -2033,7 +2033,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
         cancelled = manager.cancel(record.id);
       }
     });
-    expect(manager.continueRun(record.id, { text: 'mock:done answer' })).toEqual({ ok: true });
+    expect(manager.continueRun(record.id, { text: 'mock:cezar-done answer' })).toEqual({ ok: true });
     await waitFor(record.id, candidate => candidate?.status === 'cancelled');
 
     expect(cancelled).toBe(true);
@@ -2043,7 +2043,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
   }, 30_000);
 
   it('records a Stop accepted while a failed Continue saves its worktree as cancelled', async () => {
-    const record = manager.startRun(SINGLE_STEP, { task: 'mock:done', worktree: false });
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:cezar-done', worktree: false });
     currentId = record.id;
     await waitFor(record.id, candidate => candidate?.status === 'done' || candidate?.status === 'review');
     await waitFor(record.id, () => !manager.isActive(record.id));
@@ -2070,7 +2070,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
         { id: 'later', name: 'Later', command: 'node -e "process.exit(0)"' },
       ],
     };
-    const record = manager.startRun(SINGLE_STEP, { task: 'mock:ask choose', worktree: false });
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:cezar-ask choose', worktree: false });
     currentId = record.id;
     await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
     const state = (manager as unknown as {
@@ -2124,7 +2124,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     store.updateRun(record.id, {
       status: 'running', currentStepId: 'task', workflowDef: workflow,
       continuationMessage: {
-        id: 'restart-task', text: 'mock:done recover', origin: 'lifecycle', createdAt: new Date().toISOString(),
+        id: 'restart-task', text: 'mock:cezar-done recover', origin: 'lifecycle', createdAt: new Date().toISOString(),
       },
     });
     store.flush();
@@ -2140,7 +2140,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
   }, 30_000);
 
   it('does not mistake a legacy workflow step named continue-1 for a synthetic continuation', async () => {
-    const record = manager.startRun(SINGLE_STEP, { task: 'mock:ask choose', worktree: false });
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:cezar-ask choose', worktree: false });
     currentId = record.id;
     await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
     const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
@@ -2169,7 +2169,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
       ],
     };
     const record = store.createRun({
-      title: 'bounded retry', task: 'mock:done', workflow: workflow.name,
+      title: 'bounded retry', task: 'mock:cezar-done', workflow: workflow.name,
       steps: [
         { id: 'task', name: 'Task', kind: 'agent' },
         { id: 'verify', name: 'Verify', kind: 'check' },
@@ -2182,7 +2182,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
 
     await (manager as unknown as {
       execute(id: string, workflow: WorkflowDef, input: { task: string; worktree: boolean }, startAt: number): Promise<void>;
-    }).execute(record.id, workflow, { task: 'mock:done', worktree: false }, 1);
+    }).execute(record.id, workflow, { task: 'mock:cezar-done', worktree: false }, 1);
 
     expect(store.getRun(record.id)).toMatchObject({ status: 'failed' });
     expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
@@ -2200,7 +2200,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
       ],
     };
     const record = store.createRun({
-      title: 'distinct retry', task: 'mock:done', workflow: workflow.name,
+      title: 'distinct retry', task: 'mock:cezar-done', workflow: workflow.name,
       steps: [
         { id: 'task', name: 'Task', kind: 'agent' },
         { id: 'gate', name: 'Gate', kind: 'check' },
@@ -2219,7 +2219,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     });
     await (manager as unknown as {
       execute(id: string, workflow: WorkflowDef, input: { task: string; worktree: boolean }, startAt: number): Promise<void>;
-    }).execute(record.id, workflow, { task: 'mock:done', worktree: false }, 1);
+    }).execute(record.id, workflow, { task: 'mock:cezar-done', worktree: false }, 1);
 
     expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'task', iterations: 2 }),
@@ -2255,7 +2255,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     store.addStep(record.id, { id: 'later', name: 'Later', kind: 'check' });
     store.updateRun(record.id, { status: 'failed', currentStepId: undefined, workflowDef: workflow });
 
-    expect(manager.continueRun(record.id, { text: 'mock:done inspect failure' })).toEqual({ ok: true });
+    expect(manager.continueRun(record.id, { text: 'mock:cezar-done inspect failure' })).toEqual({ ok: true });
     await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
     expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'verify', status: 'failed', iterations: 1 }),
@@ -2295,13 +2295,13 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
   }, 30_000);
 
   it('does not let Finish skip a remaining workflow after an idle-closed synthetic continuation', async () => {
-    const record = manager.startRun(SINGLE_STEP, { task: 'mock:ask choose', worktree: false });
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:cezar-ask choose', worktree: false });
     currentId = record.id;
     await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
     store.addStep(record.id, { id: 'later', name: 'Later', kind: 'agent' });
     store.updateRun(record.id, { workflowDef: {
       name: 'ask-then-later', source: 'file',
-      steps: [SINGLE_STEP.steps[0]!, { id: 'later', name: 'Later', prompt: 'mock:done later' }],
+      steps: [SINGLE_STEP.steps[0]!, { id: 'later', name: 'Later', prompt: 'mock:cezar-done later' }],
     } });
     let state = (manager as unknown as {
       active: Map<string, { idleTimer?: NodeJS.Timeout }>;
@@ -2310,7 +2310,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     if (!idleTimer?._onTimeout) throw new Error('waiting session did not arm an idle timer');
     idleTimer._onTimeout();
     await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
-    expect(manager.continueRun(record.id, { text: 'mock:ask choose again' })).toEqual({ ok: true });
+    expect(manager.continueRun(record.id, { text: 'mock:cezar-ask choose again' })).toEqual({ ok: true });
     await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
     state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
     idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
@@ -2348,7 +2348,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
   }, 30_000);
 
   it('strips the CEZ:MONITORING marker from server-emitted v1 text events', async () => {
-    const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:cezar-wait keep going', worktree: false });
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
     // v1 `text` events are stripped server-side (like CEZ:DONE); v2 message items carry
@@ -2364,7 +2364,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
   }, 30_000);
 
   it('a user reply to a monitoring run keeps its timer (hearsay-tools/cezarion#1233)', async () => {
-    const record = manager.startRun(SINGLE_STEP, { task: 'mock:monitoring keep going', worktree: false });
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:cezar-wait keep going', worktree: false });
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
     const timer = monitoringWakeOf(store.getRun(record.id));
@@ -2382,7 +2382,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
  * monitoring) AND emits an `ask.requested` v2 event so the cockpit renders a
  * structured question as clickable chips. The marker is stripped from the v1
  * text; a markerless turn raises no ask. Driven dry through the mock
- * (`mock:ask`).
+ * (`mock:cezar-ask`).
  */
 describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
   let repoRoot: string;
@@ -2480,7 +2480,7 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
   });
 
   it('a CEZ:ASK turn-end parks the run as waiting (attention) and emits ask.requested', async () => {
-    const record = manager.startRun(SINGLE_STEP, { task: 'mock:ask which library?', worktree: false });
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:cezar-ask which library?', worktree: false });
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting');
     const parked = store.getRun(record.id);
@@ -2544,7 +2544,7 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
   }, 30_000);
 
   it('strips the CEZ:ASK marker from server-emitted v1 text events', async () => {
-    const record = manager.startRun(SINGLE_STEP, { task: 'mock:ask pick one', worktree: false });
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:cezar-ask pick one', worktree: false });
     currentId = record.id;
     await waitFor(record.id, (r) => r?.status === 'waiting');
     const v1Text = readEvents(record.id).filter((e) => e.type === 'text');
@@ -2584,7 +2584,7 @@ describe('CEZ:ASK parks as waiting and emits ask.requested (#473)', () => {
     delete process.env.CEZ_DRY_RUN;
 
     const record = manager.startRun(SINGLE_STEP, {
-      task: 'mock:hold-ask choose',
+      task: 'mock:hold-cezar-ask choose',
       runner: 'opencode',
       worktree: false,
     });
@@ -3311,8 +3311,8 @@ describe('queued stacking reaches the backend (#472)', () => {
   });
 
   it('delivers the task plus every stacked message, with the edit applied', async () => {
-    const first = manager.startRun(WORKFLOW, { task: 'mock:done occupy the slot', worktree: false });
-    const second = manager.startRun(WORKFLOW, { task: 'mock:done original prompt', worktree: false });
+    const first = manager.startRun(WORKFLOW, { task: 'mock:cezar-done occupy the slot', worktree: false });
+    const second = manager.startRun(WORKFLOW, { task: 'mock:cezar-done original prompt', worktree: false });
 
     // The second run is holding in the queue — amend it there.
     expect(store.getRun(second.id)?.status).toBe('queued');
@@ -3343,7 +3343,7 @@ describe('queued stacking reaches the backend (#472)', () => {
     expect(line!.indexOf('STACKEDONE corrected')).toBeLessThan(line!.indexOf('STACKEDTWO'));
 
     // And the record still holds the two parts separately — never the folded string.
-    expect(store.getRun(second.id)?.task).toBe('mock:done original prompt');
+    expect(store.getRun(second.id)?.task).toBe('mock:cezar-done original prompt');
     expect(store.getRun(second.id)?.queuedMessages).toHaveLength(2);
   }, 60_000);
 });
