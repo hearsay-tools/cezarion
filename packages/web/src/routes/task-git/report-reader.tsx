@@ -9,7 +9,7 @@ import { CenteredState } from '@/components/centered-state'
 import { HtmlReportFrame } from '@/components/html-report-frame'
 import { Button } from '@/components/ui/button'
 import { isHtmlPath } from '@/lib/html-report'
-import type { FilePreviewData } from '@open-mercato/cezar-api-client'
+import type { FileLinkResult, FilePreviewData } from '@open-mercato/cezar-api-client'
 
 import { CodeLines } from './file-preview'
 import { formatFileSize } from './worktree-files'
@@ -30,6 +30,10 @@ export function useLeaveReader(): () => void {
   }
 }
 
+function previewFile(data: FilePreviewData | FileLinkResult | undefined): FilePreviewData | null {
+  return data?.type === 'file' ? data : null
+}
+
 /** The URL is the one source of the selection (State restore cases, hearsay-tools/cezarion#2400). */
 function useReportSelection(id: string) {
   const [query] = useSearchParams()
@@ -48,8 +52,7 @@ export function TaskReportRoute() {
   const { path, conflict, selected, result } = useReportSelection(id)
   const location = useLocation()
   const [source, setSource] = useState(false)
-  const data = result.data
-  const file = data?.type === 'file' ? data : null
+  const file = previewFile(result.data)
   if (file && !isHtmlPath(file.path)) return <Navigate replace to={{ pathname: location.pathname.replace(/\/report\/?$/, '/files'), search: location.search, hash: location.hash }} />
   const name = file ? (file.artifact?.name ?? file.path.split(/[\\/]/).at(-1) ?? file.path) : (path ?? 'Report')
   return (
