@@ -47,7 +47,9 @@ and for no other recipe. The job
 ([`mutation-report.yml`](../../.github/workflows/mutation-report.yml)) makes small edits to the lines
 the pull request changes, called mutants, and runs the package's own unit tests against each one. A
 mutant that makes a test fail is **killed**. It is advisory: it never blocks a merge, and it posts one
-comment that each push updates.
+comment that each push updates. The job runs only while the pull request carries the `mutants` label:
+add the label when you want the report as red proof. Without it the job is skipped; after the label
+is removed, the comment stays as last posted.
 
 A mutant that restores the behavior from before the fix can only be killed by a test the pull request
 adds or changes, because every older test passed against the pre-fix code on `main`. A killed
@@ -91,6 +93,13 @@ the live repository or cockpit. Contract files also run their direct server and 
 `--tests <test files>` for more contract consumers. The file's own package pass measures static
 mutants (code that runs at import) and counts them; the consumer pass skips them. Use
 `--compare ~/.cache/cez/mutants/earlier.json` to compare runs of the same result version.
+
+The **Weekly mutation targets** workflow
+([`mutants-weekly.yml`](../../.github/workflows/mutants-weekly.yml)) runs this command on `main` every
+Saturday for each file in `.github/mutants/targets.json`, then for the product files with the most
+lines changed in the last 7 days, at most 64 files in all. Its run summary lists the files over that
+cap. It opens one issue per file that misses a target, `Mutation targets missed: <file>`. A fix PR
+runs the whole-file command, cites its PASS lines and says `Fixes #N`.
 
 ## Test-only change that removes a hidden dependency
 
