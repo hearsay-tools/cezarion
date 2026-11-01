@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 import { tmpdir, hostname } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { artifactDirectory, listArtifacts, publishArtifact, readArtifact } from './store.ts';
+import { artifactDirectory, listArtifacts, publishArtifact, readArtifact, readArtifactMetadata, artifactTitle } from './store.ts';
 
 let root: string;
 let dir: string;
@@ -297,5 +297,67 @@ describe('immutable artifact publication', () => {
     expect(first.id).not.toBe(second.id);
     expect((await readArtifact(dir, runId, first.id))?.bytes.toString()).toBe('first');
     expect((await readArtifact(dir, runId, second.id))?.bytes.toString()).toBe('second');
+  });
+});
+
+describe('report metadata', () => {
+  it.each([
+    ['report.html', '<p>No title</p>', undefined],
+    ['report.txt', '<title>Not HTML</title>', undefined],
+    ['report.HTML', '<TITLE> A &amp; B &copy; &#x1f600; &#233; &eacute; </TITLE>', 'A & B &copy; 😀 é &eacute;'],
+    ['report.htm', '<title>  A\n B\tC\u0001D </title>', 'A B CD'],
+    ['report.html', '<title>' + 'x'.repeat(250) + '</title>', 'x'.repeat(200)],
+    ['report.html', '<title><b>Text</b><script>throw 1</script></title>', '<b>Text</b><script>throw 1</script>'],
+    ['report.html', ' '.repeat(65536) + '<title>Too late</title>', undefined],
+    ['report.html', '<title>Unclosed &amp; malformed', undefined],
+    ['report.html', '<!-- <title>Comment</title> --><script>"<title>Script</title>"</script><title>Real</title>', 'Real'],
+    ['report.html', '<title>   </title>', undefined],
+    ['report.html', '<title a="x>y">&lt;&gt;&quot;&apos;&nbsp;&amp;</TITLE>', '<>"\' &'],
+    ['report.html', '<title>&#0; &#xD800; &#1114112; &#xFFFFFFFF;</title>', '� � � �'],
+    ...['script', 'style', 'template', 'textarea', 'xmp', 'noscript', 'iframe'].map(tag => ['report.html', `<${tag}><title>Hidden</title></${tag}><title>Shown</title>`, 'Shown'] as [string, string, string]),
+    ['report.html', '<!-- <title>Comment</title>', undefined],
+    ['report.html', ' '.repeat(65520) + '<title>Outside the prefix</title>', undefined],
+    ['report.html', '<template><template></template><title>Hidden</title></template><title>Shown</title>', 'Shown'],
+  ])('derives a bounded inert title case %# (%s)', async (name, html, title) => {
+    const source = join(root, name); await writeFile(source, html);
+    const artifact = await publishArtifact(dir, runId, source);
+    const metadata = await readArtifactMetadata(dir, runId, artifact.id);
+    expect(metadata?.title).toBe(title);
+    expect(metadata).toMatchObject(artifact);
+    expect((await listArtifacts(dir, runId))[0]?.title).toBe(title);
+  });
+  it('decodes malformed UTF-8 without throwing and ignores title-like attributes', () => {
+    const bytes = Buffer.concat([Buffer.from('<div data-note="<title>Fake</title>"></div><title>Title '), Buffer.from([0xff]), Buffer.from('</title>')]);
+    expect(artifactTitle('report.html', bytes)).toBe('Title �');
+  });
+  it('reads only the title prefix and validates size without hashing', async () => {
+    const source = join(root, 'large.html');
+    const html = '<title>Prefix</title>' + 'x'.repeat(200000);
+    await writeFile(source, html);
+    const artifact = await publishArtifact(dir, runId, source);
+    const actualOpen = fs.open;
+    let bytesRead = 0;
+    vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+      const file = await actualOpen(...args);
+      if (String(args[0]).endsWith('/content')) {
+        const actualRead = file.read;
+        Object.defineProperty(file, 'read', { value: async (...readArgs: unknown[]) => {
+          const result = await Reflect.apply(actualRead, file, readArgs);
+          bytesRead += result.bytesRead;
+          return result;
+        } });
+      }
+      return file;
+    });
+    expect((await readArtifactMetadata(dir, runId, artifact.id))?.title).toBe('Prefix');
+    expect(bytesRead).toBe(65536);
+  });
+  it('keeps metadata reads behind the stored-file defenses', async () => {
+    const { entry, metadata, source } = await fixture();
+    await rm(join(entry, 'content')); await symlink(source, join(entry, 'content'));
+    expect(await readArtifactMetadata(dir, runId, metadata.id)).toBeNull();
+    await rm(join(entry, 'content')); await writeFile(join(entry, 'content'), 'original');
+    await link(join(entry, 'content'), join(root, 'hardlink'));
+    expect(await readArtifactMetadata(dir, runId, metadata.id)).toBeNull();
   });
 });
