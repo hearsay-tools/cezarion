@@ -1,0 +1,9 @@
+{"type":"system","subtype":"init","session_id":"print-tools-1","model":"gpt-5.4-mini-medium","cwd":"/repo"}
+{"type":"tool_call","subtype":"started","call_id":"edit_1","session_id":"print-tools-1","tool_call":{"editToolCall":{"args":{"path":"/repo/notes.txt","old_string":"one","new_string":"two"}}}}
+{"type":"tool_call","subtype":"completed","call_id":"edit_1","session_id":"print-tools-1","tool_call":{"editToolCall":{"args":{"path":"/repo/notes.txt","old_string":"one","new_string":"two"},"result":{"success":{"diffString":"@@ -1 +1 @@\n-one\n+two\n"}}}}}
+{"type":"tool_call","subtype":"started","call_id":"shell_1","session_id":"print-tools-1","tool_call":{"shellToolCall":{"args":{"command":"false"}}}}
+{"type":"tool_call","subtype":"completed","call_id":"shell_1","session_id":"print-tools-1","tool_call":{"shellToolCall":{"args":{"command":"false"},"result":{"success":{"exitCode":1,"stdout":"","stderr":""}}}}}
+{"type":"tool_call","subtype":"started","call_id":"task_1","session_id":"print-tools-1","tool_call":{"taskToolCall":{"args":{"description":"Survey tests","prompt":"List the test files"}}}}
+{"type":"tool_call","subtype":"completed","call_id":"task_1","session_id":"print-tools-1","tool_call":{"taskToolCall":{"args":{"description":"Survey tests","prompt":"List the test files"},"result":{"success":{"content":"Three test files"}}}}}
+{"type":"assistant","session_id":"print-tools-1","message":{"role":"assistant","content":[{"type":"text","text":"Edited notes"}]}}
+{"type":"result","subtype":"success","session_id":"print-tools-1","is_error":false,"result":"Edited notes"}

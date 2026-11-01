@@ -1,0 +1,153 @@
+[
+  {
+    "type": "session.started",
+    "sessionId": "print-tools-1",
+    "backend": "cursor",
+    "model": "gpt-5.4-mini-medium",
+    "cwd": "/repo"
+  },
+  {
+    "type": "turn.started",
+    "turnId": "turn_1"
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "edit_1",
+      "name": "Edit",
+      "toolKind": "edit",
+      "title": "Edit /repo/notes.txt",
+      "status": "running",
+      "input": {
+        "path": "/repo/notes.txt",
+        "old_string": "one",
+        "new_string": "two"
+      },
+      "diffs": [
+        {
+          "path": "/repo/notes.txt",
+          "oldText": "one",
+          "newText": "two"
+        }
+      ],
+      "locations": [
+        {
+          "path": "/repo/notes.txt"
+        }
+      ]
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "edit_1",
+      "name": "Edit",
+      "toolKind": "edit",
+      "title": "Edit /repo/notes.txt",
+      "status": "completed",
+      "input": {
+        "path": "/repo/notes.txt",
+        "old_string": "one",
+        "new_string": "two"
+      },
+      "diffs": [
+        {
+          "path": "/repo/notes.txt",
+          "oldText": "one",
+          "unified": "@@ -1 +1 @@\n-one\n+two\n"
+        }
+      ],
+      "locations": [
+        {
+          "path": "/repo/notes.txt"
+        }
+      ],
+      "output": "{\"success\":{\"diffString\":\"@@ -1 +1 @@\\n-one\\n+two\\n\"}}"
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "shell_1",
+      "name": "Bash",
+      "toolKind": "execute",
+      "title": "Ran false",
+      "status": "running",
+      "input": {
+        "command": "false"
+      }
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "shell_1",
+      "name": "Bash",
+      "toolKind": "execute",
+      "title": "Ran false",
+      "status": "failed",
+      "input": {
+        "command": "false"
+      },
+      "output": ""
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "task_1",
+      "name": "Task",
+      "toolKind": "task",
+      "title": "Task: Survey tests",
+      "status": "running",
+      "input": {
+        "description": "Survey tests",
+        "prompt": "List the test files"
+      }
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "task_1",
+      "name": "Task",
+      "toolKind": "task",
+      "title": "Task: Survey tests",
+      "status": "completed",
+      "input": {
+        "description": "Survey tests",
+        "prompt": "List the test files"
+      },
+      "output": "Three test files"
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "item_1",
+      "role": "assistant",
+      "text": "Edited notes"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "item_1",
+      "role": "assistant",
+      "text": "Edited notes"
+    }
+  },
+  {
+    "type": "turn.completed",
+    "turnId": "turn_1",
+    "stopReason": "end_turn"
+  }
+]
