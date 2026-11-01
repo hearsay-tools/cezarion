@@ -14,15 +14,19 @@ worktree. Tear each one down in this order:
 4. Leave `<worktree>/.ai/qa/test-env-lease.sqlite` to `cez worker destroy`. It
    reclaims a lease only when the holder's process and process group have both
    exited (hearsay-tools/cezarion#2161), and keeps the worktree otherwise.
-5. `cez worker destroy <id>`. On "worktree mutation lock is busy", retry after
+5. For an unmerged worker, save its head under a separate coordinator-owned
+   Git ref and its patch/artifact snapshot outside the worker's worktree.
+   Record the ref, head SHA, snapshot paths and repair owner or explicit
+   disposition in campaign state. Verify the ref resolves to that SHA and
+   the snapshots are readable before proceeding; a failed checkpoint blocks
+   destruction.
+6. `cez worker destroy <id>`. On "worktree mutation lock is busy", retry after
    another worker's spawn or Git operation ends.
-6. When destroy still reports that resource identity could not be verified,
+7. When destroy still reports that resource identity could not be verified,
    or keeps a lease, find what holds the worktree: a process with its cwd there (`ps`, `/proc`),
    an orphaned `packages/cezar/src/ci-wait/mcp.ts`, or a QA server. Stop only a
    process whose cwd and argv you confirmed belong to that worktree, then retry.
-7. Delete local and remote branches only for merged PRs. Before destroying an
-   unmerged worker, preserve its branch and a patch/artifact snapshot under the
-   coordinator, with the repair owner or explicit disposition in campaign state.
+8. Delete remaining local and remote branches only for merged PRs.
 
 Done when `cez worker list` shows the worker destroyed with no remaining
 resources.
