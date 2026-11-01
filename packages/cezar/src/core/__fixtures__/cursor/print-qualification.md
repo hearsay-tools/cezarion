@@ -3,7 +3,8 @@
 Checked on 2026-10-07 with Cursor CLI `2026.10.01-e373342`, model
 `gpt-5.4-mini` from the live Cursor catalog, in a disposable Git worktree.
 The accepted vendor limits and the final product-path recheck are recorded
-below. Qualified new Cezar sessions now select print; legacy sessions keep ACP.
+below. Qualified new Cezar sessions now select print; hearsay-tools/cezarion#1267 later
+removed ACP sessions, so print is the only Cursor session transport.
 
 ## Mandatory gate
 

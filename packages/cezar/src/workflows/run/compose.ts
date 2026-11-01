@@ -251,7 +251,8 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
   });
   modules.workerQuestions = new WorkerQuestions(context, {
     active: id => host.active.get(id), deliverConversationInput: id => host.deliverConversationInput(id),
-    chargeAutomaticWake: id => modules.wakeAdmission.chargeAutomaticWake(id), hasQueuedAgentInputs: id => modules.inputDelivery.hasQueuedAgentInputs(id),
+    chargeAutomaticWake: id => modules.wakeAdmission.chargeAutomaticWake(id), countAutomaticWakes: id => modules.wakeAdmission.automaticWakes(id),
+    hasQueuedAgentInputs: id => modules.inputDelivery.hasQueuedAgentInputs(id),
     providerOwnsInboxInput: (id, inputId) => modules.inboxClaims.providerOwnsInboxInput(id, inputId), reconcileWorkerWaits: id => host.reconcileWorkerWaits(id),
     openHumanAlias: (id, state, via, card) => modules.humanWaits.openHumanAlias(id, state, via, card), prepareHumanAsk: state => modules.humanWaits.prepareHumanAsk(state),
     markHumanWaitSurfaced: (id, wait, card) => modules.humanWaits.markHumanWaitSurfaced(id, wait, card), withdrawCezarHumanWaits: id => modules.humanWaits.withdrawCezarHumanWaits(id),
@@ -267,7 +268,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     cancel: id => host.cancel(id), armWait: (id, wait) => modules.waitWatches.armWait(id, wait),
     armWorkerDeadline: (id, wait, delay) => modules.waitWatches.armWorkerDeadline(id, wait, delay), disarmWait: id => host.disarmWait(id),
     resolveWait: (id, waitId, result, observed) => modules.waitRegistry.resolveWait(id, waitId, result, observed),
-    retireSettledQuestions: id => modules.workerQuestions.retireSettledQuestions(id), fallbackRoutedQuestions: (id, reason) => modules.workerQuestions.fallbackRoutedQuestions(id, reason),
+    retireSettledQuestions: id => modules.workerQuestions.retireSettledQuestions(id), closeRoutedQuestions: id => modules.workerQuestions.closeRoutedQuestions(id),
     reconcileWorkerWaits: id => host.reconcileWorkerWaits(id),
   });
   modules.waitWatches = new WaitWatches(context, {

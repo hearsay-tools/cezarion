@@ -18,6 +18,9 @@ async function openSession(fixture: Fixture, mode: 'fresh' | 'continuation'): Pr
     expect(manager.continueRun(runId, { text: 'continue baseline' }).ok).toBe(true);
     await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
   }
+  // The idle worker parks on Cezar's fallback question, routed to its parent
+  // (hearsay-tools/cezarion#1301, hearsay-tools/cezarion#2410).
+  await waitFor(() => store.transcriptFacts(runId).pendingAsk?.routedMessageId !== undefined);
 }
 
 function activeState({ manager, runId }: Fixture) {
@@ -50,8 +53,10 @@ it.each(['fresh', 'continuation'] as const)('%s acknowledged input checkpoint re
       });
       store.flush();
       let unblock: (() => void) | undefined;
-      const observe = ({ event }: { event: { type: string } }) => {
-        if (event.type === 'agent-input') unblock ??= blockRunWrites(join(repoRoot, '.ai/cezar'));
+      // The input supersedes that question with a write to the parent's conversation first; the
+      // failure injected here is the input's own delivery checkpoint, after it.
+      const observe = ({ event }: { event: { type: string; reason?: unknown } }) => {
+        if (event.type === 'human-ask-closed' && event.reason === 'superseded') unblock ??= blockRunWrites(join(repoRoot, '.ai/cezar'));
       };
       const input = { id: randomUUID(), source: 'agent' as const, parentRunId, text: 'mock:hold', createdAt: new Date().toISOString() };
       store.on('event', observe);

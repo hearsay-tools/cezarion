@@ -1,0 +1,143 @@
+name: Weekly mutation targets
+
+# Measures whole files on main with mutants-file.cjs against .github/mutants/targets.json: every
+# listed file, then the product files main changed in the last 7 days, at most 64 in all. One matrix
+# job per file; a file that times out or fails is reported as not measured, never as passing. The
+# report job keeps one rolling issue per file that misses a target and closes it when the file passes.
+# Advisory: it never blocks a merge. No required check, queue entry or failure reporter lists it. The
+# measure jobs have a read-only token and no secrets; only the report job can write, and it runs no
+# measured code.
+on:
+  schedule:
+    - cron: '41 3 * * 6'
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: mutants-weekly
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Choose the files
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      head: ${{ steps.plan.outputs.head }}
+      count: ${{ steps.plan.outputs.count }}
+    steps:
+      - name: Check out main with its history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+      - name: Choose the files
+        id: plan
+        run: node .github/scripts/mutants-weekly.cjs plan --out mutants-weekly-plan
+      - name: Upload the plan
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mutants-weekly-plan
+          path: mutants-weekly-plan/
+          retention-days: 90
+          if-no-files-found: error
+
+  measure:
+    name: Measure ${{ matrix.file }}
+    needs: plan
+    if: needs.plan.outputs.count != '0'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 130
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      # mutants-file.cjs needs no dependencies here: it clones this checkout and installs in the clone.
+      - name: Check out the planned head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.head }}
+          persist-credentials: false
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: '12.11.2'
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      # The result is written only when the measurement finishes, so a timeout leaves no result.
+      - name: Measure the file
+        timeout-minutes: 120
+        env:
+          FILE: ${{ matrix.file }}
+        run: mkdir -p "$RUNNER_TEMP/mutants-file" && node .github/scripts/mutants-file.cjs "$FILE" --out "$RUNNER_TEMP/mutants-file/result.json"
+      - name: Upload the result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ runner.temp }}/mutants-file/result.json
+          retention-days: 90
+          if-no-files-found: ignore
+
+  report:
+    name: Report the results
+    needs: [plan, measure]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - name: Check out trusted report code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download the plan
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mutants-weekly-plan
+          path: ${{ runner.temp }}/mutants-weekly-plan
+      # A file without an artifact is reported as not measured.
+      - name: Download the results
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: mutants-weekly-file-*
+          path: ${{ runner.temp }}/mutants-weekly-files
+      - name: Update the issues and the summary
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PLAN_DIR: ${{ runner.temp }}/mutants-weekly-plan
+          FILES_DIR: ${{ runner.temp }}/mutants-weekly-files
+          OUT_DIR: ${{ runner.temp }}/mutants-weekly-results
+        with:
+          script: |
+            const { publish } = require('./.github/scripts/mutants-weekly.cjs');
+            await publish({ github, context, core, planDir: process.env.PLAN_DIR, filesDir: process.env.FILES_DIR, outDir: process.env.OUT_DIR });
+      - name: Upload the combined results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mutants-weekly-results
+          path: ${{ runner.temp }}/mutants-weekly-results
+          retention-days: 90
+          if-no-files-found: ignore

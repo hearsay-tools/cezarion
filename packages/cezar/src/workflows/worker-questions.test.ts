@@ -22,6 +22,7 @@ import type { RunRecord } from '../runs/store.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
+import { requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';
 
 /** #505 PR B: a worker's question goes to its owning parent, not to the human. */
 describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () => {
@@ -31,6 +32,15 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
   useWorkerWaitFixture();
   const conversationOf = (rootId: string) => { const d = store.getRun(rootId)?.delegation; return d?.role === 'root' ? d.conversation : undefined; };
   const eventsOf = (runId: string, type: string) => store.readEvents(runId).filter(event => event.type === type);
+  /** Cezar answered the worker's question for a live parent that could not take it (hearsay-tools/cezarion#2410). */
+  const cezarAnswered = (runId: string) => eventsOf(runId, 'human-input-delivered').filter(event => event.source === 'cezar');
+  const closedAs = (runId: string) => eventsOf(runId, 'human-ask-closed').map(event => event.reason);
+  /** No worker question of this run is on a human card: none fell back, and a pending one (a later
+   *  "Worker idle" question, for one) belongs to the parent or to Cezar. */
+  const noHumanCard = (runId: string) => {
+    expect(eventsOf(runId, 'worker-question-fallback')).toEqual([]);
+    if (hasPendingAsk(store, runId)) expect(runInternals(manager).workerQuestions.answeredElsewhere(runId)).toBe(true);
+  };
   /** A root that may message its workers, as provisioned roots are. */
   async function steeringParent(task = 'mock:hold') {
     const p = await parent(task);
@@ -68,12 +78,18 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     return { reply, undelivered: () => store.getRun(parentId)?.agentInputs?.filter(input => !input.deliveredAt).length ?? 0 };
   }
 
-  it('leaves the question with the human when an open peer request holds the parent\'s last inbox slot, and the reply still fits', async () => {
+  // hearsay-tools/cezarion#2410: a live parent that cannot take the question does not pass it to a
+  // human. Cezar answers the worker with the reason.
+  it("answers the worker for the parent when an open peer request holds the parent's last inbox slot, and the reply still fits", async () => {
     const { p, service, callerFor } = await delegatingParent({ permissions: ['spawn', 'wait', 'steer'] });
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const slot = await parentAtLastSlot(service, callerFor, p.id);
     const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
-    await until(() => eventsOf(w.id, 'worker-question-fallback').length === 1);
+    await until(() => cezarAnswered(w.id).length === 1);
+    const askSeq = eventsOf(w.id, 'ask.requested')[0]!.seq;
+    expect(eventsOf(w.id, 'worker-question-undelivered')).toEqual([expect.objectContaining({ askSeq, reason: 'the parent conversation is at capacity' })]);
+    expect(cezarAnswered(w.id)[0]).toMatchObject({ askSeq });
+    noHumanCard(w.id);
     expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
     expect(slot.undelivered()).toBe(31);
     expect((await slot.reply()).outcome).toMatchObject({ status: 'replied' });
@@ -81,8 +97,8 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
   });
 
   // hearsay-tools/cezarion#1990 review: a peer that sends first under the question's deterministic ID
-  // leaves the question with the human; the peer message keeps its ID and its sender.
-  it('leaves the question with the human when a peer message took its ID first', async () => {
+  // keeps its ID and its sender; Cezar answers the worker (hearsay-tools/cezarion#2410).
+  it('answers the worker for the parent when a peer message took its ID first', async () => {
     const { p, service, callerFor } = await delegatingParent({ permissions: ['spawn', 'wait', 'steer'] });
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const routing = runInternals(manager).workerQuestions;
@@ -98,43 +114,108 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     route.mockRestore();
     routing.routeWorkerQuestion(w.id);
     expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
-    expect(eventsOf(w.id, 'worker-question-fallback')).toEqual([expect.objectContaining({ askSeq, reason: expect.stringContaining('already in use') })]);
+    expect(eventsOf(w.id, 'worker-question-undelivered')).toEqual([expect.objectContaining({ askSeq, reason: expect.stringContaining('already in use') })]);
+    await until(() => cezarAnswered(w.id).length === 1);
+    noHumanCard(w.id);
     expect(conversationOf(p.id)?.messages.some(message => message.question) ?? false).toBe(false);
     expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === id)).toEqual([
       expect.objectContaining({ text: 'Peer progress first', conversation: expect.objectContaining({ senderRunId: peer.id, relationship: 'peer' }) })]);
   });
 
-  it('leaves the question with the human when the parent cannot take another message', async () => {
-    const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
-    // 32 undelivered inputs fill the parent's inbox (plain input, so nothing wakes it).
+  /** 32 undelivered inputs fill the parent's inbox (plain input, so nothing wakes it). */
+  const fillInbox = (parentId: string) => {
     const now = new Date().toISOString();
-    fixtureUpdateRun(p.id, { agentInputs: Array.from({ length: 32 }, () => ({ id: randomUUID(), source: 'agent' as const, parentRunId: p.id, text: 'queued', createdAt: now })) });
+    fixtureUpdateRun(parentId, { agentInputs: Array.from({ length: 32 }, () => ({ id: randomUUID(), source: 'agent' as const, parentRunId: parentId, text: 'queued', createdAt: now })) });
+  };
+
+  it('answers the worker for the parent when the parent cannot take another message, once', async () => {
+    const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
+    fillInbox(p.id);
     const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
-    await until(() => eventsOf(w.id, 'worker-question-fallback').length === 1);
-    expect(eventsOf(w.id, 'worker-question-fallback')[0]).toMatchObject({ askSeq: eventsOf(w.id, 'ask.requested')[0]!.seq });
+    await until(() => cezarAnswered(w.id).length === 1);
+    const askSeq = eventsOf(w.id, 'ask.requested')[0]!.seq;
+    const answer = store.getRun(w.id)?.agentInputs?.filter(input => input.purpose === 'undelivered-question');
+    expect(answer).toEqual([expect.objectContaining({ source: 'lifecycle', deliveredAt: expect.any(String), text: expect.stringContaining(`Not delivered to your parent task ${p.id}: the parent conversation is at capacity.`) })]);
+    // The answer carries its automatic-wake charge, so asking again cannot loop past the budget.
+    expect(store.getRun(w.id)?.automaticWakes).toBeGreaterThanOrEqual(1);
+    // Routing again finds the queued answer: no second answer and no second event.
+    runInternals(manager).workerQuestions.routeWorkerQuestion(w.id);
+    expect(store.getRun(w.id)?.agentInputs?.filter(input => input.purpose === 'undelivered-question')).toHaveLength(1);
+    expect(eventsOf(w.id, 'worker-question-undelivered')).toEqual([expect.objectContaining({ askSeq })]);
     expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
     expect(conversationOf(p.id)?.messages.some(m => m.question) ?? false).toBe(false);
-    await until(() => store.getRun(w.id)?.status === 'waiting');
+    noHumanCard(w.id);
   });
 
-  // hearsay-tools/cezarion#1301: a worker's second turn end with no wait or done asks its parent; a
-  // parent that cannot receive leaves the question with the human, as for a worker's own question.
-  it("a reviewing parent's worker fallback goes to the human", async () => {
+  // A worker that stops with Cezar's answer still queued: recovery closes its question and retires
+  // the answer, so neither stays behind to refuse a human Continue.
+  it("closes a stopped worker's question when Cezar's answer is still queued", async () => {
     const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
-    fixtureUpdateRun(p.id, { status: 'review' });
-    const inputs = store.getRun(p.id)?.agentInputs?.length ?? 0;
+    fillInbox(p.id);
+    const routing = runInternals(manager).workerQuestions;
+    const route = vi.spyOn(routing, 'routeWorkerQuestion').mockImplementation(() => {});
+    const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
+    await until(() => eventsOf(w.id, 'ask.requested').length === 1 && store.getRun(w.id)?.status === 'waiting');
+    const askSeq = eventsOf(w.id, 'ask.requested')[0]!.seq;
+    route.mockRestore();
+    // Cezar's answer is queued, and the worker stops before it is delivered.
+    const deliver = vi.spyOn(manager, 'deliverConversationInput').mockImplementation(() => {});
+    routing.answerUndelivered(w.id, askSeq, 'the parent conversation is at capacity');
+    deliver.mockRestore();
+    const answer = routing.undeliveredAnswerId(w.id, askSeq);
+    expect(store.getRun(w.id)?.agentInputs?.some(input => input.id === answer)).toBe(true);
+    manager.cancel(w.id);
+    await until(() => store.getRun(w.id)?.status === 'cancelled' && !manager.isActive(w.id));
+    routing.routeWorkerQuestion(w.id);
+    expect(closedAs(w.id)).toContain('worker-stopped');
+    expect(hasPendingAsk(store, w.id)).toBe(false);
+    expect(store.getRun(w.id)?.agentInputs?.some(input => input.id === answer && !input.deliveredAt) ?? false).toBe(false);
+  });
+
+  it('closes the question without an answer when the worker spent its automatic-wake budget', async () => {
+    const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
+    fillInbox(p.id);
+    const w = await worker(p.id, 'mock:ask'); spendWorkerBudget(w.id); manager.enqueueOwnedRun(w.id);
+    await until(() => closedAs(w.id).length === 1);
+    expect(closedAs(w.id)).toEqual(['undeliverable']);
+    expect(cezarAnswered(w.id)).toEqual([]);
+    expect(store.getRun(w.id)?.agentInputs?.some(input => input.purpose === 'undelivered-question') ?? false).toBe(false);
+    noHumanCard(w.id);
+  });
+
+  // The guard for an ask no request can carry: every writer validates the ask today, so the event
+  // is seeded here to pin that the guard answers the worker and never asks a human.
+  it('answers the worker when its question is not a valid request', async () => {
+    const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id, 'mock:ask');
+    const routing = runInternals(manager).workerQuestions;
+    const route = vi.spyOn(routing, 'routeWorkerQuestion').mockImplementation(() => {});
+    manager.enqueueOwnedRun(w.id);
+    await until(() => eventsOf(w.id, 'ask.requested').length === 1 && store.getRun(w.id)?.status === 'waiting');
+    const asked = eventsOf(w.id, 'ask.requested')[0]!;
+    store.appendEvent(w.id, { type: 'ask.requested', requestId: randomUUID(), questions: asked.questions, context: 'x'.repeat(20_001) });
+    route.mockRestore();
+    routing.routeWorkerQuestion(w.id);
+    expect(eventsOf(w.id, 'worker-question-undelivered')).toEqual([expect.objectContaining({ reason: 'the question is not a valid request' })]);
+    await until(() => cezarAnswered(w.id).length === 1);
+    noHumanCard(w.id);
+  });
+
+  // hearsay-tools/cezarion#1301: a worker's second turn end with no wait or done asks its parent. A
+  // parent that cannot take Cezar's own question closes it, with no answer that would wake the worker
+  // again, and the worker parks (hearsay-tools/cezarion#2410).
+  it("closes Cezar's idle question when the parent cannot take it, and the worker parks", async () => {
+    const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
+    fillInbox(p.id);
     const w = await worker(p.id); manager.enqueueOwnedRun(w.id);
-    await until(() => eventsOf(w.id, 'worker-question-fallback').length === 1 && store.getRun(w.id)?.status === 'waiting');
+    await until(() => closedAs(w.id).length === 1 && store.getRun(w.id)?.status === 'waiting');
     const ask = eventsOf(w.id, 'ask.requested');
     expect(ask).toEqual([expect.objectContaining({ questions: [{ header: WORKER_FALLBACK_HEADER, question: WORKER_FALLBACK_QUESTION(w.id) }] })]);
-    expect(eventsOf(w.id, 'worker-question-fallback')[0]).toMatchObject({ askSeq: ask[0]!.seq });
+    expect(eventsOf(w.id, 'human-ask-closed')).toEqual([expect.objectContaining({ askSeq: ask[0]!.seq, reason: 'undeliverable' })]);
+    expect(cezarAnswered(w.id)).toEqual([]);
     expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
     expect(conversationOf(p.id)?.messages.some(m => m.question) ?? false).toBe(false);
-    expect(store.getRun(p.id)?.agentInputs?.length ?? 0).toBe(inputs);
-    expect(hasPendingAsk(store, w.id)).toBe(true);
-    // Its session is still live, which a reviewing parent never has: back to its park before
-    // teardown stops it (hearsay-tools/cezarion#1804).
-    store.updateRun(p.id, { status: RUN_STATUS.waiting });
+    noHumanCard(w.id);
   });
 
   it('a budget-spent worker plain-parks without routing', async () => {
@@ -204,18 +285,23 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     expect({ wakes: disk.automaticWakes, delivered: delivered(disk) }).toEqual({ wakes: wakes + 1, delivered: true });
   });
 
-  it('a Continue on a stopped worker supersedes its fallback question and proceeds', async () => {
+  // hearsay-tools/cezarion#2410: the stop closes Cezar's fallback question with the worker, so the
+  // Continue that follows finds nothing to supersede and proceeds.
+  it('a Continue on a stopped worker proceeds after the stop closed its fallback question', async () => {
     const f = await idleWorker();
     manager.requestWorkerStop(f.w.id); expect(await manager.awaitRunTermination(f.w.id, 15_000)).toBe(true);
+    await until(() => eventsOf(f.w.id, 'human-ask-closed').length === 1);
+    expect(eventsOf(f.w.id, 'human-ask-closed')).toEqual([expect.objectContaining({ askSeq: f.askSeq, reason: 'worker-stopped' })]);
     expect(manager.continueRun(f.w.id, { text: 'mock:hold' }, true)).toEqual({ ok: true });
-    expect(eventsOf(f.w.id, 'human-ask-closed')).toEqual([expect.objectContaining({ askSeq: f.askSeq, reason: 'superseded' })]);
+    expect(eventsOf(f.w.id, 'human-ask-closed')).toHaveLength(1);
     await until(() => store.getRun(f.w.id)?.status === 'waiting');
   });
 
-  /** The fallback question stands, and the worker's waits and its request's outcomes are as given. */
-  function expectFallbackIntact(f: Awaited<ReturnType<typeof idleWorker>>, waits: unknown, outcomes: unknown) {
-    expect(eventsOf(f.w.id, 'human-ask-closed')).toEqual([]);
-    expect(store.transcriptFacts(f.w.id).pendingAsk?.seq).toBe(f.askSeq);
+  /** The fallback question stands, or closed only as the stop closed it, and the worker's waits and
+   *  its request's outcomes are as given. */
+  function expectFallbackIntact(f: Awaited<ReturnType<typeof idleWorker>>, waits: unknown, outcomes: unknown, stopped = false) {
+    expect(eventsOf(f.w.id, 'human-ask-closed').map(event => event.reason)).toEqual(stopped ? ['worker-stopped'] : []);
+    expect(store.transcriptFacts(f.w.id).pendingAsk?.seq).toBe(stopped ? undefined : f.askSeq);
     expect(store.getRun(f.w.id)?.waits).toEqual(waits);
     expect(conversationOf(f.p.id)?.outcomes.filter(outcome => outcome.requestId === f.requestId)).toEqual(outcomes);
   }
@@ -231,25 +317,26 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     expectFallbackIntact(f, [expect.objectContaining({ kind: 'human', source: 'cezar', via: 'no-wait', askSeq: f.askSeq })], []);
     // A stopped worker under a parent's pending Finish refuses it too.
     manager.requestWorkerStop(f.w.id); expect(await manager.awaitRunTermination(f.w.id, 15_000)).toBe(true);
-    await until(() => store.getRun(f.p.id)?.status === 'waiting');
+    await until(() => store.getRun(f.p.id)?.status === 'waiting' && eventsOf(f.w.id, 'human-ask-closed').length === 1);
     store.commitRootFinishIntent(f.p.id);
     // The stop already settled the worker's waits and its open request; the refusal leaves both as they are.
     const waits = structuredClone(store.getRun(f.w.id)?.waits);
     const outcomes = conversationOf(f.p.id)?.outcomes.filter(outcome => outcome.requestId === f.requestId);
     expect(manager.continueRun(f.w.id, { text: 'mock:hold' }, true)).toEqual({ ok: false, error: 'parent finish is pending' });
-    expectFallbackIntact(f, waits, outcomes);
+    expectFallbackIntact(f, waits, outcomes, true);
   });
 
   // hearsay-tools/cezarion#1301: a Continue whose checkpoint fails is refused, so it supersedes nothing.
   it('a Continue refused at its checkpoint leaves the fallback question, its wait and its routed request intact', async () => {
     const f = await idleWorker();
     manager.requestWorkerStop(f.w.id); expect(await manager.awaitRunTermination(f.w.id, 15_000)).toBe(true);
+    await until(() => eventsOf(f.w.id, 'human-ask-closed').length === 1);
     const waits = structuredClone(store.getRun(f.w.id)?.waits);
     const outcomes = conversationOf(f.p.id)?.outcomes.filter(outcome => outcome.requestId === f.requestId);
     const fail = vi.spyOn(store, 'commitWorkerContinuation').mockImplementationOnce(() => { throw Error('disk full'); });
     expect(manager.continueRun(f.w.id, { text: 'mock:hold' }, true)).toEqual({ ok: false, error: 'worker execution checkpoint unavailable' });
     expect(fail).toHaveBeenCalledTimes(1);
-    expectFallbackIntact(f, waits, outcomes);
+    expectFallbackIntact(f, waits, outcomes, true);
     await until(() => !manager.isActive(f.w.id));
   });
 
@@ -295,11 +382,15 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     } finally { f.close(); }
   });
 
-  it('leaves the question with the human when the parent may not message its workers', async () => {
+  // A root without the steer grant cannot reply (service.send refuses it), so it cannot take the
+  // question; provisioned roots hold every grant, so only an older or narrowed record reaches this.
+  it('answers the worker for the parent when the parent may not message its workers', async () => {
     const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
-    await until(() => eventsOf(w.id, 'worker-question-fallback').length === 1);
+    await until(() => cezarAnswered(w.id).length === 1);
+    expect(eventsOf(w.id, 'worker-question-undelivered')).toEqual([expect.objectContaining({ reason: 'the parent may not message its workers' })]);
     expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
+    noHumanCard(w.id);
   });
 
   /** A parent and a worker that has asked; the question is routed and the worker waits. */
@@ -471,7 +562,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     } finally { f.close(); }
   });
 
-  it('keeps a routed question parent-only until it falls back to the human', async () => {
+  it('keeps a routed question parent-only', async () => {
     const f = await askedPair();
     try {
       const refusals = () => eventsOf(f.w.id, 'note').filter(event => event.message === 'This question was sent to the parent task; answer it there.');
@@ -479,11 +570,6 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       expect(refusals()).toHaveLength(1);
       expect(eventsOf(f.w.id, 'human-input-delivered')).toEqual([]);
       expect(eventsOf(f.w.id, 'user-message').some(event => String(event.text).includes('human answer'))).toBe(false);
-      // The fallback hands the question back to the human, who can then answer it.
-      store.appendEvent(f.w.id, { type: 'worker-question-fallback', askSeq: eventsOf(f.w.id, 'ask.requested')[0]!.seq, reason: 'test' });
-      expect(manager.sendMessage(f.w.id, [{ type: 'text', text: 'mock:agent-echo human answer' }])).toBe(true);
-      await until(() => eventsOf(f.w.id, 'human-input-delivered').length === 1);
-      expect(eventsOf(f.w.id, 'human-input-delivered')[0]!.source).toBeUndefined();
     } finally { f.close(); }
   });
 
@@ -493,9 +579,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     await restart(false, undefined, eventCheckpoint());
     await until(() => ['running', 'waiting'].includes(store.getRun(f.p.id)?.status ?? '') && store.getRun(f.w.id)?.status === 'waiting');
     expect(manager.continueRun(f.w.id, { text: 'human answer' })).toEqual({ ok: false, error: 'This question was sent to the parent task; answer it there.' });
-    store.appendEvent(f.w.id, { type: 'worker-question-fallback', askSeq: eventsOf(f.w.id, 'ask.requested')[0]!.seq, reason: 'test' });
-    expect(manager.continueRun(f.w.id, { text: 'mock:agent-echo human answer' }).ok).toBe(true);
-    await until(() => eventsOf(f.w.id, 'human-input-delivered').length === 1);
+    expect(eventsOf(f.w.id, 'human-input-delivered')).toEqual([]);
   });
 
   // hearsay-tools/cezarion#1301: the question's delivery turn ended with a live worker, so its
@@ -538,18 +622,35 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     } finally { f.close(); }
   });
 
-  it("hands a routed question back to the human when the parent is cancelled", async () => {
+  /** Continue on the worker is refused, naming its settled parent, and changes nothing. */
+  const expectSettledParentRefusal = (workerId: string, parentId: string, status: string) => {
+    const before = JSON.stringify(store.getRun(workerId));
+    const events = store.readEvents(workerId).length;
+    expect(manager.continueRun(workerId, { text: 'mock:agent-echo human answer' })).toEqual({ ok: false, error: `Parent task ${parentId} is ${status}; continue the parent before its worker.` });
+    expect(JSON.stringify(store.getRun(workerId))).toBe(before);
+    expect(store.readEvents(workerId)).toHaveLength(events);
+  };
+
+  // hearsay-tools/cezarion#2410: a worker's question has one addressee. When the parent is cancelled,
+  // the question closes with it and the worker is cancelled; no human answers it, and no Continue
+  // brings the worker back for the next family pass to cancel again.
+  it('closes a routed question with its cancelled parent and refuses Continue on the worker', async () => {
     const f = await askedPair();
     f.close();
     const askSeq = eventsOf(f.w.id, 'ask.requested')[0]!.seq;
     manager.cancel(f.p.id);
-    await until(() => eventsOf(f.w.id, 'worker-question-fallback').length === 1);
-    expect(eventsOf(f.w.id, 'worker-question-fallback')[0]).toMatchObject({ askSeq, reason: 'parent-cancelled' });
-    expect(conversationOf(f.p.id)?.outcomes).toEqual([expect.objectContaining({ requestId: f.questionId, status: 'human-fallback' })]);
+    await until(() => closedAs(f.w.id).length === 1 && store.getRun(f.w.id)?.status === 'cancelled');
+    expect(eventsOf(f.w.id, 'human-ask-closed')).toEqual([expect.objectContaining({ askSeq, reason: 'parent-stopped' })]);
+    expect(conversationOf(f.p.id)?.outcomes).toEqual([expect.objectContaining({ requestId: f.questionId, status: requestOutcomeSchema.shape.status.enum.cancelled })]);
+    noHumanCard(f.w.id);
     await until(() => !manager.isActive(f.w.id));
-    // The cancelled worker is now the human's to answer.
-    expect(manager.continueRun(f.w.id, { text: 'mock:agent-echo human answer' }).ok).toBe(true);
-    await until(() => eventsOf(f.w.id, 'human-input-delivered').length === 1);
+    expectSettledParentRefusal(f.w.id, f.p.id, 'cancelled');
+    // The issue's reproduction: a later write to the parent starts a family pass, and the worker
+    // stays as it is.
+    store.setArchived(f.p.id, true);
+    manager.reconcileWorkerWaits();
+    expect(store.getRun(f.w.id)?.status).toBe('cancelled');
+    expect(eventsOf(f.w.id, 'human-ask-closed')).toHaveLength(1);
   });
 
   it('wakes a parent parked on its worker when the worker asks, within maxParallel', async () => {
@@ -565,30 +666,19 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     expect(semaphore.busy()).toBeLessThanOrEqual(1);
   });
 
-  it('hands a routed question to the human while the parent rests at review, keeping the worker live', async () => {
-    const f = await askedPair();
-    f.close();
-    fixtureUpdateRun(f.p.id, { status: 'review' });
-    manager.reconcileWorkerWaits();
-    expect(eventsOf(f.w.id, 'worker-question-fallback')).toEqual([expect.objectContaining({ reason: 'parent-review' })]);
-    expect(store.getRun(f.w.id)?.status).toBe('waiting');
-    expect(manager.sendMessage(f.w.id, [{ type: 'text', text: 'mock:agent-echo human answer' }])).toBe(true);
-    await until(() => eventsOf(f.w.id, 'human-input-delivered').length === 1);
-    // Its session is still live, which a reviewing parent never has: back to its park before
-    // teardown stops it (hearsay-tools/cezarion#1804).
-    store.updateRun(f.p.id, { status: RUN_STATUS.waiting });
-  });
-
-  it('hands a routed question to the human on recovery when the parent closed before the crash', async () => {
+  // A crash after the parent's cancellation committed, before the family pass that ends its workers.
+  it('closes a routed question on recovery when the parent was cancelled before the crash', async () => {
     const f = await askedPair();
     f.close();
     const events = eventCheckpoint();
     const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string; status: string }>;
-    for (const run of disk) if (run.id === f.p.id) run.status = 'done';
+    for (const run of disk) if (run.id === f.p.id) run.status = 'cancelled';
     await restart(false, disk, events);
-    await until(() => eventsOf(f.w.id, 'worker-question-fallback').length === 1);
-    expect(eventsOf(f.w.id, 'worker-question-fallback')[0]).toMatchObject({ reason: 'parent-done' });
-    expect(conversationOf(f.p.id)?.outcomes).toEqual([expect.objectContaining({ requestId: f.questionId, status: 'human-fallback' })]);
+    await until(() => closedAs(f.w.id).length === 1 && store.getRun(f.w.id)?.status === 'cancelled' && !manager.isActive(f.w.id));
+    expect(closedAs(f.w.id)).toEqual(['parent-stopped']);
+    expect(conversationOf(f.p.id)?.outcomes).toEqual([expect.objectContaining({ requestId: f.questionId, status: requestOutcomeSchema.shape.status.enum.cancelled })]);
+    noHumanCard(f.w.id);
+    expectSettledParentRefusal(f.w.id, f.p.id, 'cancelled');
   });
 
   it('answers the worker after a crash between accepting the reply and delivering it', async () => {
@@ -604,6 +694,132 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     await restart(false, undefined, eventCheckpoint());
     await until(() => answered(f.w.id).length === 1);
     await until(() => said(f.w.id, 'Use the parser'));
+  });
+
+  // A reply accepted before the parent's cancellation, then a crash before the family pass: recovery
+  // closes the question with its parent and the reply never reaches the worker.
+  it('closes a routed question on recovery when an accepted reply waited and the parent was cancelled', async () => {
+    const f = await askedPair();
+    f.close();
+    const id = randomUUID(); const now = new Date().toISOString();
+    const attribution = { senderRunId: f.p.id, recipientRunId: f.w.id, kind: 'reply' as const, requestId: f.questionId };
+    const state = conversationOf(f.p.id)!;
+    store.commitConversation(f.p.id, { messages: [...state.messages, { id, ...attribution, text: 'mock:agent-echo Use the parser', createdAt: now, requestHash: 'c'.repeat(64), state: 'accepted' }],
+      outcomes: [...state.outcomes, { requestId: f.questionId, status: 'replied', observedAt: now, replyId: id }] },
+    { recipientRunId: f.w.id, input: { id, source: agentInputSchema.shape.source.enum.agent, parentRunId: f.p.id, text: 'mock:agent-echo Use the parser', createdAt: now, conversation: attribution } });
+    const events = eventCheckpoint();
+    const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string; status: string }>;
+    for (const run of disk) if (run.id === f.p.id) run.status = 'cancelled';
+    await restart(false, disk, events);
+    await until(() => closedAs(f.w.id).length === 1 && store.getRun(f.w.id)?.status === 'cancelled' && !manager.isActive(f.w.id));
+    expect(closedAs(f.w.id)).toEqual(['parent-stopped']);
+    expect(answered(f.w.id)).toEqual([]);
+    expect(said(f.w.id, 'Use the parser')).toBe(false);
+    expect(store.getRun(f.w.id)?.agentInputs?.some(input => input.id === id) ?? false).toBe(false);
+    noHumanCard(f.w.id);
+  });
+
+  // The worker's own routing marker keeps the question the parent's when the parent's ledger cannot
+  // be read; recovery cannot route it there again, so Cezar answers it and no human does.
+  it('answers a routed question for the parent when the parent record cannot be read after a restart', async () => {
+    const f = await askedPair();
+    f.close();
+    const askSeq = eventsOf(f.w.id, 'ask.requested')[0]!.seq;
+    const events = eventCheckpoint();
+    const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string; status: string }>;
+    for (const run of disk) if (run.id === f.p.id) run.status = 'unknown-status';
+    await restart(false, disk, events);
+    expect(store.isUnreadable(f.p.id)).toBe(true);
+    // The mock asks again after the answer; each question it raises gets Cezar's answer.
+    await until(() => cezarAnswered(f.w.id).length >= 1);
+    expect(eventsOf(f.w.id, 'worker-question-undelivered')[0]).toMatchObject({ askSeq, reason: 'the parent record cannot be read' });
+    expect(cezarAnswered(f.w.id)[0]).toMatchObject({ askSeq });
+    expect(eventsOf(f.w.id, 'human-input-delivered').filter(event => event.source !== 'cezar')).toEqual([]);
+    noHumanCard(f.w.id);
+  });
+
+  // A reply the parent sent before its record became unreadable is retired before Cezar answers, so
+  // the worker takes one answer: neither bundled with Cezar's nor replayed after it.
+  it('retires an accepted parent reply before answering for a parent whose record cannot be read', async () => {
+    const f = await askedPair();
+    f.close();
+    const id = randomUUID(); const now = new Date().toISOString();
+    const attribution = { senderRunId: f.p.id, recipientRunId: f.w.id, kind: 'reply' as const, requestId: f.questionId };
+    const state = conversationOf(f.p.id)!;
+    store.commitConversation(f.p.id, { messages: [...state.messages, { id, ...attribution, text: 'mock:agent-echo Use the parser', createdAt: now, requestHash: 'c'.repeat(64), state: 'accepted' }],
+      outcomes: [...state.outcomes, { requestId: f.questionId, status: 'replied', observedAt: now, replyId: id }] },
+    { recipientRunId: f.w.id, input: { id, source: agentInputSchema.shape.source.enum.agent, parentRunId: f.p.id, text: 'mock:agent-echo Use the parser', createdAt: now, conversation: attribution } });
+    const events = eventCheckpoint();
+    const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string; status: string }>;
+    for (const run of disk) if (run.id === f.p.id) run.status = 'unknown-status';
+    await restart(false, disk, events);
+    await until(() => cezarAnswered(f.w.id).length >= 1);
+    expect(store.getRun(f.w.id)?.agentInputs?.some(input => input.id === id) ?? false).toBe(false);
+    expect(said(f.w.id, 'Use the parser')).toBe(false);
+    expect(eventsOf(f.w.id, 'human-input-delivered').filter(event => event.source === 'parent')).toEqual([]);
+    noHumanCard(f.w.id);
+  });
+
+  // A reply a live inbox claim holds cannot be retired; Cezar does not answer beside it.
+  it('does not answer for an unreadable parent while a claimed parent reply stays queued', async () => {
+    const f = await askedPair();
+    try {
+      const reply = await f.reply('mock:hold');
+      const routing = runInternals(manager).workerQuestions;
+      vi.spyOn(store, 'isUnreadable').mockImplementation(id => id === f.p.id);
+      // The claim keeps the reply where it is, as `retireUnreadParentQuestion` leaves a claimed input.
+      const retire = vi.spyOn(routing, 'retireUnreadParentQuestion').mockImplementation(() => {});
+      runInternals(manager).workerQuestions.routeWorkerQuestion(f.w.id);
+      expect(retire).toHaveBeenCalledWith(f.w.id, reply.message.id);
+      expect(store.getRun(f.w.id)?.agentInputs?.some(input => input.purpose === 'undelivered-question') ?? false).toBe(false);
+      expect(eventsOf(f.w.id, 'worker-question-undelivered')).toEqual([]);
+    } finally { vi.restoreAllMocks(); f.close(); }
+  });
+
+  it('refuses human input on a routed question whose parent record cannot be read', () => {
+    const routing = runInternals(manager).workerQuestions;
+    const ask = { seq: 3, requestId: 'r', questions: [], routedMessageId: randomUUID() };
+    const worker = { id: randomUUID(), delegation: { role: 'worker' as const } };
+    vi.spyOn(store, 'getRun').mockImplementation(id => { return (id === worker.id ? worker : undefined) as never; });
+    vi.spyOn(store, 'transcriptFacts').mockReturnValue({ pendingAsk: ask } as never);
+    // routedAsk cannot load the parent's message, yet the question stays the parent's.
+    expect(routing.routedAsk(worker.id)).toBeUndefined();
+    expect(routing.answeredElsewhere(worker.id)).toBe(true);
+  });
+
+  // Cezar's answer queued for a routed question still answers it once the parent's ledger reads
+  // again (here it always reads): the parent-reply lookup must not hide it.
+  it("delivers Cezar's queued answer to a routed question whose parent reads", async () => {
+    const f = await askedPair();
+    try {
+      const askSeq = eventsOf(f.w.id, 'ask.requested')[0]!.seq;
+      runInternals(manager).workerQuestions.answerUndelivered(f.w.id, askSeq, 'the parent record cannot be read');
+      await until(() => cezarAnswered(f.w.id).length === 1);
+      expect(cezarAnswered(f.w.id)[0]).toMatchObject({ askSeq });
+      noHumanCard(f.w.id);
+    } finally { f.close(); }
+  });
+
+  // A Stop that takes its time still ends the parent's ability to answer: the question closes while
+  // the parent is stopping, not when its status settles.
+  it('closes a routed question while its parent is stopping', async () => {
+    const f = await askedPair();
+    const state = (manager as unknown as { active: Map<string, { interrupt(): void }> }).active.get(f.p.id)!;
+    const interrupt = vi.spyOn(state, 'interrupt').mockImplementation(() => {});
+    try {
+      expect(manager.cancel(f.p.id)).toBe(true);
+      expect(store.getRun(f.p.id)).toMatchObject({ stopping: true, status: expect.stringMatching(/^(running|waiting)$/) });
+      manager.reconcileWorkerWaits();
+      await until(() => closedAs(f.w.id).length === 1);
+      expect(closedAs(f.w.id)).toEqual(['parent-stopped']);
+      expect(conversationOf(f.p.id)?.outcomes).toEqual([expect.objectContaining({ requestId: f.questionId, status: requestOutcomeSchema.shape.status.enum.cancelled })]);
+      expect(store.getRun(f.p.id)?.stopping).toBe(true);
+      noHumanCard(f.w.id);
+    } finally {
+      interrupt.mockRestore();
+      state.interrupt();
+      f.close();
+    }
   });
 
   it("waits for capacity before a parent's answer resumes the worker", async () => {
@@ -626,21 +842,6 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       } finally { clearInterval(sample); }
       expect(peak).toBeLessThanOrEqual(1);
     } finally { f.close(); }
-  });
-
-  it('lets the human answer a question handed back by a reviewing parent after the session closed', async () => {
-    const f = await askedPair();
-    f.close();
-    const events = eventCheckpoint();
-    const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string; status: string }>;
-    for (const run of disk) if (run.id === f.p.id) run.status = 'review';
-    await restart(false, disk, events);
-    await until(() => eventsOf(f.w.id, 'worker-question-fallback').length === 1);
-    await until(() => !manager.isActive(f.w.id));
-    expect(manager.continueRun(f.w.id, { text: 'mock:agent-echo human answer' })).toEqual({ ok: true });
-    await until(() => eventsOf(f.w.id, 'human-input-delivered').length === 1);
-    // Without the fallback, a reviewing parent still gates its worker's Continue.
-    expect(manager.continueRun(f.w.id).ok).toBe(false);
   });
 
   it('records the routing on recovery when the crash fell between the question and its event', async () => {
@@ -706,14 +907,16 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     }))] });
   }
 
-  it('leaves the question with the human when the conversation has no room for its reply', async () => {
+  it('answers the worker for the parent when the conversation has no room for its reply', async () => {
     process.env.CEZ_DELEGATION = '1';
     const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id, 'mock:ask');
     fillConversation(p.id, w.id, 1023);
     manager.enqueueOwnedRun(w.id);
-    await until(() => eventsOf(w.id, 'worker-question-fallback').length === 1);
+    await until(() => cezarAnswered(w.id).length === 1);
+    expect(eventsOf(w.id, 'worker-question-undelivered')).toEqual([expect.objectContaining({ reason: 'the parent conversation is at capacity' })]);
     expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
+    noHumanCard(w.id);
   });
 
   it("keeps room for an open question's reply in the conversation and the worker's inbox", async () => {
@@ -751,15 +954,20 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     } finally { f.close(); }
   });
 
-  it("hands the question to the human when the asking worker itself stops", async () => {
+  // hearsay-tools/cezarion#2410: the question ends with the worker that asked it. Its parent is live,
+  // so a Continue goes ahead, as a plain Continue rather than an answer.
+  it('closes the question when the asking worker itself stops', async () => {
     const f = await askedPair();
     f.close();
     manager.cancel(f.w.id);
-    await until(() => eventsOf(f.w.id, 'worker-question-fallback').length === 1);
-    expect(eventsOf(f.w.id, 'worker-question-fallback')[0]).toMatchObject({ reason: 'question-sender-closed' });
+    await until(() => closedAs(f.w.id).length === 1);
+    expect(closedAs(f.w.id)).toEqual(['worker-stopped']);
+    expect(conversationOf(f.p.id)?.outcomes).toEqual([expect.objectContaining({ requestId: f.questionId, status: 'sender-closed' })]);
+    noHumanCard(f.w.id);
     await until(() => !manager.isActive(f.w.id));
-    expect(manager.continueRun(f.w.id, { text: 'mock:agent-echo human answer' })).toEqual({ ok: true });
-    await until(() => eventsOf(f.w.id, 'human-input-delivered').length === 1);
+    expect(manager.continueRun(f.w.id, { text: 'mock:agent-echo plain continue' })).toEqual({ ok: true });
+    await until(() => said(f.w.id, 'plain continue'));
+    expect(eventsOf(f.w.id, 'human-input-delivered')).toEqual([]);
   });
 
   it('admits the reply even when steering filled the worker inbox', async () => {
@@ -773,22 +981,20 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     } finally { f.close(); }
   });
 
-  it("delivers an accepted reply instead of falling back when the parent settles before admission", async () => {
+  // A reply waiting for capacity does not outlive its cancelled parent (hearsay-tools/cezarion#2410).
+  it('closes the question when the parent is cancelled while its accepted reply waits for admission', async () => {
     const f = await askedPair();
     try {
       const blocker = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:slow', runner: 'claude' });
       await until(() => store.getRun(blocker.id)?.status === 'running' && semaphore.busy() === 1);
       await f.reply('mock:agent-echo Use the parser');
-      // The parent rests at review while its reply still waits for capacity.
-      fixtureUpdateRun(f.p.id, { status: 'review' });
-      manager.reconcileWorkerWaits();
-      expect(eventsOf(f.w.id, 'worker-question-fallback')).toEqual([]);
+      manager.cancel(f.p.id);
+      await until(() => closedAs(f.w.id).length === 1 && store.getRun(f.w.id)?.status === 'cancelled');
+      expect(closedAs(f.w.id)).toEqual(['parent-stopped']);
       manager.cancel(blocker.id);
-      await until(() => answered(f.w.id).length === 1);
-      expect(eventsOf(f.w.id, 'worker-question-fallback')).toEqual([]);
-      // Its session is still live, which a reviewing parent never has: back to its park before
-      // teardown stops it (hearsay-tools/cezarion#1804).
-      store.updateRun(f.p.id, { status: RUN_STATUS.waiting });
+      await until(() => !manager.isActive(f.w.id) && !manager.isActive(blocker.id));
+      expect(answered(f.w.id)).toEqual([]);
+      noHumanCard(f.w.id);
     } finally { f.close(); }
   });
 
@@ -826,24 +1032,32 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       manager.cancel(f.w.id);
       await expect(f.reply('mock:agent-echo Use the parser')).rejects.toSatisfy(error =>
         error instanceof DelegationPolicyError && error.code === 'incompatible_state');
-      await until(() => eventsOf(f.w.id, 'worker-question-fallback').length === 1);
+      await until(() => closedAs(f.w.id).length === 1);
+      expect(closedAs(f.w.id)).toEqual(['worker-stopped']);
     } finally { f.close(); }
   });
 
-  it('hands the question back when the worker stops before an accepted reply lands', async () => {
+  it('closes the question when the worker stops before an accepted reply lands', async () => {
     const f = await askedPair();
     try {
       const blocker = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:slow', runner: 'claude' });
       await until(() => store.getRun(blocker.id)?.status === 'running' && semaphore.busy() === 1);
-      await f.reply('mock:agent-echo Use the parser');
+      const reply = await f.reply('mock:agent-echo Use the parser');
       manager.cancel(f.w.id);
-      await until(() => eventsOf(f.w.id, 'worker-question-fallback').length === 1);
-      expect(eventsOf(f.w.id, 'worker-question-fallback')[0]).toMatchObject({ reason: 'worker-stopped' });
+      await until(() => closedAs(f.w.id).length === 1);
+      expect(closedAs(f.w.id)).toEqual(['worker-stopped']);
+      // The accepted reply closes with its question: no later turn reads it as a message.
+      expect(store.getRun(f.w.id)?.agentInputs?.some(input => input.id === reply.message.id) ?? false).toBe(false);
       manager.cancel(blocker.id);
       await until(() => !manager.isActive(f.w.id) && !manager.isActive(blocker.id));
       expect(answered(f.w.id)).toEqual([]);
-      expect(manager.continueRun(f.w.id, { text: 'mock:agent-echo human answer' })).toEqual({ ok: true });
-      await until(() => eventsOf(f.w.id, 'human-input-delivered').length === 1);
+      noHumanCard(f.w.id);
+      expect(manager.continueRun(f.w.id, { text: 'mock:agent-echo plain continue' })).toEqual({ ok: true });
+      await until(() => said(f.w.id, 'plain continue') && store.getRun(f.w.id)?.status === 'waiting');
+      expect(eventsOf(f.w.id, 'human-input-delivered')).toEqual([]);
+      expect(said(f.w.id, 'Use the parser')).toBe(false);
+      // A restart replays only unread input, and the reply is gone from the worker's queue.
+      expect(store.getRun(f.w.id)?.agentInputs?.some(input => input.id === reply.message.id) ?? false).toBe(false);
     } finally { f.close(); }
   });
 });

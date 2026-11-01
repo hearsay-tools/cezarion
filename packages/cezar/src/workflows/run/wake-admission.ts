@@ -4,7 +4,6 @@ import type { RunRecord } from '../../runs/store.ts';
 import type { RunOutcome } from '../../runs/outcome-commit.ts';
 import { rootsAwaitingPeer } from '../../delegation/conversations.ts';
 import { hasLiveInboxClaim } from '../../delegation/input.ts';
-import { answersQuestion } from '../../delegation/questions.ts';
 import { parseUsageLimit } from '../../core/usage-limit.ts';
 import { accountHeldFor, sessionlessWakePrompt } from '../run-scheduling.ts';
 import { executionAccount } from '../execution-account.ts';
@@ -309,8 +308,7 @@ export class WakeAdmission {
 
   /** The parent's reply that answers a worker's pending routed question, still undelivered. */
   routedAnswer(runId: string): AgentInput | undefined {
-    const routed = this.host.workerQuestions.routedAsk(runId);
-    return routed && this.context.store.getRun(runId)?.agentInputs?.find(input => !input.deliveredAt && answersQuestion(routed.message, input));
+    return this.host.workerQuestions.pendingAnswer(runId)?.input;
   }
 
   owesWake(run: RunRecord, beforeHumanReset?: HumanAnswerBudget): boolean {

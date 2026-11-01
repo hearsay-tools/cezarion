@@ -87,7 +87,8 @@ export function continuationEffort(
 }
 
 /** The Continue's runner, and whether it resumes into a thread that already holds the skill
- *  playbook. A resumed Cursor session keeps the transport it was opened with. */
+ *  playbook. A resumed Cursor session keeps the transport it was opened with: an untagged one
+ *  predates print, so it is ACP, which the Cursor runner refuses (hearsay-tools/cezarion#1267). */
 export function continuationRunner(
   backend: RunnerId,
   sessionId: string | undefined,

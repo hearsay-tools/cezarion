@@ -1249,7 +1249,7 @@ Cezarion is not married to one vendor. Every agent step runs through a single
 | **Claude Code** (default) | [`claude`](https://github.com/anthropics/claude-code) | Headless `stream-json` mode. | Per-tool `--allowedTools` (`bashAllowlist` scopes `Bash`); `dontAsk` denies unapproved tools without prompting (`CEZ_APPROVAL_GATE=1` → `acceptEdits` + approval UI; `CEZ_CLAUDE_PERMISSION_MODE=bypass` → `--dangerously-skip-permissions`). |
 | **Codex** | [`codex`](https://github.com/openai/codex) | `codex app-server` — JSON-RPC over stdio, the same transport the Codex IDE extensions use. | Ignores `allowedTools`; inherits managed permissions and Codex approval defaults. Confirmed unmanaged sessions use `danger-full-access`. `CEZ_CODEX_NETWORK=0` requires network restriction: unmanaged sessions use network-blocked `workspace-write`; managed filesystem rules remain intact, and an unconfirmed network restriction stops before any turn. If requirements discovery is unavailable, Codex permission defaults apply. |
 | **OpenCode** _(experimental)_ | [`opencode`](https://opencode.ai) | `opencode serve` — a local HTTP server with an SSE event stream. | Ignores `allowedTools` entirely; OpenCode's own permission config governs. Cezarion answers OpenCode's built-in asks (outside-worktree reads, `.env` reads, the repeated-call guard) once, unless your config has a rule for that permission. Any other ask shows a permission card in the cockpit, and the run waits for your answer. |
-| **Cursor** | [`agent`](https://cursor.com/docs/cli/installation) | Qualified builds use resumable `--print --output-format stream-json` turns; other builds and legacy sessions use ACP. | Print mode admits marketplace plugins, including user and team plugins. Per-run `allowedTools` and `bashAllowlist` are unsupported. |
+| **Cursor** | [`agent`](https://cursor.com/docs/cli/installation) | Resumable `--print --output-format stream-json` turns on a qualified build; an unqualified build fails the task before inference. | Print mode admits marketplace plugins, including user and team plugins. Per-run `allowedTools` and `bashAllowlist` are unsupported. |
 | **pi** _(experimental)_ | [`pi`](https://github.com/badlogic/pi-mono) | Persistent `--mode rpc` over JSONL; models are picked with the `provider/model` convention. | Maps `allowedTools` onto pi tool names. The default list, which adds the harness extras `Subagent`, `SubagentSupervisor` and `SubagentWait`, sends no allowlist: `--no-builtin-tools` plus a bundled extension that activates those built-ins, so MCP servers (`direct`, `codemode` and `deferred` exposure) and other pi extensions' tools stay callable. The six base tools alone, the list a worker inherits from a Claude parent, take the same path. A narrowed `allowedTools`, or one that names any tool outside that default set (an `mcp__` tool, `WebFetch` or a custom tool), uses pi's `--tools` allowlist, so a step that grants named tools reaches only those; a list that maps to nothing becomes `--no-tools` (or only the Cezarion tools). A configured `bashAllowlist` disables Bash because pi cannot express command-prefix rules. |
 | **OMP** _(experimental)_ | [`omp`](https://github.com/can1357/oh-my-pi) | Persistent `--mode rpc` over JSONL (Oh My Pi, a pi fork); models use the `provider/model` convention and are discovered from `omp models --json`. | Maps `allowedTools` onto OMP's `--tools` allowlist (`[]` becomes `--no-tools`); default sessions also pass `todo`, `lsp`, `ast_edit`, `task` and `wait`. A configured `bashAllowlist` disables `bash` because OMP cannot express command-prefix rules. |
 
@@ -1270,9 +1270,11 @@ its location. Select **Cursor** in the runner picker. On build
 are available. Cezarion checks `agent --version` and the native tool catalog before
 the first turn; `agent --version` is also the quick way to check your installation.
 Cezarion starts the CLI with `--disable-auto-update`, so a task never updates it;
-update it yourself with `agent update`. Older builds, and a build missing a core
-tool, use ACP, which may not see marketplace plugins. Existing ACP
-sessions continue on ACP so their conversation history is preserved.
+update it yourself with `agent update`. An older build, or a build missing a core
+tool, fails the task before any inference, with the reason and the fix: run
+`agent update`, or update Cezarion if your build is newer than it supports. Cursor
+sessions from before Cezarion removed ACP sessions cannot resume: Continue on one
+reports that, and you start a new task to carry the work on.
 A missing CLI leaves the other backends available. `CEZ_DRY_RUN=1` uses the mock.
 Cursor questions from a plugin may be automatically skipped by print mode. Cezarion's
 own `CEZ:ASK` questions remain answerable in the cockpit; plugins that require
@@ -1282,12 +1284,11 @@ session ID can also lose history inside Cursor without an error; Cezarion resume
 the recorded ID and checks that Cursor returns the same ID.
 Cursor provides no qualified token-usage telemetry; Cezarion leaves usage unavailable
 instead of estimating it. Cezarion discovers Cursor's canonical model IDs and advertised
-effort levels through its read-only ACP catalog. Print mode accepts those IDs and
-applies effort using a complete native parameter selection passed with `--model`,
-retaining the account catalog's defaults for other parameters. Advertised legacy
-print variants remain supported. ACP sessions apply `effort` or `reasoning` through
-session config options before prompting; an unsupported explicit effort fails
-instead of silently choosing another level.
+effort levels through Cursor's read-only ACP model catalog (`agent acp`), which opens
+no session. Print mode accepts those IDs and applies effort using a complete native
+parameter selection passed with `--model`, retaining the account catalog's defaults for
+other parameters. Advertised legacy print variants remain supported. An unsupported
+explicit effort fails instead of silently choosing another level.
 
 Settings → Agent config exposes Cursor’s global `cli-config.json`, project
 `.cursor/cli.json` permissions, `.cursor/mcp.json`, and shared `AGENTS.md`.

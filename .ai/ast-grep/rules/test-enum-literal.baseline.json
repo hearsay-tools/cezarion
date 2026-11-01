@@ -236,18 +236,6 @@
       "count": 3
     },
     {
-      "file": "packages/cezar/src/core/cursor-ui-mapper.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'failed'",
-      "count": 4
-    },
-    {
-      "file": "packages/cezar/src/core/cursor-ui-mapper.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'pending'",
-      "count": 8
-    },
-    {
       "file": "packages/cezar/src/core/dry-run-backends.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'failed'",
@@ -4236,12 +4224,6 @@
       "rule": "test-enum-literal",
       "site": "source: 'cezar'",
       "count": 1
-    },
-    {
-      "file": "packages/cezar/src/workflows/worker-questions.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'review'",
-      "count": 3
     },
     {
       "file": "packages/cezar/src/workflows/worker-questions.test.ts",

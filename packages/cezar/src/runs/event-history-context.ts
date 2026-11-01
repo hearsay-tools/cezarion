@@ -43,7 +43,7 @@ class AskRoutingContextTracker implements ContextTracker {
   constructor(private readonly ask: AskContextTracker) {}
 
   observe(event: RunHistoryEvent): void {
-    if ((event.type === 'worker-question-routed' || event.type === 'worker-question-fallback') && event.askSeq === this.ask.pending?.seq) {
+    if ((event.type === 'worker-question-routed' || event.type === 'worker-question-fallback' || event.type === 'worker-question-undelivered') && event.askSeq === this.ask.pending?.seq) {
       this.routing = event;
     }
   }

@@ -52,7 +52,7 @@ export const RUNNERS: readonly RunnerOption[] = [
   { id: 'codex', label: 'codex', desc: 'OpenAI Codex (app-server)' },
   { id: 'opencode', label: 'opencode', desc: 'OpenCode (serve)' },
   { id: 'pi', label: 'pi', desc: 'pi CLI (provider/model)' },
-  { id: 'cursor', label: 'Cursor', desc: 'Cursor CLI (ACP)' },
+  { id: 'cursor', label: 'Cursor', desc: 'Cursor CLI' },
   { id: 'omp', label: 'OMP', desc: 'Oh My Pi CLI (provider/model)' },
 ]
 

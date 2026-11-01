@@ -828,6 +828,9 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       const scratch = resolveAgentTmpDir(join(root, '.ai/cezar'), w.id);
       mkdirSync(scratch, { recursive: true });
       writeFileSync(join(scratch, 'notes'), 'answer still needed');
+      // The question waits for the parent's answer (hearsay-tools/cezarion#2410): a parent that may
+      // not message its workers would have Cezar answer it, and resume the worker, instead.
+      reopened.commitDelegation([{ id: parent.id, delegation: { role: 'root', permissions: ['spawn', 'steer'], receipts: [] } }]);
       reopened.appendEvent(w.id, { type: 'ask.requested', requestId: randomUUID(), questions: [{
         header: 'Choice', question: 'Which option?', options: [{ label: 'A' }, { label: 'B' }],
       }] });

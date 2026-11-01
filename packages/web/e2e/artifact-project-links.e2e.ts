@@ -76,21 +76,17 @@ function expectOwnerPreview() {
     .toBe(`/api/v1/p/owner/runs/${ownerRun}/artifacts/${publication.id}/download`)
 }
 
-it.each([['owner', ownerRun], ['boot', bootRun]])('retains identical publication Markdown in the %s project thread', (project, runId) => {
+it.each([['owner', ownerRun], ['boot', bootRun]])('opens identical publication Markdown in the owner\'s reader from the %s project thread', (project, runId) => {
   expect(publication.link).toBe(`/p/owner/tasks/${ownerRun}/files?artifact=${publication.id}`)
   browser.goto(`${baseUrl}/p/${project}/tasks/${runId}`)
   const selector = '[data-slot="user-bubble"] a[data-streamdown="link"]'
   const href = browser.waitForValue<string>(`document.querySelector(${JSON.stringify(selector)})?.getAttribute('href')`)
-  expect(href).toBe(publication.link)
-  // Scoped links keep the cockpit's existing confirmation/new-tab semantics.
+  // hearsay-tools/cezarion#2400: a publication opens inside cezarion, in its owner's reader, with
+  // no confirm and no browser handoff. The reader hands this Markdown snapshot on to Files.
+  expect(href).toBe(`/p/owner/tasks/${ownerRun}/report?artifact=${publication.id}`)
   browser.click(selector)
-  browser.waitForFunction(`document.querySelector('[data-slot="link-safety-dialog"]') !== null`)
-  expect(browser.text('[data-slot="link-safety-url"]')).toBe(publication.link)
-  // Follow the real rendered destination in this tab. agent-browser 0.36 cannot attach
-  // to a noreferrer popup (even a plain health-page anchor times out in Page.enable).
-  // Keep the destination and preview assertions independent of that provider failure.
-  browser.goto(baseUrl + href)
   expectOwnerPreview()
+  expect(browser.waitForValue<boolean>(`document.querySelector('[data-slot="link-safety-dialog"]') === null`)).toBe(true)
   settleVisual(browser, '[data-slot="file-preview"]')
   browser.screenshot(join(evidenceDir, `${project}-thread-preview.png`))
 })

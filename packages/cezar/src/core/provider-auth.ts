@@ -251,8 +251,8 @@ function parseOmpStatus(result: ProviderCommandResult): ProviderConnectionState 
 function parseCursorStatus(result: ProviderCommandResult): ProviderConnectionState | null {
   try {
     const value = JSON.parse(result.stdout) as { isAuthenticated?: unknown; status?: unknown };
-    // `agent status` checks stored login tokens only (CLI 2026.09.15), while ACP
-    // also accepts environment credentials. Like OpenCode's environment count,
+    // `agent status` checks stored login tokens only (CLI 2026.09.15), while sessions
+    // also accept environment credentials. Like OpenCode's environment count,
     // configured credentials permit a run; a vendor rejection is latched at runtime.
     if (result.exitCode === 0 && (process.env.CURSOR_API_KEY?.trim() || process.env.CURSOR_AUTH_TOKEN?.trim())) {
       return 'connected';

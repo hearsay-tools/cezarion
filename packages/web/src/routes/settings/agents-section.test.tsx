@@ -634,7 +634,7 @@ describe('the agents form', () => {
         'codexOpenAI Codex (app-server)',
         'opencodeOpenCode (serve)',
         'pipi CLI (provider/model)',
-        'CursorCursor CLI (ACP)',
+        'CursorCursor CLI',
         'OMPOh My Pi CLI (provider/model)',
       ])
       // The discovered account is the checked row until the repo says otherwise.

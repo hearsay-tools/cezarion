@@ -11,7 +11,16 @@ import { useAskAnswer } from './ask-answer'
 import { Markdown } from './markdown'
 import { AskAnswers } from './ask-answers'
 import { ConversationMessage } from './thread-items'
-import type { ThreadAsk } from './thread-state'
+import type { AskClosedReason, ThreadAsk } from './thread-state'
+
+/** What a closed question's card says (hearsay-tools/cezarion#1260, hearsay-tools/cezarion#1301, hearsay-tools/cezarion#2410). */
+const ASK_CLOSED_LABEL: Record<AskClosedReason, string> = {
+  finish: 'Closed when the task finished',
+  superseded: 'Closed when the worker went on',
+  'parent-stopped': 'Closed when the parent stopped',
+  'worker-stopped': 'Closed when the worker stopped',
+  undeliverable: 'Closed: not delivered',
+}
 import type { UiAskQuestion } from '@open-mercato/cezar-api-client'
 
 /** Format one answered question the way the agent reads it back. */
@@ -54,7 +63,7 @@ export function AskCard({ ask, run, onShowOrigin }: {
         data-resolved="true"
       >
         <span className="text-soft-foreground">
-          {ask.closed === 'finish' ? 'Closed when the task finished' : ask.closed === 'superseded' ? 'Closed when the worker went on' : ask.answeredBy === 'parent' ? 'Answered by parent' : 'Answered'}
+          {ask.closed ? ASK_CLOSED_LABEL[ask.closed] : ask.answeredBy === 'parent' ? 'Answered by parent' : 'Answered'}
         </span>
         <AskAnswers ask={ask} />
       </ConversationMessage>

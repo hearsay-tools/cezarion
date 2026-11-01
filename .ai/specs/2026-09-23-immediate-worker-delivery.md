@@ -145,9 +145,10 @@ follow-up issue, not part of hearsay-tools/cezarion#505.
   `packages/contract`. The worker then records a `worker-question-routed` event
   (`askSeq`, `messageId`, `parentRunId`); the message ID derives from the worker
   and the ask seq, so routing again after a restart finds the same message. A
-  question has no deadline. A question the parent cannot take (parent not live,
-  no `steer` grant, inbox or conversation at capacity) records
-  `worker-question-fallback` instead and stays with the human.
+  question has no deadline. A question a live parent cannot take (no `steer`
+  grant, inbox or conversation at capacity, its ID taken, not a valid request) gets
+  Cezar's answer instead; one with no live parent closes (see *One addressee*
+  below).
 - **Reaching the parent.** The request travels the ordinary conversation queue, so
   it steers an active parent immediately and wakes a parked parent through the
   existing message wake. Its formatted text shows the questions and options and the
@@ -170,14 +171,33 @@ follow-up issue, not part of hearsay-tools/cezarion#505.
   completion attention, so the parent cannot reach DONE past it; the completion
   note names the question, and no automatic wait on that worker is registered
   (the two would wait on each other).
-- **Human fallback.** The worker's question card reads "Routed to parent" with no
+- **One addressee** (hearsay-tools/cezarion#2410, replacing the human fallback this
+  spec first had). The worker's question card reads "Routed to parent" with no
   answer box; a human message or Continue on the worker is refused with a note
-  pointing at the parent. When the parent cannot receive the question at ask time,
-  or later settles `done`, `review`, `failed` or `cancelled` (including a parent
-  found closed on recovery), the worker records `worker-question-fallback` with
-  reason `parent-<status>`, the question becomes an ordinary human ask with an
-  answerable card, and its request outcome is a new `human-fallback` status.
-  History deletion destroys the workers with it, so it needs no fallback.
+  pointing at the parent. A worker's question is answered by its parent, or it ends
+  without a human:
+  - The parent settles `done`, `review`, `failed` or `cancelled`, is stopping, has a
+    Finish pending or is deleted, at ask time or later (including a parent found
+    closed on recovery): the request outcome follows the parent's status, the
+    worker records `human-ask-closed` with reason `parent-stopped`, and every live
+    worker of a settled parent is cancelled. Continue on a worker of a settled
+    parent is refused, naming the parent, for every caller (human, parent-reply
+    delivery, restart recovery, usage-limit auto-resume). Recovery resumes a parent
+    before its workers, so an interrupted family recovers as before.
+  - The worker stops: `human-ask-closed` with reason `worker-stopped`.
+  - A live parent cannot take the question: Cezar queues an `undelivered-question`
+    lifecycle input with the reason, charged as an automatic wake, records
+    `worker-question-undelivered`, and delivers it through the answer seam a
+    parent's reply uses, recording `human-input-delivered` with `source: 'cezar'`.
+    Cezar's own "Worker idle" question, a spent budget or a refused queue closes
+    it instead (`undeliverable`), and the worker parks: a plain park tells the
+    parent through the park notice.
+  - Cezar's own "Worker idle" question is Cezar's, not the worker's: a parent's
+    input, a Continue and a human message all supersede it. A human message to a
+    worker whose own question is pending is refused, with a note naming the parent.
+  The cockpit reads "Closed when the parent stopped", "Closed when the worker
+  stopped" or "Closed: not delivered". `worker-question-fallback` and the
+  `human-fallback` outcome are no longer written; old records keep both.
 - **Instructions.** `delegation/provision.ts` tells workers that questions go to
   their parent, and tells parents that worker questions arrive as requests, are
   answered with `reply`, and escalate through the parent's own question. The

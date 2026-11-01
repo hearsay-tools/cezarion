@@ -13,7 +13,7 @@ import type { UiEvent } from './ui-events.ts';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 afterEach(() => vi.unstubAllEnvs());
-it('uses bundled Cursor print for a fresh dry run and ACP for a legacy session', async () => {
+it('uses bundled Cursor print for a fresh dry run', async () => {
   vi.stubEnv('CEZ_DRY_RUN', '1');
   vi.stubEnv('CEZ_CURSOR_BIN', undefined);
   const dir = mkdtempSync(join(tmpdir(), 'cez-dry-cursor-'));
@@ -22,7 +22,6 @@ it('uses bundled Cursor print for a fresh dry run and ACP for a legacy session',
     const events: Array<{ type: string; sessionTransport?: string }> = [];
     await createRunner('cursor').run({ toolGrant: UNSET_TOOL_GRANT, cwd: dir, userPrompt: 'hello' }, event => events.push(event));
     expect(events.find(event => event.type === 'session')?.sessionTransport).toBe('cursor-print');
-    expect(createRunner('cursor', { sessionTransport: 'cursor-acp' })).toBeInstanceOf(CursorRunner);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 it('shows Cursor native questions as failed tools without a Cezar answer card', async () => {

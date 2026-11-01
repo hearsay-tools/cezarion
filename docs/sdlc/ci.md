@@ -682,10 +682,35 @@ target workflow before opening PRs against it.
 
 ## Merge queue and exact-commit reuse
 
-CI accepts `merge_group: checks_requested` for `main`. It tests the immutable
-combined commit with all ten verification jobs, including the function complexity
-gate, the minimum-version typecheck and build/package jobs and browser E2E. Queue runs never use docs/infra or release-bump exemptions. They have no
-model keys, npm credentials, publishing jobs or OIDC permission.
+CI accepts `merge_group: checks_requested` for `main`. It verifies the immutable
+combined commit before merge. Typecheck, citations, complexity, clones, build,
+Node tests and packaged CLI tests always run on that commit. The four Vitest
+and four browser jobs can reuse native PR suites for one unchanged queue entry.
+Queue runs have no model keys, npm credentials, publishing jobs or OIDC permission.
+
+Native PR test matrices resolve their input once to an immutable merge commit.
+For a same-repository PR that contains the trusted workflow's base and whose
+head and merge trees match, they test the immutable head instead. Only both
+successful full matrices can produce `Attest PR test inputs / <workflow SHA> /
+<PR head SHA>`, a read-only job whose official name records those identities.
+A missing or moved merge input fails input resolution. An unavailable optional
+ancestry check keeps the immutable merge checkout without attestation.
+
+At the queue head, a read-only probe requires exactly one entry, unchanged main,
+current native CI/review admission, all eight successful suite jobs, an attestation
+for the queue base and PR head, identical head/combined trees, and identical
+`ci.yml` blobs at the attested base and queue commit. A changed workflow always
+runs the queue suites, since native PR CI used the older definition. It re-reads
+membership, main, head and the newest source run/attempt. Missing, partial, old,
+failed, fork, multi-entry or changing evidence runs both full queue suites.
+The probe is bounded to 60 seconds, with individual requests capped at 10 seconds.
+It may read a still-running native workflow only when its required aggregate,
+review, attestation and all suites have passed; optional publication can finish
+later. Final queue admission still requires the native workflow to finish
+successfully. A successful probe leaves each queue matrix job running only a
+short reuse receipt, so every required job still has a successful verdict.
+This proves content equivalence for these suites; checks that depend on commit
+identity, parents or the event still execute on the queue commit.
 
 The required `Automated Code Review` check verifies existing PR-head review
 admission. It does not call a model to review combined code. The helper comes
@@ -699,8 +724,8 @@ fails closed. GitHub owns queue persistence; no cockpit session is required.
 A main push probes official Actions metadata for at most 60 seconds (each request
 at most 10 seconds; at most seven pending reads; complete lists limited to 200
 records). It reuses only the newest same-repository queue run's latest successful
-attempt for the **exact pushed SHA**, after every classifier, verification leaf,
-aggregate and review admission job succeeds. A final reread checks for races.
+attempt for the **exact pushed SHA**, after every classifier, verification leaf (including a verified native-suite
+reuse receipt), aggregate and review admission job succeeds. A final reread checks for races.
 Equal trees, ancestors, PR runs, dispatches, artifacts and an older success behind
 a newer failure are not proof. Unknown evidence or probe infrastructure failure
 runs full main CI. The aggregate records the source run and attempt when it reuses
@@ -733,8 +758,10 @@ queue requirement only after required checks can run. Do not auto-enqueue a
 backlog or jump the queue. Confirm external merge tools distinguish enqueueing
 from actual merging before adoption; documentation here does not update them.
 
-Normal eligible merges replace main's full matrix with the same full matrix
-before merge plus a metadata probe. This is a cost goal, not a guarantee. Rebuilds,
+Normal eligible merges replace main's full matrix with queue verification
+before merge plus a metadata probe. An eligible single-entry queue reuses the
+native PR's unit/browser suites and runs the remaining checks fresh. This is a
+cost goal, not a guarantee. Rebuilds,
 failed groups, retries, docs-only entries and fallback add work. Measure queue
 wait, verification job-seconds, source attempts, reuse hits and fallback reasons.
 If squash does not preserve the SHA, keep full fallback and return to design

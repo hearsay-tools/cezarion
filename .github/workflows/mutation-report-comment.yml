@@ -2,7 +2,9 @@ name: Mutation report comment
 
 # Posts the one pull request comment for the Mutation report workflow and keeps it current: it
 # creates the comment when a run has something to say and updates it on every later push, so it never
-# shows an earlier push's survivors. Advisory: it never blocks a merge and nothing requires it.
+# shows an earlier push's survivors. The report runs only on a pull request with the `mutants` label;
+# a skipped run posts nothing, so a comment stays as last posted after the label goes. Advisory: it
+# never blocks a merge and nothing requires it.
 # This is the only workflow here with a write token, so it runs no pull request code. It checks out the
 # default branch, reads the artifact as untrusted data, and finds the pull request through the API.
 on:

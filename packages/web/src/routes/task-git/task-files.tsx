@@ -6,22 +6,34 @@ import { useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router'
 
 import { ApiError } from '@/api/client'
-import { useRun, useRunFile, useArtifacts } from '@/api/queries'
+import { useArtifact, useFileLink, useRun, useRunFile, useArtifacts } from '@/api/queries'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { RunHeader } from '../task-thread/run-header'
 import { TaskFileScope } from '../task-thread/task-file-scope'
 import { LinkedFilePreview } from './linked-file-preview'
 import { FilesTree } from './files-tree'
+import { FolderMemoryContext, useFilesViewGeneration, useFilesViewMemory } from './files-view-memory'
 import { GitTabLoadError, GitTabLoading } from './git-tab-loading'
 
 /** URL selection is the source of truth: bookmarks, reload and Back select the same file. */
 export function TaskFilesRoute() {
   const { id } = useParams<{ id: string }>()
   const run = useRun(id)
+  const generation = useFilesViewGeneration()
   if (run.isPending) return <GitTabLoading tab="files" />
   if (run.isError) return <GitTabLoadError tab="files" error={run.error} />
-  return <TaskFileScope runId={run.data.id}><FilesView key={run.data.id} run={run.data} /></TaskFileScope>
+  return <TaskFileScope runId={run.data.id}><FilesView key={`${run.data.id}:${generation}`} run={run.data} /></TaskFileScope>
+}
+
+/** Whether the selected file's preview has loaded or failed. It reads the same queries as
+ *  LinkedFilePreview (shared cache): a return to Files restores the main pane's offset against the
+ *  loaded preview, so it waits for it as well as for the root listing. */
+function usePreviewSettled(runId: string, path: string | null, artifactId: string | null, conflict: boolean): boolean {
+  const live = useFileLink(runId, conflict || artifactId !== null ? null : path)
+  const published = useArtifact(runId, conflict ? null : artifactId)
+  if (conflict || (path === null && artifactId === null)) return true
+  return !(artifactId !== null ? published : live).isPending
 }
 
 function FilesView({ run }: { run: ApiRun }) {
@@ -41,6 +53,8 @@ function FilesView({ run }: { run: ApiRun }) {
     setQuery(next)
   }
   const refused = root.isError && root.error instanceof ApiError && root.error.status === 409
+  const previewSettled = usePreviewSettled(run.id, selected, artifactId, conflict)
+  const memory = useFilesViewMemory(run.id, !root.isPending && previewSettled)
   return <div data-route="task-files" className="flex min-h-full flex-col">
     <RunHeader run={run} tab="files" />
     <form className="flex min-w-0 gap-2 px-[18px] pt-[22px] md:px-9" onSubmit={event => { event.preventDefault(); if (filePath.trim()) select('path', filePath.trim()) }}>
@@ -51,9 +65,9 @@ function FilesView({ run }: { run: ApiRun }) {
       <Button type="submit" variant="outline" className="h-11 shrink-0" disabled={!filePath.trim()}>Open file</Button>
     </form>
     <div className="flex min-h-0 flex-col items-stretch gap-5 px-[18px] py-[22px] [--diff-sticky-top:1rem] md:flex-row md:items-start md:px-9">
-      <aside data-slot="files-tree-pane" className="w-full shrink-0 rounded-xl border border-border bg-card p-3.5 md:sticky md:top-[var(--diff-sticky-top)] md:max-h-[calc(100dvh_-_64px_-_var(--diff-sticky-top)_-_1rem)] md:w-60 md:overflow-y-auto md:overscroll-contain lg:w-72">
+      <aside ref={memory.tree} data-slot="files-tree-pane" className="w-full shrink-0 rounded-xl border border-border bg-card p-3.5 md:sticky md:top-[var(--diff-sticky-top)] md:max-h-[calc(100dvh_-_64px_-_var(--diff-sticky-top)_-_1rem)] md:w-60 md:overflow-y-auto md:overscroll-contain lg:w-72">
         <h2 className="sr-only">Worktree files</h2>
-        {root.isPending ? <p data-slot="files-loading" className="py-4 text-xs">Loading files…</p> : root.isError ? <CenteredState icon={refused ? <FolderTreeIcon /> : <TriangleAlertIcon size={16} />} tone={refused ? 'neutral' : 'danger'} heading="h2" title={refused ? 'No files to browse' : 'Could not load the files'} subtitle={root.error.message} /> : <FilesTree runId={run.id} selected={selected} onSelect={path => select('path', path)} />}
+        {root.isPending ? <p data-slot="files-loading" className="py-4 text-xs">Loading files…</p> : root.isError ? <CenteredState icon={refused ? <FolderTreeIcon /> : <TriangleAlertIcon size={16} />} tone={refused ? 'neutral' : 'danger'} heading="h2" title={refused ? 'No files to browse' : 'Could not load the files'} subtitle={root.error.message} /> : <FolderMemoryContext.Provider value={memory.folders}><FilesTree runId={run.id} selected={selected} onSelect={path => select('path', path)} /></FolderMemoryContext.Provider>}
         <section className="mt-4 border-t border-border pt-3" aria-label="Published artifacts">
           <h2 className="text-sm font-medium">Published artifacts</h2>
           {artifacts.isPending ? <p className="py-2 text-xs">Loading published files…</p> : artifacts.isError ? <p role="alert" className="py-2 text-xs">Could not load published files.</p> : artifacts.data.artifacts.length === 0 ? <p className="py-2 text-xs text-muted-foreground">No published files yet.</p> : <ul>{artifacts.data.artifacts.map(artifact => <li key={artifact.id}><button type="button" aria-current={artifact.id === artifactId ? 'true' : undefined} className="min-h-11 w-full rounded px-2 py-2 text-left text-xs wrap-anywhere hover:bg-muted focus-visible:ring-2" onClick={() => select('artifact', artifact.id)}>{artifact.name}</button></li>)}</ul>}
