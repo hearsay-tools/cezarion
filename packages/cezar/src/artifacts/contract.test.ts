@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { artifactListSchema, artifactParamsSchema, fileLinkQuerySchema, fileLinkResultSchema, filePreviewDataSchema, publishedArtifactSchema } from '@open-mercato/cezar-contract/artifacts';
+import { artifactListSchema, artifactMetadataResponseSchema, artifactParamsSchema, fileLinkQuerySchema, fileLinkResultSchema, filePreviewDataSchema, publishedArtifactSchema } from '@open-mercato/cezar-contract/artifacts';
 
 const metadata = { id: 'c0b82ee1-57c0-4bd4-b8b8-4b55f77ba230', runId: '12345678-1234-4234-8234-123456789012', name: 'notes.md', sourcePath: '/tmp/notes.md', createdAt: '2026-09-23T21:00:00.000Z', size: 0, sha256: 'a'.repeat(64) };
 describe('artifact wire contract', () => {
@@ -12,6 +12,12 @@ describe('artifact wire contract', () => {
     expect(artifactListSchema.parse({ artifacts: [metadata] })).toEqual({ artifacts: [metadata] });
     expect(artifactListSchema.safeParse({ artifacts: Array.from({ length: 65 }, () => metadata) }).success).toBe(false);
     expect(artifactParamsSchema.safeParse({ id: metadata.runId, artifactId: '../escape' }).success).toBe(false);
+  });
+  it('accepts old metadata and bounds the optional title without returning content', () => {
+    expect(artifactMetadataResponseSchema.parse({ artifact: metadata })).toEqual({ artifact: metadata });
+    expect(publishedArtifactSchema.parse({ ...metadata, title: 'x'.repeat(200) }).title).toHaveLength(200);
+    expect(publishedArtifactSchema.safeParse({ ...metadata, title: 'x'.repeat(201) }).success).toBe(false);
+    expect(artifactMetadataResponseSchema.safeParse({ artifact: metadata, content: 'body' }).success).toBe(false);
   });
   it('allows optional wire fields to be omitted without introducing keys', () => {
     const file = { type: 'file', path: 'notes.md', size: 0, binary: false, tooLarge: false, source: 'worktree' };

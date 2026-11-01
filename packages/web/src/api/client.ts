@@ -4,7 +4,7 @@ import { invalidateLiveReads } from './live-coordinator'
 import type {
   FileLinkResult,
   FilePreviewData,
-  PublishedArtifact,
+  PublishedArtifact, ArtifactMetadataResponse,
   AgentConfigFileContent,
   AgentAccountDetailsResponse,
   AgentAccountStatusResponse,
@@ -1145,20 +1145,20 @@ export async function getArtifact(id: string, artifactId: string, opts?: ReadOpt
   return unwrap(await cez.api.v1.p[':projectId'].runs[':id'].artifacts[':artifactId'].$get(
     { param: { projectId: queryScope(), id, artifactId } }, init(opts)), '/runs/:id/artifacts/:artifactId')
 }
+export async function getArtifactMetadata(id: string, artifactId: string, opts?: ReadOptions): Promise<ArtifactMetadataResponse> {
+  return unwrap(await cez.api.v1.p[':projectId'].runs[':id'].artifacts[':artifactId'].metadata.$get(
+    { param: { projectId: queryScope(), id, artifactId } }, init(opts)), '/runs/:id/artifacts/:artifactId/metadata')
+}
 export function artifactUrl(id: string, artifactId: string, representation: 'download' | 'image'): string {
   return apiPath(runPath(id, `/artifacts/${encodeURIComponent(artifactId)}/${representation}`))
 }
 export function fileLinkImageUrl(id: string, path: string): string {
   return apiPath(runPath(id, `/file-link?path=${encodeURIComponent(path)}&raw=1`))
 }
-
-/** The same-origin URL an `<img>` can load an image file's bytes from (R5 Files tab). The
- *  server serves raw ONLY for image extensions within the size cap — everything else 409s.
- *  Scoped here rather than in send() — this URL is handed to an `<img>`, never fetched. */
+/** Scoped same-origin `<img>` URL (not fetched): raw images within the size cap; otherwise 409. */
 export function runFileRawUrl(id: string, path: string): string {
   return apiPath(runPath(id, `/files?path=${encodeURIComponent(path)}&raw=1`))
 }
-
 // ---- workspace mutations ------------------------------------------------------------------
 
 /** Prepare the server-selected release without interrupting the running cockpit. */

@@ -5,6 +5,7 @@ export const publishedArtifactSchema = z.object({
   id: z.uuid(),
   runId: z.uuid(),
   name: z.string().min(1).max(255),
+  title: z.string().max(200).optional(),
   sourcePath: pathSchema.refine(value => /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value), 'Expected an absolute source path'),
   createdAt: z.iso.datetime(),
   size: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
@@ -32,6 +33,8 @@ export const fileLinkResultSchema = z.union([
   }).strict(),
 ]);
 export type FileLinkResult = z.infer<typeof fileLinkResultSchema>;
+export const artifactMetadataResponseSchema = z.object({ artifact: publishedArtifactSchema }).strict();
+export type ArtifactMetadataResponse = z.infer<typeof artifactMetadataResponseSchema>;
 export const artifactListSchema = z.object({ artifacts: z.array(publishedArtifactSchema).max(64) }).strict();
 export const fileLinkQuerySchema = z.object({ path: pathSchema, raw: z.literal('1').optional() }).strict();
 // Project mounts also carry projectId, validated by the outer project middleware.

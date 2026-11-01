@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -5,8 +6,9 @@ import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { artifactDirectory, publishArtifact } from '../artifacts/store.ts';
-import { artifactListSchema, fileLinkResultSchema, filePreviewDataSchema } from '@open-mercato/cezar-contract/artifacts';
+import { artifactListSchema, artifactMetadataResponseSchema, fileLinkResultSchema, filePreviewDataSchema } from '@open-mercato/cezar-contract/artifacts';
 import type { RunManager } from '../workflows/run.ts';
+import { ProjectContexts } from './project-context.ts';
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 
@@ -92,6 +94,45 @@ describe('task file links', () => {
     expect((await get(`/artifacts/${artifact.id}/image`)).status).toBe(409);
     expect((await get('/artifacts/not-a-uuid')).status).toBe(400);
     expect((await get('/file-link?path=a&raw=unexpected')).status).toBe(400);
+  });
+  it('returns metadata and a title without content through the scoped mount', async () => {
+    const path = join(working, 'report.html');
+    writeFileSync(path, '<title>Report &amp; results</title><p>private body</p>');
+    const artifact = await publishArtifact(artifactDirectory(dataDir, runId), runId, path);
+    const response = await get(`/artifacts/${artifact.id}/metadata`, '/p/default');
+    expect(response.status).toBe(200);
+    const body = artifactMetadataResponseSchema.parse(await response.json());
+    expect(body).toEqual({ artifact: { ...artifact, title: 'Report & results' } });
+    expect(JSON.stringify(body)).not.toContain('private body');
+  });
+  it('does not expose a boot-project artifact through another project', async () => {
+    const path = join(working, 'report.html'); writeFileSync(path, '<title>Owned</title>');
+    const artifact = await publishArtifact(artifactDirectory(dataDir, runId), runId, path);
+    const otherRoot = join(root, 'other'); mkdirSync(otherRoot);
+    const contexts = new ProjectContexts({ listProjects: async () => [{ id: 'other', root: otherRoot, status: 'not-git' }] });
+    try {
+      const app = createApp({ repoRoot: root, store, contexts, manager: {} as RunManager, version: 'test' });
+      expect((await apiRequest(app, `/api/v1/p/default/runs/${runId}/artifacts/${artifact.id}/metadata`)).status).toBe(200);
+      expect((await apiRequest(app, `/api/v1/p/other/runs/${runId}/artifacts/${artifact.id}/metadata`)).status).toBe(404);
+    } finally { contexts.disposeAll(); }
+  });
+  it('returns 404 for unknown, deleted and size-mismatched metadata selections', async () => {
+    expect((await get(`/artifacts/${randomUUID()}/metadata`)).status).toBe(404);
+    const path = join(working, 'report.html'); writeFileSync(path, '<title>Report</title>');
+    const artifact = await publishArtifact(artifactDirectory(dataDir, runId), runId, path);
+    const content = join(artifactDirectory(dataDir, runId), artifact.id, 'content');
+    writeFileSync(content, 'short');
+    expect((await get(`/artifacts/${artifact.id}/metadata`)).status).toBe(404);
+    rmSync(content);
+    expect((await get(`/artifacts/${artifact.id}/metadata`)).status).toBe(404);
+    expect((await get('/artifacts/not-a-uuid/metadata')).status).toBe(400);
+  });
+  it('does not hash content for metadata, while content reads still verify it', async () => {
+    const path = join(working, 'report.txt'); writeFileSync(path, 'original');
+    const artifact = await publishArtifact(artifactDirectory(dataDir, runId), runId, path);
+    writeFileSync(join(artifactDirectory(dataDir, runId), artifact.id, 'content'), 'modified');
+    expect((await get(`/artifacts/${artifact.id}/metadata`)).status).toBe(200);
+    expect((await get(`/artifacts/${artifact.id}`)).status).toBe(404);
   });
   it('lists no publications for old tasks', async () => {
     expect(await (await get('/artifacts')).json()).toEqual({ artifacts: [] });
