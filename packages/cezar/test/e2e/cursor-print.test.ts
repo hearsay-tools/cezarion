@@ -38,7 +38,9 @@ for (const transport of [undefined, 'cursor-acp']) {
   const runner = createRunner('cursor', transport ? { sessionTransport: transport } : {});
   const result = await runner.run({ cwd: process.cwd(), userPrompt: 'mock:cezar-done', toolGrant: { kind: 'unset' }, timeoutMs: 10_000 }, event => events.push(event));
   assert.equal(events.find(event => event.type === 'session')?.sessionTransport, 'cursor-print');
-  assert.match(result.text, /CEZ:DONE/);
+  // mock:cezar-done answers 'Done.' after its cezar_done call; a bare runner has no tool controller,
+  // so the turn text is the reply the print transport carried, not a completion.
+  assert.match(result.text, /^Done\./);
   assert.equal(events.some(event => event.type === 'error'), false);
 }
 for (const transport of [undefined, 'cursor-acp']) {

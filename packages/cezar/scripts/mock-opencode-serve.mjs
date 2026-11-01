@@ -306,7 +306,6 @@ const info = (extra) => ({
 
 let autonomousTurn = 0;
 let autonomousCap = false;
-let autonomousReadinessIdle = false;
 const bodyRoutes = [
   [(req, url) => req.method === 'POST' && /^\/question\/[^/]+\/(reply|reject)$/.test(url), replyToQuestion],
   [(req, url) => req.method === 'POST' && /^\/permission\/([^/]+)\/reply$/.test(url), replyToPermission],
@@ -1089,9 +1088,7 @@ function acknowledgePrompt(res, body, deliveryText) {
   res.writeHead(200, { 'content-type': 'application/json' });
   // #426: a nudged turn can finish on SSE before its HTTP acceptance arrives.
   // Force that ordering in the cap scenario; the first opening stays ordinary.
-  if (autonomousReadinessIdle && body.includes('Continue working autonomously until the task is fully complete.')) {
-    // Keep the portable answer HTTP request unacknowledged while its SSE turn finishes.
-  } else if (autonomousCap && body.includes('Continue working autonomously until the task is fully complete.')) {
+  if (autonomousCap && body.includes('Continue working autonomously until the task is fully complete.')) {
     setTimeout(() => res.end(JSON.stringify({ info: info({}), parts: [] })), 100);
   } else if (body.includes('f7-delay-ack')) {
     // F7: SSE turn-end before HTTP ACK so parkAfterAck applies the silent-tail nudge.
@@ -1151,7 +1148,6 @@ async function preparePromptTurn(res, url, body, received) {
     heldBeats.unref?.();
     return true;
   }
-  if (body.includes('mock:autonomous-readiness-idle')) autonomousReadinessIdle = true;
   if (body.includes('mock:autonomous-cap') || body.includes('mock:autonomous-cezar-ask-cap')) autonomousCap = true;
   if (await prepareSilentTail(body)) return true;
   return false;
@@ -1188,8 +1184,4 @@ server.listen(0, hostname, () => {
 // handler a shutdown scenario replaced.
 process.stdin.on('end', () => process.exit(0));
 process.stdin.resume();
-process.on('SIGTERM', () => {
-  // Expose the end-request/process-exit interval to the root idle regression.
-  if (autonomousReadinessIdle) setTimeout(() => process.exit(0), 250);
-  else process.exit(0);
-});
+process.on('SIGTERM', () => process.exit(0));

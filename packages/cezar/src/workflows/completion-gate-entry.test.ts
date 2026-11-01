@@ -127,17 +127,6 @@ describe('the completion gate outside a turn end', () => {
     expect(sent()).toBe(0);
   });
 
-  // A turn end with an ask line skips owed input; its monitoring line still opens the timer alias,
-  // as on main's `applyTurnEnd` (hearsay-tools/cezarion#1525 review).
-  it('a turn end with an ask line and a monitoring line opens the timer alias', () => {
-    state.atTurnBoundary = session;
-    const ask = { questions: [{ header: 'Choice', question: 'Which framework?', options: [{ label: 'Vitest' }, { label: 'Node' }] }] };
-    runInternals(manager).turnSettler.settleTurn(id, state, 'turn-end', { stepId: 'task', monitoring: true, humanGate: false, ask,
-      done: false, nudgedLastTurn: false });
-    expect(store.getRun(id)?.waits?.some(wait => wait.kind === 'timer')).toBe(true);
-    expect(store.getRun(id)?.status).toBe('waiting');
-  });
-
   // A run an earlier entry already parked keeps that park: a second one would free its slot twice.
   it('at the boundary, a second refusal keeps the park the first one made and frees no second slot', () => {
     state.atTurnBoundary = session;

@@ -3,7 +3,7 @@
 import { DONE, ask } from './mock-ci-tool.mjs';
 let cap = false;
 export async function autonomousReply(prompt, lifecycle) {
-  const askCap = prompt.includes('mock:autonomous-cezar-ask-cap') || prompt.includes('mock:autonomous-readiness-idle');
+  const askCap = prompt.includes('mock:autonomous-cezar-ask-cap');
   if (prompt.includes('mock:autonomous-cap') || askCap) cap = true;
   if (askCap) return 'Pick one.' + await lifecycle(ask());
   if (prompt.startsWith('Continue working autonomously until the task is fully complete.')) {

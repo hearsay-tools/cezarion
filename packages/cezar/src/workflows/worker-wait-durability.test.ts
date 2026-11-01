@@ -304,7 +304,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(p.id)?.sessionEverOpened === true);
         }
         const w = await worker(p.id); const wait = register(p.id, [w.id]);
-        if (marker === 'mock:cezar-ask') {
+        // The Continue runs autonomous, where cezar_ask is refused (hearsay-tools/cezarion#2397):
+        // its worker wait parks the run as the other markers do.
+        if (marker === 'mock:cezar-ask' && mode === 'fresh') {
           await until(() => store.readEvents(p.id).some(event => event.type === 'ask.requested'));
           expect(waitOf(store.getRun(p.id))?.id).toBe(wait.id);
           expect(store.getRun(p.id)?.agentInputs?.some(input => input.deliveredAt)).not.toBe(true);
@@ -313,6 +315,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           expect(store.getRun(p.id)?.status).toBe('waiting');
           expect(semaphore.busy()).toBe(0);
           expect(store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).includes('autonomous — continuing'))).toBe(false);
+          if (marker === 'mock:cezar-ask') expect(store.readEvents(p.id).some(event => event.type === 'ask.requested')).toBe(false);
         }
       });
     }

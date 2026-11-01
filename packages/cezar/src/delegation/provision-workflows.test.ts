@@ -26,11 +26,20 @@ import { ProjectContexts } from '../server/project-context.ts';
 import { readPersistedRuns, readPersistedText, seedRuns } from '../runs/run-store.testkit.ts';
 
 const until = (predicate: () => boolean) => vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15000, interval: 10 });
-/** The fake session's turn ends on the done line, which completes an earlier workflow step (hearsay-tools/cezarion#1620). */
-const doneTurn = (entry: { emit(event: AgentEvent): void }, text: string) => {
-  entry.emit({ type: 'text', text: `${text}\n\nCEZ:DONE` });
+/** The managers a fake session's run may belong to: the fixture's and any recovered one. */
+let liveManagers: () => RunManager[] = () => [];
+/** The fake session calls cezar_done, then its turn ends, which completes an earlier workflow step
+ *  (hearsay-tools/cezarion#1620, hearsay-tools/cezarion#2397). */
+const doneTurn = (entry: { spec: AgentRunSpec; emit(event: AgentEvent): void }, text: string) => void (async () => {
+  const runId = entry.spec.env!.CEZ_TASK_ID!;
+  const manager = liveManagers().find(candidate => runInternals(candidate).active.has(runId));
+  const state = manager && runInternals(manager).active.get(runId);
+  if (!manager || !state?.ciGeneration) throw new Error(`no live session for ${runId}`);
+  const answer = await manager.cezarToolHandlers(runId, state.ciGeneration).finishTurn({}, new AbortController().signal);
+  if (!answer.ok) throw new Error(`cezar_done refused: ${answer.code}`);
+  entry.emit({ type: 'text', text });
   entry.emit({ type: 'turn-end' });
-};
+})();
 // Git worktrees + a live RunManager contend under full-suite workers. until() is already 15s;
 // the default 5s testTimeout / 10s hookTimeout cannot finish those waits. Teardown still cancels
 // and finishes sessions without polling, then waits for owned work before removing the fixture.
@@ -40,6 +49,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   const recoveredStores: RunStore[] = [];
   const sessions: Array<{ spec: AgentRunSpec; session: AgentSession; emit(event: AgentEvent): void; finish(text?: string): void }> = [];
   beforeEach(async () => {
+    liveManagers = () => [f.manager, ...recoveredManagers];
     vi.stubEnv('CEZ_DELEGATION', '1'); vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
     f = fixture(); vi.restoreAllMocks();
     onTestFinished(scopeFixtureProcesses());

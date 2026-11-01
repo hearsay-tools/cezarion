@@ -1,3 +1,4 @@
+import { WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -192,7 +193,7 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
 
   it('a timer cancelled at the budget with nothing else open opens a budget human wait', async () => {
     claudeWire();
-    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'timer', seconds: 60, note: 'recheck' }), runner: 'claude' });
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 60, note: 'recheck' }), runner: 'claude' });
     await until(() => store.getRun(run.id)?.status === 'waiting' && store.getRun(run.id)?.waits?.some(wait => wait.kind === 'timer') === true);
     const timer = store.getRun(run.id)!.waits!.find(wait => wait.kind === 'timer')!;
     store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES });
@@ -233,7 +234,7 @@ describe('the lifecycle prompt teaches the cezar tools', { timeout: 45_000 }, ()
   it('a timer wake speaks the tools', async () => {
     wire();
     const run = await opened();
-    expect(manager.sendMessage(run.id, [{ type: 'text', text: toolCall('cezar_wait', { kind: 'timer', seconds: 120, note: 'recheck' }) }])).toBe(true);
+    expect(manager.sendMessage(run.id, [{ type: 'text', text: toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 120, note: 'recheck' }) }])).toBe(true);
     await until(() => store.getRun(run.id)?.status === 'waiting' && store.getRun(run.id)?.waits?.some(wait => wait.kind === 'timer') === true);
     const timer = store.getRun(run.id)!.waits!.find(wait => wait.kind === 'timer')!;
     runInternals(manager).waitWatches.waitTimers.get(timer.id)!.timer._onTimeout();
@@ -261,7 +262,7 @@ describe('the lifecycle prompt teaches the cezar tools', { timeout: 45_000 }, ()
   it('a done line is ordinary text: the turn gets the no-wait nudge, and the task does not finish', async () => {
     wire();
     const run = await opened();
-    const nudges = () => store.readEvents(run.id).filter(event => event.type === 'note' && event.message === NO_WAIT_NUDGE_NOTE).length;
+    const nudges = () => store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith(NO_WAIT_NUDGE_NOTE)).length;
     const before = nudges();
     expect(manager.sendMessage(run.id, [{ type: 'text', text: messagesPrompt('claude', ['All done.\nCEZ:DONE']) }])).toBe(true);
     await until(() => nudges() > before && store.getRun(run.id)?.status === 'waiting');
@@ -285,7 +286,7 @@ describe('cezar_done refusals at worker capacity', { timeout: 45_000 }, () => {
   it('every refusal naming 32 workers parses as a CezarDoneAnswer', async () => {
     claudeWire();
     // A parent parked on a timer, not on a question of its own: the worker checks decide.
-    const p = await parent(toolCall('cezar_wait', { kind: 'timer', seconds: 600, note: 'recheck' }), 'claude');
+    const p = await parent(toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 600, note: 'recheck' }), 'claude');
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const asked = vi.spyOn(runInternals(manager).workerQuestions, 'unansweredQuestions').mockReturnValue(ids().map(workerId => ({ workerId, messageId: randomUUID() })));
     const questions = await done(p.id);

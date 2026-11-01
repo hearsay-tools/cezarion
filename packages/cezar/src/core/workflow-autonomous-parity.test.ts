@@ -5,9 +5,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { AUTONOMOUS_CRITERIA, driveRun, driveSeam, exemptionFor, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 import { handoffPath } from '../handoff.ts';
-import { AUTONOMOUS_ASK_NOTE, MAX_AUTO_CONTINUES } from '../workflows/run.ts';
-import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { MAX_AUTO_CONTINUES } from '../workflows/run.ts';
+import { hasPendingAsk, readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { watchTurnOutcomes } from '../workflows/turn-outcomes.testkit.ts';
+import { WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 // The settle budget for the row cells below. OpenCode's A5, A11 and A12 cells run
 // MAX_AUTO_CONTINUES turns and take 4.6-4.8 s alone and 5.4-5.9 s in an idle full
@@ -121,9 +122,11 @@ describe('autonomous turn-end parity — #426', () => {
       }
       if (exemption) {
         it(`${backend} ${row.id} exemption — ${exemption.reason}`, async () => {
+          // The wire's ask scenario is a cezar_ask call, which no seam answers: the turn ends with no
+          // native ask.requested. A native mid-turn ask on this wire fails the first line.
           const observed = await driveSeam(backend, 'ask');
           expect(observed.v2.some(e => e.type === 'ask.requested')).toBe(false);
-          expect(observed.v1.some(e => e.type === 'text' && e.text.includes('CEZ:ASK'))).toBe(true);
+          expect(observed.v1.some(e => e.type === 'turn-end')).toBe(true);
         });
         continue;
       }
@@ -148,6 +151,9 @@ describe('autonomous turn-end parity — #426', () => {
             questions: [{ header: 'Prior', question: 'A prior unanswered question?', options: [{ label: 'Yes' }, { label: 'No' }] }],
           });
           const updates = vi.spyOn(store, 'updateRun');
+          // A refused cezar_ask answers the agent and leaves no run event; the registry's warning is its trace.
+          const warnings = vi.spyOn(console, 'warn');
+          const askRefusals = () => warnings.mock.calls.filter(([message]) => String(message).includes('wait registration refused: autonomous_run')).length;
           const startSeq = store.readEvents(runId).length;
           if (mode === 'continuation') expect(manager.continueRun(runId, { text: promptFor(backend, row.scenario) }).ok).toBe(true);
           else manager.enqueueOwnedRun(runId);
@@ -174,11 +180,15 @@ describe('autonomous turn-end parity — #426', () => {
           function assertParkedOutcome(): void {
             expect(store.getRun(runId)?.status).toBe('waiting');
             expect(notes).toHaveLength(0);
-            if (row.id !== 'A6') {
-              expect(events.some(e => e.type === 'ask.requested')).toBe(true);
-              expect(events.some(e => e.type === 'human-input-delivered')).toBe(false);
-              expect(events.some(e => e.type === 'note' && String(e.message).startsWith(AUTONOMOUS_ASK_NOTE))).toBe(false);
+            if (row.id === 'A9') expect(events.some(e => e.type === 'ask.requested')).toBe(true);
+            // The agent's own timer is the run's wake, so no autonomous nudge goes beside it.
+            if (row.id === 'A7') expect(store.getRun(runId)?.waits?.filter(wait => wait.kind === WAIT_KIND.timer && wait.phase === WAIT_PHASE.open)).toHaveLength(1);
+            if (row.id === 'A10') {
+              // The persisted question stays the pending one: the agent's own cezar_ask was refused.
+              expect(hasPendingAsk(store, runId)).toBe(true);
+              expect(askRefusals()).toBeGreaterThanOrEqual(1);
             }
+            if (row.id !== 'A6') expect(events.some(e => e.type === 'human-input-delivered')).toBe(false);
           }
           function assertDoneOutcome(): void {
             expect(store.getRun(runId)?.status).toBe('done');
@@ -189,28 +199,26 @@ describe('autonomous turn-end parity — #426', () => {
             const stepId = store.getRun(runId)!.steps.at(-1)!.id;
             expect(notes.every(note => note.stepId === stepId)).toBe(true);
             if (row.id === 'A3' || row.id === 'A4') {
-              expect(events.some(e => e.type === 'note' && e.stepId === stepId && String(e.message).startsWith(AUTONOMOUS_ASK_NOTE) && String(e.message).includes('Which test library?'))).toBe(true);
+              expect(askRefusals()).toBeGreaterThanOrEqual(1);
               expect(events.filter(e => e.type === 'ask.requested' || e.type === 'human-input-delivered')).toEqual([]);
               expect(events.filter(e => e.type === 'user-message' && String(e.text).startsWith('Continue working autonomously'))).toEqual([]);
             }
           }
           if (row.id === 'A5' || row.id === 'A11' || row.id === 'A12') {
             assertCapOutcome();
-          } else if (row.id === 'A6' || row.id === 'A9' || row.id === 'A10') {
+          } else if (row.id === 'A6' || row.id === 'A7' || row.id === 'A9' || row.id === 'A10') {
             assertParkedOutcome();
           } else {
             assertDoneOutcome();
           }
           if (row.id === 'A11' || row.id === 'A12') {
-            expect(events.filter(e => e.type === 'note' && String(e.message).startsWith(AUTONOMOUS_ASK_NOTE))).toHaveLength(1);
+            expect(askRefusals()).toBeGreaterThanOrEqual(1);
             expect(events.filter(e => e.type === 'ask.requested' || e.type === 'human-input-delivered')).toEqual([]);
             expect(events.filter(e => e.type === 'user-message' && String(e.text).startsWith('Continue working autonomously'))).toEqual([]);
-            // Prove the native SSE boundary actually beat the portable answer's
-            // HTTP ACK, rather than passing through the already-ready path.
-            if (backend === 'opencode') expect(turns.outcomes(runId)).toContainEqual({ kind: 'readiness' });
             expect(updates.mock.calls.filter(([id, patch]) => id === runId && patch.status === 'waiting')).toHaveLength(1);
           }
           updates.mockRestore();
+          warnings.mockRestore();
         });
       }, row.id === 'A5' || row.id === 'A11' || row.id === 'A12' ? CAP_ROW_TIMEOUT_MS : 30_000);
     }

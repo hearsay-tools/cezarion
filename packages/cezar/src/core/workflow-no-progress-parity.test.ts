@@ -17,7 +17,7 @@ vi.mock('./runner-runtime.ts', async importOriginal => ({
 // inactivity deadline (and N5's kill escalation) uses the controlled clock.
 // Advancing it after watchdog.pid exists cannot spend the fixture's startup
 // budget before the mock has reached the stalled turn (hearsay-tools/cezarion#1319).
-function controlDeadlines(killEscalation: boolean) {
+function controlDeadlines(killEscalation: boolean, onDeadlineArmed?: () => void) {
   const realSetTimeout = globalThis.setTimeout;
   const realClearTimeout = globalThis.clearTimeout;
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
@@ -33,6 +33,7 @@ function controlDeadlines(killEscalation: boolean) {
     }
     const timer = fakeSetTimeout(callback, ms, ...args);
     controlled.add(timer);
+    if (ms === 800) onDeadlineArmed?.();
     return timer;
   }) as typeof setTimeout);
   vi.spyOn(globalThis, 'clearTimeout').mockImplementation(timer => {
@@ -63,9 +64,19 @@ describe('managed open-turn inactivity — #470', () => {
           child.once('exit', (_code, signal) => { if (child.pid) exits.set(child.pid, signal); });
           return child;
         });
-        // N2 measures repeated native progress over a real 2.4 s turn. The
-        // other rows exercise expiry only after their native readiness signal.
-        if (row.id !== 'N2') controlDeadlines(row.id === 'N5');
+        // N2: each native progress event re-arms the deadline, and only a re-arm moves the
+        // controlled clock, 300 ms at a time. The turn outlives several deadlines through its
+        // progress alone, while the silent cezar_done call that ends it (an MCP server start,
+        // no native frame) spends no controlled time. The other rows exercise expiry only after
+        // their native readiness signal.
+        let advancing = false;
+        let advanced = 0;
+        const advanceAfterRearm = () => {
+          if (advancing) return;
+          advancing = true;
+          setImmediate(() => void vi.advanceTimersByTimeAsync(300).then(() => { advanced += 300; advancing = false; }));
+        };
+        controlDeadlines(row.id === 'N5', row.id === 'N2' ? advanceAfterRearm : undefined);
         const workflowDef = row.id === 'N1' || row.id === 'N2' || row.id === 'N5' || row.id === 'N7'
           ? workflowDefSchema.parse({ name: 'inactivity', source: 'file', steps: [
             { id: 'work', prompt: '{{task}}' }, { id: 'check', command: 'true' },
@@ -134,6 +145,7 @@ describe('managed open-turn inactivity — #470', () => {
           const run = store.getRun(runId)!;
           if (row.id === 'N2') {
             expect(run.error).toBeUndefined();
+            expect(advanced).toBeGreaterThan(3 * 800);
             expect(run.steps.map(s => s.status)).toEqual(['done', 'done']);
           } else {
             expect(run.status).toBe('failed');

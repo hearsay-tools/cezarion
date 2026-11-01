@@ -8,11 +8,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentRunResult, AgentRunner, AgentSession } from '../core/agent-runner.ts';
+import type { AgentEvent, AgentRunResult, AgentRunner, AgentSession } from '../core/agent-runner.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { RunStore } from '../runs/store.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { RunManager } from './run.ts';
+import { runInternals } from './run-internals.testkit.ts';
 import type { WorkflowDef } from './types.ts';
 
 const run = promisify(execFile);
@@ -31,6 +32,14 @@ const SINGLE_STEP: WorkflowDef = {
   source: 'built-in',
   steps: [{ id: 'task', name: 'Task', prompt: '{{task}}' }],
 };
+
+/** The turn calls cezar_done, then ends (hearsay-tools/cezarion#2397). */
+async function doneTurn(manager: RunManager, onEvent: ((event: AgentEvent) => void) | undefined): Promise<void> {
+  const [runId, state] = [...runInternals(manager).active][0]!;
+  const answer = await manager.cezarToolHandlers(runId, state.ciGeneration!).finishTurn({}, new AbortController().signal);
+  if (!answer.ok) throw new Error(`cezar_done refused: ${answer.code}`);
+  onEvent?.({ type: 'turn-end' });
+}
 
 /** Ends when `condition` holds; each call has its own deadline, which only ends a hang. */
 async function until(condition: () => boolean, what: () => string): Promise<void> {
@@ -78,8 +87,8 @@ describe('held human input liveness bound (#486)', () => {
         queueMicrotask(() => {
           opts?.onUiEvent?.({ type: 'session.started', sessionId: spec.sessionId ?? 's', backend: 'claude' });
           opts?.onUiEvent?.({ type: 'turn.started', turnId: 't1' });
-          onEvent?.({ type: 'text', text: 'Working.\nCEZ:DONE' });
-          onEvent?.({ type: 'turn-end' });
+          onEvent?.({ type: 'text', text: 'Working.' });
+          void doneTurn(manager, onEvent);
         });
         const close = () => {
           if (!open) return;
@@ -116,8 +125,8 @@ describe('held human input liveness bound (#486)', () => {
         queueMicrotask(() => {
           opts?.onUiEvent?.({ type: 'session.started', sessionId: spec.sessionId ?? 's', backend: 'claude' });
           opts?.onUiEvent?.({ type: 'turn.started', turnId: 't1' });
-          onEvent?.({ type: 'text', text: 'Working.\nCEZ:DONE' });
-          onEvent?.({ type: 'turn-end' });
+          onEvent?.({ type: 'text', text: 'Working.' });
+          void doneTurn(manager, onEvent);
         });
         const close = () => {
           if (!open) return;
@@ -154,8 +163,8 @@ describe('held human input liveness bound (#486)', () => {
         queueMicrotask(() => {
           opts?.onUiEvent?.({ type: 'session.started', sessionId: spec.sessionId ?? 's', backend: 'claude' });
           opts?.onUiEvent?.({ type: 'turn.started', turnId: 't1' });
-          onEvent?.({ type: 'text', text: 'Working.\nCEZ:DONE' });
-          onEvent?.({ type: 'turn-end' });
+          onEvent?.({ type: 'text', text: 'Working.' });
+          void doneTurn(manager, onEvent);
         });
         const close = () => {
           if (!open) return;

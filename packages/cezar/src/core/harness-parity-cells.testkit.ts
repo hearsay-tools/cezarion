@@ -29,7 +29,9 @@ import { TranscriptFactsQueue } from '../runs/transcript-facts-queue.ts';
 import { historyPaths } from '../runs/history-file.ts';
 import { MONITORING_TURN_CRITERIA, MONITORING_ACK_CRITERIA, MONITORING_ORDER_CRITERIA } from '../workflows/monitoring-turn.testkit.ts';
 import { WAIT_CRITERIA } from '../workflows/waits-parity.testkit.ts';
-import { monitoringTimerOf, monitoringWakeOf } from '../workflows/waits.testkit.ts';
+import { RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
+import type { TimerWaitEntry } from '@open-mercato/cezar-contract';
+import type { RunManager } from '../workflows/run.ts';
 import { randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { readMockRecords } from '../mock-records.testkit.ts';
@@ -291,35 +293,6 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
     },
   },
   {
-    // Groups 5 and 6 / #2, #3 — one row on purpose. The damage was never split
-    // text as such: a cezar marker assembled across deltas stopped matching its
-    // anchored regex, because `appendTurnText` joins v1 `text` events with a
-    // newline. So `CEZ:` + `MONITORING` as two events becomes `CEZ:\nMONITORING`
-    // and the run parks as "needs you" instead of monitoring.
-    //
-    // Each mock streams the strongest split its own wire permits: codex, opencode
-    // cursor and pi split INSIDE the marker (deltas, growing snapshots, tokens), which
-    // only a coalescer can reassemble; claude's stream-json has no deltas, so it
-    // sends the marker as its own whole assistant block — the multi-block reply
-    // that has to park correctly all the same.
-    id: 'S8',
-    name: 'S8 assembles split assistant text so a trailing marker still anchors',
-    scenario: 'split-text',
-    assert: ({ v1 }) => {
-      const texts = textEvents(v1);
-      // No single event may carry a TORN marker: that is the #2 defect exactly,
-      // and it survives the assembled-text check below when a stray later event
-      // happens to end the turn with an intact copy.
-      for (const text of texts) {
-        if (text.includes('CEZ:')) expect(text).toContain('CEZ:MONITORING');
-      }
-      const assembled = texts.reduce((acc, text) => appendTurnText(acc, text), '');
-      expect(assembled).toContain('parity split text');
-      // The exact test `workflows/run.ts` applies to decide a monitoring park.
-      expect(assembled.trimEnd()).toMatch(/CEZ:MONITORING$/);
-    },
-  },
-  {
     // Group 1 / #53, #54 — a runtime provider rejection used to look like a
     // clean finish, so the orchestrator parked the run as "Needs You" and the
     // user waited on an agent that was never coming back. The rejection has to
@@ -364,7 +337,7 @@ const SEAM_CRITERIA: readonly SeamCriterion[] = [
       // including AgentRunResult's fallback buffer and unfinished child deltas.
       const texts = v1.filter((e) => e.type === 'text').map((e) => e.text);
       expect(texts).toHaveLength(1);
-      expect(texts[0]).toMatch(/CEZ:MONITORING\s*$/);
+      expect(texts[0]).not.toContain('Child review finished.');
       expect(result.text).toBe(texts[0]);
       expect(v2.some((e) => e.type === 'item.completed' && e.item.kind === 'message'
         && e.item.text === 'Child review finished.' && !!e.item.parentItemId)).toBe(true);
@@ -441,6 +414,18 @@ const TERMINAL: readonly string[] = ['review', 'done', 'failed', 'cancelled'];
 const askEvents = (obs: RunObservation) =>
   obs.events.filter((e) => e.type === 'ask.requested');
 
+/** The open timer wait a declared park registered: a cezar_wait timer, or a monitoring timer. Since
+ *  the lifecycle markers went (hearsay-tools/cezarion#2397) every scenario parks through cezar_wait;
+ *  `waiting` with an open timer reads as monitoring (hearsay-tools/cezarion#1233). */
+const openTimerWait = (run?: { waits?: readonly unknown[] | undefined } | null): TimerWaitEntry | undefined =>
+  (run?.waits as TimerWaitEntry[] | undefined)?.find(wait => wait.kind === WAIT_KIND.timer && wait.phase === WAIT_PHASE.open);
+const timerWakeOf = (run?: { waits?: readonly unknown[] | undefined } | null): string | undefined => openTimerWait(run)?.deadline;
+/** The timer RunManager armed for the run's open timer wait. */
+const timerOf = (manager: RunManager, runId: string): (NodeJS.Timeout & { _onTimeout(): void }) | undefined => {
+  const id = openTimerWait(runInternals(manager).context.store.getRun(runId))?.id;
+  return id ? runInternals(manager).waitWatches.waitTimers.get(id)?.timer as NodeJS.Timeout & { _onTimeout(): void } | undefined : undefined;
+};
+
 const RUN_CRITERIA: readonly RunCriterion[] = [
   {
     // #550: Codex keeps its turn open and emits retryable errors; other wires
@@ -496,8 +481,8 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
   {
     // Group 3 / #6, #473 — an ask has to reach the cockpit as exactly one card
     // and park the run for the user. The two wires differ underneath: codex and
-    // opencode and cursor have native asks their runners map; claude and pi go
-    // through the `CEZ:ASK` marker in `workflows/run.ts`. Above the seam that
+    // opencode have native asks their runners map; claude, pi, omp and cursor call
+    // cezar_ask, whose human wait `workflows/run.ts` opens. Above the seam that
     // difference must be invisible.
     id: 'R3',
     name: 'R3 parks as waiting and emits exactly one ask card',
@@ -523,55 +508,28 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
     },
   },
   {
-    // #548: an earlier prose mention must not consume the real final-line ASK.
-    id: 'R18',
-    name: 'R18 resolves a final-line ASK after prose mentions the marker',
-    scenario: 'ask-snapshot',
-    settled: (record) => record?.status === 'waiting' || TERMINAL.includes(record?.status ?? ''),
-    assert: (obs) => {
-      expect(obs.record?.status).toBe('waiting');
-      expect(askEvents(obs)).toHaveLength(1);
-      expect(obs.events.some(e => e.type === 'note' && String(e.message).includes('structured question ignored'))).toBe(false);
-      expect(obs.events.some(e => e.type === 'text' && String(e.text).includes('Using the CEZ:ASK structured question format instead:'))).toBe(true);
-      expect(obs.events.some(e => e.type === 'text' && String(e.text).includes('\nCEZ:ASK {'))).toBe(false);
-    },
-  },
-  {
-    // #548: code spans and quoted logs alone are prose, never rejected ASK.
-    id: 'R19',
-    name: 'R19 leaves quoted ASK examples as plain text without a rejection',
-    scenario: 'ask-prose',
-    settled: (record) => record?.status === 'waiting' || TERMINAL.includes(record?.status ?? ''),
-    assert: (obs) => {
-      expect(obs.record?.status).toBe('waiting');
-      expect(askEvents(obs)).toHaveLength(0);
-      expect(obs.events.some(e => e.type === 'note' && String(e.message).includes('structured question ignored'))).toBe(false);
-      expect(obs.events.some(e => e.type === 'text' && String(e.text).includes('> CEZ:ASK {not valid json'))).toBe(true);
-    },
-  },
-  {
-    // Group 6 / #48 — a declared park is a non-attention state. The same
-    // scenario S8 asserts survives the seam: the cause below, the effect here.
+    // Group 6 / #48 — a declared park is a non-attention state: a cezar_wait timer parks
+    // the run as monitoring, never as Needs You.
     id: 'R5',
     name: 'R5 parks a declared monitoring turn on an open monitoring timer, not as a plain wait',
-    scenario: 'split-text',
+    scenario: 'cezar-wait',
     settled: (record) => record?.status === 'waiting',
     assert: (obs) => {
       // hearsay-tools/cezarion#1233: `waiting` plus an open timer reads as monitoring.
       expect(obs.record).toMatchObject({ status: 'waiting' });
-      expect(monitoringWakeOf(obs.record)).toBeDefined();
+      expect(timerWakeOf(obs.record)).toBeDefined();
       expect(deriveAttention(obs.record!).label).toBe('monitoring');
     },
   },
   {
-    // #149: the child message lands before the parent's turn-end, after its marker.
+    // #149: the child message lands before the parent's turn-end, after its cezar_wait.
     id: 'R12',
-    name: 'R12 keeps monitoring parked when child text follows the parent marker',
+    name: 'R12 keeps monitoring parked when child text follows the parent cezar_wait',
     scenario: 'subagent',
     settled: (record) => record?.status === 'waiting',
     assert: (obs) => {
       expect(obs.record).toMatchObject({ status: 'waiting' });
-      expect(monitoringWakeOf(obs.record)).toBeDefined();
+      expect(timerWakeOf(obs.record)).toBeDefined();
       expect(deriveAttention(obs.record!).label).toBe('monitoring');
     },
   },
@@ -611,7 +569,6 @@ const CONTROL_CRITERIA = [
   { id: 'R15', scenario: 'subagent-after-park' },
   // #961: hook items never move run state, mid-turn or after the park.
   { id: 'R77', scenario: 'hook-after-park' },
-  { id: 'R16', scenario: 'ask-snapshot' },
   { id: 'R20', scenario: 'baseline' },
   { id: 'R21', scenario: 'baseline' },
   { id: 'R22', scenario: 'baseline' },
@@ -623,7 +580,7 @@ const CONTROL_CRITERIA = [
   { id: 'R61', scenario: 'provider-error' },
   { id: 'R62', scenario: 'provider-error' },
   { id: 'R63', scenario: 'baseline' },
-  { id: 'R64', scenario: 'ask-snapshot' },
+  { id: 'R64', scenario: 'cezar-ask' },
   { id: 'R65', scenario: 'baseline' },
   { id: 'R66', scenario: 'baseline' },
   // hearsay-tools/cezarion#958: final autosave beside unrelated worktree process churn.
@@ -682,8 +639,8 @@ const CONTROL_CRITERIA = [
   // #399: shared monitoring instructions on each native prompt channel.
   { id: 'R36', scenario: 'baseline' },
   { id: 'R37', scenario: 'baseline' },
-  { id: 'R38', scenario: 'split-text' },
-  { id: 'R39', scenario: 'split-text' },
+  { id: 'R38', scenario: 'cezar-wait' },
+  { id: 'R39', scenario: 'cezar-wait' },
   { id: 'R40', scenario: 'baseline' },
   { id: 'R41', scenario: 'cezar-done' },
   { id: 'R42', scenario: 'baseline' },
@@ -1383,11 +1340,22 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         });
       }, 45_000);
 
-      it(`${backend} S11 non-human input cannot answer a native or marker ask`, async () => {
+      // A native ask is the runner's own: it refuses non-human input until a human answers. A
+      // cezar_ask is the workflow's human wait, which the runner never sees, so the run tier holds
+      // that input instead (R6); the exemption pins that the seam does not.
+      const s11 = exemptionFor('S11', backend);
+      it(s11 ? `${backend} is exempt from S11 — ${s11.reason}` : `${backend} S11 non-human input cannot answer a native ask`, async () => {
         await driveSeam(backend, 'ask', {
           whileOpen: async (session, { v1, v2 }) => {
             await waitFor(() => v2.some(e => e.type === 'ask.requested') || v1.some(e => e.type === 'turn-end'));
             const ends = v1.filter(e => e.type === 'turn-end').length;
+            if (s11) {
+              expect(s11.kind).toBe('capability-absent');
+              expect(v2.some(e => e.type === 'ask.requested')).toBe(false);
+              await expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo agent steering' }])).resolves.toBeUndefined();
+              await waitFor(() => textEvents(v1).some(text => text.includes('agent steering')));
+              return;
+            }
             expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo agent steering' }])).toBe(false);
             // bound: observe the real runner's native ask boundary for 150 ms; refused steering must not start a turn or answer the ask.
             await new Promise(resolve => setTimeout(resolve, 150));
@@ -1528,12 +1496,12 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             record => record?.status === 'waiting', 30_000,
             async ({ store, runId }) => {
               expect(store.getRun(runId)).toMatchObject({ status: 'waiting' });
-              const wake = monitoringWakeOf(store.getRun(runId));
+              const wake = timerWakeOf(store.getRun(runId));
               expect(wake).toBeDefined();
               const before = store.readEvents(runId).length;
               const changes: Array<{ status: string; monitoringWakeAt?: string | undefined }> = [];
               const recordChange = (record: NonNullable<RunObservation['record']>) => {
-                if (record.id === runId) changes.push({ status: record.status, monitoringWakeAt: monitoringWakeOf(record) });
+                if (record.id === runId) changes.push({ status: record.status, monitoringWakeAt: timerWakeOf(record) });
               };
               store.on('run', recordChange);
               try {
@@ -1542,7 +1510,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
                   backend === 'opencode'
                     ? event.type === 'usage.updated' && (event.usage as { total?: number } | undefined)?.total === 424242
                     : JSON.stringify(event).includes('Post-park child update processed.')));
-                expect({ ...store.getRun(runId), monitoringWakeAt: monitoringWakeOf(store.getRun(runId)) }).toMatchObject({ status: 'waiting', monitoringWakeAt: wake });
+                expect({ ...store.getRun(runId), monitoringWakeAt: timerWakeOf(store.getRun(runId)) }).toMatchObject({ status: 'waiting', monitoringWakeAt: wake });
                 for (const change of changes) expect(change).toEqual({ status: 'waiting', monitoringWakeAt: wake });
                 const after = store.readEvents(runId).slice(before);
                 expect(after.some(event => event.type === 'turn.started')).toBe(false);
@@ -1578,18 +1546,18 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             record => record?.status === 'waiting', 30_000,
             async ({ store, runId }) => {
               expect(store.getRun(runId)).toMatchObject({ status: 'waiting' });
-              const wake = monitoringWakeOf(store.getRun(runId));
+              const wake = timerWakeOf(store.getRun(runId));
               expect(wake).toBeDefined();
               const before = store.readEvents(runId).length;
               const changes: Array<{ status: string; monitoringWakeAt?: string | undefined }> = [];
               const recordChange = (record: NonNullable<RunObservation['record']>) => {
-                if (record.id === runId) changes.push({ status: record.status, monitoringWakeAt: monitoringWakeOf(record) });
+                if (record.id === runId) changes.push({ status: record.status, monitoringWakeAt: timerWakeOf(record) });
               };
               store.on('run', recordChange);
               try {
                 writeFileSync(release, 'go');
                 await waitFor(() => store.readEvents(runId).slice(before).some(event => JSON.stringify(event).includes('Late hook processed.')));
-                expect({ ...store.getRun(runId), monitoringWakeAt: monitoringWakeOf(store.getRun(runId)) }).toMatchObject({ status: 'waiting', monitoringWakeAt: wake });
+                expect({ ...store.getRun(runId), monitoringWakeAt: timerWakeOf(store.getRun(runId)) }).toMatchObject({ status: 'waiting', monitoringWakeAt: wake });
                 for (const change of changes) expect(change).toEqual({ status: 'waiting', monitoringWakeAt: wake });
                 expect(store.readEvents(runId).slice(before).some(event => event.type === 'turn.started')).toBe(false);
                 const hooks = store.readEvents(runId)
@@ -1600,40 +1568,6 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
               } finally { store.off('run', recordChange); }
             });
         } finally { rmSync(dir, { recursive: true, force: true }); }
-      }, 60_000);
-    }
-  });
-
-  // #134/#401: use native completed-message frames, not an injected UiEvent or
-  // fake runner. Current wires couple that snapshot to v1; the named exemptions
-  // are pinned in the inverse direction, in addition to the actual park/card.
-  describeRunners('harness parity — stored assistant ASK', () => {
-    for (const backend of runners) {
-      const exempt = exemptionFor('R16', backend);
-      it(exempt ? `${backend} is exempt from R16 v2-only ASK — ${exempt.reason}` : `${backend} R16 parks an ASK present only on its stored v2 message`, async () => {
-        const seam = await driveSeam(backend, 'ask-snapshot');
-        const snapshots = seam.v2.flatMap(event => event.type === 'item.completed'
-          && event.item.kind === 'message' && event.item.role === 'assistant' && !event.item.parentItemId
-          ? [event.item.text] : []);
-        const marker = snapshots.find(text => text.includes('CEZ:ASK'));
-        expect(marker).toBeDefined();
-        expect(seam.v1.some(event => event.type === 'turn-end')).toBe(true);
-        // Assert this exact absent capability, not "some assertion threw": a
-        // broken mock or missing v2 snapshot cannot pass as a wire exemption.
-        const v1HasMarker = textEvents(seam.v1).some(text => text.includes('CEZ:ASK'));
-        if (exempt) {
-          expect(exempt.kind).toBe('capability-absent');
-          expect(v1HasMarker).toBe(true);
-          expect(textEvents(seam.v1).join('\n')).toContain(marker);
-        } else {
-          expect(v1HasMarker).toBe(false);
-        }
-        const run = await driveRun(backend, 'ask-snapshot', record => record?.status === 'waiting' || TERMINAL.includes(record?.status ?? ''));
-        expect(run.record).toMatchObject({ status: 'waiting', waits: expect.arrayContaining([expect.objectContaining({ kind: 'human', phase: 'open' })]) });
-        expect(monitoringWakeOf(run.record)).toBeUndefined();
-        expect(askEvents(run)).toHaveLength(1);
-        expect(askEvents(run)[0]?.questions).toMatchObject([{ header: 'Library', question: 'Which test library?' }]);
-        expect(run.events.some(event => event.type === 'item.completed' && JSON.stringify(event.item).includes('CEZ:ASK'))).toBe(true);
       }, 60_000);
     }
   });
@@ -1711,11 +1645,26 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           await new Promise(resolve => setTimeout(resolve, 150));
           expect(store.getRun(runId)?.status).toBe('waiting');
           // #505: input queued before the session opened steers into the opening turn on a
-          // `steer` runner; input accepted while the ask is pending never reaches the session.
+          // `steer` runner. A native ask holds a `boundary` runner's turn open, so nothing reaches
+          // it. A cezar_ask is the workflow's human wait, not the runner's: the parent's message
+          // reaches a `boundary` runner at the turn boundary as an admitted wake beside the open
+          // question, which stays pending and is never answered by it (hearsay-tools/cezarion#1235).
           const steer = inputDeliveryOf(createRunner(backend)).mode === 'steer';
-          expect(!!store.getRun(runId)?.agentInputs?.find(input => input.id === first.id)?.deliveredAt).toBe(steer);
-          expect(store.getRun(runId)?.agentInputs?.find(input => input.id === second.id)?.deliveredAt).toBeUndefined();
+          const humanWait = store.getRun(runId)?.waits?.find(wait => wait.kind === WAIT_KIND.human && wait.phase === WAIT_PHASE.open);
+          const delivered = (id: string) => !!store.getRun(runId)?.agentInputs?.find(input => input.id === id)?.deliveredAt;
+          if (!steer && humanWait?.via === WAIT_VIA.cezar_ask) {
+            await waitFor(() => delivered(first.id));
+            await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes('parent steering')));
+            const beside = store.readEvents(runId).filter(e => e.type === 'text' && String(e.text).includes('parent steering')).map(e => String(e.text)).join('\n');
+            expect(beside).toContain('Still open:');
+            expect(store.transcriptFacts(runId).pendingAsk?.seq).toBe(askSeq);
+          } else {
+            expect(delivered(first.id)).toBe(steer);
+          }
+          // Input accepted while the question is pending never reaches the session before the answer.
+          expect(delivered(second.id)).toBe(false);
           expect(store.readEvents(runId).filter(e => e.type === 'user-message')).toEqual([]);
+          expect(store.readEvents(runId).filter(e => e.type === 'human-input-delivered')).toEqual([]);
           const attributed = store.readEvents(runId).filter(e => e.type === 'agent-input').map(e => agentInputEventSchema.parse(e).input);
           expect(attributed).toEqual([first, second]);
           expect(manager.sendMessage(runId, [{ type: 'text', text: 'Vitest' }])).toBe(true);
@@ -2164,12 +2113,12 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         // Independent wire inventory: deleting an adapter variant must fail this
         // guard, even when another ask kind still exercises the same backend.
         const expectedKinds: Record<RunnerId, readonly string[]> = {
-          claude: ['CEZ:ASK'],
+          claude: ['cezar_ask'],
           codex: ['item/tool/requestUserInput'],
           opencode: ['question.asked'],
-          pi: ['CEZ:ASK'],
-          cursor: ['CEZ:ASK'],
-          omp: ['CEZ:ASK'],
+          pi: ['cezar_ask'],
+          cursor: ['cezar_ask'],
+          omp: ['cezar_ask'],
         };
         for (const backend of RUNNER_IDS) {
           const cases = HARNESS_ADAPTERS[backend]?.askResumeCases;
@@ -2834,15 +2783,11 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   // Prompt delivery is the contract under test; these offline wires cannot prove
   // that a live model follows the instruction. Markerless output must still wait.
   // hearsay-tools/cezarion#1234: every runner honors cezarTools, so every session here is taught
-  // the lifecycle tools instead of the markers (the toolless form is in human-waits.test.ts).
+  // the lifecycle tools instead of the markers.
   describeRunners('harness parity — monitoring wrap-up contract (#399)', () => {
     const promptRules = [
       'When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn.',
       'call cezar_wait with kind "pr" for a pull request\'s checks or its merge, or kind "timer" to re-check later, then end your turn.',
-    ];
-    const wakeRules = [
-      'When the goal is complete and verified, call cezar_done.',
-      'If the watched work is still pending, call cezar_wait again.',
     ];
     type Wire = {
       userText?: string; method?: string; url?: string; prompt?: string;
@@ -2914,30 +2859,37 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
 
       it(`${backend} R38 restart recovery receives the shared monitoring wrap-up contract`, async () => {
         await recording(async dir => {
-          await withOwnedInputRun(backend, 'split-text', async fixture => {
+          await withOwnedInputRun(backend, 'cezar-wait', async fixture => {
             fixture.manager.enqueueOwnedRun(fixture.runId);
-            await waitFor(() => fixture.store.getRun(fixture.runId)?.status === 'waiting' && !!monitoringWakeOf(fixture.store.getRun(fixture.runId)));
+            await waitFor(() => fixture.store.getRun(fixture.runId)?.status === 'waiting' && !!timerWakeOf(fixture.store.getRun(fixture.runId)));
             clearRecording(dir);
             const { manager } = await fixture.restart();
             // hearsay-tools/cezarion#1233: recovery re-arms the park's persisted monitoring timer
             // instead of resuming at once; its wake starts the recovered session.
-            await waitFor(() => !!monitoringTimerOf(manager, fixture.runId));
-            monitoringTimerOf(manager, fixture.runId)!._onTimeout();
+            await waitFor(() => !!timerOf(manager, fixture.runId));
+            timerOf(manager, fixture.runId)!._onTimeout();
             await waitFor(() => manager.isActive(fixture.runId) && messages(backend, dir).length > 0);
             assertRules(systemPrompt(backend, dir), promptRules);
           });
         });
       }, 60_000);
 
-      it(`${backend} R39 monitoring wake delivers the cezar_done and cezar_wait instructions on the native message channel`, async () => {
+      // A cezar_wait timer's wake reaches each native message channel as its result text with the
+      // next-step instruction, never as a user message (hearsay-tools/cezarion#2397: the marker
+      // monitoring park this cell drove is gone; MONITORING_WAKE_NUDGE now answers only Claude's
+      // ScheduleWakeup and the live-workers timer).
+      it(`${backend} R39 a timer wake delivers its result and next-step instruction on the native message channel`, async () => {
         await recording(async dir => {
-          await driveRun(backend, 'split-text', record => record?.status === 'waiting' && !!monitoringWakeOf(record), 30_000,
+          await driveRun(backend, 'cezar-wait', record => record?.status === 'waiting' && !!timerWakeOf(record), 30_000,
             async ({ store, manager, runId }) => {
-              const timer = monitoringTimerOf(manager, runId)!;
+              const waitId = openTimerWait(store.getRun(runId))!.id;
+              const timer = timerOf(manager, runId)!;
               expect(timer).toBeDefined();
               timer._onTimeout();
               await waitFor(() => messages(backend, dir).length > 1);
-              assertRules(messages(backend, dir)[1]!, wakeRules);
+              const wake = messages(backend, dir)[1]!;
+              expect(wake).toContain(`Timer ${waitId} fired: Re-check the downstream work.`);
+              expect(wake).toContain('Continue toward the task goal; register another wait if you are still waiting.');
               expect(store.readEvents(runId).some(event => event.type === 'user-message')).toBe(false);
             });
         });
@@ -3069,8 +3021,12 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         it(`${backend} ${id} retires the card, its capability and the run's pending permission`, async () => {
           await withRelease(async (release) => {
             let requestId = '';
+            // P4's agent calls cezar_done while the request is still pending, and a pending request
+            // refuses it (human_question_pending), so its run parks once the turn end retires the card.
+            const settled = (run: RunObservation['record']) => !!run && (['done', 'review'].includes(run.status) ||
+              (id === 'P4' && run.status === RUN_STATUS.waiting && run.hasPendingPermission === false));
             // bound: hang guard for the live mock run; the predicate waits on the run settling, and a stuck card fails here instead of at the test timeout.
-            const observation = await driveRun(backend, scenario, run => !!run && ['done', 'review'].includes(run.status), 30_000, undefined, {
+            const observation = await driveRun(backend, scenario, settled, 30_000, undefined, {
               env: { CEZ_MOCK_RELEASE_FILE: release },
               during: async ({ store, manager, runId }) => {
                 await waitFor(() => store.readEvents(runId).some(event => event.type === 'permission.requested'));

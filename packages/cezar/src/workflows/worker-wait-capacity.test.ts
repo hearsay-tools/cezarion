@@ -514,7 +514,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
 
   it.each([false, true])('monitoring synthetic delivery respects legacy pending Finish=%s before wake bookkeeping', async pending => {
     const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
-    const w = await worker(p.id, 'mock:cezar-wait keep going');
+    const w = await worker(p.id, 'mock:schedule-wakeup keep going');
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     manager.enqueueOwnedRun(w.id);
     await until(() => !!monitoringWakeOf(store.getRun(w.id)));

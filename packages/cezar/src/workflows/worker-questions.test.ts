@@ -2,7 +2,7 @@ import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -20,7 +20,8 @@ import { recordCommits } from '../runs/outcome-crash.testkit.ts';
 import type { RunOutcome } from '../runs/outcome-commit.ts';
 import type { RunRecord } from '../runs/store.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
-import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, WAIT_KIND, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { gate, thenSay, toolCall } from './waits-parity.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 
 /** #505 PR B: a worker's question goes to its owning parent, not to the human. */
@@ -40,7 +41,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     return p;
   }
 
-  it("sends a worker's CEZ:ASK question to its active parent as a request", async () => {
+  it("sends a worker's cezar_ask question to its active parent as a request", async () => {
     const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id, 'mock:cezar-ask'); manager.enqueueOwnedRun(w.id);
     await until(() => eventsOf(w.id, 'worker-question-routed').length === 1);
@@ -502,40 +503,62 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
   // re-check timer is open and a blocked done parks on it with the refusal as a note. With no wait
   // open, the blocked done gets the questions refusal as a nudge, without the will-wait sentence:
   // waiting on the worker would deadlock, as the worker waits on this parent.
-  it('holds parent completion on an unanswered worker question: a note beside an open wait, else the questions refusal nudge, never a wait on that worker', async () => {
+  // hearsay-tools/cezarion#2397: cezar_done answers the agent itself while a worker question is
+  // unanswered: the refusal names the reply command, and no wait opens on that worker.
+  it('refuses cezar_done on an unanswered worker question with the reply command, never a wait on that worker', async () => {
     const f = await askedPair();
     try {
       await until(() => !!store.getRun(f.p.id)?.agentInputs?.find(input => input.id === f.questionId)?.deliveredAt && store.getRun(f.p.id)?.status === 'waiting');
-      const engine = manager as unknown as { active: Map<string, { session: AgentSession; ciGeneration: string }> };
-      const session = engine.active.get(f.p.id)!.session;
+      const engine = manager as unknown as { active: Map<string, { ciGeneration: string }> };
+      const answer = await manager.cezarToolHandlers(f.p.id, engine.active.get(f.p.id)!.ciGeneration).finishTurn({}, new AbortController().signal);
+      expect(answer).toMatchObject({ ok: false, code: 'worker_questions', workers: [{ worker_id: f.w.id, reason: 'question' }] });
+      expect(answer.ok === false && answer.message).toContain(`cez message reply ${f.w.id} '<answer>' --id <new-UUID> --request-id ${f.questionId}`);
+      expect(store.getRun(f.p.id)?.status).toBe(RUN_STATUS.waiting);
+      expect(store.getRun(f.p.id)?.waits?.filter(wait => wait.kind === 'worker') ?? []).toEqual([]);
+      expect(store.getRun(f.p.id)?.delegation).not.toHaveProperty('completion');
+      expect(manager.finishBlockedReason(f.p.id)).toContain(f.w.id);
+    } finally { f.close(); }
+  });
+
+  // The turn end's completion gate still holds a done the tool accepted when a worker's question
+  // arrives later in that turn (`deferParentCompletion`). The question is owed input then, so the
+  // refusal is a note, beside an open wait or not, and the question reaches the parent's next
+  // turn; never a wait on that worker, and no completion nudge beside owed input.
+  for (const besideWait of [true, false]) it(`holds a cezar_done accepted before a worker question arrives: a refusal note${besideWait ? ' beside an open wait' : ''}, the question delivered, never a wait on that worker`, async () => {
+    // The worker asks while the parent's turn holds its slot.
+    vi.spyOn(semaphore, 'maxParallel').mockReturnValue(2);
+    const { p, close } = await delegatingParent({ task: 'mock:hold', permissions: ['spawn', 'wait', 'steer'] });
+    try {
+      await until(() => store.getRun(p.id)?.status === 'waiting');
+      const engine = manager as unknown as { active: Map<string, { session: AgentSession; doneRequested?: unknown }> };
+      const session = engine.active.get(p.id)!.session;
       const sent: string[] = [];
       const real = session.sendAgentMessage.bind(session);
       session.sendAgentMessage = ((content, ...rest) => {
         sent.push(content.map(block => block.type === 'text' ? block.text : '').join('\n'));
         return real(content, ...rest);
       }) as AgentSession['sendAgentMessage'];
-      const refusal = `cez message reply ${f.w.id} '<answer>' --id <new-UUID> --request-id ${f.questionId}`;
-      const refusedNotes = () => eventsOf(f.p.id, 'note').filter(event => String(event.message).startsWith('Completion blocked: ') && String(event.message).includes(refusal));
-      const nudges = () => eventsOf(f.p.id, 'note').filter(event => String(event.message).startsWith(COMPLETION_NUDGE_NOTE));
-      const [timer] = store.getRun(f.p.id)?.waits ?? [];
-      expect(timer).toMatchObject({ kind: 'timer', via: 'monitoring-line', phase: 'open' });
-      expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'mock:cezar-done' }])).toBe(true);
-      await until(() => refusedNotes().length === 1 && store.getRun(f.p.id)?.status === 'waiting');
+      const opened = join(root, `gate-${randomUUID()}`);
+      const timer = toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 600, note: 'Re-check the worker.' });
+      expect(manager.sendMessage(p.id, [{ type: 'text', text: `${besideWait ? `${timer} ` : ''}${toolCall('cezar_done', {})} ${gate(opened)} ${thenSay('All done.')}` }])).toBe(true);
+      await until(() => !!engine.active.get(p.id)?.doneRequested);
+      const w = await worker(p.id, 'mock:cezar-ask'); manager.enqueueOwnedRun(w.id);
+      await until(() => eventsOf(w.id, 'worker-question-routed').length === 1);
+      const questionId = String(eventsOf(w.id, 'worker-question-routed')[0]!.messageId);
+      writeFileSync(opened, '');
+      const refusal = `cez message reply ${w.id} '<answer>' --id <new-UUID> --request-id ${questionId}`;
+      const refusedNotes = () => eventsOf(p.id, 'note').filter(event => String(event.message).startsWith('Completion blocked: ') && String(event.message).includes(refusal));
+      const nudges = () => eventsOf(p.id, 'note').filter(event => String(event.message).startsWith(COMPLETION_NUDGE_NOTE));
+      await until(() => refusedNotes().length === 1 && !!store.getRun(p.id)?.agentInputs?.find(input => input.id === questionId)?.deliveredAt && store.getRun(p.id)?.status === 'waiting');
       expect(nudges()).toEqual([]);
       expect(sent.filter(text => text.includes(refusal))).toEqual([]);
-      const cancelled = await manager.cezarToolHandlers(f.p.id, engine.active.get(f.p.id)!.ciGeneration).cancelWait({ wait_id: timer!.id }, new AbortController().signal);
-      expect(cancelled).toMatchObject({ cancelled: true });
-      expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'mock:cezar-done' }])).toBe(true);
-      await until(() => nudges().length === 1);
-      expect(nudges().map(event => event.message)).toEqual([`${COMPLETION_NUDGE_NOTE} (1/${MAX_AUTO_CONTINUES}): worker_questions`]);
-      const nudge = sent.filter(text => text.includes(refusal));
-      expect(nudge).toHaveLength(1);
-      expect(nudge[0]).not.toContain(COMPLETION_WILL_WAIT);
-      expect(waitOf(store.getRun(f.p.id))).toBeUndefined();
-      expect(store.getRun(f.p.id)?.waits?.filter(wait => wait.kind === 'worker') ?? []).toEqual([]);
-      expect(store.getRun(f.p.id)?.delegation).not.toHaveProperty('completion');
-      expect(manager.finishBlockedReason(f.p.id)).toContain(f.w.id);
-    } finally { f.close(); }
+      // The agent's own timer stays; without it, only the timer live workers open.
+      expect(store.getRun(p.id)?.waits?.filter(wait => wait.kind === WAIT_KIND.timer && wait.phase === 'open' && wait.via === WAIT_VIA.cezar_wait)).toHaveLength(besideWait ? 1 : 0);
+      expect(waitOf(store.getRun(p.id))).toBeUndefined();
+      expect(store.getRun(p.id)?.waits?.filter(wait => wait.kind === 'worker') ?? []).toEqual([]);
+      expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
+      expect(manager.finishBlockedReason(p.id)).toContain(w.id);
+    } finally { close(); }
   });
 
   it("hands a routed question back to the human when the parent is cancelled", async () => {

@@ -39,13 +39,13 @@ describe('harness parity — settlement during blocked autosave', () => {
           vi.spyOn(console, 'warn').mockImplementation(() => undefined);
           try {
             const hasTail = continuation && outcome === 'cancelled';
-            await withOwnedInputRun(backend, hasTail ? 'ask-snapshot' : 'baseline', async ({ store, manager, runId, repoRoot, adoptContext }) => {
+            await withOwnedInputRun(backend, hasTail ? 'cezar-ask' : 'baseline', async ({ store, manager, runId, repoRoot, adoptContext }) => {
               if (continuation || outcome !== 'failed') {
                 manager.enqueueOwnedRun(runId);
                 // bound: the native mock must park before Finish or Continue can act.
                 await waitFor(() => store.getRun(runId)?.status === 'waiting', FIXTURE_STEP_MS);
                 if (hasTail) {
-                  // bound: wait for the native ASK snapshot before expiring the continuation.
+                  // bound: wait for the cezar_ask question's human fallback before expiring the continuation.
                   await waitFor(() => !!store.transcriptFacts(runId).pendingAsk?.fallback, FIXTURE_STEP_MS);
                   expect(store.getRun(runId)?.steps.map(step => step.status)).toEqual(['waiting', 'pending']);
                 }

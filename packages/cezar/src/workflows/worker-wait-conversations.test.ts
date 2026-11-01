@@ -12,6 +12,10 @@ import {
   checkpoint, controlledWire, delegatingParent, manager, parent, restart, root, semaphore, spendWorkerBudget,
   store, until, useWorkerWaitFixture, waitOf, lastWaitOf, workerEntryOf, worker,
 } from './worker-wait.testkit.ts';
+import type { TimerWaitEntry, Wait } from '@open-mercato/cezar-contract/waits';
+/** The deadline of the run's open timer: `mock:cezar-wait` opens a cezar_wait timer (hearsay-tools/cezarion#2397). */
+const timerDeadlineOf = (run?: { waits?: Wait[] | undefined }) => run?.waits?.find((wait): wait is TimerWaitEntry => wait.kind === 'timer' && wait.phase === 'open')?.deadline;
+
 
 describe('parent and worker conversation waits through RunManager', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
@@ -364,7 +368,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
     try {
       const boundaries = turnEnds(f.p.id);
       expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'mock:cezar-wait' }])).toBe(true);
-      await until(() => turnEnds(f.p.id) > boundaries && store.getRun(f.p.id)?.status === 'waiting' && !!monitoringWakeOf(store.getRun(f.p.id)));
+      await until(() => turnEnds(f.p.id) > boundaries && store.getRun(f.p.id)?.status === 'waiting' && !!timerDeadlineOf(store.getRun(f.p.id)));
       // A real in-flight turn occupies the sole slot until this gate opens.
       controlledWire({ firstResultGate: gate });
       const busy = await worker(f.p.id);

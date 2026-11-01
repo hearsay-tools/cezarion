@@ -120,9 +120,9 @@ interface AgentSession {
   result: Promise<AgentRunResult>;   // resolves when the process exits
   readonly pid?: number;             // root of the run's process tree (resource telemetry, open-mercato/cezar#348)
   sendMessage(content: ContentBlock[]): boolean;  // human input; false when closed
-  sendAgentMessage(content: ContentBlock[], inputIds?: readonly string[], options?: AgentInputOptions): false | Promise<void>; // reserve now, harness acceptance later; `besideQuestion` admits wait results beside a portable CEZ:ASK
+  sendAgentMessage(content: ContentBlock[], inputIds?: readonly string[]): false | Promise<void>; // reserve now, harness acceptance later
   respondPermission?(requestId: string, optionId: string): boolean; // explicit offered native approval choice
-  discardQueuedMessages(): void;     // drop mid-turn follow-ups; CEZ:ASK park calls this
+  discardQueuedMessages(): void;     // drop mid-turn follow-ups; a turn that parks on a question calls this
   holdsHumanInput(): boolean;        // true while a sendMessage follow-up is held undelivered (hearsay-tools/cezarion#486). Queueing runners drop on discardQueuedMessages and return false; write-through/steer wires report true until the harness settles that line (their discard is a no-op). A drain with no new turn notifies onAgentInputReady so run.ts re-settles.
   end(): void;                       // graceful: end input, SIGTERM→SIGKILL watchdog
   interrupt(): void;                 // hard stop (cancel)
@@ -160,19 +160,19 @@ a signal can fabricate an exit or free a still-live session's capacity.
 `cez task send` is human input. When `CEZ_TASK_ID` is nonempty, it exits 64 before contacting the cockpit, including with `--resume` or `--notify`. Use `cez message progress <task-id> '<text>' --id <message-UUID> (needs CEZ_DELEGATION=1)` for agent-to-task messaging.
 
 **Non-human input (owned workers, 2026-09-06; immediate delivery, hearsay-tools/cezarion#505).** `sendAgentMessage`
-must never resolve a native question or a portable marker ask. False means the caller
+must never resolve a native question or a `cezar_ask` question. False means the caller
 still owns the input and must retry later, NEVER fall back to `sendMessage`. A runner
 whose `inputDelivery.mode` is `steer` admits it while a turn runs, through the
 harness's native mechanism, so the model reads it at its next model step instead of
 after the whole turn; a `boundary` runner refuses it until the turn ends. Routine
-input never cancels a running tool. Every runner refuses while a native question or
-a trailing `CEZ:ASK` is pending, and before its opening prompt exists (Codex until
-startup completes, OpenCode until the opening prompt starts), then emits one
-readiness hint if it refused. The one exception is `options.besideQuestion`
-(hearsay-tools/cezarion#1233): the caller delivers wait results beside a pending
-portable `CEZ:ASK`, so the runner skips only that refusal. The input is not the
-question's answer, the question stays the caller's, and a native question still refuses. Human input keeps priority: an outstanding human prompt
-acknowledgement refuses, then hints once it lands.
+input never cancels a running tool. Every runner refuses while a native question is
+pending, and before its opening prompt exists (Codex until startup completes, OpenCode
+until the opening prompt starts), then emits one readiness hint if it refused. A
+`cezar_ask` question is held by the workflow, not the runner: while it is pending the
+caller admits only resolved-wait results and conversation wakes at a turn boundary,
+and only a human delivery (or a routed parent reply) answers it (hearsay-tools/cezarion#2397).
+Human input keeps priority: an outstanding human prompt acknowledgement refuses, then
+hints once it lands.
 
 `inputIds` name the durable inputs in the submission. A runner reports
 `onAgentInputConsumed(ids)` when its wire shows the model received them — never from
@@ -392,7 +392,7 @@ transport ACK time and from the later event projection timestamp.
 Stopped/destroyed workers cannot be resumed by messages; workers cannot resume
 their parent. Parent review and genuine human questions still require a human.
 Only a human can answer an outstanding human ask, with one exception (hearsay-tools/cezarion#505): a
-worker's question (native or `CEZ:ASK`) is routed to its parent as a conversation
+worker's question (native or `cezar_ask`) is routed to its parent as a conversation
 request carrying the question (`worker-question-routed`), and the parent's `reply`
 to it answers the ask through the same seam a human answer uses, recording
 `human-input-delivered` with `source: 'parent'`. Progress and follow-ups never
@@ -402,7 +402,7 @@ answers as before; until then human input on the worker is refused. Durable queu
 insertion is atomic with acceptance, while provider acceptance and the local ACK
 checkpoint retain the documented crash ambiguity below.
 
-Already accepted input precedes automatic `CEZ:DONE` closure at a safe boundary,
+Already accepted input precedes the closure of an accepted `cezar_done` at a safe boundary,
 not explicit Finish, cancellation, destruction or fatal failure. Empty queues
 preserve ordinary completion. A completed turn with an outstanding ACK retains its
 DONE intent; acknowledgement rechecks that exact idle
@@ -638,14 +638,14 @@ type UiEvent =
   | UiImageEvent;            // 'image'            — itemId?, mediaType, data (base64; manager re-emits URL)
 ```
 
-**AskUser (`ask.requested`, open-mercato/cezar#473, open-mercato/cezar#565).** The portable path remains
-backend-neutral: the agent asks a structured
-multiple-choice question by ending a turn with a `CEZ:ASK <json>` control marker
-(a sibling of `CEZ:DONE` / `CEZ:MONITORING`); the RunManager detects it on the
-*assembled* turn text — uniform across `RUNNER_IDS` with no mapper
-work — validates the payload (`packages/cezar/src/core/ask.ts`, modeled on Claude Code's
-`AskUserQuestion`: 1–4 questions, 2–4 options each, `header` ≤12 chars), emits
-  `ask.requested` and parks the run `waiting`. A mid-turn `sendMessage` that a
+**AskUser (`ask.requested`, open-mercato/cezar#473, open-mercato/cezar#565).** The portable path is
+backend-neutral: the agent asks a structured question with the `cezar_ask` tool
+(hearsay-tools/cezarion#1234), which every runner in `RUNNER_IDS` reaches over the same
+private MCP wire. Cezar validates the card (`askRequestSchema`, modeled on Claude Code's
+`AskUserQuestion`: 1–4 questions, 2–4 options each, `header` ≤12 chars), and at the
+turn end emits `ask.requested` and parks the run `waiting`. The `CEZ:ASK <json>` line
+that once did this is no longer read (hearsay-tools/cezarion#2397); saved transcripts that
+carry it stay readable. A mid-turn `sendMessage` that a
   backend queued until idle is dropped (`AgentSession.discardQueuedMessages`) so
   that waiter cannot start a new turn after the question. The cockpit renders clickable option
 chips; the user's pick (or a free-form reply) rides the normal reply seam
@@ -659,10 +659,9 @@ main session's pending request through `GET /question`, emits `ask.requested`,
 and routes the next answer to `POST /question/:id/reply`; malformed question
 input emits no ask card and is rejected through `POST /question/:id/reject` so
 the native turn cannot remain blocked. If the pending request cannot be found,
-the runner terminates the turn instead of hanging. A malformed marker degrades
-to plain text — the prose fallback is never made worse. A native `AskUserQuestion`
+the runner terminates the turn instead of hanging. A native `AskUserQuestion`
 control-protocol bridge for claude (the `control_request can_use_tool` path) is a
-possible future enhancement; the marker is the portable baseline.
+possible future enhancement; `cezar_ask` is the portable baseline.
 
 `item.completed` carries **snapshots**, not deltas — safe to persist. `item.delta`
 carries **appends** to one field of a live item and must not be persisted as a
@@ -686,7 +685,7 @@ transport into `UiEvent`s. The authoritative table is
 | tool item | `tool_use`→running, `tool_result`→completed/failed, `permission_denials`→`declined` | `commandExecution`→execute (+`exitCode`, `outputDelta`), `fileChange`→edit (`diffs`), `mcpToolCall`→other, `webSearch`→fetch, collaboration spawn→task | tool parts (state `pending/running/completed/error→failed`, `patch` parts→`diffs`) |
 | `item.delta` `output` (live terminal) | *(none — card fills on completion; per-capability degradation)* | `item/commandExecution/outputDelta` | running-state metadata |
 | `plan.updated` | `TodoWrite` input | `todoList` / `plan` items | `todowrite` tool |
-| `ask.requested` | portable `CEZ:ASK` marker | portable marker + native `item/tool/requestUserInput` | portable marker + native `question` tool (`GET /question`, `POST /question/:id/reply`) |
+| `ask.requested` | portable `cezar_ask` tool | `cezar_ask` + native `item/tool/requestUserInput` | `cezar_ask` + native `question` tool (`GET /question`, `POST /question/:id/reply`) |
 | hook item | `system/hook_response` (`--include-hook-events` when `--help` lists it; without it only SessionStart/Setup). Entries parsed from JSON stdout: `additionalContext`→context, `systemMessage`→warning, block `reason`/`stopReason`/deny `permissionDecisionReason`→stop, ask reason→feedback; plain stdout→context. Stdout yields entries on exit 0 only (Claude ignores it otherwise; it stays raw output). Exit 2, `decision:block`, `continue:false`, deny→`blocked` | `hook/completed` (`run.entries` verbatim, `sourcePath`→`source`, `stopped`→`cancelled`) | *(none — plugin hooks run in-process)* |
 | subagent nesting (`parentItemId`) | `parent_tool_use_id` | collaboration receiver thread id (review mode remains childless) | child-session parts under a `subtask` |
 | `usage.updated` | `result.usage` + `total_cost_usd` | `thread/tokenUsage/updated` (no USD) | `message.updated` tokens/cost + `step-finish` |
@@ -734,7 +733,7 @@ plugin directory and accepts the user's existing Cursor marketplace plugins.
 Governed runs pass no `--allowed-tools` list, so native subagent tools stay
 callable (hearsay-tools/cezarion#2279; D1). The capability preflight still reads
 the build's native tool catalog before every print session, Continue included,
-and keeps a build that lacks a core tool off print. `CEZ:ASK` is parsed by Cezar and remains
+and keeps a build that lacks a core tool off print. `cezar_ask` questions remain
 answerable; this Cursor build auto-skips native questions from plugins, which
 is a visible limitation. Print mode has no child-session transcript or
 qualified token usage. Project-local Claude settings do not reliably disable
@@ -809,7 +808,7 @@ v18.4.11 `docs/rpc.md` and `rpc-types.ts`.
   at startup in plain rpc mode), `advisor_cost_changed`, `available_commands_update`, `queue_update`,
   `auto_*`, `cache_warming_*`. The wire stays on protocol v1; opt in to
   `set_event_filter {messageUpdates: "delta"}` to drop per-delta snapshots.
-- **Ask** is the portable `CEZ:ASK` marker: plain `--mode rpc` never builds OMP's native ask tool.
+- **Ask** is the portable `cezar_ask` tool: plain `--mode rpc` never builds OMP's native ask tool.
 - Startup writes `get_state`, `set_steering_mode all`, `set_subagent_subscription events`,
   `set_event_filter`, then the first `prompt`. A fresh session's id comes from `get_state`;
   Continue uses `--resume <id>`.
@@ -968,9 +967,8 @@ required. `context` is 1–20,000 characters of Markdown that the cockpit shows 
 characters, the question, and 2–4 options with unique labels. A question with its `options`
 left out is open: the cockpit shows only an answer field and sends `header: text`. An empty or
 one-option list is `invalid_request`, never an open question, and `multiSelect` applies only
-to options. The answer carries the wait id and `open_waits`, with no deadline. The ask line
-takes open questions too, since both share `askRequestSchema`. The ask line takes an optional
-`context`; native asks carry none.
+to options. The answer carries the wait id and `open_waits`, with no deadline. Native asks
+carry no `context`.
 
 On Claude, assistant text written between tool calls can reach Cezar only as a short server
 summary (hearsay-tools/cezarion#1458), and the user never sees the agent's reasoning or a
@@ -1020,9 +1018,9 @@ session that closes without a done leaves the step `waiting`, and Continue resum
 hearsay-tools/cezarion#1620. `worker_wait_pending` stays in the code enum for old clients and is never
 returned (it was the old completion wait's refusal, removed by hearsay-tools/cezarion#1301). A done
 refused at the turn end becomes the refusal nudge described below. The close writes `summary` as a `note`, then the
-lifecycle event `goal achieved — session closed` with `via: 'cezar_done'` (or
-`via: 'done-line'` for the `CEZ:DONE` line, which closes through the same path), and cancels
-every open wait, a human wait from the same turn included.
+lifecycle event `goal achieved — session closed` with `via: 'cezar_done'`, and cancels
+every open wait, a human wait from the same turn included. Events recorded before
+hearsay-tools/cezarion#2397 may carry `via: 'done-line'` from the retired `CEZ:DONE` line.
 
 Only github.com is currently accepted; the forge has no enterprise-host resolver. CI
 registration resolves canonical repository, PR and head with a ten-second metadata
@@ -1039,18 +1037,25 @@ wait. A timer repeats an open timer only with the same seconds and note in the s
 The aliases land in the same list, each recorded in the entry's `via`.
 The deprecated `cezar_wait_for_ci` tool was removed in phase 4b (hearsay-tools/cezarion#1236);
 `via: 'cezar_wait_for_ci'` remains only on stored entries it opened.
-At a turn end, the `CEZ:MONITORING` line opens a timer of
-`resources.monitoringWakeIntervalMinutes` × 60 seconds (`via: 'monitoring-line'`),
-and Claude's `ScheduleWakeup` opens one of its `delaySeconds` clamped to 60–3,600,
-or of the interval when it gave none (`via: 'schedule-wakeup'`). An alias opens at
-most one open timer per run and `via`: a later turn's line keeps the timer already
-open. With re-checks off an alias opens a `monitoring-line` human wait instead, and with
-the budget spent a `budget` one (`source: 'cezar'`); either adds a note and the run reads
-as Needs you. An autonomous run whose nudge would fire skips the alias. The ask-marker
-card opens an `ask-line` human wait with its questions, and a native ask (Codex, OpenCode) a
-`native-ask` one. A session started without cezar tools (the controller is
-unavailable) is taught the marker lines instead of the tools, and its monitoring wake keeps
-the marker wording. `cez worker wait` is an alias too (hearsay-tools/cezarion#1235 phase 3a):
+At a turn end, Claude's `ScheduleWakeup` opens a timer of its `delaySeconds` clamped to
+60–3,600, or of `resources.monitoringWakeIntervalMinutes` × 60 seconds when it gave none
+(`via: 'schedule-wakeup'`), and a turn that ends with live workers and no other wait opens
+the interval timer with `via: 'monitoring-line'` and the note `Opened while workers run.`
+An alias opens at most one open timer per run and `via`: a later turn keeps the timer
+already open. With re-checks off an alias opens a `monitoring-line` human wait instead, and
+with the budget spent a `budget` one (`source: 'cezar'`); either adds a note and the run
+reads as Needs you. An autonomous run whose nudge would fire skips the alias. A native ask
+(Codex, OpenCode) opens a `native-ask` human wait.
+
+Every agent session gets the cezar tools (hearsay-tools/cezarion#2397). The `CEZ:DONE`,
+`CEZ:ASK` and `CEZ:MONITORING` lines are no longer read: a turn that ends on one is a turn
+with no wait and gets the no-wait nudge, which names the tools. Stored `ask-line` and
+`monitoring-line` entries and `done-line` events from older runs still load. When the
+private tool controller cannot start, the launch spawns nothing and fails with
+`Cezar tools could not start: <cause>` and the fix: a fresh step and the task fail, a
+Continue fails, and a continuation that owes wait results parks with them open and retries
+under the wake-delivery backoff. A failed start is not cached, so the next launch after the
+repair starts the controller again (U26). `cez worker wait` is an alias too (hearsay-tools/cezarion#1235 phase 3a):
 it opens the same `worker` entry as `cezar_wait({ kind: 'worker' })` (or kind `request`), with
 `via: 'cez-worker-wait'`, and answers the legacy `WorkerWait` shape; the same workers (or
 requests) and mode return the open entry, and `cez worker cancel-wait` cancels through the list
@@ -1058,7 +1063,7 @@ as `cezar_cancel_wait` does. A worker wait sits beside CI, timer and human waits
 none of them. A park whose top wait is workers holds no slot, reads as the workers and
 idle-closes after `IDLE_TIMEOUT_MS`; a resolution or a message reopens it through the scheduler
 continuation. Messages are not waits: a worker message or reply wakes the run with every wait
-still open and in the footer, and beside a pending portable question it is delivered next to the
+still open and in the footer, and beside a pending `cezar_ask` question it is delivered next to the
 card, which stays answerable; beside a pending native question it waits for the answer's turn end.
 
 A root's done that the completion check refuses at a turn end (hearsay-tools/cezarion#1301, phase
@@ -1090,7 +1095,7 @@ longer written; store schema 7 reads a stored completion wait into the list
 (`upgradeLegacyWaits`), keeping an already-queued wake input as `wakeInputId`.
 
 The agent ends its turn after registering. At a turn end, in both turn-end handlers:
-a question or a permission gate parks for the human, an accepted `CEZ:DONE` finishes,
+a question or a permission gate parks for the human, an accepted `cezar_done` finishes,
 a worker wait parks on its workers, and only then do open waits park the run, after
 the owed-input checks (held human input, unread agent input, an admitted wake) have
 found nothing. The parked run is `waiting` with its waits open, and `deriveAttention`
@@ -1144,7 +1149,7 @@ nothing resolved is not counted and parks as before. A usage-limit failure that 
 settles `failed` at once, uncounted, so the usage-limit hold and its automatic resume take
 it. A `failed` run that owes results is the one terminal run that keeps its waits: they stay
 resolved and undelivered, its open waits stay armed (across a restart too) and still
-resolve, and nothing wakes it. Continue delivers them once; a pending portable question
+resolve, and nothing wakes it. Continue delivers them once; a pending `cezar_ask` question
 stays answerable, and its answer opens the turn that also delivers them. Stop discards them:
 every wait, open and resolved, moves to `lastWaits` as `cancelled`, the backoff, the admission
 retry, the count and any automatic resume are cleared, no session starts, the run stays
@@ -1163,10 +1168,10 @@ sentence then says the user's reply answers it, offering `cezar_cancel_wait` onl
 CI waits and timers (a question the user saw cannot be cancelled). A turn with nothing open
 gets no footer. The footer replaces the CI withdrawal notice.
 
-A pending portable question (the ask-marker card) never takes CI data as its answer:
+A pending `cezar_ask` question never takes CI data as its answer:
 a wake at a boundary is delivered beside it, the card stays answerable, and the
-answer keeps its `askSeq`. That wake goes through `sendAgentMessage` with
-`besideQuestion`, never the answer transport, and its provider acknowledgement is the
+answer keeps its `askSeq`. That wake goes through `sendAgentMessage`, never the answer
+transport, and its provider acknowledgement is the
 checkpoint as for any wake. A rejected acknowledgement delivers nothing and fails the
 session like any rejected agent input (Codex, OpenCode, Pi and OMP report it as a provider
 error). The waits stay resolved and the question stays pending, the run stays `waiting` on
@@ -2088,9 +2093,9 @@ prompt channel for fresh, Continue and restart-recovered sessions, and the
 automatic monitoring wake. Every runner honors `cezarTools`, so since
 hearsay-tools/cezarion#1234 the contract names the tools: finished and verified work calls
 `cezar_done`, pending work calls `cezar_wait`, and a question for the user calls
-`cezar_ask`. A session started without cezar tools keeps the
-marker prompt and the marker wake (`CEZ:DONE`, `CEZ:MONITORING`); `human-waits.test.ts`
-pins that form on the Claude wire. R40 keeps completion prose without a marker parked as waiting;
+`cezar_ask`. Every session has the tools (hearsay-tools/cezarion#2397), so no marker form of
+the contract or the wake remains; `human-waits.test.ts` pins that a marker line is ordinary
+text. R40 keeps completion prose without a marker parked as waiting;
 the harness does not infer completion from prose. Offline prompt recordings prove
 delivery, not live model compliance.
 
@@ -2693,7 +2698,7 @@ To be first-class:
    declared `PARITY_EXEMPTIONS` entry naming the wire limitation. Never an `it.skip`, and
    never "not implemented yet".
    Choose the ask path explicitly: either map the backend's native question wire to
-   `ask.requested`, or rely on the portable `CEZ:ASK` marker path in `workflows/run.ts`.
+   `ask.requested`, or rely on the portable `cezar_ask` tool, which every runner reaches through `cezarTools`.
    A native bridge must keep its pending request in that runner's `AgentSession` state and
    route the next human answer through the same state back to the provider. Harness rows R3
    and R4 pin valid and malformed asks; R6 and R7 pin human-answer routing, queued agent
@@ -2858,7 +2863,7 @@ breaking change requiring an explanation and migration path.
 
 ### Bounded structured-question recovery (hearsay-tools/cezarion#88)
 
-A CEZ:ASK payload missing only closing braces/brackets after a complete structural value gets one bounded repair, then the existing schema validation. Mid-string truncation, mismatched delimiters and invalid question structures remain rejected. Fresh and continuation turns persist a danger note for recovery or rejection; a recovered card warns users to check the options and how many they may pick, since repair cannot restore missing meaning. The raw recovered marker stays in the audit stream until the cockpit hides it alongside a validated card, preserving rejected split-stream fallback. Existing and unknown note tones stay dim. DONE/ASK precedence, Claude wakeups and monitoring serialization are unchanged.
+Retired with the `CEZ:ASK` line (hearsay-tools/cezarion#2397). The repair once closed a `CEZ:ASK` payload that was missing only its closing braces and brackets, and it persisted a danger note. `cezar_ask` validates its arguments in the tool call, so the repair has no input left. Saved runs keep their recovery and rejection notes.
 
 Harness row S13 verifies the late auto-end veto and subsequent reply completion against every `RUNNER_IDS` backend’s real offline wire.
 

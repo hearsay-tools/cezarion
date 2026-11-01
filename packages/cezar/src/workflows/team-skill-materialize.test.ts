@@ -21,6 +21,7 @@ import { discoverSkills } from '../skills.ts';
 import { bareDirFor, refreshTeamSkills } from '../skills-remote.ts';
 import { seedTeamDirSkillClone, writeSkillsReposConfig } from '../skills-remote.testkit.ts';
 import { RunManager } from './run.ts';
+import { runInternals } from './run-internals.testkit.ts';
 import { plannedWorkflow, skillTaskSteps, type WorkflowDef } from './types.ts';
 
 const LAUNCH_WAIT_MS = 15_000;
@@ -38,7 +39,7 @@ describe('team directory skills never land in the main checkout (#1024)', { time
   let store: RunStore;
   let manager: RunManager;
   let launches: AgentRunSpec[];
-  let sessions: Array<() => void>;
+  let sessions: Array<(done?: boolean) => Promise<void>>;
   let sent: string[];
   let cleanup: string[];
 
@@ -90,14 +91,18 @@ describe('team directory skills never land in the main checkout (#1024)', { time
           interrupt: finish,
           end: finish,
         };
-        // A turn that signals done, then the close: an agent step completes only on a done
-        // (hearsay-tools/cezarion#1620).
-        sessions.push(() => {
-          if (open) {
-            onEvent?.({ type: 'text', text: 'ok\n\nCEZ:DONE' });
-            onEvent?.({ type: 'turn-end' });
-          }
-          finish();
+        // A turn that calls cezar_done, then the close: an agent step completes only on a done
+        // (hearsay-tools/cezarion#1620, hearsay-tools/cezarion#2397). Teardown only closes.
+        sessions.push(async (done = true) => {
+          try {
+            const runId = spec.env?.CEZ_TASK_ID;
+            const generation = runId === undefined ? undefined : runInternals(manager).active.get(runId)?.ciGeneration;
+            if (open && done && runId !== undefined && generation !== undefined) {
+              await manager.cezarToolHandlers(runId, generation).finishTurn({}, new AbortController().signal);
+              onEvent?.({ type: 'text', text: 'ok' });
+              onEvent?.({ type: 'turn-end' });
+            }
+          } finally { finish(); }
         });
         queueMicrotask(() => onEvent?.({ type: 'session', sessionId: `sess-${launches.length}` }));
         return session;
@@ -106,7 +111,7 @@ describe('team directory skills never land in the main checkout (#1024)', { time
   });
 
   afterEach(async () => {
-    for (const finish of sessions) finish();
+    for (const finish of sessions) await finish(false);
     await drainFixtureManagers(repoRoot);
     manager.dispose();
     store.flush();

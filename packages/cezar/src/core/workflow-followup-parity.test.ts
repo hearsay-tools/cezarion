@@ -1,9 +1,9 @@
 /**
  * Mid-turn human follow-up parity — hearsay-tools/cezarion#486.
  *
- * A follow-up sent while a turn is running must survive that turn's CEZ:DONE
- * (H1), must be dropped when the same turn parks on CEZ:ASK (H2), and must not
- * park or nudge between a markerless hold-style turn and the follow-up (H3), including
+ * A follow-up sent while a turn is running must survive that turn's cezar_done
+ * (H1), must be dropped when the same turn parks on cezar_ask (H2), and must not
+ * park or nudge between a done-less hold-style turn and the follow-up (H3), including
  * when the follow-up's native turn starts late (H4, hearsay-tools/cezarion#1112).
  * Each RUNNER_IDS backend is driven through its own HARNESS_ADAPTERS native mock.
  */

@@ -1985,7 +1985,7 @@ it('delivers a secondary-project structured ASK waiting transition to browser no
   const { source } = mount()
   setVisibility('hidden')
 
-  // The server's CEZ:ASK turn-end path publishes this run summary on the workspace stream.
+  // The server's cezar_ask turn-end path publishes this run summary on the workspace stream.
   source.emit('run', stampedRun({ ...live, status: 'waiting', waits: [openHumanWait(1)] }, 'secondary'))
   expect(notifications).toEqual(['structured-ask'])
   source.emit('run', stampedRun({ ...live, status: 'waiting', waits: [openHumanWait(1)], tokensUsed: 42 }, 'secondary'))

@@ -550,7 +550,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   });
 
   it('destruction intent prevents synthetic monitoring wake bookkeeping before stop is sent', async () => {
-    const w = await worker('mock:cezar-wait keep going');
+    const w = await worker('mock:schedule-wakeup keep going');
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); releases.push(() => vi.useRealTimers());
     manager.enqueueOwnedRun(w.id); await until(() => !!monitoringWakeOf(store.getRun(w.id)));
     const deadline = monitoringWakeOf(store.getRun(w.id))!;

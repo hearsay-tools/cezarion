@@ -98,13 +98,16 @@ export async function ciPrompt(backend, wire, text) {
 // `mock:cezar-tool <name> <base64-json-args>` calls any cezar tool with those arguments
 // (hearsay-tools/cezarion#1233). Base64, standard or URL-safe, survives every wire's escaping.
 // Several calls run in order within one turn; `"wait_id": "last"` names the wait the previous
-// answer registered, so a turn can open a wait and cancel it.
+// answer registered, so a turn can open a wait and cancel it. `mock:gate <base64 path>` between
+// them holds the turn there until that file exists, so a test can act between two calls, or
+// between the last call and the turn end (hearsay-tools/cezarion#2397).
 export async function toolPrompt(backend, wire, text) {
-  const matches = [...text.matchAll(/mock:cezar-tool\s+([a-z_]+)\s+([A-Za-z0-9+/=_-]+)/g)];
-  if (!matches.length) throw new Error('mock:cezar-tool needs a tool name and base64 JSON arguments');
+  const steps = [...text.matchAll(/mock:(?:cezar-tool\s+([a-z_]+)\s+([A-Za-z0-9+/=_-]+)|gate\s+([A-Za-z0-9+/=_-]+))/g)];
+  if (!steps.some(step => step[1])) throw new Error('mock:cezar-tool needs a tool name and base64 JSON arguments');
   const responses = [];
   let last;
-  for (const [, name, encoded] of matches) {
+  for (const [, name, encoded, gate] of steps) {
+    if (gate) { await gateOpen(Buffer.from(gate, 'base64').toString('utf8')); continue; }
     const args = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
     if (args.wait_id === 'last') args.wait_id = last;
     const result = await probeCezarTool(backend, wire, name, args);
@@ -115,6 +118,14 @@ export async function toolPrompt(backend, wire, text) {
   const then = /mock:then\s+([A-Za-z0-9+/=_-]+)/.exec(text);
   if (then) responses.push(Buffer.from(then[1], 'base64').toString('utf8'));
   return responses.join('\n');
+}
+
+async function gateOpen(path) {
+  const deadline = Date.now() + 15_000;
+  while (!existsSync(path)) {
+    if (Date.now() > deadline) throw new Error(`mock:gate ${path} was not opened`);
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
 }
 
 // `mock:preview-serve <port>` registers the e2e fixture app (`node preview-app.mjs <port>`) as a live preview.
