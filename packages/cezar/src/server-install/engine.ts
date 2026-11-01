@@ -1,4 +1,5 @@
 import { loadWorkspaceConfig } from '../workspace/config.ts';
+import { disableRemoteSettings, isGranted, readRemoteSettings } from '../remote-settings.ts';
 import { acquireLock, deleteServerState, isResolved, loadServerState, saveServerState } from './state.ts';
 import { StepAborted, StepCancelled, StepSkipped, defaultRunner } from './steps.ts';
 import { createAutoUi, createClackUi } from './ui.ts';
@@ -123,6 +124,20 @@ function buildContext(state: ServerState, opts: RunOptions): InstallContext {
   return ctx;
 }
 
+/**
+ * A remote settings grant names a port, not an install (ADR 0055). Withdraw it when this instance
+ * stops owning the port, so a later cockpit on that port, with another login, starts without it.
+ */
+async function withdrawRemoteSettings(ctx: InstallContext, port: number, why: string, when = true): Promise<void> {
+  if (!when || !isGranted(readRemoteSettings(), port)) return;
+  if (ctx.dryRun) {
+    ctx.ui.info(`DRY RUN — would withdraw the remote settings grant for port ${port} (${why}).`);
+    return;
+  }
+  await disableRemoteSettings(process.env, port);
+  ctx.ui.info(`Withdrew the remote settings grant for port ${port} (${why}). \`cez remote-settings enable --port ${port}\` grants it again.`);
+}
+
 export async function runInstall(strategy: PlatformStrategy, opts: RunOptions): Promise<RunResult> {
   const release = acquireLock(opts.instance);
   try {
@@ -147,10 +162,13 @@ export async function runInstall(strategy: PlatformStrategy, opts: RunOptions): 
     // A caller-supplied port wins (a new named instance auto-picks a free one);
     // otherwise keep whatever the resumed record already carries.
     if (opts.port) state.primaryPort = opts.port;
+    const freshInstall = state.createdAt === undefined;
     state.createdAt ??= opts.now;
     state.updatedAt = opts.now;
 
     await strategy.preflight(ctx); // throws PreflightError to refuse politely
+    // A grant left on this port belongs to a cockpit that is gone; a resumed install keeps its own.
+    await withdrawRemoteSettings(ctx, state.primaryPort, 'a new install on this port', freshInstall);
 
     const steps = strategy.steps(ctx);
     const knownIds = new Set(steps.map((s) => s.id));
@@ -276,6 +294,7 @@ export async function runUninstall(strategy: PlatformStrategy, opts: RunOptions)
       });
       if (proceed !== true) return { status: 'cancelled', state };
     }
+    await withdrawRemoteSettings(ctx, state.primaryPort, 'uninstalling this cockpit');
 
     // Reverse order: undo the last-created first. `failed` outcomes are undone
     // too — the step may have created artifacts before failing, and every undo
