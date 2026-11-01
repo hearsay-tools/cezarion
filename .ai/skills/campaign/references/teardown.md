@@ -7,19 +7,20 @@ worktree. Tear each one down in this order:
    worker records it `cancelled`.
 2. Collect its latest settled revision (`cez worker collect <id>`). Copy any
    report, proof or friction draft out of its worktree first.
-3. In its worktree: `git checkout cez/<id8>` when it switched branch (the
+3. For an unmerged worker, require an available collected `head.sha`. Before
+   changing its worktree, save that SHA under a separate coordinator-owned
+   Git ref and its patch/artifact snapshot outside the worker's worktree.
+   Record the ref, collected head SHA, snapshot paths and repair owner or
+   explicit disposition in campaign state. Verify the ref resolves to the
+   collected SHA and the snapshots are readable; a failed checkpoint blocks
+   checkout and destruction.
+4. In its worktree: `git checkout cez/<id8>` when it switched branch (the
    identity check refuses any other branch), then
    `.ai/scripts/test-env-down.sh` when `.ai/qa/test-env.json` exists, then
    `squeal stop`, guarded with `test -d <worktree>`.
-4. Leave `<worktree>/.ai/qa/test-env-lease.sqlite` to `cez worker destroy`. It
+5. Leave `<worktree>/.ai/qa/test-env-lease.sqlite` to `cez worker destroy`. It
    reclaims a lease only when the holder's process and process group have both
    exited (hearsay-tools/cezarion#2161), and keeps the worktree otherwise.
-5. For an unmerged worker, save its head under a separate coordinator-owned
-   Git ref and its patch/artifact snapshot outside the worker's worktree.
-   Record the ref, head SHA, snapshot paths and repair owner or explicit
-   disposition in campaign state. Verify the ref resolves to that SHA and
-   the snapshots are readable before proceeding; a failed checkpoint blocks
-   destruction.
 6. `cez worker destroy <id>`. On "worktree mutation lock is busy", retry after
    another worker's spawn or Git operation ends.
 7. When destroy still reports that resource identity could not be verified,
