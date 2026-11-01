@@ -158,6 +158,7 @@ describe('Claude native parent turns (hearsay-tools/cezarion#1512)', () => {
       await vi.waitFor(() => expect(fixture.written).toHaveLength(1), { timeout: 10_000 });
       await fixture.frames(init, parentText('Waiting.'), result('Waiting.'));
       await fixture.frames(parentText('Resumed.'));
+      expect(fixture.starts()).toEqual(['turn_1', 'turn_2']);
       expect(fixture.session.sendMessage([{ type: 'text', text: 'human' }])).toBe(true);
       await fixture.frames(result('Resumed.', [fixture.written[1]!.uuid]));
       expect(fixture.starts()).toEqual(['turn_1', 'turn_2']);
@@ -172,7 +173,10 @@ describe('Claude native parent turns (hearsay-tools/cezarion#1512)', () => {
       const ask = 'Which one?\n\nCEZ:ASK {"questions":[{"header":"Pick","question":"Which one?","multiSelect":false,"options":[{"label":"A"},{"label":"B"}]}]}';
       await fixture.frames(init, parentText(ask), result(ask));
       expect(fixture.session.sendAgentMessage([{ type: 'text', text: 'wake' }], ['wake-1'])).toBe(false);
-      await fixture.frames(parentText('A background agent answered it.'), result('A background agent answered it.'));
+      // The unprompted turn writes no text of its own, so only a reset turn start drops the old marker.
+      const read = { type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'tool_use', id: 'read-1', name: 'Read', input: { file_path: 'a' } }] } };
+      const readResult = { type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'read-1', content: 'ok' }] } };
+      await fixture.frames(read, readResult, result(''));
       const sent = fixture.session.sendAgentMessage([{ type: 'text', text: 'wake' }], ['wake-1']);
       expect(sent).not.toBe(false);
       await sent;
@@ -222,6 +226,9 @@ describe('Claude native parent turns on the mock wire (hearsay-tools/cezarion#15
   it('opens no turn when the child ends and the parent does not resume', async () => {
     const ui = await driveMock('subagent-duplicate');
     expect(ui.filter(event => event.type === 'turn.started')).toHaveLength(1);
-    expect(ui.filter(event => event.type === 'item.completed' && event.item.id === 'toolu_bg_01')).toHaveLength(1);
+    const completed = ui.filter(event => event.type === 'item.completed' && event.item.id === 'toolu_bg_01');
+    expect(completed).toHaveLength(1);
+    expect(completed[0]).toMatchObject({ item: { background: true } });
+    expect(ui.indexOf(completed[0]!)).toBeGreaterThan(ui.findIndex(event => event.type === 'turn.completed'));
   }, 60_000);
 });

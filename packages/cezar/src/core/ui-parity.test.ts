@@ -96,7 +96,8 @@ const CAPABILITIES: ReadonlyArray<[name: string, produced: (events: UiEvent[]) =
   // hearsay-tools/cezarion#2431: a child that outlives its spawn call keeps its root task item
   // running, marked `background`, and completes it once when the child ends.
   [BACKGROUND_ROW, (events) => {
-    const background = items(events).filter((item) => item.kind === 'tool' && item.background === true && item.parentItemId === undefined);
+    const background = items(events).filter((item): item is Extract<UiItem, { kind: 'tool' }> =>
+      item.kind === 'tool' && item.background === true && item.parentItemId === undefined);
     return background.some((item) => item.status === 'running') && background.some((item) => item.status !== 'running');
   }],
 ] as const;

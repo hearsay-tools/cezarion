@@ -53,7 +53,7 @@ describe('claude background subagents (hearsay-tools/cezarion#2431)', () => {
 
   it('marks the item from the async_launched acknowledgement alone', () => {
     const { events, state } = fold([spawn(), ack()]);
-    expect(toolItems(events).at(-1)).toMatchObject({ type: 'item.updated', item: { status: 'running', background: true } });
+    expect(toolItems(events).map(({ type, item }) => [type, item.status, item.background]).at(-1)).toEqual(['item.updated', 'running', true]);
     expect(state.backgroundTasks.has('toolu_a')).toBe(true);
   });
 
@@ -72,8 +72,9 @@ describe('claude background subagents (hearsay-tools/cezarion#2431)', () => {
   });
 
   it('finds the child by its task id when the notification has no tool_use_id', () => {
-    const { events } = fold([spawn(), ack(), notification('completed', { task_id: 'agent-a' })]);
-    expect(toolItems(events).filter(({ type }) => type === 'item.completed').map(({ item }) => item.id)).toEqual(['toolu_a']);
+    const { events } = fold([spawn(), ack(), notification('failed', { task_id: 'agent-a' })]);
+    expect(toolItems(events).filter(({ type }) => type === 'item.completed').map(({ item }) => [item.id, item.status, item.background]))
+      .toEqual([['toolu_a', 'failed', true]]);
   });
 
   it('emits nothing for a repeated notification or a late result of an ended child', () => {
@@ -107,7 +108,6 @@ describe('claude background subagents (hearsay-tools/cezarion#2431)', () => {
 
   it('fails a refused spawn instead of marking it', () => {
     const items = toolItems(fold([spawn(), ack('toolu_a', 'agent-a', { is_error: true })]).events);
-    expect(items.at(-1)).toMatchObject({ type: 'item.completed', item: { status: 'failed' } });
-    expect(items.at(-1)!.item.background).toBeUndefined();
+    expect(items.map(({ type, item }) => [type, item.status, item.background]).at(-1)).toEqual(['item.completed', 'failed', undefined]);
   });
 });

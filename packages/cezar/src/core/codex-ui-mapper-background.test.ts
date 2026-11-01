@@ -55,8 +55,9 @@ describe('codex background sub-agents (hearsay-tools/cezarion#2431)', () => {
 
   it('completes the row when the child ends inside the parent turn', () => {
     const { events } = fold([onParent('item/completed', started), onParent('item/completed', ended()), turnCompleted]);
-    const types = events.map(event => event.type);
-    expect(types.indexOf('item.completed')).toBeLessThan(types.indexOf('turn.completed'));
+    expect(events.map(event => [event.type, 'item' in event ? event.item.id : undefined])).toEqual([
+      ['item.started', 'call_1'], ['item.completed', 'call_1'], ['turn.completed', undefined],
+    ]);
   });
 
   it('emits nothing for a completion it cannot match', () => {
@@ -103,7 +104,7 @@ describe('codex background sub-agents on the mock wire (hearsay-tools/cezarion#2
   it('keeps the row running past the parent turn and completes it from the stale-turn frame, with no new turn', async () => {
     const ui = await driveMock('');
     expect(ui.filter(event => event.type === 'turn.started')).toHaveLength(1);
-    const rows = ui.filter(event => 'item' in event && event.item.id === 'call_bg_01').map(event => [event.type, (event.item as UiToolItem).status]);
+    const rows = tools(ui).filter(({ item }) => item.id === 'call_bg_01').map(({ type, item }) => [type, item.status]);
     expect(rows).toEqual([['item.started', 'running'], ['item.completed', 'completed']]);
   }, 60_000);
 
