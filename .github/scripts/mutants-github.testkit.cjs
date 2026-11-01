@@ -25,7 +25,7 @@ function fakeGithub({ pulls = [], comments = [], issues = [], runs = [], artifac
       listForRepo: async ({ state: wanted = 'open' }) => ({ data: state.issues.filter(item => wanted === 'all' || item.state === wanted) }),
       create: async ({ title, body, labels = [] }) => {
         const number = state.nextId++;
-        const created = { number, title, body, labels: labels.map(name => ({ name })), state: 'open', html_url: `https://github.test/issues/${number}` };
+        const created = { number, title, body, labels: labels.map(name => ({ name })), state: 'open', user: { login: BOT }, html_url: `https://github.test/issues/${number}` };
         state.issues.push(created);
         state.writes.push('issue.create');
         return { data: created };

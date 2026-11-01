@@ -206,7 +206,7 @@ test('the issue body stays inside the GitHub limit and counts what it leaves out
   assert.ok(MAX_BODY < 65536);
 });
 
-const issueOf = (number, file, state = 'open', body = `${marker(file)}\nold`) => ({ number, title: `Mutation targets missed: ${file}`, body, state, labels: [] });
+const issueOf = (number, file, state = 'open', body = `${marker(file)}\nold`) => ({ number, title: `Mutation targets missed: ${file}`, body, state, labels: [], user: { login: 'github-actions[bot]' } });
 const outcome = (file, state, extra = {}) => ({ file, state, entryReason: 'target', ...(state === 'not-measured' ? { reason: 'no result: the job timed out, failed or was cancelled' } : {}),
   ...(state !== 'not-measured' ? { result: result(file, { fail: state === 'missed' ? ['covered lines'] : [] }), failures: state === 'missed' ? ['covered lines'] : [] } : {}), ...extra });
 const sync = (github, outcomes, exists = () => true, cut = []) => syncIssues({ github, owner: 'o', repo: 'r', outcomes, earlier: new Map(), head: HEAD, runUrl: RUN_URL, exists, cut, date: '2026-11-07' });
@@ -235,6 +235,21 @@ test('a miss reopens and rewrites a closed issue found by its marker, even after
   assert.equal(github.state.issues[0].state, 'open');
   assert.match(github.state.issues[0].body, /FAIL: covered lines/);
   assert.deepEqual(github.state.writes, ['issue.update']);
+});
+
+test('only issues the workflow created count: a marker another author adds, or one with a bad path, is never touched', async () => {
+  const file = 'packages/cezar/src/a.ts';
+  const forged = { ...issueOf(5, file), user: { login: 'someone' }, body: `${marker(file)}\nmine` };
+  const badPath = { ...issueOf(6, 'packages/cezar/src/a.test.ts') };
+  const github = fakeGithub({ issues: [forged, badPath] });
+  const actions = await sync(github, [outcome(file, 'missed')], () => false);
+  assert.deepEqual(actions.map(a => [a.action, a.number]), [['created', github.state.issues[2].number]]);
+  assert.equal(github.state.issues[0].body, `${marker(file)}\nmine`);
+  assert.equal(github.state.issues[0].state, 'open');
+  assert.equal(github.state.issues[1].state, 'open');
+  await sync(github, [outcome(file, 'passed')]);
+  assert.equal(github.state.issues[0].state, 'open', 'a pass closes only the workflow issue');
+  assert.equal(github.state.issues[2].state, 'closed');
 });
 
 test('a pass closes an open issue with a short comment and leaves a closed one alone', async () => {

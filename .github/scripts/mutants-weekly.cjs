@@ -21,6 +21,7 @@ const MAX_RESULT_BYTES = 256 * 1024 * 1024;
 const MAX_BODY = 60_000;
 const GITHUB_BODY_LIMIT = 65_536;
 const ARTIFACT_DAYS = 90;
+const WORKFLOW_AUTHOR = 'github-actions[bot]';
 const NOTE = '<!-- cez-mutants-weekly:not-measured -->';
 const MARKER = /<!-- cez-mutants-weekly:v1:(\S+) -->/;
 const AREA = { cezar: 'area-cezar', web: 'area-web', contract: 'area-contract', 'api-client': 'area-api-client' };
@@ -205,9 +206,11 @@ function withNote(body, { date, head, runUrl, reason }) {
 async function findIssues({ github, owner, repo }) {
   const issues = await github.paginate(github.rest.issues.listForRepo, { owner, repo, state: 'all', per_page: 100 });
   const byFile = new Map();
-  for (const issue of issues.filter(i => !i.pull_request).sort((a, b) => a.number - b.number)) {
+  // Only the workflow's own issues: anyone can write the marker into an issue of their own.
+  const own = issues.filter(i => !i.pull_request && i.user?.login === WORKFLOW_AUTHOR).sort((a, b) => a.number - b.number);
+  for (const issue of own) {
     const file = MARKER.exec(issue.body ?? '')?.[1];
-    if (file && !byFile.has(file)) byFile.set(file, issue);
+    if (file && productFile(file) && !byFile.has(file)) byFile.set(file, issue);
   }
   return byFile;
 }
