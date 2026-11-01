@@ -1,12 +1,12 @@
 import { isImagePath } from '@open-mercato/cezar-api-client/contract/image-path';
 import { ImageIcon } from 'lucide-react'
 import { ChevronRightIcon, FileCodeIcon, FolderIcon } from '@/components/design-icons'
-import { useState } from 'react'
+import { useContext, useEffect, useState } from 'react'
 
 import { useRunFile } from '@/api/queries'
 import { cn } from '@/lib/utils'
 
-import { isFolderOpen, rememberFolder } from './files-view-memory'
+import { FolderMemoryContext } from './files-view-memory'
 import { formatFileSize } from './worktree-files'
 
 /**
@@ -49,6 +49,8 @@ function DirChildren({
   onSelect: (path: string) => void
 }) {
   const entry = useRunFile(runId, path)
+  const memory = useContext(FolderMemoryContext)
+  useEffect(() => { if (path) memory?.loading(path, entry.isPending) }, [memory, path, entry.isPending])
 
   if (entry.isPending) {
     return (
@@ -118,8 +120,9 @@ function DirNode({
   selected: string | null
   onSelect: (path: string) => void
 }) {
-  const [open, setOpen] = useState(() => isFolderOpen(runId, path))
-  const toggle = () => setOpen((value) => { rememberFolder(runId, path, !value); return !value })
+  const memory = useContext(FolderMemoryContext)
+  const [open, setOpen] = useState(() => memory?.isOpen(path) ?? false)
+  const toggle = () => { memory?.setOpen(path, !open); setOpen(!open) }
   return (
     <li>
       <button

@@ -1,65 +1,90 @@
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
+import { createContext, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import { useLocation, useNavigationType } from 'react-router'
 
 /**
- * What the Files view keeps while it is unmounted, so Back from the reader reopens it where the
- * reader left it (hearsay-tools/cezarion#2400): each run's open folders and the tree pane's and
- * main pane's scroll offsets, for the history entry they belong to. A visit to a new entry starts
+ * What the Files view keeps after it unmounts, so a return from the reader reopens it where the
+ * reader left it (hearsay-tools/cezarion#2400). One snapshot per history entry: the open folders,
+ * and the tree pane's and main pane's scroll offsets. A visit to an entry with no snapshot starts
  * with folders closed, as the lazy tree requires. In memory only: a reload starts fresh.
  */
-const openFolders = new Map<string, { key: string; folders: Set<string> }>()
-const offsets = new Map<string, { tree: number; main: number }>()
+type Snapshot = { runId: string; folders: ReadonlySet<string>; tree: number; main: number }
+const snapshots = new Map<string, Snapshot>()
 
 /** Tests start from an empty memory, as a reload does. */
 export function clearFilesViewMemory(): void {
-  openFolders.clear()
-  offsets.clear()
+  snapshots.clear()
 }
 
-/** On mount: the folders open at this history entry, or none for an entry not seen before. */
-export function enterFolders(runId: string, key: string): void {
-  if (openFolders.get(runId)?.key !== key) openFolders.set(runId, { key, folders: new Set() })
+/** The Files entry a link into the reader came from; the reader's fallback Back carries it. */
+export function restoreKeyOf(state: unknown): string | null {
+  const key = (state as { filesRestoreKey?: unknown } | null)?.filesRestoreKey
+  return typeof key === 'string' && key ? key : null
 }
 
-/** While mounted: a new entry (another file selected) keeps the tree as it is. */
-export function moveFolders(runId: string, key: string): void {
-  const entry = openFolders.get(runId)
-  if (entry) entry.key = key
+/** The tree's open folders. A folder reports its toggles, and a remembered folder reports when its
+ *  listing is still loading, so the tree offset waits for the rows it was measured against. */
+export type FolderMemory = {
+  isOpen: (path: string) => boolean
+  setOpen: (path: string, open: boolean) => void
+  loading: (path: string, pending: boolean) => void
 }
-
-export function isFolderOpen(runId: string, path: string): boolean {
-  return openFolders.get(runId)?.folders.has(path) ?? false
-}
-
-export function rememberFolder(runId: string, path: string, open: boolean): void {
-  const folders = openFolders.get(runId)?.folders
-  if (open) folders?.add(path)
-  else folders?.delete(path)
-}
+export const FolderMemoryContext = createContext<FolderMemory | null>(null)
 
 const mainPane = () => document.querySelector<HTMLElement>('[data-slot="main"]')
 
-/** Records the tree pane's and main pane's offsets for this history entry, and puts them back
- *  when Back or Forward returns to it once the tree has loaded. A new entry starts where it is. */
-export function useFilesScrollMemory(runId: string, ready: boolean): RefObject<HTMLElement | null> {
+/**
+ * Restores the snapshot of the entry being returned to: by Back or Forward (`POP`), or by the
+ * reader's fallback Back, which pushes the Files URL and names the entry in its state. The
+ * offsets apply in a passive effect, after the shell's layout effect has reset its scroller for
+ * the new pathname, and only once the root listing has settled (success or refusal) and every
+ * remembered folder has loaded again. The snapshot is recorded on every scroll and folder toggle,
+ * and when a new entry starts while the view stays mounted.
+ */
+export function useFilesViewMemory(runId: string, rootSettled: boolean): { tree: RefObject<HTMLElement | null>; folders: FolderMemory } {
   const tree = useRef<HTMLElement | null>(null)
-  const { key } = useLocation()
-  const returning = useNavigationType() === 'POP'
-  // Before any folder renders: the tree reads its open folders during its first render.
-  useState(() => enterFolders(runId, key))
-  useEffect(() => moveFolders(runId, key), [runId, key])
+  const location = useLocation()
+  const returnKey = useNavigationType() === 'POP' ? location.key : restoreKeyOf(location.state)
+  const [arrival] = useState(() => {
+    const saved = returnKey ? snapshots.get(returnKey) : undefined
+    return saved?.runId === runId ? saved : null
+  })
+  const open = useRef(new Set(arrival?.folders ?? []))
+  const pending = useRef(new Set<string>())
+  const [pendingCount, setPendingCount] = useState(0)
+  const restored = useRef(arrival === null)
+
+  const record = useCallback(() => {
+    if (!restored.current) return
+    snapshots.set(location.key, { runId, folders: new Set(open.current), tree: tree.current?.scrollTop ?? 0, main: mainPane()?.scrollTop ?? 0 })
+  }, [location.key, runId])
+
+  const folders = useMemo<FolderMemory>(() => ({
+    isOpen: path => open.current.has(path),
+    setOpen: (path, value) => { if (value) open.current.add(path); else open.current.delete(path); record() },
+    loading: (path, isPending) => {
+      if (!arrival?.folders.has(path)) return
+      if (isPending) pending.current.add(path)
+      else pending.current.delete(path)
+      setPendingCount(pending.current.size)
+    },
+  }), [arrival, record])
+
   useEffect(() => {
-    const record = () => offsets.set(key, { tree: tree.current?.scrollTop ?? 0, main: mainPane()?.scrollTop ?? 0 })
+    // Children register their pending folders in their own effects, which run before this one.
+    if (restored.current || !arrival || !rootSettled || pending.current.size > 0) return
+    if (tree.current) tree.current.scrollTop = arrival.tree
+    const main = mainPane()
+    if (main) main.scrollTop = arrival.main
+    restored.current = true
+    record()
+  }, [arrival, rootSettled, pendingCount, record])
+
+  useEffect(() => {
+    record()
     const panes = [tree.current, mainPane()].filter((pane): pane is HTMLElement => pane !== null)
     for (const pane of panes) pane.addEventListener('scroll', record, { passive: true })
     return () => { for (const pane of panes) pane.removeEventListener('scroll', record) }
-  }, [key])
-  useLayoutEffect(() => {
-    const saved = offsets.get(key)
-    if (!ready || !returning || !saved) return
-    if (tree.current) tree.current.scrollTop = saved.tree
-    const main = mainPane()
-    if (main) main.scrollTop = saved.main
-  }, [key, ready, returning])
-  return tree
+  }, [record])
+
+  return { tree, folders }
 }
