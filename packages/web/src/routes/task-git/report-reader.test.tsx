@@ -107,7 +107,7 @@ describe('the HTML report reader', () => {
     ['too large', { size: 900_000, tooLarge: true }],
     ['binary', { size: 4096, binary: true }],
   ])('hands a live file that is %s to Files, which has its own state for it', async (_label, extra) => {
-    stubFetch({ '/api/v1/runs/r1/file-link?path=big.html': () => json({ type: 'file', source: 'worktree', path: '/wt/big.html', size: 1, binary: false, tooLarge: false, ...extra }) })
+    stubFetch({ '/api/v1/runs/r1/file-link?path=big.html': () => json({ type: 'file', source: 'worktree', path: '/wt/big.html', binary: false, tooLarge: false, ...extra }) })
     renderAt(['/p/a/tasks/r1/report?path=big.html'])
     await waitFor(() => expect(at()).toBe('/p/a/tasks/r1/files?path=big.html'))
   })
