@@ -110,7 +110,7 @@ export async function runRemoteSettingsCommand(
     cockpits: cockpits.map((cockpit) => ({
       url: cockpit.url,
       remote: !cockpit.localHandoff,
-      settingsAdmin: cockpit.settingsAdmin ?? false,
+      settingsAdmin: cockpit.settingsAdmin ?? cockpit.localHandoff,
       effect: cockpitEffect(cockpit, state),
     })),
   });

@@ -45,6 +45,7 @@ describe('cez remote-settings', () => {
       { url: 'http://127.0.0.1:4322', localHandoff: false, settingsAdmin: false },
       { url: 'http://127.0.0.1:4323', localHandoff: true, settingsAdmin: true },
       { url: 'http://127.0.0.1:4324', localHandoff: false },
+      { url: 'http://127.0.0.1:4325', localHandoff: true },
     ]);
     expect(body.enabled).toBe(true);
     expect(body.cockpits).toEqual([
@@ -57,6 +58,8 @@ describe('cez remote-settings', () => {
       },
       { url: 'http://127.0.0.1:4323', remote: false, settingsAdmin: true, effect: 'local cockpit: settings are editable without the switch' },
       { url: 'http://127.0.0.1:4324', remote: true, settingsAdmin: false, effect: 'this cockpit is older than the switch and keeps settings read-only' },
+      // An older local cockpit sends no settingsAdmin, and still edits settings.
+      { url: 'http://127.0.0.1:4325', remote: false, settingsAdmin: true, effect: 'local cockpit: settings are editable without the switch' },
     ]);
   });
 
