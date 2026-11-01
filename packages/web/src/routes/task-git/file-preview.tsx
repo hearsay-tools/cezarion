@@ -1,7 +1,7 @@
 import { FileQuestionIcon, FileWarningIcon, FileXIcon } from 'lucide-react'
 import { FileSearchIcon, TriangleAlertIcon } from '@/components/design-icons'
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate } from 'react-router'
 
 import { ApiError, runFileRawUrl } from '@/api/client'
 import { useRunFile } from '@/api/queries'
@@ -165,8 +165,9 @@ function PreviewActions({ snapshot, downloadUrl, source, onSource, readerHref }:
 
 function ReaderLink({ href }: { href: string }) {
   const navigate = useNavigate()
+  const location = useLocation()
   return <a className="inline-flex min-h-11 items-center px-2 text-accent-text underline focus-visible:ring-2" href={href}
-    onClick={event => followInApp(event, navigate, href)}>Open reader</a>
+    onClick={event => followInApp(event, navigate, href, location)}>Open reader</a>
 }
 
 /** The preview card — same bordered grammar as the diff facade's file cards. */

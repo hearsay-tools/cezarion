@@ -1,5 +1,5 @@
 import { useState, type ComponentPropsWithoutRef, type MouseEvent } from 'react'
-import { useInRouterContext, useNavigate, type NavigateFunction } from 'react-router'
+import { useInRouterContext, useLocation, useNavigate, type Location, type NavigateFunction } from 'react-router'
 import { LinkSafetyDialog } from './link-safety-dialog'
 
 type Props = ComponentPropsWithoutRef<'a'> & { internal: boolean }
@@ -21,12 +21,14 @@ export function TaskLink({ href, children, internal, ...props }: Props) {
  *  view with its restored scroll (hearsay-tools/cezarion#2400). Modified clicks stay native. */
 function RoutedLink({ href, children, ...props }: ComponentPropsWithoutRef<'a'> & { href: string }) {
   const navigate = useNavigate()
-  return <a {...props} href={href} data-streamdown="link" className={LINK} onClick={event => followInApp(event, navigate, href)}>{children}</a>
+  const location = useLocation()
+  return <a {...props} href={href} data-streamdown="link" className={LINK} onClick={event => followInApp(event, navigate, href, location)}>{children}</a>
 }
 
-/** A plain primary click navigates in the app; modified clicks (new tab, new window) stay native. */
-export function followInApp(event: MouseEvent<HTMLAnchorElement>, navigate: NavigateFunction, href: string): void {
+/** A plain primary click navigates in the app; modified clicks (new tab, new window) stay native.
+ *  The source view travels in the entry's state, so the reader's Back can return to it. */
+export function followInApp(event: MouseEvent<HTMLAnchorElement>, navigate: NavigateFunction, href: string, from: Location): void {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
   event.preventDefault()
-  void navigate(href)
+  void navigate(href, { state: { readerFrom: from.pathname + from.search } })
 }

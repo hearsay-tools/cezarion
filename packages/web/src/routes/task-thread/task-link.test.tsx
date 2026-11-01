@@ -3,7 +3,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, describe, expect, it } from 'vitest'
 import { TaskLink } from './task-link'
 
-function Where() { const location = useLocation(); return <output>{location.pathname + location.search}</output> }
+function Where() { const location = useLocation(); return <output data-state={JSON.stringify(location.state)}>{location.pathname + location.search}</output> }
 
 function renderAt(internal: boolean) {
   render(<MemoryRouter initialEntries={['/p/a/tasks/t']}>
@@ -19,6 +19,7 @@ describe('TaskLink', () => {
     renderAt(true)
     expect(fireEvent.click(screen.getByRole('link', { name: 'Report' }))).toBe(false)
     expect(document.querySelector('output')!.textContent).toBe('/p/a/tasks/t/report?artifact=x')
+    expect(document.querySelector('output')!.dataset.state).toBe(JSON.stringify({ readerFrom: '/p/a/tasks/t' }))
   })
 
   it('leaves modified clicks to the browser (new tab, new window)', () => {

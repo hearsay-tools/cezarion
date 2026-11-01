@@ -1,5 +1,5 @@
 import { FileQuestionIcon, FileWarningIcon, FileXIcon } from 'lucide-react'
-import { useMemo, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
 
 import { ApiError, artifactUrl } from '@/api/client'
@@ -17,19 +17,27 @@ import { formatFileSize } from './worktree-files'
 type NavigationApi = { canGoBack?: boolean; back: () => unknown }
 
 /** Back leaves the reader in one step. `#anchor` clicks inside the frame add history entries
- *  under the reader's URL. The Navigation API walks the top page's own entries, so it skips them;
- *  without it, Back steps over the entries added since the reader's entry opened.
+ *  under the reader's URL, and the page cannot see where the frame stands among them. The
+ *  Navigation API walks the top page's own entries, so it skips them. Without it, Back goes to the
+ *  source view the link recorded (`readerFrom`), never through history arithmetic.
  *  Without in-app history (a bookmark, a new tab) Back goes to the task's conversation. */
 export function useLeaveReader(): () => void {
   const location = useLocation()
   const navigate = useNavigate()
-  const lengthAtEntry = useMemo(() => window.history.length, [location.key]) // eslint-disable-line react-hooks/exhaustive-deps -- read once per history entry
   return () => {
     if (location.key === 'default') { void navigate({ pathname: location.pathname.replace(/\/report\/?$/, '') }, { replace: true }); return }
     const navigation = (window as { navigation?: NavigationApi }).navigation
+    const from = readerSource(location.state)
     if (navigation?.canGoBack) void navigation.back()
-    else void navigate(-(1 + Math.max(0, window.history.length - lengthAtEntry)))
+    else if (from) void navigate(from)
+    else void navigate(-1)
   }
+}
+
+/** The in-app path a link into the reader came from; anything else reads as none. */
+function readerSource(state: unknown): string | null {
+  const from = (state as { readerFrom?: unknown } | null)?.readerFrom
+  return typeof from === 'string' && from.startsWith('/') && !from.startsWith('//') ? from : null
 }
 
 function previewFile(data: FilePreviewData | FileLinkResult | undefined): FilePreviewData | null {

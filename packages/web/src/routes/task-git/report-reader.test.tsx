@@ -31,7 +31,7 @@ function stubFetch(routes: Record<string, () => Response>) {
 function Where() { const location = useLocation(); return <output>{location.pathname + location.search}</output> }
 function Go({ to }: { to: string }) { const navigate = useNavigate(); return <button onClick={() => void navigate(to)}>Go {to}</button> }
 
-function renderAt(entries: string[], extra?: React.ReactNode) {
+function renderAt(entries: (string | { pathname: string; search: string; state: unknown })[], extra?: React.ReactNode) {
   render(
     <QueryClientProvider client={createQueryClient()}>
       <MemoryRouter initialEntries={entries} initialIndex={entries.length - 1}>
@@ -162,13 +162,17 @@ describe('Back from the reader', () => {
     expect(back).toHaveBeenCalledOnce()
   })
 
-  it('without the Navigation API, steps over the entries the frame\'s anchors added', async () => {
+  it('without the Navigation API, returns to the source the link recorded, past any anchor entries', async () => {
     report()
-    const length = vi.spyOn(window.history, 'length', 'get').mockReturnValue(2)
-    renderAt(['/p/a/tasks/r1', '/p/a/tasks/r1/files', '/p/a/tasks/r1/files?x', `/p/a/tasks/r1/report?artifact=${ID}`])
-    const back = await screen.findByRole('button', { name: 'Back' })
-    length.mockReturnValue(4) // two anchor clicks inside the frame
-    fireEvent.click(back)
+    renderAt(['/p/a/tasks/r1', '/p/a/tasks/r1/files?x', { pathname: '/p/a/tasks/r1/report', search: `?artifact=${ID}`, state: { readerFrom: '/p/a/tasks/r1' } }])
+    fireEvent.click(await screen.findByRole('button', { name: 'Back' }))
+    await waitFor(() => expect(at()).toBe('/p/a/tasks/r1'))
+  })
+
+  it.each([{ readerFrom: '//evil.test/x' }, { readerFrom: 'https://evil.test' }, { readerFrom: 3 }])('ignores a source that is not an in-app path: %o', async state => {
+    report()
+    renderAt(['/p/a/tasks/r1', { pathname: '/p/a/tasks/r1/report', search: `?artifact=${ID}`, state }])
+    fireEvent.click(await screen.findByRole('button', { name: 'Back' }))
     await waitFor(() => expect(at()).toBe('/p/a/tasks/r1'))
   })
 
