@@ -282,11 +282,12 @@ export class WorkerQuestions {
       // A reply still waiting for a live worker answers it; one a stopped worker never took does not.
       const worker = this.context.store.getRun(message.senderRunId);
       const live = !!worker && ['queued', 'running', 'waiting'].includes(worker.status) && !worker.stopping;
-      if (!outcome || (live && (outcome.status === 'replied' || outcome.status === 'completed-without-reply'))) continue;
+      // A settled parent ends the question first, an accepted reply still waiting included: it
+      // cancels its workers in the same pass.
+      const parentSettled = !['queued', 'running', 'waiting'].includes(root!.status);
+      if (!outcome || (live && !parentSettled && (outcome.status === 'replied' || outcome.status === 'completed-without-reply'))) continue;
       const routed = this.routedAsk(message.senderRunId);
       if (routed?.message.id !== message.id) continue;
-      // A settled parent ends the question first: it cancels its workers in the same pass.
-      const parentSettled = !['queued', 'running', 'waiting'].includes(root!.status);
       const workerEnded = !live || outcome.status === 'sender-closed' || outcome.status === 'destroyed';
       this.closeQuestion(message.senderRunId, routed.askSeq, workerEnded && !parentSettled ? 'worker-stopped' : 'parent-stopped');
     }

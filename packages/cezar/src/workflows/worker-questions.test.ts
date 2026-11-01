@@ -671,6 +671,29 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     await until(() => said(f.w.id, 'Use the parser'));
   });
 
+  // A reply accepted before the parent's cancellation, then a crash before the family pass: recovery
+  // closes the question with its parent and the reply never reaches the worker.
+  it('closes a routed question on recovery when an accepted reply waited and the parent was cancelled', async () => {
+    const f = await askedPair();
+    f.close();
+    const id = randomUUID(); const now = new Date().toISOString();
+    const attribution = { senderRunId: f.p.id, recipientRunId: f.w.id, kind: 'reply' as const, requestId: f.questionId };
+    const state = conversationOf(f.p.id)!;
+    store.commitConversation(f.p.id, { messages: [...state.messages, { id, ...attribution, text: 'mock:agent-echo Use the parser', createdAt: now, requestHash: 'c'.repeat(64), state: 'accepted' }],
+      outcomes: [...state.outcomes, { requestId: f.questionId, status: 'replied', observedAt: now, replyId: id }] },
+    { recipientRunId: f.w.id, input: { id, source: 'agent', parentRunId: f.p.id, text: 'mock:agent-echo Use the parser', createdAt: now, conversation: attribution } });
+    const events = eventCheckpoint();
+    const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string; status: string }>;
+    for (const run of disk) if (run.id === f.p.id) run.status = 'cancelled';
+    await restart(false, disk, events);
+    await until(() => closedAs(f.w.id).length === 1 && store.getRun(f.w.id)?.status === 'cancelled' && !manager.isActive(f.w.id));
+    expect(closedAs(f.w.id)).toEqual(['parent-stopped']);
+    expect(answered(f.w.id)).toEqual([]);
+    expect(said(f.w.id, 'Use the parser')).toBe(false);
+    expect(store.getRun(f.w.id)?.agentInputs?.some(input => input.id === id) ?? false).toBe(false);
+    noHumanCard(f.w.id);
+  });
+
   it("waits for capacity before a parent's answer resumes the worker", async () => {
     const f = await askedPair();
     try {

@@ -240,6 +240,9 @@ export class RunRecovery {
     const parent = this.context.store.getRun(run.delegation.parentRunId);
     if (parent?.delegation?.role !== 'root') return false;
     if (['done', 'review', 'failed', 'cancelled'].includes(parent.status)) {
+      // The family pass skips a parent while recovery holds it: its workers' questions close here,
+      // before the cancel, an accepted reply still waiting included (hearsay-tools/cezarion#2410).
+      this.workerQuestions.closeRoutedQuestions(parent.id);
       this.host.cancel(run.id);
       return true;
     }
