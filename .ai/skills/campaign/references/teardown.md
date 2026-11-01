@@ -20,7 +20,9 @@ worktree. Tear each one down in this order:
    or keeps a lease, find what holds the worktree: a process with its cwd there (`ps`, `/proc`),
    an orphaned `packages/cezar/src/ci-wait/mcp.ts`, or a QA server. Stop only a
    process whose cwd and argv you confirmed belong to that worktree, then retry.
-7. Delete the merged PR's local and remote branch.
+7. Delete local and remote branches only for merged PRs. Before destroying an
+   unmerged worker, preserve its branch and a patch/artifact snapshot under the
+   coordinator, with the repair owner or explicit disposition in campaign state.
 
 Done when `cez worker list` shows the worker destroyed with no remaining
 resources.
