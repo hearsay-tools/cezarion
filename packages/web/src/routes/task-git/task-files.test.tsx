@@ -65,6 +65,7 @@ const FILES: Record<string, WorktreeEntry> = {
   'logo.png': { type: 'file', path: 'logo.png', size: 2048, binary: true, tooLarge: false },
   'big.txt': { type: 'file', path: 'big.txt', size: 900_000, binary: false, tooLarge: true },
   'blob.dat': { type: 'file', path: 'blob.dat', size: 4096, binary: true, tooLarge: false },
+  'huge.html': { type: 'file', path: 'huge.html', size: 900_000, binary: false, tooLarge: true },
   'report.html': { type: 'file', path: 'report.html', size: 22, binary: false, tooLarge: false, content: '<h1>Quarterly</h1>' },
 }
 
@@ -129,6 +130,14 @@ async function openFile(path: string) {
 // ---- the route -------------------------------------------------------------------------------
 
 describe('the Files tab route', () => {
+  it('offers no source toggle or reader for an HTML file it cannot read', async () => {
+    stubFetch()
+    renderFilesRoute('?path=huge.html')
+    expect((await screen.findByRole('heading', { name: 'Too large to preview' }))).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'View source' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Open reader' })).toBeNull()
+  })
+
   it('shows an HTML file as a sandboxed preview first, with View source and Open reader', async () => {
     stubFetch()
     renderFilesRoute('?path=report.html')

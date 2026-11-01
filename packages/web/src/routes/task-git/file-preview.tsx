@@ -104,9 +104,10 @@ export function FileEntryView({
   const [source, setSource] = useState(false)
   const markdown = documentPreview && /\.(?:md|markdown)$/i.test(entry.path)
   const html = documentPreview && isHtmlPath(entry.path)
-  const toggle = markdown || html
   const safeImage = /\.(?:png|jpe?g|gif|webp|bmp|ico|avif)$/i.test(entry.path)
   const kind = documentPreview && safeImage && entry.size <= 10 * 1024 * 1024 ? 'image' : previewKind(entry)
+  // Only readable text has a rendered view to toggle: too-large and binary files show their state.
+  const toggle = (markdown || html) && kind === 'text'
   return (
     <Pane className={className}>
       <header
