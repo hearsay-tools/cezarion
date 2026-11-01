@@ -598,34 +598,7 @@ function mapToolResults(msg: Record<string, unknown>, state: ClaudeUiMapperState
       events.push({ type: 'image', itemId: raw.tool_use_id, mediaType: img.media_type, data: img.data });
     }
 
-    // The task tools report their outcome only as result text — `is_error` stays
-    // unset even for a rejected update ("Task not found"), so the text is the
-    // only signal there is.
-    const parked = pendingTaskCreates.get(raw.tool_use_id);
-    if (parked !== undefined) {
-      const next = new Map(pendingTaskCreates);
-      next.delete(raw.tool_use_id);
-      pendingTaskCreates = next;
-      if (raw.is_error !== true) {
-        const landed = applyTaskCreateResult(parked, text, tasks);
-        if (landed) {
-          tasks = landed;
-          events.push({ type: 'plan.updated', entries: [...tasks.values()] });
-        }
-      }
-      // `parentItemId` here mirrors the call-side subagent guard: a subagent's
-      // list describes its own tasks, so it must not rewrite the main plan.
-    } else if (
-      open?.name.toLowerCase() === 'tasklist' &&
-      open.parentItemId === undefined &&
-      raw.is_error !== true
-    ) {
-      const resynced = applyTaskListResult(text, tasks);
-      if (resynced && !samePlan(resynced, tasks)) {
-        tasks = resynced;
-        events.push({ type: 'plan.updated', entries: [...tasks.values()] });
-      }
-    }
+    ({ tasks, pendingTaskCreates } = applyTaskToolResult(open, raw.tool_use_id, raw.is_error === true, text, tasks, pendingTaskCreates, events));
 
     openTools ??= new Map(state.openTools);
     openTools.delete(raw.tool_use_id);
@@ -637,6 +610,38 @@ function mapToolResults(msg: Record<string, unknown>, state: ClaudeUiMapperState
     events,
     state: { ...state, openTools: openTools ?? state.openTools, tasks, pendingTaskCreates, backgroundTasks, backgroundTaskIds },
   };
+}
+
+/**
+ * The task tools report their outcome only as result text — `is_error` stays unset even for a
+ * rejected update ("Task not found"), so the text is the only signal there is. A `TaskCreate`
+ * result lands its parked entry; a root `TaskList` result resyncs the plan. Pushes any
+ * `plan.updated` it causes onto `events`.
+ */
+function applyTaskToolResult(
+  open: UiToolItem | undefined,
+  toolUseId: string,
+  isError: boolean,
+  text: string,
+  tasks: ClaudeUiMapperState['tasks'],
+  pendingTaskCreates: ClaudeUiMapperState['pendingTaskCreates'],
+  events: UiEvent[],
+): { tasks: ClaudeUiMapperState['tasks']; pendingTaskCreates: ClaudeUiMapperState['pendingTaskCreates'] } {
+  const parked = pendingTaskCreates.get(toolUseId);
+  if (parked !== undefined) {
+    const next = new Map(pendingTaskCreates);
+    next.delete(toolUseId);
+    const landed = !isError ? applyTaskCreateResult(parked, text, tasks) : undefined;
+    if (landed) events.push({ type: 'plan.updated', entries: [...landed.values()] });
+    // `parentItemId` here mirrors the call-side subagent guard: a subagent's
+    // list describes its own tasks, so it must not rewrite the main plan.
+    return { tasks: landed || tasks, pendingTaskCreates: next };
+  }
+  if (open?.name.toLowerCase() !== 'tasklist' || open.parentItemId !== undefined || isError) return { tasks, pendingTaskCreates };
+  const resynced = applyTaskListResult(text, tasks);
+  if (!resynced || samePlan(resynced, tasks)) return { tasks, pendingTaskCreates };
+  events.push({ type: 'plan.updated', entries: [...resynced.values()] });
+  return { tasks: resynced, pendingTaskCreates };
 }
 
 /** Whether a `TaskList` resync would change the rendered plan — it usually just
