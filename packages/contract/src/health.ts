@@ -41,7 +41,7 @@ export const capabilitiesSchema = z.object({
   localHandoff: z.boolean(),
   /**
    * `true` means this cockpit may edit Agent config and worktree setup: it is local, or the host
-   * operator ran `cez remote-settings enable` and the server binds loopback
+   * operator ran `cez remote-settings enable` for this cockpit's listen port and it binds loopback
    * (hearsay-tools/cezarion#2428). Both persist commands the host runs.
    */
   settingsAdmin: z.boolean(),

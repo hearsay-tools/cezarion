@@ -87,6 +87,7 @@ describe('health topic + cache (live-server path)', () => {
       manager: {} as RunManager,
       version: '0.0.0-test',
       socketHub: hub,
+      cezarPort: () => 4321,
     };
     return { app: createApp(deps), topics };
   };
@@ -186,7 +187,7 @@ describe('health topic + cache (live-server path)', () => {
     };
     try {
       expect((await capabilities()).settingsAdmin).toBe(false);
-      await enableRemoteSettings();
+      await enableRemoteSettings(4321);
       expect(await capabilities()).toMatchObject({ settingsAdmin: true, remoteSettingsAdmin: true });
       await disableRemoteSettings();
       expect((await capabilities()).settingsAdmin).toBe(false);

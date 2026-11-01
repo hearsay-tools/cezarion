@@ -39,8 +39,9 @@ afterAll(async () => {
   rmSync(root, { recursive: true, force: true })
 })
 
+/** The grant names this cockpit's listen port: the fixture listens on a random one. */
 function hostSwitch(command: 'enable' | 'disable') {
-  execFileSync(process.execPath, [cezarCli, 'remote-settings', command], { env, stdio: 'ignore' })
+  execFileSync(process.execPath, [cezarCli, 'remote-settings', command, '--port', new URL(url).port], { env, stdio: 'ignore' })
 }
 
 function openAgentConfig() {

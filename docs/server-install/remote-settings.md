@@ -7,19 +7,26 @@ host operator can let the people the deployment admits edit them from the browse
 (hearsay-tools/cezarion#2428).
 
 ```bash
-cez remote-settings enable    # allow remote edits; prints what it grants
-cez remote-settings status    # the switch, and what each running cockpit does with it
-cez remote-settings disable   # read-only again
+cez remote-settings enable [--port <n>]    # allow remote edits on one cockpit; prints what it grants
+cez remote-settings status                 # the grants, and what each running cockpit does with them
+cez remote-settings disable [--port <n>]   # read-only again: one cockpit, or every cockpit without --port
 ```
 
 Run these on the machine that runs Cezarion, as the user the cockpit service runs as, with the same
-`CEZ_HOME` (default `~/.cezar`). The switch is the file `~/.cezar/remote-settings.json`. The cockpit
-reads it on each request, so enable and disable take effect without a restart. No HTTP route writes
-the file: a browser can never grant itself the permission.
+`CEZ_HOME` (default `~/.cezar`). A grant names one cockpit by its listen port (the `--port` it was
+started with). Without `--port`, `enable` grants the only remote cockpit answering on `127.0.0.1`
+ports 4321–4370, and refuses when it finds none or several. The grants live in
+`~/.cezar/remote-settings.json`. The cockpit reads the file on each request, so enable and disable
+take effect without a restart. No HTTP route writes the file: a browser can never grant itself the
+permission.
+
+One host can run several cockpits as the same user, for example the
+[multi-domain install](./ubuntu-vps.md#hosting-several-cockpits-on-one-box-multiple-domains), where
+each domain has its own port and login. A grant for one of them gives nothing to the others.
 
 ## What it grants
 
-With the switch on, every user the deployment admits can:
+With a grant, every user that cockpit admits can:
 
 - read and save every Agent config file, including the files in the agent's home directory, and
   see the user MCP servers in `~/.claude.json`;
@@ -30,14 +37,14 @@ the people you would trust with a shell on this machine.
 
 It does not grant anything else. The terminal, file manager and editor buttons stay unavailable,
 and so do agent account administration, project browsing outside the projects folder and
-application updates. The cockpit shows a warning above both editors while the switch is on.
+application updates. The cockpit shows a warning above both editors while it has a grant.
 
 ## When it applies
 
-The switch applies only to a cockpit that runs with `CEZ_REMOTE=1` and binds loopback (the
-`127.0.0.1` default). A cockpit bound to any other address keeps settings read-only, because a
-direct connection to its port would skip the deployment's authentication. A local cockpit edits
-settings without the switch.
+A grant applies only to a cockpit that runs with `CEZ_REMOTE=1`, binds loopback (the `127.0.0.1`
+default) and listens on the granted port. A cockpit bound to any other address keeps settings
+read-only, because a direct connection to its port would skip the deployment's authentication. A
+local cockpit edits settings without a grant.
 
 Cezar never infers the permission from the network: a private address, a LAN client or an
 installed Tailscale grants nothing. The deployment in front of the cockpit decides who gets in.
@@ -55,7 +62,7 @@ cez remote-settings enable
 ```
 
 Tailscale Serve is reachable by every device the tailnet policy lets reach this machine. Before you
-enable the switch, restrict port 443 on this machine to the owner (or the chosen administrators)
+run `enable`, restrict port 443 on this machine to the owner (or the chosen administrators)
 in the tailnet policy file. For example, with the machine tagged `tag:cezar`:
 
 ```json
@@ -87,12 +94,13 @@ LAN browser ──HTTPS──► proxy (TLS + login) ──► cezar (127.0.0.1:
   client can send its own.
 
 The `--external-proxy` installs with `--bind-host 172.17.0.1` (a proxy in a container) do not bind
-loopback, so the switch does not apply to them.
+loopback, so a grant does not apply to them.
 
 ## Checking and turning it off
 
-`cez remote-settings status` prints the switch and one line per cockpit it finds: `CEZ_URL` when
-set, otherwise every cockpit answering on `127.0.0.1` ports 4321–4370. A remote cockpit that stays
-read-only with the switch on binds a non-loopback address, or runs with another `CEZ_HOME`.
+`cez remote-settings status` prints the grants and one line per cockpit it finds: `CEZ_URL` when
+set, otherwise every cockpit answering on `127.0.0.1` ports 4321–4370. A granted remote cockpit
+that stays read-only binds a non-loopback address, or runs with another `CEZ_HOME`.
 
-`cez remote-settings disable` removes the file. The next request is refused, with no restart.
+`cez remote-settings disable --port <n>` withdraws one grant; `disable` alone withdraws every grant.
+The next request is refused, with no restart.

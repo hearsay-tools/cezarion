@@ -731,7 +731,7 @@ export function createApp(deps: ServerDeps) {
   };
   // Hosted-mode gate (spec §"Deployment modes") — read per request so
   // CEZ_REMOTE flips take effect live (and tests can toggle it).
-  const capabilities = () => resolveCapabilities(process.env, bindHost);
+  const capabilities = () => resolveCapabilities(process.env, bindHost, deps.cezarPort?.());
   const singleProjectRefusal = (
     action: 'adding projects' | 'editing projects' | 'removing projects' | 'folder browsing',
   ) => ({ error: `single-project mode is enabled; ${action} is disabled` });

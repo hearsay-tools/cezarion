@@ -41,7 +41,7 @@ describe('the config API', () => {
     mkdirSync(join(homeRoot, 'cezar-sandbox'), { recursive: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     // The config routes never touch the manager — an empty stub is honest.
-    app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
+    app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', cezarPort: () => 4321 });
   });
 
   afterEach(() => {
@@ -327,7 +327,7 @@ describe('the config API', () => {
     const savedRemote = process.env.CEZ_REMOTE;
     process.env.CEZ_REMOTE = '1';
     try {
-      await enableRemoteSettings();
+      await enableRemoteSettings(4321);
       const allowed = await put({ worktreeSetup: { commands: ['npm ci'] } });
       expect(allowed.status).toBe(200);
       expect(rawFile().worktreeSetup).toEqual({ commands: ['npm ci'] });

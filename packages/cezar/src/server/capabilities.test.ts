@@ -150,12 +150,13 @@ describe('resolveCapabilities — settings administration (hearsay-tools/cezario
   afterEach(() => {
     rmSync(home, { recursive: true, force: true });
   });
-  const admin = (env: NodeJS.ProcessEnv, bindHost?: string) => {
-    const caps = resolveCapabilities({ CEZ_HOME: home, ...env }, bindHost);
+  const admin = (env: NodeJS.ProcessEnv, bindHost?: string, port: number | undefined = 4321) => {
+    const caps = resolveCapabilities({ CEZ_HOME: home, ...env }, bindHost, port);
     return { localHandoff: caps.localHandoff, settingsAdmin: caps.settingsAdmin, remoteSettingsAdmin: caps.remoteSettingsAdmin };
   };
+  const grant = (port: number) => enableRemoteSettings(port, { CEZ_HOME: home });
 
-  it('a local cockpit administers settings without the host switch', () => {
+  it('a local cockpit administers settings without a grant', () => {
     expect(admin({})).toEqual({ localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false });
   });
 
@@ -163,30 +164,41 @@ describe('resolveCapabilities — settings administration (hearsay-tools/cezario
     expect(admin({ CEZ_REMOTE: '1' })).toEqual({ localHandoff: false, settingsAdmin: false, remoteSettingsAdmin: false });
   });
 
-  it('the host switch grants a loopback-bound remote cockpit settings, and nothing else', async () => {
-    await enableRemoteSettings({ CEZ_HOME: home });
+  it('a grant for this cockpit port gives a loopback-bound remote cockpit settings, and nothing else', async () => {
+    await grant(4321);
     expect(admin({ CEZ_REMOTE: '1' })).toEqual({ localHandoff: false, settingsAdmin: true, remoteSettingsAdmin: true });
     expect(admin({ CEZ_REMOTE: '1' }, '127.0.0.1')).toMatchObject({ settingsAdmin: true });
-    // A local cockpit needs no warning: the switch adds nothing there.
+    // A local cockpit needs no warning: the grant adds nothing there.
     expect(admin({})).toEqual({ localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false });
   });
 
-  it('the host switch never applies to a non-loopback bind', async () => {
-    await enableRemoteSettings({ CEZ_HOME: home });
+  it('a grant for another cockpit sharing this home grants nothing here', async () => {
+    await grant(4322);
+    expect(admin({ CEZ_REMOTE: '1' }, undefined, 4321)).toEqual({ localHandoff: false, settingsAdmin: false, remoteSettingsAdmin: false });
+    expect(admin({ CEZ_REMOTE: '1' }, undefined, 4322)).toMatchObject({ settingsAdmin: true });
+  });
+
+  it('a cockpit whose port is not known yet is never granted', async () => {
+    await grant(4321);
+    expect(resolveCapabilities({ CEZ_HOME: home, CEZ_REMOTE: '1' }, undefined, undefined).settingsAdmin).toBe(false);
+  });
+
+  it('a grant never applies to a non-loopback bind', async () => {
+    await grant(4321);
     for (const bindHost of ['0.0.0.0', '172.17.0.1', '192.168.1.10', '100.64.0.1']) {
       expect(admin({}, bindHost), bindHost).toEqual({ localHandoff: false, settingsAdmin: false, remoteSettingsAdmin: false });
     }
   });
 
-  it('turning the switch off takes effect on the next read', async () => {
-    await enableRemoteSettings({ CEZ_HOME: home });
+  it('withdrawing the grant takes effect on the next read', async () => {
+    await grant(4321);
     expect(admin({ CEZ_REMOTE: '1' }).settingsAdmin).toBe(true);
-    await disableRemoteSettings({ CEZ_HOME: home });
+    await disableRemoteSettings({ CEZ_HOME: home }, 4321);
     expect(admin({ CEZ_REMOTE: '1' }).settingsAdmin).toBe(false);
   });
 
   it('a malformed host file grants nothing', () => {
-    writeFileSync(join(home, 'remote-settings.json'), '{"enabled":"true"}');
+    writeFileSync(join(home, 'remote-settings.json'), '{"enabled":true}');
     expect(admin({ CEZ_REMOTE: '1' }).settingsAdmin).toBe(false);
   });
 });

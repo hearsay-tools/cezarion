@@ -25,9 +25,10 @@
  *
  * `settingsAdmin` (hearsay-tools/cezarion#2428): Agent config and worktree setup persist commands
  * the host runs, so editing them needs a local cockpit, or a host operator who ran
- * `cez remote-settings enable` on a remote cockpit bound to loopback. A browser cannot set the
- * switch, and a non-loopback bind never takes it, because direct backend access would skip the
- * deployment's authentication. `remoteSettingsAdmin` is the remote half, which the cockpit warns
+ * `cez remote-settings enable` for this cockpit's listen port on a remote cockpit bound to loopback.
+ * A browser cannot set the switch, a grant for another port (another cockpit sharing this home)
+ * grants nothing here, and a non-loopback bind never takes it, because direct backend access would
+ * skip the deployment's authentication. `remoteSettingsAdmin` is the remote half, which the cockpit warns
  * about. Neither widens `localHandoff`: host application launches stay local-only.
  *
  * Usage presentation: token counts and monetary cost stay visible by default.
@@ -37,7 +38,7 @@
  */
 
 import type { Capabilities } from '@open-mercato/cezar-contract';
-import { readRemoteSettings } from '../remote-settings.ts';
+import { isGranted, readRemoteSettings } from '../remote-settings.ts';
 
 /** Every IPv4 address in 127.0.0.0/8, anchored. Anchoring is load-bearing: a
  *  `startsWith('127.')` test also matches attacker-controlled *hostnames* like
@@ -134,11 +135,11 @@ export function isLoopbackHostHeader(host: string | null | undefined): boolean {
  *  Read per request. The automations flag is a boot-time setting: the workspace scheduler is
  *  started once, on the server's `listening` event, so flipping the flag on afterwards gates
  *  the routes open without ever starting the poller. Boot-time flag, same wording. */
-export function resolveCapabilities(env: NodeJS.ProcessEnv = process.env, bindHost?: string): Capabilities {
+export function resolveCapabilities(env: NodeJS.ProcessEnv = process.env, bindHost?: string, port?: number): Capabilities {
   const loopbackBind = isLoopbackHost(bindHost);
   const localHandoff = env.CEZ_REMOTE !== '1' && loopbackBind;
   // The host file is read only where it can matter: a remote cockpit bound to loopback.
-  const remoteSettingsAdmin = !localHandoff && loopbackBind && readRemoteSettings(env).enabled;
+  const remoteSettingsAdmin = !localHandoff && loopbackBind && isGranted(readRemoteSettings(env), port);
   const hideAllUsage = env.CEZ_HIDE_TOKEN_METRICS === '1';
   const tokenUsageMetrics = !hideAllUsage && env.CEZ_HIDE_TOKEN_USAGE !== '1';
   const costMetrics = !hideAllUsage && env.CEZ_HIDE_COST !== '1';
