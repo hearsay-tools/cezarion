@@ -369,9 +369,9 @@ test('publish writes the combined results before it syncs issues, compares a mis
   const files = ['packages/cezar/src/m.ts', 'packages/cezar/src/p.ts', 'packages/cezar/src/n.ts'];
   const planDir = path.join(dir, 'plan');
   fs.mkdirSync(planDir);
-  fs.writeFileSync(path.join(planDir, 'plan.json'), JSON.stringify({ version: 1, head: HEAD, since: 'x', cap: 64, selected: files.map(entry), cut: [], skipped: [] }));
+  fs.writeFileSync(path.join(planDir, 'plan.json'), JSON.stringify({ version: 1, head: HEAD, since: 'x', cap: 64, selected: files.map(entry), cut: [{ file: 'packages/cezar/src/cut.ts', lines: 3 }], skipped: [] }));
   const filesDir = resultDir(t, [[files[0], result(files[0], { fail: ['covered lines'] })], [files[1], result(files[1])]]);
-  const github = fakeGithub({ runs: [{ id: 8, created_at: '2026-10-31' }], artifacts: [{ id: 1, run_id: 8, name: 'mutants-weekly-results', expired: false, data: combined({ [files[0]]: { ...result(files[0]), head: OLD, score: 70 } }) }] });
+  const github = fakeGithub({ issues: [issueOf(5, 'packages/cezar/src/cut.ts')], runs: [{ id: 8, created_at: '2026-10-31' }], artifacts: [{ id: 1, run_id: 8, name: 'mutants-weekly-results', expired: false, data: combined({ [files[0]]: { ...result(files[0]), head: OLD, score: 70 } }) }] });
   const summaries = [];
   const core = { warning() {}, info() {}, summary: { addRaw(text) { summaries.push(text); return this; }, async write() {} } };
   const context = { repo: { owner: 'o', repo: 'r' }, runId: 9, serverUrl: 'https://github.test' };
@@ -380,9 +380,10 @@ test('publish writes the combined results before it syncs issues, compares a mis
   const written = JSON.parse(fs.readFileSync(path.join(outDir, 'results.json'), 'utf8'));
   assert.deepEqual(Object.keys(written.results), files.slice(0, 2));
   assert.equal(written.head, HEAD);
-  assert.equal(github.state.issues.length, 1);
-  assert.match(github.state.issues[0].body, /Earlier result at `bbbbbbb`: counted score \+10\.0 points/);
-  assert.match(github.state.issues[0].body, /https:\/\/github\.test\/o\/r\/actions\/runs\/9/);
+  assert.equal(github.state.issues.length, 2);
+  assert.match(github.state.issues[0].body, /Not measured this week.*over the weekly cap/s);
+  assert.match(github.state.issues[1].body, /Earlier result at `bbbbbbb`: counted score \+10\.0 points/);
+  assert.match(github.state.issues[1].body, /https:\/\/github\.test\/o\/r\/actions\/runs\/9/);
   assert.match(summaries.join(''), /1 not measured/);
   await assert.rejects(publish({ github, context, core, planDir: filesDir, filesDir, outDir, readArchive, exists: () => true }), /plan/);
 });
