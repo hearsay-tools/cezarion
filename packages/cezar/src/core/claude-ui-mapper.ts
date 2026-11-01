@@ -74,6 +74,13 @@ export interface ClaudeUiMapperState {
   /** `TaskCreate` calls whose result has not arrived yet, keyed by tool_use id.
    *  The entry parks here until the result reveals its real id. */
   readonly pendingTaskCreates: ReadonlyMap<string, PlanEntry>;
+  /** Backgrounded root task items still running after their spawn call, keyed by tool_use id
+   *  (hearsay-tools/cezarion#2431). `task_notification` completes each one exactly once. */
+  readonly backgroundTasks: ReadonlyMap<string, UiToolItem>;
+  /** Claude's task id (the Agent's `agentId`) → tool_use id: the notification's fallback key. */
+  readonly backgroundTaskIds: ReadonlyMap<string, string>;
+  /** tool_use ids whose background child already ended: later frames for them emit nothing. */
+  readonly endedBackgroundTasks: ReadonlySet<string>;
 }
 
 export interface ClaudeUiMapping {
@@ -93,6 +100,9 @@ export function createClaudeUiState(opts: { fallbackSessionId?: string | undefin
     openTools: new Map(),
     tasks: new Map(),
     pendingTaskCreates: new Map(),
+    backgroundTasks: new Map(),
+    backgroundTaskIds: new Map(),
+    endedBackgroundTasks: new Set(),
   };
 }
 
@@ -119,6 +129,8 @@ export function mapClaudeMessage(msg: unknown, state: ClaudeUiMapperState): Clau
       if (msg.subtype === 'init') return mapInit(msg, state);
       // `hook_started`/`hook_progress` render nothing: hooks are completion-only (#961).
       if (msg.subtype === 'hook_response') return { events: mapHookResponse(msg), state };
+      if (msg.subtype === 'task_started') return mapTaskStarted(msg, state);
+      if (msg.subtype === 'task_notification') return mapTaskNotification(msg, state);
       return { events: [], state };
     case 'assistant':
       return mapAssistant(msg, state);
@@ -218,6 +230,82 @@ function parseHookJson(stdout: string): Record<string, unknown> | undefined {
   } catch {
     return undefined;
   }
+}
+
+// ---- background subagents (hearsay-tools/cezarion#2431) ----------------------
+
+/**
+ * A backgrounded `Agent`/`Task` outlives its spawn call: Claude answers the call at once with an
+ * `async_launched` acknowledgement and reports the child's end later in `system/task_notification`.
+ * The root task item carries `background: true` and stays `running` until that notification. A
+ * foreground fork (`is_backgrounded: false`, forked-skill.ndjson) keeps the ordinary tool lifecycle,
+ * and so does a child's own nested spawn: only a root task item is marked.
+ */
+function isRootTask(item: UiToolItem): boolean {
+  return item.toolKind === 'task' && item.parentItemId === undefined;
+}
+
+/** Record a running background item under its tool_use id and, when known, Claude's task id. */
+function withBackgroundTask(state: ClaudeUiMapperState, item: UiToolItem, taskId: string | undefined): ClaudeUiMapperState {
+  const backgroundTaskIds = taskId === undefined ? state.backgroundTaskIds : new Map(state.backgroundTaskIds).set(taskId, item.id);
+  return { ...state, backgroundTasks: new Map(state.backgroundTasks).set(item.id, item), backgroundTaskIds };
+}
+
+function mapTaskStarted(msg: Record<string, unknown>, state: ClaudeUiMapperState): ClaudeUiMapping {
+  const toolUseId = str(msg.tool_use_id);
+  const open = toolUseId === undefined ? undefined : state.openTools.get(toolUseId);
+  if (msg.is_backgrounded !== true || !open || !isRootTask(open) || open.background) return { events: [], state };
+  const item: UiToolItem = { ...open, background: true };
+  const next = withBackgroundTask(state, item, str(msg.task_id));
+  return { events: [{ type: 'item.updated', item }], state: { ...next, openTools: new Map(state.openTools).set(item.id, item) } };
+}
+
+/** The spawn acknowledgement's `agentId`, or undefined when the result is not an async launch. */
+function asyncLaunchAgentId(msg: Record<string, unknown>): string | null | undefined {
+  const result = isRecord(msg.tool_use_result) ? msg.tool_use_result : undefined;
+  if (!result || (result.status !== 'async_launched' && result.isAsync !== true)) return undefined;
+  return str(result.agentId) ?? null;
+}
+
+/**
+ * A background child's spawn acknowledgement: the child runs on, so its item stays running with the
+ * acknowledgement as output. Null for a late result of a child that already ended, which must not
+ * reopen or rename it; undefined for an ordinary result.
+ */
+function backgroundAck(
+  state: ClaudeUiMapperState,
+  open: UiToolItem | undefined,
+  raw: Record<string, unknown>,
+  launchedAgentId: string | null | undefined,
+): UiToolItem | null | undefined {
+  if (typeof raw.tool_use_id === 'string' && state.endedBackgroundTasks.has(raw.tool_use_id)) return null;
+  if (!open || !isRootTask(open) || raw.is_error === true) return undefined;
+  if (!open.background && launchedAgentId === undefined) return undefined;
+  return { ...open, background: true, status: 'running', output: stringifyToolResultContent(raw.content) };
+}
+
+/** The child's end: completed, failed, or declined for any other status (stopped, killed). */
+function mapTaskNotification(msg: Record<string, unknown>, state: ClaudeUiMapperState): ClaudeUiMapping {
+  const toolUseId = str(msg.tool_use_id);
+  const taskId = str(msg.task_id);
+  const id = toolUseId !== undefined && state.backgroundTasks.has(toolUseId)
+    ? toolUseId
+    : taskId === undefined ? undefined : state.backgroundTaskIds.get(taskId);
+  const running = id === undefined ? undefined : state.backgroundTasks.get(id);
+  if (id === undefined || !running) return { events: [], state };
+  const status = msg.status === 'completed' ? 'completed' : msg.status === 'failed' ? 'failed' : 'declined';
+  const item: UiToolItem = { ...running, status };
+  const summary = str(msg.summary);
+  if (status === 'failed' && summary !== undefined) item.error = summary;
+  const backgroundTasks = new Map(state.backgroundTasks);
+  backgroundTasks.delete(id);
+  const backgroundTaskIds = new Map([...state.backgroundTaskIds].filter(([, toolId]) => toolId !== id));
+  const openTools = new Map(state.openTools);
+  openTools.delete(id);
+  return {
+    events: [{ type: 'item.completed', item }],
+    state: { ...state, backgroundTasks, backgroundTaskIds, openTools, endedBackgroundTasks: new Set(state.endedBackgroundTasks).add(id) },
+  };
 }
 
 // ---- assistant blocks → message/reasoning/tool items -----------------------
@@ -475,10 +563,22 @@ function mapToolResults(msg: Record<string, unknown>, state: ClaudeUiMapperState
   let openTools: Map<string, UiToolItem> | null = null;
   let tasks = state.tasks;
   let pendingTaskCreates = state.pendingTaskCreates;
+  let background = state;
+  const launchedAgentId = asyncLaunchAgentId(msg);
 
   for (const raw of content) {
     if (!isRecord(raw) || raw.type !== 'tool_result' || typeof raw.tool_use_id !== 'string') continue;
     const open = (openTools ?? state.openTools).get(raw.tool_use_id);
+    const ack = backgroundAck(state, open, raw, launchedAgentId);
+    if (ack !== undefined) {
+      if (ack !== null) {
+        events.push({ type: 'item.updated', item: ack });
+        background = withBackgroundTask(background, ack, launchedAgentId ?? undefined);
+        openTools ??= new Map(state.openTools);
+        openTools.delete(raw.tool_use_id);
+      }
+      continue;
+    }
     // A result for a tool we never saw start (state loss) still completes an
     // item — consumers upsert by id, so a lone snapshot renders fine.
     const item: UiToolItem = open
@@ -532,7 +632,11 @@ function mapToolResults(msg: Record<string, unknown>, state: ClaudeUiMapperState
   }
 
   if (events.length === 0) return { events, state };
-  return { events, state: { ...state, openTools: openTools ?? state.openTools, tasks, pendingTaskCreates } };
+  const { backgroundTasks, backgroundTaskIds } = background;
+  return {
+    events,
+    state: { ...state, openTools: openTools ?? state.openTools, tasks, pendingTaskCreates, backgroundTasks, backgroundTaskIds },
+  };
 }
 
 /** Whether a `TaskList` resync would change the rendered plan — it usually just
