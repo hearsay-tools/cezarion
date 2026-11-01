@@ -1027,7 +1027,7 @@ describe('subagent waits', () => {
   });
 
   it('lists back to the agent with its deadline', () => {
-    expect(openWaitSchema.safeParse({ wait_id: makeSubagentWait().id, kind: 'subagent', summary: 'subagent wait on 1 native subagent', deadline: '2026-10-26T00:05:00.000Z' }).success).toBe(true);
-    expect(openWaitSchema.safeParse({ wait_id: makeSubagentWait().id, kind: 'subagent', summary: 'no deadline' }).success).toBe(false);
+    expect(openWaitSchema.safeParse({ wait_id: makeSubagentWait().id, kind: WAIT_KIND.subagent, summary: 'subagent wait on 1 native subagent', deadline: '2026-10-26T00:05:00.000Z' }).success).toBe(true);
+    expect(openWaitSchema.safeParse({ wait_id: makeSubagentWait().id, kind: WAIT_KIND.subagent, summary: 'no deadline' }).success).toBe(false);
   });
 });
