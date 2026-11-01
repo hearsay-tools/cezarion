@@ -97,6 +97,17 @@ test('the plan command writes plan.json and the matrix, head and count outputs',
   assert.throws(() => cli(['plan', '--outside', 'x'], {}), /Usage/);
 });
 
+test('the default plan dependencies run git, read the clock and print', t => {
+  const deps = weekly.cliDeps();
+  assert.match(deps.git(['--version']), /^git version/);
+  assert.ok(deps.now() instanceof Date);
+  assert.equal(deps.env, process.env);
+  const printed = [];
+  t.mock.method(console, 'log', line => printed.push(line));
+  deps.log('hello');
+  assert.deepEqual(printed, ['hello']);
+});
+
 function resultDir(t, entries) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mutants-weekly-files-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
@@ -175,9 +186,11 @@ test('the issue body holds the marker, file, head, run, PASS and FAIL lines, the
   assert.ok(!body.includes('`ok`:'), 'a guard with no survivors gets no line');
   assert.match(renderIssue({ outcome, earlier: { kind: 'incomparable', version: 1 }, head: HEAD, runUrl: RUN_URL }), /No comparable earlier result: it has result version 1, this run has version 2\./);
   assert.match(renderIssue({ outcome, earlier: { kind: 'incomparable', reason: 'bad' }, head: HEAD, runUrl: RUN_URL }), /No comparable earlier result: bad\./);
-  const compared = comparison({ ...result(file, { survivors: [survivor(9)] }), head: OLD, score: 75 }, res);
+  const earlierResult = result(file, { survivors: [survivor(9)] });
+  const compared = comparison({ ...earlierResult, head: OLD, score: 75, counts: { ...earlierResult.counts, killed: 6, survived: 3 } }, res);
   const withChange = renderIssue({ outcome, earlier: compared, head: HEAD, runUrl: RUN_URL });
-  assert.match(withChange, /Earlier result at `bbbbbbb`: counted score \+5\.0 points/);
+  assert.match(withChange, /Earlier result at `bbbbbbb`: counted score \+5\.0 points, raw score \+0\.0 points\. Counts: killed \+2, survived -1\./);
+  assert.match(renderIssue({ outcome, earlier: comparison({ ...res, head: OLD }, res), head: HEAD, runUrl: RUN_URL }), /Counts: no change\./);
   assert.match(withChange, /1 new survivor/);
   assert.match(withChange, /1 survivor gone/);
 });

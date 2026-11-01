@@ -326,14 +326,14 @@ async function publish({ github, context, core, planDir, filesDir, outDir, root 
   fs.mkdirSync(outDir, { recursive: true });
   fs.writeFileSync(path.join(outDir, 'results.json'), JSON.stringify({ version: 1, head: chosen.head, runId: context.runId, runUrl, results }));
   const missed = outcomes.filter(o => o.state === 'missed').map(o => o.file);
-  const earlier = await findEarlier({ github, owner, repo, runId: context.runId, files: missed, readArchive, warn: line => core.warning(line) });
+  const earlier = await findEarlier({ github, owner, repo, runId: context.runId, files: missed, readArchive, warn: core.warning });
   const actions = await syncIssues({ github, owner, repo, outcomes, earlier, head: chosen.head, runUrl,
     exists: exists ?? (file => fs.existsSync(path.join(root, file))), date: now.toISOString().slice(0, 10) });
   await core.summary.addRaw(renderSummary({ plan: chosen, outcomes, actions })).write();
   return { outcomes, actions };
 }
 
-module.exports = { CAP, MAX_BODY, RESULTS_ARTIFACT, WORKFLOW_FILE, marker, productFile, artifactName, parseNumstat, selectFiles, plan, cli, readResult,
+module.exports = { CAP, MAX_BODY, RESULTS_ARTIFACT, WORKFLOW_FILE, marker, productFile, artifactName, parseNumstat, selectFiles, plan, cli, cliDeps, readResult,
   classify, comparison, renderIssue, withNote, findIssues, syncIssues, findEarlier, unzipResults, renderSummary, readPlan, publish };
 if (require.main === module) {
   try {
