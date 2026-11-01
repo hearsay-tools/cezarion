@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { RunModuleContext } from './types.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { RunRecord } from '../../runs/store.ts';
-import type { ConversationState } from '@open-mercato/cezar-contract';
+import type { ConversationState, RequestOutcome } from '@open-mercato/cezar-contract';
 import type { ConversationMessage } from '@open-mercato/cezar-contract/conversations';
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import type { HumanWaitEntry, WaitVia } from '@open-mercato/cezar-contract/waits';
@@ -285,20 +285,25 @@ export class WorkerQuestions {
     const root = this.context.store.getRun(parentId);
     const conversation = root?.delegation?.role === 'root' ? root.delegation.conversation : undefined;
     if (!conversation) return;
+    // A settled parent ends the question first, an accepted reply still waiting included: it
+    // cancels its workers in the same pass.
+    const parentSettled = !['queued', 'running', 'waiting'].includes(root!.status) || !!root!.stopping;
     for (const message of conversation.messages) {
       const outcome = message.question && conversation.outcomes.find(entry => entry.requestId === message.id);
-      // A reply still waiting for a live worker answers it; one a stopped worker never took does not.
-      const worker = this.context.store.getRun(message.senderRunId);
-      const live = !!worker && ['queued', 'running', 'waiting'].includes(worker.status) && !worker.stopping;
-      // A settled parent ends the question first, an accepted reply still waiting included: it
-      // cancels its workers in the same pass.
-      const parentSettled = !['queued', 'running', 'waiting'].includes(root!.status);
-      if (!outcome || (live && !parentSettled && (outcome.status === 'replied' || outcome.status === 'completed-without-reply'))) continue;
-      const routed = this.routedAsk(message.senderRunId);
-      if (routed?.message.id !== message.id) continue;
-      const workerEnded = !live || outcome.status === 'sender-closed' || outcome.status === 'destroyed';
-      this.closeQuestion(message.senderRunId, routed.askSeq, workerEnded && !parentSettled ? 'worker-stopped' : 'parent-stopped');
+      const reason = outcome ? this.settledQuestionClose(message.senderRunId, outcome.status, parentSettled) : undefined;
+      const routed = reason && this.routedAsk(message.senderRunId);
+      if (reason && routed && routed.message.id === message.id) this.closeQuestion(message.senderRunId, routed.askSeq, reason);
     }
+  }
+
+  /** Why a routed question with this outcome closes, or undefined while it still stands: a reply
+   *  waiting for a live worker answers it, one a stopped worker never took does not. */
+  private settledQuestionClose(workerId: string, status: RequestOutcome['status'], parentSettled: boolean): QuestionCloseReason | undefined {
+    const worker = this.context.store.getRun(workerId);
+    const live = !!worker && ['queued', 'running', 'waiting'].includes(worker.status) && !worker.stopping;
+    if (live && !parentSettled && (status === 'replied' || status === 'completed-without-reply')) return undefined;
+    const workerEnded = !live || status === 'sender-closed' || status === 'destroyed';
+    return workerEnded && !parentSettled ? 'worker-stopped' : 'parent-stopped';
   }
 
   /** Routed questions this parent has not answered yet, by asking worker. */
@@ -322,7 +327,7 @@ export class WorkerQuestions {
     const routed = workers.flatMap(run => { const ask = this.routedAsk(run.id); return ask ? [{ workerId: run.id, ...ask }] : []; });
     const missing = routed.filter(entry => !state.outcomes.some(outcome => outcome.requestId === entry.message.id));
     if (missing.length) {
-      const status = parent.status === 'failed' ? 'failed' as const : parent.status === 'cancelled' ? 'cancelled' as const : 'completed-without-reply' as const;
+      const status = parent.status === 'failed' ? 'failed' as const : parent.status === 'cancelled' || parent.stopping ? 'cancelled' as const : 'completed-without-reply' as const;
       const observedAt = new Date().toISOString();
       this.context.store.commitConversation(parentId, { ...state, outcomes: [...state.outcomes,
         ...missing.map(entry => ({ requestId: entry.message.id, status, observedAt }))] });

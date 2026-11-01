@@ -737,6 +737,28 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     } finally { f.close(); }
   });
 
+  // A Stop that takes its time still ends the parent's ability to answer: the question closes while
+  // the parent is stopping, not when its status settles.
+  it('closes a routed question while its parent is stopping', async () => {
+    const f = await askedPair();
+    const state = (manager as unknown as { active: Map<string, { interrupt(): void }> }).active.get(f.p.id)!;
+    const interrupt = vi.spyOn(state, 'interrupt').mockImplementation(() => {});
+    try {
+      expect(manager.cancel(f.p.id)).toBe(true);
+      expect(store.getRun(f.p.id)).toMatchObject({ stopping: true, status: expect.stringMatching(/^(running|waiting)$/) });
+      manager.reconcileWorkerWaits();
+      await until(() => closedAs(f.w.id).length === 1);
+      expect(closedAs(f.w.id)).toEqual(['parent-stopped']);
+      expect(conversationOf(f.p.id)?.outcomes).toEqual([expect.objectContaining({ requestId: f.questionId, status: requestOutcomeSchema.shape.status.enum.cancelled })]);
+      expect(store.getRun(f.p.id)?.stopping).toBe(true);
+      noHumanCard(f.w.id);
+    } finally {
+      interrupt.mockRestore();
+      state.interrupt();
+      f.close();
+    }
+  });
+
   it("waits for capacity before a parent's answer resumes the worker", async () => {
     const f = await askedPair();
     try {
