@@ -39,7 +39,7 @@ vi.mock('../core/runner-factory.ts', () => ({
 }));
 
 /**
- * Continue after a Cursor ACP bootstrap crash must open `session/new`.
+ * Continue after a Cursor bootstrap crash must open a fresh session.
  *
  * `run.ts` writes a launch UUID onto the step before Cursor returns a session
  * id, so the step rail has something to show. Continue used that UUID as
@@ -125,7 +125,7 @@ describe('Continue after a Cursor bootstrap crash', () => {
     await settled(id);
   });
 
-  it('still session/loads a Cursor-confirmed session id', async () => {
+  it('hands an untagged confirmed session id to the runner as ACP, which refuses it (hearsay-tools/cezarion#1267)', async () => {
     const id = failedCursorRun(CURSOR_SESSION_ID, true);
     const spec = await continueSpec(id);
     expect(spec.resume).toBe(true);

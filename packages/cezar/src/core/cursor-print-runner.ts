@@ -59,15 +59,15 @@ export class CursorPrintRunner implements AgentRunner {
   };
   private lastSession?: AgentSession;
   constructor(private readonly options: CursorPrintRunnerOptions = {}) {}
+  async interrupt(): Promise<void> { this.lastSession?.interrupt(); }
+  run(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void): Promise<AgentRunResult> {
+    return this.startSession(spec, onEvent, { autoEndAfterFirstTurn: true }).result;
+  }
   startSession(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void, opts: SessionOptions = {}): AgentSession {
     const bin = this.options.bin ?? process.env.CEZ_CURSOR_BIN ?? (process.env.CEZ_DRY_RUN === '1'
       ? fileURLToPath(new URL('../../scripts/mock-cursor-print.mjs', import.meta.url)) : 'agent');
     return this.lastSession = new CursorPrintSession(bin, spec, this.options, onEvent, opts);
   }
-  run(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void): Promise<AgentRunResult> {
-    return this.startSession(spec, onEvent, { autoEndAfterFirstTurn: true }).result;
-  }
-  async interrupt(): Promise<void> { this.lastSession?.interrupt(); }
 }
 
 interface ActiveTurn {

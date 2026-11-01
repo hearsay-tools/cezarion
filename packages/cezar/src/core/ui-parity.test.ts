@@ -93,13 +93,13 @@ const CAPABILITIES: ReadonlyArray<[name: string, produced: (events: UiEvent[]) =
   ['hook items (hook_response / hook/completed)', (events) => items(events).some((item) => item.kind === 'hook')],
 ] as const;
 
-/** Cursor 2026.09.15-d2fe57e: ACP presenter in 1699.index.js emits no usage,
- * and session/prompt returns only stopReason. Confirmed by a live probe; see
- * __fixtures__/cursor/README.md. Optional upstream usage_update is occupancy, not consumption,
- * and is deliberately not mapped (pinned by a separate unit test).
- * Keep inverse assertions so fabricated fixture usage cannot erase the gap.
+/** Cursor print 2026.10.01-e373342 (hearsay-tools/cezarion#1267 removed ACP): per the Cursor
+ * output-format reference, print suppresses `thinking` events and its terminal `result` frame
+ * carries no usage, so no reasoning item and no usage can be mapped. Keep inverse assertions so
+ * fabricated fixture data cannot erase the gaps.
  */
-const CURSOR_NO_USAGE_TELEMETRY = new Set([
+const CURSOR_PRINT_GAPS = new Set([
+  'reasoning items (thinking / reasoning items / reasoning parts)',
   'usage.updated with raw token counts',
   'turn.completed with per-turn directional usage',
 ]);
@@ -128,11 +128,12 @@ describe('protocol v2 backend parity (every mapper emits every matrix capability
         });
         continue;
       }
-      if (backend === 'cursor' && CURSOR_NO_USAGE_TELEMETRY.has(name)) {
-        it(`cursor explicitly lacks ${name} (2026.09.15-d2fe57e ACP has no telemetry)`, () => {
+      if (backend === 'cursor' && CURSOR_PRINT_GAPS.has(name)) {
+        it(`cursor explicitly lacks ${name} (2026.10.01-e373342 print suppresses thinking and usage)`, () => {
           expect(produced(events)).toBe(false);
           expect(events.some((event) => event.type === 'usage.updated')).toBe(false);
           expect(events.some((event) => event.type === 'turn.completed' && event.usage !== undefined)).toBe(false);
+          expect(items(events).some((item) => item.kind === 'reasoning')).toBe(false);
         });
         continue;
       }
@@ -144,12 +145,19 @@ describe('protocol v2 backend parity (every mapper emits every matrix capability
 
   // Sub-agent NESTING rides on parentItemId where the wire attributes work
   // to its parent: claude `parent_tool_use_id` and opencode child-session
-  // parts under a `subtask`; Cursor capability-negotiated subagent sessions; OMP `subagent_event`
-  // frames under their `task` call (`subagent_lifecycle.parentToolCallId`). Codex's wire has no
-  // parent attribution — its matrix cell is the review-mode task items asserted above.
-  for (const backend of ['claude', 'opencode', 'cursor', 'omp'] as const) {
+  // parts under a `subtask`; OMP `subagent_event` frames under their `task` call
+  // (`subagent_lifecycle.parentToolCallId`). Codex's wire has no parent attribution — its
+  // matrix cell is the review-mode task items asserted above.
+  for (const backend of ['claude', 'opencode', 'omp'] as const) {
     it(`${backend} nests sub-agent work via parentItemId`, () => {
       expect(items(fixtureEvents(backend)).some((item) => item.parentItemId !== undefined)).toBe(true);
     });
   }
+  // Cursor print 2026.10.01-e373342 reports the parent Task call but no child-session transcript
+  // (__fixtures__/cursor/README.md), so nothing can nest under it.
+  it('cursor explicitly lacks sub-agent nesting (print has no child-session transcript)', () => {
+    const events = fixtureEvents('cursor');
+    expect(items(events).some((item) => item.kind === 'tool' && item.toolKind === 'task')).toBe(true);
+    expect(items(events).some((item) => item.parentItemId !== undefined)).toBe(false);
+  });
 });
