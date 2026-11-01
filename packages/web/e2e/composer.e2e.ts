@@ -13,7 +13,7 @@ import { waitForStatus } from './poll'
 /**
  * The composer (R3 Step 2.1) end-to-end, against a LIVE dry-run session — not a replayed
  * fixture: a real `cezar` (CEZ_DRY_RUN=1) on a real tmp git repo runs a real task through the
- * mock claude, whose reply carries no CEZ:DONE marker, so the run parks at `waiting` — the
+ * mock claude, whose reply makes no cezar_done call, so the run parks at `waiting` — the
  * exact state the composer exists for. What this spec proves is the full loop: type a reply
  * (with a `/` skill completion from this repo's own `.ai/skills`), send, and watch the
  * transcript grow over SSE because the server accepted and persisted the message.
@@ -59,7 +59,7 @@ beforeAll(async () => {
   )
   baseUrl = await waitForFixtureServer(server)
 
-  // Boot the run the composer will talk to. The mock's reply has no CEZ:DONE marker, so after
+  // Boot the run the composer will talk to. The mock makes no cezar_done call, so after
   // its first turn and the no-wait nudge the session stays open and the run parks at `waiting`.
   const created = (await (
     await fetch(`${baseUrl}/api/v1/runs`, {

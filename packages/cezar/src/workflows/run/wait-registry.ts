@@ -212,7 +212,12 @@ export class WaitRegistry {
     const { state: active, run } = assertCanRegister();
     const turnId = active.ciTurnId ??= randomUUID();
     if (active.autonomous && this.host.countAutomaticWakes(runId) < this.maxAutoContinues) refuse('autonomous_run');
-    const open = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human' && wait.source !== 'cezar');
+    // The question this turn's opening answers stays open only until the turn end settles it, so
+    // a question asked in that turn is a new one, never the answered one returned
+    // (hearsay-tools/cezarion#2397).
+    const answering = active.session?.open ? active.openingAnswerAskSeq : undefined;
+    const open = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human' && wait.source !== 'cezar' &&
+      (answering === undefined || wait.askSeq !== answering));
     if (open?.askSeq !== undefined) return open;
     if (!open && openWaits(run).length >= WAIT_LIMIT) refuse('capacity');
     const base: HumanWaitEntry = open ?? { id: randomUUID(), kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: new Date().toISOString(), phase: 'open', turnId };

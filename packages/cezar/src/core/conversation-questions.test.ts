@@ -4,7 +4,7 @@ import type { AgentInput, ConversationMessage } from '@open-mercato/cezar-contra
 import { RUNNER_IDS } from './agent-runner.ts';
 import { waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 
-// #505 on every real runner wire: the worker's ask (native or CEZ:ASK) travels to its
+// #505 on every real runner wire: the worker's ask (native or cezar_ask) travels to its
 // parent as a routed request, and the parent's reply answers it through the same seam a
 // human answer uses. The root here is a parked record, so the reply is committed directly.
 for (const backend of RUNNER_IDS) {
