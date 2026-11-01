@@ -31,8 +31,8 @@ export function artifactTitle(name: string, bytes: Buffer): string | undefined {
   const html = bytes.subarray(0, TITLE_PREFIX_BYTES).toString('utf8');
   // Consume whole quoted attributes before interpreting another tag, including in templates.
   const tail = String.raw`(?:[^"'>]|"[^"]*"|'[^']*')*>`;
-  const incomplete = String.raw`<[a-z/](?:[^"'>]|"[^"]*(?:"|$)|'[^']*(?:'|$))*(?:>|$)`;
-  const tags = new RegExp(String.raw`<!--(?:>|->|[\s\S]*?(?:--!?>|$))|<(\/?)([a-z][\w:-]*)(?=[\s/>])${tail}|(${incomplete})`, 'gi');
+  const incomplete = String.raw`<[a-z/](?:[^"'>]|"[^"]*(?:"|$)|'[^']*(?:'|$))*$`;
+  const tags = new RegExp(String.raw`<!--(?:>|->|[\s\S]*?(?:--!?>|$))|<![^>]*(?:>|$)|<\?[^>]*(?:>|$)|<\/[^a-z>][^>]*(?:>|$)|<\/>|<(\/?)([a-z][^\s/>]*)(?=[\s/>])${tail}|(${incomplete})`, 'gi');
   let templateDepth = 0;
   let foreignDepth = 0;
   for (let tag = tags.exec(html); tag; tag = tags.exec(html)) {

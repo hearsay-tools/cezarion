@@ -303,6 +303,16 @@ describe('immutable artifact publication', () => {
 describe('report metadata', () => {
   it.each([
     ['report.html', '<p>No title</p>', undefined],
+    ['report.html', '<template><my.tag></my.tag></template><title>Real</title>', 'Real'],
+    ['report.html', '</!ignored <title>Fake</title>><title>Real</title>', 'Real'],
+    ['report.html', '</!ignored <title>Fake</title', undefined],
+    ['report.html', '</><title>Real</title>', 'Real'],
+    ['report.html', '<3 < title>text<title>Real</title>', 'Real'],
+    ['report.html', '<?ignored <title>Fake</title', undefined],
+    ['report.html', '<template><math-α></math-α></template><title>Real</title>', 'Real'],
+    ['report.html', '<!ignored <title>Fake</title>><title>Real</title>', 'Real'],
+    ['report.html', '<?ignored <title>Fake</title>><title>Real</title>', 'Real'],
+    ['report.html', '<!ignored <title>Fake</title', undefined],
     ['report.html', '<title>Budget &#128; &#x80; 2026</title>', 'Budget € € 2026'],
     ['report.html', '<title>&#129;&#141;&#143;&#144;&#157;</title>', undefined],
     ['report.html', '<title>' + Array.from({ length: 32 }, (_, i) => `&#${128 + i};`).join('') + '</title>', '€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ'],
