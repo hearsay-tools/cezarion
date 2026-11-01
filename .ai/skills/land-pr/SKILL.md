@@ -72,7 +72,9 @@ A conflict or invalidated contract returns to the implementation owner.
 
 Done when every item holds at `H`, with any owner approval recorded. Return
 `ready` for a check-only request, `blocked` with the failed item and next action,
-or `awaiting-checks` with the PR wait. A changed head invalidates the gate.
+or `awaiting-checks` with the pending results. For a check-only request, open a
+PR wait only when the caller also asked for monitoring; a landing request
+includes waiting for its required checks. A changed head invalidates the gate.
 
 ## 3. Merge or wait
 
@@ -89,7 +91,8 @@ gh pr merge <P> --squash --match-head-commit <H>
 ```
 
 A rejected merge returns its reason; do not broaden permissions or bypass a
-rule. On a head change, return to review. On pending checks, register a PR wait.
+rule. On a head change, return to review. On pending checks, use the wait rule
+in step 2; a check-only request has already returned its gate result there.
 Observe GitHub's merged state and resulting commit; command acceptance or
 green checks alone do not establish a merge.
 
