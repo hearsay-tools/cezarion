@@ -147,12 +147,20 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     expect(wakes(id)).toBe(0);
   });
 
-  it('a human message keeps the subagent wait open, and the turn end parks on it again', async () => {
-    const { id, wait } = await parkedOnSubagents();
+  it('a human message keeps the subagent wait and its timers open, and the turn end parks on it again', async () => {
+    let timerId = '';
+    const { id, wait } = await parkedOnSubagents(['toolu_bg_01'], async runId => {
+      const handlers = manager.cezarToolHandlers(runId, internals().active.get(runId)!.ciGeneration!);
+      const registered = await handlers.registerWait({ kind: WAIT_KIND.timer, seconds: 600, note: 'beside the subagents' }, 'cezar_wait', new AbortController().signal);
+      if (!('wait' in registered)) throw new Error('timer not registered');
+      timerId = registered.wait.id;
+    });
     const turns = turnEnds(id);
+    // Claude starts the turn inside Cezar's own write: that turn is the human's, not the runner's.
     expect(manager.sendMessage(id, [{ type: 'text', text: 'how is it going?' }])).toBe(true);
     await until(() => turnEnds(id) > turns && store.getRun(id)?.status === RUN_STATUS.waiting && internals().line.isParked(id));
     expect(entryOf(id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open });
+    expect(entryOf(id, timerId)).toMatchObject({ phase: WAIT_PHASE.open });
     expect(stateOf(store.getRun(id)!)).toBe('waiting:subagents');
   });
 

@@ -34,7 +34,7 @@ import { appendTurnText, trackTurnTail, RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { asksQuestion } from '@open-mercato/cezar-contract/waits';
-import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { readPersistedRuns, crashStore } from '../runs/run-store.testkit.ts';
 import { monitoringTimerOf, monitoringWakeOf } from './waits.testkit.ts';
 
@@ -1557,11 +1557,14 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
       { type: 'turn.started', turnId: 'turn_parent_resume' },
     );
 
-    // hearsay-tools/cezarion#1233: the resumed turn keeps its pool slot and its open timer until
-    // its own turn end.
+    // hearsay-tools/cezarion#1233: the resumed turn keeps its pool slot until its own turn end.
+    // hearsay-tools/cezarion#2431 (owner decision 4): a parent turn the runner starts itself closes
+    // every open timer, so the timer cannot wake a second turn after it. The turn's own end decides
+    // what it waits on next: a new monitoring line or wait, else the no-wait nudge.
     expect(store.getRun(record.id)).toMatchObject({ status: 'running' });
-    expect(monitoringWakeOf(store.getRun(record.id))).toBeDefined();
-    expect(monitoringTimerOf(manager, record.id)).toBeDefined();
+    expect(monitoringWakeOf(store.getRun(record.id))).toBeUndefined();
+    expect(monitoringTimerOf(manager, record.id)).toBeUndefined();
+    expect(store.getRun(record.id)?.lastWaits?.filter(wait => wait.kind === WAIT_KIND.timer).map(wait => wait.phase)).toEqual([WAIT_PHASE.cancelled]);
     expect(runInternals(manager).line.waiting.has(record.id)).toBe(false);
     expect(runInternals(manager).line.monitoring.has(record.id)).toBe(true);
     expect(runInternals(manager).line.busySlots()).toBe(0);
