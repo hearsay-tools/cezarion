@@ -70,6 +70,11 @@ describe('prepareReport', () => {
     expect(parse(srcdoc).querySelectorAll('img')).toHaveLength(4)
   })
 
+  it('reads a data URL inside srcset as one embedded candidate, commas included', () => {
+    const { blocked } = prepareReport('<img srcset="data:image/png;base64,AAAA 1x, data:image/png;base64,BBBB 2x"><img srcset="a.png 1x, https://x.test/b.png 2x">')
+    expect(blocked).toMatchObject({ relative: 1, remote: 1 })
+  })
+
   it('strips form actions and counts forms', () => {
     const { srcdoc, blocked } = prepareReport('<form action="https://evil.test" method="post"><button formaction="/api/v1/runs">Go</button></form>')
     const doc = parse(srcdoc)

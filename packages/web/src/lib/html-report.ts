@@ -22,6 +22,7 @@ const DATA = /^data:/i
 const REMOTE = /^(?:[a-z][a-z\d+.-]*:|\/\/)/i
 const CSS_URL = /url\(\s*(['"]?)([^'")]*)\1\s*\)|@import\s+(['"])([^'"]+)\3/gi
 const RESOURCE_ATTRS = ['src', 'href', 'xlink:href', 'poster', 'background'] as const
+const SRCSET_URL = /(?:^|,)\s*(data:\S+|[^,\s]+)/gi
 const HINTS = /\b(?:preconnect|dns-prefetch|prefetch|preload|modulepreload|prerender)\b/i
 
 function classify(url: string, blocked: BlockedContent): void {
@@ -74,7 +75,8 @@ function countResources(doc: Document, blocked: BlockedContent): void {
       const value = element.getAttribute(name)
       if (value !== null) classify(value, blocked)
     }
-    for (const candidate of (element.getAttribute('srcset') ?? '').split(',')) classify(candidate.trim().split(/\s+/)[0] ?? '', blocked)
+    // A data URL carries its own comma, so a candidate is a data URL up to whitespace, or a plain URL.
+    for (const candidate of (element.getAttribute('srcset') ?? '').matchAll(SRCSET_URL)) classify(candidate[1]!, blocked)
   }
 }
 
