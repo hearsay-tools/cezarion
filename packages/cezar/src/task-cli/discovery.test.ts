@@ -31,10 +31,14 @@ describe('discoverCockpit', () => {
     return dir;
   };
   /** A fake cockpit serving health + the registry; resolves to its port. */
-  const cockpit = async (projects: Array<ReturnType<typeof project>>, bootProject = projects[0]?.id ?? 'boot') => {
+  const cockpit = async (
+    projects: Array<ReturnType<typeof project>>,
+    bootProject = projects[0]?.id ?? 'boot',
+    healthOf: (repoRoot: string) => object = health,
+  ) => {
     const server = createServer((req, res) => {
       res.setHeader('content-type', 'application/json');
-      if (req.url === '/api/v1/health') res.end(JSON.stringify(health(projects[0]?.root ?? '/')));
+      if (req.url === '/api/v1/health') res.end(JSON.stringify(healthOf(projects[0]?.root ?? '/')));
       else if (req.url === '/api/v1/projects') res.end(JSON.stringify({ projects, bootProject, projectsDir: '/tmp' }));
       else { res.statusCode = 404; res.end('{"error":"not found"}'); }
     });
@@ -54,6 +58,18 @@ describe('discoverCockpit', () => {
     const port = await cockpit([project('other', '/nowhere'), project('mine', repo)]);
     const found = await discoverCockpit({ repoDir: repo, ports: [port] });
     expect(found).toEqual({ origin: `http://127.0.0.1:${port}`, projectId: 'mine', api: `http://127.0.0.1:${port}/api/v1/p/mine`, hasWebhook: false });
+  });
+
+  // A newer `cez` meets a cockpit still running an older build, whose health lacks capabilities
+  // added since (hearsay-tools/cezarion#2428 added settingsAdmin and remoteSettingsAdmin).
+  it('discovers a cockpit whose health lacks capabilities added after its build', async () => {
+    const repo = gitRepo();
+    const older = (repoRoot: string) => {
+      const { settingsAdmin: _settingsAdmin, remoteSettingsAdmin: _remoteSettingsAdmin, ...capabilities } = health(repoRoot).capabilities;
+      return { ...health(repoRoot), capabilities };
+    };
+    const port = await cockpit([project('mine', repo)], 'mine', older);
+    expect((await discoverCockpit({ repoDir: repo, ports: [port] })).projectId).toBe('mine');
   });
 
   it('carries whether the matched project has a task webhook (#589)', async () => {
