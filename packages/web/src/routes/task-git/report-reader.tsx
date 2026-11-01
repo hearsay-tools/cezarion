@@ -20,12 +20,15 @@ type NavigationApi = { canGoBack?: boolean; back: () => unknown }
  *  under the reader's URL, and the page cannot see where the frame stands among them. The
  *  Navigation API walks the top page's own entries, so it skips them. Without it, Back goes to the
  *  source view the link recorded (`readerFrom`), never through history arithmetic.
- *  Without in-app history (a bookmark, a new tab) Back goes to the task's conversation. */
+ *  From the first entry of the app session, Back goes to the task's conversation. */
 export function useLeaveReader(): () => void {
   const location = useLocation()
   const navigate = useNavigate()
   return () => {
-    if (location.key === 'default') { void navigate({ pathname: location.pathname.replace(/\/report\/?$/, '') }, { replace: true }); return }
+    // The first entry of this app session: a bookmark, a new tab, or a cold flat link the legacy
+    // redirect replaced (its key is no longer 'default', but the router's index stays 0).
+    const first = location.key === 'default' || (window.history.state as { idx?: unknown } | null)?.idx === 0
+    if (first) { void navigate({ pathname: location.pathname.replace(/\/report\/?$/, '') }, { replace: true }); return }
     const navigation = (window as { navigation?: NavigationApi }).navigation
     const from = readerSource(location.state)
     if (navigation?.canGoBack) void navigation.back()

@@ -187,6 +187,20 @@ describe('Back from the reader', () => {
     await waitFor(() => expect(at()).toBe('/p/a/tasks/r1'))
   })
 
+  it.each([
+    ['with', { canGoBack: true, back: vi.fn() }],
+    ['without', undefined],
+  ])('goes to the conversation from the first entry of the app session, %s the Navigation API', async (_label, navigation) => {
+    report()
+    vi.stubGlobal('navigation', navigation)
+    // A cold flat link: the legacy redirect replaced the first entry, so its key is not 'default'.
+    vi.spyOn(window.history, 'state', 'get').mockReturnValue({ idx: 0, key: 'k', usr: null })
+    renderAt(['/elsewhere', `/p/a/tasks/r1/report?artifact=${ID}`])
+    fireEvent.click(await screen.findByRole('button', { name: 'Back' }))
+    await waitFor(() => expect(at()).toBe('/p/a/tasks/r1'))
+    if (navigation) expect(navigation.back).not.toHaveBeenCalled()
+  })
+
   it('goes to the task\'s conversation without in-app history', async () => {
     report()
     renderAt([`/p/a/tasks/r1/report?artifact=${ID}`])

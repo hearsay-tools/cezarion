@@ -148,6 +148,16 @@ it('leaves the reader in one step after anchor clicks, also without the Navigati
   browser.waitForFunction(`location.pathname === ${JSON.stringify(threadPath())} && document.querySelector(${JSON.stringify(LINK)}) !== null`)
 })
 
+it.each([['with', false], ['without', true]])('goes to the conversation on Back after a cold flat link, %s the Navigation API', (_label, removeNavigation) => {
+  // A fresh tab: the flat link is its first entry, and the legacy redirect replaces it.
+  browser.switchTab(browser.newTab())
+  browser.goto(`${baseUrl}/tasks/${runId}/report?artifact=${publication.id}`)
+  browser.waitForFunction(`document.querySelector(${JSON.stringify(FRAME)}) !== null && location.pathname === ${JSON.stringify(readerPath())}`)
+  if (removeNavigation) browser.evaluate(`Object.defineProperty(window, 'navigation', { value: undefined, configurable: true }) === window`)
+  browser.click('[data-slot="report-bar"] button[aria-label="Back"]')
+  browser.waitForFunction(`location.pathname === ${JSON.stringify(threadPath())} && document.querySelector(${JSON.stringify(LINK)}) !== null`)
+})
+
 it('blocks scripts, navigation and storage by the sandbox alone, on unprepared HTML', () => {
   browser.goto(`${baseUrl}${readerPath()}?artifact=${publication.id}`)
   browser.waitForFunction(`document.querySelector(${JSON.stringify(FRAME)}) !== null`)
