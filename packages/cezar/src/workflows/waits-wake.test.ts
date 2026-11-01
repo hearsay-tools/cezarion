@@ -361,13 +361,13 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     expect(beforeAck.find(row => row.id === run.id)?.automaticWakes).toBe(1);
     release();
     await restart(false, beforeAck);
+    turns = turnEnds(run.id);
     expect(store.getRun(run.id)?.automaticWakes).toBe(1);
     expect(waitById(run.id, second.id)?.phase).toBe('resolved');
     // The continuation delivers the batch again and charges it once.
     await until(() => settled(run.id, second.id)?.phase === 'delivered');
     expect(store.getRun(run.id)?.automaticWakes).toBe(2);
     expect(notes(run.id, 'automatic timer wake-up (').map(event => event.message).at(-1)).toBe('automatic timer wake-up (2/40)');
-    turns = turnEnds(run.id);
     await until(() => turnEnds(run.id) > turns && store.getRun(run.id)?.status === 'waiting');
     expect(manager.sendMessage(run.id, [{ type: 'text', text: 'carry on' }])).toBe(true);
     expect(store.getRun(run.id)?.automaticWakes).toBe(0);

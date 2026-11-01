@@ -187,7 +187,6 @@ async function respond(userText, imageCount, uuid) {
   // Early scenarios do not advance the ordinary turn counter.
   if (await dispatchReply(earlyReplies, userText, uuid)) return;
   turn += 1;
-  await sleep(250);
   const markers = await markersFor(userText);
   // `mock:slow` → hold the turn for ~25 s so queue states are observable.
   if (userText.includes('mock:slow')) await sleep(25_000);
@@ -478,7 +477,6 @@ async function replyWithMarkdown(userText, uuid) {
     type: 'assistant',
     message: { role: 'assistant', content: [{ type: 'text', text: md }], usage: { input_tokens: 100, output_tokens: 200 } },
   });
-  await sleep(100);
   emit({ type: 'result', subtype: 'success', result: md, usage: { input_tokens: 100, output_tokens: 200 }, total_cost_usd: 0.001 });
   return;
 }
@@ -632,7 +630,6 @@ async function replyWithName(userText, uuid) {
       usage: { input_tokens: 200, output_tokens: 30 },
     },
   });
-  await sleep(50);
   emit({
     type: 'result',
     subtype: 'success',
@@ -665,7 +662,6 @@ async function replyWithPlan(userText, uuid) {
       usage: { input_tokens: 500, output_tokens: 120 },
     },
   });
-  await sleep(100);
   emit({
     type: 'result',
     subtype: 'success',
@@ -691,7 +687,6 @@ async function replyWithScheduleWakeup(userText, uuid) {
       usage: { input_tokens: 40, output_tokens: 20 },
     },
   });
-  await sleep(100);
   emit({
     type: 'user',
     message: {
@@ -699,7 +694,6 @@ async function replyWithScheduleWakeup(userText, uuid) {
       content: [{ type: 'tool_result', tool_use_id: id, content: 'Wakeup scheduled.' }],
     },
   });
-  await sleep(100);
 }
 
 async function replyWithFirstTurn(userText, { refsMarkers, calls }) {
@@ -713,7 +707,6 @@ async function replyWithFirstTurn(userText, { refsMarkers, calls }) {
       usage: { input_tokens: 850, output_tokens: 40 },
     },
   });
-  await sleep(300);
   emit({
     type: 'assistant',
     message: {
@@ -722,7 +715,6 @@ async function replyWithFirstTurn(userText, { refsMarkers, calls }) {
       usage: { input_tokens: 120, output_tokens: 55 },
     },
   });
-  await sleep(300);
   emit({
     type: 'user',
     message: {
@@ -730,7 +722,6 @@ async function replyWithFirstTurn(userText, { refsMarkers, calls }) {
       content: [{ type: 'tool_result', tool_use_id: `toolu_mock_${turn}`, content: ' M src/example.ts' }],
     },
   });
-  await sleep(200);
   // Agent screenshot in a tool result — exercises the image pipeline
   // (persist to <id>-images/, serve via /api/runs/:id/images/, zoomable
   // card + lightbox in the transcript).
@@ -742,7 +733,6 @@ async function replyWithFirstTurn(userText, { refsMarkers, calls }) {
       usage: { input_tokens: 80, output_tokens: 30 },
     },
   });
-  await sleep(200);
   emit({
     type: 'user',
     message: {
@@ -759,7 +749,6 @@ async function replyWithFirstTurn(userText, { refsMarkers, calls }) {
       ],
     },
   });
-  await sleep(300);
   emit({
     type: 'assistant',
     message: {
@@ -768,7 +757,6 @@ async function replyWithFirstTurn(userText, { refsMarkers, calls }) {
       usage: { input_tokens: 300, output_tokens: 90 },
     },
   });
-  await sleep(150);
   emit({
     type: 'result',
     subtype: 'success',
@@ -790,7 +778,6 @@ async function replyWithFollowup(userText, imageCount, { refsMarkers, calls }) {
       usage: { input_tokens: 200, output_tokens: 60 },
     },
   });
-  await sleep(150);
   emit({
     type: 'result',
     subtype: 'success',

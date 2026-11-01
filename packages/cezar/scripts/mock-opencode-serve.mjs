@@ -1025,7 +1025,7 @@ function replyWithOrdinaryTurn() {
       info: info({ cost: 0.0021, tokens: { input: 1200, output: 300, reasoning: 0, cache: { read: 0, write: 0 } } }),
     },
   });
-  setTimeout(() => {
+  setImmediate(() => {
     send({
       type: 'message.part.updated',
       properties: {
@@ -1039,8 +1039,8 @@ function replyWithOrdinaryTurn() {
         },
       },
     });
-  }, 30);
-  setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 90);
+    setImmediate(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }));
+  });
   return;
 }
 
