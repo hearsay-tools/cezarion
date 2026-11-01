@@ -681,7 +681,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     const state = conversationOf(f.p.id)!;
     store.commitConversation(f.p.id, { messages: [...state.messages, { id, ...attribution, text: 'mock:agent-echo Use the parser', createdAt: now, requestHash: 'c'.repeat(64), state: 'accepted' }],
       outcomes: [...state.outcomes, { requestId: f.questionId, status: 'replied', observedAt: now, replyId: id }] },
-    { recipientRunId: f.w.id, input: { id, source: 'agent', parentRunId: f.p.id, text: 'mock:agent-echo Use the parser', createdAt: now, conversation: attribution } });
+    { recipientRunId: f.w.id, input: { id, source: agentInputSchema.shape.source.enum.agent, parentRunId: f.p.id, text: 'mock:agent-echo Use the parser', createdAt: now, conversation: attribution } });
     const events = eventCheckpoint();
     const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string; status: string }>;
     for (const run of disk) if (run.id === f.p.id) run.status = 'cancelled';
@@ -692,6 +692,36 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     expect(said(f.w.id, 'Use the parser')).toBe(false);
     expect(store.getRun(f.w.id)?.agentInputs?.some(input => input.id === id) ?? false).toBe(false);
     noHumanCard(f.w.id);
+  });
+
+  // The worker's own routing marker keeps the question the parent's when the parent's ledger cannot
+  // be read; recovery cannot route it there again, so Cezar answers it and no human does.
+  it('answers a routed question for the parent when the parent record cannot be read after a restart', async () => {
+    const f = await askedPair();
+    f.close();
+    const askSeq = eventsOf(f.w.id, 'ask.requested')[0]!.seq;
+    const events = eventCheckpoint();
+    const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string; status: string }>;
+    for (const run of disk) if (run.id === f.p.id) run.status = 'unknown-status';
+    await restart(false, disk, events);
+    expect(store.isUnreadable(f.p.id)).toBe(true);
+    // The mock asks again after the answer; each question it raises gets Cezar's answer.
+    await until(() => cezarAnswered(f.w.id).length >= 1);
+    expect(eventsOf(f.w.id, 'worker-question-undelivered')[0]).toMatchObject({ askSeq, reason: 'the parent record cannot be read' });
+    expect(cezarAnswered(f.w.id)[0]).toMatchObject({ askSeq });
+    expect(eventsOf(f.w.id, 'human-input-delivered').filter(event => event.source !== 'cezar')).toEqual([]);
+    noHumanCard(f.w.id);
+  });
+
+  it('refuses human input on a routed question whose parent record cannot be read', () => {
+    const routing = runInternals(manager).workerQuestions;
+    const ask = { seq: 3, requestId: 'r', questions: [], routedMessageId: randomUUID() };
+    const worker = { id: randomUUID(), delegation: { role: 'worker' as const } };
+    vi.spyOn(store, 'getRun').mockImplementation(id => (id === worker.id ? worker : undefined) as never);
+    vi.spyOn(store, 'transcriptFacts').mockReturnValue({ pendingAsk: ask } as never);
+    // routedAsk cannot load the parent's message, yet the question stays the parent's.
+    expect(routing.routedAsk(worker.id)).toBeUndefined();
+    expect(routing.answeredElsewhere(worker.id)).toBe(true);
   });
 
   it("waits for capacity before a parent's answer resumes the worker", async () => {

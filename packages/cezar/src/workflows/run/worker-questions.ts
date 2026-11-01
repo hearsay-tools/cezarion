@@ -61,8 +61,13 @@ export class WorkerQuestions {
     const worker = this.context.store.getRun(workerId);
     if (worker?.delegation?.role !== 'worker') return;
     const ask = this.context.store.transcriptFacts(workerId).pendingAsk;
-    if (!ask || ask.routedMessageId !== undefined || ask.fallback) return;
+    if (!ask || ask.fallback) return;
     if (this.undeliveredAnswer(workerId, ask.seq)) { this.recordUndelivered(workerId, ask.seq, undefined); return; }
+    // A routed question whose parent can no longer be read cannot be answered there: Cezar answers it.
+    if (ask.routedMessageId !== undefined) {
+      if (this.context.store.isUnreadable(worker.delegation.parentRunId)) this.answerUndelivered(workerId, ask.seq, 'the parent record cannot be read');
+      return;
+    }
     const request = askRequestOf(ask);
     if (!request) { this.answerUndelivered(workerId, ask.seq, 'the question is not a valid request'); return; }
     const parentId = worker.delegation.parentRunId;
@@ -252,7 +257,7 @@ export class WorkerQuestions {
       return input ? { askSeq: routed.askSeq, input, source: 'parent' } : undefined;
     }
     const ask = this.context.store.getRun(runId)?.delegation?.role === 'worker' ? this.context.store.transcriptFacts(runId).pendingAsk : undefined;
-    const input = ask && !ask.fallback && ask.routedMessageId === undefined ? this.undeliveredAnswer(runId, ask.seq) : undefined;
+    const input = ask && !ask.fallback ? this.undeliveredAnswer(runId, ask.seq) : undefined;
     return ask && input && !input.deliveredAt ? { askSeq: ask.seq, input, source: 'cezar' } : undefined;
   }
 
@@ -264,9 +269,11 @@ export class WorkerQuestions {
     return ask && input.purpose === 'undelivered-question' && input.id === this.undeliveredAnswerId(runId, ask.seq) ? 'cezar' : undefined;
   }
 
-  /** The worker's pending question belongs to its parent or to Cezar: no human answers it. */
+  /** The worker's pending question belongs to its parent or to Cezar: no human answers it. The
+   *  worker's own routing marker decides, so a parent ledger that cannot be read hides nothing. */
   answeredElsewhere(runId: string): boolean {
-    return !!this.routedAsk(runId) || !!this.pendingAnswer(runId);
+    const ask = this.context.store.getRun(runId)?.delegation?.role === 'worker' ? this.context.store.transcriptFacts(runId).pendingAsk : undefined;
+    return !!ask && !ask.fallback && ask.routedMessageId !== undefined || !!this.pendingAnswer(runId);
   }
 
   /** A routed question settled without a reply can never be answered by the parent any more: it
