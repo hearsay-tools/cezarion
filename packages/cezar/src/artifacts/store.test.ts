@@ -303,6 +303,15 @@ describe('immutable artifact publication', () => {
 describe('report metadata', () => {
   it.each([
     ['report.html', '<p>No title</p>', undefined],
+    ['report.html', '<title>Budget &#128; &#x80; 2026</title>', 'Budget € € 2026'],
+    ['report.html', '<title>&#129;&#141;&#143;&#144;&#157;</title>', undefined],
+    ['report.html', '<title>' + Array.from({ length: 32 }, (_, i) => `&#${128 + i};`).join('') + '</title>', '€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ'],
+    ['report.html', '<div data-x="<title>Fake</title>', undefined],
+    ['report.html', "<div data-x='<title>Fake</title>", undefined],
+    ['report.html', '<div data-x=<title>Fake</title><title>Real</title>', 'Real'],
+    ...['--!>', '>', '->'].map(end => ['report.html', `<!--${end}<title>Annual</title>`, 'Annual'] as [string, string, string]),
+    ['report.html', '<!-- note --!><title>Annual</title>', 'Annual'],
+
     ['report.txt', '<title>Not HTML</title>', undefined],
     ['report.HTML', '<TITLE> A &amp; B &copy; &#x1f600; &#233; &eacute; </TITLE>', 'A & B &copy; 😀 é &eacute;'],
     ['report.htm', '<title>  A\n B\tC\u0001D </title>', 'A B CD'],

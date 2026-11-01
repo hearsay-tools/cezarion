@@ -17,20 +17,30 @@ const readFlags = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLO
 const TITLE_PREFIX_BYTES = 64 * 1024;
 const TITLE_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', AMP: '&', LT: '<', GT: '>', QUOT: '"' };
 
+// HTML numeric-reference replacements; the five unmapped C1 controls stay controls.
+const TITLE_NUMERIC: Record<number, number> = {
+  128: 0x20ac, 130: 0x201a, 131: 0x192, 132: 0x201e, 133: 0x2026, 134: 0x2020, 135: 0x2021,
+  136: 0x2c6, 137: 0x2030, 138: 0x160, 139: 0x2039, 140: 0x152, 142: 0x17d,
+  145: 0x2018, 146: 0x2019, 147: 0x201c, 148: 0x201d, 149: 0x2022, 150: 0x2013, 151: 0x2014,
+  152: 0x2dc, 153: 0x2122, 154: 0x161, 155: 0x203a, 156: 0x153, 158: 0x17e, 159: 0x178,
+};
+
 /** Read display text only. RCDATA markup stays literal; nothing is loaded or executed. */
 export function artifactTitle(name: string, bytes: Buffer): string | undefined {
   if (!/\.html?$/i.test(name)) return undefined;
   const html = bytes.subarray(0, TITLE_PREFIX_BYTES).toString('utf8');
   // Consume whole quoted attributes before interpreting another tag, including in templates.
-  const tail = String.raw`(?:[^"'<>]|"[^"]*"|'[^']*')*>`;
-  const tags = new RegExp(String.raw`<!--[\s\S]*?(?:-->|$)|<(\/?)([a-z][\w:-]*)(?=[\s/>])${tail}`, 'gi');
+  const tail = String.raw`(?:[^"'>]|"[^"]*"|'[^']*')*>`;
+  const incomplete = String.raw`<[a-z/](?:[^"'>]|"[^"]*(?:"|$)|'[^']*(?:'|$))*(?:>|$)`;
+  const tags = new RegExp(String.raw`<!--(?:>|->|[\s\S]*?(?:--!?>|$))|<(\/?)([a-z][\w:-]*)(?=[\s/>])${tail}|(${incomplete})`, 'gi');
   let templateDepth = 0;
   let foreignDepth = 0;
   for (let tag = tags.exec(html); tag; tag = tags.exec(html)) {
     const kind = tag[2]?.toLowerCase();
+    if (tag[3]) return undefined;
     if (!kind) continue;
     const closing = tag[1] === '/';
-    if (kind === 'svg' || kind === 'math') {
+    if (/^(?:svg|math)$/.test(kind)) {
       if (closing) foreignDepth = Math.max(0, foreignDepth - 1);
       else if (!/\/>$/.test(tag[0])) foreignDepth++;
       continue;
@@ -41,14 +51,15 @@ export function artifactTitle(name: string, bytes: Buffer): string | undefined {
     }
     if (closing) continue;
     if (kind === 'plaintext') return undefined;
-    if (kind === 'title' && templateDepth === 0 && foreignDepth === 0) {
+    if (kind === 'title' && templateDepth + foreignDepth === 0) {
       const end = new RegExp(String.raw`<\/title(?=[\s/>])${tail}`, 'gi');
       end.lastIndex = tags.lastIndex;
       const close = end.exec(html);
       if (!close) return undefined;
       const title = html.slice(tags.lastIndex, close.index).replace(/&(#(?:x[\da-f]+|\d+)|amp|lt|gt|quot|apos|nbsp);/gi, (entity, code: string) => {
         if (!code.startsWith('#')) return TITLE_ENTITIES[code] ?? entity;
-        const value = code[1]?.toLowerCase() === 'x' ? Number.parseInt(code.slice(2), 16) : Number(code.slice(1));
+        const numeric = code[1]?.toLowerCase() === 'x' ? Number.parseInt(code.slice(2), 16) : Number(code.slice(1));
+        const value = TITLE_NUMERIC[numeric] ?? numeric;
         return value > 0 && value <= 0x10ffff && !(value >= 0xd800 && value <= 0xdfff) ? String.fromCodePoint(value) : '\uFFFD';
       }).replace(/[\u0000-\u0008\u000b\u000e-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 200).replace(/[\uD800-\uDBFF]$/, '');
       return title || undefined;
