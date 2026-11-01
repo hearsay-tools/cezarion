@@ -683,7 +683,7 @@ transport into `UiEvent`s. The authoritative table is
 | v2 event / field | claude (stream-json) | codex (app-server JSON-RPC) | opencode (serve HTTP+SSE) |
 |---|---|---|---|
 | `session.started` | `system/init` (model, tools, cwd) | `thread/started` / `thread/start` result | `POST /session` response |
-| `turn.started` | each stdin user message | `turn/started` | each prompt POST |
+| `turn.started` | each stdin user message that opens a turn; after a `result` with no line queued, the first parent `assistant` frame (Claude resumed the parent itself, hearsay-tools/cezarion#1512) | `turn/started` | each prompt POST |
 | `turn.completed` + `stopReason` | `result` subtype (`success→end_turn`, `error_max_turns→max_tokens`, `error_during_execution→error`) | `turn/completed→end_turn` (failed status or provider error → `error`), `turn/failed→error`, interrupt→`cancelled` | `session.idle→end_turn` (or `error` if a failure `session.error` preceded) |
 | message item | `assistant` `text` blocks (deltas via `--include-partial-messages`) | `agentMessage` items | text parts |
 | reasoning item | `thinking` blocks | `reasoning` items (+ `textDelta`) | `reasoning` parts |
@@ -693,6 +693,7 @@ transport into `UiEvent`s. The authoritative table is
 | `ask.requested` | portable `CEZ:ASK` marker | portable marker + native `item/tool/requestUserInput` | portable marker + native `question` tool (`GET /question`, `POST /question/:id/reply`) |
 | hook item | `system/hook_response` (`--include-hook-events` when `--help` lists it; without it only SessionStart/Setup). Entries parsed from JSON stdout: `additionalContext`→context, `systemMessage`→warning, block `reason`/`stopReason`/deny `permissionDecisionReason`→stop, ask reason→feedback; plain stdout→context. Stdout yields entries on exit 0 only (Claude ignores it otherwise; it stays raw output). Exit 2, `decision:block`, `continue:false`, deny→`blocked` | `hook/completed` (`run.entries` verbatim, `sourcePath`→`source`, `stopped`→`cancelled`) | *(none — plugin hooks run in-process)* |
 | subagent nesting (`parentItemId`) | `parent_tool_use_id` | collaboration receiver thread id (review mode remains childless) | child-session parts under a `subtask` |
+| background child (`background`, hearsay-tools/cezarion#2431) | `task_started.is_backgrounded` or `async_launched` result → running; `task_notification` → completed / failed / declined | `subAgentActivity(kind: started)` → running; parent-thread `subAgentActivity(kind: completed)` → completed | *(none — the parent settles after its children)* |
 | `usage.updated` | `result.usage` + `total_cost_usd` | `thread/tokenUsage/updated` (no USD) | `message.updated` tokens/cost + `step-finish` |
 
 **Mapper robustness contract.** Inputs come off the wire and may be `null`,
@@ -880,6 +881,18 @@ or a new fixture set forgets one — a named row fails. The matrix:
   and Codex only. OpenCode 1.18.35, Pi 1.0.4, OMP 18.8.0 and Cursor
   2026.10.01-e373342 run hooks in-process or report none, and carry the named
   `NO_HOOK_TELEMETRY` exemption with an inverse assertion
+- background sub-agent task items (hearsay-tools/cezarion#2431): a child that
+  outlives its spawn call keeps its root `task` item `running` with
+  `background: true`, and one `item.completed` (`completed`, `failed`, or
+  `declined` for a stopped child) reports its end. Claude marks it from
+  `system/task_started` (`is_backgrounded`) or the `async_launched` result and
+  ends it on `system/task_notification`; Codex 0.164.0 marks the
+  `subAgentActivity(kind: started)` row and ends it on the parent-thread
+  `subAgentActivity(kind: completed)`, which carries the turn id of the parent
+  turn that already completed. A repeated end maps to nothing, and a nested
+  spawn stays passive. OpenCode and OMP settle the parent only after its
+  children end, and Pi and Cursor report no child end, so they carry the named
+  `NO_BACKGROUND_SUBAGENTS` exemption with an inverse assertion
 
 A new backend must produce every row its wire supports. A genuine upstream gap
 requires a named, versioned exemption with an inverse assertion; Cursor token

@@ -54,6 +54,8 @@ function hasToolStatus(events: UiEvent[], status: string): boolean {
   return items(events).some((item) => item.kind === 'tool' && item.status === status);
 }
 
+const BACKGROUND_ROW = 'background sub-agent task items (task_notification / subAgentActivity completed)';
+
 /** The parity matrix (spec §"Backend parity requirement"): capability →
  *  predicate over a backend's full v2 fixture output. */
 const CAPABILITIES: ReadonlyArray<[name: string, produced: (events: UiEvent[]) => boolean]> = [
@@ -91,6 +93,12 @@ const CAPABILITIES: ReadonlyArray<[name: string, produced: (events: UiEvent[]) =
   ],
   ['turn.completed with a stopReason', (events) => events.some((e) => e.type === 'turn.completed' && e.stopReason !== undefined)],
   ['hook items (hook_response / hook/completed)', (events) => items(events).some((item) => item.kind === 'hook')],
+  // hearsay-tools/cezarion#2431: a child that outlives its spawn call keeps its root task item
+  // running, marked `background`, and completes it once when the child ends.
+  [BACKGROUND_ROW, (events) => {
+    const background = items(events).filter((item) => item.kind === 'tool' && item.background === true && item.parentItemId === undefined);
+    return background.some((item) => item.status === 'running') && background.some((item) => item.status !== 'running');
+  }],
 ] as const;
 
 /** Cursor print 2026.10.01-e373342 (hearsay-tools/cezarion#1267 removed ACP): per the Cursor
@@ -113,6 +121,15 @@ const CURSOR_PRINT_GAPS = new Set([
 const NO_HOOK_TELEMETRY = new Set(['opencode', 'pi', 'cursor', 'omp']);
 const HOOK_ROW = 'hook items (hook_response / hook/completed)';
 
+/** hearsay-tools/cezarion#2431, wire survey 2026-11-01: OpenCode and OMP settle the parent only
+ * once its child sessions have ended, so no child outlives a parent turn; Pi 1.0.4 and Cursor
+ * 2026.10.01-e373342 report no child end at all (Pi has no child wire, Cursor print reports only
+ * the parent Task call). Their runs keep the monitoring timer. Claude (`task_notification`) and
+ * Codex 0.164.0 (`subAgentActivity(kind: completed)`) report it. The inverse assertion keeps a
+ * fabricated background item from erasing the gap.
+ */
+const NO_BACKGROUND_SUBAGENTS = new Set(['opencode', 'pi', 'cursor', 'omp']);
+
 describe('protocol v2 backend parity (every mapper emits every matrix capability)', () => {
   it('Cursor print independently emits a plan from its native todo wire', () => {
     const printEvents = JSON.parse(readFileSync(join(HERE, '__fixtures__', 'cursor',
@@ -125,6 +142,13 @@ describe('protocol v2 backend parity (every mapper emits every matrix capability
       if (name === HOOK_ROW && NO_HOOK_TELEMETRY.has(backend)) {
         it(`${backend} explicitly lacks ${name} (its wire reports no hook lifecycle)`, () => {
           expect(produced(events)).toBe(false);
+        });
+        continue;
+      }
+      if (name === BACKGROUND_ROW && NO_BACKGROUND_SUBAGENTS.has(backend)) {
+        it(`${backend} explicitly lacks ${name} (no child outlives a parent turn on its wire)`, () => {
+          expect(produced(events)).toBe(false);
+          expect(items(events).some((item) => item.kind === 'tool' && item.background === true)).toBe(false);
         });
         continue;
       }
