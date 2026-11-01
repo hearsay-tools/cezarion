@@ -64,7 +64,9 @@ export function TaskReportRoute() {
   const location = useLocation()
   const [source, setSource] = useState(false)
   const file = previewFile(result.data)
-  if (file && !isHtmlPath(file.path)) return <Navigate replace to={{ pathname: location.pathname.replace(/\/report\/?$/, '/files'), search: location.search, hash: location.hash }} />
+  // Files owns what the reader cannot render: other file types, and live files too large or binary
+  // to read, which have no snapshot to download (Files says to open them in the editor).
+  if (file && (!isHtmlPath(file.path) || (!file.artifact && (file.tooLarge || file.binary)))) return <Navigate replace to={{ pathname: location.pathname.replace(/\/report\/?$/, '/files'), search: location.search, hash: location.hash }} />
   const name = file ? (file.artifact?.name ?? file.path.split(/[\\/]/).at(-1) ?? file.path) : (path ?? 'Report')
   return (
     <div data-route="task-report" className="fixed inset-0 z-50 flex flex-col bg-background pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] md:static md:z-auto md:h-full md:p-0">
@@ -114,8 +116,7 @@ function ReportBody({ conflict, selected, result, source, name }: {
   }
   const data: FilePreviewData | { type: 'unavailable' | 'unpublished'; path: string; reason: string } = result.data!
   if (data.type !== 'file') return <State icon={<FileXIcon />} title={data.type === 'unpublished' ? 'Report not published' : 'Report unavailable'} subtitle={data.reason} />
-  if (data.tooLarge) return <State icon={<FileWarningIcon />} title="Too large to preview" subtitle={`${formatFileSize(data.size)} is past the 500 kB preview limit. ${data.artifact
-    ? 'Download it to read it.' : 'Open it in your editor, or ask the agent to publish it and download the snapshot.'}`} />
+  if (data.tooLarge) return <State icon={<FileWarningIcon />} title="Too large to preview" subtitle={`${formatFileSize(data.size)} is past the 500 kB preview limit. Download it to read it.`} />
   if (data.binary) return <State icon={<FileQuestionIcon />} title="Binary file" subtitle="This file holds binary data, not readable HTML." />
   if (source) return <div className="bg-card"><CodeLines path={data.path} text={data.content ?? ''} /></div>
   return <HtmlReportFrame html={data.content ?? ''} title={`Report: ${name}`} className="min-h-[60dvh] flex-1" />

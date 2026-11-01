@@ -103,12 +103,13 @@ describe('the HTML report reader', () => {
     expect(screen.queryByRole('button', { name: 'Source' })).toBeNull()
   })
 
-  it('sends an oversized live file to the editor, since it has no snapshot to download', async () => {
-    stubFetch({ '/api/v1/runs/r1/file-link?path=big.html': () => json({ type: 'file', source: 'worktree', path: '/wt/big.html', size: 900_000, binary: false, tooLarge: true }) })
+  it.each([
+    ['too large', { size: 900_000, tooLarge: true }],
+    ['binary', { size: 4096, binary: true }],
+  ])('hands a live file that is %s to Files, which has its own state for it', async (_label, extra) => {
+    stubFetch({ '/api/v1/runs/r1/file-link?path=big.html': () => json({ type: 'file', source: 'worktree', path: '/wt/big.html', size: 1, binary: false, tooLarge: false, ...extra }) })
     renderAt(['/p/a/tasks/r1/report?path=big.html'])
-    expect((await screen.findByRole('heading', { level: 2 })).textContent).toBe('Too large to preview')
-    expect(screen.getByText(/Open it in your editor, or ask the agent to publish it/)).toBeTruthy()
-    expect(screen.queryByRole('link', { name: 'Download' })).toBeNull()
+    await waitFor(() => expect(at()).toBe('/p/a/tasks/r1/files?path=big.html'))
   })
 
   it('shows an unpublished path in the server\'s words', async () => {
