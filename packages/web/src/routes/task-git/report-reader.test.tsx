@@ -150,9 +150,13 @@ describe('the HTML report reader', () => {
   it('toggles Source and back to Preview', async () => {
     stubFetch({ [`/api/v1/runs/r1/artifacts/${ID}`]: () => json(file('report.html', '<h1>Q</h1>')) })
     renderAt([`/p/a/tasks/r1/report?artifact=${ID}`])
-    fireEvent.click(await screen.findByRole('button', { name: 'Source' }))
+    const toggle = await screen.findByRole('button', { name: 'Source' })
+    // The label names the view the button switches to; a pressed state would contradict it.
+    expect(toggle.hasAttribute('aria-pressed')).toBe(false)
+    fireEvent.click(toggle)
     expect(document.querySelector('[data-slot="file-preview-code"]')?.textContent).toContain('<h1>Q</h1>')
     expect(frame()).toBeNull()
+    expect(screen.getByRole('button', { name: 'Preview' }).hasAttribute('aria-pressed')).toBe(false)
     fireEvent.click(screen.getByRole('button', { name: 'Preview' }))
     expect(frame()).not.toBeNull()
   })

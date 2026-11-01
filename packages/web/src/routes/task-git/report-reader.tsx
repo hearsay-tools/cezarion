@@ -96,7 +96,7 @@ function ReportBar({ runId, file, name, source, onSource }: { runId: string; fil
           {artifact ? `Published snapshot · ${new Date(artifact.createdAt).toLocaleString()}` : 'Live file'} · {formatFileSize(file.size)}
         </p> : null}
       </div>
-      {file && !file.tooLarge && !file.binary ? <Button variant="ghost" className="min-h-11 px-3 text-accent-text" aria-pressed={source} onClick={onSource}>{source ? 'Preview' : 'Source'}</Button> : null}
+      {file && !file.tooLarge && !file.binary ? <Button variant="ghost" className="min-h-11 px-3 text-accent-text" onClick={onSource}>{source ? 'Preview' : 'Source'}</Button> : null}
       {artifact ? <a className="inline-flex min-h-11 items-center rounded-md px-3 text-sm text-accent-text underline focus-visible:ring-2" href={artifactUrl(runId, artifact.id, 'download')}>Download</a> : null}
     </header>
   )
