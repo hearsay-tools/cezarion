@@ -1272,9 +1272,10 @@ the first turn; `agent --version` is also the quick way to check your installati
 Cezarion starts the CLI with `--disable-auto-update`, so a task never updates it;
 update it yourself with `agent update`. An older build, or a build missing a core
 tool, fails the task before any inference, with the reason and the fix: run
-`agent update`, or update Cezarion if your build is newer than it supports. Cursor
-sessions from before Cezarion removed ACP sessions cannot resume: Continue on one
-reports that, and you start a new task to carry the work on.
+`agent update`, or update Cezarion if your build is newer than it supports.
+ACP-tagged and untagged Cursor sessions cannot resume after ACP removal: Continue
+on one reports that, and you start a new task to carry the work on. Existing
+print-tagged sessions can still resume.
 A missing CLI leaves the other backends available. `CEZ_DRY_RUN=1` uses the mock.
 Cursor questions from a plugin may be automatically skipped by print mode. Cezarion's
 own `CEZ:ASK` questions remain answerable in the cockpit; plugins that require

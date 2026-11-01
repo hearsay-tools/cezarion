@@ -30,8 +30,8 @@ native question frames. `print-fields.json` records the live read tool's
 response and failed tool result were inspected on `2026.10.01-e373342`.
 `print-lifecycle.expected.json` is hand authored from the v2 contract for
 two exact-resume print turns, including one logical `session.started`.
-The qualified invocation omits native agent tools, so no child-session wire
-is expected; child attribution remains a named unsupported print case.
+Native subagent tools remain callable. Print reports the parent Task call but
+no child-session transcript; child attribution remains a named unsupported print case.
 
 `print-tools.ndjson` is a constructed fixture for hearsay-tools/cezarion#1267, so
 the UI parity matrix reads Cursor's tool rows from print alone. Text, IDs and
