@@ -979,6 +979,32 @@ stored summary whose `waitingOn` is `peers` fails the older
 summary schema, so its run index reads the full record instead. `runs/peer-wait-downgrade.test.ts`
 pins this read (hearsay-tools/cezarion#1993).
 
+Native subagents (hearsay-tools/cezarion#2431). A runner mapper marks a native subagent that
+outlives its spawn call with `background: true` on its root task item, keeps it `running`, and
+ends it with one `item.completed` (`completed`, `failed`, or `declined` for a stopped child).
+When a turn ends with such a child still running, and with no done, question or permission
+request, Cezar opens its own `subagent` wait (`source: 'cezar'`, `via: 'native-subagents'`) in
+place of the monitoring timer, also after `CEZ:MONITORING` or `ScheduleWakeup`, and sends no
+nudge. The park (`waiting:subagents`) keeps its session and a monitoring slot and reads
+**waiting for N subagents** (`waitingOn: { kind: 'subagents', count }`, bucket `none`, the robot
+glyph, webhook state `waiting-workers`); the order is human > usage limit > workers > peers >
+subagents > PR > process > timer. Each child event saves the children and moves the 30-minute
+deadline. When the last child ends and the runner starts no parent turn within 15 s, the wait
+resolves `settled` and wakes the parent once for free; the deadline resolves `timeout` and spends
+one wake. A parent `turn.started` the runner sends itself, outside Cezar's own write, closes the
+subagent wait (`superseded`) and every open timer; PR, process, worker and peer waits stay. A lost
+session or a restart resolves it `interrupted`, and the run continues once for free. Claude and
+Codex report their children; Pi, Cursor, OMP and OpenCode keep the monitoring timer. Tests:
+`workflows/subagent-waits.test.ts` drives each `waiting:subagents` row, and rows **U30**–**U37** in
+`workflows/waits-subagents-parity-cells.testkit.ts` run on every `RUNNER_IDS` native wire, with
+the named exemptions there.
+
+An older cezar reads a stored subagent wait as an unreadable entry, as it reads a peer wait: the
+store drops that entry, keeps the run and its other waits, and sets `lastWaitsError`. A run parked
+only on it reads as a plain park: Needs you. A stored summary whose `waitingOn` is `subagents`
+fails the older summary schema, so its run index reads the full record.
+`runs/subagent-wait-downgrade.test.ts` pins this read.
+
 `cezar_ask({ context, questions })` waits for the user (hearsay-tools/cezarion#1234). Both are
 required. `context` is 1–20,000 characters of Markdown that the cockpit shows above the card.
 `questions` is a card in the ask format, 1–4 questions, each with a header of at most 12

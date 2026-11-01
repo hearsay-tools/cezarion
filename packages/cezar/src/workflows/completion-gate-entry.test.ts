@@ -41,7 +41,7 @@ describe('the completion gate outside a turn end', () => {
       sendMessage: vi.fn(() => true), sendAgentMessage: vi.fn(() => Promise.resolve()),
       end: vi.fn(), interrupt: vi.fn(), discardQueuedMessages: vi.fn(), holdsHumanInput: () => false,
     };
-    state = { cwd: root, cancelled: false, interrupt: () => {}, pendingHumanAsk: false, session, currentStepId: 'task' };
+    state = { cwd: root, cancelled: false, interrupt: () => {}, pendingHumanAsk: false, backgroundChildren: new Map(), session, currentStepId: 'task' };
     runInternals(manager).active.set(id, state);
     vi.spyOn(runInternals(manager).runFinish, 'completionGate').mockReturnValue(refusal);
   });

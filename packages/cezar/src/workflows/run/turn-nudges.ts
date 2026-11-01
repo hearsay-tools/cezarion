@@ -7,7 +7,7 @@ import type { RunRecord, RunStore } from '../../runs/store.ts';
 import { enqueueAgentInput, hasLiveInboxClaim } from '../../delegation/input.ts';
 import { recordRequestRefusal, type CompletionRefusal } from '../completion-policy.ts';
 import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, stepScopedNudge, type TurnEndOutcome } from '../turn-end.ts';
-import type { ActiveRun } from '../active-run.ts';
+import { writeInput, type ActiveRun } from '../active-run.ts';
 import type { RunExitId } from '../run-states.ts';
 import { clearIdleTimer, clearNoWaitNudgeReplyTimer, harnessOwesInput } from './input-timers.ts';
 import { hasPendingHumanAsk, pendingHumanAskSeq } from './pending-ask-facts.ts';
@@ -146,7 +146,7 @@ export class TurnNudges {
     // fresh turn-end ask line: the guards above exclude every pending native/persisted
     // question. Do not route via deliverMessage, which attributes a human answer.
     // Ordinary nudges keep #505's acknowledged agent-input failure semantics.
-    const sent = ask ? session.sendMessage(content) : this.host.submitAgentInput(runId, state, content);
+    const sent = ask ? writeInput(state, () => session.sendMessage(content)) : this.host.submitAgentInput(runId, state, content);
     if (!sent) {
       // An unregistered ask line uses sendMessage: its POST may still be awaiting ACK
       // after the next SSE turn ends. It is not an agentInputFlight. Keep this

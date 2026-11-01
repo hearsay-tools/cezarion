@@ -26,6 +26,8 @@ const VOICE_STATUS_OF_RUNG: Record<AttentionRung, VoiceStatus | null> = {
   running: 'running',
   'usage-limit': 'scheduled',
   'waiting-on-workers': 'waiting-on-workers',
+  // Native subagents share the workers glyph and webhook state (hearsay-tools/cezarion#2431).
+  'waiting-on-subagents': 'waiting-on-workers',
   'waiting-for-ci': 'waiting-for-ci',
   'waiting-for-merge': null,
   'waiting-for-command': null,

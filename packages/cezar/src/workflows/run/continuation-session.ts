@@ -547,7 +547,7 @@ export class ContinuationSession {
       });
       const continuationTail = sessionEvents.launchSystemTail(this.context, this.sharedHost, {
         extraSystemPrompt: settings.extraSystemPrompt, delegation, webhooksPart: launch.webhooksPart,
-        env: settings.profile.env, ciTools, handoffInjected: resumed.handoffInjected,
+        env: settings.profile.env, ciTools, handoffInjected: resumed.handoffInjected, runner: state.delegationSettings?.runner,
       });
       session = startManagedSession(runner,
         {

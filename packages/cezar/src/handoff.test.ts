@@ -321,6 +321,18 @@ describe('handoffInstructions', () => {
     expect(handoffInstructions({ tools: false })).toBe(HANDOFF_ONLY_INSTRUCTIONS);
   });
 
+  // hearsay-tools/cezarion#2431: a runner that reports its native subagents is told Cezar waits for
+  // them; every other runner keeps the timer and marker guidance alone.
+  it.each([true, false])('adds the native subagent paragraph only for a runner that reports them (tools %s)', tools => {
+    const plain = handoffInstructions({ tools });
+    const native = handoffInstructions({ tools, nativeSubagents: true });
+    expect(plain).not.toContain('Native subagents:');
+    expect(native).toContain('Native subagents: ');
+    expect(native).toContain('spends no automatic wake and wakes you once when they have all ended');
+    expect(native).toContain(tools ? 'Use cezar_wait for other background work.' : 'keep it for other background work.');
+    expect(native.replace(/\n\nNative subagents: [^\n]*/, '')).toBe(plain);
+  });
+
   // hearsay-tools/cezarion#1428: agents asked about drafts and findings they never sent, once
   // after a plain ask and once after the content lived only in rejected tool-call arguments.
   // hearsay-tools/cezarion#1458: on Claude, assistant text between tool calls may never arrive, so
