@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [],
+  "jsPlugins": ["./packages/cezar/src/lint/plugin.ts"],
+  "categories": {
+    "correctness": "off",
+    "suspicious": "off",
+    "pedantic": "off",
+    "perf": "off",
+    "style": "off",
+    "restriction": "off",
+    "nursery": "off"
+  },
+  "rules": {
+    "cez/contract-root-import": "error",
+    "cez/native-mock-source": "error",
+    "cez/raw-query-setter": "error",
+    "cez/run-fact-reader": "error",
+    "cez/undocumented-env-name": "error"
+  },
+  "ignorePatterns": ["**/node_modules/**", "**/dist/**"]
+}

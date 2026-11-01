@@ -20,18 +20,25 @@
     ],
     "packages/cezar/src/ast-grep-rules.test.ts": [
       "sgconfig.yml",
-      ".ai/ast-grep/**",
-      "packages/*/src/**/*.{ts,tsx}",
-      "packages/*/test/**/*.ts",
-      "packages/web/e2e/**/*.ts"
+      ".ai/ast-grep/**"
     ],
     "packages/cezar/src/contract-import-boundaries.test.ts": [
-      "packages/cezar/src/**/*.ts",
-      "packages/cezar/test/**/*.ts",
-      "packages/web/src/**/*.{ts,tsx}",
-      "packages/web/e2e/**/*.ts",
-      "packages/api-client/src/**/*.ts",
-      "packages/contract/src/**/*.ts"
+      "packages/contract/src/**/*.ts",
+      "packages/api-client/src/contract/**/*.ts"
+    ],
+    "packages/cezar/src/lint/lint.test.ts": [
+      ".oxlintrc.json",
+      ".env.example",
+      "sgconfig.yml",
+      ".ai/ast-grep/**",
+      "packages/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}",
+      "packages/*/src/**/*.json"
+    ],
+    "packages/cezar/src/lint/plugin.test.ts": [
+      ".oxlintrc.json",
+      ".env.example",
+      "packages/cezar/src/lint/**",
+      "packages/web/src/test/search-params-discipline.baseline.json"
     ],
     "packages/cezar/src/file-length.test.ts": [
       "packages/**/*.{ts,tsx,mjs,cjs}",

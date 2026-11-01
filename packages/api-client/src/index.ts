@@ -26,7 +26,7 @@
  * re-export line per contract module) or `./<path>` for the modules above, e.g.
  * `@open-mercato/cezar-api-client/utils/project-scope`. Importing a value here loads every
  * contract module, delegation's schemas among them (hearsay-tools/cezarion#1237);
- * `packages/cezar/src/contract-import-boundaries.test.ts` enforces it.
+ * the `cez/contract-root-import` lint rule enforces it (`npm run lint`).
  */
 
 export * from './client.ts'
