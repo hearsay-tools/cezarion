@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { RunEvent } from '@open-mercato/cezar-api-client'
+import { humanInputDeliveredEventSchema } from '@open-mercato/cezar-api-client/contract/events'
 import type { UiMessageItem, UiToolItem } from '@open-mercato/cezar-api-client'
 
 import bashAndScreenshot from '../../../../cezar/src/core/__fixtures__/claude/bash-and-screenshot.expected.json'
@@ -1029,6 +1030,30 @@ describe('reduceThread — AskUser cards (#473)', () => {
     ]).find((i) => i.kind === 'ask')
     expect(closed).toMatchObject({ resolved: true, closed: 'superseded' })
     expect((closed as { answeredBy?: string }).answeredBy).toBeUndefined()
+  })
+
+  // hearsay-tools/cezarion#2410: a worker's question ends with its parent, never on a human card.
+  it.each(['parent-stopped', 'worker-stopped', 'undeliverable'] as const)('a worker question closed as %s resolves its card as closed', reason => {
+    const closed = allItems([
+      line(2, 'ask.requested', ASK),
+      line(3, 'worker-question-routed', { askSeq: 2, messageId: '21111111-2222-4333-8444-555555555555', parentRunId: '11111111-2222-4333-8444-555555555555' }),
+      line(4, 'human-ask-closed', { askSeq: 2, reason }),
+    ]).find((i) => i.kind === 'ask')
+    expect(closed).toMatchObject({ resolved: true, closed: reason })
+    expect((closed as { answeredBy?: string }).answeredBy).toBeUndefined()
+  })
+
+  it("closes a worker question Cezar answers for the parent, as soon as it is not delivered", () => {
+    const events = [line(2, 'ask.requested', ASK), line(3, 'worker-question-undelivered', { askSeq: 2, reason: 'the parent conversation is at capacity' })]
+    expect(allItems(events).find((i) => i.kind === 'ask')).toMatchObject({ resolved: true, closed: 'undeliverable' })
+    const answered = allItems([line(2, 'ask.requested', ASK), line(3, 'human-input-delivered', { askSeq: 2, source: humanInputDeliveredEventSchema.shape.source.unwrap().enum.cezar })]).find((i) => i.kind === 'ask')
+    expect(answered).toMatchObject({ resolved: true, closed: 'undeliverable' })
+    expect((answered as { answeredBy?: string }).answeredBy).toBeUndefined()
+  })
+
+  it('leaves the card open for an unknown close reason', () => {
+    const open = allItems([line(2, 'ask.requested', ASK), line(3, 'human-ask-closed', { askSeq: 2, reason: 'later-reason' })]).find((i) => i.kind === 'ask')
+    expect(open).toMatchObject({ resolved: false })
   })
 
   it('drops an ask.requested with no valid questions', () => {

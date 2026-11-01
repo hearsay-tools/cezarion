@@ -75,7 +75,8 @@ describe('session provisioning', () => {
     const { workerId } = await f.service.spawn(f.caller, { task: 'worker', baseline: 'HEAD', requestId: randomUUID() });
     const worker = provision(workerId)!; expect(worker.instructions).toContain('You cannot spawn Cezar workers'); expect(worker.instructions).toContain('wait --request'); expect(worker.instructions).toContain(f.parent.id); expect(worker.instructions).toContain('message reply');
     // #505: a worker's questions go to its parent, which replies or asks the human.
-    expect(worker.instructions).toContain('Your questions — cezar_ask, or a native question — go to your parent');
+    expect(worker.instructions).toContain('Ask your parent with cez message request; any question you raise goes to your parent too, never to a human.');
+    expect(worker.instructions).not.toContain('cezar_ask');
     expect(worker.instructions).not.toContain('only a human can answer');
     expect(worker.instructions).not.toContain('Messages never answer human questions');
     // hearsay-tools/cezarion#1327: a park notice quotes the worker's last message to its waiting parent.

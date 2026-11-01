@@ -9,8 +9,8 @@ import { describe, expect, it, vi } from 'vitest';
 import * as worktrees from '../git-worktree.ts';
 import { RunStore } from '../runs/store.ts';
 import { RunManager } from '../workflows/run.ts';
-import { RUNNER_IDS } from './agent-runner.ts';
-import { HARNESS_ADAPTERS, withOwnedInputRun, waitFor } from './harness-parity.testkit.ts';
+import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
+import { HARNESS_ADAPTERS, withOwnedInputRun, withoutTaskScenario, waitFor } from './harness-parity.testkit.ts';
 import { readPid, requirePid } from '../pid-file.testkit.ts';
 
 // bound: native mock turns and real saves use the same 30 s per-step guard as R24/R25
@@ -21,6 +21,19 @@ const FIXTURE_STEP_MS = 30_000;
 // independently of the retained worktree-writer proof. Registered as R61–R66.
 // hearsay-tools/cezarion#958: the retained holder is Git's detached descendant;
 // an unrelated process churning in the worktree is neither named nor signalled.
+
+/** A Continue cell reopens its settled session. The cancelled cell's pending question is the worker's
+ *  own, so its parent's answer reopens it (hearsay-tools/cezarion#2410); the others continue it. */
+async function reopenSettled(fixture: { store: RunStore; manager: RunManager; runId: string; answer: (text: string) => Promise<string> },
+  backend: RunnerId, outcome: 'failed' | 'cancelled' | 'success', prompt: string): Promise<void> {
+  if (outcome === 'cancelled') {
+    withoutTaskScenario(fixture.store, fixture.runId);
+    await fixture.answer(`Library: Vitest. ${HARNESS_ADAPTERS[backend].scenarios.done!}`);
+    return;
+  }
+  expect(fixture.manager.continueRun(fixture.runId, { text: outcome === 'failed' ? prompt : 'mock:baseline' }).ok).toBe(true);
+}
+
 describe('harness parity — settlement during blocked autosave', () => {
   for (const backend of RUNNER_IDS) {
     for (const continuation of [false, true]) {
@@ -39,14 +52,15 @@ describe('harness parity — settlement during blocked autosave', () => {
           vi.spyOn(console, 'warn').mockImplementation(() => undefined);
           try {
             const hasTail = continuation && outcome === 'cancelled';
-            await withOwnedInputRun(backend, hasTail ? 'ask-snapshot' : 'baseline', async ({ store, manager, runId, repoRoot, adoptContext }) => {
+            await withOwnedInputRun(backend, hasTail ? 'ask-snapshot' : 'baseline', async ({ store, manager, runId, repoRoot, adoptContext, answer }) => {
               if (continuation || outcome !== 'failed') {
                 manager.enqueueOwnedRun(runId);
                 // bound: the native mock must park before Finish or Continue can act.
                 await waitFor(() => store.getRun(runId)?.status === 'waiting', FIXTURE_STEP_MS);
                 if (hasTail) {
-                  // bound: wait for the native ASK snapshot before expiring the continuation.
-                  await waitFor(() => !!store.transcriptFacts(runId).pendingAsk?.fallback, FIXTURE_STEP_MS);
+                  // bound: wait for the native ASK snapshot to reach the parent before expiring the
+                  // continuation (hearsay-tools/cezarion#2410).
+                  await waitFor(() => store.transcriptFacts(runId).pendingAsk?.routedMessageId !== undefined, FIXTURE_STEP_MS);
                   expect(store.getRun(runId)?.steps.map(step => step.status)).toEqual(['waiting', 'pending']);
                 }
                 if (continuation) {
@@ -140,7 +154,7 @@ const timer = setInterval(() => {
               try {
                 const prompt = HARNESS_ADAPTERS[backend].scenarios['provider-error']!;
                 if (continuation) {
-                  expect(manager.continueRun(runId, { text: outcome === 'failed' ? prompt : outcome === 'cancelled' ? `Library: Vitest. ${HARNESS_ADAPTERS[backend].scenarios.done!}` : 'mock:baseline' }).ok).toBe(true);
+                  await reopenSettled({ store, manager, runId, answer }, backend, outcome, prompt);
                   if (outcome === 'success') {
                     // bound: the continued native turn must park before Finish.
                     await waitFor(() => store.getRun(runId)?.status === 'waiting', FIXTURE_STEP_MS);

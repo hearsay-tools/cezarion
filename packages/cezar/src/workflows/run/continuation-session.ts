@@ -221,7 +221,7 @@ export class ContinuationSession {
     // The human waits this answer answers; one the opening turn opens is its next question.
     const waits = askSeq === undefined ? []
       : openWaits(this.context.store.getRun(runId) ?? {}).filter(wait => wait.kind === 'human').map(wait => wait.id);
-    return { askSeq, waits, parentAnswer: opening.parentAnswer };
+    return { askSeq, waits, ...(opening.answerSource ? { answerSource: opening.answerSource } : {}) };
   }
 
   /**
@@ -245,7 +245,7 @@ export class ContinuationSession {
     catch (error) { this.host.latchAgentInputError(runId, state, session!, `agent input delivery checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return false; }
     if (opening) { state.openingAgentInputId = undefined; this.host.reconcileWorkerWaits(); }
     if (askSeq !== undefined) {
-      this.context.store.appendEvent(runId, { type: 'human-input-delivered', askSeq, ...(answer.parentAnswer ? { source: 'parent' } : {}) });
+      this.context.store.appendEvent(runId, { type: 'human-input-delivered', askSeq, ...(answer.answerSource ? { source: answer.answerSource } : {}) });
       answer.askSeq = undefined;
       state.openingAnswerAskSeq = undefined;
     }
@@ -468,7 +468,7 @@ export class ContinuationSession {
 
     this.startContinuationStep(runId, stepId, record, sessionId, backend);
     const opening = continuationOpening(this.context.store, {
-      routedAsk: id => this.workerQuestions.routedAsk(id),
+      answerSource: (id, input) => this.workerQuestions.answerSource(id, input),
       readPersistedAttachments: (...args) => this.queuedInput.readPersistedAttachments(...args),
     }, runId, stepId, state, record, { prompt, images, persistedImages, persistedAttachments });
     prompt = opening.prompt;

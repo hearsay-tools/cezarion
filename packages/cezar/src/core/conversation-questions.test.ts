@@ -10,9 +10,7 @@ import { waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 for (const backend of RUNNER_IDS) {
   it(`${backend} worker question reaches the parent and the parent's reply answers it`, async () => {
     await withOwnedInputRun(backend, 'ask', async ({ runId, parentRunId, store, manager }) => {
-      const root = store.getRun(parentRunId)!.delegation!;
-      if (root.role !== 'root') throw Error('missing root');
-      store.commitDelegation([{ id: parentRunId, delegation: { ...root, permissions: [...root.permissions, 'steer'] } }]);
+      // The fixture's parent holds the steer grant, as provisioned roots do.
       manager.enqueueOwnedRun(runId);
       await waitFor(() => store.readEvents(runId).some(event => event.type === 'worker-question-routed'));
       const ask = store.readEvents(runId).find(event => event.type === 'ask.requested')!;

@@ -20,7 +20,7 @@ import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
 import {
-  bookkeeping, captureState, checkpoint, collect, controlledWire, executions, fixtureUpdateRun,
+  bookkeeping, deliveredBesideWorkerMessages, grantSteer, captureState, checkpoint, collect, controlledWire, executions, fixtureUpdateRun,
   manager, parent, queuedWake, register, reopenRuntime, restart, root, semaphore, setFailureState,
   store, terminal, timeline, track, until, useWorkerWaitFixture, waitOf, lastWaitOf, workerEntryOf, worker,
 } from './worker-wait.testkit.ts';
@@ -227,13 +227,15 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       const wake = waitOf(store.getRun(p.id)); expect(wake?.phase).toBe('wake-pending');
       expect(store.getRun(blocker.id)?.status).toBe('running');
       expect(semaphore.busy()).toBe(1);
-      expect(store.getRun(p.id)?.agentInputs?.some(i => i.deliveredAt)).not.toBe(true);
+      expect(deliveredBesideWorkerMessages(store.getRun(p.id))).toBe(false);
       manager.reconcileWorkerWaits(); manager.reconcileWorkerWaits();
-      expect(store.getRun(p.id)?.agentInputs?.some(i => i.deliveredAt)).not.toBe(true);
+      expect(deliveredBesideWorkerMessages(store.getRun(p.id))).toBe(false);
       manager.cancel(blocker.id);
       await until(() => !waitOf(store.getRun(p.id)), explain);
-      expect(store.getRun(p.id)?.agentInputs).toHaveLength(1);
-      expect(store.getRun(p.id)?.agentInputs?.[0]).toMatchObject({ id: wake?.wakeId, source: 'lifecycle', parentRunId: p.id, deliveredAt: expect.any(String) });
+      // Beside the idle worker's own park notice (hearsay-tools/cezarion#1327), the wake is the one input.
+      const own = store.getRun(p.id)?.agentInputs?.filter(input => input.conversation?.senderRunId !== w.id);
+      expect(own).toHaveLength(1);
+      expect(own?.[0]).toMatchObject({ id: wake?.wakeId, source: 'lifecycle', parentRunId: p.id, deliveredAt: expect.any(String) });
       expect(store.readEvents(p.id).filter(e => e.type === 'user-message')).toEqual([]);
     } finally { writeFileSync(release, ''); }
   });
@@ -318,8 +320,10 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     }
   }
 
-  it('a parent timeout leaves a waiting child human question unanswered', async () => {
-    const p = await parent(); const w = await worker(p.id, 'mock:ask');
+  // The question is the parent's (hearsay-tools/cezarion#2410); the parent's wait expiring answers
+  // nothing of it.
+  it("a parent timeout leaves a waiting child's question unanswered", async () => {
+    const p = await parent(); grantSteer(p.id); const w = await worker(p.id, 'mock:ask');
     const wait = register(p.id, [w.id]); manager.enqueueOwnedRun(w.id);
     await until(() => store.readEvents(w.id).some(event => event.type === 'ask.requested'));
     vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(wait.deadline!);
@@ -327,7 +331,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => !waitOf(store.getRun(p.id)));
     expect(store.getRun(w.id)?.status).toBe('waiting');
     expect(store.readEvents(w.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
-    expect(store.getRun(p.id)?.agentInputs?.[0]?.text).toContain('waiting');
+    expect(store.transcriptFacts(w.id).pendingAsk?.routedMessageId).toBeDefined();
+    // The worker's question is a conversation message; the wait's timeout notice is the parent's own.
+    expect(store.getRun(p.id)?.agentInputs?.find(input => !input.conversation)?.text).toContain('waiting');
   });
 
   // hearsay-tools/cezarion#1235: an identical registration returns the open wait, and a question

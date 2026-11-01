@@ -12,6 +12,7 @@ import type { RunRecord } from '../../runs/store.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { PastedContent, PersistedAttachment } from '../pasted-content.ts';
 import type { WorkflowDef, WorkflowStepDef } from '../types.ts';
+import type { QuestionAnswerSource } from './worker-questions.ts';
 
 export type { FileBlock, PastedContent, PersistedAttachment } from '../pasted-content.ts';
 
@@ -148,19 +149,20 @@ export type StepSessionLaunch = {
 /** An owned worker's delegation record. */
 export type WorkerDelegationRecord = Extract<NonNullable<RunRecord['delegation']>, { role: 'worker' }>;
 
-/** A Continue's opening message and what it carries: the checkpoint it replays, whether it is a
- *  parent's answer to a routed question (#505), and the images and attachments it hands over. */
+/** A Continue's opening message and what it carries: the checkpoint it replays, who sent it when it
+ *  answers a worker's pending question (hearsay-tools/cezarion#505, hearsay-tools/cezarion#2410), and the images and
+ *  attachments it hands over. */
 export type ContinuationOpening = {
   prompt: string;
   checkpoint: RunRecord['continuationMessage'];
-  parentAnswer: boolean;
+  answerSource?: QuestionAnswerSource;
   openingImages: ContentBlock[];
   attachments: PersistedAttachment[];
 };
 
 /** The human ask a Continue's opening message answers, and the human waits that answer settles
  *  when the opening turn ends. The turn end clears `askSeq`. */
-export type OpeningAnswer = { askSeq: number | undefined; waits: string[]; parentAnswer: boolean };
+export type OpeningAnswer = { askSeq: number | undefined; waits: string[]; answerSource?: QuestionAnswerSource };
 
 /** What a Continue resolved before its pre-spawn checks: the step that owns its session, the
  *  workflow step it extends, and its tool grant, model, effort and account. */

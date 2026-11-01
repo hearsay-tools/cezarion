@@ -4,7 +4,7 @@ import type { AgentInput, ConversationMessage } from '@open-mercato/cezar-contra
 import { projectConversationEvents } from '../delegation/conversations.ts';
 import { WORKER_FALLBACK_HEADER } from '../workflows/run.ts';
 import { RUNNER_IDS } from './agent-runner.ts';
-import { waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
+import { waitFor, withOwnedInputRun, withoutTaskScenario } from './harness-parity.testkit.ts';
 
 // R6/R7 already pin native/portable answer routing and queue recovery. This
 // integration adds the conversation-specific seam: durable structured identity
@@ -22,7 +22,10 @@ for (const backend of RUNNER_IDS) {
       await waitFor(() => store.readEvents(runId).some(event => event.type === 'ask.requested'));
       const ask = store.readEvents(runId).find(event => event.type === 'ask.requested')!;
       const requestId = randomUUID();
-      const messages: ConversationMessage[] = [];
+      // The worker's question is routed to the parent first: its message stays in the ledger.
+      await waitFor(() => store.transcriptFacts(runId).pendingAsk?.routedMessageId !== undefined);
+      const existing = (() => { const d = store.getRun(parentRunId)!.delegation!; return d.role === 'root' ? d.conversation ?? { messages: [], outcomes: [] } : { messages: [], outcomes: [] }; })();
+      const messages: ConversationMessage[] = [...existing.messages];
       const inputs: AgentInput[] = [];
       for (const kind of ['request', 'follow-up'] as const) {
         const id = kind === 'request' ? requestId : randomUUID();
@@ -34,7 +37,7 @@ for (const backend of RUNNER_IDS) {
         messages.push({ id, ...attribution, text: input.text, createdAt: input.createdAt,
           requestHash: 'a'.repeat(64), state: 'accepted',
           ...(kind === 'request' ? { deadline: new Date(Date.now() + 600_000).toISOString() } : {}) });
-        store.commitConversation(parentRunId, { messages: [...messages], outcomes: [] }, { recipientRunId: runId, input });
+        store.commitConversation(parentRunId, { messages: [...messages], outcomes: existing.outcomes }, { recipientRunId: runId, input });
       }
       const replay = () => {
         projectConversationEvents(store, store.getRun(parentRunId)!);
@@ -67,7 +70,10 @@ for (const backend of RUNNER_IDS) {
       expect(store.readEvents(runId).filter(event => event.type === 'ask.requested')).toEqual([ask]);
       expect(store.readEvents(runId).filter(event => event.type === 'human-input-delivered')).toEqual([]);
 
-      expect(manager.continueRun(runId, { text: 'Vitest' }).ok).toBe(true);
+      // The worker's own question is its parent's to answer (hearsay-tools/cezarion#2410).
+      expect(manager.continueRun(runId, { text: 'Vitest' }).ok).toBe(false);
+      withoutTaskScenario(store, runId);
+      await fixture.answer('Vitest');
       await waitFor(() => store.getRun(runId)?.agentInputs?.every(input => !!input.deliveredAt) === true);
       await waitFor(() => store.getRun(runId)?.status === 'waiting');
       for (const input of inputs) {
@@ -76,7 +82,8 @@ for (const backend of RUNNER_IDS) {
         expect(String(echoed[0]!.text)).toContain(JSON.stringify({ id: input.id, ...input.conversation }));
       }
       const checkpoints = store.getRun(runId)!.agentInputs;
-      expect(new Set(checkpoints!.map(input => input.deliveredAt)).size).toBe(1);
+      // The parent's two messages go in one submission; its reply is the answer, delivered on its own.
+      expect(new Set(checkpoints!.filter(entry => inputs.some(input => input.id === entry.id)).map(input => input.deliveredAt)).size).toBe(1);
       expect(store.readEvents(runId).filter(event => event.type === 'text' &&
         inputs.every(input => String(event.text).includes(input.text)))).toHaveLength(1);
       replay(); replay();
@@ -91,11 +98,11 @@ for (const backend of RUNNER_IDS) {
       }
       const projections = store.readEvents(runId).filter(event => event.type === 'conversation-message' &&
         inputs.some(input => input.id === (event.message as ConversationMessage).id));
-      // The worker's own ask is routed to its parent or left with the human (#505); a routed
+      // The worker's own ask is routed to its parent (hearsay-tools/cezarion#505); a routed
       // question projects here too, so only the parent's two messages are counted. The echo turns
       // end with no wait or done, so after their nudge Cezar asks the parent too: every other
       // routed question is that fallback (hearsay-tools/cezarion#1301, § A worker's no-wait fallback).
-      const routing = store.readEvents(runId).filter(event => event.type === 'worker-question-routed' || event.type === 'worker-question-fallback');
+      const routing = store.readEvents(runId).filter(event => event.type === 'worker-question-routed');
       const fallbackAsks = new Set(store.readEvents(runId).filter(event => event.type === 'ask.requested' &&
         (event.questions as { header?: string }[])[0]?.header === WORKER_FALLBACK_HEADER).map(event => event.seq));
       expect(routing.filter(event => event.askSeq === ask.seq)).toHaveLength(1);
@@ -105,10 +112,11 @@ for (const backend of RUNNER_IDS) {
       expect(projections.filter(event => event.delivery !== 'consumed')).toHaveLength(4);
       expect(projections.filter(event => event.delivery === 'consumed').length).toBeLessThanOrEqual(2);
       expect(new Set(projections.map(event => event.projectionId)).size).toBe(projections.length);
-      // 'Vitest' answers the worker's own question; the barrier answers Cezar's fallback one.
-      expect(store.readEvents(runId).filter(event => event.type === 'human-input-delivered' && event.askSeq === ask.seq)).toHaveLength(1);
+      // The parent's 'Vitest' answers the worker's own question; the barrier supersedes Cezar's
+      // fallback one, which no human answers (hearsay-tools/cezarion#2410).
+      expect(store.readEvents(runId).filter(event => event.type === 'human-input-delivered' && event.askSeq === ask.seq)).toEqual([expect.objectContaining({ source: 'parent' })]);
       expect(store.readEvents(runId).filter(event => event.type === 'user-message').map(event => event.text))
-        .toEqual(['Vitest', 'mock:agent-echo human barrier']);
+        .toEqual(['mock:agent-echo human barrier']);
     });
   }, 60_000);
 }

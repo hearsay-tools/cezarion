@@ -26,7 +26,7 @@ import {
   type DraftTurn,
   type FoldState,
 } from './thread-fold-state'
-import type { ThreadAsk, ThreadEntry, ThreadImage, ThreadPermission } from './thread-state'
+import type { AskClosedReason, ThreadAsk, ThreadEntry, ThreadImage, ThreadPermission } from './thread-state'
 
 /**
  * One reducer per event family (hearsay-tools/cezarion#1597). Every reducer is total: a malformed
@@ -484,8 +484,9 @@ function openAskFor(fold: FoldState, event: RunEvent): ThreadAsk | undefined {
   return ask && !ask.resolved && ask.askSeq === event.askSeq ? ask : undefined
 }
 
-// A worker's question travels to its parent; the parent's reply answers it, and a parent that
-// can no longer answer hands it back to the human (the card's chips return).
+// A worker's question travels to its parent; the parent's reply answers it. It never moves to the
+// human (hearsay-tools/cezarion#2410): it closes when either end stops, or when a live parent cannot
+// take it. A legacy fallback event still hands an old question back (the card's chips return).
 function reduceWorkerQuestionRouted(fold: FoldState, event: RunEvent): void {
   const ask = openAskFor(fold, event)
   if (!ask) return
@@ -499,18 +500,31 @@ function reduceWorkerQuestionFallback(fold: FoldState, event: RunEvent): void {
   if (ask) ask.routedToParent = false
 }
 
+// Cezar answers it for the parent: no human answers it from here on.
+function reduceWorkerQuestionUndelivered(fold: FoldState, event: RunEvent): void {
+  const ask = openAskFor(fold, event)
+  if (ask) closeAsk(fold, ask, 'undeliverable')
+}
+
+const ASK_CLOSED_REASONS: ReadonlySet<unknown> = new Set<AskClosedReason>(['finish', 'superseded', 'parent-stopped', 'worker-stopped', 'undeliverable'])
+
 function reduceHumanAskClosed(fold: FoldState, event: RunEvent): void {
   const ask = openAskFor(fold, event)
-  if (!ask || (event.reason !== 'finish' && event.reason !== 'superseded')) return
+  if (ask && ASK_CLOSED_REASONS.has(event.reason)) closeAsk(fold, ask, event.reason as AskClosedReason)
+}
+
+function closeAsk(fold: FoldState, ask: ThreadAsk, reason: AskClosedReason): void {
   ask.resolved = true
-  ask.closed = event.reason
+  ask.closed = reason
   fold.pendingAsk = undefined
 }
 
 function reduceHumanInputDelivered(fold: FoldState, event: RunEvent): void {
-  // A human answer resolves on its `user-message`; only the parent's answer has none.
+  // A human answer resolves on its `user-message`; only the parent's and Cezar's answers have none.
   const ask = openAskFor(fold, event)
-  if (!ask || event.source !== 'parent') return
+  if (!ask) return
+  if (event.source === 'cezar') { closeAsk(fold, ask, 'undeliverable'); return }
+  if (event.source !== 'parent') return
   ask.resolved = true
   ask.answeredBy = 'parent'
   fold.pendingAsk = undefined
@@ -558,6 +572,7 @@ const THREAD_EVENT_REDUCERS: ReadonlyMap<string, EventReducer> = new Map<string,
   ['ask.requested', reduceAskRequested],
   ['worker-question-routed', reduceWorkerQuestionRouted],
   ['worker-question-fallback', reduceWorkerQuestionFallback],
+  ['worker-question-undelivered', reduceWorkerQuestionUndelivered],
   ['human-ask-closed', reduceHumanAskClosed],
   ['human-input-delivered', reduceHumanInputDelivered],
   // ---- THE v1 VOCABULARY SWEEP (cezar-code-map §3.2) — deliberate suppressions ---------
