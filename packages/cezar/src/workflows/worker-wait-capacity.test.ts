@@ -520,35 +520,37 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   }
 
   it.each([false, true])('monitoring synthetic delivery respects legacy pending Finish=%s before wake bookkeeping', async pending => {
-    const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
-    const w = await worker(p.id, 'mock:monitoring keep going');
-    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
-    manager.enqueueOwnedRun(w.id);
-    await until(() => !!monitoringWakeOf(store.getRun(w.id)));
-    const engine = manager as unknown as {
-      active: Map<string, { session: { sendAgentMessage(...args: unknown[]): false | Promise<void> } }>;
-    };
-    const state = engine.active.get(w.id)!;
-    const send = vi.spyOn(state.session, 'sendAgentMessage');
-    const deadline = monitoringWakeOf(store.getRun(w.id))!;
-    try {
-      if (pending) store.commitRootFinishIntent(p.id);
-      await vi.advanceTimersByTimeAsync(Date.parse(deadline) - Date.now() + 1);
-      if (pending) {
-        expect(send).not.toHaveBeenCalled();
-        expect(runInternals(manager).wakeAdmission.automaticWakes(w.id)).toBe(0);
-        expect({ ...store.getRun(w.id), monitoringWakeAt: monitoringWakeOf(store.getRun(w.id)) }).toMatchObject({ status: 'waiting', monitoringWakeAt: deadline });
-        expect(runInternals(manager).line.monitoring.has(w.id)).toBe(true);
-        expect(store.readEvents(w.id).some(event => event.type === 'note' && typeof event.message === 'string' && event.message.includes('automatic monitoring wake-up'))).toBe(false);
-        expect(runInternals(manager).inputDelivery.deliverMessage(w.id, [{ type: 'text', text: 'synthetic retry' }], false)).toBe(false);
-        expect(send).not.toHaveBeenCalled();
-      } else {
-        expect(send).toHaveBeenCalledTimes(1);
-        expect(runInternals(manager).wakeAdmission.automaticWakes(w.id)).toBe(1);
-        // hearsay-tools/cezarion#1233: the wake turn keeps its pool slot until its own turn end.
-        expect(runInternals(manager).line.monitoring.has(w.id)).toBe(true);
-      }
-    } finally { vi.useRealTimers(); }
+    await withHeldResponse('claude', async release => {
+      const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
+      const w = await worker(p.id, 'mock:monitoring keep going');
+      vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+      manager.enqueueOwnedRun(w.id);
+      await until(() => !!monitoringWakeOf(store.getRun(w.id)));
+      const engine = manager as unknown as {
+        active: Map<string, { session: { sendAgentMessage(...args: unknown[]): false | Promise<void> } }>;
+      };
+      const state = engine.active.get(w.id)!;
+      const send = vi.spyOn(state.session, 'sendAgentMessage');
+      const deadline = monitoringWakeOf(store.getRun(w.id))!;
+      try {
+        if (pending) store.commitRootFinishIntent(p.id);
+        await vi.advanceTimersByTimeAsync(Date.parse(deadline) - Date.now() + 1);
+        if (pending) {
+          expect(send).not.toHaveBeenCalled();
+          expect(runInternals(manager).wakeAdmission.automaticWakes(w.id)).toBe(0);
+          expect({ ...store.getRun(w.id), monitoringWakeAt: monitoringWakeOf(store.getRun(w.id)) }).toMatchObject({ status: 'waiting', monitoringWakeAt: deadline });
+          expect(runInternals(manager).line.monitoring.has(w.id)).toBe(true);
+          expect(store.readEvents(w.id).some(event => event.type === 'note' && typeof event.message === 'string' && event.message.includes('automatic monitoring wake-up'))).toBe(false);
+          expect(runInternals(manager).inputDelivery.deliverMessage(w.id, [{ type: 'text', text: 'synthetic retry' }], false)).toBe(false);
+          expect(send).not.toHaveBeenCalled();
+        } else {
+          expect(send).toHaveBeenCalledTimes(1);
+          expect(runInternals(manager).wakeAdmission.automaticWakes(w.id)).toBe(1);
+          // hearsay-tools/cezarion#1233: the wake turn keeps its pool slot until its own turn end.
+          expect(runInternals(manager).line.monitoring.has(w.id)).toBe(true);
+        }
+      } finally { release(); vi.useRealTimers(); }
+    }, 'Re-check the downstream work');
   });
 
   it.each(['delayed diff', 'failed diff'])('cancellation retires pending Finish after %s and preserves human Continue across restart', async mode => {

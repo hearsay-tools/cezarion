@@ -499,15 +499,23 @@ it('steers non-human input behind a queued human turn but never after its CEZ:AS
   // Node 24.15.0 floor shard at 5s; 15s still cannot cover both waits plus
   // teardown if the first transition is slow (hearsay-tools/cezarion#976).
   const { driveSeam, waitFor } = await import('./harness-parity.testkit.ts');
-  await driveSeam('claude', 'hold', {
-    whileOpen: async (session, { v1 }) => {
-      expect(session.sendMessage([{ type: 'text', text: 'mock:ask' }])).toBe(true);
-      await waitFor(() => v1.filter(event => event.type === 'turn-end').length === 1);
-      expect(session.sendAgentMessage([{ type: 'text', text: 'steered while busy' }])).not.toBe(false);
-      await waitFor(() => v1.filter(event => event.type === 'turn-end').length === 2);
-      expect(session.sendAgentMessage([{ type: 'text', text: 'must not answer the ask' }])).toBe(false);
-    },
-  });
+  const gate = mkdtempSync(join(tmpdir(), 'cez-claude-steer-ask-'));
+  const release = join(gate, 'release');
+  try {
+    await driveSeam('claude', 'hold', {
+      spec: { env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_ARGS_FILE: '', CEZ_MOCK_RELEASE_FILE: release } },
+      whileOpen: async (session, { v1 }) => {
+        expect(session.sendMessage([{ type: 'text', text: 'mock:hold-ask' }])).toBe(true);
+        await waitFor(() => v1.filter(event => event.type === 'turn-end').length === 1);
+        expect(session.sendAgentMessage([{ type: 'text', text: 'mock:ack-only steered while busy' }])).not.toBe(false);
+        writeFileSync(release, '');
+        await waitFor(() => v1.filter(event => event.type === 'turn-end').length === 2);
+        expect(session.sendAgentMessage([{ type: 'text', text: 'must not answer the ask' }])).toBe(false);
+      },
+    });
+  } finally {
+    rmSync(gate, { force: true, recursive: true });
+  }
 }, 25_000);
 
 describe('Claude non-human stdin acknowledgement boundary', () => {
