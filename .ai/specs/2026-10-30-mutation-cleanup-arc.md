@@ -4,7 +4,9 @@ Epic hearsay-tools/cezarion#2280. The owner approved the plan on 2026-10-30. Bas
 whole-file Stryker run on `main` at `dd4551617`.
 
 The pull request job (`.github/workflows/mutation-report.yml`) mutates only changed lines, and it
-skips the server package in most pull requests. From 26 to 30 October its reports flagged
+skips the server package in most pull requests. Since hearsay-tools/cezarion#2398 it runs only on a
+pull request with the `mutants` label, and the weekly workflow `mutants-weekly.yml` measures whole
+files on `main` and keeps one issue per file that misses a target. From 26 to 30 October its reports flagged
 mutants in 36 files. Stryker then mutated 33 of them in full. It left out
 `server/server.ts`, `index.ts` and `routes/tasks-overview.tsx`: they are large and the reports
 found few mutants in them. The run tested 9,851 mutants and found 2,994 undetected ones,
