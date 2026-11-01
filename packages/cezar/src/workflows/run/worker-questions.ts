@@ -93,12 +93,14 @@ export class WorkerQuestions {
   }
 
   /** A routed question whose parent record can no longer be read gets Cezar's answer. A reply the
-   *  parent sent before goes first, so the worker takes one answer; a failed write leaves this for
-   *  the next pass. */
+   *  parent sent before goes first, so the worker takes one answer. A reply a live inbox claim still
+   *  holds stays, and Cezar does not answer beside it: the next pass after it is taken does. A failed
+   *  write leaves this for the next pass too. */
   private answerForUnreadableParent(workerId: string, parentId: string, askSeq: number): void {
     if (!this.context.store.isUnreadable(parentId)) return;
     try { for (const id of this.queuedAnswerIds(workerId)) this.host.retireUnreadParentQuestion(workerId, id); }
     catch (error) { console.warn(`[cez] parent reply not retired: ${error instanceof Error ? error.message : String(error)}`); return; }
+    if (this.queuedAnswerIds(workerId).length) return;
     this.answerUndelivered(workerId, askSeq, 'the parent record cannot be read');
   }
 

@@ -735,6 +735,22 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     noHumanCard(f.w.id);
   });
 
+  // A reply a live inbox claim holds cannot be retired; Cezar does not answer beside it.
+  it('does not answer for an unreadable parent while a claimed parent reply stays queued', async () => {
+    const f = await askedPair();
+    try {
+      const reply = await f.reply('mock:hold');
+      const routing = runInternals(manager).workerQuestions;
+      vi.spyOn(store, 'isUnreadable').mockImplementation(id => id === f.p.id);
+      // The claim keeps the reply where it is, as `retireUnreadParentQuestion` leaves a claimed input.
+      const retire = vi.spyOn(routing, 'retireUnreadParentQuestion').mockImplementation(() => {});
+      runInternals(manager).workerQuestions.routeWorkerQuestion(f.w.id);
+      expect(retire).toHaveBeenCalledWith(f.w.id, reply.message.id);
+      expect(store.getRun(f.w.id)?.agentInputs?.some(input => input.purpose === 'undelivered-question') ?? false).toBe(false);
+      expect(eventsOf(f.w.id, 'worker-question-undelivered')).toEqual([]);
+    } finally { vi.restoreAllMocks(); f.close(); }
+  });
+
   it('refuses human input on a routed question whose parent record cannot be read', () => {
     const routing = runInternals(manager).workerQuestions;
     const ask = { seq: 3, requestId: 'r', questions: [], routedMessageId: randomUUID() };
