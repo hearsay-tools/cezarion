@@ -24,9 +24,10 @@ import { cezarHomeDir } from './paths.ts';
 export const REMOTE_SETTINGS_DIR = 'remote-settings';
 
 const GRANT_FILE = /^([1-9]\d{0,4})\.json$/;
-const grantSchema = z.object({ enabledAt: z.string().optional() });
+// Exactly what `enable` writes: a file without a valid timestamp grants nothing.
+const grantSchema = z.object({ enabledAt: z.iso.datetime() }).strict();
 
-export interface RemoteSettingsGrant { port: number; enabledAt?: string }
+export interface RemoteSettingsGrant { port: number; enabledAt: string }
 
 export interface RemoteSettingsState {
   /** The cockpit ports the host operator granted, ascending. */
@@ -60,7 +61,7 @@ function readGrant(path: string, port: number): RemoteSettingsGrant | { issue: s
   }
   try {
     const parsed = grantSchema.safeParse(JSON.parse(raw));
-    if (parsed.success) return { port, ...(parsed.data.enabledAt ? { enabledAt: parsed.data.enabledAt } : {}) };
+    if (parsed.success) return { port, enabledAt: parsed.data.enabledAt };
   } catch {
     // falls through to the issue below
   }

@@ -55,7 +55,7 @@ describe('remote settings grants', () => {
 
   it('fails closed on a grant file that does not parse', async () => {
     await mkdir(remoteSettingsPath(env), { recursive: true });
-    for (const content of ['not json', '[]', '{"enabledAt": 5}']) {
+    for (const content of ['not json', '[]', '{"enabledAt": 5}', '{}', '{"enabledAt": "not-a-time"}', '{"enabledAt": "2026-11-01"}']) {
       await writeFile(join(remoteSettingsPath(env), '4321.json'), content);
       const state = readRemoteSettings(env);
       expect(state.grants, content).toEqual([]);
