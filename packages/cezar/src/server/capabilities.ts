@@ -38,7 +38,7 @@
  */
 
 import type { Capabilities } from '@open-mercato/cezar-contract';
-import { isGranted, readRemoteSettings } from '../remote-settings.ts';
+import { isPortGranted } from '../remote-settings.ts';
 
 /** Every IPv4 address in 127.0.0.0/8, anchored. Anchoring is load-bearing: a
  *  `startsWith('127.')` test also matches attacker-controlled *hostnames* like
@@ -139,7 +139,7 @@ export function resolveCapabilities(env: NodeJS.ProcessEnv = process.env, bindHo
   const loopbackBind = isLoopbackHost(bindHost);
   const localHandoff = env.CEZ_REMOTE !== '1' && loopbackBind;
   // The host file is read only where it can matter: a remote cockpit bound to loopback.
-  const remoteSettingsAdmin = !localHandoff && loopbackBind && isGranted(readRemoteSettings(env), port);
+  const remoteSettingsAdmin = !localHandoff && loopbackBind && isPortGranted(env, port);
   const hideAllUsage = env.CEZ_HIDE_TOKEN_METRICS === '1';
   const tokenUsageMetrics = !hideAllUsage && env.CEZ_HIDE_TOKEN_USAGE !== '1';
   const costMetrics = !hideAllUsage && env.CEZ_HIDE_COST !== '1';

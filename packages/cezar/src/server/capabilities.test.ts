@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -198,7 +198,8 @@ describe('resolveCapabilities — settings administration (hearsay-tools/cezario
   });
 
   it('a malformed host file grants nothing', () => {
-    writeFileSync(join(home, 'remote-settings.json'), '{"enabled":true}');
+    mkdirSync(join(home, 'remote-settings'), { recursive: true });
+    writeFileSync(join(home, 'remote-settings', '4321.json'), 'not json');
     expect(admin({ CEZ_REMOTE: '1' }).settingsAdmin).toBe(false);
   });
 });
