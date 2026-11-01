@@ -245,6 +245,29 @@ describe('the Files tab route', () => {
     await waitFor(() => expect(treeButton('files-dir', 'src')!.dataset.state).toBe('open'))
   })
 
+  it('finishes the restore when a remembered folder is collapsed while its listing loads', async () => {
+    let release!: () => void
+    const listing = new Promise<void>(done => { release = done })
+    let fetches = 0
+    stubFetch({ 'GET /api/v1/runs/r1/files?path=src': (async () => {
+      fetches++
+      if (fetches > 1) await listing
+      return jsonResponse(FILES.src)
+    }) as unknown as () => Response })
+    const client = renderFilesRoute('?path=hello.ts')
+    fireEvent.click(await waitFor(() => { const dir = treeButton('files-dir', 'src'); expect(dir).not.toBeNull(); return dir! }))
+    await waitFor(() => expect(treeButton('files-file', 'src/nested.md')).not.toBeNull())
+    scrollTo(pane(), 120)
+    fireEvent.click(screen.getByRole('button', { name: 'Go to reader' }))
+    await screen.findByText('reader')
+    client.removeQueries({ predicate: query => query.queryKey.includes('src') })
+    fireEvent.click(screen.getByRole('button', { name: 'History Back' }))
+    await waitFor(() => expect(document.querySelector('[data-slot="files-tree-loading"]')).not.toBeNull())
+    fireEvent.click(treeButton('files-dir', 'src')!)
+    await waitFor(() => expect(pane().scrollTop).toBe(120))
+    release()
+  })
+
   it('restores the pane scroll when the worktree is gone and the root listing refuses', async () => {
     stubFetch({ 'GET /api/v1/runs/r1/files?path=': () => jsonResponse({ error: 'worktree removed' }, 409) })
     renderFilesRoute('?path=hello.ts')

@@ -50,7 +50,12 @@ function DirChildren({
 }) {
   const entry = useRunFile(runId, path)
   const memory = useContext(FolderMemoryContext)
-  useEffect(() => { if (path) memory?.loading(path, entry.isPending) }, [memory, path, entry.isPending])
+  // A collapsed folder unmounts its listing; it must not leave the restore waiting for it.
+  useEffect(() => {
+    if (!path || !memory) return
+    memory.loading(path, entry.isPending)
+    return () => memory.loading(path, false)
+  }, [memory, path, entry.isPending])
 
   if (entry.isPending) {
     return (
