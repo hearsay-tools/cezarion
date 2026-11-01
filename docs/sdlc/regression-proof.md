@@ -96,8 +96,9 @@ mutants (code that runs at import) and counts them; the consumer pass skips them
 
 The **Weekly mutation targets** workflow
 ([`mutants-weekly.yml`](../../.github/workflows/mutants-weekly.yml)) runs this command on `main` every
-Saturday for each file in `.github/mutants/targets.json` and the product files changed in the last 7
-days. It opens one issue per file that misses a target, `Mutation targets missed: <file>`. A fix PR
+Saturday for each file in `.github/mutants/targets.json`, then for the product files with the most
+lines changed in the last 7 days, at most 64 files in all. Its run summary lists the files over that
+cap. It opens one issue per file that misses a target, `Mutation targets missed: <file>`. A fix PR
 runs the whole-file command, cites its PASS lines and says `Fixes #N`.
 
 ## Test-only change that removes a hidden dependency
