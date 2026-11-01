@@ -231,8 +231,10 @@ describe('agent inputs and inbox claims', () => {
   const claim = { receiptId: U1, generation: U2, expiresAt: T, acknowledgedAt: T, memberIds: [U3, U4] };
   const agentInput = {
     conversation: { senderRunId: U1, recipientRunId: U2, kind: 'request', relationship: 'peer' }, id: U3, source: agentInputSchema.shape.source.enum.agent, parentRunId: U1,
-    text: 'hi', createdAt: T, deliveredAt: T, consumedAt: T, awaitingRead: true, inboxClaim: claim, purpose: 'completion-refusal', requestHash: HASH, deadline: T,
+    text: 'hi', createdAt: T, deliveredAt: T, consumedAt: T, awaitingRead: true, inboxClaim: claim, requestHash: HASH, deadline: T,
   };
+  /** Cezar's own input, as turn-nudges writes a completion refusal: no conversation, hash or deadline. */
+  const lifecycleInput = { id: U4, parentRunId: U1, source: 'lifecycle', purpose: 'completion-refusal', text: 'not done', createdAt: T, deliveredAt: T };
 
   it('keeps every claim field and refuses duplicate or empty members', () => {
     accepts(inboxClaimSchema, claim);
@@ -242,8 +244,11 @@ describe('agent inputs and inbox claims', () => {
   });
 
   it('keeps every agent input field', () => {
-    acceptsEach(agentInputSchema, agentInput, 'source', ['agent', 'lifecycle']);
-    for (const bad of [{ text: '' }, { text: 't'.repeat(100_001) }, { awaitingRead: false }, { purpose: 'other' }, { extra: true }]) {
+    accepts(agentInputSchema, agentInput);
+    accepts(agentInputSchema, lifecycleInput);
+    refuses(agentInputSchema, { ...agentInput, source: 'not-a-listed-value' });
+    refuses(agentInputSchema, { ...lifecycleInput, purpose: 'other' });
+    for (const bad of [{ text: '' }, { text: 't'.repeat(100_001) }, { awaitingRead: false }, { extra: true }]) {
       refuses(agentInputSchema, { ...agentInput, ...bad });
     }
     accepts(agentInputSchema, { ...agentInput, text: 't'.repeat(100_000) });
