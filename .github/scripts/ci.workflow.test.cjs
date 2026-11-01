@@ -22,10 +22,10 @@ test('dispatched verification checks out the attributed SHA even after its branc
   const ci = workflow();
   for (const name of ['typecheck', 'build-and-package', 'vitest', 'cockpit-browser']) {
     const checkout = ci.jobs[name].steps.find((s) => s.uses?.startsWith('actions/checkout@'));
-    const expression = checkout.with.ref.slice(3, -2).trim();
+    const expression = checkout.with.ref.slice(3, -2).trim().replace(/needs\.([\w-]+)/g, "needs['$1']");
     const ref = runInNewContext(expression, { github: {
       event: { pull_request: {}, merge_group: {} }, ref: 'refs/heads/release/v0.13.6', sha: 'a'.repeat(40),
-    }, inputs: {}, steps: { 'resolve-dispatch': { outputs: {} } } });
+    }, needs: { 'pr-test-input': { outputs: { sha: '' } } }, inputs: {}, steps: { 'resolve-dispatch': { outputs: {} } } });
     assert.equal(ref, 'a'.repeat(40), `${name} must verify the commit receiving the check`);
     assert.equal(checkout.with['persist-credentials'], false);
     assert.equal(ci.jobs[name].permissions?.contents ?? ci.permissions.contents, 'read');
@@ -138,11 +138,15 @@ test('CI classifies pull request changes from a trusted base checkout', () => {
   assert.match(classify.run, /if ! files=/);
 });
 
-test('PR jobs check out the merge ref when CI runs from the trusted target workflow', () => {
+test('PR jobs use reviewed merge inputs from the trusted target workflow', () => {
   const ci = workflow();
   for (const name of ['typecheck', 'build-and-package', 'vitest', 'cockpit-browser']) {
     const checkout = ci.jobs[name].steps.find((step) => step.uses?.startsWith('actions/checkout@'));
-    assert.match(checkout?.with?.ref || '', /format\('refs\/pull\/\{0\}\/merge', github\.event\.pull_request\.number \|\| inputs\.pr_number\)/);
+    if (['vitest', 'cockpit-browser'].includes(name)) {
+      assert.match(checkout.with.ref, /needs\.pr-test-input\.outputs\.sha/);
+    } else {
+      assert.match(checkout.with.ref, /format\('refs\/pull\/\{0\}\/merge', github\.event\.pull_request\.number \|\| inputs\.pr_number\)/);
+    }
     assert.equal(checkout?.with?.['allow-unsafe-pr-checkout'], true, `${name} must opt in to fork PR merge checkout explicitly`);
     assert.equal(checkout?.with?.['persist-credentials'], false, `${name} must not persist GITHUB_TOKEN into a PR checkout`);
   }
@@ -332,8 +336,8 @@ test('bot-authored release/v* PRs skip Vitest and cockpit E2E via classify-pr fi
   assert.equal(classifyStep.env.EVENT_NAME, '${{ github.event_name }}');
   assert.equal(classifyStep.env.PR_AUTHOR, '${{ github.event.pull_request.user.login }}');
   assert.equal(classifyStep.env.EXPECTED_HEAD_SHA, '${{ github.event.pull_request.head.sha || github.sha }}');
-  assert.deepEqual(ci.jobs.vitest.needs, ['queue-proof', 'change-surface', 'classify-pr', 'preflight', 'review-result']);
-  assert.deepEqual(ci.jobs['cockpit-browser'].needs, ['queue-proof', 'change-surface', 'classify-pr', 'preflight', 'review-result']);
+  assert.deepEqual(ci.jobs.vitest.needs, ['queue-proof', 'change-surface', 'classify-pr', 'preflight', 'review-result', 'pr-test-input', 'pr-test-proof']);
+  assert.deepEqual(ci.jobs['cockpit-browser'].needs, ['queue-proof', 'change-surface', 'classify-pr', 'preflight', 'review-result', 'pr-test-input', 'pr-test-proof']);
   assert.match(ci.jobs.vitest.if, /needs\.classify-pr\.outputs\.bump_pr != 'true'/);
   assert.match(ci.jobs['cockpit-browser'].if, /needs\.classify-pr\.outputs\.bump_pr != 'true'/);
   assert.ok(ci.jobs.verify.needs.includes('classify-pr'));
@@ -496,14 +500,15 @@ test('event routing keeps one PR verifier and preserves push/manual publication 
   assert.equal(ci.concurrency['cancel-in-progress'], true);
 });
 
-test('PR dispatch and PR event share concurrency and verification merge refs', () => {
+test('PR dispatch and event share concurrency while native suites pin immutable inputs', () => {
   const { runInNewContext } = require('node:vm');
   const HEAD = 'a'.repeat(40);
-  const evaluate = (value, context) => runInNewContext(value.slice(3, -2), context);
+  const evaluate = (value, context) => runInNewContext(value.slice(3, -2).replace(/needs\.([\w-]+)/g, "needs['$1']"), context);
   const config = workflow();
   assert.equal(config.on.workflow_dispatch.inputs.pr_number.required, false);
   function context(number, input, valid = 'true') {
     return { github: { workflow: 'CI', ref: 'refs/heads/release/v1.2.3', sha: HEAD, event: { pull_request: { number } } },
+      needs: { 'pr-test-input': { outputs: { sha: number ? 'pinned-merge-sha' : '' } } },
       inputs: { pr_number: input }, steps: { 'resolve-dispatch': { outputs: { valid: input ? valid : '' } } }, format: (s, n) => s.replace('{0}', n) };
   }
   const group = ctx => config.concurrency.group.replace(/\$\{\{(.*?)\}\}/g, (_, expression) => runInNewContext(expression, ctx));
@@ -512,7 +517,7 @@ test('PR dispatch and PR event share concurrency and verification merge refs', (
   for (const name of ['typecheck', 'build-and-package', 'vitest', 'cockpit-browser']) {
     const ref = config.jobs[name].steps.find(s => s.uses?.startsWith('actions/checkout@')).with.ref;
     assert.equal(evaluate(ref, context(undefined, '42')), 'refs/pull/42/merge');
-    assert.equal(evaluate(ref, context(42, '')), 'refs/pull/42/merge');
+    assert.equal(evaluate(ref, context(42, '')), ['vitest', 'cockpit-browser'].includes(name) ? 'pinned-merge-sha' : 'refs/pull/42/merge');
     assert.equal(evaluate(ref, context(undefined, '')), HEAD);
     assert.equal(evaluate(ref, context(undefined, '42', '')), HEAD);
   }

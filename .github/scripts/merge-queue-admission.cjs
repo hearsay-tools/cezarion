@@ -45,14 +45,11 @@ function nativeRun(run, fullName, workflowId, entry, pr) {
     && run.head_branch === pr.head.ref && run.pull_requests?.some(p => p.number === pr.number
       && p.head?.sha === pr.head.sha && p.base?.ref === 'main');
 }
-async function mergeQueueAdmission({ github, owner, repo, group, now = Date.now }) {
-  if (!validSha(group?.head_sha) || !validSha(group?.base_sha) || group.base_ref !== 'refs/heads/main'
-    || !group.head_ref?.startsWith('refs/heads/gh-readonly-queue/main/')) throw new Error('Invalid main merge group');
-  const read = reader(github, owner, repo, now() + 120000, now);
+function boundedGraphql(read) {
   // Use the same bounded request transport for GraphQL and thread pagination.
   const cursors = new Set();
   let threadPages = 0;
-  const graphql = async (query, variables) => {
+  return async (query, variables) => {
     const data = await read('POST /graphql', { query, variables });
     if (data.errors) throw new Error('Incomplete GraphQL response');
     if (query !== QUEUE_QUERY) {
@@ -64,6 +61,23 @@ async function mergeQueueAdmission({ github, owner, repo, group, now = Date.now 
     }
     return data.data;
   };
+}
+function nativeSuccess(run, allowInProgress = false) {
+  return (run.status === 'completed' && run.conclusion === 'success')
+    || (allowInProgress && run.status === 'in_progress' && run.conclusion === null);
+}
+function requireGroup(group) {
+  if (!validSha(group?.head_sha) || !validSha(group?.base_sha) || group.base_ref !== 'refs/heads/main'
+    || !group.head_ref?.startsWith('refs/heads/gh-readonly-queue/main/')) throw new Error('Invalid main merge group');
+}
+function requireStableRun(run, finalRun, finalLatest, eligible) {
+  if (!eligible(finalRun) || finalRun.id !== run.id || finalRun.run_attempt !== run.run_attempt
+    || finalLatest?.id !== run.id || finalLatest.run_attempt !== run.run_attempt || !eligible(finalLatest)) throw new Error('Native CI changed');
+}
+async function mergeQueueAdmission({ github, owner, repo, group, now = Date.now, allowInProgress = false }) {
+  requireGroup(group);
+  const read = reader(github, owner, repo, now() + 120000, now);
+  const graphql = boundedGraphql(read);
   const rules = () => read('GET /repos/{owner}/{repo}/rules/branches/{branch}', { branch: 'main', per_page: 100 });
   requireSerialRules(await rules());
   const queue = () => graphql(QUEUE_QUERY, { owner, repo });
@@ -76,19 +90,18 @@ async function mergeQueueAdmission({ github, owner, repo, group, now = Date.now 
   const runs = () => readCiRuns(read, workflow.id, pr.head.sha, 'pull_request_target');
   const latest = newest(await runs());
   const run = latest && await read('GET /repos/{owner}/{repo}/actions/runs/{run_id}', { run_id: latest.id });
-  const eligible = r => nativeRun(r, fullName, workflow.id, entry, pr) && r.status === 'completed' && r.conclusion === 'success';
+  const eligible = r => nativeRun(r, fullName, workflow.id, entry, pr) && nativeSuccess(r, allowInProgress);
   if (!eligible(run)) throw new Error('Current native PR CI/review has not passed');
   if (!successfulJobs(await readCiJobs(read, run.id), [VERIFY, REVIEW])) throw new Error('Native CI/review gates missing');
   const threads = await listReviewThreads({ github: { graphql }, owner, repo, pullNumber: pr.number });
   if (threads.some(t => !t.isResolved)) throw new Error('Unresolved review threads');
   const finalRun = await read('GET /repos/{owner}/{repo}/actions/runs/{run_id}', { run_id: run.id });
   const finalLatest = newest(await runs());
-  if (!eligible(finalRun) || finalRun.id !== run.id || finalRun.run_attempt !== run.run_attempt
-    || finalLatest?.id !== run.id || finalLatest.run_attempt !== run.run_attempt || !eligible(finalLatest)) throw new Error('Native CI changed');
+  requireStableRun(run, finalRun, finalLatest, eligible);
   requireSerialRules(await rules());
   const finalEntry = entryFrom(await queue(), group);
   if (finalEntry.id !== entry.id || finalEntry.pullRequest.number !== pr.number
     || finalEntry.pullRequest.headRefOid !== pr.head.sha || !validPull(await pull(), fullName, entry)) throw new Error('Queue or PR changed');
   return { pullNumber: pr.number, head: pr.head.sha, runId: run.id, attempt: run.run_attempt };
 }
-module.exports = { mergeQueueAdmission, requireSerialRules, entryFrom, QUEUE_QUERY };
+module.exports = { mergeQueueAdmission, requireSerialRules, entryFrom, QUEUE_QUERY, nativeSuccess };
