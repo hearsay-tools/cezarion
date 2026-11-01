@@ -7,14 +7,10 @@ worktree. Tear each one down in this order:
    worker records it `cancelled`.
 2. Collect its latest settled revision (`cez worker collect <id>`). Copy any
    report, proof or friction draft out of its worktree first.
-3. For an unmerged worker or a dirty worktree, require an available collected
-   `head.sha`. Before changing its worktree, save that SHA under a separate
-   coordinator-owned Git ref. Save a complete snapshot of its tracked and
-   untracked changes and required artifacts outside the worker's worktree.
-   Record the ref, collected head SHA, snapshot paths and repair owner or
-   explicit disposition in campaign state. Verify the ref resolves to the
-   collected SHA and the snapshots are complete and readable; a failed
-   checkpoint blocks checkout and destruction.
+3. For an unmerged worker or a dirty worktree, complete the
+   [recovery checkpoint](checkpoint.md) before changing its worktree.
+   A failed checkpoint blocks checkout and destruction. The coordinator
+   enforces this gate; `cez worker destroy` does not verify that recovery copy.
 4. After the required checkpoint succeeds, in its worktree:
    `git checkout --force cez/<id8>` when it switched branch (the identity
    check refuses any other branch). This permits checkout over saved local
