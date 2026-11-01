@@ -32,7 +32,7 @@ const flat = text => String(text).replace(/\s+/g, ' ').trim().replace(/`/g, "'")
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 function productFile(file) {
-  if (/\.(?:test|e2e|testkit)\.|\.d\.ts$/.test(file)) return false;
+  if (/\.(?:test|spec|e2e|testkit)\.|\.d\.ts$/.test(file)) return false;
   try {
     parseArgs([file]);
     return true;
