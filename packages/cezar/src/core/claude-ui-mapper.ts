@@ -238,7 +238,7 @@ function parseHookJson(stdout: string): Record<string, unknown> | undefined {
  * A backgrounded `Agent`/`Task` outlives its spawn call: Claude answers the call at once with an
  * `async_launched` acknowledgement and reports the child's end later in `system/task_notification`.
  * The root task item carries `background: true` and stays `running` until that notification. A
- * foreground fork (`is_backgrounded: false`, forked-skill.ndjson) keeps the ordinary tool lifecycle,
+ * foreground fork (`is_backgrounded: false`, the forked-skill fixture) keeps the ordinary tool lifecycle,
  * and so does a child's own nested spawn: only a root task item is marked.
  */
 function isRootTask(item: UiToolItem): boolean {
