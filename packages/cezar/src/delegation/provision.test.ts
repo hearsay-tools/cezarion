@@ -67,6 +67,13 @@ describe('session provisioning', () => {
     expect(instructions).toContain('--runner codex --effort high --context');
     expect(instructions).toContain('Use high here only when the selected model advertises it and overrides are allowed.');
   });
+  it('teaches per-step settings when workflow models have no shared effort level', () => {
+    const { instructions } = provision()!;
+    expect(instructions).toContain('A spawn --effort pin applies to every agent step whose effort is unset.');
+    expect(instructions).toContain('Use a shared effort only when every affected step\'s model advertises that level; otherwise use a workflow with compatible per-step effort settings.');
+    expect(instructions).toContain('A high-only model and a low-only model need separate step settings.');
+    expect(instructions).toContain('Omission and auto do not clear an inherited effort pin.');
+  });
   it('provision text no longer says one active wait', () => {
     const { instructions } = provision()!;
     expect(instructions).not.toMatch(/one active wait|no automatic re-wait/i);
