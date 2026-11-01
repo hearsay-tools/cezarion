@@ -11,6 +11,7 @@ import { TaskReportRoute } from './report-reader'
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
 
 const ID = '4c15e25b-a08c-438d-a32b-fd1a8c6c90e2'
@@ -159,6 +160,16 @@ describe('Back from the reader', () => {
     renderAt(['/p/a/tasks/r1', `/p/a/tasks/r1/report?artifact=${ID}`])
     fireEvent.click(await screen.findByRole('button', { name: 'Back' }))
     expect(back).toHaveBeenCalledOnce()
+  })
+
+  it('without the Navigation API, steps over the entries the frame\'s anchors added', async () => {
+    report()
+    const length = vi.spyOn(window.history, 'length', 'get').mockReturnValue(2)
+    renderAt(['/p/a/tasks/r1', '/p/a/tasks/r1/files', '/p/a/tasks/r1/files?x', `/p/a/tasks/r1/report?artifact=${ID}`])
+    const back = await screen.findByRole('button', { name: 'Back' })
+    length.mockReturnValue(4) // two anchor clicks inside the frame
+    fireEvent.click(back)
+    await waitFor(() => expect(at()).toBe('/p/a/tasks/r1'))
   })
 
   it('goes to the task\'s conversation without in-app history', async () => {

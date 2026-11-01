@@ -131,6 +131,23 @@ it('opens the published link in the reader inside cezarion, with no request leav
   expect(Math.abs(after - before)).toBeLessThanOrEqual(4)
 })
 
+it('leaves the reader in one step after anchor clicks, also without the Navigation API', () => {
+  browser.goto(baseUrl + threadPath())
+  browser.waitForFunction(`document.querySelector(${JSON.stringify(LINK)}) !== null`)
+  browser.evaluate(`document.querySelector(${JSON.stringify(LINK)}).scrollIntoView({ block: 'center', behavior: 'instant' })`)
+  browser.click(LINK)
+  browser.waitForFunction(`document.querySelector(${JSON.stringify(FRAME)}) !== null && location.pathname === ${JSON.stringify(readerPath())}`)
+  expectCockpitUntouched(readerPath())
+  // The fallback path for engines without the Navigation API.
+  browser.evaluate(`Object.defineProperty(window, 'navigation', { value: undefined, configurable: true }) === window`)
+  const frame = JSON.parse(browser.evaluate(`JSON.stringify(document.querySelector(${JSON.stringify(FRAME)}).getBoundingClientRect())`) as string) as { left: number; top: number }
+  const length = browser.evaluate('history.length') as number
+  browser.tapAt(frame.left + 60, frame.top + 20)
+  browser.waitForFunction(`history.length === ${length + 1}`)
+  browser.click('[data-slot="report-bar"] button[aria-label="Back"]')
+  browser.waitForFunction(`location.pathname === ${JSON.stringify(threadPath())} && document.querySelector(${JSON.stringify(LINK)}) !== null`)
+})
+
 it('blocks scripts, navigation and storage by the sandbox alone, on unprepared HTML', () => {
   browser.goto(`${baseUrl}${readerPath()}?artifact=${publication.id}`)
   browser.waitForFunction(`document.querySelector(${JSON.stringify(FRAME)}) !== null`)
