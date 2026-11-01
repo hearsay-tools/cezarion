@@ -103,6 +103,14 @@ describe('the HTML report reader', () => {
     expect(screen.queryByRole('button', { name: 'Source' })).toBeNull()
   })
 
+  it('sends an oversized live file to the editor, since it has no snapshot to download', async () => {
+    stubFetch({ '/api/v1/runs/r1/file-link?path=big.html': () => json({ type: 'file', source: 'worktree', path: '/wt/big.html', size: 900_000, binary: false, tooLarge: true }) })
+    renderAt(['/p/a/tasks/r1/report?path=big.html'])
+    expect((await screen.findByRole('heading', { level: 2 })).textContent).toBe('Too large to preview')
+    expect(screen.getByText(/Open it in your editor, or ask the agent to publish it/)).toBeTruthy()
+    expect(screen.queryByRole('link', { name: 'Download' })).toBeNull()
+  })
+
   it('shows an unpublished path in the server\'s words', async () => {
     stubFetch({ '/api/v1/runs/r1/file-link?path=%2Fout%2Fr.html': () => json({ type: 'unpublished', path: '/out/r.html', reason: 'Ask the agent to publish it.' }) })
     renderAt(['/p/a/tasks/r1/report?path=%2Fout%2Fr.html'])

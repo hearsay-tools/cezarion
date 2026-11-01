@@ -114,7 +114,8 @@ function ReportBody({ conflict, selected, result, source, name }: {
   }
   const data: FilePreviewData | { type: 'unavailable' | 'unpublished'; path: string; reason: string } = result.data!
   if (data.type !== 'file') return <State icon={<FileXIcon />} title={data.type === 'unpublished' ? 'Report not published' : 'Report unavailable'} subtitle={data.reason} />
-  if (data.tooLarge) return <State icon={<FileWarningIcon />} title="Too large to preview" subtitle={`${formatFileSize(data.size)} is past the 500 kB preview limit. Download it to read it.`} />
+  if (data.tooLarge) return <State icon={<FileWarningIcon />} title="Too large to preview" subtitle={`${formatFileSize(data.size)} is past the 500 kB preview limit. ${data.artifact
+    ? 'Download it to read it.' : 'Open it in your editor, or ask the agent to publish it and download the snapshot.'}`} />
   if (data.binary) return <State icon={<FileQuestionIcon />} title="Binary file" subtitle="This file holds binary data, not readable HTML." />
   if (source) return <div className="bg-card"><CodeLines path={data.path} text={data.content ?? ''} /></div>
   return <HtmlReportFrame html={data.content ?? ''} title={`Report: ${name}`} className="min-h-[60dvh] flex-1" />
