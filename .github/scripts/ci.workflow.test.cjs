@@ -271,6 +271,18 @@ test('preflight typecheck fails an added bare issue citation before every merge 
   assert.ok(index > steps.findIndex((step) => step.name === 'Install pnpm dependencies'), '@babel/parser is installed first');
 });
 
+test('preflight typecheck runs the repository lint on every change surface (hearsay-tools/cezarion#2416)', () => {
+  const ci = workflow();
+  const steps = ci.jobs.typecheck.steps;
+  const index = steps.findIndex((step) => step.name === 'Lint');
+  assert.ok(index > 0, 'expected a Lint step');
+  assert.equal(steps[index].run, 'npm run lint');
+  assert.equal(steps[index].if, undefined, 'lint runs whatever the event and test selection');
+  assert.ok(index > steps.findIndex((step) => step.name === 'Install pnpm dependencies'), 'oxlint is installed first');
+  assert.ok(!ci.jobs.typecheck.needs.includes('change-surface'), 'a docs-only or test-less change still runs lint');
+  assert.ok(ci.jobs.preflight.needs.includes('typecheck'), 'preflight requires the lint result');
+});
+
 test('test jobs require full-matrix classification without losing the bot bump skip', () => {
   const ci = workflow();
   for (const name of ['vitest', 'cockpit-browser']) {

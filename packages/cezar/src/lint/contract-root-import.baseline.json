@@ -1,0 +1,7 @@
+{
+  "$comment": "Files allowed to import a contract package root at runtime, each with its reason (hearsay-tools/cezarion#1237). This list only shrinks: the CI baseline-growth gate refuses a new key. The cez/contract-root-import rule reads it; docs/sdlc/lint.md describes the rule.",
+  "files": {
+    "packages/api-client/src/index.ts": "the api-client barrel re-exports the contract root",
+    "packages/web/src/test/api-client-subpaths.test.ts": "pins that a root and its subpaths share one module instance"
+  }
+}

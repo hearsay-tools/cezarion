@@ -1,5 +1,5 @@
 # ast-grep project config: the rules that pin construction sites and readers.
-# packages/cezar/src/ast-grep-rules.test.ts runs them; .ai/ast-grep/README.md says how to add one.
+# npm run lint scans with them; ast-grep-rules.test.ts runs their cases; .ai/ast-grep/README.md says how to add one.
 ruleDirs:
   - .ai/ast-grep/rules
 testConfigs:

@@ -14,7 +14,6 @@ import {
   ruleIds,
   ruleTestsDir,
   runAstGrep,
-  scanRepository,
   shrink,
   tally,
   updateBaseline,
@@ -26,8 +25,8 @@ import {
 /**
  * The ast-grep rules that pin construction sites and readers (hearsay-tools/cezarion#1802).
  * Each rule in `.ai/ast-grep/rules` matches a syntax tree, and its baseline records the matches
- * the repository carried when the rule landed. A match beyond the baseline fails with the
- * rule's message, which names the owner to use instead. The baseline can only shrink, the same
+ * the repository carried when the rule landed. `npm run lint` scans the repository and fails a
+ * match beyond the baseline with the rule's message, which names the owner to use instead. The baseline can only shrink, the same
  * shape `test-wait-discipline.test.ts` uses for the unit tests' waits. The rules' own cases
  * live in `.ai/ast-grep/rule-tests`, so a rule that stops matching cannot go dead unseen.
  */
@@ -64,36 +63,6 @@ describe('the rule cases', () => {
     const run = await runAstGrep(['test', '--skip-snapshot-tests']);
     expect(run.code, `ast-grep test failed:\n${run.stdout}${run.stderr}`).toBe(0);
   });
-});
-
-describe('the repository', () => {
-  // One scan of the repository serves every rule below.
-  let scanned: Promise<Site[]> | undefined;
-  const sites = () => (scanned ??= scanRepository());
-
-  for (const rule of ruleIds()) {
-    it(`matches ${rule} no more than its baseline, and the baseline names no match that is gone`, { timeout: SPAWN_TIMEOUT_MS }, async () => {
-      const mine = (await sites()).filter((s) => s.rule === rule);
-      const actual = tally(mine);
-      // Update mode starts a rule's baseline or lowers it; it never adds to one.
-      if (process.env.AST_GREP_RULES_UPDATE === '1') updateBaseline(rule, actual);
-      const { added, stale } = compareToBaseline(actual, readBaseline(rule));
-      // A site the baseline already holds shows every line it is at, since text alone cannot say which is new.
-      const where = added
-        .map((e) => {
-          const lines = mine.filter((s) => s.file === e.file && s.site === e.site).map((s) => s.line);
-          return `  ${e.file}:${lines.join(', ')} ${e.count} more than recorded: ${e.site}`;
-        })
-        .join('\n');
-      const listed = stale.map((e) => `  ${e.file} ×${e.count}: ${e.site}`).join('\n');
-      expect(added, `New match of ${rule}. ${readRule(rule).message.trim()}\nNever add a match to ${baselinePath(rule)}:\n${where}`).toEqual([]);
-      expect(
-        stale,
-        `Baseline entries of ${rule} no longer found; shrink ${baselinePath(rule)} ` +
-          `(AST_GREP_RULES_UPDATE=1 npm test -- packages/cezar/src/ast-grep-rules.test.ts does it):\n${listed}`,
-      ).toEqual([]);
-    });
-  }
 });
 
 describe('the baseline helpers', () => {

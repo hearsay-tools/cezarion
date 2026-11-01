@@ -29,7 +29,7 @@ Three consumers, one definition:
    from the cockpit. Import a value from the module that defines it. The package root re-exports
    every module, delegation's schemas among them, so a value taken from the root loads them all
    (hearsay-tools/cezarion#1237). Types may still come from the root as `import type`;
-   `packages/cezar/src/contract-import-boundaries.test.ts` refuses any other root import. A pure
+   the `cez/contract-root-import` lint rule (`npm run lint`) refuses any other root import. A pure
    helper that has no schema to import goes in a module with no runtime import, as
    `run-labels.ts` and the `*-limits.ts` modules do, so its users load no schema.
 5. **Test data through `src/test-factories.testkit.ts`.** It builds run records, waits and events
