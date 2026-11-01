@@ -724,6 +724,19 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     expect(routing.answeredElsewhere(worker.id)).toBe(true);
   });
 
+  // Cezar's answer queued for a routed question still answers it once the parent's ledger reads
+  // again (here it always reads): the parent-reply lookup must not hide it.
+  it("delivers Cezar's queued answer to a routed question whose parent reads", async () => {
+    const f = await askedPair();
+    try {
+      const askSeq = eventsOf(f.w.id, 'ask.requested')[0]!.seq;
+      runInternals(manager).workerQuestions.answerUndelivered(f.w.id, askSeq, 'the parent record cannot be read');
+      await until(() => cezarAnswered(f.w.id).length === 1);
+      expect(cezarAnswered(f.w.id)[0]).toMatchObject({ askSeq });
+      noHumanCard(f.w.id);
+    } finally { f.close(); }
+  });
+
   it("waits for capacity before a parent's answer resumes the worker", async () => {
     const f = await askedPair();
     try {

@@ -254,8 +254,9 @@ export class WorkerQuestions {
     const routed = this.routedAsk(runId);
     if (routed) {
       const input = this.context.store.getRun(runId)?.agentInputs?.find(entry => !entry.deliveredAt && answersQuestion(routed.message, entry));
-      return input ? { askSeq: routed.askSeq, input, source: 'parent' } : undefined;
+      if (input) return { askSeq: routed.askSeq, input, source: 'parent' };
     }
+    // Cezar's answer stands whether or not the parent's ledger can be read again.
     const ask = this.context.store.getRun(runId)?.delegation?.role === 'worker' ? this.context.store.transcriptFacts(runId).pendingAsk : undefined;
     const input = ask && !ask.fallback ? this.undeliveredAnswer(runId, ask.seq) : undefined;
     return ask && input && !input.deliveredAt ? { askSeq: ask.seq, input, source: 'cezar' } : undefined;
@@ -264,7 +265,7 @@ export class WorkerQuestions {
   /** Who sent `input` as the answer to the worker's pending question; undefined when it is no answer. */
   answerSource(runId: string, input: AgentInput): QuestionAnswerSource | undefined {
     const routed = this.routedAsk(runId);
-    if (routed) return answersQuestion(routed.message, input) ? 'parent' : undefined;
+    if (routed && answersQuestion(routed.message, input)) return 'parent';
     const ask = this.context.store.transcriptFacts(runId).pendingAsk;
     return ask && input.purpose === 'undelivered-question' && input.id === this.undeliveredAnswerId(runId, ask.seq) ? 'cezar' : undefined;
   }
