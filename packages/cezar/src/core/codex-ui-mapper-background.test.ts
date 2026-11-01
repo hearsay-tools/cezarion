@@ -53,6 +53,20 @@ describe('codex background sub-agents (hearsay-tools/cezarion#2431)', () => {
     expect(events.filter(event => event.type === 'turn.started')).toHaveLength(1);
   });
 
+  it('nests a spawn on the child thread under the child row, never as a parent background task', () => {
+    const onChild = (method: string, item: Record<string, unknown>) => ({ method, params: { threadId: 'th_child', turnId: 'turn_child', item } });
+    const grandchild = { type: 'subAgentActivity', id: 'call_2', kind: 'started', agentThreadId: 'th_grandchild', agentPath: '/root/sleep_child/inner' };
+    const { events } = fold([
+      onParent('item/completed', started), turnCompleted,
+      onChild('item/completed', grandchild), onChild('item/completed', ended('th_grandchild')),
+    ]);
+    expect(tools(events).map(({ type, item }) => [type, item.id, item.status, item.background, item.parentItemId])).toEqual([
+      ['item.started', 'call_1', 'running', true, undefined],
+      ['item.started', 'call_2', 'running', undefined, 'call_1'],
+      ['item.completed', 'call_2', 'completed', undefined, 'call_1'],
+    ]);
+  });
+
   it('completes the row when the child ends inside the parent turn', () => {
     const { events } = fold([onParent('item/completed', started), onParent('item/completed', ended()), turnCompleted]);
     expect(events.map(event => [event.type, 'item' in event ? event.item.id : undefined])).toEqual([

@@ -383,7 +383,7 @@ function mapItemLifecycle(
   // Internal collaboration telemetry is not a user tool. Codex emits one
   // `subAgentActivity(kind: started)` when it creates a child thread, followed
   // by `interacted` bookkeeping as control returns between threads.
-  if (type === 'subAgentActivity') return mapSubAgentActivity(raw, id, state);
+  if (type === 'subAgentActivity') return mapSubAgentActivity(raw, id, collabParentItemId(params, state), state);
 
   const item =
     type === 'agentMessage'
@@ -418,6 +418,7 @@ function mapItemLifecycle(
 function mapSubAgentActivity(
   raw: Record<string, unknown>,
   id: string,
+  parentItemId: string | undefined,
   state: CodexUiMapperState,
 ): CodexUiMapping {
   const kind = str(raw.kind);
@@ -431,10 +432,12 @@ function mapSubAgentActivity(
   const collabTasks = new Map(state.collabTasks);
   if (agentThreadId) collabTasks.set(agentThreadId, task);
   // The child runs in its own thread and may outlive the parent turn (hearsay-tools/cezarion#2431).
+  // A spawn on a child's thread is that child's work: it nests under the child's row and is not
+  // one of the parent's background subagents, though its row still ends on its own completion.
   const item: UiToolItem = {
     kind: 'tool', id, name: 'spawnAgent', toolKind: 'task', title: display.title, status: 'running',
     input: { ...(agentPath ? { agentPath } : {}), ...(agentThreadId ? { agentThreadId } : {}) },
-    background: true,
+    ...(parentItemId === undefined ? { background: true as const } : { parentItemId }),
   };
   return {
     events: [{ type: 'item.started', item }],
