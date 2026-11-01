@@ -24,7 +24,8 @@ test('a product file is a TypeScript source under packages/<pkg>/src, never a te
   for (const file of ['packages/cezar/src/a.ts', 'packages/web/src/routes/b.tsx', 'packages/contract/src/waits.ts', 'packages/api-client/src/x/y.ts']) assert.equal(productFile(file), true, file);
   for (const file of ['packages/cezar/src/a.test.ts', 'packages/web/src/b.test.tsx', 'packages/web/e2e/c.e2e.ts', 'packages/web/src/c.e2e.ts',
     'packages/cezar/src/run.testkit.ts', 'packages/cezar/src/types.d.ts', 'packages/cezar/scripts/a.ts', 'packages/cezar/src/a.mjs',
-    'packages/cezar/src/../x.ts', '.github/scripts/a.ts', 'packages/cezar/test/a.ts', 'packages/web/src/foo.spec.ts', 'packages/cezar/src/a.spec.tsx']) assert.equal(productFile(file), false, file);
+    'packages/cezar/src/../x.ts', '.github/scripts/a.ts', 'packages/cezar/test/a.ts', 'packages/web/src/foo.spec.ts', 'packages/cezar/src/a.spec.tsx',
+    'packages/web/src/test/palette.ts', 'packages/cezar/src/__tests__/a.ts', 'packages/cezar/src/fixtures/a.ts', 'packages/cezar/src/x/__fixtures__/b.tsx']) assert.equal(productFile(file), false, file);
 });
 
 test('artifact names are safe for upload-artifact and differ for paths that map to the same characters', () => {

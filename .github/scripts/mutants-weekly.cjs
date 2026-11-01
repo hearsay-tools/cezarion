@@ -9,6 +9,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { execFileSync } = require('node:child_process');
 const { parseArgs, compareResults } = require('./mutants-file.cjs');
+const { mutableTarget } = require('./mutants-scope.cjs');
 const TARGETS = require('../mutants/targets.json');
 
 const CAP = 64;
@@ -32,7 +33,7 @@ const flat = text => String(text).replace(/\s+/g, ' ').trim().replace(/`/g, "'")
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
 function productFile(file) {
-  if (/\.(?:test|spec|e2e|testkit)\.|\.d\.ts$/.test(file)) return false;
+  if (!mutableTarget(file)) return false;
   try {
     parseArgs([file]);
     return true;
