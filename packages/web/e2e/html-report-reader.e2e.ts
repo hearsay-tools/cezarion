@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
-import type { RunRecord } from '@open-mercato/cezar-api-client'
+import { makeRunRecord, RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 // fixture-server starts: 1
@@ -81,10 +81,10 @@ beforeAll(async () => {
   }))
   rmSync(source)
   const filler = Array.from({ length: 40 }, (_, i) => `Paragraph ${i + 1} of the long task description.`).join('\n\n')
-  const run: RunRecord = {
-    id: runId, task: `${filler}\n\nRead ${publication.markdown} now.\n\n${filler}`, title: 'HTML report reader', workflow: 'quick-task',
-    status: 'done', archived: false, createdAt: '2026-11-01T08:00:00Z', tokensUsed: 0, steps: [],
-  }
+  const run = makeRunRecord({
+    id: runId, task: `${filler}\n\nRead ${publication.markdown} now.\n\n${filler}`, title: 'HTML report reader',
+    status: RUN_STATUS.done, createdAt: '2026-11-01T08:00:00Z',
+  })
   writeFileSync(join(project, '.ai/cezar/runs.json'), JSON.stringify([run]))
   mkdirSync(evidenceDir, { recursive: true })
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', project, '--port', '0', '--no-open'], { env })
@@ -97,7 +97,7 @@ beforeAll(async () => {
 afterAll(async () => {
   browser?.close()
   await stopFixtureServer(server)
-  if (probe && probe.exitCode === null) await new Promise(done => { probe.once('exit', done); probe.kill() })
+  await stopFixtureServer(probe)
   if (root) rmSync(root, { recursive: true, force: true })
 })
 
