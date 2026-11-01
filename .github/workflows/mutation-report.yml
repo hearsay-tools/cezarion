@@ -1,31 +1,33 @@
 name: Mutation report
 
 # Runs StrykerJS on the lines a pull request changes in packages/*/src and uploads what it found.
-# Advisory: it never blocks a merge. No required check, queue entry or failure reporter lists it,
-# a Stryker timeout or error is recorded in its artifact and the job still passes, and a newer push
-# cancels the run before it. It also runs when an open pull request is retargeted, so the report
-# follows the new base; any other edit skips the job. mutation-report-comment.yml posts the one pull
-# request comment; this workflow runs the pull request's own code, so it has a read-only token and no
-# secrets.
+# Opt-in: it runs only while the pull request carries the `mutants` label, when the label is added
+# and on each later push; the job is skipped without it. Advisory: it never blocks a merge. No
+# required check, queue entry or failure reporter lists it, a Stryker timeout or error is recorded in
+# its artifact and the job still passes, and a newer push cancels the run before it. It also runs when
+# an open pull request is retargeted, so the report follows the new base; any other edit skips the
+# job. mutation-report-comment.yml posts the one pull request comment; this workflow runs the pull
+# request's own code, so it has a read-only token and no secrets.
 on:
   pull_request:
     branches: [main]
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened, edited, labeled]
 
 permissions:
   contents: read
 
 concurrency:
-  # An edit that does not change the base skips the job, and it gets a group of its own so it cannot
-  # cancel a report that is still running for the same pull request.
-  group: ${{ github.event.action == 'edited' && !github.event.changes.base && format('mutation-report-edit-{0}', github.run_id) || format('mutation-report-{0}', github.event.pull_request.number) }}
+  # An event that skips the job gets a group of its own, so it cannot cancel a report that is still
+  # running for the same pull request.
+  group: ${{ (contains(github.event.pull_request.labels.*.name, 'mutants') && (github.event.action != 'edited' || github.event.changes.base) && (github.event.action != 'labeled' || github.event.label.name == 'mutants')) && format('mutation-report-{0}', github.event.pull_request.number) || format('mutation-report-skip-{0}', github.run_id) }}
   cancel-in-progress: true
 
 jobs:
   mutants:
     name: Surviving mutants in changed lines
-    # `edited` also fires for a title or body change, which has nothing new to mutate.
-    if: github.event.action != 'edited' || github.event.changes.base
+    # `edited` also fires for a title or body change, which has nothing new to mutate, and `labeled`
+    # for any label.
+    if: contains(github.event.pull_request.labels.*.name, 'mutants') && (github.event.action != 'edited' || github.event.changes.base) && (github.event.action != 'labeled' || github.event.label.name == 'mutants')
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:

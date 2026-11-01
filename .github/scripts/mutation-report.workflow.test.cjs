@@ -35,10 +35,20 @@ test('both workflows say in their header that they are advisory and never block 
   }
 });
 
+test('the pull request job is opt-in: its header and its condition name the mutants label', () => {
+  const header = reportSource.split('\n').slice(0, 14).filter(line => line.startsWith('#')).join(' ');
+  assert.match(header, /`mutants` label/);
+  assert.match(header, /skipped without it/);
+  assert.match(reportJob.if, /contains\(github\.event\.pull_request\.labels\.\*\.name, 'mutants'\)/);
+  assert.ok(!report.on.pull_request.types.includes('unlabeled'), 'removing the label starts no run');
+  const commentHeader = commentSource.split('\n').slice(0, 12).filter(line => line.startsWith('#')).join(' ');
+  assert.match(commentHeader, /`mutants` label/);
+});
+
 test('the pull request job has a read-only token, no secrets, a bounded run time and one run per pull request', () => {
   assert.deepEqual(Object.keys(report.on), ['pull_request']);
   assert.deepEqual(report.on.pull_request.branches, ['main']);
-  assert.deepEqual(report.on.pull_request.types, ['opened', 'synchronize', 'reopened', 'edited']);
+  assert.deepEqual(report.on.pull_request.types, ['opened', 'synchronize', 'reopened', 'edited', 'labeled']);
   assert.deepEqual(report.permissions, { contents: 'read' });
   assert.equal(reportJob.permissions, undefined);
   assert.doesNotMatch(reportCode, /pull_request_target|secrets\.|id-token|write|continue-on-error/);
@@ -47,25 +57,36 @@ test('the pull request job has a read-only token, no secrets, a bounded run time
   assert.ok(minutes > DEFAULT_BUDGET.deadlineMinutes && minutes <= 60, `${minutes} minutes must outlast the ${DEFAULT_BUDGET.deadlineMinutes} minute deadline and stay within an hour`);
 });
 
-// The two expressions are plain JavaScript once `format` exists: `&&`, `||`, `!`, `==`, quoted strings and
-// property reads. `changes` exists on every `edited` event, and the other events never reach it.
+// The two expressions are plain JavaScript once `format` and `contains` exist and `labels.*.name` reads
+// each label's name: `&&`, `||`, `!`, `==`, quoted strings and property reads. `changes` exists on every
+// `edited` event and `label` on every `labeled` event; the other events never reach them.
 const expression = source => {
-  const inner = /^\$\{\{ (.*) \}\}$/.exec(source)?.[1] ?? source;
+  const inner = (/^\$\{\{ (.*) \}\}$/.exec(source)?.[1] ?? source).replace(/\.\*\.(\w+)/g, '.map(item => item.$1)');
   const format = (template, ...values) => template.replace(/\{(\d)\}/g, (_, index) => values[index]);
-  return github => new Function('github', 'format', `return (${inner});`)(github, format);
+  const contains = (list, value) => list.includes(value);
+  return github => new Function('github', 'format', 'contains', `return (${inner});`)(github, format, contains);
 };
-const event = (action, extra = {}) => ({ run_id: 77, event: { action, pull_request: { number: 5 }, ...extra } });
+const LABELLED = [{ name: 'bug' }, { name: 'mutants' }];
+const event = (action, extra = {}, labels = LABELLED) => ({ run_id: 77, event: { action, pull_request: { number: 5, labels }, ...extra } });
+const baseMoved = { changes: { base: { ref: { from: 'stack' } } } };
 
-test('an edit that moves the base reports and replaces the running report; any other edit skips the job in a group of its own', () => {
+test('only a pull request with the mutants label reports; an event that skips the job gets a group of its own', () => {
   const group = expression(report.concurrency.group);
   const runs = expression(reportJob.if);
   const cases = [
-    ['opened', event('opened'), 'mutation-report-5', true],
-    ['synchronize', event('synchronize'), 'mutation-report-5', true],
-    ['reopened', event('reopened'), 'mutation-report-5', true],
-    ['edited, base moved', event('edited', { changes: { base: { ref: { from: 'stack' } } } }), 'mutation-report-5', true],
-    ['edited, title only', event('edited', { changes: { title: { from: 'old' } } }), 'mutation-report-edit-77', false],
-    ['edited, body only', event('edited', { changes: { body: { from: 'old' } } }), 'mutation-report-edit-77', false],
+    ['labelled, opened', event('opened'), 'mutation-report-5', true],
+    ['labelled, synchronize', event('synchronize'), 'mutation-report-5', true],
+    ['labelled, reopened', event('reopened'), 'mutation-report-5', true],
+    ['labelled, edited, base moved', event('edited', baseMoved), 'mutation-report-5', true],
+    ['labelled, edited, title only', event('edited', { changes: { title: { from: 'old' } } }), 'mutation-report-skip-77', false],
+    ['labelled, edited, body only', event('edited', { changes: { body: { from: 'old' } } }), 'mutation-report-skip-77', false],
+    ['labeled with mutants', event('labeled', { label: { name: 'mutants' } }), 'mutation-report-5', true],
+    ['labeled with another label, mutants already there', event('labeled', { label: { name: 'bug' } }), 'mutation-report-skip-77', false],
+    ['unlabelled, opened', event('opened', {}, []), 'mutation-report-skip-77', false],
+    ['unlabelled, synchronize', event('synchronize', {}, [{ name: 'bug' }]), 'mutation-report-skip-77', false],
+    ['unlabelled, reopened', event('reopened', {}, []), 'mutation-report-skip-77', false],
+    ['unlabelled, edited, base moved', event('edited', baseMoved, []), 'mutation-report-skip-77', false],
+    ['unlabelled, labeled with another label', event('labeled', { label: { name: 'bug' } }, [{ name: 'bug' }]), 'mutation-report-skip-77', false],
   ];
   for (const [name, github, expectedGroup, expectedRuns] of cases) {
     assert.equal(group(github), expectedGroup, `${name}: group`);
