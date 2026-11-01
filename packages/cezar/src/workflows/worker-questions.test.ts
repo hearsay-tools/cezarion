@@ -147,6 +147,31 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     noHumanCard(w.id);
   });
 
+  // A worker that stops with Cezar's answer still queued: recovery closes its question and retires
+  // the answer, so neither stays behind to refuse a human Continue.
+  it("closes a stopped worker's question when Cezar's answer is still queued", async () => {
+    const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
+    fillInbox(p.id);
+    const routing = runInternals(manager).workerQuestions;
+    const route = vi.spyOn(routing, 'routeWorkerQuestion').mockImplementation(() => {});
+    const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
+    await until(() => eventsOf(w.id, 'ask.requested').length === 1 && store.getRun(w.id)?.status === 'waiting');
+    const askSeq = eventsOf(w.id, 'ask.requested')[0]!.seq;
+    route.mockRestore();
+    // Cezar's answer is queued, and the worker stops before it is delivered.
+    const deliver = vi.spyOn(manager, 'deliverConversationInput').mockImplementation(() => {});
+    routing.answerUndelivered(w.id, askSeq, 'the parent conversation is at capacity');
+    deliver.mockRestore();
+    const answer = routing.undeliveredAnswerId(w.id, askSeq);
+    expect(store.getRun(w.id)?.agentInputs?.some(input => input.id === answer)).toBe(true);
+    manager.cancel(w.id);
+    await until(() => store.getRun(w.id)?.status === 'cancelled' && !manager.isActive(w.id));
+    routing.routeWorkerQuestion(w.id);
+    expect(closedAs(w.id)).toContain('worker-stopped');
+    expect(hasPendingAsk(store, w.id)).toBe(false);
+    expect(store.getRun(w.id)?.agentInputs?.some(input => input.id === answer && !input.deliveredAt) ?? false).toBe(false);
+  });
+
   it('closes the question without an answer when the worker spent its automatic-wake budget', async () => {
     const p = await steeringParent(); await until(() => store.getRun(p.id)?.status === 'waiting');
     fillInbox(p.id);

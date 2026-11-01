@@ -62,6 +62,9 @@ export class WorkerQuestions {
     if (worker?.delegation?.role !== 'worker') return;
     const ask = this.context.store.transcriptFacts(workerId).pendingAsk;
     if (!ask || ask.fallback) return;
+    // A stopped worker's question closes first, whatever answer is queued for it: no conversation
+    // outcome closes a question that never reached the parent, and the close retires that answer.
+    if (!['queued', 'running', 'waiting'].includes(worker.status) || worker.stopping) { this.closeQuestion(workerId, ask.seq, 'worker-stopped'); return; }
     if (this.undeliveredAnswer(workerId, ask.seq)) { this.recordUndelivered(workerId, ask.seq, undefined); return; }
     // A routed question whose parent can no longer be read cannot be answered there: Cezar answers it.
     if (ask.routedMessageId !== undefined) { this.answerForUnreadableParent(workerId, worker.delegation.parentRunId, ask.seq); return; }
