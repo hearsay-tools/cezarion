@@ -54,6 +54,23 @@ describe('prepareReport', () => {
     }
   })
 
+  it('applies the same link policy to SVG xlink:href links', () => {
+    const XLINK = 'http://www.w3.org/1999/xlink'
+    const { srcdoc, blocked } = prepareReport(`<svg xmlns:xlink="${XLINK}">
+      <a id="web" xlink:href="https://example.com/" target="_self"><text>Web</text></a>
+      <a id="rel" xlink:href="other.html"><text>Rel</text></a>
+      <a id="toc" xlink:href="#s2" target="_top"><text>Toc</text></a></svg>`)
+    const doc = parse(srcdoc)
+    const link = (id: string) => doc.getElementById(id)!
+    expect(link('web').getAttributeNS(XLINK, 'href')).toBe('https://example.com/')
+    expect(link('web').getAttribute('target')).toBe('_blank')
+    expect(link('web').getAttribute('rel')).toBe('noopener noreferrer')
+    expect(link('rel').hasAttributeNS(XLINK, 'href')).toBe(false)
+    expect(link('rel').hasAttribute('href')).toBe(false)
+    expect(link('toc').hasAttribute('target')).toBe(false)
+    expect(blocked.relative).toBe(1)
+  })
+
   it('makes relative and script links inert and counts the relative ones', () => {
     const { srcdoc, blocked } = prepareReport('<a href="other.html">Next</a><a href="/api/v1/health">Api</a><a href="javascript:steal()">JS</a><area href="sub/x.html">')
     const doc = parse(srcdoc)

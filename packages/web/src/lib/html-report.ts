@@ -53,14 +53,20 @@ function removeActive(doc: Document, blocked: BlockedContent): void {
   for (const control of doc.querySelectorAll('[formaction]')) control.removeAttribute('formaction')
 }
 
-/** `#anchors` scroll the report, web and mail links open a new tab, every other link is inert. */
+const XLINK = 'http://www.w3.org/1999/xlink'
+
+/** `#anchors` scroll the report, web and mail links open a new tab, every other link is inert.
+ *  SVG links may name their destination in `xlink:href`; the same policy applies to it. */
 function rewriteLinks(doc: Document, blocked: BlockedContent): void {
-  for (const link of doc.querySelectorAll('a[href], area[href]')) {
-    const href = link.getAttribute('href')!.trim()
+  for (const link of doc.querySelectorAll('a, area')) {
+    const raw = link.getAttribute('href') ?? link.getAttributeNS(XLINK, 'href')
+    if (raw === null) continue
+    const href = raw.trim()
     if (href.startsWith('#')) { link.removeAttribute('target'); continue }
     if (NEW_TAB.test(href)) { link.setAttribute('target', '_blank'); link.setAttribute('rel', 'noopener noreferrer'); continue }
     if (!REMOTE.test(href)) blocked.relative++
     link.removeAttribute('href')
+    link.removeAttributeNS(XLINK, 'href')
     link.removeAttribute('target')
   }
 }
