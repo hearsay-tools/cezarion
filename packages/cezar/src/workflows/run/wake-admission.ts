@@ -1,5 +1,5 @@
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
-import { computeWaitingOn, isUsageLimitHold, type HumanWaitEntry, type Wait } from '@open-mercato/cezar-contract/waits';
+import { computeWaitingOn, isUsageLimitHold, type HumanWaitEntry, type Wait, type WaitingOn } from '@open-mercato/cezar-contract/waits';
 import type { RunRecord } from '../../runs/store.ts';
 import type { RunOutcome } from '../../runs/outcome-commit.ts';
 import { rootsAwaitingPeer } from '../../delegation/conversations.ts';
@@ -170,8 +170,8 @@ export class WakeAdmission {
     }
     clearIdleTimer(state);
     const top = computeWaitingOn(run)?.kind;
-    // Native subagents live in the session, so their park keeps it and a slot (hearsay-tools/cezarion#2431).
-    const keepsSlot = top === 'subagents' || top === 'pr' || top === 'process' || top === 'timer' || (top === undefined && resolvedWaits(run).length > 0);
+    const holdsSubagents = holdsNativeSubagents(run);
+    const keepsSlot = holdsSubagents || parkTopKeepsSlot(run, top);
     // A park that frees its slot publishes the intent first: a refused write throws and keeps it.
     if (keepsSlot) {
       this.host.move(runId, 'park');
@@ -179,7 +179,7 @@ export class WakeAdmission {
     } else transitionVia('park', () => this.context.store.getRun(runId), () => this.context.store.commitParked(runId, state.currentStepId));
     this.host.line.park(runId);
     if (keepsSlot) this.host.line.joinPool(runId); else this.leaveMonitoringPool(runId);
-    if (top === 'workers' || top === 'peers') this.host.armIdleTimer(runId, state);
+    if (!holdsSubagents && (top === 'workers' || top === 'peers')) this.host.armIdleTimer(runId, state);
     this.host.queueWaitWake(runId);
     this.host.releaseSlot();
     return true;
@@ -398,4 +398,15 @@ export class WakeAdmission {
     }
     return 'none';
   }
+}
+
+/** Native subagents live in the session, so any park with a subagent wait open keeps the session
+ *  and a slot, whichever wait ranks first (hearsay-tools/cezarion#2431). */
+function holdsNativeSubagents(run: RunRecord): boolean {
+  return openWaits(run).some((wait) => wait.kind === 'subagent');
+}
+
+/** A CI, process or timer park keeps its slot, and so does a wake due now with nothing open. */
+function parkTopKeepsSlot(run: RunRecord, top: WaitingOn['kind'] | undefined): boolean {
+  return top === 'subagents' || top === 'pr' || top === 'process' || top === 'timer' || (top === undefined && resolvedWaits(run).length > 0);
 }

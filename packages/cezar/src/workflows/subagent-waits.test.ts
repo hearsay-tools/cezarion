@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import type { SubagentWaitEntry, Wait } from '@open-mercato/cezar-contract/waits';
-import { RUN_STATUS, SUBAGENT_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { makePeerWait, makeWorkerWait, RUN_STATUS, SUBAGENT_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { ToolStatus, UiEvent, UiToolItem } from '../core/ui-events.ts';
 import { UiEventSink } from '../runs/ui-event-sink.ts';
 import { handleRunnerUiEvent } from './run/session-events.ts';
@@ -81,6 +81,18 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     expect(internals().active.get(id)?.idleTimer).toBeUndefined();
     expect(store.readEvents(id).some(event => event.type === 'note' && String(event.message).startsWith('no wait or done'))).toBe(false);
   });
+
+  for (const [kind, make] of [['peer', makePeerWait], ['worker', makeWorkerWait]] as const) {
+    it(`a ${kind} wait beside the subagent wait still keeps the session and its slot, with no idle close`, async () => {
+      const { id } = await parkedOnSubagents(['toolu_bg_01'], async runId => {
+        store.commitWait(runId, make({ turnId: internals().active.get(runId)!.ciTurnId ?? 'turn' }));
+      });
+      // The other wait ranks first for display; the native child still needs this session.
+      expect(internals().line.inPool(id)).toBe(true);
+      expect(internals().active.get(id)?.idleTimer).toBeUndefined();
+      expect(internals().active.get(id)?.session?.open).toBe(true);
+    });
+  }
 
   it('the last child ending wakes the parent once after the grace and spends no wake', async () => {
     const { id, wait } = await parkedOnSubagents(['toolu_bg_01', 'toolu_bg_02']);
