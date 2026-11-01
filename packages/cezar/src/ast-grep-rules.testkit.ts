@@ -7,7 +7,7 @@ import { parse } from 'yaml';
 import { z } from 'zod';
 
 /**
- * Helpers for `ast-grep-rules.test.ts`: the ast-grep rules that pin construction sites and
+ * Helpers for `npm run lint` and `ast-grep-rules.test.ts`: the ast-grep rules that pin construction sites and
  * readers (hearsay-tools/cezarion#1802). A rule is a syntax-tree match, so it finds what a regex
  * over `blank()` cannot, such as an `ActiveRun` literal whatever order its fields take. The
  * rules and their baselines live in `.ai/ast-grep/rules`, one `<id>.yml` and one
@@ -212,7 +212,7 @@ export function writeBaseline(rule: string, sites: BaselineEntry[], dir = rulesD
     $comment:
       'Matches the rule found when it landed (hearsay-tools/cezarion#1802), keyed by file and the first line of the match ' +
       'so a moved line does not churn it. This list only shrinks: fix a match, then run ' +
-      'AST_GREP_RULES_UPDATE=1 npm test -- packages/cezar/src/ast-grep-rules.test.ts. Rules: .ai/ast-grep/README.md.',
+      'AST_GREP_RULES_UPDATE=1 npm run lint. Rules: .ai/ast-grep/README.md.',
     sites,
   };
   writeFileSync(baselinePath(rule, dir), `${JSON.stringify(file, null, 2)}\n`);

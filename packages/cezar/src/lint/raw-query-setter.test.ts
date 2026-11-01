@@ -1,10 +1,11 @@
-// @vitest-environment node
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import baseline from './search-params-discipline.baseline.json'
-import { compareSetters, scanSetters, scanTree } from './search-params-discipline'
+import { compareSetters, readSetterBaseline, scanSetters, scanTree } from './raw-query-setter.ts'
+
+/** The baseline `cez/raw-query-setter` reads; `npm run lint` applies the rule to the cockpit. */
+const baseline = { sites: readSetterBaseline() }
 
 const imported = `import { useSearchParams } from 'react-router';`
 const raw = `${imported} const [query, setQuery] = useSearchParams(); setQuery(query)`
@@ -66,10 +67,5 @@ describe('raw query setter discipline (hearsay-tools/cezarion#1649)', () => {
       expect(entry.site).toBe('[query, setQuery] = useSearchParams()')
       expect(entry.reason.trim().length).toBeGreaterThan(0)
     }
-  })
-
-  it('requires every cockpit query writer to use useSearchParamsWriter outside the baseline', () => {
-    expect(compareSetters(scanTree(resolve(import.meta.dirname, '..')), baseline.sites))
-      .toEqual({ added: [], stale: [] })
   })
 })

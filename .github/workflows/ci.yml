@@ -508,6 +508,11 @@ jobs:
         if: github.event_name != 'push'
         run: node .github/scripts/check-citations.cjs --base HEAD^1
 
+      # The repository's own lint rules and the ast-grep baselines (hearsay-tools/cezarion#2416).
+      # This job runs on every change surface, so no test selection can skip them.
+      - name: Lint
+        run: npm run lint
+
       - name: Typecheck
         run: npm run typecheck
 

@@ -1,0 +1,18 @@
+{
+  "$comment": "Source files that read or write autoResumeAt, each with its reason (hearsay-tools/cezarion#1496). Tests build fixtures freely. Add a file only with its reason; npm run lint fails an entry whose file no longer reads the time. The cez/run-fact-reader rule reads this list.",
+  "files": {
+    "packages/contract/src/waits.ts": "defines `isUsageLimitHold` and names the usage-limit wait by its time",
+    "packages/cezar/src/runs/store.ts": "the withdrawal and resume writes",
+    "packages/cezar/src/runs/record-write-rules.ts": "stages the commit, loaded and debounced stale-resume write rules",
+    "packages/cezar/src/workflows/run/auto-resume.ts": "arms, re-arms, withdraws and clears the resume timer at its time",
+    "packages/cezar/src/workflows/run-scheduling.ts": "derives account holds from future resume deadlines",
+    "packages/cezar/src/workflows/run/run-line.ts": "queue rescue reads the resume time",
+    "packages/cezar/src/runs/run-row.ts": "the live column keeps an older row with a stale time live, so the store can heal it",
+    "packages/cezar/src/runs/run-index.ts": "the cold reader decodes a summary with a stale time to heal it",
+    "packages/cezar/src/task-cli/projections.ts": "prints the resume time beside the usage-limit label",
+    "packages/web/src/lib/run-row-meta.ts": "prints the time until the resume",
+    "packages/web/src/lib/tasks-table.ts": "prints the resume time in the status cell",
+    "packages/web/src/lib/task-groups.ts": "orders two holds by their resume times",
+    "packages/web/src/routes/task-thread/auto-resume-hint.tsx": "prints the resume time in the thread hint"
+  }
+}

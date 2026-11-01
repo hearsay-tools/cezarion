@@ -21,4 +21,4 @@ not imply that the api-client is published or that a published dist artifact exi
 
 Implementation: [tsconfig.json](../../packages/api-client/tsconfig.json), [tsconfig.json](../../packages/contract/tsconfig.json), [tool-display.ts](../../packages/api-client/src/protocol/tool-display.ts), [AGENTS.md](../../AGENTS.md).
 
-Coverage: [api-types.test.ts](../../packages/cezar/src/server/api-types.test.ts), [tool-display-mirror.test.ts](../../packages/cezar/src/server/tool-display-mirror.test.ts), [contract-import-boundaries.test.ts](../../packages/cezar/src/contract-import-boundaries.test.ts).
+Coverage: [api-types.test.ts](../../packages/cezar/src/server/api-types.test.ts), [tool-display-mirror.test.ts](../../packages/cezar/src/server/tool-display-mirror.test.ts), [contract-import-boundaries.test.ts](../../packages/cezar/src/contract-import-boundaries.test.ts) and the lint rule it pins, [contract-root-import.ts](../../packages/cezar/src/lint/contract-root-import.ts).

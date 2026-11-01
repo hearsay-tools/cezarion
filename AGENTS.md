@@ -37,7 +37,7 @@ Practical rules:
 - A missing dependency, an absent peer, a read-only home: degrade to a smaller working cockpit, never fail the boot.
 - Prefer a proxy-free, daemon-free mechanism when one exists — and when it doesn't, keep the mechanism invisible: no process to manage, no port to remember, no file to edit.
 - Never trade a working default for a knob.
-- Adding, renaming, or removing a `CEZ_*` env var — or changing what its default does — MUST update `.env.example` in the same commit (and the README env table when the var is user-facing). `env-example.test.ts` checks source reads against `.env.example`, the env contract.
+- Adding, renaming, or removing a `CEZ_*` env var — or changing what its default does — MUST update `.env.example` in the same commit (and the README env table when the var is user-facing). `npm run lint` checks source reads against `.env.example`, the env contract.
 
 ## Changing a mechanism that already works
 
@@ -359,8 +359,8 @@ service writes `@open-mercato/cezar-contract/<module>`. The cockpit writes
 the api-client's own modules. Both roots re-export every contract module, delegation's schemas
 among them, so one value imported through a root loads them all, and an edit to any shared schema
 then reruns tests that never use it (hearsay-tools/cezarion#1237). Types still come from the
-roots, as `import type`. `packages/cezar/src/contract-import-boundaries.test.ts` refuses every
-other root import, and its failure names the subpath for each value.
+roots, as `import type`. The lint rule `cez/contract-root-import` refuses every other root
+import and names the subpath for each value.
 
 ## Repository layout
 
@@ -389,9 +389,8 @@ Rules that follow from that:
   with a test that runs its output through `sh` and checks that spaces, apostrophes, dollar
   signs, `$()` and backticks stay literal.
 - **Source scanning.** TypeScript 7 has no stable JavaScript compiler API. To pin a construction
-  site or reader, add an ast-grep rule (`.ai/ast-grep/README.md`); for text, reuse the regex scans
-  over `blank()` in `packages/cezar/src/test-wait-discipline.testkit.ts`, as
-  `contract-import-boundaries.test.ts` and `test-wait-discipline.test.ts` do.
+  site or reader, add a lint rule ([`docs/sdlc/lint.md`](docs/sdlc/lint.md)): an ast-grep rule,
+  or a `cez` oxlint rule over `blank()`ed source.
 
 ## Task routing
 
@@ -612,8 +611,8 @@ The scan cannot see a shrunk product budget, so review checks that one.
 2. For a change to wait, turn-end, failure or step-settlement paths in
    `packages/cezar/src/workflows/run.ts` or `workflows/run/`, verify the parity suites
    ([Runner regressions ship with shared coverage](#runner-regressions-ship-with-shared-coverage)).
-3. Before the first push of a `packages/**` source or test change, require both guards
-   to pass: use current Squeal results, or run `npm test -- packages/cezar/src/file-length.test.ts packages/cezar/src/ast-grep-rules.test.ts`.
+3. Before the first push of a `packages/**` source or test change, require `npm run lint` and
+   the file-length guard to pass: use current Squeal results, or run both, the guard as `npm test -- packages/cezar/src/file-length.test.ts`.
    If a pinned source shrinks, first run `FILE_LENGTH_UPDATE=1 npm test -- packages/cezar/src/file-length.test.ts`
    to lower its pin; review and commit the baseline diff.
 4. Run the root `npm run typecheck` once when declarations matter (*Typecheck* above).
