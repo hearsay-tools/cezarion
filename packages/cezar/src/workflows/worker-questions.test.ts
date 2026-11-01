@@ -713,6 +713,28 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     noHumanCard(f.w.id);
   });
 
+  // A reply the parent sent before its record became unreadable is retired before Cezar answers, so
+  // the worker takes one answer: neither bundled with Cezar's nor replayed after it.
+  it('retires an accepted parent reply before answering for a parent whose record cannot be read', async () => {
+    const f = await askedPair();
+    f.close();
+    const id = randomUUID(); const now = new Date().toISOString();
+    const attribution = { senderRunId: f.p.id, recipientRunId: f.w.id, kind: 'reply' as const, requestId: f.questionId };
+    const state = conversationOf(f.p.id)!;
+    store.commitConversation(f.p.id, { messages: [...state.messages, { id, ...attribution, text: 'mock:agent-echo Use the parser', createdAt: now, requestHash: 'c'.repeat(64), state: 'accepted' }],
+      outcomes: [...state.outcomes, { requestId: f.questionId, status: 'replied', observedAt: now, replyId: id }] },
+    { recipientRunId: f.w.id, input: { id, source: agentInputSchema.shape.source.enum.agent, parentRunId: f.p.id, text: 'mock:agent-echo Use the parser', createdAt: now, conversation: attribution } });
+    const events = eventCheckpoint();
+    const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string; status: string }>;
+    for (const run of disk) if (run.id === f.p.id) run.status = 'unknown-status';
+    await restart(false, disk, events);
+    await until(() => cezarAnswered(f.w.id).length >= 1);
+    expect(store.getRun(f.w.id)?.agentInputs?.some(input => input.id === id) ?? false).toBe(false);
+    expect(said(f.w.id, 'Use the parser')).toBe(false);
+    expect(eventsOf(f.w.id, 'human-input-delivered').filter(event => event.source === 'parent')).toEqual([]);
+    noHumanCard(f.w.id);
+  });
+
   it('refuses human input on a routed question whose parent record cannot be read', () => {
     const routing = runInternals(manager).workerQuestions;
     const ask = { seq: 3, requestId: 'r', questions: [], routedMessageId: randomUUID() };

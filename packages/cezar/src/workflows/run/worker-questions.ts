@@ -64,10 +64,7 @@ export class WorkerQuestions {
     if (!ask || ask.fallback) return;
     if (this.undeliveredAnswer(workerId, ask.seq)) { this.recordUndelivered(workerId, ask.seq, undefined); return; }
     // A routed question whose parent can no longer be read cannot be answered there: Cezar answers it.
-    if (ask.routedMessageId !== undefined) {
-      if (this.context.store.isUnreadable(worker.delegation.parentRunId)) this.answerUndelivered(workerId, ask.seq, 'the parent record cannot be read');
-      return;
-    }
+    if (ask.routedMessageId !== undefined) { this.answerForUnreadableParent(workerId, worker.delegation.parentRunId, ask.seq); return; }
     const request = askRequestOf(ask);
     if (!request) { this.answerUndelivered(workerId, ask.seq, 'the question is not a valid request'); return; }
     const parentId = worker.delegation.parentRunId;
@@ -93,6 +90,16 @@ export class WorkerQuestions {
     projectConversationEvents(this.context.store, this.context.store.getRun(parentId)!);
     this.context.store.appendEvent(workerId, { type: 'worker-question-routed', askSeq: ask.seq, messageId: message.id, parentRunId: parentId });
     this.host.deliverConversationInput(parentId);
+  }
+
+  /** A routed question whose parent record can no longer be read gets Cezar's answer. A reply the
+   *  parent sent before goes first, so the worker takes one answer; a failed write leaves this for
+   *  the next pass. */
+  private answerForUnreadableParent(workerId: string, parentId: string, askSeq: number): void {
+    if (!this.context.store.isUnreadable(parentId)) return;
+    try { for (const id of this.queuedAnswerIds(workerId)) this.host.retireUnreadParentQuestion(workerId, id); }
+    catch (error) { console.warn(`[cez] parent reply not retired: ${error instanceof Error ? error.message : String(error)}`); return; }
+    this.answerUndelivered(workerId, askSeq, 'the parent record cannot be read');
   }
 
   /** The ID of Cezar's answer to a worker question that could not reach its parent: one per ask, so
@@ -143,10 +150,13 @@ export class WorkerQuestions {
    *  replies to the routed question, and Cezar's answer when it was not delivered. */
   private queuedAnswerIds(workerId: string): string[] {
     const ask = this.context.store.transcriptFacts(workerId).pendingAsk;
-    const routed = this.routedAsk(workerId);
+    const routedId = ask?.routedMessageId;
     const cezar = ask ? this.undeliveredAnswerId(workerId, ask.seq) : undefined;
+    // The worker's own routing marker names the request, so a parent ledger that cannot be read
+    // hides no reply to it.
     return (this.context.store.getRun(workerId)?.agentInputs ?? []).filter(input => !input.consumedAt &&
-      ((routed && answersQuestion(routed.message, input)) || (input.id === cezar && input.purpose === 'undelivered-question'))).map(input => input.id);
+      ((routedId !== undefined && input.conversation?.kind === 'reply' && input.conversation.requestId === routedId) ||
+        (input.id === cezar && input.purpose === 'undelivered-question'))).map(input => input.id);
   }
 
   /** The transcript shows the question as not delivered once, after the answer that settles it is queued. */
