@@ -2,6 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { prTestProof, PR_TEST_JOBS } = require('./pr-test-proof.cjs');
+const { CI_PATH } = require('./queue-ci-proof.cjs');
 const { attestationName } = require('./pr-test-input.cjs');
 const { fixture: admissionFixture, SHA, BASE, HEAD } = require('./merge-queue.testkit.cjs');
 function fixture() {
@@ -10,7 +11,13 @@ function fixture() {
   s.jobs.push(...[...PR_TEST_JOBS, attestationName(BASE, HEAD)].map((name, i) => ({ id: 10 + i, name, status: 'completed', conclusion: 'success' })));
   s.hasNextPage = false; s.main = BASE;
   s.commits = { [SHA]: { sha: SHA, tree: { sha: HEAD }, parents: [{ sha: BASE }] }, [HEAD]: { sha: HEAD, tree: { sha: HEAD } } };
+  s.workflows = { [BASE]: { type: 'file', path: CI_PATH, sha: HEAD }, [SHA]: { type: 'file', path: CI_PATH, sha: HEAD } };
   const github = { request: async (route, args) => {
+    if (route.endsWith('/contents/{path}')) {
+      assert.equal(args.path, CI_PATH);
+      if (s.workflowError) throw new Error('private workflow API error');
+      return { data: structuredClone(s.workflows[args.ref]) };
+    }
     if (route.endsWith('/git/ref/{ref}') || route.endsWith('/git/commits/{commit_sha}')) {
       s.onRead?.(route, args);
       if (s.gitError) throw new Error('private git API error');
@@ -39,6 +46,13 @@ for (const [name, mutate] of Object.entries({
   'main advanced': s => { s.main = HEAD; },
   'PR base changed': s => { s.pr.base.sha = SHA; },
   'fork': s => { s.pr.head.repo.full_name = 'fork/r'; s.run.head_repository.full_name = 'fork/r'; },
+  'workflow blob differs': s => { s.workflows[SHA].sha = BASE; },
+  'missing base workflow': s => { delete s.workflows[BASE]; },
+  'missing queued workflow': s => { delete s.workflows[SHA]; },
+  'invalid workflow blob': s => { s.workflows[SHA].sha = 'unknown'; },
+  'workflow is directory': s => { s.workflows[SHA].type = 'dir'; },
+  'wrong workflow path': s => { s.workflows[BASE].path = 'other.yml'; },
+  'workflow API error': s => { s.workflowError = true; },
   'different tree': s => { s.commits[SHA].tree.sha = BASE; },
   'wrong queue parent': s => { s.commits[SHA].parents[0].sha = HEAD; },
   'missing source commit': s => { delete s.commits[HEAD]; },
@@ -102,5 +116,16 @@ test('completed required suites can be reused while optional publication is stil
   const h = fixture(); h.s.run.status = 'in_progress'; h.s.run.conclusion = null;
   assert.equal((await h.run()).verified, true);
   h.s.jobs[2].status = 'in_progress';
+  assert.equal((await h.run()).verified, false);
+});
+
+test('changed queue suite commands require full queue tests despite successful native attestation', async () => {
+  const fs = require('node:fs'), path = require('node:path'), crypto = require('node:crypto');
+  const original = fs.readFileSync(path.join(__dirname, '../workflows/ci.yml'), 'utf8');
+  const changed = original.replace('npm test -- --shard=', 'npm test -- --new-suite --shard=');
+  assert.notEqual(changed, original);
+  const blob = value => crypto.createHash('sha1').update(`blob ${Buffer.byteLength(value)}\0${value}`).digest('hex');
+  const h = fixture();
+  h.s.workflows[BASE].sha = blob(original); h.s.workflows[SHA].sha = blob(changed);
   assert.equal((await h.run()).verified, false);
 });

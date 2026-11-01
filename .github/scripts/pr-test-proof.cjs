@@ -1,6 +1,6 @@
 'use strict';
 const { mergeQueueAdmission, entryFrom, QUEUE_QUERY, nativeSuccess } = require('./merge-queue-admission.cjs');
-const { reader, readCiRuns, readCiJobs, successfulJobs, newest, validSha } = require('./queue-ci-proof.cjs');
+const { reader, readCiRuns, readCiJobs, successfulJobs, newest, validSha, CI_PATH } = require('./queue-ci-proof.cjs');
 const { attestationName } = require('./pr-test-input.cjs');
 const PR_TEST_JOBS = [
   ...[1, 2, 3, 4].map(n => `Vitest shard ${n}/4`),
@@ -23,6 +23,13 @@ async function sameTree(read, group, head) {
   const source = await commit(head);
   if (queued?.sha !== group.head_sha || source?.sha !== head || !validSha(source.tree?.sha)
     || queued.tree?.sha !== source.tree.sha || queued.parents?.[0]?.sha !== group.base_sha) throw new Error('Combined tree differs');
+}
+async function matchingWorkflow(read, group) {
+  const workflow = ref => read('GET /repos/{owner}/{repo}/contents/{path}', { path: CI_PATH, ref });
+  const base = await workflow(group.base_sha);
+  const queued = await workflow(group.head_sha);
+  const validFile = file => file?.type === 'file' && file.path === CI_PATH && validSha(file.sha);
+  if (!validFile(base) || !validFile(queued) || base.sha !== queued.sha) throw new Error('Test workflow changed');
 }
 async function unchangedRun(read, admission) {
   const run = await read('GET /repos/{owner}/{repo}/actions/runs/{run_id}', { run_id: admission.runId });
@@ -51,6 +58,7 @@ async function prTestProof({ github, owner, repo, eventName, group, now = Date.n
     const jobs = await readCiJobs(read, admission.runId);
     if (!successfulJobs(jobs, [...PR_TEST_JOBS, attestationName(group.base_sha, admission.head)])) return fallback('native-inputs-not-proven');
     await sameTree(read, group, admission.head);
+    await matchingWorkflow(read, group);
     await unchangedRun(read, admission);
     const final = await onlyEntry(read, owner, repo, group);
     if (final.id !== entry.id || final.pullRequest.number !== admission.pullNumber || final.pullRequest.headRefOid !== admission.head) return fallback('entry-changed');

@@ -27,7 +27,8 @@ checkout in use. Missing or moved merge input fails the PR input resolver.
 At the queue head, require exactly one queue entry (including hasNextPage=false),
 existing native CI/review admission, unchanged main/base/head, that attestation
 for the queue base and PR head, all eight successful native suite jobs, and equal
-PR-head/queue trees. Re-read membership, main, head and newest run/attempt before
+PR-head/queue trees. Require identical CI workflow blobs at the attested base and
+queue commit, so changed suite definitions always run fresh. Re-read membership, main, head and newest run/attempt before
 accepting. Bound metadata reads; errors use full queue tests. Matrix jobs remain
 real successful jobs, but their steps do only a short reuse receipt. This preserves
 the existing exact-queue-SHA proof and main fallback without accepting PR runs as
@@ -44,6 +45,7 @@ permits the early read only; it changes no default or final merge policy.
 | --- | --- |
 | One entry, unchanged base/head, full native suites and matching attestation/tree | Reuse both suites; run fresh commit-dependent checks |
 | Main changed, PR behind, different head or different queue tree | Full queue tests |
+| Queue CI workflow differs from attested base, or its file metadata is unknown | Full queue tests |
 | More than one queued entry, unknown pagination, wrong or removed entry | Full queue tests |
 | Old workflow without attestation, fork, partial/skip/failure/duplicate suite | Full queue tests |
 | Newest native run/attempt queued or failed, even with older success | Full queue tests; existing final review admission still applies |
@@ -83,7 +85,7 @@ or browser specs change.
 
 ## Local validation
 
-- Focused bundled node coverage: 244 tests passed; all 138 changed functions
+- Focused bundled node coverage: 252 tests passed; all 150 changed functions
   measured, maximum complexity and CRAP both 18.
 - `proof_base` above, command
   `node --test --test-name-pattern='verified queue suites run only a reuse receipt' .github/scripts/pr-test-reuse.workflow.test.cjs`
@@ -103,3 +105,10 @@ or browser specs change.
   against `5957571fb281ebe3c679b613595b5b6cd9a48df7` with synthetic refs unavailable
   and passes with the fix; evidence is retained in
   `.ai/qa/pr-queue-reuse/input-endpoint-proof.json`.
+
+- Second review follow-up requires identical valid `ci.yml` file blobs at the
+  attested base and immutable queue commit. A real suite-command change now
+  rejects otherwise complete successful proof. The regression fails at
+  `1e636aebcf4efeaa24ffbda0ffd4f6a6ec592523` and passes with the fix; evidence is
+  `.ai/qa/pr-queue-reuse/workflow-definition-proof.json`. Missing, invalid or
+  unreadable workflow evidence also selects full queue execution.

@@ -698,7 +698,9 @@ ancestry check keeps the immutable merge checkout without attestation.
 
 At the queue head, a read-only probe requires exactly one entry, unchanged main,
 current native CI/review admission, all eight successful suite jobs, an attestation
-for the queue base and PR head, and identical head/combined trees. It re-reads
+for the queue base and PR head, identical head/combined trees, and identical
+`ci.yml` blobs at the attested base and queue commit. A changed workflow always
+runs the queue suites, since native PR CI used the older definition. It re-reads
 membership, main, head and the newest source run/attempt. Missing, partial, old,
 failed, fork, multi-entry or changing evidence runs both full queue suites.
 The probe is bounded to 60 seconds, with individual requests capped at 10 seconds.
