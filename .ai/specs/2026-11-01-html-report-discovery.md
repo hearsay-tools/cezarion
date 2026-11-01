@@ -10,7 +10,7 @@ slice that both need.
 | Phase | Items | State on `main` |
 | --- | --- | --- |
 | 1 | hearsay-tools/cezarion#2400 reader | Merged: PR hearsay-tools/cezarion#2407 (`7fac3b06b`), PR hearsay-tools/cezarion#2414 (`a0440272`). The `needs-qa` gate is still open: real mobile-app QA has not run. |
-| 2 | S1 report metadata, then #2401 and #2402 in parallel | This spec |
+| 2 | S1 report metadata, then hearsay-tools/cezarion#2401 and hearsay-tools/cezarion#2402 in parallel | This spec |
 
 What phase 1 gives the later slices (read `packages/web/src/routes/task-git/report-reader.tsx`):
 
@@ -66,7 +66,7 @@ them first.
 
 Behavior on `main` after S1 alone: no visible change.
 
-## Slice #2401: report cards in conversations
+## Slice hearsay-tools/cezarion#2401: report cards in conversations
 
 Depends on S1 on `main`.
 
@@ -141,9 +141,9 @@ the same card after a task switch. Reader sweep: `Markdown` consumers,
 `thread-items` copy, `PreviewSplit` users, preview specs, and specs asserting
 the new copy (`Read report`, `HTML report`).
 
-## Slice #2402: project Reports shelf
+## Slice hearsay-tools/cezarion#2402: project Reports shelf
 
-Depends on S1 on `main`. Independent of #2401.
+Depends on S1 on `main`. Independent of hearsay-tools/cezarion#2401.
 
 ### Index
 
@@ -225,8 +225,8 @@ asserting nav labels.
 | Order | Item | Release condition for dependents |
 | --- | --- | --- |
 | 1 | S1 report metadata | Merged; the metadata route and `title` contract tests pass on `main` |
-| 2a | #2401 cards | Starts after S1 is accepted on `main` |
-| 2b | #2402 shelf | Starts after S1 is accepted on `main`; runs in parallel with 2a |
+| 2a | hearsay-tools/cezarion#2401 cards | Starts after S1 is accepted on `main` |
+| 2b | hearsay-tools/cezarion#2402 shelf | Starts after S1 is accepted on `main`; runs in parallel with 2a |
 
 Hot files for 2a and 2b: `packages/web/src/api/queries.ts`,
 `packages/web/src/api/client.ts`, `packages/web/src/routes.tsx` and
@@ -238,7 +238,7 @@ of 2a and 2b to finish opens its PR after the first merges.
 
 On integrated `main`:
 
-- S1, #2401 and #2402 each pass their acceptance criteria.
+- S1, hearsay-tools/cezarion#2401 and hearsay-tools/cezarion#2402 each pass their acceptance criteria.
 - One browser check opens the same published report from a card and from the
   shelf, and both reach the same reader component.
 - The isolation checks from phase 1 still pass.
@@ -247,8 +247,8 @@ On integrated `main`:
 
 ## Epic exit
 
-The phase 2 exit, plus the owner's real mobile-app QA for #2400, #2401 and
-#2402: open a report from a link, a card and the shelf, and return to the
+The phase 2 exit, plus the owner's real mobile-app QA for hearsay-tools/cezarion#2400, hearsay-tools/cezarion#2401 and
+hearsay-tools/cezarion#2402: open a report from a link, a card and the shelf, and return to the
 source view. The `needs-qa` gate on each issue records it.
 
 ## Owner decisions (2026-11-01, planner task `ee217e94`)
