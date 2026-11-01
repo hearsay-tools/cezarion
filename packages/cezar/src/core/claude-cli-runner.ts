@@ -38,6 +38,7 @@ import { readNdjson } from './ndjson.ts';
 import { InputSubmissions } from './input-submissions.ts';
 import {
   claudeFrameDidWork,
+  isParentAssistantFrame,
   normalizeIntentionalTeardownResult,
   selectedModelRefusal,
   zeroClaudeModelUsage,
@@ -180,6 +181,8 @@ export class ClaudeCliRunner implements AgentRunner {
     const unsettled = new Set<string>();
     const humanUnsettled = new Set<string>();
     let queuedTurnPending = false;
+    // hearsay-tools/cezarion#1512: after a result with no line queued, Claude may start a parent turn itself.
+    let nativeTurn: 'none' | 'possible' | 'running' = 'none';
     const submissions = new InputSubmissions();
     // Only live, observed success grants replay eligibility (hearsay-tools/cezarion#1351).
     let reportedModel: string | undefined;
@@ -227,10 +230,11 @@ export class ClaudeCliRunner implements AgentRunner {
         return true;
       }
       // A line written while a turn runs joins that turn instead of opening one (#505).
-      const opensTurn = unsettled.size === 0;
-      if (opensTurn) queuedTurnPending = false;
+      const opensTurn = unsettled.size === 0 && nativeTurn !== 'running';
       agentInputReady = false;
       if (opensTurn) {
+        queuedTurnPending = false;
+        nativeTurn = 'none';
         pendingMarkerAsk = false;
         turnTextStart = textChunks.length;
         attemptDidWork = false;
@@ -377,6 +381,10 @@ export class ClaudeCliRunner implements AgentRunner {
     const announceQueuedTurn = (msg: ClaudeStreamMessage): void => {
       if (queuedTurnPending && (msg.type === 'assistant' || msg.type === 'user' || msg.type === 'result')) {
         queuedTurnPending = false;
+        emitUi(claudeTurnStarted);
+      } else if (nativeTurn === 'possible' && isParentAssistantFrame(msg)) {
+        nativeTurn = 'running';
+        turnTextStart = textChunks.length;
         emitUi(claudeTurnStarted);
       }
     };
@@ -536,6 +544,7 @@ export class ClaudeCliRunner implements AgentRunner {
       // CLI never runs must not look like activity. Decided before the turn-end
       // callback, which may itself submit (and announce) the next prompt.
       queuedTurnPending = unsettled.size > 0;
+      nativeTurn = queuedTurnPending ? 'none' : 'possible';
       // Remaining inputs belong to the next turn. Clear the completed
       // turn's work before any queued frame (including system activity)
       // arrives; resetting at its first assistant frame would erase work.
