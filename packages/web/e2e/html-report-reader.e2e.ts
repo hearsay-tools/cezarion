@@ -7,6 +7,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest'
 import { makeRunRecord, RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
+import { pollFor } from './poll'
 // fixture-server starts: 1
 
 // hearsay-tools/cezarion#2400: a published HTML report opens in the sandboxed reader. A probe
@@ -146,6 +147,58 @@ it('leaves the reader in one step after anchor clicks, also without the Navigati
   browser.waitForFunction(`history.length === ${length + 1}`)
   browser.click('[data-slot="report-bar"] button[aria-label="Back"]')
   browser.waitForFunction(`location.pathname === ${JSON.stringify(threadPath())} && document.querySelector(${JSON.stringify(LINK)}) !== null`)
+})
+
+it('scrolls an anchor inside the report without requesting the cockpit or an auth page', async () => {
+  browser.goto(`${baseUrl}${readerPath()}?artifact=${publication.id}`)
+  browser.waitForFunction(`document.querySelector(${JSON.stringify(FRAME)}) !== null`)
+  const url = browser.url()
+  await browser.withCdp(async (request, subscribe) => {
+    const { targetInfos: pages } = await request('Target.getTargets')
+    const page = pages.find((target: { type: string; url: string }) => target.type === 'page' && target.url === url)
+    const { sessionId: pageSession } = await request('Target.attachToTarget', { targetId: page.targetId, flatten: true })
+    // Chrome can isolate the opaque frame in another process. In either case CDP reads
+    // its document without granting the report access to the cockpit's origin.
+    const { session, executionContextId } = await pollFor(async () => {
+      const { targetInfos } = await request('Target.getTargets')
+      const remote = targetInfos.find((target: { type: string; url: string }) => target.type === 'iframe' && target.url === 'about:srcdoc')
+      const session = remote ? (await request('Target.attachToTarget', { targetId: remote.targetId, flatten: true })).sessionId : pageSession
+      const { frameTree } = await request('Page.getFrameTree', {}, session)
+      const frame = remote ? frameTree.frame : frameTree.childFrames[0].frame
+      const { executionContextId } = await request('Page.createIsolatedWorld', { frameId: frame.id, worldName: 'report-anchor-probe' }, session)
+      const { result } = await request('Runtime.evaluate', { expression: "location.href === 'about:srcdoc' && !!document.getElementById('s2')", contextId: executionContextId, returnByValue: true }, session)
+      return result.value ? { session, executionContextId } : undefined
+    }, () => 'report document did not load')
+    const read = async () => {
+      const { result, exceptionDetails } = await request('Runtime.evaluate', {
+        expression: `({ url: location.href, scrollY, targetTop: document.getElementById('s2')?.getBoundingClientRect().top, height: innerHeight })`,
+        contextId: executionContextId, returnByValue: true,
+      }, session)
+      if (exceptionDetails) throw new Error(JSON.stringify(exceptionDetails))
+      return result.value as { url: string; scrollY: number; targetTop?: number; height: number }
+    }
+    const before = await read()
+    expect(before.url).toBe('about:srcdoc')
+    expect(before.scrollY).toBe(0)
+    const documents: string[] = []
+    const off = subscribe(event => {
+      if ([pageSession, session].includes(event.sessionId) && event.method === 'Network.requestWillBeSent' && event.params.type === 'Document') documents.push(event.params.request.url)
+    })
+    await request('Network.enable', {}, pageSession)
+    if (session !== pageSession) await request('Network.enable', {}, session)
+    try {
+      const box = JSON.parse(browser.evaluate(`JSON.stringify(document.querySelector(${JSON.stringify(FRAME)}).getBoundingClientRect())`) as string) as { left: number; top: number }
+      browser.tapAt(box.left + 60, box.top + 20)
+      const after = await pollFor(async () => {
+        const sample = await read()
+        return sample.url === 'about:srcdoc#s2' && sample.scrollY > 0 ? sample : undefined
+      }, () => `anchor left the report or did not scroll; document requests: ${JSON.stringify(documents)}`)
+      expect(after.targetTop).toBeGreaterThanOrEqual(0)
+      expect(after.targetTop).toBeLessThan(after.height)
+      expect(documents).toEqual([])
+      expect(hits()).toEqual([])
+    } finally { off() }
+  })
 })
 
 it.each([['with', false], ['without', true]])('goes to the conversation on Back after a cold flat link, %s the Navigation API', (_label, removeNavigation) => {
