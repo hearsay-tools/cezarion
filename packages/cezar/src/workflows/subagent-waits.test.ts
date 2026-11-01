@@ -123,6 +123,18 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     });
   }
 
+  it('a child that starts during the grace voids it, and its own end gets a full grace', async () => {
+    const { id, wait } = await parkedOnSubagents();
+    endChild(id, 'toolu_bg_01');
+    await new Promise(resolve => setTimeout(resolve, 30)); // bound: part of the 50 ms grace passes before the next child
+    startChild(id, 'toolu_bg_02');
+    endChild(id, 'toolu_bg_02');
+    const lastEnd = Date.now();
+    await until(() => settledOf(id, wait.id)?.resolvedAt !== undefined);
+    // A timer can fire late under load, never early: the wake waits a full grace after the last end.
+    expect(Date.parse(settledOf(id, wait.id)!.resolvedAt!) - lastEnd).toBeGreaterThanOrEqual(45);
+  });
+
   it('a duplicate child end changes nothing and wakes nothing', async () => {
     const { id, wait } = await parkedOnSubagents();
     const turns = turnEnds(id);

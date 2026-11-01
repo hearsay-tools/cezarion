@@ -85,10 +85,13 @@ export class SubagentWaits {
     if (!known && !child.background) return;
     if (known && (known.status !== 'running' || known.status === child.status)) return;
     state.backgroundChildren.set(child.id, { session: known ? known.session : state.session, status: child.status });
+    // A child that runs again voids the grace: the next time none runs, a full grace starts.
+    const live = liveSubagents(state);
+    if (live) this.clearGrace(runId);
     const wait = openSubagentWaitOf(this.context.store.getRun(runId));
     if (!wait) return;
     this.refreshWait(runId, state, wait);
-    if (!liveSubagents(state) && this.host.isParked(runId)) this.armGrace(runId);
+    if (!live && this.host.isParked(runId)) this.armGrace(runId);
   }
 
   /**
