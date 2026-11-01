@@ -42,7 +42,8 @@
     "typecheck:server": "npm run typecheck -w @wjarka/cezarion",
     "typecheck:web": "npm run typecheck -w @open-mercato/cezar-web",
     "typecheck:contract": "npm run typecheck -w @open-mercato/cezar-contract",
-    "check:clones": "node .github/scripts/check-clones.cjs"
+    "check:clones": "node .github/scripts/check-clones.cjs",
+    "lint": "node packages/cezar/src/lint/run.ts"
   },
   "devDependencies": {
     "@ast-grep/cli": "0.51.0",
@@ -54,6 +55,7 @@
     "ast-v8-to-istanbul": "1.0.7",
     "esbuild": "^0.28.1",
     "jscpd": "5.4.2",
+    "oxlint": "1.90.0",
     "tsx": "^4.19.0",
     "typescript": "^7.0.2",
     "vitest": "^4.1.10",

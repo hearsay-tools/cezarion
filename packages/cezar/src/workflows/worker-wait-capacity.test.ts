@@ -14,12 +14,12 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RunManager } from './run.ts';
 import { currentUsage } from '../core/process-usage.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
-import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
+import { HARNESS_ADAPTERS, answerAsParent } from '../core/harness-parity.testkit.ts';
 import { withHeldAck, withHeldResponse } from '../core/owned-input-delivery.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
 import {
-  bookkeeping, captureState, checkpoint, collect, controlledWire, executions, fixtureUpdateRun,
+  bookkeeping, grantSteer, captureState, eventCheckpoint, checkpoint, collect, controlledWire, executions, fixtureUpdateRun,
   manager, parent, queuedWake, register, reopenRuntime, restart, root, semaphore, setFailureState,
   store, terminal, track, until, useWorkerWaitFixture, waitOf, workerEntryOf, worker,
 } from './worker-wait.testkit.ts';
@@ -286,15 +286,22 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       const w = await worker(p.id, 'mock:cezar-ask');
       const target = role === 'root' ? p : w;
       if (role === 'worker') {
+        // A worker's question is its parent's to answer (hearsay-tools/cezarion#2410).
+        grantSteer(p.id);
         manager.enqueueOwnedRun(w.id);
-        await until(() => store.getRun(w.id)?.status === 'waiting');
+        await until(() => store.getRun(w.id)?.status === 'waiting' && store.transcriptFacts(w.id).pendingAsk?.routedMessageId !== undefined);
       }
       (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(target.id)!.session.end();
       await until(() => !manager.isActive(target.id));
-      // The explicit human continuation is the only authority to answer the ask.
-      expect(manager.continueRun(target.id, { text: 'human answer mock:hold' }).ok).toBe(true);
+      // Only an explicit answer may answer the ask: the human's Continue on the root, the parent's
+      // reply on the worker, which reopens it through the same human-origin continuation.
+      if (role === 'root') expect(manager.continueRun(target.id, { text: 'human answer mock:hold' }).ok).toBe(true);
+      else await answerAsParent(store, manager, p.id, w.id, 'human answer mock:hold');
+      await until(() => store.getRun(target.id)?.continuationMessage !== undefined);
       if (role === 'root') store.updateRun(w.id, { status: 'queued', finishedAt: undefined });
-      store.flush(); const checkpoint = readPersistedRuns(join(root, '.ai/cezar'));
+      // The transcripts belong to the crash checkpoint too: the cancel below closes a worker's
+      // question as it stops (hearsay-tools/cezarion#2410), which a crash never writes.
+      store.flush(); const checkpoint = readPersistedRuns(join(root, '.ai/cezar')); const events = eventCheckpoint();
       expect(store.getRun(target.id)?.continuationMessage?.origin).toBe('human');
       await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(target.id)?.sessionEverOpened === true);
       // The real wire received the accepted input but cannot reply until released.
@@ -302,7 +309,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       manager.cancel(target.id);
       await until(() => !manager.isActive(target.id));
       expect(store.readEvents(target.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
-      await restart(false, checkpoint);
+      await restart(false, checkpoint, events);
       expect(store.getRun(target.id)?.status).not.toBe('failed');
       expect(store.getRun(w.id)?.status).not.toBe('cancelled');
       expect(store.readEvents(target.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
@@ -310,8 +317,8 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       expect(store.readEvents(target.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);
       writeFileSync(replyGate, 'release');
       await until(() => store.readEvents(target.id).some(event => event.type === 'human-input-delivered'));
-      expect(store.readEvents(target.id).filter(event => event.type === 'human-input-delivered')).toHaveLength(1);
-      expect(store.readEvents(target.id).filter(event => event.type === 'user-message').at(-1)?.text).toContain('human answer');
+      expect(store.readEvents(target.id).filter(event => event.type === 'human-input-delivered')).toEqual([expect.objectContaining(role === 'root' ? {} : { source: 'parent' })]);
+      if (role === 'root') expect(store.readEvents(target.id).filter(event => event.type === 'user-message').at(-1)?.text).toContain('human answer');
     });
   }
 

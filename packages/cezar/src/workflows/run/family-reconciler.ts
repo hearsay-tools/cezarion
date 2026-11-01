@@ -25,7 +25,7 @@ interface FamilyReconcilerHost {
   disarmWait(id: string): void;
   resolveWait(id: string, waitId: string, result: undefined, observed: WorkerWaitEntry): void;
   retireSettledQuestions(id: string): void;
-  fallbackRoutedQuestions(id: string, reason: string): void;
+  closeRoutedQuestions(id: string): void;
   reconcileWorkerWaits(id?: string): void;
 }
 
@@ -189,24 +189,33 @@ export class FamilyReconciler {
         if (parent.status === 'cancelled' && parent.delegation.role === 'root' && parent.delegation.finishRequestedAt) {
           transitionVia('cancel', () => this.context.store.getRun(parent.id), () => this.context.store.commitRootFinishCancellation(parent.id));
         }
-        if (!['queued', 'running', 'waiting'].includes(parent.status)) {
-          if (!this.host.recoveringRun(parent)) {
-            // A settled parent waits on nobody: its worker waits are cancelled, which also lets a
-            // stored wait upgraded onto a finished root go (hearsay-tools/cezarion#1301).
-            const stale = (parent.waits ?? []).filter(wait => wait.kind === 'worker' && (wait.phase === 'open' || wait.phase === 'resolved')).map(wait => wait.id);
-            if (stale.length) { this.context.store.commitOutcome(parent.id, { kind: 'cancelled', waitIds: stale }); for (const id of stale) this.host.disarmWait(id); }
-            this.host.fallbackRoutedQuestions(parent.id, `parent-${parent.status}`);
-            for (const child of parent.delegation.role === 'root' && parent.status !== 'review' ? this.context.store.listWorkersOf(parent.id) : []) {
-              if (['queued', 'running', 'waiting'].includes(child.status)) this.host.cancel(child.id);
-            }
-          }
-          continue;
-        }
+        if (this.endStoppedParent(parent)) continue;
         if (executionBlockedByRootFinish(this.context.store, parent)) continue;
         const observed = (now: string) => this.workerObservations(parent, now);
         this.reconcileWorkerEntries(parent, observed);
       }
     } finally { this.reconcilingWorkers = false; this.reconcilingFamily = undefined; }
+  }
+
+  /**
+   * A parent that can no longer answer ends what its workers wait on it for
+   * (hearsay-tools/cezarion#2410). A parent being stopped closes their questions now, however long its
+   * stop takes. A settled one also cancels its worker waits, which lets a stored wait upgraded onto a
+   * finished root go (hearsay-tools/cezarion#1301), and its live workers. A recovering parent is left
+   * to recovery. True when the parent is settled, so the pass skips the rest.
+   */
+  private endStoppedParent(parent: RunRecord): boolean {
+    const recovering = this.host.recoveringRun(parent);
+    if (parent.stopping && parent.delegation?.role === 'root' && !recovering) this.host.closeRoutedQuestions(parent.id);
+    if (['queued', 'running', 'waiting'].includes(parent.status)) return false;
+    if (recovering) return true;
+    const stale = (parent.waits ?? []).filter(wait => wait.kind === 'worker' && (wait.phase === 'open' || wait.phase === 'resolved')).map(wait => wait.id);
+    if (stale.length) { this.context.store.commitOutcome(parent.id, { kind: 'cancelled', waitIds: stale }); for (const id of stale) this.host.disarmWait(id); }
+    this.host.closeRoutedQuestions(parent.id);
+    for (const child of parent.delegation?.role === 'root' ? this.context.store.listWorkersOf(parent.id) : []) {
+      if (['queued', 'running', 'waiting'].includes(child.status)) this.host.cancel(child.id);
+    }
+    return true;
   }
 
   /** The settled outcomes a run's worker waits can observe now: each owned worker whose execution

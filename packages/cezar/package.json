@@ -54,6 +54,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@babel/parser": "^8.0.8",
+    "@babel/types": "^8.0.8",
     "@open-mercato/cezar-api-client": "^0.17.0",
     "@open-mercato/cezar-contract": "^0.17.0",
     "@types/node": "^24.19.1",

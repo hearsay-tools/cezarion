@@ -1,5 +1,4 @@
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
-import type { ConversationMessage } from '@open-mercato/cezar-contract/conversations';
 import type { Wait } from '@open-mercato/cezar-contract/waits';
 import type { ContentBlock } from '../../core/agent-runner.ts';
 import type { AgentSession } from '../../core/claude-cli-runner.ts';
@@ -13,7 +12,6 @@ import { chargesBudget, hasPrWait, isMonitoringTimer, openWaitsFooter, resolvedW
 import { transition, type RunExitId } from '../run-states.ts';
 import { DelegationPolicyError } from '../../delegation/policy.ts';
 import { enqueueAgentInput, agentInputBatch } from '../../delegation/input.ts';
-import { answersQuestion } from '../../delegation/questions.ts';
 import { acknowledgedBatch } from '../outcome-batches.ts';
 import { analyseAcknowledgedInput, type AcknowledgedInput } from '../input-acknowledgement.ts';
 import { pendingConversationBatch, reservesAutomaticWake, formatAgentInput } from './input-batch.ts';
@@ -30,11 +28,11 @@ import type { WorkerExecutions } from './worker-executions.ts';
 import type { RunSkills } from './run-skills.ts';
 import type { AttachmentWriter } from './attachment-writer.ts';
 import type { HumanWaits } from './human-waits.ts';
-import type { WorkerQuestions } from './worker-questions.ts';
+import type { QuestionAnswerSource, WorkerQuestions } from './worker-questions.ts';
 import type { WaitRegistry } from './wait-registry.ts';
 
 type HumanAnswerBudget = { spent: number };
-type RoutedAnswer = { routed: { askSeq: number; message: ConversationMessage }; reply: AgentInput; text: string; state: ActiveRun | undefined; fallback: boolean };
+type RoutedAnswer = { askSeq: number; source: QuestionAnswerSource; reply: AgentInput; text: string; state: ActiveRun | undefined; fallback: boolean };
 export const HELD_HUMAN_INPUT_RECHECK_MS = 250;
 interface InputDeliveryHost {
   active: ReadonlyMap<string, ActiveRun>;
@@ -138,16 +136,16 @@ export class InputDelivery {
   }
 
   private pendingRoutedAnswer(runId: string) {
-    const routed = this.host.workerQuestions.routedAsk(runId);
+    const answer = this.host.workerQuestions.pendingAnswer(runId);
     const run = this.context.store.getRun(runId);
-    const reply = routed && run?.agentInputs?.find(input => !input.deliveredAt && answersQuestion(routed.message, input));
     // A stopped worker is the human's to continue; a parent answer never revives it.
-    if (!routed || !reply || run?.delegation?.role !== 'worker' || !['queued', 'running', 'waiting'].includes(run.status)) return undefined;
+    if (!answer || run?.delegation?.role !== 'worker' || !['queued', 'running', 'waiting'].includes(run.status)) return undefined;
     // Verbatim: a native answer seam parses `Header: label` lines, exactly as a human's.
+    const reply = answer.input;
     const text = reply.text;
     const state = this.host.active.get(runId);
-    const fallback = this.host.workerQuestions.isWorkerFallbackAsk(runId, routed.askSeq);
-    return { routed, reply, text, state, fallback };
+    const fallback = this.host.workerQuestions.isWorkerFallbackAsk(runId, answer.askSeq);
+    return { askSeq: answer.askSeq, source: answer.source, reply, text, state, fallback };
   }
 
   private reopenRoutedAnswer(runId: string, answer: RoutedAnswer): void {
@@ -161,7 +159,7 @@ export class InputDelivery {
   }
 
   private deliverRoutedAnswer(runId: string, state: ActiveRun, answer: RoutedAnswer, admitted: boolean): void {
-    const { routed, reply, text, fallback } = answer;
+    const { askSeq, source, reply, text, fallback } = answer;
     if (!state.session?.open || state.cancelled || state.openingAgentInputId === reply.id) return;
     // Already waiting for admission: only the admission itself may deliver it.
     if (!admitted && (this.host.line.hasWake(runId) || this.host.line.isAdmitted(runId))) return;
@@ -174,7 +172,7 @@ export class InputDelivery {
     }
     const bundle = state.atTurnBoundary === state.session ? pendingConversationBatch(this.context.store.getRun(runId), state, input => formatAgentInput(input, id => this.context.store.getRun(id)), reply.id) : undefined;
     if (!state.session.sendMessage([{ type: 'text', text }, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : [])])) return;
-    this.context.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: routed.askSeq, source: 'parent' });
+    this.context.store.appendEvent(runId, { type: 'human-input-delivered', askSeq, source });
     inputReceipts.commitRoutedAnswer(this.context, runId, state, [reply.id, ...(bundle?.inputs.map(input => input.id) ?? [])], fallback, this.maxAutoContinues);
     // Spend the answer's admission now so later messages can steer before its turn ends.
     if (this.host.line.retireAdmission(runId)) state.waitWakeTurn = state.session;
@@ -543,13 +541,15 @@ export class InputDelivery {
     const run = this.context.store.getRun(runId);
     if (!canProceedWithRun(run, () => this.host.workerExecutionStopped(runId), run => this.host.executionBlockedByRootFinish(run))) return false;
 
-    if (userAuthored && this.host.workerQuestions.routedAsk(runId)) {
+    // Cezar's fallback question on a worker never holds what the plain park it replaced let
+    // through: an automatic message supersedes it, as a parent's input does (hearsay-tools/cezarion#1301),
+    // and so does a human message, as a Continue does (hearsay-tools/cezarion#2410). A question the
+    // worker asked itself belongs to its parent, and a human message is refused.
+    this.host.workerQuestions.supersedeWorkerFallback(runId);
+    if (userAuthored && this.host.workerQuestions.answeredElsewhere(runId)) {
       this.context.store.appendEvent(runId, { type: 'note', tone: 'warning', message: this.routedQuestionRefusal });
       return false;
     }
-    // Cezar's fallback question on a worker never holds what the plain park it replaced let
-    // through: an automatic message supersedes it, as a parent's input does (hearsay-tools/cezarion#1301).
-    if (!userAuthored) this.host.workerQuestions.supersedeWorkerFallback(runId);
     const prepared = this.prepareMessageContent(runId, state, content, userAuthored);
     const { blocks, expanded, deliverable } = prepared;
     const delivered = userAuthored ? state.session.sendMessage(deliverable) : this.host.submitAgentInput(runId, state, deliverable);

@@ -475,6 +475,17 @@ describe('AskCard for a worker question routed to its parent (#505)', () => {
     expect(screen.getByText('Closed when the task finished')).toBeTruthy()
     expect(screen.queryByText('Answered')).toBeNull()
   })
+
+  // hearsay-tools/cezarion#2410: a worker question closes with its parent or itself, or is not delivered.
+  it.each([
+    ['parent-stopped', 'Closed when the parent stopped'],
+    ['worker-stopped', 'Closed when the worker stopped'],
+    ['undeliverable', 'Closed: not delivered'],
+  ] as const)('says why a worker question closed (%s)', (closed, label) => {
+    renderAsk({ ...singleAsk, resolved: true, closed })
+    expect(screen.getByText(label)).toBeTruthy()
+    expect(screen.queryByText('Answered')).toBeNull()
+  })
 })
 
 describe('AskCard voice proposals', () => {

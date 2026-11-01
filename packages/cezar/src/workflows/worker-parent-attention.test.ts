@@ -9,7 +9,7 @@ import { attentionFields } from '../task-cli/projections.ts';
 import { toolCall } from './waits-parity.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
-import { delegatingParent, fixtureUpdateRun, manager, parent, queuedWake, register, store, root, terminal, worker, until, semaphore, useWorkerWaitFixture, waitOf, workerEntryOf } from './worker-wait.testkit.ts';
+import { delegatingParent, deliveredBesideWorkerMessages, fixtureUpdateRun, manager, parent, queuedWake, register, store, root, terminal, worker, until, semaphore, useWorkerWaitFixture, waitOf, workerEntryOf } from './worker-wait.testkit.ts';
 import { hasPendingAsk } from '../runs/run-store.testkit.ts';
 
 const ASK_PROMPT = toolCall('cezar_ask', { context: 'A choice is needed.', questions: [{ header: 'Choice', question: 'Which module?', options: [{ label: 'Parser' }, { label: 'Runner' }] }] });
@@ -128,7 +128,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
     const run = store.getRun(id)!;
     expect(waitOf(run)?.phase).toBe('wake-pending');
     expect(hasPendingAsk(store, id)).toBe(false);
-    expect(run.agentInputs?.some(input => input.deliveredAt)).not.toBe(true);
+    expect(deliveredBesideWorkerMessages(run)).toBe(false);
     expect(deriveAttention(run)).toMatchObject({ bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' });
     expect(attentionFields(run)).toEqual({ attention: 'none', attentionLabel: 'waiting for capacity' });
   };

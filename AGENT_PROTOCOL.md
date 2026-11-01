@@ -396,9 +396,13 @@ worker's question (native or `cezar_ask`) is routed to its parent as a conversat
 request carrying the question (`worker-question-routed`), and the parent's `reply`
 to it answers the ask through the same seam a human answer uses, recording
 `human-input-delivered` with `source: 'parent'`. Progress and follow-ups never
-answer it. When the parent cannot answer (not live, no `steer` grant, at capacity,
-or later settled), the worker records `worker-question-fallback` and the human
-answers as before; until then human input on the worker is refused. Durable queue
+answer it, and human input on the worker is refused. The question has one addressee
+(hearsay-tools/cezarion#2410): when the parent is not live or later settles, or the
+worker stops, it closes (`human-ask-closed` with `parent-stopped` or
+`worker-stopped`); when a live parent cannot take it (no `steer` grant, at
+capacity), Cezar answers it with the reason through the same seam
+(`source: 'cezar'`). No human answers it. Cezar's own "Worker idle" question is
+superseded by any new input, a human message included. Durable queue
 insertion is atomic with acceptance, while provider acceptance and the local ACK
 checkpoint retain the documented crash ambiguity below.
 
@@ -2478,7 +2482,7 @@ integration. Automatic completion wakes for inspection/collection without silent
 accepting review. A done blocked by live or uncollected workers is refused once as an automatic
 turn; a repeated one parks on Cezar's deadline-less worker wait on the live workers, or, with only
 uncollected results, on Cezar's human wait (hearsay-tools/cezarion#1301). Human
-Finish refuses unmet readiness. Continue a reviewing parent before its worker.
+Finish refuses unmet readiness. Continue a settled parent before its worker (hearsay-tools/cezarion#2410).
 
 Review and deliberately integrate desired worker commits with Git before cleanup.
 Collect/integrate, destroy owned resources, explicitly delete child histories, then

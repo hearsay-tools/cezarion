@@ -227,6 +227,19 @@ async function startParent(task: string, runner: RunnerId, permissions: WorkerOp
   });
   checkpoint('parent-session-open'); return run;
 }
+/** The root took input that is not its workers' own messages. An idle worker tells its parent why it
+ *  parked (hearsay-tools/cezarion#1327, hearsay-tools/cezarion#2410); a wake's own input is what a
+ *  capacity check reads. */
+export function deliveredBesideWorkerMessages(run: RunRecord | undefined): boolean {
+  return !!run?.agentInputs?.some(input => input.deliveredAt && !(input.conversation && input.conversation.senderRunId !== run.id && input.conversation.recipientRunId === run.id));
+}
+/** The root may message its workers, as provisioned roots do, so their questions reach it
+ *  (hearsay-tools/cezarion#2410). */
+export function grantSteer(rootId: string): void {
+  const delegation = store.getRun(rootId)?.delegation;
+  if (delegation?.role !== 'root') throw Error('missing root');
+  if (!delegation.permissions.includes('steer')) store.commitDelegation([{ id: rootId, delegation: { ...delegation, permissions: [...delegation.permissions, 'steer'] } }]);
+}
 /** Low-level root builder. It does not enable `CEZ_DELEGATION`: use `delegatingParent`
  *  for service calls. Recovery and inactive-parent tests may keep explicit service setup. */
 export function parent(task = 'mock:hold', runner: RunnerId = 'claude') {

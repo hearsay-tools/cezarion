@@ -68,6 +68,7 @@ import { allowedToolsForStep, plannedWorkflow, skillTaskSteps, type WorkflowDef 
 import { workerWorkflowHash, type WorkerAccountBinding, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import {
   withOwnedInputRun,
+  withoutTaskScenario,
   withSkillParentRun,
   promptFor,
   driveRun,
@@ -1587,7 +1588,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
       }
       for (const ask of HARNESS_ADAPTERS[backend].askResumeCases) {
         it(`${backend} R26 completes after ${ask.kind} without another needs-you park`, async () => {
-          await withOwnedInputRun(backend, ask.scenario, async ({ store, manager, runId }) => {
+          await withOwnedInputRun(backend, ask.scenario, async ({ store, manager, runId, answer }) => {
             manager.enqueueOwnedRun(runId);
             await waitFor(() => store.getRun(runId)?.status === 'waiting');
             expect(hasPendingAsk(store, runId)).toBe(true);
@@ -1603,9 +1604,9 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             };
             store.on('run', recordStatus);
             try {
-              expect(manager.sendMessage(runId, [{ type: 'text', text: ask.answer }])).toBe(true);
-              expect(store.getRun(runId)?.status).toBe('running');
-              // The synchronous delivery checkpoint precedes the unpark.
+              // The parent answers (hearsay-tools/cezarion#2410): the parked worker takes it as a wake.
+              await answer(ask.answer);
+              await waitFor(() => store.getRun(runId)?.status !== 'waiting');
               statuses.length = 0;
               await waitFor(() => !manager.isActive(runId) || statuses.includes('waiting'));
               expect(statuses).not.toContain('waiting');
@@ -1617,8 +1618,9 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             }
             const events = store.readEvents(runId);
             expect(events.filter(event => event.type === 'ask.requested')).toHaveLength(1);
-            expect(events.filter(event => event.type === 'user-message').map(event => event.text)).toEqual([ask.answer]);
-            expect(events.filter(event => event.type === 'human-input-delivered')).toHaveLength(1);
+            // The parent's answer is its conversation reply, never a human message.
+            expect(events.filter(event => event.type === 'user-message')).toEqual([]);
+            expect(events.filter(event => event.type === 'human-input-delivered')).toEqual([expect.objectContaining({ source: 'parent' })]);
           });
         }, 45_000);
       }
@@ -1627,8 +1629,8 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
 
   describeRunners('harness parity — owned input run tier', () => {
     for (const backend of runners) {
-      it(`${backend} R6 queues before/during asks and drains only after a human answer`, async () => {
-        await withOwnedInputRun(backend, 'ask', async ({ store, manager, repoRoot, runId, parentRunId }) => {
+      it(`${backend} R6 queues before/during asks and drains only after the parent's answer`, async () => {
+        await withOwnedInputRun(backend, 'ask', async ({ store, manager, repoRoot, runId, parentRunId, answer }) => {
           // A real registry entry must NOT expand agent-originated slash text.
           const skills = join(repoRoot, '.ai/cezar/skills');
           mkdirSync(skills, { recursive: true });
@@ -1667,17 +1669,19 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           expect(store.readEvents(runId).filter(e => e.type === 'human-input-delivered')).toEqual([]);
           const attributed = store.readEvents(runId).filter(e => e.type === 'agent-input').map(e => agentInputEventSchema.parse(e).input);
           expect(attributed).toEqual([first, second]);
-          expect(manager.sendMessage(runId, [{ type: 'text', text: 'Vitest' }])).toBe(true);
+          const reply = await answer('Vitest');
           await waitFor(() => store.getRun(runId)?.agentInputs?.every(input => !!input.deliveredAt) === true);
           await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes('second steering')));
           const texts = store.readEvents(runId).filter(e => e.type === 'text').map(e => e.text).join('\n');
           expect(texts).toContain(first.text);
           expect(texts).not.toContain('EXPANDED HUMAN SKILL');
-          expect(store.readEvents(runId).filter(e => e.type === 'user-message').map(e => e.text)).toEqual(['Vitest']);
+          // The parent's reply answers it through the answer seam; no human message is shown.
+          expect(store.readEvents(runId).filter(e => e.type === 'user-message')).toEqual([]);
+          expect(store.getRun(runId)?.agentInputs?.map(input => input.id)).toEqual([first.id, second.id, reply]);
           // The answer retired this ask; the answered turn's end may raise Cezar's fallback question
           // on the idle worker (hearsay-tools/cezarion#1301), which is a new one.
           expect(store.transcriptFacts(runId).pendingAsk?.seq).not.toBe(askSeq);
-          expect(store.readEvents(runId).filter(e => e.type === 'human-input-delivered')).toHaveLength(1);
+          expect(store.readEvents(runId).filter(e => e.type === 'human-input-delivered')).toEqual([expect.objectContaining({ askSeq, source: 'parent' })]);
           await waitFor(() => store.getRun(runId)?.status === 'waiting');
           const afterAsk = agentInput(parentRunId, 'mock:agent-echo after ask');
           expect(manager.steerWorker(runId, afterAsk)).toBe('queued');
@@ -1685,7 +1689,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         });
       }, 60_000);
 
-      it(`${backend} R7 restart retains pending asks and input; only explicit-answer Continue drains it`, async () => {
+      it(`${backend} R7 restart retains pending asks and input; only the parent's answer drains it`, async () => {
         await withOwnedInputRun(backend, 'ask', async fixture => {
           const { runId, parentRunId } = fixture;
           fixture.manager.enqueueOwnedRun(runId);
@@ -1704,16 +1708,20 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           const { store, manager } = recovered!;
           expect(store.getRun(runId)?.status).toBe('waiting');
           expect(store.getRun(runId)?.agentInputs).toEqual([input]);
+          // Neither a bare Continue nor a human answer drains it: the question is the parent's.
           expect(manager.continueRun(runId).ok).toBe(false);
+          expect(manager.continueRun(runId, { text: 'Vitest' }).ok).toBe(false);
           expect(store.readEvents(runId).filter(e => e.type === 'user-message')).toEqual([]);
-          expect(manager.continueRun(runId, { text: 'Vitest' }).ok).toBe(true);
+          withoutTaskScenario(store, runId);
+          await fixture.answer('Vitest');
           await waitFor(() => store.getRun(runId)?.agentInputs?.[0]?.deliveredAt !== undefined);
           await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes('parent steering')));
-          expect(store.readEvents(runId).filter(e => e.type === 'user-message').map(e => e.text)).toEqual(['Vitest']);
+          expect(store.readEvents(runId).filter(e => e.type === 'user-message')).toEqual([]);
+          expect(store.readEvents(runId).filter(e => e.type === 'human-input-delivered')).toEqual([expect.objectContaining({ source: 'parent' })]);
         });
       }, 60_000);
 
-      it(`${backend} refused human delivery retains the ask live and after restart`, async () => {
+      it(`${backend} refused answer delivery retains the ask live and after restart`, async () => {
         await withOwnedInputRun(backend, 'ask', async fixture => {
           const { manager, store, runId, parentRunId } = fixture;
           manager.enqueueOwnedRun(runId);
@@ -1723,26 +1731,29 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             active: Map<string, { pendingHumanAsk: boolean; session: import('./agent-runner.ts').AgentSession }>;
             hasPendingHumanAsk(id: string): boolean;
           };
+          await waitFor(() => store.transcriptFacts(runId).pendingAsk?.routedMessageId !== undefined && store.getRun(runId)?.status === 'waiting');
           const state = internal.active.get(runId)!;
-          const refuse = vi.spyOn(state.session, 'sendMessage').mockReturnValueOnce(false);
-          expect(manager.sendMessage(runId, [{ type: 'text', text: 'refused answer' }])).toBe(false);
+          // The session refuses the parent's answer once: it stays queued, and the ask stays pending.
+          const refuse = vi.spyOn(state.session, 'sendMessage').mockReturnValue(false);
+          const reply = await fixture.answer('refused answer');
+          await waitFor(() => refuse.mock.calls.length > 0 || !!store.getRun(runId)?.agentInputs?.find(entry => entry.id === reply)?.deliveredAt);
           refuse.mockRestore();
+          expect(store.getRun(runId)?.agentInputs?.find(entry => entry.id === reply)?.deliveredAt).toBeUndefined();
           expect(state.pendingHumanAsk).toBe(true);
           expect(store.readEvents(runId).filter(e => e.type === 'human-input-delivered')).toEqual([]);
           expect(internal.hasPendingHumanAsk(runId)).toBe(true);
           const input = agentInput(parentRunId);
           expect(manager.steerWorker(runId, input)).toBe('queued');
+          withoutTaskScenario(store, runId);
           const recovered = await fixture.restart();
-          expect(recovered.store.getRun(runId)?.status).toBe('waiting');
-          expect(recovered.store.getRun(runId)?.agentInputs).toEqual([input]);
+          // Recovery delivers the parent's accepted answer; no human answers it.
           expect(recovered.manager.continueRun(runId).ok).toBe(false);
-          expect(recovered.store.readEvents(runId).filter(e => e.type === 'user-message').map(e => e.text))
-            .toEqual(['refused answer']);
-          expect(recovered.manager.continueRun(runId, { text: 'Vitest' }).ok).toBe(true);
-          await waitFor(() => !!recovered.store.getRun(runId)?.agentInputs?.[0]?.deliveredAt);
+          expect(recovered.store.readEvents(runId).filter(e => e.type === 'user-message')).toEqual([]);
+          await waitFor(() => !!recovered.store.getRun(runId)?.agentInputs?.find(entry => entry.id === input.id)?.deliveredAt);
           // #505: input can land mid-turn, so delivery no longer implies the answering turn
           // ended; the answer's durable checkpoint is still that turn's end.
           await waitFor(() => recovered.store.readEvents(runId).some(e => e.type === 'human-input-delivered'));
+          expect(recovered.store.readEvents(runId).filter(e => e.type === 'human-input-delivered')).toEqual([expect.objectContaining({ askSeq, source: 'parent' })]);
           // The answer retired this ask; the answered turn's end may raise Cezar's fallback question
           // on the idle worker (hearsay-tools/cezarion#1301), which is a new one.
           expect(recovered.store.transcriptFacts(runId).pendingAsk?.seq).not.toBe(askSeq);
@@ -1880,11 +1891,15 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
       it(`${backend} R11 post-send checkpoint failure interrupts and reports failure without dropping input`, async () => {
         await withOwnedInputRun(backend, 'baseline', async ({ store, manager, repoRoot, runId, parentRunId }) => {
           manager.enqueueOwnedRun(runId);
-          await waitFor(() => store.getRun(runId)?.status === 'waiting');
+          // The idle worker parks on Cezar's fallback question, routed to its parent
+          // (hearsay-tools/cezarion#1301, hearsay-tools/cezarion#2410).
+          await waitFor(() => store.getRun(runId)?.status === 'waiting' && store.transcriptFacts(runId).pendingAsk?.routedMessageId !== undefined);
           store.flush();
           let unblock: (() => void) | undefined;
-          const failAfterEnqueue = ({ event }: { event: { type: string } }) => {
-            if (event.type === 'agent-input') unblock ??= blockRunWrites(join(repoRoot, '.ai/cezar'));
+          // The input supersedes that question with a write to the parent's conversation first; the
+          // failure this cell injects is the input's own delivery checkpoint, after it.
+          const failAfterEnqueue = ({ event }: { event: { type: string; reason?: unknown } }) => {
+            if (event.type === 'human-ask-closed' && event.reason === 'superseded') unblock ??= blockRunWrites(join(repoRoot, '.ai/cezar'));
           };
           store.on('event', failAfterEnqueue);
           const input = agentInput(parentRunId, 'mock:hold');
@@ -1906,7 +1921,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
       }, 60_000);
 
       it(`${backend} R9 continuation asks keep input queued through delayed native reply acknowledgement`, async () => {
-        await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId }) => {
+        await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId, answer }) => {
           manager.enqueueOwnedRun(runId);
           await waitFor(() => store.getRun(runId)?.status === 'waiting');
           manager.finish(runId);
@@ -1918,11 +1933,12 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           await waitFor(() => store.readEvents(runId).filter(e => e.type === 'ask.requested').length > asked);
           const input = agentInput(parentRunId);
           expect(manager.steerWorker(runId, input)).toBe('queued');
-          expect(manager.sendMessage(runId, [{ type: 'text', text: 'Vitest' }])).toBe(true);
+          // The continuation's ask is the worker's own: its parent answers it (hearsay-tools/cezarion#2410).
+          await answer('Vitest');
           await waitFor(() => store.getRun(runId)?.agentInputs?.[0]?.deliveredAt !== undefined);
           await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes(input.text)));
           expect(store.readEvents(runId).filter(e => e.type === 'user-message').map(e => e.text))
-            .toEqual([promptFor(backend, 'ask-reply-late'), 'Vitest']);
+            .toEqual([promptFor(backend, 'ask-reply-late')]);
         });
       }, 60_000);
 
@@ -1958,12 +1974,16 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         await withOwnedInputRun('opencode', 'ask', async fixture => {
           const { runId, parentRunId } = fixture;
           fixture.manager.enqueueOwnedRun(runId);
-          await waitFor(() => fixture.store.readEvents(runId).some(e => e.type === 'ask.requested'));
+          await waitFor(() => fixture.store.transcriptFacts(runId).pendingAsk?.routedMessageId !== undefined);
           const input = agentInput(parentRunId);
           expect(fixture.manager.steerWorker(runId, input)).toBe('queued');
           const { store, manager } = await fixture.restart();
           const before = store.readEvents(runId).at(-1)!.seq;
-          expect(manager.continueRun(runId, { text: outcome === 'rejected' ? 'mock:reject-agent-post' : 'mock:hold' }).ok).toBe(true);
+          withoutTaskScenario(store, runId);
+          // The parent's answer reopens the closed session as its opening input (hearsay-tools/cezarion#2410).
+          const reply = await fixture.answer(outcome === 'rejected' ? 'mock:reject-agent-post' : 'mock:hold');
+          // The reopened session waits for capacity, so it may not have started yet.
+          await waitFor(() => manager.isActive(runId) || store.getRun(runId)?.status === 'failed');
           if (outcome !== 'rejected') {
             await waitFor(() => store.readEvents(runId).some(e => e.seq > before && e.type === 'turn.started'));
             if (outcome === 'finished') expect(manager.finish(runId)).toBe(true);
@@ -1972,28 +1992,31 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           await waitFor(() => !manager.isActive(runId));
           const events = store.readEvents(runId).filter(e => e.seq > before);
           if (outcome === 'rejected') {
-            expect(store.getRun(runId)?.status).toBe('failed');
+            // A parent's rejected answer stays queued for another try, so the worker waits.
+            expect(store.getRun(runId)?.status).toBe('waiting');
             expect(events.filter(e => e.type === 'error')).toHaveLength(1);
             expect(events.findIndex(e => e.type === 'error')).toBeLessThan(events.findIndex(e => e.type === 'turn-end'));
           }
           expect(events.filter(e => e.type === 'human-input-delivered')).toEqual([]);
           // #505: the queued message steers into the answering turn right behind the answer,
           // so it may carry a delivery receipt; the input itself is unchanged and never lost.
-          const withoutReceipts = (inputs: AgentInput[] | undefined) => inputs?.map(({ deliveredAt: _d, consumedAt: _c, awaitingRead: _a, ...rest }) => rest);
+          const withoutReceipts = (inputs: AgentInput[] | undefined) => inputs?.filter(entry => entry.id !== reply).map(({ deliveredAt: _d, consumedAt: _c, awaitingRead: _a, ...rest }) => rest);
           expect(withoutReceipts(store.getRun(runId)?.agentInputs)).toEqual([input]);
           // hearsay-tools/cezarion#1260: Finish closes the question it never saw answered, without a
-          // delivery; a rejected answer or a Stop leaves it for an explicit answer.
+          // delivery. A Stop closes it with the worker (hearsay-tools/cezarion#2410). A rejected answer
+          // leaves it for another answer.
           const askSeq = store.readEvents(runId).find(e => e.type === 'ask.requested')!.seq;
-          expect(events.filter(e => e.type === 'human-ask-closed')).toEqual(outcome === 'finished' ? [expect.objectContaining({ askSeq, reason: 'finish' })] : []);
+          const closed = { finished: 'finish', cancelled: 'worker-stopped', rejected: undefined }[outcome];
+          expect(events.filter(e => e.type === 'human-ask-closed')).toEqual(closed ? [expect.objectContaining({ askSeq, reason: closed })] : []);
           const recovered = await fixture.restart();
-          expect((recovered.manager as unknown as { hasPendingHumanAsk(id: string): boolean }).hasPendingHumanAsk(runId)).toBe(outcome !== 'finished');
-          if (outcome !== 'finished') expect(recovered.manager.continueRun(runId).ok).toBe(false);
+          expect((recovered.manager as unknown as { hasPendingHumanAsk(id: string): boolean }).hasPendingHumanAsk(runId)).toBe(outcome === 'rejected');
+          if (outcome === 'rejected') expect(recovered.manager.continueRun(runId).ok).toBe(false);
           expect(withoutReceipts(recovered.store.getRun(runId)?.agentInputs)).toEqual([input]);
         });
       }, 60_000);
 
       it.each(['fresh', 'continuation'] as const)('%s late reply acknowledgement plus DONE retries accepted input', async mode => {
-        await withOwnedInputRun('opencode', 'baseline', async ({ store, manager, runId, parentRunId }) => {
+        await withOwnedInputRun('opencode', 'baseline', async ({ store, manager, runId, parentRunId, answer }) => {
           const prompt = 'mock:ask-reply-late-cezar-done';
           if (mode === 'fresh') store.updateRun(runId, { task: prompt });
           manager.enqueueOwnedRun(runId);
@@ -2009,7 +2032,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           await waitFor(() => store.readEvents(runId).filter(e => e.type === 'ask.requested').length > asked);
           const input = agentInput(parentRunId);
           expect(manager.steerWorker(runId, input)).toBe('queued');
-          expect(manager.sendMessage(runId, [{ type: 'text', text: 'Vitest' }])).toBe(true);
+          await answer('Vitest');
           await waitFor(() => !!store.getRun(runId)?.agentInputs?.[0]?.deliveredAt);
           await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes(input.text)));
           expect(manager.isActive(runId)).toBe(true);

@@ -41,6 +41,8 @@ import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { workerWorkflowHash, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { stepKind, type WorkflowDef } from '../workflows/types.ts';
 import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
+import { historyPaths } from '../runs/history-file.ts';
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 import { WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 
@@ -1261,12 +1263,50 @@ function trackTurnBookkeeping(manager: RunManager): () => Promise<void> {
 }
 
 /** An owned worker, using real disk/Git state and the native wire mocks for `RUNNER_IDS`. */
+/**
+ * A parent's answer reopens a closed worker session through a continuation that waits for capacity,
+ * and that continuation carries the current task (`hydrateQueuedContinuation`). A native mock picks
+ * its scenario from anywhere in the prompt, so a task such as `mock:ask` would replace the answer's
+ * own scenario. Call this before such an answer: the task keeps its meaning and loses the marker.
+ */
+export function withoutTaskScenario(store: RunStore, runId: string): void {
+  store.updateRun(runId, { task: 'worker task' });
+}
+
+/**
+ * The owning parent answers the worker's pending question (hearsay-tools/cezarion#2410): the reply is
+ * committed with its outcome as `service.send` does, and goes to the worker through the answer seam a
+ * human answer used before. A worker's question has one addressee, so no human answers it.
+ */
+export async function answerAsParent(store: RunStore, manager: RunManager, parentRunId: string, workerRunId: string, text: string): Promise<string> {
+  await waitFor(() => store.transcriptFacts(workerRunId).pendingAsk?.routedMessageId !== undefined);
+  const requestId = store.transcriptFacts(workerRunId).pendingAsk!.routedMessageId!;
+  const root = store.getRun(parentRunId)?.delegation;
+  if (root?.role !== 'root' || !root.conversation) throw Error('the parent has no conversation');
+  const now = new Date().toISOString();
+  const id = randomUUID();
+  const attribution = { senderRunId: parentRunId, recipientRunId: workerRunId, kind: 'reply' as const, requestId };
+  const state = root.conversation;
+  store.commitConversation(parentRunId, {
+    messages: [...state.messages, { id, ...attribution, text, createdAt: now, requestHash: 'b'.repeat(64), state: 'accepted' }],
+    outcomes: [...state.outcomes, { requestId, status: 'replied', observedAt: now, replyId: id }],
+  }, { recipientRunId: workerRunId, input: { id, source: agentInputSchema.shape.source.enum.agent, parentRunId, text, createdAt: now, conversation: attribution } });
+  manager.deliverConversationInput(workerRunId);
+  return id;
+}
+
+function readOptional(path: string): string | undefined {
+  try { return readFileSync(path, 'utf8'); } catch { return undefined; }
+}
+
 export async function withOwnedInputRun(
   backend: RunnerId,
   scenario: ScenarioName,
   body: (fixture: {
     repoRoot: string; runId: string; parentRunId: string;
     store: RunStore; manager: RunManager;
+    /** The parent answers the worker's pending question; returns the reply's ID. */
+    answer: (text: string) => Promise<string>;
     restart: (beforeOpen?: (dataDir: string) => void) => Promise<{ store: RunStore; manager: RunManager }>;
     /** Transfer fixture teardown to a reopened context without cancelling the old cleanup. */
     adoptContext: (context: { store: RunStore; manager: RunManager }) => Promise<void>;
@@ -1324,7 +1364,9 @@ export async function withOwnedInputRun(
     // A live root with its own unanswered question survives recovery without
     // launching a parent process. A terminal root correctly cancels its workers.
     store.updateRun(parent.id, { status: 'waiting' });
-    store.commitDelegation([{ id: parent.id, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } }]);
+    // It may message its workers, as provisioned roots do, so it answers their questions
+    // (hearsay-tools/cezarion#2410).
+    store.commitDelegation([{ id: parent.id, delegation: { role: 'root', permissions: ['spawn', 'steer'], receipts: [] } }]);
     store.appendEvent(parent.id, { type: 'ask.requested', requestId: randomUUID(), questions: [{
       header: 'Parent', question: 'Which parent task should follow?',
       options: [{ label: 'First task' }, { label: 'Second task' }],
@@ -1350,7 +1392,13 @@ export async function withOwnedInputRun(
     };
     const restart = async (beforeOpen?: (dataDir: string) => void) => {
       store!.flush();
-      const index = readPersistedRuns(join(repoRoot, '.ai/cezar'));
+      const dataDir = join(repoRoot, '.ai/cezar');
+      const index = readPersistedRuns(dataDir);
+      // The transcripts belong to the checkpoint too: the cancel that stops the processes below
+      // writes its own events (a worker's question closes when it stops,
+      // hearsay-tools/cezarion#2410), which a real crash never wrote. Their facts are a cache
+      // written behind them, so recovery rebuilds those from the restored transcripts.
+      const histories = [parent.id, runId!].map(id => [historyPaths(dataDir, id).plain, readOptional(historyPaths(dataDir, id).plain)] as const);
       // Stop only test-owned processes, then restore the precise pre-crash disk
       // checkpoint. No fake manager/session: recovery opens a new real store.
       manager!.cancel(runId!);
@@ -1358,7 +1406,12 @@ export async function withOwnedInputRun(
       await drainBookkeeping();
       manager!.dispose();
       store!.close();
-      seedRuns(join(repoRoot, '.ai/cezar'), index);
+      seedRuns(dataDir, index);
+      for (const [path, content] of histories) {
+        if (content === undefined) rmSync(path, { force: true });
+        else writeFileSync(path, content);
+      }
+      for (const id of [parent.id, runId!]) rmSync(historyPaths(dataDir, id).facts, { force: true });
       beforeOpen?.(join(repoRoot, '.ai/cezar'));
       store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
       manager = new RunManager(store, repoRoot, options);
@@ -1366,7 +1419,8 @@ export async function withOwnedInputRun(
       await manager.recover();
       return { store, manager };
     };
-    await body({ repoRoot, runId, parentRunId: parent.id, store, manager, restart, adoptContext });
+    const answer = (text: string) => answerAsParent(store!, manager!, parent.id, runId!, text);
+    await body({ repoRoot, runId, parentRunId: parent.id, store, manager, answer, restart, adoptContext });
   } finally {
     try {
       if (runId && manager) {

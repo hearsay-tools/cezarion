@@ -10,11 +10,12 @@ import type { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { inputDeliveryOf, RUNNER_IDS, type RunnerId } from './agent-runner.ts';
 import { createRunner } from './runner-factory.ts';
-import { ANSWER_DELIVERY_CRITERIA, HARNESS_ADAPTERS, exemptionFor, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
+import { ANSWER_DELIVERY_CRITERIA, HARNESS_ADAPTERS, exemptionFor, promptFor, waitFor, withOwnedInputRun, withoutTaskScenario } from './harness-parity.testkit.ts';
 
-// hearsay-tools/cezarion#935: a Continue executing a human answer keeps that answer's
-// checkpoint until turn-end for crash recovery. The checkpoint must not hold worker
-// conversation input arriving through the ordinary send path while the answer runs.
+// hearsay-tools/cezarion#935: a Continue executing an answer keeps that answer's checkpoint until
+// turn-end for crash recovery. The checkpoint must not hold worker conversation input arriving
+// through the ordinary send path while the answer runs. The answer is the parent's reply, which
+// reopens the closed session: a worker's question has one addressee (hearsay-tools/cezarion#2410).
 beforeEach(() => vi.stubEnv('CEZ_DELEGATION', '1'));
 afterEach(() => vi.unstubAllEnvs());
 
@@ -22,25 +23,25 @@ interface AnswerFixture {
   store: RunStore; manager: RunManager; runId: string; askSeq: number;
   /** The parent's ordinary `worker send`, with no inbox read or manual flush. */
   send: (text: string, requestId?: string) => Promise<string>;
+  /** The parent's reply to the worker's pending question, which reopens its closed session. */
+  answer: (text: string) => Promise<string>;
   /** Close every session again; `store` and `manager` are the reopened ones afterwards. */
   restart: () => Promise<void>;
 }
 
-/** A worker whose genuine human question survives a closed session, ready for Continue. */
+/** A worker whose own question, routed to its parent, survives a closed session, ready for the
+ *  parent's answer. */
 async function withAnsweredWorker(backend: RunnerId, env: Record<string, string>, body: (fixture: AnswerFixture) => Promise<void>): Promise<void> {
   await withOwnedInputRun(backend, 'ask', async fixture => {
     const { repoRoot, runId, parentRunId } = fixture;
     fixture.manager.enqueueOwnedRun(runId);
-    // Without the parent's steer grant, the question falls back to the human (#505).
-    await waitFor(() => fixture.store.readEvents(runId).some(event => event.type === 'worker-question-fallback'));
+    await waitFor(() => fixture.store.readEvents(runId).some(event => event.type === 'worker-question-routed'));
     await waitFor(() => fixture.store.getRun(runId)?.status === 'waiting');
     const askSeq = fixture.store.readEvents(runId).find(event => event.type === 'ask.requested')!.seq;
     // Native question turns stay open, so a restart is the session close every wire shares.
     let { store, manager } = await fixture.restart();
     expect(manager.isActive(runId)).toBe(false);
-    const parent = store.getRun(parentRunId)!;
-    if (parent.delegation?.role !== 'root') throw Error('fixture');
-    store.commitDelegation([{ id: parentRunId, delegation: { ...parent.delegation, permissions: ['spawn', 'steer'] } }]);
+    withoutTaskScenario(store, runId);
     const credentials = new CredentialRegistry();
     const caller = credentials.authenticate(credentials.issue('project', parentRunId, randomUUID()))!;
     const service = new DelegationService();
@@ -51,7 +52,9 @@ async function withAnsweredWorker(backend: RunnerId, env: Record<string, string>
         ...(requestId ? { kind: 'reply' as const, requestId } : { kind: 'progress' as const }) });
       return id;
     };
-    const answerFixture: AnswerFixture = { store, manager, runId, askSeq, send, restart: async () => {
+    const questionId = String(store.readEvents(runId).find(event => event.type === 'worker-question-routed' && event.askSeq === askSeq)!.messageId);
+    const answer = (text: string) => send(text, questionId);
+    const answerFixture: AnswerFixture = { store, manager, runId, askSeq, send, answer, restart: async () => {
       ({ store, manager } = await fixture.restart());
       Object.assign(answerFixture, { store, manager });
       service.registerProject({ id: 'project', root: repoRoot, store, manager });
@@ -82,9 +85,9 @@ for (const backend of RUNNER_IDS) {
   } else {
     it(`${backend} ${steer.id} ${steer.name}`, async () => {
       // Long enough that a held message cannot reach the tool before it returns.
-      await withAnsweredWorker(backend, { CEZ_MOCK_STEER_MS: '1500' }, async ({ store, manager, runId, askSeq, send }) => {
+      await withAnsweredWorker(backend, { CEZ_MOCK_STEER_MS: '1500' }, async ({ store, runId, askSeq, send, answer }) => {
         const start = lastSeq(store, runId);
-        expect(manager.continueRun(runId, { text: `Vitest ${promptFor(backend, steer.scenario)}` }).ok).toBe(true);
+        await answer(`Vitest ${promptFor(backend, steer.scenario)}`);
         await waitFor(() => firstAfter(store, runId, 'tool-call', start) !== undefined);
         const id = await send('mock:agent-echo review progress during the answer');
         await waitFor(() => !!input(store, runId, id)?.consumedAt);
@@ -95,7 +98,7 @@ for (const backend of RUNNER_IDS) {
         expect(projectionSeq(store, runId, id, 'consumed')).toBeLessThan(turnEnd);
         expect(checkpoints(store, runId, askSeq)[0]!.seq).toBeGreaterThan(turnEnd);
         await waitFor(() => store.getRun(runId)?.status === 'waiting');
-        expect(checkpoints(store, runId, askSeq)).toHaveLength(1);
+        expect(checkpoints(store, runId, askSeq)).toEqual([expect.objectContaining({ source: 'parent' })]);
       });
     }, 60_000);
   }
@@ -103,10 +106,10 @@ for (const backend of RUNNER_IDS) {
   it(`${backend} ${declared.id} ${declared.name}`, async () => {
     const releaseFile = join(tmpdir(), `cez-935-release-${randomUUID()}`);
     try {
-      await withAnsweredWorker(backend, { CEZ_MOCK_RELEASE_FILE: releaseFile }, async ({ store, manager, runId, askSeq, send }) => {
+      await withAnsweredWorker(backend, { CEZ_MOCK_RELEASE_FILE: releaseFile }, async ({ store, runId, askSeq, send, answer }) => {
         const mode = inputDeliveryOf(createRunner(backend)).mode;
         const start = lastSeq(store, runId);
-        expect(manager.continueRun(runId, { text: `Vitest ${promptFor(backend, declared.scenario)}` }).ok).toBe(true);
+        await answer(`Vitest ${promptFor(backend, declared.scenario)}`);
         await waitFor(() => firstAfter(store, runId, 'turn.started', start) !== undefined);
         const id = await send('mock:agent-echo review progress during the held answer');
         if (mode === 'steer') {
@@ -163,8 +166,7 @@ for (const backend of RUNNER_IDS) {
       // The answer raises a newer question; later input is held or delivered beside it the same way.
       // A cezar_ask question's run reopened through the scheduler to take the message; close that
       // session again so every wire answers in a fresh one. A mock that asked again there routed
-      // its new question to the parent (the steer grant), which answers it, as a human answers the
-      // one left with them.
+      // its new question to the parent, which answers it.
       if (manager.isActive(runId)) {
         await answerFixture.restart();
         ({ store, manager } = answerFixture);
@@ -173,13 +175,13 @@ for (const backend of RUNNER_IDS) {
       const answered = pending.seq;
       const start = lastSeq(store, runId);
       const answer = `Vitest ${promptFor(backend, held.scenario)}`;
-      if (pending.routedMessageId !== undefined && !pending.fallback) await send(answer, pending.routedMessageId);
-      else expect(manager.isActive(runId) ? manager.sendMessage(runId, [{ type: 'text', text: answer }]) : manager.continueRun(runId, { text: answer }).ok).toBe(true);
+      expect(pending.routedMessageId).toBeDefined();
+      await send(answer, pending.routedMessageId);
       await waitFor(() => firstAfter(store, runId, 'ask.requested', start) !== undefined);
       const newer = firstAfter(store, runId, 'ask.requested', start)!;
       await waitFor(() => store.getRun(runId)?.status === 'waiting');
       await waitFor(() => checkpoints(store, runId, answered).length === 1);
-      expect(checkpoints(store, runId, answered)[0]?.source).toBe(pending.routedMessageId !== undefined && !pending.fallback ? 'parent' : undefined);
+      expect(checkpoints(store, runId, answered)[0]?.source).toBe('parent');
       const later = await send('mock:agent-echo progress after the newer question');
       await expectBesideOrHeld(later, newer);
 

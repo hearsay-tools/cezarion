@@ -81,7 +81,7 @@ describe('managed open-turn inactivity — #470', () => {
           ? workflowDefSchema.parse({ name: 'inactivity', source: 'file', steps: [
             { id: 'work', prompt: '{{task}}' }, { id: 'check', command: 'true' },
           ] }) : undefined;
-        await withOwnedInputRun(backend, row.scenario, async ({ store, manager, runId, parentRunId }) => {
+        await withOwnedInputRun(backend, row.scenario, async ({ store, manager, runId, parentRunId, answer }) => {
           manager.enqueueOwnedRun(runId);
           if (row.id === 'N3' || row.id === 'N4' || row.id === 'N6' || row.id === 'N8') {
             await waitFor(() => store.getRun(runId)?.status === 'waiting');
@@ -91,7 +91,8 @@ describe('managed open-turn inactivity — #470', () => {
             if (row.id === 'N6') {
               expect(store.readEvents(runId).some(e => e.type === 'ask.requested')).toBe(true);
               const turns = store.readEvents(runId).filter(e => e.type === 'turn.completed').length;
-              expect(manager.sendMessage(runId, [{ type: 'text', text: 'Vitest' }])).toBe(true);
+              // The worker's own question is its parent's to answer (hearsay-tools/cezarion#2410).
+              await answer('Vitest');
               await waitFor(() => store.readEvents(runId).filter(e => e.type === 'turn.completed').length > turns && store.getRun(runId)?.status === 'waiting');
               manager.finish(runId);
               await waitFor(() => !manager.isActive(runId));

@@ -292,8 +292,10 @@ export const agentInputSchema = z.object({
   inboxClaim: inboxClaimSchema.optional(),
   /** A completion refusal Cezar queued for a closed session (hearsay-tools/cezarion#1301): its
    * delivery is the nudge's turn, bounded by the nudge's reply bound, and a session that closes
-   * before it is a failed delivery. Absent on every other input and on records written before. */
-  purpose: z.literal('completion-refusal').optional(),
+   * before it is a failed delivery. `undelivered-question` is Cezar's answer to a worker question
+   * that could not reach its live parent (hearsay-tools/cezarion#2410). Absent on every other input
+   * and on records written before. */
+  purpose: z.enum(['completion-refusal', 'undelivered-question']).optional(),
   /** A peer message's own hash and request deadline (hearsay-tools/cezarion#1990): the sender's
    *  ledger can be deleted before the recipient reads it. Absent on family and lifecycle inputs. */
   requestHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),

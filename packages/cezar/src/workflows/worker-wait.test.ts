@@ -177,27 +177,34 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     } finally { child?.kill('SIGKILL'); runner.mockRestore(); }
   });
 
-  it('readiness review preserves workers live and through recovery', async () => {
+  // hearsay-tools/cezarion#2410: the completion gate never lets a parent reach review with a live
+  // worker, so the status is forced here. A reviewing parent ends a live worker as every settled
+  // parent does, live and through recovery: no exception keeps it running beside a parent at rest.
+  it('readiness review cancels a live worker, live and through recovery', async () => {
     const p = await parent(); const w = await worker(p.id);
     await until(() => store.getRun(p.id)?.status === RUN_STATUS.waiting);
+    store.flush(); const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string; status: string }>;
+    for (const run of disk) if (run.id === p.id) run.status = RUN_STATUS.review;
     store.updateRun(p.id, { status: RUN_STATUS.review }); manager.reconcileWorkerWaits();
-    expect(store.getRun(w.id)?.status).toBe('queued');
-    // A reviewing parent holds no session, but this one is live: the disk keeps review, and the
-    // old manager stops the session from the park it really has (hearsay-tools/cezarion#1804).
-    store.flush(); const disk = readPersistedRuns(join(root, '.ai/cezar'));
+    expect(store.getRun(w.id)?.status).toBe('cancelled');
+    // A reviewing parent holds no session, but this one is live: the old manager stops the session
+    // from the park it really has (hearsay-tools/cezarion#1804).
     store.updateRun(p.id, { status: RUN_STATUS.waiting });
     await restart(false, disk);
-    expect(store.getRun(w.id)?.status).not.toBe('cancelled');
+    await until(() => store.getRun(w.id)?.status === 'cancelled');
   });
 
-  it('readiness worker Continue requires continuing a reviewing parent first', async () => {
+  // hearsay-tools/cezarion#2410: every settled parent gates its worker's Continue, naming itself.
+  it.each(['review', 'done', 'failed'] as const)('readiness worker Continue requires continuing a %s parent first', async status => {
     const p = await parent(); const w = await worker(p.id);
     await until(() => store.getRun(p.id)?.status === RUN_STATUS.waiting);
     store.updateRun(w.id, { status: RUN_STATUS.done });
     store.updateStep(w.id, 'task', { status: STEP_STATUS.done, sessionId: randomUUID(), backend: 'claude' });
     const generation = store.commitWorkerExecutionStart(w.id); store.commitWorkerExecutionComplete(w.id, generation);
-    store.updateRun(p.id, { status: RUN_STATUS.review });
-    expect(manager.continueRun(w.id, { text: 'more' })).toMatchObject({ ok: false, error: expect.stringMatching(/parent.*review|parent.*continu/i) });
+    store.updateRun(p.id, { status: RUN_STATUS[status] });
+    const before = JSON.stringify(store.getRun(w.id));
+    expect(manager.continueRun(w.id, { text: 'more' })).toEqual({ ok: false, error: `Parent task ${p.id} is ${status}; continue the parent before its worker.` });
+    expect(JSON.stringify(store.getRun(w.id))).toBe(before);
     // Its session is still live, which a reviewing parent never has: back to its park before
     // teardown stops it (hearsay-tools/cezarion#1804).
     store.updateRun(p.id, { status: RUN_STATUS.waiting });

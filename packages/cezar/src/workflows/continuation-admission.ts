@@ -42,6 +42,11 @@ export function parentMessageRefusal(run: RunRecord, defer: boolean, conversatio
   }
 }
 
+/** The refusal of a Continue on a worker whose parent is settled (hearsay-tools/cezarion#2410). */
+export function settledParentRefusalError(parentId: string, status: RunRecord['status']): string | undefined {
+  return ['done', 'review', 'failed', 'cancelled'].includes(status) ? `Parent task ${parentId} is ${status}; continue the parent before its worker.` : undefined;
+}
+
 export function stoppingRefusal(run: RunRecord): ContinuationRefusal | undefined {
   if (run.stopping) return { ok: false, error: 'run is still stopping' };
 }
@@ -165,15 +170,14 @@ export interface AdmissionReads {
   reclaiming(): boolean;
   run(): RunRecord | undefined;
   historyDeletionPending(): boolean;
-  parentInReview(parentId: string): boolean;
-  answersFallback(): boolean;
+  parentStatus(parentId: string): RunRecord['status'] | undefined;
   identity(run: RunRecord, session: string | undefined): WorkerStepIdentity | undefined;
   beforeFinalStep(run: RunRecord): boolean;
   waitingStepIndex(run: RunRecord): number;
   pendingFallback(): boolean;
   pendingAsk(): boolean;
   rootFinishing(run: RunRecord): boolean;
-  routedAsk(): unknown;
+  answeredElsewhere(): boolean;
   ciStepIndex(run: RunRecord): number;
   untouched(run: RunRecord): boolean;
   sessionId(step: StepState | undefined): string | undefined;
@@ -229,18 +233,22 @@ export class ContinuationChecks {
 
   private ownershipRefusal(run: RunRecord): ContinuationRefusal | undefined {
     return parentMessageRefusal(run, this.defer, this.conversation) || stoppingRefusal(run) ||
-      this.historyDeletionRefusal() || this.reviewingParentRefusal(run);
+      this.historyDeletionRefusal() || this.settledParentRefusal(run);
   }
 
   private historyDeletionRefusal(): ContinuationRefusal | undefined {
     if (this.reads.historyDeletionPending()) return { ok: false, error: 'Parent history deletion is pending; retry deletion' };
   }
 
-  private reviewingParentRefusal(run: RunRecord): ContinuationRefusal | undefined {
-    if (run.delegation?.role === 'worker' && this.reads.parentInReview(run.delegation.parentRunId) &&
-      !this.opts.answerInputId && !this.reads.answersFallback()) {
-      return { ok: false, error: 'Continue the reviewing parent before continuing its worker' };
-    }
+  /** A worker resumes only beside a live parent (hearsay-tools/cezarion#2410): every Continue, the
+   *  human's and Cezar's own, is refused while its parent is settled, before anything is written.
+   *  Restart recovery resumes a parent before its workers, so a recovering family is not refused. */
+  private settledParentRefusal(run: RunRecord): ContinuationRefusal | undefined {
+    if (run.delegation?.role !== 'worker') return;
+    const parentId = run.delegation.parentRunId;
+    const status = this.reads.parentStatus(parentId);
+    const error = status && settledParentRefusalError(parentId, status);
+    if (error) return { ok: false, error };
   }
 
   private checkIdentity(run: RunRecord) {
@@ -284,7 +292,7 @@ export class ContinuationChecks {
   }
 
   private routedAskRefusal(pending: boolean): ContinuationRefusal | undefined {
-    if (pending && !this.defer && !this.opts.answerInputId && this.reads.routedAsk()) {
+    if (pending && !this.defer && !this.opts.answerInputId && this.reads.answeredElsewhere()) {
       return { ok: false, error: this.routedQuestionRefusal };
     }
   }

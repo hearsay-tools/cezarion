@@ -1008,6 +1008,11 @@ it('refuses a second reply to an answered question (#505)', async () => {});
 
 ### Task B6: Parent completion attention and fallback triggers
 
+> **Superseded in part by hearsay-tools/cezarion#2410.** The human fallback below is gone: a
+> settled parent closes its workers' questions (`human-ask-closed`, `parent-stopped`) and cancels
+> its live workers, and a live parent that cannot take a question gets Cezar's answer instead. See
+> *One addressee* in `.ai/specs/2026-09-23-immediate-worker-delivery.md`.
+
 **Files:**
 - Modify: `packages/cezar/src/workflows/run.ts` — `parentCompletionAttention` includes unanswered routed questions whose parent is this run; fallback hook `fallbackRoutedQuestions(parentId, reason)` called where a parent settles `done|review|failed|cancelled`, on stop/destroy, when history deletion starts, and once in `recover()` for every routed question whose parent can no longer receive
 - Test: `packages/cezar/src/workflows/worker-questions.test.ts`

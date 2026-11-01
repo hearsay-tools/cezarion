@@ -1,5 +1,5 @@
 {
-  "$comment": "Matches the rule found when it landed (hearsay-tools/cezarion#1802), keyed by file and the first line of the match so a moved line does not churn it. This list only shrinks: fix a match, then run AST_GREP_RULES_UPDATE=1 npm test -- packages/cezar/src/ast-grep-rules.test.ts. Rules: .ai/ast-grep/README.md. The one site is core/managed-session.ts: it pauses the session on the event type and reads no payload field. It stays a baseline entry rather than a file-wide ignore, so a payload read added to that file still fails.",
+  "$comment": "Matches the rule found when it landed (hearsay-tools/cezarion#1802), keyed by file and the first line of the match so a moved line does not churn it. This list only shrinks: fix a match, then run AST_GREP_RULES_UPDATE=1 npm run lint. Rules: .ai/ast-grep/README.md. The one site is core/managed-session.ts: it pauses the session on the event type and reads no payload field. It stays a baseline entry rather than a file-wide ignore, so a payload read added to that file still fails.",
   "sites": [
     {
       "file": "packages/cezar/src/core/managed-session.ts",
