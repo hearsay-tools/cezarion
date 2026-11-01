@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, type SyntheticEvent } from 'react'
 import { prepareReport, REPORT_SANDBOX, type BlockedContent } from '@/lib/html-report'
 import { cn } from '@/lib/utils'
 
@@ -20,8 +20,20 @@ export function blockedSummary(blocked: BlockedContent): string | null {
  * script runs, no request leaves the frame, and it cannot reach the cockpit's APIs, cookies,
  * storage, DOM or top-level navigation. Only a clicked web or mail link opens a new tab.
  */
-export function HtmlReportFrame({ html, title, className }: { html: string; title: string; className?: string | undefined }) {
+export function HtmlReportFrame({ html, title, fragment, className }: {
+  html: string
+  title: string
+  /** A route `#fragment` the report opens at, e.g. from a `report.html#results` link. */
+  fragment?: string | undefined
+  className?: string | undefined
+}) {
   const { srcdoc, blocked } = useMemo(() => prepareReport(html), [html])
+  // The frame cannot run script, so the cockpit moves it: a fragment navigation of its own
+  // `about:srcdoc` document scrolls it in place, with no reload and, by `replace`, no history entry.
+  // The target URL is always `about:srcdoc`, so this cannot send the frame anywhere else.
+  const openAtFragment = (event: SyntheticEvent<HTMLIFrameElement>) => {
+    if (fragment && /^#\S+$/.test(fragment)) event.currentTarget.contentWindow?.location.replace(`about:srcdoc${fragment}`)
+  }
   const summary = blockedSummary(blocked)
   return (
     <div data-slot="html-report" className={cn('flex min-h-0 flex-col', className)}>
@@ -36,6 +48,7 @@ export function HtmlReportFrame({ html, title, className }: { html: string; titl
         sandbox={REPORT_SANDBOX}
         srcDoc={srcdoc}
         referrerPolicy="no-referrer"
+        onLoad={openAtFragment}
         className="block min-h-0 w-full flex-1 border-0 bg-report-canvas"
       />
     </div>

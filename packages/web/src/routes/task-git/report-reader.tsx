@@ -75,7 +75,7 @@ export function TaskReportRoute() {
     <div data-route="task-report" className="fixed inset-0 z-50 flex flex-col bg-background pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] md:static md:z-auto md:h-full md:p-0">
       <ReportBar runId={id} file={file} name={name} source={source} onSource={() => setSource(value => !value)} />
       <div data-slot="report-body" className="flex min-h-0 flex-1 flex-col overflow-auto">
-        <ReportBody conflict={conflict} selected={selected} result={result} source={source} name={name} />
+        <ReportBody conflict={conflict} selected={selected} result={result} source={source} name={name} fragment={location.hash} />
       </div>
     </div>
   )
@@ -101,7 +101,8 @@ function ReportBar({ runId, file, name, source, onSource }: { runId: string; fil
   )
 }
 
-function ReportBody({ conflict, selected, result, source, name }: {
+function ReportBody({ conflict, selected, result, source, name, fragment }: {
+  fragment: string
   conflict: boolean
   selected: boolean
   result: ReturnType<typeof useArtifact> | ReturnType<typeof useFileLink>
@@ -122,7 +123,7 @@ function ReportBody({ conflict, selected, result, source, name }: {
   if (data.tooLarge) return <State icon={<FileWarningIcon />} title="Too large to preview" subtitle={`${formatFileSize(data.size)} is past the 500 kB preview limit. Download it to read it.`} />
   if (data.binary) return <State icon={<FileQuestionIcon />} title="Binary file" subtitle="This file holds binary data, not readable HTML." />
   if (source) return <div className="bg-card"><CodeLines path={data.path} text={data.content ?? ''} /></div>
-  return <HtmlReportFrame html={data.content ?? ''} title={`Report: ${name}`} className="min-h-[60dvh] flex-1" />
+  return <HtmlReportFrame html={data.content ?? ''} title={`Report: ${name}`} fragment={fragment} className="min-h-[60dvh] flex-1" />
 }
 
 function State({ icon, title, subtitle, tone = 'neutral', action }: { icon: ReactNode; title: string; subtitle: string; tone?: 'neutral' | 'danger'; action?: ReactNode }) {

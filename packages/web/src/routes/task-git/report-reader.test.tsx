@@ -63,6 +63,22 @@ describe('the HTML report reader', () => {
     expect(document.querySelector('[data-slot="html-report-blocked"]')).toBeNull()
   })
 
+  it.each([
+    ['#s2', 'about:srcdoc#s2'],
+    ['#section%202', 'about:srcdoc#section%202'],
+    ['', null],
+    ['#', null],
+  ])('moves the loaded report to the route fragment %j without a history entry', async (hash, target) => {
+    stubFetch({ [`/api/v1/runs/r1/artifacts/${ID}`]: () => json(file('report.html', '<h2 id="s2">S2</h2>')) })
+    renderAt([`/p/a/tasks/r1/report?artifact=${ID}${hash}`])
+    await waitFor(() => expect(frame()).not.toBeNull())
+    const replace = vi.fn()
+    Object.defineProperty(frame(), 'contentWindow', { configurable: true, value: { location: { replace } } })
+    fireEvent.load(frame()!)
+    if (target) expect(replace).toHaveBeenCalledExactlyOnceWith(target)
+    else expect(replace).not.toHaveBeenCalled()
+  })
+
   it('explains what it blocked', async () => {
     stubFetch({ [`/api/v1/runs/r1/artifacts/${ID}`]: () => json(file('r.html', '<script>x()</script><img src="https://x.test/a.png"><img src="b.png">')) })
     renderAt([`/p/a/tasks/r1/report?artifact=${ID}`])
