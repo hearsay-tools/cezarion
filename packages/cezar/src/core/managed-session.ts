@@ -68,14 +68,14 @@ export function startManagedSession(
       if (!accepted && !wasOpen) pause();
       return accepted;
     },
-    sendAgentMessage(content, ids, options) {
+    sendAgentMessage(content, ids) {
       if (pendingPermissions.size) return false;
       const wasOpen = turnOpen;
       if (!wasOpen) begin();
       const admissionPhase = phase;
       const rollback = (): void => { if (!wasOpen && phase === admissionPhase) pause(); };
       try {
-        const accepted = live.sendAgentMessage(content, ids, options);
+        const accepted = live.sendAgentMessage(content, ids);
         if (accepted === false) { rollback(); return false; }
         // Do not rearm after an ACK: a synchronous turn-end or ask may already
         // have parked the session. Only a refused reservation rolls back.

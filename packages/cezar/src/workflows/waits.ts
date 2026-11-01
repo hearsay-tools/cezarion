@@ -51,7 +51,8 @@ export function resolvedWaits(run: Pick<RunRecord, 'waits'>): Wait[] {
   return (run.waits ?? []).filter((wait) => wait.phase === 'resolved').sort((a, b) => at(a) - at(b));
 }
 
-/** Monitoring timers: the timers Cezar opens for the monitoring line and `ScheduleWakeup`. */
+/** Monitoring timers: the timers Cezar opens for live workers (`monitoring-line`, also the via of
+ *  saved `CEZ:MONITORING` timers) and `ScheduleWakeup`. */
 export function isMonitoringTimer(wait: Wait): boolean {
   return wait.kind === 'timer' && (wait.via === 'monitoring-line' || wait.via === 'schedule-wakeup');
 }

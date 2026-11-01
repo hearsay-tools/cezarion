@@ -34,7 +34,7 @@ export interface SessionEventHost {
   recordSessionFault(state: ActiveRun, turn: SessionTurn, message: string): void;
   markTurnBoundary(runId: string, state: ActiveRun, event: Extract<AgentEvent, { type: 'turn-end' }>): void;
   trackTurnEnd(runId: string, text: string): void;
-  endTurn(runId: string, state: ActiveRun, sink: UiEventSink, turn: { stepId: string; text: string; completedText: string; scheduleWakeup: number | null | undefined }): void;
+  endTurn(runId: string, state: ActiveRun, sink: UiEventSink, turn: { stepId: string; scheduleWakeup: number | null | undefined }): void;
 }
 
 export function createSessionEventHandler(context: RunModuleContext, host: SessionEventHost, options: {
@@ -64,14 +64,11 @@ export function createSessionEventHandler(context: RunModuleContext, host: Sessi
       // flushes again (idempotent), so no buffered delta can outlive its turn.
       sink.flushAll();
       host.trackTurnEnd(runId, turn.text);
-      const text = turn.text;
-      const completedText = turn.completedText;
       turn.text = '';
-      turn.completedText = '';
       turn.tail = 'none';
       const turnWakeDelay = turn.scheduleWakeup;
       turn.scheduleWakeup = undefined;
-      host.endTurn(runId, state, sink, { stepId, text, completedText, scheduleWakeup: turnWakeDelay });
+      host.endTurn(runId, state, sink, { stepId, scheduleWakeup: turnWakeDelay });
     }
   };
 }

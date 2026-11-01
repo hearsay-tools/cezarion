@@ -37,7 +37,7 @@ describe('human permission lifecycle', () => {
     expect(store.getRun(id)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
     expect(runInternals(manager).line.busySlots()).toBe(0);
     expect(manager.sendMessage(id, [{ type: 'text', text: 'accept' }])).toBe(false);
-    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task', null)).toBe(false);
+    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task')).toBe(false);
     expect(session.sendMessage).not.toHaveBeenCalled();
     expect(session.sendAgentMessage).not.toHaveBeenCalled();
     expect(store.readEvents(id).some(event => event.type === 'user-message')).toBe(false);

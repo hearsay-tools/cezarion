@@ -106,8 +106,8 @@ export type StepLoop = {
 /** What a launched session's callbacks share (hearsay-tools/cezarion#1632): the turn in progress
  *  and the session's first fault. */
 export type SessionTurn = {
+  /** The turn's v1 assistant text, read for its task-reference markers at the turn end. */
   text: string;
-  completedText: string;
   tail: TurnTail;
   /** The delay a Claude ScheduleWakeup call asked for in this turn. */
   scheduleWakeup: number | null | undefined;
@@ -227,8 +227,6 @@ export type SettledTurn = {
   humanGate: boolean;
   /** This turn's ask, which the turn end surfaces as a card; a later entry has none. */
   ask: AskRequest | null;
-  /** The ask line's autonomous nudge went instead of the question. */
-  askNudged: boolean;
   humanWait?: HumanWaitEntry | undefined;
   sink?: UiEventSink;
   done: boolean;

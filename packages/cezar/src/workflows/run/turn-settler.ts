@@ -10,7 +10,7 @@ import type { ActiveRun } from '../active-run.ts';
 import { openCompletionRequests, sentRequestInstructions, type CompletionRefusal } from '../completion-policy.ts';
 import { NO_WAIT_NOTE, COMPLETION_NUDGE_NOTE, decideTurnEnd, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from '../turn-end.ts';
 import { isCezarHumanWait, openWaits } from '../waits.ts';
-import { classifyTurnEnd, discardQueuedMessagesOnAsk, emitAskRequested, type TurnEndRead } from './turn-markers.ts';
+import { classifyTurnEnd, discardQueuedMessagesOnAsk, emitAskRequested } from './turn-markers.ts';
 import { clearHeldHumanInputTimer, clearIdleTimer, harnessOwesInput, harnessHoldsHumanInput } from './input-timers.ts';
 import { canProceedWithRun } from './run-guards.ts';
 import { hasPendingHumanAsk, pendingHumanAskSeq } from './pending-ask-facts.ts';
@@ -41,7 +41,7 @@ interface TurnSettlerHost {
   submitAgentInput(id: string, state: ActiveRun, content: ContentBlock[]): boolean; flushAgentInputs(id: string): boolean; hasQueuedAgentInputs(id: string, except?: readonly string[]): boolean;
   armUnreadInputTimer(id: string, state: ActiveRun): void; armHeldHumanInputTimer(id: string, state: ActiveRun): void;
   parkOnWaits(id: string, state: ActiveRun): boolean; queueWaitWake(id: string): void; leaveMonitoringPool(id: string): void; chargeAutomaticWake(id: string): number;
-  canAutoContinue(id: string, state: ActiveRun): boolean; tryAutonomousNudge(id: string, state: ActiveRun, step: string, ask: AskRequest | null): boolean;
+  canAutoContinue(id: string, state: ActiveRun): boolean;
   sendTurnEndNudge(id: string, state: ActiveRun, step: string | undefined, text: string): boolean; awaitCompletionNudgeReply(id: string, state: ActiveRun, session: AgentSession): void;
   noticeParkedWorker(id: string): void; routeWorkerQuestion(id: string): void; settledTurnOutcome(id: string, entry: 'turn-end' | 'ack' | 'ready' | 'gate' | 'reply-timer', outcome: TurnEndOutcome): TurnEndOutcome | undefined;
 }
@@ -52,7 +52,7 @@ export class TurnSettler {
     private readonly completionWillWait: string, private readonly scheduleWakeupMaxSeconds: number) {}
 
   /** The `cezar_done` this session accepted since its last turn end, taken by this turn end: a
-   *  later turn must call it again, as it must repeat the done line. */
+   *  later turn must call it again. */
   private takeDoneRequest(state: ActiveRun) {
     const request = state.doneRequested?.session === state.session ? state.doneRequested : undefined;
     state.doneRequested = undefined;
@@ -62,7 +62,7 @@ export class TurnSettler {
   /** The DONE boundary and close metadata; a refused DONE may retain metadata for readiness. */
   private recordDoneAtBoundary(state: ActiveRun, done: boolean, request: ActiveRun['doneRequested'], keepClose = done): void {
     state.doneAtBoundary = done ? state.session : undefined;
-    state.doneClose = keepClose ? { via: request ? 'cezar_done' : 'done-line', ...(request?.summary === undefined ? {} : { summary: request.summary }) } : undefined;
+    state.doneClose = keepClose ? { via: 'cezar_done', ...(request?.summary === undefined ? {} : { summary: request.summary }) } : undefined;
   }
 
   /** Goal achieved (agent contract, #347): the summary `cezar_done` gave as a note, the closing
@@ -74,7 +74,7 @@ export class TurnSettler {
     const step = !!session && state.nextStep?.session === session;
     state.completedStepId = state.currentStepId;
     if (close?.summary) this.context.store.appendEvent(runId, { type: 'note', message: close.summary });
-    this.context.store.appendEvent(runId, { type: 'lifecycle', message: step ? 'step complete — session closed' : 'goal achieved — session closed', via: close?.via ?? 'done-line' });
+    this.context.store.appendEvent(runId, { type: 'lifecycle', message: step ? 'step complete — session closed' : 'goal achieved — session closed', via: close?.via ?? 'cezar_done' });
     this.host.cancelOpenWaits(runId);
     session?.end();
   }
@@ -83,22 +83,21 @@ export class TurnSettler {
    * A turn end on the runner's own signal, shared by the fresh step's and the Continue's turn-end
    * handlers (hearsay-tools/cezarion#1525): read what the turn said, keep it for an acknowledgement
    * that lands after the turn end (`parkAfterAck`), then settle it (`settleTurn`). Nothing reads the
-   * turn's prose beyond its markers.
+   * turn's text: only the lifecycle tools and native runner signals decide (hearsay-tools/cezarion#2397).
    */
   endTurn(runId: string, state: ActiveRun, sink: UiEventSink, turn: {
-    stepId: string; text: string; completedText: string; scheduleWakeup: number | null | undefined;
+    stepId: string; scheduleWakeup: number | null | undefined;
   }): void {
     const sessionOpen = !state.cancelled && !!state.session?.open;
     const humanWait = this.host.humanWaits.turnEndHumanWait(runId);
     const doneRequest = this.takeDoneRequest(state);
-    const read = classifyTurnEnd(turn.text, turn.completedText, {
+    const read = classifyTurnEnd({
       sessionOpen, pendingHumanAsk: !!state.pendingHumanAsk,
       scheduledWake: turn.scheduleWakeup !== undefined,
       liveWorkers: monitorsLiveWorkers(this.context, this.host.completionGateHost, runId),
       humanWait, doneRequested: !!doneRequest,
     });
     const { monitoring, humanGate, ask } = read;
-    this.host.humanWaits.latchAskLineCard(runId, humanWait, read);
     discardQueuedMessagesOnAsk(state.session, read);
     // The turn that just ended answered a nudge: one flag per cause (hearsay-tools/cezarion#1234,
     // hearsay-tools/cezarion#1301).
@@ -106,11 +105,11 @@ export class TurnSettler {
     state.noWaitNudged = undefined;
     state.completionNudgeAnswered = state.completionNudged === state.session ? state.session : undefined;
     state.completionNudged = undefined;
-    const askNudged = this.prepareTurnAsk(runId, state, { stepId: turn.stepId, sessionOpen, humanWait }, read);
+    this.prepareTurnAsk(runId, state, humanWait, read);
     state.parkAfterAck = sessionOpen && state.session
       ? { session: state.session, monitoring, humanGate, nudgedLastTurn, scheduleWakeup: turn.scheduleWakeup } : undefined;
     const settled = this.settleTurn(runId, state, 'turn-end', {
-      stepId: turn.stepId, monitoring, humanGate, ask, askNudged, humanWait, sink,
+      stepId: turn.stepId, monitoring, humanGate, ask, humanWait, sink,
       done: read.done, doneRequest, nudgedLastTurn, scheduleWakeup: turn.scheduleWakeup,
     });
     // A turn that completed is the ONLY evidence the provider's window actually reopened, so
@@ -123,22 +122,13 @@ export class TurnSettler {
     }
   }
 
-  /** Prepare the turn's ask before the turn end settles (`endTurn`): its notes, the `invalidAsk`
-   *  flag, and the ask or human gate the run parks on. True when the autonomous nudge went instead
-   *  of the ask line. */
-  private prepareTurnAsk(runId: string, state: ActiveRun, turn: { stepId: string; sessionOpen: boolean; humanWait: HumanWaitEntry | undefined },
-    read: TurnEndRead): boolean {
-    const { humanGate, ask, notes: askNotes, waitCard } = read;
-    for (const note of askNotes) this.context.store.appendEvent(runId, { type: 'note', stepId: turn.stepId, ...note });
-    this.context.store.updateRun(runId, { invalidAsk: !ask && askNotes.length > 0 ? true : undefined });
-    // An autonomous run registers no newly parsed ask line before the budget, as `cezar_ask`
-    // refuses it (hearsay-tools/cezarion#1234): the autonomous nudge goes instead. Do this before
-    // prepareHumanAsk latches it; an existing/native ask or a human wait's card still blocks the helper.
-    const askNudged = !!ask && !waitCard && turn.sessionOpen && this.host.tryAutonomousNudge(runId, state, turn.stepId, ask);
-    if (ask && !askNudged) this.host.humanWaits.prepareHumanAsk(state);
+  /** Prepare the turn's question before the turn end settles (`endTurn`): the card or human gate
+   *  the run parks on. */
+  private prepareTurnAsk(runId: string, state: ActiveRun, humanWait: HumanWaitEntry | undefined, read: { ask: AskRequest | null; humanGate: boolean }): void {
+    const { humanGate, ask } = read;
+    if (ask) this.host.humanWaits.prepareHumanAsk(state);
     if (humanGate && !ask && !state.pendingHumanAsk) this.host.humanWaits.raiseHumanGate(runId, state);
-    if (humanGate && !ask) this.host.humanWaits.recordTurnEndQuestion(runId, state, turn.humanWait, null);
-    return askNudged;
+    if (humanGate && !ask) this.host.humanWaits.recordTurnEndQuestion(runId, humanWait, null);
   }
 
   /** The turn end an entry settles after it (`settleIdleBoundary`, `handleAgentInputReady`), and
@@ -146,7 +136,7 @@ export class TurnSettler {
   boundaryTurn(runId: string, state: ActiveRun, session: AgentSession, done: boolean): SettledTurn {
     const ack = state.parkAfterAck?.session === session ? state.parkAfterAck : undefined;
     return {
-      stepId: state.currentStepId, humanGate: !!ack?.humanGate, ask: null, askNudged: false, done,
+      stepId: state.currentStepId, humanGate: !!ack?.humanGate, ask: null, done,
       // A done names no monitoring, as the turn end's own reading of it does (`classifyTurnEnd`).
       monitoring: !done && !!ack && (ack.monitoring || (!ack.humanGate && monitorsLiveWorkers(this.context, this.host.completionGateHost, runId))),
       nudgedLastTurn: !!ack?.nudgedLastTurn, scheduleWakeup: ack?.scheduleWakeup,
@@ -177,7 +167,6 @@ export class TurnSettler {
       noted = true;
       this.context.store.appendEvent(runId, { type: 'note', tone: 'warning', ...(stepId ? { stepId } : {}), message: `Completion blocked: ${refused.message}` });
     };
-    if (turn.askNudged) return this.settleAskNudgedTurn(runId, state, entry, turn);
     const { decision, tried } = this.decideSettledTurn(runId, state, session, entry, turn, refused, noteRefusal);
     if (entry === 'turn-end' && !this.settleTurnEndInput(runId, state, turn, tried, decision)) return false;
     // A run an earlier entry already parked keeps that park: a second one would free its slot twice.
@@ -200,23 +189,13 @@ export class TurnSettler {
     return true;
   }
 
-  /** The ask line's autonomous nudge went instead of the question (`settleTurn`): its turn is the
-   *  next one. False when the input checkpoint failed. */
-  private settleAskNudgedTurn(runId: string, state: ActiveRun, entry: 'turn-end' | 'ack' | 'ready' | 'gate', turn: SettledTurn): boolean {
-    this.recordDoneAtBoundary(state, false, turn.doneRequest);
-    clearHeldHumanInputTimer(state);
-    if (state.agentInputError) return false;
-    this.host.settledTurnOutcome(runId, entry, { kind: 'nudge', cause: 'no-wait', autonomous: true });
-    return true;
-  }
-
   /** What the turn-end rule decides for a settled turn (`settleTurn`): the timer alias the rule
    *  reads, the first decision and the done it keeps, then the owed input a `take-input` decision
    *  tries and the decision after it. `tried` is true when that input was tried. */
   private decideSettledTurn(runId: string, state: ActiveRun, session: AgentSession | undefined, entry: 'turn-end' | 'ack' | 'ready' | 'gate',
     turn: SettledTurn, refused: CompletionRefusal | undefined, noteRefusal: () => void): { decision: TurnEndDecision; tried: boolean } {
     // A turn end opens it once owed input was tried; this turn's ask keeps that input back, so its
-    // monitoring line opens the timer now. A refused done decides before any alias, as before.
+    // timer alias opens now. A refused done decides before any alias, as before.
     if (entry !== 'turn-end' || (turn.ask && !refused)) this.openTurnTimerAlias(runId, state, session, turn);
     // The turn end and the gate deliver owed input; an acknowledgement or readiness finds it already tried.
     const decision = decideTurnEnd(this.turnEndFacts(runId, state, session, turn, refused, entry === 'turn-end' || entry === 'gate' ? undefined : false));
@@ -254,8 +233,8 @@ export class TurnSettler {
     };
   }
 
-  /** The monitoring line and `ScheduleWakeup` open their timer before the rule reads the waits, as
-   *  the `cezar_wait` timer they alias. An autonomous nudge waiting for readiness keeps precedence. */
+  /** `ScheduleWakeup` and live workers open their timer before the rule reads the waits, as the
+   *  `cezar_wait` timer they alias. An autonomous nudge waiting for readiness keeps precedence. */
   private openTurnTimerAlias(runId: string, state: ActiveRun, session: AgentSession | undefined, turn: SettledTurn): void {
     if (turn.monitoring && session?.open && state.autonomousNudgePending !== session) this.openTimerAlias(runId, state, turn.scheduleWakeup);
   }
@@ -278,16 +257,16 @@ export class TurnSettler {
   }
 
   /** A turn end's own steps after the rule decided (`settleTurn`): the unread and held input timers,
-   *  then the `CEZ:ASK` card. False when the input checkpoint failed. */
+   *  then the human wait's card. False when the input checkpoint failed. */
   private settleTurnEndInput(runId: string, state: ActiveRun, turn: SettledTurn, tried: boolean, decision: TurnEndDecision): boolean {
     if (tried) this.host.armUnreadInputTimer(runId, state);
     if (tried && harnessHoldsHumanInput(state)) this.host.armHeldHumanInputTimer(runId, state);
     else clearHeldHumanInputTimer(state);
     if (state.agentInputError) return false;
-    // `CEZ:ASK` surfaces the structured question as an ask card (#473) before the rule parks on it.
+    // The human wait's card surfaces as an ask card (#473) before the rule parks on it.
     if (turn.ask && turn.sink && decision.kind !== 'closed' && decision.kind !== 'input' && !this.host.humanWaits.humanWaitShown(runId, turn.humanWait)) {
       emitAskRequested(turn.sink, turn.ask);
-      this.host.humanWaits.recordTurnEndQuestion(runId, state, turn.humanWait, turn.ask);
+      this.host.humanWaits.recordTurnEndQuestion(runId, turn.humanWait, turn.ask);
       this.host.routeWorkerQuestion(runId);
     }
     return true;
@@ -448,15 +427,16 @@ export class TurnSettler {
   }
 
   /**
-   * The monitoring line and Claude's `ScheduleWakeup` open a timer in the wait list
-   * (hearsay-tools/cezarion#1233): the line for the configured interval, `ScheduleWakeup` for its
-   * `delaySeconds` clamped to 60–3,600 (the interval without one). Idempotent per `via`: while one
-   * is open the alias registers nothing and the timer keeps its deadline. The line is only a
-   * fallback: any open non-human wait suppresses its registration (hearsay-tools/cezarion#1268),
-   * including the off/budget human fallback. With timers off and no such wait it opens
-   * a `monitoring-line` human wait instead, and with the automatic-wake budget spent a `budget` one
-   * (hearsay-tools/cezarion#1234); the park shows it. An autonomous run's nudge keeps precedence
-   * over the line.
+   * Claude's `ScheduleWakeup` and a turn that ends with live workers and no worker wait open a timer
+   * in the wait list (hearsay-tools/cezarion#1233): `ScheduleWakeup` for its `delaySeconds` clamped
+   * to 60–3,600 (the interval without one), live workers for the configured interval. The
+   * live-workers timer keeps the stored `monitoring-line` via, which saved runs carry. Idempotent per
+   * `via`: while one is open the alias registers nothing and the timer keeps its deadline. The
+   * live-workers timer is only a fallback: any open non-human wait suppresses its registration
+   * (hearsay-tools/cezarion#1268), including the off/budget human fallback. With timers off and no
+   * such wait it opens a `monitoring-line` human wait instead, and with the automatic-wake budget
+   * spent a `budget` one (hearsay-tools/cezarion#1234); the park shows it. An autonomous run's nudge
+   * keeps precedence over the timer.
    */
   private openTimerAlias(runId: string, state: ActiveRun, scheduleWakeup: number | null | undefined): void {
     const run = this.context.store.getRun(runId);
@@ -464,8 +444,8 @@ export class TurnSettler {
     if (state.autonomous && this.host.countAutomaticWakes(runId) < this.maxAutoContinues && this.host.canAutoContinue(runId, state)) return;
     const via: WaitVia = scheduleWakeup === undefined ? 'monitoring-line' : 'schedule-wakeup';
     const open = openWaits(run);
-    // The line is a fallback, not another poll beside a wait that already supplies its wake
-    // (hearsay-tools/cezarion#1268). Keep explicit ScheduleWakeup requests and existing timers.
+    // The live-workers timer is a fallback, not another poll beside a wait that already supplies
+    // its wake (hearsay-tools/cezarion#1268). Keep explicit ScheduleWakeup requests and existing timers.
     if (via === 'monitoring-line' && open.some(wait => wait.kind !== 'human')) return;
     if (open.some(wait => wait.kind === 'timer' && wait.via === via)) return;
     const minutes = this.context.semaphore.monitoringWakeIntervalMinutes();
@@ -488,11 +468,11 @@ export class TurnSettler {
     if (openWaits(run).length >= WAIT_LIMIT) return;
     const delay = typeof scheduleWakeup === 'number' ? Math.min(this.scheduleWakeupMaxSeconds, Math.max(TIMER_MIN_SECONDS, Math.round(scheduleWakeup))) : undefined;
     const now = Date.now();
-    // `seconds` is the record's bound; the line's deadline is the interval itself (tests run it sub-minute).
+    // `seconds` is the record's bound; the live-workers deadline is the interval itself (tests run it sub-minute).
     const wait: TimerWaitEntry = { id: randomUUID(), kind: 'timer', source: 'agent', via, registeredAt: new Date(now).toISOString(),
       deadline: new Date(now + (delay === undefined ? minutes * 60_000 : delay * 1000)).toISOString(), phase: 'open', turnId: state.ciTurnId ?? 'monitoring',
       seconds: delay ?? Math.min(TIMER_MAX_SECONDS, Math.max(TIMER_MIN_SECONDS, Math.round(minutes * 60))),
-      ...(via === 'monitoring-line' ? { note: 'Opened by CEZ:MONITORING.' } : {}) };
+      ...(via === 'monitoring-line' ? { note: 'Opened while workers run.' } : {}) };
     this.host.humanWaits.withdrawCezarHumanWaits(runId);
     try { this.context.store.commitWait(runId, wait); }
     catch (error) { console.warn(`[cez] monitoring timer checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return; }

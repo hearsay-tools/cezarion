@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentInput, ConversationMessage } from '@open-mercato/cezar-contract';
 import type { AgentSession } from '../core/agent-runner.ts';
+import { WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { manager, parent, store, timeline, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
 
 /** One accumulating conversation per root, committed the way the delegation service does. */
@@ -107,15 +108,15 @@ describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
   });
 
   // hearsay-tools/cezarion#1235 phase 3a (design § Messages beside a pending question): a pending
-  // portable question no longer holds conversation input. The messages go beside the card in one
+  // `cezar_ask` question does not hold conversation input. The messages go beside the card in one
   // submission, and the human's answer still answers it alone, through the answer seam.
-  it('delivers messages beside a pending portable question in one submission, never as its answer', async () => {
+  it('delivers messages beside a pending cezar_ask question in one submission, never as its answer', async () => {
     const p = await parent('mock:cezar-ask');
     await until(() => store.readEvents(p.id).some(event => event.type === 'ask.requested'));
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const askSeq = store.readEvents(p.id).find(event => event.type === 'ask.requested')!.seq;
     const card = () => store.getRun(p.id)?.waits?.find(wait => wait.kind === 'human' && wait.phase === 'open');
-    expect(card()).toMatchObject({ via: 'ask-line', askSeq });
+    expect(card()).toMatchObject({ via: WAIT_VIA.cezar_ask, askSeq });
     const w = await worker(p.id);
     const send = conversation(p.id);
     const beside = vi.spyOn(sessionOf(p.id), 'sendAgentMessage');
@@ -125,7 +126,6 @@ describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
     const accepted = beside.mock.calls.filter((_, i) => beside.mock.results[i]?.value !== false);
     expect(accepted).toHaveLength(1);
     expect(accepted[0]![1]).toEqual(held.map(input => input.id));
-    expect(accepted[0]![2]).toEqual({ besideQuestion: true });
     expect(new Set(held.map(input => inputOf(p.id, input.id)?.deliveredAt)).size).toBe(1);
     // The card stays answerable: nothing answered it.
     expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered'), timeline(p.id)).toEqual([]);

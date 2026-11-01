@@ -2,11 +2,10 @@ import { randomUUID } from 'node:crypto';
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import type { ContentBlock } from '../../core/agent-runner.ts';
 import type { AgentSession } from '../../core/claude-cli-runner.ts';
-import type { AskRequest } from '../../core/ask.ts';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
 import { enqueueAgentInput, hasLiveInboxClaim } from '../../delegation/input.ts';
 import { recordRequestRefusal, type CompletionRefusal } from '../completion-policy.ts';
-import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, stepScopedNudge, type TurnEndOutcome } from '../turn-end.ts';
+import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_NUDGE, stepScopedNudge, type TurnEndOutcome } from '../turn-end.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { RunExitId } from '../run-states.ts';
 import { clearIdleTimer, clearNoWaitNudgeReplyTimer, harnessOwesInput } from './input-timers.ts';
@@ -125,11 +124,9 @@ export class TurnNudges {
    * teardown. Native mid-turn asks still park for an answer (outside this policy).
    * A refused ordinary nudge waits for readiness at this exact boundary; the idle
    * timeout bounds a missing readiness signal. New activity/input invalidates it.
-   * `ask` is this turn's ask line, which an autonomous run does not register before the budget
-   * (hearsay-tools/cezarion#1234). A wire that refuses the nudge registers it after all.
+   * `text` is the turn-end rule's nudge, scoped to the step by default (hearsay-tools/cezarion#1620).
    */
-  /** `text` is the turn-end rule's nudge; an ask line's nudge scopes the same one itself (hearsay-tools/cezarion#1620). */
-  tryAutonomousNudge(runId: string, state: ActiveRun, stepId: string, ask: AskRequest | null,
+  tryAutonomousNudge(runId: string, state: ActiveRun, stepId: string,
     text = stepScopedNudge(AUTONOMOUS_NUDGE, !!state.session && state.nextStep?.session === state.session)): boolean {
     const session = state.session;
     if (!state.autonomous || !session || !this.canAutoContinue(runId, state)) return false;
@@ -141,30 +138,16 @@ export class TurnNudges {
       return false;
     }
     const content: ContentBlock[] = [{ type: 'text', text }];
-    // sendAgentMessage deliberately refuses portable asks on some native wires.
-    // The existing answer transport clears that marker, but is safe ONLY for this
-    // fresh turn-end ask line: the guards above exclude every pending native/persisted
-    // question. Do not route via deliverMessage, which attributes a human answer.
-    // Ordinary nudges keep #505's acknowledged agent-input failure semantics.
-    const sent = ask ? session.sendMessage(content) : this.host.submitAgentInput(runId, state, content);
-    if (!sent) {
-      // An unregistered ask line uses sendMessage: its POST may still be awaiting ACK
-      // after the next SSE turn ends. It is not an agentInputFlight. Keep this
-      // exact boundary running until onAgentInputReady retries, without charging
+    // The nudge keeps #505's acknowledged agent-input failure semantics.
+    if (!this.host.submitAgentInput(runId, state, content)) {
+      // Keep this exact boundary running until onAgentInputReady retries, without charging
       // the cap or claiming delivery. Missing readiness closes via the idle bound.
-      if (!ask && session.open && !state.agentInputError && !state.agentSessionError) {
+      if (session.open && !state.agentInputError && !state.agentSessionError) {
         state.autonomousNudgePending = session;
         this.host.armIdleTimer(runId, state);
       }
       return false;
     }
-    if (ask) this.host.resumeParkedRun(runId, state);
-    // The marker is stripped from visible text. Retain the question as a note,
-    // never an ask card or a fabricated human-input-delivered acknowledgement.
-    if (ask) this.context.store.appendEvent(runId, {
-      type: 'note', stepId,
-      message: `${AUTONOMOUS_ASK_NOTE}: ${ask.questions.map(question => question.question).join(' | ')}`,
-    });
     const spent = this.host.chargeAutomaticWake(runId);
     this.context.store.appendEvent(runId, {
       type: 'note', stepId,
@@ -177,7 +160,7 @@ export class TurnNudges {
    *  automatic-wake budget. The autonomous wording repeats; the no-wait one is sent once and is
    *  bounded by its reply timer (#544's liveness). */
   sendTurnEndNudge(runId: string, state: ActiveRun, stepId: string | undefined, text: string): boolean {
-    if (state.autonomous) return !!stepId && this.tryAutonomousNudge(runId, state, stepId, null, text);
+    if (state.autonomous) return !!stepId && this.tryAutonomousNudge(runId, state, stepId, text);
     if (!this.canAutoContinue(runId, state)) return false;
     state.noWaitNudgeSawContent = false;
     if (!this.host.submitAgentInput(runId, state, [{ type: 'text', text }])) return false;

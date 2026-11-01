@@ -14,7 +14,7 @@
 export type TurnEndFacts = {
   /** The session is still open. A closed one settles elsewhere. */
   sessionOpen: boolean;
-  /** `cezar_done` was accepted this turn, or the done line. */
+  /** `cezar_done` was accepted this turn. */
   done: boolean;
   /** The completion gate refused that done. `liveWorkers`: live workers block it. */
   doneRefused?: { liveWorkers: boolean };
@@ -27,8 +27,7 @@ export type TurnEndFacts = {
   inputTaken?: boolean | undefined;
   /** An autonomous nudge the wire refused waits for input readiness at this boundary. */
   nudgePending: boolean;
-  /** This turn's ask: an ask line, or the card of a human wait it registered. Owed input waits
-   *  behind it. */
+  /** This turn's ask: the card of a human wait it registered. Owed input waits behind it. */
   turnAsk: boolean;
   /** A native ask still pending in the live session. A done waits behind it. */
   nativeAsk: boolean;
@@ -133,5 +132,3 @@ export const COMPLETION_NO_REPLY_NOTE = 'no reply to the completion nudge — wa
 export const WORKER_FALLBACK_NOTE = 'no wait or done after the nudge — asking the parent';
 export const WORKER_FALLBACK_REPLY_NOTE = 'parent answered the idle worker';
 export const COMPLETION_NUDGE_NOTE = 'completion blocked — refusal sent to the agent';
-/** An autonomous run's ask line before the budget, which `cezar_ask` would refuse: its questions follow. */
-export const AUTONOMOUS_ASK_NOTE = 'autonomous — question not registered; continuing';

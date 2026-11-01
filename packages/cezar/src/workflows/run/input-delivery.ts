@@ -380,12 +380,8 @@ export class InputDelivery {
       this.latchAgentInputError(runId, state, session, `${checkpoint ? 'agent input delivery checkpoint failed' : 'agent input delivery failed'}: ${error instanceof Error ? error.message : String(error)}`);
     };
     let acknowledgement: false | Promise<void>;
-    // A wake beside a pending question tells the runner so: native wires refuse agent input while a portable CEZ:ASK is pending, and this input is not its answer. The question stays Cezar's and its card stays answerable; the provider's acknowledgement is still the checkpoint, and a rejected one fails the session like any other, leaving the waits resolved for a continuation.
-    const besideQuestion = !!state.pendingHumanAsk;
-    try {
-      acknowledgement = besideQuestion ? session.sendAgentMessage(content, inputIds, { besideQuestion })
-        : session.sendAgentMessage(content, inputIds);
-    }
+    // A wake beside a pending question (`admitsAgentInput`) is not its answer: the question stays Cezar's and its card stays answerable, because only a human delivery settles it. The provider's acknowledgement is still the checkpoint, and a rejected one fails the session like any other, leaving the waits resolved for a continuation.
+    try { acknowledgement = session.sendAgentMessage(content, inputIds); }
     catch (error) { refund(); fail(error, false); state.agentInputFlight = undefined; return false; }
     if (!acknowledgement) { refund(); state.agentInputFlight = undefined; return false; }
     // Attach rejection handling before any persistence/capacity work can throw.

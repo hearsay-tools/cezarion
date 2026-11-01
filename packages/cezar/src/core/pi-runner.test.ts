@@ -24,7 +24,6 @@ vi.mock('node:child_process', async (original) => {
 import type { AgentEvent, AgentSession } from './agent-runner.js';
 import type { UiEvent } from './ui-events.js';
 import { buildChildEnv } from './agent-env.js';
-import { parseAskMarker } from './ask.js';
 import { detectEnvironment } from './backend-detect.js';
 import { createRunner } from './runner-factory.js';
 import { buildPiArgs, PiRunner } from './pi-runner.js';
@@ -105,10 +104,10 @@ describe('a dry-run pi session emits normalized AgentEvents', () => {
     expect(result.text.length).toBeGreaterThan(0);
   });
 
-  it('coalesces token-split text_delta into one v1 text so a CEZ:ASK marker still parses (#2)', async () => {
+  it('coalesces token-split text_delta into one v1 text so a line-anchored marker stays whole (#2)', async () => {
     // Repro of open-mercato/cezar#902: Pi streams one text_delta per token.
     // Emitting each as its own v1 `text` event made appendTurnText insert
-    // newlines between tokens, so CEZ:ASK\n{…} failed ASK_MARKER_RE.
+    // newlines between tokens, splitting a marker line across lines.
     const askJson = JSON.stringify({
       questions: [
         {
@@ -170,13 +169,10 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     expect(textEvents).toHaveLength(1);
     expect(textEvents[0]!.text).toBe(fullText);
 
-    // Same assembly path RunManager uses at turn-end — marker must survive.
+    // Same assembly path RunManager uses at turn-end — the marker line must survive.
     let turnText = '';
     for (const event of textEvents) turnText = appendTurnText(turnText, event.text);
-    const ask = parseAskMarker(turnText);
-    expect(ask).not.toBeNull();
-    expect(ask!.questions[0]!.header).toBe('Design gate');
-    expect(ask!.questions[0]!.options!.map((o) => o.label)).toEqual(['Reuse coalescer', 'Local buffer']);
+    expect(turnText.split('\n').at(-1)).toBe(`CEZ:ASK ${askJson}`);
   });
 
   it('emits a second assistant text block after a tool when both use contentIndex 0', async () => {

@@ -475,7 +475,7 @@ export class ContinuationSession {
     const answer = this.openingAnswer(runId, state, opening);
     state.pendingHumanAsk = answer.askSeq === undefined && hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id));
 
-    const turn: SessionTurn = { text: '', completedText: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
+    const turn: SessionTurn = { text: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
     const sink = this.host.makeUiSink(runId, stepId);
     const onEvent = createSessionEventHandler(this.context, this.sessionEventHost, {
       runId, state, turn, stepId, backend, sink, tokenBase: 0,

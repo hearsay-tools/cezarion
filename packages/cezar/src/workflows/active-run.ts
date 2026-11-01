@@ -72,7 +72,7 @@ export interface ActiveRun {
   /** The step an accepted done closed. A workflow step that is not the last advances only on it. */
   completedStepId?: string | undefined;
   /** What declared the done `doneAtBoundary` closes on: the closing event names it. */
-  doneClose?: { via: 'cezar_done' | 'done-line'; summary?: string } | undefined;
+  doneClose?: { via: 'cezar_done'; summary?: string } | undefined;
   parkAfterAck?: { session: AgentSession; monitoring: boolean; humanGate?: boolean; nudgedLastTurn?: boolean; scheduleWakeup?: number | null | undefined } | undefined;
   /** Last completed boundary belongs to exactly this still-open session. */
   atTurnBoundary?: AgentSession | undefined;

@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import type { SessionTransport } from '@open-mercato/cezar-contract';
 import type {
-  AgentEvent, AgentInputOptions, AgentRunResult, AgentRunner, AgentRunSpec, AgentSession, ContentBlock,
+  AgentEvent, AgentRunResult, AgentRunner, AgentRunSpec, AgentSession, ContentBlock,
   InputDelivery, SessionOptions,
 } from './agent-runner.ts';
 import { CursorPrintRunner, CURSOR_PRINT_SPEC_SUPPORT } from './cursor-print-runner.ts';
@@ -134,8 +134,8 @@ class SelectingCursorSession implements AgentSession {
     this.pendingHuman.push(content);
     return true;
   }
-  sendAgentMessage(content: ContentBlock[], ids?: readonly string[], options?: AgentInputOptions): false | Promise<void> {
-    return this.inner?.sendAgentMessage(content, ids, options) ?? false;
+  sendAgentMessage(content: ContentBlock[], ids?: readonly string[]): false | Promise<void> {
+    return this.inner?.sendAgentMessage(content, ids) ?? false;
   }
   discardQueuedMessages(): void { this.pendingHuman = []; this.inner?.discardQueuedMessages(); }
   holdsHumanInput(): boolean { return this.inner?.holdsHumanInput() ?? this.pendingHuman.length > 0; }

@@ -1,9 +1,8 @@
 import type { AgentInput } from '@open-mercato/cezar-contract';
 import type { AgentEvent, AgentSession } from '../../core/agent-runner.ts';
-import { stripAskMarker } from '../../core/ask.ts';
 import { registerRunProcess } from '../../core/process-usage.ts';
 import { stripTaskMarkers } from '../../runs/task-markers.ts';
-import { appendTurnText, appendCompletedAssistantText, trackTurnTail, stripDoneMarker, stripMonitoringMarker } from './turn-markers.ts';
+import { appendTurnText, trackTurnTail } from './turn-markers.ts';
 import type { SessionTurn, ExecutionEmit } from './types.ts';
 import type { PersistedAttachment } from '../pasted-content.ts';
 import type { UiEvent } from '../../core/ui-events.ts';
@@ -167,7 +166,7 @@ export function handleReceiptEvent(context: RunModuleContext, host: InputReceipt
     steps.clearHeld(state);
     steps.noteActivity(runId, state, event);
     turn.text = appendTurnText(turn.text, event.text);
-    const text = stripAskMarker(stripTaskMarkers(stripMonitoringMarker(stripDoneMarker(event.text))), false);
+    const text = stripTaskMarkers(event.text);
     if (text) emit({ type: 'text', text, stepId });
     return true;
   }
@@ -184,7 +183,6 @@ export function handleReceiptEvent(context: RunModuleContext, host: InputReceipt
 export function inputReceiptCallbacks(context: RunModuleContext, host: InputReceiptsHost, steps: InputReceiptSteps, runId: string, state: ActiveRun, session: () => AgentSession | undefined, turn: SessionTurn, sink: UiEventSink, openingAccepted: boolean) {
   return {
     onUiEvent: (event: UiEvent) => {
-      turn.completedText = appendCompletedAssistantText(turn.completedText, event);
       turn.tail = trackTurnTail(turn.tail, event);
       if (openingAccepted && event.type === 'turn.started') recordOpeningAccepted(context, host, runId, state);
       steps.ui(runId, state, sink, event);

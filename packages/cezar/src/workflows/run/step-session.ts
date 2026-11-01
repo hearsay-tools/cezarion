@@ -77,7 +77,7 @@ export class StepSession {
 
     const stepRecord = this.context.store.getRun(runId)?.steps.find((s) => s.id === step.id);
     const startTokens = stepRecord?.tokensUsed ?? 0;
-    const turn: SessionTurn = { text: '', completedText: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
+    const turn: SessionTurn = { text: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
     const sink = sessionEvents.makeUiSink(this.context, this.sharedHost, runId, step.id);
     const onEvent = sessionEvents.createSessionEventHandler(this.context, this.sessionEventHost, {
       runId, state, turn, stepId: step.id, backend, sink, tokenBase: startTokens, emit,
