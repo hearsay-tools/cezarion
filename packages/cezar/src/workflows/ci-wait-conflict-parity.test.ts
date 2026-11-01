@@ -14,14 +14,14 @@ import { ciNativeMessages } from './waits-parity.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { ciWatchRequest } from './waits.ts';
 
-const resources = vi.hoisted(() => ({ github: undefined as GithubCiClient | undefined, toolless: false }));
+const resources = vi.hoisted(() => ({ github: undefined as GithubCiClient | undefined }));
 vi.mock('../ci-wait/resources.ts', async importOriginal => {
   const original = await importOriginal<typeof import('../ci-wait/resources.ts')>();
   return { acquireCiResources(workspace: object) {
     const shared = original.acquireCiResources(workspace);
     if (!resources.github) return shared;
     const supervisor = new CiWatcherSupervisor({ github: resources.github });
-    return { ...shared, supervisor, ...(resources.toolless ? { controller: async () => undefined } : {}), release() { supervisor.close(); shared.release(); } };
+    return { ...shared, supervisor, release() { supervisor.close(); shared.release(); } };
   } };
 });
 const pr = 'https://github.com/acme/repo/pull/12';
@@ -34,7 +34,7 @@ const disk = (id: string) => readPersistedRuns(join(root, '.ai/cezar')).find(row
 // `conflicting` result would test storage but pass with the missing detector.
 describe('native conflict observation durability and wake parity', { timeout: 35_000 }, () => {
   useWorkerWaitFixture();
-  afterEach(() => { resources.github = undefined; resources.toolless = false; vi.restoreAllMocks(); });
+  afterEach(() => { resources.github = undefined; vi.restoreAllMocks(); });
   for (const runner of RUNNER_IDS) for (const mode of ['fresh', 'continued', 'recovered'] as const) {
     const cell = mode === 'fresh' ? 'R81' : mode === 'continued' ? 'R82' : 'R83';
     it(`${runner} ${cell} delivers one committed conflict observation in ${mode} mode`, async () => {
@@ -57,7 +57,6 @@ describe('native conflict observation durability and wake parity', { timeout: 35
       }
       const wait = await manager.registerWait(run.id, { kind: 'pr', pr, timeout_seconds: 120 }, 'cezar_wait', active(run.id)!.ciGeneration);
       if (mode === 'recovered') {
-        resources.toolless = true; // Missing tool controller must not prevent saved-input delivery.
         await restart();
         expect(manager.isActive(run.id)).toBe(false);
         expect(open(run.id)?.id).toBe(wait.id);

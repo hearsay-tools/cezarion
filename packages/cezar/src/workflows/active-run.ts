@@ -12,9 +12,6 @@ export interface ActiveRun {
   delegationSettings?: DelegationExecutionSettings | undefined;
   revokeDelegation?: (() => void) | undefined;
   revokeCiTools?: (() => void) | undefined;
-  /** hearsay-tools/cezarion#1234: the last session started without cezar tools, so its prompt
-   *  taught the lifecycle markers; kept after the session's tools are revoked. */
-  toolless?: boolean;
   ciGeneration?: string;
   ciTurnId?: string;
   waitWakeTurn?: AgentSession | undefined;

@@ -48,8 +48,6 @@ export type TurnEndFacts = {
   autonomous: boolean;
   /** `automaticWakes` reached `MAX_AUTO_CONTINUES`. */
   budgetSpent: boolean;
-  /** The session has cezar tools; without them the nudge names the lifecycle markers. */
-  tools: boolean;
 };
 
 export type NudgeCause = 'no-wait' | 'completion';
@@ -75,10 +73,6 @@ export const AUTONOMOUS_NUDGE =
 /** The no-wait nudge. It names the wait kinds `cezar_wait` takes. */
 export const NO_WAIT_NUDGE =
   'Your turn ended without a wait or done. Call cezar_ask if you need the user, cezar_wait (pr, worker, request, peer, timer or process) if you are waiting on something, or cezar_done if the task is complete. If you owe the user a reply, write it in the same turn.';
-
-/** The no-wait nudge for a session without cezar tools, which was taught the markers. */
-export const NO_WAIT_NUDGE_MARKERS =
-  'Your turn ended without a wait or done. End your message with a CEZ:ASK line if you need the user, a CEZ:MONITORING line if you are waiting on something, or a CEZ:DONE line if the task is complete. If you owe the user a reply, write it in the same turn.';
 
 /** Appended to a nudge in a session whose done completes a workflow step, not the task
  *  (hearsay-tools/cezarion#1620). Appended, so the nudge keeps its opening words. */
@@ -121,7 +115,7 @@ function decideWithoutDone(facts: TurnEndFacts): TurnEndDecision {
   const scoped = (text: string) => stepScopedNudge(text, facts.stepScope);
   if (facts.autonomous) return { kind: 'nudge', cause: 'no-wait', text: scoped(AUTONOMOUS_NUDGE), ifRefused: 'readiness' };
   if (facts.noWaitNudgedLastTurn) return { kind: 'human-wait', via: 'no-wait' };
-  return { kind: 'nudge', cause: 'no-wait', text: scoped(facts.tools ? NO_WAIT_NUDGE : NO_WAIT_NUDGE_MARKERS), ifRefused: 'human-wait' };
+  return { kind: 'nudge', cause: 'no-wait', text: scoped(NO_WAIT_NUDGE), ifRefused: 'human-wait' };
 }
 
 /** How a settled turn end left the run. */

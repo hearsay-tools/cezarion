@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { HANDOFF_ONLY_INSTRUCTIONS as BASE_HANDOFF, handoffInstructions } from '../handoff.ts';
+import { handoffInstructions } from '../handoff.ts';
 import { artifactInstructions } from '../artifacts/lifecycle.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -21,10 +21,9 @@ import {
 
 // Publication guidance is additive for both fresh sessions and Continue; the
 // full prompt assertions below must still pin the unchanged handoff contract.
-const HANDOFF_INSTRUCTIONS = composeSystemPrompt(artifactInstructions('available'), BASE_HANDOFF);
 // hearsay-tools/cezarion#1234: the sessions below have cezar's tools, so they are taught the tools.
 // hearsay-tools/cezarion#1584: their opening message carries the handoff, so step 1 points there.
-const SESSION_HANDOFF = composeSystemPrompt(artifactInstructions('available'), handoffInstructions({ tools: true, handoffInjected: true }));
+const SESSION_HANDOFF = composeSystemPrompt(artifactInstructions('available'), handoffInstructions({ handoffInjected: true }));
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 const TERMINAL = new Set(['done', 'review', 'failed', 'cancelled']);
@@ -81,16 +80,6 @@ describe('composeSystemPrompt', () => {
     ['blank parts drop out', ['', '   ', H], H],
   ] as const)('%s', (_name, parts, expected) => {
     expect(composeSystemPrompt(...parts)).toBe(expected);
-  });
-});
-
-describe('handoff contract markers', () => {
-  it('teaches the CEZ:ASK structured-question marker with its schema (#473)', () => {
-    expect(HANDOFF_INSTRUCTIONS).toContain('CEZ:ASK');
-    expect(HANDOFF_INSTRUCTIONS).toContain('"questions"');
-    expect(HANDOFF_INSTRUCTIONS).toContain('"multiSelect"');
-    // It rides in the combined contract every agent step receives.
-    expect(HANDOFF_INSTRUCTIONS).toContain('CEZ:ASK');
   });
 });
 

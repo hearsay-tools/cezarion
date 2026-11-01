@@ -251,7 +251,6 @@ export class TurnSettler {
       completionNudgedLastTurn: (!!session && state.completionNudgeAnswered === session) || (!!refused?.requestIds?.length && !!state.sentRequestRefused),
       autonomous: !!state.autonomous,
       budgetSpent: this.host.countAutomaticWakes(runId) >= this.maxAutoContinues,
-      tools: !state.toolless,
     };
   }
 

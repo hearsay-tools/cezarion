@@ -517,6 +517,14 @@ export class ContinuationSession {
       this.settleStaleContinuationLaunch(runId, stepId, state, { stepId, sessionId, backend, prompt, images });
       return;
     }
+    // hearsay-tools/cezarion#2397: the tools could not start, so nothing spawns. The failure takes
+    // the session-failure path: a run that holds wakes parks and retries them with the wake-delivery
+    // backoff; any other run fails with the message.
+    if (launch.toolsError !== undefined) {
+      this.runSettlement.settleFailedContinuation(runId, state, stepId, sink, turn, new Error(launch.toolsError));
+      await this.releaseContinuationSession(runId, state, undefined, undefined, {});
+      return;
+    }
     state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
     const session = this.startContinuationSession(runId, state, runner, {
       stepId, sessionId, prompt, setupNote, opening, skills, skipSkillOnResume, settings, delegation, webhooksPart, ciTools,

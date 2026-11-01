@@ -5,7 +5,7 @@ import { CiWatcherSupervisor } from './supervisor.ts';
 const workspaces = new WeakMap<object, {
   refs: number;
   supervisor: CiWatcherSupervisor;
-  controller?: Promise<CiToolController | undefined>;
+  controller?: Promise<CiToolController> | undefined;
 }>();
 
 export function acquireCiResources(workspace: object) {
@@ -19,17 +19,25 @@ export function acquireCiResources(workspace: object) {
   let released = false;
   return {
     supervisor: shared.supervisor,
-    controller: () => shared.controller ??= CiToolController.start().catch(() => {
-      console.warn('[cez] CI-wait tool unavailable; ordinary runs remain enabled.');
-      return undefined;
-    }),
+    // hearsay-tools/cezarion#2397: only a started controller is kept. A failed start is forgotten,
+    // so the next launch after a repair starts it again.
+    controller: () => {
+      if (shared.controller) return shared.controller;
+      const starting = CiToolController.start();
+      shared.controller = starting;
+      starting.catch((error: unknown) => {
+        if (shared.controller === starting) shared.controller = undefined;
+        console.warn(`[cez] ${error instanceof Error ? error.message : String(error)}`);
+      });
+      return starting;
+    },
     release() {
       if (released) return;
       released = true;
       if (--shared.refs !== 0) return;
       workspaces.delete(workspace);
       shared.supervisor.close();
-      void shared.controller?.then(controller => controller?.close()).catch(() => {});
+      void shared.controller?.then(controller => controller.close()).catch(() => {});
     },
   };
 }

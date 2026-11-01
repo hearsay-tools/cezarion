@@ -11,6 +11,7 @@ import type { AgentInput, CiWaitResult, ConversationMessage, HumanWaitEntry, Pro
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
+import { ToolsUnavailableError } from '../ci-wait/controller.ts';
 import { ProcessWaitSupervisor } from '../process-wait/supervisor.ts';
 import { parkNoticeId } from '../delegation/park-notice.ts';
 import { checkpoint, collect, delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, timeline, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
@@ -340,52 +341,40 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
 // `describeWaitParity` passes a file's own runner to its part's group and no runner to the others.
 function baseCells(runners: RunnerId[]): void {
   for (const runner of runners) {
-    for (const tools of [false, true]) {
-      it(`${runner} U26 footer capability follows provisioning on opening, live delivery, Continue and no-session recovery (${tools ? 'tools' : 'markers'})`, async () => {
-        nativeWire(runner);
-        // Only tool availability is controlled; every prompt crosses the real native runner.
-        const capability = () => {
-          if (!tools) vi.spyOn((manager as unknown as { ciResources: { controller(): Promise<unknown> } }).ciResources, 'controller').mockResolvedValue(undefined);
-        };
-        capability();
-        const task = `${HARNESS_ADAPTERS[runner].scenarios.baseline!} footer-opening`;
-        const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task });
-        const timer: Wait = { id: randomUUID(), kind: 'timer', source: 'agent', via: 'monitoring-line', phase: 'open',
-          turnId: 'seed', seconds: 7200, registeredAt: new Date().toISOString(), deadline: new Date(Date.now() + 7_200_000).toISOString() };
-        // Persist before the asynchronous opening launch, as recovery/queued work can leave it.
-        store.updateRun(run.id, { waits: [timer] });
-        const footerOf = (text: string) => {
-          const footer = text.slice(text.lastIndexOf('Still open:'));
-          expect(footer).toContain(`Still open: timer ${timer.id} at ${timer.deadline}.`);
-          if (tools) expect(footer).toContain('Call cezar_cancel_wait for any you no longer need.');
-          else expect(footer).not.toMatch(/cezar_\w+/);
-        };
-        await until(() => parkedOn(run.id, waitOfKind(run.id, 'timer')));
-        footerOf(prompted(runner, 'footer-opening').at(-1)!);
-        const turns = turnEnds(run.id);
-        expect(manager.sendMessage(run.id, [{ type: 'text', text: 'footer-human-message' }])).toBe(true);
-        await until(() => prompted(runner, 'footer-human-message').length > 0 && turnEnds(run.id) > turns && store.getRun(run.id)?.status === 'waiting');
-        footerOf(prompted(runner, 'footer-human-message').at(-1)!);
-        const handlers = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
-        const registered = await handlers.registerWait({ kind: 'timer', seconds: 60, note: 'footer-agent-wake' }, 'cezar_wait', new AbortController().signal);
-        if (!('wait' in registered)) throw Error('registration refused');
-        fireTimer(registered.wait.id);
-        await until(() => settled(run.id, registered.wait.id)?.phase === 'delivered' && prompted(runner, 'footer-agent-wake').length > 0 && store.getRun(run.id)?.status === 'waiting');
-        footerOf(prompted(runner, 'footer-agent-wake').at(-1)!);
-        engine().active.get(run.id)!.session.end();
-        await until(() => !manager.isActive(run.id));
-        expect(manager.continueRun(run.id, { text: 'footer-continue' }).ok).toBe(true);
-        await until(() => prompted(runner, 'footer-continue').length > 0 && store.getRun(run.id)?.status === 'waiting');
-        footerOf(prompted(runner, 'footer-continue').at(-1)!);
-        await restart();
-        capability();
-        expect(manager.isActive(run.id)).toBe(false);
-        expect(manager.continueRun(run.id, { text: 'footer-after-recovery' }).ok).toBe(true);
-        await until(() => prompted(runner, 'footer-after-recovery').length > 0 && store.getRun(run.id)?.status === 'waiting');
-        footerOf(prompted(runner, 'footer-after-recovery').at(-1)!);
-        expect(store.getRun(run.id)?.waits).toEqual([timer]);
-      });
-    }
+    it(`${runner} U26 a launch whose cezar tools cannot start fails with the cause, frees its slot, and the next launch after the repair is taught the tools`, async () => {
+      nativeWire(runner);
+      retryAtOnce();
+      const resources = (manager as unknown as { ciResources: { controller(): Promise<unknown> } }).ciResources;
+      const broken = () => vi.spyOn(resources, 'controller').mockRejectedValueOnce(new ToolsUnavailableError("ENOSPC: no space left on device, mkdtemp '/tmp/cez-ci-XXXXXX'", '/tmp'));
+      const cause = /Cezar tools could not start: ENOSPC: no space left on device, mkdtemp '\/tmp\/cez-ci-XXXXXX'\. .*Free space in \/tmp or fix its permissions, then Continue the task\./;
+      // A fresh start: nothing spawns, the step and the run fail with the cause.
+      broken();
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: `${HARNESS_ADAPTERS[runner].scenarios.baseline!} u26-opening` });
+      await until(() => store.getRun(run.id)?.status === 'failed' && !manager.isActive(run.id));
+      expect(store.getRun(run.id)?.error).toMatch(cause);
+      expect(store.getRun(run.id)?.steps[0]).toMatchObject({ status: 'failed', error: expect.stringMatching(cause) });
+      expect(prompted(runner, 'u26-opening')).toEqual([]);
+      // Its slot is free: at maxParallel 1 another task starts.
+      expect(semaphore.maxParallel()).toBe(1);
+      const other = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: `${HARNESS_ADAPTERS[runner].scenarios.baseline!} u26-other` });
+      await until(() => prompted(runner, 'u26-other').length > 0 && store.getRun(other.id)?.status === 'waiting');
+      engine().active.get(other.id)!.session.end();
+      await until(() => !manager.isActive(other.id));
+      // The repair: Continue starts the tools and the session learns them.
+      expect(manager.continueRun(run.id, { text: 'u26-continue' }).ok).toBe(true);
+      await until(() => prompted(runner, 'u26-continue').length > 0 && store.getRun(run.id)?.status === 'waiting');
+      // A wake with no live session: the failed launch keeps the result, and the retry delivers it.
+      const handlers = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const registered = await handlers.registerWait({ kind: 'timer', seconds: 60, note: 'u26-wake' }, 'cezar_wait', new AbortController().signal);
+      if (!('wait' in registered)) throw Error('registration refused');
+      engine().active.get(run.id)!.session.end();
+      await until(() => !manager.isActive(run.id));
+      broken();
+      fireTimer(registered.wait.id);
+      await until(() => settled(run.id, registered.wait.id)?.phase === 'delivered' && prompted(runner, 'u26-wake').length > 0 && store.getRun(run.id)?.status === 'waiting');
+      expect(store.getRun(run.id)?.steps.filter(step => step.status === 'failed').map(step => step.error)).toEqual([expect.stringMatching(cause), expect.stringMatching(cause)]);
+      expect(inputsFor(run.id, registered.wait.id).map(input => input.text)).toEqual([timerText(registered.wait, 'u26-wake')]);
+    });
 
     it(`${runner} U1 ci and timer register through cezar_wait on the native wire, park, and wake with their result`, async () => {
       const external = github();

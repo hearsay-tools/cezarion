@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { askPayloadOf, askRequestOf } from '@open-mercato/cezar-contract/pending-ask';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
 import { AgentTempDirError } from '../../runs/agent-tmpdir.ts';
+import { ToolsUnavailableError } from '../../ci-wait/controller.ts';
 import { AgentAccountUnavailableError } from '../../workspace/agent-profiles.ts';
 import { artifactInstructions } from '../../artifacts/lifecycle.ts';
 import { handoffInstructions } from '../../handoff.ts';
@@ -82,13 +83,27 @@ export interface LaunchPreambleHost {
   launchStale(runId: string, state: ActiveRun, delegation: LaunchDelegation, ciTools: LaunchCiTools): boolean;
 }
 
-export async function launchPreamble(host: LaunchPreambleHost, runId: string, state: ActiveRun) {
+/** A launch's provisioning. `toolsError` (hearsay-tools/cezarion#2397): the lifecycle tools could
+ *  not start, so this launch spawns nothing; its delegation is already revoked and the caller
+ *  settles the run with the message. */
+export async function launchPreamble(host: LaunchPreambleHost, runId: string, state: ActiveRun):
+  Promise<{ delegation: LaunchDelegation; webhooksPart: string | undefined; ciTools: LaunchCiTools; stale: boolean; toolsError?: string }> {
   const delegation = host.provisionSession(runId, state);
   // Read before the cancellation checks below, which also cover this await (hearsay-tools/cezarion#1576).
   const webhooksPart = await host.agentWebhooksPart();
-  const ciTools = await host.provisionCiSession(runId, state);
+  let ciTools: LaunchCiTools;
+  let toolsError: string | undefined;
+  try {
+    ciTools = await host.provisionCiSession(runId, state);
+  } catch (error) {
+    if (!(error instanceof ToolsUnavailableError)) throw error;
+    toolsError = error.message;
+  }
   const stale = host.launchStale(runId, state, delegation, ciTools);
-  return { delegation, webhooksPart, ciTools, stale };
+  if (stale || toolsError === undefined) return { delegation, webhooksPart, ciTools, stale };
+  delegation?.revoke();
+  if (state.revokeDelegation === delegation?.revoke) state.revokeDelegation = undefined;
+  return { delegation: undefined, webhooksPart, ciTools: undefined, stale: false, toolsError };
 }
 
 
@@ -182,8 +197,7 @@ export function launchOpening(context: RunModuleContext, host: SessionHelperHost
   stepId: string,
   launch: { body: string; ciTools: LaunchCiTools; checkpoint?: RunRecord['continuationMessage'] },
 ): LaunchOpening {
-  // Opening prompts bypass live delivery; do not infer tools before provisioning finishes.
-  const footer = openWaitsFooter(context.store.getRun(runId)?.waits ?? [], { tools: !!launch.ciTools });
+  const footer = openWaitsFooter(context.store.getRun(runId)?.waits ?? []);
   const prompt = withResumeContext(footer ? `${launch.body}\n\n${footer}` : launch.body, launch.checkpoint);
   const sessionContext = host.sessionContextFor(runId, state, stepId, prompt);
   return { userPrompt: sessionContext.prefix + prompt, handoffInjected: sessionContext.handoffInjected };
@@ -208,7 +222,7 @@ export function launchSystemTail(context: RunModuleContext, host: SessionHelperH
     host.automationsPart(),
     launch.webhooksPart,
     artifactInstructions(launch.env.CEZ_ARTIFACTS_DIR),
-    handoffInstructions({ tools: !!launch.ciTools, handoffInjected: launch.handoffInjected }),
+    handoffInstructions({ handoffInjected: launch.handoffInjected }),
   );
 }
 

@@ -19,9 +19,10 @@ const lastCiWaitOf = (id: string) => [...(store.getRun(id)?.lastWaits ?? [])].re
 const parked = (id: string) => ciWaitOf(id)?.phase === 'open' && store.getRun(id)?.status === 'waiting';
 
 const externalResource = vi.hoisted(() => ({ supervisor: {} }));
-vi.mock('../ci-wait/resources.ts', () => ({ acquireCiResources: () => ({
-  supervisor: externalResource.supervisor, controller: async () => undefined, release() {},
-}) }));
+vi.mock('../ci-wait/resources.ts', async importOriginal => {
+  const original = await importOriginal<typeof import('../ci-wait/resources.ts')>();
+  return { acquireCiResources: (workspace: object) => ({ ...original.acquireCiResources(workspace), supervisor: externalResource.supervisor }) };
+});
 
 const identity = { prUrl: 'https://github.com/acme/repo/pull/12', repository: 'acme/repo', prNumber: 12, headSha: 'a'.repeat(40) };
 function github() {

@@ -14,11 +14,12 @@ import { timed, type TimedWait } from './waits.testkit.ts';
 import { readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { ciWatchRequest, waitResultText } from './waits.ts';
 
-// Tool transport is exercised by adapter parity; lifecycle tests control only external resources.
+// Tool transport is exercised by adapter parity; lifecycle tests control only the CI supervisor.
 const externalResource = vi.hoisted(() => ({ supervisor: {} }));
-vi.mock('../ci-wait/resources.ts', () => ({ acquireCiResources: () => ({
-  supervisor: externalResource.supervisor, controller: async () => undefined, release() {},
-}) }));
+vi.mock('../ci-wait/resources.ts', async importOriginal => {
+  const original = await importOriginal<typeof import('../ci-wait/resources.ts')>();
+  return { acquireCiResources: (workspace: object) => ({ ...original.acquireCiResources(workspace), supervisor: externalResource.supervisor }) };
+});
 
 const pr = 'https://github.com/acme/repo/pull/12';
 const identity = { prUrl: pr, repository: 'acme/repo', prNumber: 12, headSha: 'a'.repeat(40) };
@@ -512,10 +513,8 @@ const waitById = (id: string, waitId: string) => store.getRun(id)?.waits?.find((
 const settledById = (id: string, waitId: string) => store.getRun(id)?.lastWaits?.find(entry => entry.id === waitId);
 const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?.filter(input => input.id === waitId) ?? [];
 const fireTimer = (waitId: string) => runInternals(manager).waitWatches.waitTimers.get(waitId)!.timer._onTimeout();
-/** This suite's sessions have no cezar tool controller (`controller: async () => undefined`), so a
- *  timer wakes them in the marker wording (hearsay-tools/cezarion#1234). */
 const timerFired = (waitId: string, note: string) =>
-  `Timer ${waitId} fired: ${note}. Continue toward the task goal. If the watched work is still pending, end your final message with CEZ:MONITORING.`;
+  `Timer ${waitId} fired: ${note}. Continue toward the task goal; register another wait if you are still waiting.`;
 const flushMicrotasks = async () => { for (let n = 0; n < 5; n++) await Promise.resolve(); };
 
 /** External GitHub per PR number: each watch settles on its own; a gate holds every lookup. */

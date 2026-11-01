@@ -138,7 +138,7 @@ test('chainStepNote names the step position, total, and skill for every step of 
   assert.ok(first?.includes('om-auto-review-pr'));
   assert.ok(second?.includes('step 2 of 2'));
   assert.ok(second?.includes('om-auto-verify-pr-ui'));
-  for (const note of [first, second]) assert.ok(note?.includes('CEZ:DONE'));
+  for (const note of [first, second]) assert.ok(note?.includes('cezar_done'));
   // The whole point: tell a step that HAS a predecessor that the predecessor's
   // completion isn't its own. On step 1 that premise is false, so it is left out.
   assert.ok(second?.includes("does not mean step 2's work is done"));

@@ -120,6 +120,8 @@ export class StepSession {
       state.currentStepId = undefined;
       return null;
     }
+    // The step fails before anything spawns, like a refused model (hearsay-tools/cezarion#2397).
+    if (launch.toolsError !== undefined) return launch.toolsError;
     state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
     const launchOpening = sessionEvents.launchOpening(this.context, this.sharedHost, runId, state, step.id, { body: opening.userPrompt, ciTools });
     const session = this.startStepSession(runId, state, runner, {

@@ -366,7 +366,7 @@ export class WaitRegistry {
     const resolvedAt = new Date().toISOString();
     const settled = settledWaitEntry(latest, result, observed, resolvedAt);
     const input: AgentInput = { id: waitInputId(settled), parentRunId: runId, source: 'lifecycle', createdAt: resolvedAt,
-      text: waitResultText(settled, { tools: !state?.toolless, workerStatus: this.workerStatus }) };
+      text: waitResultText(settled, { workerStatus: this.workerStatus }) };
     this.context.store.commitWait(runId, settled, input);
     try { this.host.queueWaitWake(runId); }
     catch { this.host.retryWaitAdmission(runId); }
