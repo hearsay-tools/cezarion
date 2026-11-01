@@ -75,6 +75,12 @@ const GOLDEN_FIXTURES = [
   // Hook frames as `--include-hook-events` emits them (CLI 2.1.301), trimmed from a
   // live capture (#961): silent hooks map to nothing, the rest to one hook item each.
   'hooks',
+  // A backgrounded Agent (hearsay-tools/cezarion#2431), reconstructed — not captured from
+  // stream-json — from a live CLI 2.1.303 session transcript: its `async_launched` result,
+  // `task_started`/`task_notification` frames and the unprompted parent turn after the
+  // notification. The root item stays running past the turn end; the repeated notification
+  // maps to nothing.
+  'background-agent',
 ] as const;
 
 describe('claude → v2 golden fixtures', () => {
