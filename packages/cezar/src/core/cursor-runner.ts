@@ -72,11 +72,12 @@ export class CursorRunner implements AgentRunner {
     return this.lastSession = new SelectingCursorSession(select, makeRunner, spec, onEvent, opts);
   }
 
+  async interrupt(): Promise<void> { this.lastSession?.interrupt(); }
+
   run(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void): Promise<AgentRunResult> {
     return this.startSession(spec, onEvent, { autoEndAfterFirstTurn: true }).result;
   }
 
-  async interrupt(): Promise<void> { this.lastSession?.interrupt(); }
 }
 
 class SelectingCursorSession implements AgentSession {
