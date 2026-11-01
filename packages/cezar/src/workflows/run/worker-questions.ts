@@ -4,13 +4,14 @@ import type { ActiveRun } from '../active-run.ts';
 import type { RunRecord } from '../../runs/store.ts';
 import type { ConversationState } from '@open-mercato/cezar-contract';
 import type { ConversationMessage } from '@open-mercato/cezar-contract/conversations';
+import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import type { HumanWaitEntry, WaitVia } from '@open-mercato/cezar-contract/waits';
 import type { AskRequest } from '../../core/ask.ts';
 import type { PastedContent } from '../pasted-content.ts';
 import { askRequestOf } from '@open-mercato/cezar-contract/pending-ask';
 import { hasLiveInboxClaim } from '../../delegation/input.ts';
 import { commitNewMessage, inboxSlotsUsed, projectConversationEvents } from '../../delegation/conversations.ts';
-import { questionMessage, reservedReplies } from '../../delegation/questions.ts';
+import { answersQuestion, questionMessage, reservedReplies } from '../../delegation/questions.ts';
 import { messagedParentSince, parkNoticeIdInUse, parkNoticeMessage, parkNoticeWait, parkingTurn } from '../../delegation/park-notice.ts';
 import { workerQuestionFallback } from '../question-routing.ts';
 import { WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE } from '../turn-end.ts';
@@ -35,6 +36,10 @@ interface WorkerQuestionsHost {
   updatePendingHumanAsk(id: string, value: boolean): void;
 }
 type HumanAnswerBudget = { spent: number };
+/** Who answers a worker's pending question. */
+export type QuestionAnswerSource = 'parent';
+/** The undelivered input that answers a worker's pending question, and who sent it. */
+export interface QuestionAnswer { askSeq: number; input: AgentInput; source: QuestionAnswerSource }
 
 /** A worker's second turn end with no wait or done asks its parent, as a routed open question
  *  (hearsay-tools/cezarion#1301). */
@@ -161,6 +166,20 @@ export class WorkerQuestions {
     const message = root?.delegation?.role === 'root'
       ? root.delegation.conversation?.messages.find(entry => entry.id === ask.routedMessageId) : undefined;
     return message ? { askSeq: ask.seq, message } : undefined;
+  }
+
+  /** The one reader of what answers a worker's pending question (hearsay-tools/cezarion#2410):
+   *  waking, delivering, reopening and recording an answer all read it here. */
+  pendingAnswer(runId: string): QuestionAnswer | undefined {
+    const routed = this.routedAsk(runId);
+    const input = routed && this.context.store.getRun(runId)?.agentInputs?.find(entry => !entry.deliveredAt && answersQuestion(routed.message, entry));
+    return routed && input ? { askSeq: routed.askSeq, input, source: 'parent' } : undefined;
+  }
+
+  /** Who sent `input` as the answer to the worker's pending question; undefined when it is no answer. */
+  answerSource(runId: string, input: AgentInput): QuestionAnswerSource | undefined {
+    const routed = this.routedAsk(runId);
+    return routed && answersQuestion(routed.message, input) ? 'parent' : undefined;
   }
 
   /** A routed question settled without a reply (its worker stopped, a deadline, fallback) can

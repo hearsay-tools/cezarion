@@ -1,4 +1,4 @@
-import type { ConversationMessage } from '@open-mercato/cezar-contract/conversations';
+import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import type { ContentBlock } from '../../core/agent-runner.ts';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
 import type { ActiveRun } from '../active-run.ts';
@@ -7,9 +7,10 @@ import { contentBlocksOf, type PastedContent, type PersistedAttachment } from '.
 import { stepKind } from '../types.ts';
 import { agentInputOutcomeText } from './input-batch.ts';
 import type { ContinuationOpening, Execution } from './types.ts';
+import type { QuestionAnswerSource } from './worker-questions.ts';
 
 export interface OpeningHost {
-  routedAsk(runId: string): { askSeq: number; message: ConversationMessage } | undefined;
+  answerSource(runId: string, input: AgentInput): QuestionAnswerSource | undefined;
   readPersistedAttachments(runId: string, urls: string[], kind: 'task' | 'queued' | 'continuation'): { blocks: ContentBlock[]; attachments: PersistedAttachment[] };
 }
 
@@ -31,18 +32,18 @@ export function continuationOpening(
   // the current obligation outcome without replacing that composed prompt.
   // A parent's answer to a routed question (#505) is shown as its conversation reply, not
   // as a human message, and its own reply outcome is not news to the worker.
-  const parentAnswer = openingInput?.conversation?.kind === 'reply' && host.routedAsk(runId) !== undefined;
+  const answerSource = openingInput ? host.answerSource(runId, openingInput) : undefined;
   let prompt = input.prompt;
-  if (openingInput && !parentAnswer) prompt += agentInputOutcomeText(openingInput, store.getRun(openingInput.parentRunId));
+  if (openingInput && !answerSource) prompt += agentInputOutcomeText(openingInput, store.getRun(openingInput.parentRunId));
   const { openingImages, attachments } = continuationImages(host, runId, stepId, checkpoint, input);
-  if (checkpoint?.origin !== 'lifecycle' && !parentAnswer) store.appendEvent(runId, {
+  if (checkpoint?.origin !== 'lifecycle' && !answerSource) store.appendEvent(runId, {
     type: 'user-message',
     stepId,
     text: prompt,
     imageCount: openingImages.filter((b) => b.type === 'image').length,
     ...(attachments.length ? { images: attachments.map((saved) => saved.url) } : {}),
   });
-  return { prompt, checkpoint, parentAnswer, openingImages, attachments };
+  return { prompt, checkpoint, ...(answerSource ? { answerSource } : {}), openingImages, attachments };
 }
 
 /** A Continue's opening images and attachments. */
