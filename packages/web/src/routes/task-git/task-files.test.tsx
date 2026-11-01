@@ -6,11 +6,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createQueryClient } from '@/api/query-client'
 import type { ApiRun, HealthResponse, WorktreeEntry } from '@open-mercato/cezar-api-client'
 
+import { clearFilesViewMemory } from './files-view-memory'
 import { TaskFilesRoute } from './task-files'
 
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  clearFilesViewMemory()
 })
 
 // ---- fixtures --------------------------------------------------------------------------------
@@ -106,13 +108,20 @@ function HistoryBack() {
   return <button onClick={() => void navigate(-1)}>History Back</button>
 }
 
+function GoToReader() {
+  const navigate = useNavigate()
+  return <button onClick={() => void navigate('/tasks/r1/report?path=report.html')}>Go to reader</button>
+}
+
 function renderFilesRoute(search = '') {
   render(
     <QueryClientProvider client={createQueryClient()}>
       <MemoryRouter initialEntries={[`/tasks/r1/files${search}`]}>
         <HistoryBack />
+        <GoToReader />
         <Routes>
           <Route path="/tasks/:id/files" element={<TaskFilesRoute />} />
+          <Route path="/tasks/:id/report" element={<p>reader</p>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -130,6 +139,22 @@ async function openFile(path: string) {
 // ---- the route -------------------------------------------------------------------------------
 
 describe('the Files tab route', () => {
+  it('reopens the tree where it was on Back from the reader: same folders open, same pane scroll', async () => {
+    stubFetch()
+    renderFilesRoute('?path=hello.ts')
+    fireEvent.click(await waitFor(() => { const dir = treeButton('files-dir', 'src'); expect(dir).not.toBeNull(); return dir! }))
+    await waitFor(() => expect(treeButton('files-file', 'src/nested.md')).not.toBeNull())
+    const pane = document.querySelector<HTMLElement>('[data-slot="files-tree-pane"]')!
+    pane.scrollTop = 120
+    fireEvent.scroll(pane)
+    fireEvent.click(screen.getByRole('button', { name: 'Go to reader' }))
+    await screen.findByText('reader')
+    fireEvent.click(screen.getByRole('button', { name: 'History Back' }))
+    await waitFor(() => expect(treeButton('files-file', 'src/nested.md')).not.toBeNull())
+    expect(treeButton('files-dir', 'src')!.dataset.state).toBe('open')
+    await waitFor(() => expect(document.querySelector<HTMLElement>('[data-slot="files-tree-pane"]')!.scrollTop).toBe(120))
+  })
+
   it('offers no source toggle or reader for an HTML file it cannot read', async () => {
     stubFetch()
     renderFilesRoute('?path=huge.html')

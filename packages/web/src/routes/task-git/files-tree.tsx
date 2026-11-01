@@ -6,6 +6,7 @@ import { useState } from 'react'
 import { useRunFile } from '@/api/queries'
 import { cn } from '@/lib/utils'
 
+import { isFolderOpen, rememberFolder } from './files-view-memory'
 import { formatFileSize } from './worktree-files'
 
 /**
@@ -117,7 +118,8 @@ function DirNode({
   selected: string | null
   onSelect: (path: string) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(() => isFolderOpen(runId, path))
+  const toggle = () => setOpen((value) => { rememberFolder(runId, path, !value); return !value })
   return (
     <li>
       <button
@@ -126,7 +128,7 @@ function DirNode({
         data-path={path}
         data-state={open ? 'open' : 'closed'}
         aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
+        onClick={toggle}
         className="flex min-h-11 md:min-h-8 w-full min-w-0 items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-muted-foreground hover:bg-muted hover:text-foreground"
         style={{ paddingLeft: `${6 + depth * 14}px` }}
       >
