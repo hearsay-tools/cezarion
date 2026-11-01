@@ -50,7 +50,7 @@ test('only native PRs resolve and attest test inputs, after both complete suites
   const { jobs } = ci(); const input = jobs['pr-test-input'], attestation = jobs['pr-test-attestation'];
   assert.equal(input.steps[0].with.ref, '${{ github.workflow_sha }}');
   assert.equal(input.steps[0].with['persist-credentials'], false);
-  assert.deepEqual(input.permissions, { contents: 'read' });
+  assert.deepEqual(input.permissions, { contents: 'read', 'pull-requests': 'read' });
   assert.deepEqual(attestation.permissions, {});
   assert.deepEqual(attestation.needs, ['pr-test-input', 'vitest', 'cockpit-browser']);
   assert.equal(attestation.name, 'Attest PR test inputs / ${{ github.workflow_sha }} / ${{ github.event.pull_request.head.sha }}');

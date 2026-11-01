@@ -14,8 +14,8 @@ function reusableHead(commit, comparison, head, merge, workflowSha) {
 async function resolvePrTestInput({ github, owner, repo, pullNumber, head, workflowSha, headRepository, now = Date.now }) {
   const read = reader(github, owner, repo, now() + 45000, now);
   if (!Number.isSafeInteger(pullNumber) || pullNumber < 1 || !validSha(head)) throw new Error('Invalid PR input');
-  const ref = await read('GET /repos/{owner}/{repo}/git/ref/{ref}', { ref: `pull/${pullNumber}/merge` });
-  const sha = ref?.object?.sha;
+  const pull = await read('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: pullNumber });
+  const sha = pull?.merge_commit_sha;
   if (!validSha(sha)) throw new Error('Missing PR merge revision');
   const merge = await read('GET /repos/{owner}/{repo}/git/commits/{commit_sha}', { commit_sha: sha });
   requireMergeInput(merge, sha, head);

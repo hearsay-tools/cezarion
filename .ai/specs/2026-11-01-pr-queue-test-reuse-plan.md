@@ -14,7 +14,8 @@ This changes the workflow test's unconditional-suite expectation; that test pinn
 combined-code verification. The replacement pins immutable source identity,
 complete native suites, current serial membership, and full fallback.
 
-Resolve PR test checkouts once to an immutable merge commit. For a same-repository
+Resolve PR test checkouts once to an immutable merge commit, using the supported
+pull-request endpoint and validating the returned commit parents. For a same-repository
 PR whose merge base equals the trusted workflow SHA, require the head to contain
 that base and have the same tree as the merge commit. Pin both test matrices to
 that head. A read-only workflow job records successful attestation in its name:
@@ -82,7 +83,7 @@ or browser specs change.
 
 ## Local validation
 
-- Focused bundled node coverage: 241 tests passed; all 135 changed functions
+- Focused bundled node coverage: 244 tests passed; all 138 changed functions
   measured, maximum complexity and CRAP both 18.
 - `proof_base` above, command
   `node --test --test-name-pattern='verified queue suites run only a reuse receipt' .github/scripts/pr-test-reuse.workflow.test.cjs`
@@ -95,3 +96,10 @@ or browser specs change.
   passed on the workflow. Citations and whitespace checks passed.
 - The native PR and final-definition bare dispatch remain the required hosted
   gate. Neither can prove a live merge-group reuse hit before this workflow lands.
+
+- Review follow-up uses `GET /pulls/{pull_number}` with read permission to
+  resolve `merge_commit_sha`, then retains the same parent validation. Pending,
+  absent and invalid SHAs fail closed. The supported-endpoint regression fails
+  against `5957571fb281ebe3c679b613595b5b6cd9a48df7` with synthetic refs unavailable
+  and passes with the fix; evidence is retained in
+  `.ai/qa/pr-queue-reuse/input-endpoint-proof.json`.

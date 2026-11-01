@@ -1230,6 +1230,7 @@ jobs:
     timeout-minutes: 2
     permissions:
       contents: read
+      pull-requests: read
     outputs:
       sha: ${{ steps.input.outputs.sha }}
       reusable: ${{ steps.input.outputs.reusable }}

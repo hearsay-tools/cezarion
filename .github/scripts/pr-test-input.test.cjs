@@ -4,14 +4,15 @@ const assert = require('node:assert/strict');
 const { resolvePrTestInput, attestationName } = require('./pr-test-input.cjs');
 const MERGE = 'a'.repeat(40), BASE = 'b'.repeat(40), HEAD = 'c'.repeat(40), TREE = 'd'.repeat(40);
 function fixture() {
-  const s = { ref: { object: { sha: MERGE } }, merge: { sha: MERGE, parents: [{ sha: BASE }, { sha: HEAD }], tree: { sha: TREE } },
+  const s = { pull: { merge_commit_sha: MERGE }, merge: { sha: MERGE, parents: [{ sha: BASE }, { sha: HEAD }], tree: { sha: TREE } },
     head: { sha: HEAD, tree: { sha: TREE } }, compare: { status: 'ahead', merge_base_commit: { sha: BASE } }, calls: [] };
   const options = { owner: 'o', repo: 'r', pullNumber: 7, head: HEAD, workflowSha: BASE, headRepository: 'o/r',
     github: { request: async (route, args) => {
       s.calls.push({ route, args });
       if (s.failAt === s.calls.length) throw new Error('private error');
       let data;
-      if (route.endsWith('/git/ref/{ref}')) data = s.ref;
+      if (route.endsWith('/pulls/{pull_number}')) data = s.pull;
+      else if (route.endsWith('/git/ref/{ref}')) throw Object.assign(new Error('synthetic ref unavailable'), { status: 404 });
       else if (route.endsWith('/compare/{basehead}')) data = s.compare;
       else data = args.commit_sha === s.merge.sha ? s.merge : s.head;
       return { data: structuredClone(data) };
@@ -22,6 +23,12 @@ test('pins an up-to-date same-repository PR to its immutable head and names its 
   const h = fixture(); assert.deepEqual(await h.run(), { sha: HEAD, reusable: true });
   assert.equal(attestationName(BASE, HEAD), `Attest PR test inputs / ${BASE} / ${HEAD}`);
   assert.ok(h.s.calls.every(c => c.args.request.timeout <= 10000));
+});
+test('uses the supported pull endpoint when synthetic Git refs are unavailable', async () => {
+  const h = fixture();
+  assert.deepEqual(await h.run(), { sha: HEAD, reusable: true });
+  assert.equal(h.s.calls[0].route, 'GET /repos/{owner}/{repo}/pulls/{pull_number}');
+  assert.equal(h.s.calls[0].args.pull_number, 7);
 });
 for (const [name, mutate] of Object.entries({
   'fork': h => { h.options.headRepository = 'fork/r'; },
@@ -39,7 +46,9 @@ for (const [name, mutate] of Object.entries({
 for (const [name, mutate] of Object.entries({
   'invalid head': h => { h.options.head = 'unknown'; },
   'invalid PR': h => { h.options.pullNumber = 0; },
-  'missing merge ref': h => { h.s.ref = {}; },
+  'missing merge SHA': h => { h.s.pull = {}; },
+  'pending merge SHA': h => { h.s.pull.merge_commit_sha = null; },
+  'invalid merge SHA': h => { h.s.pull.merge_commit_sha = 'unknown'; },
   'moved head': h => { h.s.merge.parents[1].sha = MERGE; },
   'wrong merge commit': h => { h.s.merge.sha = HEAD; },
   'missing tree': h => { h.s.merge.tree = {}; },
@@ -73,7 +82,7 @@ test('real Git merge and squash commits can share the attested head tree with di
   assert.notEqual(merge, head); assert.notEqual(squash, head); assert.notEqual(merge, squash);
   assert.equal(git('rev-parse', `${squash}^{tree}`), tree);
   const h = fixture(); h.options.head = head; h.options.workflowSha = base;
-  h.s.ref.object.sha = merge;
+  h.s.pull.merge_commit_sha = merge;
   h.s.merge = { sha: merge, tree: { sha: tree }, parents: [{ sha: base }, { sha: head }] };
   h.s.head = { sha: head, tree: { sha: tree } };
   h.s.compare.merge_base_commit.sha = git('merge-base', base, head);
