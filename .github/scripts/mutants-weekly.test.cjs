@@ -290,6 +290,9 @@ test('the earlier result is the newest earlier run that holds one for the file, 
   const earlier = await findEarlier({ github, owner: 'o', repo: 'r', runId: 9, files: [a, b], readArchive, warn: () => {} });
   assert.equal(earlier.get(a).head, 'week-1');
   assert.equal(earlier.get(b).head, 'week-3');
+  // A rerun of run 8 keeps its id: run 9 is newer and is never its earlier result.
+  const rerun = await findEarlier({ github, owner: 'o', repo: 'r', runId: 8, files: [a], readArchive, warn: () => {} });
+  assert.equal(rerun.get(a).head, 'week-3');
   const none = await findEarlier({ github: fakeGithub({ runs: [{ id: 9, created_at: 'x' }], artifacts }), owner: 'o', repo: 'r', runId: 9, files: [a], readArchive, warn: () => {} });
   assert.equal(none.get(a), undefined);
   assert.equal((await findEarlier({ github, owner: 'o', repo: 'r', runId: 9, files: [], readArchive, warn: () => {} })).size, 0);

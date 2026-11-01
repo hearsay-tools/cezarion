@@ -271,7 +271,7 @@ async function findEarlier({ github, owner, repo, runId, files, readArchive = un
   const found = new Map();
   if (files.length === 0) return found;
   const { data } = await github.rest.actions.listWorkflowRuns({ owner, repo, workflow_id: WORKFLOW_FILE, per_page: EARLIER_RUNS });
-  const runs = data.workflow_runs.filter(run => run.id !== runId).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  const runs = data.workflow_runs.filter(run => run.id < runId).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
   for (const run of runs) {
     if (files.every(file => found.has(file))) break;
     const { data: listed } = await github.rest.actions.listWorkflowRunArtifacts({ owner, repo, run_id: run.id, name: RESULTS_ARTIFACT });
