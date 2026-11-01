@@ -187,7 +187,7 @@ opened a turn counts as read when that turn completes.
 | Codex 0.155.1 | steer, observable | `turn/steer` with `expectedTurnId` and `clientUserMessageId` | `item/started` `userMessage` whose `clientId` matches — the input entered the thread's history and the next model call reads it (not a sampling timestamp: probes saw it 0.8 s and 26.7 s after the steer, mid-tool); a `turn/start` submission at its turn's completion | `turn-end.unconsumedInputIds`; a steer refused because its turn ended, or acknowledged after it completed, starts a turn with the same client id |
 | Pi 0.87.0 | steer, observable | `prompt` with `streamingBehavior: 'steer'` (never `followUp`); session starts with `set_steering_mode: all` (overrides Pi's default `one-at-a-time` — cezar owns the session and `get_state` cannot tell the default from an explicit user setting) | the user `message_start` with the submitted text; a burst of steers in `all` mode all match at the same next step, oldest pending submission first | none: pi runs an acknowledged steer in the turn or as the next prompt |
 | OpenCode 1.18.32 (V1) | steer, observable | `prompt_async` while busy; no second turn opens | the first assistant `message.updated` naming the steered user message as `parentID` | `input-unconsumed` after a 2 s quiet idle (anomalyco/opencode#46842 lost wake); a later server run for it opens its own turn |
-| Cursor 2026.09.18 | boundary | refused while busy: a second ACP `session/prompt` cancels the running turn | the turn it opens | none |
+| Cursor 2026.10.01 (print) | boundary | refused while busy: a print turn writes its prompt to stdin once, so a running turn has no input channel; input waits for the next exact-resume print process | the turn it opens | none |
 | OMP 18.4.11 | steer, observable | `prompt` with `streamingBehavior: 'steer'`; session starts with `set_steering_mode: all` | the user `message_start` with the submitted text | none: OMP's settle predicate (`rpc-session-settle.ts`) requires `queuedMessageCount === 0`, so a queued steer is read before the session settles. Source-derived; no live turn was possible (see §4 OMP) |
 
 Probe evidence for this table is in `.ai/specs/2026-09-23-immediate-worker-delivery.md`;
@@ -719,8 +719,15 @@ turn launches `agent --disable-auto-update -p --force --trust --output-format
 stream-json`; subsequent turns use `--resume` with the exact recorded native
 session ID. A mismatch fails the run. Transport identity is persisted with the
 native ID and account, so Continue and recovery retain the original transport.
-Untagged legacy Cursor sessions use ACP. Unqualified new sessions also fall back
-to ACP with a visible note that marketplace plugins are unavailable.
+Print is the only Cursor session transport: hearsay-tools/cezarion#1267 removed ACP
+sessions. A build that fails the check fails the step before inference with
+`Cursor CLI cannot run this task: <reason>`, followed by the fix: run
+`agent update`, or update Cezarion when the build is newer than it supports.
+A Continue or recovery of a session recorded on `cursor-acp`, or of an untagged
+Cursor session from before print existed, fails with an error that says the
+session cannot resume, and no Cursor process starts. Run records keep
+`sessionTransport: "cursor-acp"` readable. A step that never received a Cursor
+session ID has no conversation to lose, so its Continue opens a new print session.
 
 The print invocation supplies the run's Cezar tools through a private temporary
 plugin directory and accepts the user's existing Cursor marketplace plugins.
@@ -749,58 +756,24 @@ is kept for every print turn and revalidated under the pinned account on Continu
 Advertised legacy IDs keep their existing variant-selection path. The discovery
 child has a finite startup bound and is terminated when selection is cancelled.
 
-### Cursor ACP (hearsay-tools/cezarion#264)
+### Cursor model discovery
 
-`cursor-acp-runner.ts` launches `agent --force acp` and holds one JSON-RPC stdio
-connection across prompts. `initialize` precedes `session/new` or `session/load`;
-`session/set_model` preserves the selected model ID. Only the response to the
-matching `session/prompt` completes the parent turn. Resume history is suppressed
-before the opening prompt, so Continue cannot replay old terminal markers.
+ACP sessions were removed in hearsay-tools/cezarion#1267, and the earlier ACP runner
+(hearsay-tools/cezarion#264) is in git history. One ACP use stays, for discovery only:
+`cursor-model-catalog.ts` launches `agent acp`, sends `initialize` with
+`_meta.parameterizedModelPicker: true`, and reads the read-only
+`cursor/list_available_models` extension. It never sends `session/new`, so no session or
+inference starts. The catalog gives the canonical model IDs, parameter keys, values and
+defaults that print model admission needs (§ Cursor print); `--list-models` lists only
+legacy aliases. Older CLIs without the extension fall back to `--list-models`, without
+guessed effort. The discovery child has a finite startup bound and stops when selection
+is cancelled.
 
-`cursor-ui-mapper.ts` maps ACP message/thought chunks, tool calls and updates,
-structured diff content, plans, and Cursor todo/task extensions. Child updates
-are attributed through `subagent_spawned` metadata and cannot enter parent v1
-text. Native `cursor/ask_question` keeps its request ID until a human reply;
-nonhuman input never answers it. Option labels map back to the original option
-IDs. Free text skips the choice request and follows as a new prompt. Plan
-approval displays the plan and asks explicitly. After a human native answer,
-a successful markerless `end_turn` resumes once on the same session without a
-second human prompt (hearsay-tools/cezarion#383). An already queued human prompt takes precedence;
-rejection remains rejection. Pending asks, DONE/MONITORING markers and non-success
-stop reasons prevent this automatic resume. The intermediate ACP boundary remains
-in v2 turn accounting but emits no v1 idle handoff. Ordinary markerless turns
-without a native answer still yield to the human; completion requires `CEZ:DONE`.
-Unknown RPC methods receive a
-method-not-found error rather than leaving the provider blocked.
-
-Wire evidence: [Cursor ACP documentation](https://cursor.com/docs/cli/acp),
-[ACP schema](https://agentclientprotocol.com/protocol/v1/schema), and the installed
-Cursor CLI `2026.09.15-d2fe57e` ACP implementation. That build catches provider
-errors as an assistant chunk beginning `\n\nError: ` and then returns
-`end_turn`; the runner classifies this exact envelope as a sanitized failure.
-The local probe confirmed this with a TLS transport rejection.
-
-**Telemetry limitation:** this Cursor build emits no token usage, and its prompt
-response contains only `stopReason`. ACP's optional `usage_update` describes
-context occupancy, not cumulative token consumption. Cezar reports no invented
-usage: the UI usage rows and harness S4 carry named, inverse-asserted wire-gap
-exemptions. Other matrix rows remain required. Revisit these exemptions when
-Cursor exposes directional token usage; the fixtures document their sources.
-
-Cursor initializes with `_meta.parameterizedModelPicker: true`. It captures session
-`configOptions` and `config_option_update` snapshots, then maps generic effort to
-an advertised `effort`, `reasoning`, or `reasoning_effort` select value through `session/set_config_option`.
-It verifies the returned current value before inference; unsupported effort fails.
-`--model` pins the initial model before the ACP session is built. Advertised model
-config options are preferred, with opaque IDs and legacy `session/set_model` retained
-for compatibility. Read-only `cursor/list_available_models` supplies base models and
-parameter options; older CLIs fall back to `--list-models` without guessed effort.
-Per-session tool/command allowlists remain unsupported. Additional roots use
-`--add-dir`; Cursor's native defaults remain authoritative when no model/effort is pinned.
-
-Verified on Cursor `2026.09.15-d2fe57e`: Sonnet exposes `effort`, GPT-5.4 Mini exposes
-`reasoning`, and a live Cezar runner turn with `reasoning=low` completed successfully.
-See [ACP Session Config Options](https://agentclientprotocol.com/protocol/v1/session-config-options).
+**Telemetry limitation:** Cursor print emits no token usage: its terminal `result` frame
+carries no `usage` or `total_cost_usd`, and print mode suppresses `thinking` events and
+child-session transcripts. Cezar reports no invented usage, reasoning or nesting: the UI
+matrix rows and harness S4 carry named, inverse-asserted wire-gap exemptions. Other
+matrix rows remain required. Revisit these exemptions when Cursor exposes the data.
 
 ---
 
@@ -1074,8 +1047,8 @@ most one open timer per run and `via`: a later turn's line keeps the timer alrea
 open. With re-checks off an alias opens a `monitoring-line` human wait instead, and with
 the budget spent a `budget` one (`source: 'cezar'`); either adds a note and the run reads
 as Needs you. An autonomous run whose nudge would fire skips the alias. The ask-marker
-card opens an `ask-line` human wait with its questions, and a native ask (Codex, OpenCode,
-Cursor ACP) a `native-ask` one. A session started without cezar tools (the controller is
+card opens an `ask-line` human wait with its questions, and a native ask (Codex, OpenCode) a
+`native-ask` one. A session started without cezar tools (the controller is
 unavailable) is taught the marker lines instead of the tools, and its monitoring wake keeps
 the marker wording. `cez worker wait` is an alias too (hearsay-tools/cezarion#1235 phase 3a):
 it opens the same `worker` entry as `cezar_wait({ kind: 'worker' })` (or kind `request`), with
@@ -1317,7 +1290,7 @@ extensions and permissions when adding a collision-resistant per-session tool na
 | Claude / `claude-cli` | Add `--mcp-config` without `--strict-mcp-config`; admit only the added tool when tools are restricted; exercise fresh and resumed argv. |
 | Codex | Merge `mcp_servers` for both `thread/start` and `thread/resume`; forward internal environment names with `env_vars`; set `default_tools_approval_mode = "approve"` on that entry so Codex never asks before a cezar tool (hearsay-tools/cezarion#1294); verify discovery and invocation on both paths. |
 | OpenCode | Merge the local MCP entry into parsed runtime configuration without discarding supplied config or replacing unrelated servers; malformed configuration fails explicitly. |
-| Cursor | Supply the supported ACP descriptor and environment on `session/new` and `session/load`; verify invocation and existing permission routing. |
+| Cursor | Supply the run's cezar tools through the private temporary plugin directory of each print turn, fresh and resumed; verify invocation and existing permission routing. |
 | Pi | Add an explicit CI extension alongside the retry extension; exercise actual tool registration and calls without replacing discovered extensions or tool settings. |
 | OMP | Add an explicit CI `--extension scripts/omp-ci-wait.mjs` alongside the user's discovered extensions (never `--no-extensions`); registration is proven by `get_state.dumpTools` listing the then-current CI tool on the real binary (v18.4.11; see `core/__fixtures__/omp/README.md`). `--tools` admits exactly the names the extension registers, since OMP exits 2 on an unknown name. The extension imports `src/ci-wait/tools.ts` in a source checkout; real OMP cannot resolve the workspace contract package there, so it falls back to `dist/ci-wait/tools.js` only when that file exists and otherwise rethrows the source error. MCP injection is rejected: OMP has no CLI flag for it, only `.omp/mcp.json` files. |
 
@@ -1950,15 +1923,12 @@ maps these exits to its own wire:
   POST, once the running turn ends. (c) `discardQueuedMessages`. A follow-up sent
   while a question reply is in flight stays held until that reply succeeds, then posts
   like any other.
-- **Cursor ACP**: (a) the `turn.started` cezar emits when it shifts the follow-up off
-  its queue into `session/prompt`, after the running prompt's response. (c)
-  `discardQueuedMessages`, which a `CEZ:ASK` turn end also runs.
 - **Cursor print**: (a) the `system`/`init` frame of the print process that carries
   the follow-up, which the mapper turns into `turn.started`. (c)
   `discardQueuedMessages`, which drops the queue; for a spawned follow-up it drops
   only the hold, and that process can still run it. The queue shift and the spawn are
-  not a release. Before the wrapper picks ACP or print, it holds the follow-up itself
-  and hands it to the runner it picks.
+  not a release. Before the print qualification check passes, the wrapper holds the
+  follow-up itself and hands it to the print runner.
 - **Pi**: (a) its ack, when its write opened a normalized turn that is still open
   (cezar emits that `turn.started` at the write); for a steer, the first
   `turn.started` after its ack. (b) its user `message_start` inside an open
@@ -2441,7 +2411,7 @@ backend's initial, nonfinal, Continue, recovery and disabled paths.
 | Claude Code 2.1.312 | None (`honored: false`) | `SendMessage` and `ListAgents` also reach the session's own subagents, background agents and teammates, so no outbound tool is separate from subagent messaging. Inbound messages from other sessions are refused on every launch (`crossSessionInbound: refuse`, D3), so a native send from one Cezar task to another ends as not sent. **Known limitation:** a session Cezar starts can still list and message Claude sessions that Cezar did not start, and sessions on other machines. |
 | Codex 0.164.0 | `thread/start` and `thread/resume` `config: { "features.agent_message_board": false }` | The `multi_agent` tools (`spawn_agent`, `send_input`, `wait`) reach only agents of the same session and stay as the user configured them. The cross-thread `agent_message_board` feature is "under development" and off by default; a governed session keeps it off even when the user's config turns it on. `codex -c features.<unknown>=false features list` exits 0, so a renamed key does not fail a launch. Existing sandbox, approval, account and model settings remain unchanged. |
 | OpenCode 1.19.4 | `scripts/opencode-task-scope.mjs`, appended to the `plugin` list of `OPENCODE_CONFIG_CONTENT` | The `task` tool starts the session's own subagents, and with `task_id` it resumes any session by ID without a parent check (installed `TaskTool.execute`), which can reach another Cezar task's session. The plugin's `tool.execute.before` hook walks `session.get` parent links and refuses a `task_id` whose session tree differs from the caller's, pointing at `cez message`; a `task_id` that names no session passes (OpenCode starts a fresh subagent), and a failed lookup is refused. OpenCode appends runtime plugins to the ones its config files name, so the user's plugins keep loading. A live 1.19.4 `opencode serve` with throwaway data directories loaded the plugin next to a second plugin; its client's `session.get` returned a child's `parentID`, and 404 for an unknown ID. No session permission rule is sent. **Known limitation:** an OpenCode session that an older Cezar created or resumed under delegation carries a `task` deny, and keeps it on Continue and restart recovery: OpenCode appends permission rules and has no remove. New OpenCode sessions allow subagents. The same-user shell can still reach another session directly (`opencode run --session <id>`). |
-| Cursor 2026.10.22-27dcf5f | None (`honored: false`); ACP advertises `_meta.subagents: true`, print sends no `--allowed-tools` | The agent protocol defines `send_message` (to cloud agents); the CLI never sets `sendMessageEnabled` and has no handler. The native agent tools reach the session's own subagents. |
+| Cursor 2026.10.22-27dcf5f | None (`honored: false`); print sends no `--allowed-tools` | The agent protocol defines `send_message` (to cloud agents); the CLI never sets `sendMessageEnabled` and has no handler. The native agent tools reach the session's own subagents. |
 | OMP 18.13.1 | None (`honored: false`) | The default set (`get_state.dumpTools`) holds no cross-session tool. `irc` is an in-process bus (`irc/bus.ts`) that resolves recipients from the process's own agent registry, so it reaches only agents inside the same OMP process. `task`, `wait` and `eval` stay. |
 | pi 1.4.0 | None (`honored: false`) | No built-in cross-session tool. An extension may add one, and its name cannot be discovered as messaging. The `subagent` extension stays. |
 

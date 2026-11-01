@@ -73,7 +73,12 @@ export async function discoverCursorModels(options: CursorModelDiscoveryOptions)
   }
 }
 
-/** Read native parameter keys/defaults without creating a session or starting inference. */
+/**
+ * Read native parameter keys/defaults without creating a session or starting inference. This is
+ * cezar's one remaining use of `agent acp`, for discovery only: Cursor sessions run on print
+ * (hearsay-tools/cezarion#1267), and print model admission needs the canonical IDs and parameters
+ * that only this read-only catalog returns; `--list-models` lists legacy aliases.
+ */
 export function discoverCursorParameterizedModels(
   options: CursorModelDiscoveryOptions & { env?: Record<string, string> | undefined; signal?: AbortSignal | undefined },
 ): Promise<CursorParameterizedModel[]> {

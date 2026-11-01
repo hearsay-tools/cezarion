@@ -188,7 +188,7 @@ export class ContinuationSession {
   }
 
   /** Mark the run and the Continue's step as running, then open the step. A Cursor session resumes
-   *  on the transport it was opened with. */
+   *  on the transport it was opened with; the runner refuses an ACP one (hearsay-tools/cezarion#1267). */
   private startContinuationStep(
     runId: string,
     stepId: string,
