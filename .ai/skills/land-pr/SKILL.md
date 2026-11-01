@@ -45,9 +45,13 @@ Each item must hold at the same current head:
 4. **CI:** every required check passes on `H`; an absent or pending required
    result is not a pass. Read failures before classifying them. A flake needs
    its tracking issue and still needs a passing required check.
-5. **Review and QA:** automated review ran on `H`, zero threads remain open,
-   and `needs-qa` has `qa-approved` when present. Follow the repo's review-round
-   rules for new heads and pushback-only rounds.
+5. **Review and QA:** the required automated review check passes on `H` under
+   [the repo's review policy](../../../docs/sdlc/ci.md#automated-code-review).
+   Accept an intentional skipped review only with the trusted classification
+   and documented exemption that allow it; a missing or failed review is no
+   exemption. A caller requiring actual model execution still needs that
+   evidence. Zero threads remain open, and `needs-qa` has `qa-approved` when
+   present. Follow the repo's review-round rules for new heads and pushback.
 6. **Owner paths:** run `node .ai/skills/auto-merge/check.mjs --title '<title>'`
    against the PR's committed head in its checkout (quote the actual title with
    `shellQuote`). A "gate or test harness" result or an `AGENTS.md` edit needs
