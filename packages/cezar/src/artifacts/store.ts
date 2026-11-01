@@ -15,7 +15,7 @@ const MAX_DIRECTORY_ENTRIES = 1024;
 const readFlags = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
 const TITLE_PREFIX_BYTES = 64 * 1024;
-const TITLE_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+const TITLE_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', AMP: '&', LT: '<', GT: '>', QUOT: '"' };
 
 /** Read display text only. RCDATA markup stays literal; nothing is loaded or executed. */
 export function artifactTitle(name: string, bytes: Buffer): string | undefined {
@@ -25,17 +25,23 @@ export function artifactTitle(name: string, bytes: Buffer): string | undefined {
   const tail = String.raw`(?:[^"'<>]|"[^"]*"|'[^']*')*>`;
   const tags = new RegExp(String.raw`<!--[\s\S]*?(?:-->|$)|<(\/?)([a-z][\w:-]*)(?=[\s/>])${tail}`, 'gi');
   let templateDepth = 0;
+  let foreignDepth = 0;
   for (let tag = tags.exec(html); tag; tag = tags.exec(html)) {
     const kind = tag[2]?.toLowerCase();
     if (!kind) continue;
     const closing = tag[1] === '/';
+    if (kind === 'svg' || kind === 'math') {
+      if (closing) foreignDepth = Math.max(0, foreignDepth - 1);
+      else if (!/\/>$/.test(tag[0])) foreignDepth++;
+      continue;
+    }
     if (kind === 'template') {
       templateDepth = closing ? Math.max(0, templateDepth - 1) : templateDepth + 1;
       continue;
     }
     if (closing) continue;
     if (kind === 'plaintext') return undefined;
-    if (kind === 'title' && templateDepth === 0) {
+    if (kind === 'title' && templateDepth === 0 && foreignDepth === 0) {
       const end = new RegExp(String.raw`<\/title(?=[\s/>])${tail}`, 'gi');
       end.lastIndex = tags.lastIndex;
       const close = end.exec(html);
@@ -44,11 +50,11 @@ export function artifactTitle(name: string, bytes: Buffer): string | undefined {
         if (!code.startsWith('#')) return TITLE_ENTITIES[code] ?? entity;
         const value = code[1]?.toLowerCase() === 'x' ? Number.parseInt(code.slice(2), 16) : Number(code.slice(1));
         return value > 0 && value <= 0x10ffff && !(value >= 0xd800 && value <= 0xdfff) ? String.fromCodePoint(value) : '\uFFFD';
-      }).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 200).replace(/[\uD800-\uDBFF]$/, '');
+      }).replace(/[\u0000-\u0008\u000b\u000e-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 200).replace(/[\uD800-\uDBFF]$/, '');
       return title || undefined;
     }
     // Skip raw text even in a template: its literal closing tags cannot end the template.
-    if (/^(?:script|style|textarea|xmp|noscript|iframe|title)$/.test(kind)) {
+    if (/^(?:script|style|textarea|xmp|noscript|iframe|noembed|noframes|title)$/.test(kind)) {
       const end = new RegExp(String.raw`<\/${kind}(?=[\s/>])${tail}`, 'gi');
       end.lastIndex = tags.lastIndex;
       if (!end.exec(html)) return undefined;
