@@ -180,8 +180,10 @@ describe('health topic + cache (live-server path)', () => {
     const { app } = build();
     currentApp = app;
     await settle();
-    const capabilities = async () =>
-      ((await (await apiRequest(app, '/api/v1/health')).json()) as { capabilities: { settingsAdmin: boolean } }).capabilities;
+    const capabilities = async () => {
+      const body = (await (await apiRequest(app, '/api/v1/health')).json()) as { capabilities: { settingsAdmin: boolean } };
+      return body.capabilities;
+    };
     try {
       expect((await capabilities()).settingsAdmin).toBe(false);
       await enableRemoteSettings();
