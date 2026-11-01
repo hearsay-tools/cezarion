@@ -25,7 +25,7 @@ interface FamilyReconcilerHost {
   disarmWait(id: string): void;
   resolveWait(id: string, waitId: string, result: undefined, observed: WorkerWaitEntry): void;
   retireSettledQuestions(id: string): void;
-  fallbackRoutedQuestions(id: string, reason: string): void;
+  closeRoutedQuestions(id: string): void;
   reconcileWorkerWaits(id?: string): void;
 }
 
@@ -195,8 +195,10 @@ export class FamilyReconciler {
             // stored wait upgraded onto a finished root go (hearsay-tools/cezarion#1301).
             const stale = (parent.waits ?? []).filter(wait => wait.kind === 'worker' && (wait.phase === 'open' || wait.phase === 'resolved')).map(wait => wait.id);
             if (stale.length) { this.context.store.commitOutcome(parent.id, { kind: 'cancelled', waitIds: stale }); for (const id of stale) this.host.disarmWait(id); }
-            this.host.fallbackRoutedQuestions(parent.id, `parent-${parent.status}`);
-            for (const child of parent.delegation.role === 'root' && parent.status !== 'review' ? this.context.store.listWorkersOf(parent.id) : []) {
+            // A settled parent ends its workers' questions and its live workers with it
+            // (hearsay-tools/cezarion#2410): nothing of theirs moves to a human.
+            this.host.closeRoutedQuestions(parent.id);
+            for (const child of parent.delegation.role === 'root' ? this.context.store.listWorkersOf(parent.id) : []) {
               if (['queued', 'running', 'waiting'].includes(child.status)) this.host.cancel(child.id);
             }
           }

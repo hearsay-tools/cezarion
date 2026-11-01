@@ -233,17 +233,17 @@ export class RunRecovery {
     return undefined;
   }
 
-  /** True when a worker's root takes no more work from it: a closed root cancels the worker, and a
-   *  root in review or finishing leaves it as it is. */
+  /** True when a worker's root takes no more work from it: a settled root cancels the worker
+   *  (hearsay-tools/cezarion#2410), and a finishing root leaves it as it is. */
   private recoveryLeavesWorkerToRoot(run: RunRecord): boolean {
     if (run.delegation?.role !== 'worker') return false;
     const parent = this.context.store.getRun(run.delegation.parentRunId);
     if (parent?.delegation?.role !== 'root') return false;
-    if (['done', 'failed', 'cancelled'].includes(parent.status)) {
+    if (['done', 'review', 'failed', 'cancelled'].includes(parent.status)) {
       this.host.cancel(run.id);
       return true;
     }
-    return parent.status === 'review' || Boolean(parent.delegation.finishRequestedAt);
+    return Boolean(parent.delegation.finishRequestedAt);
   }
 
   /** An unanswered `ask.requested` with no open human wait (a row written before every ask opened

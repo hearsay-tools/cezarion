@@ -150,7 +150,7 @@ export type StepSessionLaunch = {
 export type WorkerDelegationRecord = Extract<NonNullable<RunRecord['delegation']>, { role: 'worker' }>;
 
 /** A Continue's opening message and what it carries: the checkpoint it replays, who sent it when it
- *  answers a worker's pending question (hearsay-tools/cezarion#505, #2410), and the images and
+ *  answers a worker's pending question (hearsay-tools/cezarion#505, hearsay-tools/cezarion#2410), and the images and
  *  attachments it hands over. */
 export type ContinuationOpening = {
   prompt: string;

@@ -260,8 +260,10 @@ model execution. Never silently lose an undelivered outcome.
 Parent cancellation, failure, or terminal success revokes its session credential,
 clears its wait, and requests cancellation of all unfinished workers. Preserve
 artifacts. A controller shutdown/restart is not parent terminal success and must
-not cascade-cancel recoverable work. Workers needing human input remain visible
-and retain their ask; the parent's bounded wait may expire normally.
+not cascade-cancel recoverable work. A worker's question has one addressee, its
+parent (hearsay-tools/cezarion#2410): when the parent is cancelled or fails, its
+workers are cancelled and their open questions close with them; none moves to a
+human. Continue on a worker whose parent has settled is refused, naming the parent.
 
 Task 5 review ruling: ordinary parked delegated roots remain `waiting` across
 restart even after their children finish. Inactive roots retain explicit human

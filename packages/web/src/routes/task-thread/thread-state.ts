@@ -92,13 +92,17 @@ export interface ThreadAsk {
   routedToParent?: boolean
   parentRunId?: string
   answeredBy?: 'human' | 'parent'
-  /** Finish ended the task with the question unanswered (hearsay-tools/cezarion#1260), or new input
-   *  superseded a worker's fallback question (hearsay-tools/cezarion#1301). */
-  closed?: 'finish' | 'superseded'
+  /** Finish ended the task with the question unanswered (hearsay-tools/cezarion#1260), new input
+   *  superseded a worker's fallback question (hearsay-tools/cezarion#1301), or a worker's question
+   *  ended with its parent or itself, or could not reach a live parent (hearsay-tools/cezarion#2410). */
+  closed?: AskClosedReason
   /** View-only, set by `mainTranscriptSections` (hearsay-tools/cezarion#1495), never by the
    *  reducer: the pending ask's answerable copy after the newest entry, or its original place. */
   placement?: 'origin' | 'pinned' | undefined
 }
+
+/** Why an ask closed unanswered. */
+export type AskClosedReason = 'finish' | 'superseded' | 'parent-stopped' | 'worker-stopped' | 'undeliverable'
 
 /** Native approvals belong to the live request that offered the choices, never a later turn. */
 export type ThreadPermission = Omit<UiPermissionRequestedEvent, 'type'> & {

@@ -545,13 +545,15 @@ export class InputDelivery {
     const run = this.context.store.getRun(runId);
     if (!canProceedWithRun(run, () => this.host.workerExecutionStopped(runId), run => this.host.executionBlockedByRootFinish(run))) return false;
 
-    if (userAuthored && this.host.workerQuestions.routedAsk(runId)) {
+    // Cezar's fallback question on a worker never holds what the plain park it replaced let
+    // through: an automatic message supersedes it, as a parent's input does (hearsay-tools/cezarion#1301),
+    // and so does a human message, as a Continue does (hearsay-tools/cezarion#2410). A question the
+    // worker asked itself belongs to its parent, and a human message is refused.
+    this.host.workerQuestions.supersedeWorkerFallback(runId);
+    if (userAuthored && this.host.workerQuestions.answeredElsewhere(runId)) {
       this.context.store.appendEvent(runId, { type: 'note', tone: 'warning', message: this.routedQuestionRefusal });
       return false;
     }
-    // Cezar's fallback question on a worker never holds what the plain park it replaced let
-    // through: an automatic message supersedes it, as a parent's input does (hearsay-tools/cezarion#1301).
-    if (!userAuthored) this.host.workerQuestions.supersedeWorkerFallback(runId);
     const prepared = this.prepareMessageContent(runId, state, content, userAuthored);
     const { blocks, expanded, deliverable } = prepared;
     const delivered = userAuthored ? state.session.sendMessage(deliverable) : this.host.submitAgentInput(runId, state, deliverable);

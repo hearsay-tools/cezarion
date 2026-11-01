@@ -4228,12 +4228,6 @@
     {
       "file": "packages/cezar/src/workflows/worker-questions.test.ts",
       "rule": "test-enum-literal",
-      "site": "status: 'review'",
-      "count": 3
-    },
-    {
-      "file": "packages/cezar/src/workflows/worker-questions.test.ts",
-      "rule": "test-enum-literal",
       "site": "via: 'monitoring-line'",
       "count": 1
     },

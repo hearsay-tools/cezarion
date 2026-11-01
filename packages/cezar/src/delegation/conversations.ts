@@ -51,8 +51,8 @@ function familyRecipientSettlement(root: RunRecord, request: ConversationMessage
   const deletedRecipient = !recipient && receipts.some(receipt => receipt.workerId === request.recipientRunId && receipt.deletion?.phase === 'complete');
   if (deletedRecipient || (recipient?.delegation?.role === 'worker' && recipient.delegation.destroy?.phase === 'complete')) return 'destroyed';
   if (!recipient || !['done', 'failed', 'cancelled'].includes(recipient.status) || !isSettled(recipient)) return undefined;
-  // A worker's question outlives its parent: the human answers it instead (hearsay-tools/cezarion#505).
-  if (request.question) return 'human-fallback';
+  // A worker's question ends with its parent like any request; it never moves to a human
+  // (hearsay-tools/cezarion#2410).
   return recipient.status === 'done' ? 'completed-without-reply' : recipient.status as 'failed' | 'cancelled';
 }
 

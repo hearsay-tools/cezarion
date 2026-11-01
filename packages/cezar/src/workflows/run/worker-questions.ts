@@ -7,13 +7,12 @@ import type { ConversationMessage } from '@open-mercato/cezar-contract/conversat
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import type { HumanWaitEntry, WaitVia } from '@open-mercato/cezar-contract/waits';
 import type { AskRequest } from '../../core/ask.ts';
-import type { PastedContent } from '../pasted-content.ts';
 import { askRequestOf } from '@open-mercato/cezar-contract/pending-ask';
-import { hasLiveInboxClaim } from '../../delegation/input.ts';
+import { enqueueAgentInput, hasLiveInboxClaim } from '../../delegation/input.ts';
 import { commitNewMessage, inboxSlotsUsed, projectConversationEvents } from '../../delegation/conversations.ts';
-import { answersQuestion, questionMessage, reservedReplies } from '../../delegation/questions.ts';
+import { answersQuestion, questionMessage, reservedReplies, uuidFrom } from '../../delegation/questions.ts';
 import { messagedParentSince, parkNoticeIdInUse, parkNoticeMessage, parkNoticeWait, parkingTurn } from '../../delegation/park-notice.ts';
-import { workerQuestionFallback } from '../question-routing.ts';
+import { workerQuestionRouting } from '../question-routing.ts';
 import { WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE } from '../turn-end.ts';
 import { historyDeletionPending, rootFinishRequested } from './run-guards.ts';
 import { pendingHumanAskSeq, hasPendingHumanAsk } from './pending-ask-facts.ts';
@@ -22,6 +21,7 @@ interface WorkerQuestionsHost {
   active(id: string): ActiveRun | undefined;
   deliverConversationInput(id: string): void;
   chargeAutomaticWake(id: string): number;
+  countAutomaticWakes(id: string): number;
   hasQueuedAgentInputs(id: string): boolean;
   providerOwnsInboxInput(id: string, input: string): boolean;
   reconcileWorkerWaits(id?: string): void;
@@ -36,8 +36,11 @@ interface WorkerQuestionsHost {
   updatePendingHumanAsk(id: string, value: boolean): void;
 }
 type HumanAnswerBudget = { spent: number };
-/** Who answers a worker's pending question. */
-export type QuestionAnswerSource = 'parent';
+/** Who answers a worker's pending question: its parent, or Cezar when a live parent cannot take it
+ *  (hearsay-tools/cezarion#2410). Never a human. */
+export type QuestionAnswerSource = 'parent' | 'cezar';
+/** Why a worker's question closed unanswered (hearsay-tools/cezarion#2410). */
+export type QuestionCloseReason = 'parent-stopped' | 'worker-stopped' | 'undeliverable';
 /** The undelivered input that answers a worker's pending question, and who sent it. */
 export interface QuestionAnswer { askSeq: number; input: AgentInput; source: QuestionAnswerSource }
 
@@ -49,37 +52,102 @@ export const WORKER_FALLBACK_HEADER = 'Worker idle';
 export class WorkerQuestions {
   constructor(private readonly context: RunModuleContext, private readonly host: WorkerQuestionsHost, private readonly maxAutoContinues: number) {}
 
-  /** A worker's pending question goes to its owning parent as a conversation request
-   * (#505). The worker still parks on its ask; only the parent's reply, or a human after
-   * fallback, answers it. Routing is idempotent: the message ID derives from the ask seq. */
+  /** A worker's pending question goes to its owning parent as a conversation request (#505). The
+   * worker still parks on its ask; only the parent's reply answers it. A question with no live
+   * parent, or a worker that stopped, closes; one a live parent cannot take gets Cezar's answer
+   * with the reason (hearsay-tools/cezarion#2410). Routing is idempotent: the message ID derives
+   * from the ask seq. */
   routeWorkerQuestion(workerId: string): void {
     const worker = this.context.store.getRun(workerId);
     if (worker?.delegation?.role !== 'worker') return;
     const ask = this.context.store.transcriptFacts(workerId).pendingAsk;
     if (!ask || ask.routedMessageId !== undefined || ask.fallback) return;
-    const fallback = (reason: string) => { this.context.store.appendEvent(workerId, { type: 'worker-question-fallback', askSeq: ask.seq, reason }); };
+    if (this.undeliveredAnswer(workerId, ask.seq)) { this.recordUndelivered(workerId, ask.seq, undefined); return; }
     const request = askRequestOf(ask);
-    if (!request) { fallback('the question cannot be carried to the parent'); return; }
+    if (!request) { this.answerUndelivered(workerId, ask.seq, 'the question is not a valid request'); return; }
     const parentId = worker.delegation.parentRunId;
     const root = this.context.store.getRun(parentId);
     const now = new Date().toISOString();
     const message = questionMessage({ workerRunId: workerId, parentRunId: parentId, askSeq: ask.seq, request, now });
     // Already committed (a crash before the routing event): the question did reach the parent,
-    // whatever its capacity or state is now. Record the routing; fallback sweeps follow.
+    // whatever its capacity or state is now. Record the routing; the close sweeps follow.
     const committed = root?.delegation?.role === 'root' && !!root.delegation.conversation?.messages.some(m => m.id === message.id);
     if (committed) {
       this.context.store.appendEvent(workerId, { type: 'worker-question-routed', askSeq: ask.seq, messageId: message.id, parentRunId: parentId });
       return;
     }
-    const routing = workerQuestionFallback(worker, root, parent => this.parentCanReceive(parent));
-    if ('reason' in routing) { fallback(routing.reason); return; }
+    const routing = workerQuestionRouting(worker, root, { unreadable: id => this.context.store.isUnreadable(id),
+      parentEnding: parent => rootFinishRequested(this.context.store, parent.id) || historyDeletionPending(this.context.store, parent.id) });
+    if ('close' in routing) { this.closeQuestion(workerId, ask.seq, routing.close); return; }
+    if ('undeliverable' in routing) { this.answerUndelivered(workerId, ask.seq, routing.undeliverable); return; }
     const { state } = routing;
     const input = { id: message.id, source: 'agent' as const, parentRunId: parentId, text: message.text, createdAt: now,
       conversation: { senderRunId: workerId, recipientRunId: parentId, kind: 'request' as const } };
-    if (!commitNewMessage(this.context.store, parentId, { ...state, messages: [...state.messages, message] }, { recipientRunId: parentId, input }, () => fallback('its message ID is already in use in the parent conversation'))) return;
+    if (!commitNewMessage(this.context.store, parentId, { ...state, messages: [...state.messages, message] }, { recipientRunId: parentId, input },
+      () => this.answerUndelivered(workerId, ask.seq, 'its message ID is already in use in the parent conversation'))) return;
     projectConversationEvents(this.context.store, this.context.store.getRun(parentId)!);
     this.context.store.appendEvent(workerId, { type: 'worker-question-routed', askSeq: ask.seq, messageId: message.id, parentRunId: parentId });
     this.host.deliverConversationInput(parentId);
+  }
+
+  /** The ID of Cezar's answer to a worker question that could not reach its parent: one per ask, so
+   *  a restart that routes again finds it instead of answering twice. */
+  undeliveredAnswerId(workerId: string, askSeq: number): string {
+    return uuidFrom(`undelivered-question:${workerId}:${askSeq}`);
+  }
+
+  /** Cezar's answer to this ask, when one was queued (hearsay-tools/cezarion#2410). */
+  private undeliveredAnswer(workerId: string, askSeq: number): AgentInput | undefined {
+    const id = this.undeliveredAnswerId(workerId, askSeq);
+    return this.context.store.getRun(workerId)?.agentInputs?.find(input => input.id === id && input.purpose === 'undelivered-question');
+  }
+
+  /**
+   * A live parent cannot take the worker's question (hearsay-tools/cezarion#2410): Cezar answers it
+   * with the reason through the answer seam a parent's reply uses, so the worker decides what to do
+   * next and no human card holds it. The answer is queued with its automatic-wake charge, so a
+   * worker that asks again cannot loop past the budget. Cezar's own "Worker idle" question, a spent
+   * budget or a queue that refuses the answer closes the question instead, and the worker parks.
+   */
+  answerUndelivered(workerId: string, askSeq: number, reason: string): void {
+    const run = this.context.store.getRun(workerId);
+    if (!run || this.undeliveredAnswer(workerId, askSeq)) return;
+    const ask = this.context.store.transcriptFacts(workerId).pendingAsk;
+    if (ask?.seq !== askSeq) return;
+    const spent = this.host.countAutomaticWakes(workerId) + 1;
+    if (this.isWorkerFallbackAsk(workerId, askSeq) || spent > this.maxAutoContinues) { this.closeQuestion(workerId, askSeq, 'undeliverable', reason); return; }
+    const parentId = run.delegation?.role === 'worker' ? run.delegation.parentRunId : workerId;
+    const notice = `Not delivered to your parent task ${parentId}: ${reason}. Decide without its answer, or message your parent later with cez message request.`;
+    const questions = askRequestOf(ask)?.questions;
+    // One `Header: answer` line per question, as a native answer seam parses a parent's reply.
+    const text = questions?.length ? questions.map(question => `${question.header}: ${notice}`).join('\n') : notice;
+    const input: AgentInput = { id: this.undeliveredAnswerId(workerId, askSeq), parentRunId: workerId, source: 'lifecycle', purpose: 'undelivered-question', text, createdAt: new Date().toISOString() };
+    try {
+      enqueueAgentInput(run, input);
+      this.context.store.commitOutcome(workerId, { kind: 'charged', automaticWakes: spent }, { enqueue: [input] });
+    } catch (error) {
+      console.warn(`[cez] undelivered question answer not queued: ${error instanceof Error ? error.message : String(error)}`);
+      this.closeQuestion(workerId, askSeq, 'undeliverable', reason);
+      return;
+    }
+    this.recordUndelivered(workerId, askSeq, reason);
+    this.host.deliverConversationInput(workerId);
+  }
+
+  /** The transcript shows the question as not delivered once, after the answer that settles it is queued. */
+  private recordUndelivered(workerId: string, askSeq: number, reason: string | undefined): void {
+    if (this.context.store.readEvents(workerId).some(event => event.type === 'worker-question-undelivered' && event.askSeq === askSeq)) return;
+    this.context.store.appendEvent(workerId, { type: 'worker-question-undelivered', askSeq, reason: reason ?? 'the parent could not take it' });
+  }
+
+  /** The worker's pending question closes unanswered (hearsay-tools/cezarion#2410), and Cezar's own
+   *  human wait for it goes. Idempotent: a question that already closed is left alone. */
+  closeQuestion(workerId: string, askSeq: number, reason: QuestionCloseReason, detail?: string): void {
+    if (this.context.store.transcriptFacts(workerId).pendingAsk?.seq !== askSeq) return;
+    if (detail) this.context.store.appendEvent(workerId, { type: 'note', tone: 'warning', message: `Question not delivered to the parent: ${detail}.` });
+    this.context.store.appendEvent(workerId, { type: 'human-ask-closed', askSeq, reason });
+    this.host.withdrawCezarHumanWaits(workerId);
+    this.host.updatePendingHumanAsk(workerId, hasPendingHumanAsk(workerId, id => pendingHumanAskSeq(this.context.store, id)));
   }
 
   /**
@@ -148,14 +216,7 @@ export class WorkerQuestions {
     for (const child of this.context.store.listWorkersOf(rootId)) this.host.noticeParkedWorker(child.id);
   }
 
-  /** A human answering a worker question its parent handed back (#505): the reviewing parent
-   * can no longer answer it, so it must not also block the human. */
-  answersFallenBackAsk(runId: string, opts: { text?: string | undefined; images?: PastedContent[] | undefined }, deferred: boolean): boolean {
-    if (deferred || !(opts.text?.trim() || opts.images?.length)) return false;
-    return !!this.context.store.transcriptFacts(runId).pendingAsk?.fallback;
-  }
-
-  /** The worker's pending ask when it went to the parent and has not fallen back to a human. */
+  /** The worker's pending ask when it went to the parent (a legacy human fallback excluded). */
   routedAsk(runId: string): { askSeq: number; message: ConversationMessage } | undefined {
     const run = this.context.store.getRun(runId);
     if (run?.delegation?.role !== 'worker') return undefined;
@@ -172,18 +233,32 @@ export class WorkerQuestions {
    *  waking, delivering, reopening and recording an answer all read it here. */
   pendingAnswer(runId: string): QuestionAnswer | undefined {
     const routed = this.routedAsk(runId);
-    const input = routed && this.context.store.getRun(runId)?.agentInputs?.find(entry => !entry.deliveredAt && answersQuestion(routed.message, entry));
-    return routed && input ? { askSeq: routed.askSeq, input, source: 'parent' } : undefined;
+    if (routed) {
+      const input = this.context.store.getRun(runId)?.agentInputs?.find(entry => !entry.deliveredAt && answersQuestion(routed.message, entry));
+      return input ? { askSeq: routed.askSeq, input, source: 'parent' } : undefined;
+    }
+    const ask = this.context.store.getRun(runId)?.delegation?.role === 'worker' ? this.context.store.transcriptFacts(runId).pendingAsk : undefined;
+    const input = ask && !ask.fallback && ask.routedMessageId === undefined ? this.undeliveredAnswer(runId, ask.seq) : undefined;
+    return ask && input && !input.deliveredAt ? { askSeq: ask.seq, input, source: 'cezar' } : undefined;
   }
 
   /** Who sent `input` as the answer to the worker's pending question; undefined when it is no answer. */
   answerSource(runId: string, input: AgentInput): QuestionAnswerSource | undefined {
     const routed = this.routedAsk(runId);
-    return routed && answersQuestion(routed.message, input) ? 'parent' : undefined;
+    if (routed) return answersQuestion(routed.message, input) ? 'parent' : undefined;
+    const ask = this.context.store.transcriptFacts(runId).pendingAsk;
+    return ask && input.purpose === 'undelivered-question' && input.id === this.undeliveredAnswerId(runId, ask.seq) ? 'cezar' : undefined;
   }
 
-  /** A routed question settled without a reply (its worker stopped, a deadline, fallback) can
-   * never be answered by the parent any more: hand it to the human on the worker (#505). */
+  /** The worker's pending question belongs to its parent or to Cezar: no human answers it. */
+  answeredElsewhere(runId: string): boolean {
+    return !!this.routedAsk(runId) || !!this.pendingAnswer(runId);
+  }
+
+  /** A routed question settled without a reply can never be answered by the parent any more: it
+   * closes (hearsay-tools/cezarion#2410). A question its worker stopped on, or a reply a stopped
+   * worker never took, closes as `worker-stopped`; one the parent's end settled closes as
+   * `parent-stopped`. A superseded fallback question closes through `supersedeWorkerFallback`. */
   retireSettledQuestions(parentId: string): void {
     const root = this.context.store.getRun(parentId);
     const conversation = root?.delegation?.role === 'root' ? root.delegation.conversation : undefined;
@@ -193,11 +268,13 @@ export class WorkerQuestions {
       // A reply still waiting for a live worker answers it; one a stopped worker never took does not.
       const worker = this.context.store.getRun(message.senderRunId);
       const live = !!worker && ['queued', 'running', 'waiting'].includes(worker.status) && !worker.stopping;
-      if (!outcome || (outcome.status === 'replied' && live)) continue;
+      if (!outcome || (live && (outcome.status === 'replied' || outcome.status === 'completed-without-reply'))) continue;
       const routed = this.routedAsk(message.senderRunId);
-      if (routed?.message.id === message.id) {
-        this.context.store.appendEvent(message.senderRunId, { type: 'worker-question-fallback', askSeq: routed.askSeq, reason: outcome.status === 'human-fallback' ? `parent-${root!.status}` : outcome.status === 'replied' ? 'worker-stopped' : `question-${outcome.status}` });
-      }
+      if (routed?.message.id !== message.id) continue;
+      // A settled parent ends the question first: it cancels its workers in the same pass.
+      const parentSettled = !['queued', 'running', 'waiting'].includes(root!.status);
+      const workerEnded = !live || outcome.status === 'sender-closed' || outcome.status === 'destroyed';
+      this.closeQuestion(message.senderRunId, routed.askSeq, workerEnded && !parentSettled ? 'worker-stopped' : 'parent-stopped');
     }
   }
 
@@ -211,32 +288,27 @@ export class WorkerQuestions {
     });
   }
 
-  /** The parent can no longer answer: its workers' routed questions go back to the human
-   * (#505). The outcome lands first, so a crash before the worker's event repeats this. */
-  fallbackRoutedQuestions(parentId: string, reason: string): void {
+  /** The parent settled (hearsay-tools/cezarion#2410): every open question of its workers closes
+   * with it, never moving to a human. The request outcome lands first, so a crash before the
+   * worker's close repeats this, and the close finds nothing left to do. */
+  closeRoutedQuestions(parentId: string): void {
     const parent = this.context.store.getRun(parentId);
     if (parent?.delegation?.role !== 'root') return;
     const state = parent.delegation.conversation ?? { messages: [], outcomes: [] };
-    const routed = this.context.store.listWorkersOf(parentId).flatMap(run => {
-      const ask = this.routedAsk(run.id);
-      // An accepted reply still on its way to a live worker answers it; no human card beside it.
-      const replied = ask && state.outcomes.some(outcome => outcome.requestId === ask.message.id && outcome.status === 'replied');
-      return ask && !(replied && ['queued', 'running', 'waiting'].includes(run.status) && !run.stopping) ? [{ workerId: run.id, ...ask }] : [];
-    });
-    if (!routed.length) return;
-    const observedAt = new Date().toISOString();
+    const workers = this.context.store.listWorkersOf(parentId);
+    const routed = workers.flatMap(run => { const ask = this.routedAsk(run.id); return ask ? [{ workerId: run.id, ...ask }] : []; });
     const missing = routed.filter(entry => !state.outcomes.some(outcome => outcome.requestId === entry.message.id));
     if (missing.length) {
+      const status = parent.status === 'failed' ? 'failed' as const : parent.status === 'cancelled' ? 'cancelled' as const : 'completed-without-reply' as const;
+      const observedAt = new Date().toISOString();
       this.context.store.commitConversation(parentId, { ...state, outcomes: [...state.outcomes,
-        ...missing.map(entry => ({ requestId: entry.message.id, status: 'human-fallback' as const, observedAt }))] });
+        ...missing.map(entry => ({ requestId: entry.message.id, status, observedAt }))] });
       projectConversationEvents(this.context.store, this.context.store.getRun(parentId)!);
     }
-    for (const entry of routed) this.context.store.appendEvent(entry.workerId, { type: 'worker-question-fallback', askSeq: entry.askSeq, reason });
-  }
-
-  /** The parent can still read and answer a routed question; answering needs its steer grant. */
-  parentCanReceive(parent: RunRecord): boolean {
-    return parent.delegation?.role === 'root' && parent.delegation.permissions.includes('steer') && this.parentTakesMessages(parent);
+    for (const run of workers) {
+      const ask = this.context.store.transcriptFacts(run.id).pendingAsk;
+      if (ask) this.closeQuestion(run.id, ask.seq, 'parent-stopped');
+    }
   }
 
   /** The parent can still read a message from its worker. */
@@ -250,8 +322,8 @@ export class WorkerQuestions {
    * (hearsay-tools/cezarion#1301): Cezar's `no-wait` human wait carries one open question, raised
    * as `ask.requested` so `routeWorkerQuestion` takes it to the parent as a request. The parent's
    * reply resumes the worker through the answer seam, charged to the worker's budget; a parent that
-   * cannot receive leaves it with the human (`worker-question-fallback`). A full wait list opens
-   * none and the worker parks as before.
+   * cannot take it closes it (hearsay-tools/cezarion#2410), and the worker parks. A full wait list
+   * opens none and the worker parks as before.
    */
   askParentForWorker(runId: string, state: ActiveRun, stepId: string | undefined): void {
     const questions = [{ header: WORKER_FALLBACK_HEADER, question: WORKER_FALLBACK_QUESTION(runId) }];

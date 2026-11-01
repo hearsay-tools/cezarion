@@ -47,19 +47,22 @@ export const humanInputDeliveredEventSchema = runEventSchema.extend({
   type: z.literal('human-input-delivered'),
   askSeq: z.number().int().nonnegative(),
   /** Who answered: absent (records before #505) or `human` is a person; `parent` is the
-   * owning parent's reply to a routed worker question. */
-  source: z.enum(['human', 'parent']).optional(),
+   * owning parent's reply to a routed worker question; `cezar` is Cezar's notice that the question
+   * could not reach a live parent (hearsay-tools/cezarion#2410). */
+  source: z.enum(['human', 'parent', 'cezar']).optional(),
 });
 export type HumanInputDeliveredEvent = z.infer<typeof humanInputDeliveredEventSchema>;
 
 /** The question was retired unanswered: an accepted Finish ended the task (`finish`,
  * hearsay-tools/cezarion#1260), or new input went to a worker whose only question was Cezar's own
- * fallback question (`superseded`, hearsay-tools/cezarion#1301). It retires the question like a
- * delivery does, but nobody answered it. */
+ * fallback question (`superseded`, hearsay-tools/cezarion#1301). A worker's question has one
+ * addressee, its parent (hearsay-tools/cezarion#2410): it also closes when the parent stopped
+ * (`parent-stopped`), when the worker stopped (`worker-stopped`), or when a live parent could not
+ * take it (`undeliverable`). It retires the question like a delivery does, but nobody answered it. */
 export const humanAskClosedEventSchema = runEventSchema.extend({
   type: z.literal('human-ask-closed'),
   askSeq: z.number().int().nonnegative(),
-  reason: z.enum(['finish', 'superseded']),
+  reason: z.enum(['finish', 'superseded', 'parent-stopped', 'worker-stopped', 'undeliverable']),
 });
 export type HumanAskClosedEvent = z.infer<typeof humanAskClosedEventSchema>;
 
@@ -72,13 +75,23 @@ export const workerQuestionRoutedEventSchema = runEventSchema.extend({
 });
 export type WorkerQuestionRoutedEvent = z.infer<typeof workerQuestionRoutedEventSchema>;
 
-/** The parent can no longer receive a routed question: a human answers it on the worker. */
+/** Legacy (hearsay-tools/cezarion#2410 stopped writing it): a routed question was handed to a human
+ *  on the worker. Kept so old transcripts still read. */
 export const workerQuestionFallbackEventSchema = runEventSchema.extend({
   type: z.literal('worker-question-fallback'),
   askSeq: z.number().int().nonnegative(),
   reason: z.string().min(1).max(200),
 });
 export type WorkerQuestionFallbackEvent = z.infer<typeof workerQuestionFallbackEventSchema>;
+
+/** A worker's question could not reach its live parent (hearsay-tools/cezarion#2410): Cezar answers
+ *  it with the reason, and no human does. */
+export const workerQuestionUndeliveredEventSchema = runEventSchema.extend({
+  type: z.literal('worker-question-undelivered'),
+  askSeq: z.number().int().nonnegative(),
+  reason: z.string().min(1).max(200),
+});
+export type WorkerQuestionUndeliveredEvent = z.infer<typeof workerQuestionUndeliveredEventSchema>;
 
 /** Linked terminal outcomes, rather than completion inferred from assistant prose. */
 export const workerOutcomeEventSchema = runEventSchema.extend({
