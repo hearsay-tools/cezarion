@@ -30,6 +30,19 @@ export type FolderMemory = {
 }
 export const FolderMemoryContext = createContext<FolderMemory | null>(null)
 
+/** A new view generation on Back or Forward to another entry, so the Files view remounts from
+ *  that entry's snapshot. A pushed selection keeps the mounted tree and records it as the new
+ *  entry's state. (Adjusting state during render: React's pattern for state derived from props.) */
+export function useFilesViewGeneration(): number {
+  const { key } = useLocation()
+  const popped = useNavigationType() === 'POP'
+  const [view, setView] = useState({ key, generation: 0 })
+  if (view.key === key) return view.generation
+  const next = { key, generation: popped ? view.generation + 1 : view.generation }
+  setView(next)
+  return next.generation
+}
+
 const mainPane = () => document.querySelector<HTMLElement>('[data-slot="main"]')
 
 /**

@@ -231,6 +231,20 @@ describe('the Files tab route', () => {
     await waitFor(() => expect(pane().scrollTop).toBe(120))
   })
 
+  it('shows each entry\'s own tree on Back between two file selections inside Files', async () => {
+    stubFetch()
+    renderFilesRoute('?path=hello.ts')
+    fireEvent.click(await waitFor(() => { const dir = treeButton('files-dir', 'src'); expect(dir).not.toBeNull(); return dir! }))
+    await waitFor(() => expect(treeButton('files-file', 'src/nested.md')).not.toBeNull())
+    await openFile('logo.png')
+    await waitFor(() => expect(document.querySelector('[data-slot="file-preview-image"]')).not.toBeNull())
+    fireEvent.click(treeButton('files-dir', 'src')!) // collapse it at the logo.png entry
+    await waitFor(() => expect(treeButton('files-dir', 'src')!.dataset.state).toBe('closed'))
+    fireEvent.click(screen.getByRole('button', { name: 'History Back' }))
+    await waitFor(() => expect(document.querySelector('[data-slot="file-preview-code"]')?.textContent).toContain("export const hi = 'world'"))
+    await waitFor(() => expect(treeButton('files-dir', 'src')!.dataset.state).toBe('open'))
+  })
+
   it('restores the pane scroll when the worktree is gone and the root listing refuses', async () => {
     stubFetch({ 'GET /api/v1/runs/r1/files?path=': () => jsonResponse({ error: 'worktree removed' }, 409) })
     renderFilesRoute('?path=hello.ts')

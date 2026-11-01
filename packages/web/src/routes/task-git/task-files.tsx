@@ -13,16 +13,17 @@ import { RunHeader } from '../task-thread/run-header'
 import { TaskFileScope } from '../task-thread/task-file-scope'
 import { LinkedFilePreview } from './linked-file-preview'
 import { FilesTree } from './files-tree'
-import { FolderMemoryContext, useFilesViewMemory } from './files-view-memory'
+import { FolderMemoryContext, useFilesViewGeneration, useFilesViewMemory } from './files-view-memory'
 import { GitTabLoadError, GitTabLoading } from './git-tab-loading'
 
 /** URL selection is the source of truth: bookmarks, reload and Back select the same file. */
 export function TaskFilesRoute() {
   const { id } = useParams<{ id: string }>()
   const run = useRun(id)
+  const generation = useFilesViewGeneration()
   if (run.isPending) return <GitTabLoading tab="files" />
   if (run.isError) return <GitTabLoadError tab="files" error={run.error} />
-  return <TaskFileScope runId={run.data.id}><FilesView key={run.data.id} run={run.data} /></TaskFileScope>
+  return <TaskFileScope runId={run.data.id}><FilesView key={`${run.data.id}:${generation}`} run={run.data} /></TaskFileScope>
 }
 
 function FilesView({ run }: { run: ApiRun }) {
