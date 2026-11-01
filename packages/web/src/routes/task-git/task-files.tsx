@@ -6,7 +6,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router'
 
 import { ApiError } from '@/api/client'
-import { useRun, useRunFile, useArtifacts } from '@/api/queries'
+import { useArtifact, useFileLink, useRun, useRunFile, useArtifacts } from '@/api/queries'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { RunHeader } from '../task-thread/run-header'
@@ -26,6 +26,16 @@ export function TaskFilesRoute() {
   return <TaskFileScope runId={run.data.id}><FilesView key={`${run.data.id}:${generation}`} run={run.data} /></TaskFileScope>
 }
 
+/** Whether the selected file's preview has loaded or failed. It reads the same queries as
+ *  LinkedFilePreview (shared cache): a return to Files restores the main pane's offset against the
+ *  loaded preview, so it waits for it as well as for the root listing. */
+function usePreviewSettled(runId: string, path: string | null, artifactId: string | null, conflict: boolean): boolean {
+  const live = useFileLink(runId, conflict || artifactId !== null ? null : path)
+  const published = useArtifact(runId, conflict ? null : artifactId)
+  if (conflict || (path === null && artifactId === null)) return true
+  return !(artifactId !== null ? published : live).isPending
+}
+
 function FilesView({ run }: { run: ApiRun }) {
   const root = useRunFile(run.id, '')
   const artifacts = useArtifacts(run.id)
@@ -43,7 +53,8 @@ function FilesView({ run }: { run: ApiRun }) {
     setQuery(next)
   }
   const refused = root.isError && root.error instanceof ApiError && root.error.status === 409
-  const memory = useFilesViewMemory(run.id, !root.isPending)
+  const previewSettled = usePreviewSettled(run.id, selected, artifactId, conflict)
+  const memory = useFilesViewMemory(run.id, !root.isPending && previewSettled)
   return <div data-route="task-files" className="flex min-h-full flex-col">
     <RunHeader run={run} tab="files" />
     <form className="flex min-w-0 gap-2 px-[18px] pt-[22px] md:px-9" onSubmit={event => { event.preventDefault(); if (filePath.trim()) select('path', filePath.trim()) }}>

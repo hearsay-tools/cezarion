@@ -268,6 +268,29 @@ describe('the Files tab route', () => {
     release()
   })
 
+  it('restores the main pane only after the selected file\'s preview has loaded again', async () => {
+    let release!: () => void
+    const preview = new Promise<void>(done => { release = done })
+    let fetches = 0
+    stubFetch({ 'GET /api/v1/runs/r1/file-link?path=hello.ts': (async () => {
+      fetches++
+      if (fetches > 1) await preview
+      return jsonResponse({ ...FILES['hello.ts'], source: 'worktree' })
+    }) as unknown as () => Response })
+    const client = renderFilesRoute('?path=hello.ts')
+    await waitFor(() => expect(document.querySelector('[data-slot="file-preview-code"]')).not.toBeNull())
+    scrollTo(mainPane(), 300)
+    fireEvent.click(screen.getByRole('button', { name: 'Go to reader' }))
+    await screen.findByText('reader')
+    client.removeQueries({ predicate: query => query.queryKey.includes('file-link') })
+    fireEvent.click(screen.getByRole('button', { name: 'History Back' }))
+    await screen.findByText('Loading file…')
+    expect(mainPane().scrollTop).toBe(0)
+    release()
+    await waitFor(() => expect(document.querySelector('[data-slot="file-preview-code"]')).not.toBeNull())
+    await waitFor(() => expect(mainPane().scrollTop).toBe(300))
+  })
+
   it('restores the pane scroll when the worktree is gone and the root listing refuses', async () => {
     stubFetch({ 'GET /api/v1/runs/r1/files?path=': () => jsonResponse({ error: 'worktree removed' }, 409) })
     renderFilesRoute('?path=hello.ts')
