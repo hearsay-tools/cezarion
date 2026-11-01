@@ -33,7 +33,7 @@ export function artifactTitle(name: string, bytes: Buffer): string | undefined {
         if (!code.startsWith('#')) return TITLE_ENTITIES[code] ?? entity;
         const value = code[1]?.toLowerCase() === 'x' ? Number.parseInt(code.slice(2), 16) : Number(code.slice(1));
         return value > 0 && value <= 0x10ffff && !(value >= 0xd800 && value <= 0xdfff) ? String.fromCodePoint(value) : '\uFFFD';
-      }).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 200);
+      }).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 200).replace(/[\uD800-\uDBFF]$/, '');
       return title || undefined;
     }
     if (kind && /^(?:script|style|template|textarea|xmp|noscript|iframe)$/.test(kind)) {

@@ -307,6 +307,8 @@ describe('report metadata', () => {
     ['report.HTML', '<TITLE> A &amp; B &copy; &#x1f600; &#233; &eacute; </TITLE>', 'A & B &copy; 😀 é &eacute;'],
     ['report.htm', '<title>  A\n B\tC\u0001D </title>', 'A B CD'],
     ['report.html', '<title>' + 'x'.repeat(250) + '</title>', 'x'.repeat(200)],
+    ['report.html', '<title>' + 'x'.repeat(199) + '😀</title>', 'x'.repeat(199)],
+    ['report.html', '<title>' + 'x'.repeat(198) + '😀</title>', 'x'.repeat(198) + '😀'],
     ['report.html', '<title><b>Text</b><script>throw 1</script></title>', '<b>Text</b><script>throw 1</script>'],
     ['report.html', ' '.repeat(65536) + '<title>Too late</title>', undefined],
     ['report.html', '<title>Unclosed &amp; malformed', undefined],
