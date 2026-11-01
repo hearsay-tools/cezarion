@@ -1183,7 +1183,7 @@ export function createApp(deps: ServerDeps) {
     const age = Date.now() - healthCache.at;
     if (age > HEALTH_MAX_STALE_MS) return refreshHealth(); // too old to serve — wait for the truth
     if (age > HEALTH_TTL_MS) void refreshHealth(); // stale: refresh, don't wait on it
-    return healthCache.payload;
+    return { ...healthCache.payload, capabilities: capabilities() }; // per request, like the gates (ADR 0055)
   };
 
   // ---- chained family: health (workspace-level) ----------------------------
