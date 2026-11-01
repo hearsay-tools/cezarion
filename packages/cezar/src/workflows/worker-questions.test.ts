@@ -780,7 +780,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     const routing = runInternals(manager).workerQuestions;
     const ask = { seq: 3, requestId: 'r', questions: [], routedMessageId: randomUUID() };
     const worker = { id: randomUUID(), delegation: { role: 'worker' as const } };
-    vi.spyOn(store, 'getRun').mockImplementation(id => (id === worker.id ? worker : undefined) as never);
+    vi.spyOn(store, 'getRun').mockImplementation(id => { return (id === worker.id ? worker : undefined) as never; });
     vi.spyOn(store, 'transcriptFacts').mockReturnValue({ pendingAsk: ask } as never);
     // routedAsk cannot load the parent's message, yet the question stays the parent's.
     expect(routing.routedAsk(worker.id)).toBeUndefined();
