@@ -21,11 +21,22 @@ const TITLE_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quo
 export function artifactTitle(name: string, bytes: Buffer): string | undefined {
   if (!/\.html?$/i.test(name)) return undefined;
   const html = bytes.subarray(0, TITLE_PREFIX_BYTES).toString('utf8');
-  const tags = /<!--[\s\S]*?(?:-->|$)|<([a-z][\w:-]*)\b(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi;
+  // Consume whole quoted attributes before interpreting another tag, including in templates.
+  const tail = String.raw`(?:[^"'<>]|"[^"]*"|'[^']*')*>`;
+  const tags = new RegExp(String.raw`<!--[\s\S]*?(?:-->|$)|<(\/?)([a-z][\w:-]*)(?=[\s/>])${tail}`, 'gi');
+  let templateDepth = 0;
   for (let tag = tags.exec(html); tag; tag = tags.exec(html)) {
-    const kind = tag[1]?.toLowerCase();
-    if (kind === 'title') {
-      const end = /<\/title(?=[\s/>])/gi;
+    const kind = tag[2]?.toLowerCase();
+    if (!kind) continue;
+    const closing = tag[1] === '/';
+    if (kind === 'template') {
+      templateDepth = closing ? Math.max(0, templateDepth - 1) : templateDepth + 1;
+      continue;
+    }
+    if (closing) continue;
+    if (kind === 'plaintext') return undefined;
+    if (kind === 'title' && templateDepth === 0) {
+      const end = new RegExp(String.raw`<\/title(?=[\s/>])${tail}`, 'gi');
       end.lastIndex = tags.lastIndex;
       const close = end.exec(html);
       if (!close) return undefined;
@@ -36,23 +47,12 @@ export function artifactTitle(name: string, bytes: Buffer): string | undefined {
       }).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 200).replace(/[\uD800-\uDBFF]$/, '');
       return title || undefined;
     }
-    if (kind && /^(?:script|style|template|textarea|xmp|noscript|iframe)$/.test(kind)) {
-      const end = new RegExp(`<\\/${kind}(?=[\\s/>])[^>]*>`, 'gi');
+    // Skip raw text even in a template: its literal closing tags cannot end the template.
+    if (/^(?:script|style|textarea|xmp|noscript|iframe|title)$/.test(kind)) {
+      const end = new RegExp(String.raw`<\/${kind}(?=[\s/>])${tail}`, 'gi');
       end.lastIndex = tags.lastIndex;
-      const close = end.exec(html);
-      if (!close) return undefined;
-      // Templates can nest. Raw-text elements end at their first matching close.
-      if (kind === 'template') {
-        const templates = /<!--[\s\S]*?(?:-->|$)|<(\/?)template(?=[\s/>])(?:[^"'<>]|"[^"]*"|'[^']*')*>/gi;
-        templates.lastIndex = tags.lastIndex;
-        let depth = 1;
-        while (depth > 0) {
-          const token = templates.exec(html);
-          if (!token) return undefined;
-          if (token[1] !== undefined) depth += token[1] === '/' ? -1 : 1;
-        }
-        tags.lastIndex = templates.lastIndex;
-      } else tags.lastIndex = end.lastIndex;
+      if (!end.exec(html)) return undefined;
+      tags.lastIndex = end.lastIndex;
     }
   }
   return undefined;

@@ -320,6 +320,19 @@ describe('report metadata', () => {
     ['report.html', '<!-- <title>Comment</title>', undefined],
     ['report.html', ' '.repeat(65520) + '<title>Outside the prefix</title>', undefined],
     ['report.html', '<template><template></template><title>Hidden</title></template><title>Shown</title>', 'Shown'],
+    ['report.html', '<template><div data-example="</template>"><title>Hidden</title></div></template><title>Real</title>', 'Real'],
+    ['report.html', '<template><script>"</template>"</script><title>Hidden</title></template><title>Real</title>', 'Real'],
+    ['report.html', '<template><!-- </template> --><title>Hidden</title></template><title>Real</title>', 'Real'],
+    ['report.html', '<template><textarea></template></textarea><title>Hidden</title></template><title>Real</title>', 'Real'],
+    ['report.html', '<template><title>Literal </template></title></template><title>Real</title>', 'Real'],
+    ['report.html', '<title>Unfinished close</title ', undefined],
+    ['report.html', '<title>Unfinished quote</title a="unfinished>', undefined],
+    ['report.html', '<script><title>Hidden</title></script ', undefined],
+    ['report.html', '<plaintext><title>Literal text</title>', undefined],
+    ['report.html', '<template><PLAINTEXT data-note="literal"></template><title>Literal text</title>', undefined],
+    ['report.html', '<title>Real</title><plaintext><title>Literal text</title>', 'Real'],
+
+
   ])('derives a bounded inert title case %# (%s)', async (name, html, title) => {
     const source = join(root, name); await writeFile(source, html);
     const artifact = await publishArtifact(dir, runId, source);
