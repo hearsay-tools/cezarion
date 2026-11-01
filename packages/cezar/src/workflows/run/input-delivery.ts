@@ -4,7 +4,7 @@ import type { ContentBlock } from '../../core/agent-runner.ts';
 import type { AgentSession } from '../../core/claude-cli-runner.ts';
 import type { RunRecord } from '../../runs/store.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
-import type { ActiveRun } from '../active-run.ts';
+import { writeInput, type ActiveRun } from '../active-run.ts';
 import type { PastedContent } from '../pasted-content.ts';
 import { contentBlocksOf, pastedAttachmentsNote } from '../pasted-content.ts';
 import { startCompletionCycle } from '../completion-policy.ts';
@@ -171,7 +171,8 @@ export class InputDelivery {
       return;
     }
     const bundle = state.atTurnBoundary === state.session ? pendingConversationBatch(this.context.store.getRun(runId), state, input => formatAgentInput(input, id => this.context.store.getRun(id)), reply.id) : undefined;
-    if (!state.session.sendMessage([{ type: 'text', text }, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : [])])) return;
+    const session = state.session;
+    if (!writeInput(state, () => session.sendMessage([{ type: 'text', text }, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : [])]))) return;
     this.context.store.appendEvent(runId, { type: 'human-input-delivered', askSeq, source });
     inputReceipts.commitRoutedAnswer(this.context, runId, state, [reply.id, ...(bundle?.inputs.map(input => input.id) ?? [])], fallback, this.maxAutoContinues);
     // Spend the answer's admission now so later messages can steer before its turn ends.
@@ -381,8 +382,8 @@ export class InputDelivery {
     // A wake beside a pending question tells the runner so: native wires refuse agent input while a portable CEZ:ASK is pending, and this input is not its answer. The question stays Cezar's and its card stays answerable; the provider's acknowledgement is still the checkpoint, and a rejected one fails the session like any other, leaving the waits resolved for a continuation.
     const besideQuestion = !!state.pendingHumanAsk;
     try {
-      acknowledgement = besideQuestion ? session.sendAgentMessage(content, inputIds, { besideQuestion })
-        : session.sendAgentMessage(content, inputIds);
+      acknowledgement = writeInput(state, () => besideQuestion ? session.sendAgentMessage(content, inputIds, { besideQuestion })
+        : session.sendAgentMessage(content, inputIds));
     }
     catch (error) { refund(); fail(error, false); state.agentInputFlight = undefined; return false; }
     if (!acknowledgement) { refund(); state.agentInputFlight = undefined; return false; }
@@ -556,7 +557,8 @@ export class InputDelivery {
     }
     const prepared = this.prepareMessageContent(runId, state, content, userAuthored);
     const { blocks, expanded, deliverable } = prepared;
-    const delivered = userAuthored ? state.session.sendMessage(deliverable) : this.host.submitAgentInput(runId, state, deliverable);
+    const session = state.session;
+    const delivered = userAuthored ? writeInput(state, () => session.sendMessage(deliverable)) : this.host.submitAgentInput(runId, state, deliverable);
     if (delivered && expanded !== blocks) this.host.runSkills.provisionLiveSlashSkill(runId, state, blocks);
     if (delivered) {
       if (userAuthored) this.applyHumanMessageDelivery(runId, state, prepared, messageId);

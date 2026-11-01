@@ -45,7 +45,7 @@ export class WakeAdmission {
   constructor(private readonly context: RunModuleContext, private readonly host: WakeAdmissionHost,
     private readonly maxAutoContinues: number, private readonly maxWakeDeliveryAttempts: number) {}
 
-  /** A timer, process or peer wait due, or still owed, once the automatic-wake budget is spent
+  /** A timer, process, peer or timed-out subagent wait due, or still owed, once the automatic-wake budget is spent
    *  wakes nothing: it is cancelled with the cap note, and the run keeps whatever else it waits on
    *  (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1446, hearsay-tools/cezarion#1995). */
   cancelAutomaticAtCap(runId: string, waits: readonly Wait[]): void {
@@ -53,7 +53,7 @@ export class WakeAdmission {
     this.context.store.commitOutcome(runId, { kind: 'cancelled', waitIds: waits.map(wait => wait.id) });
     for (const wait of waits) {
       this.host.disarmWait(wait.id);
-      this.context.store.appendEvent(runId, { type: 'note', message: wait.kind === 'process' || wait.kind === 'peer'
+      this.context.store.appendEvent(runId, { type: 'note', message: wait.kind === 'process' || wait.kind === 'peer' || wait.kind === 'subagent'
         ? `automatic ${wait.kind} wake-up cap reached (${this.maxAutoContinues}); ${wait.kind} wait ${wait.id} cancelled`
         : `automatic ${isMonitoringTimer(wait) ? 'monitoring' : 'timer'} wake-up cap reached (${this.maxAutoContinues}); timer ${wait.id} cancelled` });
     }
@@ -170,7 +170,8 @@ export class WakeAdmission {
     }
     clearIdleTimer(state);
     const top = computeWaitingOn(run)?.kind;
-    const keepsSlot = top === 'pr' || top === 'process' || top === 'timer' || (top === undefined && resolvedWaits(run).length > 0);
+    // Native subagents live in the session, so their park keeps it and a slot (hearsay-tools/cezarion#2431).
+    const keepsSlot = top === 'subagents' || top === 'pr' || top === 'process' || top === 'timer' || (top === undefined && resolvedWaits(run).length > 0);
     // A park that frees its slot publishes the intent first: a refused write throws and keeps it.
     if (keepsSlot) {
       this.host.move(runId, 'park');

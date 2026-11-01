@@ -26,6 +26,7 @@ import type { ActiveRun } from '../active-run.ts';
 import type { ExecutionEmit, LaunchCiTools, LaunchDelegation, RunModuleContext, SessionTurn } from './types.ts';
 import { claudeScheduleWakeupDelay } from './turn-markers.ts';
 import { recordReportedCost } from './usage-accounting.ts';
+import { reportsNativeSubagents } from './subagent-waits.ts';
 
 export interface SessionEventHost {
   disposedSessionEvent(runId: string, state: ActiveRun, event: AgentEvent): boolean;
@@ -107,6 +108,10 @@ export interface SessionHelperHost {
   resumeParkedRun(runId: string, state: ActiveRun): void;
   noteNoWaitNudgeContent(runId: string, state: ActiveRun, event: { type: string; item?: { parentItemId?: string } }): void;
   parkedOnWorkers(runId: string): boolean;
+  /** Native subagents (hearsay-tools/cezarion#2431): track a background child's events, and close
+   *  the subagent wait and the timers when the runner resumes the parent itself. */
+  trackSubagentEvent(runId: string, state: ActiveRun, event: UiEvent): void;
+  supersedeOnRunnerResume(runId: string): void;
   releaseSlot(): void;
   routeWorkerQuestion(runId: string): void;
 }
@@ -201,6 +206,8 @@ export function launchSystemTail(context: RunModuleContext, host: SessionHelperH
   env: StepProfile['env'];
   ciTools: LaunchCiTools;
   handoffInjected: boolean;
+  /** The session's runner: one that reports its native subagents is taught to end its turn while they run. */
+  runner?: RunnerId | undefined;
 }): string {
   return composeSystemPrompt(
     launch.extraSystemPrompt,
@@ -208,7 +215,7 @@ export function launchSystemTail(context: RunModuleContext, host: SessionHelperH
     host.automationsPart(),
     launch.webhooksPart,
     artifactInstructions(launch.env.CEZ_ARTIFACTS_DIR),
-    handoffInstructions({ tools: !!launch.ciTools, handoffInjected: launch.handoffInjected }),
+    handoffInstructions({ tools: !!launch.ciTools, handoffInjected: launch.handoffInjected, nativeSubagents: reportsNativeSubagents(launch.runner) }),
   );
 }
 
@@ -248,6 +255,7 @@ export function handleRunnerUiEvent(context: RunModuleContext, host: SessionHelp
   recordUsageUiEvent(context.store, runId, state, event);
   sink.handle(event);
   if (state.cancelled) return;
+  host.trackSubagentEvent(runId, state, event);
   host.noteNoWaitNudgeContent(runId, state, event);
   if (isRunnerActivity(event)) {
     if (state.autonomousNudgePending) { state.autonomousNudgePending = undefined; clearIdleTimer(state); }
@@ -271,8 +279,10 @@ export function handleRunnerUiEvent(context: RunModuleContext, host: SessionHelp
   // synthesizes a parent `turn.started` for that work (#61). Nested child
   // items without a parent turn must not unpark monitoring or worker waits (#121).
   // A list worker park (hearsay-tools/cezarion#1235), Cezar's completion wait included
-  // (hearsay-tools/cezarion#1301), resumes the same way.
+  // (hearsay-tools/cezarion#1301), resumes the same way. A parent turn the runner starts itself, not
+  // inside Cezar's own write, closes the subagent wait and every timer (hearsay-tools/cezarion#2431).
   if (host.line.isParked(runId) && (host.line.inPool(runId) || host.parkedOnWorkers(runId)) && isRunnerActivity(event)) {
+    if (!state.writingInput) host.supersedeOnRunnerResume(runId);
     host.resumeParkedRun(runId, state);
   }
 }

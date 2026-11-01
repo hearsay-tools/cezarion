@@ -20,6 +20,7 @@ import type { HumanWaits } from './human-waits.ts';
 import type { RunLine } from './run-line.ts';
 import type { WaitWatches } from './wait-watches.ts';
 import type { WaitRegistry } from './wait-registry.ts';
+import { openSubagentWaitOf, type SubagentWaits } from './subagent-waits.ts';
 import type { WorkerQuestions } from './worker-questions.ts';
 
 /** What `carryOutTurnEnd` hands the method for a decision kind. `session` is the session as the
@@ -36,6 +37,7 @@ type TurnEndCarriers = { [K in TurnEndDecision['kind']]: (carry: TurnEndCarry, d
 
 interface TurnSettlerHost {
   humanWaits: HumanWaits; line: RunLine; waitWatches: WaitWatches; waitRegistry: WaitRegistry; workerQuestions: WorkerQuestions; completionGateHost: CompletionGateHost;
+  subagentWaits: SubagentWaits;
   move(id: string, exit: RunExitId): unknown; releaseSlot(): void; completionGate(id: string): 'accept' | 'held' | CompletionRefusal;
   cancelOpenWaits(id: string): void; countAutomaticWakes(id: string): number; workerExecutionStopped(id: string): boolean; executionBlockedByRootFinish(run: RunRecord): boolean;
   submitAgentInput(id: string, state: ActiveRun, content: ContentBlock[]): boolean; flushAgentInputs(id: string): boolean; hasQueuedAgentInputs(id: string, except?: readonly string[]): boolean;
@@ -107,6 +109,8 @@ export class TurnSettler {
     state.completionNudgeAnswered = state.completionNudged === state.session ? state.session : undefined;
     state.completionNudged = undefined;
     const askNudged = this.prepareTurnAsk(runId, state, { stepId: turn.stepId, sessionOpen, humanWait }, read);
+    // Native subagents still running: Cezar waits on them, instead of a timer (hearsay-tools/cezarion#2431).
+    this.host.subagentWaits.atTurnEnd(runId, state, { sessionOpen, done: read.done, asks: !!ask || humanGate });
     state.parkAfterAck = sessionOpen && state.session
       ? { session: state.session, monitoring, humanGate, nudgedLastTurn, scheduleWakeup: turn.scheduleWakeup } : undefined;
     const settled = this.settleTurn(runId, state, 'turn-end', {
@@ -256,8 +260,10 @@ export class TurnSettler {
   }
 
   /** The monitoring line and `ScheduleWakeup` open their timer before the rule reads the waits, as
-   *  the `cezar_wait` timer they alias. An autonomous nudge waiting for readiness keeps precedence. */
+   *  the `cezar_wait` timer they alias. An autonomous nudge waiting for readiness keeps precedence,
+   *  and Cezar's subagent wait replaces the alias: its children wake the run (hearsay-tools/cezarion#2431). */
   private openTurnTimerAlias(runId: string, state: ActiveRun, session: AgentSession | undefined, turn: SettledTurn): void {
+    if (openSubagentWaitOf(this.context.store.getRun(runId))) return;
     if (turn.monitoring && session?.open && state.autonomousNudgePending !== session) this.openTimerAlias(runId, state, turn.scheduleWakeup);
   }
 

@@ -34,7 +34,7 @@ describe('createActiveRun', () => {
     // The keys the `execute` and `runContinuation` literals both set. A field added to `ActiveRun`
     // as required fails to compile in the factory; an optional one lands here.
     expect(Object.keys(state).sort()).toEqual([
-      'autonomous', 'cancelled', 'cwd', 'delegationSettings', 'interrupt', 'pendingHumanAsk',
+      'autonomous', 'backgroundChildren', 'cancelled', 'cwd', 'delegationSettings', 'interrupt', 'pendingHumanAsk',
       'pendingPermissions', 'revokeDelegation',
     ]);
     expect(state).toMatchObject({ cwd: '/work/tree', pendingHumanAsk: true, autonomous: true, cancelled: false });
@@ -42,6 +42,8 @@ describe('createActiveRun', () => {
     expect(state.revokeDelegation).toBeUndefined();
     expect(state.interrupt()).toBeUndefined();
     expect(state.pendingPermissions).toEqual(new Set());
+    // No native subagent is known before a session reports one (hearsay-tools/cezarion#2431).
+    expect(state.backgroundChildren).toEqual(new Map());
     // The registry is loaded after the run is registered, by `loadRunSkills`, never by the factory.
     expect(state.skills).toBeUndefined();
   });
@@ -53,6 +55,8 @@ describe('createActiveRun', () => {
     expect(second).toMatchObject({ cwd: '/b', pendingHumanAsk: true, autonomous: true });
     first.pendingPermissions?.add('p');
     expect(second.pendingPermissions?.size).toBe(0);
+    first.backgroundChildren.set('child', { session: undefined, status: 'running' });
+    expect(second.backgroundChildren.size).toBe(0);
   });
 });
 

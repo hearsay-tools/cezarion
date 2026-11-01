@@ -152,7 +152,7 @@ export class RunManager {
   constructor(
     private readonly store: RunStore,
     private readonly repoRoot: string,
-    options: { work?: TrackedWork; semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined; sweepBranches?: ((keep: number) => void) | undefined } = {},
+    options: { work?: TrackedWork; semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; subagentGraceMs?: number; subagentDeadlineMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined; sweepBranches?: ((keep: number) => void) | undefined } = {},
   ) {
     this.dataDir = join(repoRoot, '.ai/cezar');
     this.preview = options.preview;
@@ -165,6 +165,7 @@ export class RunManager {
     this.modules = composeRunModules(this.context, {
       unreadInputGraceMs: () => unreadInputGraceMs,
       noWaitNudgeReplyMs: () => options.noWaitNudgeReplyMs,
+      subagentWaitMs: () => ({ graceMs: options.subagentGraceMs, deadlineMs: options.subagentDeadlineMs }),
       pendingHumanAskSeq: (...args) => this.pendingHumanAskSeq(...args),
       waitingBeforeFinalWorkflowStep: (...args) => this.waitingBeforeFinalWorkflowStep(...args),
       parentCompletionBlockers: (...args) => this.parentCompletionBlockers(...args),
@@ -252,6 +253,7 @@ export class RunManager {
     this.modules.retries.dispose();
     // Wait records stay as they are: a later manager re-arms them from their deadlines.
     this.modules.waitWatches.dispose();
+    this.modules.subagentWaits.dispose();
     this.ciResources.release();
     this.delegationProvisioner = undefined;
     this.modules.orphans.dispose();
@@ -421,6 +423,8 @@ export class RunManager {
     this.active.delete(runId);
     this.store.unpin(runId, 'active');
     this.modules.runSettlement.afterDropActive(runId);
+    // The session held the run's native subagents: an open subagent wait resolves interrupted (hearsay-tools/cezarion#2431).
+    this.modules.subagentWaits.afterSessionGone(runId);
   }
 
   /** Project detach cancels autonomous cleanup; reattach reconstructs the durable intents. */

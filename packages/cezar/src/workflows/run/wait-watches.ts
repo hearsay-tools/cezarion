@@ -1,7 +1,7 @@
 import type { RunModuleContext } from './types.ts';
 import type { RunRecord } from '../../runs/store.ts';
 import { familyOf } from './run-guards.ts';
-import { ciWatchRequest } from '../waits.ts';
+import { ciWatchRequest, type WaitResult } from '../waits.ts';
 import { ciWaitResultSchema, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import type { Wait, WorkerWaitEntry, PrWaitEntry, ProcessWaitEntry, ProcessWaitResult, PeerWaitEntry, PeerWaitResult } from '@open-mercato/cezar-contract/waits';
 import type { CiWatcherSupervisor } from '../../ci-wait/supervisor.ts';
@@ -12,13 +12,15 @@ import { agentTmpDirEnabled, resolveAgentTmpDir } from '../../runs/agent-tmpdir.
 interface WaitWatchesHost {
   canProceedWithRun(id: string, run: RunRecord | undefined): boolean;
   ciSupervisor(): Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
-  resolveWait(id: string, waitId: string, result?: CiWaitResult | ProcessWaitResult | PeerWaitResult): void;
+  resolveWait(id: string, waitId: string, result?: WaitResult): void;
   reconcileWorkerWaits(family: string): void;
   resolvePeerWait(id: string, wait: PeerWaitEntry): boolean;
   disarmWait(id: string): void;
   armWorkerDeadline(id: string, wait: WorkerWaitEntry, firstDelay?: number): void;
-  settleWait(id: string, waitId: string, result?: CiWaitResult | ProcessWaitResult | PeerWaitResult): void;
+  settleWait(id: string, waitId: string, result?: WaitResult): void;
   exitFileRoots(id: string): ExitFileRoots;
+  /** The session that holds a subagent wait's children is live (hearsay-tools/cezarion#2431). */
+  subagentSessionLive(id: string): boolean;
 }
 
 export class WaitWatches {
@@ -51,12 +53,16 @@ export class WaitWatches {
     if (wait.kind === 'worker') { this.host.armWorkerDeadline(runId, wait); return; }
     // A peer that already wrote or settled resolves it first, at registration and recovery alike.
     if (wait.kind === 'peer' && this.host.resolvePeerWait(runId, wait)) return;
+    // Native subagents live only in their session: with none, as at a restart, they stopped
+    // (hearsay-tools/cezarion#2431). At its deadline a lost session reads the same.
+    const interrupted = () => wait.kind === 'subagent' && !this.host.subagentSessionLive(runId);
+    if (interrupted()) { this.host.settleWait(runId, wait.id, { reason: 'interrupted' }); return; }
     // A stopping, stopped or finishing run takes no self-generated wake: the timer stays open
     // for that transition to cancel, as the monitoring timer did before it was a wait.
     const fire = () => {
       const run = this.context.store.getRun(runId);
       if (!this.host.canProceedWithRun(runId, run)) return;
-      this.host.settleWait(runId, wait.id);
+      this.host.settleWait(runId, wait.id, interrupted() ? { reason: 'interrupted' } : undefined);
     };
     const due = Date.parse(wait.deadline) - Date.now();
     if (due <= 0) { fire(); return; }
@@ -155,7 +161,7 @@ export class WaitWatches {
 
   /** `resolveWait`, retried while its durable checkpoint is unavailable: a failed write may not
    *  drop the accepted intent or publish a false result. */
-  settleWait(runId: string, waitId: string, result?: CiWaitResult | ProcessWaitResult | PeerWaitResult): void {
+  settleWait(runId: string, waitId: string, result?: WaitResult): void {
     if (this.context.disposed()) return;
     try { this.host.resolveWait(runId, waitId, result); }
     catch {
