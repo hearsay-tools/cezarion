@@ -111,6 +111,7 @@ describe('conversation records', () => {
     const statuses = ['replied', 'replied-late', 'completed-without-reply', 'failed', 'cancelled', 'destroyed', 'timed-out',
       'sender-closed', 'human-fallback', 'deleted'];
     acceptsEach(conversationStateSchema, state, 'outcomes', [statuses.map(status => ({ ...outcome, status }))]);
+    refuses(conversationStateSchema, { messages: [], outcomes: [{ ...outcome, status: 'not-a-listed-value' }] });
     refuses(conversationStateSchema, { messages: [], outcomes: [{ ...outcome, extra: true }] });
   });
 
