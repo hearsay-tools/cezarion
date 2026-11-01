@@ -15,14 +15,17 @@ cez remote-settings disable [--port <n>]   # read-only again: one cockpit, or ev
 Run these on the machine that runs Cezarion, as the user the cockpit service runs as, with the same
 `CEZ_HOME` (default `~/.cezar`). A grant names one cockpit by its listen port (the `--port` it was
 started with). Without `--port`, `enable` grants the only remote cockpit answering on `127.0.0.1`
-ports 4321–4370, and refuses when it finds none or several. The grants live in
-`~/.cezar/remote-settings.json`. The cockpit reads the file on each request, so enable and disable
-take effect without a restart. No HTTP route writes the file: a browser can never grant itself the
-permission.
+ports 4321–4370, and refuses when it finds none or several. Each grant is one file,
+`~/.cezar/remote-settings/<port>.json`. The cockpit reads its file on each request, so enable and
+disable take effect without a restart, and an open settings page re-reads the grant when you open it.
+No HTTP route writes these files: a browser can never grant itself the permission.
 
 One host can run several cockpits as the same user, for example the
 [multi-domain install](./ubuntu-vps.md#hosting-several-cockpits-on-one-box-multiple-domains), where
 each domain has its own port and login. A grant for one of them gives nothing to the others.
+`server-uninstall` withdraws the grant for the cockpit it removes, and a new `server-install` on a
+port withdraws any grant left there, so a later domain on the same port starts read-only. If you
+stop or replace a cockpit by hand, run `cez remote-settings disable --port <n>` for its port.
 
 ## What it grants
 
