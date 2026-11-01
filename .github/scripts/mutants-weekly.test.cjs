@@ -208,7 +208,7 @@ test('the issue body stays inside the GitHub limit and counts what it leaves out
 const issueOf = (number, file, state = 'open', body = `${marker(file)}\nold`) => ({ number, title: `Mutation targets missed: ${file}`, body, state, labels: [] });
 const outcome = (file, state, extra = {}) => ({ file, state, entryReason: 'target', ...(state === 'not-measured' ? { reason: 'no result: the job timed out, failed or was cancelled' } : {}),
   ...(state !== 'not-measured' ? { result: result(file, { fail: state === 'missed' ? ['covered lines'] : [] }), failures: state === 'missed' ? ['covered lines'] : [] } : {}), ...extra });
-const sync = (github, outcomes, exists = () => true) => syncIssues({ github, owner: 'o', repo: 'r', outcomes, earlier: new Map(), head: HEAD, runUrl: RUN_URL, exists, date: '2026-11-07' });
+const sync = (github, outcomes, exists = () => true, cut = []) => syncIssues({ github, owner: 'o', repo: 'r', outcomes, earlier: new Map(), head: HEAD, runUrl: RUN_URL, exists, cut, date: '2026-11-07' });
 
 test('a miss creates one issue with the title, marker and labels, and a re-run updates that issue instead of adding one', async () => {
   const github = fakeGithub();
@@ -263,14 +263,28 @@ test('a file that is not measured never closes its issue: an open one gets one n
   assert.doesNotMatch(github.state.issues[0].body, /Not measured this week/);
 });
 
-test('an open issue whose file no longer exists at the head is closed with a note; one whose file exists is left alone', async () => {
+test('an open issue whose file no longer exists at the head is closed with a note; one whose file exists stays open', async () => {
   const github = fakeGithub({ issues: [issueOf(7, 'packages/cezar/src/gone.ts'), issueOf(8, 'packages/cezar/src/kept.ts'), issueOf(9, 'packages/cezar/src/old.ts', 'closed')] });
   const actions = await sync(github, [], file => !/gone|old/.test(file));
-  assert.deepEqual(actions, [{ file: 'packages/cezar/src/gone.ts', action: 'closed-deleted', number: 7 }]);
+  assert.deepEqual(actions, [{ file: 'packages/cezar/src/gone.ts', action: 'closed-deleted', number: 7 },
+    { file: 'packages/cezar/src/kept.ts', action: 'noted', number: 8 }]);
   assert.equal(github.state.issues[0].state, 'closed');
   assert.equal(github.state.issues[0].state_reason, 'not_planned');
   assert.match(github.state.comments[0].body, /no longer exists/);
   assert.equal(github.state.issues[1].state, 'open');
+});
+
+test('an open issue for a file this run did not select gets the not-measured note with the reason, and costs no slot', async () => {
+  const over = 'packages/cezar/src/over.ts';
+  const quiet = 'packages/web/src/quiet.tsx';
+  const github = fakeGithub({ issues: [issueOf(7, over), issueOf(8, quiet), issueOf(9, 'packages/cezar/src/shut.ts', 'closed')] });
+  const actions = await sync(github, [], () => true, [over]);
+  assert.deepEqual(actions, [{ file: over, action: 'noted', number: 7 }, { file: quiet, action: 'noted', number: 8 }]);
+  assert.match(github.state.issues[0].body, /Not measured this week.*over the weekly cap/s);
+  assert.match(github.state.issues[1].body, /Not measured this week.*not a target and not changed in the last 7 days/s);
+  assert.ok(github.state.issues[0].body.startsWith(`${marker(over)}\nold`), 'the last measured body stays');
+  assert.equal(github.state.issues[2].body.includes('Not measured'), false);
+  assert.deepEqual(github.state.writes, ['issue.update', 'issue.update']);
 });
 
 const combined = (results) => Buffer.from(JSON.stringify({ version: 1, results }));

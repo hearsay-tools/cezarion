@@ -239,7 +239,7 @@ async function syncOne({ github, owner, repo, issue, outcome, earlier, head, run
   return { action: 'created', number: created.data.number };
 }
 
-async function syncIssues({ github, owner, repo, outcomes, earlier, head, runUrl, exists, date }) {
+async function syncIssues({ github, owner, repo, outcomes, earlier, head, runUrl, exists, cut = [], date }) {
   const issues = await findIssues({ github, owner, repo });
   const actions = [];
   for (const outcome of outcomes) {
@@ -248,8 +248,15 @@ async function syncIssues({ github, owner, repo, outcomes, earlier, head, runUrl
     if (typeof done === 'string') actions.push({ file: outcome.file, action: done, number: issue.number });
     else if (done) actions.push({ file: outcome.file, ...done });
   }
+  const planned = new Set(outcomes.map(o => o.file));
   for (const [file, issue] of issues) {
-    if (issue.state !== 'open' || exists(file)) continue;
+    if (issue.state !== 'open' || planned.has(file)) continue;
+    if (exists(file)) {
+      const reason = cut.includes(file) ? 'over the weekly cap' : 'not a target and not changed in the last 7 days';
+      await github.rest.issues.update({ owner, repo, issue_number: issue.number, body: withNote(issue.body ?? '', { date, head, runUrl, reason }) });
+      actions.push({ file, action: 'noted', number: issue.number });
+      continue;
+    }
     await closeIssue({ github, owner, repo, issue, reason: 'not_planned', body: `\`${file}\` no longer exists at \`${short(head)}\` ([weekly mutation run](${runUrl})). Closing.` });
     actions.push({ file, action: 'closed-deleted', number: issue.number });
   }
@@ -328,7 +335,7 @@ async function publish({ github, context, core, planDir, filesDir, outDir, root 
   const missed = outcomes.filter(o => o.state === 'missed').map(o => o.file);
   const earlier = await findEarlier({ github, owner, repo, runId: context.runId, files: missed, readArchive, warn: core.warning });
   const actions = await syncIssues({ github, owner, repo, outcomes, earlier, head: chosen.head, runUrl,
-    exists: exists ?? (file => fs.existsSync(path.join(root, file))), date: now.toISOString().slice(0, 10) });
+    exists: exists ?? (file => fs.existsSync(path.join(root, file))), cut: chosen.cut.map(e => e.file), date: now.toISOString().slice(0, 10) });
   await core.summary.addRaw(renderSummary({ plan: chosen, outcomes, actions })).write();
   return { outcomes, actions };
 }
