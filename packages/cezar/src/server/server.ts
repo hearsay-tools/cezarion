@@ -731,7 +731,7 @@ export function createApp(deps: ServerDeps) {
   };
   // Hosted-mode gate (spec §"Deployment modes") — read per request so
   // CEZ_REMOTE flips take effect live (and tests can toggle it).
-  const capabilities = () => resolveCapabilities(process.env, bindHost);
+  const capabilities = () => resolveCapabilities(process.env, bindHost, deps.cezarPort?.());
   const singleProjectRefusal = (
     action: 'adding projects' | 'editing projects' | 'removing projects' | 'folder browsing',
   ) => ({ error: `single-project mode is enabled; ${action} is disabled` });
@@ -1183,7 +1183,7 @@ export function createApp(deps: ServerDeps) {
     const age = Date.now() - healthCache.at;
     if (age > HEALTH_MAX_STALE_MS) return refreshHealth(); // too old to serve — wait for the truth
     if (age > HEALTH_TTL_MS) void refreshHealth(); // stale: refresh, don't wait on it
-    return healthCache.payload;
+    return { ...healthCache.payload, capabilities: capabilities() }; // per request, like the gates (ADR 0055)
   };
 
   // ---- chained family: health (workspace-level) ----------------------------
@@ -4823,7 +4823,7 @@ export function createApp(deps: ServerDeps) {
     });
 
   /** #917: setup commands run on the host before every task, so only a local cockpit edits them. */
-  const WORKTREE_SETUP_HOSTED_ERROR = 'Worktree setup commands can be edited only on the machine running cezar.';
+  const WORKTREE_SETUP_HOSTED_ERROR = 'Worktree setup commands are read-only on this remote cockpit. To allow remote edits, run `cez remote-settings enable` on the machine running cezar.';
 
   // The Settings → Agents knobs in one read (R6 Step 1.5) — an ADDITIVE
   // sibling of PUT /api/config below; /api/health keeps its protected shape.
@@ -4874,9 +4874,9 @@ export function createApp(deps: ServerDeps) {
       if (agentModelsLocked(repoRoot) && parsed.data.defaultModels !== undefined) {
         return c.json({ error: AGENT_MODELS_LOCKED_ERROR }, 409);
       }
-      // Setup commands run on the host before every task (#917): a local-machine capability, like
-      // Agent config writes. Checked before any write, so a refused body changes nothing.
-      if (parsed.data.worktreeSetup !== undefined && !capabilities().localHandoff) {
+      // Setup commands run on the host (#917): settings administration, like Agent config writes
+      // (hearsay-tools/cezarion#2428). Checked before any write, so a refusal changes nothing.
+      if (parsed.data.worktreeSetup !== undefined && !capabilities().settingsAdmin) {
         return c.json({ error: WORKTREE_SETUP_HOSTED_ERROR }, 409);
       }
       const configPath = join(dataDir, 'config.json');
@@ -4968,7 +4968,7 @@ export function createApp(deps: ServerDeps) {
   // so `AppType` carries it — see `healthRoutes`.
   const agentConfigRoutes = new Hono<ProjectApiEnv>()
     .get('/agent-config', async (c) => {
-      const editable = capabilities().localHandoff;
+      const editable = capabilities().settingsAdmin;
       return c.json(await listAgentConfig(c.get('project').root, process.env, editable));
     })
 
@@ -4976,13 +4976,9 @@ export function createApp(deps: ServerDeps) {
       const id = c.req.param('id');
       const def = findConfigFile(id);
       if (!def) return c.json({ error: 'unknown config file' }, 404);
-      if (def.tracked === 'outside-repo' && !capabilities().localHandoff) {
-        return c.json(
-          {
-            error: 'this file lives in your home directory and is not served in hosted mode (CEZ_REMOTE)',
-          },
-          409,
-        );
+      if (def.tracked === 'outside-repo' && !capabilities().settingsAdmin) {
+        const error = 'this file lives in your home directory and is not served on a remote cockpit — run `cez remote-settings enable` on the host to allow it';
+        return c.json({ error }, 409);
       }
       const read = await readConfigFile(id, c.get('project').root);
       if (read === null) return c.json({ error: 'unknown config file' }, 404);
@@ -4991,13 +4987,13 @@ export function createApp(deps: ServerDeps) {
     })
 
     .put('/agent-config/:id', jsonZodValidator(setAgentConfigSchema), async (c) => {
-      // Config files may define hooks and MCP commands, so writes remain a
-      // local-machine capability and are re-gated on every request.
-      if (!capabilities().localHandoff) {
+      // Hooks and MCP commands run on the host: writes need settings administration (ADR 0055),
+      // re-gated on every request.
+      if (!capabilities().settingsAdmin) {
         return c.json(
           {
             error:
-              'editing agent config is disabled in hosted mode (CEZ_REMOTE) — edit it from the machine that owns the checkout',
+              'editing agent config is disabled on this remote cockpit — run `cez remote-settings enable` on the host to allow it',
           },
           409,
         );

@@ -1416,7 +1416,9 @@ none of its own. [Details →](docs/server-install/ubuntu-vps.md#the-box-already
 | macOS + ngrok | `macosx-ngrok` | ngrok tunnel + `--basic-auth`, launchd | [Step-by-step →](docs/server-install/macosx-ngrok.md) |
 
 See the **[Remote access overview](docs/server-install/README.md)** for how it
-works and how to redeploy new versions.
+works and how to redeploy new versions. A remote cockpit keeps Agent config and
+worktree setup read-only; to edit them from the browser, see
+**[Remote settings administration](docs/server-install/remote-settings.md)**.
 
 ---
 
@@ -1528,9 +1530,9 @@ starts in a ready tree:
 }
 ```
 
-Or edit it in **Settings → Worktrees → Prepare new worktrees**, one command per line. Only a
-cockpit on the machine running Cezarion can change it: a hosted cockpit (`CEZ_REMOTE=1`) shows it
-read-only, because these are commands the host runs.
+Or edit it in **Settings → Worktrees → Prepare new worktrees**, one command per line. These are
+commands the host runs, so a hosted cockpit (`CEZ_REMOTE=1`) shows it read-only until the host
+operator runs `cez remote-settings enable` ([Remote settings administration](docs/server-install/remote-settings.md)).
 
 - **When it runs.** In every new task worktree and every worker worktree, and again when Continue
   rebuilds a worktree that retention reclaimed. Never for a task that runs in the repo working
@@ -1572,8 +1574,10 @@ files continue to resolve from the agent's home.
 
 Each file keeps its native format and vendor-documented precedence. Tracked
 files reach task worktrees after commit; Claude's gitignored personal layer is
-seeded into each run's worktree. Editing is a local-machine capability, so a
-hosted cockpit (`CEZ_REMOTE=1`) is read-only and never serves home-file contents.
+seeded into each run's worktree. Config files can define hooks and MCP commands that run
+on the host, so a hosted cockpit (`CEZ_REMOTE=1`) is read-only and never serves home-file
+contents until the host operator runs `cez remote-settings enable`
+([Remote settings administration](docs/server-install/remote-settings.md)).
 
 ---
 

@@ -673,7 +673,7 @@ describe('SessionTranscript', () => {
       )
     function renderPreview(capable: boolean, pane: PreviewPane | null) {
       vi.stubGlobal('fetch', vi.fn(async () =>
-        new Response(JSON.stringify({ capabilities: { localHandoff: true, singleProject: false, tokenMetrics: true, preview: capable } }), {
+        new Response(JSON.stringify({ capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, singleProject: false, tokenMetrics: true, preview: capable } }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         })))
@@ -698,7 +698,7 @@ describe('SessionTranscript', () => {
       const openPane = vi.fn()
       const stopped: ThreadEntry = { ...preview, state: 'stopped' } as ThreadEntry
       vi.stubGlobal('fetch', vi.fn(async () =>
-        new Response(JSON.stringify({ capabilities: { localHandoff: true, singleProject: false, tokenMetrics: true, preview: true } }), {
+        new Response(JSON.stringify({ capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, singleProject: false, tokenMetrics: true, preview: true } }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         })))

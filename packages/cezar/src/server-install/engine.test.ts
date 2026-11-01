@@ -8,6 +8,7 @@ import { StepAborted } from './steps.ts';
 import { createAutoUi } from './ui.ts';
 import type { InstallStep, PlatformStrategy, Runner } from './types.ts';
 import { mergeWriteWorkspaceConfig } from '../workspace/config.ts';
+import { enableRemoteSettings, readRemoteSettings } from '../remote-settings.ts';
 
 const noRunner: Runner = { capture: async () => ({ code: 0, stdout: '', stderr: '' }), interactive: async () => 0 };
 
@@ -239,6 +240,44 @@ describe('engine', () => {
     // the default record is untouched (still port 4321, no domain)
     expect(loadServerState().primaryPort).toBe(4321);
     expect(loadServerState().domain).toBeUndefined();
+  });
+
+  // A grant names a port (ADR 0055). Another domain installed later on the same port must not
+  // inherit it: uninstall withdraws it, and a fresh install on the port withdraws a leftover one.
+  const grantedPorts = () => readRemoteSettings().grants.map((grant) => grant.port);
+
+  it('uninstalling a cockpit withdraws its remote settings grant, and only its own', async () => {
+    await runInstall(strategyOf([fakeStep('a')]), opts({ instance: 'shop-example-com', domain: 'shop.example.com', port: 4322 }));
+    await enableRemoteSettings(4321);
+    await enableRemoteSettings(4322);
+    const res = await runUninstall(strategyOf([fakeStep('a')]), opts({ instance: 'shop-example-com' }));
+    expect(res.status).toBe('complete');
+    expect(grantedPorts()).toEqual([4321]);
+  });
+
+  it('a real install after a dry-run preview withdraws a grant left on its port', async () => {
+    await runInstall(strategyOf([fakeStep('a')]), opts({ instance: 'blog-example-com', domain: 'blog.example.com', port: 4322, dryRun: true }));
+    await enableRemoteSettings(4322);
+    await runInstall(strategyOf([fakeStep('a')]), opts({ instance: 'blog-example-com', domain: 'blog.example.com', port: 4322 }));
+    expect(grantedPorts()).toEqual([]);
+  });
+
+  it('a fresh install withdraws a grant left on its port; re-running a completed install keeps its own', async () => {
+    await enableRemoteSettings(4322);
+    await runInstall(strategyOf([fakeStep('a')]), opts({ instance: 'blog-example-com', domain: 'blog.example.com', port: 4322 }));
+    expect(grantedPorts()).toEqual([]);
+    await enableRemoteSettings(4322);
+    await runInstall(strategyOf([fakeStep('a')]), opts({ instance: 'blog-example-com', domain: 'blog.example.com', port: 4322 }));
+    expect(grantedPorts()).toEqual([4322]);
+  });
+
+  it('a dry run only says it would withdraw a grant', async () => {
+    await runInstall(strategyOf([fakeStep('a')]), opts({ instance: 'shop-example-com', domain: 'shop.example.com', port: 4322 }));
+    await enableRemoteSettings(4322);
+    const lines: string[] = [];
+    await runUninstall(strategyOf([fakeStep('a')]), opts({ instance: 'shop-example-com', dryRun: true, ui: createAutoUi({}, (m) => lines.push(m)) }));
+    expect(grantedPorts()).toEqual([4322]);
+    expect(lines.some((line) => line.includes('would withdraw the remote settings grant for port 4322'))).toBe(true);
   });
 
   it('a named instance uninstall removes its record; a default uninstall keeps the file', async () => {

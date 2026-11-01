@@ -85,7 +85,7 @@ function gateSeededClient(singleProject = false) {
   const client = createQueryClient()
   client.setQueryData(queryKeys.health, {
     bootProject: 'boot',
-    capabilities: { localHandoff: true, singleProject },
+    capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, singleProject },
   })
   client.setQueryData(workspaceQueryKeys.projects, {
     projects: [],

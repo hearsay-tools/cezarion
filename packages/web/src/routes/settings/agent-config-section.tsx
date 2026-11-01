@@ -2,8 +2,8 @@ import { FileCogIcon } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import { ApiError } from '@/api/client'
-import { useAgentConfig, useAgentConfigFile, useHealth, usePutAgentConfigFile } from '@/api/queries'
-import type { AgentConfigFile, AgentConfigListing, Runner } from '@open-mercato/cezar-api-client'
+import { queryKeys, useAgentConfig, useAgentConfigFile, useHealth, usePutAgentConfigFile } from '@/api/queries'
+import type { AgentConfigFile, AgentConfigListing, HealthResponse, Runner } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { CodeEditor } from '@/components/code-editor'
 import { Badge } from '@/components/ui/badge'
@@ -12,6 +12,8 @@ import { toast } from '@/components/ui/toaster'
 import { availableRunners } from '@/routes/new-task-form'
 import { cn } from '@/lib/utils'
 import { AGENT_DESCRIPTORS, descriptorFor, type AgentDescriptor } from './agent-descriptors'
+import { useQueryClient } from '@tanstack/react-query'
+import { REMOTE_SETTINGS_ENABLE_COMMAND, RemoteSettingsNotice, useSettingsAdminRefresh } from './remote-settings-notice'
 
 /**
  * Settings → Agent config (spec #404, regrouped per
@@ -20,9 +22,10 @@ import { AGENT_DESCRIPTORS, descriptorFor, type AgentDescriptor } from './agent-
  * first; the selected agent's pane holds its Settings, MCP and Memory files
  * together, driven by the per-agent descriptor table. cezar never re-serializes;
  * it shows each scope's file and the vendor's own documented precedence, and
- * never claims a merge it does not perform. Writing is a local-machine
- * capability: in hosted mode the whole section is read-only (the server refuses
- * every write regardless).
+ * never claims a merge it does not perform. Writing needs settings
+ * administration: a local cockpit, or a remote one whose host operator ran
+ * `cez remote-settings enable` (hearsay-tools/cezarion#2428). Otherwise the whole
+ * section is read-only (the server refuses every write regardless).
  */
 
 /** What this file actually governs for a run — the honest label the spec insists on. */
@@ -35,6 +38,7 @@ function effectLabel(file: AgentConfigFile): string {
 
 export function AgentConfigSection() {
   const listing = useAgentConfig()
+  useSettingsAdminRefresh()
   const health = useHealth()
   const installed = useMemo<Runner[]>(
     () => (health.data ? availableRunners(health.data.checks) : AGENT_DESCRIPTORS.map((d) => d.id)),
@@ -81,10 +85,11 @@ function AgentConfigView({ listing, installed }: { listing: AgentConfigListing; 
           data-slot="agent-config-readonly"
           className="rounded-md border border-border bg-muted/40 px-3 py-2 text-[13px] text-soft-foreground"
         >
-          Read-only: agent config is edited from the machine that owns the checkout (this cockpit runs in hosted
-          mode). You can still see every file and which one wins.
+          Read-only: this remote cockpit cannot edit agent config. You can still see every file and which one wins.
+          To edit here, the host operator runs <code>{REMOTE_SETTINGS_ENABLE_COMMAND}</code>.
         </div>
       )}
+      <RemoteSettingsNotice risk="Agent config can define hooks and MCP servers that run commands on the machine running Cezarion" />
 
       <div data-slot="agent-config-agents" role="tablist" className="flex flex-wrap gap-1">
         {AGENT_DESCRIPTORS.map((d) => (
@@ -237,6 +242,8 @@ function UserMcpBlock({ userMcp }: { userMcp: NonNullable<AgentConfigListing['us
 export function FileEditor({ file }: { file: AgentConfigFile }) {
   const fileQuery = useAgentConfigFile(file.id)
   const put = usePutAgentConfigFile(file.id)
+  const queryClient = useQueryClient()
+  const refreshSettingsAdmin = useSettingsAdminRefresh()
   const [draft, setDraft] = useState<string | null>(null)
   const [conflict, setConflict] = useState(false)
   const [formatError, setFormatError] = useState<string | null>(null)
@@ -266,8 +273,14 @@ export function FileEditor({ file }: { file: AgentConfigFile }) {
           toast(`${file.exists ? 'Saved' : 'Created'} ${file.label}`)
         },
         onError: (err) => {
-          if (err instanceof ApiError && err.status === 409) setConflict(true)
-          else if (err instanceof ApiError && err.status === 400) setFormatError(err.message)
+          // A 409 is a version conflict, or the host withdrew the grant since the page loaded.
+          if (err instanceof ApiError && err.status === 409) {
+            void refreshSettingsAdmin().then(() => {
+              const health = queryClient.getQueryData<HealthResponse>(queryKeys.health)
+              if (health?.capabilities.settingsAdmin === false) toast(err.message, { tone: 'danger' })
+              else setConflict(true)
+            })
+          } else if (err instanceof ApiError && err.status === 400) setFormatError(err.message)
           else toast((err as Error).message, { tone: 'danger' })
         },
       },

@@ -39,6 +39,14 @@ export type ForgeInfo = z.infer<typeof forgeInfoSchema>;
 /** Server-side feature switches the cockpit reads once at boot. */
 export const capabilitiesSchema = z.object({
   localHandoff: z.boolean(),
+  /**
+   * `true` means this cockpit may edit Agent config and worktree setup: it is local, or the host
+   * operator ran `cez remote-settings enable` for this cockpit's listen port and it binds loopback
+   * (hearsay-tools/cezarion#2428). Both persist commands the host runs.
+   */
+  settingsAdmin: z.boolean(),
+  /** `true` when `settingsAdmin` comes from the host switch on a remote cockpit, not from a local one. */
+  remoteSettingsAdmin: z.boolean(),
   singleProject: z.boolean(),
   /**
    * `true` means `CEZ_AUTOMATIONS=1` opted this server into GitHub automations (#801). Off — the
