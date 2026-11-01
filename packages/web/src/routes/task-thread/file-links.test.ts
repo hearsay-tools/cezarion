@@ -22,18 +22,36 @@ describe('task file links', () => {
     expect(target.searchParams.get('path')).toBe(path)
     expect(target.hash).toBe(hash)
   })
-  it('preserves fragments when scoping a published artifact link', () => {
+  it('preserves fragments when sending a published artifact link to the reader', () => {
     const id = '4c15e25b-a08c-438d-a32b-fd1a8c6c90e2'
-    expect(taskFileHref(`/tasks/task/files?artifact=${id}#install`, context)).toBe(`/p/project/tasks/task/files?artifact=${id}#install`)
+    expect(taskFileHref(`/tasks/task/files?artifact=${id}#install`, context)).toBe(`/p/project/tasks/task/report?artifact=${id}#install`)
   })
-  it('scopes a generated artifact link without treating it as a file', () => {
+  it('sends a generated artifact link to the reader without treating it as a file', () => {
     const id = '4c15e25b-a08c-438d-a32b-fd1a8c6c90e2'
-    expect(taskFileHref(`/tasks/task/files?artifact=${id}`, context)).toBe(`/p/project/tasks/task/files?artifact=${id}`)
+    expect(taskFileHref(`/tasks/task/files?artifact=${id}`, context)).toBe(`/p/project/tasks/task/report?artifact=${id}`)
   })
   it('keeps unscoped legacy artifact links usable and does not reassign another task', () => {
     const href = '/tasks/task/files?artifact=4c15e25b-a08c-438d-a32b-fd1a8c6c90e2'
-    expect(taskFileHref(href, { runId: 'task' })).toBe(href)
+    expect(taskFileHref(href, { runId: 'task' })).toBe('/tasks/task/report?artifact=4c15e25b-a08c-438d-a32b-fd1a8c6c90e2')
     expect(taskFileHref(href, { runId: 'another', projectId: 'other' })).toBeNull()
+  })
+  it.each([
+    ['owner', 'owner-task', { runId: 'owner-task', projectId: 'owner' }],
+    ['owner', 'owner-task', { runId: 'boot-task', projectId: 'boot' }],
+  ])('opens a project-scoped publication of %s/%s in its owner\'s reader from any thread', (project, run, ctx) => {
+    const id = '4c15e25b-a08c-438d-a32b-fd1a8c6c90e2'
+    expect(taskFileHref(`/p/${project}/tasks/${run}/files?artifact=${id}`, ctx)).toBe(`/p/${project}/tasks/${run}/report?artifact=${id}`)
+  })
+  it.each([
+    '/p/owner/tasks/run/files?artifact=not-a-uuid',
+    '/p/owner/tasks/run/files?artifact=4c15e25b-a08c-438d-a32b-fd1a8c6c90e2&path=x',
+    '/p/owner/tasks/run/changes?artifact=4c15e25b-a08c-438d-a32b-fd1a8c6c90e2',
+    '/p/owner/tasks/run/files?path=report.html',
+  ])('keeps other author-written cockpit URLs behind the confirmation: %s', href => {
+    expect(taskFileHref(href, context)).toBeNull()
+  })
+  it.each(['docs/report.html', '/tmp/REPORT.HTM', 'file:///tmp/r.html'])('opens the HTML path %s in the reader', path => {
+    expect(taskFileHref(path, context)).toBe(`/p/project/tasks/task/report?path=${encodeURIComponent(path)}`)
   })
   it('resolves document relative links against its directory', () => {
     expect(taskFileHref('next.md', { ...context, basePath: '/repo/docs/ADR.md' })).toBe('/p/project/tasks/task/files?path=%2Frepo%2Fdocs%2Fnext.md')

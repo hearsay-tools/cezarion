@@ -65,6 +65,7 @@ const FILES: Record<string, WorktreeEntry> = {
   'logo.png': { type: 'file', path: 'logo.png', size: 2048, binary: true, tooLarge: false },
   'big.txt': { type: 'file', path: 'big.txt', size: 900_000, binary: false, tooLarge: true },
   'blob.dat': { type: 'file', path: 'blob.dat', size: 4096, binary: true, tooLarge: false },
+  'report.html': { type: 'file', path: 'report.html', size: 22, binary: false, tooLarge: false, content: '<h1>Quarterly</h1>' },
 }
 
 const jsonResponse = (body: unknown, status = 200) =>
@@ -128,6 +129,16 @@ async function openFile(path: string) {
 // ---- the route -------------------------------------------------------------------------------
 
 describe('the Files tab route', () => {
+  it('shows an HTML file as a sandboxed preview first, with View source and Open reader', async () => {
+    stubFetch()
+    renderFilesRoute('?path=report.html')
+    await waitFor(() => expect(document.querySelector('[data-slot="html-report-frame"]')?.getAttribute('srcdoc')).toContain('<h1>Quarterly</h1>'))
+    expect(screen.getByRole('link', { name: 'Open reader' }).getAttribute('href')).toBe('/tasks/r1/report?path=report.html')
+    fireEvent.click(screen.getByRole('button', { name: 'View source' }))
+    expect(document.querySelector('[data-slot="file-preview-code"]')?.textContent).toContain('<h1>Quarterly</h1>')
+    expect(document.querySelector('[data-slot="html-report-frame"]')).toBeNull()
+  })
+
   it('Back restores the previous file selection', async () => {
     stubFetch()
     renderFilesRoute('?path=hello.ts')

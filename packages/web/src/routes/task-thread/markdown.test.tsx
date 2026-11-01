@@ -25,10 +25,10 @@ describe('Markdown', () => {
   it.each([
     { runId: 'owner-task', projectId: 'owner' },
     { runId: 'another-task', projectId: 'other' },
-  ])('preserves a scoped artifact destination in $projectId task context', context => {
+  ])('opens a scoped publication in its owner\'s reader from the $projectId task context', context => {
     const href = '/p/owner/tasks/owner-task/files?artifact=4c15e25b-a08c-438d-a32b-fd1a8c6c90e2'
     render(<TaskFileContext.Provider value={context}><Markdown>{`[Report](${href})`}</Markdown></TaskFileContext.Provider>)
-    expect(screen.getByRole('link', { name: 'Report' }).getAttribute('href')).toBe(href)
+    expect(screen.getByRole('link', { name: 'Report' }).getAttribute('href')).toBe('/p/owner/tasks/owner-task/report?artifact=4c15e25b-a08c-438d-a32b-fd1a8c6c90e2')
   })
 
   it('stamps each task its own Files route, not the first task rendered (processor cache)', () => {
@@ -46,12 +46,20 @@ describe('Markdown', () => {
     expect(document.querySelector('[data-slot="link-safety-dialog"]')).toBeNull()
   })
 
-  it('confirms a link the author already scoped to this task, which only a rewrite skips', () => {
-    // artifact-project-links.e2e.ts pins the same rule in a real browser: a published artifact
-    // URL in its owner's thread is not a file reference cezar resolved, so it keeps the confirm.
+  it('opens a publication link without the confirm: the read-only reader is its only destination', () => {
     const href = '/p/owner/tasks/owner-task/files?artifact=4c15e25b-a08c-438d-a32b-fd1a8c6c90e2'
     render(<TaskFileContext.Provider value={{ runId: 'owner-task', projectId: 'owner' }}><Markdown>{`[Report](${href})`}</Markdown></TaskFileContext.Provider>)
     fireEvent.click(screen.getByRole('link', { name: 'Report' }))
+    expect(document.querySelector('[data-slot="link-safety-dialog"]')).toBeNull()
+  })
+
+  it.each([
+    '/p/owner/tasks/owner-task/changes',
+    '/p/owner/tasks/owner-task/files?path=report.html',
+    '/p/owner/tasks/owner-task/report?artifact=4c15e25b-a08c-438d-a32b-fd1a8c6c90e2',
+  ])('confirms any other cockpit URL the author wrote, which only a rewrite skips: %s', href => {
+    render(<TaskFileContext.Provider value={{ runId: 'owner-task', projectId: 'owner' }}><Markdown>{`[Link](${href})`}</Markdown></TaskFileContext.Provider>)
+    fireEvent.click(screen.getByRole('link', { name: 'Link' }))
     expect(document.querySelector('[data-slot="link-safety-dialog"]')).not.toBeNull()
   })
 
