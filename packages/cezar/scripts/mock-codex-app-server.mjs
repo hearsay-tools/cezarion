@@ -170,6 +170,7 @@ const openingReplies = [
 const afterSilentReplies = [
   [turnText => turnText.includes('mock:hook-after-park'), replyWithParkedHook],
   [turnText => turnText.includes('mock:subagent-after-park'), replyWithParkedSubagent],
+  [turnText => turnText.includes('mock:subagent-background'), async turnText => (await import('./mock-codex-subagents.mjs')).replyWithBackgroundSubagents(turnText, { emit, afterParityPark })],
   [turnText => turnText.includes('mock:multi-pr-refs'), replyWithMultiplePrs],
   [turnText => turnText.includes('mock:turn-messages:'), replyWithTurnMessages],
   [turnText => turnText.includes('mock:ask-snapshot'), replyWithAskSnapshot],
