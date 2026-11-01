@@ -45,6 +45,12 @@ describe('Cursor print mapper', () => {
     );
   });
 
+  it('maps edit diffs, a failed shell and a Task call to their golden v2 events (hearsay-tools/cezarion#1267)', () => {
+    expect(JSON.parse(JSON.stringify(replay('print-tools.ndjson')))).toStrictEqual(
+      JSON.parse(readFileSync(join(fixtures, 'print-tools.expected.json'), 'utf8')),
+    );
+  });
+
   it('treats an auto-rejected native question as one failed tool, without a Cezar ASK', () => {
     const events = replay('print-native-question.ndjson');
     const question = events.filter(event => event.type === 'item.completed' && event.item.kind === 'tool');

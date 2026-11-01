@@ -4,7 +4,6 @@ import type {
   AgentEvent, AgentInputOptions, AgentRunResult, AgentRunner, AgentRunSpec, AgentSession, ContentBlock,
   InputDelivery, SessionOptions,
 } from './agent-runner.ts';
-import { CursorAcpRunner } from './cursor-acp-runner.ts';
 import { CursorPrintRunner, CURSOR_PRINT_SPEC_SUPPORT } from './cursor-print-runner.ts';
 import { inspectCursorPrintCapabilities } from './cursor-print-capabilities.ts';
 import type { CursorPrintCapabilityResult } from './cursor-print-capabilities.ts';
@@ -14,15 +13,28 @@ export interface CursorRunnerOptions {
   sessionTransport?: SessionTransport;
   bin?: string;
   inspect?: (bin: string, spec: AgentRunSpec, signal?: AbortSignal) => Promise<CursorPrintCapabilityResult>;
-  makeAcp?: () => AgentRunner;
   makePrint?: (models?: readonly ModelOption[], resolvedModel?: string) => AgentRunner;
 }
 
 interface CursorSelection {
-  transport: SessionTransport; note?: string; models?: readonly ModelOption[] | undefined; model?: string | undefined; resolvedModel?: string | undefined;
+  models?: readonly ModelOption[] | undefined; model?: string | undefined; resolvedModel?: string | undefined;
 }
 
-/** Selects one Cursor transport before inference; persisted identity always wins over defaults. */
+/** A Continue of a session that ran on the removed ACP transport (hearsay-tools/cezarion#1267). */
+export const CURSOR_ACP_RESUME_REFUSED = 'This Cursor session was started on the ACP transport, which Cezarion no longer '
+  + 'supports, so it cannot resume. Start a new task to continue this work.';
+
+/** The step error for a Cursor build that fails print qualification (hearsay-tools/cezarion#1267). */
+export function cursorPrintUnsupportedMessage(reason: string): string {
+  return `Cursor CLI cannot run this task: ${reason}. Run "agent update" to install a supported Cursor CLI, `
+    + 'or update Cezarion if your build is newer than this version supports.';
+}
+
+/**
+ * Runs every Cursor session on print, after a pre-inference qualification check. ACP sessions
+ * were removed in hearsay-tools/cezarion#1267: a resume recorded on ACP, or an untagged resume
+ * from before print existed, fails before any session starts, and so does an unqualified build.
+ */
 export class CursorRunner implements AgentRunner {
   readonly backend = 'cursor' as const;
   readonly specSupport = CURSOR_PRINT_SPEC_SUPPORT;
@@ -44,31 +56,19 @@ export class CursorRunner implements AgentRunner {
       { id: 'mock-default-model-xhigh', label: 'Mock high effort', description: 'Mock high effort' },
     ];
     const select = async (signal: AbortSignal): Promise<CursorSelection> => {
-      if (this.options.sessionTransport === 'cursor-acp') return { transport: 'cursor-acp' };
-      if (this.options.sessionTransport === 'cursor-print') {
-        if (isBundledMock) {
-          return { transport: 'cursor-print', models: spec.effort ? mockModels : undefined,
-            model: spec.effort && !spec.model ? 'mock-default-model' : undefined };
-        }
-        const capability = await (this.options.inspect ?? inspectCursorPrintCapabilities)(bin, spec, signal);
-        if (!capability.supported) throw new Error(`Cursor print session cannot resume: ${capability.reason}`);
-        return { transport: 'cursor-print', models: capability.models, model: capability.model, resolvedModel: capability.resolvedModel };
-      }
-      if (spec.resume) return { transport: 'cursor-acp' }; // Legacy untagged Cursor ID.
+      // An untagged resume predates print sessions, so its native ID belongs to ACP.
+      if (spec.resume && this.options.sessionTransport !== 'cursor-print') throw new Error(CURSOR_ACP_RESUME_REFUSED);
       if (isBundledMock) {
-        return { transport: 'cursor-print', models: spec.effort ? mockModels : undefined,
+        return { models: spec.effort ? mockModels : undefined,
           model: spec.effort && !spec.model ? 'mock-default-model' : undefined };
       }
       const capability = await (this.options.inspect ?? inspectCursorPrintCapabilities)(bin, spec, signal);
-      return capability.supported
-        ? { transport: 'cursor-print', models: capability.models, model: capability.model, resolvedModel: capability.resolvedModel }
-        : { transport: 'cursor-acp', note: `Cursor marketplace plugins unavailable: ${capability.reason}` };
+      if (!capability.supported) throw new Error(cursorPrintUnsupportedMessage(capability.reason));
+      return { models: capability.models, model: capability.model, resolvedModel: capability.resolvedModel };
     };
-    const makeRunner = (transport: SessionTransport, models?: readonly ModelOption[], resolvedModel?: string): AgentRunner =>
-      transport === 'cursor-print'
-        ? (this.options.makePrint?.(models, resolvedModel)
-          ?? new CursorPrintRunner({ bin: this.options.bin, models, resolvedModel }))
-        : (this.options.makeAcp?.() ?? new CursorAcpRunner({ bin: this.options.bin }));
+    const makeRunner = (models?: readonly ModelOption[], resolvedModel?: string): AgentRunner =>
+      this.options.makePrint?.(models, resolvedModel)
+        ?? new CursorPrintRunner({ bin: this.options.bin, models, resolvedModel });
     return this.lastSession = new SelectingCursorSession(select, makeRunner, spec, onEvent, opts);
   }
 
@@ -90,7 +90,7 @@ class SelectingCursorSession implements AgentSession {
 
   constructor(
     select: (signal: AbortSignal) => Promise<CursorSelection>,
-    makeRunner: (transport: SessionTransport, models?: readonly ModelOption[], resolvedModel?: string) => AgentRunner,
+    makeRunner: (models?: readonly ModelOption[], resolvedModel?: string) => AgentRunner,
     spec: AgentRunSpec,
     onEvent?: (event: AgentEvent) => void,
     opts: SessionOptions = {},
@@ -98,13 +98,12 @@ class SelectingCursorSession implements AgentSession {
     this.result = new Promise(resolve => { this.resolveResult = resolve; });
     void (async () => {
       try {
-        const { transport, note, models, model, resolvedModel } = await select(this.controller.signal);
+        const { models, model, resolvedModel } = await select(this.controller.signal);
         if (!this.active) return;
-        if (note) onEvent?.({ type: 'note', message: note });
-        const runner = makeRunner(transport, models, resolvedModel);
+        const runner = makeRunner(models, resolvedModel);
         const selectedSpec = model && !spec.model ? { ...spec, model } : spec;
         const inner = runner.startSession(selectedSpec, event => onEvent?.(event.type === 'session'
-          ? { ...event, sessionTransport: transport } : event), opts);
+          ? { ...event, sessionTransport: 'cursor-print' } : event), opts);
         this.inner = inner;
         if (inner.pid !== undefined) opts.onPidChange?.(inner.pid);
         for (const message of this.pendingHuman.splice(0)) inner.sendMessage(message);
@@ -112,7 +111,7 @@ class SelectingCursorSession implements AgentSession {
         this.settle(result);
       } catch (error) {
         if (!this.active) return;
-        const message = error instanceof Error ? error.message : 'Cursor transport selection failed';
+        const message = error instanceof Error ? error.message : 'Cursor print qualification failed';
         onEvent?.({ type: 'error', message });
         opts.onUiEvent?.({ type: 'session.error', message, fatal: true });
         this.settle({ text: '', toolCalls: [], tokensUsed: 0 });

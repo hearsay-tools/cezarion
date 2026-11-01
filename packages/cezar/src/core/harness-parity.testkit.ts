@@ -69,7 +69,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `permission-late` | the turn ends with `CEZ:DONE`, then a native permission request from a run the server started; its answer resumes that run, which ends with `CEZ:DONE` |
  * | `ask` | an ask — native where the wire has one, a `CEZ:ASK` marker otherwise |
  * | `ask-resume` | accept one human answer, then finish with `CEZ:DONE` without another prompt |
- * | `plan-resume` | Legacy Cursor ACP `cursor/create_plan` variant (direct ACP tests) |
  * | `ask-reply-late` | native ask whose reply acknowledgement can lag the resumed turn |
  * | `ask-bad` | a malformed ask, and then still end the turn |
  * | `subagent` | child work and terminal signal, then parent monitoring text followed by late child text |
@@ -139,7 +138,6 @@ export const SCENARIOS = [
   'post-success-refusal',
   'ask',
   'ask-resume',
-  'plan-resume',
   'ask-snapshot',
   'ask-snapshot-bad',
   'ask-prose',
@@ -325,7 +323,7 @@ export interface HarnessAdapter {
   /** Every human ask wire this runner exposes; marker fallback when none exists. */
   readonly askResumeCases: readonly {
     kind: string;
-    scenario: 'ask-resume' | 'plan-resume';
+    scenario: 'ask-resume';
     answer: string;
   }[];
   /** The env var this backend's runner already reads to locate its binary. */
@@ -573,7 +571,6 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'post-success-refusal': 'mock:provider-error',
       ask: 'mock:ask',
       'ask-resume': 'mock:ask mock:resume-done',
-      'plan-resume': 'mock:plan mock:resume-done',
       'ask-snapshot': 'mock:ask-snapshot',
       'ask-snapshot-bad': 'mock:ask-snapshot-bad', 'ask-prose': 'mock:ask-prose', 'ask-bad': 'mock:ask-bad', 'ask-reply-late': 'mock:ask-reply-late' },
   },
@@ -765,11 +762,11 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   },
   {
     criterion: 'S29', backend: 'cursor', kind: 'scenario-unconstructible',
-    reason: 'Cursor print writes the prompt to stdin once per turn and then closes stdin. It refuses agent input while busy and queues human follow-ups for a new per-turn child, so this admitted-turn/live-followup cell has no writable input transport to close. ACP stdin behavior is a separate legacy transport, not the HARNESS_ADAPTERS cursor-print wire.',
+    reason: 'Cursor print writes the prompt to stdin once per turn and then closes stdin. It refuses agent input while busy and queues human follow-ups for a new per-turn child, so this admitted-turn/live-followup cell has no writable input transport to close.',
   },
   ...(['S9', 'R12', 'R15'] as const).map(criterion => ({
     criterion, backend: 'cursor' as const, kind: 'scenario-unconstructible' as const,
-    reason: 'Cursor 2026.10.01-e373342 print stream-json reports parent tool calls but no child-session transcript or child terminal frames; native delegation is suppressed for governed runs. The ACP child-session fixture remains covered by direct ACP mapper tests.',
+    reason: 'Cursor 2026.10.01-e373342 print stream-json reports parent tool calls but no child-session transcript or child terminal frames; native delegation is suppressed for governed runs.',
   })),
   ...(['claude', 'codex', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion: 'S25', backend, kind: 'scenario-unconstructible' as const,
@@ -850,7 +847,7 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   },
   {
     criterion: 'R16', backend: 'cursor', kind: 'capability-absent',
-    reason: 'Cursor ACP agent_message_chunk has a single text channel; cursor-acp-runner emits v1 directly from each completed parent v2 message (acp-lifecycle.ndjson). A completed marker cannot be present only on v2.',
+    reason: 'Cursor print stream-json assistant frames are the one assistant-text channel: cursor-print-runner maps v1 text and the v2 message from the same frame, and the result frame supplies text only when no assistant text arrived (print-lifecycle.ndjson). A completed marker cannot be present only on v2.',
   },
   {
     criterion: 'R16', backend: 'omp', kind: 'capability-absent',
@@ -862,7 +859,7 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   },
   {
     criterion: 'I1', backend: 'cursor', kind: 'scenario-unconstructible',
-    reason: 'Cursor ACP 2026.09.18: a second session/prompt cancels the running turn (live probe 2026-09-23), so agent input cannot be admitted mid-turn without cancelling tools. inputDelivery is boundary (#505).',
+    reason: 'Cursor print runs one process per turn and writes its prompt to stdin once, so a running turn has no input channel. sendAgentMessage refuses while busy, and inputDelivery is boundary: input waits for the next exact-resume print process (#505).',
   },
   {
     criterion: 'I2', backend: 'cursor', kind: 'scenario-unconstructible',
@@ -874,7 +871,7 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   },
   {
     criterion: 'I3', backend: 'cursor', kind: 'scenario-unconstructible',
-    reason: 'Same wire as I1: a second Cursor ACP session/prompt cancels the running answer turn, so a conversation message cannot steer it. I4 pins its boundary delivery after that turn (hearsay-tools/cezarion#935).',
+    reason: 'Same wire as I1: a running Cursor print turn has no input channel, so a conversation message cannot steer the answer turn. I4 pins its boundary delivery after that turn (hearsay-tools/cezarion#935).',
   },
   {
     criterion: 'I2', backend: 'claude', kind: 'capability-absent',
@@ -890,7 +887,7 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   },
   {
     criterion: 'S4', backend: 'cursor', kind: 'capability-absent',
-    reason: 'Cursor ACP 2026.09.15-d2fe57e emits no token usage (src/acp presenter and prompt result; live probe). Do not manufacture counts from text. Revisit when upstream emits telemetry.',
+    reason: 'Cursor print 2026.10.01-e373342 emits no token usage: its terminal result frame carries no usage or total_cost_usd (Cursor output-format reference; cursor-print-ui-mapper.ts header). Do not manufacture counts from text. Revisit when upstream emits telemetry.',
   },
   {
     criterion: 'R12',

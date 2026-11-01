@@ -14,8 +14,7 @@ import { defined } from './defined.ts';
  * exclusions in `ui-parity.test.ts` (AGENT_PROTOCOL.md §6), not capabilities
  * this mapper produces. The `usage`/`total_cost_usd` reads below are kept as a
  * defensive no-op against real output, per the docs' own "field additions may
- * occur… backward-compatible" note — see `cursor-ui-mapper.test.ts`'s header
- * for the full verified-vs-unverified provenance split.
+ * occur… backward-compatible" note.
  *
  * Never throws on malformed input. State is immutable — callers thread the
  * returned `state` into the next call.

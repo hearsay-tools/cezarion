@@ -75,7 +75,9 @@ export const stepStatusSchema = z.enum([
 ]);
 export type StepStatus = z.infer<typeof stepStatusSchema>;
 
-/** Wire transport that owns a Cursor native session. Legacy Cursor sessions omit it (ACP). */
+/** Wire transport that owns a Cursor native session. Legacy Cursor sessions omit it (ACP).
+ *  `cursor-acp` stays readable for old run records; no new session is opened on it and a
+ *  Continue of one fails (hearsay-tools/cezarion#1267). */
 export const sessionTransportSchema = z.enum(['cursor-acp', 'cursor-print']);
 export type SessionTransport = z.infer<typeof sessionTransportSchema>;
 

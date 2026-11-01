@@ -83,8 +83,8 @@ export async function inspectCursorPrintCapabilities(
   const model = spec.model ?? models.find(option => option.description === 'Default model')?.id;
   if (!model) throw new Error('Cursor print requested model is not advertised for the selected account');
   if (!models.some(option => option.id === model)) {
-    // The picker uses canonical ACP IDs; --list-models lists legacy aliases.
-    // Query the same account, retaining native parameter keys and defaults.
+    // The picker uses canonical IDs from the read-only `agent acp` model catalog; --list-models
+    // lists legacy aliases. Query the same account, retaining native parameter keys and defaults.
     let catalog;
     try { catalog = await discoverCursorParameterizedModels({ cwd: spec.cwd, bin, env: spec.env, signal }); }
     catch { throw new Error('Cursor print capability preflight could not read selected-account model parameters'); }

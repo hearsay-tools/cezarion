@@ -29,17 +29,6 @@ export function opencodeToolGrantFields(grant: ToolGrant): Record<never, never> 
   }
 }
 
-/** The session fields each grant kind adds: none, since ACP has no per-session tool allowlist. */
-export function cursorAcpToolGrantFields(grant: ToolGrant): Record<never, never> {
-  switch (grant.kind) {
-    case 'unset':
-    case 'step-default':
-    case 'inherited':
-    case 'explicit': return {};
-    default: return unknownToolGrant(grant);
-  }
-}
-
 /** The print flags each grant kind adds: none. Only D1 sends `--allowed-tools`, from the capability list. */
 export function cursorPrintToolGrantArgs(grant: ToolGrant): string[] {
   switch (grant.kind) {
