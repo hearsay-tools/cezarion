@@ -380,6 +380,31 @@ describe('AgentConfigSection', () => {
     expect(document.querySelector('[data-slot="agent-config-conflict"]')).toBeNull()
   })
 
+  it('opening a file re-reads a grant the host made after the section loaded', async () => {
+    const readOnly = { editable: false, files: [{ ...SETTINGS_FILE, writable: false }], userMcp: null }
+    const server: LiveServer = { capabilities: READ_ONLY_REMOTE, listing: readOnly, putStatus: 200 }
+    serveLive(server)
+    renderSection()
+    await waitFor(() => expect(document.querySelector('[data-slot="agent-config-readonly"]')).toBeTruthy())
+    // The host runs `cez remote-settings enable` before the user picks a file.
+    Object.assign(server, { capabilities: REMOTE_ADMIN, listing: { editable: true, files: [SETTINGS_FILE], userMcp: null } })
+    fireEvent.click(screen.getByText('.claude/settings.json'))
+    expect(await screen.findByRole('button', { name: 'Save file' })).toBeTruthy()
+  })
+
+  it('a version conflict keeps the rejected draft in the editor', async () => {
+    const server: LiveServer = { capabilities: REMOTE_ADMIN, listing: { editable: true, files: [SETTINGS_FILE], userMcp: null }, putStatus: 409 }
+    serveLive(server)
+    renderSection()
+    fireEvent.click(await screen.findByText('.claude/settings.json'))
+    const editor = (await screen.findByLabelText('.claude/settings.json contents')) as HTMLTextAreaElement
+    await waitFor(() => expect(editor.value).toBe('{"a":1}'))
+    fireEvent.change(editor, { target: { value: '{"a":2}' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save file' }))
+    await waitFor(() => expect(document.querySelector('[data-slot="agent-config-conflict"]')).toBeTruthy())
+    expect((screen.getByLabelText('.claude/settings.json contents') as HTMLTextAreaElement).value).toBe('{"a":2}')
+  })
+
   it('a local cockpit shows no remote administration warning', async () => {
     serve({ editable: true, files: [], userMcp: null })
     renderSection()

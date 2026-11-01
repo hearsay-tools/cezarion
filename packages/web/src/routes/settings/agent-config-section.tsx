@@ -243,7 +243,7 @@ export function FileEditor({ file }: { file: AgentConfigFile }) {
   const fileQuery = useAgentConfigFile(file.id)
   const put = usePutAgentConfigFile(file.id)
   const queryClient = useQueryClient()
-  const refreshSettingsAdmin = useSettingsAdminRefresh({ onOpen: false })
+  const refreshSettingsAdmin = useSettingsAdminRefresh()
   const [draft, setDraft] = useState<string | null>(null)
   const [conflict, setConflict] = useState(false)
   const [formatError, setFormatError] = useState<string | null>(null)
