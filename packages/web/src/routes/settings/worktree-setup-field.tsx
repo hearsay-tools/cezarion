@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
-import { putConfig } from '@/api/client'
+import { ApiError, putConfig } from '@/api/client'
 import { queryKeys, useHealth } from '@/api/queries'
 import {
   WORKTREE_SETUP_DEFAULT_TIMEOUT_SECONDS,
@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toaster'
 import { SettingsField } from './settings-field'
 import { useActiveProjectRoot } from './project-location'
-import { REMOTE_SETTINGS_ENABLE_COMMAND, RemoteSettingsNotice } from './remote-settings-notice'
+import { REMOTE_SETTINGS_ENABLE_COMMAND, RemoteSettingsNotice, useSettingsAdminRefresh } from './remote-settings-notice'
 
 /**
  * Project settings → Worktrees → "Prepare new worktrees" (hearsay-tools/cezarion#917, spec
@@ -29,6 +29,7 @@ import { REMOTE_SETTINGS_ENABLE_COMMAND, RemoteSettingsNotice } from './remote-s
 export function WorktreeSetupField({ config }: { config: ConfigResponse }) {
   const queryClient = useQueryClient()
   const health = useHealth()
+  const refreshSettingsAdmin = useSettingsAdminRefresh()
   const projectRoot = useActiveProjectRoot()
   const configPath = projectRoot === null ? null : `${projectRoot.replace(/\/$/, '')}/.ai/cezar/config.json`
   // Unknown until health answers: read-only rather than editable-then-refused.
@@ -66,7 +67,11 @@ export function WorktreeSetupField({ config }: { config: ConfigResponse }) {
       setText(commands.join('\n'))
       toast(commands.length === 0 ? 'Worktree setup cleared' : 'Worktree setup saved')
     },
-    onError: (error: Error) => toast(error.message, { tone: 'danger' }),
+    onError: (error: Error) => {
+      toast(error.message, { tone: 'danger' })
+      // A 409 can mean the host withdrew the grant since the page loaded: show the field read-only.
+      if (error instanceof ApiError && error.status === 409) void refreshSettingsAdmin()
+    },
   })
   const submit = () =>
     save.mutate({

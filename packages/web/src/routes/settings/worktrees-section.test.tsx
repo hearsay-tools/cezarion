@@ -21,6 +21,8 @@ import { AppRoutes } from '@/routes'
  */
 
 let requests: Array<{ method: string; url: string; body?: unknown }> = []
+/** What `/api/v1/health` answers; unset, the request never settles and the seeded health stays. */
+let liveHealth: object | undefined
 
 function serve(config: Partial<ConfigResponse> = {}) {
   requests = []
@@ -51,6 +53,7 @@ function serve(config: Partial<ConfigResponse> = {}) {
       const method = init?.method ?? 'GET'
       const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined
       requests.push({ method, url, body })
+      if (url === '/api/v1/health' && liveHealth !== undefined) return json(liveHealth)
       if ((url === '/api/v1/config' || url === '/api/v1/p/other/config') && method === 'GET') return json(state)
       if (url === '/api/v1/config' && method === 'PUT') {
         if (body?.worktreeRetention !== undefined) {
@@ -116,6 +119,7 @@ const puts = () =>
   )
 
 afterEach(() => {
+  liveHealth = undefined
   act(() => resetToasts())
   cleanup()
   vi.unstubAllGlobals()
@@ -294,6 +298,16 @@ describe('Project settings → Worktrees: worktree setup commands (#917)', () =>
     fireEvent.click(saveSetup()!)
     await waitFor(() => expect(setupPuts()).toHaveLength(1))
     expect(setupPuts()[0]?.body).toEqual({ worktreeSetup: { commands: ['npm ci', 'pnpm build'] } })
+  })
+
+  // hearsay-tools/cezarion#2428: a remote cockpit gets no live health push, so the field re-reads
+  // the grant when it opens instead of trusting the cached capability.
+  it('opening the field re-reads a grant the host made after the cached read', async () => {
+    serve({ worktreeSetup: { commands: ['npm ci'], timeoutSeconds: 900 } })
+    liveHealth = { bootProject: 'boot', capabilities: { localHandoff: false, settingsAdmin: true, remoteSettingsAdmin: true } }
+    renderAt('/settings/worktrees', { localHandoff: false })
+    await waitFor(() => expect(commandsBox()?.readOnly).toBe(false))
+    expect(document.querySelector('[data-slot="remote-settings-notice"]')).toBeTruthy()
   })
 
   it('a local cockpit shows no remote administration warning', async () => {

@@ -1,4 +1,27 @@
-import { useHealth } from '@/api/queries'
+import { useQueryClient } from '@tanstack/react-query'
+import { useCallback, useEffect } from 'react'
+import { queryKeys, useHealth } from '@/api/queries'
+
+/**
+ * Re-reads whether this cockpit may edit host settings: health (the capability) and the Agent
+ * config listing (its `editable` flag). The host operator grants and withdraws remote settings
+ * administration outside the cockpit, and a remote cockpit gets no live health push, so an editor
+ * re-reads both when it opens and after the server refuses a save. Returns the refresh, which
+ * resolves once both reads end.
+ */
+export function useSettingsAdminRefresh({ onOpen = true }: { onOpen?: boolean } = {}): () => Promise<void> {
+  const queryClient = useQueryClient()
+  const refresh = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.health }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.agentConfig }),
+    ])
+  }, [queryClient])
+  useEffect(() => {
+    if (onOpen) void refresh()
+  }, [onOpen, refresh])
+  return refresh
+}
 
 /** The host command that grants remote settings administration (hearsay-tools/cezarion#2428). */
 export const REMOTE_SETTINGS_ENABLE_COMMAND = 'cez remote-settings enable'

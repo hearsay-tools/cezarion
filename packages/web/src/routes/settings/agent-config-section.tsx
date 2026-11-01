@@ -2,8 +2,8 @@ import { FileCogIcon } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import { ApiError } from '@/api/client'
-import { useAgentConfig, useAgentConfigFile, useHealth, usePutAgentConfigFile } from '@/api/queries'
-import type { AgentConfigFile, AgentConfigListing, Runner } from '@open-mercato/cezar-api-client'
+import { queryKeys, useAgentConfig, useAgentConfigFile, useHealth, usePutAgentConfigFile } from '@/api/queries'
+import type { AgentConfigFile, AgentConfigListing, HealthResponse, Runner } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { CodeEditor } from '@/components/code-editor'
 import { Badge } from '@/components/ui/badge'
@@ -12,7 +12,8 @@ import { toast } from '@/components/ui/toaster'
 import { availableRunners } from '@/routes/new-task-form'
 import { cn } from '@/lib/utils'
 import { AGENT_DESCRIPTORS, descriptorFor, type AgentDescriptor } from './agent-descriptors'
-import { REMOTE_SETTINGS_ENABLE_COMMAND, RemoteSettingsNotice } from './remote-settings-notice'
+import { useQueryClient } from '@tanstack/react-query'
+import { REMOTE_SETTINGS_ENABLE_COMMAND, RemoteSettingsNotice, useSettingsAdminRefresh } from './remote-settings-notice'
 
 /**
  * Settings → Agent config (spec #404, regrouped per
@@ -37,6 +38,7 @@ function effectLabel(file: AgentConfigFile): string {
 
 export function AgentConfigSection() {
   const listing = useAgentConfig()
+  useSettingsAdminRefresh()
   const health = useHealth()
   const installed = useMemo<Runner[]>(
     () => (health.data ? availableRunners(health.data.checks) : AGENT_DESCRIPTORS.map((d) => d.id)),
@@ -240,6 +242,8 @@ function UserMcpBlock({ userMcp }: { userMcp: NonNullable<AgentConfigListing['us
 export function FileEditor({ file }: { file: AgentConfigFile }) {
   const fileQuery = useAgentConfigFile(file.id)
   const put = usePutAgentConfigFile(file.id)
+  const queryClient = useQueryClient()
+  const refreshSettingsAdmin = useSettingsAdminRefresh({ onOpen: false })
   const [draft, setDraft] = useState<string | null>(null)
   const [conflict, setConflict] = useState(false)
   const [formatError, setFormatError] = useState<string | null>(null)
@@ -269,8 +273,14 @@ export function FileEditor({ file }: { file: AgentConfigFile }) {
           toast(`${file.exists ? 'Saved' : 'Created'} ${file.label}`)
         },
         onError: (err) => {
-          if (err instanceof ApiError && err.status === 409) setConflict(true)
-          else if (err instanceof ApiError && err.status === 400) setFormatError(err.message)
+          // A 409 is a version conflict, or the host withdrew the grant since the page loaded.
+          if (err instanceof ApiError && err.status === 409) {
+            void refreshSettingsAdmin().then(() => {
+              const health = queryClient.getQueryData<HealthResponse>(queryKeys.health)
+              if (health?.capabilities.settingsAdmin === false) toast(err.message, { tone: 'danger' })
+              else setConflict(true)
+            })
+          } else if (err instanceof ApiError && err.status === 400) setFormatError(err.message)
           else toast((err as Error).message, { tone: 'danger' })
         },
       },
