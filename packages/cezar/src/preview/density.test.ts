@@ -66,6 +66,31 @@ describe('PixelDensity (hearsay-tools/cezarion#2069)', () => {
     expect(calls.at(-1)).toEqual({ method: 'Browser.setWindowBounds', params: { windowId: 7, bounds: { left: 0, top: 0 } } });
   });
 
+  it('keeps trying to move a window back to the primary screen after a failed move, and says so', async () => {
+    let refuse = false;
+    const screens = [PRIMARY];
+    const { cdp, calls } = fakeBrowser(screens);
+    const send = cdp.send.bind(cdp);
+    (cdp as { send: typeof cdp.send }).send = (async (method: string, params?: Record<string, unknown>) => {
+      if (refuse && method === 'Browser.setWindowBounds') {
+        calls.push({ method, params: params ?? {} });
+        throw new Error('Browser.setWindowBounds: target closed');
+      }
+      return send(method, params);
+    }) as typeof cdp.send;
+    const density = new PixelDensity(cdp);
+    expect(await density.place(2)).toBe(2);
+    refuse = true;
+    expect(await density.place(1)).toBe(1);
+    expect(density.onExtraScreen).toBe(true);
+    refuse = false;
+    expect(await density.place(1)).toBe(1);
+    expect(density.onExtraScreen).toBe(false);
+    expect(calls.filter(call => call.method === 'Browser.setWindowBounds').map(call => (call.params.bounds as { left: number } | undefined)?.left)).toEqual([100_000, 0, 0]);
+    // Ultra still works after the retry: the failure was the move, not a missing feature.
+    expect(await density.place(2)).toBe(2);
+  });
+
   it.each(['Emulation.getScreenInfos', 'Emulation.addScreen', 'Browser.setWindowBounds'])('streams at scale 1 for good when Chromium refuses %s', async refused => {
     const { cdp, calls } = fakeBrowser([PRIMARY], refused);
     const density = new PixelDensity(cdp);

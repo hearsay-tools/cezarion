@@ -29,6 +29,13 @@ export class PixelDensity {
   private windowId?: number | undefined;
   /** Chromium refused a density command: everything streams at scale 1 from now on. */
   private unsupported = false;
+  /** The window sits on an emulated screen: a move back to the primary screen is still owed. */
+  private moved = false;
+
+  /** Whether the window still sits on an emulated screen, so the page renders above scale 1. */
+  get onExtraScreen(): boolean {
+    return this.moved;
+  }
 
   constructor(private readonly cdp: Cdp) {}
 
@@ -47,9 +54,13 @@ export class PixelDensity {
       this.windowId ??= (await this.cdp.send<{ windowId: number }>('Browser.getWindowForTarget')).windowId;
       await this.cdp.send('Browser.setWindowBounds', { windowId: this.windowId, bounds: { left: screen.availLeft, top: screen.availTop } });
       this.placed = scale;
+      this.moved = scale !== 1;
       return scale;
     } catch {
-      this.unsupported = true;
+      // A failed move back from an emulated screen is a failed move, not a missing feature: the
+      // next placement tries again. Any other refusal turns density off for this session.
+      if (scale === 1 && this.moved) this.placed = undefined;
+      else this.unsupported = true;
       return 1;
     }
   }

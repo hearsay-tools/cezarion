@@ -247,6 +247,60 @@ describe('pixel density (hearsay-tools/cezarion#2069)', () => {
     expect(sent('Page.startScreencast')).toHaveLength(1);
   });
 
+  it('a failed move back leaves the reset pending, so the next viewer leaving retries it', async () => {
+    let refuseMoves = false;
+    const screens: Array<Record<string, unknown>> = [{ id: 'P', availLeft: 0, availTop: 0, devicePixelRatio: 1, isPrimary: true }];
+    const { cdp, sent } = fakeCdp((method, params) => {
+      if (method === 'Browser.setWindowBounds' && refuseMoves) throw new Error('Browser.setWindowBounds: refused');
+      if (method === 'Emulation.getScreenInfos') return { screenInfos: [...screens] };
+      if (method === 'Browser.getWindowForTarget') return { windowId: 3 };
+      if (method === 'Emulation.addScreen') {
+        const info = { id: 'S1', availLeft: params.left, availTop: 0, devicePixelRatio: params.devicePixelRatio, isPrimary: false };
+        screens.push(info);
+        return { screenInfo: info };
+      }
+      return undefined;
+    });
+    const session = await PreviewSession.create(cdp, { quality: () => 'ultra' });
+    const first = fakeViewer();
+    session.attach(first);
+    await session.handle({ t: 'resize', w: 800, h: 600, dpr: 2 });
+    await flush();
+    refuseMoves = true;
+    session.detach(first);
+    await flush();
+    refuseMoves = false;
+    const second = fakeViewer();
+    session.attach(second);
+    await session.handle({ t: 'resize', w: 800, h: 600, dpr: 2 });
+    await flush();
+    // Ultra still renders at 2 for the next viewer: the failed move did not turn density off.
+    expect(sent('Page.startScreencast').at(-1)?.params).toMatchObject({ maxWidth: 1600, maxHeight: 1200 });
+    session.detach(second);
+    await flush();
+    await flush();
+    expect(sent('Browser.setWindowBounds').at(-1)?.params).toEqual({ windowId: 3, bounds: { left: 0, top: 0 } });
+  });
+
+  it('closes the connection after a bounded wait when a queued CDP call never answers', async () => {
+    vi.useFakeTimers();
+    let hang = false;
+    const { cdp } = browser();
+    const send = cdp.send;
+    (cdp as { send: typeof cdp.send }).send = vi.fn((method: string, params?: Record<string, unknown>) => (hang ? new Promise<never>(() => {}) : send(method, params))) as typeof cdp.send;
+    const session = await PreviewSession.create(cdp, { quality: () => 'ultra' });
+    session.attach(fakeViewer());
+    await session.handle({ t: 'resize', w: 800, h: 600, dpr: 2 });
+    await vi.advanceTimersByTimeAsync(0);
+    hang = true;
+    void session.handle({ t: 'resize', w: 900, h: 600, dpr: 2 });
+    session.close();
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(cdp.close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(cdp.close).toHaveBeenCalledOnce();
+  });
+
   it('closing a session that never left scale 1 moves no window and closes the connection', async () => {
     const { cdp, calls } = browser();
     const session = await PreviewSession.create(cdp, { quality: () => 'high' });

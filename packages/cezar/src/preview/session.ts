@@ -30,6 +30,8 @@ const FIRST_FRAME_RETRIES = 5;
  * and a first paint after the first-frame retries never reached it (#870).
  */
 const ACTIVITY_FRAME_WAIT_MS = 1000;
+/** How long a close waits for queued work (the density reset among it) before it closes the connection anyway. */
+const CLOSE_WAIT_MS = 5000;
 /** Input that can change what the page shows. A pointer move alone is too frequent to count. */
 const ACTIVE_MOUSE = new Set(['mousePressed', 'mouseReleased', 'mouseWheel']);
 
@@ -215,7 +217,8 @@ export class PreviewSession {
     if (this.viewer || this.rendered === 1) return;
     await this.density.place(1);
     await this.cdp.send('Emulation.setDeviceMetricsOverride', { width: this.viewport.w, height: this.viewport.h, deviceScaleFactor: 1, mobile: false }).catch(() => {});
-    this.rendered = 1;
+    // A window still on an emulated screen keeps the reset owed, so the next detach or close retries it.
+    if (!this.density.onExtraScreen) this.rendered = 1;
   }
 
   /**
@@ -249,7 +252,17 @@ export class PreviewSession {
   close(): void {
     this.viewer = undefined;
     this.disarmWatchdog();
-    void this.enqueue(() => this.leaveDensity()).catch(() => {}).then(() => this.cdp.close());
+    const reset = this.enqueue(() => this.leaveDensity()).catch(() => {});
+    // CDP calls have no timeout: a queued call that never answers must not keep the session open.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const bound = new Promise<void>(resolve => {
+      timer = setTimeout(resolve, CLOSE_WAIT_MS);
+      timer.unref?.();
+    });
+    void Promise.race([reset, bound]).then(() => {
+      clearTimeout(timer);
+      this.cdp.close();
+    });
   }
 
   /** The whole browser-facing surface. Everything else in CDP stays unreachable. */
