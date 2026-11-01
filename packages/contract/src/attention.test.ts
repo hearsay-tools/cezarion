@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { computeWaitingOn, type WaitingOnInput, type WorkerWaitEntry } from './waits.ts';
 import { ATTENTION_RANK, ATTENTION_RUNGS, DEFAULT_WEBHOOK_TRIGGERS, deriveAttention, deriveWebhookState, WEBHOOK_TRIGGERS, workerWaitLabel, type Attention, type AttentionInput, type AttentionRung } from './attention.ts';
 import type { RunStatus } from './runs.ts';
-import { makePeerWait, makeSubagentWait, RUN_STATUS, SUBAGENT_STATUS, WAIT_PHASE } from './test-factories.testkit.ts';
+import { makePeerWait, makeSubagentWait, makeTimerWait, RUN_STATUS, SUBAGENT_STATUS, WAIT_PHASE } from './test-factories.testkit.ts';
 
 /**
  * The attention ladder, pinned where it now lives (#553/#609). The cockpit's
@@ -519,8 +519,7 @@ describe('attention boundary cases', () => {
 
   it('reads native subagents as the robot glyph without a pulse, and outranks a timer beside them', () => {
     const subagents = makeSubagentWait({ children: [{ id: 'a', status: SUBAGENT_STATUS.running }, { id: 'b', status: SUBAGENT_STATUS.completed }] });
-    const timer = { kind: 'timer' as const, id: '22222222-2222-4222-8222-222222222223', source: 'agent' as const, via: 'cezar_wait' as const, registeredAt: '2026-10-26T00:00:00.000Z',
-      phase: 'open' as const, turnId: 'turn-1', seconds: 300, deadline: '2026-10-26T00:01:00.000Z' };
+    const timer = makeTimerWait({ deadline: '2026-10-26T00:01:00.000Z' });
     const attention = deriveAttention({ status: RUN_STATUS.waiting, waits: [timer, subagents] });
     expect(attention).toEqual({ rung: 'waiting-on-subagents', bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting for 1 subagent' });
     expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [subagents, workerEntry()] }).rung).toBe('waiting-on-workers');

@@ -27,7 +27,7 @@ describe('human permission lifecycle', () => {
         if (optionId !== 'deny') return false;
         emit({ type: 'permission.resolved', requestId, optionId }); return true;
       }), end: vi.fn(), interrupt: vi.fn(), discardQueuedMessages: vi.fn(), holdsHumanInput: () => false };
-    state = { cwd: root, cancelled: false, interrupt: () => {}, pendingHumanAsk: false, autonomous: true, session, currentStepId: 'task' };
+    state = { cwd: root, cancelled: false, interrupt: () => {}, pendingHumanAsk: false, backgroundChildren: new Map(), autonomous: true, session, currentStepId: 'task' };
     manager['activate'](id, state);
   });
   afterEach(() => { manager.dispose(); store.close(); rmSync(root, { recursive: true, force: true }); });

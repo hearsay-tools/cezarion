@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import type { SubagentWaitEntry, Wait } from '@open-mercato/cezar-contract/waits';
-import { RUN_STATUS, WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, SUBAGENT_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { ToolStatus, UiEvent, UiToolItem } from '../core/ui-events.ts';
 import { UiEventSink } from '../runs/ui-event-sink.ts';
 import { handleRunnerUiEvent } from './run/session-events.ts';
@@ -73,7 +73,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     const run = store.getRun(id)!;
     expect(stateOf(run)).toBe('waiting:subagents');
     expect(deriveAttention(run)).toMatchObject({ rung: 'waiting-on-subagents', label: 'waiting for 1 subagent', pulse: false, shape: 'workers' });
-    expect(wait).toMatchObject({ source: 'cezar', via: 'native-subagents', children: [{ id: 'toolu_bg_01', status: 'running' }] });
+    expect(wait).toMatchObject({ source: WAIT_SOURCE.cezar, via: WAIT_VIA['native-subagents'], children: [{ id: 'toolu_bg_01', status: SUBAGENT_STATUS.running }] });
     expect(run.waits?.filter(entry => entry.kind === WAIT_KIND.timer)).toEqual([]);
     expect(wakes(id)).toBe(0);
     // It keeps its session and a monitoring slot, so the idle close never applies.
@@ -88,7 +88,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     const turns = turnEnds(id);
     endChild(id, 'toolu_bg_01');
     // One child still runs: the wait saves the end, reads 1, and stays open.
-    expect(entryOf(id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open, children: [{ id: 'toolu_bg_02', status: 'running' }, { id: 'toolu_bg_01', status: 'completed' }] });
+    expect(entryOf(id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open, children: [{ id: 'toolu_bg_02', status: SUBAGENT_STATUS.running }, { id: 'toolu_bg_01', status: SUBAGENT_STATUS.completed }] });
     expect(deriveAttention(store.getRun(id)!).label).toBe('waiting for 1 subagent');
     endChild(id, 'toolu_bg_02');
     await until(() => settledOf(id, wait.id)?.phase === WAIT_PHASE.delivered && turnEnds(id) > turns && store.getRun(id)?.status === RUN_STATUS.waiting);
@@ -188,7 +188,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
 });
 
 describe('the subagent wait deadline (hearsay-tools/cezarion#2431)', () => {
-  useWorkerWaitFixture({ subagentGraceMs: 50, subagentDeadlineMs: 300 });
+  useWorkerWaitFixture({ subagentGraceMs: 50, subagentDeadlineMs: 1_000 });
 
   it('the deadline wakes the parent and spends one wake', async () => {
     const { id, wait } = await parkedOnSubagents();
@@ -210,7 +210,7 @@ describe('the subagent wait deadline (hearsay-tools/cezarion#2431)', () => {
     store.commitOutcome(id, { kind: 'charged', automaticWakes: MAX_AUTO_CONTINUES });
     await until(() => settledOf(id, wait.id)?.phase === WAIT_PHASE.cancelled);
     await until(() => stateOf(store.getRun(id)!) === 'waiting:human');
-    expect(store.getRun(id)?.waits).toEqual([expect.objectContaining({ kind: WAIT_KIND.human, source: 'cezar', via: 'budget' })]);
+    expect(store.getRun(id)?.waits).toEqual([expect.objectContaining({ kind: WAIT_KIND.human, source: WAIT_SOURCE.cezar, via: WAIT_VIA.budget })]);
     expect(store.readEvents(id).some(event => event.type === 'note' && String(event.message).includes(`subagent wait ${wait.id} cancelled`))).toBe(true);
   });
 });

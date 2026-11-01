@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SUBAGENT_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { RunStore } from '../runs/store.ts';
 import type { Skill } from '../skills.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
@@ -55,7 +56,7 @@ describe('createActiveRun', () => {
     expect(second).toMatchObject({ cwd: '/b', pendingHumanAsk: true, autonomous: true });
     first.pendingPermissions?.add('p');
     expect(second.pendingPermissions?.size).toBe(0);
-    first.backgroundChildren.set('child', { session: undefined, status: 'running' });
+    first.backgroundChildren.set('child', { session: undefined, status: SUBAGENT_STATUS.running });
     expect(second.backgroundChildren.size).toBe(0);
   });
 });
