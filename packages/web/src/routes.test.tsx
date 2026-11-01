@@ -184,6 +184,7 @@ describe('pageTitleContext', () => {
     '/p/cezar/tasks/run-1',
     '/p/cezar/tasks/run-1/changes',
     '/p/cezar/tasks/run-1/files',
+    '/p/cezar/tasks/run-1/report',
     '/p/cezar/tasks/run-1/commits/abc123',
     '/p/cezar/tasks/run-1/pr/5',
     '/p/cezar/tasks/run-1/issue/7',
@@ -208,6 +209,8 @@ const ROUTE_CASES: Array<[url: string, route: string, title: string]> = [
   // The real R5 tab routes: with fetch never answering they are honestly loading.
   ['/tasks/abc123/changes', 'task-changes', 'Loading changes…'],
   ['/tasks/abc123/files', 'task-files', 'Loading files…'],
+  // The HTML report reader (hearsay-tools/cezarion#2400).
+  ['/tasks/abc123/report', 'task-report', 'Loading report…'],
   // The linked-item tabs (#692): with fetch never answering they are honestly loading.
   ['/tasks/abc123/pr/5', 'task-github-item', 'Loading pull request…'],
   ['/tasks/abc123/issue/7', 'task-github-item', 'Loading issue…'],

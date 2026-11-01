@@ -1,11 +1,12 @@
 import { isImagePath } from '@open-mercato/cezar-api-client/contract/image-path';
 import { ImageIcon } from 'lucide-react'
 import { ChevronRightIcon, FileCodeIcon, FolderIcon } from '@/components/design-icons'
-import { useState } from 'react'
+import { useContext, useEffect, useState } from 'react'
 
 import { useRunFile } from '@/api/queries'
 import { cn } from '@/lib/utils'
 
+import { FolderMemoryContext } from './files-view-memory'
 import { formatFileSize } from './worktree-files'
 
 /**
@@ -48,6 +49,13 @@ function DirChildren({
   onSelect: (path: string) => void
 }) {
   const entry = useRunFile(runId, path)
+  const memory = useContext(FolderMemoryContext)
+  // A collapsed folder unmounts its listing; it must not leave the restore waiting for it.
+  useEffect(() => {
+    if (!path || !memory) return
+    memory.loading(path, entry.isPending)
+    return () => memory.loading(path, false)
+  }, [memory, path, entry.isPending])
 
   if (entry.isPending) {
     return (
@@ -117,7 +125,9 @@ function DirNode({
   selected: string | null
   onSelect: (path: string) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const memory = useContext(FolderMemoryContext)
+  const [open, setOpen] = useState(() => memory?.isOpen(path) ?? false)
+  const toggle = () => { memory?.setOpen(path, !open); setOpen(!open) }
   return (
     <li>
       <button
@@ -126,7 +136,7 @@ function DirNode({
         data-path={path}
         data-state={open ? 'open' : 'closed'}
         aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
+        onClick={toggle}
         className="flex min-h-11 md:min-h-8 w-full min-w-0 items-center gap-1.5 rounded-sm px-1.5 py-1 text-left text-muted-foreground hover:bg-muted hover:text-foreground"
         style={{ paddingLeft: `${6 + depth * 14}px` }}
       >

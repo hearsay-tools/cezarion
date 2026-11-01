@@ -59,6 +59,10 @@ const TaskChangesRoute = lazy(() =>
 const TaskFilesRoute = lazy(() =>
   import('./routes/task-git/task-files').then((m) => ({ default: m.TaskFilesRoute })),
 )
+const TaskReportRoute = lazy(async () => {
+  const { TaskReportRoute: route } = await import('./routes/task-git/report-reader')
+  return { default: route }
+})
 const TaskCommitsRoute = lazy(() =>
   import('./routes/task-git/task-commits').then((m) => ({ default: m.TaskCommitsRoute })),
 )
@@ -367,6 +371,15 @@ function projectScopeRoute(capabilities: HealthResponse['capabilities'] | undefi
           element={
             <Suspense fallback={<GitTabLoading tab="files" />}>
               <TaskFilesRoute />
+            </Suspense>
+          }
+        />
+        {/* The HTML report reader (hearsay-tools/cezarion#2400): one full-screen surface on a phone. */}
+        <Route
+          path="report"
+          element={
+            <Suspense fallback={<div data-route="task-report"><h1 className="p-4 text-sm text-soft-foreground">Loading report…</h1></div>}>
+              <TaskReportRoute />
             </Suspense>
           }
         />

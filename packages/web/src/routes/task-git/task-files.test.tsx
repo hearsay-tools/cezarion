@@ -1,16 +1,20 @@
-import { QueryClientProvider } from '@tanstack/react-query'
+import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
+import { useLayoutEffect, useRef, type ReactNode } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes, useNavigate } from 'react-router'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
 import type { ApiRun, HealthResponse, WorktreeEntry } from '@open-mercato/cezar-api-client'
 
+import { clearFilesViewMemory } from './files-view-memory'
+import { TaskReportRoute } from './report-reader'
 import { TaskFilesRoute } from './task-files'
 
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  clearFilesViewMemory()
 })
 
 // ---- fixtures --------------------------------------------------------------------------------
@@ -65,6 +69,8 @@ const FILES: Record<string, WorktreeEntry> = {
   'logo.png': { type: 'file', path: 'logo.png', size: 2048, binary: true, tooLarge: false },
   'big.txt': { type: 'file', path: 'big.txt', size: 900_000, binary: false, tooLarge: true },
   'blob.dat': { type: 'file', path: 'blob.dat', size: 4096, binary: true, tooLarge: false },
+  'huge.html': { type: 'file', path: 'huge.html', size: 900_000, binary: false, tooLarge: true },
+  'report.html': { type: 'file', path: 'report.html', size: 22, binary: false, tooLarge: false, content: '<h1>Quarterly</h1>' },
 }
 
 const jsonResponse = (body: unknown, status = 200) =>
@@ -104,17 +110,48 @@ function HistoryBack() {
   return <button onClick={() => void navigate(-1)}>History Back</button>
 }
 
-function renderFilesRoute(search = '') {
+function GoToReader() {
+  const navigate = useNavigate()
+  return <button onClick={() => void navigate('/tasks/r1/report?path=report.html')}>Go to reader</button>
+}
+
+/** The shell's scroller, with its reset on every pathname change (AppShell's layout effect). */
+function ShellMain({ children }: { children: ReactNode }) {
+  const { pathname } = useLocation()
+  const main = useRef<HTMLElement>(null)
+  useLayoutEffect(() => { if (main.current) main.current.scrollTop = 0 }, [pathname])
+  return <main ref={main} data-slot="main">{children}</main>
+}
+
+function renderFilesRoute(search = '', { reader = <p>reader</p> }: { reader?: ReactNode } = {}): QueryClient {
+  const client = createQueryClient()
   render(
-    <QueryClientProvider client={createQueryClient()}>
+    <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[`/tasks/r1/files${search}`]}>
         <HistoryBack />
-        <Routes>
-          <Route path="/tasks/:id/files" element={<TaskFilesRoute />} />
-        </Routes>
+        <GoToReader />
+        <ShellMain>
+          <Routes>
+            <Route path="/tasks/:id/files" element={<TaskFilesRoute />} />
+            <Route path="/tasks/:id/report" element={reader} />
+          </Routes>
+        </ShellMain>
       </MemoryRouter>
     </QueryClientProvider>,
   )
+  return client
+}
+
+const pane = () => document.querySelector<HTMLElement>('[data-slot="files-tree-pane"]')!
+const mainPane = () => document.querySelector<HTMLElement>('[data-slot="main"]')!
+function scrollTo(element: HTMLElement, top: number) {
+  element.scrollTop = top
+  fireEvent.scroll(element)
+}
+async function toReaderAndBack() {
+  fireEvent.click(screen.getByRole('button', { name: 'Go to reader' }))
+  await screen.findByText('reader')
+  fireEvent.click(screen.getByRole('button', { name: 'History Back' }))
 }
 
 const treeButton = (slot: string, path: string) =>
@@ -128,6 +165,160 @@ async function openFile(path: string) {
 // ---- the route -------------------------------------------------------------------------------
 
 describe('the Files tab route', () => {
+  it('reopens the tree where it was on Back from the reader: same folders open, same pane scroll', async () => {
+    stubFetch()
+    renderFilesRoute('?path=hello.ts')
+    fireEvent.click(await waitFor(() => { const dir = treeButton('files-dir', 'src'); expect(dir).not.toBeNull(); return dir! }))
+    await waitFor(() => expect(treeButton('files-file', 'src/nested.md')).not.toBeNull())
+    scrollTo(pane(), 120)
+    scrollTo(mainPane(), 300)
+    await toReaderAndBack()
+    await waitFor(() => expect(treeButton('files-file', 'src/nested.md')).not.toBeNull())
+    expect(treeButton('files-dir', 'src')!.dataset.state).toBe('open')
+    await waitFor(() => expect(pane().scrollTop).toBe(120))
+    // The shell resets its scroller on the pathname change; the Files return still wins.
+    await waitFor(() => expect(mainPane().scrollTop).toBe(300))
+  })
+
+  it('keeps each history entry\'s tree: a file picked just before the reader returns as it was', async () => {
+    stubFetch()
+    renderFilesRoute('?path=hello.ts')
+    fireEvent.click(await waitFor(() => { const dir = treeButton('files-dir', 'src'); expect(dir).not.toBeNull(); return dir! }))
+    await waitFor(() => expect(treeButton('files-file', 'src/nested.md')).not.toBeNull())
+    scrollTo(pane(), 50)
+    await openFile('logo.png') // a new history entry, with no scroll of its own
+    await waitFor(() => expect(document.querySelector('[data-slot="file-preview-image"]')).not.toBeNull())
+    await toReaderAndBack()
+    await waitFor(() => expect(document.querySelector('[data-slot="file-preview-image"]')).not.toBeNull())
+    expect(treeButton('files-dir', 'src')!.dataset.state).toBe('open')
+    await waitFor(() => expect(pane().scrollTop).toBe(50))
+  })
+
+  it('restores the entry the reader came from when Back has no Navigation API and pushes the Files URL', async () => {
+    stubFetch()
+    renderFilesRoute('?path=report.html', { reader: <TaskReportRoute /> })
+    fireEvent.click(await waitFor(() => { const dir = treeButton('files-dir', 'src'); expect(dir).not.toBeNull(); return dir! }))
+    await waitFor(() => expect(treeButton('files-file', 'src/nested.md')).not.toBeNull())
+    scrollTo(pane(), 90)
+    fireEvent.click(await screen.findByRole('link', { name: 'Open reader' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Back' }))
+    await waitFor(() => expect(treeButton('files-file', 'src/nested.md')).not.toBeNull())
+    expect(treeButton('files-dir', 'src')!.dataset.state).toBe('open')
+    await waitFor(() => expect(pane().scrollTop).toBe(90))
+  })
+
+  it('restores the tree offset only after the remembered folders have loaded again', async () => {
+    let release!: () => void
+    const listing = new Promise<void>(done => { release = done })
+    let fetches = 0
+    stubFetch({ 'GET /api/v1/runs/r1/files?path=src': (async () => {
+      fetches++
+      if (fetches > 1) await listing
+      return jsonResponse(FILES.src)
+    }) as unknown as () => Response })
+    const client = renderFilesRoute('?path=hello.ts')
+    fireEvent.click(await waitFor(() => { const dir = treeButton('files-dir', 'src'); expect(dir).not.toBeNull(); return dir! }))
+    await waitFor(() => expect(treeButton('files-file', 'src/nested.md')).not.toBeNull())
+    scrollTo(pane(), 120)
+    fireEvent.click(screen.getByRole('button', { name: 'Go to reader' }))
+    await screen.findByText('reader')
+    client.removeQueries({ predicate: query => query.queryKey.includes('src') })
+    fireEvent.click(screen.getByRole('button', { name: 'History Back' }))
+    await waitFor(() => expect(document.querySelector('[data-slot="files-tree-loading"]')).not.toBeNull())
+    expect(pane().scrollTop).toBe(0)
+    release()
+    await waitFor(() => expect(treeButton('files-file', 'src/nested.md')).not.toBeNull())
+    await waitFor(() => expect(pane().scrollTop).toBe(120))
+  })
+
+  it('shows each entry\'s own tree on Back between two file selections inside Files', async () => {
+    stubFetch()
+    renderFilesRoute('?path=hello.ts')
+    fireEvent.click(await waitFor(() => { const dir = treeButton('files-dir', 'src'); expect(dir).not.toBeNull(); return dir! }))
+    await waitFor(() => expect(treeButton('files-file', 'src/nested.md')).not.toBeNull())
+    await openFile('logo.png')
+    await waitFor(() => expect(document.querySelector('[data-slot="file-preview-image"]')).not.toBeNull())
+    fireEvent.click(treeButton('files-dir', 'src')!) // collapse it at the logo.png entry
+    await waitFor(() => expect(treeButton('files-dir', 'src')!.dataset.state).toBe('closed'))
+    fireEvent.click(screen.getByRole('button', { name: 'History Back' }))
+    await waitFor(() => expect(document.querySelector('[data-slot="file-preview-code"]')?.textContent).toContain("export const hi = 'world'"))
+    await waitFor(() => expect(treeButton('files-dir', 'src')!.dataset.state).toBe('open'))
+  })
+
+  it('finishes the restore when a remembered folder is collapsed while its listing loads', async () => {
+    let release!: () => void
+    const listing = new Promise<void>(done => { release = done })
+    let fetches = 0
+    stubFetch({ 'GET /api/v1/runs/r1/files?path=src': (async () => {
+      fetches++
+      if (fetches > 1) await listing
+      return jsonResponse(FILES.src)
+    }) as unknown as () => Response })
+    const client = renderFilesRoute('?path=hello.ts')
+    fireEvent.click(await waitFor(() => { const dir = treeButton('files-dir', 'src'); expect(dir).not.toBeNull(); return dir! }))
+    await waitFor(() => expect(treeButton('files-file', 'src/nested.md')).not.toBeNull())
+    scrollTo(pane(), 120)
+    fireEvent.click(screen.getByRole('button', { name: 'Go to reader' }))
+    await screen.findByText('reader')
+    client.removeQueries({ predicate: query => query.queryKey.includes('src') })
+    fireEvent.click(screen.getByRole('button', { name: 'History Back' }))
+    await waitFor(() => expect(document.querySelector('[data-slot="files-tree-loading"]')).not.toBeNull())
+    fireEvent.click(treeButton('files-dir', 'src')!)
+    await waitFor(() => expect(pane().scrollTop).toBe(120))
+    release()
+  })
+
+  it('restores the main pane only after the selected file\'s preview has loaded again', async () => {
+    let release!: () => void
+    const preview = new Promise<void>(done => { release = done })
+    let fetches = 0
+    stubFetch({ 'GET /api/v1/runs/r1/file-link?path=hello.ts': (async () => {
+      fetches++
+      if (fetches > 1) await preview
+      return jsonResponse({ ...FILES['hello.ts'], source: 'worktree' })
+    }) as unknown as () => Response })
+    const client = renderFilesRoute('?path=hello.ts')
+    await waitFor(() => expect(document.querySelector('[data-slot="file-preview-code"]')).not.toBeNull())
+    scrollTo(mainPane(), 300)
+    fireEvent.click(screen.getByRole('button', { name: 'Go to reader' }))
+    await screen.findByText('reader')
+    client.removeQueries({ predicate: query => query.queryKey.includes('file-link') })
+    fireEvent.click(screen.getByRole('button', { name: 'History Back' }))
+    await screen.findByText('Loading file…')
+    expect(mainPane().scrollTop).toBe(0)
+    release()
+    await waitFor(() => expect(document.querySelector('[data-slot="file-preview-code"]')).not.toBeNull())
+    await waitFor(() => expect(mainPane().scrollTop).toBe(300))
+  })
+
+  it('restores the pane scroll when the worktree is gone and the root listing refuses', async () => {
+    stubFetch({ 'GET /api/v1/runs/r1/files?path=': () => jsonResponse({ error: 'worktree removed' }, 409) })
+    renderFilesRoute('?path=hello.ts')
+    await screen.findByRole('heading', { name: 'No files to browse' })
+    scrollTo(pane(), 40)
+    await toReaderAndBack()
+    await screen.findByRole('heading', { name: 'No files to browse' })
+    await waitFor(() => expect(pane().scrollTop).toBe(40))
+  })
+
+  it('offers no source toggle or reader for an HTML file it cannot read', async () => {
+    stubFetch()
+    renderFilesRoute('?path=huge.html')
+    expect((await screen.findByRole('heading', { name: 'Too large to preview' }))).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'View source' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Open reader' })).toBeNull()
+  })
+
+  it('shows an HTML file as a sandboxed preview first, with View source and Open reader', async () => {
+    stubFetch()
+    renderFilesRoute('?path=report.html')
+    await waitFor(() => expect(document.querySelector('[data-slot="html-report-frame"]')?.getAttribute('srcdoc')).toContain('<h1>Quarterly</h1>'))
+    expect(screen.getByRole('link', { name: 'Open reader' }).getAttribute('href')).toBe('/tasks/r1/report?path=report.html')
+    fireEvent.click(screen.getByRole('button', { name: 'View source' }))
+    expect(document.querySelector('[data-slot="file-preview-code"]')?.textContent).toContain('<h1>Quarterly</h1>')
+    expect(document.querySelector('[data-slot="html-report-frame"]')).toBeNull()
+  })
+
   it('Back restores the previous file selection', async () => {
     stubFetch()
     renderFilesRoute('?path=hello.ts')

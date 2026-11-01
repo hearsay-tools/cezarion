@@ -369,6 +369,9 @@
  */
 
 @theme inline {
+  /* An HTML report renders on a browser's default white page in both themes
+     (hearsay-tools/cezarion#2400); only the reader's chrome follows the theme. */
+  --color-report-canvas: #fff;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
