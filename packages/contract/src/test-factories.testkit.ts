@@ -7,12 +7,14 @@ import {
   peerWaitEntrySchema,
   prWaitEntrySchema,
   processWaitEntrySchema,
+  subagentChildSchema,
+  subagentWaitEntrySchema,
   timerWaitEntrySchema,
   waitPhaseSchema,
   waitViaSchema,
   workerWaitEntrySchema,
 } from './waits.ts';
-import type { HumanWaitEntry, PeerWaitEntry, PrWaitEntry, ProcessWaitEntry, TimerWaitEntry, WorkerWaitEntry } from './waits.ts';
+import type { HumanWaitEntry, PeerWaitEntry, PrWaitEntry, ProcessWaitEntry, SubagentWaitEntry, TimerWaitEntry, WorkerWaitEntry } from './waits.ts';
 
 /**
  * Typed test data for run records, waits and events (hearsay-tools/cezarion#1812). A test builds its
@@ -50,7 +52,10 @@ export const WAIT_KIND = {
   worker: workerWaitEntrySchema.shape.kind.value,
   process: processWaitEntrySchema.shape.kind.value,
   peer: peerWaitEntrySchema.shape.kind.value,
+  subagent: subagentWaitEntrySchema.shape.kind.value,
 } as const;
+// A native subagent's status inside a subagent wait (hearsay-tools/cezarion#2431).
+export const SUBAGENT_STATUS = subagentChildSchema.shape.status.enum;
 
 // ---- shared defaults ----------------------------------------------------------------------
 
@@ -197,6 +202,19 @@ export function makePeerWait(over: Partial<PeerWaitEntry> = {}): PeerWaitEntry {
     deadline: LATER,
     timeoutSeconds: 600,
     peerIds: [uuid()],
+    ...over,
+  };
+}
+
+/** Cezar's open wait on one running native subagent (hearsay-tools/cezarion#2431). */
+export function makeSubagentWait(over: Partial<SubagentWaitEntry> = {}): SubagentWaitEntry {
+  return {
+    ...waitBase(),
+    kind: WAIT_KIND.subagent,
+    source: WAIT_SOURCE.cezar,
+    via: WAIT_VIA['native-subagents'],
+    deadline: LATER,
+    children: [{ id: 'toolu_bg_01', status: SUBAGENT_STATUS.running }],
     ...over,
   };
 }

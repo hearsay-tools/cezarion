@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { ApiRun, RunStatus, StepState } from '@open-mercato/cezar-api-client'
 
-import { makePeerWait, RUN_STATUS, WAIT_PHASE } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import { makePeerWait, makeSubagentWait, RUN_STATUS, SUBAGENT_STATUS, WAIT_PHASE } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { RunWaitDetails, hasWaitDetails } from './run-waits'
 
 /** The run's wait details, which moved from the run header into the Session activity card's
@@ -146,6 +146,17 @@ describe('RunWaitDetails', () => {
     const items = [...document.querySelectorAll<HTMLElement>('[data-slot="peer-wait-status"]')]
     expect(items.map(item => item.querySelector('p')?.textContent)).toEqual(['Waiting on 2 tasks'])
     expect(items[0]?.querySelector('time')?.getAttribute('datetime')).toBe('2026-09-22T12:10:00.000Z')
+  })
+
+  // hearsay-tools/cezarion#2431: a subagent wait lists the native subagents still running while it is open.
+  it('lists an open subagent wait with its running count and deadline, and hides it once resolved', () => {
+    const open = makeSubagentWait({ deadline: '2026-09-22T12:30:00.000Z', children: [
+      { id: 'toolu_bg_01', status: SUBAGENT_STATUS.running }, { id: 'toolu_bg_02', status: SUBAGENT_STATUS.running }, { id: 'toolu_bg_03', status: SUBAGENT_STATUS.completed }] })
+    const resolved = makeSubagentWait({ phase: WAIT_PHASE.resolved, resolvedAt: '2026-09-22T12:01:00.000Z', result: { reason: 'settled' } })
+    renderWaits(run(RUN_STATUS.waiting, { waits: [open, resolved] }))
+    const items = [...document.querySelectorAll<HTMLElement>('[data-slot="subagent-wait-status"]')]
+    expect(items.map(item => item.querySelector('p')?.textContent)).toEqual(['Waiting for 2 subagents'])
+    expect(items[0]?.querySelector('time')?.getAttribute('datetime')).toBe('2026-09-22T12:30:00.000Z')
   })
 
   it('reads a run with only a timer open as monitoring, without a note line when there is none', () => {
