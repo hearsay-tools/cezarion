@@ -30,5 +30,5 @@ function RoutedLink({ href, children, ...props }: ComponentPropsWithoutRef<'a'> 
 export function followInApp(event: MouseEvent<HTMLAnchorElement>, navigate: NavigateFunction, href: string, from: Location): void {
   if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
   event.preventDefault()
-  void navigate(href, { state: { readerFrom: from.pathname + from.search } })
+  void navigate(href, { state: { readerFrom: from.pathname + from.search, filesRestoreKey: from.key } })
 }

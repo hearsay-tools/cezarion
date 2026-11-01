@@ -8,6 +8,7 @@ import { createQueryClient } from '@/api/query-client'
 import type { ApiRun, HealthResponse, WorktreeEntry } from '@open-mercato/cezar-api-client'
 
 import { clearFilesViewMemory } from './files-view-memory'
+import { TaskReportRoute } from './report-reader'
 import { TaskFilesRoute } from './task-files'
 
 afterEach(() => {
@@ -191,6 +192,19 @@ describe('the Files tab route', () => {
     await waitFor(() => expect(document.querySelector('[data-slot="file-preview-image"]')).not.toBeNull())
     expect(treeButton('files-dir', 'src')!.dataset.state).toBe('open')
     await waitFor(() => expect(pane().scrollTop).toBe(50))
+  })
+
+  it('restores the entry the reader came from when Back has no Navigation API and pushes the Files URL', async () => {
+    stubFetch()
+    renderFilesRoute('?path=report.html', { reader: <TaskReportRoute /> })
+    fireEvent.click(await waitFor(() => { const dir = treeButton('files-dir', 'src'); expect(dir).not.toBeNull(); return dir! }))
+    await waitFor(() => expect(treeButton('files-file', 'src/nested.md')).not.toBeNull())
+    scrollTo(pane(), 90)
+    fireEvent.click(await screen.findByRole('link', { name: 'Open reader' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Back' }))
+    await waitFor(() => expect(treeButton('files-file', 'src/nested.md')).not.toBeNull())
+    expect(treeButton('files-dir', 'src')!.dataset.state).toBe('open')
+    await waitFor(() => expect(pane().scrollTop).toBe(90))
   })
 
   it('restores the tree offset only after the remembered folders have loaded again', async () => {

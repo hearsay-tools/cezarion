@@ -19,7 +19,7 @@ describe('TaskLink', () => {
     renderAt(true)
     expect(fireEvent.click(screen.getByRole('link', { name: 'Report' }))).toBe(false)
     expect(document.querySelector('output')!.textContent).toBe('/p/a/tasks/t/report?artifact=x')
-    expect(document.querySelector('output')!.dataset.state).toBe(JSON.stringify({ readerFrom: '/p/a/tasks/t' }))
+    expect(JSON.parse(document.querySelector('output')!.dataset.state!)).toEqual({ readerFrom: '/p/a/tasks/t', filesRestoreKey: expect.any(String) })
   })
 
   it('leaves modified clicks to the browser (new tab, new window)', () => {

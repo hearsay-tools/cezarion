@@ -32,7 +32,8 @@ export function useLeaveReader(): () => void {
     const navigation = (window as { navigation?: NavigationApi }).navigation
     const from = readerSource(location.state)
     if (navigation?.canGoBack) void navigation.back()
-    else if (from) void navigate(from)
+    // Pushing the source creates a new entry, so it names the one it returns to (Files restores it).
+    else if (from) void navigate(from, { state: { filesRestoreKey: (location.state as { filesRestoreKey?: unknown } | null)?.filesRestoreKey } })
     else void navigate(-1)
   }
 }
