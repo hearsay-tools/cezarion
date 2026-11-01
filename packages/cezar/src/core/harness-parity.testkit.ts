@@ -897,8 +897,8 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion: 'R4', backend, kind: 'scenario-unconstructible' as const,
     reason: 'this wire has no native ask; a malformed cezar_ask is refused to the agent as invalid_request before any card exists',
   })),
-  // hearsay-tools/cezarion#1233 U7: the monitoring-line alias stays
-  // live on every wire; only the ScheduleWakeup alias is Claude's.
+  // hearsay-tools/cezarion#1233 U7: cezar_wait stays live on every wire; only the
+  // ScheduleWakeup alias is Claude's.
   ...(['codex', 'opencode', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion: 'U7', backend, kind: 'capability-absent' as const,
     reason: 'native scheduler tool exists only on the Claude wire',

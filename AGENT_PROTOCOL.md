@@ -200,7 +200,7 @@ resolves — harness acceptance, which on a steer runner can be mid-turn. `consu
 records the read report; an observable acceptance also writes `awaitingRead` until
 then. Input the harness reports unread returns to the queue (receipts cleared, order
 and identity kept) and is submitted again; accepted-but-unread input counts as queued
-work, so DONE, auto-end, the autonomous nudge and parking wait for it. A restart
+work, so a done, auto-end, the autonomous nudge and parking wait for it. A restart
 replays input still `awaitingRead`: delivery is at-least-once and the replayed text
 keeps the input ID. The method remains synchronous: false refuses without a write; a Promise
 reserves one submission immediately, but is not a delivery receipt. Codex resolves
@@ -405,11 +405,11 @@ checkpoint retain the documented crash ambiguity below.
 Already accepted input precedes the closure of an accepted `cezar_done` at a safe boundary,
 not explicit Finish, cancellation, destruction or fatal failure. Empty queues
 preserve ordinary completion. A completed turn with an outstanding ACK retains its
-DONE intent; acknowledgement rechecks that exact idle
+done intent; acknowledgement rechecks that exact idle
 boundary, without requiring a phantom turn. Worker-wake reservation acquires real
 capacity immediately, while only positive ACK plus checkpoint retires the durable
 wait. A wake turn completed before ACK does not become running again at ACK. A temporary refusal during a late OpenCode HTTP ack
-keeps accepted input queued even when the completed turn declares DONE. Rejected
+keeps accepted input queued even when the completed turn called `cezar_done`. Rejected
 OpenCode agent-input POSTs emit a fatal error before any synthetic turn boundary,
 stop further delivery, and fail the run. Opening POST failure is also fatal before
 its synthetic boundary, reported once; human follow-up rejection stays nonfatal.
@@ -594,7 +594,7 @@ type UiItem = UiMessageItem | UiReasoningItem | UiToolItem | UiHookItem;
   and only when visible: `status !== 'completed'` or `entries` is non-empty
   (`hook-items.ts` `isVisibleHookItem`). A silent successful hook, or one printing
   only control JSON (`{"continue":true}`), is never emitted. Hook items are v2-only
-  and never touch run state: no turn, park, wake, Needs You, ASK or completion path
+  and never touch run state: no turn, park, wake, Needs You, ask or completion path
   reads them.
 
 `parentItemId` nests subagent work under the tool item that spawned it (claude
@@ -1393,7 +1393,7 @@ U2 opens both: the timer wakes, the CI wait stays open and is in that turn's foo
 the turn end re-parks without a new registration, and the later CI result is
 delivered. U3 delivers a human message during a CI wait, keeps the wait open and
 delivers its result in a later turn. U4 cancels with `cezar_cancel_wait`, and nothing
-is delivered. U7 lands `cezar_wait`, the monitoring line and `ScheduleWakeup`
+is delivered. U7 lands `cezar_wait` and `ScheduleWakeup`
 in the same list with their `via`; only `ScheduleWakeup` is exempt, as
 `native scheduler tool exists only on the Claude wire`. U8 parks on a CI wait, and separately on a
 timer, at `maxParallel: 1` and wakes without queueing behind the held slot. U8l
@@ -1408,9 +1408,10 @@ one turn carries both and spends one wake, and a third timer due at the budget i
 cancelled with the cap note and wakes nothing. A second U10 case holds the provider
 acknowledgement of a timer batch sent at 39: a timer that comes due meanwhile is
 cancelled, the held batch keeps the fortieth wake, and a CI result still wakes the agent
-uncharged. U11 opens a monitoring-line timer and ends the turn on a done blocked by a live
-worker: the timer keeps its deadline, the run parks on it with the refusal as a note and no
-nudge, and the timer's result is delivered. U12 delivers a timer result beside a pending portable question and holds its
+uncharged. U11 opens a `cezar_wait` timer, calls `cezar_done`, which is accepted, and then
+starts a worker in the same turn, so the done is blocked at the turn end: the timer keeps its
+deadline, the run parks on it with the refusal as a note and no nudge, and the timer's result
+is delivered. U12 delivers a timer result beside a pending `cezar_ask` question and holds its
 provider acknowledgement: the wait stays `resolved` and its input undelivered until the
 acknowledgement lands after the wake turn ended, and then the run is back in Needs you and
 the answer keeps its `askSeq`. U13 rejects that acknowledgement once: the session fails, the
@@ -1433,7 +1434,7 @@ A third U14 case Stops the held run at the bound before any Continue, with the r
 a still-open one: both are in `lastWaits` as `cancelled`, no wait, backoff, admission retry,
 delivery count or queued continuation is left, the run stays `failed` with the discard note, and
 a later Continue is a plain continuation that delivers neither. Scenario cases that need one wire live in
-`workflows/waits-wake.test.ts`: a CI result beside a pending portable question (U3b,
+`workflows/waits-wake.test.ts`: a CI result beside a pending `cezar_ask` question (U3b,
 Claude and Codex), a Codex native question, an idle-closed question, two waits in one
 submission, the footer and the monitoring pool, and on the Claude wire the delivery bound's
 backoff (each retry waits for it, and Continue clears it), the usage-limit failure that is
@@ -1451,14 +1452,13 @@ run, because the counter writes outside a delivery are best-effort. U6s calls `c
 in the first of two workflow steps: it is accepted with `completes: 'step'` and the second
 step's name, the first step's session closes as done, and the second step runs
 (hearsay-tools/cezarion#1620). U10 also reads the committed row as the charge note is written: the
-delivery, the charge and the cleared failure count are there together. U7h lands the ask line, `cezar_ask` (its card holding an open
+delivery, the charge and the cleared failure count are there together. U7h lands `cezar_ask` (its card holding an open
 question) and a native ask in the same list with their `via`, and the user's answer delivers each; Claude, Pi,
-Cursor (print) and OMP are exempt from the native case as `native ask arrives as the portable
-marker on this wire` and assert the `ask-line` alias instead. Two more U7h cases run on every
-runner: a valid ask line later in the turn replaces a `cezar_ask` card (on Cursor print the
-turn end re-enters a boundary from `discardQueuedMessages`, so the replacement is saved
-first), and a Continue that answers one question and asks the next keeps the next one open
-and shows its card. U9h registers a human wait
+Cursor (print) and OMP are exempt from the native case as `this wire has no native ask; its ask
+scenario calls cezar_ask` and assert the `cezar_ask` entry instead. A third U7h case runs on
+every runner: a Continue that answers one question and asks the next keeps the next one open
+and shows its card. U7k pins that `cezar_ask` delivers its `context` whole to the human wait and
+the card on every wire (hearsay-tools/cezarion#1458). U9h registers a human wait
 mid-turn and fails the provider, and separately registers one at a boundary and closes the
 session cleanly: each time the card is shown once with its `askSeq`, the run reads Needs you,
 and the answer delivers it. A step's authored `timeoutMs` is the exception: once it has passed,
@@ -1467,9 +1467,9 @@ every runner. U6 calls `cezar_done` from a parent with a live worker
 (`workers_outstanding`), then with that worker settled but not collected
 (`workers_uncollected`), and once it is collected with a CI wait open: the run finishes, the
 CI wait is cancelled into `lastWaits`, and the closing event carries `via: 'cezar_done'`. U7d
-finishes one run with the done line and one with `cezar_done` and a summary, which lands as a
-note just before the closing event, and then finishes a Continue turn through `cezar_done`
-again, so both turn-end handlers are covered. A third U7d case closes the session while a
+finishes a message turn with `cezar_done` and a summary, which lands as a note just before the
+closing event, and then finishes a Continue turn through `cezar_done` again, so both turn-end
+handlers are covered. A second U7d case closes the session while a
 question is shown, then Continues with a message that answers it and calls `cezar_done`: the
 answer in flight is not a pending question, so the done is accepted and the run finishes.
 
@@ -1495,8 +1495,8 @@ Reply with what it should do next.`), raised as `ask.requested` and routed to th
 worker question; the parent's reply resumes the worker, charged to its budget. A parent's steer,
 an automatic message, an admitted Continue, a clean exit, an idle close or a restart supersedes
 it (`human-ask-closed`, reason `superseded`; its routed request completes without reply). A worker
-whose budget is spent keeps the plain park. The native mocks answer the nudge with a `cezar_ask` card, or with the ask line in
-a session taught the markers, unless `CEZ_MOCK_NUDGE_REPLY=plain`. The unit fixtures set `plain`,
+whose budget is spent keeps the plain park. The native mocks answer the nudge with a `cezar_ask` card
+unless `CEZ_MOCK_NUDGE_REPLY=plain`. The unit fixtures set `plain`,
 and the cells that need the card opt out. U5 ends a turn with no wait: one nudge, then a second
 no-wait turn end opens the `no-wait` wait, which reads Needs you and is answered by the user's
 reply, which restarts the budget. U5a answers the nudge with `cezar_ask` and parks on that question
@@ -1507,8 +1507,8 @@ registers cancels it into `lastWaits` and parks the run as monitoring. U18 finis
 on the agent's `cezar_ask` card, with its session open and with it closed: Finish records
 `human-ask-closed` for that question and no `human-input-delivered`, so no question stays pending.
 U17 sends a prose question
-with no wait, which gets the nudge, then the same question after the monitoring line, which leaves
-the line's timer in place with no gate note. U15 nudges an autonomous run with the autonomous
+with no wait, which gets the nudge, then the same question beside a `cezar_wait` timer, which
+parks the run on that timer as monitoring with no gate note. U15 nudges an autonomous run with the autonomous
 wording until the budget, then opens a `budget` human wait.
 
 Phase 3a (hearsay-tools/cezarion#1235) adds nine cells for worker waits, with the workers on the
@@ -1538,16 +1538,14 @@ restarts a parked parent from a row an older build wrote, with its worker wait i
 `delegation.wait`, and U9v does the same for the completion gate's wait (schema 7), which wakes
 once through the list: a cancelled receipt's queued wake is delivered as ordinary input and the wait
 stays cancelled in `lastWaits`, and a `reason: 'message'` stand-in whose message a provider took
-before the crash reads as interrupted execution, so recovery resumes the parent. U19 delivers a worker message beside a pending portable question on every runner:
+before the crash reads as interrupted execution, so recovery resumes the parent. U19 delivers a worker message beside a pending `cezar_ask` question on every runner:
 the message reaches the wire, nothing answers the card, and the human's answer keeps its
 `askSeq`. No runner takes U12's exemption here: U19 pins delivery, not a delayed acknowledgement.
 Phase 3b (hearsay-tools/cezarion#1301) adds, on every runner: U20 and U20u (a blocked done at the
 turn end gets one refusal nudge, with the will-wait sentence for live workers and without it for a
-settled, uncollected one, and opens no wait), U20h and U20m (a human message, in the opening session
-or a continuation, or a worker message after a refusal nudge the harness never answered starts a
-fresh cycle: its blocked done gets a fresh nudge, not the park), U20a (a done in the turn that answers
-an input acknowledged only after that turn ended still gets the nudge once the acknowledgement
-lands, never an implicit re-check timer), U21 (an ignored refusal parks on Cezar's completion
+settled, uncollected one, and opens no wait), U20h (a human message, in the opening session or a
+continuation, after a refusal nudge the harness never answered starts a fresh cycle: its blocked
+done gets a fresh nudge, not the park), U21 (an ignored refusal parks on Cezar's completion
 worker wait, which settlement wakes), U21r (that deadline-less wait restarted and settled), U21m (a
 worker message wakes the parent beside it), U21t (an agent timer beside it keeps its deadline),
 U21h (only uncollected results: Cezar's human wait), U21a (an autonomous parent is nudged again
@@ -1557,13 +1555,17 @@ nudge's reply bound), U22c (reopened sessions that keep closing first: one copy,
 and Continue delivers it once; a legacy Finish too), U22f (one such close counts a failure, and the
 delivery clears it), U22x (Stop retires a refusal a closed session still owes, and a Continue after
 it does not deliver it), U24 (a worker's second no-wait turn end asks its parent, whose reply resumes it) and U25
-(an automatic message supersedes that question). The harness that never answers is each native
-mock's `mock:ack-only` reply (`CEZ_MOCK_COMPLETION_REPLY`): it acknowledges the refusal on its own
-wire and opens no turn until more input arrives. Cursor print is exempt from U20h, U20m and U22s
-(each prompt spawns a process whose init frame is `turn.started`, as F8), and OpenCode from U20h (a
-human prompt waits for the busy turn to go idle, and that turn never does; U20m's worker message
-steers it). Claude and Cursor print are exempt from U20a: neither can end a turn before its input is
-acknowledged (the stdin write; the first model work of the spawned process).
+(an automatic message supersedes that question). `cezar_done` itself refuses while a worker is
+live or uncollected, so a done reaches the turn end blocked only when the tool accepted it and a
+worker started later in the same turn; the cells build the blocked done that way, and their
+second step is the nudge's reply, whose `cezar_done` the tool refuses. The harness that never
+answers is each native mock's `mock:ack-only` reply (`CEZ_MOCK_COMPLETION_REPLY`): it
+acknowledges the refusal on its own wire and opens no turn until more input arrives. Cursor print
+is exempt from U20h and U22s (each prompt spawns a process whose init frame is `turn.started`, as
+F8), and OpenCode from U20h (a human prompt waits for the busy turn to go idle, and that turn never
+does). A done whose input is acknowledged only after its turn ended still gets the refusal nudge
+once the acknowledgement lands, never an implicit re-check timer: U27 pins that through its
+late-acknowledgement U20 cell, from which Claude and Cursor print are exempt.
 
 **R74** extends that native-wire matrix to a failed nonfinal workflow agent.
 CI recovery must retain the failed attempt, including across restart and CI
@@ -1817,23 +1819,23 @@ retain their default cap. Longer authored limits override that cap, while defaul
 tasks retain no wall-clock cap. The tests shorten only `DEFAULT_RUN_TIMEOUT_MS`; the
 manager, runners, transports and terminal signals remain real.
 
-Intermediate question rows **Q1–Q10** (hearsay-tools/cezarion#427) live in
+Intermediate question rows **Q1 and Q3–Q10** (hearsay-tools/cezarion#427) live in
 `core/workflow-ask-parity.test.ts` and the shared parity guard. Every
-`RUNNER_IDS` adapter sends portable ASK text through its native assistant-message
-and turn-completion wire; the malformed variant changes only the text inside
-the existing snapshot fixture. No wire exemption is needed. The rows cover
-same-session answers and trailing checks, malformed markers, final interactive
-asks, idle close/Continue, disk-round-trip restart recovery, cancellation,
-Finish on fresh and continued sessions, authored timeouts, autonomous ask lines
-that are not registered (Q9), and clean unanswered session exit. Unrun checks remain pending on stop/failure;
-an unanswered clean close retains durable waiting and releases capacity.
+`RUNNER_IDS` adapter drives the `cezar-ask` scenario, one `cezar_ask` call over its
+native wire. No wire exemption is needed. The rows cover same-session answers and
+trailing checks (Q1), final interactive asks (Q3), idle close and a second question
+on Continue (Q4), disk-round-trip restart recovery (Q5), cancellation (Q6), Finish
+on fresh and continued sessions (Q7), authored timeouts (Q8), an autonomous
+intermediate `cezar_ask` that the tool refuses while the tail runs with no human wait
+(Q9), and clean unanswered session exit (Q10). Unrun checks remain pending on
+stop/failure; an unanswered clean close retains durable waiting and releases capacity.
 
 
 Open-turn inactivity rows **N1–N8** live in `core/workflow-no-progress-parity.test.ts`
 and the same parity guard. Every native adapter proves that stalled nonfinal turns
 fail without running trailing checks, native progress/heartbeats sustain a long
 turn, parked sessions do not time out, followups and Continue rearm protection,
-native questions pause until answered (Claude/Pi use their marker fallback),
+native questions or `cezar_ask` pause until answered (N6),
 agent input rearms protection even when a backend omits a turn-start notification,
 and a process ignoring SIGTERM is killed before capacity is released. A descendant
 holding inherited stdout/stderr cannot retain capacity after the CLI exits.
@@ -1847,43 +1849,43 @@ releases capacity early. Standalone wall-clock limits remain unchanged.
 
 Autonomous turn-end rows **A1–A14** live in
 `core/workflow-autonomous-parity.test.ts` and the same parity guard (hearsay-tools/cezarion#426).
-Every adapter covers fresh and Continue nudges, the unregistered ask line, the
-40-nudge cap, non-autonomous parking, monitoring, DONE and persisted-question
-priority. A9 preserves native mid-turn questions; Claude/Pi have executable
-exemptions proving their native wire uses the portable marker fallback instead.
-Before the budget an autonomous run registers no ask line, as `cezar_ask` refuses with
-`autonomous_run` (hearsay-tools/cezarion#1234): A3/A4 record the note
-`autonomous — question not registered; continuing` with its questions, and the
-autonomous nudge goes instead. Only that fresh turn-end ask line may use the existing
-answer transport for the nudge, without a human message or answer checkpoint, because
-the runner holds the line as a pending portable ask. Queued/accepted input, worker/CI
-waits, existing questions and lifecycle stops block it, and a wire that refuses the
-nudge registers the line after all.
+Every adapter covers fresh and Continue nudges, a refused `cezar_ask` (A3/A4), the
+40-nudge cap, non-autonomous parking, a `cezar_wait` timer park with no nudge (A7),
+`cezar_done` with no nudge (A8) and persisted-question priority (A10). A9 preserves
+native mid-turn questions; Claude, Pi, Cursor and OMP carry executable exemptions,
+because they ask through `cezar_ask`. Before the budget an autonomous run registers no
+question: `cezar_ask` refuses with `autonomous_run` (hearsay-tools/cezarion#1234). The
+refusal answers the tool call and writes no run event, so A3/A4 see no `ask.requested`
+and no answer delivery, and the autonomous nudge goes at the turn end. A10 keeps a
+persisted unanswered question pending: the run parks with no nudge, and the agent's own
+`cezar_ask` is refused. A11/A12 repeat a refused `cezar_ask` until the cap on fresh and
+Continue sessions, and the run is written `waiting` once.
 OpenCode's cap cell holds each nudge's HTTP ACK until after its SSE turn ends;
 deferred idle-boundary settlement applies the same policy after the ACK, including
-the cap note and the settled outcome for the state actually entered. A11/A12 start with
-an unregistered ask line before markerless turns, covering the separate answer
-transport's delayed ACK on fresh and Continue sessions. A refused ordinary nudge
+the cap note and the settled outcome for the state actually entered. A refused ordinary nudge
 retains its capacity slot and a readiness outcome until input readiness retries
 that exact completed boundary, after durable input. New parent activity, accepted
 input or a real question invalidates the retry; cancellation, Finish, disposal and
 session replacement revoke it. Missing readiness reaches the existing idle close
 bound. Successful retries use normal acknowledged input, so the cap and all
-worker/CI/native-question guards still apply. A13/A14 use ordinary root runs on
-fresh and Continue paths: OpenCode retains the answer ACK indefinitely, the actual
-idle callback requests shutdown, and the slot stays occupied until process exit.
-Only then do the run and step become durable `waiting`, with a successful Continue
-proving resumability. The other adapters have named executable exemptions for
-this HTTP-only ordering and test root idle expiry/Continue on their native wires.
+worker/CI/native-question guards still apply. A13/A14 pinned that a refused
+autonomous nudge waits for readiness, that the idle bound closes it, and that the slot
+stays occupied until process exit. Only the retired ask line reached that path on a
+native wire: on OpenCode its nudge went out as human input and left its HTTP ACK
+outstanding. A nudge is now agent input, which OpenCode admits at the boundary, so
+every runner carries a `scenario-unconstructible` exemption, and the executable cell
+checks ordinary root idle expiry and a successful Continue on fresh and Continue
+paths. The readiness path stays in production, reached only when a human
+acknowledgement races the nudge; no native-wire cell exercises it now.
 Owned-worker terminal settlement and explicit question/worker/CI waits retain
 their existing policies.
 
 **H1–H5** (hearsay-tools/cezarion#486, H4–H5 hearsay-tools/cezarion#1112) live in `core/workflow-followup-parity.test.ts`
 and the same parity guard. A human follow-up sent via `manager.sendMessage` while a
-turn is running must reach the agent without a resend when that turn ends with
-`CEZ:DONE` (H1), must be dropped when the same turn parks on a portable `CEZ:ASK`
-(H2), and a markerless hold-style turn must not park or nudge between the follow-up
-and the next turn (H3). H3 is a guard that the run does not park or nudge in that
+turn is running must reach the agent without a resend when that turn calls
+`cezar_done` (H1), must be dropped when the same turn parks on `cezar_ask` (H2), and a
+done-less hold-style turn must not park or nudge between the follow-up and the next
+turn (H3). H3 is a guard that the run does not park or nudge in that
 gap, not a proof the follow-up ran as its own turn — except OpenCode continuation,
 which does pin the follow-up across Continue. H4 sends the follow-up with
 `mock:deferred-turn-start`, which every mock honors by starting that turn 800 ms late
@@ -1948,7 +1950,7 @@ maps these exits to its own wire:
   (`agentInvoked: false`) ack or `prompt_result`. A raw `agent_start` is not a
   release.
 
-`discardQueuedMessagesOnAsk` still runs first, so an ASK park drops the waiter on
+`discardQueuedMessagesOnAsk` still runs first, so a `cezar_ask` park drops the waiter on
 queueing wires. Write-through/steer wires may consume the follow-up inside the running
 turn or open a later one; H1 still holds either way. A held follow-up that drains at
 an idle boundary (the turn already ended) without opening a new turn must call
@@ -1966,7 +1968,7 @@ steer accepted before settle is read in-turn (I2), and a post-settle rejection h
 no cheap idle-boundary retry. Claude, Codex, Pi and OMP have named executable H2
 exemptions: their wires write or steer immediately, so `discardQueuedMessages` cannot
 unwrite a line already on the pipe. On Claude, a mid-turn line is queued by the CLI
-and runs as a fresh turn after the ASK park while the card is pending — the inverted
+and runs as a fresh turn after the `cezar_ask` park while the card is pending — the inverted
 H2 assertion does not pin that.
 
 No-wait nudge rows **F1–F11** live in
@@ -1974,10 +1976,11 @@ No-wait nudge rows **F1–F11** live in
 final-message nudge (hearsay-tools/cezarion#544), which the no-wait nudge absorbed
 (hearsay-tools/cezarion#1234): a silent tail is a turn end with no wait, so it gets the same one
 nudge, reply bound and settled outcome. Every adapter covers a reasoning-or-tool tail with no later
-assistant message, on fresh and Continue paths: one nudge that can complete with DONE, a
-still-silent nudge that opens Cezar's no-wait human wait (#119), reasoning that names `CEZ:DONE`
-never completing the run (#399), a markerless message-then-tool tail getting exactly one nudge, an
-explicit DONE with zero nudge notes, and an autonomous silent tail that stays `running` with a held
+assistant message, on fresh and Continue paths: one nudge that can complete with a visible
+`cezar_done` (F1), a still-silent nudge that opens Cezar's no-wait human wait (#119, F2),
+reasoning that names `cezar_done` never completing the run (#399, F3), a done-less
+message-then-tool tail getting exactly one nudge (F4), `cezar_done` with zero nudge notes (F5),
+and an autonomous silent tail that stays `running` with a held
 slot and no idle timer at the first `continuing without pausing` note, with zero no-wait nudge
 notes. F7 covers the park-after-ACK site: a silent-tail turn that ends while its agent-input ACK is
 still pending produces exactly one `no wait or done — reminding the agent once` note and a
@@ -1998,9 +2001,9 @@ alone unparks (`running`, slot held) before content arrives, then the run comple
 emits a native `turn/started` after the nudge is sent; the other adapters have named executable exemptions
 because `turn.started` is synthetic inside `sendAgentMessage` and fires at nudge send, before the bound.
 F10 starts streaming content before the bound and ends after it: no `no reply to the no-wait nudge`
-note, and a normal DONE. A user-authored
+note, and a normal `cezar_done`. A user-authored
 delivery resets the one-shot latch so the next silent tail can nudge; expiry does not. The one-shot
-latch keeps #48 closed; control markers are never read from reasoning. A pending autonomous retry is
+latch keeps #48 closed; completion comes only from the `cezar_done` call, never from reasoning. A pending autonomous retry is
 never replaced by the no-wait nudge.
 
 > Every criterion in the harness parity matrix MUST hold for **every** backend,
@@ -2043,25 +2046,26 @@ it, so no existing marker is renamed. A new runner declares its own map:
 | Scenario | The mock must |
 | --- | --- |
 | `baseline` | one text, one tool call and result, usage, then its terminal turn signal |
-| `done` | the same, with a trailing `CEZ:DONE` so the run reaches its review gate |
+| `cezar-done` | the same, calling `cezar_done` before its final text so the run reaches its review gate |
 | `hold` | acknowledge the prompt, then a timed pause before the content AND the terminal signal |
 | `hold-gated` | like `hold`, but wait for `CEZ_MOCK_RELEASE_FILE` (or a fallback delay) so a mid-turn follow-up can be injected before content |
-| `hold-done` | like `hold-gated`, then end with `CEZ:DONE` so a mid-turn follow-up can race the close |
-| `hold-ask` | like `hold-gated`, then end with a portable `CEZ:ASK` so a mid-turn follow-up can race the park |
-| `split-text` | stream the reply in pieces, ending with a trailing `CEZ:MONITORING` |
+| `hold-cezar-done` | like `hold`, then call `cezar_done` so a mid-turn follow-up can race the close |
+| `hold-cezar-ask` | like `hold`, then call `cezar_ask` so a mid-turn follow-up can race the park |
 | `provider-error` | a runtime provider rejection in its own native error shape |
-| `ask` | an ask — native where the wire has one, a `CEZ:ASK` marker otherwise |
-| `ask-resume` | ask, accept a human answer, then complete work with `CEZ:DONE` without another human prompt |
-| `plan-resume` | Cursor’s `cursor/create_plan` variant of `ask-resume` |
-| `ask-bad` | a malformed ask, and then still end the turn |
+| `cezar-ask` | call `cezar_ask` with one question, then end the turn; the same tool call on every wire, fresh or resumed |
+| `cezar-wait` | call `cezar_wait` for a 60 s timer, then end the turn; a declared monitoring park on every wire |
+| `ask` | an ask: native where the wire has one (Codex, OpenCode), a `cezar_ask` call otherwise |
+| `ask-resume` | ask, accept a human answer, then call `cezar_done` without another human prompt |
+| `ask-bad` | a malformed native ask, and then still end the turn; only the wires with a native ask (Codex, OpenCode, Cursor) declare it |
 | `ask-reply-late` | the same ask, with OpenCode SSE idle preceding the independent reply HTTP acknowledgement |
-| `subagent` | child work and a child terminal signal the parent survives, then parent `CEZ:MONITORING` text followed by child text before parent turn-end |
+| `subagent` | child work and a child terminal signal the parent survives, then parent text after a `cezar_wait` timer, followed by child text before parent turn-end |
 | `subagent-after-park` | wait for the manager to park, then emit native child updates without a new parent turn |
-| `ask-snapshot` | a complete parent assistant ASK snapshot, without earlier text deltas where the wire supports snapshots |
-| `ask-prose` | code-span and quoted-log ASK mentions with no final-line marker; no card or rejection note |
+
+The full catalog, with each scenario's contract, is the `SCENARIOS` comment in
+`core/harness-parity.testkit.ts`.
 
 S9 also pins parent-only v1/result text while child messages remain nested on v2.
-R12 asserts the `subagent` turn parks on an open monitoring timer (`waiting`, label
+R12 asserts the `subagent` turn parks on its open `cezar_wait` timer (`waiting`, label
 `monitoring`), never as a plain wait that reads as Needs you (hearsay-tools/cezarion#149). Pi is explicitly exempt from S9 and R12 because its RPC has no child
 session transcript. Codex filters both child message deltas and completions;
 Claude excludes child assistant text from v1 and its result fallback buffer;
@@ -2088,22 +2092,25 @@ hearsay-tools/cezarion#1638, the handoff replayed `mock:ask-snapshot` in the Ope
 of `workflow-ask-parity` rows Q5 and Q10. The cause showed only after a temporary debug log
 in `mock-opencode-serve.mjs`.
 
-R36–R39 (hearsay-tools/cezarion#399) record the shared monitoring wrap-up contract on every native
-prompt channel for fresh, Continue and restart-recovered sessions, and the
-automatic monitoring wake. Every runner honors `cezarTools`, so since
+R36–R38 (hearsay-tools/cezarion#399) record the shared monitoring wrap-up contract on every native
+prompt channel for fresh, Continue and restart-recovered sessions (R38 parks on a
+`cezar-wait` timer before the restart). R39 fires a `cezar_wait` timer and pins that its wake
+carries the timer's result and the next-step instruction (`register another wait if you are
+still waiting`) on the native message channel, never as a user message. The monitoring wake
+nudge now answers only Claude's `ScheduleWakeup` and the live-workers timer. Every runner honors `cezarTools`, so since
 hearsay-tools/cezarion#1234 the contract names the tools: finished and verified work calls
 `cezar_done`, pending work calls `cezar_wait`, and a question for the user calls
 `cezar_ask`. Every session has the tools (hearsay-tools/cezarion#2397), so no marker form of
 the contract or the wake remains; `human-waits.test.ts` pins that a marker line is ordinary
-text. R40 keeps completion prose without a marker parked as waiting;
+text. R40 keeps completion prose without `cezar_done` parked as waiting;
 the harness does not infer completion from prose. Offline prompt recordings prove
 delivery, not live model compliance.
 
 R26 (hearsay-tools/cezarion#398) runs every `HARNESS_ADAPTERS.askResumeCases` entry for every
-`RUNNER_IDS` backend: Claude/Pi/OMP `CEZ:ASK`, Codex `item/tool/requestUserInput`,
-OpenCode `question.asked`, and Cursor `cursor/ask_question` plus `cursor/create_plan`.
+`RUNNER_IDS` backend: Claude, Pi, Cursor and OMP `cezar_ask`, Codex
+`item/tool/requestUserInput`, and OpenCode `question.asked`.
 One human answer must reach completion with no later `waiting` transition and no
-second human prompt. R3 proves parking; R6 deliberately returns to markerless
+second human prompt. R3 proves parking; R6 deliberately returns to done-less
 waiting to test owned-input draining. Neither replaces R26. New runners must
 supply a nonempty ask-kind inventory and native prompts, or a named executable
 wire exemption. The prose guard rejects counted runner rosters in this contract,
@@ -2131,20 +2138,11 @@ never "not implemented"):
 
 | Row | Kind | Why |
 | --- | --- | --- |
-| A9 | capability-absent | v18.4.11 plain `--mode rpc` never constructs the ask tool: `sessionOptions.hasUI` is true only for interactive or `rpc-ui` (`src/main.ts`) and `AskTool.createIf` returns null without it. The turn-end `CEZ:ASK` fallback applies (A3/A4). |
-| R16 | capability-absent | `text_end.content` is the one assistant-text channel for v1 and v2; `message_end` has no separately mapped text. |
+| A9 | capability-absent | v18.4.11 plain `--mode rpc` never constructs the ask tool: `sessionOptions.hasUI` is true only for interactive or `rpc-ui` (`src/main.ts`) and `AskTool.createIf` returns null without it. Asks go through `cezar_ask` (A3/A4). |
+| S11, R4 | capability-absent, scenario-unconstructible | No native ask on this wire: `cezar_ask` is the workflow's human wait, so the runner admits non-human input and the run tier holds it (R6), and a malformed `cezar_ask` is refused to the agent as `invalid_request` before any card exists. Claude and Pi carry the same rows; Cursor carries S11. |
 | I2 | capability-absent | `session_settled` requires `queuedMessageCount === 0` (`isRpcSessionSettled`, `modes/rpc/rpc-session-settle.ts`) and `agent_end` is rewritten to non-terminal while the agent has queued messages (`session/agent-session.ts`), so a steer accepted before settle is read in the same turn. Source-derived (no live turn). |
-| A13, A14 | scenario-unconstructible | Same as every runner: no portable-answer HTTP ACK retained after turn completion; the executable cell checks idle expiry and Continue instead. |
+| A13, A14 | scenario-unconstructible | Same as every runner: no answer HTTP ACK retained after turn completion; the executable cell checks idle expiry and Continue instead. |
 | H2 | capability-absent | Mid-turn human follow-up is steered immediately; `discardQueuedMessages` cannot unwrite it. OpenCode and Cursor queue and drop (H2 live rows). |
-
-R16 (hearsay-tools/cezarion#134/#401) checks a stored assistant ASK and exactly one waiting question
-card on every runner. All current wires couple their completed parent text to
-v1, so the v2-only precondition has named `capability-absent` exemptions pinned
-by the opposite assertion: the raw v1 stream must contain that same marker.
-A future runner that can carry independent final text must exercise the v2-only
-case instead. The isolated manager fallback tests remain in `run.test.ts`; the
-wire rows do not pretend to reproduce a missing-v1 envelope these protocols do
-not supply.
 
 R22/R23 (hearsay-tools/cezarion#515) preserve task scratch across native session close and host temp-environment changes: ordinary
 runs keep files through fresh and continuation idle-close paths, and workers
@@ -2243,74 +2241,39 @@ notice that human input used to trigger; human input no longer cancels a wait, a
 open-waits footer that replaced the notice is pinned by U2 and the footer case of
 `workflows/waits-wake.test.ts`.
 
-R18/R19 (hearsay-tools/cezarion#548) use every runner's native message wire to check final-line ASK
-selection after an earlier prose mention, and quoted ASK examples without a
-marker. Parsing and transcript stripping must select the same final line;
-ordinary examples leave no question card or rejection note.
+Monitoring turn rows (hearsay-tools/cezarion#772) live in `workflows/monitoring-turn.test.ts`
+and `workflows/worker-parent-attention.test.ts` and enter the shared parity guard. Every
+`RUNNER_IDS` adapter carries multiple parent assistant text segments through its native wire on
+fresh and Continue sessions. A turn monitors through a `cezar_wait` timer or live workers, asks
+through `cezar_ask` and finishes through `cezar_done` (hearsay-tools/cezarion#2397).
+M1 opens a `cezar_wait` timer that survives a same-turn acknowledgement, reads `monitoring`,
+then fires the real timer wake. No prose is read (hearsay-tools/cezarion#1234): a later prose
+question leaves the timer in place (M2), and a review request in prose leaves a turn with live
+workers monitoring on the live-workers timer (M3). A later `cezar_ask` beats the timer (M4). A
+later `cezar_done` reaches review, with or without a later acknowledgement (M5, M19). M7 closes
+the actual idle session, keeps the unanswered question, then delivers its answer through Continue
+and checks that a later monitoring turn carries no stale attention. M18 keeps a `cezar_ask` card
+across a routine acknowledgement, idle close and delivered answer. M21 pins that `cezar_done` is
+refused with `human_question_pending` while the turn's question is pending, and the question
+stays. Ordinary done-less autonomous turns keep their nudge policy (M13/M14). M17 pins that a
+clean session close with an accepted worker wait open parks the run on it. M23 pins that an
+autonomous `cezar_ask` is refused with `autonomous_run` on fresh and Continue sessions, registers
+nothing, and the run continues to done. M26/M27 extend owned-input ACK coverage with live workers;
+the existing executable Claude/Cursor pipe-write exemptions keep their native
+acceptance-before-response proof. The native rows also assert CLI attention-wait and webhook
+projections. Cockpit grouping and notification transitions remain consumers of the same contract
+attention rule.
 
-Monitoring turn rows **M1–M30** (hearsay-tools/cezarion#772) live in
-`workflows/monitoring-turn.test.ts`, `workflows/worker-parent-attention.test.ts`
-and `workflows/monitoring-channel-order.test.ts` and enter the shared parity guard.
-Every `RUNNER_IDS` adapter carries multiple parent assistant text segments through its native wire on fresh and Continue sessions.
-A standalone `CEZ:MONITORING` declaration survives a same-turn acknowledgement.
-No prose is read (hearsay-tools/cezarion#1234): a later question or review request,
-in any Markdown form, leaves the monitoring line's timer in place (M2, and M3 with
-live workers). Durable structured questions, DONE and spent parent completion gates
-retain their existing precedence. Ordinary markerless autonomous turns retain their
-nudge policy (M13/M14). Quoted/indented marker examples and fenced code cannot
-declare monitoring. M1 fires the real monitoring wake
-callback and proves capacity was released. M7 closes the actual idle session,
-retains the unanswered question, then delivers its answer through Continue and
-checks that a later monitoring turn carries no stale attention. M17 pins the fresh
-path's genuine accepted-wait session-failure protection. M18 retains a real ASK
-card across a routine acknowledgement, idle close and delivered answer; M19
-retains DONE through an acknowledgement and reaches review. M20 excludes
-quoted/fenced/indented/example ASK and DONE declarations. M21 retains later
-DONE precedence over an earlier portable ASK; M22 retains the latest malformed
-ASK diagnostic and raw fallback, and the turn, which registered no wait, takes the
-no-wait nudge before Cezar's no-wait human wait. M23 does not register an autonomous
-ask line on either turn-end path. A rejected ask line registers nothing either: M24
-keeps its diagnostic and raw text beside the monitoring line's timer, including
-latest malformed replacement, and a later valid ASK still shows its card. M26/M27
-pin the same through delayed ACK admission with live workers; M28 preserves ordinary
-rejected-ASK autonomous nudging. Active ASK lines use the existing payload parser
-unchanged.
-
-Each text-form row keeps one or two representative forms on every native wire, on
-fresh and Continue sessions (M2, M3, M6, M18, M20, and M30's earlier gate). The other
-quoted, fenced, indented, example and Markdown forms are read by the shared turn-end
-rule directly in `workflows/turn-end-text.test.ts`, with identical channels and the
-`missing` and `refresh` channel shapes (hearsay-tools/cezarion#1665).
-
-M9, M10, M15, M16 and M25 are retired (hearsay-tools/cezarion#1234). They pinned
-the prose gate and the rejected-ASK fallback gate, which raised Needs you beside a
-monitoring line, live workers or a dependency wait and held later worker input until
-the user answered. No prose raises a gate now: M2, M3 and U17 pin that a prose
-question beside the monitoring line leaves its timer in place, and U17 that one with
-no wait takes the no-wait nudge. M24, M26 and M27 pin the rejected ask line. The gate
-a human wait without a card raises, which keeps the `unstructured-human-gate` note
-code, is pinned by `workflows/human-waits.test.ts`.
-M29/M30 in `workflows/monitoring-channel-order.test.ts` retain ordering across
-partial channels on fresh/Continue. Native Codex completion refreshes and
-Codex/OpenCode omitted completion text exercise actual channel divergence;
-the native observer pins each capability. Claude/Pi/OMP/Cursor carry coupled
-completion text; OpenCode also deduplicates refreshed completed parts. Those
-named executable wire controls assert equality rather than inject divergence; a
-runner runs one coupled control, not one per direction it lacks.
-When one channel is an ordered expansion of the other, classify its raw text
-once; neither channel always wins. Incomparable transcripts retain the existing
-conservative gate policy. This partial/replayed-frame coverage differs from
-R16's canonical complete-snapshot coupling guarantee.
-The native rows
-also assert CLI attention-wait and webhook projections. Cockpit grouping and
-notification transitions remain consumers of the same contract attention rule.
-M9/M10 extend owned-input ACK coverage with explicit human gates and live workers;
-the existing executable Claude/Cursor pipe-write exemptions retain their native
-acceptance-before-response proof. No new wire exemption is needed.
+No prose raises a gate: M2, M3 and U17 pin that a prose question beside a `cezar_wait` timer or
+live workers leaves monitoring in place, and U17 that one with no wait takes the no-wait nudge.
+The gate a human wait without a card raises, which keeps the `unstructured-human-gate` note
+code, is pinned by `workflows/human-waits.test.ts`. The rows that read marker lines, quoted
+or fenced marker examples, and the order of partial text channels were removed with the
+markers (hearsay-tools/cezarion#2397): no lifecycle decision reads assistant text any more.
 
 `worker-parent-attention.test.ts` (hearsay-tools/cezarion#249/#401) loops every runner for fresh and
-Continue sessions: markerless turns with live workers stay monitoring, and real
-ASK still wins. Codex/OpenCode/Pi delay transport acknowledgement past turn-end.
+Continue sessions: done-less turns with live workers stay monitoring, and a
+`cezar_ask` still wins. Codex/OpenCode/Pi delay transport acknowledgement past turn-end.
 Claude/Cursor acknowledge pipe writes, so their named executable exemptions hold
 the provider response and prove acceptance precedes it. Its exhaustive ACK table
 makes a new runner fail until its transport is classified and exercised.
@@ -2327,11 +2290,11 @@ worker's human answer after a restart closed its session and send a parent messa
 follows the declared mode while the answer is held: steer runners accept it in the turn, and Cursor
 receives it only after the turn-end `human-input-delivered` checkpoint. I5: a genuinely unanswered
 native question, and a newer one raised by the answer, hold the message until answered; beside a
-portable question the message is delivered at once and the card stays answerable
+`cezar_ask` question the message is delivered at once and the card stays answerable
 (hearsay-tools/cezarion#1235 phase 3a). It is never the answer. The
 answer's checkpoint stays at turn-end in every row. Cursor is scenario-unconstructible for I3. R6–R11 exercise durable queued/startup input, before/during/
 after asks, restart with an unanswered ask, continuation asks, delayed native replies,
-DONE/explicit-stop precedence and post-send checkpoint failure. R13 runs a persisted
+`cezar_done`/explicit-stop precedence and post-send checkpoint failure. R13 runs a persisted
 catalog chain (an agent step plus a check step) inside the owned worker on every
 runner, proving the check executes in the worker's own worktree (hearsay-tools/cezarion#451). R14 runs an
 accepted mixed-runner chain — a step on the runner under test followed by a step on
@@ -2700,8 +2663,9 @@ To be first-class:
    Choose the ask path explicitly: either map the backend's native question wire to
    `ask.requested`, or rely on the portable `cezar_ask` tool, which every runner reaches through `cezarTools`.
    A native bridge must keep its pending request in that runner's `AgentSession` state and
-   route the next human answer through the same state back to the provider. Harness rows R3
-   and R4 pin valid and malformed asks; R6 and R7 pin human-answer routing, queued agent
+   route the next human answer through the same state back to the provider. Harness row R3
+   pins a valid ask and R4 a malformed native one (a wire with no native ask is exempt from R4,
+   because `cezar_ask` refuses bad arguments with `invalid_request`); R6 and R7 pin human-answer routing, queued agent
    input, and recovery with an unanswered ask. R26 pins completion after answering
    every exposed human ask kind in `askResumeCases`. A native-answer `end_turn`
    does not hand off to the human: resume the work unless the agent declares a
@@ -2804,8 +2768,8 @@ Check these before copying an existing runner's code for a fork or near-fork of 
   fatal, because model, prompt, resume and tools are not optional.
 - **Diffs and plan come from the tool result**, not the args: the default `hashline` edit mode has
   args `{input}` only.
-- **The ask marker works in plain `--mode rpc`** because OMP never registers its native ask tool
-  without a UI; do not build a native ask bridge there.
+- **`cezar_ask` is the ask in plain `--mode rpc`**, because OMP never registers its native ask
+  tool without a UI; do not build a native ask bridge there.
 - **Sub-agents are on the wire**, so S9/R12/R15 are constructible and carry no exemption.
 - **`omp models --json` prints an object** (`{"models": [...]}`), not an array, and exits 0 with an
   empty list when logged out.
