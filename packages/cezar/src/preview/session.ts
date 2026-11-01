@@ -214,7 +214,9 @@ export class PreviewSession {
 
   /** Ultra's density lasts while a viewer watches: with none, the page goes back to scale 1, at the same CSS size. */
   private async leaveDensity(): Promise<void> {
-    if (this.viewer || this.rendered === 1) return;
+    // Owed while the page renders above 1 or its window still sits on an emulated screen: a move
+    // whose override then failed leaves the window moved with the page at 1.
+    if (this.viewer || (this.rendered === 1 && !this.density.onExtraScreen)) return;
     await this.density.place(1);
     await this.cdp.send('Emulation.setDeviceMetricsOverride', { width: this.viewport.w, height: this.viewport.h, deviceScaleFactor: 1, mobile: false }).catch(() => {});
     // A window still on an emulated screen keeps the reset owed, so the next detach or close retries it.

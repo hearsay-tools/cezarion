@@ -91,6 +91,25 @@ describe('PixelDensity (hearsay-tools/cezarion#2069)', () => {
     expect(await density.place(2)).toBe(2);
   });
 
+  it('a failed change to another ratio after a move keeps density on, so the window can still go back', async () => {
+    let refuse = false;
+    const { cdp, calls } = fakeBrowser();
+    const send = cdp.send.bind(cdp);
+    (cdp as { send: typeof cdp.send }).send = (async (method: string, params?: Record<string, unknown>) => {
+      if (refuse && method === 'Emulation.addScreen') throw new Error('Emulation.addScreen: refused');
+      return send(method, params);
+    }) as typeof cdp.send;
+    const density = new PixelDensity(cdp);
+    await density.place(2);
+    refuse = true;
+    expect(await density.place(1.5)).toBe(1);
+    expect(density.onExtraScreen).toBe(true);
+    refuse = false;
+    expect(await density.place(1)).toBe(1);
+    expect(density.onExtraScreen).toBe(false);
+    expect(calls.filter(call => call.method === 'Browser.setWindowBounds').at(-1)?.params).toEqual({ windowId: 7, bounds: { left: 0, top: 0 } });
+  });
+
   it.each(['Emulation.getScreenInfos', 'Emulation.addScreen', 'Browser.setWindowBounds'])('streams at scale 1 for good when Chromium refuses %s', async refused => {
     const { cdp, calls } = fakeBrowser([PRIMARY], refused);
     const density = new PixelDensity(cdp);

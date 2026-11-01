@@ -57,9 +57,10 @@ export class PixelDensity {
       this.moved = scale !== 1;
       return scale;
     } catch {
-      // A failed move back from an emulated screen is a failed move, not a missing feature: the
-      // next placement tries again. Any other refusal turns density off for this session.
-      if (scale === 1 && this.moved) this.placed = undefined;
+      // Once the window sits on an emulated screen, a failure is a failed move, not a missing feature:
+      // density stays on, so a later placement (the move back among them) tries again. A refusal
+      // before any move turns density off for this session.
+      if (this.moved) this.placed = undefined;
       else this.unsupported = true;
       return 1;
     }

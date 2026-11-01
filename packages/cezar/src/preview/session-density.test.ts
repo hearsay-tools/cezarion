@@ -282,6 +282,36 @@ describe('pixel density (hearsay-tools/cezarion#2069)', () => {
     expect(sent('Browser.setWindowBounds').at(-1)?.params).toEqual({ windowId: 3, bounds: { left: 0, top: 0 } });
   });
 
+  it('a window moved by an Ultra resize whose override failed still goes back when the viewer leaves', async () => {
+    let refuseOverride = false;
+    const screens: Array<Record<string, unknown>> = [{ id: 'P', availLeft: 0, availTop: 0, devicePixelRatio: 1, isPrimary: true }];
+    const { cdp, sent } = fakeCdp((method, params) => {
+      if (method === 'Emulation.setDeviceMetricsOverride' && refuseOverride) {
+        refuseOverride = false;
+        throw new Error('Emulation.setDeviceMetricsOverride: refused');
+      }
+      if (method === 'Emulation.getScreenInfos') return { screenInfos: [...screens] };
+      if (method === 'Browser.getWindowForTarget') return { windowId: 3 };
+      if (method === 'Emulation.addScreen') {
+        const info = { id: 'S1', availLeft: params.left, availTop: 0, devicePixelRatio: params.devicePixelRatio, isPrimary: false };
+        screens.push(info);
+        return { screenInfo: info };
+      }
+      return undefined;
+    });
+    const session = await PreviewSession.create(cdp, { quality: () => 'ultra' });
+    const viewer = fakeViewer();
+    session.attach(viewer);
+    await flush();
+    refuseOverride = true;
+    await session.handle({ t: 'resize', w: 800, h: 600, dpr: 2 }).catch(() => {});
+    expect(sent('Browser.setWindowBounds').at(-1)?.params).toEqual({ windowId: 3, bounds: { left: 100_000, top: 0 } });
+    session.detach(viewer);
+    await flush();
+    await flush();
+    expect(sent('Browser.setWindowBounds').at(-1)?.params).toEqual({ windowId: 3, bounds: { left: 0, top: 0 } });
+  });
+
   it('closes the connection after a bounded wait when a queued CDP call never answers', async () => {
     vi.useFakeTimers();
     let hang = false;
