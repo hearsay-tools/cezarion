@@ -1,0 +1,34 @@
+{
+  "cases": [
+    {
+      "id": "preview-tests",
+      "head": "fbf1ec149bcdff4dcd6b391ef8005512b9168bab",
+      "base": "e5e50c17821e34acac01acfbb52fd279143c2c59",
+      "title": "Narrow preview test edits"
+    },
+    {
+      "id": "web-project-cache",
+      "head": "ea30dd7f22ea8e46ab582d6a3dfc52d692dda1bb",
+      "base": "21612ba2be35315aa99649d86ddeee9c1928bf26",
+      "title": "Web project cache update"
+    },
+    {
+      "id": "continuation-inputs",
+      "head": "47bbd24dc7d923079fd48eac9a55488304296f72",
+      "base": "ea30dd7f22ea8e46ab582d6a3dfc52d692dda1bb",
+      "title": "Shared continuation input path"
+    },
+    {
+      "id": "single-project",
+      "head": "02a389814b3ee8091574aa9b783a4676c45ded3c",
+      "base": "bc0d9d94f471fa248cae2e314b13e6c82b8f1391",
+      "title": "Server single-project path"
+    },
+    {
+      "id": "contract-fallback",
+      "head": "4bef1d26ac80ed766f9db29d354531715acd0509",
+      "base": "83438698db424522cf04aca7b320e29f0fe8d1c2",
+      "title": "Contract tests: full fallback"
+    }
+  ]
+}
