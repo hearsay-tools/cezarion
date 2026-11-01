@@ -46,7 +46,7 @@ Each item must hold at the same current head:
    result is not a pass. Read failures before classifying them. A flake needs
    its tracking issue and still needs a passing required check.
 5. **Review and QA:** the required automated review check passes on `H` under
-   [the repo's review policy](../../../docs/sdlc/ci.md#automated-code-review).
+   [the repo's review policy](../../../docs/sdlc/ci.md#ci-verification).
    Accept an intentional skipped review only with the trusted classification
    and documented exemption that allow it; a missing or failed review is no
    exemption. A caller requiring actual model execution still needs that
