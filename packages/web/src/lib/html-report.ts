@@ -62,7 +62,14 @@ function rewriteLinks(doc: Document, blocked: BlockedContent): void {
     const raw = link.getAttribute('href') ?? link.getAttributeNS(XLINK, 'href')
     if (raw === null) continue
     const href = raw.trim()
-    if (href.startsWith('#')) { link.removeAttribute('target'); continue }
+    if (href.startsWith('#')) {
+      // srcdoc inherits the cockpit's base URL: a bare fragment would load the cockpit
+      // inside the opaque frame, losing its auth cookies instead of scrolling the report.
+      link.setAttribute('href', `about:srcdoc${href}`)
+      link.removeAttributeNS(XLINK, 'href')
+      link.removeAttribute('target')
+      continue
+    }
     if (NEW_TAB.test(href)) { link.setAttribute('target', '_blank'); link.setAttribute('rel', 'noopener noreferrer'); continue }
     if (!REMOTE.test(href)) blocked.relative++
     link.removeAttribute('href')
