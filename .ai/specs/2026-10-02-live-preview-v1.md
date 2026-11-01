@@ -117,7 +117,12 @@ so adding a tool is one edit.
 - Messages in both directions are zod schemas in `packages/contract/src/preview.ts`. Client to
   server: `open { target: { port } | { url }, quality? }` (never spawns anything), `stop { port }`, the input whitelist, `ack`,
   `ping`, `run { port }`, `quality { quality }` (hearsay-tools/cezarion#2066: `normal` streams JPEG
-  quality 60, `high` quality 100; a change restarts only the screencast, never the page). Server to client: binary JPEG frames; JSON `state`, `url`, `cursor`, `dialog`,
+  quality 60, `high` quality 100; a change restarts only the screencast, never the page).
+  hearsay-tools/cezarion#2069 adds `ultra`: quality 100 at the viewer's pixel ratio, capped at 2,
+  which `resize { w, h, dpr? }` carries (absent means 1). An emulated `deviceScaleFactor` alone
+  still streams CSS-size frames, so `preview/density.ts` moves the page's window onto an emulated
+  screen at that ratio (`Emulation.addScreen`, `Browser.setWindowBounds`); a Chromium that refuses
+  those commands streams at scale 1. Server to client: binary JPEG frames; JSON `state`, `url`, `cursor`, `dialog`,
   `replaced`, `pong`.
 - Route inventory: listed in BACKWARD_COMPATIBILITY.md §2 like `/api/v1/ws`.
 
@@ -153,7 +158,7 @@ Under the task route, each its own component:
   only opens the pane on that server's current state; it never runs a command.
 - **Split layout**: resizable divider; below 1180 px the pane takes the main area.
 - **Pane**: toolbar (back, forward, reload, URL, server switcher when two or more servers are
-  registered, viewport, stream quality Normal/High (hearsay-tools/cezarion#2066; remembered per
+  registered, viewport, stream quality Normal/High/Ultra (hearsay-tools/cezarion#2066, hearsay-tools/cezarion#2069; remembered per
   browser, in More on a phone), live stats with an "idle" reading when no frames change, Experimental badge,
   More: Reload without cache, Copy page URL, Stop server, close) and the canvas stage with the states below. The empty state focuses the
   URL bar, expands a bare port to `localhost:<port>`, lists the task's registered servers and states

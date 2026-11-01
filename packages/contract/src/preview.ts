@@ -95,12 +95,16 @@ export type PreviewAgentBrowserEvent = z.infer<typeof previewAgentBrowserEventSc
 
 const port = z.number().int().min(1).max(65535);
 const clampViewport = (value: number) => Math.min(4000, Math.max(100, Math.round(value)));
+/** The highest pixel ratio Ultra renders at (hearsay-tools/cezarion#2069): 2 keeps a frame at four times the pixels. */
+export const PREVIEW_MAX_PIXEL_RATIO = 2;
+const clampPixelRatio = (value: number) => Math.min(PREVIEW_MAX_PIXEL_RATIO, Math.max(1, value));
 
 /**
- * The stream's JPEG quality (hearsay-tools/cezarion#2066). `normal` is the original quality 60;
- * `high` is quality 100, still lossy JPEG. Neither changes the page's pixel density.
+ * The stream's mode. `normal` is the original JPEG quality 60; `high` is quality 100, still lossy
+ * JPEG (hearsay-tools/cezarion#2066). Both render one page pixel per CSS pixel. `ultra` is quality
+ * 100 at the viewer's pixel ratio, capped at `PREVIEW_MAX_PIXEL_RATIO` (hearsay-tools/cezarion#2069).
  */
-export const previewQualitySchema = z.enum(['normal', 'high']);
+export const previewQualitySchema = z.enum(['normal', 'high', 'ultra']);
 export type PreviewQuality = z.infer<typeof previewQualitySchema>;
 
 /** Mouse and key vocabularies are the prototype's: CDP's own names, nothing else gets through. */
@@ -131,6 +135,8 @@ export const previewClientMessageSchema = z.discriminatedUnion('t', [
     t: z.literal('resize'),
     w: z.number().finite().transform(clampViewport),
     h: z.number().finite().transform(clampViewport),
+    /** The viewer's `devicePixelRatio`, read only in `ultra`. Absent from an older cockpit, which means 1. */
+    dpr: z.number().finite().transform(clampPixelRatio).optional(),
   }),
   z.object({
     t: z.literal('mouse'),

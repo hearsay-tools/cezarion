@@ -66,3 +66,27 @@ it('releases a decoded bitmap without painting after the document hides', async 
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
   }
 })
+
+it('draws a 2x frame into a 2x backing store and keeps the CSS size and the input scale (hearsay-tools/cezarion#2069)', async () => {
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 1000 })
+  Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 700 })
+  const ref = createRef<PreviewStageHandle>()
+  const draw = vi.fn()
+  const context = vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ drawImage: draw } as never)
+  vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 2000, height: 1400, close: vi.fn() })))
+  const seen: StageGeometry[] = []
+  try {
+    render(<PreviewStage ref={ref} viewport="fit" renderInput={geometry => { seen.push(geometry); return null }} />)
+    await ref.current!.draw(new Blob(['frame']))
+    const canvas = document.querySelector<HTMLCanvasElement>('canvas[aria-label="Page preview"]')!
+    expect([canvas.width, canvas.height]).toEqual([2000, 1400])
+    expect([canvas.style.width, canvas.style.height]).toEqual(['1000px', '700px'])
+    expect(draw).toHaveBeenCalledWith(expect.anything(), 0, 0)
+    // Input maps in CSS pixels: the page is 1000 wide at scale 1, whatever the frame's pixel size.
+    expect(seen.at(-1)).toMatchObject({ scale: 1, viewport: { w: 1000, h: 700 } })
+  } finally {
+    context.mockRestore(); vi.unstubAllGlobals(); cleanup()
+    delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth
+    delete (HTMLElement.prototype as { clientHeight?: number }).clientHeight
+  }
+})

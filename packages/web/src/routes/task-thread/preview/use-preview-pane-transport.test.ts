@@ -154,6 +154,31 @@ it('acks without a stage handle and reports zero stats and nonnegative round tri
   expect(last().send).not.toHaveBeenCalled()
 })
 
+it('sends the pixel ratio with each resize when it is not 1, and resends it when it changes (hearsay-tools/cezarion#2069)', () => {
+  const ratio = { value: 2 }
+  const lists: Array<{ query: string; listeners: Set<() => void> }> = []
+  vi.stubGlobal('devicePixelRatio', 2)
+  Object.defineProperty(window, 'devicePixelRatio', { configurable: true, get: () => ratio.value })
+  vi.stubGlobal('matchMedia', (query: string) => {
+    const list = { query, listeners: new Set<() => void>() }
+    lists.push(list)
+    return { matches: false, media: query, addEventListener: (_: string, fn: () => void) => list.listeners.add(fn), removeEventListener: (_: string, fn: () => void) => list.listeners.delete(fn) }
+  })
+  try {
+    const hook = mount()
+    act(() => hook.result.current.setStageSize({ w: 600, h: 400 }))
+    transport('open')
+    stream()
+    expect(last().send).toHaveBeenLastCalledWith({ t: 'resize', w: 600, h: 400, dpr: 2 })
+    // The window moves to a display at ratio 1: its resolution query fires, and the size goes again without a ratio.
+    ratio.value = 1
+    act(() => { for (const list of lists.filter(entry => entry.query === '(resolution: 2dppx)')) for (const fn of list.listeners) fn() })
+    expect(last().send).toHaveBeenLastCalledWith({ t: 'resize', w: 600, h: 400 })
+  } finally {
+    delete (window as { devicePixelRatio?: number }).devicePixelRatio
+  }
+})
+
 it('resizes only live stages and repeats the size for a new page', () => {
   const hook = mount()
   act(() => hook.result.current.setStageSize({ w: 600, h: 400 }))

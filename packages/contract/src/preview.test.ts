@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  PREVIEW_MAX_PIXEL_RATIO,
   previewClientMessageSchema,
   previewResultCodeSchema,
   previewServeRequestSchema,
@@ -88,10 +89,13 @@ describe('previewClientMessageSchema', () => {
     [{ t: 'open', target: { port: 5173 }, quality: 'high' }],
     [{ t: 'quality', quality: 'normal' }],
     [{ t: 'quality', quality: 'high' }],
+    [{ t: 'quality', quality: 'ultra' }],
+    [{ t: 'open', target: { port: 5173 }, quality: 'ultra' }],
     [{ t: 'run', port: 5173 }],
     [{ t: 'stop', port: 5173 }],
     [{ t: 'keepWaiting', port: 5173 }],
     [{ t: 'resize', w: 390, h: 844 }],
+    [{ t: 'resize', w: 390, h: 844, dpr: 2 }],
     [{ t: 'mouse', type: 'mousePressed', x: 10, y: 20, button: 'left', buttons: 1, clickCount: 1 }],
     [{ t: 'mouse', type: 'mouseWheel', x: 10, y: 20, deltaX: 0, deltaY: 120 }],
     [{ t: 'key', type: 'keyDown', key: 'a', code: 'KeyA', text: 'a', modifiers: 0, vk: 65, commands: ['selectAll'] }],
@@ -123,6 +127,8 @@ describe('previewClientMessageSchema', () => {
     ['a port outside 1..65535', { t: 'run', port: 0 }],
     ['a non-numeric coordinate', { t: 'mouse', type: 'mouseMoved', x: 'a', y: 1 }],
     ['a missing t', { port: 5173 }],
+    ['a non-numeric pixel ratio', { t: 'resize', w: 390, h: 844, dpr: '2' }],
+    ['an infinite pixel ratio', { t: 'resize', w: 390, h: 844, dpr: Infinity }],
   ])('rejects %s', (_name, message) => {
     expect(previewClientMessageSchema.safeParse(message).success).toBe(false);
   });
@@ -130,6 +136,22 @@ describe('previewClientMessageSchema', () => {
   it('clamps resize to 100..4000', () => {
     expect(previewClientMessageSchema.parse({ t: 'resize', w: 5, h: 99999 })).toEqual({ t: 'resize', w: 100, h: 4000 });
     expect(previewClientMessageSchema.parse({ t: 'resize', w: 1440, h: 900 })).toEqual({ t: 'resize', w: 1440, h: 900 });
+  });
+
+  // hearsay-tools/cezarion#2069: Ultra renders at the viewer's pixel ratio, capped at 2.
+  it('clamps the pixel ratio to 1..2 and keeps it exact inside that range', () => {
+    const dpr = (value: number) => {
+      const parsed = previewClientMessageSchema.parse({ t: 'resize', w: 800, h: 600, dpr: value }) as { dpr?: number };
+      return parsed.dpr;
+    };
+    expect(dpr(3)).toBe(PREVIEW_MAX_PIXEL_RATIO);
+    expect(dpr(0.5)).toBe(1);
+    expect(dpr(1.5)).toBe(1.5);
+    expect(dpr(10 / 9)).toBe(10 / 9);
+  });
+
+  it('leaves the pixel ratio out when an older cockpit sends none', () => {
+    expect(previewClientMessageSchema.parse({ t: 'resize', w: 800, h: 600 })).toEqual({ t: 'resize', w: 800, h: 600 });
   });
 });
 

@@ -251,7 +251,7 @@ describe('live preview', () => {
     browser.screenshot(resolve(artifactsDir, 'quality-normal.png'), { viewport: true })
     writeFileSync(resolve(artifactsDir, 'quality.json'), JSON.stringify({ normal }, null, 2))
     browser.click(qualityTrigger)
-    browser.click('[data-slot="dropdown-menu-radio-item"]:last-child')
+    browser.click('[data-slot="dropdown-menu-radio-item"][data-quality="high"]')
     // The switch restarts only the stream: the next frame arrives at quality 100, so the wait ends
     // on the first frame that shows it.
     const high = browser.waitForValue(
@@ -272,6 +272,50 @@ describe('live preview', () => {
       `(() => { const input = document.querySelector('${address}'); return input ? input.value : null })()`,
       value => typeof value === 'string' && value.endsWith('#clicked-2'),
     )
+
+    // Ultra at display scale factor 2 (hearsay-tools/cezarion#2069). Chosen at scale factor 1, it
+    // streams CSS-size frames like High. Then the owner opens the task at scale factor 2: the pane
+    // reconnects, the page renders at the viewer's pixel ratio, the canvas holds twice the pixels of
+    // its CSS box on each side, and a tap still lands on the button, because input maps in CSS
+    // pixels. The reload stands in for a display change: an emulated scale factor does not fire the
+    // resolution query a real display move fires.
+    browser.click(qualityTrigger)
+    browser.click('[data-slot="dropdown-menu-radio-item"][data-quality="ultra"]')
+    const ULTRA_PROBE = `(() => {
+      const c = document.querySelector('${canvas}');
+      const surface = c && c.closest('[data-slot="preview-surface"]');
+      if (!c || !surface || !c.width || document.querySelector('[data-slot="preview-pane"] [data-slot="preview-state"]')) return null;
+      const rect = surface.getBoundingClientRect();
+      const scale = Number(surface.getAttribute('data-scale') || 1);
+      return { dpr: devicePixelRatio, ratio: c.width / rect.width, label: document.querySelector('${qualityTrigger}')?.getAttribute('aria-label') ?? '',
+        x: Math.round(rect.left + ${BUTTON.x} * scale), y: Math.round(rect.top + ${BUTTON.y} * scale) };
+    })()`
+    type UltraReading = { dpr: number; ratio: number; label: string; x: number; y: number }
+    const atRatio = (ratio: number) => browser.waitForStable(ULTRA_PROBE, {
+      holdMs: 500,
+      matcher: value => !!value && (value as UltraReading).label === 'Stream quality: Ultra' && Math.abs((value as UltraReading).ratio - ratio) < 0.01,
+    }) as UltraReading
+    atRatio(1)
+    const cockpit = browser.waitForValue('({ w: innerWidth, h: innerHeight })', value => !!value) as { w: number; h: number }
+    browser.setViewport(cockpit.w, cockpit.h, 2)
+    browser.goto(taskUrl)
+    const ultra = atRatio(2)
+    expect(ultra.dpr).toBe(2)
+    browser.screenshot(resolve(artifactsDir, 'quality-ultra-dpr2.png'), { viewport: true })
+    browser.tapAt(ultra.x, ultra.y)
+    browser.waitForValue(
+      `(() => { const input = document.querySelector('${address}'); return input ? input.value : null })()`,
+      value => typeof value === 'string' && value.endsWith('#clicked-3'),
+    )
+    // Back at scale factor 1, Ultra streams CSS-size frames again.
+    browser.setViewport(cockpit.w, cockpit.h, 1)
+    browser.goto(taskUrl)
+    expect(atRatio(1).dpr).toBe(1)
+    browser.screenshot(resolve(artifactsDir, 'quality-ultra-dpr1.png'), { viewport: true })
+    // High again, so the reclaim below finds High as the mode this browser remembers.
+    browser.click(qualityTrigger)
+    browser.click('[data-slot="dropdown-menu-radio-item"][data-quality="high"]')
+    browser.waitForValue(QUALITY_PROBE, value => !!value && (value as QualityReading).label === 'Stream quality: High')
 
     // Native tab visibility releases preview transport; restoring an old viewer must not
     // steal the page from the tab that explicitly opened it in the meantime.

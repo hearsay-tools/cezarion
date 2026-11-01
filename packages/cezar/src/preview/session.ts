@@ -1,5 +1,6 @@
 import type { PreviewClientMessage, PreviewQuality, PreviewServerMessage } from '@open-mercato/cezar-contract';
 import type { Cdp } from './cdp.ts';
+import { PixelDensity } from './density.ts';
 import { normalizePreviewUrl } from './url.ts';
 
 /**
@@ -17,9 +18,9 @@ export type Viewer = {
   userAgent: string;
 };
 
-/** JPEG quality per mode (hearsay-tools/cezarion#2066): Normal is the original 60, High the most Chromium takes. */
-const JPEG_QUALITY: Record<PreviewQuality, number> = { normal: 60, high: 100 };
-const DEFAULT_VIEWPORT = { w: 1280, h: 800 };
+/** JPEG quality per mode (hearsay-tools/cezarion#2066): Normal is the original 60, High the most Chromium takes. Ultra is High at the viewer's pixel ratio (hearsay-tools/cezarion#2069). */
+const JPEG_QUALITY: Record<PreviewQuality, number> = { normal: 60, high: 100, ultra: 100 };
+const DEFAULT_VIEWPORT = { w: 1280, h: 800, dpr: 1 };
 /** A started stream with no frame after this long is restarted: Chromium can stay silent after back-to-back restarts on a page that no longer changes. */
 const FIRST_FRAME_WAIT_MS = 500;
 const FIRST_FRAME_RETRIES = 5;
@@ -29,6 +30,8 @@ const FIRST_FRAME_RETRIES = 5;
  * and a first paint after the first-frame retries never reached it (#870).
  */
 const ACTIVITY_FRAME_WAIT_MS = 1000;
+/** How long a close waits for queued work (the density reset among it) before it closes the connection anyway. */
+const CLOSE_WAIT_MS = 5000;
 /** Input that can change what the page shows. A pointer move alone is too frequent to count. */
 const ACTIVE_MOUSE = new Set(['mousePressed', 'mouseReleased', 'mouseWheel']);
 
@@ -57,6 +60,19 @@ function jpegSize(base64: string): { w: number; h: number } | undefined {
 }
 
 /**
+ * Whether a frame is the size the stream renders at. A whole size must match exactly, as at scale 1;
+ * a fractional one (1.25 of 645 is 806.25) can round either way (hearsay-tools/cezarion#2069).
+ */
+function fitsSide(side: number, css: number, rendered: number): boolean {
+  const expected = css * rendered;
+  return Number.isInteger(expected) ? side === expected : Math.abs(side - expected) < 1;
+}
+
+function fitsStream(size: { w: number; h: number }, stream: { w: number; h: number; rendered: number }): boolean {
+  return fitsSide(size.w, stream.w, stream.rendered) && fitsSide(size.h, stream.h, stream.rendered);
+}
+
+/**
  * Runs in every page. Popups open in the same tab (there is one page to stream), and the cursor
  * shape is reported through the `__cursor` binding because screencast frames carry no cursor.
  */
@@ -72,6 +88,14 @@ export const INJECT = `(() => {
     if (c !== last) { last = c; window.__cursor && window.__cursor(c); }
   }, true);
 })();`;
+
+/** The pixel ratio a mode renders at: the viewer's in Ultra, 1 in every other mode (hearsay-tools/cezarion#2069). */
+function scaleFor(quality: PreviewQuality, dpr: number): number {
+  return quality === 'ultra' ? dpr : 1;
+}
+
+/** What a running screencast was started with. Frames are `rendered` times the CSS size; `scale` is the ratio asked for. */
+type Stream = { w: number; h: number; dpr: number; quality: PreviewQuality; scale: number; rendered: number };
 
 type SessionOptions = {
   onFirstFrame?: (viewer: Viewer) => void;
@@ -101,10 +125,16 @@ export class PreviewSession {
   private held?: ScreencastFrame | undefined;
   private announced = false;
   private viewport = DEFAULT_VIEWPORT;
+  private readonly density: PixelDensity;
+  /** The device scale factor the page renders at now. */
+  private rendered = 1;
   /** Viewport changes and screencast stops run one at a time: overlapping stop/start pairs can leave Chromium without a first frame. */
   private queue: Promise<void> = Promise.resolve();
-  /** The size and mode the running screencast was started at; unset while stopped. */
-  private streaming?: { w: number; h: number; quality: PreviewQuality } | undefined;
+  /**
+   * The size and mode the running screencast was started at; unset while stopped. `scale` is the
+   * pixel ratio asked for, `rendered` the one Chromium renders at: frames are `rendered` times the size.
+   */
+  private streaming?: Stream | undefined;
   private watchdog?: ReturnType<typeof setTimeout> | undefined;
   private silentStarts = 0;
   /** Chromium refused the last start, so no stream runs and no watchdog will start one. */
@@ -116,6 +146,7 @@ export class PreviewSession {
     private readonly cdp: Cdp,
     private readonly opts: SessionOptions,
   ) {
+    this.density = new PixelDensity(cdp);
     cdp.on<ScreencastFrame>('Page.screencastFrame', frame => this.onFrame(frame));
     cdp.on<{ frame: { id?: string; url: string; parentId?: string } }>('Page.frameNavigated', ({ frame }) => {
       if (frame.parentId) return;
@@ -166,7 +197,7 @@ export class PreviewSession {
     // A new viewer needs its own first frame, so its stream always restarts, whatever the size.
     this.streaming = undefined;
     this.silentStarts = 0;
-    void this.setViewport(this.viewport.w, this.viewport.h).catch(() => {});
+    void this.setViewport(this.viewport.w, this.viewport.h, this.viewport.dpr).catch(() => {});
   }
 
   detach(viewer: Viewer): void {
@@ -177,19 +208,34 @@ export class PreviewSession {
     this.disarmWatchdog();
     this.enqueue(async () => {
       await this.cdp.send('Page.stopScreencast').catch(() => {});
+      await this.leaveDensity();
     });
+  }
+
+  /** Ultra's density lasts while a viewer watches: with none, the page goes back to scale 1, at the same CSS size. */
+  private async leaveDensity(): Promise<void> {
+    // Owed while the page renders above 1 or its window still sits on an emulated screen: a move
+    // whose override then failed leaves the window moved with the page at 1.
+    if (this.viewer || (this.rendered === 1 && !this.density.onExtraScreen)) return;
+    await this.density.place(1);
+    await this.cdp.send('Emulation.setDeviceMetricsOverride', { width: this.viewport.w, height: this.viewport.h, deviceScaleFactor: 1, mobile: false }).catch(() => {});
+    // A window still on an emulated screen keeps the reset owed, so the next detach or close retries it.
+    if (!this.density.onExtraScreen) this.rendered = 1;
   }
 
   /**
    * The chosen mode changed: a running stream restarts at it, at the same size. The page is not
-   * touched (no navigation, no new viewport), so its URL, form state and scroll stay. A stream that
-   * is not running picks the mode up at its next start.
+   * navigated or reloaded, so its URL, form state and scroll stay. A change of pixel density (to or
+   * from Ultra) also moves the window and renders the page at the new ratio. A stream that is not
+   * running picks the mode up at its next start.
    */
   refreshQuality(): Promise<void> {
     return this.enqueue(async () => {
       const streaming = this.streaming;
-      if (!this.viewer || !streaming || streaming.quality === this.quality()) return;
-      await this.restartScreencast(streaming.w, streaming.h);
+      const quality = this.quality();
+      if (!this.viewer || !streaming || streaming.quality === quality) return;
+      if (streaming.scale !== scaleFor(quality, streaming.dpr)) return this.applyViewport(streaming.w, streaming.h, streaming.dpr);
+      await this.restartScreencast({ ...streaming, quality });
     });
   }
 
@@ -199,17 +245,33 @@ export class PreviewSession {
     await this.cdp.send('Page.navigate', { url });
   }
 
+  /**
+   * Closes the page session. The window position outlives it (screens belong to the browser), so a
+   * page Ultra moved goes back to the primary screen first. The close waits behind viewport work
+   * already queued: a first Ultra resize still waiting on Chromium has not recorded its ratio yet,
+   * and would otherwise move the window after the connection closed. At scale 1 nothing moves.
+   */
   close(): void {
     this.viewer = undefined;
     this.disarmWatchdog();
-    this.cdp.close();
+    const reset = this.enqueue(() => this.leaveDensity()).catch(() => {});
+    // CDP calls have no timeout: a queued call that never answers must not keep the session open.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const bound = new Promise<void>(resolve => {
+      timer = setTimeout(resolve, CLOSE_WAIT_MS);
+      timer.unref?.();
+    });
+    void Promise.race([reset, bound]).then(() => {
+      clearTimeout(timer);
+      this.cdp.close();
+    });
   }
 
   /** The whole browser-facing surface. Everything else in CDP stays unreachable. */
   async handle(msg: PreviewClientMessage): Promise<void> {
     switch (msg.t) {
       case 'resize':
-        return this.setViewport(msg.w, msg.h);
+        return this.setViewport(msg.w, msg.h, msg.dpr);
       case 'ack': {
         if (this.pending === undefined) return;
         const acked = this.pending;
@@ -278,35 +340,49 @@ export class PreviewSession {
     return run;
   }
 
-  private setViewport(w: number, h: number): Promise<void> {
+  /** `dpr` is the viewer's pixel ratio; an older cockpit sends none, and streams at 1 as before. */
+  private setViewport(w: number, h: number, dpr: number | undefined): Promise<void> {
     // Recorded now, so an attach that follows queued resizes starts at the newest size.
-    this.viewport = { w, h };
-    return this.enqueue(() => this.applyViewport(w, h));
+    const viewport = { w, h, dpr: dpr ?? 1 };
+    this.viewport = viewport;
+    return this.enqueue(() => this.applyViewport(viewport.w, viewport.h, viewport.dpr));
   }
 
   private quality(): PreviewQuality {
     return this.opts.quality?.() ?? 'normal';
   }
 
-  private async applyViewport(w: number, h: number): Promise<void> {
+  private async applyViewport(w: number, h: number, dpr: number): Promise<void> {
+    // The mode is read once: one that changes while this job waits on Chromium is a later job's,
+    // so the stream records what was applied and that job sees the difference.
+    const quality = this.quality();
+    const scale = scaleFor(quality, dpr);
     // The pane repeats its size at every loading step; a stream already at this size has nothing to redo.
-    if (this.streaming?.w === w && this.streaming.h === h && this.streaming.quality === this.quality()) return;
-    await this.cdp.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
+    if (this.streaming?.w === w && this.streaming.h === h && this.streaming.quality === quality && this.streaming.scale === scale) {
+      // Nothing to restart, but a mode change later (to Ultra) renders at this ratio, not the one the stream started with.
+      this.streaming.dpr = dpr;
+      return;
+    }
+    // The window reaches its screen before the page renders at the ratio, so the first frame is full size.
+    const rendered = await this.density.place(scale);
+    await this.cdp.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: rendered, mobile: false });
+    this.rendered = rendered;
     if (!this.viewer) return;
-    await this.restartScreencast(w, h);
+    await this.restartScreencast({ w, h, dpr, quality, scale, rendered });
   }
 
-  private async restartScreencast(w: number, h: number): Promise<void> {
+  private async restartScreencast(stream: Stream): Promise<void> {
+    const { w, h, quality, rendered } = stream;
     this.streaming = undefined;
     await this.cdp.send('Page.stopScreencast').catch(() => {});
     // A restarted screencast numbers its frames afresh; the old in-flight frame will never be acked.
     this.pending = undefined;
     this.held = undefined;
     // Set before the start: its first frame can beat the command's reply, and is judged against this size.
-    const quality = this.quality();
-    this.streaming = { w, h, quality };
+    this.streaming = stream;
     try {
-      await this.cdp.send('Page.startScreencast', { format: 'jpeg', quality: JPEG_QUALITY[quality], maxWidth: w, maxHeight: h, everyNthFrame: 1 });
+      // Rounded up: a bound one pixel short of a fractional frame would scale the whole frame down.
+      await this.cdp.send('Page.startScreencast', { format: 'jpeg', quality: JPEG_QUALITY[quality], maxWidth: Math.ceil(w * rendered), maxHeight: Math.ceil(h * rendered), everyNthFrame: 1 });
     } catch (error) {
       this.streaming = undefined;
       this.startRefused = true;
@@ -330,7 +406,7 @@ export class PreviewSession {
     // start (hearsay-tools/cezarion#784, the agent's browser over a pipe). Its next activity starts one.
     else if (this.startRefused) {
       this.startRefused = false;
-      void this.setViewport(this.viewport.w, this.viewport.h).catch(() => {});
+      void this.setViewport(this.viewport.w, this.viewport.h, this.viewport.dpr).catch(() => {});
     }
   }
 
@@ -345,7 +421,7 @@ export class PreviewSession {
       if (!this.viewer || !this.streaming || this.silentStarts >= FIRST_FRAME_RETRIES) return;
       this.silentStarts += 1;
       this.streaming = undefined;
-      void this.setViewport(this.viewport.w, this.viewport.h).catch(() => {});
+      void this.setViewport(this.viewport.w, this.viewport.h, this.viewport.dpr).catch(() => {});
     }, waitMs);
     this.watchdog.unref?.();
   }
@@ -361,7 +437,7 @@ export class PreviewSession {
     // has resized (646x362 for a 646x787 viewport) and send nothing after it on a static page; the
     // viewer still gets that frame, and the watchdog starts the stream again to replace it.
     const size = jpegSize(frame.data);
-    const stale = size !== undefined && this.streaming !== undefined && (size.w !== this.streaming.w || size.h !== this.streaming.h);
+    const stale = size !== undefined && this.streaming !== undefined && !fitsStream(size, this.streaming);
     if (stale) {
       this.armWatchdog();
     } else {
