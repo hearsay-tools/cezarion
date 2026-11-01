@@ -21,7 +21,10 @@ const file = (name: string, content: string, id = ID, extra: object = {}) => ({ 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
 function stubFetch(routes: Record<string, () => Response>) {
-  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => (routes[String(input)] ?? (() => json({ error: `unstubbed: ${String(input)}` }, 500)))()))
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const route = routes[String(input)]
+    return route ? route() : json({ error: `unstubbed: ${String(input)}` }, 500)
+  }))
 }
 
 function Where() { const location = useLocation(); return <output>{location.pathname + location.search}</output> }

@@ -116,12 +116,8 @@ export function FileEntryView({
         <span className="min-w-0 truncate font-mono font-medium">{entry.path}</span>
         <span className="ml-auto shrink-0 tabular-nums text-soft-foreground">{formatFileSize(entry.size)}</span>
       </header>
-      {snapshot || downloadUrl || toggle ? <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-2 text-xs">
-        {snapshot ? <span>Published snapshot · {snapshot}</span> : null}
-        {downloadUrl ? <a className="inline-flex min-h-11 items-center text-accent-text underline" href={downloadUrl}>Download</a> : null}
-        {toggle ? <button className="min-h-11 rounded px-2 text-accent-text underline focus-visible:ring-2" onClick={() => setSource(value => !value)}>{source ? 'Preview' : 'View source'}</button> : null}
-        {html && readerHref && kind === 'text' ? <ReaderLink href={readerHref} /> : null}
-      </div> : null}
+      {snapshot || downloadUrl || toggle ? <PreviewActions snapshot={snapshot} downloadUrl={downloadUrl} source={toggle ? source : null}
+        onSource={() => setSource(value => !value)} readerHref={html && kind === 'text' ? readerHref : undefined} /> : null}
       <EntryBody runId={runId} entry={entry} kind={kind} showImage={kind === 'image' && (!documentPreview || safeImage)}
         rendered={source ? null : markdown ? 'markdown' : html ? 'html' : null} imageUrl={imageUrl} />
     </Pane>
@@ -149,6 +145,22 @@ function EntryBody({ runId, entry, kind, showImage, rendered, imageUrl }: {
   if (rendered === 'markdown') return <div className="p-4"><Markdown document>{entry.content ?? ''}</Markdown></div>
   if (rendered === 'html') return <HtmlReportFrame html={entry.content ?? ''} title={`Report: ${entry.path}`} className="h-[70vh]" />
   return <CodeLines path={entry.path} text={entry.content ?? ''} />
+}
+
+function PreviewActions({ snapshot, downloadUrl, source, onSource, readerHref }: {
+  snapshot?: string | undefined
+  downloadUrl?: string | undefined
+  /** null: the file has no rendered view to toggle. */
+  source: boolean | null
+  onSource: () => void
+  readerHref?: string | undefined
+}) {
+  return <div className="flex flex-wrap items-center gap-3 border-b border-border px-4 py-2 text-xs">
+    {snapshot ? <span>Published snapshot · {snapshot}</span> : null}
+    {downloadUrl ? <a className="inline-flex min-h-11 items-center text-accent-text underline" href={downloadUrl}>Download</a> : null}
+    {source !== null ? <button className="min-h-11 rounded px-2 text-accent-text underline focus-visible:ring-2" onClick={onSource}>{source ? 'Preview' : 'View source'}</button> : null}
+    {readerHref ? <ReaderLink href={readerHref} /> : null}
+  </div>
 }
 
 function ReaderLink({ href }: { href: string }) {

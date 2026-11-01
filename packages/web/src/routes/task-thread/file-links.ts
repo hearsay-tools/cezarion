@@ -27,6 +27,20 @@ function publicationHref(href: string, files: string, reader: string): string | 
 
 const COCKPIT_PATH = /^\/(?:api|p|tasks|new|settings|skills|workflows|git|github|inbox|automations)(?:\/|[?#]|$)/
 
+/** The literal file path a non-cockpit destination names, or null when it names none. */
+function localPath(href: string, basePath: string | undefined): string | null {
+  const windows = /^[a-z]:[\\/]/i.test(href)
+  const fileUrl = /^file:/i.test(href)
+  if (!windows && /^[a-z][a-z\d+.-]*:/i.test(href) && !fileUrl) return null
+  // Markdown destinations are URI-encoded; query selectors carry literal paths.
+  // File URLs retain their own encoding for the server's fileURLToPath parser.
+  const path = fileUrl ? href : decodeURIComponent(href)
+  if (/[\u0000-\u001f]/.test(path)) return null
+  if (!basePath || path.startsWith('/') || windows || fileUrl) return path
+  const base = basePath.replaceAll('\\', '/')
+  return base.slice(0, base.lastIndexOf('/') + 1) + path
+}
+
 /** Classify before the Markdown sanitizer drops file: URLs; never broaden its protocol list. */
 export function taskFileHref(destination: string, context: TaskFileContextValue): string | null {
   if (!destination || /[\u0000-\u001f]/.test(destination) || destination.startsWith('#') || destination.startsWith('//')) return null
@@ -41,15 +55,7 @@ export function taskFileHref(destination: string, context: TaskFileContextValue)
   const publication = publicationHref(href, files, prefix + reader)
   if (publication !== undefined) return publication === null ? null : publication + fragment
   if (COCKPIT_PATH.test(href)) return null
-  const windows = /^[a-z]:[\\/]/i.test(href)
-  if (!windows && /^[a-z][a-z\d+.-]*:/i.test(href) && !/^file:/i.test(href)) return null
-  // Markdown destinations are URI-encoded; query selectors carry literal paths.
-  // File URLs retain their own encoding for the server's fileURLToPath parser.
-  let path = /^file:/i.test(href) ? href : decodeURIComponent(href)
-  if (/[\u0000-\u001f]/.test(path)) return null
-  if (context.basePath && !path.startsWith('/') && !windows && !/^file:/i.test(href)) {
-    const base = context.basePath.replaceAll('\\', '/')
-    path = base.slice(0, base.lastIndexOf('/') + 1) + path
-  }
+  const path = localPath(href, context.basePath)
+  if (path === null) return null
   return `${prefix}${isHtmlPath(path) ? reader : files}?path=${encodeURIComponent(path)}${fragment}`
 }

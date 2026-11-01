@@ -59,9 +59,10 @@ const TaskChangesRoute = lazy(() =>
 const TaskFilesRoute = lazy(() =>
   import('./routes/task-git/task-files').then((m) => ({ default: m.TaskFilesRoute })),
 )
-const TaskReportRoute = lazy(() =>
-  import('./routes/task-git/report-reader').then((m) => ({ default: m.TaskReportRoute })),
-)
+const TaskReportRoute = lazy(async () => {
+  const { TaskReportRoute: route } = await import('./routes/task-git/report-reader')
+  return { default: route }
+})
 const TaskCommitsRoute = lazy(() =>
   import('./routes/task-git/task-commits').then((m) => ({ default: m.TaskCommitsRoute })),
 )
