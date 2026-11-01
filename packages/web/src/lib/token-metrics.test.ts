@@ -13,6 +13,8 @@ const health = (
 ): { capabilities?: Partial<HealthResponse['capabilities']> | undefined } => ({
   capabilities: {
     localHandoff: true,
+    settingsAdmin: true,
+    remoteSettingsAdmin: false,
     singleProject: false,
     ...capabilities,
   },

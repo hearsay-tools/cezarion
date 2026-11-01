@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { disableRemoteSettings, enableRemoteSettings } from '../remote-settings.ts';
 import { isLoopbackHost, isLoopbackHostHeader, normalizeHostname, resolveCapabilities } from './capabilities.ts';
 
 /**
@@ -135,6 +139,55 @@ describe('resolveCapabilities — localHandoff', () => {
 
   it('is off for a non-loopback bind host', () => {
     expect(resolveCapabilities({}, '0.0.0.0').localHandoff).toBe(false);
+  });
+});
+
+describe('resolveCapabilities — settings administration (hearsay-tools/cezarion#2428)', () => {
+  let home: string;
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'cez-caps-home-'));
+  });
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+  });
+  const admin = (env: NodeJS.ProcessEnv, bindHost?: string) => {
+    const caps = resolveCapabilities({ CEZ_HOME: home, ...env }, bindHost);
+    return { localHandoff: caps.localHandoff, settingsAdmin: caps.settingsAdmin, remoteSettingsAdmin: caps.remoteSettingsAdmin };
+  };
+
+  it('a local cockpit administers settings without the host switch', () => {
+    expect(admin({})).toEqual({ localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false });
+  });
+
+  it('a remote cockpit is read-only by default', () => {
+    expect(admin({ CEZ_REMOTE: '1' })).toEqual({ localHandoff: false, settingsAdmin: false, remoteSettingsAdmin: false });
+  });
+
+  it('the host switch grants a loopback-bound remote cockpit settings, and nothing else', async () => {
+    await enableRemoteSettings({ CEZ_HOME: home });
+    expect(admin({ CEZ_REMOTE: '1' })).toEqual({ localHandoff: false, settingsAdmin: true, remoteSettingsAdmin: true });
+    expect(admin({ CEZ_REMOTE: '1' }, '127.0.0.1')).toMatchObject({ settingsAdmin: true });
+    // A local cockpit needs no warning: the switch adds nothing there.
+    expect(admin({})).toEqual({ localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false });
+  });
+
+  it('the host switch never applies to a non-loopback bind', async () => {
+    await enableRemoteSettings({ CEZ_HOME: home });
+    for (const bindHost of ['0.0.0.0', '172.17.0.1', '192.168.1.10', '100.64.0.1']) {
+      expect(admin({}, bindHost), bindHost).toEqual({ localHandoff: false, settingsAdmin: false, remoteSettingsAdmin: false });
+    }
+  });
+
+  it('turning the switch off takes effect on the next read', async () => {
+    await enableRemoteSettings({ CEZ_HOME: home });
+    expect(admin({ CEZ_REMOTE: '1' }).settingsAdmin).toBe(true);
+    await disableRemoteSettings({ CEZ_HOME: home });
+    expect(admin({ CEZ_REMOTE: '1' }).settingsAdmin).toBe(false);
+  });
+
+  it('a malformed host file grants nothing', () => {
+    writeFileSync(join(home, 'remote-settings.json'), '{"enabled":"true"}');
+    expect(admin({ CEZ_REMOTE: '1' }).settingsAdmin).toBe(false);
   });
 });
 

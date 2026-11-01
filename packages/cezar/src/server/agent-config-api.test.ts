@@ -5,6 +5,7 @@ import type { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
+import { disableRemoteSettings, enableRemoteSettings } from '../remote-settings.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { createApp } from './server.ts';
 
@@ -141,5 +142,60 @@ describe('the agent-config API', () => {
     expect((await apiRequest(app, '/api/v1/agent-config/claude.user.settings')).status).toBe(409);
     expect((await apiRequest(app, '/api/v1/agent-config/codex.user.config')).status).toBe(409);
     expect((await apiRequest(app, '/api/v1/agent-config/pi.user.settings')).status).toBe(409);
+  });
+
+  // hearsay-tools/cezarion#2428: the host switch grants the remote cockpit settings administration.
+  describe('remote settings administration', () => {
+    afterEach(async () => {
+      await disableRemoteSettings();
+    });
+
+    it('enabled on the host: the listing is editable, home files are served and writes land', async () => {
+      process.env.CEZ_REMOTE = '1';
+      await enableRemoteSettings();
+      const body = (await (await apiRequest(app, '/api/v1/agent-config')).json()) as { editable: boolean; userMcp: unknown };
+      expect(body.editable).toBe(true);
+      expect(body.userMcp).not.toBeNull();
+      expect((await apiRequest(app, '/api/v1/agent-config/claude.user.settings')).status).toBe(200);
+      const saved = await put('claude.project.settings', { content: '{"hooks":{}}', version: null });
+      expect(saved.status).toBe(200);
+      expect(readFileSync(join(repoRoot, '.claude', 'settings.json'), 'utf8')).toBe('{"hooks":{}}');
+    });
+
+    it('disabled again: the next request is refused without a restart', async () => {
+      process.env.CEZ_REMOTE = '1';
+      await enableRemoteSettings();
+      expect((await put('claude.project.settings', { content: '{}', version: null })).status).toBe(200);
+      await disableRemoteSettings();
+      const refused = await put('claude.project.settings', { content: '{"hooks":{}}', version: null });
+      expect(refused.status).toBe(409);
+      expect(((await refused.json()) as { error: string }).error).toContain('cez remote-settings enable');
+      expect((await apiRequest(app, '/api/v1/agent-config/claude.user.settings')).status).toBe(409);
+      expect(((await (await apiRequest(app, '/api/v1/agent-config')).json()) as { editable: boolean }).editable).toBe(false);
+    });
+
+    it('enabled on the host: a cross-origin browser write is still rejected', async () => {
+      process.env.CEZ_REMOTE = '1';
+      await enableRemoteSettings();
+      const res = await apiRequest(app, '/api/v1/agent-config/claude.project.settings', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', host: 'cezar.example.ts.net', origin: 'https://evil.example' },
+        body: JSON.stringify({ content: '{"hooks":{}}', version: null }),
+      });
+      expect(res.status).toBe(403);
+      expect(() => readFileSync(join(repoRoot, '.claude', 'settings.json'), 'utf8')).toThrow();
+    });
+
+    it('a non-loopback bind never takes the switch', async () => {
+      process.env.CEZ_REMOTE = '1';
+      await enableRemoteSettings();
+      const exposed = createApp({ repoRoot, store, manager: {} as RunManager, version: '0.0.0-test', bindHost: '172.17.0.1' });
+      const res = await apiRequest(exposed, '/api/v1/agent-config/claude.project.settings', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ content: '{"hooks":{}}', version: null }),
+      });
+      expect(res.status).toBe(409);
+    });
   });
 });

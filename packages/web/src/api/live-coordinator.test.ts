@@ -17,7 +17,7 @@ let coordinator: ReturnType<typeof createLiveCoordinator>
 beforeEach(() => {
   vi.useFakeTimers(); Worker.all = []
   vi.stubGlobal('SharedWorker', Worker)
-  vi.stubGlobal('fetch', vi.fn(async path => new Response(JSON.stringify(String(path).endsWith('/health') ? { bootProject: 'boot', capabilities: { localHandoff: true, singleProject: false, automations: false, preview: false, voice: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true } } : { generation: 'one', results: [] }))))
+  vi.stubGlobal('fetch', vi.fn(async path => new Response(JSON.stringify(String(path).endsWith('/health') ? { bootProject: 'boot', capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, singleProject: false, automations: false, preview: false, voice: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true } } : { generation: 'one', results: [] }))))
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
   coordinator = createLiveCoordinator()
 })
@@ -210,7 +210,7 @@ it('restores live delivery from an older server whose health lacks newer capabil
   window.dispatchEvent(new Event('pagehide'))
   const healthy = vi.mocked(fetch).getMockImplementation()!
   vi.mocked(fetch).mockImplementation(async (path, init) => String(path).endsWith('/health')
-    ? new Response(JSON.stringify({ bootProject: 'boot', capabilities: { localHandoff: true, singleProject: false } }))
+    ? new Response(JSON.stringify({ bootProject: 'boot', capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, singleProject: false } }))
     : healthy(path, init))
   window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
   await vi.advanceTimersByTimeAsync(0)

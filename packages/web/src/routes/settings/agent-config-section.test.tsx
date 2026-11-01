@@ -43,10 +43,13 @@ const HEALTH = {
   checks: [{ name: 'claude', available: true }],
   defaultRunner: 'claude',
   forge: null,
-  capabilities: { localHandoff: true },
+  capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false },
 }
 
-function serve(listing: AgentConfigListing, fileContent = '{"a":1}') {
+/** A remote cockpit whose host operator ran `cez remote-settings enable` (hearsay-tools/cezarion#2428). */
+const REMOTE_ADMIN = { localHandoff: false, settingsAdmin: true, remoteSettingsAdmin: true }
+
+function serve(listing: AgentConfigListing, fileContent = '{"a":1}', capabilities: object = HEALTH.capabilities) {
   const json = (payload: unknown, status = 200) =>
     new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } })
   vi.stubGlobal(
@@ -54,7 +57,7 @@ function serve(listing: AgentConfigListing, fileContent = '{"a":1}') {
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       const method = init?.method ?? 'GET'
-      if (url.endsWith('/api/v1/health')) return json(HEALTH)
+      if (url.endsWith('/api/v1/health')) return json({ ...HEALTH, capabilities })
       if (url.endsWith('/api/v1/agent-config')) return json(listing)
       if (url.includes('/api/v1/agent-config/') && method === 'GET') {
         return json({ id: 'x', path: '/repo/x', exists: true, content: fileContent, version: 'v1' })
@@ -293,6 +296,36 @@ describe('AgentConfigSection', () => {
     fireEvent.click(screen.getByText('.claude/settings.json'))
     await waitFor(() => expect(screen.getByLabelText('.claude/settings.json contents')).toBeTruthy())
     expect(screen.queryByRole('button', { name: 'Save file' })).toBeNull()
+    expect(document.querySelector('[data-slot="agent-config-readonly"]')?.textContent).toContain('cez remote-settings enable')
+    expect(document.querySelector('[data-slot="remote-settings-notice"]')).toBeNull()
+  })
+
+  it('a remote cockpit with remote settings administration edits files and warns about host commands', async () => {
+    serve(
+      {
+        editable: true,
+        files: [fileOf({ id: 'claude.project.settings', label: '.claude/settings.json' })],
+        userMcp: { path: '~/.claude.json', servers: [], readable: true },
+      },
+      '{"a":1}',
+      REMOTE_ADMIN,
+    )
+    renderSection()
+    await waitFor(() => expect(document.querySelector('[data-slot="remote-settings-notice"]')).toBeTruthy())
+    expect(document.querySelector('[data-slot="remote-settings-notice"]')?.textContent).toContain('hooks and MCP servers')
+    expect(document.querySelector('[data-slot="agent-config-readonly"]')).toBeNull()
+    fireEvent.click(screen.getByText('.claude/settings.json'))
+    const editor = (await screen.findByLabelText('.claude/settings.json contents')) as HTMLTextAreaElement
+    fireEvent.change(editor, { target: { value: '{"a":2}' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save file' }))
+    await waitFor(() => expect(screen.getByText(/Saved/)).toBeTruthy())
+  })
+
+  it('a local cockpit shows no remote administration warning', async () => {
+    serve({ editable: true, files: [], userMcp: null })
+    renderSection()
+    await waitFor(() => expect(document.querySelector('[data-slot="agent-config"]')).toBeTruthy())
+    expect(document.querySelector('[data-slot="remote-settings-notice"]')).toBeNull()
   })
 
   it('saves an edited file', async () => {

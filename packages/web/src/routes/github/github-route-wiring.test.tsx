@@ -99,6 +99,8 @@ function stubServer(kind: 'issue' | 'pr') {
           forge: { kind: 'github', available: true },
           capabilities: {
             localHandoff: true,
+            settingsAdmin: true,
+            remoteSettingsAdmin: false,
             tokenMetrics: false,
             tokenUsageMetrics: false,
             costMetrics: false,

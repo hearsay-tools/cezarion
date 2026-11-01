@@ -73,8 +73,14 @@ function serve(config: Partial<ConfigResponse> = {}) {
 /** Seeds the step-3.2 route gates — boot id (legacy redirect) + registry (known-check) — so a
  *  flat entry URL lands scoped immediately. The boot project mounts UNSCOPED, so the exact
  *  `/api/v1/*` paths this file's fetch stub matches stay byte-identical. */
-function gateSeededClient(capabilities?: { localHandoff: boolean }) {
+interface SeededCapabilities { localHandoff: boolean; settingsAdmin?: boolean; remoteSettingsAdmin?: boolean }
+
+function gateSeededClient(seeded?: SeededCapabilities) {
   const client = createQueryClient()
+  // Settings administration follows a local cockpit unless a case says otherwise, as on the server.
+  const capabilities = seeded
+    ? { settingsAdmin: seeded.localHandoff, remoteSettingsAdmin: false, ...seeded }
+    : undefined
   const health = { bootProject: 'boot', ...(capabilities ? { capabilities } : {}) }
   client.setQueryData(queryKeys.health, health)
   client.setQueryData(['other', 'health'], health)
@@ -89,7 +95,7 @@ function gateSeededClient(capabilities?: { localHandoff: boolean }) {
   return client
 }
 
-function renderAt(entry: string, capabilities?: { localHandoff: boolean }) {
+function renderAt(entry: string, capabilities?: SeededCapabilities) {
   render(
     <QueryClientProvider client={gateSeededClient(capabilities)}>
       <MemoryRouter initialEntries={[entry]}>
@@ -270,8 +276,31 @@ describe('Project settings → Worktrees: worktree setup commands (#917)', () =>
     expect(timeoutInput()!.readOnly).toBe(true)
     expect(saveSetup()!.disabled).toBe(true)
     expect(document.querySelector('[data-slot="worktree-setup-readonly"]')?.textContent).toBe(
-      'Edit worktreeSetup.commands in /host/boot/.ai/cezar/config.json on the machine running Cezarion. Valid file edits apply to new worktrees; no restart is needed.',
+      'Edit worktreeSetup.commands in /host/boot/.ai/cezar/config.json on the machine running Cezarion. Valid file edits apply to new worktrees; no restart is needed. To edit here, the host operator runs cez remote-settings enable.',
     )
+    expect(document.querySelector('[data-slot="remote-settings-notice"]')).toBeNull()
+  })
+
+  it('a remote cockpit with remote settings administration edits the field and warns about host commands', async () => {
+    serve({ worktreeSetup: { commands: ['npm ci'], timeoutSeconds: 900 } })
+    renderAt('/settings/worktrees', { localHandoff: false, settingsAdmin: true, remoteSettingsAdmin: true })
+    await waitFor(() => expect(commandsBox()).not.toBeNull())
+    expect(commandsBox()!.readOnly).toBe(false)
+    expect(document.querySelector('[data-slot="worktree-setup-readonly"]')).toBeNull()
+    expect(document.querySelector('[data-slot="remote-settings-notice"]')?.textContent).toContain(
+      'These commands run on the machine running Cezarion',
+    )
+    fireEvent.change(commandsBox()!, { target: { value: 'npm ci\npnpm build' } })
+    fireEvent.click(saveSetup()!)
+    await waitFor(() => expect(setupPuts()).toHaveLength(1))
+    expect(setupPuts()[0]?.body).toEqual({ worktreeSetup: { commands: ['npm ci', 'pnpm build'] } })
+  })
+
+  it('a local cockpit shows no remote administration warning', async () => {
+    serve()
+    renderAt('/settings/worktrees', LOCAL)
+    await waitFor(() => expect(commandsBox()).not.toBeNull())
+    expect(document.querySelector('[data-slot="remote-settings-notice"]')).toBeNull()
   })
 
   it('an invalid config shows the issue', async () => {

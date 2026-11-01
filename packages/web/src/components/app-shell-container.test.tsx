@@ -44,7 +44,7 @@ const HEALTH: HealthResponse = {
   checks: [],
   defaultRunner: 'claude',
   forge: null,
-  capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations: false, preview: false, voice: false },
+  capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations: false, preview: false, voice: false },
 }
 
 /** One registered project — the degenerate workspace every existing install upgrades into. */

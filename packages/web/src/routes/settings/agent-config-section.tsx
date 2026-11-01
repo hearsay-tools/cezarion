@@ -12,6 +12,7 @@ import { toast } from '@/components/ui/toaster'
 import { availableRunners } from '@/routes/new-task-form'
 import { cn } from '@/lib/utils'
 import { AGENT_DESCRIPTORS, descriptorFor, type AgentDescriptor } from './agent-descriptors'
+import { REMOTE_SETTINGS_ENABLE_COMMAND, RemoteSettingsNotice } from './remote-settings-notice'
 
 /**
  * Settings → Agent config (spec #404, regrouped per
@@ -20,9 +21,10 @@ import { AGENT_DESCRIPTORS, descriptorFor, type AgentDescriptor } from './agent-
  * first; the selected agent's pane holds its Settings, MCP and Memory files
  * together, driven by the per-agent descriptor table. cezar never re-serializes;
  * it shows each scope's file and the vendor's own documented precedence, and
- * never claims a merge it does not perform. Writing is a local-machine
- * capability: in hosted mode the whole section is read-only (the server refuses
- * every write regardless).
+ * never claims a merge it does not perform. Writing needs settings
+ * administration: a local cockpit, or a remote one whose host operator ran
+ * `cez remote-settings enable` (hearsay-tools/cezarion#2428). Otherwise the whole
+ * section is read-only (the server refuses every write regardless).
  */
 
 /** What this file actually governs for a run — the honest label the spec insists on. */
@@ -81,10 +83,11 @@ function AgentConfigView({ listing, installed }: { listing: AgentConfigListing; 
           data-slot="agent-config-readonly"
           className="rounded-md border border-border bg-muted/40 px-3 py-2 text-[13px] text-soft-foreground"
         >
-          Read-only: agent config is edited from the machine that owns the checkout (this cockpit runs in hosted
-          mode). You can still see every file and which one wins.
+          Read-only: this remote cockpit cannot edit agent config. You can still see every file and which one wins.
+          To edit here, the host operator runs <code>{REMOTE_SETTINGS_ENABLE_COMMAND}</code>.
         </div>
       )}
+      <RemoteSettingsNotice risk="Agent config can define hooks and MCP servers that run commands on the machine running Cezarion" />
 
       <div data-slot="agent-config-agents" role="tablist" className="flex flex-wrap gap-1">
         {AGENT_DESCRIPTORS.map((d) => (
