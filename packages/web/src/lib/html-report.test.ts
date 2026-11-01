@@ -46,7 +46,7 @@ describe('prepareReport', () => {
   it('keeps in-page anchors and opens web and mail links in a new tab without opener or referrer', () => {
     const doc = parse(prepareReport('<a href="#s2" target="_top">TOC</a><a href="https://example.com" target="_self">Web</a><a href="mailto:a@example.com">Mail</a><h2 id="s2">S2</h2>').srcdoc)
     const [toc, web, mail] = [...doc.querySelectorAll('a')]
-    expect(toc!.getAttribute('href')).toBe('#s2')
+    expect(toc!.getAttribute('href')).toBe('about:srcdoc#s2')
     expect(toc!.hasAttribute('target')).toBe(false)
     for (const link of [web!, mail!]) {
       expect(link.getAttribute('target')).toBe('_blank')
@@ -67,8 +67,20 @@ describe('prepareReport', () => {
     expect(link('web').getAttribute('rel')).toBe('noopener noreferrer')
     expect(link('rel').hasAttributeNS(XLINK, 'href')).toBe(false)
     expect(link('rel').hasAttribute('href')).toBe(false)
+    expect(link('toc').getAttribute('href')).toBe('about:srcdoc#s2')
+    expect(link('toc').hasAttributeNS(XLINK, 'href')).toBe(false)
     expect(link('toc').hasAttribute('target')).toBe(false)
     expect(blocked.relative).toBe(1)
+  })
+
+  it.each(['#', '#section%202', '#résultats'])('keeps fragment %s inside the srcdoc document for links and image maps', href => {
+    const { srcdoc, blocked } = prepareReport(`<a href="${href}" target="_blank">Section</a><map name="toc"><area href="${href}" target="_top"></map>`)
+    const doc = parse(srcdoc)
+    for (const link of doc.querySelectorAll('a, area')) {
+      expect(link.getAttribute('href')).toBe(`about:srcdoc${href}`)
+      expect(link.hasAttribute('target')).toBe(false)
+    }
+    expect(blocked).toEqual({ scripts: 0, remote: 0, relative: 0, forms: 0, embeds: 0 })
   })
 
   it('makes relative and script links inert and counts the relative ones', () => {
