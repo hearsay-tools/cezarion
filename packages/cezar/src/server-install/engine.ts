@@ -162,12 +162,13 @@ export async function runInstall(strategy: PlatformStrategy, opts: RunOptions): 
     // A caller-supplied port wins (a new named instance auto-picks a free one);
     // otherwise keep whatever the resumed record already carries.
     if (opts.port) state.primaryPort = opts.port;
-    const freshInstall = state.createdAt === undefined;
+    // Only a re-run of a completed real install keeps a grant; a dry-run preview record does not count.
+    const freshInstall = state.installed !== true;
     state.createdAt ??= opts.now;
     state.updatedAt = opts.now;
 
     await strategy.preflight(ctx); // throws PreflightError to refuse politely
-    // A grant left on this port belongs to a cockpit that is gone; a resumed install keeps its own.
+    // A grant left on this port belongs to a cockpit that is gone; a completed install keeps its own.
     await withdrawRemoteSettings(ctx, state.primaryPort, 'a new install on this port', freshInstall);
 
     const steps = strategy.steps(ctx);

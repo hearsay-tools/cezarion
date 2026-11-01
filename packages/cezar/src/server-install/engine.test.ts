@@ -255,7 +255,14 @@ describe('engine', () => {
     expect(grantedPorts()).toEqual([4321]);
   });
 
-  it('a fresh install withdraws a grant left on its port; a resumed install keeps its own', async () => {
+  it('a real install after a dry-run preview withdraws a grant left on its port', async () => {
+    await runInstall(strategyOf([fakeStep('a')]), opts({ instance: 'blog-example-com', domain: 'blog.example.com', port: 4322, dryRun: true }));
+    await enableRemoteSettings(4322);
+    await runInstall(strategyOf([fakeStep('a')]), opts({ instance: 'blog-example-com', domain: 'blog.example.com', port: 4322 }));
+    expect(grantedPorts()).toEqual([]);
+  });
+
+  it('a fresh install withdraws a grant left on its port; re-running a completed install keeps its own', async () => {
     await enableRemoteSettings(4322);
     await runInstall(strategyOf([fakeStep('a')]), opts({ instance: 'blog-example-com', domain: 'blog.example.com', port: 4322 }));
     expect(grantedPorts()).toEqual([]);
