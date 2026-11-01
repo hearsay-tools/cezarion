@@ -134,6 +134,16 @@ export class WorkerQuestions {
     this.host.deliverConversationInput(workerId);
   }
 
+  /** The answers queued for the worker's pending question that it has not taken: the parent's
+   *  replies to the routed question, and Cezar's answer when it was not delivered. */
+  private queuedAnswerIds(workerId: string): string[] {
+    const ask = this.context.store.transcriptFacts(workerId).pendingAsk;
+    const routed = this.routedAsk(workerId);
+    const cezar = ask ? this.undeliveredAnswerId(workerId, ask.seq) : undefined;
+    return (this.context.store.getRun(workerId)?.agentInputs ?? []).filter(input => !input.consumedAt &&
+      ((routed && answersQuestion(routed.message, input)) || (input.id === cezar && input.purpose === 'undelivered-question'))).map(input => input.id);
+  }
+
   /** The transcript shows the question as not delivered once, after the answer that settles it is queued. */
   private recordUndelivered(workerId: string, askSeq: number, reason: string | undefined): void {
     if (this.context.store.readEvents(workerId).some(event => event.type === 'worker-question-undelivered' && event.askSeq === askSeq)) return;
@@ -144,6 +154,10 @@ export class WorkerQuestions {
    *  human wait for it goes. Idempotent: a question that already closed is left alone. */
   closeQuestion(workerId: string, askSeq: number, reason: QuestionCloseReason, detail?: string): void {
     if (this.context.store.transcriptFacts(workerId).pendingAsk?.seq !== askSeq) return;
+    // An answer accepted for it and not yet taken goes first, so no later turn reads it as an
+    // unrelated message. A failed write leaves the question pending for the next sweep.
+    try { for (const id of this.queuedAnswerIds(workerId)) this.host.retireUnreadParentQuestion(workerId, id); }
+    catch (error) { console.warn(`[cez] worker question not closed: ${error instanceof Error ? error.message : String(error)}`); return; }
     if (detail) this.context.store.appendEvent(workerId, { type: 'note', tone: 'warning', message: `Question not delivered to the parent: ${detail}.` });
     this.context.store.appendEvent(workerId, { type: 'human-ask-closed', askSeq, reason });
     this.host.withdrawCezarHumanWaits(workerId);
@@ -394,9 +408,10 @@ export class WorkerQuestions {
     return true;
   }
 
-  /** The parent no longer owes an answer to a superseded fallback question: one it has not read is
-   *  retired, so neither a wake nor a restart's replay of unread input delivers it. One a provider
-   *  or an inbox read already holds is left to them. */
+  /** An input its run no longer owes: the parent's copy of a superseded fallback question, or a
+   *  worker's queued answer to a question that closed. One it has not read is retired, so neither a
+   *  wake nor a restart's replay of unread input delivers it. One a provider or an inbox read
+   *  already holds is left to them. */
   retireUnreadParentQuestion(parentId: string, requestId: string): void {
     const input = this.context.store.getRun(parentId)?.agentInputs?.find(entry => entry.id === requestId);
     if (!input || input.consumedAt || hasLiveInboxClaim(input) || this.host.providerOwnsInboxInput(parentId, requestId)) return;

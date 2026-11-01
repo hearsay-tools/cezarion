@@ -891,17 +891,22 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     try {
       const blocker = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:slow', runner: 'claude' });
       await until(() => store.getRun(blocker.id)?.status === 'running' && semaphore.busy() === 1);
-      await f.reply('mock:agent-echo Use the parser');
+      const reply = await f.reply('mock:agent-echo Use the parser');
       manager.cancel(f.w.id);
       await until(() => closedAs(f.w.id).length === 1);
       expect(closedAs(f.w.id)).toEqual(['worker-stopped']);
+      // The accepted reply closes with its question: no later turn reads it as a message.
+      expect(store.getRun(f.w.id)?.agentInputs?.some(input => input.id === reply.message.id) ?? false).toBe(false);
       manager.cancel(blocker.id);
       await until(() => !manager.isActive(f.w.id) && !manager.isActive(blocker.id));
       expect(answered(f.w.id)).toEqual([]);
       noHumanCard(f.w.id);
       expect(manager.continueRun(f.w.id, { text: 'mock:agent-echo plain continue' })).toEqual({ ok: true });
-      await until(() => said(f.w.id, 'plain continue'));
+      await until(() => said(f.w.id, 'plain continue') && store.getRun(f.w.id)?.status === 'waiting');
       expect(eventsOf(f.w.id, 'human-input-delivered')).toEqual([]);
+      expect(said(f.w.id, 'Use the parser')).toBe(false);
+      // A restart replays only unread input, and the reply is gone from the worker's queue.
+      expect(store.getRun(f.w.id)?.agentInputs?.some(input => input.id === reply.message.id) ?? false).toBe(false);
     } finally { f.close(); }
   });
 });
