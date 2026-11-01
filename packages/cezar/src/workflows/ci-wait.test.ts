@@ -160,11 +160,13 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
       const accepted = original(...args);
       return accepted && accepted.then(() => ack);
     });
+    const turnEnds = () => store.readEvents(run.id).filter(event => event.type === 'turn-end').length;
+    const before = turnEnds();
     try {
       external.settle(success());
       await until(() => send.mock.calls.length === 1);
       // Native activity and turn-end happen before the held transport ACK.
-      await until(() => store.readEvents(run.id).filter(event => event.type === 'turn-end').length === 2);
+      await until(() => turnEnds() === before + 1);
       expect(runInternals(manager).line.monitoring.has(run.id)).toBe(true);
       expect(store.getRun(run.id)?.status).toBe('waiting');
       expect(semaphore.busy()).toBe(0);
@@ -473,7 +475,10 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     await until(() => messages.every(message => inputOf(message.id)?.deliveredAt));
     const delivered = store.getRun(run.id)!.agentInputs!;
     expect(delivered.find(input => input.id === wait.id)?.deliveredAt).toBeTruthy();
-    const accepted = send.mock.calls.filter((_, i) => send.mock.results[i]?.value !== false);
+    // A later turn-end nudge is its own send; only the wake may carry the observation or a message.
+    const ids = [wait.id, ...messages.map(message => message.id)];
+    const accepted = send.mock.calls.filter((call, i) => send.mock.results[i]?.value !== false
+      && ids.some(id => JSON.stringify(call).includes(id)));
     expect(accepted).toHaveLength(1);
     const batch = JSON.stringify(accepted[0]);
     for (const message of messages) expect(batch.indexOf(message.id)).toBeGreaterThan(batch.indexOf(wait.id));
