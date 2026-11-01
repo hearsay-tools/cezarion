@@ -113,6 +113,8 @@ describe('the HTML report reader', () => {
   it.each([
     ['/p/a/tasks/r1/report', 'No report selected'],
     [`/p/a/tasks/r1/report?artifact=${ID}&path=x.html`, 'Invalid report link'],
+    ['/p/a/tasks/r1/report?artifact=', 'Invalid report link'],
+    ['/p/a/tasks/r1/report?path=', 'Invalid report link'],
   ])('handles %s without a request', async (url, title) => {
     stubFetch({})
     renderAt([url])

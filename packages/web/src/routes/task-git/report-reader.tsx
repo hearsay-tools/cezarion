@@ -49,7 +49,8 @@ function useReportSelection(id: string) {
   const [query] = useSearchParams()
   const path = query.get('path')
   const artifactId = query.get('artifact')
-  const conflict = query.getAll('path').length > 1 || query.getAll('artifact').length > 1 || (path !== null && artifactId !== null)
+  // An empty value selects nothing a query could load, so it reads as an invalid link.
+  const conflict = query.getAll('path').length > 1 || query.getAll('artifact').length > 1 || (path !== null && artifactId !== null) || path === '' || artifactId === ''
   const live = useFileLink(id, artifactId || conflict ? null : path)
   const published = useArtifact(id, conflict ? null : artifactId)
   return { path, conflict, selected: path !== null || artifactId !== null, result: artifactId ? published : live }
