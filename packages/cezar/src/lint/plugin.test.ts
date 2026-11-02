@@ -21,7 +21,7 @@ const OXLINT_TIMEOUT_MS = 120_000;
 const config = JSON.parse(readFileSync(join(repoRoot, '.oxlintrc.json'), 'utf8')) as { jsPlugins: string[]; plugins: string[]; rules: Record<string, string | [string, object]> };
 const plugin = join(repoRoot, 'packages/cezar/src/lint/plugin.ts');
 // Scanner fixtures test cez exceptions independently of built-in policy.
-const cezOnly = { ...config, plugins: [], rules: Object.fromEntries(Object.entries(config.rules).filter(([rule]) => rule.startsWith('cez/'))), jsPlugins: [plugin] };
+const cezOnly = { ...config, plugins: [], overrides: [], rules: Object.fromEntries(Object.entries(config.rules).filter(([rule]) => rule.startsWith('cez/'))), jsPlugins: [plugin] };
 
 function tree(files: Record<string, string>, oxlintrc: object = cezOnly): string {
   const root = mkdtempSync(join(tmpdir(), 'cez-lint-'));
