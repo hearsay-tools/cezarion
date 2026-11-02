@@ -396,8 +396,18 @@ test('verification bindings keep the final gate in CI and reserve local full bro
   assert.match(row[1], /npm run test:package/);
   assert.match(row[1], /Full gate in CI:.*`npm run test:e2e`/);
   assert.match(agents.match(/^\| Verification \|([^|]+)\|/m)?.[1] ?? '', /Full gate in CI:.*`npm run test:e2e`/);
-  const validation = fs.readFileSync(path.join(repoRoot, '.ai/skills/validation/SKILL.md'), 'utf8');
-  assert.match(validation, /npm run test:e2e:local\s+# explicitly requested full local browser run/);
+  const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
+  assert.equal(typeof manifest.scripts['test:e2e:local'], 'string');
+  assert.ok(manifest.scripts['test:e2e:local'].trim(), 'expected a local full browser script');
+  const workflowsDir = path.join(repoRoot, '.github/workflows');
+  for (const name of fs.readdirSync(workflowsDir).filter((name) => /\.ya?ml$/.test(name))) {
+    const ci = yaml.parse(fs.readFileSync(path.join(workflowsDir, name), 'utf8'));
+    for (const job of Object.values(ci.jobs ?? {})) {
+      for (const step of job.steps ?? []) {
+        assert.doesNotMatch(step.run ?? '', /test:e2e:local/, `${name} must not run the local full browser script`);
+      }
+    }
+  }
   const ciDocs = fs.readFileSync(path.join(repoRoot, 'docs/sdlc/ci.md'), 'utf8');
   assert.match(ciDocs, /npm run test:e2e:local/);
 });
