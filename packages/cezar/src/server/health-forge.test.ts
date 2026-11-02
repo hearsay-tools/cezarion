@@ -104,6 +104,8 @@ describe('GET /api/v1/health — forge + capabilities', () => {
     expect(body.forge).toBeNull(); // tmp dir — not a git repo, no remote
     expect(body.capabilities).toEqual({
       localHandoff: true,
+      settingsAdmin: true,
+      remoteSettingsAdmin: false,
       singleProject: false,
       automations: false,
       preview: false,
@@ -154,6 +156,8 @@ describe('GET /api/v1/health — forge + capabilities', () => {
     const body = await health();
     expect(body.capabilities).toEqual({
       localHandoff: false,
+      settingsAdmin: false,
+      remoteSettingsAdmin: false,
       singleProject: false,
       automations: false,
       preview: false,
@@ -183,6 +187,8 @@ describe('GET /api/v1/health — forge + capabilities', () => {
     const body = await health({ bindHost: '0.0.0.0' });
     expect(body.capabilities).toEqual({
       localHandoff: false,
+      settingsAdmin: false,
+      remoteSettingsAdmin: false,
       singleProject: false,
       automations: false,
       preview: false,
@@ -197,6 +203,8 @@ describe('GET /api/v1/health — forge + capabilities', () => {
     const body = await health({ bindHost: '127.0.0.1' });
     expect(body.capabilities).toEqual({
       localHandoff: true,
+settingsAdmin: true,
+remoteSettingsAdmin: false,
 
       singleProject: false,
       automations: false,
@@ -218,6 +226,8 @@ describe('GET /api/v1/health — forge + capabilities', () => {
     process.env.CEZ_AUTOMATIONS = '1';
     expect((await health()).capabilities).toEqual({
       localHandoff: true,
+      settingsAdmin: true,
+      remoteSettingsAdmin: false,
       singleProject: false,
       automations: true,
       preview: false,
@@ -232,6 +242,8 @@ describe('GET /api/v1/health — forge + capabilities', () => {
     process.env.CEZ_HIDE_TOKEN_METRICS = '1';
     expect((await health()).capabilities).toEqual({
       localHandoff: true,
+      settingsAdmin: true,
+      remoteSettingsAdmin: false,
       singleProject: false,
       automations: false,
       preview: false,

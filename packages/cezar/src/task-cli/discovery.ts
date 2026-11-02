@@ -1,7 +1,11 @@
 import { execFile } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import { basename, dirname, resolve } from 'node:path';
-import { healthResponseSchema } from '@open-mercato/cezar-contract/health';
+import { capabilitiesSchema, healthResponseSchema } from '@open-mercato/cezar-contract/health';
+
+/** Health from any cockpit version: a running cockpit can predate capabilities added since its build,
+ *  and discovery reads none of them. Same tolerance as the cockpit's `healthPayloadSchema`. */
+const cockpitHealthSchema = healthResponseSchema.extend({ capabilities: capabilitiesSchema.partial() });
 import { projectsResponseSchema } from '@open-mercato/cezar-contract/projects';
 import { fetchJson, TaskCliError, type Cockpit } from './http.ts';
 
@@ -50,7 +54,7 @@ interface Candidate { origin: string; projects: Array<{ id: string; root: string
 async function probe(origin: string, timeoutMs: number, signal?: AbortSignal): Promise<Candidate | undefined> {
   try {
     const health = await fetchJson(`${origin}/api/v1/health`, { timeoutMs, ...(signal ? { signal } : {}) });
-    if (health.status !== 200 || !healthResponseSchema.safeParse(health.data).success) return undefined;
+    if (health.status !== 200 || !cockpitHealthSchema.safeParse(health.data).success) return undefined;
     const registry = await fetchJson(`${origin}/api/v1/projects`, { timeoutMs, ...(signal ? { signal } : {}) });
     const parsed = projectsResponseSchema.safeParse(registry.data);
     if (registry.status !== 200 || !parsed.success) return undefined;

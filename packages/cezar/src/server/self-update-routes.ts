@@ -67,7 +67,7 @@ export function createSelfUpdateRoutes(
       const { version: target } = c.req.valid('json');
       // SECURITY: a hosted cockpit may only move FORWARD. Installing a published package cannot
       // inject code, but installing an OLDER one can: every hosted-mode guard — the `/api/*`
-      // request-origin check (open-mercato/cezar#426), the `localHandoff` 409 that closes the agent-config hooks
+      // request-origin check (open-mercato/cezar#426), the `settingsAdmin` 409 that closes the agent-config hooks
       // RCE path — lives in the running version, so a downgrade to a release that predates them
       // re-opens exactly what they close, through a route those guards never get to see. A
       // local cockpit keeps the full picker, downgrades included: there is no boundary left to

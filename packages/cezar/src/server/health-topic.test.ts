@@ -7,6 +7,7 @@ import type { RunManager } from '../workflows/run.ts';
 import { createApp, type ServerDeps } from './server.ts';
 import type { SocketHub, TopicPublisher } from './ws.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
+import { disableRemoteSettings, enableRemoteSettings } from '../remote-settings.ts';
 
 /**
  * The LIVE-SERVER health path (spec `2026-07-23-websocket-subscriptions.md`).
@@ -86,6 +87,7 @@ describe('health topic + cache (live-server path)', () => {
       manager: {} as RunManager,
       version: '0.0.0-test',
       socketHub: hub,
+      cezarPort: () => 4321,
     };
     return { app: createApp(deps), topics };
   };
@@ -170,6 +172,28 @@ describe('health topic + cache (live-server path)', () => {
 
     // Waits for the recompute rather than answering from a two-hour-old cache.
     expect(await runner()).toBe('codex');
+  }, TEST_BUDGET_MS);
+
+  // hearsay-tools/cezarion#2428: `cez remote-settings status` and the cockpit read the switch through
+  // health, so a cached payload must not hide an enable or disable for up to the staleness ceiling.
+  it('serves the current capabilities from a cached payload', async () => {
+    process.env.CEZ_REMOTE = '1';
+    const { app } = build();
+    currentApp = app;
+    await settle();
+    const capabilities = async () => {
+      const body = (await (await apiRequest(app, '/api/v1/health')).json()) as { capabilities: { settingsAdmin: boolean } };
+      return body.capabilities;
+    };
+    try {
+      expect((await capabilities()).settingsAdmin).toBe(false);
+      await enableRemoteSettings(4321);
+      expect(await capabilities()).toMatchObject({ settingsAdmin: true, remoteSettingsAdmin: true });
+      await disableRemoteSettings();
+      expect((await capabilities()).settingsAdmin).toBe(false);
+    } finally {
+      await disableRemoteSettings();
+    }
   }, TEST_BUDGET_MS);
 
   it('still answers instantly from cache inside the TTL', async () => {

@@ -2,6 +2,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { queryKeys } from '@/api/queries'
 import { createQueryClient } from '@/api/query-client'
 import type { AgentConfigFile, AgentConfigListing } from '@open-mercato/cezar-api-client'
 import { Toaster } from '@/components/ui/toaster'
@@ -43,10 +44,13 @@ const HEALTH = {
   checks: [{ name: 'claude', available: true }],
   defaultRunner: 'claude',
   forge: null,
-  capabilities: { localHandoff: true },
+  capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false },
 }
 
-function serve(listing: AgentConfigListing, fileContent = '{"a":1}') {
+/** A remote cockpit whose host operator ran `cez remote-settings enable` (hearsay-tools/cezarion#2428). */
+const REMOTE_ADMIN = { localHandoff: false, settingsAdmin: true, remoteSettingsAdmin: true }
+
+function serve(listing: AgentConfigListing, fileContent = '{"a":1}', capabilities: object = HEALTH.capabilities) {
   const json = (payload: unknown, status = 200) =>
     new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } })
   vi.stubGlobal(
@@ -54,7 +58,7 @@ function serve(listing: AgentConfigListing, fileContent = '{"a":1}') {
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       const method = init?.method ?? 'GET'
-      if (url.endsWith('/api/v1/health')) return json(HEALTH)
+      if (url.endsWith('/api/v1/health')) return json({ ...HEALTH, capabilities })
       if (url.endsWith('/api/v1/agent-config')) return json(listing)
       if (url.includes('/api/v1/agent-config/') && method === 'GET') {
         return json({ id: 'x', path: '/repo/x', exists: true, content: fileContent, version: 'v1' })
@@ -67,9 +71,39 @@ function serve(listing: AgentConfigListing, fileContent = '{"a":1}') {
   )
 }
 
-function renderSection() {
+/** What the stubbed server answers right now; a case changes it to act as the host operator. */
+interface LiveServer { capabilities: object; listing: AgentConfigListing; putStatus: number }
+
+function serveLive(server: LiveServer) {
+  const json = (payload: unknown, status = 200) =>
+    new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } })
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const method = init?.method ?? 'GET'
+      if (url.endsWith('/api/v1/health')) return json({ ...HEALTH, capabilities: server.capabilities })
+      if (url.endsWith('/api/v1/agent-config')) return json(server.listing)
+      if (url.includes('/api/v1/agent-config/') && method === 'GET') {
+        return json({ id: 'x', path: '/repo/x', exists: true, content: '{"a":1}', version: 'v1' })
+      }
+      if (url.includes('/api/v1/agent-config/') && method === 'PUT') {
+        if (server.putStatus === 409) {
+          return json({ error: 'editing agent config is disabled on this remote cockpit — run `cez remote-settings enable` on the host to allow it' }, 409)
+        }
+        return json({ id: 'x', path: '/repo/x', exists: true, content: '{"a":2}', version: 'v2' })
+      }
+      return json({ error: 'unexpected' }, 500)
+    }),
+  )
+}
+
+const READ_ONLY_REMOTE = { localHandoff: false, settingsAdmin: false, remoteSettingsAdmin: false }
+const SETTINGS_FILE = fileOf({ id: 'claude.project.settings', label: '.claude/settings.json' })
+
+function renderSection(client = createQueryClient()) {
   return render(
-    <QueryClientProvider client={createQueryClient()}>
+    <QueryClientProvider client={client}>
       <AgentConfigSection />
       <Toaster />
     </QueryClientProvider>,
@@ -293,6 +327,89 @@ describe('AgentConfigSection', () => {
     fireEvent.click(screen.getByText('.claude/settings.json'))
     await waitFor(() => expect(screen.getByLabelText('.claude/settings.json contents')).toBeTruthy())
     expect(screen.queryByRole('button', { name: 'Save file' })).toBeNull()
+    expect(document.querySelector('[data-slot="agent-config-readonly"]')?.textContent).toContain('cez remote-settings enable')
+    expect(document.querySelector('[data-slot="remote-settings-notice"]')).toBeNull()
+  })
+
+  it('a remote cockpit with remote settings administration edits files and warns about host commands', async () => {
+    serve(
+      {
+        editable: true,
+        files: [fileOf({ id: 'claude.project.settings', label: '.claude/settings.json' })],
+        userMcp: { path: '~/.claude.json', servers: [], readable: true },
+      },
+      '{"a":1}',
+      REMOTE_ADMIN,
+    )
+    renderSection()
+    await waitFor(() => expect(document.querySelector('[data-slot="remote-settings-notice"]')).toBeTruthy())
+    expect(document.querySelector('[data-slot="remote-settings-notice"]')?.textContent).toContain('hooks and MCP servers')
+    expect(document.querySelector('[data-slot="agent-config-readonly"]')).toBeNull()
+    fireEvent.click(screen.getByText('.claude/settings.json'))
+    const editor = (await screen.findByLabelText('.claude/settings.json contents')) as HTMLTextAreaElement
+    fireEvent.change(editor, { target: { value: '{"a":2}' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save file' }))
+    await waitFor(() => expect(screen.getByText(/Saved/)).toBeTruthy())
+  })
+
+  // hearsay-tools/cezarion#2428: the host grants and withdraws outside the cockpit, and a remote
+  // cockpit gets no live health push, so the section must not trust a cached capability.
+  it('opening the section re-reads a grant the host made after the cached read', async () => {
+    const client = createQueryClient()
+    client.setQueryData(queryKeys.health, { ...HEALTH, capabilities: READ_ONLY_REMOTE })
+    client.setQueryData(queryKeys.agentConfig, { editable: false, files: [{ ...SETTINGS_FILE, writable: false }], userMcp: null })
+    serveLive({ capabilities: REMOTE_ADMIN, listing: { editable: true, files: [SETTINGS_FILE], userMcp: null }, putStatus: 200 })
+    renderSection(client)
+    await waitFor(() => expect(document.querySelector('[data-slot="remote-settings-notice"]')).toBeTruthy())
+    await waitFor(() => expect(document.querySelector('[data-slot="agent-config-readonly"]')).toBeNull())
+  })
+
+  it('a save refused after the host withdrew the grant shows the refusal and goes read-only, not a conflict', async () => {
+    const server: LiveServer = { capabilities: REMOTE_ADMIN, listing: { editable: true, files: [SETTINGS_FILE], userMcp: null }, putStatus: 200 }
+    serveLive(server)
+    renderSection()
+    await waitFor(() => expect(document.querySelector('[data-slot="remote-settings-notice"]')).toBeTruthy())
+    fireEvent.click(screen.getByText('.claude/settings.json'))
+    const editor = (await screen.findByLabelText('.claude/settings.json contents')) as HTMLTextAreaElement
+    fireEvent.change(editor, { target: { value: '{"a":2}' } })
+    // The host runs `cez remote-settings disable` while the editor is open.
+    Object.assign(server, { capabilities: READ_ONLY_REMOTE, listing: { editable: false, files: [{ ...SETTINGS_FILE, writable: false }], userMcp: null }, putStatus: 409 })
+    fireEvent.click(screen.getByRole('button', { name: 'Save file' }))
+    await waitFor(() => expect(screen.getByText(/disabled on this remote cockpit/)).toBeTruthy())
+    await waitFor(() => expect(document.querySelector('[data-slot="agent-config-readonly"]')).toBeTruthy())
+    expect(document.querySelector('[data-slot="agent-config-conflict"]')).toBeNull()
+  })
+
+  it('opening a file re-reads a grant the host made after the section loaded', async () => {
+    const readOnly = { editable: false, files: [{ ...SETTINGS_FILE, writable: false }], userMcp: null }
+    const server: LiveServer = { capabilities: READ_ONLY_REMOTE, listing: readOnly, putStatus: 200 }
+    serveLive(server)
+    renderSection()
+    await waitFor(() => expect(document.querySelector('[data-slot="agent-config-readonly"]')).toBeTruthy())
+    // The host runs `cez remote-settings enable` before the user picks a file.
+    Object.assign(server, { capabilities: REMOTE_ADMIN, listing: { editable: true, files: [SETTINGS_FILE], userMcp: null } })
+    fireEvent.click(screen.getByText('.claude/settings.json'))
+    expect(await screen.findByRole('button', { name: 'Save file' })).toBeTruthy()
+  })
+
+  it('a version conflict keeps the rejected draft in the editor', async () => {
+    const server: LiveServer = { capabilities: REMOTE_ADMIN, listing: { editable: true, files: [SETTINGS_FILE], userMcp: null }, putStatus: 409 }
+    serveLive(server)
+    renderSection()
+    fireEvent.click(await screen.findByText('.claude/settings.json'))
+    const editor = (await screen.findByLabelText('.claude/settings.json contents')) as HTMLTextAreaElement
+    await waitFor(() => expect(editor.value).toBe('{"a":1}'))
+    fireEvent.change(editor, { target: { value: '{"a":2}' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save file' }))
+    await waitFor(() => expect(document.querySelector('[data-slot="agent-config-conflict"]')).toBeTruthy())
+    expect((screen.getByLabelText('.claude/settings.json contents') as HTMLTextAreaElement).value).toBe('{"a":2}')
+  })
+
+  it('a local cockpit shows no remote administration warning', async () => {
+    serve({ editable: true, files: [], userMcp: null })
+    renderSection()
+    await waitFor(() => expect(document.querySelector('[data-slot="agent-config"]')).toBeTruthy())
+    expect(document.querySelector('[data-slot="remote-settings-notice"]')).toBeNull()
   })
 
   it('saves an edited file', async () => {

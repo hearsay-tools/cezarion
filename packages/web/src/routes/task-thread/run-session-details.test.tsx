@@ -361,7 +361,7 @@ describe('Workflow — automation provenance (#801)', () => {
   })
   const health = (automations: boolean) => () => jsonResponse({
     capabilities: {
-      localHandoff: true, singleProject: false, automations,
+      localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, singleProject: false, automations,
       tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true,
     },
   })
@@ -396,7 +396,7 @@ describe('Usage & agent — metrics', () => {
   it('omits token and cost text when health disables token metrics', async () => {
     stubFetch({
       '/api/v1/health': () => jsonResponse({
-        capabilities: { localHandoff: true, singleProject: false, tokenMetrics: false },
+        capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, singleProject: false, tokenMetrics: false },
       }),
     })
     renderCard(run('done', { id: freshId(), costUsd: 0.04 }))

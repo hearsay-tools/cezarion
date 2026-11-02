@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
-import { putConfig } from '@/api/client'
+import { ApiError, putConfig } from '@/api/client'
 import { queryKeys, useHealth } from '@/api/queries'
 import {
   WORKTREE_SETUP_DEFAULT_TIMEOUT_SECONDS,
@@ -15,22 +15,25 @@ import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toaster'
 import { SettingsField } from './settings-field'
 import { useActiveProjectRoot } from './project-location'
+import { REMOTE_SETTINGS_ENABLE_COMMAND, RemoteSettingsNotice, useSettingsAdminRefresh } from './remote-settings-notice'
 
 /**
  * Project settings → Worktrees → "Prepare new worktrees" (hearsay-tools/cezarion#917, spec
  * `.ai/specs/2026-10-07-worktree-setup.md`): the commands Cezar runs in every new task and worker
  * worktree before the agent starts. One command per line; blank lines are dropped.
  *
- * Editable only on a local cockpit. These are commands the host runs, so a hosted cockpit shows
- * them read-only and the server refuses the write (409) whatever the client does.
+ * Editable on a local cockpit, or on a remote one whose host operator ran `cez remote-settings
+ * enable` (hearsay-tools/cezarion#2428). These are commands the host runs, so any other cockpit
+ * shows them read-only and the server refuses the write (409) whatever the client does.
  */
 export function WorktreeSetupField({ config }: { config: ConfigResponse }) {
   const queryClient = useQueryClient()
   const health = useHealth()
+  const refreshSettingsAdmin = useSettingsAdminRefresh()
   const projectRoot = useActiveProjectRoot()
   const configPath = projectRoot === null ? null : `${projectRoot.replace(/\/$/, '')}/.ai/cezar/config.json`
   // Unknown until health answers: read-only rather than editable-then-refused.
-  const editable = health.data?.capabilities?.localHandoff === true
+  const editable = health.data?.capabilities?.settingsAdmin === true
 
   const savedCommands = config.worktreeSetup?.commands ?? []
   const savedTimeout = config.worktreeSetup?.timeoutSeconds ?? WORKTREE_SETUP_DEFAULT_TIMEOUT_SECONDS
@@ -64,7 +67,11 @@ export function WorktreeSetupField({ config }: { config: ConfigResponse }) {
       setText(commands.join('\n'))
       toast(commands.length === 0 ? 'Worktree setup cleared' : 'Worktree setup saved')
     },
-    onError: (error: Error) => toast(error.message, { tone: 'danger' }),
+    onError: (error: Error) => {
+      toast(error.message, { tone: 'danger' })
+      // A 409 can mean the host withdrew the grant since the page loaded: show the field read-only.
+      if (error instanceof ApiError && error.status === 409) void refreshSettingsAdmin()
+    },
   })
   const submit = () =>
     save.mutate({
@@ -86,6 +93,7 @@ export function WorktreeSetupField({ config }: { config: ConfigResponse }) {
       title="Prepare new worktrees"
       hint="Runs in every new task and worker worktree before the agent starts, in order, stopping at the first failure. Leave commands empty to skip setup."
     >
+      <RemoteSettingsNotice risk="These commands run on the machine running Cezarion" />
       {savedCommands.length === 0 && config.worktreeSetupIssue === null ? (
         <p data-slot="worktree-setup-empty" className="text-sm text-foreground">
           No setup commands configured. No commands will run in new worktrees.
@@ -137,7 +145,7 @@ export function WorktreeSetupField({ config }: { config: ConfigResponse }) {
           Save setup
         </Button>
       </div>
-      {health.data?.capabilities?.localHandoff === false ? (
+      {health.data?.capabilities?.settingsAdmin === false ? (
         <p data-slot="worktree-setup-readonly" className="text-xs text-foreground">
           Edit <code>worktreeSetup.commands</code> in{' '}
           {configPath === null ? (
@@ -145,7 +153,8 @@ export function WorktreeSetupField({ config }: { config: ConfigResponse }) {
           ) : (
             <code className="break-all">{configPath}</code>
           )}{' '}
-          on the machine running Cezarion. Valid file edits apply to new worktrees; no restart is needed.
+          on the machine running Cezarion. Valid file edits apply to new worktrees; no restart is needed. To edit
+          here, the host operator runs <code>{REMOTE_SETTINGS_ENABLE_COMMAND}</code>.
         </p>
       ) : null}
       {config.worktreeSetupIssue !== null ? (

@@ -114,7 +114,7 @@ function health(forgeAvailable: boolean, automations = false): HealthResponse {
     checks: [],
     defaultRunner: 'claude',
     forge: forgeAvailable ? { kind: 'github', available: true } : null,
-    capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations, preview: false, voice: false },
+    capabilities: { localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations, preview: false, voice: false },
   }
 }
 

@@ -48,7 +48,7 @@ export interface AgentConfigListing {
   userMcp: UserMcpListing | null;
 }
 
-const HOSTED_REASON = 'agent config is edited from the machine that owns the checkout (this cockpit runs in hosted mode)';
+const HOSTED_REASON = 'agent config is read-only on this remote cockpit; run `cez remote-settings enable` on the host to allow edits';
 /** ~/.claude.json can be large (per-project history); cap the read. */
 const CLAUDE_JSON_CAP = 2 * 1024 * 1024;
 

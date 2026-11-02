@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { disableRemoteSettings, enableRemoteSettings } from '../remote-settings.ts';
 import { isLoopbackHost, isLoopbackHostHeader, normalizeHostname, resolveCapabilities } from './capabilities.ts';
 
 /**
@@ -135,6 +139,70 @@ describe('resolveCapabilities — localHandoff', () => {
 
   it('is off for a non-loopback bind host', () => {
     expect(resolveCapabilities({}, '0.0.0.0').localHandoff).toBe(false);
+  });
+});
+
+describe('resolveCapabilities — settings administration (hearsay-tools/cezarion#2428)', () => {
+  let home: string;
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'cez-caps-home-'));
+  });
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+  });
+  const admin = (env: NodeJS.ProcessEnv, bindHost?: string, port: number | undefined = 4321) => {
+    const caps = resolveCapabilities({ CEZ_HOME: home, ...env }, bindHost, port);
+    return { localHandoff: caps.localHandoff, settingsAdmin: caps.settingsAdmin, remoteSettingsAdmin: caps.remoteSettingsAdmin };
+  };
+  const grant = (port: number) => enableRemoteSettings(port, { CEZ_HOME: home });
+
+  it('a local cockpit administers settings without a grant', () => {
+    expect(admin({})).toEqual({ localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false });
+  });
+
+  it('a remote cockpit is read-only by default', () => {
+    expect(admin({ CEZ_REMOTE: '1' })).toEqual({ localHandoff: false, settingsAdmin: false, remoteSettingsAdmin: false });
+  });
+
+  it('a grant for this cockpit port gives a loopback-bound remote cockpit settings, and nothing else', async () => {
+    await grant(4321);
+    expect(admin({ CEZ_REMOTE: '1' })).toEqual({ localHandoff: false, settingsAdmin: true, remoteSettingsAdmin: true });
+    expect(admin({ CEZ_REMOTE: '1' }, '127.0.0.1')).toMatchObject({ settingsAdmin: true });
+    // A local cockpit needs no warning: the grant adds nothing there.
+    expect(admin({})).toEqual({ localHandoff: true, settingsAdmin: true, remoteSettingsAdmin: false });
+  });
+
+  it('a grant for another cockpit sharing this home grants nothing here', async () => {
+    await grant(4322);
+    expect(admin({ CEZ_REMOTE: '1' }, undefined, 4321)).toEqual({ localHandoff: false, settingsAdmin: false, remoteSettingsAdmin: false });
+    expect(admin({ CEZ_REMOTE: '1' }, undefined, 4322)).toMatchObject({ settingsAdmin: true });
+  });
+
+  it('a cockpit whose port is not known yet is never granted', async () => {
+    await grant(4321);
+    expect(resolveCapabilities({ CEZ_HOME: home, CEZ_REMOTE: '1' }, undefined, undefined).settingsAdmin).toBe(false);
+  });
+
+  it('a grant never applies to a non-loopback bind', async () => {
+    await grant(4321);
+    for (const bindHost of ['0.0.0.0', '172.17.0.1', '192.168.1.10', '100.64.0.1']) {
+      expect(admin({}, bindHost), bindHost).toEqual({ localHandoff: false, settingsAdmin: false, remoteSettingsAdmin: false });
+    }
+  });
+
+  it('withdrawing the grant takes effect on the next read', async () => {
+    await grant(4321);
+    expect(admin({ CEZ_REMOTE: '1' }).settingsAdmin).toBe(true);
+    await disableRemoteSettings({ CEZ_HOME: home }, 4321);
+    expect(admin({ CEZ_REMOTE: '1' }).settingsAdmin).toBe(false);
+  });
+
+  it('a malformed host file grants nothing', () => {
+    mkdirSync(join(home, 'remote-settings'), { recursive: true });
+    for (const content of ['not json', '{}', '{"enabledAt":"not-a-time"}']) {
+      writeFileSync(join(home, 'remote-settings', '4321.json'), content);
+      expect(admin({ CEZ_REMOTE: '1' }).settingsAdmin, content).toBe(false);
+    }
   });
 });
 
