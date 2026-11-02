@@ -96,7 +96,7 @@ it('serve boots with the boot project unavailable, and prunes, sweeps and recove
 }, 60_000);
 
 it('headless run refuses to start, says why, and leaves every file as it was', async () => {
-  const result = await exec(process.execPath, ['--import', 'tsx', CLI, 'run', 'mock:done', '--repo', root], {
+  const result = await exec(process.execPath, ['--import', 'tsx', CLI, 'run', 'mock:cezar-done', '--repo', root], {
     cwd: PACKAGE_DIR, env: env(), timeout: 30_000,
   }).then(() => ({ code: 0, stderr: '' }), (error: { code?: number; stderr?: string }) => ({ code: error.code, stderr: error.stderr ?? '' }));
   expect(result.code).toBe(1);

@@ -63,7 +63,7 @@ describe('authoritative finishability (#449)', () => {
   });
 
   it.each([false, true])('pending human ask, delegation root=%s: the verdict agrees with POST', async isRoot => {
-    const p = isRoot ? await parent('mock:ask') : manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:ask', runner: 'claude' });
+    const p = isRoot ? await parent('mock:cezar-ask') : manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:cezar-ask', runner: 'claude' });
     await until(() => hasPendingAsk(store, p.id) === true);
     const verdict = (await detail(p.id)).finishBlocked;
     if (isRoot) expect(verdict).toMatch(/pending human question/);

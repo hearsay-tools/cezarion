@@ -14,11 +14,12 @@ import { timed, type TimedWait } from './waits.testkit.ts';
 import { readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { ciWatchRequest, waitResultText } from './waits.ts';
 
-// Tool transport is exercised by adapter parity; lifecycle tests control only external resources.
+// Tool transport is exercised by adapter parity; lifecycle tests control only the CI supervisor.
 const externalResource = vi.hoisted(() => ({ supervisor: {} }));
-vi.mock('../ci-wait/resources.ts', () => ({ acquireCiResources: () => ({
-  supervisor: externalResource.supervisor, controller: async () => undefined, release() {},
-}) }));
+vi.mock('../ci-wait/resources.ts', async importOriginal => {
+  const original = await importOriginal<typeof import('../ci-wait/resources.ts')>();
+  return { acquireCiResources: (workspace: object) => ({ ...original.acquireCiResources(workspace), supervisor: externalResource.supervisor }) };
+});
 
 const pr = 'https://github.com/acme/repo/pull/12';
 const identity = { prUrl: pr, repository: 'acme/repo', prNumber: 12, headSha: 'a'.repeat(40) };
@@ -128,7 +129,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
   it('requeues a settled wake dequeued after losing its turn boundary', async () => {
     const external = github();
     const gate = join(root, 'ask-boundary'); controlledWire({ firstResultGate: gate });
-    const run = await parent('mock:ask');
+    const run = await parent('mock:cezar-ask');
     await register(run.id);
     writeFileSync(gate, 'end');
     await until(() => store.getRun(run.id)?.status === 'waiting' && store.readEvents(run.id).some(event => event.type === 'ask.requested'));
@@ -356,7 +357,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
   it('accepts CI during an executing approval and after a newer human ask', async () => {
     github(); const release = join(root, 'ci-answer');
     const wire = controlledWire({ humanAnswerGate: release });
-    const p = await parent('mock:ask');
+    const p = await parent('mock:cezar-ask');
     await until(() => store.readEvents(p.id).some(event => event.type === 'ask.requested'));
     await restart();
     expect(manager.continueRun(p.id, { text: 'human answer mock:hold' }).ok).toBe(true);
@@ -397,7 +398,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
   it('a human ask at turn-end keeps CI open and its result leaves the question unanswered', async () => {
     const external = github();
     const gate = join(root, 'ask-boundary'); controlledWire({ firstResultGate: gate });
-    const run = await parent('mock:ask');
+    const run = await parent('mock:cezar-ask');
     const wait = await register(run.id);
     writeFileSync(gate, 'end');
     await until(() => store.getRun(run.id)?.status === 'waiting' && hasPendingAsk(store, run.id) === true);
@@ -438,7 +439,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
     // The wake turn signals nothing; the earlier step completes only on a done (hearsay-tools/cezarion#1620).
     expect(store.getRun(run.id)?.steps.find(step => step.id === 'check')?.status).toBe('pending');
-    expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:done' }])).toBe(true);
+    expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:cezar-done' }])).toBe(true);
     await until(() => !manager.isActive(run.id));
     expect(store.getRun(run.id)?.steps.map(step => step.status)).toEqual(['done', 'done']);
   });
@@ -517,10 +518,8 @@ const waitById = (id: string, waitId: string) => store.getRun(id)?.waits?.find((
 const settledById = (id: string, waitId: string) => store.getRun(id)?.lastWaits?.find(entry => entry.id === waitId);
 const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?.filter(input => input.id === waitId) ?? [];
 const fireTimer = (waitId: string) => runInternals(manager).waitWatches.waitTimers.get(waitId)!.timer._onTimeout();
-/** This suite's sessions have no cezar tool controller (`controller: async () => undefined`), so a
- *  timer wakes them in the marker wording (hearsay-tools/cezarion#1234). */
 const timerFired = (waitId: string, note: string) =>
-  `Timer ${waitId} fired: ${note}. Continue toward the task goal. If the watched work is still pending, end your final message with CEZ:MONITORING.`;
+  `Timer ${waitId} fired: ${note}. Continue toward the task goal; register another wait if you are still waiting.`;
 const flushMicrotasks = async () => { for (let n = 0; n < 5; n++) await Promise.resolve(); };
 
 /** External GitHub per PR number: each watch settles on its own; a gate holds every lookup. */

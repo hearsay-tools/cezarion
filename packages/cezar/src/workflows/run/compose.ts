@@ -496,7 +496,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     hasQueuedAgentInputs: (id, except) => modules.inputDelivery.hasQueuedAgentInputs(id, except), armUnreadInputTimer: (id, state) => modules.inputDelivery.armUnreadInputTimer(id, state),
     armHeldHumanInputTimer: (id, state) => modules.inputDelivery.armHeldHumanInputTimer(id, state), parkOnWaits: (id, state) => modules.wakeAdmission.parkOnWaits(id, state),
     queueWaitWake: id => modules.wakeAdmission.queueWaitWake(id), leaveMonitoringPool: id => modules.wakeAdmission.leaveMonitoringPool(id), chargeAutomaticWake: id => modules.wakeAdmission.chargeAutomaticWake(id),
-    canAutoContinue: (id, state) => modules.turnNudges.canAutoContinue(id, state), tryAutonomousNudge: (id, state, step, ask) => modules.turnNudges.tryAutonomousNudge(id, state, step, ask),
+    canAutoContinue: (id, state) => modules.turnNudges.canAutoContinue(id, state),
     sendTurnEndNudge: (id, state, step, text) => modules.turnNudges.sendTurnEndNudge(id, state, step, text),
     awaitCompletionNudgeReply: (id, state, session) => modules.turnNudges.awaitCompletionNudgeReply(id, state, session),
     noticeParkedWorker: id => modules.workerQuestions.noticeParkedWorker(id), routeWorkerQuestion: id => modules.workerQuestions.routeWorkerQuestion(id),

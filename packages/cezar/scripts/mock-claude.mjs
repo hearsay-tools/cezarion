@@ -70,6 +70,12 @@ async function afterParityPark(prompt) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// hearsay-tools/cezarion#2397: a reply that finishes, asks or waits calls that cezar tool over
+// the session's MCP config before its turn ends. Returns '' or a failure note for the text.
+const tools = () => import('./mock-ci-tool.mjs');
+async function lifecycle(call) {
+  return (await tools()).lifecycleCall('claude', process.argv.slice(2), ...call);
+}
 /** Leave a visible trace in the cwd (the task worktree under spec 006) so
  *  the Diff view has something real to show in dry runs. Exactly one line
  *  per spawned session: tests read this file back as a per-step trace, so
@@ -181,7 +187,7 @@ async function respond(userText, imageCount, uuid) {
   // Early scenarios do not advance the ordinary turn counter.
   if (await dispatchReply(earlyReplies, userText, uuid)) return;
   turn += 1;
-  const markers = markersFor(userText);
+  const markers = await markersFor(userText);
   // `mock:slow` → hold the turn for ~25 s so queue states are observable.
   if (userText.includes('mock:slow')) await sleep(25_000);
   if (await dispatchReply(timedReplies, userText, uuid)) return;
@@ -201,7 +207,7 @@ async function acknowledgeOnly(userText, uuid) {
 
 async function replyAutonomously(userText, uuid) {
   const { autonomousReply } = await import('./mock-autonomous.mjs');
-  const text = autonomousReply(userText);
+  const text = await autonomousReply(userText, lifecycle);
   emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
   emit({ type: 'result', subtype: 'success', result: text, user_message_uuids: [uuid].filter(Boolean), usage: { input_tokens: 10, output_tokens: 5 } });
   return;
@@ -225,7 +231,7 @@ async function replyWithFinalTailText(silent, uuid, kind) {
     emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: silent.SLOW_DONE_PREFIX }] } });
     await silent.sleep(silent.SLOW_DONE_TAIL_MS);
 }
-const text = kind === 'standing' ? silent.FINAL_MESSAGE_STANDING : silent.SILENT_TAIL_DONE;
+const text = await silent.finalNudgeText(kind, lifecycle);
 emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
 emit({ type: 'result', subtype: 'success', result: text, user_message_uuids: [uuid].filter(Boolean), usage: { input_tokens: 10, output_tokens: 5 } });
 }
@@ -284,8 +290,9 @@ async function replyWithParkedHook(userText, uuid) {
     stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: event, additionalContext: text } }), stderr: '', exit_code: 0, outcome: 'success',
   });
   emit(hook('mid', 'PostToolBatch', 'Mid-turn hook context.'));
-  emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Watching.\nCEZ:MONITORING' }] } });
-  emit({ type: 'result', subtype: 'success', result: 'Watching.\nCEZ:MONITORING', usage: { input_tokens: 10, output_tokens: 5 } });
+  const watching = 'Watching.' + await lifecycle((await tools()).wait());
+  emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: watching }] } });
+  emit({ type: 'result', subtype: 'success', result: watching, usage: { input_tokens: 10, output_tokens: 5 } });
   await afterParityPark(userText);
   emit(hook('late', 'Stop', 'Late hook processed.'));
   return;
@@ -295,8 +302,9 @@ async function replyWithParkedHook(userText, uuid) {
 async function replyWithParkedChild(userText, uuid) {
   const task = `toolu_park_${turn}`;
   emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: task, name: 'Task', input: { description: 'Review' } }] } });
-  emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Watching the child.\nCEZ:MONITORING' }] } });
-  emit({ type: 'result', subtype: 'success', result: 'Watching the child.\nCEZ:MONITORING', usage: { input_tokens: 10, output_tokens: 5 } });
+  const watching = 'Watching the child.' + await lifecycle((await tools()).wait());
+  emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: watching }] } });
+  emit({ type: 'result', subtype: 'success', result: watching, usage: { input_tokens: 10, output_tokens: 5 } });
   await afterParityPark(userText);
   emit({ type: 'assistant', parent_tool_use_id: task, message: { role: 'assistant', content: [{ type: 'tool_use', id: 'late-read', name: 'Read', input: { file_path: 'README.md' } }] } });
   emit({ type: 'user', parent_tool_use_id: task, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'late-read', content: 'Read the file.' }] } });
@@ -332,7 +340,7 @@ async function replyWithMultiplePrs(userText, uuid) {
   emit({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'multi-read', content: unrelatedPr }] } });
   emit({ type: 'assistant', parent_tool_use_id: 'multi-read', message: { role: 'assistant', content: [{ type: 'text', text: unrelatedPr }] } });
   emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', thinking: unrelatedPr }] } });
-  const text = multiPrText(userText);
+  const text = await multiPrText(userText, lifecycle);
   for (const block of text.split('\n')) emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: block }] } });
   emit({ type: 'result', subtype: 'success', result: text, usage: { input_tokens: 10, output_tokens: 5 } });
   return;
@@ -346,63 +354,18 @@ async function replyWithTurnMessages(userText, uuid) {
   return;
 }
 
-async function replyWithAskSnapshot(userText, uuid) {
-  emit({ type: 'result', subtype: 'success', result: userText.includes('mock:ask-snapshot-bad') ? 'CEZ:ASK {not valid json' : 'Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}', usage: { input_tokens: 10, output_tokens: 5 } });
-  return;
-}
-
-async function replyWithAskProse(userText, uuid) {
-  emit({ type: 'result', subtype: 'success', result: 'Use `CEZ:ASK {"questions":[]}` in your reply.\n> CEZ:ASK {not valid json', usage: { input_tokens: 10, output_tokens: 5 } });
-  return;
-}
-
-async function replyWithCezarTool(userText, uuid) {
-  const { toolPrompt } = await import('./mock-ci-tool.mjs');
-  const text = await toolPrompt('claude', process.argv.slice(2), userText);
+/** The reply text a mock-ci-tool prompt helper makes over this session's real tool wire. */
+async function replyWithToolText(helper, userText) {
+  const text = await (await import('./mock-ci-tool.mjs'))[helper]('claude', process.argv.slice(2), userText);
   emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
   emit({ type: 'result', subtype: 'success', result: text, usage: { input_tokens: 20, output_tokens: 10 } });
-  return;
 }
 
-async function replyWithCiWait(userText, uuid) {
-  const { ciPrompt } = await import('./mock-ci-tool.mjs');
-  const text = await ciPrompt('claude', process.argv.slice(2), userText);
-  emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
-  emit({ type: 'result', subtype: 'success', result: text, usage: { input_tokens: 20, output_tokens: 10 } });
-  return;
-}
+const replyWithCezarTool = (userText) => replyWithToolText('toolPrompt', userText);
 
-async function replyWithPreview(userText, uuid) {
-  const { previewPrompt } = await import('./mock-ci-tool.mjs');
-  const text = await previewPrompt('claude', process.argv.slice(2), userText);
-  emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
-  emit({ type: 'result', subtype: 'success', result: text, usage: { input_tokens: 20, output_tokens: 10 } });
-  return;
-}
+const replyWithCiWait = (userText) => replyWithToolText('ciPrompt', userText);
 
-// `mock:split-text` → the reply as TWO assistant blocks, the second being the
-// bare `CEZ:MONITORING` marker. stream-json has no text deltas (one frame is
-// one whole block, see `__fixtures__/claude/text-turn.ndjson`), so claude's
-// strongest form of the harness parity S8 split is a multi-block reply: the
-// assembled turn text must still end with the marker, or the run parks as
-// "needs you" instead of monitoring (#2's failure mode on claude's wire).
-async function replyWithSplitText(userText, uuid) {
-  for (const block of ['parity split text', 'CEZ:MONITORING']) {
-    emit({
-      type: 'assistant',
-      message: { role: 'assistant', content: [{ type: 'text', text: block }], usage: { input_tokens: 20, output_tokens: 10 } },
-    });
-    await sleep(50);
-  }
-  emit({
-    type: 'result',
-    subtype: 'success',
-    result: 'parity split text\n\nCEZ:MONITORING',
-    usage: { input_tokens: 20, output_tokens: 10 },
-    total_cost_usd: 0.0001,
-  });
-  return;
-}
+const replyWithPreview = (userText) => replyWithToolText('previewPrompt', userText);
 
 // Same assistant/result envelopes as the baseline stream-json fixture.
 async function replyWithEcho(userText, uuid) {
@@ -416,7 +379,7 @@ async function acknowledgeStall(userText, uuid) {
 
 async function replyWithBusyProgress(userText, uuid) {
   for (let i = 0; i < 24; i++) { emit({ type: 'ping' }); await sleep(100); }
-  const busy = 'busy complete\n\nCEZ:DONE';
+  const busy = 'busy complete' + await lifecycle((await tools()).DONE);
   emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: busy }], usage: { input_tokens: 20, output_tokens: 10 } } });
   emit({ type: 'result', subtype: 'success', result: busy });
   return;
@@ -424,7 +387,7 @@ async function replyWithBusyProgress(userText, uuid) {
 
 async function replyWithHeldDone(userText, uuid) {
   await waitForMockRelease(400);
-  const held = 'parity hold-done: content after the pause\n\nCEZ:DONE';
+  const held = 'parity hold-done: content after the pause' + await lifecycle((await tools()).DONE);
   emit({
     type: 'assistant',
     message: { role: 'assistant', content: [{ type: 'text', text: held }], usage: { input_tokens: 20, output_tokens: 10 } },
@@ -435,7 +398,7 @@ async function replyWithHeldDone(userText, uuid) {
 
 async function replyWithHeldAsk(userText, uuid) {
   await waitForMockRelease(400);
-  const ask = 'Pick one.\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}';
+  const ask = 'Pick one.' + await lifecycle((await tools()).ask());
   emit({
     type: 'assistant',
     message: { role: 'assistant', content: [{ type: 'text', text: ask }], usage: { input_tokens: 20, output_tokens: 10 } },
@@ -540,13 +503,14 @@ async function replyWithSubagents(userText, uuid) {
   await replyWithSubagentSpawns(agents);
   await replyWithSubagentSteps(agents);
   await replyWithSubagentResults(agents);
-  const summary = 'Both sub-agents reported back: the redirect drops the cookie in src/middleware.ts:12, and the store layer is clean. (dry-run mock)\nCEZ:MONITORING';
+  const summary = 'Both sub-agents reported back: the redirect drops the cookie in src/middleware.ts:12, and the store layer is clean. (dry-run mock)'
+    + await lifecycle((await tools()).wait('Re-check the sub-agents.'));
   emit({
     type: 'assistant',
     message: { role: 'assistant', content: [{ type: 'text', text: summary }], usage: { input_tokens: 400, output_tokens: 60 } },
     parent_tool_use_id: null,
   });
-  // #149: a child assistant frame can arrive after the parent's final marker.
+  // #149: a child assistant frame can arrive after the parent's final message.
   emit({
     type: 'assistant',
     message: { role: 'assistant', content: [{ type: 'text', text: 'Child review finished.' }] },
@@ -697,9 +661,9 @@ async function replyWithPlan(userText, uuid) {
   return;
 }
 
-// `mock:schedule-wakeup` → Claude's native park tool, without also emitting
-// CEZ:MONITORING. The workflow engine must recognize the completed turn's
-// tool use rather than depending on the textual agent contract marker (#46).
+// `mock:schedule-wakeup` → Claude's native park tool, without also calling
+// cezar_wait. The workflow engine must recognize the completed turn's
+// native tool use (#46).
 // `mock:schedule-wakeup:<n>` sends the tool's `delaySeconds` (hearsay-tools/cezarion#1233).
 async function replyWithScheduleWakeup(userText, uuid) {
   const id = `toolu_schedule_wakeup_${turn}`;
@@ -721,7 +685,7 @@ async function replyWithScheduleWakeup(userText, uuid) {
   });
 }
 
-async function replyWithFirstTurn(userText, { refsMarkers, doneMarker, monitoringMarker, askMarker }) {
+async function replyWithFirstTurn(userText, { refsMarkers, calls }) {
   writeNotesTrace(userText);
   writeHandoff();
   emit({
@@ -778,7 +742,7 @@ async function replyWithFirstTurn(userText, { refsMarkers, doneMarker, monitorin
     type: 'assistant',
     message: {
       role: 'assistant',
-      content: [{ type: 'text', text: `Done with the first pass — opened a draft PR: https://github.com/open-mercato/demo/pull/123. Anything to adjust? (dry-run mock)${refsMarkers}${doneMarker}${monitoringMarker}${askMarker}` }],
+      content: [{ type: 'text', text: `Done with the first pass — opened a draft PR: https://github.com/open-mercato/demo/pull/123. Anything to adjust? (dry-run mock)${refsMarkers}${await runCalls(calls)}` }],
       usage: { input_tokens: 300, output_tokens: 90 },
     },
   });
@@ -792,13 +756,14 @@ async function replyWithFirstTurn(userText, { refsMarkers, doneMarker, monitorin
   return;
 }
 
-async function replyWithFollowup(userText, imageCount, { refsMarkers, doneMarker, monitoringMarker, askMarker }) {
+async function replyWithFollowup(userText, imageCount, { refsMarkers, calls }) {
   const imgNote = imageCount > 0 ? ` I can see ${imageCount} image(s) you attached.` : '';
+  const notes = await runCalls(calls);
   emit({
     type: 'assistant',
     message: {
       role: 'assistant',
-      content: [{ type: 'text', text: `Follow-up #${turn - 1} received: "${userText.slice(0, 100)}".${imgNote} Applied (dry run).${refsMarkers}${doneMarker}${monitoringMarker}${askMarker}` }],
+      content: [{ type: 'text', text: `Follow-up #${turn - 1} received: "${userText.slice(0, 100)}".${imgNote} Applied (dry run).${refsMarkers}${notes}` }],
       usage: { input_tokens: 200, output_tokens: 60 },
     },
   });
@@ -855,108 +820,52 @@ async function replyWithNativeFailure(userText) {
   return false;
 }
 
-function multiAskMarker() {
-  return '\n\nCEZ:ASK ' +
-  JSON.stringify({
-    questions: [
-      {
-        header: 'Library',
-        question: 'Which test library?',
-        options: [{ label: 'Vitest' }, { label: 'Node test' }],
-      },
-      {
-        header: 'Build',
-        question: 'Which build tool?',
-        options: [{ label: 'Vite' }, { label: 'Webpack' }],
-      },
-    ],
-    });
-}
-
-function invalidJsonAskMarker() { return '\n\nCEZ:ASK {not valid json'; }
-
-function invalidSchemaAskMarker() { return '\n\nCEZ:ASK {"questions":[]}'; }
-
-function truncatedAskMarker() { return '\n\nCEZ:ASK {"questions":[{"header":"Lint scope","question":"How much of the lint backlog should I land now?","multiSelect":false,"options":[{"label":"First slice only"},{"label":"Rule by rule"},{"label":"Whole backlog"}]}]'; }
-
-function nearAskMarker() {
-  return '\n\nCEZ:ASK ' +
-  JSON.stringify({
-    transportHint: 'render as chips',
-    questions: [
-      {
-        header: 'Implementation path',
-        question: 'Which implementation should I use?',
-        presentation: 'compact',
-        options: [
-          { label: 'Minimal', description: 'd'.repeat(300), recommended: true },
-          { label: 'Expanded', description: 'Touch the wider surface' },
-        ],
-      },
-    ],
-    });
-}
-
-function ordinaryAskMarker() {
-  return '\n\nCEZ:ASK ' +
-  JSON.stringify({
-    questions: [
-      {
-        header: 'Library',
-        question: 'Which date library should I standardize on?',
-        options: [
-          { label: 'date-fns', description: 'Tree-shakeable, functional' },
-          { label: 'Luxon', description: 'Immutable, tz-aware' },
-        ],
-      },
-    ],
-    });
-}
-
-const askMarkers = [
-  [userText => userText.includes('mock:multi-ask'), multiAskMarker],
-  [userText => userText.includes('mock:ask-bad'), invalidJsonAskMarker],
-  [userText => userText.includes('mock:ask-invalid'), invalidSchemaAskMarker],
-  [userText => userText.includes('mock:ask-truncated'), truncatedAskMarker],
-  [userText => userText.includes('mock:ask-near'), nearAskMarker],
-  [userText => userText.includes('mock:ask'), ordinaryAskMarker]
+const MULTI_QUESTIONS = [
+  { header: 'Library', question: 'Which test library?', options: [{ label: 'Vitest' }, { label: 'Node test' }] },
+  { header: 'Build', question: 'Which build tool?', options: [{ label: 'Vite' }, { label: 'Webpack' }] },
 ];
-function askMarkerFor(userText) {
-  const entry = askMarkers.find(([matches]) => matches(userText));
-  return entry ? entry[1]() : '';
+const DATE_QUESTIONS = [{
+  header: 'Library',
+  question: 'Which date library should I standardize on?',
+  options: [
+    { label: 'date-fns', description: 'Tree-shakeable, functional' },
+    { label: 'Luxon', description: 'Immutable, tz-aware' },
+  ],
+}];
+
+/** The cezar tool calls a reply makes, in order, before its final text. */
+async function runCalls(calls) {
+  let notes = '';
+  for (const call of calls) notes += await lifecycle(call);
+  return notes;
 }
 
-// `mock:done` anywhere in the message → the reply ends with the CEZ:DONE
-// completion marker (#347), so the auto-close path is testable dry.
-// `mock:monitoring` → the reply ends with CEZ:MONITORING, the "still working
-// on downstream work" marker (#490), so the monitoring-status path is testable dry.
-// `mock:ask` → the reply ends with a valid CEZ:ASK marker (#473), so the
-// AskUser card path (park `waiting` + emit `ask.requested`) is testable dry.
-// `mock:ask-bad` → a MALFORMED marker (invalid JSON), to prove graceful
-// degradation: the run still parks `waiting`, no ask card, prose preserved.
-// `mock:ask-invalid` → syntactically valid JSON that FAILS the ask schema
-// (empty questions) — the shape behind the blank-question bug: no card will
-// ever render it, so the marker must survive in the v1 text.
-// `mock:ask-near` → bounded presentation drift: harmless extra keys plus
-// an overlong header/description. It should normalize into exactly one card.
-// `mock:ask-truncated` → a complete payload one closing brace short (#936):
-// the closer repair should still produce one card, note the recovery, and
-// strip the raw marker (which ends on `]`, not `}`).
-// `mock:multi-ask` → ONE marker with two questions (Library, Build), for the voice-mode E2E
-// (spec 2026-10-21-voice-mode). Checked before every `mock:ask` form so none of them can
-// claim the prompt first.
+// hearsay-tools/cezarion#2397: the lifecycle scenarios call the cezar tool, then end the turn.
+// `mock:cezar-done` anywhere in the message → the reply calls cezar_done, so the auto-close
+// path is testable dry (#347).
+// `mock:cezar-wait` → the reply opens a 60 s timer wait with cezar_wait, the "still working on
+// downstream work" park (#490).
+// `mock:cezar-ask` → the reply asks with cezar_ask (#473), so the AskUser card path (park
+// `waiting` + emit `ask.requested`) is testable dry.
+// `mock:multi-cezar-ask` → ONE cezar_ask with two questions (Library, Build), for the
+// voice-mode E2E (spec 2026-10-21-voice-mode).
+// `mock:cezar-ask mock:resume-cezar-done` → the answer `Library: Vitest` then calls cezar_done.
 // `mock:refs` → the reply carries the in-band task-reference markers
 // (spec 2026-07-18-task-ref-markers), so the declaration path is testable dry.
-function markersFor(userText) {
+async function markersFor(userText) {
   const answered = resumeAfterAsk && userText.trim() === 'Library: Vitest';
-  resumeAfterAsk = userText.includes('mock:ask') && userText.includes('mock:resume-done');
-  const doneMarker = (userText.includes('mock:done') || answered) ? '\n\nCEZ:DONE' : '';
-  const monitoringMarker = userText.includes('mock:monitoring') ? '\n\nCEZ:MONITORING' : '';
-  const askMarker = askMarkerFor(userText);
+  resumeAfterAsk = userText.includes('mock:cezar-ask') && userText.includes('mock:resume-cezar-done');
+  const calls = [];
+  // Loaded only for a lifecycle scenario: ordinary turns keep their timing.
+  const { DONE, wait, ask } = /mock:(cezar-|multi-cezar-)/.test(userText) || answered ? await tools() : {};
+  if (userText.includes('mock:cezar-done') || answered) calls.push(DONE);
+  if (userText.includes('mock:cezar-wait')) calls.push(wait());
+  if (userText.includes('mock:multi-cezar-ask')) calls.push(ask(MULTI_QUESTIONS));
+  else if (userText.includes('mock:cezar-ask')) calls.push(ask(DATE_QUESTIONS, 'Pick a date library before I continue.'));
   const refsMarkers = userText.includes('mock:refs')
     ? '\nCEZ:PR=4242\nCEZ:ISSUE=17\nCEZ:TITLE=implementing marker refs'
     : '';
-  return { doneMarker, monitoringMarker, askMarker, refsMarkers };
+  return { calls, refsMarkers };
 }
 
 // Ordered matchers preserve scenario priority and the silent-tail fall-through.
@@ -970,19 +879,16 @@ const earlyReplies = [
   [userText => !userText.includes('[cez-namer]') && userText.includes('mock:forked-skill'), replyWithForkedSkill],
   [userText => userText.includes('mock:multi-pr-refs'), replyWithMultiplePrs],
   [userText => userText.includes('mock:turn-messages:'), replyWithTurnMessages],
-  [userText => !userText.includes('[cez-namer]') && userText.includes('mock:ask-snapshot'), replyWithAskSnapshot],
-  [userText => !userText.includes('[cez-namer]') && userText.includes('mock:ask-prose'), replyWithAskProse],
   [userText => !userText.includes('[cez-namer]') && userText.includes('mock:cezar-tool'), replyWithCezarTool],
   [userText => userText.includes('mock:ci-wait'), replyWithCiWait],
   [userText => !userText.includes('[cez-namer]') && userText.includes('mock:preview-serve'), replyWithPreview]
 ];
 const timedReplies = [
-  [userText => userText.includes('mock:split-text'), replyWithSplitText],
   [userText => userText.includes('mock:agent-echo'), replyWithEcho],
   [watchdogStall, acknowledgeStall],
   [userText => userText.includes('mock:busy-progress'), replyWithBusyProgress],
-  [userText => userText.includes('mock:hold-done'), replyWithHeldDone],
-  [userText => userText.includes('mock:hold-ask'), replyWithHeldAsk],
+  [userText => userText.includes('mock:hold-cezar-done'), replyWithHeldDone],
+  [userText => userText.includes('mock:hold-cezar-ask'), replyWithHeldAsk],
   [userText => userText.includes('mock:hold-gated'), replyWithGatedHold],
   [userText => userText.includes('mock:hold'), replyWithHold]
 ];

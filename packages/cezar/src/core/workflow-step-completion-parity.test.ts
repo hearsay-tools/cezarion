@@ -19,7 +19,7 @@ describe('explicit step completion parity — hearsay-tools/cezarion#1620', () =
     it(`${backend} ${row.id} ${row.name}`, async () => {
       const workflowDef = workflowDefSchema.parse({ name: 'completion-chain', source: 'file', steps: [
         { id: 'implement', prompt: '{{task}}' },
-        { id: 'review', prompt: promptFor(backend, 'done') },
+        { id: 'review', prompt: promptFor(backend, 'cezar-done') },
         { id: 'verify', command: 'test -f a.txt' },
       ] });
       const parked = (run: RunRecord | undefined) => run?.status === 'waiting' &&
@@ -76,14 +76,14 @@ describe('explicit step completion parity — hearsay-tools/cezarion#1620', () =
         await new Promise(resolve => setTimeout(resolve, 350)); // bound: observe past the 250 ms runner auto-end timer
         expect(session.open).toBe(true);
         if (row.id === 'C1') {
-          expect(manager.sendMessage(runId, [{ type: 'text', text: 'Carry on. mock:done' }])).toBe(true);
+          expect(manager.sendMessage(runId, [{ type: 'text', text: 'Carry on. mock:cezar-done' }])).toBe(true);
           await complete();
           return;
         }
         if (row.id === 'C3') {
           session.end();
           await incomplete();
-          expect(manager.continueRun(runId, { text: 'Carry on. mock:done' }).ok).toBe(true);
+          expect(manager.continueRun(runId, { text: 'Carry on. mock:cezar-done' }).ok).toBe(true);
           await complete();
           return;
         }
@@ -97,7 +97,7 @@ describe('explicit step completion parity — hearsay-tools/cezarion#1620', () =
           expect(manager.continueRun(runId, { text: 'Carry on.' }).ok).toBe(true);
           await waitFor(() => manager.isActive(runId) && parked(run()), 15_000);
           expect(run().steps.find(step => step.id === 'review')?.status).toBe('pending');
-          expect(manager.sendMessage(runId, [{ type: 'text', text: 'Carry on. mock:done' }])).toBe(true);
+          expect(manager.sendMessage(runId, [{ type: 'text', text: 'Carry on. mock:cezar-done' }])).toBe(true);
           await complete();
           return;
         }
@@ -115,7 +115,7 @@ describe('explicit step completion parity — hearsay-tools/cezarion#1620', () =
         expect(run().status).toBe('waiting');
         expect(statuses()).toEqual([['implement', 'waiting'], ['review', 'pending'], ['verify', 'pending']]);
         expect(manager.isActive(runId)).toBe(false);
-        expect(manager.continueRun(runId, { text: 'Carry on. mock:done' }).ok).toBe(true);
+        expect(manager.continueRun(runId, { text: 'Carry on. mock:cezar-done' }).ok).toBe(true);
         await complete();
       }, { workflowDef, autonomous: row.id === 'C6', beforeStart: observe });
     }, 60_000);

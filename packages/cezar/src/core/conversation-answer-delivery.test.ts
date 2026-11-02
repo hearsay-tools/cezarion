@@ -142,7 +142,7 @@ for (const backend of RUNNER_IDS) {
       const quiet = () => new Promise(resolve => setTimeout(resolve, 300)); // bound: proves a held message stays undelivered
       // hearsay-tools/cezarion#1235 phase 3a (§ Messages beside a pending question): a native
       // question takes nothing but its answer, so the message waits for the answer's turn end; a
-      // portable question takes it beside the card. Either way it is never the answer.
+      // cezar_ask question takes it beside the card. Either way it is never the answer.
       const question = (seq: number) => store.getRun(runId)?.waits?.find(wait => wait.kind === 'human' && wait.phase === 'open' && wait.askSeq === seq);
       const expectBesideOrHeld = async (id: string, seq: number) => {
         if (question(seq)?.via === 'native-ask') {
@@ -164,7 +164,7 @@ for (const backend of RUNNER_IDS) {
       await expectBesideOrHeld(early, askSeq);
 
       // The answer raises a newer question; later input is held or delivered beside it the same way.
-      // A portable question's run reopened through the scheduler to take the message; close that
+      // A cezar_ask question's run reopened through the scheduler to take the message; close that
       // session again so every wire answers in a fresh one. A mock that asked again there routed
       // its new question to the parent, which answers it.
       if (manager.isActive(runId)) {

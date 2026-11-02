@@ -44,6 +44,7 @@ import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 import { historyPaths } from '../runs/history-file.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
+import { WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -55,30 +56,31 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `baseline` | one text, one tool call and result, a later visible assistant message, usage, then its terminal turn signal |
  * | `tool-tail` | visible assistant text, a tool call/result, then turn end with no later message |
  * | `mcp-approval` | ask the native client before another MCP server's tool call, then echo the exact answer and end the turn |
- * | `done` | the same, with a trailing `CEZ:DONE` so the run reaches its review gate |
+ * | `cezar-done` | the same, calling `cezar_done` before its final text so the run reaches its review gate |
  * | `hold` | delay the terminal turn signal after the last content event |
- * | `hold-done` | like `hold`, then end with `CEZ:DONE` so a mid-turn follow-up can race the close (#486) |
- * | `hold-ask` | like `hold`, then end with a portable `CEZ:ASK` so a mid-turn follow-up can race the park (#486) |
- * | `split-text` | stream the reply in pieces, ending with a trailing `CEZ:MONITORING` |
+ * | `hold-cezar-done` | like `hold`, then call `cezar_done` so a mid-turn follow-up can race the close (#486) |
+ * | `hold-cezar-ask` | like `hold`, then call `cezar_ask` so a mid-turn follow-up can race the park (#486) |
  * | `provider-error` | a runtime provider rejection in its native error shape |
  * | `approval` | a native permission request cezar routes to the cockpit; no turn end until it is answered |
- * | `permission-default` | a native built-in default permission ask cezar answers itself, then end with `CEZ:DONE` (#1266) |
- * | `approval-resolved` | the `approval` request, which the backend settles itself once `CEZ_MOCK_RELEASE_FILE` exists, then `CEZ:DONE` |
- * | `approval-turn-end` | the `approval` request, still pending when the turn ends with `CEZ:DONE` once `CEZ_MOCK_RELEASE_FILE` exists |
+ * | `permission-default` | a native built-in default permission ask cezar answers itself, then call `cezar_done` (#1266) |
+ * | `approval-resolved` | the `approval` request, which the backend settles itself once `CEZ_MOCK_RELEASE_FILE` exists, then `cezar_done` |
+ * | `approval-turn-end` | the `approval` request, still pending when the turn ends after `cezar_done` once `CEZ_MOCK_RELEASE_FILE` exists |
  * | `approval-reply-fails` | the `approval` request, whose first answer the backend refuses to accept; a later answer ends the turn |
- * | `approval-malformed` | a malformed native permission request; the backend ends the turn with `CEZ:DONE` once it is refused |
+ * | `approval-malformed` | a malformed native permission request; the backend calls `cezar_done` and ends the turn once it is refused |
  * | `permission-classify` | a request the backend settles while cezar reads its config, then a marker request (`CEZ_MOCK_RELEASE_FILE` gates) |
- * | `permission-late` | the turn ends with `CEZ:DONE`, then a native permission request from a run the server started; its answer resumes that run, which ends with `CEZ:DONE` |
- * | `ask` | an ask — native where the wire has one, a `CEZ:ASK` marker otherwise |
- * | `ask-resume` | accept one human answer, then finish with `CEZ:DONE` without another prompt |
+ * | `permission-late` | the turn ends after `cezar_done`, then a native permission request from a run the server started; its answer resumes that run, which calls `cezar_done` |
+ * | `ask` | an ask — native where the wire has one (Codex, OpenCode), a `cezar_ask` call (`mock:cezar-ask`) otherwise |
+ * | `ask-resume` | accept one human answer, then call `cezar_done` without another prompt (`mock:resume-cezar-done`) |
+ * | `cezar-ask` | call `cezar_ask` with one "Which test library?" question, then end the turn — the same tool call on every wire, fresh or resumed |
+ * | `cezar-wait` | call `cezar_wait` for a 60 s timer, then end the turn — a declared monitoring park on every wire |
  * | `ask-reply-late` | native ask whose reply acknowledgement can lag the resumed turn |
- * | `ask-bad` | a malformed ask, and then still end the turn |
- * | `subagent` | child work and terminal signal, then parent monitoring text followed by late child text |
+ * | `ask-bad` | a malformed native ask, and then still end the turn (the runners with no native ask have none) |
+ * | `subagent` | child work and terminal signal, then parent text after a `cezar_wait` timer, followed by late child text |
  * | `forked-skill` | a skill call that runs as a native forked subagent: child work nested under the call, then its result and final text |
- * | `hook-after-park` | a mid-turn hook with context, a monitoring park, then a late hook (#961) |
+ * | `hook-after-park` | a mid-turn hook with context, a `cezar_wait` park, then a late hook (#961) |
  * | `steer-tool` | one slow tool; agent input sent while it runs is read before the turn ends (#505) |
  * | `steer-late` | the final text first; agent input sent after it arrives after the last model call (#505) |
- * | `silent-tail` | visible assistant text, a tool, then reasoning that names CEZ:DONE, and no later message |
+ * | `silent-tail` | visible assistant text, a tool, then reasoning that names cezar_done, and no later message |
  * | `silent-tail-again` | the same first turn; a final-message nudge is answered with reasoning only |
  * | `silent-tail-ack-delay` | silent-tail as a follow-up whose transport ACK is held until after turn-end |
  * | `silent-tail-no-reply` | the same first turn; a final-message nudge is ACKed and never opens a turn |
@@ -86,6 +88,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
  * | `silent-tail-late-turn-start` | the same first turn; after the bound, native turn-start holds before any content |
  * | `silent-tail-slow-done` | the same first turn; a nudge reply starts before the bound and ends after it |
  * | `serve-start-exit` | the backend server's first start exits before listening; the next start answers `baseline` |
+ *
+ * hearsay-tools/cezarion#2397 removed the lifecycle markers, and with them the scenarios that
+ * drove marker parsing only (`split-text`, `ask-snapshot`, `ask-snapshot-bad`, `ask-prose`).
  */
 export const SCENARIOS = [
   'approval',
@@ -112,7 +117,7 @@ export const SCENARIOS = [
   'crash-stderr-single',
   'autonomous',
   'autonomous-cap',
-  'autonomous-ask-cap',
+  'autonomous-cezar-ask-cap',
   'autonomous-readiness-idle',
   'silent-tail',
   'silent-tail-again',
@@ -123,28 +128,26 @@ export const SCENARIOS = [
   'silent-tail-slow-done',
   'tool-tail',
   'baseline',
-  'done',
+  'cezar-done',
   'hold',
   'hold-gated',
-  'hold-done',
-  'hold-ask',
+  'hold-cezar-done',
+  'hold-cezar-ask',
   'no-progress',
   'no-progress-ignore-term',
   'no-progress-held-pipe',
   'no-progress-ack-only',
   'no-progress-leftover',
   'busy-progress',
-  'split-text',
   'provider-error',
   'provider-unavailable',
   'post-success-refusal',
   'ask',
   'ask-resume',
-  'ask-snapshot',
-  'ask-snapshot-bad',
-  'ask-prose',
   'ask-bad',
   'ask-reply-late',
+  'cezar-ask',
+  'cezar-wait',
   'subagent',
   'subagent-after-park',
   'forked-skill',
@@ -176,25 +179,25 @@ export const MODEL_REFUSAL_CRITERIA = [
   { id: 'S32', scenario: 'post-success-refusal', name: 'bounds a provider refusal after prior success and retains its diagnosis' },
 ] as const;
 
-/** #427: portable intermediate asks, through every native message wire. */
+/** #427: intermediate asks through cezar_ask, on every native message wire. Q2 (a malformed
+ *  intermediate marker) went with the CEZ:ASK line (hearsay-tools/cezarion#2397). */
 export const WORKFLOW_ASK_CRITERIA = [
-  { id: 'Q1', scenario: 'ask-snapshot', name: 'holds the same intermediate session until answered, then runs the tail' },
-  { id: 'Q2', scenario: 'ask-snapshot-bad', name: 'notes a malformed intermediate marker and keeps the step open until done' },
-  { id: 'Q3', scenario: 'ask-snapshot', name: 'preserves final interactive asks' },
-  { id: 'Q4', scenario: 'ask-snapshot', name: 'idle close and a second question on Continue retain the workflow tail' },
-  { id: 'Q5', scenario: 'ask-snapshot', name: 'restart preserves the unanswered question and resumes the tail after an answer' },
-  { id: 'Q6', scenario: 'ask-snapshot', name: 'cancel leaves later steps pending' },
-  { id: 'Q7', scenario: 'ask-snapshot', name: 'Finish stops at the parked step on fresh and Continue sessions' },
-  { id: 'Q8', scenario: 'ask-snapshot', name: 'an authored timeout fails without running later steps' },
-  { id: 'Q9', scenario: 'ask-snapshot', name: 'autonomous intermediate ask lines are not registered before the tail' },
-  { id: 'Q10', scenario: 'ask-snapshot', name: 'an unanswered clean session close stays resumable without success' },
+  { id: 'Q1', scenario: 'cezar-ask', name: 'holds the same intermediate session until answered, then runs the tail' },
+  { id: 'Q3', scenario: 'cezar-ask', name: 'preserves final interactive asks' },
+  { id: 'Q4', scenario: 'cezar-ask', name: 'idle close and a second question on Continue retain the workflow tail' },
+  { id: 'Q5', scenario: 'cezar-ask', name: 'restart preserves the unanswered question and resumes the tail after an answer' },
+  { id: 'Q6', scenario: 'cezar-ask', name: 'cancel leaves later steps pending' },
+  { id: 'Q7', scenario: 'cezar-ask', name: 'Finish stops at the parked step on fresh and Continue sessions' },
+  { id: 'Q8', scenario: 'cezar-ask', name: 'an authored timeout fails without running later steps' },
+  { id: 'Q9', scenario: 'cezar-ask', name: 'an autonomous intermediate cezar_ask is refused and the tail runs' },
+  { id: 'Q10', scenario: 'cezar-ask', name: 'an unanswered clean session close stays resumable without success' },
 ] as const;
 
 /** hearsay-tools/cezarion#1620: workflow-step-completion-parity.test.ts, every native wire. An
  *  earlier agent step completes only on an accepted done; the tail never starts without one. */
 export const STEP_COMPLETION_CRITERIA = [
   { id: 'C1', scenario: 'baseline', name: 'an earlier step without done is nudged once, then waits for the user; a reply with done runs the tail' },
-  { id: 'C2', scenario: 'done', name: 'the done line completes an earlier step without a nudge and runs the tail' },
+  { id: 'C2', scenario: 'cezar-done', name: 'cezar_done completes an earlier step without a nudge and runs the tail' },
   { id: 'C3', scenario: 'baseline', name: 'a clean session close without done leaves the earlier step waiting; Continue with done runs the tail' },
   { id: 'C4', scenario: 'baseline', name: 'an idle close leaves the earlier step waiting; a Continue without done parks on it again' },
   { id: 'C5', scenario: 'baseline', name: 'restart recovery keeps the parked earlier step; Continue with done runs the tail' },
@@ -205,11 +208,11 @@ export const STEP_COMPLETION_CRITERIA = [
 // T1, T2 and T5 hold their turn and then signal done, which an earlier step needs
 // since hearsay-tools/cezarion#1620.
 export const WORKFLOW_TIMEOUT_CRITERIA = [
-  { id: 'T1', scenario: 'hold-done', name: 'default non-final steps outlive the runner deadline' },
-  { id: 'T2', scenario: 'hold-done', name: 'explicit zero disables the workflow deadline' },
+  { id: 'T1', scenario: 'hold-cezar-done', name: 'default non-final steps outlive the runner deadline' },
+  { id: 'T2', scenario: 'hold-cezar-done', name: 'explicit zero disables the workflow deadline' },
   { id: 'T3', scenario: 'hold', name: 'authored positive deadlines fail without running trailing checks' },
   { id: 'T4', scenario: 'hold', name: 'standalone sessions retain the default deadline' },
-  { id: 'T5', scenario: 'hold-done', name: 'an authored longer limit replaces the runner default' },
+  { id: 'T5', scenario: 'hold-cezar-done', name: 'an authored longer limit replaces the runner default' },
   { id: 'T6', scenario: 'hold', name: 'default tasks remain unlimited' },
 ] as const;
 
@@ -218,7 +221,7 @@ export const NO_PROGRESS_CRITERIA = [
   { id: 'N2', scenario: 'busy-progress', name: 'native progress keeps a long turn alive' },
   { id: 'N3', scenario: 'baseline', name: 'parked sessions outlive inactivity and followups rearm it' },
   { id: 'N5', scenario: 'no-progress-ignore-term', name: 'stalled processes ignoring TERM are killed before releasing capacity' },
-  { id: 'N6', scenario: 'ask', name: 'native questions or marker fallback pause protection until answered' },
+  { id: 'N6', scenario: 'ask', name: 'native questions or cezar_ask pause protection until answered' },
   { id: 'N7', scenario: 'no-progress-held-pipe', name: 'descendant-held pipes cannot retain capacity after CLI exit' },
   { id: 'N8', scenario: 'no-progress-ack-only', name: 'agent input rearms protection even without a native turn-start notification' },
   { id: 'N4', scenario: 'baseline', name: 'Continue sessions enforce inactivity' },
@@ -226,9 +229,9 @@ export const NO_PROGRESS_CRITERIA = [
 
 /** #486: workflow-followup-parity.test.ts, real native wires on both turn-end paths. */
 export const FOLLOWUP_CRITERIA = [
-  { id: 'H1', scenario: 'hold-done', name: 'keeps a mid-turn human follow-up across a DONE turn' },
-  { id: 'H2', scenario: 'hold-ask', name: 'drops a mid-turn human follow-up when the turn parks on ASK' },
-  { id: 'H3', scenario: 'hold-gated', name: 'does not park or nudge between a markerless turn and a mid-turn follow-up' },
+  { id: 'H1', scenario: 'hold-cezar-done', name: 'keeps a mid-turn human follow-up across a cezar_done turn' },
+  { id: 'H2', scenario: 'hold-cezar-ask', name: 'drops a mid-turn human follow-up when the turn parks on cezar_ask' },
+  { id: 'H3', scenario: 'hold-gated', name: 'does not park or nudge between a done-less turn and a mid-turn follow-up' },
   { id: 'H4', scenario: 'hold-gated', name: 'does not park before a held follow-up whose native turn starts late' },
   { id: 'H5', scenario: 'hold-gated', name: 'does not park before a late-acknowledged steer that runs after the turn' },
 ] as const;
@@ -237,27 +240,27 @@ export const FOLLOWUP_CRITERIA = [
 export const AUTONOMOUS_CRITERIA = [
   { id: 'A1', scenario: 'autonomous', name: 'nudges fresh markerless turns to completion' },
   { id: 'A2', scenario: 'autonomous', name: 'hydrates autonomous Continue sessions' },
-  { id: 'A3', scenario: 'ask-snapshot', name: 'records an unregistered ask line on fresh turns' },
-  { id: 'A4', scenario: 'ask-snapshot', name: 'records an unregistered ask line on Continue' },
+  { id: 'A3', scenario: 'cezar-ask', name: 'refuses cezar_ask on fresh turns and nudges to completion' },
+  { id: 'A4', scenario: 'cezar-ask', name: 'refuses cezar_ask on Continue and nudges to completion' },
   { id: 'A5', scenario: 'autonomous-cap', name: 'parks at the cap with an explicit note' },
   { id: 'A6', scenario: 'autonomous', name: 'keeps non-autonomous parking reachable' },
-  { id: 'A7', scenario: 'split-text', name: 'nudges monitoring without a false waiting heartbeat' },
-  { id: 'A8', scenario: 'done', name: 'honors DONE without a nudge' },
+  { id: 'A7', scenario: 'cezar-wait', name: 'parks on a cezar_wait timer without a nudge' },
+  { id: 'A8', scenario: 'cezar-done', name: 'honors cezar_done without a nudge' },
   { id: 'A9', scenario: 'ask', name: 'preserves native mid-turn questions' },
-  { id: 'A10', scenario: 'ask-snapshot', name: 'never continues past a persisted unanswered question' },
-  { id: 'A11', scenario: 'autonomous-ask-cap', name: 'continues after an unregistered ask line and delayed readiness' },
-  { id: 'A12', scenario: 'autonomous-ask-cap', name: 'continues a resumed unregistered ask line after delayed readiness' },
+  { id: 'A10', scenario: 'cezar-ask', name: 'never continues past a persisted unanswered question' },
+  { id: 'A11', scenario: 'autonomous-cezar-ask-cap', name: 'continues after a refused cezar_ask and delayed readiness' },
+  { id: 'A12', scenario: 'autonomous-cezar-ask-cap', name: 'continues a resumed refused cezar_ask after delayed readiness' },
   { id: 'A13', scenario: 'autonomous-readiness-idle', name: 'settles a root readiness timeout after process exit' },
   { id: 'A14', scenario: 'autonomous-readiness-idle', name: 'settles a continued root readiness timeout after process exit' },
 ] as const;
 
 /** #544: workflow-final-message-parity.test.ts, real native wires on both turn-end paths. */
 export const FINAL_MESSAGE_CRITERIA = [
-  { id: 'F1', scenario: 'silent-tail', name: 'nudges a silent tail to a visible DONE' },
+  { id: 'F1', scenario: 'silent-tail', name: 'nudges a silent tail to a visible cezar_done' },
   { id: 'F2', scenario: 'silent-tail-again', name: 'parks waiting after one still-silent nudge' },
-  { id: 'F3', scenario: 'silent-tail-again', name: 'never completes from reasoning that names CEZ:DONE' },
-  { id: 'F4', scenario: 'tool-tail', name: 'nudges a markerless message-then-tool tail once' },
-  { id: 'F5', scenario: 'done', name: 'honors DONE without a nudge' },
+  { id: 'F3', scenario: 'silent-tail-again', name: 'never completes from reasoning that names cezar_done' },
+  { id: 'F4', scenario: 'tool-tail', name: 'nudges a done-less message-then-tool tail once' },
+  { id: 'F5', scenario: 'cezar-done', name: 'honors cezar_done without a nudge' },
   { id: 'F6', scenario: 'tool-tail', name: 'keeps an autonomous silent tail running without the no-wait nudge' },
   { id: 'F7', scenario: 'silent-tail-ack-delay', name: 'nudges a silent tail after a delayed ACK' },
   { id: 'F8', scenario: 'silent-tail-no-reply', name: 'parks waiting when a nudge is ACKed without a turn' },
@@ -301,7 +304,7 @@ export const WORKTREE_SETUP_CRITERIA = [
 export const ANSWER_DELIVERY_CRITERIA = [
   { id: 'I3', scenario: 'steer-tool', name: 'steers a conversation message into a running human answer and reports it read before that turn ends' },
   { id: 'I4', scenario: 'hold-gated', name: 'delivers a conversation message to a running human answer as its input delivery declares' },
-  { id: 'I5', scenario: 'ask-snapshot', name: 'holds conversation input behind a native question and delivers it beside a portable one, never as its answer' },
+  { id: 'I5', scenario: 'cezar-ask', name: 'holds conversation input behind a native question and delivers it beside a cezar_ask one, never as its answer' },
 ] as const;
 
 /** Native approvals, exercised through the manager and HTTP route (P1), and a backend's own
@@ -322,7 +325,7 @@ export const PERMISSION_CRITERIA = [
 
 export interface HarnessAdapter {
   readonly backend: RunnerId;
-  /** Every human ask wire this runner exposes; marker fallback when none exists. */
+  /** Every human ask wire this runner exposes; cezar_ask when it has no native one. */
   readonly askResumeCases: readonly {
     kind: string;
     scenario: 'ask-resume';
@@ -353,6 +356,21 @@ const OPENCODE_MOCK = join(HERE, '..', '..', 'scripts', 'mock-opencode-serve.mjs
 /** No marker: every mock's default branch answers this with its scripted turn. */
 const BASELINE_PROMPT = 'inspect the working tree';
 
+/** `mock:cezar-tool` (scripts/mock-ci-tool.mjs) calls one cezar tool over the session's own wire,
+ *  then `mock:then` ends the turn with that text. Every mock answers it the same way, on a fresh
+ *  turn and on a resumed one, so `cezar-ask` and `cezar-wait` are one prompt for every runner. */
+const cezarToolPrompt = (name: 'cezar_ask' | 'cezar_wait', args: Record<string, unknown>, then: string): string =>
+  `mock:cezar-tool ${name} ${Buffer.from(JSON.stringify(args)).toString('base64url')} mock:then ${Buffer.from(then).toString('base64url')}`;
+/** The question every `cezar-ask` turn sends. */
+export const CEZAR_ASK_QUESTION = 'Which test library?';
+const CEZAR_ASK_PROMPT = cezarToolPrompt('cezar_ask', {
+  context: 'A choice is needed before I continue.',
+  questions: [{ header: 'Library', question: CEZAR_ASK_QUESTION, options: [{ label: 'Vitest' }, { label: 'Node test' }] }],
+}, 'Pick one.');
+const CEZAR_WAIT_PROMPT = cezarToolPrompt('cezar_wait', { kind: WAIT_KIND.timer, seconds: 60, note: 'Re-check the downstream work.' },
+  'parity cezar-wait: waiting on downstream work');
+const CEZAR_TOOL_SCENARIOS = { 'cezar-ask': CEZAR_ASK_PROMPT, 'cezar-wait': CEZAR_WAIT_PROMPT } as const;
+
 /** The id cezar pins on every session, mirroring `RunManager`. */
 export const PINNED_SESSION_ID = '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90';
 
@@ -379,17 +397,18 @@ export function seedOpencodeMockSession(
 export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
   claude: {
     backend: 'claude',
-    askResumeCases: [{ kind: 'CEZ:ASK', scenario: 'ask-resume', answer: 'Library: Vitest' }],
+    askResumeCases: [{ kind: 'cezar_ask', scenario: 'ask-resume', answer: 'Library: Vitest' }],
     binEnv: 'CEZ_CLAUDE_BIN',
     mockBin: CLAUDE_MOCK,
     scenarios: {
+      ...CEZAR_TOOL_SCENARIOS,
       'input-closed-live': 'mock:no-progress-input-closed',
       'multi-pr-refs': 'mock:multi-pr-refs',
       'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
-      'autonomous-ask-cap': 'mock:autonomous-ask-cap',
+      'autonomous-cezar-ask-cap': 'mock:autonomous-cezar-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-no-reply': 'mock:silent-tail-no-reply',
@@ -403,20 +422,15 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
-      done: 'mock:done',
-      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
-      'split-text': 'mock:split-text',
+      'cezar-done': 'mock:cezar-done',
+      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-cezar-done': 'mock:hold-cezar-done', 'hold-cezar-ask': 'mock:hold-cezar-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
       // Claude's mock has carried an auth-rejection branch since #430.
       'provider-error': 'mock:auth-error',
       'provider-unavailable': 'mock:auth-error',
       'post-success-refusal': 'mock:model-refusal:always',
-      ask: 'mock:ask',
-      'ask-resume': 'mock:ask mock:resume-done',
-      'ask-reply-late': 'mock:ask',
-      'ask-snapshot': 'mock:ask-snapshot',
-      'ask-snapshot-bad': 'mock:ask-snapshot-bad',
-      'ask-prose': 'mock:ask-prose',
-      'ask-bad': 'mock:ask-bad',
+      ask: 'mock:cezar-ask',
+      'ask-resume': 'mock:cezar-ask mock:resume-cezar-done',
+      'ask-reply-late': 'mock:cezar-ask',
       subagent: 'mock:subagents',
       'subagent-after-park': 'mock:subagent-after-park',
       'forked-skill': 'mock:forked-skill',
@@ -437,6 +451,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     ],
     malformedApprovalEcho: 'Approval error: -32602',
     scenarios: {
+      ...CEZAR_TOOL_SCENARIOS,
       approval: 'mock:approval',
       'approval-resolved': 'mock:approval-resolved',
       'approval-turn-end': 'mock:approval-turn-end',
@@ -448,7 +463,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
-      'autonomous-ask-cap': 'mock:autonomous-ask-cap',
+      'autonomous-cezar-ask-cap': 'mock:autonomous-cezar-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-no-reply': 'mock:silent-tail-no-reply',
@@ -463,19 +478,15 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
-      done: 'mock:done',
-      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
-      'split-text': 'mock:split-text',
+      'cezar-done': 'mock:cezar-done',
+      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-cezar-done': 'mock:hold-cezar-done', 'hold-cezar-ask': 'mock:hold-cezar-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
       // #83: 0.147 reports provider rejection on turn/completed with turn.error.
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:stream-retry',
       'post-success-refusal': 'mock:provider-error',
       ask: 'mock:native-codex-ask',
-      'ask-resume': 'mock:native-codex-ask mock:resume-done',
+      'ask-resume': 'mock:native-codex-ask mock:resume-cezar-done',
       'ask-reply-late': 'mock:native-codex-ask',
-      'ask-snapshot': 'mock:ask-snapshot',
-      'ask-snapshot-bad': 'mock:ask-snapshot-bad',
-      'ask-prose': 'mock:ask-prose',
       'ask-bad': 'mock:ask-bad',
       // #600's repro: a child thread's own turn/completed must not end the parent.
       subagent: 'mock:child-turn',
@@ -496,6 +507,7 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
     ],
     malformedApprovalEcho: 'Approval response: {"reply":"reject"}',
     scenarios: {
+      ...CEZAR_TOOL_SCENARIOS,
       approval: 'mock:approval',
       'permission-default': 'mock:permission-default',
       'approval-resolved': 'mock:approval-resolved',
@@ -505,15 +517,14 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'permission-classify': 'mock:permission-classify',
       'permission-late': 'mock:permission-late',
       'input-closed-live': 'mock:no-progress-input-closed',
-      'skill-warning': 'mock:skill-warning mock:done',
+      'skill-warning': 'mock:skill-warning mock:cezar-done',
       'multi-pr-refs': 'mock:multi-pr-refs', 'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       // The failing start is set by driveSeam's env (no prompt exists before listening).
       'serve-start-exit': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
-      'autonomous-ask-cap': 'mock:autonomous-ask-cap',
-      'autonomous-readiness-idle': 'mock:autonomous-readiness-idle',
+      'autonomous-cezar-ask-cap': 'mock:autonomous-cezar-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-ack-delay': 'mock:silent-tail f7-delay-ack',
@@ -528,18 +539,14 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
-      done: 'mock:done',
-      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
-      'split-text': 'mock:split-text',
+      'cezar-done': 'mock:cezar-done',
+      hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-cezar-done': 'mock:hold-cezar-done', 'hold-cezar-ask': 'mock:hold-cezar-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
       'post-success-refusal': 'mock:provider-error',
       ask: 'mock:ask',
-      'ask-resume': 'mock:ask mock:resume-done',
+      'ask-resume': 'mock:ask mock:resume-cezar-done',
       'ask-reply-late': 'mock:ask-reply-late',
-      'ask-snapshot': 'mock:ask-snapshot',
-      'ask-snapshot-bad': 'mock:ask-snapshot-bad',
-      'ask-prose': 'mock:ask-prose',
       'ask-bad': 'mock:ask-bad',
       subagent: 'mock:subagent',
       'subagent-after-park': 'mock:subagent-after-park',
@@ -549,15 +556,16 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
   },
   cursor: {
     backend: 'cursor',
-    askResumeCases: [{ kind: 'CEZ:ASK', scenario: 'ask-resume', answer: 'Library: Vitest' }],
+    askResumeCases: [{ kind: 'cezar_ask', scenario: 'ask-resume', answer: 'Library: Vitest' }],
     binEnv: 'CEZ_CURSOR_BIN',
     mockBin: join(HERE, '..', '..', 'scripts', 'mock-cursor-print.mjs'),
     scenarios: {
+      ...CEZAR_TOOL_SCENARIOS,
       'multi-pr-refs': 'mock:multi-pr-refs',
       'turn-messages': 'mock:turn-messages', 'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
-      'autonomous-ask-cap': 'mock:autonomous-ask-cap',
+      'autonomous-cezar-ask-cap': 'mock:autonomous-cezar-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-slow-done': 'mock:silent-tail-slow-done',
@@ -567,28 +575,26 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'crash-stderr-held-pipe': 'mock:crash-stderr-held-pipe',
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
-      'crash-stderr-single': 'mock:crash-stderr-single', done: 'mock:done', hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-done': 'mock:hold-done', 'hold-ask': 'mock:hold-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
-      'split-text': 'mock:split-text', 'provider-error': 'mock:provider-error',
+      'crash-stderr-single': 'mock:crash-stderr-single', 'cezar-done': 'mock:cezar-done', hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'hold-cezar-done': 'mock:hold-cezar-done', 'hold-cezar-ask': 'mock:hold-cezar-ask', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress', 'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
       'post-success-refusal': 'mock:provider-error',
-      ask: 'mock:ask',
-      'ask-resume': 'mock:ask mock:resume-done',
-      'ask-snapshot': 'mock:ask-snapshot',
-      'ask-snapshot-bad': 'mock:ask-snapshot-bad', 'ask-prose': 'mock:ask-prose', 'ask-bad': 'mock:ask-bad', 'ask-reply-late': 'mock:ask-reply-late' },
+      ask: 'mock:cezar-ask',
+      'ask-resume': 'mock:cezar-ask mock:resume-cezar-done', 'ask-bad': 'mock:ask-bad', 'ask-reply-late': 'mock:cezar-ask-reply-late' },
   },
   pi: {
     backend: 'pi',
-    askResumeCases: [{ kind: 'CEZ:ASK', scenario: 'ask-resume', answer: 'Library: Vitest' }],
+    askResumeCases: [{ kind: 'cezar_ask', scenario: 'ask-resume', answer: 'Library: Vitest' }],
     binEnv: 'CEZ_PI_BIN',
     mockBin: PI_MOCK,
     scenarios: {
+      ...CEZAR_TOOL_SCENARIOS,
       'input-closed-live': 'mock:no-progress-input-closed',
       'multi-pr-refs': 'mock:multi-pr-refs',
       'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
-      'autonomous-ask-cap': 'mock:autonomous-ask-cap',
+      'autonomous-cezar-ask-cap': 'mock:autonomous-cezar-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-no-reply': 'mock:silent-tail-no-reply',
@@ -600,23 +606,18 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
-      done: 'mock:done',
+      'cezar-done': 'mock:cezar-done',
       hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
-      'split-text': 'mock:split-text',
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
       'post-success-refusal': 'mock:provider-error',
-      ask: 'mock:ask',
-      'ask-resume': 'mock:ask mock:resume-done',
-      'ask-reply-late': 'mock:ask',
-      'ask-snapshot': 'mock:ask-snapshot',
-      'ask-snapshot-bad': 'mock:ask-snapshot-bad',
-      'ask-prose': 'mock:ask-prose',
-      'ask-bad': 'mock:ask-bad',
+      ask: 'mock:cezar-ask',
+      'ask-resume': 'mock:cezar-ask mock:resume-cezar-done',
+      'ask-reply-late': 'mock:cezar-ask',
       'steer-tool': 'mock:steer-tool',
       'steer-late': 'mock:steer-late',
-      'hold-done': 'mock:hold-done',
-      'hold-ask': 'mock:hold-ask',
+      'hold-cezar-done': 'mock:hold-cezar-done',
+      'hold-cezar-ask': 'mock:hold-cezar-ask',
       'silent-tail-late-reply': 'mock:silent-tail-late-reply',
       'silent-tail-slow-done': 'mock:silent-tail-slow-done',
       // No `subagent`: see the S9 and R12 entries in PARITY_EXEMPTIONS.
@@ -626,20 +627,21 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
   // subagent scenarios pi is exempt from: OMP's `task` tool surfaces subagent events natively.
   omp: {
     backend: 'omp',
-    askResumeCases: [{ kind: 'CEZ:ASK', scenario: 'ask-resume', answer: 'Library: Vitest' }],
+    askResumeCases: [{ kind: 'cezar_ask', scenario: 'ask-resume', answer: 'Library: Vitest' }],
     binEnv: 'CEZ_OMP_BIN',
     mockBin: OMP_MOCK,
     scenarios: {
+      ...CEZAR_TOOL_SCENARIOS,
       'input-closed-live': 'mock:no-progress-input-closed',
       'closed-input': 'mock:closed-input',
       'auto-resumed': BASELINE_PROMPT,
-      'hold-done': 'mock:hold-done',
-      'hold-ask': 'mock:hold-ask',
+      'hold-cezar-done': 'mock:hold-cezar-done',
+      'hold-cezar-ask': 'mock:hold-cezar-ask',
       'multi-pr-refs': 'mock:multi-pr-refs', 'turn-messages': 'mock:turn-messages',
       'missing-binary': BASELINE_PROMPT,
       autonomous: 'mock:autonomous',
       'autonomous-cap': 'mock:autonomous-cap',
-      'autonomous-ask-cap': 'mock:autonomous-ask-cap',
+      'autonomous-cezar-ask-cap': 'mock:autonomous-cezar-ask-cap',
       'silent-tail': 'mock:silent-tail',
       'silent-tail-again': 'mock:silent-tail-again',
       'silent-tail-no-reply': 'mock:silent-tail-no-reply',
@@ -653,19 +655,14 @@ export const HARNESS_ADAPTERS: Readonly<Record<RunnerId, HarnessAdapter>> = {
       'shutdown-stderr': 'mock:crash-stderr-clean',
       'crash-stderr': 'mock:crash-stderr',
       'crash-stderr-single': 'mock:crash-stderr-single',
-      done: 'mock:done',
+      'cezar-done': 'mock:cezar-done',
       hold: 'mock:hold', 'hold-gated': 'mock:hold-gated', 'no-progress': 'mock:no-progress', 'no-progress-ignore-term': 'mock:no-progress-ignore-term', 'no-progress-held-pipe': 'mock:no-progress-held-pipe', 'no-progress-leftover': 'mock:no-progress-leftover', 'busy-progress': 'mock:busy-progress',
-      'split-text': 'mock:split-text',
       'provider-error': 'mock:provider-error',
       'provider-unavailable': 'mock:provider-error',
       'post-success-refusal': 'mock:provider-error',
-      ask: 'mock:ask',
-      'ask-resume': 'mock:ask mock:resume-done',
-      'ask-reply-late': 'mock:ask',
-      'ask-snapshot': 'mock:ask-snapshot',
-      'ask-snapshot-bad': 'mock:ask-snapshot-bad',
-      'ask-prose': 'mock:ask-prose',
-      'ask-bad': 'mock:ask-bad',
+      ask: 'mock:cezar-ask',
+      'ask-resume': 'mock:cezar-ask mock:resume-cezar-done',
+      'ask-reply-late': 'mock:cezar-ask',
       'steer-tool': 'mock:steer-tool',
       'steer-late': 'mock:steer-late',
       subagent: 'mock:subagent',
@@ -790,6 +787,10 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion, backend, kind: 'scenario-unconstructible' as const,
     reason: 'This wire has no separate portable-answer HTTP ACK retained after turn completion. The executable cell checks ordinary root idle expiry and successful Continue through its native wire instead.',
   }))),
+  ...(['A13', 'A14'] as const).map(criterion => ({
+    criterion, backend: 'opencode' as const, kind: 'scenario-unconstructible' as const,
+    reason: 'The refused autonomous nudge was reached only through the retired ask line, whose nudge went out as human input and left its HTTP ACK outstanding (hearsay-tools/cezarion#2397). A tool-era nudge is agent input, which OpenCode admits at the boundary. The executable cell checks ordinary root idle expiry and successful Continue through its native wire instead.',
+  })),
   ...(['claude', 'codex', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion: 'F7', backend, kind: 'scenario-unconstructible' as const,
     reason: 'This wire has no separate HTTP ACK retained after turn completion. Turn frames and the transport ACK share one stream, so a silent-tail turn cannot end while its agent-input ACK is still pending.',
@@ -817,43 +818,19 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   })),
   {
     criterion: 'A9', backend: 'claude', kind: 'capability-absent',
-    reason: 'Claude stream-json uses the turn-end CEZ:ASK fallback; its ask wire emits no native mid-turn ask.requested (A3/A4 cover the portable policy).',
+    reason: 'Claude stream-json asks through cezar_ask; its wire emits no native mid-turn ask.requested (A3/A4 cover the cezar_ask policy).',
   },
   {
     criterion: 'A9', backend: 'cursor', kind: 'capability-absent',
-    reason: 'Cursor print auto-skips native AskQuestion before a human can answer. The executable native-question rejection and A3/A4 portable CEZ:ASK cells cover the available paths.',
+    reason: 'Cursor print auto-skips native AskQuestion before a human can answer. The executable native-question rejection and the A3/A4 cezar_ask cells cover the available paths.',
   },
   {
     criterion: 'A9', backend: 'pi', kind: 'capability-absent',
-    reason: 'Pi RPC uses the turn-end CEZ:ASK fallback; its ask wire emits no native mid-turn ask.requested (A3/A4 cover the portable policy).',
+    reason: 'Pi RPC asks through cezar_ask; its wire emits no native mid-turn ask.requested (A3/A4 cover the cezar_ask policy).',
   },
   {
     criterion: 'A9', backend: 'omp', kind: 'capability-absent',
-    reason: 'OMP v18.4.11 plain `--mode rpc` never constructs the ask tool: sessionOptions.hasUI is true only for interactive or rpc-ui (src/main.ts) and AskTool.createIf returns null without it, so the native ask path cannot exist on the wire cezar uses. The turn-end CEZ:ASK fallback applies (A3/A4 cover the portable policy).',
-  },
-  {
-    criterion: 'R16', backend: 'claude', kind: 'capability-absent',
-    reason: 'Claude stream-json has whole assistant text blocks and a result-only fallback, not a separate completed-text channel. claude-cli-runner handleClaudeMessage and claude-ui-mapper mapResult consume the same text (text-turn.ndjson and claude-ui-mapper result-fallback tests).',
-  },
-  {
-    criterion: 'R16', backend: 'codex', kind: 'capability-absent',
-    reason: 'Codex app-server item/completed carries the authoritative agentMessage.text snapshot to both the v1 coalescer and v2 mapper (text-turn.ndjson). Omitting deltas does not omit v1 text; no independent final-text channel exists.',
-  },
-  {
-    criterion: 'R16', backend: 'opencode', kind: 'capability-absent',
-    reason: 'OpenCode SSE message.part.updated supplies the same assistant text snapshot and time.end to v1 and v2 (text-turn.ndjson). The role/session filters agree; snapshot-only completion cannot omit just v1.',
-  },
-  {
-    criterion: 'R16', backend: 'pi', kind: 'capability-absent',
-    reason: 'Pi RPC text_end.content is authoritative for both v1 and v2, including snapshot-only blocks (rpc-lifecycle.ndjson). message_end has no separately mapped assistant-text channel.',
-  },
-  {
-    criterion: 'R16', backend: 'cursor', kind: 'capability-absent',
-    reason: 'Cursor print stream-json assistant frames are the one assistant-text channel: cursor-print-runner maps v1 text and the v2 message from the same frame, and the result frame supplies text only when no assistant text arrived (print-lifecycle.ndjson). A completed marker cannot be present only on v2.',
-  },
-  {
-    criterion: 'R16', backend: 'omp', kind: 'capability-absent',
-    reason: 'OMP RPC text_end.content is the one assistant-text channel for v1 and v2 (rpc-lifecycle.ndjson, v18.4.11); message_end has no separately mapped text channel.',
+    reason: 'OMP v18.4.11 plain `--mode rpc` never constructs the ask tool: sessionOptions.hasUI is true only for interactive or rpc-ui (src/main.ts) and AskTool.createIf returns null without it, so the native ask path cannot exist on the wire cezar uses. Asks go through cezar_ask (A3/A4 cover the cezar_ask policy).',
   },
   {
     criterion: 'R15', backend: 'pi', kind: 'scenario-unconstructible',
@@ -898,7 +875,7 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     reason:
       "pi's RPC has no child session or child transcript: task tools run on the parent " +
       'session (see `__fixtures__/pi/rpc-lifecycle.expected.json`), so no child message can ' +
-      'arrive between the parent monitoring marker and turn-end.',
+      'arrive between the parent cezar_wait call and turn-end.',
   },
   {
     criterion: 'S9',
@@ -910,17 +887,29 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
       'parentItemId and no child transcript), so there is no child terminal signal that could ' +
       'end the parent turn.',
   },
-  // hearsay-tools/cezarion#1233 U7: the monitoring-line alias stays
-  // live on every wire; only the ScheduleWakeup alias is Claude's.
+  // S11 (hearsay-tools/cezarion#2397): these wires have no native ask; the `ask` scenario calls
+  // cezar_ask, whose human wait the workflow holds input behind (R6), not the runner.
+  ...(['claude', 'pi', 'cursor', 'omp'] as const).map(backend => ({
+    criterion: 'S11', backend, kind: 'capability-absent' as const,
+    reason: 'this wire has no native ask; cezar_ask is the workflow\'s human wait, so the runner admits non-human input and the run tier holds it (R6)',
+  })),
+  // R4: a malformed question is a native ask's failure. cezar_ask validates its arguments and
+  // answers the agent with invalid_request, so no malformed question reaches the run.
+  ...(['claude', 'pi', 'omp'] as const).map(backend => ({
+    criterion: 'R4', backend, kind: 'scenario-unconstructible' as const,
+    reason: 'this wire has no native ask; a malformed cezar_ask is refused to the agent as invalid_request before any card exists',
+  })),
+  // hearsay-tools/cezarion#1233 U7: cezar_wait stays live on every wire; only the
+  // ScheduleWakeup alias is Claude's.
   ...(['codex', 'opencode', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion: 'U7', backend, kind: 'capability-absent' as const,
     reason: 'native scheduler tool exists only on the Claude wire',
   })),
-  // U7h (hearsay-tools/cezarion#1234): the ask scenario on these wires prints the portable ask
-  // line, so its human wait opens through the ask-line alias; the cell asserts that instead.
+  // U7h (hearsay-tools/cezarion#1234): the ask scenario on these wires calls cezar_ask, so its
+  // human wait opens through cezar_ask rather than a native ask; the cell asserts that instead.
   ...(['claude', 'pi', 'cursor', 'omp'] as const).map(backend => ({
     criterion: 'U7h', backend, kind: 'capability-absent' as const,
-    reason: 'native ask arrives as the portable marker on this wire',
+    reason: 'this wire has no native ask; its ask scenario calls cezar_ask',
   })),
   // U12/U13: an agent-input acknowledgement the provider can delay or reject.
   {
@@ -935,17 +924,8 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion: 'U13', backend: 'cursor', kind: 'capability-absent',
     reason: 'Cursor print acknowledges agent input on the first model work of the process it spawns; the print wire has no rejection of an admitted prompt.',
   },
-  // U20a (hearsay-tools/cezarion#1301): a turn that ends before its input is acknowledged.
-  {
-    criterion: 'U20a', backend: 'claude', kind: 'capability-absent',
-    reason: 'Claude acknowledges agent input with the local stdin pipe write, so no turn can end before its input is acknowledged.',
-  },
-  {
-    criterion: 'U20a', backend: 'cursor', kind: 'capability-absent',
-    reason: 'Cursor print acknowledges agent input on the first model work of the process it spawns, so no turn can end before its input is acknowledged.',
-  },
   // U27 (hearsay-tools/cezarion#1525): the late-acknowledgement entry needs a turn that ends before
-  // its input is acknowledged, as U20a does. The fresh-step and Continue cells run on every wire.
+  // its input is acknowledged. The fresh-step and Continue cells run on every wire.
   {
     criterion: 'U27', backend: 'claude', kind: 'capability-absent',
     reason: 'Claude acknowledges agent input with the local stdin pipe write, so no turn can end before its input is acknowledged; its fresh-step and Continue cells still run.',
@@ -954,14 +934,14 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
     criterion: 'U27', backend: 'cursor', kind: 'capability-absent',
     reason: 'Cursor print acknowledges agent input on the first model work of the process it spawns, so no turn can end before its input is acknowledged; its fresh-step and Continue cells still run.',
   },
-  // U20h/U20m/U22s (hearsay-tools/cezarion#1301): a refusal the harness acknowledges and never answers.
-  ...(['U20h', 'U20m', 'U22s'] as const).map(criterion => ({
+  // U20h/U22s (hearsay-tools/cezarion#1301): a refusal the harness acknowledges and never answers.
+  ...(['U20h', 'U22s'] as const).map(criterion => ({
     criterion, backend: 'cursor' as const, kind: 'capability-absent' as const,
     reason: 'Cursor print has no acknowledgement before native model work: each prompt spawns a process whose init frame is turn.started, which answers the nudge, so a refusal cannot be acknowledged and left unanswered (as F8).',
   })),
   {
     criterion: 'U20h', backend: 'opencode', kind: 'capability-absent',
-    reason: 'OpenCode runs one prompt per turn: a human prompt waits for the busy turn to go idle, and a refusal acknowledged without a turn never goes idle, so the human message the cell sends after the bound is never posted. U20m delivers a worker message, which steers the busy turn.',
+    reason: 'OpenCode runs one prompt per turn: a human prompt waits for the busy turn to go idle, and a refusal acknowledged without a turn never goes idle, so the human message the cell sends after the bound is never posted.',
   },
   // D1 (hearsay-tools/cezarion#2279): a governed session keeps native subagents, and cezar adds a
   // control only where a runner's cross-session tool is separate from subagent messaging. Each
@@ -1511,7 +1491,7 @@ export async function withSkillParentRun(
     // come exclusively from the parent's actual live native session.
     const caller = controller.credentials.authenticate(controller.credentials.issue('project', parent.id, randomUUID()))!;
     const child = await controller.service.spawn(caller, {
-      task: promptFor(backend, 'done'), baseline: 'HEAD', requestId: randomUUID(),
+      task: promptFor(backend, 'cezar-done'), baseline: 'HEAD', requestId: randomUUID(),
     });
     await body({ repoRoot, parentRunId: parent.id, runId: child.workerId, store, manager });
   } finally {

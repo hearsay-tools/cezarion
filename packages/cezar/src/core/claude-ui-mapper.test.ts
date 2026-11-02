@@ -341,11 +341,11 @@ describe('mapClaudeMessage edge cases', () => {
       item: { kind: 'message', id: 'item_1', role: 'assistant', text: 'Child verdict.', parentItemId: 'task_child' },
     });
     const parent = mapClaudeMessage({
-      type: 'result', subtype: 'success', result: 'Parent is monitoring.\nCEZ:MONITORING',
+      type: 'result', subtype: 'success', result: 'Parent is monitoring.',
     }, child.state);
     expect(parent.events).toContainEqual({
       type: 'item.completed',
-      item: { kind: 'message', id: 'item_2', role: 'assistant', text: 'Parent is monitoring.\nCEZ:MONITORING' },
+      item: { kind: 'message', id: 'item_2', role: 'assistant', text: 'Parent is monitoring.' },
     });
   });
 

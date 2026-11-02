@@ -20,6 +20,7 @@ import type { AgentSession } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { withHeldAck } from '../core/owned-input-delivery.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
+import { gate, thenSay, toolCall } from './waits-parity.testkit.ts';
 
 import {
   bookkeeping, captureState, checkpoint, collect, controlledWire, executions, fixtureUpdateRun,
@@ -44,6 +45,20 @@ function recordAgentInput(id: string): string[] {
   return sent;
 }
 
+/** hearsay-tools/cezarion#2397: cezar_done refuses a done that workers already block, and that answer
+ *  is the agent's. The turn end's refusal comes from a done the tool accepted before `block` added
+ *  the blocker later in the same turn, as an agent that spawns a worker after its done does. `send`
+ *  opens the turn: a human message unless the test sends straight to the session. */
+async function blockedDone<T>(id: string, block: () => Promise<T>, send: (text: string) => unknown = text => manager.sendMessage(id, [{ type: 'text', text }])): Promise<T> {
+  const opened = join(root, `gate-${randomUUID()}`);
+  expect(send(`${toolCall('cezar_done', {})} ${gate(opened)} ${thenSay('All done.')}`)).toBe(true);
+  await until(() => !!(manager as unknown as { active: Map<string, { doneRequested?: unknown }> }).active.get(id)?.doneRequested);
+  const blocker = await block();
+  writeFileSync(opened, '');
+  return blocker;
+}
+const sessionOf = (id: string) => (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(id)!.session;
+
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
 describe('worker waits through RunManager', { timeout: 30_000 }, () => {
@@ -57,10 +72,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         expect(manager.continueRun(p.id, { text: 'mock:hold' }).ok).toBe(true);
         await until(() => store.getRun(p.id)?.status === 'waiting');
       }
-      const w = await worker(p.id);
       const sent = recordAgentInput(p.id);
-      expect(manager.sendMessage(p.id, [{ type: 'text', text: 'mock:done' }])).toBe(true);
-      // hearsay-tools/cezarion#1301: the refusal `cezar_done` gives, as one automatic turn.
+      const w = await blockedDone(p.id, () => worker(p.id));
+      // hearsay-tools/cezarion#1301: the turn end's refusal, as one automatic turn.
       await until(() => completionNudges(p.id).length === 1 && store.getRun(p.id)?.status === 'waiting');
       expect(sentTexts(sent, `Workers are still live: ${w.id}.`)).toEqual([expect.stringContaining(COMPLETION_WILL_WAIT)]);
       expect(waitOf(store.getRun(p.id))).toBeUndefined();
@@ -213,21 +227,20 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(store.getRun(p.id)?.status).toBe('done');
   });
 
-  // hearsay-tools/cezarion#1301: a blocked DONE gets the refusal nudge. The nudge's own turn end with
-  // live workers opens the live-worker re-check timer, so the next blocked DONE parks on that timer
-  // with the refusal as a note, and neither opens an automatic worker wait.
-  it('readiness repeated DONE with live workers: one nudge, then a park on the re-check timer, and no automatic wait', async () => {
+  // hearsay-tools/cezarion#1301: a blocked done gets the refusal nudge. The nudge's own turn end with
+  // live workers opens the live-worker re-check timer, so the next done, which cezar_done itself
+  // refuses, parks on that timer, and neither opens an automatic worker wait.
+  it('readiness repeated done with live workers: one nudge, then a park on the re-check timer, and no automatic wait', async () => {
     const p = await parent();
     await until(() => store.getRun(p.id)?.status === 'waiting');
-    const w = await worker(p.id);
-    manager.sendMessage(p.id, [{ type: 'text', text: 'mock:done' }]);
+    const w = await blockedDone(p.id, () => worker(p.id));
     await until(() => completionNudges(p.id).length === 1 && store.getRun(p.id)?.status === 'waiting');
     const timer = store.getRun(p.id)?.waits?.find(wait => wait.kind === 'timer' && wait.via === 'monitoring-line');
     expect(timer).toBeDefined();
     const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
     const engine = manager as unknown as { active: Map<string, { session: AgentSession }> };
-    engine.active.get(p.id)!.session.sendMessage([{ type: 'text', text: 'mock:done' }]);
-    const refused = () => store.readEvents(p.id).filter(event => event.type === 'note' && String(event.message).startsWith(`Completion blocked: Workers are still live: ${w.id}.`));
+    engine.active.get(p.id)!.session.sendMessage([{ type: 'text', text: toolCall('cezar_done', {}) }]);
+    const refused = () => store.readEvents(p.id).filter(event => event.type === 'text' && String(event.text).includes('workers_outstanding') && String(event.text).includes(`worker stop ${w.id}`));
     await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && refused().length === 1 && store.getRun(p.id)?.status === 'waiting');
     expect(completionNudges(p.id)).toHaveLength(1);
     expect(store.getRun(p.id)?.waits).toEqual([expect.objectContaining({ id: timer!.id, phase: WAIT_PHASE.open })]);
@@ -239,15 +252,14 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
 
   // The refusal nudge is charged to the automatic-wake budget; with it spent, the blocked DONE opens
   // Cezar's budget human wait instead (hearsay-tools/cezarion#1301).
-  it('a blocked DONE with the automatic-wake budget spent opens the budget human wait instead of a nudge', async () => {
+  it('a blocked done with the automatic-wake budget spent opens the budget human wait instead of a nudge', async () => {
     const p = await parent();
     await until(() => store.getRun(p.id)?.status === 'waiting');
-    const w = await worker(p.id);
     store.commitOutcome(p.id, { kind: 'charged', automaticWakes: MAX_AUTO_CONTINUES });
     const sent = recordAgentInput(p.id);
     const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
     // Straight to the session: a human message would restart the budget.
-    (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!.session.sendMessage([{ type: 'text', text: 'mock:done' }]);
+    const w = await blockedDone(p.id, () => worker(p.id), text => sessionOf(p.id).sendMessage([{ type: 'text', text }]));
     await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && store.getRun(p.id)?.status === 'waiting');
     expect(completionNudges(p.id)).toEqual([]);
     expect(sentTexts(sent, `Workers are still live: ${w.id}.`)).toEqual([]);
@@ -261,10 +273,12 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   it('readiness settled uncollected completion sends the collect refusal without the will-wait sentence, then finishes once collected', async () => {
     const p = await parent();
     await until(() => store.getRun(p.id)?.status === 'waiting');
-    const w = await worker(p.id);
-    manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
     const sent = recordAgentInput(p.id);
-    manager.sendMessage(p.id, [{ type: 'text', text: 'mock:done' }]);
+    const w = await blockedDone(p.id, async () => {
+      const settled = await worker(p.id);
+      manager.requestWorkerStop(settled.id); expect(await manager.awaitRunTermination(settled.id, 15000)).toBe(true);
+      return settled;
+    });
     await until(() => completionNudges(p.id).length === 1 && store.getRun(p.id)?.status === 'waiting');
     const [nudge, ...more] = sentTexts(sent, `worker collect ${w.id}`);
     expect(more).toEqual([]);
@@ -275,7 +289,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     process.env.CEZ_REVIEW_GATE = '1';
     writeFileSync(join(store.getRun(p.id)!.worktreePath!, 'parent-result.txt'), 'parent result');
     const state = (manager as unknown as { active: Map<string, { session: AgentSession }> }).active.get(p.id)!;
-    state.session.sendMessage([{ type: 'text', text: 'mock:done' }]);
+    state.session.sendMessage([{ type: 'text', text: toolCall('cezar_done', {}) }]);
     await until(() => !manager.isActive(p.id));
     expect(store.getRun(p.id)?.status).toBe('review');
   });
@@ -354,9 +368,8 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
             expect(manager.continueRun(p.id, { text: 'mock:hold' }).ok).toBe(true);
             checkpoint('continuation parked'); await until(() => store.getRun(p.id)?.status === 'waiting');
           }
-          checkpoint('worker spawned'); const w = await worker(p.id);
           const sent = recordAgentInput(p.id);
-          manager.sendMessage(p.id, [{ type: 'text', text: 'mock:done' }]);
+          checkpoint('worker spawned'); const w = await blockedDone(p.id, () => worker(p.id));
           checkpoint('completion nudge note'); await until(() => completionNudges(p.id).length === 1);
           if (delayedAck) {
             // The nudge's own turn ends before its acknowledgement. The note is written inside that
@@ -385,7 +398,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   }
 
   it('readiness Finish preserves pending parent human questions', async () => {
-    const p = await parent('mock:ask'); await until(() => store.getRun(p.id)?.status === 'waiting');
+    const p = await parent('mock:cezar-ask'); await until(() => store.getRun(p.id)?.status === 'waiting');
     expect(manager.finish(p.id)).toBe(false);
     expect(store.getRun(p.id)?.status).toBe('waiting');
     expect(store.readEvents(p.id).filter(event => event.type === 'human-input-delivered')).toEqual([]);

@@ -69,9 +69,9 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     }
   }
 
-  for (const portable of [false, true]) it.each(guards)('%s blocks the nudge (portable ASK=' + portable + ')', guard => {
+  it.each(guards)('%s blocks the nudge', guard => {
     applyGuard(guard);
-    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task', portable ? ask : null)).toBe(false);
+    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task')).toBe(false);
     expect(session.sendMessage).not.toHaveBeenCalled();
     expect(session.sendAgentMessage).not.toHaveBeenCalled();
     expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
@@ -81,7 +81,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
   // hearsay-tools/cezarion#1234: one budget of automatic wakes on the record, for nudges and timers.
   it('autonomous nudges and timer wakes share one budget of 40', async () => {
     store.updateRun(id, { automaticWakes: 39 });
-    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task', null)).toBe(true);
+    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task')).toBe(true);
     expect(store.getRun(id)?.automaticWakes).toBe(40);
     // The charge is committed at once, so a crash before the debounced save cannot lose it.
     expect(readPersistedRuns(join(root, '.ai/cezar')).find(record => record.id === id)?.automaticWakes).toBe(40);
@@ -89,17 +89,11 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     // The nudge's input was acknowledged; only the budget stands in the way of the next one.
     await state.agentInputFlight?.settled;
     state.agentInputFlight = undefined;
-    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task', null)).toBe(false);
+    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task')).toBe(false);
     expect(store.getRun(id)?.automaticWakes).toBe(40);
     expect(store.readEvents(id).some(e => e.type === 'note' && String(e.message).startsWith('autonomous — safety cap reached (40)'))).toBe(true);
   });
 
-  it('a nudge the wire refuses after an ask line leaves the question and budget untouched', () => {
-    vi.mocked(session.sendMessage).mockReturnValue(false);
-    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task', ask)).toBe(false);
-    expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
-    expect(store.readEvents(id).filter(e => e.type === 'note' || e.type === 'human-input-delivered')).toEqual([]);
-  });
 
   function pendingBoundary(): void {
     state.currentStepId = 'task';
@@ -143,7 +137,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
   it('refused ordinary input waits for readiness without charging the cap or releasing capacity', () => {
     pendingBoundary();
     vi.mocked(session.sendAgentMessage).mockReturnValueOnce(false);
-    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task', null)).toBe(false);
+    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task')).toBe(false);
     expect(state.autonomousNudgePending).toBe(session);
     expect(state.idleTimer).toBeDefined();
     expect(store.getRun(id)?.automaticWakes ?? 0).toBe(0);
@@ -161,7 +155,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     vi.useFakeTimers();
     pendingBoundary();
     vi.mocked(session.sendAgentMessage).mockReturnValue(false);
-    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task', null)).toBe(false);
+    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task')).toBe(false);
     vi.runOnlyPendingTimers();
     expect(session.end).toHaveBeenCalledOnce();
     expect(state.idleClosed).toBe(true);
@@ -173,7 +167,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
   it('parent activity invalidates the refused boundary and its timer', () => {
     pendingBoundary();
     vi.mocked(session.sendAgentMessage).mockReturnValue(false);
-    runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task', null);
+    runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task');
     handleRunnerUiEvent(runInternals(manager).context, runInternals(manager).sessionHelperHost, id, state, makeUiSink(runInternals(manager).context, runInternals(manager).sessionHelperHost, id, 'task'), { type: 'turn.started', turnId: randomUUID() });
     expect(state.autonomousNudgePending).toBeUndefined();
     expect(state.atTurnBoundary).toBeUndefined();
@@ -267,7 +261,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
   it('a transport exception fails without retaining a readiness retry', () => {
     pendingBoundary();
     vi.mocked(session.sendAgentMessage).mockImplementation(() => { throw new Error('failed transport'); });
-    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task', null)).toBe(false);
+    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task')).toBe(false);
     expect(state.agentInputError).toContain('failed transport');
     expect(state.autonomousNudgePending).toBeUndefined();
     expect(state.idleTimer).toBeUndefined();

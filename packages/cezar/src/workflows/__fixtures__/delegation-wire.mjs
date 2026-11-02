@@ -24,6 +24,8 @@ export function runWire(control) {
   let serial = 0;
   let nudges = 0;
   let queue = Promise.resolve();
+  // The session's own tool wiring: Claude's argv, or the Codex thread's params.
+  let toolWire = codex ? undefined : process.argv.slice(2);
   const rl = createInterface({ input: process.stdin });
   if (!codex) emit({ type: 'system', subtype: 'init', session_id: id });
   async function turn(text, number, turnId = `turn-${number}`) {
@@ -39,6 +41,13 @@ export function runWire(control) {
       const git = (...args) => execFileSync('git', args, { stdio: 'pipe' });
       git('add', 'shared.txt'); git('commit', '-qm', `worker ${result.commit}`);
     }
+    // `done` calls cezar_done over the session's own wire before the turn ends, and publishes the
+    // tool's answer beside the turn's input (hearsay-tools/cezarion#2397).
+    if (result.done) {
+      const { probeCezarTool } = await import(new URL('../../../scripts/mock-ci-tool.mjs', import.meta.url).href);
+      const answer = await probeCezarTool(codex ? 'codex' : 'claude', toolWire, 'cezar_done', {}, false);
+      publishJson(join(control, `${id}.${number}.done.json`), JSON.parse(answer.response.content[0].text.split('\n')[0]));
+    }
     const reply = result.text ?? 'Independent work paused';
     if (codex) {
       if (!result.error) emit({ method: 'item/completed', params: { threadId, turnId, item: { id: `item-${turnId}`, type: 'agentMessage', text: reply } } });
@@ -53,7 +62,7 @@ export function runWire(control) {
     if (codex) {
       if (message.method === 'configRequirements/read') emit({ id: message.id, result: { requirements: null } });
       if (message.method === 'initialize') emit({ id: message.id, result: { userAgent: 'delegation-integration' } });
-      else if (message.method === 'thread/start' || message.method === 'thread/resume') emit({ id: message.id, result: { thread: { id: threadId } } });
+      else if (message.method === 'thread/start' || message.method === 'thread/resume') { toolWire = message.params; emit({ id: message.id, result: { thread: { id: threadId } } }); }
       else if (message.method === 'turn/start') {
         const text = message.params.input.map(part => part.text ?? '').join('\n');
         const number = text.includes(NO_WAIT_NUDGE) ? undefined : ++serial;

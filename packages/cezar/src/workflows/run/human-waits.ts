@@ -29,7 +29,7 @@ export class HumanWaits {
     state.pendingHumanAsk = true;
   }
 
-  /** The human gate a human wait without a card raises (the monitoring line with re-checks off):
+  /** The human gate a human wait without a card raises (live workers with re-checks off):
    * `PROSE_HUMAN_GATE` names it in the transcript. Keep the checkpoint through idle closure/restart
    * and hold worker input until a successful human delivery, just as for a structured ask. */
   raiseHumanGate(runId: string, state: ActiveRun): void {
@@ -142,28 +142,14 @@ export class HumanWaits {
     return (this.context.store.getRun(runId)?.waits ?? []).some(wait => !isCezarHumanWait(wait));
   }
 
-  /** A valid ask line replaces the card of the human wait its turn registered. It is saved
-   *  before the turn end can re-enter a boundary (Cursor print's ready callback from
-   *  `discardQueuedMessages`), so a wait shown there shows the later card. */
-  latchAskLineCard(runId: string, wait: HumanWaitEntry | undefined, turn: { ask: AskRequest | null; waitCard: boolean }): void {
-    if (!wait || !turn.ask || turn.waitCard) return;
-    const latest = this.context.store.getRun(runId)?.waits?.find((entry): entry is HumanWaitEntry => entry.id === wait.id && entry.kind === 'human');
-    if (!latest || latest.phase !== 'open' || latest.askSeq !== undefined) return;
-    const { context: _replaced, ...kept } = latest;
-    try { this.context.store.commitWait(runId, { ...kept, ...askCardFields(turn.ask) }); }
-    catch (error) { console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
-  }
-
   /** Read fresh: a boundary the turn end re-enters (Cursor print's ready callback from
    *  `discardQueuedMessages`) may have shown the wait already, and its card stands. */
   humanWaitShown(runId: string, wait: HumanWaitEntry | undefined): boolean {
     return !!wait && this.context.store.getRun(runId)?.waits?.some(entry => entry.id === wait.id && entry.kind === 'human' && entry.askSeq !== undefined) === true;
   }
 
-  /** The turn end raised a card or the gate: record the human wait it shows. A turn that registered
-   *  none opens the ask line's. */
-  recordTurnEndQuestion(runId: string, state: ActiveRun, wait: HumanWaitEntry | undefined, ask: AskRequest | null): void {
-    const shown = wait ?? (ask ? this.openHumanAlias(runId, state, 'ask-line', ask) : undefined);
-    if (shown) this.markHumanWaitSurfaced(runId, shown, ask ?? undefined);
+  /** The turn end raised a card or the gate: record the human wait it shows. */
+  recordTurnEndQuestion(runId: string, wait: HumanWaitEntry | undefined, ask: AskRequest | null): void {
+    if (wait) this.markHumanWaitSurfaced(runId, wait, ask ?? undefined);
   }
 }

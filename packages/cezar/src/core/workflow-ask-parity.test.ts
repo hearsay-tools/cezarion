@@ -2,9 +2,8 @@ import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
-import { driveRun, promptFor, waitFor, WORKFLOW_ASK_CRITERIA } from './harness-parity.testkit.ts';
+import { CEZAR_ASK_QUESTION, driveRun, promptFor, waitFor, WORKFLOW_ASK_CRITERIA } from './harness-parity.testkit.ts';
 import { RunStore } from '../runs/store.ts';
-import { AUTONOMOUS_ASK_NOTE } from '../workflows/run.ts';
 import { workflowDefSchema } from '../workflows/types.ts';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
@@ -31,30 +30,19 @@ describe('intermediate workflow ASK parity — #427', () => {
             expect(run().steps.find(s => s.id === 'implement')?.status).toBe('done');
             expect(checks()).toMatchObject([{ stepId: 'verify', exitCode: 0 }]);
           };
-          if (row.id === 'Q2') {
-            // A malformed marker is no done (hearsay-tools/cezarion#1620): the step parks on
-            // Cezar's human wait, and only a done in the reply runs the tail.
-            expect(events().some(e => e.type === 'note' && e.stepId === 'implement' && e.tone === 'danger' &&
-              /CEZ:ASK.*JSON/.test(String(e.message)))).toBe(true);
-            expect(events().filter(e => e.type === 'ask.requested')).toHaveLength(0);
-            expect(run().status).toBe('waiting');
-            expect((run().waits ?? []).some(wait => wait.kind === 'human' && wait.source === 'cezar')).toBe(true);
-            expect(run().steps.map(s => s.status)).toEqual(['waiting', 'pending']);
-            expect(checks()).toEqual([]);
-            expect(manager.sendMessage(runId, [{ type: 'text', text: 'Carry on. mock:done' }])).toBe(true);
-            await complete();
-            return;
-          }
           if (row.id === 'Q9') {
+            // An autonomous run refuses cezar_ask (`autonomous_run`): the agent is told to assume
+            // and continue, no question parks the step, and the tail runs.
             await complete();
             expect(events().filter(e => e.type === 'ask.requested')).toHaveLength(0);
-            expect(events().some(e => e.type === 'note' && String(e.message).startsWith(AUTONOMOUS_ASK_NOTE))).toBe(true);
+            expect((run().waits ?? []).filter(wait => wait.kind === 'human')).toEqual([]);
+            expect(events().some(e => e.type === 'text' && String(e.text).includes('This is an autonomous run: do not wait for the user.'))).toBe(true);
             return;
           }
           expect(run().status).toBe('waiting');
           expect(run().steps.map(s => s.status)).toEqual(row.id === 'Q3' ? ['waiting'] : ['waiting', 'pending']);
           expect(events().filter(e => e.type === 'ask.requested')).toMatchObject([
-            { stepId: 'implement', questions: [{ question: 'Which test library?' }] },
+            { stepId: 'implement', questions: [{ question: CEZAR_ASK_QUESTION }] },
           ]);
           expect(checks()).toEqual([]);
           const session = manager['active'].get(runId)!.session!;
@@ -79,7 +67,7 @@ describe('intermediate workflow ASK parity — #427', () => {
             expect(run().status).toBe('waiting');
             expect(run().steps.map(s => s.status)).toEqual(['waiting', 'pending']);
             expect(manager.isActive(runId)).toBe(false);
-            expect(manager.continueRun(runId, { text: 'Vitest. mock:done' }).ok).toBe(true);
+            expect(manager.continueRun(runId, { text: 'Vitest. mock:cezar-done' }).ok).toBe(true);
             await complete();
             return;
           }
@@ -104,7 +92,7 @@ describe('intermediate workflow ASK parity — #427', () => {
               await waitFor(() => !manager.isActive(runId));
               expect(run().status).toBe('waiting');
               expect(run().steps.map(s => s.status)).toEqual(['waiting', 'pending']);
-              expect(manager.continueRun(runId, { text: promptFor(backend, 'ask-snapshot') }).ok).toBe(true);
+              expect(manager.continueRun(runId, { text: promptFor(backend, 'cezar-ask') }).ok).toBe(true);
               await waitFor(() => run().status === 'waiting');
               expect(events().filter(e => e.type === 'ask.requested')).toHaveLength(2);
               if (row.id === 'Q10') {
@@ -114,7 +102,7 @@ describe('intermediate workflow ASK parity — #427', () => {
                 await waitFor(() => !manager.isActive(runId));
                 expect(run().status).toBe('waiting');
                 expect(run().steps.map(s => s.status)).toEqual(['waiting', 'pending', 'waiting']);
-                expect(manager.continueRun(runId, { text: 'Vitest. mock:done' }).ok).toBe(true);
+                expect(manager.continueRun(runId, { text: 'Vitest. mock:cezar-done' }).ok).toBe(true);
                 await complete();
                 return;
               }
@@ -125,7 +113,7 @@ describe('intermediate workflow ASK parity — #427', () => {
               expect(run().status).toBe('done');
             } else {
               if (row.id === 'Q1') expect(manager['active'].get(runId)?.session).toBe(session);
-              expect(manager.sendMessage(runId, [{ type: 'text', text: 'Vitest. mock:done' }])).toBe(true);
+              expect(manager.sendMessage(runId, [{ type: 'text', text: 'Vitest. mock:cezar-done' }])).toBe(true);
               if (row.id === 'Q3') {
                 await waitFor(() => !manager.isActive(runId));
                 expect(run().status).toBe('done');

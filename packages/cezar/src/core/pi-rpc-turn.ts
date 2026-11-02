@@ -1,6 +1,5 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { parseAskMarker } from './ask.ts';
-import type { AgentEvent, AgentInputOptions, AgentRunResult, AgentToolCallRecord, ContentBlock, SessionOptions } from './agent-runner.js';
+import type { AgentEvent, AgentRunResult, AgentToolCallRecord, ContentBlock, SessionOptions } from './agent-runner.js';
 import { isSignalTerminationExit } from './agent-runner.js';
 import { InputSubmissions } from './input-submissions.ts';
 import { contentText, emitImages, isRecord, piMessageText, string } from './pi-rpc-wire.ts';
@@ -18,9 +17,9 @@ import { V1TextCoalescer } from './v1-text-coalescer.js';
 
 /**
  * Streamed `text_delta` tokens buffered per content block. v1 `text` is one event per complete
- * block (claude/codex/opencode parity), never per token: token-by-token emission split
- * `CEZ:ASK` markers so `parseAskMarker` never matched (open-mercato/cezar#902,
- * hearsay-tools/cezarion#2). Streaming display rides protocol v2's `item.delta`.
+ * block (claude/codex/opencode parity), never per token: token-by-token emission split text
+ * markers across events (open-mercato/cezar#902, hearsay-tools/cezarion#2). Streaming display rides
+ * protocol v2's `item.delta`.
  *
  * A message's `contentIndex` restarts at 0 on every assistant message, while the coalescer
  * latches completed keys for the session. So each open index maps to a once-per-block id, and
@@ -105,8 +104,6 @@ export interface PiRpcInputHost {
   cli: 'pi' | 'omp';
   opts: SessionOptions;
   onEvent?: ((event: AgentEvent) => void) | undefined;
-  /** The run's completed text blocks, read for the turn's CEZ:ASK marker. */
-  textChunks: readonly string[];
   isOpen(): boolean;
   /** The mapper's open normalized turn, if any. */
   turnId(): string | null;
@@ -124,11 +121,8 @@ export interface PiRpcInputHost {
 export class PiRpcInput {
   /** The last turn settled and no prompt went out since. */
   agentInputReady = false;
-  /** The last settled turn's text holds a CEZ:ASK marker. */
-  pendingMarkerAsk = false;
   /** Accepted agent prompts not yet seen as a user message_start (#505). */
   readonly submissions = new InputSubmissions();
-  private turnTextStart = 0;
   // Agent input refused only because a prompt acknowledgement was outstanding gets one readiness
   // hint when it lands, even mid-turn: the turn can be steered (hearsay-tools/cezarion#505).
   private refusedForAck = false;
@@ -143,13 +137,9 @@ export class PiRpcInput {
 
   constructor(private readonly host: PiRpcInputHost) {}
 
-  /** The head of sendMessage: input is no longer ready, and a prompt that opens a turn starts its text. */
-  beginPrompt(opensTurn: boolean): void {
+  /** The head of sendMessage: input is no longer ready. */
+  beginPrompt(): void {
     this.agentInputReady = false;
-    if (opensTurn) {
-      this.pendingMarkerAsk = false;
-      this.turnTextStart = this.host.textChunks.length;
-    }
   }
 
   /** A prompt goes out: the auto-end timer stops and may be scheduled again. */
@@ -182,10 +172,10 @@ export class PiRpcInput {
     if (host.isOpen() && this.agentInputReady && !host.turnId() && !acksPending) {
       this.refusedForAck = false;
       host.opts.onAgentInputReady?.(); this.scheduleAutoEnd();
-    } else if (this.refusedForAck && host.isOpen() && !acksPending && !this.pendingMarkerAsk) {
+    } else if (this.refusedForAck && host.isOpen() && !acksPending) {
       this.refusedForAck = false;
       host.opts.onAgentInputReady?.();
-    } else if (host.isOpen() && !host.turnId() && !acksPending && !this.pendingMarkerAsk) {
+    } else if (host.isOpen() && !host.turnId() && !acksPending) {
       // #486: a human ack drained with no turn open — re-settle the idle boundary.
       this.refusedForAck = false;
       host.opts.onAgentInputReady?.();
@@ -253,13 +243,12 @@ export class PiRpcInput {
     this.turnFailed = true;
   }
 
-  /** The turn ended: flush its text, report its error, mark a CEZ:ASK, report the input it read,
+  /** The turn ended: flush its text, report its error, report the input it read,
    *  then `turn-end` and auto-end. */
   settleTurn(): void {
     const { host } = this;
     host.flushText();
     this.emitLatchedProviderError();
-    this.pendingMarkerAsk = parseAskMarker(host.textChunks.slice(this.turnTextStart).join('\n')) !== null;
     this.agentInputReady = true;
     // Input queued before this turn began was processed by it, even without a user
     // message_start (#505) — unless the turn failed and may never have reached the model.
@@ -272,21 +261,19 @@ export class PiRpcInput {
   }
 
   /**
-   * The session's `sendAgentMessage`. A running turn is steered; only a pending CEZ:ASK (unless the
-   * caller delivers beside it) or an unacknowledged prompt refuses (#505). `send` is the runner's
+   * The session's `sendAgentMessage`. A running turn is steered; only an unacknowledged prompt
+   * refuses (#505). `send` is the runner's
    * sendMessage; `keepReceiptOnFailure` says whether a failed write still returns the receipt.
    */
   sendAgentMessage(
     content: ContentBlock[],
     inputIds: readonly string[],
-    options: AgentInputOptions | undefined,
     send: (content: ContentBlock[], requestId: string, inputIds: readonly string[]) => boolean,
     keepReceiptOnFailure: () => boolean,
   ): false | Promise<void> {
     const open = this.host.isOpen();
-    const askRefuses = this.pendingMarkerAsk && !options?.besideQuestion;
-    if (open && !askRefuses && (this.agentAck || this.host.humanAcksPending())) { this.refusedForAck = true; return false; }
-    if (!open || askRefuses) return false;
+    if (open && (this.agentAck || this.host.humanAcksPending())) { this.refusedForAck = true; return false; }
+    if (!open) return false;
     const id = `cezar-agent-${++this.promptSerial}`;
     let resolve!: () => void, reject!: (error: Error) => void;
     const acknowledged = new Promise<void>((yes, no) => { resolve = yes; reject = no; });

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActiveRun } from '../active-run.ts';
 import type { AgentSession } from '../../core/agent-runner.ts';
-import { makeRunRecord, RUN_STATUS, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { makeRunRecord, RUN_STATUS, WAIT_KIND, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { UiEventSink } from '../../runs/ui-event-sink.ts';
 import * as rule from '../turn-end.ts';
 import type { CompletionRefusal } from '../completion-policy.ts';
@@ -10,7 +10,7 @@ import { TurnSettler } from './turn-settler.ts';
 
 type Host = ConstructorParameters<typeof TurnSettler>[1];
 const refusal: CompletionRefusal = { code: 'workers_outstanding', workers: [], message: 'workers remain', liveWorkerIds: ['worker'] };
-const turn: SettledTurn = { stepId: 'step', monitoring: false, humanGate: false, ask: null, askNudged: false, done: false, nudgedLastTurn: false };
+const turn: SettledTurn = { stepId: 'step', monitoring: false, humanGate: false, ask: null, done: false, nudgedLastTurn: false };
 const ask = { questions: [{ header: 'Choice', question: 'Which path?' }] };
 
 function fixture() {
@@ -33,7 +33,7 @@ function fixture() {
     updateStep: call('step', undefined), flush: call('flush', undefined), commitWait: call('commitWait', undefined),
   };
   const humanWaits = {
-    turnEndHumanWait: call('humanWait', undefined), latchAskLineCard: call('latch', undefined),
+    turnEndHumanWait: call<object | undefined>('humanWait', undefined),
     prepareHumanAsk: call('prepareAsk', undefined), raiseHumanGate: call('raiseGate', undefined),
     recordTurnEndQuestion: call('recordQuestion', undefined), holdsAgentWaits: call('agentWaits', false),
     humanWaitShown: call('shown', false), withdrawCezarHumanWaits: call('withdraw', undefined),
@@ -49,7 +49,7 @@ function fixture() {
     executionBlockedByRootFinish: () => false, submitAgentInput: call('submit', true), flushAgentInputs: call('input', false),
     hasQueuedAgentInputs: call('queued', false), armUnreadInputTimer: call('unread', undefined), armHeldHumanInputTimer: call('held', undefined),
     parkOnWaits: call('parkWaits', true), queueWaitWake: call('wake', undefined), leaveMonitoringPool: call('leavePool', undefined),
-    chargeAutomaticWake: call('charge', 1), canAutoContinue: call('canContinue', true), tryAutonomousNudge: call('askNudge', false),
+    chargeAutomaticWake: call('charge', 1), canAutoContinue: call('canContinue', true),
     sendTurnEndNudge: call('sendNudge', true), awaitCompletionNudgeReply: call('replyBound', undefined), noticeParkedWorker: call('notice', undefined),
     routeWorkerQuestion: call('route', undefined), settledTurnOutcome: call('outcome', undefined),
   };
@@ -74,28 +74,26 @@ function decide(...decisions: rule.TurnEndDecision[]) {
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
 describe('turn settler entry orders', () => {
-  it('turn-end consumes done before latching, resets nudges before preparing ask, saves boundary before settlement, then clears resume attempts', () => {
+  it('turn-end consumes done before resetting nudges, saves boundary before settlement, then clears resume attempts', () => {
     const f = fixture();
     f.state.doneRequested = { session: f.session };
     f.state.noWaitNudged = f.session;
     f.state.completionNudged = f.session;
     decide({ kind: 'park' });
-    f.host.humanWaits.latchAskLineCard.mockImplementation(() => {
-      f.log.push('latch'); expect(f.state.doneRequested).toBeUndefined();
-    });
     f.host.parkOnWaits.mockImplementation(() => {
       f.log.push('parkWaits'); expect(f.state.parkAfterAck?.session).toBe(f.session); return true;
     });
     f.log.length = 0;
-    f.settler.endTurn('run', f.state, { handle: () => undefined } as unknown as UiEventSink, { stepId: 'step', text: '', completedText: '', scheduleWakeup: undefined });
-    order(f, ['state:doneRequested', 'latch', 'state:noWaitNudged', 'state:completionNudgeAnswered', 'state:completionNudged', 'update:invalidAsk', 'state:parkAfterAck', 'parkWaits', 'outcome', 'update:autoResumeAttempts']);
+    f.settler.endTurn('run', f.state, { handle: () => undefined } as unknown as UiEventSink, { stepId: 'step', scheduleWakeup: undefined });
+    order(f, ['state:doneRequested', 'state:noWaitNudged', 'state:completionNudgeAnswered', 'state:completionNudged', 'state:parkAfterAck', 'parkWaits', 'outcome', 'update:autoResumeAttempts']);
   });
 
-  it('turn-end latches and discards an ask before preparing it and storing its boundary', () => {
+  it('turn-end discards queued input for a human wait card before preparing it and storing its boundary', () => {
     const f = fixture();
     decide({ kind: 'park' });
-    f.settler.endTurn('run', f.state, { handle: () => undefined } as unknown as UiEventSink, { stepId: 'step', text: `CEZ:ASK ${JSON.stringify(ask)}`, completedText: '', scheduleWakeup: undefined });
-    order(f, ['latch', 'discard', 'state:noWaitNudged', 'update:invalidAsk', 'askNudge', 'prepareAsk', 'state:parkAfterAck']);
+    f.host.humanWaits.turnEndHumanWait.mockImplementation(() => { f.log.push('humanWait'); return { kind: WAIT_KIND.human, ...ask }; });
+    f.settler.endTurn('run', f.state, { handle: () => undefined } as unknown as UiEventSink, { stepId: 'step', scheduleWakeup: undefined });
+    order(f, ['humanWait', 'discard', 'state:noWaitNudged', 'prepareAsk', 'state:parkAfterAck']);
   });
 
   it('ready calls the gate before clearing the pending nudge and dispatching the carrier', () => {
@@ -133,15 +131,6 @@ describe('turn settler entry orders', () => {
     f.log.length = 0;
     f.settler.settleTurn('run', f.state, entry, { ...turn, done: true });
     expect(f.log).toEqual(['gate', 'inPool', 'outcome']);
-  });
-
-  it.each([false, true])('ask nudge clears done then held timer before the input error checkpoint (%s)', failed => {
-    const f = fixture();
-    if (failed) f.state.agentInputError = 'checkpoint failed';
-    f.log.length = 0;
-    const result = f.settler.settleTurn('run', f.state, 'turn-end', { ...turn, askNudged: true });
-    expect(result).toBe(!failed);
-    expect(f.log).toEqual(['state:doneAtBoundary', 'state:doneClose', 'state:heldHumanInputTimer', 'state:heldHumanInputSince', 'state:heldHumanInputExpired', ...(failed ? [] : ['outcome'])]);
   });
 
   it('take-input notes refusal before flushing, opens monitoring after a refused flush, then reads new facts', () => {

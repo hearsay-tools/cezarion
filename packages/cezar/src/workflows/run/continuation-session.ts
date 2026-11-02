@@ -475,7 +475,7 @@ export class ContinuationSession {
     const answer = this.openingAnswer(runId, state, opening);
     state.pendingHumanAsk = answer.askSeq === undefined && hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id));
 
-    const turn: SessionTurn = { text: '', completedText: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
+    const turn: SessionTurn = { text: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
     const sink = this.host.makeUiSink(runId, stepId);
     const onEvent = createSessionEventHandler(this.context, this.sessionEventHost, {
       runId, state, turn, stepId, backend, sink, tokenBase: 0,
@@ -515,6 +515,14 @@ export class ContinuationSession {
     // Stop/Finish can arrive while the local tool controller is starting.
     if (launch.stale) {
       this.settleStaleContinuationLaunch(runId, stepId, state, { stepId, sessionId, backend, prompt, images });
+      return;
+    }
+    // hearsay-tools/cezarion#2397: the tools could not start, so nothing spawns. The failure takes
+    // the session-failure path: a run that holds wakes parks and retries them with the wake-delivery
+    // backoff; any other run fails with the message.
+    if (launch.toolsError !== undefined) {
+      this.runSettlement.settleFailedContinuation(runId, state, stepId, sink, turn, new Error(launch.toolsError));
+      await this.releaseContinuationSession(runId, state, undefined, undefined, {});
       return;
     }
     state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();

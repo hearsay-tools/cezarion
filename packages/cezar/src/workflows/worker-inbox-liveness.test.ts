@@ -16,7 +16,7 @@ describe('worker inbox holds nonfinal agent completion', { timeout: 30_000 }, ()
     const wire = controlledWire({ firstResultGate: gate });
     const run = manager.startRun({ name: 'inbox chain', source: 'built-in', steps: [
       { id: 'task', prompt: '{{task}}' }, { id: 'check', command: 'echo checked' },
-    ] }, { task: 'Handle worker progress mock:done', runner: 'claude' });
+    ] }, { task: 'Handle worker progress mock:cezar-done', runner: 'claude' });
     store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
     await until(wire.initialReceived);
     const sender = { id: randomUUID() };
@@ -26,7 +26,7 @@ describe('worker inbox holds nonfinal agent completion', { timeout: 30_000 }, ()
   it.each(['release', 'expiry', 'ack'] as const)('keeps the agent→check recipient live until inbox %s', async action => {
     const { run, sender, gate } = await startChain();
     const input = { id: randomUUID(), parentRunId: run.id, source: 'agent' as const,
-      text: 'Review this before checking mock:done', createdAt: new Date().toISOString(),
+      text: 'Review this before checking mock:cezar-done', createdAt: new Date().toISOString(),
       conversation: { senderRunId: sender.id, recipientRunId: run.id, kind: 'progress' as const } };
     store.commitAgentInputs(run.id, [input]);
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });

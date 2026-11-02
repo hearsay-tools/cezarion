@@ -76,7 +76,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         // The wake turn signals nothing; the earlier step completes only on a done (hearsay-tools/cezarion#1620),
         // which the uncollected worker would refuse on any step.
         await collect(w.id);
-        expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:done' }])).toBe(true);
+        expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:cezar-done' }])).toBe(true);
         await until(() => store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status !== 'pending');
         expect(store.getRun(run.id)?.steps.find(step => step.id === 'first')?.status).toBe('done');
         expect(parkedOnWorkers(run.id)).toBe(false);
@@ -97,7 +97,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
         const run = manager.startRun({ name: 'ACK held chain', source: 'built-in', steps: [
           { id: 'first', prompt: 'mock:hold' },
-          next === 'agent' ? { id: 'next', prompt: 'mock:done' } : { id: 'next', command: 'echo checked' },
+          next === 'agent' ? { id: 'next', prompt: 'mock:cezar-done' } : { id: 'next', command: 'echo checked' },
         ] }, { task: 'parent', runner: backend });
         store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
         // hearsay-tools/cezarion#1235: the list's park and admission, not `workerWaiting`/`workerWakeAdmitted`.
@@ -129,7 +129,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           await until(() => !!store.getRun(run.id)?.agentInputs?.find(input => input.id === wake?.id)?.deliveredAt);
           expect(waitOf(store.getRun(run.id))).toBeUndefined();
           // The wake turn signals nothing; the earlier step completes only on a done (hearsay-tools/cezarion#1620).
-          expect(manager.sendMessage(run.id, [{ type: 'text', text: HARNESS_ADAPTERS[backend].scenarios.done! }])).toBe(true);
+          expect(manager.sendMessage(run.id, [{ type: 'text', text: HARNESS_ADAPTERS[backend].scenarios['cezar-done']! }])).toBe(true);
           await until(() => store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status !== 'pending');
           expect(store.getRun(run.id)?.steps.find(step => step.id === 'first')?.status).toBe('done');
           await until(() => !manager.isActive(run.id));
@@ -211,7 +211,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   });
 
   it('a portable human ask still takes precedence over an accepted nonfinal worker wait', async () => {
-    const run = manager.startRun({ name: 'ask chain', source: 'built-in', steps: [{ id: 'first', prompt: 'mock:ask' }, { id: 'next', command: 'echo checked' }] }, { task: 'parent', runner: 'claude' });
+    const run = manager.startRun({ name: 'ask chain', source: 'built-in', steps: [{ id: 'first', prompt: 'mock:cezar-ask' }, { id: 'next', command: 'echo checked' }] }, { task: 'parent', runner: 'claude' });
     store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
     const engine = manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> };
     await until(() => !!engine.active.get(run.id)?.sessionEverOpened);
@@ -228,13 +228,13 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
     // The answer signals done, which the uncollected worker would refuse (hearsay-tools/cezarion#1620).
     await collect(w.id);
-    expect(manager.sendMessage(run.id, [{ type: 'text', text: 'Vitest mock:done' }])).toBe(true);
+    expect(manager.sendMessage(run.id, [{ type: 'text', text: 'Vitest mock:cezar-done' }])).toBe(true);
     await until(() => store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status === 'done');
     expect(store.readEvents(run.id).filter(event => event.type === 'human-input-delivered')).toHaveLength(1);
   });
 
   it('an ordinary earlier step advances to the next check on its done without a worker wait', async () => {
-    const run = manager.startRun({ name: 'ordinary chain', source: 'built-in', steps: [{ id: 'first', prompt: 'mock:done' }, { id: 'next', command: 'echo checked' }] }, { task: 'parent', runner: 'claude' });
+    const run = manager.startRun({ name: 'ordinary chain', source: 'built-in', steps: [{ id: 'first', prompt: 'mock:cezar-done' }, { id: 'next', command: 'echo checked' }] }, { task: 'parent', runner: 'claude' });
     await until(() => terminal.includes(store.getRun(run.id)!.status));
     expect(store.getRun(run.id)?.steps.map(step => step.status)).toEqual(['done', 'done']);
     expect(semaphore.busy()).toBe(0);
@@ -261,7 +261,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       fixtureUpdateRun(w.id, { status: 'done' });
       await until(() => runInternals(manager).line.waitWakeAdmitted.has(p.id));
       const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
-      session.sendMessage([{ type: 'text', text: 'mock:ask' }]);
+      session.sendMessage([{ type: 'text', text: 'mock:cezar-ask' }]);
       await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries);
       expect(store.readEvents(p.id).some(event => event.type === 'ask.requested')).toBe(true);
       expect(waitOf(store.getRun(p.id))?.id).toBe(wait.id);
@@ -281,9 +281,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   for (const role of ['root', 'worker'] as const) {
     it(`${role}: restart re-admits a persisted human answer before its first boundary`, async () => {
       const replyGate = join(root, 'release-human-reply'); const wire = controlledWire({ humanAnswerGate: replyGate });
-      const p = await parent('mock:ask');
+      const p = await parent('mock:cezar-ask');
       await until(() => store.getRun(p.id)?.status === 'waiting');
-      const w = await worker(p.id, 'mock:ask');
+      const w = await worker(p.id, 'mock:cezar-ask');
       const target = role === 'root' ? p : w;
       if (role === 'worker') {
         // A worker's question is its parent's to answer (hearsay-tools/cezarion#2410).
@@ -339,7 +339,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   });
 
   it('restart with an empty human-origin checkpoint preserves the ask without a synthetic answer', async () => {
-    const p = await parent('mock:ask');
+    const p = await parent('mock:cezar-ask');
     await until(() => store.getRun(p.id)?.status === 'waiting');
     store.updateRun(p.id, { status: 'running', continuationMessage: {
       id: randomUUID(), text: '', origin: 'human', createdAt: new Date().toISOString(),
@@ -522,7 +522,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   it.each([false, true])('monitoring synthetic delivery respects legacy pending Finish=%s before wake bookkeeping', async pending => {
     await withHeldResponse('claude', async release => {
       const p = await parent(); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
-      const w = await worker(p.id, 'mock:monitoring keep going');
+      const w = await worker(p.id, 'mock:schedule-wakeup keep going');
       vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
       manager.enqueueOwnedRun(w.id);
       await until(() => !!monitoringWakeOf(store.getRun(w.id)));
@@ -581,7 +581,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   });
 
   it('restart durably reconciles cancelled roots with superseded Finish intent', async () => {
-    const p = await parent('mock:ask'); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
+    const p = await parent('mock:cezar-ask'); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
     store.commitRootFinishIntent(p.id);
     store.updateRun(p.id, { status: 'cancelled', finishedAt: new Date().toISOString() });
     store.flush(); const checkpoint = readPersistedRuns(join(root, '.ai/cezar'));

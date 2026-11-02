@@ -293,14 +293,14 @@ describe('verified destruction retains results through explicit history deletion
     vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
     f.store.addStep(f.parent.id, { id: 'task', name: 'Task', kind: 'agent' });
     f.store.updateStep(f.parent.id, 'task', { status: 'done', sessionId: 'mock-prior', backend: 'claude' });
-    f.store.updateRun(f.parent.id, { status: 'done', workflowDef: QUICK_TASK_WORKFLOW, task: 'mock:done', worktreePath: undefined });
+    f.store.updateRun(f.parent.id, { status: 'done', workflowDef: QUICK_TASK_WORKFLOW, task: 'mock:cezar-done', worktreePath: undefined });
     vi.mocked(rmSync).mockImplementationOnce(() => { throw Error('history temporarily busy'); });
     expect(f.store.deleteRun(f.parent.id)).toBe(false);
     expect(f.store.getRun(f.parent.id)?.delegation).toMatchObject({ historyDeletion: 'pending' });
   }
   it('refuses Continue after interrupted parent deletion without resetting its retry marker', () => {
     interruptedParentDeletion();
-    expect(f.manager.continueRun(f.parent.id, { text: 'mock:done' }, true)).toMatchObject({ ok: false, error: expect.stringContaining('deletion') });
+    expect(f.manager.continueRun(f.parent.id, { text: 'mock:cezar-done' }, true)).toMatchObject({ ok: false, error: expect.stringContaining('deletion') });
     expect(f.manager.isActive(f.parent.id)).toBe(false);
     expect(f.store.deleteRun(f.parent.id)).toBe(true);
   });
@@ -328,8 +328,8 @@ describe('verified destruction retains results through explicit history deletion
     const before = f.store.readEvents(f.parent.id);
     const engine = f.manager as unknown as { execute(id: string, workflow: typeof QUICK_TASK_WORKFLOW, input: { task: string }): Promise<void>;
       runContinuation(id: string, step: string, session: string | undefined, backend: 'claude', prompt: string): Promise<void> };
-    if (kind === 'execute') await engine.execute(f.parent.id, QUICK_TASK_WORKFLOW, { task: 'mock:done' });
-    else await engine.runContinuation(f.parent.id, 'task', 'mock-prior', 'claude', 'mock:done');
+    if (kind === 'execute') await engine.execute(f.parent.id, QUICK_TASK_WORKFLOW, { task: 'mock:cezar-done' });
+    else await engine.runContinuation(f.parent.id, 'task', 'mock-prior', 'claude', 'mock:cezar-done');
     expect(f.store.readEvents(f.parent.id)).toEqual(before);
     expect(existsSync(join(f.root, '.ai/cezar/worktrees', f.parent.id))).toBe(false);
     expect(f.manager.isActive(f.parent.id)).toBe(false);

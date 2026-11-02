@@ -25,7 +25,7 @@ function native(runner: RunnerId) {
   });
 }
 
-async function start(runner: RunnerId, scenario: 'provider-error' | 'done') {
+async function start(runner: RunnerId, scenario: 'provider-error' | 'cezar-done') {
   const run = manager.startRun(QUICK_TASK_WORKFLOW, {
     task: HARNESS_ADAPTERS[runner].scenarios[scenario]!, runner, worktree: false,
   });
@@ -68,7 +68,7 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
 
     it(`${runner} R87 leaves a non-error Continue unchanged`, async () => {
       const messages = native(runner);
-      const id = await start(runner, 'done');
+      const id = await start(runner, 'cezar-done');
       const before = messages().length;
       const text = 'Keep working.\nKeep this second line.';
       expect(manager.continueRun(id, { text })).toEqual({ ok: true });
@@ -125,7 +125,7 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
 
     it(`${runner} R90 explains repeated recovery once when the interrupted task had no saved message`, async () => {
       const messages = native(runner);
-      const id = await start(runner, 'done');
+      const id = await start(runner, 'cezar-done');
       store.updateStep(id, 'task', { status: 'running', finishedAt: undefined });
       store.updateRun(id, { status: 'running', currentStepId: 'task', finishedAt: undefined, continuationMessage: undefined });
       const before = messages().length;
@@ -144,7 +144,7 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
 
     it(`${runner} R91 preserves human text that equals the legacy restart fallback`, async () => {
       const messages = native(runner);
-      const id = await start(runner, 'done');
+      const id = await start(runner, 'cezar-done');
       const text = 'The cezar process restarted while you were working on this task. Read the handoff file (CEZ_HANDOFF_FILE) to recover context, then continue the task from where you left off.';
       const before = messages().length;
       expect(manager.continueRun(id, { text })).toEqual({ ok: true });
@@ -155,7 +155,7 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
     for (const status of ['running', 'queued'] as const) {
       it(`${runner} R86 explains restart ahead of a saved ${status} continuation, without a live session`, async () => {
         const messages = native(runner);
-        const id = await start(runner, 'done');
+        const id = await start(runner, 'cezar-done');
         const original = store.getRun(id)!.steps[0]!;
         const text = 'Saved human text.\nDo not change it.';
         store.addStep(id, { id: 'continue-1', name: 'Continue', kind: 'agent', synthetic: 'continuation' });

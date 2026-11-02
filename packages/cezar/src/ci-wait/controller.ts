@@ -10,7 +10,7 @@ import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { createMiddleware } from 'hono/factory';
 import { previewStopResult } from '../preview/registration.ts';
-import { askErrorMessage, askInvalidInput, ciErrorMessage, doneErrorMessage, doneInvalidInput, previewInvalidInput, previewOversized, previewRefusal, scheduleInvalidInput, scheduleRefusal, waitInvalidInput } from './errors.ts';
+import { askErrorMessage, askInvalidInput, ciErrorMessage, toolsUnavailableMessage, doneErrorMessage, doneInvalidInput, previewInvalidInput, previewOversized, previewRefusal, scheduleInvalidInput, scheduleRefusal, waitInvalidInput } from './errors.ts';
 import { automationsToolEnabled, previewToolEnabled } from './tools.ts';
 import { SCHEDULED_TASK_LIMITS, scheduleTaskAnswerSchema, scheduleTaskRequestSchema, scheduledTasksAnswerSchema, scheduledTasksRequestSchema, type ScheduleTaskAnswer, type ScheduleTaskRequest, type ScheduledTasksAnswer, type ScheduledTasksRequest } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { cezarAskAnswerSchema, cezarAskRequestSchema, cezarCancelWaitAnswerSchema, cezarCancelWaitRequestSchema, cezarDoneAnswerSchema, cezarDoneRequestSchema, cezarWaitAnswerSchema, cezarWaitRequestSchema, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarCancelWaitRequest, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitAnswer, type CezarWaitRequest, type CezarWaitRequestInput, type Wait, type WaitVia } from '@open-mercato/cezar-contract/waits';
@@ -47,11 +47,36 @@ export type CezarToolHandlers = {
 };
 type Capability = CezarToolHandlers & { lifetime: AbortController };
 export type CiToolSession = { descriptor: NonNullable<AgentRunSpec['cezarTools']>; env: Record<string, string>; revoke(): void };
-const unavailable = { code: 'unavailable' as const, message: ciErrorMessage('unavailable') };
 /** `cezar_ask` carries up to 20,000 characters of context (hearsay-tools/cezarion#1458). JSON can
  *  escape a character to six bytes, so the largest valid card (context, four questions with four
  *  options, every field at its limit) is about 166 KB; 256 KiB admits it with room to spare. */
 const ASK_BODY_LIMIT = 262_144;
+
+function temporaryRootFor(): string {
+  return Buffer.byteLength(tmpdir()) > 64 ? '/tmp' : tmpdir();
+}
+
+/** Where the private socket lives, or undefined for a Windows named pipe. */
+function socketRoot(): string | undefined {
+  return process.platform === 'win32' ? undefined : temporaryRootFor();
+}
+
+/** The OS error's own words (code, syscall and path), bounded; never an environment value. */
+function startFailureDetail(error: unknown): string {
+  const text = error instanceof Error ? error.message : String(error);
+  return text.replace(/\s+/g, ' ').trim().slice(0, 300) || 'unknown error';
+}
+
+/**
+ * hearsay-tools/cezarion#2397: every agent session needs the lifecycle tools, so a controller that
+ * cannot start fails the launch with this error. Its message names the cause and the fix.
+ */
+export class ToolsUnavailableError extends Error {
+  constructor(readonly detail: string, readonly directory: string | undefined) {
+    super(toolsUnavailableMessage(detail, directory));
+    this.name = 'ToolsUnavailableError';
+  }
+}
 
 /** Separate from the cockpit and delegation APIs. No TCP listener or durable credentials. */
 export class CiToolController {
@@ -66,7 +91,7 @@ export class CiToolController {
     try {
       // sockaddr_un is only 104–108 bytes on supported Unix platforms. Agent
       // worktree TMPDIRs can be much longer; the endpoint must not inherit that.
-      const temporaryRoot = Buffer.byteLength(tmpdir()) > 64 ? '/tmp' : tmpdir();
+      const temporaryRoot = temporaryRootFor();
       directory = process.platform === 'win32' ? undefined : await mkdtemp(join(temporaryRoot, 'cez-ci-'));
       if (directory) await chmod(directory, 0o700);
       const address = directory ? join(directory, 'ipc') : `\\\\.\\pipe\\cezar-ci-${randomUUID()}`;
@@ -82,16 +107,16 @@ export class CiToolController {
       if (directory) await chmod(address, 0o600);
       server.unref();
       return controller;
-    } catch {
+    } catch (error) {
       server?.close();
       server?.closeAllConnections();
       if (directory) await rm(directory, { recursive: true, force: true }).catch(() => {});
-      throw new Error('CI tool unavailable: private IPC could not start');
+      throw new ToolsUnavailableError(startFailureDetail(error), socketRoot());
     }
   }
 
   provision(handlers: CezarToolHandlers): CiToolSession {
-    if (this.closed) throw new Error(unavailable.message);
+    if (this.closed) throw new ToolsUnavailableError('the tool controller was closed', socketRoot());
     const token = randomBytes(32).toString('hex');
     const capability: Capability = { ...handlers, lifetime: new AbortController() };
     this.capabilities.set(token, capability);

@@ -379,7 +379,6 @@ export class OmpRunner implements AgentRunner {
       cli: 'omp',
       opts,
       onEvent,
-      textChunks,
       isOpen: () => open,
       turnId: () => ompUi.turnId,
       humanAcksPending: () => humanAcks.size > 0,
@@ -402,7 +401,7 @@ export class OmpRunner implements AgentRunner {
       if (!open) return false;
       // A steer joins the running turn; only an idle prompt opens one (#505).
       const opensTurn = !ompUi.turnId;
-      rpcInput.beginPrompt(opensTurn);
+      rpcInput.beginPrompt();
       const { message, images } = toPiPrompt(content);
       const id = requestId ?? `cezar-prompt-${++humanSerial}`;
       rpcInput.cancelAutoEnd();
@@ -745,8 +744,8 @@ export class OmpRunner implements AgentRunner {
       result,
       sendMessage,
       // A failed write returns no receipt.
-      sendAgentMessage: (content, inputIds = [], options) =>
-        rpcInput.sendAgentMessage(content, inputIds, options, sendMessage, () => false),
+      sendAgentMessage: (content, inputIds = []) =>
+        rpcInput.sendAgentMessage(content, inputIds, sendMessage, () => false),
       // A written prompt cannot be unwritten; only stop reporting an acknowledged one as held.
       discardQueuedMessages: () => { humanHeld.clear(); },
       holdsHumanInput: () => humanHeld.size > 0,

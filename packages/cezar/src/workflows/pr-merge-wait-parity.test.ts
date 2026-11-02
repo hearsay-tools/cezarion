@@ -30,14 +30,14 @@ vi.mock('node:timers/promises', async importOriginal => {
     });
   } };
 });
-const resources = vi.hoisted(() => ({ github: undefined as GithubCiClient | undefined, toolless: false }));
+const resources = vi.hoisted(() => ({ github: undefined as GithubCiClient | undefined }));
 vi.mock('../ci-wait/resources.ts', async importOriginal => {
   const original = await importOriginal<typeof import('../ci-wait/resources.ts')>();
   return { acquireCiResources(workspace: object) {
     const shared = original.acquireCiResources(workspace);
     if (!resources.github) return shared;
     const supervisor = new CiWatcherSupervisor({ github: resources.github });
-    return { ...shared, supervisor, ...(resources.toolless ? { controller: async () => undefined } : {}), release() { supervisor.close(); shared.release(); } };
+    return { ...shared, supervisor, release() { supervisor.close(); shared.release(); } };
   } };
 });
 const pr = 'https://github.com/acme/repo/pull/12';
@@ -51,7 +51,7 @@ const mergeReads = (log: string) => existsSync(log) ? readFileSync(log, 'utf8').
 // gh wire. Green checks do not end it; GitHub's merge does, with one committed, delivered input.
 describe('native PR merge wait parity', { timeout: 35_000 }, () => {
   useWorkerWaitFixture();
-  afterEach(() => { resources.github = undefined; resources.toolless = false; for (const probe of [...probes]) probe.resume(); vi.restoreAllMocks(); });
+  afterEach(() => { resources.github = undefined; for (const probe of [...probes]) probe.resume(); vi.restoreAllMocks(); });
   for (const runner of RUNNER_IDS) for (const mode of ['fresh', 'continued', 'recovered'] as const) {
     const cell = mode === 'fresh' ? 'R97' : mode === 'continued' ? 'R98' : 'R99';
     it(`${runner} ${cell} delivers one committed merge observation in ${mode} mode`, async () => {
@@ -74,7 +74,6 @@ describe('native PR merge wait parity', { timeout: 35_000 }, () => {
       }
       const wait = await manager.registerWait(run.id, { kind: 'pr', pr, until: 'merge', timeout_seconds: 120 }, 'cezar_wait', active(run.id)!.ciGeneration);
       if (mode === 'recovered') {
-        resources.toolless = true; // A missing tool controller must not prevent saved-input delivery.
         await restart();
         expect(manager.isActive(run.id)).toBe(false);
         expect(open(run.id)).toMatchObject({ id: wait.id, until: 'merge' });

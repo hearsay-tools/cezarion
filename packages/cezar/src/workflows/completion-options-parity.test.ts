@@ -4,7 +4,7 @@ import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { manager, store, root, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
-import { messagesPrompt } from './monitoring-turn.testkit.ts';
+import { toolCall } from './waits-parity.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
 // hearsay-tools/cezarion#1540: completion controls run on every native wire, fresh and Continue.
@@ -17,7 +17,7 @@ describe('task completion controls on native harnesses', { timeout: 40_000 }, ()
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline!, archiveWhenDone: true });
       await until(() => store.getRun(run.id)?.status === 'waiting');
       expect(store.getRun(run.id)?.archived).toBe(false);
-      const done = messagesPrompt(runner, ['All done.\nCEZ:DONE']);
+      const done = toolCall('cezar_done', { summary: 'All done.' });
       expect(manager.sendMessage(run.id, [{ type: 'text', text: done }])).toBe(true);
       await until(() => store.getRun(run.id)?.status === 'done' && !manager.isActive(run.id));
       expect(readPersistedRuns(join(root, '.ai/cezar')).find(row => row.id === run.id)).toMatchObject({ status: 'done', archived: true });
@@ -32,7 +32,7 @@ describe('task completion controls on native harnesses', { timeout: 40_000 }, ()
       process.env.CEZ_DRY_RUN = '0';
       process.env[HARNESS_ADAPTERS[runner].binEnv] = HARNESS_ADAPTERS[runner].mockBin;
       for (const enabled of [false, true]) {
-        const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.done!,
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['cezar-done']!,
           ...(enabled ? { archiveWhenDone: true, autoMergePr: true } : {}) });
         await until(() => store.getRun(run.id)?.status === 'done' && !manager.isActive(run.id));
         const row = readPersistedRuns(join(root, '.ai/cezar')).find(row => row.id === run.id);

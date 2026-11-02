@@ -31,7 +31,7 @@ const WORKFLOW: WorkflowDef = {
   name: 'setup-test',
   source: 'built-in',
   steps: [
-    { id: 'work', prompt: '{{task}} mock:done' },
+    { id: 'work', prompt: '{{task}} mock:cezar-done' },
     { id: 'verify', command: 'true' },
   ],
 };
@@ -154,7 +154,7 @@ describe('worktree setup on task start (#917)', () => {
     expect(messages(f, id).some((m) => m.includes('worktree setup'))).toBe(false);
     // The session-context prefix (hearsay-tools/cezarion#1584) comes first; setup adds nothing after it.
     const opening = openingMessages(f)[0]!;
-    expect(opening.slice(opening.lastIndexOf('\n\n---\n\n') + '\n\n---\n\n'.length)).toBe('do the thing mock:done');
+    expect(opening.slice(opening.lastIndexOf('\n\n---\n\n') + '\n\n---\n\n'.length)).toBe('do the thing mock:cezar-done');
   }, 60_000);
 
   it('an in-place run never runs setup', async () => {

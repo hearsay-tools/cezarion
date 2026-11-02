@@ -43,7 +43,7 @@ const promptArg = stdinPrompt || positionalPrompt;
 const promptBoundary = promptArg.lastIndexOf('\n\n---\n\n');
 const rawPrompt = promptBoundary < 0 ? promptArg : promptArg.slice(promptBoundary + '\n\n---\n\n'.length);
 const taggedScenarios = [
-  ['resume-done', 'a0000001'], ['autonomous-ask-cap', 'a0000002'],
+  ['resume-cezar-done', 'a0000001'], ['autonomous-cezar-ask-cap', 'a0000002'],
   ['autonomous-cap', 'a0000003'], ['silent-tail-late-turn-start', 'a0000004'],
   ['silent-tail-no-reply', 'a0000005'], ['silent-tail-late-reply', 'a0000006'],
   ['silent-tail-slow-done', 'a0000007'], ['silent-tail-again', 'a0000008'],
@@ -86,6 +86,12 @@ const waitForRelease = async (fallbackMs) => {
   }
 };
 const finish = (text) => { assistant(text); result(text); };
+// hearsay-tools/cezarion#2397: a reply that finishes, asks or waits calls that cezar tool over
+// the --plugin-dir MCP config before its turn ends. Returns '' or a note for the text.
+const tools = () => import('./mock-ci-tool.mjs');
+const lifecycle = async (call) => (await tools()).lifecycleCall('cursor', args, ...call);
+const done = async (text) => text + await lifecycle((await tools()).DONE);
+const askLibrary = async () => 'Pick one.' + await lifecycle((await tools()).ask());
 const log = process.env.CEZ_MOCK_CURSOR_PRINT_LOG;
 if (log) appendFileSync(log, `${JSON.stringify({ pid: process.pid, resumeId, id, args,
   promptSource: stdinPrompt ? 'stdin' : 'argv', prompt: promptArg })}\n`);
@@ -127,12 +133,6 @@ if (mode === 'model-rejection-after-init' || mode === 'model-rejection-after-wor
   rejectModel(); process.exit(1);
 }
 if (mode === 'no-result') process.exit(0);
-if (mode === 'portable-ask' && !resumeId) {
-  const ask = 'CEZ:ASK {"questions":[{"header":"Library","question":"Which library?","multiSelect":false,"options":[{"label":"Vitest","description":"Use Vitest"},{"label":"Jest","description":"Use Jest"}]}]}';
-  frame({ type: 'assistant', session_id: id, message: { role: 'assistant', content: [{ type: 'text', text: `Choose one.\n${ask}` }] } });
-  frame({ type: 'result', subtype: 'success', session_id: id, is_error: false, result: `Choose one.\n${ask}` });
-  process.exit(0);
-}
 if (mode === 'native-question') {
   const args = { title: 'Choice', questions: [{ prompt: 'Choose', options: [{ label: 'Alpha' }, { label: 'Beta' }], allowMultiple: false }], runAsync: false };
   const call = { askQuestionToolCall: { args } };
@@ -153,11 +153,11 @@ if (prompt.includes('mock:crash-stderr')) {
 }
 if (prompt.includes('mock:autonomous') || prompt.startsWith('Continue working autonomously until the task is fully complete.')) {
   const { autonomousReply } = await import('./mock-autonomous.mjs');
-  if (origin === 'autonomous-ask-cap' && resumeId && prompt.startsWith('Continue working autonomously until the task is fully complete.')) {
+  if (origin === 'autonomous-cezar-ask-cap' && resumeId && prompt.startsWith('Continue working autonomously until the task is fully complete.')) {
     finish('Still working.'); process.exit(0);
   }
   const tagged = origin?.startsWith('autonomous') ? `${prompt} mock:${origin}` : prompt;
-  finish(autonomousReply(tagged)); process.exit(0);
+  finish(await autonomousReply(tagged, lifecycle)); process.exit(0);
 }
 if (prompt.includes('mock:silent-tail') || prompt.includes('mock:tool-tail') ||
     (silentOrigin && prompt.includes(NO_WAIT_NUDGE_PREFIX))) {
@@ -171,13 +171,13 @@ if (prompt.includes('mock:silent-tail') || prompt.includes('mock:tool-tail') ||
       await waitForRelease(silent.SLOW_DONE_TAIL_MS);
     }
     if (origin === 'silent-tail-again') { result(''); process.exit(0); }
-    finish(origin === 'tool-tail' ? silent.FINAL_MESSAGE_STANDING : silent.SILENT_TAIL_DONE);
+    finish(await silent.finalNudgeText(origin === 'tool-tail' ? 'standing' : 'done', lifecycle));
     process.exit(0);
   }
   assistant(prompt.includes('mock:tool-tail') ? silent.TOOL_TAIL_OPENING : silent.SILENT_TAIL_OPENING);
   readTool(origin === 'silent-tail-again' ? silent.SILENT_TAIL_REASONING : 'A project'); result(''); process.exit(0);
 }
-if (origin === 'resume-done' && resumeId) { finish('Resumed work finished.\nCEZ:DONE'); process.exit(0); }
+if (origin === 'resume-cezar-done' && resumeId) { finish(await done('Resumed work finished.')); process.exit(0); }
 if (prompt.includes('mock:cezar-tool')) {
   const { toolPrompt } = await import('./mock-ci-tool.mjs');
   finish(await toolPrompt('cursor', args, prompt)); process.exit(0);
@@ -205,15 +205,15 @@ if (prompt.includes('mock:no-progress')) {
 if (prompt.includes('mock:busy-progress')) {
   // N2: a long turn whose native output keeps it alive, then a done (hearsay-tools/cezarion#1620).
   for (let i = 0; i < 24; i++) { assistant('working\n'); await new Promise(resolve => setTimeout(resolve, 100)); }
-  finish('busy complete\n\nCEZ:DONE'); process.exit(0);
+  finish(await done('busy complete')); process.exit(0);
 }
-if (prompt.includes('mock:hold-done')) { await waitForRelease(400); finish('parity hold-done: content after the pause\nCEZ:DONE'); process.exit(0); }
-if (prompt.includes('mock:hold-ask')) { await waitForRelease(400); finish('Pick one.\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}'); process.exit(0); }
+if (prompt.includes('mock:hold-cezar-done')) { await waitForRelease(400); finish(await done('parity hold-done: content after the pause')); process.exit(0); }
+if (prompt.includes('mock:hold-cezar-ask')) { await waitForRelease(400); finish(await askLibrary()); process.exit(0); }
 if (prompt.includes('mock:hold-gated')) { await waitForRelease(500); finish('parity hold-gated: content after the pause'); process.exit(0); }
 if (prompt.includes('mock:multi-pr-refs')) {
   const { multiPrText, unrelatedPr } = await import('./mock-multi-pr.mjs');
   readTool(unrelatedPr);
-  const text = multiPrText(prompt);
+  const text = await multiPrText(prompt, lifecycle);
   for (const block of text.split('\n')) assistant(block + '\n');
   result(text); process.exit(0);
 }
@@ -222,23 +222,13 @@ if (prompt.includes('mock:turn-messages:')) {
   for (const message of turnMessages(prompt)) assistant(message + '\n');
   result(''); process.exit(0);
 }
-if (prompt.includes('mock:ask-snapshot')) {
-  finish(prompt.includes('mock:ask-snapshot-bad') ? 'CEZ:ASK {not valid json'
-    : 'Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}');
-  process.exit(0);
-}
-if (prompt.includes('mock:ask-prose')) { finish('Use `CEZ:ASK {"questions":[]}` in your reply.\n> CEZ:ASK {not valid json'); process.exit(0); }
 if (prompt.includes('mock:ask-bad')) { finish('Malformed question skipped.'); process.exit(0); }
 if (!failureControl && prompt.includes('mock:provider-error')) { result('RetriableError: provider unavailable', true); process.exit(0); }
-if (prompt.includes('mock:split-text')) {
-  const text = 'parity split text\nCEZ:MONITORING'; assistant(text); result(text); process.exit(0);
+if (prompt.includes('mock:cezar-done') || (resumeId && /Library:|Tests:|Plan:/.test(prompt))) {
+  finish(await done('Done.')); process.exit(0);
 }
-if (prompt.includes('mock:done') || (resumeId && /Library:|Tests:|Plan:/.test(prompt))) {
-  const text = 'Done.\nCEZ:DONE'; assistant(text); result(text); process.exit(0);
-}
-if (prompt.includes('mock:ask') && (!resumeId || prompt.includes('mock:ask-reply-late'))) {
-  const text = 'Pick one.\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}';
-  assistant(text); result(text); process.exit(0);
+if (prompt.includes('mock:cezar-ask') && (!resumeId || prompt.includes('mock:cezar-ask-reply-late'))) {
+  finish(await askLibrary()); process.exit(0);
 }
 if (prompt.includes('mock:hold')) await new Promise(resolve => setTimeout(resolve, 500));
 if (prompt === 'inspect the working tree' || prompt.includes('mock:baseline')) {

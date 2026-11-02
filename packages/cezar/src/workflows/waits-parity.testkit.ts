@@ -13,14 +13,12 @@ export const WAIT_CRITERIA = [
   { id: 'U9', scenario: 'provider-error', name: 'provider failure and clean close with a ci or timer wait open leave the run recoverable and the next wake delivers' },
   { id: 'U2', scenario: 'baseline', name: 'ci and timer open: the timer wakes, ci stays open and is in the footer, the turn end re-parks without re-registering, the later ci result is delivered' },
   { id: 'U3', scenario: 'hold', name: 'a human message during a ci wait is delivered, the wait stays open, and its result arrives in a later turn' },
-  { id: 'U7', scenario: 'turn-messages', name: 'cezar_wait, the monitoring line and ScheduleWakeup land in the same wait list' },
-  { id: 'U7m', scenario: 'turn-messages', name: 'the monitoring line adds no timer beside an open ci, timer or worker wait' },
-  { id: 'U7f', scenario: 'turn-messages', name: 'the monitoring line alone opens an identifiable timer and keeps its deadline' },
+  { id: 'U7', scenario: 'turn-messages', name: 'cezar_wait and ScheduleWakeup land in the same wait list' },
   { id: 'U8', scenario: 'baseline', name: 'a ci or timer park keeps its slot and wakes without queueing at maxParallel 1' },
   { id: 'U8l', scenario: 'hold-gated', name: 'a wake of a started run takes the slot before an unstarted task that queued earlier, at maxParallel 1' },
   { id: 'U8h', scenario: 'baseline', name: 'a ci result for a park on a held account waits in the line and is delivered once the hold lifts' },
   { id: 'U10', scenario: 'hold-gated', name: 'timer wakes stop at the automatic-wake budget; one admitted turn is charged once' },
-  { id: 'U11', scenario: 'turn-messages', name: 'an alias timer open at a blocked done keeps its deadline, the run parks on it with the refusal as a note and no nudge, and its result is delivered' },
+  { id: 'U11', scenario: 'turn-messages', name: 'a timer open at a blocked done keeps its deadline, the run parks on it with the refusal as a note and no nudge, and its result is delivered' },
   { id: 'U12', scenario: 'turn-messages', name: 'a wait result beside a pending portable question is checkpointed only on its delayed provider acknowledgement, and the question stays answerable' },
   { id: 'U13', scenario: 'turn-messages', name: 'a wait result beside a pending portable question whose acknowledgement is rejected stays resolved, is retried, and the question stays answerable' },
   { id: 'U14', scenario: 'provider-error', name: 'a wait-result delivery whose sessions persistently fail or close cleanly stops at the delivery bound, the run fails keeping its result, Continue delivers it once, and Stop discards it' },
@@ -28,11 +26,12 @@ export const WAIT_CRITERIA = [
   { id: 'U16b', scenario: 'baseline', name: 'timers due at the spent budget with no live session are cancelled, and the last one opens a budget human wait the user answers' },
   { id: 'U9c', scenario: 'baseline', name: 'with a delivery-failure count on the record and the store refusing writes, Finish still stops the run' },
   // hearsay-tools/cezarion#1234: human waits.
-  { id: 'U7h', scenario: 'ask', name: 'the ask line, cezar_ask (an open question included) and a native ask land in the same wait list' },
+  { id: 'U7h', scenario: 'ask', name: 'cezar_ask (an open question included) and a native ask land in the same wait list' },
   { id: 'U7k', scenario: 'ask', name: 'cezar_ask delivers its context to the human wait and the card' },
+  { id: 'U7a', scenario: 'baseline', name: 'cezar_done after cezar_ask in the same turn is refused and the question stays pending' },
   { id: 'U9h', scenario: 'provider-error', name: 'provider failure and clean close with a human wait open leave the run recoverable' },
   { id: 'U6', scenario: 'baseline', name: 'cezar_done is refused with live workers and with settled but uncollected workers, accepted once collected, and open waits are cancelled' },
-  { id: 'U7d', scenario: 'baseline', name: 'the done line and cezar_done finish through the same path' },
+  { id: 'U7d', scenario: 'baseline', name: 'cezar_done finishes through the done path in a message turn and in a Continue' },
   { id: 'U7q', scenario: 'baseline', name: 'live and deferred human answers commit their reset wake counters with the answer and keep the flush budget decisions' },
   { id: 'U6s', scenario: 'baseline', name: 'cezar_done in a workflow step that is not the last completes that step, and the next step runs' },
   // hearsay-tools/cezarion#1234 phase 2b: the turn-end rule.
@@ -49,7 +48,7 @@ export const WAIT_CRITERIA = [
   { id: 'U2c', scenario: 'baseline', name: 'ci and worker open: the ci result wakes the agent with the worker wait still open and in the footer, and the later worker result is delivered' },
   { id: 'U3w', scenario: 'baseline', name: 'a worker message during a worker wait wakes the parent and the worker wait stays open' },
   // hearsay-tools/cezarion#1327: a worker that parks while its parent waits on it tells the parent why.
-  { id: 'U3n', scenario: 'turn-messages', name: 'a worker that parks on the monitoring line while its parent waits on it wakes the parent with one notice naming its timer, the wait stays open, a second park sends none, and settlement resolves the wait' },
+  { id: 'U3n', scenario: 'turn-messages', name: 'a worker that parks on a timer while its parent waits on it wakes the parent with one notice naming its timer, the wait stays open, a second park sends none, and settlement resolves the wait' },
   { id: 'U3r', scenario: 'turn-messages', name: 'a worker parked before its parent waits on it sends its notice when the wait opens' },
   { id: 'U3d', scenario: 'turn-messages', name: 'a worker that finishes while its parent waits on it sends no notice' },
   { id: 'U7w', scenario: 'baseline', name: 'cez worker wait and cezar_wait kind worker land in the same wait list' },
@@ -67,8 +66,6 @@ export const WAIT_CRITERIA = [
   { id: 'U20', scenario: 'baseline', name: 'a done blocked by live workers at the turn end gets one refusal nudge with the will-wait sentence and opens no wait' },
   { id: 'U20u', scenario: 'baseline', name: 'a done blocked by a settled, uncollected worker gets the uncollected refusal nudge without the will-wait sentence' },
   { id: 'U20h', scenario: 'baseline', name: 'a human message, in the opening session or a continuation, after an unanswered refusal nudge starts a fresh cycle' },
-  { id: 'U20m', scenario: 'baseline', name: 'a worker message after an unanswered refusal nudge starts a fresh cycle' },
-  { id: 'U20a', scenario: 'baseline', name: 'a done blocked in the turn that answers a worker message acknowledged after that turn ended still gets the refusal nudge' },
   { id: 'U21', scenario: 'baseline', name: 'an ignored refusal with live workers parks on a Cezar worker wait that settlement wakes' },
   { id: 'U21r', scenario: 'baseline', name: 'after a restart, a deadline-less completion wait resolves on the worker\'s settlement and wakes the parent once' },
   { id: 'U21m', scenario: 'baseline', name: 'a worker message wakes a parent parked on the completion wait and the wait stays open' },
@@ -84,7 +81,7 @@ export const WAIT_CRITERIA = [
   { id: 'U22x', scenario: 'baseline', name: 'Stop retires a refusal a closed session still owes, and a Continue after it does not deliver it' },
   { id: 'U24', scenario: 'baseline', name: 'a worker\'s second no-wait turn end asks its parent, and the reply resumes it' },
   { id: 'U24r', scenario: 'baseline', name: 'a parent\'s reply to a worker question whose session closed opens a continuation that answers it in one commit' },
-  { id: 'U26', scenario: 'baseline', name: 'footer capability follows provisioning on opening, live delivery, Continue and no-session recovery' },
+  { id: 'U26', scenario: 'baseline', name: 'a launch whose cezar tools cannot start fails with the cause, frees its slot, and the next launch after the repair is taught the tools' },
   { id: 'U25', scenario: 'baseline', name: 'an automatic message supersedes a worker\'s fallback question' },
   // hearsay-tools/cezarion#1446: process waits.
   { id: 'U1p', scenario: 'baseline', name: 'a process wait registers through cezar_wait on the native wire, parks keeping its slot, and wakes with its exit code' },
@@ -103,6 +100,10 @@ export const WAIT_CRITERIA = [
  *  Several in one prompt run in order; `wait_id: 'last'` names the previous answer's wait. */
 export function toolCall(name: 'cezar_wait' | 'cezar_ask' | 'cezar_cancel_wait' | 'cezar_done', args: Record<string, unknown>): string {
   return `mock:cezar-tool ${name} ${Buffer.from(JSON.stringify(args)).toString('base64url')}`;
+}
+/** Between the `toolCall`s around it, the mock holds its turn until the file at `path` exists. */
+export function gate(path: string): string {
+  return `mock:gate ${Buffer.from(path).toString('base64url')}`;
 }
 /** After the `toolCall`s in the same prompt, the turn ends with `text`. */
 export function thenSay(text: string): string {

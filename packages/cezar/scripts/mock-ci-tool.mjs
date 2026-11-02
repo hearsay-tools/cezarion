@@ -11,59 +11,88 @@ export async function probeCiTool(backend, wire, pr = process.env.CEZ_MOCK_CI_PR
 }
 
 // Calls one cezar tool the way the real harness would: through the wired MCP server (or Pi/OMP extension).
-export async function probeCezarTool(backend, wire, name, args) {
-  let result;
-  if (backend === 'pi' || backend === 'omp') {
-    const extensions = wire.flatMap((arg, index) => arg === '--extension' ? [wire[index + 1]] : []);
-    const path = extensions.find(path => basename(path) === `${backend}-ci-wait.mjs`);
-    if (!path) throw new Error('CI extension absent');
-    // The real Pi loader compiles TS when running from source; installed script uses JS.
-    if (existsSync(new URL('../src/ci-wait/mcp.ts', import.meta.url))) { const { register } = await import('tsx/esm/api'); register(); }
-    const { default: extension } = await import(pathToFileURL(path));
-    const tools = [];
-    extension({ registerTool(tool) { tools.push(tool); } });
-    const tool = tools.find(tool => tool.name === name);
-    if (!tool) throw new Error(`${name} not registered`);
-    // A registered tool pi's tool selection hides answers the model the way pi 1.0.4 does.
-    const response = backend === 'pi' && !piAdmits(wire, name)
-      ? { isError: true, content: [{ type: 'text', text: `Tool ${name} not found` }] }
-      : await tool.execute('ci-1', args);
-    result = { names: tools.map(tool => tool.name), response };
-  } else {
-    let server; let env;
-    if (backend === 'claude') {
-      server = Object.values(JSON.parse(wire[wire.indexOf('--mcp-config') + 1]).mcpServers)[0];
-      env = Object.fromEntries(Object.entries(server.env ?? {}).map(([key, value]) => [key, value.replace(/\$\{([^}]+)\}/g, (_, name) => process.env[name] ?? '')]));
-    } else if (backend === 'codex') {
-      server = Object.entries(wire.config ?? {}).find(([key]) => key.startsWith('mcp_servers.cezar_ci_'))?.[1];
-      env = Object.fromEntries((server?.env_vars ?? []).map(name => [name, process.env[name]]));
-    } else if (backend === 'cursor') {
-      if (Array.isArray(wire)) {
-        const dir = wire[wire.indexOf('--plugin-dir') + 1];
-        const servers = JSON.parse(readFileSync(join(dir, 'mcp.json'), 'utf8')).mcpServers;
-        server = Object.entries(servers).find(([name]) => name.startsWith('cezar_ci_'))?.[1];
-        env = Object.fromEntries(Object.entries(server?.env ?? {}).map(([key, value]) =>
-          [key, value.replace(/\$\{([^}]+)\}/g, (_, name) => process.env[name] ?? '')]));
-      } else {
-        server = wire.mcpServers.find(server => server.name.startsWith('cezar_ci_'));
-        env = Object.fromEntries(server?.env.map(({name,value}) => [name,value]) ?? []);
-      }
-    } else {
-      const local = Object.entries(wire.mcp ?? {}).find(([key]) => key.startsWith('cezar_ci_'))?.[1];
-      server = local && { command: local.command[0], args: local.command.slice(1) };
-      env = { ...process.env, ...local?.environment };
-    }
-    if (!server) throw new Error('CI server absent');
-    const client = new Client({ name: 'offline-harness', version: '1' });
-    try {
-      await client.connect(new StdioClientTransport({ command: server.command, args: server.args, env, stderr: 'pipe' }));
-      const list = await client.listTools();
-      result = { names: list.tools.map(tool => tool.name), response: await client.callTool({ name, arguments: args }) };
-    } finally { await client.close(); }
-  }
-  if (process.env.CEZ_MOCK_CI_RESULT) writeFileSync(process.env.CEZ_MOCK_CI_RESULT, JSON.stringify(result));
+export async function probeCezarTool(backend, wire, name, args, record = true) {
+  const result = backend === 'pi' || backend === 'omp'
+    ? await probeExtensionTool(backend, wire, name, args)
+    : await probeMcpTool(mcpServerOf(backend, wire), name, args);
+  if (record && process.env.CEZ_MOCK_CI_RESULT) writeFileSync(process.env.CEZ_MOCK_CI_RESULT, JSON.stringify(result));
   return result;
 }
+
+/** Pi and OMP load the tools as an extension the mock imports and calls in process. */
+async function probeExtensionTool(backend, wire, name, args) {
+  const extensions = wire.flatMap((arg, index) => arg === '--extension' ? [wire[index + 1]] : []);
+  const path = extensions.find(path => basename(path) === `${backend}-ci-wait.mjs`);
+  if (!path) throw new Error('CI extension absent');
+  // The real Pi loader compiles TS when running from source; installed script uses JS.
+  if (existsSync(new URL('../src/ci-wait/mcp.ts', import.meta.url))) { const { register } = await import('tsx/esm/api'); register(); }
+  const { default: extension } = await import(pathToFileURL(path));
+  const tools = [];
+  extension({ registerTool(tool) { tools.push(tool); } });
+  const tool = tools.find(tool => tool.name === name);
+  if (!tool) throw new Error(`${name} not registered`);
+  // A registered tool pi's tool selection hides answers the model the way pi 1.0.4 does.
+  const response = backend === 'pi' && !piAdmits(wire, name)
+    ? { isError: true, content: [{ type: 'text', text: `Tool ${name} not found` }] }
+    : await tool.execute('ci-1', args);
+  return { names: tools.map(tool => tool.name), response };
+}
+
+/** `${NAME}` placeholders in a server's env resolve from this process, as the harness does. */
+const expandEnv = (env) => Object.fromEntries(Object.entries(env ?? {}).map(([key, value]) =>
+  [key, value.replace(/\$\{([^}]+)\}/g, (_, name) => process.env[name] ?? '')]));
+
+/** The cezar MCP server a runner's wire names, with the environment it starts under. */
+function mcpServerOf(backend, wire) {
+  if (backend === 'claude') {
+    const server = Object.values(JSON.parse(wire[wire.indexOf('--mcp-config') + 1]).mcpServers)[0];
+    return { server, env: expandEnv(server.env) };
+  }
+  if (backend === 'codex') {
+    const server = Object.entries(wire.config ?? {}).find(([key]) => key.startsWith('mcp_servers.cezar_ci_'))?.[1];
+    return { server, env: Object.fromEntries((server?.env_vars ?? []).map(name => [name, process.env[name]])) };
+  }
+  if (backend === 'cursor') return cursorServerOf(wire);
+  const local = Object.entries(wire.mcp ?? {}).find(([key]) => key.startsWith('cezar_ci_'))?.[1];
+  return { server: local && { command: local.command[0], args: local.command.slice(1) }, env: { ...process.env, ...local?.environment } };
+}
+
+/** Cursor print names the server in its plugin directory; the ACP-shaped wire lists it inline. */
+function cursorServerOf(wire) {
+  if (!Array.isArray(wire)) {
+    const server = wire.mcpServers.find(server => server.name.startsWith('cezar_ci_'));
+    return { server, env: Object.fromEntries(server?.env.map(({ name, value }) => [name, value]) ?? []) };
+  }
+  const dir = wire[wire.indexOf('--plugin-dir') + 1];
+  const servers = JSON.parse(readFileSync(join(dir, 'mcp.json'), 'utf8')).mcpServers;
+  const server = Object.entries(servers).find(([name]) => name.startsWith('cezar_ci_'))?.[1];
+  return { server, env: expandEnv(server?.env) };
+}
+
+async function probeMcpTool({ server, env }, name, args) {
+  if (!server) throw new Error('CI server absent');
+  const client = new Client({ name: 'offline-harness', version: '1' });
+  try {
+    await client.connect(new StdioClientTransport({ command: server.command, args: server.args, env, stderr: 'pipe' }));
+    const list = await client.listTools();
+    return { names: list.tools.map(tool => tool.name), response: await client.callTool({ name, arguments: args }) };
+  } finally { await client.close(); }
+}
+
+// hearsay-tools/cezarion#2397: a scripted reply that finishes, asks or waits calls the cezar
+// lifecycle tool over the session's own wire before its turn ends, as an agent does. It
+// returns '' (a refusal is the tool's answer, not the mock's failure), or a note for the turn
+// text when the tool could not be reached, so the transcript says why the turn did not settle.
+export async function lifecycleCall(backend, wire, name, args) {
+  try { await probeCezarTool(backend, wire, name, args, false); return ''; }
+  catch (error) { return `\n\n(mock: ${name} failed: ${error?.message ?? error})`; }
+}
+/** The one-question card the portable ask scenarios send. */
+export const LIBRARY_QUESTIONS = [{ header: 'Library', question: 'Which test library?', options: [{ label: 'Vitest' }, { label: 'Node test' }] }];
+export const ASK_CONTEXT = 'A choice is needed before I continue.';
+export const DONE = ['cezar_done', {}];
+export const ask = (questions = LIBRARY_QUESTIONS, context = ASK_CONTEXT) => ['cezar_ask', { context, questions }];
+export const wait = (note = 'Re-check the downstream work.') => ['cezar_wait', { kind: 'timer', seconds: 60, note }];
 
 // pi reads --tools as an allowlist and --no-tools as an empty one; with neither (cezar's default
 // list sends --no-builtin-tools), an extension's tools are active once registered
@@ -83,13 +112,16 @@ export async function ciPrompt(backend, wire, text) {
 // `mock:cezar-tool <name> <base64-json-args>` calls any cezar tool with those arguments
 // (hearsay-tools/cezarion#1233). Base64, standard or URL-safe, survives every wire's escaping.
 // Several calls run in order within one turn; `"wait_id": "last"` names the wait the previous
-// answer registered, so a turn can open a wait and cancel it.
+// answer registered, so a turn can open a wait and cancel it. `mock:gate <base64 path>` between
+// them holds the turn there until that file exists, so a test can act between two calls, or
+// between the last call and the turn end (hearsay-tools/cezarion#2397).
 export async function toolPrompt(backend, wire, text) {
-  const matches = [...text.matchAll(/mock:cezar-tool\s+([a-z_]+)\s+([A-Za-z0-9+/=_-]+)/g)];
-  if (!matches.length) throw new Error('mock:cezar-tool needs a tool name and base64 JSON arguments');
+  const steps = [...text.matchAll(/mock:(?:cezar-tool\s+([a-z_]+)\s+([A-Za-z0-9+/=_-]+)|gate\s+([A-Za-z0-9+/=_-]+))/g)];
+  if (!steps.some(step => step[1])) throw new Error('mock:cezar-tool needs a tool name and base64 JSON arguments');
   const responses = [];
   let last;
-  for (const [, name, encoded] of matches) {
+  for (const [, name, encoded, gate] of steps) {
+    if (gate) { await gateOpen(Buffer.from(gate, 'base64').toString('utf8')); continue; }
     const args = JSON.parse(Buffer.from(encoded, 'base64').toString('utf8'));
     if (args.wait_id === 'last') args.wait_id = last;
     const result = await probeCezarTool(backend, wire, name, args);
@@ -100,6 +132,14 @@ export async function toolPrompt(backend, wire, text) {
   const then = /mock:then\s+([A-Za-z0-9+/=_-]+)/.exec(text);
   if (then) responses.push(Buffer.from(then[1], 'base64').toString('utf8'));
   return responses.join('\n');
+}
+
+async function gateOpen(path) {
+  const deadline = Date.now() + 15_000;
+  while (!existsSync(path)) {
+    if (Date.now() > deadline) throw new Error(`mock:gate ${path} was not opened`);
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
 }
 
 // `mock:preview-serve <port>` registers the e2e fixture app (`node preview-app.mjs <port>`) as a live preview.

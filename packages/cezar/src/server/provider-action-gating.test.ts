@@ -481,7 +481,7 @@ describe('provider availability preserves existing execution', () => {
       source: 'built-in',
       steps: [
         // The earlier step signals done, which it needs to advance (hearsay-tools/cezarion#1620).
-        { id: 'claude', name: 'Claude', prompt: '{{task}} mock:done', runner: 'claude' },
+        { id: 'claude', name: 'Claude', prompt: '{{task}} mock:cezar-done', runner: 'claude' },
         { id: 'codex', name: 'Codex', prompt: '{{task}}', runner: 'codex' },
       ],
     };

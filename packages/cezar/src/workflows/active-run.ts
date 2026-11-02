@@ -12,9 +12,6 @@ export interface ActiveRun {
   delegationSettings?: DelegationExecutionSettings | undefined;
   revokeDelegation?: (() => void) | undefined;
   revokeCiTools?: (() => void) | undefined;
-  /** hearsay-tools/cezarion#1234: the last session started without cezar tools, so its prompt
-   *  taught the lifecycle markers; kept after the session's tools are revoked. */
-  toolless?: boolean;
   ciGeneration?: string;
   ciTurnId?: string;
   waitWakeTurn?: AgentSession | undefined;
@@ -75,7 +72,7 @@ export interface ActiveRun {
   /** The step an accepted done closed. A workflow step that is not the last advances only on it. */
   completedStepId?: string | undefined;
   /** What declared the done `doneAtBoundary` closes on: the closing event names it. */
-  doneClose?: { via: 'cezar_done' | 'done-line'; summary?: string } | undefined;
+  doneClose?: { via: 'cezar_done'; summary?: string } | undefined;
   parkAfterAck?: { session: AgentSession; monitoring: boolean; humanGate?: boolean; nudgedLastTurn?: boolean; scheduleWakeup?: number | null | undefined } | undefined;
   /** Last completed boundary belongs to exactly this still-open session. */
   atTurnBoundary?: AgentSession | undefined;
