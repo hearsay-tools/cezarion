@@ -20,13 +20,12 @@ failed and all heavy jobs were skipped, it reports heavy verification as not
 started because review blocked it. The failed aggregate remains a merge blocker;
 it does not mean tests ran and failed.
 
-Previously, only test-green heads consumed automated review rounds. Review now
-spends rounds on preflight-green heads whose tests may later fail. The owner
-requested review before tests and accepted that later tests may fail. This can
-exhaust the unchanged cap earlier, so subsequent final-head changes may receive
-no new model review. Final-head model review was already conditional on that cap.
-The provider and review policy are unchanged; both required checks still gate
-merge.
+CodeRabbit starts automatic draft and incremental reviews on PR changes without
+a label filter or custom round cap. Its external review can start before
+preflight finishes. Heavy verification still waits for successful preflight and
+current-head review admission. The owner accepted automatic review because
+CodeRabbit is free for this open-source repository. Both required checks still
+gate merge.
 
 Local typechecking starts with `pnpm install --frozen-lockfile` in the checkout being verified, including
 nested task worktrees. Both `npm run typecheck:web` and
