@@ -3,7 +3,7 @@ vi.mock('node:fs/promises', async importOriginal => ({ ...await importOriginal<t
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, renameSync, symlinkSync, cpSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
@@ -156,7 +156,7 @@ describe('project reports', () => {
       raw.prepare('UPDATE runs SET summary = ? WHERE id = ?').run(summary!, broken.id);
       const open = vi.spyOn(fs, 'open');
       expect((await page()).reports.map(row => row.id)).toContain(cached.id);
-      expect(open).not.toHaveBeenCalled(); // Terminal task: no rescan was needed for the repaired summary.
+      expect(open.mock.calls.filter(([path]) => String(path).endsWith('/metadata.json'))).toHaveLength(0); // Page checks validate directories; no metadata rescan was needed.
     } finally { raw.close(); }
   });
 
@@ -184,7 +184,46 @@ describe('project reports', () => {
       expect((await page('?q=first.html')).total).toBe(1);
       expect((await page('?q=broken')).total).toBe(0);
       expect(getRun).not.toHaveBeenCalled();
-      expect(stat.mock.calls.every(([path]) => String(path).endsWith('/content'))).toBe(true);
+      expect(stat.mock.calls.filter(([path]) => String(path).endsWith('/content'))).toHaveLength(10); // Only page candidates, including lookahead; count never checks content.
+    } finally { raw.close(); }
+  });
+
+  it('preserves cached reports and retries a directory redirected to an empty target', async () => {
+    const run = task(); const artifact = await publish(run.id);
+    await page();
+    const directory = artifactDirectory(dataDir, run.id), saved = directory + '-saved';
+    const empty = join(root, 'empty'); mkdirSync(empty);
+    renameSync(directory, saved); symlinkSync(empty, directory, 'dir');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    store.updateRun(run.id, { status: RUN_STATUS.done }); store.flush();
+    await store.reports.reconcile(false, run.id);
+    const raw = new DatabaseSync(join(dataDir, 'runs.db'));
+    try {
+      raw.prepare('DELETE FROM meta WHERE key = ?').run(REPORTS_BACKFILL_KEY);
+      expect((await page()).reports).toEqual([]);
+      expect(raw.prepare('SELECT id FROM artifacts WHERE id = ?').get(artifact.id)).toBeTruthy();
+      expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(REPORTS_BACKFILL_KEY)).toBeUndefined();
+      expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(`reports-dirty:${run.id}`)).toBeTruthy();
+      rmSync(directory); renameSync(saved, directory);
+      expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
+      expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(`reports-dirty:${run.id}`)).toBeUndefined();
+    } finally { raw.close(); }
+  });
+
+  it('never lists same-sized outside content through a symlinked storage ancestor', async () => {
+    const run = task(); const artifact = await publish(run.id);
+    store.updateRun(run.id, { status: RUN_STATUS.done }); store.flush(); await page();
+    const directory = join(dataDir, 'runs'), saved = directory + '-saved', outside = join(root, 'outside');
+    cpSync(directory, outside, { recursive: true });
+    renameSync(directory, saved); symlinkSync(outside, directory, 'dir');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const raw = new DatabaseSync(join(dataDir, 'runs.db'), { readOnly: true });
+    try {
+      expect((await page()).reports).toEqual([]);
+      expect(raw.prepare('SELECT id FROM artifacts WHERE id = ?').get(artifact.id)).toBeTruthy();
+      expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(`reports-dirty:${run.id}`)).toBeTruthy();
+      rmSync(directory); renameSync(saved, directory);
+      expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
     } finally { raw.close(); }
   });
 

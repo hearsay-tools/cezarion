@@ -9,7 +9,7 @@ import type { RunDatabase } from '../runs/run-database.ts';
 import { REPORTS_BACKFILL_KEY, type IndexedArtifact, type ReportRow, type ReportCursor } from '../runs/report-rows.ts';
 import { parseStoredSummary } from '../runs/run-summary-page.ts';
 import type { RunRecord, RunStore } from '../runs/store.ts';
-import { artifactDirectory, readArtifactMetadataForIndex } from './store.ts';
+import { artifactDirectory, inspectArtifactStorageForIndex, readArtifactMetadataForIndex } from './store.ts';
 
 export { REPORTS_BACKFILL_KEY } from '../runs/report-rows.ts';
 const cursorSchema = z.tuple([z.iso.datetime(), z.uuid()]);
@@ -63,9 +63,11 @@ export class ReportsIndex {
       this.store.flush();
       if (this.db.getMeta(REPORTS_BACKFILL_KEY)) return;
       let complete = true;
-      for (const entry of await readdir(join(this.dataDir, 'runs'), { withFileTypes: true })) {
+      const scan = await inspectArtifactStorageForIndex(join(this.dataDir, 'runs'), path => readdir(path, { withFileTypes: true }));
+      if (scan.state !== 'read') return;
+      for (const entry of scan.value) {
         const id = entry.name.replace(/-artifacts$/, '');
-        if (entry.isDirectory() && entry.name.endsWith('-artifacts') && z.uuid().safeParse(id).success && this.db.has(id)) {
+        if ((entry.isDirectory() || entry.isSymbolicLink()) && entry.name.endsWith('-artifacts') && z.uuid().safeParse(id).success && this.db.has(id)) {
           if (!await this.indexRun(id)) complete = false;
         }
       }
@@ -85,12 +87,13 @@ export class ReportsIndex {
     const previous = this.db.reports.forRun(runId);
     const revision = this.db.revisionOf(runId);
     const directory = artifactDirectory(this.dataDir, runId);
-    const entries = await readdir(directory).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return [];
-      console.warn(`[cez] Report scan could not be completed: ${runId}`, error);
-      return null;
-    });
-    if (!entries) { this.db.reports.retry(runId, revision); return false; }
+    const scan = await inspectArtifactStorageForIndex(directory, path => readdir(path));
+    if (scan.state === 'indeterminate') {
+      console.warn(`[cez] Report scan could not be completed: ${runId}`, scan.error);
+      this.db.reports.retry(runId, revision);
+      return false;
+    }
+    const entries = scan.state === 'read' ? scan.value : [];
     const artifacts: IndexedArtifact[] = [];
     let complete = true;
     for (const id of entries) {
@@ -109,15 +112,13 @@ export class ReportsIndex {
     return complete;
   }
   private async present(row: ReportRow): Promise<boolean | null> {
-    const content = join(artifactDirectory(this.dataDir, row.runId), row.id, 'content');
-    const file = await lstat(content).catch((error: NodeJS.ErrnoException) => {
-      if (error.code === 'ENOENT') return null;
+    const check = await inspectArtifactStorageForIndex(join(artifactDirectory(this.dataDir, row.runId), row.id), path => lstat(join(path, 'content')));
+    if (check.state === 'indeterminate') {
       this.db.reports.retry(row.runId, this.db.revisionOf(row.runId));
-      console.warn(`[cez] Report content could not be checked: ${row.runId}/${row.id}`, error);
-      return undefined;
-    });
-    if (file === undefined) return null;
-    if (file?.isFile() && !file.isSymbolicLink() && file.size === row.size) return true;
+      console.warn(`[cez] Report content could not be checked: ${row.runId}/${row.id}`, check.error);
+      return null;
+    }
+    if (check.state === 'read' && check.value.isFile() && !check.value.isSymbolicLink() && check.value.size === row.size) return true;
     this.db.reports.drop(row.id);
     console.warn(`[cez] Report missing or deleted: ${row.runId}/${row.id}`);
     return false;

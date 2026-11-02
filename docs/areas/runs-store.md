@@ -27,7 +27,8 @@ clears a marker only when its numeric revision is no newer than the directory re
 live and dirty runs; a transition from a live to a terminal status reconciles the settled run
 and dirty runs. Read, pin and archive events on terminal runs do not start reconciliation.
 Listing pages through joined summaries, checks content only for the selected page and fills
-past missing files. A separate joined-summary pass counts all readable matching source summaries
+past missing files. Index directory scans and page checks use the artifact reader’s anchored
+no-follow storage access. Redirected storage retains cache rows and retry markers. A separate joined-summary pass counts all readable matching source summaries
 without full-record or filesystem reads. That total is independent of the cursor; missing content
 dropped during page filling can lower it on the next request. Indeterminate filesystem reads retain cached snapshots and a durable dirty
 marker; unreadable summaries skip rows without deleting them, so repair restores their display.

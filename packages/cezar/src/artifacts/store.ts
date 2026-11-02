@@ -13,6 +13,7 @@ const MAX_RUN_BYTES = 64 * 1024 * 1024;
 const MAX_ARTIFACTS = 64;
 const MAX_DIRECTORY_ENTRIES = 1024;
 class InvalidArtifactError extends Error {}
+class RedirectedArtifactError extends Error {}
 
 const readFlags = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
@@ -138,11 +139,27 @@ async function storageDirectory(path: string, create = false): Promise<Directory
     const handle = file;
     const original = await handle.stat({ bigint: true });
     const check = async () => {
-      if (await realpath(absolute) !== absolute || !sameFile(original, await lstat(absolute, { bigint: true }))) throw new InvalidArtifactError('Redirected artifact storage');
+      if (await realpath(absolute) !== absolute || !sameFile(original, await lstat(absolute, { bigint: true }))) throw new RedirectedArtifactError('Redirected artifact storage');
     };
     await check();
     return { path: process.platform === 'linux' ? `/proc/self/fd/${handle.fd}` : absolute, check, close: () => handle.close() };
   } catch (error) { await file?.close(); throw error; }
+}
+
+/** Internal index access uses the reader's anchored, no-follow storage validation. */
+export async function inspectArtifactStorageForIndex<T>(directory: string, inspect: (path: string) => Promise<T>): Promise<
+  { state: 'read'; value: T } | { state: 'missing' } | { state: 'indeterminate'; error: unknown }
+> {
+  let root: Directory | undefined;
+  try {
+    root = await storageDirectory(directory);
+    const value = await inspect(root.path);
+    await root.check();
+    return { state: 'read', value };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { state: 'missing' };
+    return { state: 'indeterminate', error };
+  } finally { await root?.close(); }
 }
 
 async function* entries(path: string): AsyncGenerator<string> {
@@ -278,7 +295,7 @@ async function readEntry(root: Directory, runId: string, id: string, metadataOnl
     const prefix = /\.html?$/i.test(metadata.name) ? TITLE_PREFIX_BYTES : 0;
     const bytes = await boundedRead(join(path, 'content'), MAX_FILE_BYTES, true, metadataOnly ? prefix : undefined, metadata.size);
     if (!metadataOnly && createHash('sha256').update(bytes).digest('hex') !== metadata.sha256) return null;
-    if (!sameFile(await entry.stat({ bigint: true }), await lstat(join(root.path, id), { bigint: true }))) return null;
+    if (!sameFile(await entry.stat({ bigint: true }), await lstat(join(root.path, id), { bigint: true }))) throw new RedirectedArtifactError('Redirected artifact storage');
     await root.check();
     return { metadata: { ...metadata, title: artifactTitle(metadata.name, bytes) }, bytes };
   } catch (error) { if (strict) throw error; return null; } finally { await entry?.close(); }

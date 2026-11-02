@@ -417,3 +417,17 @@ it('distinguishes an indeterminate metadata read for the index while keeping pub
   await writeFile(join(dir, metadata.id, 'metadata.json'), '{broken');
   expect(await readArtifactMetadataForIndex(dir, runId, metadata.id)).toEqual({ state: 'missing' });
 });
+
+it('keeps a redirect detected during the per-entry read indeterminate for the index', async () => {
+  const runId = randomUUID(), dir = artifactDirectory(root, runId);
+  const source = join(root, 'redirect.html'); await writeFile(source, '<title>Report</title>');
+  const artifact = await publishArtifact(dir, runId, source);
+  const actual = fs.realpath;
+  let calls = 0;
+  vi.spyOn(fs, 'realpath').mockImplementation(async (...args) => {
+    const value = await actual(...args);
+    return ++calls >= 3 ? value + '-redirected' : value;
+  });
+  expect(await readArtifactMetadataForIndex(dir, runId, artifact.id)).toMatchObject({ state: 'indeterminate' });
+  expect(await readArtifactMetadata(dir, runId, artifact.id)).toBeNull();
+});

@@ -9,7 +9,7 @@ import { useSearchParamsWriter } from '@/lib/use-search-params-writer'
 import './reports.css'
 
 // Keep the source entry through both native Back and the reader's fallback navigation.
-const positions = new Map<string, { scroll: number; row: string }>()
+const positions = new Map<string, { scroll: number; row: string; pages: number }>()
 
 export function ReportsRoute() {
   const location = useLocation()
@@ -23,13 +23,19 @@ export function ReportsRoute() {
   const reports = result.data?.pages.flatMap(page => page.reports) ?? []
   useLayoutEffect(() => {
     if (!result.data || restored.current === key) return
-    restored.current = key
     const saved = positions.get(key)
     const fallback = (location.state as { filesRestoreKey?: unknown } | null)?.filesRestoreKey === key
-    if (!saved || !scroller.current || (navigationType !== 'POP' && !fallback)) return
-    scroller.current.scrollTop = saved.scroll
-    scroller.current.querySelector<HTMLAnchorElement>(`[data-report-id="${saved.row}"]`)?.focus({ preventScroll: true })
-  }, [key, result.data, location.state, navigationType])
+    if (!saved || !scroller.current || (navigationType !== 'POP' && !fallback)) { restored.current = key; return }
+    const row = scroller.current.querySelector<HTMLAnchorElement>(`[data-report-id="${saved.row}"]`)
+    if ((!row || result.data.pages.length < saved.pages) && result.hasNextPage) {
+      if (!result.isFetchingNextPage && !result.isFetchNextPageError) void result.fetchNextPage()
+      return
+    }
+    restored.current = key
+    scroller.current.scrollTop = row ? saved.scroll : 0
+    row?.focus({ preventScroll: true })
+  }, [key, result.data, result.hasNextPage, result.isFetchingNextPage, result.isFetchNextPageError, result.fetchNextPage, location.state, navigationType])
+
   const search = (value: string) => write(current => {
     if (value) current.set('q', value)
     else current.delete('q')
@@ -51,7 +57,7 @@ export function ReportsRoute() {
       </div> : <ul className="flex flex-col gap-3">
         {reports.map(report => <li key={report.id} data-slot="report-row" className="reports-row rounded-lg border border-border bg-card p-3">
           <h2 className="min-w-0 font-medium [overflow-wrap:anywhere]"><Link data-report-id={report.id} className="reports-open" to={`/tasks/${report.runId}/report?artifact=${report.id}`} state={{ readerFrom: key, filesRestoreKey: key }}
-            onClick={() => positions.set(key, { scroll: scroller.current?.scrollTop ?? 0, row: report.id })}>{reportTitle(report)}</Link></h2>
+            onClick={() => positions.set(key, { scroll: scroller.current?.scrollTop ?? 0, row: report.id, pages: result.data?.pages.length ?? 1 })}>{reportTitle(report)}</Link></h2>
           <Link className="reports-task text-sm text-accent-text underline [overflow-wrap:anywhere]" to={`/tasks/${report.runId}`}>{report.taskTitle}</Link>
           <time className="block text-xs text-soft-foreground" dateTime={report.createdAt}>{new Date(report.createdAt).toLocaleString()}</time>
         </li>)}
