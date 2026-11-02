@@ -11,27 +11,30 @@ export function readHistoryReaders(path = join(repoRoot, historyReadersFile)): H
   return (JSON.parse(readFileSync(path, 'utf8')) as { entries: HistoryReader[] }).entries;
 }
 
-/** Track nested templates and substitution braces using the delimiters blanking preserves. */
-function templatePaths(source: string, code: string): HistorySite[] {
-  const stack: Array<{ start: number; depth: number; dynamic: boolean }> = [];
-  const sites: HistorySite[] = [];
+interface PathLiteral { start: number; end: number; dynamic: boolean; containsPath: boolean }
+
+/** Only literal segments count; substitution code is scanned separately. */
+function templateLiterals(source: string, code: string): PathLiteral[] {
+  const stack: Array<{ start: number; depth: number; dynamic: boolean; literalStart: number; containsPath: boolean }> = [];
+  const literals: PathLiteral[] = [];
   for (const token of code.matchAll(/`|\$\{|[{}]/g)) {
     const top = stack.at(-1);
     if (token[0] === '`') {
-      if (!top || top.depth > 0) stack.push({ start: token.index, depth: 0, dynamic: false });
+      if (!top || top.depth > 0) stack.push({ start: token.index, depth: 0, dynamic: false, literalStart: token.index + 1, containsPath: false });
       else {
         stack.pop();
-        if (top.dynamic && !/^\s*\+/.test(code.slice(token.index + 1)) && /[.]ndjson(?:[.]br)?$/.test(source.slice(top.start, token.index))) {
-          sites.push({ kind: 'dynamic-path', offset: top.start });
-        }
+        literals.push({ start: top.start, end: token.index + 1, dynamic: top.dynamic,
+          containsPath: top.containsPath || source.slice(top.literalStart, token.index).includes('.ndjson') });
       }
     } else if (top) {
-      if (token[0] === '${') { top.depth++; top.dynamic = true; }
-      else if (token[0] === '{') top.depth++;
-      else top.depth--;
+      if (token[0] === '${') {
+        top.containsPath ||= source.slice(top.literalStart, token.index).includes('.ndjson');
+        top.depth++; top.dynamic = true;
+      } else if (token[0] === '{') top.depth++;
+      else if (--top.depth === 0) top.literalStart = token.index + 1;
     }
   }
-  return sites;
+  return literals;
 }
 
 /** Start of a fixed literal immediately before `end`, ignoring surrounding call/return syntax. */
@@ -64,40 +67,58 @@ function fixedExpressionStart(code: string, end: number): number {
   return before.endsWith('+') ? fixedExpressionStart(code, before.length - 1) : start;
 }
 
-/** Read the final fixed-literal tail of a + chain as one suffix, across lines. */
-function concatenationTail(source: string, code: string, plus: number): { suffix: string; end: number } {
-  let end = plus;
-  // A dynamic template can supply the first part of the suffix: `${id}.ndjson` + '.br'.
-  const prefix = /([^`}]*)(?:`|['"])\s*$/.exec(source.slice(0, plus));
-  let suffix = prefix?.[1] ?? '';
-  const next = /\+\s*(['"])[ \n\r\t]*\1|\+\s*`[ \n\r\t]*`/y;
+/** The forward counterpart of fixedExpressionStart, for the right side of a + chain. */
+function fixedExpressionEnd(code: string, start: number): number {
+  const rest = code.slice(start);
+  const space = /^\s*/.exec(rest)![0].length;
+  start += space;
+  const literal = /^(['"])[ \n\r\t]*\1|^`[ \n\r\t]*`/.exec(code.slice(start));
+  let end: number;
+  if (literal) end = start + literal[0].length;
+  else if (code[start] === '(') {
+    const inner = fixedExpressionEnd(code, start + 1);
+    if (inner < 0 || code[inner] !== ')') return -1;
+    end = inner + 1;
+  } else return -1;
+  end += /^\s*/.exec(code.slice(end))![0].length;
+  return code[end] === '+' ? fixedExpressionEnd(code, end + 1) : end;
+}
+
+/** Parentheses and blanked comments do not break a + chain; calls remain separate arguments. */
+function dynamicChain(code: string, literal: PathLiteral): boolean {
+  let { start, end } = literal;
   while (true) {
-    next.lastIndex = end;
-    const match = next.exec(code);
-    if (!match) return { suffix, end };
-    const quote = match[0].search(/['"`]/);
-    suffix += source.slice(match.index + quote + 1, next.lastIndex - 1);
-    end = next.lastIndex;
-    const space = /^\s*/.exec(code.slice(end))![0].length;
-    end += space;
+    const before = code.slice(0, start).trimEnd();
+    const afterSpace = /^\s*/.exec(code.slice(end))![0].length;
+    end += afterSpace;
+    if (before.endsWith('(') && code[end] === ')' && !/[\w$)\]`]$/.test(before.slice(0, -1).trimEnd())) {
+      start = before.length - 1; end++;
+      continue;
+    }
+    let changed = false;
+    if (before.endsWith('+')) {
+      const left = fixedExpressionStart(code, before.length - 1);
+      if (left < 0) return true;
+      start = left; changed = true;
+    }
+    if (code[end] === '+') {
+      const right = fixedExpressionEnd(code, end + 1);
+      if (right < 0) return true;
+      end = right; changed = true;
+    }
+    if (!changed) return false;
   }
 }
 
-/** Literal delimiters survive blanking at their original offsets. Comments do not. */
+/** Dynamic paths contain .ndjson, even before another suffix or substitution. */
 function dynamicPaths(source: string, code: string): HistorySite[] {
-  const sites = templatePaths(source, code);
-  let consumed = -1;
-  for (const match of code.matchAll(/\+\s*(?:['"`])/g)) {
-    if (match.index < consumed) continue;
-    const tail = concatenationTail(source, code, match.index);
-    consumed = tail.end;
-    // A later + operand replaces this candidate's suffix; inspect the chain's final tail instead.
-    if (code[tail.end] === '+') continue;
-    if (/[.]ndjson(?:[.]br)?$/.test(tail.suffix) && fixedExpressionStart(code, match.index) < 0) {
-      sites.push({ kind: 'dynamic-path', offset: match.index });
-    }
+  const literals = templateLiterals(source, code);
+  for (const match of code.matchAll(/(['"])[ \n\r\t]*\1/g)) {
+    literals.push({ start: match.index, end: match.index + match[0].length, dynamic: false,
+      containsPath: source.slice(match.index, match.index + match[0].length).includes('.ndjson') });
   }
-  return sites;
+  const sites = literals.filter((literal) => literal.containsPath && (literal.dynamic || dynamicChain(code, literal)));
+  return sites.map((literal) => ({ kind: 'dynamic-path', offset: literal.start }));
 }
 
 /** Raw path access, before exceptions: also used to refuse stale exception entries. */

@@ -40,7 +40,7 @@ never a pass.
 | `cez/native-mock-source` | A test that reads, splices or swaps native mock source (hearsay-tools/cezarion#1479) | None |
 | `cez/raw-query-setter` | A raw `useSearchParams` setter in the cockpit (hearsay-tools/cezarion#1649) | `packages/web/src/test/search-params-discipline.baseline.json`, shrink-only and reasoned |
 | `cez/run-fact-reader` | An attention label comparison, a restated usage-limit hold, or an unlisted `autoResumeAt` read (hearsay-tools/cezarion#1496) | `resume-time-readers.json`: add a reader only with its reason |
-| `cez/run-history-reader` | An unlisted raw `historyPaths` or `eventsPath` use, or a dynamic path ending in `.ndjson` or `.ndjson.br` (hearsay-tools/cezarion#2420) | `run-history-readers.json`: each file and access kind has a reason; stale entries fail |
+| `cez/run-history-reader` | An unlisted raw `historyPaths` or `eventsPath` use, or a dynamic template or `+` chain containing `.ndjson` (hearsay-tools/cezarion#2420) | `run-history-readers.json`: each file and access kind has a reason; stale entries fail |
 | `cez/undocumented-env-name` | A `CEZ_*` name in a shipped source or runner script that `.env.example` lacks | The `CEZ_MOCK_*` prefix |
 
 The lists live beside the rules in `packages/cezar/src/lint/`, except the query-setter baseline,

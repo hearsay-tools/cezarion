@@ -92,6 +92,9 @@ describe('the cez rules under oxlint', () => {
     'readFileSync(`${id}.ndjson`)',
     'readFileSync(id + ".ndjson.br")',
     'readFileSync(id\n + ".ndjson")',
+    'readFileSync(id + (".ndjson"))',
+    'readFileSync(`${id}.ndjson` /* explanation */ + ".br")',
+    'readFileSync(`${id}.ndjson${compressed ? ".br" : ""}`)',
     'readFileSync(`${id}` + ".ndjson")',
     'import { historyPaths as pathsForRun } from "./runs/history-file.ts"; readFileSync(pathsForRun(dir, id).plain);',
   ])('refuses direct transcript access under oxlint: %s', async (source) => {
