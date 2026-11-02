@@ -1,0 +1,33 @@
+id: active-run-map-write
+language: typescript
+severity: warning
+message: >-
+  Write RunManager.active only through RunManager.activate (set) or RunManager.dropActive
+  (delete), which pin and unpin the store record (hearsay-tools/cezarion#779;
+  hearsay-tools/cezarion#2419).
+files:
+  - packages/cezar/src/workflows/run.ts
+# Syntax only: direct writes to this.active, not aliases or computed property access.
+# The nearest method must own the operation; another method nested in an owner is not exempt.
+rule:
+  any:
+    - all:
+        - pattern: this.active.set($$$)
+        - not:
+            inside:
+              kind: method_definition
+              has:
+                field: name
+                regex: ^activate$
+              stopBy:
+                kind: method_definition
+    - all:
+        - pattern: this.active.delete($$$)
+        - not:
+            inside:
+              kind: method_definition
+              has:
+                field: name
+                regex: ^dropActive$
+              stopBy:
+                kind: method_definition

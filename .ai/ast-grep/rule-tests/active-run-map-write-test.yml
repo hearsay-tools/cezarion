@@ -1,0 +1,21 @@
+id: active-run-map-write
+valid:
+  - 'class RunManager { activate(id, state) { this.active.set(id, state); } }'
+  - 'class RunManager { dropActive(id) { this.active.delete(id); } }'
+  - 'class RunManager { execute(id, state) { this.activate(id, state); this.dropActive(id); } }'
+  - 'class RunManager { execute(id) { this.active.get(id); this.waiting.delete(id); } }'
+invalid:
+  - 'class RunManager { execute(id, state) { this.active.set(id, state); } }'
+  - 'class RunManager { execute(id) { this.active.delete(id); } }'
+  - 'class RunManager { activate(id) { this.active.delete(id); } }'
+  - 'class RunManager { dropActive(id, state) { this.active.set(id, state); } }'
+  - |
+    class RunManager {
+    execute(id, state) {
+    if (state) {
+    this.active.set(id, state);
+    }
+    }
+    }
+  - 'class RunManager { activate() { class Other { execute(id, state) { this.active.set(id, state); } } } }'
+  - 'class RunManager { dropActive() { class Other { execute(id) { this.active.delete(id); } } } }'
