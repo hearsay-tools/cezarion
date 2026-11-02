@@ -86,7 +86,7 @@ const GithubRoute = lazy(() =>
 
 /** Lazy because the builder carries dnd-kit (R6 Step 1.6) — drag machinery only this surface
  *  uses, so only this surface pays for it. */
-const ReportsRoute = lazy(() => import('./routes/reports').then(m => ({ default: m.ReportsRoute })))
+const ReportsRoute = lazy(() => import('./routes/reports').then(m => { return { default: m.ReportsRoute }; }))
 const WorkflowsRoute = lazy(() =>
   import('./routes/workflows/workflows').then((m) => ({ default: m.WorkflowsRoute })),
 )

@@ -51,7 +51,7 @@ export class ReportRows {
   markDirty(id: string, live: boolean, revision: number): void {
     this.execute(() => { if (live || this.statements.live.get(id)?.live === 1) this.statements.mark.run(`reports-dirty:${id}`, String(revision)); });
   }
-  dirty(): string[] { return this.execute(() => this.statements.dirty.all().map(row => (row.key as string).slice('reports-dirty:'.length))); }
+  dirty(): string[] { return this.execute(() => this.statements.dirty.all().map(row => { return (row.key as string).slice('reports-dirty:'.length); })); }
   deleteRun(id: string): void { this.execute(() => { this.statements.deleteRun.run(id); this.statements.clearRun.run(`reports-dirty:${id}`); }); }
   drop(id: string): void { this.execute(() => this.statements.drop.run(id)); }
   count(): number { return this.execute(() => this.statements.count.get()!.total as number); }
