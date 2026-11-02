@@ -22,7 +22,6 @@ import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './f
 
 const sessionId = `e2e-live-preview-${process.pid}`
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e/live-preview')
-const fixtureApp = resolve(import.meta.dirname, 'fixtures/preview-app.mjs')
 /** The fixture button in page pixels (see fixtures/preview-app.mjs): its centre is where the spec
  *  clicks, a point in its plain padding (no label glyphs) is where it reads colour. */
 const BUTTON = { x: 140, y: 140 }

@@ -31,7 +31,6 @@ const COMMITS = 200
 const RUN_ID = 'cccccccc-2222-4333-8444-ddddddddeeee'
 
 const MAIN = `document.querySelector('[data-slot="main"]')`
-const rowCount = () => browser.count('[data-slot="commit-row"]')
 
 /** Fractional-layout slack for the fold measurement below. Deliberately tiny: the regression
  *  it must still catch is tens of pixels, so this cannot launder a real gap into a pass. */

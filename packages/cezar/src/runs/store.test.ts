@@ -106,7 +106,7 @@ describe('RunStore save lifecycle (#124)', () => {
 
   it('retention skips a pinned run', () => {
     const pinnedId = randomUUID();
-    const kept = Array.from({ length: 300 }, (_, index) => ({
+    const kept = Array.from({ length: 300 }, () => ({
       ...LEGACY_RUN, id: randomUUID(), createdAt: '2026-02-01T00:00:00.000Z',
     }));
     seedRuns(dataDir, [{
@@ -120,7 +120,7 @@ describe('RunStore save lifecycle (#124)', () => {
 
   it('retention does not archive a held pinned run past 300', () => {
     const pinnedId = randomUUID();
-    const kept = Array.from({ length: 300 }, (_, index) => ({
+    const kept = Array.from({ length: 300 }, () => ({
       ...LEGACY_RUN, id: randomUUID(), createdAt: '2026-02-01T00:00:00.000Z',
     }));
     seedRuns(dataDir, [{
@@ -463,7 +463,7 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
 
   it('still loads an old record that predates activity (#490)', () => {
     seedRuns(dataDir, [LEGACY_RUN]);
-    const store = RunStore.open(dataDir);
+    RunStore.open(dataDir);
   });
 
   it('never lets an unknown activity value through the schema boundary (#490)', () => {

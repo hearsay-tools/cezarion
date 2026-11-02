@@ -78,12 +78,6 @@ function discover(
   return promise;
 }
 
-const LISTING = [
-  'anthropic/claude-sonnet-5',
-  'openai/gpt-5.3-codex-spark',
-  'openai/gpt-5.4',
-  'openai/gpt-5.5-fast',
-].join('\n');
 
 const VERBOSE_LISTING = [
   'openai/gpt-5.6-sol',
