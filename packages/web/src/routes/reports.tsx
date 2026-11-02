@@ -47,7 +47,7 @@ export function ReportsRoute() {
         <Button className="min-h-11" onClick={() => void result.refetch()}>Retry</Button>
       </div> : reports.length === 0 ? <div className="flex flex-col items-start gap-3">
         <h2 className="font-medium">{q ? 'No matching reports' : 'No published reports yet'}</h2>
-        {q ? <Button variant="outline" className="min-h-11" onClick={() => search('')}>Clear search</Button> : <p className="text-sm text-soft-foreground">Publish an HTML snapshot with <code>cez artifact publish</code> to list it here.</p>}
+        {q ? <Button data-slot="reports-clear-search" variant="outline" className="min-h-11" onClick={() => search('')}>Clear search</Button> : <p className="text-sm text-soft-foreground">Publish an HTML snapshot with <code>cez artifact publish</code> to list it here.</p>}
       </div> : <ul className="flex flex-col gap-3">
         {reports.map(report => <li key={report.id} data-slot="report-row" className="reports-row rounded-lg border border-border bg-card p-3">
           <h2 className="min-w-0 font-medium [overflow-wrap:anywhere]"><Link data-report-id={report.id} className="reports-open" to={`/tasks/${report.runId}/report?artifact=${report.id}`} state={{ readerFrom: key, filesRestoreKey: key }}
