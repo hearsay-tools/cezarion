@@ -354,29 +354,18 @@ async function replyWithTurnMessages(userText, uuid) {
   return;
 }
 
-async function replyWithCezarTool(userText, uuid) {
-  const { toolPrompt } = await import('./mock-ci-tool.mjs');
-  const text = await toolPrompt('claude', process.argv.slice(2), userText);
+/** The reply text a mock-ci-tool prompt helper makes over this session's real tool wire. */
+async function replyWithToolText(helper, userText) {
+  const text = await (await import('./mock-ci-tool.mjs'))[helper]('claude', process.argv.slice(2), userText);
   emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
   emit({ type: 'result', subtype: 'success', result: text, usage: { input_tokens: 20, output_tokens: 10 } });
-  return;
 }
 
-async function replyWithCiWait(userText, uuid) {
-  const { ciPrompt } = await import('./mock-ci-tool.mjs');
-  const text = await ciPrompt('claude', process.argv.slice(2), userText);
-  emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
-  emit({ type: 'result', subtype: 'success', result: text, usage: { input_tokens: 20, output_tokens: 10 } });
-  return;
-}
+const replyWithCezarTool = (userText) => replyWithToolText('toolPrompt', userText);
 
-async function replyWithPreview(userText, uuid) {
-  const { previewPrompt } = await import('./mock-ci-tool.mjs');
-  const text = await previewPrompt('claude', process.argv.slice(2), userText);
-  emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
-  emit({ type: 'result', subtype: 'success', result: text, usage: { input_tokens: 20, output_tokens: 10 } });
-  return;
-}
+const replyWithCiWait = (userText) => replyWithToolText('ciPrompt', userText);
+
+const replyWithPreview = (userText) => replyWithToolText('previewPrompt', userText);
 
 // Same assistant/result envelopes as the baseline stream-json fixture.
 async function replyWithEcho(userText, uuid) {

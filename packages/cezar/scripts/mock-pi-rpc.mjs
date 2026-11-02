@@ -359,23 +359,18 @@ function respondProviderError(command) {
   send({ type: 'agent_settled' });
 }
 
-async function respondHoldDone(command) {
+/** Acknowledge the prompt, hold until released, then end the turn on the text `reply` makes. */
+async function respondHeld(command, reply) {
   send({ id: command.id, type: 'response', command: 'prompt', success: true });
   send({ type: 'agent_start' });
   send({ type: 'turn_start' });
   await waitForMockRelease(400);
-  sendText([await done('parity hold-done: content after the pause')]);
+  sendText([await reply()]);
   sendTurnEnd();
 }
 
-async function respondHoldAsk(command) {
-  send({ id: command.id, type: 'response', command: 'prompt', success: true });
-  send({ type: 'agent_start' });
-  send({ type: 'turn_start' });
-  await waitForMockRelease(400);
-  sendText(['Pick one.' + await lifecycle((await tools()).ask())]);
-  sendTurnEnd();
-}
+const respondHoldDone = command => respondHeld(command, () => done('parity hold-done: content after the pause'));
+const respondHoldAsk = command => respondHeld(command, async () => 'Pick one.' + await lifecycle((await tools()).ask()));
 
 async function respondDone(command) {
   resumeAfterAsk = false;

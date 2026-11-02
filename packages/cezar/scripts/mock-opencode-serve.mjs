@@ -799,21 +799,25 @@ async function replyWithAsk(body) {
   return;
 }
 
-async function replyWithHeldDone(body) {
-  // Pause, then cezar_done, so a mid-turn sendMessage can queue behind the
-  // running turn and race the close (#486).
-  await waitForMockRelease(400);
-  const text = await finishText('parity hold-done: content after the pause');
+/** One timed text part, its usage, then the session goes idle. */
+function sendTextTurn(partId, text) {
   send({ type: 'message.updated', properties: { info: info({}) } });
   send({ type: 'message.part.updated', properties: { part: {
-    id: 'prt_mock_hold_done', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text',
-    text,
+    id: partId, messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text,
     time: { start: 1760000000500, end: 1760000000600 },
   } } });
   send({ type: 'message.updated', properties: { info: info({
     cost: 0.0001, tokens: { input: 20, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
   }) } });
   setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
+}
+
+async function replyWithHeldDone(body) {
+  // Pause, then cezar_done, so a mid-turn sendMessage can queue behind the
+  // running turn and race the close (#486).
+  await waitForMockRelease(400);
+  const text = await finishText('parity hold-done: content after the pause');
+  sendTextTurn('prt_mock_hold_done', text);
   return;
 }
 
@@ -821,16 +825,7 @@ async function replyWithDone(body) {
   // Calls cezar_done so the run reaches cezar's review gate; a turn-end with
   // no tool call correctly parks as `waiting` instead (harness parity R1).
   const text = await finishText('parity done: the task is complete');
-  send({ type: 'message.updated', properties: { info: info({}) } });
-  send({ type: 'message.part.updated', properties: { part: {
-    id: 'prt_mock_done', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text',
-    text,
-    time: { start: 1760000000500, end: 1760000000600 },
-  } } });
-  send({ type: 'message.updated', properties: { info: info({
-    cost: 0.0001, tokens: { input: 20, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
-  }) } });
-  setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
+  sendTextTurn('prt_mock_done', text);
   return;
 }
 
@@ -841,16 +836,7 @@ async function replyWithHeldAsk(body, hold = 250) {
   if (hold) await waitForMockRelease(hold);
   const ask = 'Pick one.' + await lifecycle((await tools()).ask([{ header: 'Library', question: 'Which date library should I standardize on?',
     options: [{ label: 'date-fns', description: 'Tree-shakeable, functional' }, { label: 'Luxon', description: 'Immutable, tz-aware' }] }]));
-  send({ type: 'message.updated', properties: { info: info({}) } });
-  send({ type: 'message.part.updated', properties: { part: {
-    id: 'prt_mock_hold_ask', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text',
-    text: ask,
-    time: { start: 1760000000500, end: 1760000000600 },
-  } } });
-  send({ type: 'message.updated', properties: { info: info({
-    cost: 0.0001, tokens: { input: 20, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
-  }) } });
-  setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
+  sendTextTurn('prt_mock_hold_ask', ask);
   return;
 }
 
