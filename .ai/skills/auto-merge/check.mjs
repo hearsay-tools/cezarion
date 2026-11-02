@@ -33,8 +33,9 @@ const NEVER = [
   { why: 'guard test change', unless: 'adds', globs: [
     'packages/cezar/src/server/{contract-parity*,route-parity,versioned-surface,bc-route-inventory,typed-bodies,api-types,origin-guard,host-guard}.test.ts',
     'packages/cezar/src/{contract-import-boundaries,contract-subpaths,test-wait-discipline,pack-check}.test.ts',
+    'packages/cezar/src/lint/card-2-contrast.test.ts',
     'packages/cezar/src/test-wait-discipline.testkit.ts', 'packages/cezar/test/e2e/inline-contract.test.ts',
-    'packages/web/src/test/{api-client-subpaths,e2e-wait-discipline,card-2-contrast}.test.ts', 'packages/web/src/design-guardian.test.ts',
+    'packages/web/src/test/{api-client-subpaths,e2e-wait-discipline}.test.ts', 'packages/web/src/design-guardian.test.ts',
   ] },
   { why: 'agent instructions or contracts', globs: [
     '**/AGENTS.md', '**/CLAUDE.md', 'CODE_REVIEW.md', 'SDLC.md', 'BACKWARD_COMPATIBILITY.md', 'AGENT_PROTOCOL.md',
