@@ -220,7 +220,7 @@ test('auto-merge protects moved unit wait scanners and fixtures while permitting
   const files = [
     'blank.ts', 'server-wait-syntax.ts', 'server-wait-deadlines.ts', 'server-wait-baseline.ts',
     'test-wait-discipline.ts', 'unit-wait-values.ts', 'unit-wait-deadlines.ts',
-    'unit-wait-baseline.ts', 'unit-wait-discipline.ts', 'unit-wait-discipline.test.ts',
+    'wait-baseline.ts', 'unit-wait-discipline.ts', 'unit-wait-discipline.test.ts',
     'wait-discipline-runner.ts',
   ].map(file => `packages/cezar/src/lint/${file}`);
   const fixture = "export const expected = 1;\n";

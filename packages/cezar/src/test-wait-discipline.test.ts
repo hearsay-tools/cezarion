@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { blank } from './lint/blank.ts';
 import { scanFile, scanSource, SHORT_BOUND_MS, type Site } from './lint/test-wait-discipline.ts';
-import { type Baseline, baselines, compareToBaseline, readBaseline, shrinkBaseline, tally } from './lint/server-wait-baseline.ts';
+import { type Baseline, baselines } from './lint/server-wait-baseline.ts';
+import { compareToBaseline, readBaseline, shrinkBaseline, tally } from './lint/wait-baseline.ts';
 
 /**
  * The server unit tests' wait discipline, as a source scan (hearsay-tools/cezarion#1155). A bare

@@ -1,6 +1,7 @@
-import { baselinePath as unitBaselinePath, srcDir as unitSrcDir, scanTree, shrinkBaseline as shrinkUnitBaseline, tally as tallyUnits, compareToBaseline as compareUnits, readBaseline as readUnitBaseline } from './unit-wait-discipline.ts';
+import { compareToBaseline, readBaseline, shrinkBaseline, tally } from './wait-baseline.ts';
+import { baselinePath as unitBaselinePath, srcDir as unitSrcDir, scanTree, unitBaseline } from './unit-wait-discipline.ts';
 import { relative } from 'node:path';
-import { baselines, compareToBaseline, readBaseline, scannedFiles, scanSuite, srcDir, shrinkBaseline, tally } from './server-wait-baseline.ts';
+import { baselines, scannedFiles, scanSuite, srcDir } from './server-wait-baseline.ts';
 import { repoRoot } from './source-rule.ts';
 
 /** Whole-suite guarantees formerly held by the server unit suite's repository cases. */
@@ -28,8 +29,8 @@ export function serverWaitProblems(update = process.env.TEST_WAIT_DISCIPLINE_UPD
 
 /** The cockpit baseline ratchet, separate from the host's asyncUtilTimeout test. */
 export function unitWaitProblems(update = process.env.UNIT_WAIT_DISCIPLINE_UPDATE === '1', dir = unitSrcDir, path = unitBaselinePath): string[] {
-  const actual = tallyUnits(scanTree(dir));
-  if (update) shrinkUnitBaseline(actual, path);
-  return compareUnits(actual, readUnitBaseline(path)).stale.map(entry =>
+  const actual = tally(scanTree(dir));
+  if (update) shrinkBaseline(actual, { ...unitBaseline, path });
+  return compareToBaseline(actual, readBaseline(path)).stale.map(entry =>
     `${relative(repoRoot, path)}:1:1 cez/unit-wait-discipline: stale entry ${entry.file} [${entry.rule}] x${entry.count}: ${entry.site}. Baseline entries no longer found; shrink ${path} (UNIT_WAIT_DISCIPLINE_UPDATE=1 npm run lint does it)`);
 }

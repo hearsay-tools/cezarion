@@ -1,3 +1,4 @@
+import { compareToBaseline, readBaseline, shrinkBaseline, tally, writeBaseline } from './wait-baseline.ts';
 // @vitest-environment node
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -5,14 +6,10 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   baselinePath,
-  compareToBaseline,
+  unitBaseline,
   FLOOR_MS,
-  readBaseline,
   scanSource,
   scanTree,
-  shrinkBaseline,
-  tally,
-  writeBaseline,
   type BaselineEntry,
   type Site,
 } from './unit-wait-discipline.ts'
@@ -831,12 +828,12 @@ describe('the baseline', () => {
     const path = join(dir, 'baseline.json')
     try {
       expect(readBaseline(path)).toEqual([])
-      shrinkBaseline([entry('a', 2), entry('b')], path)
+      shrinkBaseline([entry('a', 2), entry('b')], { ...unitBaseline, path })
       expect(readBaseline(path)).toEqual([entry('a', 2), entry('b')])
-      shrinkBaseline([entry('a', 1), entry('c', 5)], path)
+      shrinkBaseline([entry('a', 1), entry('c', 5)], { ...unitBaseline, path })
       expect(readBaseline(path)).toEqual([entry('a', 1)])
-      writeBaseline([], path)
-      shrinkBaseline([entry('a')], path)
+      writeBaseline([], { ...unitBaseline, path })
+      shrinkBaseline([entry('a')], { ...unitBaseline, path })
       expect(readBaseline(path)).toEqual([])
     } finally {
       rmSync(dir, { recursive: true, force: true })

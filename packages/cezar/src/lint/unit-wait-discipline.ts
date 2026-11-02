@@ -1,9 +1,9 @@
 import type { SourceRule } from './source-rule.ts';
-import { compareToBaseline, tally } from './unit-wait-baseline.ts';
+import { compareToBaseline, tally, readBaseline } from './wait-baseline.ts';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { parse } from '@babel/parser';
-import { type BaselineEntry as Entry, waitBaseline } from './unit-wait-baseline.ts';
+import type { BaselineEntry as Entry } from './wait-baseline.ts';
 import type { AwaitExpression, BinaryExpression, BlockStatement, CallExpression, Comment, DoWhileStatement, File, ForStatement, Identifier, MemberExpression, Node, ObjectExpression, UnaryExpression, WhileStatement } from '@babel/types';
 import { sizeNumber, calleeOf, vitestBound, testingLibraryBound, contains, writes, placeAt, readerFor } from './unit-wait-values.ts';
 import { compares, iterations, earliest, ends, exits, pollDeadline } from './unit-wait-deadlines.ts';
@@ -297,21 +297,14 @@ export function scanTree(root = srcDir, dir = root): Site[] {
 
 /** Shrink the baseline through `UNIT_WAIT_DISCIPLINE_UPDATE=1 npm run lint`: a site it does not
  *  cover stays a failure. The first shrink writes the baseline from the sites the tests carry the day the ratchet lands. */
-export const {
-  read: readBaseline,
-  write: writeBaseline,
-  shrink: shrinkBaseline,
-} = waitBaseline<Rule>({
+export const unitBaseline = {
   path: baselinePath,
-  seedWhenMissing: true,
   comment:
     'Bare sleeps, short wait bounds and unbounded poll loops the cockpit unit tests carried when the ratchet landed (hearsay-tools/cezarion#1203). ' +
     'Keyed by file, rule and the line text so a moved line does not churn it. ' +
     'This list only shrinks: fix a site, then run UNIT_WAIT_DISCIPLINE_UPDATE=1 npm run lint. ' +
     'Rules: AGENTS.md § Validation.',
-})
-
-export { compareToBaseline, tally } from './unit-wait-baseline.ts';
+};
 
 /** The cockpit scanner's original traversal scope, expressed for oxlint paths. */
 export const scannedUnitFile = (file: string): boolean => file.startsWith('packages/web/src/')
@@ -323,7 +316,7 @@ export const unitWaitDiscipline: SourceRule = {
   applies: scannedUnitFile,
   check(file, source) {
     const sites = scanSource(file.slice('packages/web/src/'.length), source);
-    const { added } = compareToBaseline(tally(sites), readBaseline());
+    const { added } = compareToBaseline(tally(sites), readBaseline(baselinePath));
     return added.flatMap(entry => sites.filter(site => site.rule === entry.rule && site.site === entry.site).map(site => ({
       line: site.line,
       message: `[${site.rule}] ${site.site}. New wait-discipline sites. Give each a product signal, a bound of at least ${FLOOR_MS} ms, or a "// bound: <reason>" comment, rather than adding it to ${baselinePath} (AGENTS.md § Validation)`,

@@ -26,7 +26,8 @@ command, it fails closed, and it does not depend on which tests a change selects
 
 6. **Unit wait discipline** (M07): `cez/test-wait-discipline` scans server test and testkit files
    with a 10 s floor; `cez/unit-wait-discipline` scans cockpit unit tests with a 3 s floor.
-   Each rule uses its original scanner. The runner checks stale entries in the three baselines,
+   Each rule uses its original scanner. Both use `lint/wait-baseline.ts` for the same shrink-only
+   ratchet. The runner checks stale entries in the three baselines,
    server scan scope, and unterminated constructs that would hide a file's tail. Update mode
    runs before oxlint: `TEST_WAIT_DISCIPLINE_UPDATE=1 npm run lint` (both server baselines),
    `UNIT_WAIT_DISCIPLINE_UPDATE=1 npm run lint` (cockpit). Existing allowances only shrink.
