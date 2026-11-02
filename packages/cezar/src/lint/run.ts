@@ -1,5 +1,5 @@
 import { guardianCssProblems } from './design-guardian-css.ts';
-import { serverWaitProblems } from './wait-discipline-runner.ts';
+import { serverWaitProblems, unitWaitProblems } from './wait-discipline-runner.ts';
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -171,7 +171,7 @@ export function staleHistoryReaders(root = repoRoot): string[] {
 
 /** Every problem `npm run lint` reports, in one list. */
 export async function lint(): Promise<string[]> {
-  const waits = serverWaitProblems();
+  const waits = [...serverWaitProblems(), ...unitWaitProblems()];
   const [oxlint, astGrep] = await Promise.all([oxlintProblems(repoRoot, LINT_PATHS), astGrepProblems()]);
   return [...waits, ...oxlint, ...astGrep, ...staleEntries(), ...fileLengthProblems(), ...guardianCssProblems()];
 }
