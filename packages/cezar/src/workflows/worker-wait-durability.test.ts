@@ -297,15 +297,21 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   for (const mode of ['fresh', 'continuation'] as const) {
     for (const marker of ['mock:cezar-done', 'mock:cezar-wait', 'mock:cezar-ask'] as const) {
       it(`${mode}: worker wait precedes ${marker} except that a human ask wins`, async () => {
+        const release = join(root, 'release-marker-turn');
+        // Each new session holds its first turn until the worker wait is durable.
+        let wire = mode === 'fresh' ? controlledWire({ firstResultGate: release }) : undefined;
         const p = await parent(mode === 'fresh' ? marker : 'mock:hold');
         if (mode === 'continuation') {
           await until(() => store.getRun(p.id)?.status === 'waiting');
           manager.finish(p.id); await until(() => !manager.isActive(p.id));
           store.updateRun(p.id, { autonomous: true });
+          wire = controlledWire({ firstResultGate: release });
           expect(manager.continueRun(p.id, { text: marker }).ok).toBe(true);
           await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(p.id)?.sessionEverOpened === true);
         }
+        await until(wire!.initialReceived);
         const w = await worker(p.id); const wait = register(p.id, [w.id]);
+        writeFileSync(release, 'release');
         // The Continue runs autonomous, where cezar_ask is refused (hearsay-tools/cezarion#2397):
         // its worker wait parks the run as the other markers do.
         if (marker === 'mock:cezar-ask' && mode === 'fresh') {
