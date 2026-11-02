@@ -32,7 +32,8 @@
       "sgconfig.yml",
       ".ai/ast-grep/**",
       "packages/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}",
-      "packages/*/src/**/*.json"
+      "packages/*/src/**/*.json",
+      "packages/web/src/styles/index.css"
     ],
     "packages/cezar/src/lint/run-history-reader.test.ts": [
       "packages/cezar/src/lint/run-history-readers.json"
@@ -44,7 +45,8 @@
       ".oxlintrc.json",
       ".env.example",
       "packages/cezar/src/lint/**",
-      "packages/web/src/test/search-params-discipline.baseline.json"
+      "packages/web/src/test/search-params-discipline.baseline.json",
+      "packages/web/src/test/card-2-contrast.baseline.json"
     ],
     "packages/cezar/src/contract-subpaths.test.ts": [
       "packages/contract/src/**",
@@ -52,10 +54,8 @@
       "packages/api-client/src/**",
       "packages/api-client/package.json"
     ],
-    "packages/web/src/test/card-2-contrast.test.ts": [
-      "packages/web/src/**/*.tsx",
-      "packages/web/src/test/card-2-contrast.baseline.json",
-      "packages/web/src/styles/index.css"
+    "packages/cezar/src/lint/card-2-contrast.test.ts": [
+      "packages/cezar/src/lint/card-2-contrast.ts"
     ],
     "packages/web/e2e/*.e2e.ts": [
       "packages/contract/src/**",

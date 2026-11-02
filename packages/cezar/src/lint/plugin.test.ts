@@ -40,6 +40,7 @@ afterAll(() => {
 });
 
 const VIOLATIONS: Record<string, [string, string]> = {
+  'card-2-contrast': ['packages/web/src/unsafe.tsx', '<p className="bg-card-2 text-danger text-xs">bad</p>'],
   'contract-root-import': ['packages/cezar/src/a.ts', "import { runRecordSchema } from '@open-mercato/cezar-contract';\n"],
   'native-mock-source': ['packages/cezar/test/b.test.ts', "const text = readFileSync(adapter.mockBin, 'utf8');\n"],
   'raw-query-setter': ['packages/web/src/c.tsx', "import { useSearchParams } from 'react-router';\nconst [p, setP] = useSearchParams();\n"],
@@ -50,6 +51,8 @@ const VIOLATIONS: Record<string, [string, string]> = {
 
 /** Each approved exception, by the rule it exercises. None may produce a finding. */
 const APPROVED: Record<string, string> = {
+  'packages/web/src/routes/unknown-project.tsx': '<div className="bg-card-2"><span className="font-mono text-[11px] font-normal text-soft-foreground">old</span></div>',
+
   // contract-root-import: the listed barrel, and type imports anywhere.
   'packages/api-client/src/index.ts': "export * from '@open-mercato/cezar-contract';\n",
   'packages/web/src/f.ts': "import type { RunRecord } from '@open-mercato/cezar-contract';\ntype T = import('@open-mercato/cezar-api-client').X;\n",
@@ -74,6 +77,11 @@ describe('the cez rules under oxlint', () => {
     const files = { ...Object.fromEntries(Object.values(VIOLATIONS)), ...APPROVED, 'packages/cezar/src/broken.ts': 'let x = ;\n' };
     problems = await oxlintProblems(seeded(files), ['packages']);
   }, OXLINT_TIMEOUT_MS);
+
+  it('selects the lint bridge when the contrast palette stylesheet changes', () => {
+    const squeal = JSON.parse(readFileSync(join(repoRoot, 'squeal.config.json'), 'utf8')) as { inputs: Record<string, string[]> };
+    expect(squeal.inputs['packages/cezar/src/lint/lint.test.ts']).toContain('packages/web/src/styles/index.css');
+  });
 
   it('turn every rule of the plugin on in .oxlintrc.json, and nothing else', () => {
     expect(Object.keys(config.rules).sort()).toEqual(RULES.map((rule) => `cez/${rule.name}`).sort());
@@ -130,6 +138,7 @@ describe('lint fails closed', () => {
 
 describe('stale entries', () => {
   const lists = {
+    'packages/web/src/test/card-2-contrast.baseline.json': JSON.stringify(['gone.tsx: <p className="bg-card-2 text-danger">']),
     'packages/cezar/src/lint/contract-root-import.baseline.json': JSON.stringify({ files: { 'packages/api-client/src/index.ts': 'barrel', 'packages/web/src/gone.ts': 'gone' } }),
     'packages/cezar/src/lint/run-history-readers.json': JSON.stringify({ entries: [] }),
     'packages/cezar/src/lint/resume-time-readers.json': JSON.stringify({ files: { 'packages/web/src/lib/reads.ts': 'reads', 'packages/web/src/lib/stopped.ts': 'stopped' } }),
@@ -145,6 +154,7 @@ describe('stale entries', () => {
       'packages/cezar/src/lint/contract-root-import.baseline.json cez/contract-root-import: packages/web/src/gone.ts no longer imports a contract root at runtime; remove its exemption',
       'packages/cezar/src/lint/resume-time-readers.json cez/run-fact-reader: packages/web/src/lib/stopped.ts no longer reads autoResumeAt; remove it from the list',
       'packages/web/src/test/search-params-discipline.baseline.json cez/raw-query-setter: routes/x.tsx no longer has [query, setQuery] = useSearchParams(); remove the entry',
+      'packages/web/src/test/card-2-contrast.baseline.json cez/card-2-contrast: stale entry gone.tsx: <p className="bg-card-2 text-danger">. Fix new sites; remove fixed entries from the baseline. Never add allowances. (hearsay-tools/cezarion#1133, hearsay-tools/cezarion#2423).',
     ]);
   });
 

@@ -193,3 +193,19 @@ test('CI permits a new ratchet, while auto-merge requires owner review of its st
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stdout, /new ratchet baseline: new.baseline.json/);
 });
+
+
+test('auto-merge protects the moved contrast fixtures while permitting added cases', (t) => {
+  const r = repository(t);
+  const file = 'packages/cezar/src/lint/card-2-contrast.test.ts';
+  const fixture = "it('keeps contrast', () => assert.equal(scan('unsafe').length, 1));\n";
+  r.write(file, fixture);
+  r.base = r.commit();
+  r.write(file, fixture.replace("length, 1", "length, 0"));
+  const changed = autoMerge(r, r.commit());
+  assert.equal(changed.status, 1, changed.stdout + changed.stderr);
+  assert.match(changed.stdout, /guard test change/);
+  r.write(file, fixture + "it('adds a case', () => assert.equal(scan('safe').length, 0));\n");
+  const added = autoMerge(r, r.commit());
+  assert.equal(added.status, 0, added.stdout + added.stderr);
+});

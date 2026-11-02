@@ -14,6 +14,7 @@ import {
   updateBaseline,
 } from '../ast-grep-rules.testkit.ts';
 import { readExemptions, scanRootImports } from './contract-root-import.ts';
+import { baselineFile as contrastBaselineFile, readContrastBaseline, scan as scanContrast, paletteSurfaces } from './card-2-contrast.ts';
 import { fileLengthProblems } from './file-length.ts';
 import { RULES } from './plugin.ts';
 import { compareSetters, readSetterBaseline, scanSetters, WEB_SRC } from './raw-query-setter.ts';
@@ -140,6 +141,17 @@ export function staleEntries(root = repoRoot): string[] {
   });
   for (const entry of compareSetters(actual, baseline).stale) {
     problems.push(`${SETTERS} cez/raw-query-setter: ${entry.file} no longer has ${entry.site}; remove the entry`);
+  }
+  const contrastBaseline = readContrastBaseline(root);
+  for (const entry of new Set(contrastBaseline)) {
+    const separator = entry.indexOf(': ');
+    const file = entry.slice(0, separator);
+    const text = source(`${WEB_SRC}${file}`);
+    const actual = text === undefined ? [] : scanContrast(text, paletteSurfaces()).map(site => `${file}: ${site}`);
+    const expected = contrastBaseline.filter(site => site === entry).length;
+    if (actual.filter(site => site === entry).length < expected) {
+      problems.push(`${contrastBaselineFile} cez/card-2-contrast: stale entry ${entry}. Fix new sites; remove fixed entries from the baseline. Never add allowances. (hearsay-tools/cezarion#1133, hearsay-tools/cezarion#2423).`);
+    }
   }
   return problems;
 }
