@@ -653,10 +653,7 @@ async function replyWithSubagent(body) {
       type: 'text', text: 'Child review finished.',
       time: { start: 1760000009200, end: 1760000009300 },
     } } });
-    send({ type: 'message.updated', properties: { info: info({
-      cost: 0.0001, tokens: { input: 20, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
-    }) } });
-    setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
+    sendUsageThenIdle();
   }, 60);
   return;
 }
@@ -806,6 +803,11 @@ function sendTextTurn(partId, text) {
     id: partId, messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text,
     time: { start: 1760000000500, end: 1760000000600 },
   } } });
+  sendUsageThenIdle();
+}
+
+/** The turn's usage, then the session goes idle. */
+function sendUsageThenIdle() {
   send({ type: 'message.updated', properties: { info: info({
     cost: 0.0001, tokens: { input: 20, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
   }) } });
