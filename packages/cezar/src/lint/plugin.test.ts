@@ -78,6 +78,11 @@ describe('the cez rules under oxlint', () => {
     problems = await oxlintProblems(seeded(files), ['packages']);
   }, OXLINT_TIMEOUT_MS);
 
+  it('selects the lint bridge when the contrast palette stylesheet changes', () => {
+    const squeal = JSON.parse(readFileSync(join(repoRoot, 'squeal.config.json'), 'utf8')) as { inputs: Record<string, string[]> };
+    expect(squeal.inputs['packages/cezar/src/lint/lint.test.ts']).toContain('packages/web/src/styles/index.css');
+  });
+
   it('turn every rule of the plugin on in .oxlintrc.json, and nothing else', () => {
     expect(Object.keys(config.rules).sort()).toEqual(RULES.map((rule) => `cez/${rule.name}`).sort());
     expect(Object.values(config.rules)).toEqual(RULES.map(() => 'error'));
