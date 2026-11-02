@@ -14,5 +14,5 @@ export function isLeaseExpired(nowMs: number, expiresAtMs: number): boolean {
  * Neither input has a trailing slash, empty segment, '.' or '..'; root is not '/'.
  */
 export function isPathContained(root: string, candidate: string): boolean {
-  return candidate === root || candidate.startsWith(root);
+  return candidate === root || candidate.startsWith(root + '/');
 }
