@@ -170,4 +170,4 @@ async function reconcile({ github, owner, repo, pullNumber, releaseAppBotLogin,
   return reconcilePull({ github, owner, repo, pr,
     releaseAppBotLogin, now, deadline, sleep, log });
 }
-module.exports = { discover, reconcile, eventTarget, reviewJob, rerunnable, GATE_STEP };
+module.exports = { discover, reconcile, eventTarget, eligiblePull, reviewJob, rerunnable, GATE_STEP };

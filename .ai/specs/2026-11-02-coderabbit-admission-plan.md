@@ -265,3 +265,109 @@ Published task snapshots: incremental quality
 `1e78f321-d6d5-4d05-b817-bf9c4e88dc84`, updated full-PR quality
 `8e5b6d57-2284-47d0-ac6d-1007ea6ff20a`, unchanged-test red/green proof
 `1e55f546-ba31-4106-9f74-8df2a9dce71a`.
+
+
+## Readiness cross-event serialization (2026-11-03)
+
+Confirmed finding `4448988392` on `hearsay-tools/cezarion#2501`.
+Regression `proof_base`: `a5559af6217316b802aa83b7c7f7b77e4e1b9579`.
+Preserve policy `4b104846c` and docs `8b2342b80`.
+
+The old concurrency key serialized branch-based PR/CI wakes and SHA-based check
+wakes separately. Its intended guarantee was one readiness/board writer per PR,
+including a non-cancellable draft flip plus board sync. It did not provide that
+guarantee across event kinds. Replace it with trusted read-only discovery before
+job-level concurrency keyed only by discovered PR number. Automatic check/CI/
+signal wakes reuse the reconciler's authenticated discovery and discover all
+eligible open same-repository main PRs; lifecycle and manual events scope their
+validated PR number. Every admitted PR receives an independent job/deadline,
+max-parallel four, fail-fast false. No workflow-global or head-SHA lock.
+
+The old new-head action forced draft without proof. That pinned the guarantee
+that an unverified head never stays ready. Replace the unconditional event-time
+write with current native/provider/required-check proof at the PR lock head:
+missing/unverified live-head evidence forces draft, while a late synchronize wake
+must not override already-successful current evidence. No old event head, draft
+value or admission decision enters the queue. Every surviving job evaluates fresh
+proof. Human ready/draft events request the same fresh reevaluation. The old human
+path guaranteed board sync; it did not establish a durable manual override.
+Replace that path with the workflow-owned readiness rule for every event:
+`draft = !freshAdmitted`. A verified head may become ready automatically after a
+human draft flip. No event-specific preserve flag enters the queue. This also
+prevents a human wake from suppressing either a pending revocation or promotion.
+
+| Event / boundary case | Draft behavior at the PR lock head | Board / isolation |
+| --- | --- | --- |
+| New unverified head, PR open/reopen/synchronize | Read live head; failed/missing proof => draft | Sync live result to In progress |
+| Late synchronize after current CI/admission succeeds | Keep/mark ready from current proof | In review; never force draft from old event |
+| CI held after reading green, pending provider wake queued | First writer settles; queued check job reads pending => draft | Final In progress after both jobs |
+| Check, CI, signal, manual, lifecycle for same PR | One PR-number lock, no cancellation during mutation/sync | Same lock across all event kinds |
+| Valid old head/run event after newer event | Wake only; prove live PR/head/newest native evidence | No historical proof or stale head filter |
+| PR A/B automatic events coalesce | Discovery covers both; independent PR jobs/deadlines | One stalled/failed job cannot block another |
+| Manual ready/draft event delayed behind another flip | Derive draft from fresh admission, like every other event | Sync computed state, not stale action |
+| Pending revoker replaced by human wake | Fresh failed admission still forces draft | Final In progress; no board-only bypass |
+| Pending promotion replaced by human wake behind old failed decision | Fresh passing admission makes ready | Final In review; no durable manual override |
+| Provider/native/required check fails or is pending | Draft on next admitted trigger | Sync In progress; Done cards stay Done |
+| All current checks, native proof and provider/thread admission pass | Ready | Sync In review |
+| Fork, closed PR, different base, removed PR | No mutation | No board write |
+| Head changes while proof is read | Refuse stale mutation | Later wake reads new head |
+| No board token or board read/write failure | Draft gate still works | Quiet optional sync skip |
+| Invalid/spoofed event | No discovery outputs or jobs | No writes |
+
+Keep trusted default-branch checkout, optional project token, no PR checkout,
+current native/provider proof and final live rereads. The workflow lock is a
+GitHub scheduling guarantee tested statically plus deterministic queue fixtures;
+fixtures cannot prove hosted scheduling or exactly-once delivery.
+
+
+### Readiness validation evidence
+
+Measured the final working source after `8b2342b80`; the readiness commit records
+that exact source. No package source/declarations changed, so no local build,
+package suite or root typecheck was needed. Parent owns final CI dispatch.
+
+- Disposable scratch at `a5559af62`, own `pnpm install --frozen-lockfile`:
+  six selected regressions **0 pass / 6 intended assertion failures**. The test
+  reads the checked-in YAML key and models one running plus one replaceable
+  pending job. It runs the old exported handler on the baseline and the new
+  discovery/refresh exports on the fixed source. There is no import adapter or
+  setup failure. Copy only the fixed readiness source, discovery export and
+  workflow: the unchanged readiness tests **31/31 pass**. Both revocation and
+  promotion are covered when a human wake replaces a pending job. The overlap
+  test checks final draft plus PR/issue board state after both jobs settle.
+- Mandatory bundled affected quality against `a5559af62`: **59/59 changed
+  functions** across three files; **99 selected tests pass**; max complexity
+  **18**, CRAP **18**. Full-PR measurement against merged main
+  `9dbe93aa4b36593ec0f46af09338ae50083e36a7`: **289/289 functions** across 21
+  files; **336 selected tests pass**; max complexity **20**, CRAP **20.231481**.
+  Both use the bundled collector with `--runner node --node-import
+  scripts/test-git-env.mjs`; every changed test and the PR-test-proof consumer
+  are included in the full-PR selection.
+- `npm run lint`, citations, `git diff --check` and pinned actionlint/shellcheck
+  with CI warning severity pass. AGENTS shrinks; no byte-budget growth.
+- Squeal revision **21** returned current passing results for readiness,
+  reconciliation and auto-merge admission after 42.8 seconds. At that capture,
+  no worktree failures were known and 220 other files / 4584 tests were pending.
+  This does not claim a full-suite or slow-tier pass. Final global status is
+  reported to the parent after committing; no duplicate issue is filed for
+  friction already covered by `hearsay-tools/squeal#138`.
+- Reader sweep covered removed readiness exports/old key, lifecycle tests,
+  CODE_REVIEW, CI documentation and the AGENTS board binding. No external caller
+  uses the removed handler exports. Fork state, Done cards and optional project
+  token behavior remain covered. Hosted GitHub scheduling remains a rollout
+  validation limit; these fixtures do not prove lossless delivery.
+
+SHA-256 of measured source:
+
+| File | SHA-256 |
+| --- | --- |
+| `.github/scripts/pr-readiness.cjs` | `3c80b02d08c44c6ac05f47b998dd4c2edc34765aa9f1bed78f1ca5bcb7690507` |
+| `.github/scripts/pr-readiness.test.cjs` | `db385711f2cce37a6c07444fa62c307869012c9ceaf3a89d53466c5da31b34ac` |
+| `.github/scripts/coderabbit-reconcile.cjs` | `f7c609edd6874a1c40208758f053749f02dd2ffc34284ec3b7668616ea6a28c2` |
+| `.github/workflows/pr-readiness.yml` | `8673096da19a32d2fdbd1c930db09b6c486eabfd68710eb8d9edcce430ee838f` |
+
+Published task snapshots: affected quality
+`b71dcd3c-fe13-4344-9f1b-2a4026f392cd`, full-PR quality Markdown
+`ec52a7d1-d8ce-4a54-949b-55e7a32bef5d`, full source-hash/coverage report JSON
+`b79c0bb0-2db6-4e2b-822b-4af07292b6e5`, red/green proof
+`29992b96-8406-46b1-91be-cdd8f8a18296`.
