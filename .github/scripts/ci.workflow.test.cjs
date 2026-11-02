@@ -399,14 +399,16 @@ test('verification bindings keep the final gate in CI and reserve local full bro
   const manifest = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
   assert.equal(typeof manifest.scripts['test:e2e:local'], 'string');
   assert.ok(manifest.scripts['test:e2e:local'].trim(), 'expected a local full browser script');
+  const entryPoint = manifest.scripts['test:e2e:local'].match(/(?:^|\s)(\S+\.mjs)(?:\s|$)/)?.[1];
+  assert.ok(entryPoint, 'expected the local full browser script to name its .mjs entry point');
   const workflowsDir = path.join(repoRoot, '.github/workflows');
   for (const name of fs.readdirSync(workflowsDir).filter((name) => /\.ya?ml$/.test(name))) {
     const ci = yaml.parse(fs.readFileSync(path.join(workflowsDir, name), 'utf8'));
     for (const job of Object.values(ci.jobs ?? {})) {
       for (const step of job.steps ?? []) {
         assert.doesNotMatch(step.run ?? '', /test:e2e:local/, `${name} must not run the local full browser script`);
-        assert.ok(!(step.run ?? '').includes(manifest.scripts['test:e2e:local']),
-          `${name} must not run the local full browser command directly`);
+        assert.ok(!(step.run ?? '').includes(entryPoint),
+          `${name} must not run the local full browser entry point`);
       }
     }
   }
