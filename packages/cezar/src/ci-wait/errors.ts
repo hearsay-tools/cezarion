@@ -55,7 +55,7 @@ const waitMessages: Partial<Record<WaitErrorCode, string>> = {
   capacity: 'Cezar cannot open another wait now: this run has the maximum open waits, or the CI watcher is full. Cancel a wait you no longer need with cezar_cancel_wait, or retry later.',
   denied_scope: 'This run cannot wait on those workers or requests: wait only on workers you own (a parent with the wait permission), or on requests you sent that are still accepted.',
   // hearsay-tools/cezarion#1446: process waits.
-  exit_file_outside: 'exit_file must be inside the task worktree or the Cezar temp directory that $TMPDIR names, with no symlink leading out. If $TMPDIR is not under .ai/cezar or a cez-agent directory, use a git-ignored path in the worktree.',
+  exit_file_outside: 'exit_file must be inside the task worktree or the Cezar temp directory that $TMPDIR names, with no symlink leading out. If $TMPDIR is not under .ai/cezar or a cez-agent directory, use a git-ignored path in the worktree. For a command that writes its own status file somewhere else, leave exit_file out: wait on pid alone, and read that file after the wake.',
   process_not_allowed: 'Cezar cannot wait on that PID: it is Cezar itself or an agent session, which ends only with the session. Pass the PID that `echo $!` printed for the background command.',
   process_not_owned: 'That PID belongs to another user, so Cezar cannot tell whether it is the process you started. Pass the PID of a command you started yourself.',
 };
@@ -254,9 +254,8 @@ const SCHEDULE_FIELD_RULES: Record<string, string> = {
   archived: 'must be "include" or "only"',
   name: 'must be a string of 1 to 200 characters',
   prompt: 'must be a string of 1 to 100000 characters',
-  at: 'must be a local wall time YYYY-MM-DDTHH:MM; give at or delay, not both',
+  at: 'must be a UTC time YYYY-MM-DDTHH:MMZ; give at or delay, not both',
   delay: 'must be a duration such as 30m, 6h or 7d; give at or delay, not both',
-  time_zone: 'must be an IANA time zone name such as Europe/Warsaw',
   latest_start: 'must be a duration such as 30m, 6h or 7d',
   workflow: 'must be a workflow name',
   runner: 'must be a runner name',

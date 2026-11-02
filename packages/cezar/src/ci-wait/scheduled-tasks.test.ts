@@ -6,7 +6,7 @@ import { callScheduleTask, callScheduledTasks } from './client.ts';
 
 // hearsay-tools/cezarion#1465: `cezar_schedule_task` and `cezar_scheduled_tasks` on the session's
 // private tool socket. The run and project come from the capability, never from the arguments.
-const task = { id: 'a1', name: 'Check the rollout', status: 'waiting' as const, due_at: '2026-10-29T09:00', time_zone: 'Europe/Warsaw', resolved_instant: '2026-10-29T08:00:00.000Z' };
+const task = { id: 'a1', name: 'Check the rollout', status: 'waiting' as const, due_at: '2026-10-29T08:00Z' };
 const created: ScheduleTaskAnswer = { ok: true, task, note: 'n' };
 const listed: ScheduledTasksAnswer = { ok: true, tasks: [task] };
 const notUsed = async (): Promise<never> => { throw new Error('not used'); };
@@ -62,7 +62,7 @@ describe('schedule-task route', () => {
     vi.stubEnv('CEZ_AUTOMATIONS', '1');
     const scheduleTask = vi.fn(async () => created);
     const { env } = await session({ scheduleTask });
-    const answer = await callScheduleTask({ ...valid, at: '2026-10-29T09:00' }, env);
+    const answer = await callScheduleTask({ ...valid, at: '2026-10-29T09:00Z' }, env);
     expect(answer).toMatchObject({ ok: false, code: 'invalid_request' });
     expect(answer.ok ? '' : answer.message).toMatch(/`delay`/);
     const unknown = await callScheduleTask({ ...valid, project_id: 'other' }, env);

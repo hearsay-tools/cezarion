@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { exactLineIndex, HANDOFF_AUTOSAVE_RECORDS_MAX, nextLineIndex, type HandoffAutosaveRecord, type HandoffRecords } from '@open-mercato/cezar-contract/handoff';
+import { localTimeZone } from '@open-mercato/cezar-contract/zoned-time';
 import type { RunStore } from './runs/store.ts';
 
 /**
@@ -210,6 +211,10 @@ const NATIVE_SUBAGENTS_TOOLS = `Native subagents: when you end a turn while suba
  *  (hearsay-tools/cezarion#2397). */
 const LIFECYCLE_TOOLS = `Lifecycle tools (cezar): End every turn with a cezar tool call that says what happens next. When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn. When a user decision or missing input is needed, call cezar_ask with the complete decision context and short questions. Put the full draft, findings, evidence and option meanings in context. Cezar shows context as Markdown above the card. Reasoning and rejected calls are hidden. Give a question 2–4 options to show them as choices, or leave its options out and the user types the answer. Once the call accepts the context and questions, end the turn and wait for the user. When you are waiting on something else, call cezar_wait with kind "pr" for a pull request's checks or its merge, or kind "timer" to re-check later, then end your turn. A human message or any resolved wait wakes you. The user's reply answers your question; PR waits and timers stay open until they resolve or you cancel them with cezar_cancel_wait. Never call cezar_done while anything is unfinished or unverified.`;
 
+/** Agents read UTC from Cezar's tools and local time from \`date\`, and told users UTC times
+ *  as if they were local. Every Cezar tool speaks UTC; this names the user's zone. */
+const timeZoneNote = (zone: string) => `Times: Cezar tools take and answer times in UTC, ending in Z, such as a wait's \`deadline\` or a scheduled task's \`due_at\`. The user's time zone is ${zone}. Before you tell the user a time, convert it to ${zone} and name the zone. \`date -u\` prints the current time in UTC, and \`TZ=${zone} date\` prints it in the user's zone.`;
+
 const REFERENCES_AND_ATTACHMENTS = `Task reference markers: as soon as you know which GitHub pull request or issue this task is ABOUT (it was named in the task, or you just opened it), declare it by emitting, on its own line in your message text: CEZ:PR=<number> and/or CEZ:ISSUE=<number>. Declare each PR this task opens, even when it opens several. Earlier declarations remain associated with the task; the last declaration selects the current subject. For issues, an issue directly identified as the task subject in its prompt remains the primary attribution; later issue declarations and discovered links do not replace it. Re-emit with the new number if the subject changes (e.g. you open a PR later in the task). Declare only the task's own subject — never a PR/issue you merely mention, list, or compare against. You may also emit CEZ:TITLE=<terse gerund phrase, max 40 chars, e.g. "implementing comment threads"> once the work has a clearer shape than its current title; cez uses these instead of guessing from the transcript. Put markers in plain message text, never inside a code fence.
 
 ## Messaging other tasks
@@ -220,13 +225,15 @@ User-attached screenshots and files (PDF, TXT, MD) are saved as real files; thei
 
 /**
  * The handoff contract for one agent session: the journal, the lifecycle tools, then task
- * references and attachments. With `nativeSubagents` (a runner that reports them,
+ * references and attachments. It names the user's time zone (the host's, as \`localTimeZone\` reads it,
+ * unless \`timeZone\` is given): the cockpit's zone, the one one-time schedules default to. With `nativeSubagents` (a runner that reports them,
  * hearsay-tools/cezarion#2431) it adds that Cezar waits for native subagents. With
  * `handoffInjected` the launch's opening message already carries the file
  * (hearsay-tools/cezarion#1584), so step 1 points there instead of asking for a read; the
  * writing duties never change.
  */
-export function handoffInstructions(opts: { handoffInjected?: boolean; nativeSubagents?: boolean } = {}): string {
+export function handoffInstructions(opts: { handoffInjected?: boolean; nativeSubagents?: boolean; timeZone?: string } = {}): string {
   const subagents = opts.nativeSubagents ? `\n\n${NATIVE_SUBAGENTS_TOOLS}` : '';
-  return `${handoffJournal(opts.handoffInjected ?? false)}\n\n${LIFECYCLE_TOOLS}${subagents}\n\n${REFERENCES_AND_ATTACHMENTS}`;
+  const times = timeZoneNote(opts.timeZone ?? localTimeZone());
+  return `${handoffJournal(opts.handoffInjected ?? false)}\n\n${LIFECYCLE_TOOLS}${subagents}\n\n${times}\n\n${REFERENCES_AND_ATTACHMENTS}`;
 }
