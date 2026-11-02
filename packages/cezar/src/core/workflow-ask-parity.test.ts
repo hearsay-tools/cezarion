@@ -1,6 +1,6 @@
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { CEZAR_ASK_QUESTION, driveRun, promptFor, waitFor, WORKFLOW_ASK_CRITERIA } from './harness-parity.testkit.ts';
 import { RunStore } from '../runs/store.ts';
@@ -8,12 +8,41 @@ import { workflowDefSchema } from '../workflows/types.ts';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 
+const STEP_TIMEOUT_MS = 2_000;
+
+/** Keep the authored deadline independent of native-process startup and expire it after the ask. */
+function holdStepDeadline() {
+  const now = Date.now;
+  // OMP computes its remaining delay from Date; fix the clock only until that timer is armed.
+  const startupClock = vi.spyOn(Date, 'now').mockReturnValue(now());
+  const schedule = globalThis.setTimeout;
+  const deadlines: Array<() => void> = [];
+  const clock = vi.spyOn(globalThis, 'setTimeout').mockImplementation((callback, delay, ...args) => {
+    // bound: the test's 30 s guard owns a hang; this deadline is released explicitly below.
+    const timer = schedule(callback, delay === STEP_TIMEOUT_MS ? 2_147_483_647 : delay, ...args);
+    if (delay === STEP_TIMEOUT_MS) {
+      startupClock.mockRestore();
+      deadlines.push(() => { clearTimeout(timer); callback(...args); });
+    }
+    return timer;
+  });
+  return () => {
+    expect(deadlines).toHaveLength(1);
+    clock.mockRestore();
+    // Keep elapsed-time guards advancing while the step settles past its deadline.
+    vi.spyOn(Date, 'now').mockImplementation(() => now() + STEP_TIMEOUT_MS);
+    deadlines[0]!();
+  };
+}
+
 describe('intermediate workflow ASK parity — #427', () => {
+  afterEach(() => vi.restoreAllMocks());
   for (const backend of RUNNER_IDS) for (const row of WORKFLOW_ASK_CRITERIA) {
     const modes = row.id === 'Q7' ? ['fresh', 'continuation'] : ['fresh'];
     for (const mode of modes) it(`${backend} ${row.id} ${row.name} (${mode})`, async () => {
+      let expireDeadline: (() => void) | undefined;
       const workflowDef = workflowDefSchema.parse({ name: 'question-chain', source: 'file', steps: [
-        { id: 'implement', prompt: '{{task}}', ...(row.id === 'Q8' ? { timeoutMs: 2_000 } : {}) },
+        { id: 'implement', prompt: '{{task}}', ...(row.id === 'Q8' ? { timeoutMs: STEP_TIMEOUT_MS } : {}) },
         ...(row.id === 'Q3' ? [] : [{ id: 'verify', command: 'test -f a.txt' }]),
       ] });
       await driveRun(backend, row.scenario,
@@ -76,6 +105,7 @@ describe('intermediate workflow ASK parity — #427', () => {
             await waitFor(() => !manager.isActive(runId));
             expect(run().status).toBe('cancelled');
           } else if (row.id === 'Q8') {
+            expireDeadline!();
             await waitFor(() => !manager.isActive(runId));
             expect(run().status).toBe('failed');
             expect(run().error).toContain('timed out');
@@ -126,7 +156,9 @@ describe('intermediate workflow ASK parity — #427', () => {
           expect(run().steps.find(s => s.id === 'verify')?.status).toBe('pending');
           expect(checks()).toEqual([]);
           expect(runInternals(manager).line.busySlots()).toBe(0);
-        }, { workflowDef, autonomous: row.id === 'Q9' });
+        }, { workflowDef, autonomous: row.id === 'Q9', beforeCleanup: () => vi.restoreAllMocks(), beforeStart: () => {
+          if (row.id === 'Q8') expireDeadline = holdStepDeadline();
+        } });
     }, 30_000);
   }
 });

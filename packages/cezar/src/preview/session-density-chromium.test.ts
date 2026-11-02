@@ -40,7 +40,8 @@ describe('Ultra streams at the viewer pixel ratio in a real Chromium (hearsay-to
         browser.close();
         await waitForExit(browser);
       }
-      rmSync(profile, { recursive: true, force: true });
+      // Chromium can still flush profile files after its main process exits.
+      rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     });
     browser = await launchBrowser(profile, process.env);
     let quality: PreviewQuality = 'ultra';
@@ -104,7 +105,8 @@ describe('Ultra streams at the viewer pixel ratio in a real Chromium (hearsay-to
         browser.close();
         await waitForExit(browser);
       }
-      rmSync(profile, { recursive: true, force: true });
+      // Chromium can still flush profile files after its main process exits.
+      rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     });
     browser = await launchBrowser(profile, process.env);
     // As an agent does through the CDP proxy: a new target, then a flat page session on it.
