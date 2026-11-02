@@ -27,8 +27,13 @@ export function ReportsRoute() {
     const fallback = (location.state as { filesRestoreKey?: unknown } | null)?.filesRestoreKey === key
     if (!saved || !scroller.current || (navigationType !== 'POP' && !fallback)) { restored.current = key; return }
     const row = scroller.current.querySelector<HTMLAnchorElement>(`[data-report-id="${saved.row}"]`)
+    if (result.isFetchNextPageError) {
+      restored.current = key
+      scroller.current.scrollTop = 0
+      return
+    }
     if ((!row || result.data.pages.length < saved.pages) && result.hasNextPage) {
-      if (!result.isFetchingNextPage && !result.isFetchNextPageError) void result.fetchNextPage()
+      if (!result.isFetchingNextPage) void result.fetchNextPage()
       return
     }
     restored.current = key
