@@ -186,26 +186,26 @@ export function removeTestSandboxes(paths, remove = removeSandbox, stop = stopSa
  *  /proc; elsewhere the list is empty. */
 export function sandboxProcesses(paths, { procRoot = '/proc', uid = process.getuid?.() } = {}) {
   if (process.platform !== 'linux' || uid === undefined || paths.length === 0) return []
-  const inside = (value) => paths.some((path) => value === path || value.startsWith(path + sep))
   let names
   try {
     names = readdirSync(procRoot)
   } catch {
     return []
   }
-  const pids = []
-  for (const name of names) {
-    const pid = Number(name)
-    if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid) continue
-    const dir = join(procRoot, name)
-    try {
-      if (statSync(dir).uid !== uid) continue
-    } catch {
-      continue
-    }
-    if (pointsInto(dir, inside)) pids.push(pid)
+  return names.map(Number).filter((pid) => pointsIntoSandbox(pid, paths, { procRoot, uid }))
+}
+
+/** Whether process `pid` of account `uid`, not this process, runs in or points into `paths`. */
+function pointsIntoSandbox(pid, paths, { procRoot = '/proc', uid = process.getuid?.() } = {}) {
+  if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid || uid === undefined) return false
+  const dir = join(procRoot, String(pid))
+  try {
+    if (statSync(dir).uid !== uid) return false
+  } catch {
+    return false
   }
-  return pids
+  const inside = (value) => paths.some((path) => value === path || value.startsWith(path + sep))
+  return pointsInto(dir, inside)
 }
 
 function pointsInto(procDir, inside) {
@@ -244,8 +244,11 @@ function waitStopped(pids, ms) {
   while (pids.some(running) && Date.now() < until) Atomics.wait(pause, 0, 0, 10)
 }
 
-function signal(pids, name) {
+/** Signal each of `pids` that `verify` still accepts. A process ID read earlier can name another
+ *  process by now; checking it again right before the signal keeps this from hitting a stranger. */
+function signal(pids, name, verify) {
   for (const pid of pids) {
+    if (!verify(pid)) continue
     try {
       process.kill(pid, name)
     } catch {
@@ -254,22 +257,34 @@ function signal(pids, name) {
   }
 }
 
+/** Rescans after the first SIGKILL: each catches what a killed process started before it died. */
+const KILL_ROUNDS = 5
+
 /**
- * Stop every process `sandboxProcesses` finds for `paths`: SIGTERM, then SIGKILL for what still
- * runs after `graceMs`, including anything they started in the meantime. Return the process IDs
- * found first. Tests leave such processes behind (gh, tsx, runner CLIs, Chrome), and they wrote
- * into the sandbox after its removal (hearsay-tools/cezarion#2453).
+ * Stop every process `find` returns for `paths`: SIGTERM, then after `graceMs` SIGKILL for every
+ * process a new scan finds, and again until a scan finds none (at most `KILL_ROUNDS` times), so a
+ * child forked after one scan is caught by the next. Each signal goes only to a process that
+ * `verify` shows still points into `paths`. Return the process IDs found first. Tests leave such
+ * processes behind (gh, tsx, runner CLIs, Chrome), and they wrote into the sandbox after its
+ * removal (hearsay-tools/cezarion#2453).
  */
 // bound: two seconds is how long a well-behaved child gets to exit on SIGTERM; then SIGKILL.
-export function stopSandboxProcesses(paths, { graceMs = 2_000, find = sandboxProcesses } = {}) {
+export function stopSandboxProcesses(paths, {
+  graceMs = 2_000,
+  find = sandboxProcesses,
+  verify = (pid) => pointsIntoSandbox(pid, paths),
+} = {}) {
   const pids = find(paths)
   if (pids.length === 0) return pids
-  signal(pids, 'SIGTERM')
+  signal(pids, 'SIGTERM', verify)
   waitStopped(pids, graceMs)
-  const left = [...new Set([...pids.filter(running), ...find(paths)])]
-  signal(left, 'SIGKILL')
-  // bound: SIGKILL cannot be refused; this only lets the kernel finish the exits.
-  waitStopped(left, 500)
+  let left = find(paths)
+  for (let round = 0; left.length > 0 && round < KILL_ROUNDS; round += 1) {
+    signal(left, 'SIGKILL', verify)
+    // bound: SIGKILL cannot be refused; this only lets the kernel finish the exits.
+    waitStopped(left, 500)
+    left = find(paths)
+  }
   return pids
 }
 

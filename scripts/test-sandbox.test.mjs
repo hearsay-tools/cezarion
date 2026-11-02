@@ -7,7 +7,7 @@ import { delimiter, join } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { OWNER_FILE, createTestSandbox, hideHostCommands, linkSharedOmpNatives, reapTestSandboxes, removeTestSandboxes, sharedOmpNativesCache, stopSandboxProcesses } from './test-sandbox.mjs'
+import { OWNER_FILE, createTestSandbox, hideHostCommands, linkSharedOmpNatives, reapTestSandboxes, removeTestSandboxes, sandboxProcesses, sharedOmpNativesCache, stopSandboxProcesses } from './test-sandbox.mjs'
 
 const preload = fileURLToPath(new URL('./test-git-env.mjs', import.meta.url))
 const helper = new URL('./test-sandbox.mjs', import.meta.url).href
@@ -176,6 +176,44 @@ test('stopSandboxProcesses kills what ignores SIGTERM once the grace ends', { sk
 
   assert.deepEqual(stopSandboxProcesses([sandbox], { graceMs: 100 }), [ignoring.pid])
   assert.deepEqual(await exitWithin(ignoring, 5_000), { code: null, signal: 'SIGKILL' })
+})
+
+test('stopSandboxProcesses never signals a process ID that no longer points into the sandbox', { skip: linux }, async (t) => {
+  const root = scratch(t)
+  const sandbox = join(root, 'cez-stop-reused')
+  mkdirSync(sandbox)
+  // A scan saw this process ID inside the sandbox; by the signal it names an unrelated process.
+  const stranger = await startChild(t, { cwd: root })
+  const kill = t.mock.method(process, 'kill')
+  let scans = 0
+  stopSandboxProcesses([sandbox], { graceMs: 0, find: () => (scans++ === 0 ? [stranger.pid] : []) })
+  assert.deepEqual(kill.mock.calls.filter((call) => call.arguments[0] === stranger.pid), [])
+})
+
+test('stopSandboxProcesses scans again after SIGKILL, so a writer forked after a scan is stopped too', { skip: linux }, async (t) => {
+  const root = scratch(t)
+  const sandbox = join(root, 'cez-stop-forked')
+  mkdirSync(sandbox)
+  const holder = spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => {}); process.stdout.write("ready\\n"); setInterval(() => {}, 1000)'], {
+    cwd: sandbox, stdio: ['ignore', 'pipe', 'inherit'],
+  })
+  t.after(() => holder.kill('SIGKILL'))
+  await once(holder.stdout, 'data')
+  // The scan right before SIGKILL misses a child that starts after it: spawn returns once exec ran.
+  let late
+  let scans = 0
+  const find = (paths) => {
+    const found = sandboxProcesses(paths)
+    if (++scans === 2) {
+      late = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: root, env: { ...process.env, TMPDIR: sandbox }, stdio: 'ignore' })
+      t.after(() => late.kill('SIGKILL'))
+    }
+    return found
+  }
+
+  stopSandboxProcesses([sandbox], { graceMs: 100, find })
+  assert.deepEqual(sandboxProcesses([sandbox]), [])
+  assert.deepEqual(await exitWithin(late, 5_000), { code: null, signal: 'SIGKILL' })
 })
 
 test('reaps unmarked sandboxes older than the age limit, only of this prefix and account, at most the limit per call (hearsay-tools/cezarion#2453)', (t) => {
