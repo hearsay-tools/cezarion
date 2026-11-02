@@ -69,8 +69,8 @@ looped case). **Moved** cases now run in `npm run lint`; the scanner's fixture c
 | --- | --- | --- | --- |
 | Contract import boundaries (M01) | `packages/cezar/src/contract-import-boundaries.test.ts` | 2: no root import; each exemption still imports a root | 33 scanner cases; the api-client shim mirror, which compares files rather than scanning shapes |
 | Raw query setters (M02) | `packages/web/src/test/search-params-discipline.test.ts`, now `packages/cezar/src/lint/raw-query-setter.test.ts` | 1: no setter outside the baseline | 8 scanner cases; the exception-policy guard on the baseline |
-| Active-run map ownership (M04) | `packages/cezar/src/workflows/run-active-pin.test.ts` (removed) | 2 ownership scans replaced by `active-run-map-write`; call-presence scan retired (hearsay-tools/cezarion#2419) | Harness parity R48 runs execute and Continue, checks active pins and release from memory |
 | Native mock boundaries (M03) | `packages/cezar/src/mock-source-boundary.test.ts` | 1: no test reads or swaps mock source | 9 scanner cases |
+| Active-run map ownership (M04) | `packages/cezar/src/workflows/run-active-pin.test.ts` (removed) | 2 ownership scans replaced by `active-run-map-write`; call-presence scan retired (hearsay-tools/cezarion#2419) | Harness parity R48 runs execute and Continue, checks active pins and release from memory |
 | Shared run-fact readers (M05) | `packages/cezar/src/run-fact-readers.test.ts` | 2: no finding; every listed reader still reads | 27 scanner cases |
 | Environment-name documentation (M11) | `packages/cezar/src/env-example.test.ts` | 1: every `CEZ_*` name documented | 4 scanner cases |
 | File-length budget (M12) | `packages/cezar/src/file-length.test.ts` | 1: no unpinned long file, grown pin or stale pin | 6 fixture cases |
