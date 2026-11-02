@@ -40,6 +40,7 @@ never a pass.
 | `cez/native-mock-source` | A test that reads, splices or swaps native mock source (hearsay-tools/cezarion#1479) | None |
 | `cez/raw-query-setter` | A raw `useSearchParams` setter in the cockpit (hearsay-tools/cezarion#1649) | `packages/web/src/test/search-params-discipline.baseline.json`, shrink-only and reasoned |
 | `cez/run-fact-reader` | An attention label comparison, a restated usage-limit hold, or an unlisted `autoResumeAt` read (hearsay-tools/cezarion#1496) | `resume-time-readers.json`: add a reader only with its reason |
+| `cez/run-history-reader` | An unlisted raw `historyPaths` or `eventsPath` use, or a dynamic path ending in `.ndjson` or `.ndjson.br` (hearsay-tools/cezarion#2420) | `run-history-readers.json`: each file and access kind has a reason; stale entries fail |
 | `cez/undocumented-env-name` | A `CEZ_*` name in a shipped source or runner script that `.env.example` lacks | The `CEZ_MOCK_*` prefix |
 
 The lists live beside the rules in `packages/cezar/src/lint/`, except the query-setter baseline,
@@ -72,11 +73,12 @@ looped case). **Moved** cases now run in `npm run lint`; the scanner's fixture c
 | Native mock boundaries (M03) | `packages/cezar/src/mock-source-boundary.test.ts` | 1: no test reads or swaps mock source | 9 scanner cases |
 | Active-run map ownership (M04) | `packages/cezar/src/workflows/run-active-pin.test.ts` (removed) | 2 ownership scans replaced by `active-run-map-write`; call-presence scan retired (hearsay-tools/cezarion#2419) | Harness parity R48 runs execute and Continue, checks active pins and release from memory |
 | Shared run-fact readers (M05) | `packages/cezar/src/run-fact-readers.test.ts` | 2: no finding; every listed reader still reads | 27 scanner cases |
+| Run-history readers (M06) | `packages/cezar/src/runs/history-readers.test.ts` | 1: no raw transcript path outside its owners | The adapted predicate fixture and both compression/reopen behavior cases; new lint fixtures pin helpers, dynamic paths, fixed strings, comments and stale exceptions |
 | Environment-name documentation (M11) | `packages/cezar/src/env-example.test.ts` | 1: every `CEZ_*` name documented | 4 scanner cases |
 | File-length budget (M12) | `packages/cezar/src/file-length.test.ts` | 1: no unpinned long file, grown pin or stale pin | 6 fixture cases |
 | Existing ast-grep enforcement | `packages/cezar/src/ast-grep-rules.test.ts` | 14: one repository scan per rule | Rule-file checks, the `ast-grep test` cases, the baseline helpers, the update mode helpers, binary resolution |
 
-24 cases moved; M04's call-presence case retired. Update modes moved with them:
+25 cases moved; M04's call-presence case retired. Update modes moved with them:
 `AST_GREP_RULES_UPDATE=1 npm run lint` and `FILE_LENGTH_UPDATE=1 npm run lint`.
 
 
@@ -84,7 +86,6 @@ looped case). **Moved** cases now run in `npm run lint`; the scanner's fixture c
 
 | Family | Current file(s) | Why not in this migration | Follow-up |
 | --- | --- | --- | --- |
-| Run-history readers (M06) | `packages/cezar/src/runs/history-readers.test.ts` | A per-line substring scan; not every `.ndjson` path is run history, so the rule must target ownership first | hearsay-tools/cezarion#2420 |
 | Unit wait discipline (M07) | `packages/cezar/src/test-wait-discipline.test.ts`, `packages/web/src/test/unit-wait-discipline.test.ts` | Three baselines, a cached full scan that fixture cases share, and a host timeout check to separate | hearsay-tools/cezarion#2421 |
 | Design guardian (M09) | `packages/web/src/design-guardian.test.ts` | Ten per-file rules fit lint; the token and control cases pin named files' content; the suite reads all sources at import | hearsay-tools/cezarion#2422 |
 | Card-2 contrast (M10) | `packages/web/src/test/card-2-contrast.test.ts` | Joins `styles/index.css` with every `.tsx`; dynamic styling still needs browser evidence | hearsay-tools/cezarion#2423 |
