@@ -1,3 +1,4 @@
+import { mergeConfig } from './config-merge.js';
 import { reportsRoutes } from './reports-api.ts';
 import { automationCreateSchema, automationUpdateSchema, automationCheckRequestSchema, automationLogQuerySchema } from '@open-mercato/cezar-contract/automation-requests';
 import { providerConnectSchema, createAgentProfileSchema, openAgentAccountFileSchema, updateAgentProfileSchema, selectAgentProfileSchema, providerEnabledSchema, providerRetrySchema, providerRouteParamsSchema, agentProfileRouteParamsSchema } from '@open-mercato/cezar-contract/provider-requests';
@@ -4869,69 +4870,7 @@ export function createApp(deps: ServerDeps) {
       } catch {
         // missing or malformed — start fresh
       }
-      if (parsed.data.baseBranch !== undefined) {
-        if (parsed.data.baseBranch === null) delete raw.baseBranch;
-        else raw.baseBranch = parsed.data.baseBranch;
-      }
-      if (parsed.data.defaultRunner !== undefined) raw.defaultRunner = parsed.data.defaultRunner;
-      if (parsed.data.systemPrompt !== undefined) {
-        // '' and null both clear: an emptied textarea means "no extra prompt".
-        if (parsed.data.systemPrompt === null || parsed.data.systemPrompt === '') {
-          delete raw.systemPrompt;
-        } else {
-          raw.systemPrompt = parsed.data.systemPrompt;
-        }
-      }
-      if (parsed.data.maxParallel !== undefined) raw.maxParallel = parsed.data.maxParallel;
-      if (parsed.data.worktreeRetention !== undefined) {
-        // null clears back to the default (10); a number (including 0 = unlimited)
-        // is stored as-is.
-        if (parsed.data.worktreeRetention === null) delete raw.worktreeRetention;
-        else raw.worktreeRetention = parsed.data.worktreeRetention;
-      }
-      if (parsed.data.liveTitleUpdates !== undefined) {
-        if (parsed.data.liveTitleUpdates === null) delete raw.liveTitleUpdates;
-        else raw.liveTitleUpdates = parsed.data.liveTitleUpdates;
-      }
-      if (parsed.data.archiveOnMerge !== undefined) {
-        if (parsed.data.archiveOnMerge === null) delete raw.archiveOnMerge;
-        else raw.archiveOnMerge = parsed.data.archiveOnMerge;
-      }
-      if (parsed.data.reviewGate !== undefined) {
-        if (parsed.data.reviewGate === null) delete raw.reviewGate;
-        else raw.reviewGate = parsed.data.reviewGate;
-      }
-      if (parsed.data.memoryLimitMb !== undefined) {
-        // null or 0 both mean "no ceiling" — drop the key back to the default.
-        if (parsed.data.memoryLimitMb === null || parsed.data.memoryLimitMb === 0) {
-          delete raw.memoryLimitMb;
-        } else {
-          raw.memoryLimitMb = parsed.data.memoryLimitMb;
-        }
-      }
-      if (parsed.data.worktreeSetup !== undefined) {
-        // null or no commands = no setup: delete the key rather than store an empty list.
-        const setup = parsed.data.worktreeSetup;
-        if (setup === null || setup.commands.length === 0) delete raw.worktreeSetup;
-        else raw.worktreeSetup = {
-          commands: setup.commands,
-          ...(setup.timeoutSeconds !== undefined ? { timeoutSeconds: setup.timeoutSeconds } : {}),
-        };
-      }
-      if (parsed.data.defaultModels !== undefined) {
-        // Per-runner merge, so setting codex's preset never clobbers claude's.
-        const current =
-          raw.defaultModels && typeof raw.defaultModels === 'object'
-            ? { ...(raw.defaultModels as Record<string, unknown>) }
-            : {};
-        for (const [runner, model] of Object.entries(parsed.data.defaultModels)) {
-          if (model === undefined) continue;
-          if (model === null || model === '') delete current[runner];
-          else current[runner] = model;
-        }
-        if (Object.keys(current).length === 0) delete raw.defaultModels;
-        else raw.defaultModels = current;
-      }
+      raw = mergeConfig(raw, parsed.data);
       try {
         await mkdir(dataDir, { recursive: true });
         await writeFile(configPath, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');

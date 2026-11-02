@@ -11,6 +11,7 @@ function applyValue(raw: RawConfig, key: string, value: unknown, clear: readonly
 }
 
 function applyWorktreeSetup(raw: RawConfig, body: SetConfigInput): void {
+  // null or no commands = no setup: delete the key rather than store an empty list.
   const setup = body.worktreeSetup;
   if (setup === undefined) return;
   if (setup === null || setup.commands.length === 0) delete raw.worktreeSetup;
@@ -22,7 +23,8 @@ function applyWorktreeSetup(raw: RawConfig, body: SetConfigInput): void {
 
 function applyDefaultModels(raw: RawConfig, body: SetConfigInput): void {
   if (body.defaultModels === undefined) return;
-  // Per-runner merge preserves presets and unknown keys from the existing file.
+  // Per-runner merge, so setting codex's preset never clobbers claude's.
+  // Unknown keys from the existing file survive too.
   const current = raw.defaultModels && typeof raw.defaultModels === 'object'
     ? { ...(raw.defaultModels as RawConfig) }
     : {};
@@ -37,12 +39,16 @@ function applyDefaultModels(raw: RawConfig, body: SetConfigInput): void {
 const fieldAppliers = {
   baseBranch: (raw, body) => applyValue(raw, 'baseBranch', body.baseBranch),
   defaultRunner: (raw, body) => applyValue(raw, 'defaultRunner', body.defaultRunner),
+  // '' and null both clear: an emptied textarea means "no extra prompt".
   systemPrompt: (raw, body) => applyValue(raw, 'systemPrompt', body.systemPrompt, [null, '']),
   maxParallel: (raw, body) => applyValue(raw, 'maxParallel', body.maxParallel),
+  // null clears back to the default (10); a number (including 0 = unlimited)
+  // is stored as-is.
   worktreeRetention: (raw, body) => applyValue(raw, 'worktreeRetention', body.worktreeRetention),
   liveTitleUpdates: (raw, body) => applyValue(raw, 'liveTitleUpdates', body.liveTitleUpdates),
   archiveOnMerge: (raw, body) => applyValue(raw, 'archiveOnMerge', body.archiveOnMerge),
   reviewGate: (raw, body) => applyValue(raw, 'reviewGate', body.reviewGate),
+  // null or 0 both mean "no ceiling" — drop the key back to the default.
   memoryLimitMb: (raw, body) => applyValue(raw, 'memoryLimitMb', body.memoryLimitMb, [null, 0]),
   worktreeSetup: applyWorktreeSetup,
   defaultModels: applyDefaultModels,
@@ -50,7 +56,8 @@ const fieldAppliers = {
 
 /** Merge parsed config fields without materializing defaults or mutating either input. */
 export function mergeConfig(raw: RawConfig, body: SetConfigInput): RawConfig {
-  const next = { ...raw };
+  // The reader accepts arrays too; preserve their JSON serialization behavior.
+  const next: RawConfig = Array.isArray(raw) ? Object.assign([...raw], raw) : { ...raw };
   for (const apply of Object.values(fieldAppliers)) apply(next, body);
   return next;
 }

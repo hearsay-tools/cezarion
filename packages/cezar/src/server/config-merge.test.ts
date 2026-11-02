@@ -60,6 +60,14 @@ describe('mergeConfig', () => {
     expect(mergeConfig({ defaultModels: existing }, { defaultModels: {} })).toEqual({});
   });
 
+  it('preserves top-level array serialization accepted by the existing file reader', () => {
+    const raw = ['legacy'] as unknown as Record<string, unknown>;
+    const next = mergeConfig(raw, { baseBranch: 'main' });
+    expect(JSON.stringify(next)).toBe(JSON.stringify(raw));
+    expect(next).not.toBe(raw);
+    expect(raw.baseBranch).toBeUndefined();
+  });
+
   it('retains legacy object-like model keys and the field insertion order', () => {
     expect(mergeConfig({ defaultModels: ['legacy'] }, { defaultModels: { codex: 'new' } })).toEqual({
       defaultModels: { 0: 'legacy', codex: 'new' },
