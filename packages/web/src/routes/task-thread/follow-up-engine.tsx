@@ -99,6 +99,63 @@ function resolveContinueAccount(
   return { sessionStep, accountDefaults, account }
 }
 
+type ContinueModel = ReturnType<typeof resolveContinueModel>
+
+function continueRequestBody(
+  text: string, images: AttachmentInput[], runnerOverride: Runner | undefined,
+  modelsLocked: boolean, runnerChanged: boolean,
+  pickedModel: string | null, pickedEffort: string | null,
+  { model, effort, mustClearStoredEffort }: ContinueModel, account: string | null,
+) {
+  return {
+        // An empty draft posts no `text` at all, so the server's default opening prompt
+        // ("Continue.") still applies — one-click Continue, unchanged.
+        text: text.trim() ? text : undefined,
+        images: images.length ? images : undefined,
+        // Send an override only for a pill the user actually touched; otherwise omit it so the
+        // server keeps the run's current backend/model. If that backend disconnected, the
+        // connected fallback must be explicit even when the pills were untouched.
+        runner: runnerOverride,
+        // The model and effort the pills DISPLAY (#411): a picked pill always writes its value,
+        // and a runner switch — pick or connected fallback — writes what the pills now show even
+        // when untouched, because the switch re-resolves both against the new runner
+        // (`modelDefaults`/`resolveEffort` above) and the record must match the display.
+        // `undefined` = keep the run's value, `''` = auto.
+        model:
+          !modelsLocked && (pickedModel !== null || runnerChanged)
+            ? model
+            : undefined,
+        effort:
+          !modelsLocked && (pickedEffort !== null || runnerChanged)
+            ? effort
+            : mustClearStoredEffort
+              ? ''
+              : undefined,
+        // Only a login the user actually picked rides the request. Omitted, the run keeps the
+        // account it is on — and the reopened session still resumes, which an explicit switch
+        // deliberately does not (a session id lives inside ONE account's config dir).
+        agentProfile: account ?? undefined,
+      }
+}
+
+function continueStartsNewConversation(
+  run: ApiRun, sessionStep: ReturnType<typeof resolveContinueAccount>['sessionStep'],
+  runner: Runner, currentRunner: Runner, account: string | null,
+) {
+  return !!sessionStep && (
+    runner !== (sessionStep.backend ?? currentRunner) ||
+    (account ?? run.agentProfile ?? sessionStep.profileId ?? DEFAULT_AGENT_ACCOUNT_ID) !==
+      (sessionStep.profileId ?? DEFAULT_AGENT_ACCOUNT_ID)
+  )
+}
+
+function continueLabels({ models, model, effortOptions, effort }: ContinueModel) {
+  return {
+    modelLabel: models.find((m) => m.id === model)?.label ?? 'auto',
+    effortLabel: effortOptions.find((option) => option.value === effort)?.label ?? 'auto',
+  }
+}
+
 /**
  * The follow-up composer's Continue (#401): the same runner + model pills the /new composer
  * offers, so a follow-up can pick which backend and model reopen the session. The pills DEFAULT
@@ -140,9 +197,11 @@ export function useContinueAction(run: ApiRun): ContinueAction {
   const catalog = useRunnerModels(runner, available)
   const modelsLocked = config.data?.modelsLocked === true
   const runnerChanged = runner !== currentRunner
-  const { models, model, effortOptions, effort, mustClearStoredEffort } = resolveContinueModel(
+  const modelSelection = resolveContinueModel(
     run, runner, runnerChanged, modelsLocked, config.data, catalog.data, pickedModel, pickedEffort,
   )
+  const { models, model, effortOptions, effort } = modelSelection
+  const { modelLabel, effortLabel } = continueLabels(modelSelection)
   const accountChoices = useAgentAccounts()
   const { accounts } = accountChoices
   const { sessionStep, accountDefaults, account } = resolveContinueAccount(
@@ -154,35 +213,10 @@ export function useContinueAction(run: ApiRun): ContinueAction {
       if (!canContinue) {
         return Promise.reject(new Error(continuation.reason ?? 'Connect an agent provider to continue.'))
       }
-      return continueRun(runAddress(run.id), {
-        // An empty draft posts no `text` at all, so the server's default opening prompt
-        // ("Continue.") still applies — one-click Continue, unchanged.
-        text: text.trim() ? text : undefined,
-        images: images.length ? images : undefined,
-        // Send an override only for a pill the user actually touched; otherwise omit it so the
-        // server keeps the run's current backend/model. If that backend disconnected, the
-        // connected fallback must be explicit even when the pills were untouched.
-        runner: continuation.runnerOverride,
-        // The model and effort the pills DISPLAY (#411): a picked pill always writes its value,
-        // and a runner switch — pick or connected fallback — writes what the pills now show even
-        // when untouched, because the switch re-resolves both against the new runner
-        // (`modelDefaults`/`resolveEffort` above) and the record must match the display.
-        // `undefined` = keep the run's value, `''` = auto.
-        model:
-          !modelsLocked && (pickedModel !== null || runnerChanged)
-            ? model
-            : undefined,
-        effort:
-          !modelsLocked && (pickedEffort !== null || runnerChanged)
-            ? effort
-            : mustClearStoredEffort
-              ? ''
-              : undefined,
-        // Only a login the user actually picked rides the request. Omitted, the run keeps the
-        // account it is on — and the reopened session still resumes, which an explicit switch
-        // deliberately does not (a session id lives inside ONE account's config dir).
-        agentProfile: account ?? undefined,
-      })
+      return continueRun(runAddress(run.id), continueRequestBody(
+        text, images, continuation.runnerOverride, modelsLocked, runnerChanged,
+        pickedModel, pickedEffort, modelSelection, account,
+      ))
     },
     // Capture the run's project at the start: navigation must not retarget the refresh.
     onMutate: () => runAddress(run.id),
@@ -197,11 +231,7 @@ export function useContinueAction(run: ApiRun): ContinueAction {
   return {
     available,
     canContinue,
-    startsNewConversation: !!sessionStep && (
-      runner !== (sessionStep.backend ?? currentRunner) ||
-      (account ?? run.agentProfile ?? sessionStep.profileId ?? DEFAULT_AGENT_ACCOUNT_ID) !==
-        (sessionStep.profileId ?? DEFAULT_AGENT_ACCOUNT_ID)
-    ),
+    startsNewConversation: continueStartsNewConversation(run, sessionStep, runner, currentRunner, account),
     reason: continuation.reason,
     providerPending: continuation.providerPending,
     pills: (
@@ -249,7 +279,7 @@ export function useContinueAction(run: ApiRun): ContinueAction {
           fieldLabel
           slot="follow-up-model-pill"
           ariaLabel="Model"
-          label={models.find((m) => m.id === model)?.label ?? 'auto'}
+          label={modelLabel}
           value={model}
           readOnly={modelsLocked}
           disabledHint="Model selection is locked to native coding-agent settings."
@@ -266,7 +296,7 @@ export function useContinueAction(run: ApiRun): ContinueAction {
           fieldLabel
           slot="follow-up-effort-pill"
           ariaLabel="Effort"
-          label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}
+          label={effortLabel}
           value={effort}
           readOnly={modelsLocked}
           disabledHint="Effort selection is locked to native coding-agent settings."
