@@ -176,7 +176,7 @@ in `.github/workflows/ci.yml`; check its required aggregate before merge.
 CI's final gate covers:
 
 ```bash
-npm run typecheck   # refresh server declarations, then check all four workspaces
+npm run typecheck   # check all four workspaces without building
 npm test -- --shard=N/4 --maxWorkers=4  # vitest, N=1..4 — server + cockpit unit suites
 npm run test:unit   # node:test — fast core-module coverage (packages/cezar/test/unit/)
 npm run build       # tsc → dist/, vite → packages/cezar/web/dist/, then the check:pack tarball gate
