@@ -683,7 +683,7 @@ transport into `UiEvent`s. The authoritative table is
 | v2 event / field | claude (stream-json) | codex (app-server JSON-RPC) | opencode (serve HTTP+SSE) |
 |---|---|---|---|
 | `session.started` | `system/init` (model, tools, cwd) | `thread/started` / `thread/start` result | `POST /session` response |
-| `turn.started` | each stdin user message | `turn/started` | each prompt POST |
+| `turn.started` | each stdin user message that opens a turn; after a `result` with no line queued, the first parent `assistant` frame (Claude resumed the parent itself, hearsay-tools/cezarion#1512) | `turn/started` | each prompt POST |
 | `turn.completed` + `stopReason` | `result` subtype (`success→end_turn`, `error_max_turns→max_tokens`, `error_during_execution→error`) | `turn/completed→end_turn` (failed status or provider error → `error`), `turn/failed→error`, interrupt→`cancelled` | `session.idle→end_turn` (or `error` if a failure `session.error` preceded) |
 | message item | `assistant` `text` blocks (deltas via `--include-partial-messages`) | `agentMessage` items | text parts |
 | reasoning item | `thinking` blocks | `reasoning` items (+ `textDelta`) | `reasoning` parts |
@@ -693,6 +693,7 @@ transport into `UiEvent`s. The authoritative table is
 | `ask.requested` | portable `CEZ:ASK` marker | portable marker + native `item/tool/requestUserInput` | portable marker + native `question` tool (`GET /question`, `POST /question/:id/reply`) |
 | hook item | `system/hook_response` (`--include-hook-events` when `--help` lists it; without it only SessionStart/Setup). Entries parsed from JSON stdout: `additionalContext`→context, `systemMessage`→warning, block `reason`/`stopReason`/deny `permissionDecisionReason`→stop, ask reason→feedback; plain stdout→context. Stdout yields entries on exit 0 only (Claude ignores it otherwise; it stays raw output). Exit 2, `decision:block`, `continue:false`, deny→`blocked` | `hook/completed` (`run.entries` verbatim, `sourcePath`→`source`, `stopped`→`cancelled`) | *(none — plugin hooks run in-process)* |
 | subagent nesting (`parentItemId`) | `parent_tool_use_id` | collaboration receiver thread id (review mode remains childless) | child-session parts under a `subtask` |
+| background child (`background`, hearsay-tools/cezarion#2431) | `task_started.is_backgrounded` or `async_launched` result → running; `task_notification` → completed / failed / declined | `subAgentActivity(kind: started)` → running; parent-thread `subAgentActivity(kind: completed)` → completed | *(none — the parent settles after its children)* |
 | `usage.updated` | `result.usage` + `total_cost_usd` | `thread/tokenUsage/updated` (no USD) | `message.updated` tokens/cost + `step-finish` |
 
 **Mapper robustness contract.** Inputs come off the wire and may be `null`,
@@ -880,6 +881,18 @@ or a new fixture set forgets one — a named row fails. The matrix:
   and Codex only. OpenCode 1.18.35, Pi 1.0.4, OMP 18.8.0 and Cursor
   2026.10.01-e373342 run hooks in-process or report none, and carry the named
   `NO_HOOK_TELEMETRY` exemption with an inverse assertion
+- background sub-agent task items (hearsay-tools/cezarion#2431): a child that
+  outlives its spawn call keeps its root `task` item `running` with
+  `background: true`, and one `item.completed` (`completed`, `failed`, or
+  `declined` for a stopped child) reports its end. Claude marks it from
+  `system/task_started` (`is_backgrounded`) or the `async_launched` result and
+  ends it on `system/task_notification`; Codex 0.164.0 marks the
+  `subAgentActivity(kind: started)` row and ends it on the parent-thread
+  `subAgentActivity(kind: completed)`, which carries the turn id of the parent
+  turn that already completed. A repeated end maps to nothing, and a nested
+  spawn stays passive. OpenCode and OMP settle the parent only after its
+  children end, and Pi and Cursor report no child end, so they carry the named
+  `NO_BACKGROUND_SUBAGENTS` exemption with an inverse assertion
 
 A new backend must produce every row its wire supports. A genuine upstream gap
 requires a named, versioned exemption with an inverse assertion; Cursor token
@@ -965,6 +978,32 @@ An older cezar reads a stored peer wait as an unreadable entry: its strict wait 
 stored summary whose `waitingOn` is `peers` fails the older
 summary schema, so its run index reads the full record instead. `runs/peer-wait-downgrade.test.ts`
 pins this read (hearsay-tools/cezarion#1993).
+
+Native subagents (hearsay-tools/cezarion#2431). A runner mapper marks a native subagent that
+outlives its spawn call with `background: true` on its root task item, keeps it `running`, and
+ends it with one `item.completed` (`completed`, `failed`, or `declined` for a stopped child).
+When a turn ends with such a child still running, and with no done, question or permission
+request, Cezar opens its own `subagent` wait (`source: 'cezar'`, `via: 'native-subagents'`) in
+place of the monitoring timer, also after `CEZ:MONITORING` or `ScheduleWakeup`, and sends no
+nudge. The park (`waiting:subagents`) keeps its session and a monitoring slot and reads
+**waiting for N subagents** (`waitingOn: { kind: 'subagents', count }`, bucket `none`, the robot
+glyph, webhook state `waiting-workers`); the order is human > usage limit > workers > peers >
+subagents > PR > process > timer. Each child event saves the children and moves the 30-minute
+deadline. When the last child ends and the runner starts no parent turn within 15 s, the wait
+resolves `settled` and wakes the parent once for free; the deadline resolves `timeout` and spends
+one wake. A parent `turn.started` the runner sends itself, outside Cezar's own write, closes the
+subagent wait (`superseded`) and every open timer; PR, process, worker and peer waits stay. A lost
+session or a restart resolves it `interrupted`, and the run continues once for free. Claude and
+Codex report their children; Pi, Cursor, OMP and OpenCode keep the monitoring timer. Tests:
+`workflows/subagent-waits.test.ts` drives each `waiting:subagents` row, and rows **U30**–**U37** in
+`workflows/waits-subagents-parity-cells.testkit.ts` run on every `RUNNER_IDS` native wire, with
+the named exemptions there.
+
+An older cezar reads a stored subagent wait as an unreadable entry, as it reads a peer wait: the
+store drops that entry, keeps the run and its other waits, and sets `lastWaitsError`. A run parked
+only on it reads as a plain park: Needs you. A stored summary whose `waitingOn` is `subagents`
+fails the older summary schema, so its run index reads the full record.
+`runs/subagent-wait-downgrade.test.ts` pins this read.
 
 `cezar_ask({ context, questions })` waits for the user (hearsay-tools/cezarion#1234). Both are
 required. `context` is 1–20,000 characters of Markdown that the cockpit shows above the card.

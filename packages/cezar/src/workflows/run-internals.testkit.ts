@@ -7,6 +7,7 @@ import { FamilyReconciler } from './run/family-reconciler.ts';
 import { WaitWatches } from './run/wait-watches.ts';
 import { WaitRegistry } from './run/wait-registry.ts';
 import { HumanWaits } from './run/human-waits.ts';
+import { SubagentWaits } from './run/subagent-waits.ts';
 import { TurnNudges } from './run/turn-nudges.ts';
 import { WorktreeAutosave } from './run/worktree-autosave.ts';
 import { WorkerOrphans } from './run/worker-orphans.ts';
@@ -45,6 +46,7 @@ export const RUN_MODULE_CLASSES = {
   waitWatches: WaitWatches,
   waitRegistry: WaitRegistry,
   humanWaits: HumanWaits,
+  subagentWaits: SubagentWaits,
   turnNudges: TurnNudges,
   worktreeAutosave: WorktreeAutosave,
   orphans: WorkerOrphans,

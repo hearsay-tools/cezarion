@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { computeWaitingOn, type WaitingOnInput, type WorkerWaitEntry } from './waits.ts';
 import { ATTENTION_RANK, ATTENTION_RUNGS, DEFAULT_WEBHOOK_TRIGGERS, deriveAttention, deriveWebhookState, WEBHOOK_TRIGGERS, workerWaitLabel, type Attention, type AttentionInput, type AttentionRung } from './attention.ts';
 import type { RunStatus } from './runs.ts';
-import { makePeerWait, RUN_STATUS, WAIT_PHASE } from './test-factories.testkit.ts';
+import { makePeerWait, makeSubagentWait, makeTimerWait, RUN_STATUS, SUBAGENT_STATUS, WAIT_PHASE } from './test-factories.testkit.ts';
 
 /**
  * The attention ladder, pinned where it now lives (#553/#609). The cockpit's
@@ -134,6 +134,10 @@ describe('rung ids', () => {
     ['waiting-on-workers', 'waiting on replies', { status: RUN_STATUS.waiting, waitingOn: { kind: 'workers', count: 1, replies: true, peers: true } }],
     ['waiting-on-workers', 'waiting on 2 tasks', { status: RUN_STATUS.waiting, waitingOn: { kind: 'peers', count: 2 } }],
     ['waiting-on-workers', 'waiting on 1 task', { status: RUN_STATUS.waiting, waits: [makePeerWait()] }],
+    // hearsay-tools/cezarion#2431: native subagents the turn left running.
+    ['waiting-on-subagents', 'waiting for 1 subagent', { status: RUN_STATUS.waiting, waits: [makeSubagentWait()] }],
+    ['waiting-on-subagents', 'waiting for 2 subagents', { status: RUN_STATUS.waiting, waitingOn: { kind: 'subagents', count: 2 } }],
+    ['waiting-on-subagents', 'waiting for subagents', { status: RUN_STATUS.waiting, waitingOn: { kind: 'subagents', count: 0 } }],
     ['waiting-for-ci', 'waiting for CI', { status: 'waiting', waitingOn: pr('checks') }],
     ['waiting-for-merge', 'waiting for merge', { status: 'waiting', waitingOn: pr('merge') }],
     ['waiting-for-command', 'waiting for a command', { status: 'waiting', waitingOn: { kind: 'process', waitId: '77777777-7777-4777-8777-777777777777', pid: 4242, deadline: '2026-10-17T15:30:00.000Z' } }],
@@ -462,6 +466,8 @@ describe('deriveWebhookState', () => {
     ['a CI wait', { status: 'waiting', waitingOn: ci }, 'waiting-ci'],
     ['a root on named peer tasks', { status: RUN_STATUS.waiting, waitingOn: { kind: 'peers', count: 1 } }, 'waiting-other'],
     ['a timer wait', { status: 'waiting', waitingOn: timer }, 'waiting-timer'],
+    // hearsay-tools/cezarion#2431: the owner chose the workers trigger.
+    ['a root on native subagents', { status: RUN_STATUS.waiting, waitingOn: { kind: 'subagents', count: 1 } }, 'waiting-workers'],
     // hearsay-tools/cezarion#1446: no option of its own, so the catch-all.
     ['a process wait', { status: 'waiting', waitingOn: { kind: 'process', waitId: '77777777-7777-4777-8777-777777777777', pid: 4242, deadline: '2026-10-17T15:30:00.000Z' } }, 'waiting-other'],
     // A usage-limit park is parked on a clock, as the scheduled resume it replaces was: no state.
@@ -509,6 +515,15 @@ describe('attention boundary cases', () => {
     expect(deriveAttention({ status: RUN_STATUS.queued, waitingOn: { kind: 'usage-limit', at: '2026-10-30T12:00:00Z' } }).rung).toBe('usage-limit');
     expect(deriveAttention({ status: RUN_STATUS.waiting, delegation: { role: 'invalid' }, waits: [workerEntry({ phase: WAIT_PHASE.resolved }), workerEntry()] }).rung).toBe('waiting-on-workers');
     expect(deriveAttention({ status: RUN_STATUS.waiting, waits: 'malformed' as never }).rung).toBe('needs-you');
+  });
+
+  it('reads native subagents as the robot glyph without a pulse, and outranks a timer beside them', () => {
+    const subagents = makeSubagentWait({ children: [{ id: 'a', status: SUBAGENT_STATUS.running }, { id: 'b', status: SUBAGENT_STATUS.completed }] });
+    const timer = makeTimerWait({ deadline: '2026-10-26T00:01:00.000Z' });
+    const attention = deriveAttention({ status: RUN_STATUS.waiting, waits: [timer, subagents] });
+    expect(attention).toEqual({ rung: 'waiting-on-subagents', bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting for 1 subagent' });
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [subagents, workerEntry()] }).rung).toBe('waiting-on-workers');
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [makeSubagentWait({ phase: WAIT_PHASE.resolved })] }).rung).toBe('waiting-for-capacity');
   });
 
   it.each([0, 1, 2])('labels %i peer tasks and preserves the webhook catch-all', count => {

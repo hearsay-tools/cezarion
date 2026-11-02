@@ -1,5 +1,5 @@
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
-import { computeWaitingOn, isUsageLimitHold, type HumanWaitEntry, type Wait } from '@open-mercato/cezar-contract/waits';
+import { computeWaitingOn, isUsageLimitHold, type HumanWaitEntry, type Wait, type WaitingOn } from '@open-mercato/cezar-contract/waits';
 import type { RunRecord } from '../../runs/store.ts';
 import type { RunOutcome } from '../../runs/outcome-commit.ts';
 import { rootsAwaitingPeer } from '../../delegation/conversations.ts';
@@ -45,7 +45,7 @@ export class WakeAdmission {
   constructor(private readonly context: RunModuleContext, private readonly host: WakeAdmissionHost,
     private readonly maxAutoContinues: number, private readonly maxWakeDeliveryAttempts: number) {}
 
-  /** A timer, process or peer wait due, or still owed, once the automatic-wake budget is spent
+  /** A timer, process, peer or timed-out subagent wait due, or still owed, once the automatic-wake budget is spent
    *  wakes nothing: it is cancelled with the cap note, and the run keeps whatever else it waits on
    *  (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1446, hearsay-tools/cezarion#1995). */
   cancelAutomaticAtCap(runId: string, waits: readonly Wait[]): void {
@@ -53,7 +53,7 @@ export class WakeAdmission {
     this.context.store.commitOutcome(runId, { kind: 'cancelled', waitIds: waits.map(wait => wait.id) });
     for (const wait of waits) {
       this.host.disarmWait(wait.id);
-      this.context.store.appendEvent(runId, { type: 'note', message: wait.kind === 'process' || wait.kind === 'peer'
+      this.context.store.appendEvent(runId, { type: 'note', message: wait.kind === 'process' || wait.kind === 'peer' || wait.kind === 'subagent'
         ? `automatic ${wait.kind} wake-up cap reached (${this.maxAutoContinues}); ${wait.kind} wait ${wait.id} cancelled`
         : `automatic ${isMonitoringTimer(wait) ? 'monitoring' : 'timer'} wake-up cap reached (${this.maxAutoContinues}); timer ${wait.id} cancelled` });
     }
@@ -170,7 +170,8 @@ export class WakeAdmission {
     }
     clearIdleTimer(state);
     const top = computeWaitingOn(run)?.kind;
-    const keepsSlot = top === 'pr' || top === 'process' || top === 'timer' || (top === undefined && resolvedWaits(run).length > 0);
+    const holdsSubagents = holdsNativeSubagents(run);
+    const keepsSlot = holdsSubagents || parkTopKeepsSlot(run, top);
     // A park that frees its slot publishes the intent first: a refused write throws and keeps it.
     if (keepsSlot) {
       this.host.move(runId, 'park');
@@ -178,7 +179,7 @@ export class WakeAdmission {
     } else transitionVia('park', () => this.context.store.getRun(runId), () => this.context.store.commitParked(runId, state.currentStepId));
     this.host.line.park(runId);
     if (keepsSlot) this.host.line.joinPool(runId); else this.leaveMonitoringPool(runId);
-    if (top === 'workers' || top === 'peers') this.host.armIdleTimer(runId, state);
+    if (!holdsSubagents && (top === 'workers' || top === 'peers')) this.host.armIdleTimer(runId, state);
     this.host.queueWaitWake(runId);
     this.host.releaseSlot();
     return true;
@@ -397,4 +398,15 @@ export class WakeAdmission {
     }
     return 'none';
   }
+}
+
+/** Native subagents live in the session, so any park with a subagent wait open keeps the session
+ *  and a slot, whichever wait ranks first (hearsay-tools/cezarion#2431). */
+function holdsNativeSubagents(run: RunRecord): boolean {
+  return openWaits(run).some((wait) => wait.kind === 'subagent');
+}
+
+/** A CI, process or timer park keeps its slot, and so does a wake due now with nothing open. */
+function parkTopKeepsSlot(run: RunRecord, top: WaitingOn['kind'] | undefined): boolean {
+  return top === 'subagents' || top === 'pr' || top === 'process' || top === 'timer' || (top === undefined && resolvedWaits(run).length > 0);
 }

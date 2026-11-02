@@ -1,6 +1,6 @@
 import { runDelegationSummarySchema } from '@open-mercato/cezar-api-client/contract/delegation'
 import { runWorkflowLabel } from '@open-mercato/cezar-api-client/contract/run-labels'
-import type { RunRecord, RunSummary } from '@open-mercato/cezar-api-client'
+import type { HumanWaitEntry, RunRecord, RunSummary } from '@open-mercato/cezar-api-client'
 
 /**
  * A list-row fixture from a full test record (#817). List views now read `RunSummary`; the fields
@@ -24,7 +24,7 @@ export function summaryOf(run: RunRecord): RunSummary {
 
 /** An open human wait: how a record says the agent asked the user (phase 4b,
  *  hearsay-tools/cezarion#1236). `askSeq` marks a question the user already sees. */
-export function openHumanWait(askSeq?: number): NonNullable<RunRecord['waits']>[number] {
+export function openHumanWait(askSeq?: number): HumanWaitEntry {
   return {
     id: '00000000-0000-4000-8000-0000000000ac', kind: 'human', source: 'agent', via: 'cezar_ask',
     registeredAt: '2026-09-16T00:00:00.000Z', phase: 'open', turnId: 'turn-1',

@@ -98,6 +98,8 @@ export interface UiToolItem {
   /** commandExecution / bash exit code, when the backend reports one. */
   exitCode?: number
   parentItemId?: string
+  /** A native subagent that outlives its spawn call — see the server's `ui-events.ts` (hearsay-tools/cezarion#2431). */
+  background?: true
 }
 
 /** How a native hook run ended — see the server's `ui-events.ts` (#961). */

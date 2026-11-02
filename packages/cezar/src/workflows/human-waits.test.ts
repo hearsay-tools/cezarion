@@ -251,7 +251,7 @@ describe('the lifecycle prompt follows the session\'s cezar tools', { timeout: 4
     await opened();
     const [prompt] = prompts();
     // The opening message carries the handoff (hearsay-tools/cezarion#1584), so step 1 points there.
-    expect(prompt).toContain(handoffInstructions({ tools: false, handoffInjected: true }));
+    expect(prompt).toContain(handoffInstructions({ tools: false, handoffInjected: true, nativeSubagents: true }));
     expect(prompt).not.toContain('Lifecycle tools (cezar)');
   });
 
@@ -290,7 +290,7 @@ describe('the lifecycle prompt follows the session\'s cezar tools', { timeout: 4
     runInternals(manager).waitWatches.waitTimers.get(timer.id)!.timer._onTimeout();
     await until(() => inbound().some(text => text.includes(MONITORING_WAKE_NUDGE_MARKERS)));
     expect(inbound().some(text => text.includes(MONITORING_WAKE_NUDGE))).toBe(false);
-    expect(prompts()[1]).toContain(handoffInstructions({ tools: false, handoffInjected: true }));
+    expect(prompts()[1]).toContain(handoffInstructions({ tools: false, handoffInjected: true, nativeSubagents: true }));
   });
 
   it('a session with cezar tools is taught the tools when it opens and when it continues', async () => {
@@ -302,7 +302,7 @@ describe('the lifecycle prompt follows the session\'s cezar tools', { timeout: 4
     expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
     await until(() => prompts().length === 2 && store.getRun(run.id)?.status === 'waiting');
     for (const prompt of prompts()) {
-      expect(prompt).toContain(handoffInstructions({ tools: true, handoffInjected: true }));
+      expect(prompt).toContain(handoffInstructions({ tools: true, handoffInjected: true, nativeSubagents: true }));
       expect(prompt).not.toContain('CEZ:DONE');
     }
   });

@@ -34,7 +34,7 @@ import { appendTurnText, trackTurnTail, RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { asksQuestion } from '@open-mercato/cezar-contract/waits';
-import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { readPersistedRuns, crashStore } from '../runs/run-store.testkit.ts';
 import { monitoringTimerOf, monitoringWakeOf } from './waits.testkit.ts';
 
@@ -1382,7 +1382,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
   it.each([
     { activity: 'tool', trigger: 'mock:backend-resume', eventNeedle: 'pi-autonomous-edit' },
     { activity: 'message', trigger: 'mock:backend-resume-text', eventNeedle: 'Pi resumed without a prompt' },
-  ])('backend $activity activity resumes a parked monitor before its wake deadline and keeps its timer (#59)', async ({ trigger, eventNeedle }) => {
+  ])('backend $activity activity resumes a parked monitor before its wake deadline and closes its timer (#59, hearsay-tools/cezarion#2431)', async ({ trigger, eventNeedle }) => {
     manager.dispose();
     const semaphore = new WorkspaceSemaphore({ initial: { monitoringWakeIntervalMinutes: 0.02 } });
     manager = createFixtureManager(store, repoRoot, { semaphore });
@@ -1408,20 +1408,25 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
       return events.includes(eventNeedle);
     });
 
-    // hearsay-tools/cezarion#1233: the backend's own turn runs on the pool slot it parked with,
-    // and its timer stays open until it fires.
+    // hearsay-tools/cezarion#1233: the backend's own turn runs on the pool slot it parked with.
+    // hearsay-tools/cezarion#2431 (owner decision 4): a parent turn the runner starts itself closes
+    // every open timer, so the timer cannot wake a second turn after it; the turn's own end decides
+    // what it waits on next.
     expect(store.getRun(record.id)).toMatchObject({ status: 'running' });
-    expect(Date.parse(String(monitoringWakeOf(store.getRun(record.id))))).toBe(originalDeadline);
-    expect(monitoringTimerOf(manager, record.id)).toBeDefined();
+    expect(originalDeadline).toBeGreaterThan(0);
+    expect(monitoringWakeOf(store.getRun(record.id))).toBeUndefined();
+    expect(monitoringTimerOf(manager, record.id)).toBeUndefined();
+    expect(store.getRun(record.id)?.lastWaits?.filter(wait => wait.kind === WAIT_KIND.timer).map(wait => wait.phase)).toEqual([WAIT_PHASE.cancelled]);
     expect(runInternals(manager).line.waiting.has(record.id)).toBe(false);
     expect(runInternals(manager).line.monitoring.has(record.id)).toBe(true);
     expect(runInternals(manager).line.busySlots()).toBe(0);
     expect(semaphore.busy()).toBe(0);
     expect((state.session as { open?: boolean } | undefined)?.open).toBe(true);
 
-    // The mock's backend turn never ends, so the fired timer stays owed: no boundary, no delivery.
-    await waitFor(record.id, (r) => r?.waits?.some(wait => wait.kind === 'timer' && wait.phase === 'resolved') === true);
-    expect(store.getRun(record.id)?.lastWaits?.some(wait => wait.phase === 'delivered')).not.toBe(true);
+    // Past the old 1.2 s deadline nothing fires: the closed timer owes no wake.
+    await new Promise(resolve => setTimeout(resolve, 2_000)); // bound: outlasts the cancelled timer's deadline
+    expect(store.getRun(record.id)?.waits?.some(wait => wait.kind === WAIT_KIND.timer)).not.toBe(true);
+    expect(store.getRun(record.id)?.lastWaits?.some(wait => wait.phase === WAIT_PHASE.delivered)).not.toBe(true);
     const events = readFileSync(join(repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`), 'utf8');
     expect(events.includes(eventNeedle)).toBe(true);
     expect((state.session as { open?: boolean } | undefined)?.open).toBe(true);
@@ -1557,11 +1562,14 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
       { type: 'turn.started', turnId: 'turn_parent_resume' },
     );
 
-    // hearsay-tools/cezarion#1233: the resumed turn keeps its pool slot and its open timer until
-    // its own turn end.
+    // hearsay-tools/cezarion#1233: the resumed turn keeps its pool slot until its own turn end.
+    // hearsay-tools/cezarion#2431 (owner decision 4): a parent turn the runner starts itself closes
+    // every open timer, so the timer cannot wake a second turn after it. The turn's own end decides
+    // what it waits on next: a new monitoring line or wait, else the no-wait nudge.
     expect(store.getRun(record.id)).toMatchObject({ status: 'running' });
-    expect(monitoringWakeOf(store.getRun(record.id))).toBeDefined();
-    expect(monitoringTimerOf(manager, record.id)).toBeDefined();
+    expect(monitoringWakeOf(store.getRun(record.id))).toBeUndefined();
+    expect(monitoringTimerOf(manager, record.id)).toBeUndefined();
+    expect(store.getRun(record.id)?.lastWaits?.filter(wait => wait.kind === WAIT_KIND.timer).map(wait => wait.phase)).toEqual([WAIT_PHASE.cancelled]);
     expect(runInternals(manager).line.waiting.has(record.id)).toBe(false);
     expect(runInternals(manager).line.monitoring.has(record.id)).toBe(true);
     expect(runInternals(manager).line.busySlots()).toBe(0);

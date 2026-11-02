@@ -24,7 +24,8 @@ import {
 const HANDOFF_INSTRUCTIONS = composeSystemPrompt(artifactInstructions('available'), BASE_HANDOFF);
 // hearsay-tools/cezarion#1234: the sessions below have cezar's tools, so they are taught the tools.
 // hearsay-tools/cezarion#1584: their opening message carries the handoff, so step 1 points there.
-const SESSION_HANDOFF = composeSystemPrompt(artifactInstructions('available'), handoffInstructions({ tools: true, handoffInjected: true }));
+// The dry run's Claude reports its native subagents (hearsay-tools/cezarion#2431).
+const SESSION_HANDOFF = composeSystemPrompt(artifactInstructions('available'), handoffInstructions({ tools: true, handoffInjected: true, nativeSubagents: true }));
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 const TERMINAL = new Set(['done', 'review', 'failed', 'cancelled']);

@@ -20,6 +20,8 @@ import type { RunRecord } from './runs.ts';
  * entry with no deadline, so the list is all `computeWaitingOn` reads.
  * hearsay-tools/cezarion#1995 adds `peer` (spec `2026-10-27-task-communication-protocol` § 7): a root
  * task waits for named peer root tasks to write or to settle, with a deadline.
+ * hearsay-tools/cezarion#2431 adds `subagent`: Cezar's own wait on the native subagents a turn left
+ * running, with a safety deadline.
  */
 
 export const WAIT_LIMIT = 16;
@@ -34,6 +36,11 @@ export const PROCESS_EXIT_FILE_MAX = 4096;
 /** A peer wait's deadline, and a request or worker wait's (hearsay-tools/cezarion#1995). */
 export const PEER_WAIT_DEFAULT_SECONDS = 600;
 export const PEER_WAIT_MAX_SECONDS = 1800;
+/** A subagent wait (hearsay-tools/cezarion#2431): its safety deadline after the last child event,
+ *  the grace after the last child ends before Cezar wakes the parent, and its child bound. */
+export const SUBAGENT_WAIT_DEADLINE_SECONDS = 1800;
+export const SUBAGENT_WAIT_GRACE_SECONDS = 15;
+export const SUBAGENT_WAIT_CHILD_LIMIT = 32;
 const pidSchema = z.number().int().min(2);
 
 /** `open` → `resolved` (its event fired or its deadline passed) → `delivered`, or `cancelled`. */
@@ -45,11 +52,12 @@ export type WaitPhase = z.infer<typeof waitPhaseSchema>;
  *  `cez worker wait`, the alias that opens a `worker` wait; `completion` is the worker wait
  *  cezar opens for a root whose done is refused twice (hearsay-tools/cezarion#1301).
  *  `cez-message-wait` is `cez message wait --peer` (hearsay-tools/cezarion#1995); a request wait
- *  from `cez message wait --request` keeps `cez-worker-wait`. */
+ *  from `cez message wait --request` keeps `cez-worker-wait`. `native-subagents` is the subagent
+ *  wait Cezar opens when a turn ends with native subagents still running (hearsay-tools/cezarion#2431). */
 export const waitViaSchema = z.enum([
   // `cezar_wait_for_ci` is kept for stored rows only: the tool was removed (hearsay-tools/cezarion#1236).
   'cezar_wait', 'cezar_wait_for_ci', 'cezar_ask', 'monitoring-line', 'schedule-wakeup', 'ask-line', 'native-ask', 'no-wait', 'budget',
-  'cez-worker-wait', 'completion', 'cez-message-wait',
+  'cez-worker-wait', 'completion', 'cez-message-wait', 'native-subagents',
 ]);
 export type WaitVia = z.infer<typeof waitViaSchema>;
 
@@ -215,7 +223,43 @@ export function peerWaitView(entry: PeerWaitEntry): PeerWaitView {
   return { id: entry.id, peerIds: entry.peerIds, deadline: entry.deadline, phase: entry.phase, ...(entry.result ? { result: entry.result } : {}) };
 }
 
-export const waitSchema = z.discriminatedUnion('kind', [prWaitEntrySchema, timerWaitEntrySchema, humanWaitEntrySchema, workerWaitEntrySchema, processWaitEntrySchema, peerWaitEntrySchema]);
+/** One native subagent a subagent wait follows: the runner's id for its root task item, and its
+ *  last status. `cancelled` is a child the runner stopped or declined. */
+export const subagentChildSchema = z.object({
+  id: z.string().min(1).max(256),
+  status: z.enum(['running', 'completed', 'failed', 'cancelled']),
+}).strict();
+export type SubagentChild = z.infer<typeof subagentChildSchema>;
+
+/** Why a subagent wait ended (hearsay-tools/cezarion#2431): every child ended (`settled`), the safety
+ *  deadline passed (`timeout`), a restart found no session to hold the children (`interrupted`), or
+ *  the runner resumed the parent itself (`superseded`, a cancelled entry). */
+export const subagentWaitResultSchema = z.object({ reason: z.enum(['settled', 'timeout', 'interrupted', 'superseded']) }).strict();
+export type SubagentWaitResult = z.infer<typeof subagentWaitResultSchema>;
+
+/**
+ * The native subagents a turn left running (hearsay-tools/cezarion#2431). Cezar opens it at the
+ * turn end instead of a monitoring timer: the park keeps its session, which holds the children, and
+ * a monitoring-pool slot. It resolves when every child ended and the runner did not resume the
+ * parent within a grace, or at its deadline, which each child event moves.
+ */
+export const subagentWaitEntrySchema = z.object({
+  ...waitBaseShape,
+  kind: z.literal('subagent'),
+  source: z.literal('cezar'),
+  via: z.literal('native-subagents'),
+  deadline: z.iso.datetime(),
+  children: z.array(subagentChildSchema).min(1).max(SUBAGENT_WAIT_CHILD_LIMIT),
+  result: subagentWaitResultSchema.optional(),
+}).strict();
+export type SubagentWaitEntry = z.infer<typeof subagentWaitEntrySchema>;
+
+/** The children a subagent wait still waits on. */
+export function runningSubagents(wait: Pick<SubagentWaitEntry, 'children'>): number {
+  return wait.children.filter((child) => child.status === 'running').length;
+}
+
+export const waitSchema = z.discriminatedUnion('kind', [prWaitEntrySchema, timerWaitEntrySchema, humanWaitEntrySchema, workerWaitEntrySchema, processWaitEntrySchema, peerWaitEntrySchema, subagentWaitEntrySchema]);
 export type Wait = z.infer<typeof waitSchema>;
 
 // ---- the tools ----------------------------------------------------------------------------
@@ -268,11 +312,11 @@ export type CezarWaitRequestInput = z.input<typeof cezarWaitRequestSchema>;
 export const cezarCancelWaitRequestSchema = z.object({ wait_id: z.uuid() }).strict();
 export type CezarCancelWaitRequest = z.infer<typeof cezarCancelWaitRequestSchema>;
 
-/** One still-open wait as both tools list it back to the agent. A PR, timer, worker, process or
- *  peer wait carries its deadline; a human wait has none. */
+/** One still-open wait as both tools list it back to the agent. A PR, timer, worker, process,
+ *  peer or subagent wait carries its deadline; a human wait has none. */
 const openWaitFields = { wait_id: z.uuid(), summary: z.string().max(256) };
 export const openWaitSchema = z.discriminatedUnion('kind', [
-  z.object({ ...openWaitFields, kind: z.enum(['pr', 'timer', 'worker', 'process', 'peer']), deadline: z.iso.datetime() }).strict(),
+  z.object({ ...openWaitFields, kind: z.enum(['pr', 'timer', 'worker', 'process', 'peer', 'subagent']), deadline: z.iso.datetime() }).strict(),
   z.object({ ...openWaitFields, kind: z.literal('human') }).strict(),
 ]);
 export type OpenWait = z.infer<typeof openWaitSchema>;
@@ -394,8 +438,8 @@ export type CezarDoneAnswer = z.infer<typeof cezarDoneAnswerSchema>;
 // ---- what the run is waiting on -----------------------------------------------------------
 
 /**
- * The run's top open wait, by the spec's order: human > usage limit > workers > peers > PR > process
- * > timer. A summary field: lists and `deriveAttention` read it instead of the wait list.
+ * The run's top open wait, by the spec's order: human > usage limit > workers > peers > subagents >
+ * PR > process > timer. A summary field: lists and `deriveAttention` read it instead of the wait list.
  */
 const waitingOnUnionSchema = z.discriminatedUnion('kind', [
   /** `shown` once the user sees the question (its `askSeq`): attention reads that as Needs you at
@@ -410,6 +454,8 @@ const waitingOnUnionSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('workers'), count: z.number().int().nonnegative(), replies: z.literal(true).optional(), peers: z.literal(true).optional() }),
   /** The peer tasks the open peer waits name, counted once each (hearsay-tools/cezarion#1995). */
   z.object({ kind: z.literal('peers'), count: z.number().int().nonnegative() }),
+  /** The native subagents still running, over every open subagent wait (hearsay-tools/cezarion#2431). */
+  z.object({ kind: z.literal('subagents'), count: z.number().int().nonnegative() }),
   z.object({
     kind: z.literal('pr'),
     until: prWaitUntilSchema,
@@ -517,6 +563,8 @@ export function computeWaitingOn(run: WaitingOnInput): WaitingOn | undefined {
   }
   const peerWaits = open.filter((wait): wait is PeerWaitEntry => wait.kind === 'peer');
   if (peerWaits.length) return { kind: 'peers', count: new Set(peerWaits.flatMap((wait) => wait.peerIds)).size };
+  const subagentWaits = open.filter((wait): wait is SubagentWaitEntry => wait.kind === 'subagent');
+  if (subagentWaits.length) return { kind: 'subagents', count: subagentWaits.reduce((sum, wait) => sum + runningSubagents(wait), 0) };
   const pr = earliest(open.filter((wait): wait is PrWaitEntry => wait.kind === 'pr'));
   if (pr) {
     return { kind: 'pr', until: pr.until, waitId: pr.id, prUrl: pr.prUrl, repository: pr.repository, prNumber: pr.prNumber, deadline: pr.deadline };

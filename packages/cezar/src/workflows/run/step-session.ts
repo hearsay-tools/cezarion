@@ -217,7 +217,7 @@ export class StepSession {
           // default), then the handoff contract — every agent step.
           systemPrompt: composeSystemPrompt(launch.skillPrompt, sessionEvents.launchSystemTail(this.context, this.sharedHost, {
             extraSystemPrompt: launch.extraSystemPrompt, delegation, webhooksPart: launch.webhooksPart,
-            env: profile.env, ciTools, handoffInjected: launch.opening.handoffInjected,
+            env: profile.env, ciTools, handoffInjected: launch.opening.handoffInjected, runner: state.delegationSettings?.runner,
           })),
           userPrompt: launch.opening.userPrompt,
           images: launch.images,

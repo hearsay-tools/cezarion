@@ -967,7 +967,7 @@ const earlyReplies = [
   [userText => userText.includes('mock:steer-tool'), replyToSteering],
   [userText => !userText.includes('[cez-namer]') && userText.includes('mock:hook-after-park'), replyWithParkedHook],
   [userText => !userText.includes('[cez-namer]') && userText.includes('mock:subagent-after-park'), replyWithParkedChild],
-  [userText => !userText.includes('[cez-namer]') && userText.includes('mock:forked-skill'), replyWithForkedSkill],
+  [userText => !userText.includes('[cez-namer]') && userText.includes('mock:forked-skill'), replyWithForkedSkill], [userText => !userText.includes('[cez-namer]') && userText.includes('mock:subagent-background'), async userText => (await import('./mock-claude-subagents.mjs')).replyWithBackgroundSubagents(userText, { emit, afterParityPark })],
   [userText => userText.includes('mock:multi-pr-refs'), replyWithMultiplePrs],
   [userText => userText.includes('mock:turn-messages:'), replyWithTurnMessages],
   [userText => !userText.includes('[cez-namer]') && userText.includes('mock:ask-snapshot'), replyWithAskSnapshot],

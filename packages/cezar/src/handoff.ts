@@ -209,6 +209,11 @@ Still-working marker: if you end a turn while still working on your OWN downstre
 
 Structured question marker: when you are blocked on a decision that is genuinely the user's to make — one you cannot resolve from the request, the code, or sensible defaults — and it comes down to a few concrete choices, end your turn with a single line CEZ:ASK <json> instead of asking in prose. Before the CEZ:ASK line, send everything the decision depends on (the full draft, every finding, what each option means) as ordinary text in the same message. The user sees only your message text and the chips. Your reasoning never reaches them, so never call content "above" unless you sent it as message text. cez renders it as clickable option chips in the cockpit so the user can answer in one tap. The <json> is ONE object on ONE line, the last thing in your message: {"questions":[{"header":"≤12-char label","question":"a clear question ending in ?","multiSelect":false,"options":[{"label":"short choice","description":"what it means / the trade-off"}]}]} — use only those keys (plus an optional non-empty "id" up to 64 characters per question, plus an optional "context" of up to 20000 characters of Markdown shown above the chips), with 1–4 questions, 2–4 options per question, unique question text and option labels, header 1–12 characters, question 1–400, option label 1–60, and description at most 280. The JSON must be syntactically valid — every brace and bracket closed, no trailing commas; re-read the line before you send it, because a payload cez cannot parse is shown to the user as raw JSON instead of chips. The user can always type a free-form reply, so never add an "Other" option. Prefer sensible defaults over asking; use CEZ:ASK only when the choice is truly the user's. Never combine CEZ:ASK with CEZ:DONE or CEZ:MONITORING.`;
 
+/** hearsay-tools/cezarion#2431: a runner that reports its native subagents. Cezar waits on them, so
+ *  the agent just ends its turn; other background work keeps the timer and marker guidance. */
+const NATIVE_SUBAGENTS_TOOLS = `Native subagents: when you end a turn while subagents you started in the background inside this session still run, just end the turn, with no cezar_wait timer for them. Cezar waits for them itself: it spends no automatic wake and wakes you once when they have all ended. Use cezar_wait for other background work.`;
+const NATIVE_SUBAGENTS_MARKERS = `Native subagents: when your turn ends while subagents you started in the background inside this session still run, Cezar waits for them itself: it spends no automatic wake and wakes you once when they have all ended. You do not need CEZ:MONITORING for them; keep it for other background work.`;
+
 /** hearsay-tools/cezarion#1234: the same lifecycle as tool calls, for a session that has them. */
 const LIFECYCLE_TOOLS = `Lifecycle tools (cezar): End every turn with a cezar tool call that says what happens next. When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn. When a user decision or missing input is needed, call cezar_ask with the complete decision context and short questions. Put the full draft, findings, evidence and option meanings in context. Cezar shows context as Markdown above the card. Reasoning and rejected calls are hidden. Give a question 2–4 options to show them as choices, or leave its options out and the user types the answer. Once the call accepts the context and questions, end the turn and wait for the user. When you are waiting on something else, call cezar_wait with kind "pr" for a pull request's checks or its merge, or kind "timer" to re-check later, then end your turn. A human message or any resolved wait wakes you. The user's reply answers your question; PR waits and timers stay open until they resolve or you cancel them with cezar_cancel_wait. Never call cezar_done while anything is unfinished or unverified.`;
 
@@ -226,11 +231,14 @@ export const HANDOFF_ONLY_INSTRUCTIONS = `${handoffJournal(false)}\n\n${LIFECYCL
 /**
  * The handoff contract for one agent session. With `tools` (the session has cezar's tools) the
  * lifecycle is taught as cezar_done, cezar_ask and cezar_wait calls; without them it is today's marker
- * variant, `HANDOFF_ONLY_INSTRUCTIONS`. The marker lines are parsed in
+ * variant, `HANDOFF_ONLY_INSTRUCTIONS`. With `nativeSubagents` (a runner that reports them,
+ * hearsay-tools/cezarion#2431) it adds that Cezar waits for native subagents. The marker lines are parsed in
  * both cases. With `handoffInjected` the launch's opening message already carries the file
  * (hearsay-tools/cezarion#1584), so step 1 points there instead of asking for a read; the
  * writing duties never change.
  */
-export function handoffInstructions(opts: { tools: boolean; handoffInjected?: boolean }): string {
-  return `${handoffJournal(opts.handoffInjected ?? false)}\n\n${opts.tools ? LIFECYCLE_TOOLS : LIFECYCLE_MARKERS}\n\n${REFERENCES_AND_ATTACHMENTS}`;
+export function handoffInstructions(opts: { tools: boolean; handoffInjected?: boolean; nativeSubagents?: boolean }): string {
+  const lifecycle = opts.tools ? LIFECYCLE_TOOLS : LIFECYCLE_MARKERS;
+  const subagents = opts.nativeSubagents ? `\n\n${opts.tools ? NATIVE_SUBAGENTS_TOOLS : NATIVE_SUBAGENTS_MARKERS}` : '';
+  return `${handoffJournal(opts.handoffInjected ?? false)}\n\n${lifecycle}${subagents}\n\n${REFERENCES_AND_ATTACHMENTS}`;
 }

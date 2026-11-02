@@ -1,0 +1,117 @@
+[
+  {
+    "type": "turn.started",
+    "turnId": "01a19938-9dee-77d3-9d18-bfc1d8af279c"
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "call_141caeb1cd434e09894c0f8eddbbf7f3",
+      "name": "spawnAgent",
+      "toolKind": "task",
+      "title": "Task: sleep child",
+      "status": "running",
+      "input": {
+        "agentPath": "/root/sleep_child",
+        "agentThreadId": "01a19938-aa14-79e1-b616-224eb68b1981"
+      },
+      "background": true
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "msg_05cfcf5d5ce908d8016ae7bc97f9248191a3ec15a0b6c8cfc2",
+      "role": "assistant",
+      "text": "",
+      "phase": "final"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "msg_05cfcf5d5ce908d8016ae7bc97f9248191a3ec15a0b6c8cfc2",
+      "role": "assistant",
+      "text": "<text>",
+      "phase": "final"
+    }
+  },
+  {
+    "type": "turn.completed",
+    "turnId": "01a19938-9dee-77d3-9d18-bfc1d8af279c",
+    "stopReason": "end_turn"
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "exec-943f6d03-d3f2-446d-ae55-881e0d1e2b7d",
+      "name": "commandExecution",
+      "toolKind": "execute",
+      "title": "Ran <command>",
+      "status": "running",
+      "input": {
+        "command": "<command>"
+      },
+      "parentItemId": "call_141caeb1cd434e09894c0f8eddbbf7f3"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "exec-943f6d03-d3f2-446d-ae55-881e0d1e2b7d",
+      "name": "commandExecution",
+      "toolKind": "execute",
+      "title": "Ran <command>",
+      "status": "completed",
+      "input": {
+        "command": "<command>"
+      },
+      "output": "<output>",
+      "exitCode": 0,
+      "parentItemId": "call_141caeb1cd434e09894c0f8eddbbf7f3"
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "msg_05cfcf5d5ce908d8016ae7bcc322e88191b5adaaa71d307176",
+      "role": "assistant",
+      "text": "",
+      "phase": "final",
+      "parentItemId": "call_141caeb1cd434e09894c0f8eddbbf7f3"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "msg_05cfcf5d5ce908d8016ae7bcc322e88191b5adaaa71d307176",
+      "role": "assistant",
+      "text": "<text>",
+      "phase": "final",
+      "parentItemId": "call_141caeb1cd434e09894c0f8eddbbf7f3"
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "call_141caeb1cd434e09894c0f8eddbbf7f3",
+      "name": "spawnAgent",
+      "toolKind": "task",
+      "title": "Task: sleep child",
+      "status": "completed",
+      "input": {
+        "agentPath": "/root/sleep_child",
+        "agentThreadId": "01a19938-aa14-79e1-b616-224eb68b1981"
+      },
+      "background": true
+    }
+  }
+]
