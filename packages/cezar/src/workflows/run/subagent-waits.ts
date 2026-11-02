@@ -20,6 +20,8 @@ import type { RunModuleContext } from './types.ts';
  */
 
 type SubagentStatus = SubagentChild['status'];
+/** How long a failed interruption waits before it writes the children's ends again: at most half the deadline, so it comes first. */
+const INTERRUPT_RETRY_MS = 60_000;
 type ChildEvent = { id: string; status: SubagentStatus; background: boolean };
 
 interface SubagentWaitsHost {
@@ -70,6 +72,8 @@ export function openSubagentWaitOf(run: Pick<RunRecord, 'waits'> | undefined): S
 export class SubagentWaits {
   /** The grace after the last child ended, by run id. */
   private readonly graces = new Map<string, NodeJS.Timeout>();
+  /** The retry of an interruption whose transcript write failed, by run id. */
+  private readonly retries = new Map<string, NodeJS.Timeout>();
 
   constructor(private readonly context: RunModuleContext, private readonly host: SubagentWaitsHost,
     private readonly graceMs = SUBAGENT_WAIT_GRACE_SECONDS * 1000, private readonly deadlineMs = SUBAGENT_WAIT_DEADLINE_SECONDS * 1000) {}
@@ -227,11 +231,31 @@ export class SubagentWaits {
 
   /**
    * The session that held the wait's children is gone, so they stopped: they end in the transcript
-   * and the wait resolves `interrupted`.
+   * and the wait resolves `interrupted`. A failed transcript write keeps the wait open and tries
+   * again, as a worker deadline retries its checkpoint, so the wait never says the children stopped
+   * while the activity view still shows one running. A retry skips the children already ended.
    */
   interrupt(runId: string, waitId: string): void {
-    this.endStoppedChildren(runId);
+    this.clearRetry(runId);
+    if (!this.endStoppedChildren(runId)) { this.armRetry(runId, waitId); return; }
     this.host.settleWait(runId, waitId, { reason: 'interrupted' });
+  }
+
+  private armRetry(runId: string, waitId: string): void {
+    const timer = setTimeout(() => {
+      if (this.retries.get(runId) !== timer) return;
+      this.retries.delete(runId);
+      const open = openWaits(this.context.store.getRun(runId) ?? {}).some(entry => entry.id === waitId);
+      if (open && !this.context.disposed()) this.interrupt(runId, waitId);
+    }, Math.min(this.deadlineMs / 2, INTERRUPT_RETRY_MS));
+    timer.unref?.();
+    this.retries.set(runId, timer);
+  }
+
+  private clearRetry(runId: string): void {
+    const timer = this.retries.get(runId);
+    if (timer) clearTimeout(timer);
+    this.retries.delete(runId);
   }
 
   /**
@@ -240,7 +264,7 @@ export class SubagentWaits {
    * The ending event copies the child's last recorded item and its step, because a reader
    * replaces an item by its step and id.
    */
-  private endStoppedChildren(runId: string): void {
+  private endStoppedChildren(runId: string): boolean {
     const last = new Map<string, { item: UiToolItem; stepId: string | undefined }>();
     for (const event of this.context.store.readEvents(runId)) {
       const item = (event as { item?: unknown }).item as UiToolItem | undefined;
@@ -248,11 +272,13 @@ export class SubagentWaits {
       if (!last.has(item.id) && item.background !== true) continue;
       last.set(item.id, { item, stepId: event.stepId });
     }
+    let written = true;
     for (const { item, stepId } of last.values()) {
       if (item.status !== 'running' && item.status !== 'pending') continue;
       try { this.context.store.appendEvent(runId, { type: 'item.completed', ...(stepId ? { stepId } : {}), item: { ...item, background: true, status: 'declined' } }); }
-      catch (error) { console.warn(`[cez] subagent end write failed: ${error instanceof Error ? error.message : String(error)}`); }
+      catch (error) { written = false; console.warn(`[cez] subagent end write failed: ${error instanceof Error ? error.message : String(error)}`); }
     }
+    return written;
   }
 
   /** Whether the session that holds the wait's children is still live. */
@@ -261,7 +287,8 @@ export class SubagentWaits {
   }
 
   dispose(): void {
-    for (const timer of this.graces.values()) clearTimeout(timer);
+    for (const timer of [...this.graces.values(), ...this.retries.values()]) clearTimeout(timer);
     this.graces.clear();
+    this.retries.clear();
   }
 }

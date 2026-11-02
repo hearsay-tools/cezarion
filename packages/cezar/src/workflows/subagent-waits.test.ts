@@ -347,6 +347,24 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
 describe('the subagent wait deadline (hearsay-tools/cezarion#2431)', () => {
   useWorkerWaitFixture({ subagentGraceMs: 50, subagentDeadlineMs: 1_000 });
 
+  it('an interruption whose transcript write fails keeps the wait open and retries, so the wait never outruns the activity view', async () => {
+    const { id, wait } = await parkedOnSubagents();
+    const real = store.appendEvent.bind(store);
+    let refuse = true;
+    const append = vi.spyOn(store, 'appendEvent').mockImplementation((runId, event) => {
+      if (refuse && event.type === 'item.completed') { refuse = false; throw Error('injected: disk full'); }
+      return real(runId, event);
+    });
+    internals().subagentWaits.interrupt(id, wait.id);
+    // The end did not land, so the wait still reads its children as running.
+    expect(entryOf(id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open });
+    expect(backgroundEnds(id)).toEqual([]);
+    await until(() => entryOf(id, wait.id)?.phase !== WAIT_PHASE.open || settledOf(id, wait.id) !== undefined);
+    append.mockRestore();
+    expect(backgroundEnds(id).map(([child, status]) => [child, status])).toEqual([['toolu_bg_01', 'declined']]);
+    expect(entryOf(id, wait.id) ?? settledOf(id, wait.id)).toMatchObject({ result: { reason: 'interrupted' } });
+  });
+
   it('the deadline wakes the parent and spends one wake', async () => {
     const { id, wait } = await parkedOnSubagents();
     await until(() => settledOf(id, wait.id)?.phase === WAIT_PHASE.delivered && store.getRun(id)?.status === RUN_STATUS.waiting);
