@@ -43,6 +43,62 @@ export interface ContinueAction {
   continueWith: (text: string, images: AttachmentInput[]) => Promise<ContinueResponse>
 }
 
+type ContinueConfig = ReturnType<typeof useConfig>['data']
+type ContinueCatalog = ReturnType<typeof useRunnerModels>['data']
+type ContinueAccounts = ReturnType<typeof useAgentAccounts>
+
+function resolveContinueModel(
+  run: ApiRun, runner: Runner, runnerChanged: boolean, modelsLocked: boolean,
+  config: ContinueConfig, catalog: ContinueCatalog,
+  pickedModel: string | null, pickedEffort: string | null,
+) {
+  // While the runner is unchanged, the model pill starts on the run's own pin; switching the
+  // runner invalidates that pin and falls back to the new backend's configured default / auto.
+  const modelDefaults =
+    !modelsLocked && !runnerChanged && run.model
+      ? { ...config?.defaultModels, [runner]: run.model }
+      : config?.defaultModels
+  const effectivePickedModel = modelsLocked ? null : pickedModel
+  const models = modelsForRunner(runner, catalog, [effectivePickedModel, modelDefaults?.[runner]])
+  const model = resolveModel(effectivePickedModel, runner, modelDefaults, catalog)
+  const effortOptions = effortOptionsForModel(runner, model, catalog)
+  const rawEffort = modelsLocked ? '' : (pickedEffort ?? run.effort ?? '')
+  const effort = resolveEffort(rawEffort, effortOptions)
+  const mustClearStoredEffort =
+    !modelsLocked && pickedEffort === null && rawEffort !== '' && effort === ''
+
+  return { models, model, effortOptions, effort, mustClearStoredEffort }
+}
+
+function resolveContinueAccount(
+  run: ApiRun, runner: Runner, currentRunner: Runner, runnerChanged: boolean,
+  { accounts, repoAccount }: ContinueAccounts, pickedAccount: string | null,
+) {
+  // Agent accounts (spec 2026-07-29-agent-profiles): rows of the RUNNER pill, exactly as the /new
+  // composer offers them — `claude · Default` / `claude · Klaudiusz` / `codex`. Without them a
+  // thread could switch agent but not login, so "continue this on my other Claude account" was
+  // unsayable anywhere except at task creation.
+  // Which account this run is ON: the STEP that spawned, never the project's current selection —
+  // `sessionId` and `profileId` are a pair, so that step is the account a resume reattaches to and
+  // therefore the row that is selected until the user picks another. A run from before accounts
+  // existed recorded none and ran under the discovered one.
+  const sessionStep = [...run.steps].reverse().find((step) => step.sessionId)
+  const runAccount =
+    sessionStep?.profileId
+    ?? run.agentProfile
+    ?? DEFAULT_AGENT_ACCOUNT_ID
+  // The run's own account stands in for the project's selection only while the runner is
+  // unchanged; switching backend falls back to what the project resolves to for THAT agent, since
+  // an account belongs to one agent (same rule the model pill above follows).
+  const accountDefaults = runnerChanged ? repoAccount : { ...repoAccount, [currentRunner]: runAccount }
+  // A pick belonging to ANOTHER runner is dropped rather than sent: switching runner must not
+  // silently carry the previous runner's login along (the composer's guard, verbatim).
+  const account = accounts.some((choice) => choice.provider === runner && choice.id === pickedAccount)
+    ? pickedAccount
+    : null
+  return { sessionStep, accountDefaults, account }
+}
+
 /**
  * The follow-up composer's Continue (#401): the same runner + model pills the /new composer
  * offers, so a follow-up can pick which backend and model reopen the session. The pills DEFAULT
@@ -83,45 +139,15 @@ export function useContinueAction(run: ApiRun): ContinueAction {
   // fetching it to render nothing.
   const catalog = useRunnerModels(runner, available)
   const modelsLocked = config.data?.modelsLocked === true
-  // While the runner is unchanged, the model pill starts on the run's own pin; switching the
-  // runner invalidates that pin and falls back to the new backend's configured default / auto.
   const runnerChanged = runner !== currentRunner
-  const modelDefaults =
-    !modelsLocked && !runnerChanged && run.model
-      ? { ...config.data?.defaultModels, [runner]: run.model }
-      : config.data?.defaultModels
-  const effectivePickedModel = modelsLocked ? null : pickedModel
-  const models = modelsForRunner(runner, catalog.data, [effectivePickedModel, modelDefaults?.[runner]])
-  const model = resolveModel(effectivePickedModel, runner, modelDefaults, catalog.data)
-  const effortOptions = effortOptionsForModel(runner, model, catalog.data)
-  const rawEffort = modelsLocked ? '' : (pickedEffort ?? run.effort ?? '')
-  const effort = resolveEffort(rawEffort, effortOptions)
-  const mustClearStoredEffort =
-    !modelsLocked && pickedEffort === null && rawEffort !== '' && effort === ''
-
-  // Agent accounts (spec 2026-07-29-agent-profiles): rows of the RUNNER pill, exactly as the /new
-  // composer offers them — `claude · Default` / `claude · Klaudiusz` / `codex`. Without them a
-  // thread could switch agent but not login, so "continue this on my other Claude account" was
-  // unsayable anywhere except at task creation.
-  const { accounts, repoAccount } = useAgentAccounts()
-  // Which account this run is ON: the STEP that spawned, never the project's current selection —
-  // `sessionId` and `profileId` are a pair, so that step is the account a resume reattaches to and
-  // therefore the row that is selected until the user picks another. A run from before accounts
-  // existed recorded none and ran under the discovered one.
-  const sessionStep = [...run.steps].reverse().find((step) => step.sessionId)
-  const runAccount =
-    sessionStep?.profileId
-    ?? run.agentProfile
-    ?? DEFAULT_AGENT_ACCOUNT_ID
-  // The run's own account stands in for the project's selection only while the runner is
-  // unchanged; switching backend falls back to what the project resolves to for THAT agent, since
-  // an account belongs to one agent (same rule the model pill above follows).
-  const accountDefaults = runnerChanged ? repoAccount : { ...repoAccount, [currentRunner]: runAccount }
-  // A pick belonging to ANOTHER runner is dropped rather than sent: switching runner must not
-  // silently carry the previous runner's login along (the composer's guard, verbatim).
-  const account = accounts.some((choice) => choice.provider === runner && choice.id === pickedAccount)
-    ? pickedAccount
-    : null
+  const { models, model, effortOptions, effort, mustClearStoredEffort } = resolveContinueModel(
+    run, runner, runnerChanged, modelsLocked, config.data, catalog.data, pickedModel, pickedEffort,
+  )
+  const accountChoices = useAgentAccounts()
+  const { accounts } = accountChoices
+  const { sessionStep, accountDefaults, account } = resolveContinueAccount(
+    run, runner, currentRunner, runnerChanged, accountChoices, pickedAccount,
+  )
 
   const mutation = useMutation({
     mutationFn: ({ text, images }: { text: string; images: AttachmentInput[] }) => {
