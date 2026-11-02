@@ -85,3 +85,36 @@ their empty association is expected and never required.
 Local checks validate fixtures and static workflow structure. They do not prove
 postmerge external event delivery or exact-once rerun execution. A bounded acceptance
 observation reduces retry races but is not durable cross-execution deduplication.
+
+## Confirmed review corrections (2026-11-02)
+
+Proof base: `b71de1afc9dff86036634948b83a5ab2074def0d`. Preserve the original
+implementation and the parent's docs policy correction. One commit per finding.
+
+The repository lock supplies write serialization and the acceptance-observation
+barrier. Keep both. GitHub replaces pending events within that lock, so every
+admitted trigger must sweep open same-repository main PRs. Event validation stays
+authoritative and precedes the sweep. Source CI run/attempt constraints apply only
+to the triggering PR; all other PRs prove their own newest native run independently.
+
+| Sweep case | Required behavior |
+| --- | --- |
+| B's pending event replaced by A's check, CI, signal or manual event | Surviving event reconciles both live PRs |
+| Triggering CI source run/attempt differs from matching PR's newest run | Skip matching PR; independently reconcile other PRs |
+| Signal association head differs from live triggering PR | Skip that PR; sweep unrelated PRs; never use signal merge SHA |
+| Invalid/foreign/spoofed trigger | No sweep or writes |
+| Unrelated PR has malformed identity or no valid native proof | Log/skip only that PR; continue |
+| Admission read fails for a proved green native gate | Preserve fail-closed revocation behavior |
+| Rerun acceptance remains ambiguous | Stop and report inspection needed; never retry POST |
+| Fork, closed or non-main PR | No mutation |
+| Large listing or exhausted deadline | Fail bounded; manual recovery, no unbounded pagination |
+
+Retain two 100-row listing pages and the shared 120-second deadline. A full second
+page remains incomplete and fails closed. Validate listing structure globally,
+then skip malformed individual PRs. Native-proof read failures are per PR; ambiguous
+writes still stop the execution. No blind POST retry or whole-CI dispatch.
+
+Also protect `merge-queue-admission.cjs` in the auto-merge never-list, filter provider
+listings by check name and App ID while retaining exact identity validation, and
+scope draft automation documentation to same-repository PRs. Search active readers
+of the old target-only/coalescing descriptions and update them with the sweep.
