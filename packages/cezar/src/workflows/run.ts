@@ -12,7 +12,7 @@ export type { TurnTail, DelegationExecutionSettings, StartRunInput, WorkerTermin
 import { settledRootFinishPatch } from './completion-policy.ts';
 import type { ContinueRunOptions } from './continuation-admission.ts';
 import { type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type TimerWaitEntry, type Wait, type WaitVia, type WorkerWaitEntry, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
-import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, type TurnEndOutcome } from './turn-end.ts';
+import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_NUDGE, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
 import { canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested } from './run/run-guards.ts';
@@ -69,7 +69,7 @@ export { periodicAutosaveEnabled, AUTOSAVE_INTERVAL_MS } from './run/worktree-au
 /** #486: recheck a turn-end that deferred close/park only because the harness still held a human follow-up. */
 export { HELD_HUMAN_INPUT_RECHECK_MS } from './run/input-delivery.ts';
 export { WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_HEADER } from './run/worker-questions.ts';
-export { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE };
+export { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE };
 
 /**
  * The mini workflow engine: executes a `WorkflowDef` against a repo, one step
@@ -152,7 +152,7 @@ export class RunManager {
   constructor(
     private readonly store: RunStore,
     private readonly repoRoot: string,
-    options: { work?: TrackedWork; semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined; sweepBranches?: ((keep: number) => void) | undefined } = {},
+    options: { work?: TrackedWork; semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; subagentGraceMs?: number; subagentDeadlineMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined; sweepBranches?: ((keep: number) => void) | undefined } = {},
   ) {
     this.dataDir = join(repoRoot, '.ai/cezar');
     this.preview = options.preview;
@@ -165,6 +165,7 @@ export class RunManager {
     this.modules = composeRunModules(this.context, {
       unreadInputGraceMs: () => unreadInputGraceMs,
       noWaitNudgeReplyMs: () => options.noWaitNudgeReplyMs,
+      subagentWaitMs: () => ({ graceMs: options.subagentGraceMs, deadlineMs: options.subagentDeadlineMs }),
       pendingHumanAskSeq: (...args) => this.pendingHumanAskSeq(...args),
       waitingBeforeFinalWorkflowStep: (...args) => this.waitingBeforeFinalWorkflowStep(...args),
       parentCompletionBlockers: (...args) => this.parentCompletionBlockers(...args),
@@ -252,6 +253,7 @@ export class RunManager {
     this.modules.retries.dispose();
     // Wait records stay as they are: a later manager re-arms them from their deadlines.
     this.modules.waitWatches.dispose();
+    this.modules.subagentWaits.dispose();
     this.ciResources.release();
     this.delegationProvisioner = undefined;
     this.modules.orphans.dispose();
@@ -421,6 +423,8 @@ export class RunManager {
     this.active.delete(runId);
     this.store.unpin(runId, 'active');
     this.modules.runSettlement.afterDropActive(runId);
+    // The session held the run's native subagents: an open subagent wait resolves interrupted (hearsay-tools/cezarion#2431).
+    this.modules.subagentWaits.afterSessionGone(runId, state);
   }
 
   /** Project detach cancels autonomous cleanup; reattach reconstructs the durable intents. */

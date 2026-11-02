@@ -1,4 +1,4 @@
-import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
+import { QueryClientProvider, QueryObserver, type QueryClient } from '@tanstack/react-query'
 import { openHumanWait } from '@/test/run-summary-fixture'
 import { act, cleanup, render, renderHook, waitFor } from '@testing-library/react'
 import { Profiler, type ReactNode } from 'react'
@@ -1078,6 +1078,27 @@ describe('useGlobalEvents — run events', () => {
     expect(indexRefreshes).toHaveLength(1)
   })
 
+  it('debounces report refreshes and refetches only a mounted shelf', async () => {
+    const active = vi.fn().mockResolvedValue({ reports: [], total: 0, nextCursor: null })
+    const dormant = vi.fn().mockResolvedValue({ reports: [], total: 0, nextCursor: null })
+    const key = ['default', 'reports', 'active']
+    client.setQueryData(key, { reports: [], total: 0, nextCursor: null })
+    client.setQueryDefaults(['default', 'reports', 'dormant'], { queryFn: dormant })
+    client.setQueryData(['default', 'reports', 'dormant'], { reports: [], total: 0, nextCursor: null })
+    const observer = new QueryObserver(client, { queryKey: key, queryFn: active, staleTime: Infinity })
+    const unsubscribe = observer.subscribe(() => {})
+    const { source } = mount()
+    try {
+      for (const status of [RUN_STATUS.queued, RUN_STATUS.running, RUN_STATUS.done]) source.emit('run', stampedRun(runRecord('reports-source', { status })))
+      expect(active).not.toHaveBeenCalled()
+      await waitFor(() => expect(active).toHaveBeenCalledTimes(1))
+      expect(dormant).not.toHaveBeenCalled()
+      source.emit('run-deleted', JSON.stringify({ project: 'default', id: 'reports-source' }))
+      await waitFor(() => expect(active).toHaveBeenCalledTimes(2))
+      expect(dormant).not.toHaveBeenCalled()
+    } finally { unsubscribe() }
+  })
+
   it('ignores a malformed frame and keeps serving the next one', () => {
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [])
     const { source } = mount()
@@ -1985,7 +2006,7 @@ it('delivers a secondary-project structured ASK waiting transition to browser no
   const { source } = mount()
   setVisibility('hidden')
 
-  // The server's CEZ:ASK turn-end path publishes this run summary on the workspace stream.
+  // The server's cezar_ask turn-end path publishes this run summary on the workspace stream.
   source.emit('run', stampedRun({ ...live, status: 'waiting', waits: [openHumanWait(1)] }, 'secondary'))
   expect(notifications).toEqual(['structured-ask'])
   source.emit('run', stampedRun({ ...live, status: 'waiting', waits: [openHumanWait(1)], tokensUsed: 42 }, 'secondary'))

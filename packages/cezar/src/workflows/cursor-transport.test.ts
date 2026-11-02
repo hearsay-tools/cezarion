@@ -5,12 +5,10 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CursorRunner } from '../core/cursor-runner.ts';
-import { unregisterRunProcess } from '../core/process-usage.ts';
 import { RunStore } from '../runs/store.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import type { RunManager } from './run.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
-import { hasPendingAsk } from '../runs/run-store.testkit.ts';
 
 vi.mock('../core/runner-factory.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../core/runner-factory.ts')>();
@@ -78,42 +76,5 @@ describe('Cursor print workflow transport', () => {
     await expect.poll(() => manager.isActive(run.id), { timeout: 15_000 }).toBe(false);
     expect(manager.continueRun(run.id, { text: 'third turn' })).toEqual({ ok: true });
     await expect.poll(() => calls().length, { timeout: 15_000 }).toBe(6);
-  }, 20_000);
-
-  it('leaves a portable ASK pending until an explicit human reply', async () => {
-    process.env.CEZ_MOCK_CURSOR_PRINT_MODE = 'portable-ask';
-    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'ask', runner: 'cursor', worktree: false });
-    await expect.poll(() => hasPendingAsk(store, run.id), { timeout: 15_000 }).toBe(true);
-    const before = readFileSync(log, 'utf8').trim().split('\n').length;
-    expect(before).toBe(1);
-    expect(store.getRun(run.id)?.status).toBe('waiting');
-    expect(manager.continueRun(run.id)).toEqual({ ok: false, error: 'run is still active' });
-    // bound: negative window. The refusal above is synchronous, so this only guards against a launch that ignored it; a miss under load hides a regression without failing a good run.
-    await new Promise(resolve => setTimeout(resolve, 100));
-    expect(readFileSync(log, 'utf8').trim().split('\n')).toHaveLength(before);
-    expect(hasPendingAsk(store, run.id)).toBe(true);
-    const nativeId = store.getRun(run.id)!.steps[0]!.sessionId;
-    expect(manager.sendMessage(run.id, [{ type: 'text', text: 'Library: Vitest' }])).toBe(true);
-    await expect.poll(() => readFileSync(log, 'utf8').trim().split('\n').length, { timeout: 15_000 }).toBe(2);
-    await expect.poll(() => hasPendingAsk(store, run.id), { timeout: 15_000 }).toBe(false);
-    const reply = JSON.parse(readFileSync(log, 'utf8').trim().split('\n')[1]!) as { resumeId: string };
-    expect(reply.resumeId).toBe(nativeId);
-  }, 20_000);
-
-  it('recovers a pending portable ASK without admitting an automatic print turn', async () => {
-    process.env.CEZ_MOCK_CURSOR_PRINT_MODE = 'portable-ask';
-    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'ask', runner: 'cursor', worktree: false });
-    await expect.poll(() => hasPendingAsk(store, run.id), { timeout: 15_000 }).toBe(true);
-    const nativeId = store.getRun(run.id)!.steps[0]!.sessionId;
-    manager.dispose();
-    unregisterRunProcess(run.id); // A real controller restart begins with an empty process registry.
-    manager = createFixtureManager(store, root);
-    await manager.recover();
-    expect(hasPendingAsk(store, run.id)).toBe(true);
-    expect(readFileSync(log, 'utf8').trim().split('\n')).toHaveLength(1);
-    expect(manager.continueRun(run.id, { text: 'Library: Vitest' })).toEqual({ ok: true });
-    await expect.poll(() => readFileSync(log, 'utf8').trim().split('\n').length, { timeout: 15_000 }).toBe(2);
-    const reply = JSON.parse(readFileSync(log, 'utf8').trim().split('\n')[1]!) as { resumeId: string };
-    expect(reply.resumeId).toBe(nativeId);
   }, 20_000);
 });

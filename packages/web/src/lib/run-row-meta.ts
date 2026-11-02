@@ -23,6 +23,7 @@ const STATE_WORD: Record<AttentionRung, 'none' | 'label' | 'queue-position' | 'r
   running: 'label',
   'usage-limit': 'resume',
   'waiting-on-workers': 'label',
+  'waiting-on-subagents': 'label',
   'waiting-for-ci': 'label',
   'waiting-for-merge': 'label',
   'waiting-for-command': 'until',

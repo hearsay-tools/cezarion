@@ -59,7 +59,15 @@ function fakeChild(): {
     exit,
     signals,
     killed: () => signals.length > 0,
-    input: () => stdin.read()?.toString() ?? '',
+    input() {
+      // Node 26 returns one buffered chunk per read; Node 24 coalesces them.
+      // Drain every write so assertions inspect the complete RPC transcript.
+      let input = '';
+      for (let chunk = stdin.read(); chunk !== null; chunk = stdin.read()) {
+        input += chunk.toString();
+      }
+      return input;
+    },
   };
 }
 

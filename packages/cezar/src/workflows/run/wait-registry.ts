@@ -16,7 +16,7 @@ import type { CiWatcherSupervisor } from '../../ci-wait/supervisor.ts';
 import { askErrorMessage, waitErrorMessage } from '../../ci-wait/errors.ts';
 import { toolSessionRefusal } from './cezar-tools.ts';
 import { askCardFields } from './turn-markers.ts';
-import { chargesBudget, identicalWait, normalizePrUrl, openWaits, waitInputId, waitResultText, timerWaitEntry, prWaitEntry, processWaitEntry, settledWaitEntry } from '../waits.ts';
+import { chargesBudget, type WaitResult, identicalWait, normalizePrUrl, openWaits, waitInputId, waitResultText, timerWaitEntry, prWaitEntry, processWaitEntry, settledWaitEntry } from '../waits.ts';
 import { delegationWaitRefusal, isDelegationWait, workerListTarget } from '../wait-scope.ts';
 import { isSessionLeader } from '../../core/session-process.ts';
 import { probeProcessWait } from '../../process-wait/supervisor.ts';
@@ -35,7 +35,7 @@ interface WaitRegistryHost {
   canProceedWithRun(id: string, run: RunRecord | undefined): run is RunRecord;
   exitFileRoots(id: string, run: RunRecord): ExitFileRoots;
   disarmWait(id: string): void;
-  settleWait(id: string, waitId: string, result?: CiWaitResult | ProcessWaitResult | PeerWaitResult): void;
+  settleWait(id: string, waitId: string, result?: WaitResult): void;
   withdrawCezarHumanWaits(id: string): void;
   armWait(id: string, wait: Wait): void;
   parkOnWaits(id: string, state: ActiveRun): void;
@@ -212,7 +212,12 @@ export class WaitRegistry {
     const { state: active, run } = assertCanRegister();
     const turnId = active.ciTurnId ??= randomUUID();
     if (active.autonomous && this.host.countAutomaticWakes(runId) < this.maxAutoContinues) refuse('autonomous_run');
-    const open = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human' && wait.source !== 'cezar');
+    // The question this turn's opening answers stays open only until the turn end settles it, so
+    // a question asked in that turn is a new one, never the answered one returned
+    // (hearsay-tools/cezarion#2397).
+    const answering = active.session?.open ? active.openingAnswerAskSeq : undefined;
+    const open = openWaits(run).find((wait): wait is HumanWaitEntry => wait.kind === 'human' && wait.source !== 'cezar' &&
+      (answering === undefined || wait.askSeq !== answering));
     if (open?.askSeq !== undefined) return open;
     if (!open && openWaits(run).length >= WAIT_LIMIT) refuse('capacity');
     const base: HumanWaitEntry = open ?? { id: randomUUID(), kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: new Date().toISOString(), phase: 'open', turnId };
@@ -352,21 +357,22 @@ export class WaitRegistry {
    *  upgraded worker wait's `wakeInputId`), then queue the run's wake. A worker wait passes the
    *  entry as reconciled, with its outcomes and `result`. Throws when the checkpoint fails; a wait
    *  no longer open is ignored. */
-  resolveWait(runId: string, waitId: string, result?: CiWaitResult | ProcessWaitResult | PeerWaitResult, observed?: WorkerWaitEntry): void {
+  resolveWait(runId: string, waitId: string, result?: WaitResult, observed?: WorkerWaitEntry): void {
     const latest = this.context.store.getRun(runId)?.waits?.find(wait => wait.id === waitId);
     if (!latest || latest.phase !== 'open') return;
     const state = this.host.active(runId);
-    // The count includes a timer batch still awaiting its acknowledgement.
-    if (chargesBudget(latest) && this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) {
+    const resolvedAt = new Date().toISOString();
+    const settled = settledWaitEntry(latest, result, observed, resolvedAt);
+    // The count includes a timer batch still awaiting its acknowledgement. A subagent wait charges
+    // by how it resolved, so the resolved entry is what this reads (hearsay-tools/cezarion#2431).
+    if (chargesBudget(settled) && this.host.countAutomaticWakes(runId) >= this.maxAutoContinues) {
       this.host.cancelAutomaticAtCap(runId, [latest]);
       if (state) this.host.reparkWithoutWaits(runId, state);
       else this.host.waitOnUserWithoutSession(runId);
       return;
     }
-    const resolvedAt = new Date().toISOString();
-    const settled = settledWaitEntry(latest, result, observed, resolvedAt);
     const input: AgentInput = { id: waitInputId(settled), parentRunId: runId, source: 'lifecycle', createdAt: resolvedAt,
-      text: waitResultText(settled, { tools: !state?.toolless, workerStatus: this.workerStatus }) };
+      text: waitResultText(settled, { workerStatus: this.workerStatus }) };
     this.context.store.commitWait(runId, settled, input);
     try { this.host.queueWaitWake(runId); }
     catch { this.host.retryWaitAdmission(runId); }

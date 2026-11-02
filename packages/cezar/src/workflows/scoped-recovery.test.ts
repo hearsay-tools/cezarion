@@ -17,7 +17,7 @@ describe('a recovery scoped to one family', { timeout: 30_000 }, () => {
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
     // Another family: queued, in this store's memory, not in the manager's queue — the state an
     // adoption hands recovery. Its revive is held so the recovery stays in progress.
-    const other = store.createRun({ title: 'other', workflow: 'quick-task', task: 'mock:done', workflowDef: QUICK_TASK_WORKFLOW,
+    const other = store.createRun({ title: 'other', workflow: 'quick-task', task: 'mock:cezar-done', workflowDef: QUICK_TASK_WORKFLOW,
       steps: QUICK_TASK_WORKFLOW.steps.map((step) => ({ id: step.id, name: step.id, kind: 'agent' as const })) });
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });

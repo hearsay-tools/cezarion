@@ -37,7 +37,7 @@ and project-link details in `routes/unknown-project.tsx`. The latter two inherit
 on hover. All five instances predate this guard; the ratchet applies after this initial baseline.
 The existing tool-error fix belongs to hearsay-tools/cezarion#1114.
 
-`src/test/card-2-contrast.test.ts` scans JSX class strings, including literal
+`cez/card-2-contrast` in `npm run lint` scans JSX class strings, including literal
 branches of class helpers and templates. It follows card-2 ancestors, inherited
 ink, font sizes and named font weights, and known tool/hook body slots. A named opaque palette background ends inheritance; transparent/translucent
 backgrounds, images, and background layout utilities retain it conservatively. Literal size/background branches are checked
@@ -54,4 +54,5 @@ This is a static guard, not a computed-style audit: runtime-generated classes,
 component boundaries and CSS rules still need rendered contrast checks.
 The baseline identifies existing instances by file and opening JSX, including
 counts through duplicate entries. Remove an entry when fixing its instance;
-never add allowances. The test rejects new instances and stale baseline entries.
+never add allowances. The lint rule rejects new instances; the lint runner rejects stale baseline entries.
+`../cezar/src/lint/card-2-contrast.test.ts` keeps the inline scanner fixtures without a repository scan.

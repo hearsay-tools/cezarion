@@ -491,31 +491,20 @@ describe('ClaudeCliRunner token usage', () => {
   });
 });
 
-it('steers non-human input behind a queued human turn but never after its CEZ:ASK', async () => {
+it('steers non-human input behind a queued human turn', async () => {
   // Pre-#505 the queued human turn refused all agent input until it ended. Claude now
-  // steers a mid-turn line into the running turn; only a pending CEZ:ASK still refuses.
-  // waitFor defaults to 10s and this cell awaits two of them sequentially.
-  // Vitest's 5s testTimeout already cut the isolated run off at ~4s and the
-  // Node 24.15.0 floor shard at 5s; 15s still cannot cover both waits plus
-  // teardown if the first transition is slow (hearsay-tools/cezarion#976).
+  // steers a mid-turn line into the running turn. A pending `cezar_ask` question is the
+  // workflow's to hold (`InputDelivery.admitsAgentInput`), not the runner's.
+  // bound: waitFor defaults to 10s; Vitest's 5s testTimeout cut this cell off before
+  // (hearsay-tools/cezarion#976).
   const { driveSeam, waitFor } = await import('./harness-parity.testkit.ts');
-  const gate = mkdtempSync(join(tmpdir(), 'cez-claude-steer-ask-'));
-  const release = join(gate, 'release');
-  try {
-    await driveSeam('claude', 'hold', {
-      spec: { env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_ARGS_FILE: '', CEZ_MOCK_RELEASE_FILE: release } },
-      whileOpen: async (session, { v1 }) => {
-        expect(session.sendMessage([{ type: 'text', text: 'mock:hold-ask' }])).toBe(true);
-        await waitFor(() => v1.filter(event => event.type === 'turn-end').length === 1);
-        expect(session.sendAgentMessage([{ type: 'text', text: 'mock:ack-only steered while busy' }])).not.toBe(false);
-        writeFileSync(release, '');
-        await waitFor(() => v1.filter(event => event.type === 'turn-end').length === 2);
-        expect(session.sendAgentMessage([{ type: 'text', text: 'must not answer the ask' }])).toBe(false);
-      },
-    });
-  } finally {
-    rmSync(gate, { force: true, recursive: true });
-  }
+  await driveSeam('claude', 'hold', {
+    whileOpen: async (session, { v1 }) => {
+      expect(session.sendMessage([{ type: 'text', text: 'mock:cezar-ask' }])).toBe(true);
+      await waitFor(() => v1.filter(event => event.type === 'turn-end').length === 1);
+      expect(session.sendAgentMessage([{ type: 'text', text: 'steered while busy' }])).not.toBe(false);
+    },
+  });
 }, 25_000);
 
 describe('Claude non-human stdin acknowledgement boundary', () => {

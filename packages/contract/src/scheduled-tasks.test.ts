@@ -53,17 +53,25 @@ describe('scheduleTaskRequestSchema', () => {
   const base = { name: 'Check the rollout', prompt: 'Check it' };
 
   it('takes at or delay, never both and never neither', () => {
-    expect(scheduleTaskRequestSchema.safeParse({ ...base, at: '2026-10-29T09:00', time_zone: 'Europe/Warsaw' }).success).toBe(true);
+    expect(scheduleTaskRequestSchema.safeParse({ ...base, at: '2026-10-29T09:00Z' }).success).toBe(true);
     expect(scheduleTaskRequestSchema.safeParse({ ...base, delay: '7d' }).success).toBe(true);
-    expect(scheduleTaskRequestSchema.safeParse({ ...base, at: '2026-10-29T09:00', delay: '7d' }).success).toBe(false);
+    expect(scheduleTaskRequestSchema.safeParse({ ...base, at: '2026-10-29T09:00Z', delay: '7d' }).success).toBe(false);
     expect(scheduleTaskRequestSchema.safeParse(base).success).toBe(false);
   });
 
+  // Every Cezar tool time is UTC: a local wall time or a zone is refused, never read as local.
+  it('takes at only as UTC and refuses a time zone', () => {
+    expect(scheduleTaskRequestSchema.safeParse({ ...base, at: '2026-10-29T09:00' }).success).toBe(false);
+    expect(scheduleTaskRequestSchema.safeParse({ ...base, at: '2026-10-29T09:00+01:00' }).success).toBe(false);
+    expect(scheduleTaskRequestSchema.safeParse({ ...base, at: '2026-10-29T09:00Z', time_zone: 'Europe/Warsaw' }).success).toBe(false);
+    expect(scheduledTasksRequestSchema.safeParse({ action: 'update', id: 'a1', time_zone: 'UTC' }).success).toBe(false);
+  });
+
   it('refuses an at that is no real date and time', () => {
-    const parsed = scheduleTaskRequestSchema.safeParse({ name: 'n', prompt: 'p', at: '2027-02-30T09:00' });
+    const parsed = scheduleTaskRequestSchema.safeParse({ name: 'n', prompt: 'p', at: '2027-02-30T09:00Z' });
     expect(parsed.success).toBe(false);
     expect(parsed.error?.issues[0]?.path).toEqual(['at']);
-    expect(scheduledTasksRequestSchema.safeParse({ action: 'update', id: 'a1', at: '2026-13-01T25:99' }).success).toBe(false);
+    expect(scheduledTasksRequestSchema.safeParse({ action: 'update', id: 'a1', at: '2026-13-01T25:99Z' }).success).toBe(false);
   });
 
   it('refuses unknown fields such as a run or project id', () => {

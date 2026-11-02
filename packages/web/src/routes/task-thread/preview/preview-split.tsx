@@ -39,7 +39,7 @@ function useScrollerHeight(element: { current: HTMLElement | null }): number | u
   return height
 }
 
-export function PreviewSplit({ run, state, children }: { run: ApiRun | undefined; state: PreviewPaneState; children: ReactNode }) {
+export function PreviewSplit({ run, state, children, report }: { run: ApiRun | undefined; state: PreviewPaneState; children: ReactNode; report?: ReactNode }) {
   const docked = useMediaQuery(PREVIEW_DOCK_QUERY, true)
   const phone = useMediaQuery(PREVIEW_PHONE_QUERY, false)
   const wrapper = useRef<HTMLDivElement>(null)
@@ -47,12 +47,13 @@ export function PreviewSplit({ run, state, children }: { run: ApiRun | undefined
   // Each task keeps its own width (hearsay-tools/cezarion#2077); the state saves every change.
   const { percent, setPercent } = state
 
-  const showPane = state.open && run !== undefined
+  const showPane = Boolean(report) || (state.open && run !== undefined)
   const takeover = showPane && !docked
   // Pane in front: below 1180 px it takes the main area, under the task header (design 02); on a
   // phone it is the whole screen and the task view steps aside entirely.
-  const paneInFront = takeover && !state.session
-  const paneHidden = takeover && state.session
+  const session = report ? false : state.session
+  const paneInFront = takeover && !session
+  const paneHidden = takeover && session
 
   const dragTo = (clientX: number) => {
     const box = wrapper.current?.getBoundingClientRect()
@@ -113,21 +114,24 @@ export function PreviewSplit({ run, state, children }: { run: ApiRun | undefined
             />
           ) : null}
           <aside data-slot="preview-pane" data-phone={phone ? '' : undefined} hidden={paneHidden} className="preview-pane">
-            <PreviewErrorBoundary onClose={state.closePane}>
-              <Suspense fallback={<p role="status" className="p-6 text-sm text-muted-foreground">Opening the preview…</p>}>
-                {/* One mount per task: a pane carried over from another task would reopen its target here. */}
-                <PreviewPane
-                  key={run.id}
-                  run={run}
-                  servers={run.previewServers ?? []}
-                  request={state.request}
-                  onSession={paneInFront ? state.showSession : undefined}
-                  onTarget={state.setTarget}
-                  onLive={state.setLive}
-                  onClose={state.closePane}
-                />
-              </Suspense>
-            </PreviewErrorBoundary>
+            {report}
+            <div hidden={Boolean(report)} className="h-full">
+              {state.open && run ? <PreviewErrorBoundary onClose={state.closePane}>
+                <Suspense fallback={<p role="status" className="p-6 text-sm text-muted-foreground">Opening the preview…</p>}>
+                  {/* One mount per task: a pane carried over from another task would reopen its target here. */}
+                  <PreviewPane
+                    key={run.id}
+                    run={run}
+                    servers={run.previewServers ?? []}
+                    request={state.request}
+                    onSession={paneInFront ? state.showSession : undefined}
+                    onTarget={state.setTarget}
+                    onLive={state.setLive}
+                    onClose={state.closePane}
+                  />
+                </Suspense>
+              </PreviewErrorBoundary> : null}
+            </div>
           </aside>
         </>
       ) : null}

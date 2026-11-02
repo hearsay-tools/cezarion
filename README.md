@@ -656,13 +656,12 @@ options is open, and the card shows a text box for your answer. The task reads N
 you once the turn ends, and your next message answers it. `cezar_wait` takes PR waits,
 worker waits and timers only, and points an agent that asks it for a human wait to `cezar_ask`. A run
 has one question to you at a time, and the agent cannot cancel it once you have seen
-it. The ask-marker card, a native question and `CEZ:MONITORING` with re-checks off
-open the same kind of wait. When the work is
+it. A native question opens the same kind of wait. When the work is
 done and verified, the agent calls `cezar_done` (an optional `summary`), and the task
 finishes at the end of that turn: its open waits are cancelled and the summary is
 written as a note. `cezar_done` refuses while owned workers are live or uncollected,
 a worker question is unanswered, a question to you is still pending, or the step is not
-the workflow's last, and says what to do first. The `CEZ:DONE` line keeps working and finishes the same way. An
+the workflow's last, and says what to do first. An
 autonomous task does not wait for you until its automatic-wake budget is spent.
 
 A run can have several waits open at once, up to 16. Each answer carries the
@@ -674,8 +673,14 @@ for CI — owner/repo#N** or **Waiting for merge — owner/repo#N** with a PR li
 with its time and note. **CI result ready — waiting for capacity** means the
 observation is owed to the agent and its wake turn has not started yet. A run parked
 on CI or a timer keeps its agent slot, a monitoring slot when one is free, so the
-wake usually starts at once. The older `CEZ:MONITORING` line and Claude's
-`ScheduleWakeup` open a timer in the same list.
+wake usually starts at once. Claude's `ScheduleWakeup` opens a timer in the same list.
+
+Every agent session needs these tools. Cezarion starts a private local socket for them,
+in the system temporary directory, when the first session of a cockpit launches. If it
+cannot start, for example because that directory is full or not writable, the task fails
+before the agent starts. The error names the cause and the fix: free space or fix the
+permissions, then Continue the task. A task woken by a wait retries with the usual backoff.
+The cockpit and other tasks keep working, and the next launch tries again.
 
 Cezarion reports passed, failed, cancelled or skipped checks, no checks, changed head,
 timeout or an operational error. It watches the registered commit: a new PR head
@@ -1047,6 +1052,8 @@ A launch that fails marks it **Failed**, and nothing retries on its own; **Retry
 relaunches the same receipt, so one schedule starts at most one task. Agents can create and manage
 one-time schedules with the `cezar_schedule_task` and `cezar_scheduled_tasks` tools, which exist
 only with `CEZ_AUTOMATIONS=1` and also create schedules paused unless the user asked for them to run.
+These tools take and answer the due time in UTC, like every other time in a Cezar tool; the
+schedule keeps a wall time in the cockpit's time zone, so the cockpit shows it in local time.
 
 Automation list counters use two windows. **Launched** counts every stored task with that
 automation's provenance, across definition revisions, including historical variants, completed and
@@ -1278,7 +1285,7 @@ on one reports that, and you start a new task to carry the work on. Existing
 print-tagged sessions can still resume.
 A missing CLI leaves the other backends available. `CEZ_DRY_RUN=1` uses the mock.
 Cursor questions from a plugin may be automatically skipped by print mode. Cezarion's
-own `CEZ:ASK` questions remain answerable in the cockpit; plugins that require
+own `cezar_ask` questions remain answerable in the cockpit; plugins that require
 native questions may not work fully. Project-local Claude plugin settings may
 not disable a user or team marketplace copy. A previously confirmed Cursor
 session ID can also lose history inside Cursor without an error; Cezarion resumes
@@ -1307,7 +1314,7 @@ both binaries keeps both, and `CEZ_PI_BIN` never selects OMP. Select **OMP** in 
 picker to use a persistent `--mode rpc` session. A missing CLI leaves the other backends
 available and shows OMP as unavailable. `CEZ_DRY_RUN=1` uses the mock.
 
-Agents ask questions through Cezarion's `CEZ:ASK` marker, and OMP's own sub-agents appear in the
+Agents ask questions through Cezarion's `cezar_ask` tool, and OMP's own sub-agents appear in the
 Agents drawer. Settings → Agent config exposes OMP's `config.yml`, `mcp.json` and
 `AGENTS.md` files. Named OMP profiles and accounts are not supported yet.
 
@@ -1440,8 +1447,12 @@ returns JSON with a Markdown link for the agent to share. When the owning projec
 is registered, the link keeps that project when copied or opened from another
 project. If ownership cannot be discovered, publication keeps the legacy task link.
 The Files tab also lists published artifacts. It previews text, Markdown and raster
-images; other formats can be downloaded. HTML/scripts never execute inside the cockpit, and embedded
-images in Markdown documents do not load automatically.
+images; other formats can be downloaded. Published HTML links in assistant replies also
+show report cards. **Read report** opens the sandboxed reader beside the conversation
+on wide screens, in the main area on medium screens, and full screen on phones.
+Back returns to the source card. Unopened cards fetch metadata only.
+Report scripts never execute, and embedded images in Markdown documents do not load
+automatically.
 
 Snapshots do not change when the original file changes. They survive worktree
 removal and are removed with task history, including normal history retention.
@@ -1739,7 +1750,7 @@ For iteration, run affected test files or `npm run test:changed` (inspect with
 `-- --plan`; override the local main comparison with `-- --base=<ref>`).
 The changed-test command includes staged, unstaged and untracked changes and
 falls back to full Vitest on shared/configuration/unknown input or missing Git
-history. It is not a substitute for final verification. See `AGENTS.md` § Validation
+history. It is not a substitute for final verification. See `.ai/skills/validation/SKILL.md`
 for targeted browser commands and the final-gate/evidence-reuse policy.
 
 Both `npm run typecheck:web` and

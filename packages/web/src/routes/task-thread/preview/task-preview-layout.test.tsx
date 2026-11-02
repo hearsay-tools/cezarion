@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { useEffect } from 'react'
+import { useContext, useEffect, useLayoutEffect } from 'react'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -17,6 +17,8 @@ vi.mock('@/api/queries', () => ({
   useRun: (id: string) => ({ data: state.runLoading ? undefined : state.runs[id] ?? { id, worktreePath: '/w', previewServers: [] } }),
   useHealth: () => ({ data: { capabilities: { preview: state.preview } } }),
 }))
+
+vi.mock('../report-source', () => ({ useReportSource: (runId: string, artifactId?: string, knownSource?: string) => ({ data: artifactId ? knownSource ?? runId : undefined, isPending: false, isError: false, error: null }) }))
 
 vi.mock('./use-preview-server-states', () => ({ usePreviewServerStates: () => new Map() }))
 vi.mock('./use-agent-page-live', () => ({
@@ -38,6 +40,10 @@ vi.mock('./preview-pane', () => ({
     )
   },
 }))
+
+import { ReportCardSourcesContext } from '../report-selection'
+
+vi.mock('../../task-git/report-reader', () => ({ ReportReader: ({ runId, onBack }: {runId: string; onBack: () => void}) => <button onClick={onBack}>report for {runId}</button> }))
 
 import { TaskPreviewLayout } from './task-preview-layout'
 import { usePreviewPane } from './preview-state'
@@ -63,10 +69,13 @@ const mounts = vi.fn()
 function Tab({ name }: { name: string }) {
   const pane = usePreviewPane()
   const navigate = useNavigate()
+  const sources = useContext(ReportCardSourcesContext)
+  useLayoutEffect(() => sources?.register('11111111-1111-4111-8111-111111111111', 'worker'), [sources])
   useEffect(() => mounts(), [])
   return (
     <div>
       <span data-testid="tab">{name}</span>
+      <button onClick={() => navigate('?report=11111111-1111-4111-8111-111111111111&card=message')}>Read report</button>
       {pane ? <button type="button" onClick={() => pane.openPane({})}>toggle</button> : <span>no pane</span>}
       {pane ? <button type="button" onClick={() => pane.openPane({ port: 5173 })}>open 5173</button> : null}
       {pane ? <span data-testid="removed">{String(pane.worktreeRemoved)}</span> : null}
@@ -181,12 +190,39 @@ describe('TaskPreviewLayout', () => {
     expect(state.agentReads).toContain('r1')
   })
 
-  it('leaves the task view exactly as it was with the feature off: no split around the tab', () => {
+  it('keeps a closed split available for reports with live preview off', () => {
     state.preview = false
     renderAt('/tasks/r1')
     expect(screen.getByTestId('tab').textContent).toBe('session')
-    expect(document.querySelector('[data-slot="task-split"]')).toBeNull()
-    expect(document.querySelector('[data-slot="task-main"]')).toBeNull()
+    expect(document.querySelector('[data-slot="task-split"]')?.getAttribute('data-pane')).toBe('closed')
+    expect(document.querySelector('[data-slot="task-main"]')).toBeTruthy()
+  })
+
+  it('opens reports at shipped defaults without reading live-preview events', async () => {
+    state.preview = false
+    renderAt('/tasks/r1')
+    fireEvent.click(screen.getByText('Read report'))
+    expect(await screen.findByText('report for worker')).toBeTruthy()
+    expect(state.agentReads).toEqual([])
+    expect(document.querySelector('[data-slot="task-split"]')?.getAttribute('data-pane')).toBe('open')
+    fireEvent.click(screen.getByText('report for worker'))
+    expect(document.querySelector('[data-slot="task-split"]')?.getAttribute('data-pane')).toBe('closed')
+    expect(mounts).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns to the same live preview mount after closing a report', async () => {
+    state.preview = true
+    renderAt('/tasks/r1')
+    fireEvent.click(screen.getByText('open 5173'))
+    await screen.findByRole('button', { name: 'pane' })
+    const mountsBefore = [...state.paneMounts]
+    fireEvent.click(screen.getByText('Read report'))
+    await screen.findByText('report for worker')
+    expect(screen.queryByRole('button', { name: 'pane' })).toBeNull()
+    fireEvent.click(screen.getByText('report for worker'))
+    expect(await screen.findByRole('button', { name: 'pane' })).toBeTruthy()
+    expect(state.paneMounts).toEqual(mountsBefore)
+    expect(mounts).toHaveBeenCalledTimes(1)
   })
 
   describe('remembers the pane per task (hearsay-tools/cezarion#2077)', () => {

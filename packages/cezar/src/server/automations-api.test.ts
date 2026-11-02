@@ -1148,8 +1148,8 @@ describe('GitHub automation API', () => {
       const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
       let tools: AutomationToolService | undefined;
       app({ automationStore, manager: { setAutomationTools: (value: AutomationToolService | undefined) => { tools = value; } } as unknown as RunManager });
-      const answer = await tools!.scheduleTask({ name: 'Check', prompt: 'Check it', delay: '1d', time_zone: 'UTC' });
-      expect(answer).toMatchObject({ ok: true, task: { status: 'paused', time_zone: 'UTC' } });
+      const answer = await tools!.scheduleTask({ name: 'Check', prompt: 'Check it', delay: '1d' });
+      expect(answer).toMatchObject({ ok: true, task: { status: 'paused' } });
       expect(automationStore.list().map(automation => automation.name)).toEqual(['Check']);
     });
   });

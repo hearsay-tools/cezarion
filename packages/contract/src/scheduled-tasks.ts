@@ -36,7 +36,15 @@ export function parseDurationMinutes(value: string): number {
  * days across a DST change lands one wall-clock hour away from the starting hour.
  */
 export function resolveDelay(delay: string, nowMs: number, timeZone: string): string {
-  const target = Math.ceil((nowMs + parseDurationMinutes(delay) * 60_000) / 60_000) * 60_000;
+  return wallTimeAtOrAfter(nowMs + parseDurationMinutes(delay) * 60_000, timeZone);
+}
+
+/**
+ * The instant `targetMs`, rounded UP to the minute, as the `at` wall time (`YYYY-MM-DDTHH:MM`) in
+ * `timeZone`: how a UTC time from an agent is stored in the cockpit's zone.
+ */
+export function wallTimeAtOrAfter(targetMs: number, timeZone: string): string {
+  const target = Math.ceil(targetMs / 60_000) * 60_000;
   const pad = (n: number) => String(n).padStart(2, '0');
   // A wall time names one instant of a clock overlap (the one `onceInstant` picks). When the
   // target is the other one, the first later minute whose wall time reads back at or after the
@@ -47,14 +55,20 @@ export function resolveDelay(delay: string, nowMs: number, timeZone: string): st
     const at = `${parts.year}-${pad(parts.month)}-${pad(parts.day)}T${pad(parts.hour)}:${pad(parts.minute)}`;
     if ((onceInstant({ type: 'once', at, timeZone }) ?? target) >= target) return at;
   }
-  throw new Error(`no wall time in ${timeZone} reads back at or after the delay`);
+  throw new Error(`no wall time in ${timeZone} reads back at or after ${new Date(target).toISOString()}`);
 }
+
+/**
+ * The agent's form of a time: UTC to the minute, `YYYY-MM-DDTHH:MMZ`, like every other time a
+ * Cezar tool takes or answers. The stored schedule keeps a wall time in its zone for the cockpit.
+ */
+export const UTC_MINUTE_PATTERN = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})Z$/;
+export const utcMinute = (instantMs: number): string => `${new Date(instantMs).toISOString().slice(0, 16)}Z`;
 
 /** The fields a create and an update share. */
 const scheduleFields = {
-  at: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, 'a local wall time YYYY-MM-DDTHH:MM').refine(isRealOnceAt, 'not a real date and time').optional(),
+  at: z.string().regex(UTC_MINUTE_PATTERN, 'a UTC time YYYY-MM-DDTHH:MMZ').refine(value => isRealOnceAt(value.slice(0, -1)), 'not a real date and time').optional(),
   delay: durationField.optional(),
-  time_zone: z.string().min(1).max(100).optional(),
   latest_start: durationField.optional(),
   workflow: z.string().trim().min(1).max(200).optional(),
   runner: z.string().trim().min(1).max(32).optional(),
@@ -74,7 +88,7 @@ export const scheduleTaskRequestSchema = z
   })
   .strict()
   .refine(notBoth, { message: 'give at or delay, not both', path: ['delay'] })
-  .refine((value) => Boolean(value.at || value.delay), { message: 'give at (with time_zone) or delay', path: ['at'] });
+  .refine((value) => Boolean(value.at || value.delay), { message: 'give at or delay', path: ['at'] });
 export type ScheduleTaskRequest = z.infer<typeof scheduleTaskRequestSchema>;
 
 const idField = z.string().min(1).max(100);
@@ -101,11 +115,8 @@ export const scheduledTaskSchema = z.object({
   id: z.string(),
   name: z.string(),
   status: onceStatusSchema,
-  /** The local wall time and its zone, as stored. */
+  /** When it is due, in UTC: `YYYY-MM-DDTHH:MMZ`, the form `at` takes. */
   due_at: z.string(),
-  time_zone: z.string(),
-  /** The same moment as a UTC ISO instant. */
-  resolved_instant: z.string(),
   latest_start_minutes: z.number().optional(),
   /** The task it launched, once archived with one. */
   run_id: z.string().optional(),

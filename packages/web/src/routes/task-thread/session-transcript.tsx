@@ -1,5 +1,7 @@
 import { useMemo, type ReactNode } from 'react'
 import { TaskFileScope } from './task-file-scope'
+import { useTranscriptReports } from './transcript-reports'
+import { ReportMessageKeyContext } from './report-cards'
 import { PermissionCard } from './permission-card'
 import { AskAnswers } from './ask-answers'
 
@@ -314,6 +316,7 @@ export function SessionTranscript({
   const rowModels = useMemo(() => buildTranscriptRows(sections, runId), [sections, runId])
   const internalScroll = useThreadScroll(`${runId}:${viewId}`, { surface: mode })
   const controls = scrollControls ?? internalScroll
+  useTranscriptReports(runId, rowModels, controls, mode)
   const navigation = useMemo(() => {
     const targets = new Map<string, ConversationTarget>()
     rowModels.forEach((row, rowIndex) => {
@@ -458,7 +461,7 @@ function ThreadBlockRenderer({
 }): ReactNode {
   switch (block.kind) {
     case 'entry':
-      return <ThreadEntryRenderer entry={block.entry} scope={scope} renderAsk={renderAsk} renderPermission={renderPermission} runId={runId} taskTitles={taskTitles} recipientBackends={recipientBackends} />
+      return <ReportMessageKeyContext.Provider value={`${scope}:${block.entry.id}`}><ThreadEntryRenderer entry={block.entry} scope={scope} renderAsk={renderAsk} renderPermission={renderPermission} runId={runId} taskTitles={taskTitles} recipientBackends={recipientBackends} /></ReportMessageKeyContext.Provider>
     case 'tool-card':
       return (
         <ToolCard

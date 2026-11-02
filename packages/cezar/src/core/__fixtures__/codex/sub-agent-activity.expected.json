@@ -15,7 +15,8 @@
       "input": {
         "agentPath": "/root/scope_review",
         "agentThreadId": "th_child"
-      }
+      },
+      "background": true
     }
   }
 ]

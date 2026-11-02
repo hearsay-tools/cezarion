@@ -5,7 +5,7 @@ command, it fails closed, and it does not depend on which tests a change selects
 
 ## What it runs
 
-`packages/cezar/src/lint/run.ts` runs three parts and prints every problem as
+`packages/cezar/src/lint/run.ts` runs four parts and prints every problem as
 `file:line:column rule: reason → owner`:
 
 1. **oxlint** with the `cez` JS plugin (`packages/cezar/src/lint/plugin.ts`) over `packages/`.
@@ -15,6 +15,10 @@ command, it fails closed, and it does not depend on which tests a change selects
    [`.ai/ast-grep/README.md`](../../.ai/ast-grep/README.md) says how to write one.
 3. **Stale entries**: an exemption, a reader-list entry or a baseline entry that no longer names
    a match fails, so the lists only shrink to what the code still needs.
+
+4. **File length** (`file-length`, a runner check): every tracked non-test source file over 1,000 lines stays at or below its
+   pin in `packages/cezar/src/file-length.baseline.json`. Unpinned long files, grown pins and
+   stale pins fail. `FILE_LENGTH_UPDATE=1 npm run lint` only lowers or drops existing pins.
 
 A non-zero tool exit, unreadable tool output, a plugin that does not load, a config that turns on
 another number of rules than the plugin defines, and a file that does not parse are failures,
@@ -32,14 +36,16 @@ never a pass.
 
 | Rule | Refuses | Exceptions |
 | --- | --- | --- |
+| `cez/card-2-contrast` | Unsafe small text on card-2 (hearsay-tools/cezarion#1133, hearsay-tools/cezarion#2423) | `packages/web/src/test/card-2-contrast.baseline.json`, shrink-only |
 | `cez/contract-root-import` | A runtime import of a contract package root (hearsay-tools/cezarion#1237) | `contract-root-import.baseline.json`, shrink-only |
 | `cez/native-mock-source` | A test that reads, splices or swaps native mock source (hearsay-tools/cezarion#1479) | None |
 | `cez/raw-query-setter` | A raw `useSearchParams` setter in the cockpit (hearsay-tools/cezarion#1649) | `packages/web/src/test/search-params-discipline.baseline.json`, shrink-only and reasoned |
 | `cez/run-fact-reader` | An attention label comparison, a restated usage-limit hold, or an unlisted `autoResumeAt` read (hearsay-tools/cezarion#1496) | `resume-time-readers.json`: add a reader only with its reason |
+| `cez/run-history-reader` | An unlisted raw `historyPaths` or `eventsPath` use, or a string/template literal containing `.ndjson` with no preceding character or a preceding character outside `[A-Za-z0-9_-]` (hearsay-tools/cezarion#2420) | `run-history-readers.json`: each file and access kind has a reason; stale entries fail |
 | `cez/undocumented-env-name` | A `CEZ_*` name in a shipped source or runner script that `.env.example` lacks | The `CEZ_MOCK_*` prefix |
 
-The lists live beside the rules in `packages/cezar/src/lint/`, except the query-setter baseline,
-which keeps its path. CI's baseline-growth gate refuses a `*.baseline.json` that grows.
+The lists live beside the rules in `packages/cezar/src/lint/`, except the query-setter and card-2 contrast baselines,
+which keep their paths. CI's baseline-growth gate refuses a `*.baseline.json` that grows.
 
 ## Add a rule
 
@@ -66,22 +72,24 @@ looped case). **Moved** cases now run in `npm run lint`; the scanner's fixture c
 | Contract import boundaries (M01) | `packages/cezar/src/contract-import-boundaries.test.ts` | 2: no root import; each exemption still imports a root | 33 scanner cases; the api-client shim mirror, which compares files rather than scanning shapes |
 | Raw query setters (M02) | `packages/web/src/test/search-params-discipline.test.ts`, now `packages/cezar/src/lint/raw-query-setter.test.ts` | 1: no setter outside the baseline | 8 scanner cases; the exception-policy guard on the baseline |
 | Native mock boundaries (M03) | `packages/cezar/src/mock-source-boundary.test.ts` | 1: no test reads or swaps mock source | 9 scanner cases |
+| Active-run map ownership (M04) | `packages/cezar/src/workflows/run-active-pin.test.ts` (removed) | 2 ownership scans replaced by `active-run-map-write`; call-presence scan retired (hearsay-tools/cezarion#2419) | Harness parity R48 runs execute and Continue, checks active pins and release from memory |
 | Shared run-fact readers (M05) | `packages/cezar/src/run-fact-readers.test.ts` | 2: no finding; every listed reader still reads | 27 scanner cases |
+| Run-history readers (M06) | `packages/cezar/src/runs/history-readers.test.ts` | 1: no raw transcript path outside its owners | The adapted predicate fixture and both compression/reopen behavior cases; new lint fixtures pin helpers, dynamic paths, fixed strings, comments and stale exceptions |
+| Card-2 contrast (M10) | `packages/web/src/test/card-2-contrast.test.ts`, now `packages/cezar/src/lint/card-2-contrast.test.ts` | 1: no new unsafe small-text site or stale baseline entry | 20 scanner fixture cases; static classes only, dynamic styling still needs browser evidence |
 | Environment-name documentation (M11) | `packages/cezar/src/env-example.test.ts` | 1: every `CEZ_*` name documented | 4 scanner cases |
+| File-length budget (M12) | `packages/cezar/src/file-length.test.ts` | 1: no unpinned long file, grown pin or stale pin | 6 fixture cases |
 | Existing ast-grep enforcement | `packages/cezar/src/ast-grep-rules.test.ts` | 14: one repository scan per rule | Rule-file checks, the `ast-grep test` cases, the baseline helpers, the update mode helpers, binary resolution |
 
-21 cases moved. The update mode moved with them: `AST_GREP_RULES_UPDATE=1 npm run lint`.
+26 cases moved; M04's call-presence case retired. Update modes moved with them:
+`AST_GREP_RULES_UPDATE=1 npm run lint` and `FILE_LENGTH_UPDATE=1 npm run lint`.
+
 
 ### Deferred
 
 | Family | Current file(s) | Why not in this migration | Follow-up |
 | --- | --- | --- | --- |
-| Active-run map ownership (M04) | `packages/cezar/src/workflows/run-active-pin.test.ts` | Its 3 scans cut method bodies by indentation, and call presence does not prove execution, order or cleanup | hearsay-tools/cezarion#2419 |
-| Run-history readers (M06) | `packages/cezar/src/runs/history-readers.test.ts` | A per-line substring scan; not every `.ndjson` path is run history, so the rule must target ownership first | hearsay-tools/cezarion#2420 |
 | Unit wait discipline (M07) | `packages/cezar/src/test-wait-discipline.test.ts`, `packages/web/src/test/unit-wait-discipline.test.ts` | Three baselines, a cached full scan that fixture cases share, and a host timeout check to separate | hearsay-tools/cezarion#2421 |
 | Design guardian (M09) | `packages/web/src/design-guardian.test.ts` | Ten per-file rules fit lint; the token and control cases pin named files' content; the suite reads all sources at import | hearsay-tools/cezarion#2422 |
-| Card-2 contrast (M10) | `packages/web/src/test/card-2-contrast.test.ts` | Joins `styles/index.css` with every `.tsx`; dynamic styling still needs browser evidence | hearsay-tools/cezarion#2423 |
-| File-length budget (M12) | `packages/cezar/src/file-length.test.ts` | A whole-repository budget over `git ls-files`; it belongs in the runner, with its update mode | hearsay-tools/cezarion#2424 |
 
 ### Retained
 

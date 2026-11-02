@@ -1,8 +1,9 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { scanHistoryReaders } from '../lint/run-history-reader.ts';
 import { compressHistory, historyPaths } from './history-file.ts';
 import { RunStore } from './store.ts';
 
@@ -22,64 +23,17 @@ function openStore(): { dir: string; store: RunStore } {
   return { dir, store };
 }
 
-function walkTs(dir: string, acc: string[] = []): string[] {
-  for (const name of readdirSync(dir)) {
-    const path = join(dir, name);
-    if (statSync(path).isDirectory()) walkTs(path, acc);
-    else if (name.endsWith('.ts')) acc.push(path);
-  }
-  return acc;
-}
-
-const NDJSON_ALLOW_FILES = new Set([
-  join('automations', 'store.ts'),
-  join('data-gitignore.ts'),
-  join('runs', 'history-file.ts'),
-  join('voice', 'decision-log.ts'), // its own `voice/decisions.ndjson`, not a run transcript
-]);
-
-const EVENTS_PATH_ALLOW = [
-  { file: join('runs', 'store.ts'), text: 'private eventsPath(runId: string)' },
-  { file: join('runs', 'store.ts'), text: 'appendFileSync(this.eventsPath(runId)' },
-];
-
-function eventsPathViolation(rel: string, line: string): boolean {
-  if (!line.includes('eventsPath(')) return false;
-  return !EVENTS_PATH_ALLOW.some((allow) => allow.file === rel && line.includes(allow.text));
-}
-
-function ndjsonViolation(rel: string, line: string): boolean {
-  if (NDJSON_ALLOW_FILES.has(rel)) return false;
-  if (/\bfrom\s+['"][^'"]+\.ndjson['"]/.test(line)) return false;
-  if (/FIXTURES.*\.ndjson|\.ndjson.*FIXTURES/.test(line)) return false;
-  return line.includes('.ndjson');
-}
-
 describe('history readers', () => {
   it('flags stray transcript path access', () => {
-    expect(eventsPathViolation('runs/other.ts', 'createReadStream(this.eventsPath(id))')).toBe(true);
-    expect(eventsPathViolation('runs/other.ts', 'statSync(this.eventsPath(id))')).toBe(true);
-    expect(eventsPathViolation(join('runs', 'store.ts'), 'appendFileSync(this.eventsPath(runId), line)')).toBe(false);
-    expect(eventsPathViolation(join('runs', 'store.ts'), 'private eventsPath(runId: string): string {')).toBe(false);
-    expect(ndjsonViolation('runs/store.ts', 'id + ".ndjson"')).toBe(true);
-    expect(ndjsonViolation('runs/store.ts', '`${id}.ndjson.br`')).toBe(true);
-    expect(ndjsonViolation(join('runs', 'history-file.ts'), '`${id}.ndjson`')).toBe(false);
-    expect(ndjsonViolation(join('automations', 'store.ts'), "const RECEIPTS = 'automation-receipts.ndjson';")).toBe(false);
-  });
-
-  it('no module opens a transcript path directly', () => {
-    const srcRoot = join(import.meta.dirname, '..');
-    const hits: string[] = [];
-    for (const file of walkTs(srcRoot)) {
-      if (file.endsWith('.test.ts') || file.endsWith('.testkit.ts')) continue;
-      const rel = relative(srcRoot, file);
-      for (const [index, line] of readFileSync(file, 'utf8').split('\n').entries()) {
-        if (eventsPathViolation(rel, line) || ndjsonViolation(rel, line)) {
-          hits.push(`${rel}:${index + 1}:${line.trim()}`);
-        }
-      }
-    }
-    expect(hits).toEqual([]);
+    const violates = (file: string, source: string) => scanHistoryReaders(`packages/cezar/src/${file}`, source).length > 0;
+    expect(violates('runs/other.ts', 'createReadStream(this.eventsPath(id))')).toBe(true);
+    expect(violates('runs/other.ts', 'statSync(this.eventsPath(id))')).toBe(true);
+    expect(violates('runs/store.ts', 'appendFileSync(this.eventsPath(runId), line)')).toBe(false);
+    expect(violates('runs/store.ts', 'class Store { private eventsPath(runId: string): string { return ""; } }')).toBe(false);
+    expect(violates('runs/store.ts', 'id + ".ndjson"')).toBe(true);
+    expect(violates('runs/store.ts', '`${id}.ndjson.br`')).toBe(true);
+    expect(violates('runs/history-file.ts', '`${id}.ndjson`')).toBe(false);
+    expect(violates('automations/store.ts', "const RECEIPTS = 'automation-receipts.ndjson';")).toBe(false);
   });
 
   it('store.readEvents reads a compressed transcript', async () => {

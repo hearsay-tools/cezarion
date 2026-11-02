@@ -43,7 +43,7 @@ import {
   type WorkerWaitEntry,
 } from './waits.ts';
 import { peerWaitViewSchema, workerCompletionWaitSchema, workerInspectionSchema, workerWaitSchema } from './delegation.ts';
-import { makeRunRecord, RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from './test-factories.testkit.ts';
+import { makePeerWait, makeRunRecord, makeSubagentWait, RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from './test-factories.testkit.ts';
 import { toRunSummary } from './runs.ts';
 import { deriveAttention } from './attention.ts';
 
@@ -995,5 +995,39 @@ describe('waiting-on mixed entries', () => {
     expect(computeWaitingOn({ waits: [unknown] })).toBeUndefined();
     const timer = openTimer();
     expect(computeWaitingOn({ waits: [unknown, timer] })).toStrictEqual({ kind: WAIT_KIND.timer, waitId: timer.id, at: timer.deadline });
+  });
+});
+
+// hearsay-tools/cezarion#2431: Cezar's wait on native subagents a turn left running.
+describe('subagent waits', () => {
+  const child = (id: string, status: 'running' | 'completed' | 'failed' | 'cancelled' = 'running') => ({ id, status });
+
+  it('is Cezar\'s own entry with a required deadline, 1 to 32 children and a reason once settled', () => {
+    expect(waitSchema.safeParse(makeSubagentWait()).success).toBe(true);
+    expect(waitSchema.safeParse(makeSubagentWait({ source: WAIT_SOURCE.agent as never })).success).toBe(false);
+    expect(waitSchema.safeParse(makeSubagentWait({ via: WAIT_VIA.cezar_wait as never })).success).toBe(false);
+    expect(waitSchema.safeParse({ ...makeSubagentWait(), deadline: undefined }).success).toBe(false);
+    expect(waitSchema.safeParse(makeSubagentWait({ children: [] })).success).toBe(false);
+    expect(waitSchema.safeParse(makeSubagentWait({ children: Array.from({ length: 32 }, (_, n) => child(`c${n}`)) })).success).toBe(true);
+    expect(waitSchema.safeParse(makeSubagentWait({ children: Array.from({ length: 33 }, (_, n) => child(`c${n}`)) })).success).toBe(false);
+    expect(waitSchema.safeParse(makeSubagentWait({ children: [{ id: 'c', status: 'declined' as never }] })).success).toBe(false);
+    for (const reason of ['settled', 'timeout', 'interrupted', 'superseded'] as const) {
+      expect(waitSchema.safeParse(makeSubagentWait({ phase: WAIT_PHASE.resolved, resolvedAt: '2026-10-26T00:01:00.000Z', result: { reason } })).success).toBe(true);
+    }
+    expect(waitSchema.safeParse(makeSubagentWait({ result: { reason: 'message' as never } })).success).toBe(false);
+  });
+
+  it('counts the running children over every open subagent wait, below peers and above a PR wait', () => {
+    const two = makeSubagentWait({ children: [child('a'), child('b'), child('c', 'completed')] });
+    const one = makeSubagentWait({ children: [child('d'), child('e', 'failed')] });
+    expect(computeWaitingOn({ status: RUN_STATUS.waiting, waits: [two, one] })).toStrictEqual({ kind: 'subagents', count: 3 });
+    expect(computeWaitingOn({ status: RUN_STATUS.waiting, waits: [two, makeSubagentWait({ phase: WAIT_PHASE.resolved })] })).toStrictEqual({ kind: 'subagents', count: 2 });
+    expect(computeWaitingOn({ status: RUN_STATUS.waiting, waits: [two, makePeerWait()] })?.kind).toBe('peers');
+    expect(waitingOnSchema.safeParse({ kind: 'subagents', count: 0 }).success).toBe(true);
+  });
+
+  it('lists back to the agent with its deadline', () => {
+    expect(openWaitSchema.safeParse({ wait_id: makeSubagentWait().id, kind: WAIT_KIND.subagent, summary: 'subagent wait on 1 native subagent', deadline: '2026-10-26T00:05:00.000Z' }).success).toBe(true);
+    expect(openWaitSchema.safeParse({ wait_id: makeSubagentWait().id, kind: WAIT_KIND.subagent, summary: 'no deadline' }).success).toBe(false);
   });
 });

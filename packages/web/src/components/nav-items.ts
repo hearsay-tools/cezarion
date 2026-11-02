@@ -1,3 +1,4 @@
+import { FileTextIcon } from 'lucide-react'
 import { stripProjectPrefix } from '@/lib/project-router'
 import { GitBranchIcon, SettingsIcon, SparklesIcon, WorkflowIcon, ZapIcon } from '@/components/design-icons'
 import { ListTodoIcon } from '@/components/design-icons'
@@ -36,6 +37,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/automations', label: 'Automations', icon: ZapIcon, match: ['/automations'], automations: true },
   { to: '/skills', label: 'Skills', icon: SparklesIcon, match: ['/skills'] },
   { to: '/workflows', label: 'Workflows', icon: WorkflowIcon, match: ['/workflows'] },
+  { to: '/reports', label: 'Reports', icon: FileTextIcon, match: ['/reports'] },
   { to: '/settings', label: 'Settings', icon: SettingsIcon, match: ['/settings'] },
 ]
 
@@ -132,6 +134,6 @@ export function isPushedGitScreen(pathname: string, search: string): boolean {
 /** The tab bar's fixed slots: the views that stay one tap away. Everything else lives in More. */
 export const TAB_BAR_PATHS: readonly string[] = ['/', '/git', '/github']
 
-/** The `to` of every nav item the More sheet lists (Skills, Workflows, Settings, and the flagged
+/** The `to` of every nav item the More sheet lists (Skills, Workflows, Reports, Settings, and the flagged
  *  Automations) — used to light the More tab when the current route belongs to one. */
-export const MORE_SHEET_PATHS: readonly string[] = ['/skills', '/workflows', '/settings', '/automations']
+export const MORE_SHEET_PATHS: readonly string[] = ['/skills', '/workflows', '/reports', '/settings', '/automations']

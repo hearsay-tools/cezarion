@@ -122,9 +122,10 @@ export async function provisionCiSession(context: RunModuleContext, host: CiSess
   state.ciGeneration = randomUUID();
   state.ciTurnId = randomUUID();
   const generation = state.ciGeneration;
+  // hearsay-tools/cezarion#2397: a controller that cannot start throws `ToolsUnavailableError`,
+  // which fails this launch; no session runs without the lifecycle tools.
   const controller = await host.ciResources().controller();
-  state.toolless = !controller;
-  if (!controller || context.disposed() || state.cancelled || host.active.get(runId) !== state) return;
+  if (context.disposed() || state.cancelled || host.active.get(runId) !== state) return;
   const provisioned = previewCdpSession(controller.provision(host.cezarToolHandlers(runId, generation)), { host: host.preview(), cockpitOrigin: host.cockpit()?.origin, runId, worktree: !!context.store.getRun(runId)?.worktreePath, context: () => previewRunContext(context.store, context.dataDir, runId) });
   state.revokeCiTools = provisioned.revoke;
   return provisioned;

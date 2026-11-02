@@ -1,3 +1,4 @@
+import type { SubagentChild } from '@open-mercato/cezar-contract/waits';
 import type { AgentSession, InputDelivery } from '../core/agent-runner.ts';
 import type { Skill } from '../skills.ts';
 import type { DelegationExecutionSettings } from './run/types.ts';
@@ -12,9 +13,6 @@ export interface ActiveRun {
   delegationSettings?: DelegationExecutionSettings | undefined;
   revokeDelegation?: (() => void) | undefined;
   revokeCiTools?: (() => void) | undefined;
-  /** hearsay-tools/cezarion#1234: the last session started without cezar tools, so its prompt
-   *  taught the lifecycle markers; kept after the session's tools are revoked. */
-  toolless?: boolean;
   ciGeneration?: string;
   ciTurnId?: string;
   waitWakeTurn?: AgentSession | undefined;
@@ -75,7 +73,7 @@ export interface ActiveRun {
   /** The step an accepted done closed. A workflow step that is not the last advances only on it. */
   completedStepId?: string | undefined;
   /** What declared the done `doneAtBoundary` closes on: the closing event names it. */
-  doneClose?: { via: 'cezar_done' | 'done-line'; summary?: string } | undefined;
+  doneClose?: { via: 'cezar_done'; summary?: string } | undefined;
   parkAfterAck?: { session: AgentSession; monitoring: boolean; humanGate?: boolean; nudgedLastTurn?: boolean; scheduleWakeup?: number | null | undefined } | undefined;
   /** Last completed boundary belongs to exactly this still-open session. */
   atTurnBoundary?: AgentSession | undefined;
@@ -123,6 +121,15 @@ export interface ActiveRun {
   releaseRepoRoot?: (() => void) | undefined;
   /** Durable directional-usage accounting state for the current runner
    * invocation. Provider-local turn ids are unique only within this epoch. */
+  /** Native subagents a session started in the background (hearsay-tools/cezarion#2431), by the
+   *  runner's root task item id: the session that holds each, and its last status. */
+  backgroundChildren: Map<string, { session: AgentSession | undefined; status: SubagentChild['status'] }>;
+  /** Cezar is writing input into the session now: a parent turn that starts during the write is
+   *  Cezar's, not one the runner started itself (hearsay-tools/cezarion#2431). */
+  writingInput?: boolean | undefined;
+  /** A park for the user kept the session and its slot for running native subagents
+   *  (hearsay-tools/cezarion#2431): their last end gives both back. */
+  heldForSubagents?: boolean | undefined;
   usageInvocation?: {
     stepId: string;
     epoch: number;
@@ -130,6 +137,15 @@ export interface ActiveRun {
     startedTurns: Set<string>;
     recordedTurns: Set<string>;
   };
+}
+
+/** Run Cezar's own write into the session: a parent turn the runner starts during it is Cezar's
+ *  (hearsay-tools/cezarion#2431). Claude emits `turn.started` inside the write itself. */
+export function writeInput<T>(state: ActiveRun, write: () => T): T {
+  const previous = state.writingInput;
+  state.writingInput = true;
+  try { return write(); }
+  finally { state.writingInput = previous; }
 }
 
 /** What differs between the ways a run starts executing. Every other `ActiveRun` field starts the
@@ -159,6 +175,7 @@ export function createActiveRun(init: ActiveRunInit): ActiveRun {
     cancelled: false, interrupt: () => undefined, cwd: init.cwd,
     pendingHumanAsk: init.pendingHumanAsk,
     pendingPermissions: new Set(),
+    backgroundChildren: new Map(),
     autonomous: init.autonomous,
   };
 }

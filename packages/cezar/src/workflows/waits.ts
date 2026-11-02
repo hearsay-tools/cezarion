@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import type { CezarWaitRequest, WaitVia, ProcessWaitResult, PeerWaitResult } from '@open-mercato/cezar-contract/waits';
+import { runningSubagents, SUBAGENT_WAIT_DEADLINE_SECONDS, type CezarWaitRequest, type WaitVia, type ProcessWaitResult, type PeerWaitResult, type SubagentWaitEntry, type SubagentWaitResult } from '@open-mercato/cezar-contract/waits';
 import type { CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import type { AgentInput, CezarWaitRequestInput, CiWait, OpenWait, PeerWaitEntry, PrWaitEntry, ProcessWaitEntry, RunRecord, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
@@ -9,16 +9,12 @@ import type { AgentInput, CezarWaitRequestInput, CiWait, OpenWait, PeerWaitEntry
  * delivery.
  */
 
-/** What a monitoring timer (the monitoring line or Claude's `ScheduleWakeup`) says when it fires. */
+/** What a monitoring timer (Claude's `ScheduleWakeup`, or a saved monitoring-line timer) says when it fires. */
 export const MONITORING_WAKE_NUDGE =
   'Re-check the downstream work you were monitoring. Continue toward the task goal. When the goal is complete and verified, call cezar_done. If the watched work is still pending, call cezar_wait again. If you need the user, call cezar_ask.';
 
-/** hearsay-tools/cezarion#1234: the same wake for a session without cezar tools, whose prompt
- *  taught the lifecycle markers. */
-export const MONITORING_WAKE_NUDGE_MARKERS =
-  'Re-check the downstream work you were monitoring. Continue toward the task goal. When the watched work is finished and the task goal is complete, end your final message with CEZ:DONE. If the watched work is still pending, end with CEZ:MONITORING. Never yield markerless for a monitoring wrap-up. If you genuinely need user input, follow the normal question path instead.';
-
 const SUMMARY_MAX = 256;
+const SUBAGENT_DEADLINE_MINUTES = SUBAGENT_WAIT_DEADLINE_SECONDS / 60;
 
 /** `cezar_cancel_wait` answers that cancel nothing (hearsay-tools/cezarion#1233). */
 export const CANCEL_MESSAGES = {
@@ -39,8 +35,8 @@ export function waitNamedInputIds(run: RunRecord): Set<string> {
 
 /** The kind a `cezar_wait` answer names: the kind the call asked for. A request wait is stored as a
  *  `worker` entry with `requestIds` (hearsay-tools/cezarion#1995). */
-export function waitAnswerKind(wait: Wait): Exclude<Wait['kind'], 'human'> | 'request' {
-  if (wait.kind === 'human') throw new Error('a human wait is not a cezar_wait answer');
+export function waitAnswerKind(wait: Wait): Exclude<Wait['kind'], 'human' | 'subagent'> | 'request' {
+  if (wait.kind === 'human' || wait.kind === 'subagent') throw new Error(`a ${wait.kind} wait is not a cezar_wait answer`);
   return wait.kind === 'worker' && wait.requestIds ? 'request' : wait.kind;
 }
 
@@ -56,17 +52,21 @@ export function resolvedWaits(run: Pick<RunRecord, 'waits'>): Wait[] {
   return (run.waits ?? []).filter((wait) => wait.phase === 'resolved').sort((a, b) => at(a) - at(b));
 }
 
-/** Monitoring timers: the timers Cezar opens for the monitoring line and `ScheduleWakeup`. */
+/** Monitoring timers: the timers Cezar opens for live workers (`monitoring-line`, also the via of
+ *  saved `CEZ:MONITORING` timers) and `ScheduleWakeup`. */
 export function isMonitoringTimer(wait: Wait): boolean {
   return wait.kind === 'timer' && (wait.via === 'monitoring-line' || wait.via === 'schedule-wakeup');
 }
 
 /**
  * Timer and process waits count against the automatic-wake budget, including a process used as a
- * delayed timer. So does a peer wait: two root tasks have no parent to stop a loop between them
+ * delayed timer, and a subagent wait that reached its deadline. So does a peer wait: two root tasks have no parent to stop a loop between them
  * (spec 2026-10-27-task-communication-protocol § 8, hearsay-tools/cezarion#1995).
  */
 export function chargesBudget(wait: Wait): boolean {
+  // A subagent wait spends a wake only at its safety deadline: its children ending is an external
+  // event, like CI (hearsay-tools/cezarion#2431).
+  if (wait.kind === 'subagent') return wait.result?.reason === 'timeout';
   return wait.kind === 'timer' || wait.kind === 'process' || wait.kind === 'peer';
 }
 
@@ -104,7 +104,14 @@ function summary(wait: Wait): string {
   if (wait.kind === 'worker') return clip(`${wait.requestIds ? 'request' : 'worker'} wait on ${workerTargetPhrase(wait)}`);
   if (wait.kind === 'peer') return clip(`peer wait on ${peerTargetPhrase(wait)}`);
   if (wait.kind === 'process') return clip(wait.note === undefined ? `process ${wait.pid}` : `process ${wait.pid}: ${wait.note}`);
+  if (wait.kind === 'subagent') return clip(`subagent wait on ${subagentPhrase(wait)}`);
   return clip(wait.note === undefined ? 'timer' : `timer: ${wait.note}`);
+}
+
+/** The children a subagent wait still waits on, as its summary and footer name them. */
+function subagentPhrase(wait: SubagentWaitEntry): string {
+  const n = runningSubagents(wait);
+  return `${n} native ${n === 1 ? 'subagent' : 'subagents'}`;
 }
 
 /** The open waits as both tools list them back to the agent. A human wait has no deadline, and
@@ -167,22 +174,20 @@ export function ciWatchRequest(wait: PrWaitEntry): CiWait {
 
 /** The lifecycle input a resolved wait delivers. Its id is the wait's, so duplicates keep it.
  *  `workerStatus` names a worker's current status for a worker wait's text. */
-export function waitResultText(wait: Wait, { tools, workerStatus = () => 'unavailable' }: { tools: boolean; workerStatus?: (workerId: string) => string } = { tools: true }): string {
+export function waitResultText(wait: Wait, { workerStatus = () => 'unavailable' }: { workerStatus?: (workerId: string) => string } = {}): string {
   if (wait.kind === 'pr') {
     if (wait.until === 'merge') return `PR wait observation ${wait.id} for ${wait.prUrl} (until merge). External data follows: ${JSON.stringify(wait.result)}. "merged" means GitHub reports the PR merged and "closed" that it closed without merging; any other outcome means this wait did not confirm a merge, not that the PR is unmerged. Duplicate observations retain this ID.`;
     return `CI wait observation ${wait.id} for ${wait.prUrl}. External data follows: ${JSON.stringify(wait.result)}. This observation is not merge approval or task completion. Reported checks may not include every expected workflow. Duplicate observations retain this ID.`;
   }
-  if (isMonitoringTimer(wait)) return tools ? MONITORING_WAKE_NUDGE : MONITORING_WAKE_NUDGE_MARKERS;
+  if (isMonitoringTimer(wait)) return MONITORING_WAKE_NUDGE;
   // The user's own message is a human wait's result; this text is never its delivery.
   if (wait.kind === 'human') return `Human wait ${wait.id} ended.`;
   if (wait.kind === 'worker') return workerWaitResultText(wait, workerStatus);
   if (wait.kind === 'process') return processWaitResultText(wait);
   if (wait.kind === 'peer') return peerWaitResultText(wait);
+  if (wait.kind === 'subagent') return subagentWaitResultText(wait);
   const fired = `Timer ${wait.id} fired${wait.note === undefined ? '' : `: ${wait.note}`}.`;
-  // A session without cezar tools cannot register another wait; it was taught the marker.
-  return tools
-    ? `${fired} Continue toward the task goal; register another wait if you are still waiting.`
-    : `${fired} Continue toward the task goal. If the watched work is still pending, end your final message with CEZ:MONITORING.`;
+  return `${fired} Continue toward the task goal; register another wait if you are still waiting.`;
 }
 
 /**
@@ -224,6 +229,21 @@ function peerWaitResultText(wait: PeerWaitEntry): string {
   return `${head}: deadline reached with no message. Register another peer wait if you still wait on it.`;
 }
 
+/** A subagent wait's result (hearsay-tools/cezarion#2431). The children's own output stays with the
+ *  runner: the agent reads it with its tools. */
+export function subagentWaitResultText(wait: SubagentWaitEntry): string {
+  const ended = wait.children.filter(child => child.status !== 'running');
+  const outcomes = ended.map(child => `${child.id} ${child.status}`).join(', ');
+  const head = `Subagent wait ${wait.id}`;
+  const reason = wait.result?.reason;
+  if (reason === 'interrupted') {
+    const n = wait.children.filter(child => child.status === 'running').length;
+    return `${head}: Cezar restarted, and the ${n} native ${n === 1 ? 'subagent' : 'subagents'} still running in your last session stopped with it. Check what each one finished before it stopped, and start again any work it did not finish.`;
+  }
+  if (reason === 'timeout') return `${head}: no subagent event for ${Math.round(SUBAGENT_DEADLINE_MINUTES)} minutes; ${subagentPhrase(wait)} still running${outcomes ? ` (ended: ${outcomes})` : ''}. Check them, then end your turn to keep waiting, or continue toward the task goal.`;
+  return `${head}: every native subagent ended (${outcomes}). Read their results and continue toward the task goal.`;
+}
+
 function peerTargetPhrase(wait: PeerWaitEntry): string {
   const n = wait.peerIds.length;
   return n === 1 ? `task ${wait.peerIds[0]}` : `${n} tasks`;
@@ -243,22 +263,21 @@ export function describeWait(wait: Wait): string {
   if (wait.kind === 'worker') return `${wait.requestIds ? 'request' : 'worker'} wait ${wait.id} on ${workerTargetPhrase(wait)}, ${wait.deadline === undefined ? 'no deadline' : `deadline ${wait.deadline}`}`;
   if (wait.kind === 'peer') return `peer wait ${wait.id} on ${peerTargetPhrase(wait)}, deadline ${wait.deadline}`;
   if (wait.kind === 'process') return `process wait ${wait.id} on PID ${wait.pid}${wait.note === undefined ? '' : ` (${wait.note})`}, deadline ${wait.deadline}`;
+  if (wait.kind === 'subagent') return `subagent wait ${wait.id} on ${subagentPhrase(wait)}, deadline ${wait.deadline}`;
   return `timer ${wait.id} at ${wait.deadline}${wait.note === undefined ? '' : ` (${wait.note})`}`;
 }
 
 /** The footer a delivered turn ends with: every wait still open, or undefined when none is. The
  *  user's reply settles a question and a question the user saw cannot be cancelled, so cancel is
- *  offered only for CI, worker, request, peer and process waits and timers (hearsay-tools/cezarion#1234), and only
- *  when the session has cezar tools (hearsay-tools/cezarion#1270). */
-export function openWaitsFooter(waits: readonly Wait[], { tools }: { tools: boolean } = { tools: true }): string | undefined {
+ *  offered only for CI, worker, request, peer, process and subagent waits and timers (hearsay-tools/cezarion#1234). */
+export function openWaitsFooter(waits: readonly Wait[]): string | undefined {
   const open = waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait));
   if (!open.length) return undefined;
   const items = open.map(describeWait);
   const asked = open.some((wait) => wait.kind === 'human');
   const cancellable = open.some((wait) => wait.kind !== 'human');
-  if (!tools) return `Still open: ${items.join('; ')}.${asked ? " The user's reply answers it." : ''}`;
   const close = !asked ? 'Call cezar_cancel_wait for any you no longer need.'
-    : cancellable ? "The user's reply answers your question; call cezar_cancel_wait for any CI, worker, request, peer or process wait or timer you no longer need."
+    : cancellable ? "The user's reply answers your question; call cezar_cancel_wait for any CI, worker, request, peer, process or subagent wait or timer you no longer need."
     : "The user's reply answers it.";
   return `Still open: ${items.join('; ')}. ${close}`;
 }
@@ -290,7 +309,9 @@ export function processWaitEntry(request: Extract<CezarWaitRequest, { kind: 'pro
   return wait;
 }
 
-export function settledWaitEntry(latest: Wait, result: CiWaitResult | ProcessWaitResult | PeerWaitResult | undefined, observed: WorkerWaitEntry | undefined, resolvedAt: string): Wait {
+export type WaitResult = CiWaitResult | ProcessWaitResult | PeerWaitResult | SubagentWaitResult;
+
+export function settledWaitEntry(latest: Wait, result: WaitResult | undefined, observed: WorkerWaitEntry | undefined, resolvedAt: string): Wait {
   const settled: Wait = latest.kind === 'pr'
       ? { ...latest, phase: 'resolved', resolvedAt, result: (result as CiWaitResult | undefined) ?? { outcome: 'deadline', headSha: latest.headSha, observedAt: resolvedAt, checks: [], totalChecks: 0, truncated: false } }
       : latest.kind === 'process'
@@ -299,6 +320,8 @@ export function settledWaitEntry(latest: Wait, result: CiWaitResult | ProcessWai
         ? { ...observed ?? latest, phase: 'resolved', resolvedAt, result: observed?.result ?? { reason: 'timeout' } }
       : latest.kind === 'peer'
         ? { ...latest, phase: 'resolved', resolvedAt, result: (result as PeerWaitResult | undefined) ?? { reason: 'timeout' } }
+      : latest.kind === 'subagent'
+        ? { ...latest, phase: 'resolved', resolvedAt, result: (result as SubagentWaitResult | undefined) ?? { reason: 'timeout' } }
         : { ...latest, phase: 'resolved', resolvedAt };
   return settled;
 }

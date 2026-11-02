@@ -54,7 +54,7 @@ describe('silent-tail seam — mapper emits reasoning/tool with no later message
       expect(completed.some(e => e.item.kind === 'reasoning' || e.item.kind === 'tool')).toBe(true);
       const tail = lastTopLevelTail(observed.v2);
       expect(tail?.kind === 'reasoning' || tail?.kind === 'tool').toBe(true);
-      if (tail?.kind === 'reasoning') expect(tail.text).toContain('CEZ:DONE');
+      if (tail?.kind === 'reasoning') expect(tail.text).toContain('cezar_done');
     });
   }
 });
@@ -299,10 +299,10 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
                 if (e.type !== 'item.completed') return false;
                 const item = e.item as { kind?: string; text?: string; output?: string } | undefined;
                 // Cursor print suppresses reasoning natively. Its tool output
-                // carries the marker control without turning it into v1 text.
+                // carries the reasoning text without turning it into v1 text.
                 return backend === 'cursor'
-                  ? item?.kind === 'tool' && (item.output ?? '').includes('CEZ:DONE')
-                  : item?.kind === 'reasoning' && (item.text ?? '').includes('CEZ:DONE');
+                  ? item?.kind === 'tool' && (item.output ?? '').includes('cezar_done')
+                  : item?.kind === 'reasoning' && (item.text ?? '').includes('cezar_done');
               })).toBe(true);
             } else if (row.id === 'F4') {
               expect(status).toBe('waiting');

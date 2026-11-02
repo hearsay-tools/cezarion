@@ -45,7 +45,7 @@ function flatWaitInputSchema() {
   return {
     type: 'object' as const,
     properties: {
-      kind: { type: 'string', enum: cezarWaitRequestSchema.options.map(option => option.shape.kind.value), description: '"pr" waits for a GitHub pull request: its checks or its merge (see `until`); "worker" waits for workers you own; "request" waits for replies to requests you sent; "peer" waits for named peer tasks to message you or settle; "timer" wakes you after `seconds`; "process" wakes you when a background command you started ends.' },
+      kind: { type: 'string', enum: cezarWaitRequestSchema.options.map(option => option.shape.kind.value), description: '"pr" waits for a GitHub pull request: its checks or its merge (see `until`); "worker" waits for workers you own; "request" waits for replies to requests you sent; "peer" waits for named peer tasks to message you or settle; "timer" wakes you after `seconds`; "process" wakes you when a background command ends.' },
       pr: field('pr', 'kind "pr": the HTTPS GitHub pull request URL.'),
       until: field('until', 'kind "pr": "checks" (default) wakes you when the checks finish; "merge" wakes you only when GitHub reports the PR merged or closed without merge, so green checks keep it open.'),
       wake_on_conflict: field('wake_on_conflict', 'kind "pr": Default true. Set false when you watch a PR you do not own, such as another agent\'s PR your work depends on: you cannot resolve its conflicts. With until "checks", GitHub often runs no workflows on a conflicting PR, so the wait usually ends as no_checks or deadline.'),
@@ -56,7 +56,7 @@ function flatWaitInputSchema() {
       timeout_seconds: field('timeout_seconds', 'The deadline in seconds. kind "pr": 1–7200, default 1800. kind "worker", "request" or "peer": 1–1800, default 600 (the default shown is the pr one). kind "process": 1–7200, default 1800.'),
       seconds: field('seconds', 'kind "timer": seconds until the wake (60–7200).'),
       pid: field('pid', 'kind "process": the PID of the background command, as `echo $!` printed it.'),
-      exit_file: field('exit_file', 'kind "process": optional file the command writes its exit code to, in $TMPDIR or the worktree; a new name for each command.'),
+      exit_file: field('exit_file', 'kind "process": optional. Only a file that your own wrapper writes the exit code to, in $TMPDIR or the worktree, with a new name for each command. Leave it out for a command that is already running or that writes its status file somewhere else.'),
       note: field('note', 'kind "timer" or "process": what to re-check, handed back to you at the wake.'),
     },
     required: ['kind'],
@@ -66,12 +66,16 @@ function flatWaitInputSchema() {
 
 export const waitToolDefinition = {
   name: 'cezar_wait',
-  description: 'Open a wait on something outside this turn: a GitHub pull request\'s checks or its merge (kind "pr"), workers you own (kind "worker"), the replies to requests you sent (kind "request"), named peer tasks that may message you or settle (kind "peer"), a timer (kind "timer"), or a background command you started (kind "process"). End your turn after it answers; Cezar wakes you when any open wait resolves, with its result. A human message wakes you too and closes no wait; only a message from a peer that a peer wait names closes that wait. Several waits can be open at once; the answer lists them. To wait for the user, call cezar_ask. A checks observation is not merge approval; only a merge wait\'s "merged" outcome means the PR merged. ' +
+  description: 'Open a wait on something outside this turn: a GitHub pull request\'s checks or its merge (kind "pr"), workers you own (kind "worker"), the replies to requests you sent (kind "request"), named peer tasks that may message you or settle (kind "peer"), a timer (kind "timer"), or a background command (kind "process"). End your turn after it answers; Cezar wakes you when any open wait resolves, with its result. A human message wakes you too and closes no wait; only a message from a peer that a peer wait names closes that wait. Several waits can be open at once; the answer lists them. To wait for the user, call cezar_ask. A checks observation is not merge approval; only a merge wait\'s "merged" outcome means the PR merged. Times in the answers, such as `deadline`, are UTC. ' +
     // hearsay-tools/cezarion#1446: the `sh -c` wrapper because omp's own shell prints no `$!`.
-    'kind "process" wakes you when a command you started in the background ends. Start it as ' +
+    'kind "process" wakes you when a background command ends. To start one yourself, run ' +
     '`sh -c \'( cmd > "$TMPDIR/build.log" 2>&1; echo $? > "$TMPDIR/build.exit" ) > /dev/null 2>&1 & echo $!\'` ' +
     'and pass the printed PID as `pid` and the exit file as `exit_file`, so the wake reports the exit code. ' +
     'Use a new exit file name for each command: a file that already exists resolves the wait at once. ' +
+    // A batch that writes its exit file outside $TMPDIR made agents start a watcher to copy it in.
+    'For a command that is already running, or that writes its own status file somewhere else, pass only its `pid` and leave `exit_file` out. ' +
+    'The wake then reports `exited` without a code: read the command\'s own log or status file after it. ' +
+    'Never start a watcher or helper process to copy a file into $TMPDIR. ' +
     'The job outlives this session and Cezar does not stop it.',
   inputSchema: flatWaitInputSchema(),
 };
@@ -118,7 +122,8 @@ export async function invokeCancelWaitTool(input: unknown) {
   return { content: [{ type: 'text' as const, text: `${JSON.stringify(answer)}\n${hint}` }], isError: !answer.cancelled, details: answer };
 }
 
-/** hearsay-tools/cezarion#1234: the explicit form of the done line. */
+/** hearsay-tools/cezarion#1234: the agent declares the task (or step) done; since
+ *  hearsay-tools/cezarion#2397 it is the only way to. */
 export const doneToolDefinition = {
   name: 'cezar_done',
   description: 'Finish the task, or in a workflow step that is not the last, finish that step. Call it when the goal is fully achieved and verified and you have no question for the user; end your turn after it answers. Cezar closes the session at the end of this turn and cancels every open wait; after a step, Cezar starts the next step, and the answer names it. It refuses, naming what to do first, while owned workers are live or uncollected, a worker question is unanswered, or your question to the user is still pending.',
@@ -163,7 +168,7 @@ const PREVIEW_STOP_TOOL: CezarTool = { definition: previewStopToolDefinition, tr
  */
 export const scheduleTaskToolDefinition = {
   name: 'cezar_schedule_task',
-  description: 'Schedule a new task to start once, later, in this project: give a name, the full prompt the task starts from, and either `at` (a local wall time YYYY-MM-DDTHH:MM with `time_zone`, an IANA name; the cockpit\'s zone when left out) or `delay` (30m, 6h, 7d of elapsed time from now). `latest_start` (10m to 30d) bounds how late it may still start after Cezarion was down; past it the schedule is marked missed. Pass enable: true only when the user\'s request asks for the work to run later; otherwise it is created paused for the user to enable. The new task does not see this conversation, so put every detail it needs in the prompt. The answer gives the stored time, its zone and the same moment in UTC.',
+  description: 'Schedule a new task to start once, later, in this project: give a name, the full prompt the task starts from, and either `at` (a UTC time YYYY-MM-DDTHH:MMZ, like every time in Cezar tools) or `delay` (30m, 6h, 7d of elapsed time from now). For a relative time ("in 2 hours"), use `delay`. For a clock time that the user names, convert it from the user\'s time zone to UTC. `latest_start` (10m to 30d) bounds how late it may still start after Cezarion was down; past it the schedule is marked missed. Pass enable: true only when the user\'s request asks for the work to run later; otherwise it is created paused for the user to enable. The new task does not see this conversation, so put every detail it needs in the prompt. The answer gives `due_at` in UTC. The cockpit shows the schedule in local time.',
   inputSchema: { ...z.toJSONSchema(scheduleTaskRequestSchema, { io: 'input' }), type: 'object' as const },
 };
 
@@ -188,7 +193,7 @@ export const scheduledTasksToolDefinition = {
 };
 
 function scheduleHint(answer: ScheduleTaskAnswer | ScheduledTasksAnswer): string {
-  if (answer.ok) return 'Done. Tell the user the stored time and zone.';
+  if (answer.ok) return 'Done. due_at is UTC: tell the user that time in their time zone, and name the zone.';
   return answer.code === 'automations_off' || answer.code === 'unavailable' ? 'Not scheduled. Tell the user, and do not retry.' : 'Not changed. Fix the call from the message, or continue without it.';
 }
 export async function invokeScheduleTaskTool(input: unknown) {

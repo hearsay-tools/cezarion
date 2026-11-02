@@ -130,12 +130,16 @@ write({ type: 'extension_ui_request', id: 'mock-widget-1', method: 'setWidget', 
 write({ type: 'advisor_cost_changed' });
 write({ type: 'available_commands_update', commands: [{ name: 'model', description: 'Select model' }] });
 
-/** One valid CEZ:ASK payload (spec #473), as mock-pi-rpc.mjs `ASK_MARKER_BODY`. */
-const ASK_MARKER_BODY = '{"questions":[{"header":"Library","question":"Which test library?","multiSelect":false,"options":[{"label":"Vitest","description":"Use the existing test runner"},{"label":"Node test","description":"Use node:test"}]}]}';
-const SNAPSHOT_ASK = 'Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}';
+/** The card `mock:cezar-ask` sends (spec #473), as mock-pi-rpc.mjs `ASK_QUESTIONS`. */
+const ASK_QUESTIONS = [{ header: 'Library', question: 'Which test library?', multiSelect: false, options: [{ label: 'Vitest', description: 'Use the existing test runner' }, { label: 'Node test', description: 'Use node:test' }] }];
+// hearsay-tools/cezarion#2397: a reply that finishes, asks or waits calls that cezar tool through
+// the session's --extension before its turn ends. Returns '' or a note for the text.
+const ciTool = () => import('./mock-ci-tool.mjs');
+const lifecycle = async (call) => (await ciTool()).lifecycleCall('omp', argv, ...call);
+const done = async (text) => text + await lifecycle((await ciTool()).DONE);
 // OMP's tool-approval error with no interactive UI (v18.4.11 tool wrapper, `runner.hasUI()` false).
 const NO_UI_APPROVAL_ERROR = 'Tool "bash" requires approval but no interactive UI available.\nOptions:\n  1. Set tools.approvalMode: yolo in /settings\n  2. Add tools.approval.bash: allow to config\n  3. Use an interactive UI to approve the tool call';
-/** Set by `mock:ask mock:resume-done`: the human answer then finishes with CEZ:DONE. */
+/** Set by `mock:cezar-ask mock:resume-cezar-done`: the human answer then calls cezar_done. */
 let resumeAfterAsk = false;
 
 /** Same as mock-pi-rpc.mjs `watchdogStall`: a turn that never progresses (no-progress rows). */
@@ -391,7 +395,7 @@ async function respondMultiPrRefs(command, message, gated) {
   subagentText('multi-child', unrelatedPr);
   write({ type: 'tool_execution_start', toolCallId: 'multi-read', toolName: 'read', args: { path: 'other.txt' } });
   write({ type: 'tool_execution_end', toolCallId: 'multi-read', toolName: 'read', result: { content: [{ type: 'text', text: unrelatedPr }] }, isError: false });
-  const text = multiPrText(message);
+  const text = await multiPrText(message, lifecycle);
   assistantText([text.slice(0, 5), text.slice(5)]);
   endTurn(); return;
 }
@@ -412,7 +416,7 @@ function respondAgentEcho(command, message, gated) {
 
 async function respondAutonomous(command, message, gated) {
   const { autonomousReply } = await import('./mock-autonomous.mjs');
-  assistantText([autonomousReply(message)]);
+  assistantText([await autonomousReply(message, lifecycle)]);
   endTurn();
   return;
 }
@@ -423,8 +427,8 @@ async function respondFinalNudge(silent) {
   else if (kind === 'slow-done') {
     assistantText([silent.SLOW_DONE_PREFIX]);
     await silent.sleep(silent.SLOW_DONE_TAIL_MS);
-    assistantText([silent.SILENT_TAIL_DONE]);
-  } else assistantText([kind === 'standing' ? silent.FINAL_MESSAGE_STANDING : silent.SILENT_TAIL_DONE]);
+    assistantText([await silent.finalNudgeText('done', lifecycle)]);
+  } else assistantText([await silent.finalNudgeText(kind, lifecycle)]);
   endTurn();
   return;
 }
@@ -463,57 +467,26 @@ async function respondProgress(command, message, gated) {
     write({ type: 'tool_execution_update', toolCallId: 'busy', toolName: 'bash', args: { command: 'build' }, partialResult: { content: [{ type: 'text', text: 'working' }] } });
     await sleep(100);
   }
-  assistantText(['busy progress finished', '\n\nCEZ:DONE']);
+  assistantText([await done('busy progress finished')]);
   endTurn();
   return;
 }
 
-function respondSplitText(command, message, gated) {
-  // One text_delta per token, so the marker is split across deltas (harness parity S8).
-  assistantText(['parity split text', '\n\n', 'CEZ:', 'MONITORING']);
-  endTurn();
-  return;
-}
-
-function respondAskSnapshot(command, message, gated) {
-  // #401: an authoritative text_end with no deltas.
-  const messageId = `msg-${++messageSeq}`;
-  const text = message.includes('mock:ask-snapshot-bad') ? 'CEZ:ASK {not valid json' : SNAPSHOT_ASK;
-  write({ type: 'message_start', messageId, message: { role: 'assistant', content: [] } });
-  messageUpdate(messageId, { type: 'text_end', contentIndex: 0, content: text });
-  write({ type: 'message_end', messageId, message: { role: 'assistant', content: [{ type: 'text', text }], provider: 'anthropic', model: 'claude-mock', usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { total: 0.001 } }, stopReason: 'stop' } });
-  endTurn();
-  return;
-}
-
-function respondAskProse(command, message, gated) {
-  assistantText(['Use `CEZ:ASK {"questions":[]}` in your reply.\n> CEZ:ASK {not valid json']);
-  endTurn();
-  return;
-}
-
-function respondBadAsk(command, message, gated) {
-  // OMP's `ask` tool needs an interactive UI, so the CEZ:ASK marker is the ask path (as Pi's).
-  assistantText(['Pick one.\n\nCEZ:ASK {not valid json']);
-  endTurn();
-  return;
-}
-
-function respondAsk(command, message, gated) {
-  resumeAfterAsk = message.includes('mock:resume-done');
-  // The marker and its JSON body land in separate deltas (the #2 boundary).
-  assistantText(['Pick one.\n\n', 'CEZ:ASK', ' ', ASK_MARKER_BODY]);
+async function respondAsk(command, message, gated) {
+  resumeAfterAsk = message.includes('mock:resume-cezar-done');
+  // OMP's `ask` tool needs an interactive UI, so cezar_ask is the ask path (as Pi's).
+  assistantText(['Pick one.' + await lifecycle((await ciTool()).ask(ASK_QUESTIONS))]);
   endTurn();
   return;
 }
 
 async function respondSubagentAfterPark(command, message, gated) {
-  // A `task` call whose sub-agent is still reporting after the parent parked on its marker.
+  // A `task` call whose sub-agent is still reporting after the parent parked on cezar_wait.
   write({ type: 'tool_execution_start', toolCallId: 'toolu_park_task', toolName: 'task', args: { agent: 'explore', task: 'Review the change' } });
   write({ type: 'subagent_lifecycle', payload: { id: 'ParkReviewer', agent: 'explore', status: 'started', parentToolCallId: 'toolu_park_task', index: 0 } });
   subagentText('ParkReviewer', 'Child review started.');
   write({ type: 'tool_execution_end', toolCallId: 'toolu_park_task', toolName: 'task', result: { content: [{ type: 'text', text: 'ParkReviewer: running' }] }, isError: false });
-  assistantText(['Watching the child.\nCEZ:MONITORING']);
+  assistantText(['Watching the child.' + await lifecycle((await ciTool()).wait())]);
   endTurn();
   await afterParityPark(message);
   write({ type: 'subagent_event', payload: { id: 'ParkReviewer', event: { type: 'tool_execution_start', toolCallId: 'toolu_park_read', toolName: 'read', args: { path: 'README.md' } } } });
@@ -524,7 +497,7 @@ async function respondSubagentAfterPark(command, message, gated) {
   return;
 }
 
-function respondSubagent(command, message, gated) {
+async function respondSubagent(command, message, gated) {
   // #5/#600: the sub-agent's own terminal agent_end, nested under the parent's `task` call
   // (rpc-subagents.ndjson), must not end the parent turn; #149: its text stays nested.
   write({ type: 'tool_execution_start', toolCallId: 'toolu_task_1', toolName: 'task', args: { agent: 'explore', task: 'Review the change' } });
@@ -536,8 +509,8 @@ function respondSubagent(command, message, gated) {
   write({ type: 'subagent_lifecycle', payload: { id: 'Reviewer', agent: 'explore', status: 'completed', parentToolCallId: 'toolu_task_1', index: 0 } });
   write({ type: 'tool_execution_end', toolCallId: 'toolu_task_1', toolName: 'task', result: { content: [{ type: 'text', text: 'Reviewer: done' }] }, isError: false });
   // The parent keeps streaming after the child's terminal frame.
-  assistantText(['Still working after the sub-agent.\nCEZ:MONITORING']);
-  // Late child text after the parent marker; the second block never completes.
+  assistantText(['Still working after the sub-agent.' + await lifecycle((await ciTool()).wait('Re-check the sub-agent.'))]);
+  // Late child text after the parent's text; the second block never completes.
   subagentText('Reviewer', 'Child review finished.', { input: 20, output: 10, cacheRead: 100, cacheWrite: 4, totalTokens: 134, cost: { total: 0.002 } });
   write({ type: 'subagent_event', payload: { id: 'Reviewer', event: { type: 'message_update', message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_start', contentIndex: 0 } } } });
   write({ type: 'subagent_event', payload: { id: 'Reviewer', event: { type: 'message_update', message: { role: 'assistant' }, assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'Child review still streaming.' } } } });
@@ -565,21 +538,21 @@ async function respondSteerLate(command, message, gated) {
 
 async function respondHoldDone(command, message, gated) {
   await waitForMockRelease(400);
-  assistantText(['parity hold-done: content after the pause\n\nCEZ:DONE']);
+  assistantText([await done('parity hold-done: content after the pause')]);
   endTurn();
   return;
 }
 
 async function respondHoldAsk(command, message, gated) {
   await waitForMockRelease(400);
-  assistantText(['Pick one.\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}']);
+  assistantText(['Pick one.' + await lifecycle((await ciTool()).ask())]);
   endTurn();
   return;
 }
 
-function respondDone(command, message, gated) {
+async function respondDone(command, message, gated) {
   resumeAfterAsk = false;
-  assistantText(['parity done: the task is complete\n\nCEZ:DONE']);
+  assistantText([await done('parity done: the task is complete')]);
   endTurn();
   return;
 }
@@ -632,10 +605,11 @@ async function respondHold(command, message) {
 }
 
 async function respondDefault(command, message) {
-  assistantText([`Investigating: `, message, ...(message.includes('mock:monitoring') ? ['\n\nCEZ:MONITORING'] : [])]);
+  const waiting = message.includes('mock:cezar-wait');
+  assistantText([`Investigating: `, message, ...(waiting ? [await lifecycle((await ciTool()).wait())] : [])]);
   write({ type: 'tool_execution_start', toolCallId: 'tool-1', toolName: 'read', args: { path: 'README.md' } });
   write({ type: 'tool_execution_end', toolCallId: 'tool-1', toolName: 'read', result: { content: [{ type: 'text', text: 'mock file' }] }, isError: false });
-  if (!message.includes('mock:monitoring')) {
+  if (!waiting) {
     assistantText(['Done with the first pass.'], { usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } } });
   }
   endTurn();
@@ -667,18 +641,14 @@ const promptScenarios = [
   { matches: message => message.includes('mock:autonomous') || message.startsWith('Continue working autonomously until the task is fully complete.'), respond: respondAutonomous },
   { matches: message => message.includes('mock:silent-tail') || message.includes('mock:tool-tail') || silentNudge(message), respond: respondSilentTail },
   { matches: message => /mock:(no-progress|busy-progress)/.test(message), respond: respondProgress },
-  { matches: message => message.includes('mock:split-text'), respond: respondSplitText },
-  { matches: message => message.includes('mock:ask-snapshot'), respond: respondAskSnapshot },
-  { matches: message => message.includes('mock:ask-prose'), respond: respondAskProse },
-  { matches: message => message.includes('mock:ask-bad'), respond: respondBadAsk },
-  { matches: message => message.includes('mock:ask'), respond: respondAsk },
+  { matches: message => message.includes('mock:cezar-ask'), respond: respondAsk },
   { matches: message => message.includes('mock:subagent-after-park'), respond: respondSubagentAfterPark },
   { matches: message => message.includes('mock:subagent'), respond: respondSubagent },
   { matches: message => message.includes('mock:approval-denied'), respond: respondApprovalDenied },
   { matches: message => message.includes('mock:steer-late'), respond: respondSteerLate },
-  { matches: message => message.includes('mock:hold-done'), respond: respondHoldDone },
-  { matches: message => message.includes('mock:hold-ask'), respond: respondHoldAsk },
-  { matches: message => message.includes('mock:done') || (resumeAfterAsk && message.trim() === 'Library: Vitest'), respond: respondDone },
+  { matches: message => message.includes('mock:hold-cezar-done'), respond: respondHoldDone },
+  { matches: message => message.includes('mock:hold-cezar-ask'), respond: respondHoldAsk },
+  { matches: message => message.includes('mock:cezar-done') || (resumeAfterAsk && message.trim() === 'Library: Vitest'), respond: respondDone },
   { matches: message => message.includes('mock:cezar-tool'), respond: respondCezarTool },
   { matches: message => message.includes('mock:ci-wait'), respond: respondCiWait },
   { matches: message => message.includes('mock:steer-tool'), respond: respondSteerTool },

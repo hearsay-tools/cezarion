@@ -103,7 +103,7 @@ beforeAll(async () => {
       })
     ).json()) as { id: string }
     threadRunId = created.id
-    // The dry-run mock's reply carries no CEZ:DONE marker, so the run parks at `waiting`.
+    // The dry-run mock makes no cezar_done call, so the run parks at `waiting`.
     const status = await waitForStatus(baseUrl, threadRunId, ['waiting', 'review', 'done', 'failed'])
     if (status === 'waiting') {
       await fetch(`${baseUrl}/api/v1/runs/${threadRunId}/finish`, { method: 'POST' })

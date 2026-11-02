@@ -20,6 +20,8 @@ const fetchMock = vi.fn<typeof fetch>()
 beforeEach(() => {
   document.title = 'cezar'
   vi.stubGlobal('fetch', fetchMock)
+  // The permanent More menu sizes its Radix content; jsdom does not resize elements.
+  vi.stubGlobal('ResizeObserver', class { observe() {}; unobserve() {}; disconnect() {} })
   // jsdom ships no matchMedia; the shell's breakpoint effect and the theme toggle need one.
   // md-and-up is the desktop shell (the project rail reads it); every other query stays false.
   vi.stubGlobal(
@@ -191,7 +193,7 @@ describe('sidebar wiring', () => {
     expect(repoChip()?.textContent).toMatch(/Loading project|Project unavailable/)
     expect(versionChip()).toBeNull()
     expect(navBadge()).toBeNull()
-    expect(inSidebar().queryByRole('button', { name: 'More views' })).toBeNull()
+    expect(inSidebar().queryByRole('button', { name: 'More views' })).not.toBeNull()
     // …and the app itself is up. The chips being empty is not a loading screen.
     expect(screen.getByText('route content')).toBeTruthy()
     expect(document.querySelector('[data-slot="sidebar"]')).not.toBeNull()
@@ -354,7 +356,9 @@ describe('sidebar wiring', () => {
         ...health.capabilities, automations: false,
       } })))
     })
-    await waitFor(() => expect(inSidebar().queryByRole('button', { name: 'More views' })).toBeNull())
+    await waitFor(() => expect(screen.queryByRole('menuitem', { name: 'Automations' })).toBeNull())
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' })
+    await waitFor(() => expect(inSidebar().getByRole('button', { name: 'More views' })).toBeTruthy())
   })
 
   it('keeps the automations filter beside the current project tasks (#1332)', async () => {

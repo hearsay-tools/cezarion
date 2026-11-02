@@ -205,11 +205,16 @@ it('cezar_wait advertises the process fields and tells the agent how to write th
   expect(schema.properties.exit_file.description).toMatch(/^kind "process":/);
   expect(schema.properties.timeout_seconds.description).toMatch(/kind "process": 1–7200, default 1800/);
   expect(schema.properties.note.description).toMatch(/"process"/);
-  expect(schema.properties.kind.description).toMatch(/"process" wakes you when a background command you started ends/);
+  expect(schema.properties.kind.description).toMatch(/"process" wakes you when a background command ends/);
   const description = waitToolDefinition.description;
+  expect(description).toContain('Times in the answers, such as `deadline`, are UTC.');
   expect(description).toContain(`sh -c '( cmd > "$TMPDIR/build.log" 2>&1; echo $? > "$TMPDIR/build.exit" ) > /dev/null 2>&1 & echo $!'`);
   expect(description).toContain('Use a new exit file name for each command: a file that already exists resolves the wait at once.');
   expect(description).toContain('The job outlives this session and Cezar does not stop it.');
+  // An agent whose batch wrote its exit file outside $TMPDIR started a watcher to copy it in.
+  expect(description).toContain('For a command that is already running, or that writes its own status file somewhere else, pass only its `pid` and leave `exit_file` out.');
+  expect(description).toContain('Never start a watcher or helper process to copy a file into $TMPDIR.');
+  expect(schema.properties.exit_file.description).toMatch(/Leave it out for a command that is already running/);
   const refused = cezarWaitRequestSchema.safeParse({ kind: 'human' });
   expect(waitInvalidInput(refused.success ? undefined : refused.error)).toBe('`kind` must be "pr", "worker", "request", "peer", "timer" or "process" (kind "ci" was replaced by kind "pr"); ask the user with cezar_ask.');
   const pid = cezarWaitRequestSchema.safeParse({ kind: 'process', pid: 1 });

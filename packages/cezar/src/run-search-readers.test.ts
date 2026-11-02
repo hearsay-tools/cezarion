@@ -15,6 +15,7 @@ const SUBPATH = /from\s+['"]@open-mercato\/cezar-(?:contract|api-client\/contrac
 
 /** Each reader, and what it must call. The prefilter belongs to the two that read SQL rows. */
 const READERS: Record<string, readonly string[]> = {
+  'packages/cezar/src/artifacts/reports-index.ts': ['matchesRunSearch'],
   'packages/cezar/src/runs/store.ts': ['matchesRunSearch', 'sqlPrefilterTokens'],
   'packages/cezar/src/runs/run-index.ts': ['matchesRunSearch', 'sqlPrefilterTokens'],
   'packages/web/src/lib/tasks-table.ts': ['matchesRunSearch'],
@@ -31,6 +32,10 @@ describe('run search readers', () => {
       for (const call of calls) expect(blank(source), call).toMatch(new RegExp(`\\b${call}\\(`));
     });
   }
+
+  it('the Reports shelf uses stored source-task search', () => {
+    expect(read('packages/cezar/src/artifacts/reports-index.ts')).toContain("matchesRunSearch(summary, q, { scope: 'stored' })");
+  });
 
   it('the old server module is gone', () => {
     expect(existsSync(join(repo, 'packages/cezar/src/runs/run-search.ts'))).toBe(false);

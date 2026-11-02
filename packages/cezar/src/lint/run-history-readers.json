@@ -1,0 +1,45 @@
+{
+  "$comment": "Run-history ownership exceptions, each with a reason (hearsay-tools/cezarion#2420). npm run lint refuses stale entries.",
+  "entries": [
+    {
+      "file": "packages/cezar/src/runs/history-file.ts",
+      "kind": "historyPaths",
+      "reason": "owns transcript paths and compression"
+    },
+    {
+      "file": "packages/cezar/src/runs/history-stream.ts",
+      "kind": "historyPaths",
+      "reason": "streams either transcript form"
+    },
+    {
+      "file": "packages/cezar/src/runs/transcript-facts.ts",
+      "kind": "historyPaths",
+      "reason": "reads and writes the transcript facts sidecar"
+    },
+    {
+      "file": "packages/cezar/src/runs/transcript-facts-load.ts",
+      "kind": "historyPaths",
+      "reason": "loads the transcript facts sidecar"
+    },
+    {
+      "file": "packages/cezar/src/runs/store.ts",
+      "kind": "historyPaths",
+      "reason": "appends events and checks archive eligibility"
+    },
+    {
+      "file": "packages/cezar/src/runs/store.ts",
+      "kind": "eventsPath-declaration",
+      "reason": "private writer path wrapper"
+    },
+    {
+      "file": "packages/cezar/src/runs/store.ts",
+      "kind": "eventsPath-append",
+      "reason": "appends to the restored plain transcript"
+    },
+    {
+      "file": "packages/cezar/src/runs/history-file.ts",
+      "kind": "dynamic-path",
+      "reason": "owns construction of transcript filenames"
+    }
+  ]
+}

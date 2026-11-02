@@ -32,8 +32,10 @@ export type RunOutcome =
   | { kind: 'inbox-acknowledged'; receiptId: string; at: string }
   /** The user answered: each open human wait (or only those named) settles `delivered`. */
   | { kind: 'answered'; waitIds?: readonly string[] }
-  /** Each named open or resolved wait settles `cancelled`, and its undelivered wake input goes. */
-  | { kind: 'cancelled'; waitIds: readonly string[] }
+  /** Each named open or resolved wait settles `cancelled`, and its undelivered wake input goes.
+   *  `superseded`: the runner resumed the parent itself, which a subagent wait records as its result
+   *  (hearsay-tools/cezarion#2431). */
+  | { kind: 'cancelled'; waitIds: readonly string[]; superseded?: true }
   /** A deferred human message reached the session: its persisted queue entry goes. */
   | { kind: 'message-delivered'; messageId: string }
   /** The automatic-wake budget spent so far: a charge, or 0 when the user restarts it. */
@@ -142,7 +144,8 @@ const APPLY: { [K in RunOutcome['kind']]: Handler<K> } = {
     if (!waits.length) return unchanged(run);
     const cancelledAt = new Date().toISOString();
     const inputs = new Set(waits.map(waitInputId));
-    const next = settle(run, waits.map((wait) => ({ ...wait, phase: 'cancelled' as const, cancelledAt })));
+    const next = settle(run, waits.map((wait): Wait => wait.kind === 'subagent' && outcome.superseded
+      ? { ...wait, phase: 'cancelled', cancelledAt, result: { reason: 'superseded' } } : { ...wait, phase: 'cancelled', cancelledAt }));
     return { run: { ...next, ...(run.agentInputs ? { agentInputs: run.agentInputs.filter((input) => !inputs.has(input.id) || input.deliveredAt) } : {}) }, changed: true };
   },
   'message-delivered'(run, outcome) {

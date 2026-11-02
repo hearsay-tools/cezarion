@@ -134,10 +134,11 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
       expect(browser.waitForValue(`document.querySelector('${TAB_BAR} a[data-tab="${to}"]')?.getAttribute('aria-current')`)).toBe('page')
     }
 
-    // More: Skills, Workflows, Project settings always; Automations only with its flag.
+    // More: Skills, Workflows, Reports, Project settings always; Automations only with its flag.
     const rows = [
       { to: '/skills', route: 'skills' },
       { to: '/workflows', route: 'workflows' },
+      { to: '/reports', route: 'reports' },
       { to: '/settings', route: 'settings' },
       ...(automations ? [{ to: '/automations', route: 'automations' }] : []),
     ]

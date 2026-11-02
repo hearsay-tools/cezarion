@@ -142,9 +142,9 @@ function isWebhookTrigger(value: unknown): value is WebhookTrigger {
 }
 
 /**
- * Zero-config cadence, in minutes, for re-checking a run parked with
- * `CEZ:MONITORING` (#810). The single source of truth for that default — the
- * schema below and `WorkspaceSemaphore`'s fallback both read it, so an install
+ * Zero-config cadence, in minutes, for re-checking a monitoring run (#810): the
+ * live-workers re-check and a `ScheduleWakeup` without a delay. The single
+ * source of truth for that default — the schema below and `WorkspaceSemaphore`'s fallback both read it, so an install
  * with no `~/.cezar/config.json` and a semaphore built without boot wiring
  * agree. `null` (explicit park) is a user choice and is never replaced by it.
  */
@@ -154,7 +154,7 @@ const resourcesSchema = z
   .object({
     /** Workspace-wide parallel-task cap (moved from per-repo config.json). */
     maxParallel: z.number().int().min(1).max(16).default(2).catch(2),
-    /** Extra durable `CEZ:MONITORING` sessions exempt from the active-task cap. */
+    /** Extra durable monitoring sessions exempt from the active-task cap. */
     maxMonitoringSessions: z.number().int().min(0).max(16).default(2).catch(2),
     /**
      * Cadence for re-checking monitored work; `null` parks at zero model cost until a
@@ -162,7 +162,7 @@ const resourcesSchema = z
      *
      * Default-ON at 5 minutes (#810). It shipped as `null` and that made monitoring a
      * dead end: #661 removed the 15-minute idle timer that used to bound a parked
-     * monitor, so with no wake timer a `CEZ:MONITORING` run has NO timer at all — and
+     * monitor, so with no wake timer a monitoring run had NO timer at all — and
      * cezar has no other resume path (no process-exit callback, no CI webhook, no
      * sub-agent-completion event). Tasks sat in `monitoring` for hours until a human
      * typed something. Same reasoning as `autoResumeOnUsageLimit` below: it spends

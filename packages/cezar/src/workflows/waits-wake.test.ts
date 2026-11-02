@@ -1,3 +1,4 @@
+import { WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -76,7 +77,7 @@ async function questionBesideCi(runner: RunnerId) {
   nativeWire(runner);
   const release = join(root, 'ask-release');
   process.env.CEZ_MOCK_RELEASE_FILE = release;
-  const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['hold-ask']!, runner });
+  const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['hold-cezar-ask']!, runner });
   await until(() => turnStarted(run.id));
   const ci = await openWait(run.id, { kind: 'pr', pr, timeout_seconds: 600 });
   writeFileSync(release, '');
@@ -161,12 +162,16 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     await until(() => turnStarted(run.id));
     const first = await openWait(run.id, { kind: 'timer', seconds: 60, note: 'first' });
     const second = await openWait(run.id, { kind: 'timer', seconds: 60, note: 'second' });
+    // Keep the wake reply parked on an unrelated wait, outside this batch's budget assertion.
+    const later = await openWait(run.id, { kind: WAIT_KIND.timer, seconds: 7200, note: 'later' });
     fireTimer(first.id); fireTimer(second.id);
     await until(() => waitById(run.id, first.id)?.phase === 'resolved' && waitById(run.id, second.id)?.phase === 'resolved');
     writeFileSync(release, '');
     // The store marks the wake delivered before the mock records the prompt it read; wait for both.
     await until(() => settled(run.id, first.id)?.phase === 'delivered' && settled(run.id, second.id)?.phase === 'delivered'
       && prompted('claude', `Timer ${first.id} fired`).length > 0);
+    await until(() => store.getRun(run.id)?.status === 'waiting');
+    expect(waitById(run.id, later.id)?.phase).toBe('open');
     const wakes = prompted('claude', `Timer ${first.id} fired`);
     expect(wakes).toHaveLength(1);
     expect(wakes[0]).toContain(`Timer ${second.id} fired`);

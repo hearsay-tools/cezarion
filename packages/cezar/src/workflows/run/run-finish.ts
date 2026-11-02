@@ -4,7 +4,7 @@ import { doneErrorMessage } from '../../ci-wait/errors.ts';
 import { openCompletionRequests, recordRequestRefusal, settledRootFinishPatch, type CompletionRefusal } from '../completion-policy.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { RunExitId } from '../run-states.ts';
-import { openWaitList } from '../waits.ts';
+import { openWaitList, openWaits } from '../waits.ts';
 import { toolSessionRefusal } from './cezar-tools.ts';
 import { clearIdleTimer, clearAutosaveTimer } from './input-timers.ts';
 import { hasPendingHumanAsk } from './pending-ask-facts.ts';
@@ -51,7 +51,9 @@ export class RunFinish {
     if (session || !run || !state?.session) return refuse(session ?? 'run_missing', doneErrorMessage(session ?? 'run_missing'));
     if (this.host.executionBlockedByRootFinish(run)) return refuse('root_finish_pending', doneErrorMessage('root_finish_pending'));
     // The answer a continuation opened with is not a pending question while its turn runs.
-    if (state.pendingHumanAsk || this.host.hasUnansweredHumanAsk(runId)) return refuse('human_question_pending', doneErrorMessage('human_question_pending'));
+    // A cezar_ask this turn registered is pending too, before its turn end shows it
+    // (hearsay-tools/cezarion#2442).
+    if (state.pendingHumanAsk || this.host.hasUnansweredHumanAsk(runId) || askedThisTurn(run)) return refuse('human_question_pending', doneErrorMessage('human_question_pending'));
     const refusal = this.completionRefusal(runId);
     if (refusal) {
       recordRequestRefusal(state, refusal, true);
@@ -214,4 +216,9 @@ export class RunFinish {
     const askSeq = this.completionGateHost.pendingHumanAskSeq(runId);
     if (askSeq !== undefined) this.context.store.appendEvent(runId, { type: 'human-ask-closed', askSeq, reason: 'finish' });
   }
+}
+
+/** An agent question registered in this turn: open, and not yet shown (no `askSeq`). */
+function askedThisTurn(run: RunRecord): boolean {
+  return openWaits(run).some(wait => wait.kind === 'human' && wait.source !== 'cezar' && wait.askSeq === undefined);
 }

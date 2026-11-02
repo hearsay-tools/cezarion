@@ -48,41 +48,17 @@ beforeAll(async () => {
   writeSharedProjects(readSharedProjects().filter((project) => project.id === bootProject))
 })
 
-/** More views in nav order (sidebar-view-tabs.tsx keeps NAV_ITEMS order): the opt-in
- *  Automations, plus Workflows once they crowd the row (see `isCrowded`). */
+/** Preserve NAV_ITEMS order: optional Automations, then permanent Workflows and Reports. */
 function expectedOverflowLabels(): string[] {
-  return [
-    ...(forgeAvailable && automationsAvailable ? ['Automations'] : []),
-    ...(isCrowded() ? ['Workflows'] : []),
-  ]
+  return [...(automationsAvailable ? ['Automations'] : []), 'Workflows', 'Reports']
 }
 
-/** Six non-optional views plus More cannot fit the 264px column unclipped, so with any optional
- *  view present Workflows moves into More (MAX_PRIMARY_WITH_MORE = 5, sidebar-view-tabs.tsx).
- *  Without GitHub there are only five, so nothing moves. */
-function isCrowded(): boolean {
-  const optional = (forgeAvailable && automationsAvailable ? 1 : 0)
-  return optional > 0 && expectedPrimaryCount() > 5
-}
-
-function expectedPrimaryCount(): number {
-  return forgeAvailable ? 6 : 5
-}
-
-/** The main row's tab links, in order. Workflows sits between Skills and Settings until it moves
- *  into More; Automations never appears here. */
+/** Reports always needs More; Workflows shares it to keep the primary row unclipped. */
 function expectedNavLabels(): string[] {
-  return [
-    'Tasks',
-    'Git',
-    ...(forgeAvailable ? ['GitHub'] : []),
-    'Skills',
-    ...(isCrowded() ? [] : ['Workflows']),
-    'Settings',
-  ]
+  return ['Tasks', 'Git', ...(forgeAvailable ? ['GitHub'] : []), 'Skills', 'Settings']
 }
 
-const OVERFLOW_PATHS: Record<string, string> = { Automations: '/automations', Workflows: '/workflows' }
+const OVERFLOW_PATHS: Record<string, string> = { Automations: '/automations', Workflows: '/workflows', Reports: '/reports' }
 
 afterAll(() => {
   browser?.close()
@@ -243,7 +219,7 @@ describe('cockpit app shell', () => {
     // An overflow route lights More itself, and the menu item announces the current page.
     browser.waitForFunction(`document.querySelector('${trigger}').getAttribute('data-active') === 'true'`)
 
-    // Keyboard walk to the LAST overflow item (Workflows when crowded) and activate it.
+    // Keyboard walk to the LAST overflow item (Reports) and activate it.
     const last = expected[expected.length - 1]!
     browser.evaluate(`document.querySelector('${trigger}').focus()`)
     browser.press('ArrowDown')

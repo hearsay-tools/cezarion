@@ -285,19 +285,22 @@ the tasks it governs already read:
 
 | The rule governs | Put it in |
 | --- | --- |
-| One code area: the runs store, worktrees, skills, real-time events and the like | That area's doc under `docs/areas/`, or a new one the Task routing row points to |
-| Runners, the event protocol or the parity matrices | `AGENT_PROTOCOL.md` |
+| One code area: the runs store, worktrees, skills, the HTTP API, real-time events and the like | That area's doc under `docs/areas/`, or a new one the Task routing row points to |
+| Runners, the event protocol or the parity matrices | `AGENT_PROTOCOL.md`, or `docs/areas/runners.md` for how a runner change is tested |
+| A design rule for changing working behavior, or a new case table | `.ai/skills/load-bearing-change/SKILL.md` |
+| Where a changed name, value or default has readers | `.ai/skills/reader-sweep/SKILL.md` |
+| Running tests, Squeal waits, typecheck, waits in unit tests | `.ai/skills/validation/SKILL.md` |
 | Browser specs and the e2e environment | `packages/web/e2e/README.md` |
 | CI, workflows or investigating a CI failure | `docs/sdlc/ci.md` |
 | Regression proof | `docs/sdlc/regression-proof.md` |
 | What a reviewer checks, and severities | `CODE_REVIEW.md` |
 | Labels, claims, the QA gate or process | `SDLC.md`, or this file for friction |
 | A protected public surface | `BACKWARD_COMPATIBILITY.md` |
-| Work every task does, or a design rule for any mechanism change | `AGENTS.md` |
+| Work every task does | `AGENTS.md` |
 
 When the rule lands outside `AGENTS.md`, confirm that a pointer reaches it: a Task
 routing row or a Related documents line names the document with when-to-read
-wording. Add a pointer only when none fits. When the rule belongs in `AGENTS.md`,
+wording. Add a pointer only when none fits. Wherever the rule lands,
 state it once: extend the defined term it belongs to (*case table*, *reader sweep*)
 rather than adding a paragraph, and keep its incident to one clause and a citation.
 

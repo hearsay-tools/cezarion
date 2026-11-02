@@ -93,3 +93,13 @@ export function normalizeIntentionalTeardownResult(
   }
   return msg;
 }
+
+/**
+ * Whether a frame is the parent agent's own model output (hearsay-tools/cezarion#1512). Claude can
+ * resume the parent without a stdin line — a background task's notification, a native peer message —
+ * and its first parent `assistant` frame is the only sign. Init, hooks, `task_*` frames, replays and
+ * a child's nested output (a non-null `parent_tool_use_id`) are not parent work.
+ */
+export function isParentAssistantFrame(msg: ClaudeStreamMessage): boolean {
+  return msg.type === 'assistant' && (msg.parent_tool_use_id === undefined || msg.parent_tool_use_id === null || msg.parent_tool_use_id === '');
+}

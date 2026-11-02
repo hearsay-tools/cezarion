@@ -4,7 +4,7 @@ import type { ContentBlock } from '../../core/agent-runner.ts';
 import type { AgentSession } from '../../core/claude-cli-runner.ts';
 import type { RunRecord } from '../../runs/store.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
-import type { ActiveRun } from '../active-run.ts';
+import { writeInput, type ActiveRun } from '../active-run.ts';
 import type { PastedContent } from '../pasted-content.ts';
 import { contentBlocksOf, pastedAttachmentsNote } from '../pasted-content.ts';
 import { startCompletionCycle } from '../completion-policy.ts';
@@ -171,7 +171,8 @@ export class InputDelivery {
       return;
     }
     const bundle = state.atTurnBoundary === state.session ? pendingConversationBatch(this.context.store.getRun(runId), state, input => formatAgentInput(input, id => this.context.store.getRun(id)), reply.id) : undefined;
-    if (!state.session.sendMessage([{ type: 'text', text }, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : [])])) return;
+    const session = state.session;
+    if (!writeInput(state, () => session.sendMessage([{ type: 'text', text }, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : [])]))) return;
     this.context.store.appendEvent(runId, { type: 'human-input-delivered', askSeq, source });
     inputReceipts.commitRoutedAnswer(this.context, runId, state, [reply.id, ...(bundle?.inputs.map(input => input.id) ?? [])], fallback, this.maxAutoContinues);
     // Spend the answer's admission now so later messages can steer before its turn ends.
@@ -332,7 +333,7 @@ export class InputDelivery {
     if (!session?.open || state.agentInputFlight || state.cancelled || state.finishRequested || state.agentInputError) return false;
     if (!this.admitsAgentInput(runId, state, session, inputIds, beforeHumanReset)) return false;
     // Every delivered turn ends with the waits still open.
-    const footer = openWaitsFooter(this.context.store.getRun(runId)?.waits ?? [], { tools: !state.toolless });
+    const footer = openWaitsFooter(this.context.store.getRun(runId)?.waits ?? []);
     if (footer) content = [...content, { type: 'text', text: `\n\n${footer}` }];
     // A refusal queued for a closed session (hearsay-tools/cezarion#1301): this turn is the nudge's.
     const refusal = !!this.context.store.getRun(runId)?.agentInputs?.some(input => input.purpose === 'completion-refusal' && inputIds.includes(input.id));
@@ -378,12 +379,8 @@ export class InputDelivery {
       this.latchAgentInputError(runId, state, session, `${checkpoint ? 'agent input delivery checkpoint failed' : 'agent input delivery failed'}: ${error instanceof Error ? error.message : String(error)}`);
     };
     let acknowledgement: false | Promise<void>;
-    // A wake beside a pending question tells the runner so: native wires refuse agent input while a portable CEZ:ASK is pending, and this input is not its answer. The question stays Cezar's and its card stays answerable; the provider's acknowledgement is still the checkpoint, and a rejected one fails the session like any other, leaving the waits resolved for a continuation.
-    const besideQuestion = !!state.pendingHumanAsk;
-    try {
-      acknowledgement = besideQuestion ? session.sendAgentMessage(content, inputIds, { besideQuestion })
-        : session.sendAgentMessage(content, inputIds);
-    }
+    // A wake beside a pending question (`admitsAgentInput`) is not its answer: the question stays Cezar's and its card stays answerable, because only a human delivery settles it. The provider's acknowledgement is still the checkpoint, and a rejected one fails the session like any other, leaving the waits resolved for a continuation.
+    try { acknowledgement = writeInput(state, () => session.sendAgentMessage(content, inputIds)); }
     catch (error) { refund(); fail(error, false); state.agentInputFlight = undefined; return false; }
     if (!acknowledgement) { refund(); state.agentInputFlight = undefined; return false; }
     // Attach rejection handling before any persistence/capacity work can throw.
@@ -500,7 +497,7 @@ export class InputDelivery {
       (!askPending || beside.has(input.id)) && (boundary || input.purpose !== 'completion-refusal'));
     const admitted = this.host.line.isAdmitted(runId) && state.atTurnBoundary === state.session;
     if (resolved.length && admitted) {
-      const batch = resolvedWaitInputBatch(run, resolved, queue, input => formatAgentInput(input, id => this.context.store.getRun(id)), { tools: !state.toolless, workerStatus: this.host.waitRegistry.workerStatus });
+      const batch = resolvedWaitInputBatch(run, resolved, queue, input => formatAgentInput(input, id => this.context.store.getRun(id)), { workerStatus: this.host.waitRegistry.workerStatus });
       if (!batch) return false;
       return this.host.submitAgentInput(runId, state, [{ type: 'text', text: batch.text }], batch.inputIds, beforeHumanReset);
     }
@@ -556,7 +553,8 @@ export class InputDelivery {
     }
     const prepared = this.prepareMessageContent(runId, state, content, userAuthored);
     const { blocks, expanded, deliverable } = prepared;
-    const delivered = userAuthored ? state.session.sendMessage(deliverable) : this.host.submitAgentInput(runId, state, deliverable);
+    const session = state.session;
+    const delivered = userAuthored ? writeInput(state, () => session.sendMessage(deliverable)) : this.host.submitAgentInput(runId, state, deliverable);
     if (delivered && expanded !== blocks) this.host.runSkills.provisionLiveSlashSkill(runId, state, blocks);
     if (delivered) {
       if (userAuthored) this.applyHumanMessageDelivery(runId, state, prepared, messageId);
@@ -594,7 +592,7 @@ export class InputDelivery {
     const bundle = userAuthored && answeringAskSeq !== undefined && state.atTurnBoundary === state.session
       ? pendingConversationBatch(this.context.store.getRun(runId), state, input => formatAgentInput(input, id => this.context.store.getRun(id))) : undefined;
     // Human input answers all human waits. Agent input gets its footer in submitAgentInput.
-    const footer = userAuthored ? openWaitsFooter((this.context.store.getRun(runId)?.waits ?? []).filter(wait => wait.kind !== 'human'), { tools: !state.toolless }) : undefined;
+    const footer = userAuthored ? openWaitsFooter((this.context.store.getRun(runId)?.waits ?? []).filter(wait => wait.kind !== 'human')) : undefined;
     const deliverable = userAuthored ? [...attached, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : []),
       ...(footer ? [{ type: 'text' as const, text: `\n\n${footer}` }] : [])] : attached;
     return { blocks, expanded, deliverable, answeringAskSeq, bundle };

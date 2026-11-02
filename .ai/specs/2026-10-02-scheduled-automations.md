@@ -332,6 +332,14 @@ after downtime; without it a late start always launches. Run now consumes the sc
 shapes are unchanged. The MCP tools `cezar_schedule_task` and `cezar_scheduled_tasks` reach it through
 the session tool socket.
 
+The tools speak UTC, as every other Cezar tool time does (a wait's `deadline`, for one): `at` and
+the answer's `due_at` are `YYYY-MM-DDTHH:MMZ`, and the tools take no time zone. Agents mixed the
+UTC times from Cezar with the local time from `date`, and gave local wall times where Cezar meant
+UTC. The tool converts `at` to a wall time in the schedule's stored zone (the cockpit's zone for a
+new schedule), so the cockpit and the CLI still show it in local time. An instant inside a
+repeated DST hour is stored at the first wall time that is not earlier than asked, as `delay` is.
+Each session's system prompt names the user's time zone and says that Cezar tool times are UTC.
+
 
 ### The archive invariant
 

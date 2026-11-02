@@ -11,6 +11,7 @@ const delivered = (input: object, stored: { consumedAt?: string | undefined; awa
   ({ ...input, deliveredAt: expect.any(String), ...(stored?.consumedAt ? { consumedAt: expect.any(String) } : {}),
     ...(stored?.awaitingRead ? { awaitingRead: true } : {}) });
 import { driveSeam, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
+import { thenSay, toolCall } from '../workflows/waits-parity.testkit.ts';
 
 for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
   it.each(['fresh', 'continuation'] as const)(`${backend} %s rejected transport remains queued and replays the same input after reopening`, async mode => {
@@ -73,8 +74,9 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
       await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId }) => {
         manager.enqueueOwnedRun(runId);
         await waitFor(() => store.getRun(runId)?.status === 'waiting');
+        // An accepted cezar_done in the turn whose input ACK the fixture holds ('delay-owned-ack').
         const input = { id: randomUUID(), source: 'agent' as const, parentRunId,
-          text: 'mock:agent-echo delay-owned-ack\nCEZ:DONE', createdAt: new Date().toISOString() };
+          text: `delay-owned-ack ${toolCall('cezar_done', {})} ${thenSay('delay-owned-ack finished')}`, createdAt: new Date().toISOString() };
         const session = (manager as unknown as { active: Map<string, { session: import('./agent-runner.ts').AgentSession }> }).active.get(runId)!.session;
         if (origin === 'owned') expect(manager.steerWorker(runId, input)).toBe('queued');
         else expect(runInternals(manager).inputDelivery.deliverMessage(runId, [{ type: 'text', text: input.text }], false)).toBe(true);

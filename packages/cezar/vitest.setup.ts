@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeEach } from 'vitest'
 import { strictRunExits, throwRunExitViolations } from './src/workflows/run-states.ts'
 import { installOutboundGuard, throwOutboundRefusals } from './src/test-outbound-guard.testkit.ts'
 
-import { createTestSandbox, linkSharedOmpNatives, removeTestSandboxes } from '../../scripts/test-sandbox.mjs'
+import { createTestSandbox, hideHostCommands, linkSharedOmpNatives, removeTestSandboxes } from '../../scripts/test-sandbox.mjs'
 
 // Test files start from shipped defaults, not the parent cockpit's flags or
 // task context (hearsay-tools/cezarion#1517). Scrub once before sandbox pins:
@@ -34,6 +34,14 @@ writeFileSync(sandboxGitConfig, '[gc]\n\tauto = 0\n[maintenance]\n\tauto = false
 process.env.TMPDIR = sandboxTemp
 process.env.TMP = sandboxTemp
 process.env.TEMP = sandboxTemp
+
+// No test may start a host runner CLI by its default name (hearsay-tools/cezarion#1916): the real
+// omp ran model discovery over the network and unpacked 120 MB into every sandbox home
+// (hearsay-tools/cezarion#2453). CI has none of these, so every host now resolves them as CI does,
+// to ENOENT. A test that sets its own binary or PATH still runs what it names. Set once per file,
+// like the task keys below. The mirror directories live in the sandbox and go with it.
+const HOST_RUNNER_COMMANDS = ['claude', 'codex', 'opencode', 'pi', 'omp', 'agent', 'cursor-agent']
+process.env.PATH = hideHostCommands(HOST_RUNNER_COMMANDS, join(sandboxTemp, 'path'))
 
 // Nothing in this suite may write to the developer's own `~/.cezar`. Most cases pin
 // `CEZ_HOME` themselves, but the pin is one global for the whole worker and their
@@ -174,8 +182,9 @@ afterEach(() => {
   pinGitEnvironment()
   clearHostBinAndModeOverrides()
 })
-// One failed removal no longer skips the next one (hearsay-tools/cezarion#1395);
-// the helper keeps the three retries for late child-process writes.
+// One failed removal no longer skips the next one (hearsay-tools/cezarion#1395). The helper
+// first stops every process a test left running in the sandbox, so none rebuilds it after
+// removal (hearsay-tools/cezarion#2453), and keeps the three retries for one-shot late writes.
 afterAll(() => removeTestSandboxes([sandboxHome, sandboxUserHome, sandboxTemp]))
 // A run status write the run state table does not declare throws, and fails the test it happens
 // in even when run.ts caught the throw (hearsay-tools/cezarion#1804). Production never checks.

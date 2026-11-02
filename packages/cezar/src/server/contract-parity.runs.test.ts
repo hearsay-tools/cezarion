@@ -1,3 +1,4 @@
+import type { reportsResponseSchema } from '@open-mercato/cezar-contract/reports';
 import type { InferResponseType } from 'hono/client';
 import { hc } from 'hono/client';
 import { describe, expect, it } from 'vitest';
@@ -8,6 +9,7 @@ import type {
   fileLinkResultSchema,
   filePreviewDataSchema,
   artifactListSchema,
+  artifactMetadataResponseSchema,
   archiveFinishedResponseSchema,
   archivedRunsResponseSchema,
   cancelResponseSchema,
@@ -55,6 +57,8 @@ describe('src/contract/runs.ts matches the runs routes exactly', () => {
 
   type Runs = typeof client.api.v1.runs;
   type Run = Runs[':id'];
+
+  type _Reports = Assert<Exact<z.infer<typeof reportsResponseSchema>, InferResponseType<(typeof client.api.v1)['reports']['$get'], 200>>>;
 
   type RunsList200 = InferResponseType<Runs['$get'], 200>;
   type RunSummaries200 = InferResponseType<(typeof client.api.v1)['run-summaries']['$get'], 200>;
@@ -129,6 +133,7 @@ describe('src/contract/runs.ts matches the runs routes exactly', () => {
     Assert<Exact<z.infer<typeof fileLinkResultSchema>, Exclude<InferResponseType<Run['file-link']['$get'], 200>, ArrayBuffer>>>,
     Assert<Exact<z.infer<typeof filePreviewDataSchema>, InferResponseType<Run['artifacts'][':artifactId']['$get'], 200>>>,
     Assert<Exact<z.infer<typeof artifactListSchema>, InferResponseType<Run['artifacts']['$get'], 200>>>,
+    Assert<Exact<z.infer<typeof artifactMetadataResponseSchema>, InferResponseType<Run['artifacts'][':artifactId']['metadata']['$get'], 200>>>,
     // artifacts + local handoff
     Assert<Exact<z.infer<typeof openInCliResponseSchema>, OpenInCli200>>,
     Assert<Exact<z.infer<typeof runCommitsResponseSchema>, Commits200>>,

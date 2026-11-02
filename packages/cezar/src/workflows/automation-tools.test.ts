@@ -9,7 +9,7 @@ import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.te
 // hearsay-tools/cezarion#1465: the schedule tools reach a project-level service, not the run. The
 // server sets it after the boot manager recovers, so a session provisioned before the setter (a
 // recovered run) must still reach it: the handlers read it at call time.
-const task = { id: 'a1', name: 'n', status: 'paused' as const, due_at: '2026-10-29T09:00', time_zone: 'UTC', resolved_instant: '2026-10-29T09:00:00.000Z' };
+const task = { id: 'a1', name: 'n', status: 'paused' as const, due_at: '2026-10-29T09:00Z' };
 const created: ScheduleTaskAnswer = { ok: true, task, note: 'note' };
 const listed: ScheduledTasksAnswer = { ok: true, tasks: [task] };
 const signal = new AbortController().signal;

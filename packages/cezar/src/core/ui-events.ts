@@ -167,6 +167,13 @@ export interface UiToolItem {
   /** commandExecution / bash exit code, when the backend reports one. */
   exitCode?: number;
   parentItemId?: string;
+  /**
+   * A native subagent that outlives its spawn call (hearsay-tools/cezarion#2431): claude's
+   * backgrounded `Agent`/`Task` (`async_launched`, `task_started.is_backgrounded`). Only a root
+   * task item carries it. The item stays `running` until the runner reports the child's own end
+   * (claude `task_notification`), so a parent turn may end while it runs.
+   */
+  background?: true;
 }
 
 /** How a native hook run ended. `blocked` covers a blocking exit (claude exit 2) and a
@@ -343,10 +350,10 @@ export interface UiAskQuestion {
 }
 
 /**
- * The agent asked the user a structured multiple-choice question via a
- * `CEZ:ASK` marker (spec `2026-07-18-askuser-across-runners`). Emitted by the
- * RunManager off the assembled turn text — uniform across claude/codex/opencode
- * with no per-backend mapper work. The run parks `waiting`; the cockpit renders
+ * The agent asked the user a structured multiple-choice question (spec
+ * `2026-07-18-askuser-across-runners`): a `cezar_ask` card or a native runner
+ * ask, emitted by the RunManager. Saved runs also hold asks from the retired
+ * `CEZ:ASK` text marker. The run parks `waiting`; the cockpit renders
  * clickable option chips. Resolution is client-side — the next user message for
  * the run closes the card — so there is no separate `ask.resolved` event.
  */
@@ -355,7 +362,7 @@ export interface UiAskRequestedEvent {
   requestId: string;
   questions: UiAskQuestion[];
   /** Markdown shown above the questions (hearsay-tools/cezarion#1458); absent on older asks,
-   *  native asks and an ask line without one. */
+   *  native asks and saved marker asks without one. */
   context?: string;
 }
 

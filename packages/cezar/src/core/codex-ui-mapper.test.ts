@@ -72,6 +72,12 @@ const GOLDEN_FIXTURES = [
   'collab-agent-tool-call',
   'collab-tool-call',
   'sub-agent-activity',
+  // A spawned child that outlives the parent turn (hearsay-tools/cezarion#2431), trimmed from a
+  // live codex-cli 0.164.0 capture: text, commands and usage are stripped, and the child
+  // thread's own turn lifecycle is left out because the runner drops it before the mapper
+  // (isForeignTurnLifecycle). The row stays running until the parent-thread
+  // `subAgentActivity(kind: completed)`, stamped with the completed parent turn.
+  'background-subagent',
   // Codex 0.160.1 `hook/started` + `hook/completed` (generated schema, #961).
   'hooks',
 ] as const;

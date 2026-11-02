@@ -30,7 +30,7 @@ describe('run states of an owned worker', { timeout: 45_000 }, () => {
   it('Stop on a worker that settled done records it cancelled', async () => {
     const p = await parent();
     await until(() => store.getRun(p.id)?.status === 'waiting');
-    const w = await worker(p.id, 'mock:done');
+    const w = await worker(p.id, 'mock:cezar-done');
     manager.enqueueOwnedRun(w.id);
     await until(() => store.getRun(w.id)?.status === 'done' && !manager.isActive(w.id));
     expect(manager.cancel(w.id)).toBe(false);

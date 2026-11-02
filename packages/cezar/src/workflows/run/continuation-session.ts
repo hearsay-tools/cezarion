@@ -475,7 +475,7 @@ export class ContinuationSession {
     const answer = this.openingAnswer(runId, state, opening);
     state.pendingHumanAsk = answer.askSeq === undefined && hasPendingHumanAsk(runId, id => pendingHumanAskSeq(this.context.store, id));
 
-    const turn: SessionTurn = { text: '', completedText: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
+    const turn: SessionTurn = { text: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
     const sink = this.host.makeUiSink(runId, stepId);
     const onEvent = createSessionEventHandler(this.context, this.sessionEventHost, {
       runId, state, turn, stepId, backend, sink, tokenBase: 0,
@@ -517,6 +517,14 @@ export class ContinuationSession {
       this.settleStaleContinuationLaunch(runId, stepId, state, { stepId, sessionId, backend, prompt, images });
       return;
     }
+    // hearsay-tools/cezarion#2397: the tools could not start, so nothing spawns. The failure takes
+    // the session-failure path: a run that holds wakes parks and retries them with the wake-delivery
+    // backoff; any other run fails with the message.
+    if (launch.toolsError !== undefined) {
+      this.runSettlement.settleFailedContinuation(runId, state, stepId, sink, turn, new Error(launch.toolsError));
+      await this.releaseContinuationSession(runId, state, undefined, undefined, {});
+      return;
+    }
     state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
     const session = this.startContinuationSession(runId, state, runner, {
       stepId, sessionId, prompt, setupNote, opening, skills, skipSkillOnResume, settings, delegation, webhooksPart, ciTools,
@@ -547,7 +555,7 @@ export class ContinuationSession {
       });
       const continuationTail = sessionEvents.launchSystemTail(this.context, this.sharedHost, {
         extraSystemPrompt: settings.extraSystemPrompt, delegation, webhooksPart: launch.webhooksPart,
-        env: settings.profile.env, ciTools, handoffInjected: resumed.handoffInjected,
+        env: settings.profile.env, ciTools, handoffInjected: resumed.handoffInjected, runner: state.delegationSettings?.runner,
       });
       session = startManagedSession(runner,
         {

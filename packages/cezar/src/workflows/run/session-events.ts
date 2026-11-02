@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { askPayloadOf, askRequestOf } from '@open-mercato/cezar-contract/pending-ask';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
 import { AgentTempDirError } from '../../runs/agent-tmpdir.ts';
+import { ToolsUnavailableError } from '../../ci-wait/controller.ts';
 import { AgentAccountUnavailableError } from '../../workspace/agent-profiles.ts';
 import { artifactInstructions } from '../../artifacts/lifecycle.ts';
 import { handoffInstructions } from '../../handoff.ts';
@@ -26,6 +27,7 @@ import type { ActiveRun } from '../active-run.ts';
 import type { ExecutionEmit, LaunchCiTools, LaunchDelegation, RunModuleContext, SessionTurn } from './types.ts';
 import { claudeScheduleWakeupDelay } from './turn-markers.ts';
 import { recordReportedCost } from './usage-accounting.ts';
+import { reportsNativeSubagents } from './subagent-waits.ts';
 
 export interface SessionEventHost {
   disposedSessionEvent(runId: string, state: ActiveRun, event: AgentEvent): boolean;
@@ -33,7 +35,7 @@ export interface SessionEventHost {
   recordSessionFault(state: ActiveRun, turn: SessionTurn, message: string): void;
   markTurnBoundary(runId: string, state: ActiveRun, event: Extract<AgentEvent, { type: 'turn-end' }>): void;
   trackTurnEnd(runId: string, text: string): void;
-  endTurn(runId: string, state: ActiveRun, sink: UiEventSink, turn: { stepId: string; text: string; completedText: string; scheduleWakeup: number | null | undefined }): void;
+  endTurn(runId: string, state: ActiveRun, sink: UiEventSink, turn: { stepId: string; scheduleWakeup: number | null | undefined }): void;
 }
 
 export function createSessionEventHandler(context: RunModuleContext, host: SessionEventHost, options: {
@@ -63,14 +65,11 @@ export function createSessionEventHandler(context: RunModuleContext, host: Sessi
       // flushes again (idempotent), so no buffered delta can outlive its turn.
       sink.flushAll();
       host.trackTurnEnd(runId, turn.text);
-      const text = turn.text;
-      const completedText = turn.completedText;
       turn.text = '';
-      turn.completedText = '';
       turn.tail = 'none';
       const turnWakeDelay = turn.scheduleWakeup;
       turn.scheduleWakeup = undefined;
-      host.endTurn(runId, state, sink, { stepId, text, completedText, scheduleWakeup: turnWakeDelay });
+      host.endTurn(runId, state, sink, { stepId, scheduleWakeup: turnWakeDelay });
     }
   };
 }
@@ -82,13 +81,27 @@ export interface LaunchPreambleHost {
   launchStale(runId: string, state: ActiveRun, delegation: LaunchDelegation, ciTools: LaunchCiTools): boolean;
 }
 
-export async function launchPreamble(host: LaunchPreambleHost, runId: string, state: ActiveRun) {
+/** A launch's provisioning. `toolsError` (hearsay-tools/cezarion#2397): the lifecycle tools could
+ *  not start, so this launch spawns nothing; its delegation is already revoked and the caller
+ *  settles the run with the message. */
+export async function launchPreamble(host: LaunchPreambleHost, runId: string, state: ActiveRun):
+  Promise<{ delegation: LaunchDelegation; webhooksPart: string | undefined; ciTools: LaunchCiTools; stale: boolean; toolsError?: string }> {
   const delegation = host.provisionSession(runId, state);
   // Read before the cancellation checks below, which also cover this await (hearsay-tools/cezarion#1576).
   const webhooksPart = await host.agentWebhooksPart();
-  const ciTools = await host.provisionCiSession(runId, state);
+  let ciTools: LaunchCiTools;
+  let toolsError: string | undefined;
+  try {
+    ciTools = await host.provisionCiSession(runId, state);
+  } catch (error) {
+    if (!(error instanceof ToolsUnavailableError)) throw error;
+    toolsError = error.message;
+  }
   const stale = host.launchStale(runId, state, delegation, ciTools);
-  return { delegation, webhooksPart, ciTools, stale };
+  if (stale || toolsError === undefined) return { delegation, webhooksPart, ciTools, stale };
+  delegation?.revoke();
+  if (state.revokeDelegation === delegation?.revoke) state.revokeDelegation = undefined;
+  return { delegation: undefined, webhooksPart, ciTools: undefined, stale: false, toolsError };
 }
 
 
@@ -107,6 +120,10 @@ export interface SessionHelperHost {
   resumeParkedRun(runId: string, state: ActiveRun): void;
   noteNoWaitNudgeContent(runId: string, state: ActiveRun, event: { type: string; item?: { parentItemId?: string } }): void;
   parkedOnWorkers(runId: string): boolean;
+  /** Native subagents (hearsay-tools/cezarion#2431): track a background child's events, and close
+   *  the subagent wait and the timers when the runner resumes the parent itself. */
+  trackSubagentEvent(runId: string, state: ActiveRun, event: UiEvent): void;
+  supersedeOnRunnerResume(runId: string): void;
   releaseSlot(): void;
   routeWorkerQuestion(runId: string): void;
 }
@@ -182,8 +199,7 @@ export function launchOpening(context: RunModuleContext, host: SessionHelperHost
   stepId: string,
   launch: { body: string; ciTools: LaunchCiTools; checkpoint?: RunRecord['continuationMessage'] },
 ): LaunchOpening {
-  // Opening prompts bypass live delivery; do not infer tools before provisioning finishes.
-  const footer = openWaitsFooter(context.store.getRun(runId)?.waits ?? [], { tools: !!launch.ciTools });
+  const footer = openWaitsFooter(context.store.getRun(runId)?.waits ?? []);
   const prompt = withResumeContext(footer ? `${launch.body}\n\n${footer}` : launch.body, launch.checkpoint);
   const sessionContext = host.sessionContextFor(runId, state, stepId, prompt);
   return { userPrompt: sessionContext.prefix + prompt, handoffInjected: sessionContext.handoffInjected };
@@ -201,6 +217,8 @@ export function launchSystemTail(context: RunModuleContext, host: SessionHelperH
   env: StepProfile['env'];
   ciTools: LaunchCiTools;
   handoffInjected: boolean;
+  /** The session's runner: one that reports its native subagents is taught to end its turn while they run. */
+  runner?: RunnerId | undefined;
 }): string {
   return composeSystemPrompt(
     launch.extraSystemPrompt,
@@ -208,7 +226,7 @@ export function launchSystemTail(context: RunModuleContext, host: SessionHelperH
     host.automationsPart(),
     launch.webhooksPart,
     artifactInstructions(launch.env.CEZ_ARTIFACTS_DIR),
-    handoffInstructions({ tools: !!launch.ciTools, handoffInjected: launch.handoffInjected }),
+    handoffInstructions({ handoffInjected: launch.handoffInjected, nativeSubagents: reportsNativeSubagents(launch.runner) }),
   );
 }
 
@@ -248,6 +266,7 @@ export function handleRunnerUiEvent(context: RunModuleContext, host: SessionHelp
   recordUsageUiEvent(context.store, runId, state, event);
   sink.handle(event);
   if (state.cancelled) return;
+  host.trackSubagentEvent(runId, state, event);
   host.noteNoWaitNudgeContent(runId, state, event);
   if (isRunnerActivity(event)) {
     if (state.autonomousNudgePending) { state.autonomousNudgePending = undefined; clearIdleTimer(state); }
@@ -271,8 +290,10 @@ export function handleRunnerUiEvent(context: RunModuleContext, host: SessionHelp
   // synthesizes a parent `turn.started` for that work (#61). Nested child
   // items without a parent turn must not unpark monitoring or worker waits (#121).
   // A list worker park (hearsay-tools/cezarion#1235), Cezar's completion wait included
-  // (hearsay-tools/cezarion#1301), resumes the same way.
+  // (hearsay-tools/cezarion#1301), resumes the same way. A parent turn the runner starts itself, not
+  // inside Cezar's own write, closes the subagent wait and every timer (hearsay-tools/cezarion#2431).
   if (host.line.isParked(runId) && (host.line.inPool(runId) || host.parkedOnWorkers(runId)) && isRunnerActivity(event)) {
+    if (!state.writingInput) host.supersedeOnRunnerResume(runId);
     host.resumeParkedRun(runId, state);
   }
 }

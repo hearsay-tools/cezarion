@@ -27,7 +27,7 @@ describe('human permission lifecycle', () => {
         if (optionId !== 'deny') return false;
         emit({ type: 'permission.resolved', requestId, optionId }); return true;
       }), end: vi.fn(), interrupt: vi.fn(), discardQueuedMessages: vi.fn(), holdsHumanInput: () => false };
-    state = { cwd: root, cancelled: false, interrupt: () => {}, pendingHumanAsk: false, autonomous: true, session, currentStepId: 'task' };
+    state = { cwd: root, cancelled: false, interrupt: () => {}, pendingHumanAsk: false, backgroundChildren: new Map(), autonomous: true, session, currentStepId: 'task' };
     manager['activate'](id, state);
   });
   afterEach(() => { manager.dispose(); store.close(); rmSync(root, { recursive: true, force: true }); });
@@ -37,7 +37,7 @@ describe('human permission lifecycle', () => {
     expect(store.getRun(id)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
     expect(runInternals(manager).line.busySlots()).toBe(0);
     expect(manager.sendMessage(id, [{ type: 'text', text: 'accept' }])).toBe(false);
-    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task', null)).toBe(false);
+    expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task')).toBe(false);
     expect(session.sendMessage).not.toHaveBeenCalled();
     expect(session.sendAgentMessage).not.toHaveBeenCalled();
     expect(store.readEvents(id).some(event => event.type === 'user-message')).toBe(false);
