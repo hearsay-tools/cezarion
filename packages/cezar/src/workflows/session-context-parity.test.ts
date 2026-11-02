@@ -107,6 +107,8 @@ describe('session-start context through every native wire (hearsay-tools/cezario
       expect(count(second, '<cezar-context id="handoff"')).toBe(1);
       expect(refreshed).toContain('VISION-V2');
       expect(refreshed).not.toContain('VISION-V1');
+      // Input capture precedes the mock's handoff write; read after its turn settles.
+      await until(() => store.getRun(run.id)?.status === 'waiting');
       // The whole handoff as it stands at this launch, including what was written since the first.
       expect(readFileSync(handoff, 'utf8')).toContain('- 10:00 — R120 progress');
       expect(refreshed).toContain('- 10:00 — R120 progress');

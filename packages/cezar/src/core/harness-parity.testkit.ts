@@ -1141,6 +1141,8 @@ export async function driveRun(
     /** Called with the fresh store and manager before the run starts (to observe either), and
      *  the repo root, so a row can write the project's `.ai/cezar/config.json` (#917). */
     beforeStart?: (context: { store: RunStore; manager: RunManager; repoRoot: string }) => void;
+    /** Restore a test-controlled clock before teardown measures its real cleanup bounds. */
+    beforeCleanup?: () => void;
     /** Run in an isolated task worktree instead of in place (#917: worktree setup only runs
      *  there). Default false, which every earlier row relies on. */
     worktree?: boolean;
@@ -1152,7 +1154,7 @@ export async function driveRun(
     mockBin?: string;
   } = {},
 ): Promise<RunObservation> {
-  const { beforeStart, during, env: extraEnv, mockBin, worktree, ...runOptions } = options;
+  const { beforeStart, beforeCleanup, during, env: extraEnv, mockBin, worktree, ...runOptions } = options;
   const adapter = HARNESS_ADAPTERS[backend];
   const savedBin = process.env[adapter.binEnv];
   const savedDry = process.env.CEZ_DRY_RUN;
@@ -1162,6 +1164,16 @@ export async function driveRun(
   // up. `options.env` may opt back in to the card.
   const env = { CEZ_MOCK_NUDGE_REPLY: 'plain', ...extraEnv };
   const savedEnv = Object.keys(env).map(name => [name, process.env[name]] as const);
+  const restoreEnvironment = () => {
+    if (savedBin === undefined) delete process.env[adapter.binEnv];
+    else process.env[adapter.binEnv] = savedBin;
+    if (savedDry !== undefined) process.env.CEZ_DRY_RUN = savedDry;
+    if (savedAutoName === undefined) delete process.env.CEZ_AUTONAME;
+    else process.env.CEZ_AUTONAME = savedAutoName;
+    for (const [name, saved] of savedEnv) {
+      if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
+    }
+  };
   Object.assign(process.env, env);
   process.env.CEZ_AUTONAME = '0';
   process.env[adapter.binEnv] = mockBin ?? adapter.mockBin;
@@ -1183,14 +1195,14 @@ export async function driveRun(
       ...runOptions,
       task: typeof scenario === 'string' ? promptFor(backend, scenario) : scenario.prompt,
       runner: backend,
-      ...(worktree === true ? {} : { worktree: false as const }),
+      worktree: worktree === true,
     });
     let duringError: unknown;
     const duringWork = during
       ? during({ store, manager, runId: started.id }).catch((err: unknown) => { duringError = err; })
       : undefined;
     const statuses: string[] = [];
-    const record = () => store?.getRun(started.id);
+    const record = () => store!.getRun(started.id);
     const deadline = Date.now() + timeoutMs;
     for (;;) {
       if (duringError) break;
@@ -1212,16 +1224,10 @@ export async function driveRun(
     // Cleanup mutates the live record; return the observed state before cancellation.
     return { statuses, record: structuredClone(record()), events: readRunEvents(repoRoot, started.id) };
   } finally {
+    beforeCleanup?.();
     await drainFixtureManagers(repoRoot);
     store?.close();
-    if (savedBin === undefined) delete process.env[adapter.binEnv];
-    else process.env[adapter.binEnv] = savedBin;
-    if (savedDry !== undefined) process.env.CEZ_DRY_RUN = savedDry;
-    if (savedAutoName === undefined) delete process.env.CEZ_AUTONAME;
-    else process.env.CEZ_AUTONAME = savedAutoName;
-    for (const [name, saved] of savedEnv) {
-      if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
-    }
+    restoreEnvironment();
     rmSync(repoRoot, { force: true, recursive: true });
   }
 }
