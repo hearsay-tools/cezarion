@@ -21,6 +21,8 @@ interface WaitWatchesHost {
   exitFileRoots(id: string): ExitFileRoots;
   /** The session that holds a subagent wait's children is live (hearsay-tools/cezarion#2431). */
   subagentSessionLive(id: string): boolean;
+  /** Resolve a subagent wait whose session is gone `interrupted`, ending its running children in the transcript (hearsay-tools/cezarion#2431). */
+  interruptSubagentWait(id: string, waitId: string): void;
 }
 
 export class WaitWatches {
@@ -56,13 +58,14 @@ export class WaitWatches {
     // Native subagents live only in their session: with none, as at a restart, they stopped
     // (hearsay-tools/cezarion#2431). At its deadline a lost session reads the same.
     const interrupted = () => wait.kind === 'subagent' && !this.host.subagentSessionLive(runId);
-    if (interrupted()) { this.host.settleWait(runId, wait.id, { reason: 'interrupted' }); return; }
+    if (interrupted()) { this.host.interruptSubagentWait(runId, wait.id); return; }
     // A stopping, stopped or finishing run takes no self-generated wake: the timer stays open
     // for that transition to cancel, as the monitoring timer did before it was a wait.
     const fire = () => {
       const run = this.context.store.getRun(runId);
       if (!this.host.canProceedWithRun(runId, run)) return;
-      this.host.settleWait(runId, wait.id, interrupted() ? { reason: 'interrupted' } : undefined);
+      if (interrupted()) this.host.interruptSubagentWait(runId, wait.id);
+      else this.host.settleWait(runId, wait.id);
     };
     const due = Date.parse(wait.deadline) - Date.now();
     if (due <= 0) { fire(); return; }

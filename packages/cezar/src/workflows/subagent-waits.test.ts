@@ -267,6 +267,10 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     expect(more).toEqual([]);
     expect(input!.text).toContain('Cezar restarted, and the 2 native subagents still running in your last session stopped with it.');
     expect(wakes(id)).toBe(0);
+    // The transcript ends each stopped child, so the activity view no longer shows it running.
+    const ends = store.readEvents(id).filter(event => event.type === 'item.completed' && (event.item as UiToolItem | undefined)?.background === true)
+      .map(event => [(event.item as UiToolItem).id, (event.item as UiToolItem).status, (event.item as UiToolItem).title]);
+    expect(ends).toEqual([['toolu_bg_01', 'declined', 'Background research toolu_bg_01'], ['toolu_bg_02', 'declined', 'Background research toolu_bg_02']]);
   });
 });
 

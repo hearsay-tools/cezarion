@@ -283,6 +283,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     armWorkerDeadline: (id, wait, delay) => modules.waitWatches.armWorkerDeadline(id, wait, delay),
     settleWait: (id, waitId, result) => modules.waitWatches.settleWait(id, waitId, result), exitFileRoots: id => modules.waitWatches.exitFileRoots(id),
     subagentSessionLive: id => modules.subagentWaits.sessionLive(id),
+    interruptSubagentWait: (id, waitId) => modules.subagentWaits.interrupt(id, waitId),
   });
   modules.waitRegistry = new WaitRegistry(context, {
     active: id => host.active.get(id), workerExecutionStopped: id => host.workerExecutionStopped(id),

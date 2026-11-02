@@ -3,7 +3,7 @@ import {
   SUBAGENT_WAIT_CHILD_LIMIT, SUBAGENT_WAIT_DEADLINE_SECONDS, SUBAGENT_WAIT_GRACE_SECONDS,
   type SubagentChild, type SubagentWaitEntry, type SubagentWaitResult, type Wait,
 } from '@open-mercato/cezar-contract/waits';
-import type { UiEvent } from '../../core/ui-events.ts';
+import type { UiEvent, UiToolItem } from '../../core/ui-events.ts';
 import type { RunnerId } from '../../core/agent-runner.ts';
 import type { RunRecord } from '../../runs/store.ts';
 import type { ActiveRun } from '../active-run.ts';
@@ -205,7 +205,31 @@ export class SubagentWaits {
     this.clearGrace(runId);
     if (this.context.disposed()) return;
     const wait = openSubagentWaitOf(this.context.store.getRun(runId));
-    if (wait) this.host.settleWait(runId, wait.id, { reason: 'interrupted' });
+    if (wait) this.interrupt(runId, wait.id);
+  }
+
+  /**
+   * The session that held the wait's children is gone, so they stopped: each child the wait still
+   * reads as running ends in the transcript as `declined`, so the activity view stops showing it
+   * as running, and the wait resolves `interrupted`. The ending item copies the child's last
+   * recorded item, because a reader replaces an item by id.
+   */
+  interrupt(runId: string, waitId: string): void {
+    const wait = openWaits(this.context.store.getRun(runId) ?? {}).find((entry): entry is SubagentWaitEntry => entry.id === waitId && entry.kind === 'subagent');
+    const running = new Set(wait?.children.filter(child => child.status === 'running').map(child => child.id));
+    if (running.size) {
+      const last = new Map<string, UiToolItem>();
+      for (const event of this.context.store.readEvents(runId)) {
+        const item = (event as { item?: unknown }).item as UiToolItem | undefined;
+        if (item?.kind === 'tool' && running.has(item.id) && item.background === true) last.set(item.id, item);
+      }
+      for (const item of last.values()) {
+        if (item.status !== 'running' && item.status !== 'pending') continue;
+        try { this.context.store.appendEvent(runId, { type: 'item.completed', item: { ...item, status: 'declined' } }); }
+        catch (error) { console.warn(`[cez] subagent end write failed: ${error instanceof Error ? error.message : String(error)}`); }
+      }
+    }
+    this.host.settleWait(runId, waitId, { reason: 'interrupted' });
   }
 
   /** Whether the session that holds the wait's children is still live. */
