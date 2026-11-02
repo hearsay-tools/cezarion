@@ -651,7 +651,6 @@
     "packages/web/src/components/use-swipe-to-archive.test.tsx": 154.76232600000003,
     "packages/web/src/components/voice/use-voice-command.test.tsx": 122.11794399999997,
     "packages/web/src/components/zoomable-image.test.tsx": 261.74759100000006,
-    "packages/web/src/design-guardian.test.ts": 194.19316399999997,
     "packages/web/src/lib/appearance.test.ts": 8.527350999999953,
     "packages/web/src/lib/attention.test.ts": 34.832926999999984,
     "packages/web/src/lib/automation-cli.test.ts": 692.1572570000001,

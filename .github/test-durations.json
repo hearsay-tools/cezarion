@@ -832,7 +832,6 @@
     "packages/web/src/components/use-swipe-to-archive.test.tsx": 204,
     "packages/web/src/components/voice/use-voice-command.test.tsx": 270,
     "packages/web/src/components/zoomable-image.test.tsx": 318,
-    "packages/web/src/design-guardian.test.ts": 385,
     "packages/web/src/lib/app-shell-route.test.ts": 13,
     "packages/web/src/lib/appearance.test.ts": 14,
     "packages/web/src/lib/attention.test.ts": 39,
