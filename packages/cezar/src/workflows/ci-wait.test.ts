@@ -1,3 +1,4 @@
+import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -542,6 +543,14 @@ async function waitingParent() {
   return run;
 }
 
+/** Delivery starts a wake turn. Read its final list after the no-wait reply has settled. */
+async function expectNoWaitHumanWait(id: string) {
+  await until(() => store.getRun(id)?.waits?.some(wait => wait.kind === WAIT_KIND.human && wait.via === WAIT_VIA['no-wait']) === true);
+  expect(store.getRun(id)?.waits).toEqual([expect.objectContaining({
+    kind: WAIT_KIND.human, source: WAIT_SOURCE.cezar, via: WAIT_VIA['no-wait'], phase: WAIT_PHASE.open, askSeq: expect.any(Number),
+  })]);
+}
+
 describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
   afterEach(() => vi.restoreAllMocks());
@@ -564,7 +573,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     expect(waitById(run.id, first.id)?.phase).toBe('open');
     external.settle(12);
     await until(() => settledById(run.id, first.id)?.phase === 'delivered');
-    expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
+    await expectNoWaitHumanWait(run.id);
     for (const wait of [first, second, timer]) expect(inputsFor(run.id, wait.id)).toHaveLength(1);
   });
 
@@ -714,7 +723,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     await restart(false, disk);
     await until(() => settledById(run.id, wait.id)?.phase === 'delivered');
     expect(inputsFor(run.id, wait.id)).toHaveLength(1);
-    expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
+    await expectNoWaitHumanWait(run.id);
   });
 
   it('restart: a resolved v3-upgraded CI wait is delivered exactly once', async () => {
@@ -735,7 +744,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     await until(() => settledById(run.id, wait.id)?.phase === 'delivered');
     expect(inputsFor(run.id, wait.id)).toMatchObject([{ deliveredAt: expect.any(String) }]);
     expect(store.getRun(run.id)?.lastWaits?.filter(entry => entry.id === wait.id)).toHaveLength(1);
-    expect(store.getRun(run.id)?.waits ?? []).toEqual([]);
+    await expectNoWaitHumanWait(run.id);
   });
 
   it('restart: recovery cancels the waits of a terminal row without arming them', async () => {

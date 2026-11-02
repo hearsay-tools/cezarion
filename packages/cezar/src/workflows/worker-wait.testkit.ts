@@ -210,7 +210,8 @@ const lifecycle = async (name, toolArgs) => (await import(${JSON.stringify(MOCK_
 const ask = !humanAnswer && text.includes('mock:cezar-ask');
 const done = !ask && text.includes('mock:cezar-done');
 const reply = 'controlled wire reply' + (ask ? await lifecycle('cezar_ask', { context: 'A choice is needed before I continue.', questions: [{ header: 'Choice', question: 'Which framework?', options: [{ label: 'Vitest' }, { label: 'Other' }] }] })
-  : done ? await lifecycle('cezar_done', {}) : '');
+  : done ? await lifecycle('cezar_done', {})
+  : text.includes('mock:cezar-wait') ? await lifecycle('cezar_wait', { kind: 'timer', seconds: 60 }) : '');
 emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: reply }] } });
 emit({ type: 'result', subtype: 'success', result: reply, usage: { input_tokens: 1, output_tokens: 1 } });
 }); });
