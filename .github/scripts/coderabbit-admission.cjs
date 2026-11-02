@@ -53,7 +53,7 @@ async function verifiedException(read, pr, fullName, releaseAppBotLogin) {
 }
 async function providerCheck(read, head) {
   const checks = await pages(read, 'GET /repos/{owner}/{repo}/commits/{ref}/check-runs',
-    { ref: head, filter: 'all' }, 'check_runs');
+    { ref: head, filter: 'all', check_name: CHECK_NAME, app_id: APP_ID }, 'check_runs');
   const candidates = checks.filter(trustedCheck);
   if (candidates.some(c => !positive(c.id) || c.head_sha !== head || typeof c.status !== 'string')
     || new Set(checks.map(c => c.id)).size !== checks.length) throw new Error('Malformed provider execution');

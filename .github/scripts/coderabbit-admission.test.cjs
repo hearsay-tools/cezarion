@@ -91,3 +91,19 @@ for (const [name, mutate] of Object.entries({
   const h = fixture(); exception(h, 'release'); mutate(h);
   try { assert.equal((await admission(h)).admitted, false); } catch (error) { assert.match(error.message, /Incomplete|Truncated/); }
 });
+
+test('unrelated CI attempts do not exhaust the provider pagination budget', async () => {
+  const h = fixture(), request = h.github.request;
+  h.github.request = async (route, args) => {
+    if (route.endsWith('/commits/{ref}/check-runs')) {
+      assert.equal(args.filter, 'all', 'retain every provider attempt');
+      if (args.check_name !== 'CodeRabbit' || args.app_id !== 347564) {
+        return { data: { total_count: 301, check_runs: [] } };
+      }
+    }
+    return request(route, args);
+  };
+  assert.equal((await admission(h)).admitted, true);
+  const listings = h.s.calls.filter(([route]) => route.endsWith('/commits/{ref}/check-runs'));
+  assert.equal(listings.length, 2, 'initial and final provider reads both use filters');
+});
