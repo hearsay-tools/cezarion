@@ -1,0 +1,16 @@
+{
+  "people": [
+    { "name": "Sam Reed", "role": "Repository owner" }
+  ],
+  "projects": [
+    { "name": "cedar-tools" },
+    { "name": "river-docs" }
+  ],
+  "tasks": [
+    { "title": "Audit invoice export", "project": "cedar-tools", "status": "done", "archived": "false", "created_date": "2026-10-01", "created_time": "09:00" },
+    { "title": "Review invoice totals", "project": "cedar-tools", "status": "done", "archived": "false", "created_date": "2026-10-01", "created_time": "10:00" },
+    { "title": "Polish settings labels", "project": "cedar-tools", "status": "cancelled", "archived": "false", "created_date": "2026-10-01", "created_time": "11:00" },
+    { "title": "Archive invoice prototype", "project": "cedar-tools", "status": "done", "archived": "true", "created_date": "2026-10-01", "created_time": "08:00" },
+    { "title": "Invoice partner migration", "project": "river-docs", "status": "done", "archived": "false", "created_date": "2026-10-01", "created_time": "12:00" }
+  ]
+}
