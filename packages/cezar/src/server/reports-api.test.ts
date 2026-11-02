@@ -1,7 +1,9 @@
+import * as fs from 'node:fs/promises';
+vi.mock('node:fs/promises', async importOriginal => ({ ...await importOriginal<typeof import('node:fs/promises')>() }));
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
@@ -21,7 +23,7 @@ describe('project reports', () => {
     dataDir = join(root, '.ai/cezar');
     store = RunStore.open(dataDir);
   });
-  afterEach(() => { store.close(); rmSync(root, { recursive: true, force: true }); });
+  afterEach(() => { vi.restoreAllMocks(); store.close(); rmSync(root, { recursive: true, force: true }); });
   const task = (title = 'Source task') => store.createRun({ title, workflow: 'quick-task', task: 'Searchable source prompt', steps: [] });
   const publish = async (id: string, name = 'analysis.html', title = 'Quarterly results') => {
     const source = join(root, name); writeFileSync(source, `<title>${title}</title><p>report</p>`);
@@ -134,22 +136,105 @@ describe('project reports', () => {
     } finally { getRun.mockRestore(); warning.mockRestore(); }
   });
 
-  it('skips an unreadable source summary and fills the page with a readable report', async () => {
+  it('skips an unreadable summary without losing its cached snapshot, then lists it after repair', async () => {
     const broken = task('Broken'), good = task('Readable');
-    await publish(broken.id, 'broken.html');
+    const cached = await publish(broken.id, 'broken.html');
     const artifact = await publish(good.id, 'good.html');
     for (const run of [broken, good]) store.updateRun(run.id, { status: RUN_STATUS.done });
     store.flush(); await page();
     const raw = new DatabaseSync(join(dataDir, 'runs.db'));
-    try { raw.prepare('UPDATE runs SET summary = ? WHERE id = ?').run('{broken', broken.id); }
-    finally { raw.close(); }
+    const summary = raw.prepare('SELECT summary FROM runs WHERE id = ?').get(broken.id)!.summary;
+    raw.prepare('UPDATE runs SET summary = ? WHERE id = ?').run('{broken', broken.id);
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     try {
       const result = await page('?limit=1');
       expect(result.reports).toEqual([expect.objectContaining({ id: artifact.id, taskTitle: 'Readable' })]);
       expect(result.total).toBe(1); expect(result.nextCursor).toBeNull();
       expect(warning).toHaveBeenCalledExactlyOnceWith(`[cez] Report source task could not be read: ${broken.id}`);
-    } finally { warning.mockRestore(); }
+      expect(raw.prepare('SELECT id FROM artifacts WHERE id = ?').get(cached.id)).toBeTruthy();
+      raw.prepare('UPDATE runs SET summary = ? WHERE id = ?').run(summary!, broken.id);
+      const open = vi.spyOn(fs, 'open');
+      expect((await page()).reports.map(row => row.id)).toContain(cached.id);
+      expect(open).not.toHaveBeenCalled(); // Terminal task: no rescan was needed for the repaired summary.
+    } finally { raw.close(); }
+  });
+
+  it('keeps cached reports and a durable retry marker after metadata I/O failure, then indexes a recovered publication', async () => {
+    const run = task(); const cached = await publish(run.id);
+    store.updateRun(run.id, { status: RUN_STATUS.done }); store.flush(); await page();
+    const recovered = await publish(run.id, 'recovered.html');
+    const actualOpen = fs.open;
+    const fault = vi.spyOn(fs, 'open').mockImplementation((...args) => {
+      if (String(args[0]).endsWith('/metadata.json')) return Promise.reject(Object.assign(new Error('temporarily unreadable'), { code: 'EIO' }));
+      return actualOpen(...args);
+    });
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await store.reports.reconcile(false, run.id);
+    const raw = new DatabaseSync(join(dataDir, 'runs.db'), { readOnly: true });
+    try {
+      expect(raw.prepare('SELECT id FROM artifacts WHERE run_id = ?').all(run.id)).toEqual([{ id: cached.id }]);
+      expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(`reports-dirty:${run.id}`)).toBeTruthy();
+      expect((await page()).reports.map(row => row.id)).toEqual([cached.id]);
+      fault.mockRestore();
+      expect(new Set((await page()).reports.map(row => row.id))).toEqual(new Set([cached.id, recovered.id]));
+      expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(`reports-dirty:${run.id}`)).toBeUndefined();
+    } finally { raw.close(); }
+  });
+
+  it('leaves backfill incomplete after an indeterminate scan and retries after restart', async () => {
+    const run = task(); const artifact = await publish(run.id);
+    store.updateRun(run.id, { status: RUN_STATUS.done }); store.flush();
+    const actualOpen = fs.open;
+    const fault = vi.spyOn(fs, 'open').mockImplementation((...args) => {
+      if (String(args[0]).endsWith('/metadata.json')) return Promise.reject(Object.assign(new Error('temporarily unreadable'), { code: 'EACCES' }));
+      return actualOpen(...args);
+    });
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await store.reports.backfill();
+    const raw = new DatabaseSync(join(dataDir, 'runs.db'), { readOnly: true });
+    try { expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(REPORTS_BACKFILL_KEY)).toBeUndefined(); }
+    finally { raw.close(); }
+    fault.mockRestore(); store.close(); store = RunStore.open(dataDir);
+    expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
+    const repaired = new DatabaseSync(join(dataDir, 'runs.db'), { readOnly: true });
+    try { expect(repaired.prepare('SELECT value FROM meta WHERE key = ?').get(REPORTS_BACKFILL_KEY)).toBeTruthy(); }
+    finally { repaired.close(); }
+  });
+
+  it('keeps a report when its directory or content check is indeterminate and retries later', async () => {
+    const run = task(); const artifact = await publish(run.id);
+    store.updateRun(run.id, { status: RUN_STATUS.done }); store.flush(); await page();
+    const actualReaddir = fs.readdir;
+    const directoryFault = vi.spyOn(fs, 'readdir').mockImplementation((...args) => {
+      if (String(args[0]) === artifactDirectory(dataDir, run.id)) return Promise.reject(Object.assign(new Error('busy directory'), { code: 'EACCES' }));
+      return actualReaddir(...args);
+    });
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    await store.reports.reconcile(false, run.id);
+    expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
+    directoryFault.mockRestore(); await page();
+    const actualStat = fs.lstat;
+    const contentFault = vi.spyOn(fs, 'lstat').mockImplementation((...args) => {
+      if (String(args[0]).endsWith('/content')) return Promise.reject(Object.assign(new Error('busy content'), { code: 'EIO' }));
+      return actualStat(...args);
+    });
+    expect((await page()).reports).toEqual([]);
+    contentFault.mockRestore();
+    expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
+  });
+
+  it.each(['bad metadata', 'foreign metadata', 'size mismatch'])('drops a known-invalid snapshot: %s', async kind => {
+    const run = task(); const artifact = await publish(run.id); await page();
+    const directory = join(artifactDirectory(dataDir, run.id), artifact.id);
+    const metadata = join(directory, 'metadata.json');
+    if (kind === 'bad metadata') writeFileSync(metadata, '{broken');
+    else if (kind === 'foreign metadata') writeFileSync(metadata, JSON.stringify({ ...JSON.parse(readFileSync(metadata, 'utf8')), runId: randomUUID() }));
+    else writeFileSync(join(directory, 'content'), 'changed size');
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect((await page()).reports).toEqual([]);
+    const raw = new DatabaseSync(join(dataDir, 'runs.db'), { readOnly: true });
+    try { expect(raw.prepare('SELECT id FROM artifacts WHERE id = ?').get(artifact.id)).toBeUndefined(); }
+    finally { raw.close(); }
   });
 
   it('never indexes foreign artifact directories or exposes reports through an unknown project', async () => {

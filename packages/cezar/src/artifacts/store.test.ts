@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 import { tmpdir, hostname } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { artifactDirectory, listArtifacts, publishArtifact, readArtifact, readArtifactMetadata, artifactTitle } from './store.ts';
+import { artifactDirectory, listArtifacts, publishArtifact, readArtifact, readArtifactMetadata, readArtifactMetadataForIndex, artifactTitle } from './store.ts';
 
 let root: string;
 let dir: string;
@@ -401,4 +401,19 @@ describe('report metadata', () => {
     await link(join(entry, 'content'), join(root, 'hardlink'));
     expect(await readArtifactMetadata(dir, runId, metadata.id)).toBeNull();
   });
+});
+
+it('distinguishes an indeterminate metadata read for the index while keeping public metadata behavior', async () => {
+  const { metadata } = await fixture();
+  const actualOpen = fs.open;
+  const fault = vi.spyOn(fs, 'open').mockImplementation((...args) => {
+    if (String(args[0]).endsWith('/metadata.json')) return Promise.reject(Object.assign(new Error('temporary I/O failure'), { code: 'EIO' }));
+    return actualOpen(...args);
+  });
+  expect(await readArtifactMetadata(dir, runId, metadata.id)).toBeNull();
+  expect(await readArtifactMetadataForIndex(dir, runId, metadata.id)).toMatchObject({ state: 'indeterminate' });
+  fault.mockRestore();
+  expect(await readArtifactMetadataForIndex(dir, runId, metadata.id)).toMatchObject({ state: 'read', artifact: { id: metadata.id } });
+  await writeFile(join(dir, metadata.id, 'metadata.json'), '{broken');
+  expect(await readArtifactMetadataForIndex(dir, runId, metadata.id)).toEqual({ state: 'missing' });
 });

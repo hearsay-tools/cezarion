@@ -9,7 +9,7 @@ import type { RunDatabase } from '../runs/run-database.ts';
 import { REPORTS_BACKFILL_KEY, type IndexedArtifact, type ReportRow, type ReportCursor } from '../runs/report-rows.ts';
 import { parseStoredSummary } from '../runs/run-summary-page.ts';
 import type { RunRecord, RunStore } from '../runs/store.ts';
-import { artifactDirectory, readArtifactMetadata } from './store.ts';
+import { artifactDirectory, readArtifactMetadataForIndex } from './store.ts';
 
 export { REPORTS_BACKFILL_KEY } from '../runs/report-rows.ts';
 const cursorSchema = z.tuple([z.iso.datetime(), z.uuid()]);
@@ -62,11 +62,14 @@ export class ReportsIndex {
     return this.serial(async () => {
       this.store.flush();
       if (this.db.getMeta(REPORTS_BACKFILL_KEY)) return;
+      let complete = true;
       for (const entry of await readdir(join(this.dataDir, 'runs'), { withFileTypes: true })) {
         const id = entry.name.replace(/-artifacts$/, '');
-        if (entry.isDirectory() && entry.name.endsWith('-artifacts') && z.uuid().safeParse(id).success && this.db.has(id)) await this.indexRun(id);
+        if (entry.isDirectory() && entry.name.endsWith('-artifacts') && z.uuid().safeParse(id).success && this.db.has(id)) {
+          if (!await this.indexRun(id)) complete = false;
+        }
       }
-      if (!this.closed) this.db.transaction({ upserts: [], deletes: [], meta: { [REPORTS_BACKFILL_KEY]: new Date().toISOString() } });
+      if (!this.closed && complete) this.db.transaction({ upserts: [], deletes: [], meta: { [REPORTS_BACKFILL_KEY]: new Date().toISOString() } });
     });
   }
   reconcile(includeLive = true, settledId?: string): Promise<void> {
@@ -78,27 +81,42 @@ export class ReportsIndex {
       for (const id of ids) await this.indexRun(id);
     });
   }
-  private async indexRun(runId: string): Promise<void> {
+  private async indexRun(runId: string): Promise<boolean> {
     const previous = this.db.reports.forRun(runId);
     const revision = this.db.revisionOf(runId);
     const directory = artifactDirectory(this.dataDir, runId);
     const entries = await readdir(directory).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return [];
-      throw error;
+      console.warn(`[cez] Report scan could not be completed: ${runId}`, error);
+      return null;
     });
+    if (!entries) { this.db.reports.retry(runId, revision); return false; }
     const artifacts: IndexedArtifact[] = [];
+    let complete = true;
     for (const id of entries) {
-      const artifact = await readArtifactMetadata(directory, runId, id);
-      if (artifact && /\.html?$/i.test(artifact.name)) artifacts.push(artifact);
+      const result = await readArtifactMetadataForIndex(directory, runId, id);
+      if (result.state === 'indeterminate') {
+        complete = false;
+        const cached = previous.find(row => row.id === id);
+        if (cached) artifacts.push(cached);
+        console.warn(`[cez] Report read could not be completed: ${runId}/${id}`, result.error);
+      } else if (result.state === 'read' && /\.html?$/i.test(result.artifact.name)) artifacts.push(result.artifact);
     }
-    if (this.closed) return;
-    this.db.replaceArtifacts(runId, artifacts, revision);
+    if (this.closed) return false;
+    this.db.reports.replace(runId, artifacts, revision, complete);
     const kept = new Set(artifacts.map(a => a.id));
     for (const missing of previous) if (!kept.has(missing.id)) console.warn(`[cez] Report missing or deleted: ${runId}/${missing.id}`);
+    return complete;
   }
-  private async present(row: ReportRow): Promise<boolean> {
+  private async present(row: ReportRow): Promise<boolean | null> {
     const content = join(artifactDirectory(this.dataDir, row.runId), row.id, 'content');
-    const file = await lstat(content).catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return null; throw error; });
+    const file = await lstat(content).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return null;
+      this.db.reports.retry(row.runId, this.db.revisionOf(row.runId));
+      console.warn(`[cez] Report content could not be checked: ${row.runId}/${row.id}`, error);
+      return undefined;
+    });
+    if (file === undefined) return null;
     if (file?.isFile() && !file.isSymbolicLink() && file.size === row.size) return true;
     this.db.reports.drop(row.id);
     console.warn(`[cez] Report missing or deleted: ${row.runId}/${row.id}`);
@@ -125,6 +143,8 @@ export class ReportsIndex {
     const limit = query.limit ?? 50;
     const reports: Report[] = [];
     let missing = 0;
+    let unreadable = 0;
+    const warned = new Set<string>();
     while (reports.length <= limit) {
       const count = limit + 1 - reports.length;
       const rows = matches ? matches.filter(row => !before || after(row, before)).slice(0, count) : this.db.reports.page(before, count);
@@ -133,17 +153,20 @@ export class ReportsIndex {
         before = cursor(row);
         const entry = report(row);
         if (!entry) {
-          this.db.reports.drop(row.id);
-          console.warn(`[cez] Report source task could not be read: ${row.runId}`);
-          missing++;
-        } else if (await this.present(row)) reports.push(entry);
-        else missing++;
+          if (!warned.has(row.runId)) console.warn(`[cez] Report source task could not be read: ${row.runId}`);
+          warned.add(row.runId);
+          missing++; unreadable++;
+        } else {
+          const present = await this.present(row);
+          if (present) reports.push(entry);
+          else { missing++; if (present === null) unreadable++; }
+        }
       }
     }
     const more = reports.length > limit;
     if (more) reports.pop();
     const last = reports.at(-1);
-    return { reports, total: matches ? matches.length - missing : this.db.reports.count(),
+    return { reports, total: matches ? matches.length - missing : this.db.reports.count() - unreadable,
       nextCursor: more && last ? Buffer.from(JSON.stringify(cursor(last))).toString('base64url') : null };
   }
 }

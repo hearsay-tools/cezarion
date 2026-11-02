@@ -481,6 +481,28 @@ describe('RunDatabase', () => {
     });
   });
 
+  it('clears an older dirty revision after terminal updates but keeps a mark newer than the scan', () => {
+    const db = openDb();
+    db.transaction({ upserts: [row('owner', { live: true })], deletes: [] });
+    db.transaction({ upserts: [row('owner')], deletes: [] });
+    const terminalRevision = db.revisionOf('owner')!;
+    for (let i = 0; i < 8; i++) db.transaction({ upserts: [row('owner', { archived: true })], deletes: [] });
+    const scannedRevision = db.revisionOf('owner')!;
+    expect(scannedRevision).toBeGreaterThan(terminalRevision);
+    expect(db.reports.dirty()).toEqual(['owner']);
+    db.replaceArtifacts('owner', [], scannedRevision);
+    expect(db.reports.dirty()).toEqual([]);
+
+    // A concurrent writer dirties this run after the directory reader took its revision.
+    db.transaction({ upserts: [row('owner', { live: true })], deletes: [] });
+    const newerRevision = db.revisionOf('owner')!;
+    db.reports.retry('owner', scannedRevision); // A failed older scan cannot lower a newer mark.
+    db.replaceArtifacts('owner', [], scannedRevision);
+    expect(db.getMeta('reports-dirty:owner')).toBe(String(newerRevision));
+    db.replaceArtifacts('owner', [], newerRevision);
+    expect(db.reports.dirty()).toEqual([]);
+  });
+
   it('rolls back artifact removal with a refused history deletion, then commits both together', () => {
     const db = openDb();
     db.transaction({ upserts: [row('report-owner')], deletes: [] });

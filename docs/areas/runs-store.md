@@ -20,13 +20,16 @@ One embedded SQLite file per project, `.ai/cezar/runs.db` (`node:sqlite`, WAL; N
 
 Schema 10 adds `artifacts`, an HTML-only cache of owned snapshot metadata. Files remain the
 source of truth. The server starts backfill after listening; lazy project contexts start it
-behind the running listener. `reports-backfill-complete` in `meta` records a completed pass.
+behind the running listener. `reports-backfill-complete` in `meta` records a completed pass;
+an indeterminate scan leaves it absent for retry.
 Run-row transactions mark `reports-dirty:<runId>` when a row is or was live. Reconciliation
-clears a marker only when its revision still matches the directory read. Shelf queries reconcile
+clears a marker only when its numeric revision is no newer than the directory read. Shelf queries reconcile
 live and dirty runs; a transition from a live to a terminal status reconciles the settled run
 and dirty runs. Read, pin and archive events on terminal runs do not start reconciliation.
 Listing pages through joined summaries, checks content only for the selected page and fills
-past missing files. History deletion removes cache rows and dirty markers with the run row.
+past missing files. Indeterminate filesystem reads retain cached snapshots and a durable dirty
+marker; unreadable summaries skip rows without deleting them, so repair restores their display.
+History deletion removes cache rows and dirty markers with the run row.
 Deleting `runs.db` removes task ownership too: artifact bytes survive, but orphan snapshots
 stay outside the shelf until their source tasks are restored. Dropping the cache table alone
 is unsupported; removing the completed-backfill marker lets the next pass rebuild cache rows.

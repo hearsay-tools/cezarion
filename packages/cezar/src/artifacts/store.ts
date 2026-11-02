@@ -12,6 +12,8 @@ const MAX_METADATA_BYTES = 32 * 1024;
 const MAX_RUN_BYTES = 64 * 1024 * 1024;
 const MAX_ARTIFACTS = 64;
 const MAX_DIRECTORY_ENTRIES = 1024;
+class InvalidArtifactError extends Error {}
+
 const readFlags = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
 const TITLE_PREFIX_BYTES = 64 * 1024;
@@ -99,8 +101,8 @@ async function boundedRead(path: string, limit: number, stored = false, prefixBy
   const file = await open(path, readFlags);
   try {
     const before = await file.stat({ bigint: true });
-    if (!before.isFile() || before.size > BigInt(limit) || (stored && before.nlink !== 1n)) throw new Error('Artifact must be a bounded regular file');
-    if (expectedSize !== undefined && before.size !== BigInt(expectedSize)) throw new Error('Artifact size mismatch');
+    if (!before.isFile() || before.size > BigInt(limit) || (stored && before.nlink !== 1n)) throw new InvalidArtifactError('Artifact must be a bounded regular file');
+    if (expectedSize !== undefined && before.size !== BigInt(expectedSize)) throw new InvalidArtifactError('Artifact size mismatch');
     const expectedRead = Math.min(Number(before.size), prefixBytes ?? Number(before.size));
     const buffer = Buffer.alloc(prefixBytes === undefined ? expectedRead + 1 : expectedRead);
     let count = 0;
@@ -111,7 +113,7 @@ async function boundedRead(path: string, limit: number, stored = false, prefixBy
     }
     const after = await file.stat({ bigint: true });
     const current = await lstat(path, { bigint: true });
-    if (count !== expectedRead || !sameSnapshot(before, after) || !sameFile(after, current) || current.isSymbolicLink()) throw new Error('File changed while publishing or reading artifact');
+    if (count !== expectedRead || !sameSnapshot(before, after) || !sameFile(after, current) || current.isSymbolicLink()) throw new InvalidArtifactError('File changed while publishing or reading artifact');
     return buffer.subarray(0, count);
   } finally { await file.close(); }
 }
@@ -136,7 +138,7 @@ async function storageDirectory(path: string, create = false): Promise<Directory
     const handle = file;
     const original = await handle.stat({ bigint: true });
     const check = async () => {
-      if (await realpath(absolute) !== absolute || !sameFile(original, await lstat(absolute, { bigint: true }))) throw new Error('Redirected artifact storage');
+      if (await realpath(absolute) !== absolute || !sameFile(original, await lstat(absolute, { bigint: true }))) throw new InvalidArtifactError('Redirected artifact storage');
     };
     await check();
     return { path: process.platform === 'linux' ? `/proc/self/fd/${handle.fd}` : absolute, check, close: () => handle.close() };
@@ -243,7 +245,7 @@ export async function publishArtifact(directory: string, runId: string, source: 
     // unchanged, so reread and compare: any mutation that landed before this second
     // read surfaces as differing bytes. Later mutations stay covered by the snapshot.
     const reread = await boundedRead(source, MAX_FILE_BYTES);
-    if (!bytes.equals(reread)) throw new Error('File changed while publishing or reading artifact');
+    if (!bytes.equals(reread)) throw new InvalidArtifactError('File changed while publishing or reading artifact');
     await checkCapacity(root, bytes.length);
     const metadata = publishedArtifactSchema.parse({ id: randomUUID(), runId, name: basename(source), sourcePath: resolve(source), createdAt: new Date().toISOString(), size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
     pending = join(root.path, `.pending-${metadata.id}`);
@@ -264,7 +266,7 @@ export async function publishArtifact(directory: string, runId: string, source: 
   }
 }
 
-async function readEntry(root: Directory, runId: string, id: string, metadataOnly = false): Promise<{ metadata: PublishedArtifact; bytes: Buffer } | null> {
+async function readEntry(root: Directory, runId: string, id: string, metadataOnly = false, strict = false): Promise<{ metadata: PublishedArtifact; bytes: Buffer } | null> {
   if (!z.uuid().safeParse(id).success) return null;
   let entry: FileHandle | undefined;
   try {
@@ -279,21 +281,33 @@ async function readEntry(root: Directory, runId: string, id: string, metadataOnl
     if (!sameFile(await entry.stat({ bigint: true }), await lstat(join(root.path, id), { bigint: true }))) return null;
     await root.check();
     return { metadata: { ...metadata, title: artifactTitle(metadata.name, bytes) }, bytes };
-  } catch { return null; } finally { await entry?.close(); }
+  } catch (error) { if (strict) throw error; return null; } finally { await entry?.close(); }
 }
-async function readStoredArtifact(directory: string, runId: string, id: string, metadataOnly: boolean): Promise<{ metadata: PublishedArtifact; bytes: Buffer } | null> {
+async function readStoredArtifact(directory: string, runId: string, id: string, metadataOnly: boolean, strict = false): Promise<{ metadata: PublishedArtifact; bytes: Buffer } | null> {
   let root: Directory | undefined;
   try {
     validateContext(directory, runId);
     root = await storageDirectory(directory);
-    return await readEntry(root, runId, id, metadataOnly);
-  } catch { return null; } finally { await root?.close(); }
+    return await readEntry(root, runId, id, metadataOnly, strict);
+  } catch (error) { if (strict) throw error; return null; } finally { await root?.close(); }
 }
 export async function readArtifact(directory: string, runId: string, id: string): Promise<{ metadata: PublishedArtifact; bytes: Buffer } | null> {
   return readStoredArtifact(directory, runId, id, false);
 }
 export async function readArtifactMetadata(directory: string, runId: string, id: string): Promise<PublishedArtifact | null> {
   return (await readStoredArtifact(directory, runId, id, true))?.metadata ?? null;
+}
+/** Internal index read: an I/O failure cannot prove that a published snapshot is gone. */
+export async function readArtifactMetadataForIndex(directory: string, runId: string, id: string): Promise<
+  { state: 'read'; artifact: PublishedArtifact } | { state: 'missing' } | { state: 'indeterminate'; error: unknown }
+> {
+  try {
+    const entry = await readStoredArtifact(directory, runId, id, true, true);
+    return entry ? { state: 'read', artifact: entry.metadata } : { state: 'missing' };
+  } catch (error) {
+    if (error instanceof InvalidArtifactError || error instanceof SyntaxError || error instanceof z.ZodError || (error as NodeJS.ErrnoException).code === 'ENOENT') return { state: 'missing' };
+    return { state: 'indeterminate', error };
+  }
 }
 export async function listArtifacts(directory: string, runId: string): Promise<PublishedArtifact[]> {
   let root: Directory | undefined;

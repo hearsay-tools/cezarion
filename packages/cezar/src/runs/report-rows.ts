@@ -35,7 +35,9 @@ export class ReportRows {
       exists: db.prepare('SELECT 1 FROM runs WHERE id = ?'),
       mark: db.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'),
       dirty: db.prepare("SELECT key FROM meta WHERE key >= 'reports-dirty:' AND key < 'reports-dirty;'"),
-      clear: db.prepare('DELETE FROM meta WHERE key = ? AND value = ?'),
+      clear: db.prepare('DELETE FROM meta WHERE key = ? AND CAST(value AS INTEGER) <= ?'),
+      retry: db.prepare(`INSERT INTO meta (key, value) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM runs WHERE id = ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE CAST(meta.value AS INTEGER) < CAST(excluded.value AS INTEGER)`),
       clearRun: db.prepare('DELETE FROM meta WHERE key = ?'),
       deleteRun: db.prepare('DELETE FROM artifacts WHERE run_id = ?'),
       drop: db.prepare('DELETE FROM artifacts WHERE id = ?'),
@@ -51,6 +53,7 @@ export class ReportRows {
   markDirty(id: string, live: boolean, revision: number): void {
     this.execute(() => { if (live || this.statements.live.get(id)?.live === 1) this.statements.mark.run(`reports-dirty:${id}`, String(revision)); });
   }
+  retry(id: string, revision?: number): void { this.execute(() => this.statements.retry.run(`reports-dirty:${id}`, String(revision ?? 0), id)); }
   dirty(): string[] { return this.execute(() => this.statements.dirty.all().map(row => { return (row.key as string).slice('reports-dirty:'.length); })); }
   deleteRun(id: string): void { this.execute(() => { this.statements.deleteRun.run(id); this.statements.clearRun.run(`reports-dirty:${id}`); }); }
   drop(id: string): void { this.execute(() => this.statements.drop.run(id)); }
@@ -69,7 +72,7 @@ export class ReportRows {
   }
   forRun(id: string): IndexedArtifact[] { return this.execute(() => this.statements.perRun.all(id).map(artifact)); }
   list(): IndexedArtifact[] { return this.execute(() => this.statements.all.all().map(artifact)); }
-  replace(runId: string, artifacts: readonly IndexedArtifact[], revision?: number): void {
+  replace(runId: string, artifacts: readonly IndexedArtifact[], revision?: number, complete = true): void {
     this.execute(() => {
     this.db.exec('BEGIN IMMEDIATE');
     try {
@@ -77,7 +80,8 @@ export class ReportRows {
       if (this.statements.exists.get(runId)) {
         for (const a of artifacts) this.statements.insert.run(a.id, runId, a.name, a.title ?? null, a.createdAt, a.size);
       }
-      this.statements.clear.run(`reports-dirty:${runId}`, String(revision));
+      if (complete) this.statements.clear.run(`reports-dirty:${runId}`, revision ?? -1);
+      else this.retry(runId, revision);
       this.db.exec('COMMIT');
     } catch (error) {
       if (this.db.isTransaction) { try { this.db.exec('ROLLBACK'); } catch { /* Preserve the original write failure. */ } }
