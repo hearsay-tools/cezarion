@@ -198,6 +198,8 @@ test('CI permits a new ratchet, while auto-merge requires owner review of its st
 for (const [name, file] of [
   ['contrast', 'packages/cezar/src/lint/card-2-contrast.test.ts'],
   ['design guardian', 'packages/cezar/src/lint/design-guardian.test.ts'],
+  ['server wait discipline', 'packages/cezar/src/test-wait-discipline.test.ts'],
+  ['unit wait discipline', 'packages/cezar/src/lint/unit-wait-discipline.test.ts'],
 ]) {
   test(`auto-merge protects the moved ${name} fixtures while permitting added cases`, (t) => {
     const r = repository(t);
@@ -220,7 +222,7 @@ test('auto-merge protects moved unit wait scanners and fixtures while permitting
   const files = [
     'blank.ts', 'server-wait-syntax.ts', 'server-wait-deadlines.ts', 'server-wait-baseline.ts',
     'test-wait-discipline.ts', 'unit-wait-values.ts', 'unit-wait-deadlines.ts',
-    'wait-baseline.ts', 'unit-wait-discipline.ts', 'unit-wait-discipline.test.ts',
+    'wait-baseline.ts', 'unit-wait-discipline.ts',
     'wait-discipline-runner.ts',
   ].map(file => `packages/cezar/src/lint/${file}`);
   const fixture = "export const expected = 1;\n";
