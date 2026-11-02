@@ -302,22 +302,7 @@ class CursorPrintSession implements AgentSession {
     if (!frame || typeof frame !== 'object' || Array.isArray(frame)) return;
     const native = frame as Record<string, unknown>;
     if (native.type === 'system' && native.subtype === 'init') {
-      if (typeof native.session_id !== 'string' || !NATIVE_ID_RE.test(native.session_id)) {
-        this.fail('Cursor print returned an invalid session id'); return;
-      }
-      if (this.nativeId && native.session_id !== this.nativeId) {
-        this.fail('Cursor print returned a different session id on resume'); return;
-      }
-      if (!this.nativeId) {
-        this.nativeId = native.session_id;
-      }
-      // A separate Continue creates a new managed step even with the same native ID.
-      // Emit once for that logical session so its step has corroborating evidence.
-      if (!this.sessionEventEmitted) {
-        this.sessionEventEmitted = true;
-        this.emit({ type: 'session', sessionId: native.session_id });
-      }
-      active.initSeen = true;
+      if (!this.acceptSessionInit(native, active)) return;
     }
     if (native.type === 'result') {
       if (!this.nativeId || native.session_id !== this.nativeId) {
@@ -337,6 +322,30 @@ class CursorPrintSession implements AgentSession {
         active.receipt.resolve();
       }
     }
+    this.mapFrameEvents(frame, active);
+  }
+
+  private acceptSessionInit(native: Record<string, unknown>, active: ActiveTurn): boolean {
+    if (typeof native.session_id !== 'string' || !NATIVE_ID_RE.test(native.session_id)) {
+      this.fail('Cursor print returned an invalid session id'); return false;
+    }
+    if (this.nativeId && native.session_id !== this.nativeId) {
+      this.fail('Cursor print returned a different session id on resume'); return false;
+    }
+    if (!this.nativeId) {
+      this.nativeId = native.session_id;
+    }
+    // A separate Continue creates a new managed step even with the same native ID.
+    // Emit once for that logical session so its step has corroborating evidence.
+    if (!this.sessionEventEmitted) {
+      this.sessionEventEmitted = true;
+      this.emit({ type: 'session', sessionId: native.session_id });
+    }
+    active.initSeen = true;
+    return true;
+  }
+
+  private mapFrameEvents(frame: unknown, active: ActiveTurn): void {
     const mapped = mapCursorPrintMessage(frame, this.uiState);
     this.uiState = mapped.state;
     for (const event of mapped.events) this.opts.onUiEvent?.(event);
