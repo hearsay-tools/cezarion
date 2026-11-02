@@ -121,7 +121,6 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
 
   it('inbox ACK of progress preserves a parked worker wait and its terminal wake', async () => {
     const f = await conversationPair();
-    const engine = runInternals(manager).line;
     // The wait opens on a parked worker, which sends its park notice (hearsay-tools/cezarion#1327).
     // The parent takes it and parks again before the progress this test acknowledges.
     const turns = turnEnds(f.p.id);
@@ -150,7 +149,6 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
   // hearsay-tools/cezarion#1235: messages are not waits; a request no longer interrupts the wait.
   it.each(['provider', 'inbox'] as const)('a mixed progress/request %s batch is delivered and the worker wait stays open', async mode => {
     const f = await conversationPair();
-    const engine = runInternals(manager).line;
     const pump = vi.spyOn(runInternals(manager).line, 'pump').mockResolvedValue();
     try {
       const wait = manager.registerWorkerWait(f.p.id, { workerIds: [f.w.id], timeoutSeconds: 600 });
@@ -326,7 +324,6 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
 
   it('conversation: a full queue of 32 replies can admit an all-request wake without losing a message', async () => {
     const f = await conversationPair();
-    const engine = runInternals(manager).line;
     const pump = vi.spyOn(runInternals(manager).line, 'pump').mockResolvedValue();
     const submissions = vi.spyOn(runInternals(manager).inputDelivery, 'submitAgentInput');
     try {
@@ -456,7 +453,6 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
 
   it('a claimed message cannot interrupt a registered wait or acquire a wake admission', async () => {
     const f = await conversationPair();
-    const engine = runInternals(manager).line;
     const pump = vi.spyOn(runInternals(manager).line, 'pump').mockResolvedValue();
     try {
       const request = randomUUID();

@@ -859,13 +859,6 @@ describe('ubuntu-vps identity step (end-to-end verify)', () => {
 describe('ubuntu-vps review fixes (PR #423)', () => {
   it('ufwIsActive reads the world-readable ufw.conf, never root-only `ufw status`', async () => {
     const calls: string[][] = [];
-    const runner: Runner = {
-      capture: async (_p, args) => {
-        calls.push(args);
-        return { code: 0, stdout: 'ufw-enabled\n', stderr: '' };
-      },
-      interactive: async () => 0,
-    };
     // reach the sub-step via the proxy step's run with everything else stubbed green
     const ui = {
       ...createAutoUi(),
@@ -899,7 +892,7 @@ describe('ubuntu-vps review fixes (PR #423)', () => {
     const ctx = {
       ...ctxWith({ ui }),
       runner: {
-        capture: async (p: string, args: string[]) => {
+        capture: async (p: string) => {
           if (p === 'openssl') return { code: 0, stdout: '$apr1$abc$secret-hash', stderr: '' };
           return { code: 0, stdout: '', stderr: '' };
         },

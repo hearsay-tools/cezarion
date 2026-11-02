@@ -144,7 +144,7 @@ type Record_ = (target: string, state: string, min: number, property?: string, s
 const resolveFn = `const resolve = (value) => { const probe = document.createElement('span'); probe.style.color = value
     document.body.appendChild(probe); const out = getComputedStyle(probe).color; probe.remove(); return out }`
 
-function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, navSelector, fill, amber, open, record }: {
+function checkNavBody(variant: ContrastQaVariant, { base, container, navSelector, fill, open, record }: {
   base: string; projectId: string; container: string; navSelector: string; fill: { hover: string; selected: string }
   amber: { fill: string; ink: string }; open: Open; record: Record_
 }): void {

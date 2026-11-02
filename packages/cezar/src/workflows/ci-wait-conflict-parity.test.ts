@@ -142,7 +142,6 @@ describe('native conflict observation durability and wake parity', { timeout: 35
       await supervisor.watch(request, new AbortController().signal);
       const late = await supervisor.watch(request, new AbortController().signal);
       expect(late).toMatchObject({ outcome: 'conflicting', mergeable: 'CONFLICTING' });
-      const engine = runInternals(manager).waitRegistry;
       runInternals(manager).waitRegistry.resolveWait(run.id, wait.id, late);
       expect(open(run.id)).toBeUndefined();
       expect(store.getRun(run.id)?.agentInputs?.some(input => input.id === wait.id) ?? false).toBe(false);
