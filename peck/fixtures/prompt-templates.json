@@ -1,0 +1,14 @@
+{
+  "people": [
+    { "name": "Sam Reed", "role": "Repository owner" }
+  ],
+  "projects": [
+    { "name": "cedar-tools" },
+    { "name": "river-docs" }
+  ],
+  "prompt_templates": [
+    { "label": "Review security", "project": "cedar-tools", "text": "Check input validation and access boundaries." },
+    { "label": "Explain changes", "project": "cedar-tools", "text": "Describe the user-visible changes." },
+    { "label": "Translate release notes", "project": "river-docs", "text": "Translate the release notes into French." }
+  ]
+}

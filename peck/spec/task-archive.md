@@ -49,9 +49,9 @@ Sam Reed starts on the Project tasks page for cedar-tools at `/p/cedar-tools`.
 ## Behavior
 
 1. Sam opens "Audit invoice export" from the main task list.
-2. Sam requests to archive "Audit invoice export" without confirming the request.
+2. Sam requests to archive "Audit invoice export" with "Archive task" on its task page, without confirming the request.
 3. Sam cancels the archive request for "Audit invoice export".
-4. Sam archives "Audit invoice export" from its task page, confirming the request.
+4. Sam archives "Audit invoice export" with "Archive task" on its task page, confirming the request.
 5. Sam views the "Active" task list on the Project tasks page for "cedar-tools".
 6. Sam views the "Archived" task list for "cedar-tools".
 7. Sam reloads the "Archived" task list.

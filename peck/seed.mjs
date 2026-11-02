@@ -8,11 +8,12 @@ const [input, destination] = process.argv.slice(2);
 if (!input || !destination) throw new Error('Usage: node peck/seed.mjs <given.json> <empty-run-directory>');
 const tables = JSON.parse(readFileSync(input, 'utf8'));
 const projects = tables.projects;
-const tasks = tables.tasks;
-if (!Array.isArray(tables.people) || !Array.isArray(projects) || !Array.isArray(tasks)) {
-  throw new Error('Expected people, projects and tasks arrays');
+const tasks = tables.tasks ?? [];
+const templates = tables.prompt_templates ?? [];
+if (!Array.isArray(tables.people) || !Array.isArray(projects) || !Array.isArray(tasks) || !Array.isArray(templates)) {
+  throw new Error('Expected people and projects arrays; tasks and prompt_templates are optional arrays');
 }
-for (const row of [...tables.people, ...projects, ...tasks]) {
+for (const row of [...tables.people, ...projects, ...tasks, ...templates]) {
   if (Object.values(row).some(value => typeof value !== 'string')) throw new Error('Every Given value must be a string');
 }
 const names = new Set(projects.map(row => row.name));
@@ -29,6 +30,13 @@ for (const row of tasks) {
 }
 const keys = tasks.map(row => `${row.project}\0${row.title}`);
 if (new Set(keys).size !== keys.length) throw new Error('Task titles must be unique within each project');
+for (const row of templates) {
+  if (!names.has(row.project) || !row.label?.trim() || !row.text?.trim() || row.label.length > 80 || row.text.length > 2000) {
+    throw new Error('Each prompt template needs a known project, a label of 1–80 characters and text of 1–2000 characters');
+  }
+}
+const templateKeys = templates.map(row => `${row.project}\0${row.label}`);
+if (new Set(templateKeys).size !== templateKeys.length) throw new Error('Prompt template labels must be unique within each project');
 
 mkdirSync(resolve(destination), { recursive: true });
 const root = realpathSync(destination);
@@ -63,6 +71,13 @@ for (const project of projects) {
   const dataDir = join(repo, '.ai', 'cezar');
   mkdirSync(join(dataDir, 'runs'), { recursive: true });
   writeFileSync(join(dataDir, 'runs.json'), JSON.stringify(records, null, 2) + '\n');
+  if (tables.prompt_templates !== undefined) {
+    const promptTemplates = templates.filter(row => row.project === project.name).map(row => ({
+      id: `peck-${createHash('sha256').update(`${row.project}\0${row.label}`).digest('hex').slice(0, 20)}`,
+      label: row.label, text: row.text,
+    }));
+    writeFileSync(join(dataDir, 'ui-state.json'), JSON.stringify({ promptTemplates }, null, 2) + '\n');
+  }
   registry.push({ id: project.name, name: project.name, root: repo, source: 'local', addedAt: '2026-10-01T08:00:00Z', lastOpenedAt: '2026-10-01T08:00:00Z' });
 }
 writeFileSync(join(root, 'home', 'config.json'), JSON.stringify({ projects: registry }, null, 2) + '\n', { mode: 0o600 });
