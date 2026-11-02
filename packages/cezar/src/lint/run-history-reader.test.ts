@@ -31,7 +31,6 @@ describe('run history ownership', () => {
     'const path = ".ndjson" + id;',
     'const path = ".ndjson" + (id);',
     'const path = (".ndjson" + ".br") + id;',
-    'const path = `fixed.ndjson` + id;',
     'const path = id + ".ndjson" + (".br");',
     'const path = `${id}.ndjson` /* explanation */ + ".br";',
     'const path = `${id}.ndjson${compressed ? ".br" : ""}`;',
@@ -43,15 +42,6 @@ describe('run history ownership', () => {
     'const path = (`${id}`) + ".ndjson";',
     'import { historyPaths as pathsForRun } from "./history-file.ts"; readFileSync(pathsForRun(dir, id).plain);',
     'const path = id + "prefix" + ".ndjson.br";',
-  ])('refuses raw access: %s', (source) => {
-    expect(scanHistoryReaders(other, source)).toHaveLength(1);
-  });
-
-  it.each([
-    '// readFileSync(historyPaths(dir, id).plain); `${id}.ndjson`',
-    '/* id + ".ndjson" */',
-    'const name = "automation-receipts.ndjson";',
-    'const example = "historyPaths(dir, id)";',
     'const name = "fixed" + ".ndjson";',
     'const name = ".ndjson" + ".br";',
     'const name = ".ndjson" + (".br" + "");',
@@ -59,14 +49,31 @@ describe('run history ownership', () => {
     'readFileSync("fixed" + ".ndjson");',
     'readFileSync(("fixed" + "prefix") + ".ndjson");',
     'return `fixed` + ".ndjson";',
-    'const name = `fixed.ndjson`;',
     'const name = `${".ndjson"}`;',
     'const name = (("fixed" as string) + (".ndjson" satisfies string))!;',
+    'return "fixed"\n + ".ndjson";',
+    'readFileSync(prefix.concat(runId, ".ndjson"));',
+    'const EXT = ".ndjson";',
+    'const name = ".ndjson.br";',
+  ])('refuses raw access: %s', (source) => {
+    expect(scanHistoryReaders(other, source)).toHaveLength(1);
+  });
+
+  it.each([
+    'const path = `fixed.ndjson` + id;',
+    '// readFileSync(historyPaths(dir, id).plain); `${id}.ndjson`',
+    '/* id + ".ndjson" */',
+    'const name = "automation-receipts.ndjson";',
+    'const example = "historyPaths(dir, id)";',
+    'const name = `fixed.ndjson`;',
     'const name = `${id /* .ndjson */}`;',
     'import data from "./fixture.ndjson";',
     'const text = readHistoryText(dir, id);',
     'const path = `${id}.json`;',
-    'return "fixed"\n + ".ndjson";',
+    'const name = `${dir}/decisions.ndjson`;',
+    'readFileSync("prefix".concat("run.ndjson"));',
+    'const name = "name_.ndjson";',
+    'const name = "name-.ndjson";',
   ])('passes non-path code: %s', (source) => {
     expect(scanHistoryReaders(other, source)).toEqual([]);
   });

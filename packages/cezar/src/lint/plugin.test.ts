@@ -61,6 +61,7 @@ const APPROVED: Record<string, string> = {
   // run-fact-reader: a listed reader, and a test spelling the hold as its oracle.
   'packages/web/src/lib/tasks-table.ts': 'const at = run.autoResumeAt;\n',
   'packages/cezar/src/i.test.ts': "until(() => run.status === 'waiting' && run.autoResumeAt !== undefined);\n",
+  'packages/cezar/src/fixed-history-name.ts': 'readFileSync("prefix".concat("run.ndjson"));\n',
   'packages/cezar/src/runs/history-stream.ts': 'const paths = historyPaths(dir, id);\n',
   // undocumented-env-name: a documented name, a mock control, and a test.
   'packages/cezar/src/j.ts': "const a = process.env.CEZ_DRY_RUN; const b = env.CEZ_MOCK_ANYTHING;\n",
@@ -96,6 +97,7 @@ describe('the cez rules under oxlint', () => {
     'readFileSync(`${id}.ndjson` /* explanation */ + ".br")',
     'readFileSync(`${id}.ndjson${compressed ? ".br" : ""}`)',
     'readFileSync(`${id}${".ndjson"}`)',
+    'readFileSync(prefix.concat(runId, ".ndjson"))',
     'readFileSync(`${id}` + ".ndjson")',
     'import { historyPaths as pathsForRun } from "./runs/history-file.ts"; readFileSync(pathsForRun(dir, id).plain);',
   ])('refuses direct transcript access under oxlint: %s', async (source) => {

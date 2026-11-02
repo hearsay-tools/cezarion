@@ -13,38 +13,19 @@ export function readHistoryReaders(path = join(repoRoot, historyReadersFile)): H
   return (JSON.parse(readFileSync(path, 'utf8')) as { entries: HistoryReader[] }).entries;
 }
 
-/** The AST expression forms that preserve a path's literal operands. */
-function pathExpression(node: Node): boolean {
-  return (node.type === 'BinaryExpression' && node.operator === '+') || node.type === 'TemplateLiteral' ||
-    node.type === 'TSAsExpression' || node.type === 'TSSatisfiesExpression' ||
-    node.type === 'TSNonNullExpression' || node.type === 'ParenthesizedExpression';
+/** A bare extension fragment can build a transcript; a fixed filename has its own stem. */
+function pathFragment(node: Node): boolean {
+  const fragment = /(?:^|[^A-Za-z0-9_-])[.]ndjson/;
+  if (node.type === 'StringLiteral') return fragment.test(node.value);
+  return node.type === 'TemplateElement' && fragment.test(node.value.cooked ?? node.value.raw);
 }
 
-/** Fixed-only expressions stay legal in assignments, returns and arguments alike. */
-function fixedPathExpression(node: Node): boolean {
-  if (node.type === 'StringLiteral') return true;
-  if (node.type === 'TemplateLiteral') return node.expressions.every(fixedPathExpression);
-  if (node.type === 'BinaryExpression' && node.operator === '+') return fixedPathExpression(node.left) && fixedPathExpression(node.right);
-  if (node.type === 'TSAsExpression' || node.type === 'TSSatisfiesExpression' || node.type === 'TSNonNullExpression' || node.type === 'ParenthesizedExpression') {
-    return fixedPathExpression(node.expression);
-  }
-  return false;
-}
-
-function pathLiteral(node: Node): boolean {
-  if (node.type === 'StringLiteral') return node.value.includes('.ndjson');
-  return node.type === 'TemplateElement' && (node.value.cooked ?? node.value.raw).includes('.ndjson');
-}
-
-/** Index parents once, including literals inside template substitutions. Comments are not paths. */
-function pathNodes(node: Node, parents: Map<Node, Node>, literals: Node[]): void {
-  if (pathLiteral(node)) literals.push(node);
+/** Literal syntax supplies ownership sites regardless of the surrounding call or expression. */
+function pathNodes(node: Node, offsets: Set<number>, parent?: Node): void {
+  if (pathFragment(node)) offsets.add((node.type === 'TemplateElement' ? parent?.start : node.start) ?? 0);
   for (const value of Object.values(node)) {
     for (const child of Array.isArray(value) ? value : [value]) {
-      if (child && typeof child === 'object' && typeof child.type === 'string') {
-        parents.set(child as Node, node);
-        pathNodes(child as Node, parents, literals);
-      }
+      if (child && typeof child === 'object' && typeof child.type === 'string') pathNodes(child as Node, offsets, node);
     }
   }
 }
@@ -53,21 +34,10 @@ function pathNodes(node: Node, parents: Map<Node, Node>, literals: Node[]): void
 function dynamicPaths(source: string): HistorySite[] {
   // The old guard searched raw source too; oxlint still refuses malformed files outside this prefilter.
   if (!source.includes('ndjson')) return [];
-  const ast = parse(source, { sourceType: 'module', plugins: ['typescript'], createParenthesizedExpressions: true, allowReturnOutsideFunction: true });
-  const parents = new Map<Node, Node>();
-  const literals: Node[] = [];
-  pathNodes(ast, parents, literals);
-  const expressions = new Set<Node>();
-  for (const literal of literals) {
-    let expression = literal;
-    let parent = parents.get(expression);
-    while (parent && pathExpression(parent)) {
-      expression = parent;
-      parent = parents.get(expression);
-    }
-    if (!fixedPathExpression(expression)) expressions.add(expression);
-  }
-  return [...expressions].map((expression) => ({ kind: 'dynamic-path', offset: expression.start ?? 0 }));
+  const ast = parse(source, { sourceType: 'module', plugins: ['typescript'], allowReturnOutsideFunction: true });
+  const offsets = new Set<number>();
+  pathNodes(ast, offsets);
+  return [...offsets].map((offset) => ({ kind: 'dynamic-path', offset }));
 }
 
 /** Raw path access, before exceptions: also used to refuse stale exception entries. */
