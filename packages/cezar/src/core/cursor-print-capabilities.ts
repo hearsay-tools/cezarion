@@ -24,20 +24,9 @@ function buildDate(version: string): number | undefined {
   return match ? Number(`${match[1]}${match[2]}${match[3]}`) : undefined;
 }
 
-/** Bounded, pre-inference checks that the installed build can run print sessions: a dated
- * build no older than the baseline, the strict native tool validator, and the core tools. */
-export async function inspectCursorPrintCapabilities(
-  bin: string,
-  spec: AgentRunSpec,
-  signal?: AbortSignal,
-): Promise<CursorPrintCapabilityResult> {
-  const options = {
-    cwd: spec.cwd,
-    env: buildChildEnv({ backend: 'cursor', extraEnv: spec.env }),
-    timeout: 5_000,
-    maxBuffer: 64 * 1024,
-    signal,
-  };
+type ProbeOptions = Parameters<typeof execute>[2];
+
+async function inspectBuildVersion(bin: string, options: ProbeOptions): Promise<CursorPrintCapabilityResult> {
   let version: string;
   try { version = (await execute(bin, cursorArgs(bin, ['--version']), options)).stdout.trim(); }
   catch (error) {
@@ -50,6 +39,10 @@ export async function inspectCursorPrintCapabilities(
   if (date === undefined || date < buildDate(QUALIFIED_BASELINE)!) {
     return { supported: false, reason: `Cursor print marketplace support needs a build from ${QUALIFIED_BASELINE} or newer; installed build is not qualified` };
   }
+  return { supported: true };
+}
+
+async function inspectNativeTools(bin: string, options: ProbeOptions): Promise<CursorPrintCapabilityResult> {
   const probe = async (): Promise<string> => {
     try {
       // Match the trusted headless invocation. In a new task worktree Cursor
@@ -76,6 +69,27 @@ export async function inspectCursorPrintCapabilities(
   if (missing.length) {
     return { supported: false, reason: `Cursor native tool catalog lacks core print tools: ${missing.join(', ')}` };
   }
+  return { supported: true };
+}
+
+/** Bounded, pre-inference checks that the installed build can run print sessions: a dated
+ * build no older than the baseline, the strict native tool validator, and the core tools. */
+export async function inspectCursorPrintCapabilities(
+  bin: string,
+  spec: AgentRunSpec,
+  signal?: AbortSignal,
+): Promise<CursorPrintCapabilityResult> {
+  const options = {
+    cwd: spec.cwd,
+    env: buildChildEnv({ backend: 'cursor', extraEnv: spec.env }),
+    timeout: 5_000,
+    maxBuffer: 64 * 1024,
+    signal,
+  };
+  const version = await inspectBuildVersion(bin, options);
+  if (!version.supported) return version;
+  const tools = await inspectNativeTools(bin, options);
+  if (!tools.supported) return tools;
   if (!spec.model && !spec.effort) return { supported: true };
   let models: ModelOption[];
   try { models = parseCursorModels((await execute(bin, cursorArgs(bin, ['--list-models']), options)).stdout); }
