@@ -122,11 +122,17 @@ export class ReportsIndex {
     console.warn(`[cez] Report missing or deleted: ${row.runId}/${row.id}`);
     return false;
   }
-  private search(q: string): ReportRow[] {
+  private matchingRows(q: string): ReportRow[] {
     const matches: ReportRow[] = [];
+    const warned = new Set<string>();
     for (const row of this.db.reports.summaries()) {
       const summary = parseStoredSummary(row.summary);
-      if (reportTitle(row).toLowerCase().includes(q) || row.name.toLowerCase().includes(q) || (summary && matchesRunSearch(summary, q, { scope: 'stored' }))) matches.push(row);
+      if (!summary) {
+        if (!warned.has(row.runId)) console.warn(`[cez] Report source task could not be read: ${row.runId}`);
+        warned.add(row.runId);
+        continue;
+      }
+      if (!q || reportTitle(row).toLowerCase().includes(q) || row.name.toLowerCase().includes(q) || matchesRunSearch(summary, q, { scope: 'stored' })) matches.push(row);
     }
     return matches;
   }
@@ -139,34 +145,23 @@ export class ReportsIndex {
     await this.backfill();
     await this.reconcile();
     const q = query.q?.trim().toLowerCase() ?? '';
-    const matches = q ? this.search(q) : undefined;
+    const matches = this.matchingRows(q);
     const limit = query.limit ?? 50;
     const reports: Report[] = [];
-    let missing = 0;
-    let unreadable = 0;
-    const warned = new Set<string>();
     while (reports.length <= limit) {
       const count = limit + 1 - reports.length;
-      const rows = matches ? matches.filter(row => !before || after(row, before)).slice(0, count) : this.db.reports.page(before, count);
+      const rows = q ? matches.filter(row => !before || after(row, before)).slice(0, count) : this.db.reports.page(before, count);
       if (!rows.length) break;
       for (const row of rows) {
         before = cursor(row);
         const entry = report(row);
-        if (!entry) {
-          if (!warned.has(row.runId)) console.warn(`[cez] Report source task could not be read: ${row.runId}`);
-          warned.add(row.runId);
-          missing++; unreadable++;
-        } else {
-          const present = await this.present(row);
-          if (present) reports.push(entry);
-          else { missing++; if (present === null) unreadable++; }
-        }
+        if (entry && await this.present(row)) reports.push(entry);
       }
     }
     const more = reports.length > limit;
     if (more) reports.pop();
     const last = reports.at(-1);
-    return { reports, total: matches ? matches.length - missing : this.db.reports.count() - unreadable,
+    return { reports, total: matches.length,
       nextCursor: more && last ? Buffer.from(JSON.stringify(cursor(last))).toString('base64url') : null };
   }
 }

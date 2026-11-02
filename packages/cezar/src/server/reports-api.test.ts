@@ -131,7 +131,8 @@ describe('project reports', () => {
       const next = await page('?limit=1');
       expect(next.reports).toHaveLength(1);
       expect(next.reports[0]!.id).not.toBe(missing.id);
-      expect(next.total).toBe(2); expect(next.nextCursor).toBeTruthy();
+      expect(next.total).toBe(3); expect(next.nextCursor).toBeTruthy();
+      expect((await page('?limit=1')).total).toBe(2);
       expect(getRun).not.toHaveBeenCalled();
     } finally { getRun.mockRestore(); warning.mockRestore(); }
   });
@@ -156,6 +157,34 @@ describe('project reports', () => {
       const open = vi.spyOn(fs, 'open');
       expect((await page()).reports.map(row => row.id)).toContain(cached.id);
       expect(open).not.toHaveBeenCalled(); // Terminal task: no rescan was needed for the repaired summary.
+    } finally { raw.close(); }
+  });
+
+  it('counts readable matching summaries beyond lookahead consistently across cursor pages', async () => {
+    const broken = task('Broken'), good = task('Readable');
+    await publish(broken.id, 'old.html', 'Matching report');
+    const first = await publish(good.id, 'first.html', 'Matching report');
+    const second = await publish(good.id, 'second.html', 'Matching report');
+    for (const run of [broken, good]) store.updateRun(run.id, { status: RUN_STATUS.done });
+    store.flush(); await page();
+    const raw = new DatabaseSync(join(dataDir, 'runs.db'));
+    try {
+      // Put the unreadable summary strictly beyond the first page's lookahead.
+      raw.prepare('UPDATE artifacts SET created_at = ? WHERE run_id = ?').run('2000-01-01T00:00:00.000Z', broken.id);
+      raw.prepare('UPDATE runs SET summary = ? WHERE id = ?').run('{broken', broken.id);
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      const getRun = vi.spyOn(store, 'getRun'), stat = vi.spyOn(fs, 'lstat');
+      for (const search of ['', '&q=matching', '&q=readable']) {
+        const one = await page(`?limit=1${search}`);
+        expect(one.total).toBe(2); expect(one.nextCursor).toBeTruthy();
+        const two = await page(`?limit=1${search}&before=${one.nextCursor}`);
+        expect(two.total).toBe(one.total); expect(two.nextCursor).toBeNull();
+        expect(new Set([...one.reports, ...two.reports].map(row => row.id))).toEqual(new Set([first.id, second.id]));
+      }
+      expect((await page('?q=first.html')).total).toBe(1);
+      expect((await page('?q=broken')).total).toBe(0);
+      expect(getRun).not.toHaveBeenCalled();
+      expect(stat.mock.calls.every(([path]) => String(path).endsWith('/content'))).toBe(true);
     } finally { raw.close(); }
   });
 

@@ -12,7 +12,10 @@ export const reportSchema = z.object({
   taskTitle: z.string(), taskStatus: runStatusSchema,
 }).strict();
 export const reportsResponseSchema = z.object({
-  reports: z.array(reportSchema), nextCursor: z.string().nullable(), total: z.number().int().nonnegative(),
+  reports: z.array(reportSchema), nextCursor: z.string().nullable(),
+  // Counts all matching cached rows with readable source summaries before page content checks.
+  // A missing-content row dropped while filling this page can lower total on the next request.
+  total: z.number().int().nonnegative(),
 }).strict();
 export type Report = z.infer<typeof reportSchema>;
 export type ReportsResponse = z.infer<typeof reportsResponseSchema>;
