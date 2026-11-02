@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { useLayoutEffect } from 'react'
-import { MemoryRouter, Route, Routes, useLocation, useNavigate, useParams } from 'react-router'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate, useNavigationType, useParams } from 'react-router'
 import { parseReportSelection, useConversationReport } from './report-selection'
 
 const id = 'b962b341-4d95-4d46-a107-f278ab187228'
@@ -27,12 +27,14 @@ function Conversation() {
   const report = useConversationReport(runId)
   const navigate = useNavigate()
   const location = useLocation()
+  const navigationType = useNavigationType()
   useLayoutEffect(() => {
     const source = report.registry.register(id, 'worker')
     const opener = report.registry.registerOpener('message', restoreOpener)
     return () => { source(); opener() }
   }, [report.registry])
   return <>
+    <output data-testid="navigation">{navigationType}</output>
     <output data-testid="url">{location.pathname + location.search}</output>
     <output data-testid="source">{report.sourceRunId ?? 'none'}</output>
     <button id={`report-card-message-${id}`} onClick={() => navigate(`?report=${id}&card=message`, { state: { reportCardEntry: true } })}>Read report</button>
@@ -74,10 +76,12 @@ it('restores URL selection after a task switch without leaking it to the other t
 it('replaces an invalid selection and closes a cold bookmark without leaving the task', () => {
   at('/tasks/one?report=invalid&card=message&thread=flat')
   expect(screen.getByTestId('url').textContent).toBe('/tasks/one?thread=flat')
+  expect(screen.getByTestId('navigation').textContent).toBe('REPLACE')
 })
 
 it('closes a cold selection by replacement', () => {
   at(`/tasks/one?report=${id}&card=message&thread=flat`)
   fireEvent.click(screen.getByText('Close'))
   expect(screen.getByTestId('url').textContent).toBe('/tasks/one?thread=flat')
+  expect(screen.getByTestId('navigation').textContent).toBe('REPLACE')
 })

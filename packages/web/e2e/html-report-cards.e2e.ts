@@ -29,6 +29,7 @@ let base: string
 let server: ChildProcess
 let browser: AgentBrowser
 let publication: { id: string; markdown: string }
+let unreferencedPublication: { id: string; markdown: string }
 
 const thread = () => `/p/${projectId}/tasks/${runId}?thread=flat`
 const otherThread = () => `/p/${projectId}/tasks/${otherRunId}`
@@ -45,6 +46,9 @@ beforeAll(async () => {
   writeFileSync(source, '<!doctype html><title>Published research results</title><main><h1>Research results</h1><p style="height:3000px">Long report body</p><p>End of report</p></main>')
   publication = JSON.parse(execFileSync(process.execPath, [cezarCli, 'artifact', 'publish', source], {
     cwd: project, env: { ...env, CEZ_TASK_ID: runId, CEZ_ARTIFACTS_DIR: join(project, '.ai/cezar/runs', `${runId}-artifacts`) }, encoding: 'utf8',
+  }))
+  unreferencedPublication = JSON.parse(execFileSync(process.execPath, [cezarCli, 'artifact', 'publish', source], {
+    cwd: project, env: { ...env, CEZ_TASK_ID: otherRunId, CEZ_ARTIFACTS_DIR: join(project, '.ai/cezar/runs', `${otherRunId}-artifacts`) }, encoding: 'utf8',
   }))
   rmSync(source)
   const records = [[runId, 'Report card source'], [otherRunId, 'Other conversation'], [virtualRunId, 'Long report conversation']].map(([id, title]) => makeRunRecord({
@@ -160,6 +164,38 @@ it('restores the selected report after a task switch, then returns to the second
   browser.click(BACK)
   expectReturned(selector)
   expect(browser.waitForValue<string>(`document.activeElement?.id`)).toBe(buttonId)
+})
+
+it('opens a cold selected publication without a transcript reference or mounted source card', async () => {
+  const currentUrl = browser.url()
+  await browser.withCdp(async request => {
+    const { targetInfos } = await request('Target.getTargets')
+    const page = targetInfos.find((target: { type: string; url: string }) => target.type === 'page' && target.url === currentUrl)
+    const { sessionId } = await request('Target.attachToTarget', { targetId: page.targetId, flatten: true })
+    await request('Page.enable', {}, sessionId)
+    // Observe the whole cold load, so a transient source-registry error cannot pass on recovery.
+    const { identifier } = await request('Page.addScriptToEvaluateOnNewDocument', { source: `
+      window.__reportSourceFailures = [];
+      new MutationObserver(() => {
+        if (document.body?.textContent.includes('Report source unavailable')) window.__reportSourceFailures.push('source unavailable');
+      }).observe(document, { childList: true, subtree: true, characterData: true });
+    ` }, sessionId)
+    try {
+      browser.goto(`${base}${otherThread()}?report=${unreferencedPublication.id}&card=not-yet-mounted-message`)
+      browser.waitForFunction(`Array.isArray(window.__reportSourceFailures)`)
+      const opening = browser.waitForValue<{ frame: boolean; failures: string[] }>(`({ frame: document.querySelector('${FRAME}') !== null, failures: window.__reportSourceFailures ?? [] })`, value => value.frame || value.failures.length > 0)
+      expect(opening.failures, 'A published report must resolve without a mounted source card').toEqual([])
+      browser.waitForFunction(`document.querySelector('${FRAME}') !== null`)
+      settleVisual(browser, READER, { idle: true })
+      const state = browser.waitForValue<{ cards: number; failures: string[]; selection: string | null }>(`({ cards: document.querySelectorAll('${CARD}').length, failures: window.__reportSourceFailures, selection: new URLSearchParams(location.search).get('report') })`)
+      expect(state).toEqual({ cards: 0, failures: [], selection: unreferencedPublication.id })
+      browser.click(BACK)
+      browser.waitForFunction(`!new URLSearchParams(location.search).has('report') && document.querySelector('${FRAME}') === null`)
+    } finally {
+      await request('Page.removeScriptToEvaluateOnNewDocument', { identifier }, sessionId)
+      await request('Target.detachFromTarget', { sessionId })
+    }
+  })
 })
 
 it('restores an offscreen source card after a cold virtualized report selection', () => {

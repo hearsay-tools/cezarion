@@ -18,6 +18,8 @@ vi.mock('@/api/queries', () => ({
   useHealth: () => ({ data: { capabilities: { preview: state.preview } } }),
 }))
 
+vi.mock('../report-source', () => ({ useReportSource: (runId: string, artifactId?: string, knownSource?: string) => ({ data: artifactId ? knownSource ?? runId : undefined, isPending: false, isError: false, error: null }) }))
+
 vi.mock('./use-preview-server-states', () => ({ usePreviewServerStates: () => new Map() }))
 vi.mock('./use-agent-page-live', () => ({
   useAgentPageLive: (id: string | undefined) => {

@@ -70,16 +70,19 @@ export function TaskReportRoute() {
 }
 
 export type ReportSelection = { path?: string | null; artifactId?: string | null; conflict?: boolean }
+export type ReportSourceLookup = { isPending: boolean; isError: boolean; error: Error | null; refetch: () => unknown }
+type ReportQueryState = ReportSourceLookup & { data: FilePreviewData | FileLinkResult | undefined }
 
 /** Shared reader for route links and conversation cards. Content loads only while mounted. */
-export function ReportReader({ runId, selection, fragment, onBack, variant }: {
+export function ReportReader({ runId, selection, fragment, onBack, variant, sourceLookup }: {
   runId: string
   selection: ReportSelection
   fragment: string
   onBack: () => void
   variant: 'route' | 'pane'
+  sourceLookup?: ReportSourceLookup | undefined
 }) {
-  const { path, conflict, selected, result } = useReportData(runId, selection)
+  const { path, conflict, selected, result } = useReportData(runId, selection, sourceLookup)
   const docked = useMediaQuery(PREVIEW_DOCK_QUERY, true)
   const phone = useMediaQuery(PREVIEW_PHONE_QUERY, false)
   const location = useLocation()
@@ -114,11 +117,13 @@ function reportFilesHref(pathname: string, runId: string, selection: ReportSelec
   return `${prefix}/tasks/${encodeURIComponent(runId)}/files?${query}`
 }
 
-function useReportData(runId: string, selection: ReportSelection) {
+function useReportData(runId: string, selection: ReportSelection, sourceLookup?: ReportSourceLookup) {
   const { path = null, artifactId = null, conflict = false } = selection
-  const live = useFileLink(runId, artifactId || conflict ? null : path)
-  const published = useArtifact(runId, conflict ? null : artifactId)
-  return { path, conflict, selected: path !== null || artifactId !== null, result: artifactId ? published : live }
+  const resolving = sourceLookup?.isPending || sourceLookup?.isError
+  const live = useFileLink(runId, artifactId || conflict || resolving ? null : path)
+  const published = useArtifact(runId, conflict || resolving ? null : artifactId)
+  const result: ReportQueryState = resolving && sourceLookup ? { ...sourceLookup, data: undefined } : artifactId ? published : live
+  return { path, conflict, selected: path !== null || artifactId !== null, result }
 }
 
 /** Files owns non-HTML files and live files with no readable snapshot. */
@@ -162,19 +167,14 @@ function ReportBody({ conflict, selected, result, source, name, fragment, pane, 
   fragment: string
   conflict: boolean
   selected: boolean
-  result: ReturnType<typeof useArtifact> | ReturnType<typeof useFileLink>
+  result: ReportQueryState
   source: boolean
   name: string
 }): ReactNode {
   if (conflict) return <State icon={<FileXIcon />} title="Invalid report link" subtitle="Choose either a path or a published artifact." />
   if (!selected) return <State icon={<FileQuestionIcon />} title="No report selected" subtitle="Open a report from a link in the conversation or from Files." />
   if (result.isPending) return <p role="status" data-slot="report-loading" className="px-4 py-6 text-center text-sm text-soft-foreground">Loading report…</p>
-  if (result.isError) {
-    const missing = result.error instanceof ApiError && result.error.status === 404
-    return <State icon={missing ? <FileXIcon /> : <TriangleAlertIcon size={16} />} tone={missing ? 'neutral' : 'danger'}
-      title={missing ? 'Report missing or deleted' : 'Could not load this report'} subtitle={result.error.message}
-      action={<Button variant="outline" className="min-h-11" onClick={() => void result.refetch()}>Retry</Button>} />
-  }
+  if (result.isError) return <ReportError result={result} />
   const data: FilePreviewData | { type: 'unavailable' | 'unpublished'; path: string; reason: string } = result.data!
   if (data.type !== 'file') return <State icon={<FileXIcon />} title={data.type === 'unpublished' ? 'Report not published' : 'Report unavailable'} subtitle={data.reason} />
   if (pane && !isHtmlPath(data.path)) return <State icon={<FileQuestionIcon />} title="Not an HTML report" subtitle="Open this published file in Files."
@@ -183,6 +183,13 @@ function ReportBody({ conflict, selected, result, source, name, fragment, pane, 
   if (data.binary) return <State icon={<FileQuestionIcon />} title="Binary file" subtitle="This file holds binary data, not readable HTML." />
   if (source) return <div className="bg-card"><CodeLines path={data.path} text={data.content ?? ''} /></div>
   return <HtmlReportFrame html={data.content ?? ''} title={`Report: ${name}`} fragment={fragment} className={pane ? 'min-h-0 flex-1' : 'min-h-[60dvh] flex-1'} />
+}
+
+function ReportError({ result }: { result: ReportQueryState }) {
+  const missing = result.error instanceof ApiError && result.error.status === 404
+  return <State icon={missing ? <FileXIcon /> : <TriangleAlertIcon size={16} />} tone={missing ? 'neutral' : 'danger'}
+    title={missing ? 'Report missing or deleted' : 'Could not load this report'} subtitle={result.error?.message ?? 'Try again.'}
+    action={<Button variant="outline" className="min-h-11" onClick={() => void result.refetch()}>Retry</Button>} />
 }
 
 function State({ icon, title, subtitle, tone = 'neutral', action }: { icon: ReactNode; title: string; subtitle: string; tone?: 'neutral' | 'danger'; action?: ReactNode }) {

@@ -4,8 +4,9 @@ import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
+import { ApiError } from '@/api/client'
 import { REPORT_SANDBOX } from '@/lib/html-report'
-import { ReportReader, TaskReportRoute } from './report-reader'
+import { ReportReader, TaskReportRoute, type ReportSourceLookup } from './report-reader'
 
 const ID = '4c15e25b-a08c-438d-a32b-fd1a8c6c90e2'
 const result = {
@@ -25,9 +26,45 @@ function mount(route: boolean, onBack = vi.fn(), data = result, runId = 'r1') {
   </QueryClientProvider>)
 }
 
+function mountLookup(lookup: ReportSourceLookup) {
+  const client = createQueryClient()
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(result), { headers: { 'content-type': 'application/json' } })))
+  const tree = (sourceLookup: ReportSourceLookup) => <QueryClientProvider client={client}>
+    <MemoryRouter><ReportReader runId="r1" selection={{ artifactId: ID }} fragment="" onBack={vi.fn()} variant="pane" sourceLookup={sourceLookup} /></MemoryRouter>
+  </QueryClientProvider>
+  const view = render(tree(lookup))
+  return (next: ReportSourceLookup) => view.rerender(tree(next))
+}
+
 const frame = () => document.querySelector<HTMLIFrameElement>('[data-slot="html-report-frame"]')
 
 describe('the extracted report reader', () => {
+  it('loads no content while source ownership is pending, then loads after resolution', async () => {
+    const refetch = vi.fn()
+    const resolve = mountLookup({ isPending: true, isError: false, error: null, refetch })
+    expect(screen.getByRole('status').textContent).toBe('Loading report…')
+    expect(frame()).toBeNull()
+    expect(fetch).not.toHaveBeenCalled()
+    resolve({ isPending: false, isError: false, error: null, refetch })
+    await waitFor(() => expect(frame()).not.toBeNull())
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(String(vi.mocked(fetch).mock.calls[0]![0])).toBe(`/api/v1/runs/r1/artifacts/${ID}`)
+  })
+
+  it.each([
+    [404, 'Report missing or deleted'],
+    [500, 'Could not load this report'],
+  ])('shows source lookup error %i through the reader state and retries ownership, with no content request', async (status, heading) => {
+    const refetch = vi.fn()
+    mountLookup({ isPending: false, isError: true, error: new ApiError(status, 'Source unavailable'), refetch })
+    expect(screen.getByRole('heading', { name: heading })).toBeTruthy()
+    expect(screen.getByText('Source unavailable')).toBeTruthy()
+    expect(frame()).toBeNull()
+    expect(fetch).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    expect(refetch).toHaveBeenCalledOnce()
+  })
+
   it('sends a non-HTML publication opened before metadata loads to its source task Files', async () => {
     mount(false, vi.fn(), { ...result, path: 'notes.md', artifact: { ...result.artifact, name: 'notes.md', runId: 'worker' } }, 'worker')
     expect((await screen.findByRole('heading', { name: 'Not an HTML report' })).textContent).toBe('Not an HTML report')

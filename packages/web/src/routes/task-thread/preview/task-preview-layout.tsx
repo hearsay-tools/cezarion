@@ -5,6 +5,7 @@ import type { ApiRun } from '@open-mercato/cezar-api-client'
 
 import { useHealth, useRun } from '@/api/queries'
 
+import { useReportSource } from '../report-source'
 import { ReportCardSourcesContext, useConversationReport } from '../report-selection'
 
 import { PreviewSplit } from './preview-split'
@@ -26,10 +27,10 @@ export function TaskPreviewLayout() {
   const removed = run.data ? worktreeRemoved(run.data) : false
   const pane = usePreviewPaneState(id, removed)
   const report = useConversationReport(id)
+  const source = useReportSource(id, report.selection?.artifactId, report.sourceRunId)
   const reader = report.selection ? <Suspense fallback={<p role="status">Loading report…</p>}>
-    {report.sourceRunId ? <ReportReader key={`${id}:${report.sourceRunId}:${report.selection.artifactId}`} runId={report.sourceRunId}
-      selection={{ artifactId: report.selection.artifactId }} fragment={location.hash} onBack={report.close} variant="pane" />
-      : <div className="flex h-full flex-col gap-4 p-4"><button className="min-h-11" onClick={report.close}>Back</button><p>Report source unavailable</p><p className="text-sm text-soft-foreground">Return to the conversation to load the message that names this report.</p></div>}
+    <ReportReader key={`${id}:${report.selection.artifactId}`} runId={source.data ?? id ?? ''}
+      selection={{ artifactId: report.selection.artifactId }} fragment={location.hash} onBack={report.close} variant="pane" sourceLookup={source} />
   </Suspense> : undefined
   const content = enabled ? <PreviewProvider id={id} run={run.data} pane={pane} removed={removed} report={reader}><Outlet /></PreviewProvider>
     : <PreviewSplit run={run.data} state={{ ...pane, open: false }} report={reader}><Outlet /></PreviewSplit>
