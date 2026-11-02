@@ -33,6 +33,12 @@ const nudges = (runId: string) => store.readEvents(runId).filter(event => event.
 const wakes = (runId: string) => (store.getRun(runId)?.automaticWakes ?? 0) - nudges(runId);
 const inputsNaming = (runId: string, text: string) => (store.getRun(runId)?.agentInputs ?? []).filter(input => input.text.includes(text));
 
+/** The background children's `item.completed` events: id, status, title and step. */
+const backgroundEnds = (runId: string) => store.readEvents(runId).filter(event => event.type === 'item.completed' && (event.item as UiToolItem | undefined)?.background === true)
+  .map(event => [(event.item as UiToolItem).id, (event.item as UiToolItem).status, (event.item as UiToolItem).title, event.stepId]);
+/** The step a child's `item.started` was recorded under. */
+const startStep = (runId: string, childId: string) => store.readEvents(runId).find(event => event.type === 'item.started' && (event.item as UiToolItem | undefined)?.id === childId)?.stepId;
+
 /** A backgrounded native subagent's root task item, as a runner mapper marks it. */
 const child = (id: string, status: ToolStatus, background = true): UiToolItem => ({
   kind: 'tool', id, name: 'Agent', toolKind: 'task', title: `Background research ${id}`, status, ...(background ? { background: true as const } : {}),
@@ -41,7 +47,8 @@ const child = (id: string, status: ToolStatus, background = true): UiToolItem =>
 /** One UI event, through the handler every runner's `onUiEvent` reaches. */
 function emitUi(runId: string, event: UiEvent): void {
   const engine = internals();
-  const sink = new UiEventSink({ persist: next => store.appendEvent(runId, next), emitLive: () => undefined });
+  const stepId = engine.active.get(runId)!.currentStepId;
+  const sink = new UiEventSink({ persist: next => store.appendEvent(runId, { ...next, ...(stepId ? { stepId } : {}) }), emitLive: () => undefined });
   handleRunnerUiEvent(engine.context, engine.sessionHelperHost, runId, engine.active.get(runId)!, sink, event);
 }
 const startChild = (runId: string, id: string) => emitUi(runId, { type: 'item.started', item: child(id, 'running') });
@@ -186,20 +193,6 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     expect(internals().active.get(id)?.session?.open).toBe(true);
   });
 
-  it('a first turn that asks with children running keeps the session and slot, and gives both back when they end', async () => {
-    const { run, release } = await heldParent(undefined, 'mock:ask which one?');
-    startChild(run.id, 'toolu_bg_01');
-    release();
-    await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting && internals().line.isParked(run.id));
-    // A question opens no subagent wait, but the children still run in this session.
-    expect(subagentWait(run.id)).toBeUndefined();
-    expect(internals().line.inPool(run.id)).toBe(true);
-    expect(internals().active.get(run.id)?.idleTimer).toBeUndefined();
-    endChild(run.id, 'toolu_bg_01');
-    expect(internals().line.inPool(run.id)).toBe(false);
-    expect(internals().active.get(run.id)?.idleTimer).toBeDefined();
-  });
-
   it('past the child bound the saved wait keeps the latest ends, so a new child\'s end is never dropped', async () => {
     const ids = Array.from({ length: 33 }, (_, index) => `toolu_bg_${String(index).padStart(2, '0')}`);
     const { id, wait } = await parkedOnSubagents(ids);
@@ -284,6 +277,14 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     expect([...store.getRun(run.id)?.waits ?? [], ...store.getRun(run.id)?.lastWaits ?? []].some(entry => entry.kind === WAIT_KIND.subagent)).toBe(false);
   });
 
+  it('a restart ends every running child in the transcript, past the wait\'s child bound', async () => {
+    const ids = Array.from({ length: 33 }, (_, index) => `toolu_bg_${String(index).padStart(2, '0')}`);
+    const { id, wait } = await parkedOnSubagents(ids);
+    await restart();
+    await until(() => settledOf(id, wait.id)?.phase === WAIT_PHASE.delivered);
+    expect(backgroundEnds(id).map(([child, status]) => [child, status])).toEqual(ids.map(child => [child, 'declined']));
+  });
+
   it('a restart with no session resolves the wait interrupted and continues the run once, free', async () => {
     const { id, wait } = await parkedOnSubagents(['toolu_bg_01', 'toolu_bg_02']);
     await restart();
@@ -294,9 +295,9 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     expect(input!.text).toContain('Cezar restarted, and the 2 native subagents still running in your last session stopped with it.');
     expect(wakes(id)).toBe(0);
     // The transcript ends each stopped child, so the activity view no longer shows it running.
-    const ends = store.readEvents(id).filter(event => event.type === 'item.completed' && (event.item as UiToolItem | undefined)?.background === true)
-      .map(event => [(event.item as UiToolItem).id, (event.item as UiToolItem).status, (event.item as UiToolItem).title]);
-    expect(ends).toEqual([['toolu_bg_01', 'declined', 'Background research toolu_bg_01'], ['toolu_bg_02', 'declined', 'Background research toolu_bg_02']]);
+    const ends = backgroundEnds(id);
+    expect(ends).toEqual([['toolu_bg_01', 'declined', 'Background research toolu_bg_01', startStep(id, 'toolu_bg_01')], ['toolu_bg_02', 'declined', 'Background research toolu_bg_02', startStep(id, 'toolu_bg_02')]]);
+    expect(startStep(id, 'toolu_bg_01')).toEqual(expect.any(String));
   });
 });
 

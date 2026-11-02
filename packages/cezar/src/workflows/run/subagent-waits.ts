@@ -214,36 +214,44 @@ export class SubagentWaits {
   }
 
   /** The run left the live registry: its session, and the children it held, are gone. An open
-   *  subagent wait resolves `interrupted`, so its wake says so, for nothing. */
-  afterSessionGone(runId: string): void {
+   *  subagent wait resolves `interrupted`, so its wake says so, for nothing. With no wait open
+   *  (a park held beside a question), the children still end in the transcript. */
+  afterSessionGone(runId: string, state?: ActiveRun): void {
     this.clearGrace(runId);
     if (this.context.disposed()) return;
     const wait = openSubagentWaitOf(this.context.store.getRun(runId));
     if (wait) this.interrupt(runId, wait.id);
+    else if (state && liveSubagents(state)) this.endStoppedChildren(runId);
   }
 
   /**
-   * The session that held the wait's children is gone, so they stopped: each child the wait still
-   * reads as running ends in the transcript as `declined`, so the activity view stops showing it
-   * as running, and the wait resolves `interrupted`. The ending item copies the child's last
-   * recorded item, because a reader replaces an item by id.
+   * The session that held the wait's children is gone, so they stopped: they end in the transcript
+   * and the wait resolves `interrupted`.
    */
   interrupt(runId: string, waitId: string): void {
-    const wait = openWaits(this.context.store.getRun(runId) ?? {}).find((entry): entry is SubagentWaitEntry => entry.id === waitId && entry.kind === 'subagent');
-    const running = new Set(wait?.children.filter(child => child.status === 'running').map(child => child.id));
-    if (running.size) {
-      const last = new Map<string, UiToolItem>();
-      for (const event of this.context.store.readEvents(runId)) {
-        const item = (event as { item?: unknown }).item as UiToolItem | undefined;
-        if (item?.kind === 'tool' && running.has(item.id) && item.background === true) last.set(item.id, item);
-      }
-      for (const item of last.values()) {
-        if (item.status !== 'running' && item.status !== 'pending') continue;
-        try { this.context.store.appendEvent(runId, { type: 'item.completed', item: { ...item, status: 'declined' } }); }
-        catch (error) { console.warn(`[cez] subagent end write failed: ${error instanceof Error ? error.message : String(error)}`); }
-      }
-    }
+    this.endStoppedChildren(runId);
     this.host.settleWait(runId, waitId, { reason: 'interrupted' });
+  }
+
+  /**
+   * Every background child the transcript still shows running ends as `declined`, so the activity
+   * view stops showing it running. The transcript, not the wait's bounded snapshot, names them.
+   * The ending event copies the child's last recorded item and its step, because a reader
+   * replaces an item by its step and id.
+   */
+  private endStoppedChildren(runId: string): void {
+    const last = new Map<string, { item: UiToolItem; stepId: string | undefined }>();
+    for (const event of this.context.store.readEvents(runId)) {
+      const item = (event as { item?: unknown }).item as UiToolItem | undefined;
+      if (item?.kind !== 'tool' || item.parentItemId !== undefined) continue;
+      if (!last.has(item.id) && item.background !== true) continue;
+      last.set(item.id, { item, stepId: event.stepId });
+    }
+    for (const { item, stepId } of last.values()) {
+      if (item.status !== 'running' && item.status !== 'pending') continue;
+      try { this.context.store.appendEvent(runId, { type: 'item.completed', ...(stepId ? { stepId } : {}), item: { ...item, background: true, status: 'declined' } }); }
+      catch (error) { console.warn(`[cez] subagent end write failed: ${error instanceof Error ? error.message : String(error)}`); }
+    }
   }
 
   /** Whether the session that holds the wait's children is still live. */

@@ -424,7 +424,7 @@ export class RunManager {
     this.store.unpin(runId, 'active');
     this.modules.runSettlement.afterDropActive(runId);
     // The session held the run's native subagents: an open subagent wait resolves interrupted (hearsay-tools/cezarion#2431).
-    this.modules.subagentWaits.afterSessionGone(runId);
+    this.modules.subagentWaits.afterSessionGone(runId, state);
   }
 
   /** Project detach cancels autonomous cleanup; reattach reconstructs the durable intents. */
