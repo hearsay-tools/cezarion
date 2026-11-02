@@ -29,6 +29,8 @@ interface SubagentWaitsHost {
   settleWait(id: string, waitId: string, result?: SubagentWaitResult): void;
   armWait(id: string, wait: Wait): void;
   disarmWait(id: string): void;
+  /** Give a held park for the user its slot back and arm its idle close. */
+  releaseHeldPark(id: string, state: ActiveRun): void;
 }
 
 /**
@@ -89,7 +91,7 @@ export class SubagentWaits {
     const live = liveSubagents(state);
     if (live) this.clearGrace(runId);
     const wait = openSubagentWaitOf(this.context.store.getRun(runId));
-    if (!wait) return;
+    if (!wait) { if (!live) this.releaseHeldPark(runId, state); return; }
     // A grace starts only from a saved snapshot, so the settled wait names every child's end.
     if (this.refreshWait(runId, state, wait) && !live && this.host.isParked(runId)) this.armGrace(runId);
   }
@@ -110,11 +112,19 @@ export class SubagentWaits {
     else if (!turn.asks && !state.pendingHumanAsk && !state.pendingPermissions?.size) this.openSubagentWait(runId, state);
   }
 
-  /** Whether the run waits on native subagents that still run in its session: then a park for the
-   *  user keeps the session and its slot, so no idle close stops them (hearsay-tools/cezarion#2431). */
+  /** Whether native subagents still run in the run's session: then a park for the user keeps the
+   *  session and its slot, so no idle close stops them (hearsay-tools/cezarion#2431). */
   holdsLiveSubagents(runId: string): boolean {
     const state = this.host.active.get(runId);
-    return !!state && liveSubagents(state) > 0 && openSubagentWaitOf(this.context.store.getRun(runId)) !== undefined;
+    return !!state && liveSubagents(state) > 0;
+  }
+
+  /** The last child of a park for the user that held its slot for them ended, with no subagent wait
+   *  to wake the parent: the park gives the slot back and arms its idle close, as it would have. */
+  private releaseHeldPark(runId: string, state: ActiveRun): void {
+    if (!state.heldForSubagents || !this.host.isParked(runId)) return;
+    state.heldForSubagents = undefined;
+    this.host.releaseHeldPark(runId, state);
   }
 
   /** The children the wait saves: the session's own, the running ones first, within the bound. */
@@ -122,6 +132,7 @@ export class SubagentWaits {
     const own = [...state.backgroundChildren].filter(([, child]) => child.session === state.session).map(([id, child]) => ({ id, status: child.status }));
     return [...own.filter(child => child.status === 'running'), ...own.filter(child => child.status !== 'running')].slice(0, SUBAGENT_WAIT_CHILD_LIMIT);
   }
+
 
   private deadline(): string {
     return new Date(Date.now() + this.deadlineMs).toISOString();

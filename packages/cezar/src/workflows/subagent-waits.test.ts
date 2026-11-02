@@ -48,10 +48,10 @@ const startChild = (runId: string, id: string) => emitUi(runId, { type: 'item.st
 const endChild = (runId: string, id: string, status: ToolStatus = 'completed') => emitUi(runId, { type: 'item.completed', item: child(id, status, false) });
 
 /** A parent whose first turn is held until `release()`: children start inside it. */
-async function heldParent(humanAnswerGate?: string) {
+async function heldParent(humanAnswerGate?: string, task?: string) {
   const gate = join(root, `release-${randomUUID()}`);
   const wire = controlledWire({ firstResultGate: gate, replay: true, ...(humanAnswerGate ? { humanAnswerGate } : {}) });
-  const run = await parent(); await until(wire.initialReceived);
+  const run = await parent(task); await until(wire.initialReceived);
   return { run, release: () => writeFileSync(gate, 'release') };
 }
 
@@ -184,6 +184,20 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     expect(internals().line.inPool(id)).toBe(true);
     expect(internals().active.get(id)?.idleTimer).toBeUndefined();
     expect(internals().active.get(id)?.session?.open).toBe(true);
+  });
+
+  it('a first turn that asks with children running keeps the session and slot, and gives both back when they end', async () => {
+    const { run, release } = await heldParent(undefined, 'mock:ask which one?');
+    startChild(run.id, 'toolu_bg_01');
+    release();
+    await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting && internals().line.isParked(run.id));
+    // A question opens no subagent wait, but the children still run in this session.
+    expect(subagentWait(run.id)).toBeUndefined();
+    expect(internals().line.inPool(run.id)).toBe(true);
+    expect(internals().active.get(run.id)?.idleTimer).toBeUndefined();
+    endChild(run.id, 'toolu_bg_01');
+    expect(internals().line.inPool(run.id)).toBe(false);
+    expect(internals().active.get(run.id)?.idleTimer).toBeDefined();
   });
 
   it('a duplicate child end changes nothing and wakes nothing', async () => {

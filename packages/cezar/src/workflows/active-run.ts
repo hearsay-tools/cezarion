@@ -130,6 +130,9 @@ export interface ActiveRun {
   /** Cezar is writing input into the session now: a parent turn that starts during the write is
    *  Cezar's, not one the runner started itself (hearsay-tools/cezarion#2431). */
   writingInput?: boolean | undefined;
+  /** A park for the user kept the session and its slot for running native subagents
+   *  (hearsay-tools/cezarion#2431): their last end gives both back. */
+  heldForSubagents?: boolean | undefined;
   usageInvocation?: {
     stepId: string;
     epoch: number;

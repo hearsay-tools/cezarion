@@ -302,6 +302,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     active: host.active, isParked: id => modules.line.isParked(id), isAdmitted: id => modules.line.isAdmitted(id),
     settleWait: (id, waitId, result) => modules.waitWatches.settleWait(id, waitId, result),
     armWait: (id, wait) => modules.waitWatches.armWait(id, wait), disarmWait: id => host.disarmWait(id),
+    releaseHeldPark: (id, state) => { modules.wakeAdmission.leaveMonitoringPool(id); modules.turnSettler.armIdleTimer(id, state); },
   }, host.subagentWaitMs().graceMs, host.subagentWaitMs().deadlineMs);
   modules.humanWaits = new HumanWaits(context, { routeWorkerQuestion: id => modules.workerQuestions.routeWorkerQuestion(id) }, MAX_AUTO_CONTINUES);
   modules.sessionHelperHost = {
