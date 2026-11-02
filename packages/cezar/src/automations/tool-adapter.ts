@@ -40,6 +40,11 @@ function wallTime(request: { at?: string | undefined; delay?: string | undefined
   return request.delay ? resolveDelay(request.delay, now, zone) : undefined;
 }
 
+/** The task settings a create or an update names; an empty one leaves the stored setting. */
+function taskSettings({ workflow, runner, model, effort }: { workflow?: string | undefined; runner?: string | undefined; model?: string | undefined; effort?: string | undefined }) {
+  return { ...(workflow ? { workflow } : {}), ...(runner ? { runner } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}) };
+}
+
 export function createAutomationToolService(
   service: AutomationService,
   project: AutomationServiceProject,
@@ -84,13 +89,12 @@ export function createAutomationToolService(
     async scheduleTask(request: ScheduleTaskRequest): Promise<ScheduleTaskAnswer> {
       const schedule = scheduleOf(request);
       if (isRefusal(schedule)) return schedule;
-      const { workflow, runner, model, effort } = request;
       const body = automationCreateSchema.safeParse({
         name: request.name,
         kind: 'schedule',
         schedule,
         // Nobody waits on a scheduled task: autonomous, as the CLI and the cockpit create it.
-        task: { prompt: request.prompt, autonomous: true, ...(workflow ? { workflow } : {}), ...(runner ? { runner } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}) },
+        task: { prompt: request.prompt, autonomous: true, ...taskSettings(request) },
         enable: request.enable === true,
       });
       if (!body.success) return refuse('invalid_request', body.error.issues[0]?.message ?? 'invalid schedule');
@@ -116,14 +120,13 @@ export function createAutomationToolService(
           const moves = request.at !== undefined || request.delay !== undefined || request.latest_start !== undefined;
           const schedule = moves ? scheduleOf(request, stored.schedule) : stored.schedule;
           if (schedule && isRefusal(schedule)) return schedule;
-          const { workflow, runner, model, effort } = request;
           const body = automationUpdateSchema.safeParse({
             name: request.name ?? stored.name,
             ...(stored.description !== undefined ? { description: stored.description } : {}),
             enabled: stored.enabled,
             kind: stored.kind,
             schedule,
-            task: { ...stored.task, ...(request.prompt !== undefined ? { prompt: request.prompt } : {}), ...(workflow ? { workflow } : {}), ...(runner ? { runner } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}) },
+            task: { ...stored.task, ...(request.prompt !== undefined ? { prompt: request.prompt } : {}), ...taskSettings(request) },
             expectedRevision: stored.revision,
           });
           if (!body.success) return refuse('invalid_request', body.error.issues[0]?.message ?? 'invalid schedule');
