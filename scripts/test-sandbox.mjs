@@ -1,6 +1,6 @@
-import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { hostname, userInfo } from 'node:os'
-import { isAbsolute, join } from 'node:path'
+import { delimiter, isAbsolute, join, sep } from 'node:path'
 
 // The temp sandboxes of the test entry points: scripts/test-git-env.mjs (node:test and the
 // browser e2e workers), packages/cezar/vitest.setup.ts and packages/web/vitest.setup.ts.
@@ -45,23 +45,34 @@ function readOwner(dir) {
   }
 }
 
-/** A directory of the account `uid` whose marker names an exited process on `host`. */
-function ownerGone(dir, alive, host, uid) {
+/** How long a sandbox without a readable marker may stay. A live sandbox has no marker only
+ *  between `mkdtemp` and the marker write; a directory a late writer rebuilt after removal never
+ *  gets one (hearsay-tools/cezarion#2453). */
+export const UNMARKED_MAX_AGE_MS = 60 * 60 * 1000
+/** Unmarked sandboxes removed per call, so the first run on a host full of them stalls no worker. */
+export const UNMARKED_LIMIT = 64
+
+/** Why a directory of the account `uid` may go: its marker names an exited process on `host`
+ *  (`owner-gone`), or it has no readable marker and is older than `maxAgeMs` (`unmarked`). */
+function reapReason(dir, { alive, host, uid, now, maxAgeMs }) {
+  let stat
   try {
-    const stat = lstatSync(dir)
-    if (!stat.isDirectory() || stat.uid !== uid) return false
+    stat = lstatSync(dir)
+    if (!stat.isDirectory() || stat.uid !== uid) return undefined
   } catch {
-    return false
+    return undefined
   }
   const owner = readOwner(dir)
-  return owner !== undefined && owner.host === host && owner.pid !== process.pid && !alive(owner.pid)
+  if (owner === undefined) return now - stat.mtimeMs > maxAgeMs ? 'unmarked' : undefined
+  return owner.host === host && owner.pid !== process.pid && !alive(owner.pid) ? 'owner-gone' : undefined
 }
 
 /**
- * Remove the `<root>/<prefix>*` sandboxes whose owner process on this host has exited, and
- * return their paths. Everything else stays: a live owner, an owner on another host (a
- * container sharing this temp root), a missing or unreadable marker (a sandbox still being
- * created, or one from before the marker existed), a symlink, and another account's directory.
+ * Remove the `<root>/<prefix>*` sandboxes whose owner process on this host has exited, and the
+ * ones without a readable marker that are older than `unmarkedMaxAgeMs` (at most
+ * `unmarkedLimit` of those per call). Return the removed paths. Everything else stays: a live
+ * owner, an owner on another host (a container sharing this temp root), a recent directory
+ * without a marker (a sandbox still being created), a symlink, and another account's directory.
  * A recycled process ID keeps a dead sandbox until that process exits too.
  *
  * Without a uid (Windows) nothing is reaped: the temp root there is shared by every account and
@@ -72,6 +83,9 @@ export function reapTestSandboxes(prefix, root = osTempRoot(), {
   alive = processAlive,
   host = hostname(),
   account = { uid: process.getuid?.() },
+  now = Date.now,
+  unmarkedMaxAgeMs = UNMARKED_MAX_AGE_MS,
+  unmarkedLimit = UNMARKED_LIMIT,
 } = {}) {
   if (account.uid === undefined) return []
   let names
@@ -80,13 +94,18 @@ export function reapTestSandboxes(prefix, root = osTempRoot(), {
   } catch {
     return []
   }
+  const context = { alive, host, uid: account.uid, now: now(), maxAgeMs: unmarkedMaxAgeMs }
   const reaped = []
+  let unmarked = 0
   for (const name of names) {
+    if (!name.startsWith(prefix)) continue
     const dir = join(root, name)
-    if (!name.startsWith(prefix) || !ownerGone(dir, alive, host, account.uid)) continue
+    const reason = reapReason(dir, context)
+    if (reason === undefined || (reason === 'unmarked' && unmarked >= unmarkedLimit)) continue
     try {
       rmSync(dir, REMOVE_OPTIONS)
       reaped.push(dir)
+      if (reason === 'unmarked') unmarked += 1
     } catch {
       // best-effort: a later sandbox retries it.
     }
@@ -104,7 +123,7 @@ function installCleanup() {
   const cleanup = () => {
     for (const dir of dirs) {
       try {
-        rmSync(dir, REMOVE_OPTIONS)
+        removeSandbox(dir)
       } catch {
         // best-effort: the next sandbox of the same kind removes it once this process is gone.
       }
@@ -134,9 +153,21 @@ export function createTestSandbox(prefix, root = osTempRoot()) {
   return dir
 }
 
-/** Remove every path, even after one removal fails, then throw the first failure. A path that
- *  could not be removed stays on the exit and signal cleanup list. */
-export function removeTestSandboxes(paths, remove = (path) => rmSync(path, REMOVE_OPTIONS)) {
+/** Remove a directory. In a sandbox the owner marker goes last: a removal that fails partway
+ *  leaves the marker, so the reaper still knows whose directory it is. */
+function removeSandbox(dir) {
+  if (existsSync(join(dir, OWNER_FILE))) {
+    for (const name of readdirSync(dir)) if (name !== OWNER_FILE) rmSync(join(dir, name), REMOVE_OPTIONS)
+  }
+  rmSync(dir, REMOVE_OPTIONS)
+}
+
+/** Stop the processes that run in or point into `paths`, then remove every path, even after one
+ *  removal fails, and throw the first failure. A path that could not be removed stays on the
+ *  exit and signal cleanup list. Stopping first keeps a late writer from rebuilding a removed
+ *  sandbox without its marker (hearsay-tools/cezarion#2453). */
+export function removeTestSandboxes(paths, remove = removeSandbox, stop = stopSandboxProcesses) {
+  stop(paths)
   let failure
   for (const path of paths) {
     try {
@@ -147,6 +178,136 @@ export function removeTestSandboxes(paths, remove = (path) => rmSync(path, REMOV
     }
   }
   if (failure) throw failure
+}
+
+/** The process IDs of this account, other than this process, whose working directory is inside
+ *  one of `paths` or whose environment holds a value equal to one of them or under it. Every child
+ *  a test starts inherits the sandbox's TMPDIR, HOME or Git config. Only Linux exposes this, in
+ *  /proc; elsewhere the list is empty. */
+export function sandboxProcesses(paths, { procRoot = '/proc', uid = process.getuid?.() } = {}) {
+  if (process.platform !== 'linux' || uid === undefined || paths.length === 0) return []
+  const inside = (value) => paths.some((path) => value === path || value.startsWith(path + sep))
+  let names
+  try {
+    names = readdirSync(procRoot)
+  } catch {
+    return []
+  }
+  const pids = []
+  for (const name of names) {
+    const pid = Number(name)
+    if (!Number.isSafeInteger(pid) || pid <= 0 || pid === process.pid) continue
+    const dir = join(procRoot, name)
+    try {
+      if (statSync(dir).uid !== uid) continue
+    } catch {
+      continue
+    }
+    if (pointsInto(dir, inside)) pids.push(pid)
+  }
+  return pids
+}
+
+function pointsInto(procDir, inside) {
+  try {
+    if (inside(readlinkSync(join(procDir, 'cwd')))) return true
+  } catch {
+    // gone, or a zombie: it has no working directory.
+  }
+  try {
+    for (const entry of readFileSync(join(procDir, 'environ'), 'utf8').split('\0')) {
+      const equals = entry.indexOf('=')
+      if (equals > 0 && inside(entry.slice(equals + 1))) return true
+    }
+  } catch {
+    // gone between the listing and this read.
+  }
+  return false
+}
+
+/** Running, not exited: a zombie waits only for its parent to collect its status. */
+function running(pid) {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8')
+    const state = stat[stat.lastIndexOf(')') + 2]
+    return state !== 'Z' && state !== 'X'
+  } catch {
+    return false
+  }
+}
+
+const pause = new Int32Array(new SharedArrayBuffer(4))
+
+/** Wait until none of `pids` runs, or `ms` passes. Synchronous: the exit cleanup cannot await. */
+function waitStopped(pids, ms) {
+  const until = Date.now() + ms
+  while (pids.some(running) && Date.now() < until) Atomics.wait(pause, 0, 0, 10)
+}
+
+function signal(pids, name) {
+  for (const pid of pids) {
+    try {
+      process.kill(pid, name)
+    } catch {
+      // already gone.
+    }
+  }
+}
+
+/**
+ * Stop every process `sandboxProcesses` finds for `paths`: SIGTERM, then SIGKILL for what still
+ * runs after `graceMs`, including anything they started in the meantime. Return the process IDs
+ * found first. Tests leave such processes behind (gh, tsx, runner CLIs, Chrome), and they wrote
+ * into the sandbox after its removal (hearsay-tools/cezarion#2453).
+ */
+// bound: two seconds is how long a well-behaved child gets to exit on SIGTERM; then SIGKILL.
+export function stopSandboxProcesses(paths, { graceMs = 2_000, find = sandboxProcesses } = {}) {
+  const pids = find(paths)
+  if (pids.length === 0) return pids
+  signal(pids, 'SIGTERM')
+  waitStopped(pids, graceMs)
+  const left = [...new Set([...pids.filter(running), ...find(paths)])]
+  signal(left, 'SIGKILL')
+  // bound: SIGKILL cannot be refused; this only lets the kernel finish the exits.
+  waitStopped(left, 500)
+  return pids
+}
+
+/**
+ * A PATH in which every absolute directory that holds one of `names` is replaced by a mirror
+ * under `mirrorRoot`: a directory of symlinks to every other entry. The named commands then
+ * resolve as on a host without them. Server unit tests hide the runner CLIs this way, so a test
+ * that starts one by its default name gets ENOENT on every host, as on CI, and never runs the
+ * real one (hearsay-tools/cezarion#1916). Windows keeps its PATH.
+ */
+export function hideHostCommands(names, mirrorRoot, path = process.env.PATH ?? '') {
+  if (process.platform === 'win32') return path
+  const hidden = new Set(names)
+  return path.split(delimiter).map((dir, index) => {
+    if (!isAbsolute(dir)) return dir
+    let entries
+    try {
+      entries = readdirSync(dir)
+    } catch {
+      return dir
+    }
+    if (!entries.some((entry) => hidden.has(entry))) return dir
+    const mirror = join(mirrorRoot, String(index))
+    try {
+      mkdirSync(mirror, { recursive: true })
+    } catch {
+      return dir
+    }
+    for (const entry of entries) {
+      if (hidden.has(entry)) continue
+      try {
+        symlinkSync(join(dir, entry), join(mirror, entry))
+      } catch {
+        // best-effort: a command that cannot be linked is missing from this test run only.
+      }
+    }
+    return mirror
+  }).join(delimiter)
 }
 
 /** The one omp natives cache that every sandbox home shares: `<XDG_CACHE_HOME or ~/.cache>/cez/
