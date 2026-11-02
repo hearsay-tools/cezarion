@@ -359,13 +359,13 @@ For an owner-approved increase, the owner adds the `baseline-growth` label, then
 `complexity-gate` job. An agent never adds the label. Auto-merge has no complexity check. CI now
 publishes Vitest coverage (§ Vitest coverage artifact); adding CRAP to the gate is a separate change.
 
-**File length.** `packages/cezar/src/file-length.test.ts` pins every non-test source file over
-1,000 lines in `file-length.baseline.json`, and Squeal re-runs it when any counted source file
-changes. It fails when a pinned file grows, when another file passes 1,000 lines, and when a pin is
+**File length.** `npm run lint` pins every non-test source file over 1,000 lines in
+`packages/cezar/src/file-length.baseline.json`. The lint bridge lets Squeal re-run the budget
+when any counted source file changes. It fails when a pinned file grows, when another file passes 1,000 lines, and when a pin is
 stale. After you cut a file, lower its pin:
 
 ```bash
-FILE_LENGTH_UPDATE=1 npm test -- packages/cezar/src/file-length.test.ts
+FILE_LENGTH_UPDATE=1 npm run lint
 ```
 
 The update only lowers pins and drops entries. The `Reject baseline growth` step refuses a raised pin

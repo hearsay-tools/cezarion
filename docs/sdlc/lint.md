@@ -5,7 +5,7 @@ command, it fails closed, and it does not depend on which tests a change selects
 
 ## What it runs
 
-`packages/cezar/src/lint/run.ts` runs three parts and prints every problem as
+`packages/cezar/src/lint/run.ts` runs four parts and prints every problem as
 `file:line:column rule: reason → owner`:
 
 1. **oxlint** with the `cez` JS plugin (`packages/cezar/src/lint/plugin.ts`) over `packages/`.
@@ -15,6 +15,10 @@ command, it fails closed, and it does not depend on which tests a change selects
    [`.ai/ast-grep/README.md`](../../.ai/ast-grep/README.md) says how to write one.
 3. **Stale entries**: an exemption, a reader-list entry or a baseline entry that no longer names
    a match fails, so the lists only shrink to what the code still needs.
+
+4. **File length**: every tracked non-test source file over 1,000 lines stays at or below its
+   pin in `packages/cezar/src/file-length.baseline.json`. Unpinned long files, grown pins and
+   stale pins fail. `FILE_LENGTH_UPDATE=1 npm run lint` only lowers or drops existing pins.
 
 A non-zero tool exit, unreadable tool output, a plugin that does not load, a config that turns on
 another number of rules than the plugin defines, and a file that does not parse are failures,
@@ -68,9 +72,11 @@ looped case). **Moved** cases now run in `npm run lint`; the scanner's fixture c
 | Native mock boundaries (M03) | `packages/cezar/src/mock-source-boundary.test.ts` | 1: no test reads or swaps mock source | 9 scanner cases |
 | Shared run-fact readers (M05) | `packages/cezar/src/run-fact-readers.test.ts` | 2: no finding; every listed reader still reads | 27 scanner cases |
 | Environment-name documentation (M11) | `packages/cezar/src/env-example.test.ts` | 1: every `CEZ_*` name documented | 4 scanner cases |
+| File-length budget (M12) | `packages/cezar/src/file-length.test.ts` | 1: no unpinned long file, grown pin or stale pin | 6 fixture cases |
 | Existing ast-grep enforcement | `packages/cezar/src/ast-grep-rules.test.ts` | 14: one repository scan per rule | Rule-file checks, the `ast-grep test` cases, the baseline helpers, the update mode helpers, binary resolution |
 
-21 cases moved. The update mode moved with them: `AST_GREP_RULES_UPDATE=1 npm run lint`.
+22 cases moved. Update modes moved with them: `AST_GREP_RULES_UPDATE=1 npm run lint` and
+`FILE_LENGTH_UPDATE=1 npm run lint`.
 
 ### Deferred
 
@@ -81,7 +87,6 @@ looped case). **Moved** cases now run in `npm run lint`; the scanner's fixture c
 | Unit wait discipline (M07) | `packages/cezar/src/test-wait-discipline.test.ts`, `packages/web/src/test/unit-wait-discipline.test.ts` | Three baselines, a cached full scan that fixture cases share, and a host timeout check to separate | hearsay-tools/cezarion#2421 |
 | Design guardian (M09) | `packages/web/src/design-guardian.test.ts` | Ten per-file rules fit lint; the token and control cases pin named files' content; the suite reads all sources at import | hearsay-tools/cezarion#2422 |
 | Card-2 contrast (M10) | `packages/web/src/test/card-2-contrast.test.ts` | Joins `styles/index.css` with every `.tsx`; dynamic styling still needs browser evidence | hearsay-tools/cezarion#2423 |
-| File-length budget (M12) | `packages/cezar/src/file-length.test.ts` | A whole-repository budget over `git ls-files`; it belongs in the runner, with its update mode | hearsay-tools/cezarion#2424 |
 
 ### Retained
 
