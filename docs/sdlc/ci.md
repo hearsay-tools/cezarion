@@ -28,15 +28,13 @@ no new model review. Final-head model review was already conditional on that cap
 The provider and review policy are unchanged; both required checks still gate
 merge.
 
-Local typechecking starts with `pnpm install --frozen-lockfile` in the checkout being verified, including
-nested task worktrees. Both `npm run typecheck:web` and
-`npm run typecheck -w @open-mercato/cezar-web` use the web workspace's
-`pretypecheck` hook to rebuild the local server declarations before checking web
-sources. This prevents missing or stale local declarations from falling back to
-an older parent checkout. The full `npm run typecheck` checks web first, then
-contract, API client, and server, so it builds declarations once. Direct
-`tsc --noEmit` calls bypass preparation; use the npm commands for verification.
-The nested-worktree regression runs with `npm run test:unit`.
+Local typechecking starts with `pnpm install --frozen-lockfile` in the checkout being verified,
+including nested task worktrees. `npm run typecheck` checks all four workspaces without
+writing build output. The web config resolves the server route types from local source,
+so missing or stale declarations cannot select an older parent checkout. The
+nested-worktree regression runs with `npm run test:unit`. Packaged CLI tests import
+built modules; the build/package job checks them with `npm run typecheck:package`
+after the application build.
 
 ### Local iteration versus final verification
 
@@ -139,7 +137,7 @@ exactly the `engines.node` minimum (Node 24.21.0):
 
 - Four Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/4 --maxWorkers=4` for N=1..4.
 - The required typecheck job uses `blacksmith-2vcpu-ubuntu-2404` (2 vCPU, 8 GB) for PRs and manual dispatches, and `ubuntu-24.04` for pushes and merge groups. It runs pinned workflow lint, issue-citation checking and `npm run typecheck` for all change surfaces, including docs, infrastructure and release bumps. It keeps the minimum-Node setup and its bounded retry.
-- The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It builds server declarations, then runs Node unit tests, the full application build, packaged CLI E2E tests, and release-package dry-run packing. The explicit server build preserves the preparation that typecheck supplied before the split. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
+- The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It builds server declarations, then runs Node unit tests, the full application build, packaged CLI E2E typecheck and tests, and release-package dry-run packing. The explicit server build preserves the preparation that typecheck supplied before the split. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
 - Four cockpit browser E2E shards on `ubicloud-standard-2` (2 vCPU, 8 GB RAM, Ubuntu 24.04 x64) each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
 
 The Ubicloud trial moves only the four browser CI shards to the lowest x64 tier,
@@ -267,7 +265,7 @@ sequencer's balancing-only role and median fallback for unlisted files.
 
 The push-only `.github/workflows/ci-benchmark.yml` workflow runs controlled experiments on `bench/156-*` branches. It uses a fixed application baseline, records failures and resource usage, and performs publication experiments only as dry runs. Reproduction instructions and retained results are in [the issue 156 benchmark report](../benchmarks/ci-performance-156.md). Automated review remains enabled throughout.
 
-Automated code review runs inside the `ci.yml` main pull-request run after `preflight`. The gate requires trusted classification and applicable baseline/complexity/clone checks, plus typecheck, workflow lint and citations. Typecheck retains its server declaration preparation; it does not run the full application build or product suites. The model jobs use the trusted workflow revision and validate native caller provenance against Actions metadata and the live PR head. Their context states that heavy verification is pending behind review. Manual context reads the latest current-head native attempt without polling or accepting older success. API errors fail context collection. The legacy `fetch-ci-results.cjs` utility remains available to its independent consumers; it no longer gates model work.
+Automated code review runs inside the `ci.yml` main pull-request run after `preflight`. The gate requires trusted classification and applicable baseline/complexity/clone checks, plus typecheck, workflow lint and citations. Typecheck reads source without building; packaged test typechecking runs after the build in the build/package job. The model jobs use the trusted workflow revision and validate native caller provenance against Actions metadata and the live PR head. Their context states that heavy verification is pending behind review. Manual context reads the latest current-head native attempt without polling or accepting older success. API errors fail context collection. The legacy `fetch-ci-results.cjs` utility remains available to its independent consumers; it no longer gates model work.
 
 A passing PR review result releases build/package, Vitest and browser jobs. The review result checks the live head again before release. The final verification gate fails on a blocked review or an unexpected skipped heavy job. The queue has a separate protected review result after full verification and native admission, so it cannot create a PR dependency cycle. Failed or cancelled preflight never starts review; cancellation never releases heavy work. Explicit status functions preserve intended docs/infra/bot skips without GitHub's implicit `success()` suppressing later jobs.
 

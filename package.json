@@ -40,6 +40,7 @@
     "typecheck": "npm run typecheck:web && npm run typecheck:contract && npm run typecheck:client && npm run typecheck:server",
     "typecheck:client": "npm run typecheck -w @open-mercato/cezar-api-client",
     "typecheck:server": "npm run typecheck -w @wjarka/cezarion",
+    "typecheck:package": "npm run typecheck:package -w @wjarka/cezarion",
     "typecheck:web": "npm run typecheck -w @open-mercato/cezar-web",
     "typecheck:contract": "npm run typecheck -w @open-mercato/cezar-contract",
     "check:clones": "node .github/scripts/check-clones.cjs",

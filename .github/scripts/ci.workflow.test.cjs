@@ -429,6 +429,16 @@ test('verification bindings keep the final gate in CI and reserve local full bro
   assert.ok(prepare.steps.some(s => s.uses?.startsWith('actions/upload-artifact@')));
 });
 
+test('packaged tests stay typechecked after the application build', () => {
+  const ci = workflow();
+  const steps = ci.jobs['build-and-package'].steps;
+  const build = steps.findIndex(step => step.run === 'npm run build');
+  const check = steps.findIndex(step => step.run === 'npm run typecheck:package');
+  const tests = steps.findIndex(step => step.run === 'npm run test:package');
+  assert.ok(build >= 0 && check > build && tests > check);
+  assert.equal(steps[check].if, undefined, 'every build checks packaged test types');
+});
+
 test('build and package verifies the engines minimum without a second full unit run', () => {
   const ci = workflow();
   const readManifest = name => JSON.parse(fs.readFileSync(path.join(repoRoot, name), 'utf8'));

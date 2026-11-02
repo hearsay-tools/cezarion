@@ -24,6 +24,8 @@
     // file's directory, which is what the mapping below already assumed.
     "paths": {
       "@/*": ["./src/*"],
+      // Route types come from this checkout, without building server declarations.
+      "@wjarka/cezarion/app-type": ["../cezar/src/server/app-type.ts"],
       // Source, not `dist` — see the matching alias in vite.config.ts. Typechecking the web
       // app must not depend on the api-client having been built.
       "@open-mercato/cezar-api-client": ["../api-client/src/index.ts"]

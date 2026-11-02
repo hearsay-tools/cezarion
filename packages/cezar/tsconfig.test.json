@@ -13,5 +13,5 @@
     "allowImportingTsExtensions": true
   },
   "include": ["src/**/*.ts", "test/**/*.ts", "vitest.config.ts"],
-  "exclude": []
+  "exclude": ["test/e2e/**"]
 }

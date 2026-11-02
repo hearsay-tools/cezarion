@@ -133,36 +133,7 @@ To check a UI change by hand in a real browser, run `node .ai/scripts/qa-fixture
 (hearsay-tools/cezarion#1406); `packages/web/e2e/README.md` § Checking a UI change by hand
 says what it serves and how it stops.
 
-**Typecheck.** For web-only verification, use `npm run typecheck:web` or
-`npm run typecheck -w @open-mercato/cezar-web`. Both rebuild server declarations
-from this worktree before checking web sources; direct `tsc --noEmit` does not.
-The full root typecheck runs web first, preparing declarations once for all four
-workspace checks.
-
-To typecheck without rebuilding `packages/cezar/dist`, run the three server
-configs from `packages/cezar`.
-
-```bash
-./node_modules/.bin/tsc --noEmit -p tsconfig.json          # shipped sources only
-./node_modules/.bin/tsc --noEmit -p tsconfig.test.json     # adds every test file
-./node_modules/.bin/tsc --noEmit -p tsconfig.scripts.json  # .ai/scripts/*.ts probes
-```
-
-The `.ai/scripts/*.ts` probes import server internals and CI never runs them,
-so `tsconfig.scripts.json` is their only check (hearsay-tools/cezarion#1702).
-
-`tsconfig.json` leaves out every test file: on hearsay-tools/cezarion#1291 a
-TS2353 in `src/runs/waits-store.test.ts` passed it and failed CI.
-`tsconfig.test.json` sets `rootDir` to `.`, so only `tsconfig.json` reports a
-shipped file that imports from outside `src/`. `tsconfig.test.json` also
-compiles the `test/e2e/` imports of `../../dist/`, so in a worktree that was
-never built it fails with TS2307: run `npm run build -w @wjarka/cezarion` once
-first. For contract edits, also run `npm run typecheck:contract` from the repo
-root. It checks `packages/contract/tsconfig.test.json`, because that package's
-`tsconfig.json` leaves out its tests too. Run the root `npm run typecheck` once
-before a PR when declarations matter: a cockpit edit, or a server change that
-the cockpit reads through `AppType` or that a `test/e2e/` file imports from
-`dist`.
+**Typecheck.** Run `npm run typecheck`; it checks all workspaces without building or writing `dist`.
 
 **In a unit test, a timeout is a hang guard, never the thing the test waits on.**
 Wait for the product's own signal: an event, a callback, a store write, a file
