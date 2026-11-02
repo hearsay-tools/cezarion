@@ -108,7 +108,7 @@ describe('cez automation', () => {
       })).toBe(EXIT.ok);
       const task = { prompt: 'Finish the task', worktree: true, autonomous: true, ...expected };
       expect(posted[0]?.body).toMatchObject({ task });
-      expect((posted[0]?.body as { task: unknown }).task).toEqual(task);
+      expect((posted[0]!.body as { task: unknown }).task).toEqual(task);
       const id = String(last().id);
       expect(last()).toMatchObject({ enabled: false });
       expect(await run(['show', id])).toBe(EXIT.ok);
@@ -133,7 +133,7 @@ describe('cez automation', () => {
       expect(await run(['update', id, '--file', 'update.json'], env(), { readFile: async () => JSON.stringify({ task: { prompt: 'Revised' } }) })).toBe(EXIT.ok);
       expect(posted.at(-1)?.body).toMatchObject({ task: { prompt: 'Revised', archiveWhenDone: true, autoMergePr: true } });
       expect(await run(['update', id, '--json', JSON.stringify({ task: { archiveWhenDone: false, autoMergePr: null } })])).toBe(EXIT.ok);
-      expect((posted.at(-1)?.body as { task: unknown }).task).toEqual({ prompt: 'Revised', archiveWhenDone: false });
+      expect((posted.at(-1)!.body as { task: unknown }).task).toEqual({ prompt: 'Revised', archiveWhenDone: false });
     });
 
     it('opts a GitHub poll into existing matches without enabling it', () => {
@@ -333,7 +333,7 @@ describe('cez automation', () => {
       const id = String(last().id);
       expect(await run(['update', id, '--json', JSON.stringify({ task: { prompt: 'p2', model: null } })])).toBe(EXIT.ok);
       expect(posted[1]?.body).toMatchObject({ task: { prompt: 'p2', worktree: true, autonomous: true, runner: 'codex' } });
-      expect((posted[1]?.body as { task: Record<string, unknown> }).task).not.toHaveProperty('model');
+      expect((posted[1]!.body as { task: Record<string, unknown> }).task).not.toHaveProperty('model');
     });
 
     it('update against a stale revision exits 2 and overwrites nothing', async () => {
@@ -431,7 +431,7 @@ describe('cez automation', () => {
       const { timeZone } = (await fetchJson(`${cockpit.api}/automations`)).data as { timeZone: string };
       const at = resolveDelay('7d', Date.now(), timeZone);
       expect(await run(['add', '--name', 'Later', '--in', '7d', '--prompt', 'Go'], env(), { now: () => Date.now() }), out.join('\n')).toBe(EXIT.ok);
-      const schedule = (posted.at(-1)?.body as { schedule: { at: string; timeZone: string } }).schedule;
+      const schedule = (posted.at(-1)!.body as { schedule: { at: string; timeZone: string } }).schedule;
       expect(schedule.timeZone).toBe(timeZone);
       // Within a minute of the resolution above: the CLI resolved it a moment later.
       expect(Math.abs(Date.parse(`${schedule.at}:00Z`) - Date.parse(`${at}:00Z`))).toBeLessThanOrEqual(60_000);

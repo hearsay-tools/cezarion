@@ -362,7 +362,7 @@ describe('request shapes', () => {
     reply([])
     const controller = new AbortController()
     await getRuns(projectAddress(), { signal: controller.signal })
-    expect((fetchMock.mock.calls.at(-1)?.[1] as RequestInit).signal).toBe(controller.signal)
+    expect((fetchMock.mock.calls.at(-1)![1] as RequestInit).signal).toBe(controller.signal)
   })
 })
 
@@ -750,7 +750,7 @@ describe('voice calls', () => {
       method: 'POST',
       body: { text: 'open next failed', sidebarView: 'active' },
     })
-    expect((fetchMock.mock.calls.at(-1)?.[1] as RequestInit).signal).toBeDefined()
+    expect((fetchMock.mock.calls.at(-1)![1] as RequestInit).signal).toBeDefined()
   })
 
   it('rejects with the server message when voice is off or the engine is down, and does not retry', async () => {
