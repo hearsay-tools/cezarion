@@ -33,7 +33,7 @@ function declarationKind(head: string): Kind | undefined {
   if (/^(?:import|export) type\b/.test(head)) return undefined;
   if (/^export\b/.test(head)) return 're-export';
   if (/^import \* as\b/.test(head)) return 'namespace';
-  if (/^import \{/.test(head)) return 'value-import';
+  if (head.startsWith('import {')) return 'value-import';
   return 'default';
 }
 

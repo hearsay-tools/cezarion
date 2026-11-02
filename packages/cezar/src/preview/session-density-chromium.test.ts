@@ -53,7 +53,10 @@ describe('Ultra streams at the viewer pixel ratio in a real Chromium (hearsay-to
     const viewer: Viewer = {
       sendFrame(buf) {
         const size = jpegSize(buf);
-        for (const waiter of waiters.splice(0)) (waiter.size === size ? waiter.resolve() : waiters.push(waiter));
+        for (const waiter of waiters.splice(0)) {
+          if (waiter.size === size) waiter.resolve();
+          else waiters.push(waiter);
+        }
         void session.handle({ t: 'ack' });
       },
       send() {},
@@ -120,7 +123,10 @@ describe('Ultra streams at the viewer pixel ratio in a real Chromium (hearsay-to
     const viewer: Viewer = {
       sendFrame(buf) {
         const size = jpegSize(buf);
-        for (const waiter of waiters.splice(0)) (waiter.size === size ? waiter.resolve() : waiters.push(waiter));
+        for (const waiter of waiters.splice(0)) {
+          if (waiter.size === size) waiter.resolve();
+          else waiters.push(waiter);
+        }
         void session.handle({ t: 'ack' });
       },
       send() {},

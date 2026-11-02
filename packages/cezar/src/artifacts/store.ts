@@ -46,7 +46,7 @@ export function artifactTitle(name: string, bytes: Buffer): string | undefined {
     const closing = tag[1] === '/';
     if (/^(?:svg|math)$/.test(kind)) {
       if (closing) foreignDepth = Math.max(0, foreignDepth - 1);
-      else if (!/\/>$/.test(tag[0])) foreignDepth++;
+      else if (!tag[0].endsWith('/>')) foreignDepth++;
       continue;
     }
     if (kind === 'template') {

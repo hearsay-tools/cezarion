@@ -13,7 +13,7 @@ export function summarizeRunnerStderr(stderr: string): string {
   const indent = (line: string) => line.length - line.trimStart().length;
   const outerIndent = headers.reduce((min, line) => Math.min(min, indent(line)), Infinity);
   const exception = headers.filter(line => indent(line) === outerIndent).at(-1)?.trim();
-  const summary = exception ?? lines.map(line => line.trim()).filter(line => !/^at\s/.test(line) && !/^[{}\[\]]+$/.test(line)).slice(-3).join(' | ');
+  const summary = exception ?? lines.map(line => line.trim()).filter(line => !/^at\s/.test(line) && !/^[{}[\]]+$/.test(line)).slice(-3).join(' | ');
   if (summary.length <= 500) return summary;
   return exception ? `${summary.slice(0, 499)}…` : `…${summary.slice(-499)}`;
 }

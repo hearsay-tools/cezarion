@@ -1341,7 +1341,7 @@ function baseCells(runners: RunnerId[]): void {
       const answer = JSON.parse(JSON.parse(readFileSync(answers, 'utf8')).response.content[0].text.split('\n')[0]);
       expect(answer).toMatchObject({ ok: true, finishes: 'at_turn_end', completes: 'step', next_step: 'Review' });
       expect(store.getRun(run.id)!.steps.map(step => [step.id, step.status])).toEqual([['implement', 'done'], ['review', 'waiting']]);
-      const closings = store.readEvents(run.id).filter(event => event.type === 'lifecycle' && /session closed$/.test(String(event.message)));
+      const closings = store.readEvents(run.id).filter(event => event.type === 'lifecycle' && String(event.message).endsWith('session closed'));
       expect(closings).toEqual([expect.objectContaining({ message: 'step complete — session closed', via: 'cezar_done' })]);
       expect(store.readEvents(run.id).some(event => event.type === 'note' && event.message === 'step shipped')).toBe(true);
     });

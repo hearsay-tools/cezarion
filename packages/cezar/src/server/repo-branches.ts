@@ -182,7 +182,7 @@ function isFinished(run: BranchOwner): boolean {
 }
 
 function creationSha(sha: string, subject: string): string | null {
-  return sha && /^branch: Created from /.test(subject) ? sha : null;
+  return sha && subject.startsWith('branch: Created from ') ? sha : null;
 }
 
 /** Refs per bulk reflog read: keeps the argument list far under any platform's limit. */
