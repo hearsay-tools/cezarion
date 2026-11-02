@@ -198,6 +198,9 @@ test('CI permits a new ratchet, while auto-merge requires owner review of its st
 for (const [name, file] of [
   ['contrast', 'packages/cezar/src/lint/card-2-contrast.test.ts'],
   ['design guardian', 'packages/cezar/src/lint/design-guardian.test.ts'],
+  ['server wait discipline', 'packages/cezar/src/test-wait-discipline.test.ts'],
+  ['unit wait discipline', 'packages/cezar/src/lint/unit-wait-discipline.test.ts'],
+  ['wait runner', 'packages/cezar/src/lint/wait-discipline-runner.test.ts'],
 ]) {
   test(`auto-merge protects the moved ${name} fixtures while permitting added cases`, (t) => {
     const r = repository(t);
@@ -213,3 +216,28 @@ for (const [name, file] of [
     assert.equal(added.status, 0, added.stdout + added.stderr);
   });
 }
+
+// Moved M07 scanners and their fixtures keep the old guard's owner-review requirement.
+test('auto-merge protects moved unit wait scanners and fixtures while permitting added cases', (t) => {
+  const r = repository(t);
+  const files = [
+    'blank.ts', 'server-wait-syntax.ts', 'server-wait-deadlines.ts', 'server-wait-baseline.ts',
+    'test-wait-discipline.ts', 'unit-wait-values.ts', 'unit-wait-deadlines.ts',
+    'wait-baseline.ts', 'unit-wait-discipline.ts',
+    'wait-discipline-runner.ts',
+  ].map(file => `packages/cezar/src/lint/${file}`);
+  const fixture = "export const expected = 1;\n";
+  for (const file of files) r.write(file, fixture);
+  r.base = r.commit();
+  for (const file of files) {
+    r.write(file, fixture.replace('= 1', '= 0'));
+    const changed = autoMerge(r, r.commit());
+    assert.equal(changed.status, 1, changed.stdout + changed.stderr);
+    assert.match(changed.stdout, /guard test change/);
+    r.write(file, fixture);
+  }
+  r.write(files[0], fixture + 'export const another = 2;\n');
+  const added = autoMerge(r, r.commit());
+  assert.equal(added.status, 0, added.stdout + added.stderr);
+});
+

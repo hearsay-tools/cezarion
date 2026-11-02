@@ -43,6 +43,9 @@
       "packages/web/src/components/ui/{button,input,select}.tsx",
       "packages/web/src/components/composer/composer.tsx"
     ],
+    "packages/web/src/test/unit-wait-discipline.test.ts": [
+      "packages/web/vitest.setup.ts"
+    ],
     "packages/cezar/src/lint/run-history-reader.test.ts": [
       "packages/cezar/src/lint/run-history-readers.json"
     ],
@@ -54,7 +57,10 @@
       ".env.example",
       "packages/cezar/src/lint/**",
       "packages/web/src/test/search-params-discipline.baseline.json",
-      "packages/web/src/test/card-2-contrast.baseline.json"
+      "packages/web/src/test/card-2-contrast.baseline.json",
+      "packages/cezar/src/test-wait-discipline.baseline.json",
+      "packages/cezar/src/test-wait-discipline-polls.baseline.json",
+      "packages/web/src/test/unit-wait-discipline.baseline.json"
     ],
     "packages/cezar/src/contract-subpaths.test.ts": [
       "packages/contract/src/**",

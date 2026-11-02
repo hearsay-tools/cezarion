@@ -24,6 +24,15 @@ command, it fails closed, and it does not depend on which tests a change selects
    `packages/web/src/**/*.css` and `packages/web/e2e/**/*.css`, which oxlint cannot read. It also
    refuses stylesheet overrides that hide or restyle status dots or status pills.
 
+6. **Unit wait discipline** (M07): `cez/test-wait-discipline` scans server test and testkit files
+   with a 10 s floor; `cez/unit-wait-discipline` scans cockpit unit tests with a 3 s floor.
+   Each rule uses its original scanner. Both use `lint/wait-baseline.ts` for the same shrink-only
+   ratchet. The runner checks stale entries in the three baselines,
+   server scan scope, and unterminated constructs that would hide a file's tail. Update mode
+   runs before oxlint: `TEST_WAIT_DISCIPLINE_UPDATE=1 npm run lint` (both server baselines),
+   `UNIT_WAIT_DISCIPLINE_UPDATE=1 npm run lint` (cockpit). Existing allowances only shrink.
+   The web host test separately pins `asyncUtilTimeout` in `vitest.setup.ts`.
+
 A non-zero tool exit, unreadable tool output, a plugin that does not load, a config that turns on
 another number of rules than the plugin defines, and a file that does not parse are failures,
 never a pass.
@@ -47,7 +56,9 @@ never a pass.
 | `cez/raw-query-setter` | A raw `useSearchParams` setter in the cockpit (hearsay-tools/cezarion#1649) | `packages/web/src/test/search-params-discipline.baseline.json`, shrink-only and reasoned |
 | `cez/run-fact-reader` | An attention label comparison, a restated usage-limit hold, or an unlisted `autoResumeAt` read (hearsay-tools/cezarion#1496) | `resume-time-readers.json`: add a reader only with its reason |
 | `cez/run-history-reader` | An unlisted raw `historyPaths` or `eventsPath` use, or a string/template literal containing `.ndjson` with no preceding character or a preceding character outside `[A-Za-z0-9_-]` (hearsay-tools/cezarion#2420) | `run-history-readers.json`: each file and access kind has a reason; stale entries fail |
+| `cez/test-wait-discipline` | Bare sleeps, bounds under 10 s and poll loops without a sufficient deadline in server tests (hearsay-tools/cezarion#2421) | `packages/cezar/src/test-wait-discipline.baseline.json` and `test-wait-discipline-polls.baseline.json`, shrink-only |
 | `cez/undocumented-env-name` | A `CEZ_*` name in a shipped source or runner script that `.env.example` lacks | The `CEZ_MOCK_*` prefix |
+| `cez/unit-wait-discipline` | Bare sleeps, bounds under 3 s and poll loops without a sufficient deadline in cockpit unit tests (hearsay-tools/cezarion#2421) | `packages/web/src/test/unit-wait-discipline.baseline.json`, shrink-only |
 
 The lists live beside the rules in `packages/cezar/src/lint/`, except the query-setter and card-2 contrast baselines,
 which keep their paths. CI's baseline-growth gate refuses a `*.baseline.json` that grows.
@@ -80,27 +91,28 @@ looped case). **Moved** cases now run in `npm run lint`; the scanner's fixture c
 | Active-run map ownership (M04) | `packages/cezar/src/workflows/run-active-pin.test.ts` (removed) | 2 ownership scans replaced by `active-run-map-write`; call-presence scan retired (hearsay-tools/cezarion#2419) | Harness parity R48 runs execute and Continue, checks active pins and release from memory |
 | Shared run-fact readers (M05) | `packages/cezar/src/run-fact-readers.test.ts` | 2: no finding; every listed reader still reads | 27 scanner cases |
 | Run-history readers (M06) | `packages/cezar/src/runs/history-readers.test.ts` | 1: no raw transcript path outside its owners | The adapted predicate fixture and both compression/reopen behavior cases; new lint fixtures pin helpers, dynamic paths, fixed strings, comments and stale exceptions |
+| Unit wait discipline (M07) | `packages/cezar/src/test-wait-discipline.test.ts`, `packages/web/src/test/unit-wait-discipline.test.ts` | 5: server scope, reads-to-end, two server baseline checks, cockpit baseline check | 91 server fixtures; 79 cockpit fixtures moved to `packages/cezar/src/lint/unit-wait-discipline.test.ts`; host `asyncUtilTimeout` test stays in web |
 | Design guardian (M09) | `packages/web/src/design-guardian.test.ts` | 11: ten per-file rules and status stylesheet ownership; walker replaced by discovery fixtures (see per-case inventory below) | Five named-content cases; fill-accent spelling fixture moved beside the scanner |
 | Card-2 contrast (M10) | `packages/web/src/test/card-2-contrast.test.ts`, now `packages/cezar/src/lint/card-2-contrast.test.ts` | 1: no new unsafe small-text site or stale baseline entry | 20 scanner fixture cases; static classes only, dynamic styling still needs browser evidence |
 | Environment-name documentation (M11) | `packages/cezar/src/env-example.test.ts` | 1: every `CEZ_*` name documented | 4 scanner cases |
 | File-length budget (M12) | `packages/cezar/src/file-length.test.ts` | 1: no unpinned long file, grown pin or stale pin | 6 fixture cases |
 | Existing ast-grep enforcement | `packages/cezar/src/ast-grep-rules.test.ts` | 14: one repository scan per rule | Rule-file checks, the `ast-grep test` cases, the baseline helpers, the update mode helpers, binary resolution |
 
-37 cases moved; M04's call-presence case retired. Update modes moved with them:
-`AST_GREP_RULES_UPDATE=1 npm run lint` and `FILE_LENGTH_UPDATE=1 npm run lint`.
+42 cases moved; M04's call-presence case retired. Update modes moved with them:
+`AST_GREP_RULES_UPDATE=1 npm run lint`, `FILE_LENGTH_UPDATE=1 npm run lint`,
+`TEST_WAIT_DISCIPLINE_UPDATE=1 npm run lint` and `UNIT_WAIT_DISCIPLINE_UPDATE=1 npm run lint`.
 
 
 ### Deferred
 
 | Family | Current file(s) | Why not in this migration | Follow-up |
 | --- | --- | --- | --- |
-| Unit wait discipline (M07) | `packages/cezar/src/test-wait-discipline.test.ts`, `packages/web/src/test/unit-wait-discipline.test.ts` | Three baselines, a cached full scan that fixture cases share, and a host timeout check to separate | hearsay-tools/cezarion#2421 |
 
 ### Retained
 
 | Family | File | Reason |
 | --- | --- | --- |
-| Browser wait discipline (M08) | `packages/web/src/test/e2e-wait-discipline.test.ts` | Its two-line and twelve-line windows depend on formatting; a lint rule would harden a heuristic without new evidence |
+| Browser wait discipline (M08) | `packages/web/src/test/e2e-wait-discipline.test.ts` | Its two-line and twelve-line windows depend on formatting; a lint rule would harden a heuristic without new evidence. The named cross-package exception in `check-clones.cjs` permits only `packages/cezar/src/lint/wait-baseline.ts` and `packages/web/src/test/wait-baseline.ts`; remove it when M08 moves into lint |
 | AGENTS.md byte budget (M12) | `.github/scripts/agents-md-budget.test.cjs` | A document budget, not a source rule; it costs under a millisecond in `node:test` |
 | Run-search readers (M13) | `packages/cezar/src/run-search-readers.test.ts` | Required-presence checks: a dead `matchesRunSearch(…)` call satisfies them, so they are not proof enough for a hard rule |
 

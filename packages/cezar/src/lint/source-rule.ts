@@ -1,5 +1,5 @@
 import { relative, resolve } from 'node:path';
-import { blank } from '../test-wait-discipline.testkit.ts';
+import { blank } from './blank.ts';
 
 /**
  * The repository's own lint rules (hearsay-tools/cezarion#2416). Each rule keeps the source

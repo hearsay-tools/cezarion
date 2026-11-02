@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { blank } from './test-wait-discipline.testkit.ts';
+import { blank } from './lint/blank.ts';
 
 /**
  * Run search has one home in `packages/contract/src/run-search.ts` (hearsay-tools/cezarion#1807).

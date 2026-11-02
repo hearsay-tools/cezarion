@@ -1,5 +1,5 @@
 {
-  "$comment": "Bare sleeps, short wait bounds and unbounded poll loops the cockpit unit tests carried when the ratchet landed (hearsay-tools/cezarion#1203). Keyed by file, rule and the line text so a moved line does not churn it. This list only shrinks: fix a site, then run UNIT_WAIT_DISCIPLINE_UPDATE=1 npm test -- unit-wait-discipline. Rules: AGENTS.md \u00a7 Validation.",
+  "$comment": "Bare sleeps, short wait bounds and unbounded poll loops the cockpit unit tests carried when the ratchet landed (hearsay-tools/cezarion#1203). Keyed by file, rule and the line text so a moved line does not churn it. This list only shrinks: fix a site, then run UNIT_WAIT_DISCIPLINE_UPDATE=1 npm run lint. Rules: AGENTS.md \u00a7 Validation.",
   "sites": [
     {
       "file": "api/client.test.ts",

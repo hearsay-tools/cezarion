@@ -108,9 +108,8 @@ unless `worktreeSetup` already did.
 - In a unit test, wait on the product's own signal. A timeout is only a hang guard, with a
   `// bound: <reason>` comment at the call site.
 
-Read [`.ai/skills/validation/SKILL.md`](.ai/skills/validation/SKILL.md) before you run
-tests, a typecheck, browser or packaged E2E, choose a Squeal wait, or write a wait in a
-unit test.
+Read [`.ai/skills/validation/SKILL.md`](.ai/skills/validation/SKILL.md) before running
+tests, lint, typechecks, browser or packaged E2E, or choosing a Squeal or unit-test wait.
 
 ### Before opening a PR
 
