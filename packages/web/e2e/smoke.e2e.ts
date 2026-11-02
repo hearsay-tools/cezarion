@@ -1,10 +1,9 @@
 import { normalizeColorSample } from './contrast'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
-import { AgentBrowser, bootProjectId, readTestEnv, servedRoot } from './agent-browser'
+import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
 import { readSharedProjects, writeSharedProjects } from './workspace-registry'
 
 /**

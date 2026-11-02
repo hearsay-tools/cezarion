@@ -30,7 +30,6 @@ describe('the versioned API surface', () => {
   let store: RunStore;
   let contexts: ProjectContexts;
   let app: ReturnType<typeof createApp>;
-  let bootId: string;
 
   beforeEach(async () => {
     home = mkdtempSync(join(tmpdir(), 'cez-v1-home-'));
@@ -41,7 +40,7 @@ describe('the versioned API surface', () => {
     clearProjectProbeCache();
     store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
     contexts = new ProjectContexts({ listProjects });
-    bootId = (await registerProject(repoRoot)).id;
+    await registerProject(repoRoot);
     app = createApp({
       repoRoot,
       store,

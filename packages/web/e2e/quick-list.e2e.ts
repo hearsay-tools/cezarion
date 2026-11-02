@@ -163,13 +163,6 @@ const scoped = (path: string) => `/p/${bootProject}${path}`
 const textOf = (selector: string) =>
   browser.evaluate(`document.querySelector(${JSON.stringify(selector)}).textContent`) as string
 
-/** The rendered rows under one bucket header, in DOM order. */
-const rowsIn = (label: string) =>
-  browser.evaluate(`(() => {
-    const bucket = document.querySelector('[data-bucket=${JSON.stringify(label)}]')
-    if (!bucket) return null
-    return [...bucket.querySelectorAll('${ROW}')].map((el) => el.textContent.trim())
-  })()`) as string[] | null
 
 beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-'))
@@ -1451,7 +1444,6 @@ describe('archive from the sidebar (#780)', () => {
   ]
   const rowSel = (id: string) => `${ROW}[data-run-id="${id}"]`
   const archiveBtn = (id: string) => `${rowSel(id)} [data-action="archive-run"]`
-  const toastText = () => browser.evaluate(`document.querySelector('[data-slot="toast"]')?.textContent ?? null`)
   const ids = (bucket: string) =>
     browser.evaluate(`[...document.querySelectorAll('[data-bucket="${bucket}"] ${ROW}')].map((row) => row.dataset.runId)`) as string[]
   const stored = async (id: string) =>

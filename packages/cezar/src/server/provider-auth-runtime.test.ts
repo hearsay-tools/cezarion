@@ -613,7 +613,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
       );
       const gatingResolver = vi.fn<RuntimeAuthProfileResolver>(async () => resolverGate);
       const runCommand = accountAwareRunCommand({ stdout: '{"loggedIn":true}', exitCode: 0 });
-      const onProviderStatus = watch(gatingResolver);
+      watch(gatingResolver);
       const verifying = vi.spyOn(providerAuth, 'verifyRuntimeAuthFailure');
 
       const run = store.createRun({

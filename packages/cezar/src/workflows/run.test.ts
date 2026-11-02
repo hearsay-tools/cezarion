@@ -21,7 +21,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentRunResult, AgentRunner, AgentSession, ContentBlock, SessionOptions } from '../core/agent-runner.ts';
+import type { AgentRunResult, AgentRunner, AgentSession, ContentBlock } from '../core/agent-runner.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { registerRunProcess, unregisterRunProcess } from '../core/process-usage.ts';
 import type { UiEvent } from '../core/ui-events.ts';
@@ -3132,7 +3132,7 @@ describe('queued stacking reaches the backend (#472)', () => {
   });
 
   it('delivers the task plus every stacked message, with the edit applied', async () => {
-    const first = manager.startRun(WORKFLOW, { task: 'mock:cezar-done occupy the slot', worktree: false });
+    manager.startRun(WORKFLOW, { task: 'mock:cezar-done occupy the slot', worktree: false });
     const second = manager.startRun(WORKFLOW, { task: 'mock:cezar-done original prompt', worktree: false });
 
     // The second run is holding in the queue — amend it there.

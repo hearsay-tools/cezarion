@@ -16,7 +16,6 @@ import { gatedProviderFailure } from './waits-parity.testkit.ts';
 // on a waiting run.
 const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'pr');
 const lastCiWaitOf = (id: string) => [...(store.getRun(id)?.lastWaits ?? [])].reverse().find(entry => entry.kind === 'pr');
-const parked = (id: string) => ciWaitOf(id)?.phase === 'open' && store.getRun(id)?.status === 'waiting';
 
 const externalResource = vi.hoisted(() => ({ supervisor: {} }));
 vi.mock('../ci-wait/resources.ts', async importOriginal => {

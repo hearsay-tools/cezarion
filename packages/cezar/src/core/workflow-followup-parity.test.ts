@@ -39,9 +39,6 @@ function rpcLines(files: readonly string[]): Record<string, unknown>[] {
   });
 }
 
-function turnStartCarriesKeep(files: readonly string[]): boolean {
-  return rpcLines(files).some(msg => msg.method === 'turn/start' && JSON.stringify(msg.params ?? {}).includes(KEEP));
-}
 
 function turnStartsCarryingKeep(files: readonly string[]): number {
   return rpcLines(files).filter(msg => msg.method === 'turn/start' && JSON.stringify(msg.params ?? {}).includes(KEEP)).length;

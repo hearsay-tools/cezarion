@@ -492,21 +492,6 @@ describe('GitHub merge requirements', () => {
  *  The `gh`-shelling is injected as a `GraphqlRunner`, so pagination, accumulation, the page cap,
  *  and the degrade-to-empty contract are all unit-testable without a real `gh`. */
 
-const page = (
-  root: 'issues' | 'pullRequests',
-  nodes: Array<{ number: number; count: number }>,
-  next: string | null,
-): string =>
-  JSON.stringify({
-    data: {
-      repository: {
-        [root]: {
-          nodes: nodes.map((n) => ({ number: n.number, comments: { totalCount: n.count } })),
-          pageInfo: { hasNextPage: next !== null, endCursor: next },
-        },
-      },
-    },
-  });
 
 describe('parseOwnerName', () => {
   it('splits a clean owner/name handle', () => {

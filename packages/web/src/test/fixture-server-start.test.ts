@@ -1,6 +1,5 @@
 // @vitest-environment node
 import { spawn, type ChildProcess } from 'node:child_process'
-import { once } from 'node:events'
 import { readFileSync, readdirSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { resolve } from 'node:path'
