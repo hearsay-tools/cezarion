@@ -82,14 +82,18 @@ function validateContext(directory: string, runId: string): void {
   z.uuid().parse(runId);
   if (!isAbsolute(directory) || basename(directory) !== `${runId}-artifacts`) throw new Error('Invalid artifact task directory');
 }
+/** Resolve only the trusted data root; runs and task redirects remain forbidden. */
+export function artifactRunsRoot(dataDir: string): string {
+  return join(realpathSync(resolve(dataDir)), 'runs');
+}
 export function artifactDirectory(dataDir: string, runId: string): string {
   z.uuid().parse(runId);
-  // The server's trusted data root may have an OS alias (e.g. macOS /var).
-  // Only canonicalize that root; runs/task entry redirects remain forbidden.
-  let root = resolve(dataDir);
-  try { root = realpathSync(root); } catch { /* absent storage reads as unavailable */ }
-  return join(root, 'runs', `${runId}-artifacts`);
+  let root: string;
+  try { root = artifactRunsRoot(dataDir); }
+  catch { root = join(resolve(dataDir), 'runs'); } // Preserve unavailable-storage behavior for public readers.
+  return join(root, `${runId}-artifacts`);
 }
+
 function sameFile(a: BigIntStats, b: BigIntStats): boolean {
   return a.dev === b.dev && a.ino === b.ino;
 }
@@ -114,7 +118,7 @@ async function boundedRead(path: string, limit: number, stored = false, prefixBy
     }
     const after = await file.stat({ bigint: true });
     const current = await lstat(path, { bigint: true });
-    if (count !== expectedRead || !sameSnapshot(before, after) || !sameFile(after, current) || current.isSymbolicLink()) throw new InvalidArtifactError('File changed while publishing or reading artifact');
+    if (count !== expectedRead || !sameSnapshot(before, after) || !sameFile(after, current) || current.isSymbolicLink()) throw new Error('File changed while publishing or reading artifact');
     return buffer.subarray(0, count);
   } finally { await file.close(); }
 }

@@ -3,7 +3,7 @@ vi.mock('node:fs/promises', async importOriginal => ({ ...await importOriginal<t
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, renameSync, symlinkSync, cpSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, renameSync, symlinkSync, cpSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { reportsResponseSchema, REPORTS_QUERY_MAX } from '@open-mercato/cezar-contract/reports';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
-import { artifactDirectory, publishArtifact } from '../artifacts/store.ts';
+import { artifactDirectory, publishArtifact, readArtifact } from '../artifacts/store.ts';
 import { REPORTS_BACKFILL_KEY } from '../artifacts/reports-index.ts';
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
@@ -200,17 +200,22 @@ describe('project reports', () => {
     const raw = new DatabaseSync(join(dataDir, 'runs.db'));
     try {
       raw.prepare('DELETE FROM meta WHERE key = ?').run(REPORTS_BACKFILL_KEY);
-      expect((await page()).reports).toEqual([]);
+      expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
+      expect(await readArtifact(artifactDirectory(dataDir, run.id), run.id, artifact.id)).toBeNull();
       expect(raw.prepare('SELECT id FROM artifacts WHERE id = ?').get(artifact.id)).toBeTruthy();
       expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(REPORTS_BACKFILL_KEY)).toBeUndefined();
       expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(`reports-dirty:${run.id}`)).toBeTruthy();
+      rmSync(directory); writeFileSync(directory, 'not a directory');
+      await store.reports.backfill();
+      expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(REPORTS_BACKFILL_KEY)).toBeUndefined();
+      expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
       rmSync(directory); renameSync(saved, directory);
       expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
       expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(`reports-dirty:${run.id}`)).toBeUndefined();
     } finally { raw.close(); }
   });
 
-  it('never lists same-sized outside content through a symlinked storage ancestor', async () => {
+  it('keeps redirected cached metadata reachable while refusing same-sized outside content', async () => {
     const run = task(); const artifact = await publish(run.id);
     store.updateRun(run.id, { status: RUN_STATUS.done }); store.flush(); await page();
     const directory = join(dataDir, 'runs'), saved = directory + '-saved', outside = join(root, 'outside');
@@ -219,7 +224,8 @@ describe('project reports', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const raw = new DatabaseSync(join(dataDir, 'runs.db'), { readOnly: true });
     try {
-      expect((await page()).reports).toEqual([]);
+      expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
+      expect(await readArtifact(artifactDirectory(dataDir, run.id), run.id, artifact.id)).toBeNull();
       expect(raw.prepare('SELECT id FROM artifacts WHERE id = ?').get(artifact.id)).toBeTruthy();
       expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(`reports-dirty:${run.id}`)).toBeTruthy();
       rmSync(directory); renameSync(saved, directory);
@@ -286,7 +292,7 @@ describe('project reports', () => {
       if (String(args[0]).endsWith('/content')) return Promise.reject(Object.assign(new Error('busy content'), { code: 'EIO' }));
       return actualStat(...args);
     });
-    expect((await page()).reports).toEqual([]);
+    expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
     contentFault.mockRestore();
     expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
   });
@@ -365,6 +371,57 @@ describe('project reports', () => {
     const response = await apiRequest(app, '/api/v1/p/default/reports');
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ error: expect.stringContaining('Run history is damaged') });
+  });
+
+  it('backfills through a trusted data-root ancestor alias while preserving below-root redirect checks', async () => {
+    const run = task(); const artifact = await publish(run.id);
+    store.updateRun(run.id, { status: RUN_STATUS.done }); store.flush(); store.close();
+    const alias = root + '-alias'; symlinkSync(root, alias, 'dir');
+    try {
+      dataDir = join(alias, '.ai/cezar'); store = RunStore.open(dataDir);
+      expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
+      const raw = new DatabaseSync(join(dataDir, 'runs.db'), { readOnly: true });
+      try { expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(REPORTS_BACKFILL_KEY)).toBeTruthy(); }
+      finally { raw.close(); }
+      const runs = join(dataDir, 'runs'), saved = runs + '-saved', empty = join(root, 'empty-alias');
+      mkdirSync(empty); renameSync(runs, saved); symlinkSync(empty, runs, 'dir');
+      vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+      await store.reports.reconcile(false, run.id);
+      expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
+      expect(await readArtifact(artifactDirectory(dataDir, run.id), run.id, artifact.id)).toBeNull();
+      rmSync(runs); renameSync(saved, runs);
+      expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
+    } finally { store.close(); rmSync(alias); dataDir = join(root, '.ai/cezar'); store = RunStore.open(dataDir); }
+  });
+
+  it('keeps an indeterminate row reachable and all cursor pages complete before and after recovery', async () => {
+    const run = task();
+    for (const name of ['first.html', 'second.html', 'third.html']) await publish(run.id, name);
+    store.updateRun(run.id, { status: RUN_STATUS.done }); store.flush();
+    const baseline = await page();
+    const target = baseline.reports[0]!;
+    const actual = fs.lstat;
+    const fault = vi.spyOn(fs, 'lstat').mockImplementation((...args) => {
+      if (String(args[0]).endsWith('/content') && realpathSync(String(args[0])) === join(artifactDirectory(dataDir, run.id), target.id, 'content')) return Promise.reject(Object.assign(new Error('temporary stat failure'), { code: 'EIO' }));
+      return actual(...args);
+    });
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const scan = async () => {
+      const reports = []; let before: string | null = null;
+      do {
+        const next = await page(`?limit=1${before ? '&before=' + before : ''}`);
+        expect(next.total).toBe(3); expect(next.reports).toHaveLength(1);
+        reports.push(...next.reports.map(row => row.id)); before = next.nextCursor;
+      } while (before);
+      return reports;
+    };
+    expect(await scan()).toEqual(baseline.reports.map(row => row.id));
+    const raw = new DatabaseSync(join(dataDir, 'runs.db'), { readOnly: true });
+    try { expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(`reports-dirty:${run.id}`)).toBeTruthy(); }
+    finally { raw.close(); }
+    fault.mockRestore();
+    expect(await scan()).toEqual(baseline.reports.map(row => row.id));
+    expect(baseline.reports.map(row => row.id)).toContain(target.id);
   });
 
   it('ignores live legacy task IDs and clears their impossible artifact retry markers', async () => {

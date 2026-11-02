@@ -431,3 +431,16 @@ it('keeps a redirect detected during the per-entry read indeterminate for the in
   expect(await readArtifactMetadataForIndex(dir, runId, artifact.id)).toMatchObject({ state: 'indeterminate' });
   expect(await readArtifactMetadata(dir, runId, artifact.id)).toBeNull();
 });
+
+it('treats a snapshot identity change during a bounded read as indeterminate', async () => {
+  const runId = randomUUID(), directory = artifactDirectory(root, runId);
+  const source = join(root, 'unstable.html'); await writeFile(source, '<title>Report</title>');
+  const artifact = await publishArtifact(directory, runId, source);
+  const actual = fs.lstat;
+  vi.spyOn(fs, 'lstat').mockImplementation(async (...args) => {
+    const stat = await actual(...args);
+    return String(args[0]).endsWith('/content') ? Object.assign(Object.create(stat), { ino: BigInt(stat.ino) + 1n }) : stat;
+  });
+  expect(await readArtifactMetadataForIndex(directory, runId, artifact.id)).toMatchObject({ state: 'indeterminate' });
+  expect(await readArtifactMetadata(directory, runId, artifact.id)).toBeNull();
+});

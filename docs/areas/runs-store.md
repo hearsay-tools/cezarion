@@ -29,7 +29,10 @@ them and removes their impossible retry markers; a transition from a live to a t
 and dirty runs. Read, pin and archive events on terminal runs do not start reconciliation.
 Listing pages through joined summaries, checks content only for the selected page and fills
 past missing files. Index directory scans and page checks use the artifact reader’s anchored
-no-follow storage access. Redirected storage retains cache rows and retry markers. A separate joined-summary pass counts all readable matching source summaries
+no-follow storage access. The shared artifact root helper canonicalizes only the trusted data
+root, once per index after listen or on the first query. Failed resolution remains retryable.
+Redirected storage retains cache rows and retry markers. Indeterminate page checks keep cached
+rows in the page, so cursors never hide them; the reader handles open failures. A separate joined-summary pass counts all readable matching source summaries
 without full-record or filesystem reads. That total is independent of the cursor; missing content
 dropped during page filling can lower it on the next request. Indeterminate filesystem reads retain cached snapshots and a durable dirty
 marker; unreadable summaries skip rows without deleting them, so repair restores their display.
