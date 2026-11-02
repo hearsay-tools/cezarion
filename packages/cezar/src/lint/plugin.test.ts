@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { oxlintProblems, staleEntries } from './run.ts';
+import { DESIGN_SAMPLES } from './design-guardian.testkit.ts';
 import { RULES } from './plugin.ts';
 import { repoRoot } from './source-rule.ts';
 
@@ -41,6 +42,7 @@ afterAll(() => {
 
 const VIOLATIONS: Record<string, [string, string]> = {
   'card-2-contrast': ['packages/web/src/unsafe.tsx', '<p className="bg-card-2 text-danger text-xs">bad</p>'],
+  'design-guardian': ['packages/web/src/design-violation.tsx', 'const value = "h-screen";\n'],
   'contract-root-import': ['packages/cezar/src/a.ts', "import { runRecordSchema } from '@open-mercato/cezar-contract';\n"],
   'native-mock-source': ['packages/cezar/test/b.test.ts', "const text = readFileSync(adapter.mockBin, 'utf8');\n"],
   'raw-query-setter': ['packages/web/src/c.tsx', "import { useSearchParams } from 'react-router';\nconst [p, setP] = useSearchParams();\n"],
@@ -53,6 +55,9 @@ const VIOLATIONS: Record<string, [string, string]> = {
 const APPROVED: Record<string, string> = {
   'packages/web/src/routes/unknown-project.tsx': '<div className="bg-card-2"><span className="font-mono text-[11px] font-normal text-soft-foreground">old</span></div>',
 
+  'packages/web/src/styles/index.ts': 'export const value = "h-dvh";',
+  'packages/web/src/lib/bookmarklet.ts': 'alert("hello");',
+  'packages/web/src/design-guardian.test.ts': 'confirm();',
   // contract-root-import: the listed barrel, and type imports anywhere.
   'packages/api-client/src/index.ts': "export * from '@open-mercato/cezar-contract';\n",
   'packages/web/src/f.ts': "import type { RunRecord } from '@open-mercato/cezar-contract';\ntype T = import('@open-mercato/cezar-api-client').X;\n",
@@ -162,3 +167,11 @@ describe('stale entries', () => {
     expect(staleEntries()).toEqual([]);
   });
 });
+
+// Each original guardian rule runs through the real oxlint adapter, including e2e scope.
+it.each(Object.entries(DESIGN_SAMPLES))('oxlint runs guardian %s', async (name, token) => {
+  const file = name === 'fixture-serve-must-pin-cez-home' ? 'packages/web/e2e/design.e2e.ts' : 'packages/web/src/design.tsx';
+  const result = await oxlintProblems(seeded({ [file]: `// first line\nconst token = "${token}";` }), ['packages']);
+  expect(result).toEqual([expect.stringContaining(`${file}:2:`)]);
+  expect(result[0]).toContain(`${name} —`);
+}, OXLINT_TIMEOUT_MS);
