@@ -1,5 +1,5 @@
 import type { StatementSync } from 'node:sqlite';
-import type { RunRow } from './run-database.ts';
+import type { RunRow, RunRowInput } from './run-database.ts';
 
 type SqlRow = Record<string, unknown>;
 export function toRunRow(row: SqlRow): RunRow {
@@ -30,4 +30,25 @@ export function writeMetadata(statements: { deleteMeta: StatementSync; setMeta: 
     if (value === null) statements.deleteMeta.run(key);
     else statements.setMeta.run(key, value);
   }
+}
+
+/** Convert the input row to the named SQLite bindings without changing optional-column defaults. */
+export function toRunBindings(row: RunRowInput, revision: number) {
+  return {
+    id: row.id,
+    createdAt: row.createdAt,
+    finishedAt: row.finishedAt ?? null,
+    status: row.status,
+    archived: row.archived ? 1 : 0,
+    live: row.live ? 1 : 0,
+    parentRunId: row.parentRunId ?? null,
+    clientRequestId: row.clientRequestId ?? null,
+    groupId: row.groupId ?? null,
+    worktreePath: row.worktreePath ?? null,
+    branch: row.branch ?? null,
+    baseBranch: row.baseBranch ?? null,
+    revision,
+    data: row.data,
+    summary: row.summary,
+  };
 }

@@ -1,4 +1,4 @@
-import { toRunRow, writeMetadata } from './run-database-row.ts';
+import { toRunRow, toRunBindings, writeMetadata } from './run-database-row.ts';
 import { reportRows, REPORTS_MIGRATION, type IndexedArtifact } from './report-rows.ts';
 import { readPeerSummaryPage, toSummaryRow, type PeerSummaryPageQuery } from './run-database-peer-page.ts';
 import { accessSync, closeSync, constants, existsSync, openSync, readSync, statSync } from 'node:fs';
@@ -912,23 +912,7 @@ export class RunDatabase {
         const revision = changes.upserts.length > 0 ? this.nextSequence(COMMIT_SEQ_KEY) : 0;
         for (const row of changes.upserts) {
           this.reports.markDirty(row.id, row.live, revision);
-          const inserted = this.statements.upsert.get({
-            id: row.id,
-            createdAt: row.createdAt,
-            finishedAt: row.finishedAt ?? null,
-            status: row.status,
-            archived: row.archived ? 1 : 0,
-            live: row.live ? 1 : 0,
-            parentRunId: row.parentRunId ?? null,
-            clientRequestId: row.clientRequestId ?? null,
-            groupId: row.groupId ?? null,
-            worktreePath: row.worktreePath ?? null,
-            branch: row.branch ?? null,
-            baseBranch: row.baseBranch ?? null,
-            revision,
-            data: row.data,
-            summary: row.summary,
-          });
+          const inserted = this.statements.upsert.get(toRunBindings(row, revision));
           // Revision binding makes an older writer invalidate this optional repair cache.
           if (row.issueAttributionCurrent) this.statements.setMeta.run(`issue-attribution:${row.id}`, String(revision));
           else this.statements.deleteMeta.run(`issue-attribution:${row.id}`);
