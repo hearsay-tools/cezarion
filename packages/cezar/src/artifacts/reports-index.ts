@@ -1,4 +1,3 @@
-import { readdir, lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { matchesRunSearch } from '@open-mercato/cezar-contract/run-search';
@@ -9,7 +8,7 @@ import type { RunDatabase } from '../runs/run-database.ts';
 import { REPORTS_BACKFILL_KEY, type IndexedArtifact, type ReportRow, type ReportCursor } from '../runs/report-rows.ts';
 import { parseStoredSummary } from '../runs/run-summary-page.ts';
 import type { RunRecord, RunStore } from '../runs/store.ts';
-import { artifactRunsRoot, inspectArtifactStorageForIndex, readArtifactMetadataForIndex } from './store.ts';
+import { artifactRunsRoot, scanArtifactsForIndex, checkArtifactContentForIndex } from './store.ts';
 
 export { REPORTS_BACKFILL_KEY } from '../runs/report-rows.ts';
 const cursorSchema = z.tuple([z.iso.datetime(), z.uuid()]);
@@ -37,8 +36,8 @@ export class ReportsIndex {
   private runsRoot?: string;
 
   private root(): string { return this.runsRoot ??= artifactRunsRoot(this.dataDir); }
-  private async inspect<T>(parts: string[], inspect: (path: string) => Promise<T>) {
-    try { return await inspectArtifactStorageForIndex(join(this.root(), ...parts), inspect); }
+  private async storage<T>(runId: string, read: (directory: string) => Promise<T>) {
+    try { return await read(join(this.root(), `${runId}-artifacts`)); }
     catch (error) { return { state: 'indeterminate' as const, error }; }
   }
 
@@ -70,13 +69,8 @@ export class ReportsIndex {
       this.store.flush();
       if (this.db.getMeta(REPORTS_BACKFILL_KEY)) return;
       let complete = true;
-      const scan = await this.inspect([], path => readdir(path, { withFileTypes: true }));
-      if (scan.state !== 'read') return;
-      for (const entry of scan.value) {
-        const id = entry.name.replace(/-artifacts$/, '');
-        if (entry.name.endsWith('-artifacts') && this.db.has(id)) {
-          if (this.supportedRun(id) && !await this.indexRun(id)) complete = false;
-        }
+      for (const id of this.db.listIds()) {
+        if (this.supportedRun(id) && !await this.indexRun(id)) complete = false;
       }
       if (!this.closed && complete) this.db.transaction({ upserts: [], deletes: [], meta: { [REPORTS_BACKFILL_KEY]: new Date().toISOString() } });
     });
@@ -99,25 +93,17 @@ export class ReportsIndex {
     if (!this.supportedRun(runId)) return true;
     const previous = this.db.reports.forRun(runId);
     const revision = this.db.revisionOf(runId);
-    const scan = await this.inspect([`${runId}-artifacts`], path => readdir(path));
+    const scan = await this.storage(runId, directory => scanArtifactsForIndex(directory, runId));
     if (scan.state === 'indeterminate') {
       console.warn(`[cez] Report scan could not be completed: ${runId}`, scan.error);
       this.db.reports.retry(runId, revision);
       return false;
     }
-    const directory = join(this.root(), `${runId}-artifacts`);
-    const entries = scan.state === 'read' ? scan.value : [];
-    const artifacts: IndexedArtifact[] = [];
-    let complete = true;
-    for (const id of entries) {
-      const result = await readArtifactMetadataForIndex(directory, runId, id);
-      if (result.state === 'indeterminate') {
-        complete = false;
-        const cached = previous.find(row => row.id === id);
-        if (cached) artifacts.push(cached);
-        console.warn(`[cez] Report read could not be completed: ${runId}/${id}`, result.error);
-      } else if (result.state === 'read' && /\.html?$/i.test(result.artifact.name)) artifacts.push(result.artifact);
-    }
+    const artifacts: IndexedArtifact[] = scan.state === 'read' ? scan.value.artifacts.filter(a => /\.html?$/i.test(a.name)) : [];
+    const uncertain = scan.state === 'read' ? scan.value.indeterminate : [];
+    for (const cached of previous) if (uncertain.includes(cached.id)) artifacts.push(cached);
+    const complete = uncertain.length === 0;
+    if (!complete) console.warn(`[cez] Report read could not be completed: ${runId}`);
     if (this.closed) return false;
     this.db.reports.replace(runId, artifacts, revision, complete);
     const kept = new Set(artifacts.map(a => a.id));
@@ -126,13 +112,13 @@ export class ReportsIndex {
   }
   private async present(row: ReportRow): Promise<boolean | null> {
     if (!this.supportedRun(row.runId)) return false;
-    const check = await this.inspect([`${row.runId}-artifacts`, row.id], path => lstat(join(path, 'content')));
+    const check = await this.storage(row.runId, directory => checkArtifactContentForIndex(directory, row.runId, row.id, row.size));
     if (check.state === 'indeterminate') {
       this.db.reports.retry(row.runId, this.db.revisionOf(row.runId));
       console.warn(`[cez] Report content could not be checked: ${row.runId}/${row.id}`, check.error);
       return null;
     }
-    if (check.state === 'read' && check.value.isFile() && !check.value.isSymbolicLink() && check.value.size === row.size) return true;
+    if (check.state === 'read' && check.value) return true;
     this.db.reports.drop(row.id);
     console.warn(`[cez] Report missing or deleted: ${row.runId}/${row.id}`);
     return false;

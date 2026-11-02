@@ -28,8 +28,10 @@ live and dirty runs; legacy non-UUID task IDs cannot own artifacts, so reconcili
 them and removes their impossible retry markers; a transition from a live to a terminal status reconciles the settled run
 and dirty runs. Read, pin and archive events on terminal runs do not start reconciliation.
 Listing pages through joined summaries, checks content only for the selected page and fills
-past missing files. Index directory scans and page checks use the artifact reader’s anchored
-no-follow storage access. The shared artifact root helper canonicalizes only the trusted data
+past missing files. Backfill selects task IDs from the database, then uses the same bounded per-task scan as
+reconciliation. The index has no filesystem imports or walks. Store-side helpers share
+`entries`, `readEntry`, every artifact byte/count cap, and the artifact reader’s anchored
+no-follow storage access. Any cap overflow retains the whole run cache and dirty marker. The shared artifact root helper canonicalizes only the trusted data
 root, once per index after listen or on the first query. Failed resolution remains retryable.
 Redirected storage retains cache rows and retry markers. Indeterminate page checks keep cached
 rows in the page, so cursors never hide them; the reader handles open failures. A separate joined-summary pass counts all readable matching source summaries

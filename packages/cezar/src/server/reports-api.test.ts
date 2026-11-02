@@ -3,7 +3,7 @@ vi.mock('node:fs/promises', async importOriginal => ({ ...await importOriginal<t
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, renameSync, symlinkSync, cpSync, realpathSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, renameSync, symlinkSync, cpSync, realpathSync, truncateSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
@@ -278,11 +278,7 @@ describe('project reports', () => {
   it('keeps a report when its directory or content check is indeterminate and retries later', async () => {
     const run = task(); const artifact = await publish(run.id);
     store.updateRun(run.id, { status: RUN_STATUS.done }); store.flush(); await page();
-    const actualReaddir = fs.readdir;
-    const directoryFault = vi.spyOn(fs, 'readdir').mockImplementation((...args) => {
-      if (String(args[0]) === artifactDirectory(dataDir, run.id)) return Promise.reject(Object.assign(new Error('busy directory'), { code: 'EACCES' }));
-      return actualReaddir(...args);
-    });
+    const directoryFault = vi.spyOn(fs, 'opendir').mockRejectedValue(Object.assign(new Error('busy directory'), { code: 'EACCES' }));
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     await store.reports.reconcile(false, run.id);
     expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
@@ -422,6 +418,57 @@ describe('project reports', () => {
     fault.mockRestore();
     expect(await scan()).toEqual(baseline.reports.map(row => row.id));
     expect(baseline.reports.map(row => row.id)).toContain(target.id);
+  });
+
+  it.each(['directory entries', 'artifact count', 'metadata bytes', 'file bytes', 'task bytes'])('retains the full cache and retry state after exceeding the store cap: %s', async cap => {
+    const run = task(); const artifact = await publish(run.id);
+    store.updateRun(run.id, { status: RUN_STATUS.done }); store.flush(); await page();
+    const directory = artifactDirectory(dataDir, run.id), entry = join(directory, artifact.id);
+    const metadata = JSON.parse(readFileSync(join(entry, 'metadata.json'), 'utf8'));
+    const added: string[] = [];
+    if (cap === 'directory entries') {
+      for (let i = 0; i < 1024; i++) {
+        const file = join(directory, `junk-${i}`); writeFileSync(file, ''); added.push(file);
+      }
+    } else if (cap === 'artifact count' || cap === 'task bytes') {
+      for (let i = 0; i < (cap === 'artifact count' ? 64 : 7); i++) {
+        const id = randomUUID(), copy = join(directory, id); cpSync(entry, copy, { recursive: true }); added.push(copy);
+        const size = cap === 'task bytes' ? 10 * 1024 * 1024 : metadata.size;
+        if (cap === 'task bytes') truncateSync(join(copy, 'content'), size);
+        writeFileSync(join(copy, 'metadata.json'), JSON.stringify({ ...metadata, id, size }));
+      }
+    } else if (cap === 'metadata bytes') writeFileSync(join(entry, 'metadata.json'), ' '.repeat(32 * 1024 + 1));
+    else truncateSync(join(entry, 'content'), 10 * 1024 * 1024 + 1);
+    const raw = new DatabaseSync(join(dataDir, 'runs.db'));
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      raw.prepare('DELETE FROM meta WHERE key = ?').run(REPORTS_BACKFILL_KEY);
+      expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
+      expect(raw.prepare('SELECT id FROM artifacts WHERE run_id = ?').all(run.id)).toEqual([{ id: artifact.id }]);
+      expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(`reports-dirty:${run.id}`)).toBeTruthy();
+      expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(REPORTS_BACKFILL_KEY)).toBeUndefined();
+      for (const path of added) rmSync(path, { recursive: true });
+      writeFileSync(join(entry, 'metadata.json'), JSON.stringify(metadata));
+      writeFileSync(join(entry, 'content'), '<title>Quarterly results</title><p>report</p>');
+      expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
+      expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(`reports-dirty:${run.id}`)).toBeUndefined();
+      expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(REPORTS_BACKFILL_KEY)).toBeTruthy();
+    } finally { raw.close(); }
+  });
+
+  it('retains a cached row and retries when its content becomes a symlink', async () => {
+    const run = task(); const artifact = await publish(run.id);
+    store.updateRun(run.id, { status: RUN_STATUS.done }); store.flush(); await page();
+    const content = join(artifactDirectory(dataDir, run.id), artifact.id, 'content'), saved = content + '-saved';
+    renameSync(content, saved); symlinkSync(saved, content);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
+    expect(await readArtifact(artifactDirectory(dataDir, run.id), run.id, artifact.id)).toBeNull();
+    const raw = new DatabaseSync(join(dataDir, 'runs.db'), { readOnly: true });
+    try { expect(raw.prepare('SELECT value FROM meta WHERE key = ?').get(`reports-dirty:${run.id}`)).toBeTruthy(); }
+    finally { raw.close(); }
+    rmSync(content); renameSync(saved, content);
+    expect((await page()).reports.map(row => row.id)).toEqual([artifact.id]);
   });
 
   it('ignores live legacy task IDs and clears their impossible artifact retry markers', async () => {
