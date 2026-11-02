@@ -90,8 +90,8 @@ export class SubagentWaits {
     if (live) this.clearGrace(runId);
     const wait = openSubagentWaitOf(this.context.store.getRun(runId));
     if (!wait) return;
-    this.refreshWait(runId, state, wait);
-    if (!live && this.host.isParked(runId)) this.armGrace(runId);
+    // A grace starts only from a saved snapshot, so the settled wait names every child's end.
+    if (this.refreshWait(runId, state, wait) && !live && this.host.isParked(runId)) this.armGrace(runId);
   }
 
   /**
@@ -129,14 +129,16 @@ export class SubagentWaits {
     this.host.armWait(runId, wait);
   }
 
-  /** Save the children and move the deadline, then re-arm it. */
-  private refreshWait(runId: string, state: ActiveRun, wait: SubagentWaitEntry): void {
+  /** Save the children and move the deadline, then re-arm it. False when the checkpoint failed:
+   *  the saved wait and its armed deadline stay as they were. */
+  private refreshWait(runId: string, state: ActiveRun, wait: SubagentWaitEntry): boolean {
     const children = this.children(state);
     const next: SubagentWaitEntry = { ...wait, deadline: this.deadline(), children: children.length ? children : wait.children };
     try { this.context.store.commitWait(runId, next); }
-    catch (error) { console.warn(`[cez] subagent wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return; }
+    catch (error) { console.warn(`[cez] subagent wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return false; }
     this.host.disarmWait(wait.id);
     this.host.armWait(runId, next);
+    return true;
   }
 
   /** Every child ended: unless the runner starts a parent turn first, the wait resolves `settled`. */
@@ -147,7 +149,10 @@ export class SubagentWaits {
       this.graces.delete(runId);
       const state = this.host.active.get(runId);
       const wait = openSubagentWaitOf(this.context.store.getRun(runId));
-      if (!state || !wait || liveSubagents(state) || this.context.disposed()) return;
+      // A parent turn that started in the grace (a human message, another wake) sees the ends
+      // itself: its turn end cancels the wait. The saved snapshot must hold every end first.
+      if (!state || !wait || liveSubagents(state) || this.context.disposed() || !this.host.isParked(runId)) return;
+      if (!this.refreshWait(runId, state, wait)) return;
       this.host.settleWait(runId, wait.id, { reason: 'settled' });
     }, this.graceMs);
     timer.unref?.();
@@ -178,7 +183,11 @@ export class SubagentWaits {
   private supersede(runId: string, waitIds: readonly string[]): void {
     this.clearGrace(runId);
     try { this.context.store.commitOutcome(runId, { kind: 'cancelled', waitIds, superseded: true }); }
-    catch (error) { console.warn(`[cez] wait cancellation failed: ${error instanceof Error ? error.message : String(error)}`); }
+    catch (error) {
+      // The waits stay open on disk, so they keep their armed deadlines.
+      console.warn(`[cez] wait cancellation failed: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
     for (const id of waitIds) this.host.disarmWait(id);
   }
 

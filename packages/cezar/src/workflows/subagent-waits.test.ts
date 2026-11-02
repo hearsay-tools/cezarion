@@ -2,7 +2,7 @@ import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import type { SubagentWaitEntry, Wait } from '@open-mercato/cezar-contract/waits';
 import { makePeerWait, makeWorkerWait, RUN_STATUS, SUBAGENT_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
@@ -48,16 +48,16 @@ const startChild = (runId: string, id: string) => emitUi(runId, { type: 'item.st
 const endChild = (runId: string, id: string, status: ToolStatus = 'completed') => emitUi(runId, { type: 'item.completed', item: child(id, status, false) });
 
 /** A parent whose first turn is held until `release()`: children start inside it. */
-async function heldParent() {
+async function heldParent(humanAnswerGate?: string) {
   const gate = join(root, `release-${randomUUID()}`);
-  const wire = controlledWire({ firstResultGate: gate, replay: true });
+  const wire = controlledWire({ firstResultGate: gate, replay: true, ...(humanAnswerGate ? { humanAnswerGate } : {}) });
   const run = await parent(); await until(wire.initialReceived);
   return { run, release: () => writeFileSync(gate, 'release') };
 }
 
 /** A parent parked on the subagent wait for `children` running native subagents. */
-async function parkedOnSubagents(children = ['toolu_bg_01'], beforeRelease?: (runId: string) => Promise<void>) {
-  const { run, release } = await heldParent();
+async function parkedOnSubagents(children = ['toolu_bg_01'], beforeRelease?: (runId: string) => Promise<void>, humanAnswerGate?: string) {
+  const { run, release } = await heldParent(humanAnswerGate);
   for (const id of children) startChild(run.id, id);
   await beforeRelease?.(run.id);
   release();
@@ -133,6 +133,45 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     await until(() => settledOf(id, wait.id)?.resolvedAt !== undefined);
     // A timer can fire late under load, never early: the wake waits a full grace after the last end.
     expect(Date.parse(settledOf(id, wait.id)!.resolvedAt!) - lastEnd).toBeGreaterThanOrEqual(45);
+  });
+
+  it('a parent turn that starts in the grace sees the ends itself: no settled wake, its turn end cancels the wait', async () => {
+    const gate = join(root, `human-${randomUUID()}`);
+    const { id, wait } = await parkedOnSubagents(['toolu_bg_01'], undefined, gate);
+    endChild(id, 'toolu_bg_01');
+    expect(manager.sendMessage(id, [{ type: 'text', text: 'human answer mock:hold' }])).toBe(true);
+    await until(() => store.getRun(id)?.status === RUN_STATUS.running);
+    await new Promise(resolve => setTimeout(resolve, 150)); // bound: outlasts the 50 ms grace while the human's turn is held
+    expect(entryOf(id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open });
+    writeFileSync(gate, 'release');
+    await until(() => settledOf(id, wait.id)?.phase === WAIT_PHASE.cancelled);
+    expect(inputsNaming(id, `Subagent wait ${wait.id}`)).toEqual([]);
+  });
+
+  it('a child end whose checkpoint fails starts no grace, so no wake settles a stale snapshot', async () => {
+    const { id, wait } = await parkedOnSubagents();
+    const commit = vi.spyOn(store, 'commitWait').mockImplementationOnce(() => { throw Error('injected: disk full'); });
+    endChild(id, 'toolu_bg_01');
+    expect(commit).toHaveBeenCalledTimes(1);
+    await new Promise(resolve => setTimeout(resolve, 150)); // bound: outlasts the 50 ms grace
+    // The saved wait still reads the child running; its armed deadline is the fallback.
+    expect(entryOf(id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open, children: [{ id: 'toolu_bg_01', status: SUBAGENT_STATUS.running }] });
+    expect(internals().waitWatches.waitTimers.has(wait.id)).toBe(true);
+    expect(inputsNaming(id, 'Subagent wait')).toEqual([]);
+  });
+
+  it('a runner resume whose cancellation fails keeps every wait open and armed', async () => {
+    const { id, wait } = await parkedOnSubagents();
+    const real = store.commitOutcome.bind(store);
+    const commit = vi.spyOn(store, 'commitOutcome').mockImplementation((runId, outcome, ...rest) => {
+      if (outcome.kind === 'cancelled') throw Error('injected: disk full');
+      return real(runId, outcome, ...rest);
+    });
+    emitUi(id, { type: 'turn.started', turnId: 'turn_runner' });
+    expect(commit.mock.calls.some(([, outcome]) => outcome.kind === 'cancelled')).toBe(true);
+    commit.mockRestore();
+    expect(entryOf(id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open });
+    expect(internals().waitWatches.waitTimers.has(wait.id)).toBe(true);
   });
 
   it('a duplicate child end changes nothing and wakes nothing', async () => {
