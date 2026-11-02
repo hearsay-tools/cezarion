@@ -28,7 +28,7 @@ async function reopenSettled(fixture: { store: RunStore; manager: RunManager; ru
   backend: RunnerId, outcome: 'failed' | 'cancelled' | 'success', prompt: string): Promise<void> {
   if (outcome === 'cancelled') {
     withoutTaskScenario(fixture.store, fixture.runId);
-    await fixture.answer(`Library: Vitest. ${HARNESS_ADAPTERS[backend].scenarios.done!}`);
+    await fixture.answer(`Library: Vitest. ${HARNESS_ADAPTERS[backend].scenarios['cezar-done']!}`);
     return;
   }
   expect(fixture.manager.continueRun(fixture.runId, { text: outcome === 'failed' ? prompt : 'mock:baseline' }).ok).toBe(true);
@@ -52,13 +52,13 @@ describe('harness parity — settlement during blocked autosave', () => {
           vi.spyOn(console, 'warn').mockImplementation(() => undefined);
           try {
             const hasTail = continuation && outcome === 'cancelled';
-            await withOwnedInputRun(backend, hasTail ? 'ask-snapshot' : 'baseline', async ({ store, manager, runId, repoRoot, adoptContext, answer }) => {
+            await withOwnedInputRun(backend, hasTail ? 'cezar-ask' : 'baseline', async ({ store, manager, runId, repoRoot, adoptContext, answer }) => {
               if (continuation || outcome !== 'failed') {
                 manager.enqueueOwnedRun(runId);
                 // bound: the native mock must park before Finish or Continue can act.
                 await waitFor(() => store.getRun(runId)?.status === 'waiting', FIXTURE_STEP_MS);
                 if (hasTail) {
-                  // bound: wait for the native ASK snapshot to reach the parent before expiring the
+                  // bound: wait for the cezar_ask question to reach the parent before expiring the
                   // continuation (hearsay-tools/cezarion#2410).
                   await waitFor(() => store.transcriptFacts(runId).pendingAsk?.routedMessageId !== undefined, FIXTURE_STEP_MS);
                   expect(store.getRun(runId)?.steps.map(step => step.status)).toEqual(['waiting', 'pending']);

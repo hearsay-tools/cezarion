@@ -4,7 +4,6 @@ import { randomUUID } from 'node:crypto';
 import { parseEffort } from '@open-mercato/cezar-contract/effort';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve as resolvePath } from 'node:path';
-import { parseAskMarker } from './ask.ts';
 import {
   AUTO_END_DELAY_MS,
   DEFAULT_RUN_TIMEOUT_MS,
@@ -217,8 +216,6 @@ export class ClaudeCliRunner implements AgentRunner {
       }, AUTO_END_DELAY_MS);
       autoEndTimer.unref?.();
     };
-    let pendingMarkerAsk = false;
-    let turnTextStart = 0;
     const sendMessage = (content: ContentBlock[], acknowledge?: (error?: Error | null) => void, inputIds: readonly string[] = [], humanFollowUp = false, retryWrite = false): boolean => {
       if (!stdinOpen) return false;
       if (refusalRetry && !retryWrite) {
@@ -235,8 +232,6 @@ export class ClaudeCliRunner implements AgentRunner {
       if (opensTurn) {
         queuedTurnPending = false;
         nativeTurn = 'none';
-        pendingMarkerAsk = false;
-        turnTextStart = textChunks.length;
         attemptDidWork = false;
       }
       // A follow-up inside the reopen window cancels the scheduled close.
@@ -384,7 +379,6 @@ export class ClaudeCliRunner implements AgentRunner {
         emitUi(claudeTurnStarted);
       } else if (nativeTurn === 'possible' && isParentAssistantFrame(msg)) {
         nativeTurn = 'running';
-        turnTextStart = textChunks.length;
         emitUi(claudeTurnStarted);
       }
     };
@@ -534,7 +528,6 @@ export class ClaudeCliRunner implements AgentRunner {
       if (typeof msg.total_cost_usd === 'number' && Number.isFinite(msg.total_cost_usd) && msg.total_cost_usd >= 0) {
         onEvent?.({ type: 'cost', usd: msg.total_cost_usd });
       }
-      pendingMarkerAsk = parseAskMarker(textChunks.slice(turnTextStart).join('\n')) !== null;
       settleResultInputs(msg);
       // A result is not idle if human stdin messages already queued later turns.
       agentInputReady = unsettled.size === 0;
@@ -669,9 +662,9 @@ export class ClaudeCliRunner implements AgentRunner {
     const session: AgentSession = {
       result,
       sendMessage: content => sendMessage(content, undefined, [], true),
-      sendAgentMessage: (content, inputIds = [], options) => {
+      sendAgentMessage: (content, inputIds = []) => {
         // #505: allowed mid-turn — the CLI steers the line into the running turn.
-        if (!stdinOpen || refusalRetry || (pendingMarkerAsk && !options?.besideQuestion) || agentWritePending) return false;
+        if (!stdinOpen || refusalRetry || agentWritePending) return false;
         let resolve!: () => void, reject!: (error: Error) => void;
         const acknowledged = new Promise<void>((yes, no) => { resolve = yes; reject = no; });
         agentWritePending = true;

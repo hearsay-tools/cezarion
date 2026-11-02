@@ -8,7 +8,7 @@
 
 ## Rules
 
-A per-task journal at `.ai/cezar/runs/<runId>.handoff.md` (spec 007, `.ai/specs/007-handoff-file-todos.md`), outside the worktree so it survives worktree removal. `seedHandoffFile` writes the skeleton. The agent finds the file through `CEZ_HANDOFF_FILE` and the `HANDOFF_ONLY_INSTRUCTIONS` system-prompt fragment, and keeps `## Progress log` (newest at the top) and `## Resume notes`.
+A per-task journal at `.ai/cezar/runs/<runId>.handoff.md` (spec 007, `.ai/specs/007-handoff-file-todos.md`), outside the worktree so it survives worktree removal. `seedHandoffFile` writes the skeleton. The agent finds the file through `CEZ_HANDOFF_FILE` and the `handoffInstructions` system-prompt fragment, and keeps `## Progress log` (newest at the top) and `## Resume notes`.
 
 **The file belongs to the agent; cezar writes no line of its own into it.** `buildPrBody` (`server/forge/github.ts`) and the Tasks-row preview (`packages/web/src/lib/task-preview.ts`) read the first lines of `## Progress log` as the agent's own summary. cezar touches the file in three places only, and two ast-grep rules (`.ai/ast-grep/rules/handoff-write-outside-writers.yml`, `handoff-written-outside-handoff-module.yml`) refuse a fourth:
 

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { cezarDoneAnswerSchema } from '@open-mercato/cezar-contract/waits';
 import { manager, parent, restart, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
-import { messagesPrompt } from './monitoring-turn.testkit.ts';
+import { toolCall } from './waits-parity.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
 function rootTask() {
@@ -127,7 +127,6 @@ describe('root request completion without a live session', () => {
     expect(store.getRun(run.id)?.delegation).not.toHaveProperty('finishRequestedAt');
   });
   it('bounds incoming refusal text and settles every request, including omitted names', async () => {
-    process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt('claude', ['Finish without replying.\nCEZ:DONE']);
     const recipient = await parent(HARNESS_ADAPTERS.claude.scenarios.baseline!);
     await until(() => store.getRun(recipient.id)?.status === 'waiting');
     const senders = [rootTask(), rootTask()];
@@ -140,8 +139,11 @@ describe('root request completion without a live session', () => {
     expect(refusal.message).toContain('cez message conversation <sender>');
     expect(refusal.message.length).toBeLessThanOrEqual(4096);
     expect(cezarDoneAnswerSchema.safeParse({ ok: false, code: refusal.code, message: refusal.message }).success).toBe(true);
-    expect(manager.sendMessage(recipient.id, [{ type: 'text', text: messagesPrompt('claude', ['Done.\nCEZ:DONE']) }])).toBe(true);
+    // The first cezar_done is refused with the request list; a second one in the same completion
+    // cycle finishes without replying, and every request settles.
+    expect(manager.sendMessage(recipient.id, [{ type: 'text', text: `${toolCall('cezar_done', {})} ${toolCall('cezar_done', {})}` }])).toBe(true);
     await until(() => store.getRun(recipient.id)?.status === 'done' && !manager.isActive(recipient.id));
+    expect(store.readEvents(recipient.id).some(event => event.type === 'text' && String(event.text).includes('requests_unanswered'))).toBe(true);
     for (const [index, sender] of senders.entries()) {
       const delegation = store.getRun(sender.id)?.delegation;
       const outcomes = delegation?.role === 'root' ? delegation.conversation?.outcomes : [];

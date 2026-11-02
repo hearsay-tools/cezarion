@@ -20,7 +20,7 @@ describe('recover() with tied runs in a one-slot project', () => {
   const savedDryRun = process.env.CEZ_DRY_RUN;
 
   const record = (id: string) => ({
-    id, title: `run ${id}`, workflow: 'quick-task', task: 'mock:done pick me up', status: 'running',
+    id, title: `run ${id}`, workflow: 'quick-task', task: 'mock:cezar-done pick me up', status: 'running',
     createdAt: '2026-07-30T00:00:00.000Z', startedAt: '2026-07-30T00:00:01.000Z', tokensUsed: 0, archived: false,
     worktree: false, currentStepId: 'work',
     workflowDef: { name: 'quick-task', source: 'built-in', steps: [{ id: 'work', name: 'Work', prompt: '{{task}}' }] },

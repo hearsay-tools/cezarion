@@ -3,13 +3,12 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type {
-  AgentEvent, AgentInputOptions, AgentRunResult, AgentRunner, AgentRunSpec, AgentRunSpecSupport,
+  AgentEvent, AgentRunResult, AgentRunner, AgentRunSpec, AgentRunSpecSupport,
   AgentSession, AgentToolCallRecord, ContentBlock, InputDelivery, SessionOptions,
 } from './agent-runner.ts';
 import { prependSystemPrompt } from './agent-runner.ts';
 import { cursorPrintToolGrantArgs } from './runner-tool-grants.ts';
 import { buildChildEnv } from './agent-env.ts';
-import { parseAskMarker } from './ask.ts';
 import { cezarToolEnvNames } from '../ci-wait/tools.ts';
 import type { ModelOption } from './runner-model-catalog.ts';
 import { cursorArgs } from './cursor-cli-flags.ts';
@@ -112,7 +111,6 @@ class CursorPrintSession implements AgentSession {
   private noProgress?: NodeJS.Timeout | undefined;
   private autoEnd?: NodeJS.Timeout | undefined;
   private errorReported = false;
-  private markerAsk = false;
   private model?: string | undefined;
   private scratch?: string;
   private pluginDir?: string;
@@ -218,7 +216,6 @@ class CursorPrintSession implements AgentSession {
       receipt?.reject(new Error(message)); this.fail(message); return;
     }
     this.clearAutoEnd();
-    this.markerAsk = false;
     this.busy = true;
     const args = cursorArgs(this.bin, ['-p', '--force', '--trust', '--output-format', 'stream-json']);
     if (this.model) args.push('--model', this.model);
@@ -386,10 +383,6 @@ class CursorPrintSession implements AgentSession {
       else active.receipt.reject(new Error('Cursor print input admission was not confirmed'));
     }
     const completedTurn = active.resultSeen && !spawnError && exitCode === 0 && signal === null;
-    if (completedTurn && !this.errorReported) {
-      this.markerAsk = parseAskMarker(active.turnText) !== null;
-      if (this.markerAsk) this.queue = [];
-    }
     // The workflow can submit an autonomous follow-up synchronously from
     // turn-end. Admit it at this boundary, after the old process settled.
     if (completedTurn && !this.errorReported) this.busy = false;
@@ -405,12 +398,12 @@ class CursorPrintSession implements AgentSession {
     }
     if (!active.resultSeen) { this.fail('Cursor print exited without a result frame'); return; }
     if (this.errorReported) { this.finish(); return; }
-    if (!this.markerAsk && !this.busy) this.opts.onAgentInputReady?.();
+    if (!this.busy) this.opts.onAgentInputReady?.();
     queueMicrotask(() => this.afterTurn());
   }
 
   private afterTurn(): void {
-    if (!this.isOpen || this.busy || this.closing || this.markerAsk) return;
+    if (!this.isOpen || this.busy || this.closing) return;
     const next = this.queue.shift();
     // Shifting the queue must not read as delivered: until the new process's init
     // frame, the manager still sees the old turn's boundary (hearsay-tools/cezarion#1112).
@@ -419,7 +412,7 @@ class CursorPrintSession implements AgentSession {
   }
   private clearAutoEnd(): void { if (this.autoEnd) clearTimeout(this.autoEnd); this.autoEnd = undefined; }
   private scheduleAutoEnd(): void {
-    if (!this.opts.autoEndAfterFirstTurn || this.busy || this.closing || this.markerAsk) return;
+    if (!this.opts.autoEndAfterFirstTurn || this.busy || this.closing) return;
     this.clearAutoEnd();
     this.autoEnd = setTimeout(() => {
       this.autoEnd = undefined;
@@ -433,8 +426,8 @@ class CursorPrintSession implements AgentSession {
     else this.beginTurn(content);
     return true;
   }
-  sendAgentMessage(content: ContentBlock[], _inputIds?: readonly string[], options?: AgentInputOptions): false | Promise<void> {
-    if (!this.isOpen || this.closing || this.busy || this.queue.length || (this.markerAsk && !options?.besideQuestion)) return false;
+  sendAgentMessage(content: ContentBlock[], _inputIds?: readonly string[]): false | Promise<void> {
+    if (!this.isOpen || this.closing || this.busy || this.queue.length) return false;
     return new Promise<void>((resolve, reject) => {
       const receipt = { resolve, reject, settled: false };
       this.beginTurn(content, receipt);

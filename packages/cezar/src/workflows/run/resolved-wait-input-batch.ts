@@ -12,8 +12,6 @@ export function resolvedWaitInputBatch(
 ): { text: string; inputIds: string[] } | undefined {
   // One wake turn delivers every resolved wait, oldest first, then the conversation input
   // that would lead the next batch (hearsay-tools/cezarion#1233).
-  // Each result speaks the lifecycle of the session that receives it: a wake resolved with no
-  // session, or delivered by a continuation without cezar tools, keeps that session's wording.
   const results = resolved.flatMap(wait => {
     const input = run.agentInputs?.find(entry => entry.id === waitInputId(wait) && !entry.deliveredAt);
     if (!input) return [];

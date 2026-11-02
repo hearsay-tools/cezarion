@@ -127,7 +127,7 @@ export class TurnBookkeeper {
    * In-band declarations from the finished turn (spec
    * 2026-07-18-task-ref-markers): the main thread's own `CEZ:PR=` /
    * `CEZ:ISSUE=` / `CEZ:TITLE=` lines, parsed from the accumulated turn text
-   * like `CEZ:DONE` — never from tool output. Declared numbers overwrite the
+   * — never from tool output. Declared numbers overwrite the
    * regex/namer display tier (the store re-resolves the referenced-PR chip);
    * a declared title takes `titleOrigin: 'marker'`, which beats the namer but
    * never a user rename, and silences the live refresh below.

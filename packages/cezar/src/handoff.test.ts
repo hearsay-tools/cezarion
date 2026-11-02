@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HANDOFF_AUTOSAVE_RECORDS_MAX, type HandoffRecords } from '@open-mercato/cezar-contract/handoff';
 
 import {
-  HANDOFF_ONLY_INSTRUCTIONS,
   handoffInstructions,
   handoffPath,
   recordHandoffAutosave,
@@ -285,11 +284,11 @@ describe('the store-backed autosave records', () => {
   });
 });
 
-// hearsay-tools/cezarion#1234: a session with cezar tools is taught the tools, not the lifecycle
-// markers; a session without them keeps today's prompt.
+// hearsay-tools/cezarion#1234, hearsay-tools/cezarion#2397: every session is taught the tools,
+// never the lifecycle markers.
 describe('handoffInstructions', () => {
   it('the tool variant teaches cezar_done, cezar_ask and cezar_wait and no lifecycle marker', () => {
-    const text = handoffInstructions({ tools: true });
+    const text = handoffInstructions();
     expect(text).toContain('Lifecycle tools (cezar): End every turn with a cezar tool call that says what happens next. When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn.');
     expect(text).toContain('When a user decision or missing input is needed, call cezar_ask with the complete decision context and short questions. Put the full draft, findings, evidence and option meanings in context. Cezar shows context as Markdown above the card. Reasoning and rejected calls are hidden. Give a question 2–4 options to show them as choices, or leave its options out and the user types the answer. Once the call accepts the context and questions, end the turn and wait for the user.');
     expect(text).toContain('call cezar_wait with kind "pr" for a pull request\'s checks or its merge, or kind "timer" to re-check later');
@@ -307,8 +306,8 @@ describe('handoffInstructions', () => {
 
   // hearsay-tools/cezarion#1994: at shipped defaults, native cross-session tools stay callable
   // on some runners, so every session learns that tasks talk only through `cez message`.
-  it.each([true, false])('steers agents off native cross-session messaging (tools=%s)', tools => {
-    const text = handoffInstructions({ tools });
+  it('steers agents off native cross-session messaging', () => {
+    const text = handoffInstructions();
     expect(text).toContain('## Messaging other tasks');
     expect(text).toContain('Cezar tasks talk to each other only through `cez message`, which needs `CEZ_DELEGATION=1`; with it, your delegation instructions give the full command and its verbs (`tasks`, `request`, `progress`, `reply`).');
     expect(text).toContain("Never use your runner's native cross-session tools to reach another task or agent session, for example Claude's SendMessage or ListAgents for other sessions.");
@@ -317,33 +316,25 @@ describe('handoffInstructions', () => {
     expect(text).toContain("Native subagents inside your own session are not tasks: you may start them and message them with your runner's tools.");
   });
 
-  it('the marker variant is unchanged', () => {
-    expect(handoffInstructions({ tools: false })).toBe(HANDOFF_ONLY_INSTRUCTIONS);
-  });
-
   // hearsay-tools/cezarion#2431: a runner that reports its native subagents is told Cezar waits for
-  // them; every other runner keeps the timer and marker guidance alone.
-  it.each([true, false])('adds the native subagent paragraph only for a runner that reports them (tools %s)', tools => {
-    const plain = handoffInstructions({ tools });
-    const native = handoffInstructions({ tools, nativeSubagents: true });
+  // them; every other runner keeps the timer guidance alone.
+  it('adds the native subagent paragraph only for a runner that reports them', () => {
+    const plain = handoffInstructions({});
+    const native = handoffInstructions({ nativeSubagents: true });
     expect(plain).not.toContain('Native subagents:');
     expect(native).toContain('Native subagents: ');
     expect(native).toContain('spends no automatic wake and wakes you once when they have all ended');
-    expect(native).toContain(tools ? 'Use cezar_wait for other background work.' : 'keep it for other background work.');
+    expect(native).toContain('Use cezar_wait for other background work.');
     expect(native.replace(/\n\nNative subagents: [^\n]*/, '')).toBe(plain);
   });
 
   // hearsay-tools/cezarion#1428: agents asked about drafts and findings they never sent, once
   // after a plain ask and once after the content lived only in rejected tool-call arguments.
   // hearsay-tools/cezarion#1458: on Claude, assistant text between tool calls may never arrive, so
-  // the tool variant puts the content in context; the marker's own message text still arrives.
-  it('the tool variant puts the decision context in the call, the marker variant in the message', () => {
-    const tools = handoffInstructions({ tools: true });
+  // the content goes in the call's context.
+  it('puts the decision context in the call', () => {
+    const tools = handoffInstructions();
     expect(tools).not.toContain('as assistant text');
     expect(tools).toContain('Put the full draft, findings, evidence and option meanings in context.');
-    const markers = handoffInstructions({ tools: false });
-    expect(markers).toContain('Before the CEZ:ASK line, send everything the decision depends on (the full draft, every finding, what each option means) as ordinary text in the same message.');
-    expect(markers).toContain('The user sees only your message text and the chips. Your reasoning never reaches them, so never call content "above" unless you sent it as message text.');
-    expect(markers).toContain('plus an optional "context" of up to 20000 characters of Markdown shown above the chips');
   });
 });

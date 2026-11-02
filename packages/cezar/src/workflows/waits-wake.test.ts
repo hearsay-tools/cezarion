@@ -76,7 +76,7 @@ async function questionBesideCi(runner: RunnerId) {
   nativeWire(runner);
   const release = join(root, 'ask-release');
   process.env.CEZ_MOCK_RELEASE_FILE = release;
-  const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['hold-ask']!, runner });
+  const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['hold-cezar-ask']!, runner });
   await until(() => turnStarted(run.id));
   const ci = await openWait(run.id, { kind: 'pr', pr, timeout_seconds: 600 });
   writeFileSync(release, '');

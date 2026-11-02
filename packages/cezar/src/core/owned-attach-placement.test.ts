@@ -41,7 +41,7 @@ const ATTACHED = { 'qa/1149/brief.md': 'the brief\n', 'qa/evidence.log': 'eviden
 // the worker's worktree holds at the moment its session starts (hearsay-tools/cezarion#1149).
 describe('attached parent files in the worker worktree', { timeout: 30_000 }, () => {
   let f: ReturnType<typeof fixture>;
-  const seen: Array<{ spec: AgentRunSpec; files: Record<string, string | undefined>; claudeLocal?: string | undefined; finish(): void; done(): void }> = [];
+  const seen: Array<{ spec: AgentRunSpec; files: Record<string, string | undefined>; claudeLocal?: string | undefined; finish(): void; done(runId: string): Promise<void> }> = [];
   const spawn = (paths: readonly string[]) => f.service.spawn(f.caller, { task: 'inspect', baseline: 'parent-head', requestId: randomUUID(),
     context: { artifacts: paths.map(path => ({ kind: 'parent-file' as const, path })) } satisfies WorkerSpawnRequest['context'] });
   const commit = (path: string, content: string) => {
@@ -76,8 +76,16 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
         const finish = () => { if (open) { open = false; resolve({ text: '', toolCalls: [], tokensUsed: 0 }); } };
         const session: AgentSession = { result, get open() { return open; }, sendMessage: () => open, sendAgentMessage: () => open ? Promise.resolve() : false,
           discardQueuedMessages: () => {}, holdsHumanInput: () => false, interrupt: finish, end: finish };
-        // An earlier workflow step completes only on its done (hearsay-tools/cezarion#1620).
-        const done = () => { if (open) { onEvent?.({ type: 'text', text: 'ok\n\nCEZ:DONE' }); onEvent?.({ type: 'turn-end' }); } finish(); };
+        // An earlier workflow step completes only on an accepted cezar_done (hearsay-tools/cezarion#1620).
+        const done = async (runId: string) => {
+          if (open) {
+            const state = runInternals(f.manager).active.get(runId)!;
+            const answer = await f.manager.cezarToolHandlers(runId, state.ciGeneration!).finishTurn({}, new AbortController().signal);
+            if (!answer.ok) throw new Error(`cezar_done refused: ${answer.code}`);
+            onEvent?.({ type: 'text', text: 'ok' }); onEvent?.({ type: 'turn-end' });
+          }
+          finish();
+        };
         seen.push({ spec, files, claudeLocal, finish, done }); return session;
       } }));
   });
@@ -151,7 +159,7 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
     await launch();
     await until(() => seen.length === 1);
     rmSync(join(seen[0]!.spec.cwd, 'qa/1149/brief.md'));
-    seen[0]!.done();
+    await seen[0]!.done(workerId);
     await until(() => seen.length === 2);
     seen[1]!.finish();
     expect(await f.manager.awaitRunTermination(workerId, 15_000)).toBe(true);

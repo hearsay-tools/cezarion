@@ -12,7 +12,7 @@ export type { TurnTail, DelegationExecutionSettings, StartRunInput, WorkerTermin
 import { settledRootFinishPatch } from './completion-policy.ts';
 import type { ContinueRunOptions } from './continuation-admission.ts';
 import { type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequestInput, type PeerWaitEntry, type PrWaitEntry, type ProcessWaitEntry, type TimerWaitEntry, type Wait, type WaitVia, type WorkerWaitEntry, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
-import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE, AUTONOMOUS_NUDGE, type TurnEndOutcome } from './turn-end.ts';
+import { NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_NUDGE, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
 import { canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested } from './run/run-guards.ts';
@@ -69,7 +69,7 @@ export { periodicAutosaveEnabled, AUTOSAVE_INTERVAL_MS } from './run/worktree-au
 /** #486: recheck a turn-end that deferred close/park only because the harness still held a human follow-up. */
 export { HELD_HUMAN_INPUT_RECHECK_MS } from './run/input-delivery.ts';
 export { WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_HEADER } from './run/worker-questions.ts';
-export { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE, AUTONOMOUS_ASK_NOTE };
+export { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE_NOTE, NO_WAIT_NOTE, NO_WAIT_NO_REPLY_NOTE, COMPLETION_NO_REPLY_NOTE, WORKER_FALLBACK_NOTE, WORKER_FALLBACK_REPLY_NOTE, COMPLETION_NUDGE_NOTE };
 
 /**
  * The mini workflow engine: executes a `WorkflowDef` against a repo, one step

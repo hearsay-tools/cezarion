@@ -159,7 +159,7 @@ describe('adopting a dead owner\'s run for a control', () => {
   /** A run a `cez run` process left behind when it crashed: never started, or mid-turn. */
   const crashed = (shape: 'unstarted' | 'running'): string => {
     const owner = RunStore.open(dataDir, { keepLive: true });
-    const run = owner.createRun({ title: shape, workflow: 'quick-task', task: 'mock:done', runner: 'claude', workflowDef: QUICK_TASK_WORKFLOW,
+    const run = owner.createRun({ title: shape, workflow: 'quick-task', task: 'mock:cezar-done', runner: 'claude', workflowDef: QUICK_TASK_WORKFLOW,
       steps: [{ id: 'task', name: 'Do the task', kind: 'agent' }] });
     if (shape === 'running') {
       const at = new Date().toISOString();

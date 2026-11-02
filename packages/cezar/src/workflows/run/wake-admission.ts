@@ -287,7 +287,7 @@ export class WakeAdmission {
       if (!run || wait.kind !== 'worker' || run.agentInputs?.some(input => input.id === waitInputId(wait))) continue;
       if ((this.context.store.getRun(runId)?.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32) return;
       this.context.store.commitWait(runId, wait, { id: waitInputId(wait), parentRunId: runId, source: 'lifecycle', createdAt: wait.resolvedAt ?? new Date().toISOString(),
-        text: waitResultText(wait, { tools: !this.host.active.get(runId)?.toolless, workerStatus: this.host.waitRegistry.workerStatus }) });
+        text: waitResultText(wait, { workerStatus: this.host.waitRegistry.workerStatus }) });
     }
   }
 

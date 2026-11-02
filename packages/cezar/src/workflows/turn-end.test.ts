@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { expectNoWaitNudgeKinds } from './turn-end.testkit.ts';
-import { AUTONOMOUS_NUDGE, decideTurnEnd, NO_WAIT_NUDGE, NO_WAIT_NUDGE_MARKERS, STEP_NUDGE_SUFFIX, type TurnEndDecision, type TurnEndFacts } from './turn-end.ts';
+import { AUTONOMOUS_NUDGE, decideTurnEnd, NO_WAIT_NUDGE, STEP_NUDGE_SUFFIX, type TurnEndDecision, type TurnEndFacts } from './turn-end.ts';
 
 /** A quiet final turn end whose owed input was already tried: nothing taken, nothing owed. */
 const quiet: TurnEndFacts = {
   sessionOpen: true, done: false, inputInFlight: false, inputQueued: false, inputTaken: false, nudgePending: false,
   turnAsk: false, nativeAsk: false, question: false, agentWaits: false, cezarHumanWait: false, stepScope: false,
-  noWaitNudgedLastTurn: false, completionNudgedLastTurn: false, autonomous: false, budgetSpent: false, tools: true,
+  noWaitNudgedLastTurn: false, completionNudgedLastTurn: false, autonomous: false, budgetSpent: false,
 };
 const live = { doneRefused: { liveWorkers: true }, done: true };
 const settled = { doneRefused: { liveWorkers: false }, done: true };
@@ -38,12 +38,10 @@ describe('decideTurnEnd decides both nudge causes (hearsay-tools/cezarion#1234, 
     ['an earlier step\'s done completes it', { done: true, stepScope: true }, { kind: 'done' }],
     ['an earlier step parks on its wait', { agentWaits: true, stepScope: true }, { kind: 'park' }],
     ['an earlier step with no wait gets the step nudge', { stepScope: true }, { ...noWaitNudge, text: `${NO_WAIT_NUDGE} ${STEP_NUDGE_SUFFIX}` }],
-    ['an earlier step without cezar tools gets the step marker nudge', { stepScope: true, tools: false }, { ...noWaitNudge, text: `${NO_WAIT_NUDGE_MARKERS} ${STEP_NUDGE_SUFFIX}` }],
     ['an autonomous earlier step gets the step autonomous nudge', { stepScope: true, autonomous: true }, { ...autonomousNudge, text: `${AUTONOMOUS_NUDGE} ${STEP_NUDGE_SUFFIX}` }],
     ['an earlier step with the budget spent opens the budget human wait', { stepScope: true, budgetSpent: true }, { kind: 'human-wait', via: 'budget' }],
     ['an earlier step\'s second no-wait turn end opens the no-wait human wait', { stepScope: true, noWaitNudgedLastTurn: true }, { kind: 'human-wait', via: 'no-wait' }],
     ['no wait gets the nudge', {}, noWaitNudge],
-    ['no wait without cezar tools gets the marker nudge', { tools: false }, { ...noWaitNudge, text: NO_WAIT_NUDGE_MARKERS }],
     ['a second no-wait turn end opens the no-wait human wait', { noWaitNudgedLastTurn: true }, { kind: 'human-wait', via: 'no-wait' }],
     ['a spent budget opens the budget human wait', { budgetSpent: true }, { kind: 'human-wait', via: 'budget' }],
     ['no wait checks the budget before the second step', { budgetSpent: true, noWaitNudgedLastTurn: true }, { kind: 'human-wait', via: 'budget' }],
@@ -81,11 +79,5 @@ describe('decideTurnEnd decides both nudge causes (hearsay-tools/cezarion#1234, 
   it('the tool nudge advertises exactly the wait kinds accepted by the contract', () => {
     expectNoWaitNudgeKinds(NO_WAIT_NUDGE);
     for (const tool of ['cezar_ask', 'cezar_wait', 'cezar_done']) expect(NO_WAIT_NUDGE).toContain(tool);
-  });
-
-  it('the marker-only nudge names lifecycle markers without cezar tools', () => {
-    expect(NO_WAIT_NUDGE_MARKERS.startsWith('Your turn ended without a wait or done. ')).toBe(true);
-    for (const marker of ['CEZ:ASK', 'CEZ:MONITORING', 'CEZ:DONE']) expect(NO_WAIT_NUDGE_MARKERS).toContain(marker);
-    expect(NO_WAIT_NUDGE_MARKERS).not.toContain('cezar_');
   });
 });

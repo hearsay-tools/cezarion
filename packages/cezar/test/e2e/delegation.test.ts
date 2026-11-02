@@ -50,7 +50,7 @@ test('built worker CLI runs without cez on PATH; headless provision stays local 
     await execFile('git', ['config', 'gc.auto', '0'], { cwd: repo });
     await execFile('git', ['config', 'maintenance.auto', 'false'], { cwd: repo });
     await execFile('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: repo });
-    const run = await execFile(process.execPath, [cli, 'run', 'mock:done', '--repo', repo], {
+    const run = await execFile(process.execPath, [cli, 'run', 'mock:cezar-done', '--repo', repo], {
       cwd, env: { ...cleanEnv, CEZ_DRY_RUN: '1', CEZ_DELEGATION: '1', CEZ_AUTONAME: '0' }, timeout: 60_000,
     });
     assert.match(run.stdout, /run (done|review)/);
@@ -154,7 +154,9 @@ rl.on('line', line => {
       while (!existsSync(join(wire, id + '.release'))) await sleep(20);
       if (!parent) writeFileSync('tracked.txt', 'worker change\\n');
     }
-    const reply = !parent && turn > 1 && text.includes('finish worker') ? 'Worker complete\\nCEZ:DONE' : 'Turn yielded';
+    // hearsay-tools/cezarion#2397: the worker finishes through cezar_done over its MCP config.
+    const finish = !parent && turn > 1 && text.includes('finish worker');
+    const reply = finish ? 'Worker complete' + await (await import(${JSON.stringify(pathToFileURL(join(packageRoot, 'scripts/mock-ci-tool.mjs')).href)})).lifecycleCall('claude', process.argv.slice(2), 'cezar_done', {}) : 'Turn yielded';
     emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: reply }], usage: { input_tokens: 1, output_tokens: 1 } } });
     emit({ type: 'result', subtype: 'success', result: reply, usage: { input_tokens: 1, output_tokens: 1 }, total_cost_usd: 0 });
   });

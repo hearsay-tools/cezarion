@@ -13,7 +13,7 @@ import { DelegationController } from '../delegation/provision.ts';
 import { RunStore } from '../runs/store.ts';
 import { createApp } from '../server/server.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
-import { COMPLETION_WILL_WAIT, RunManager, WORKER_FALLBACK_QUESTION } from './run.ts';
+import { RunManager, WORKER_FALLBACK_QUESTION } from './run.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 
@@ -70,7 +70,13 @@ describe('public delegation completion integration', () => {
     await until(() => existsSync(path), `wire receives ${id} turn ${turn}`);
     return JSON.parse(readFileSync(path, 'utf8')) as { text: string; cwd: string; backend: string };
   }
-  function reply(id: string, turn: number, value: { text?: string; commit?: string; error?: string } = {}) {
+  /** The answer the wire's cezar_done got in that turn. */
+  async function done(id: string, turn: number) {
+    const path = join(control, `${id}.${turn}.done.json`);
+    await until(() => existsSync(path), `wire calls cezar_done in ${id} turn ${turn}`);
+    return JSON.parse(readFileSync(path, 'utf8')) as { ok: boolean; code?: string; message: string };
+  }
+  function reply(id: string, turn: number, value: { text?: string; commit?: string; error?: string; done?: true } = {}) {
     const path = join(control, `${id}.${turn}.reply.json`);
     const tmp = `${path}.${process.pid}.tmp`;
     writeFileSync(tmp, JSON.stringify(value));
@@ -101,7 +107,7 @@ describe('public delegation completion integration', () => {
     expect((await input(id, 2)).text).toContain(`Commit ${change}`);
     await until(() => store.getRun(id)?.agentInputs?.some(item => item.source === 'agent' && !!item.deliveredAt) === true, 'steering delivery persisted');
     expect(store.readEvents(id).filter(event => event.type === 'user-message')).toEqual([]);
-    reply(id, 2, { commit: change, text: `Implemented ${change}; Git commit ready for inspection.\nCEZ:DONE` });
+    reply(id, 2, { commit: change, text: `Implemented ${change}; Git commit ready for inspection.`, done: true });
     await settled(id);
   }
   const collect = (parentId: string, id: string) => command<WorkerCollectedResult>(parentId, ['collect', id]);
@@ -128,27 +134,26 @@ describe('public delegation completion integration', () => {
     expect(environments.get(a)?.CEZ_DELEGATION_TOKEN).not.toBe(environments.get(p.id)?.CEZ_DELEGATION_TOKEN);
     expect(environments.get(b)?.CEZ_DELEGATION_TOKEN).not.toBe(environments.get(a)?.CEZ_DELEGATION_TOKEN);
 
-    reply(p.id, 1, { text: 'Attempted completion before observing workers\nCEZ:DONE' });
-    // hearsay-tools/cezarion#1301: the blocked done is answered with the refusal, as the parent's next
-    // turn, and Cezar opens no wait for it.
-    const refusal = await input(p.id, 2);
-    expect(refusal.text).toContain('Workers are still live:');
-    for (const id of [a, b]) expect(refusal.text).toContain(`worker stop ${id}`);
-    expect(refusal.text).toContain(COMPLETION_WILL_WAIT);
+    reply(p.id, 1, { text: 'Attempted completion before observing workers', done: true });
+    // hearsay-tools/cezarion#1301, hearsay-tools/cezarion#2397: cezar_done answers the blocked done
+    // with the refusal itself, and Cezar opens no wait for it.
+    const refusal = await done(p.id, 1);
+    expect(refusal).toMatchObject({ ok: false, code: 'workers_outstanding' });
+    expect(refusal.message).toContain('Workers are still live:');
+    for (const id of [a, b]) expect(refusal.message).toContain(`worker stop ${id}`);
+    await until(() => monitoringPark(p.id), 'parent ends its refused turn');
     const gate = store.getRun(p.id)!.delegation;
     expect(gate).not.toHaveProperty('wait');
     expect(gate).not.toHaveProperty('completion');
     expect(manager.finish(p.id)).toBe(false);
-    reply(p.id, 2);
-    await until(() => monitoringPark(p.id), 'parent ends its refusal turn');
     const wait = await command<WorkerWaitResult>(p.id, ['wait', a, b, '--mode', 'any']);
     expect(wait.wait.mode).toBe('any');
     await finishWorker(p.id, a, 'alpha');
     // hearsay-tools/cezarion#1301: worker a ended its first turn idle, so after its no-wait nudge its
     // fallback question woke the parent before the steer superseded it; the wait-any wake follows.
-    const question = await input(p.id, 3); reply(p.id, 3);
+    const question = await input(p.id, 2); reply(p.id, 2);
     expect(question.text).toContain(WORKER_FALLBACK_QUESTION(a));
-    if (!question.text.includes(`Worker wait ${wait.wait.id}`)) { await input(p.id, 4); reply(p.id, 4); }
+    if (!question.text.includes(`Worker wait ${wait.wait.id}`)) { await input(p.id, 3); reply(p.id, 3); }
     await until(() => monitoringPark(p.id), 'parent observes wait-any wake');
     expect(store.getRun(p.id)?.agentInputs?.filter(item => item.id === wait.wait.id && item.deliveredAt)).toHaveLength(1);
     expect(store.getRun(b)?.status).toBe('running');
@@ -215,7 +220,7 @@ describe('public delegation completion integration', () => {
     expect(git(parentPath, 'rev-parse', 'HEAD')).toBe(integratedHead);
     const publicState = JSON.stringify([store.listRuns(), ...store.listRuns().map(run => store.readEvents(run.id))]);
     for (const env of environments.values()) expect(publicState).not.toContain(env.CEZ_DELEGATION_TOKEN!);
-    reply(p.id, 1, { text: 'Reviewed alpha integration; beta conflict deliberately aborted.\nCEZ:DONE' });
+    reply(p.id, 1, { text: 'Reviewed alpha integration; beta conflict deliberately aborted.', done: true });
     await until(() => store.getRun(p.id)?.status === 'review', 'collected deleted workers permit honest parent review');
   }, 120_000);
 

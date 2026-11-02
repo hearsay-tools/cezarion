@@ -35,7 +35,8 @@ describe('Codex approvals over the native mock wire (hearsay-tools/cezarion#1049
       // bound: wait for the fixture's native process receipt on a loaded host.
       await vi.waitFor(() => expect(ui.some(e => e.type === 'turn.completed')).toBe(true), { timeout: 10_000 });
       session.end();
-      expect((await session.result).text).toBe(`Approval response: ${JSON.stringify({ decision })}\nCEZ:DONE`);
+      // The mock then calls cezar_done; a bare session has no tool controller, so only its first line is the echo.
+      expect((await session.result).text.split('\n')[0]).toBe(`Approval response: ${JSON.stringify({ decision })}`);
       expect(ui).toContainEqual({ type: 'permission.resolved', requestId: event.requestId, optionId: event.options[index]!.id });
     } finally { session.interrupt(); await session.result; }
   });
@@ -67,7 +68,7 @@ describe('Codex approvals over the native mock wire (hearsay-tools/cezarion#1049
       expect(session.respondPermission?.(event.requestId, option.id)).toBe(true);
       await seen(ui, 'turn.completed');
       session.end();
-      expect((await session.result).text).toBe(`Approval response: ${JSON.stringify(reply)}\nCEZ:DONE`);
+      expect((await session.result).text.split('\n')[0]).toBe(`Approval response: ${JSON.stringify(reply)}`);
       expect(ui).toContainEqual({ type: 'permission.resolved', requestId: event.requestId, optionId: option.id });
       expect(kind).toBe(option.kind);
     } finally { session.interrupt(); await session.result; }

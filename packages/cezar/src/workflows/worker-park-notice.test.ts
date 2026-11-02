@@ -4,10 +4,11 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConversationMessage } from '@open-mercato/cezar-contract';
-import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { parkNoticeId } from '../delegation/park-notice.ts';
 import { messagesPrompt } from './monitoring-turn.testkit.ts';
+import { thenSay, toolCall } from './waits-parity.testkit.ts';
 import { delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, register, restart, root, spendWorkerBudget, store, timeline, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
 
 /** hearsay-tools/cezarion#1327: the single-runner paths of the park notice. The RUNNER_IDS cells
@@ -40,7 +41,7 @@ describe('a parked worker tells its waiting parent why (hearsay-tools/cezarion#1
 
   it('posts the notice a crash lost before its commit when recovery runs, with no live session', async () => {
     const { p } = await family();
-    const w = await worker(p.id, messagesPrompt('claude', ['Waiting on the load run.\nCEZ:MONITORING']));
+    const w = await worker(p.id, `${toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 600, note: 'Re-check the load run.' })} ${thenSay('Waiting on the load run.')}`);
     const wait = register(p.id, [w.id]);
     // The crash: the worker parks, and its notice is never committed.
     const lostNotice = vi.spyOn(runInternals(manager).workerQuestions, 'noticeParkedWorker').mockImplementation(() => {});
@@ -58,8 +59,9 @@ describe('a parked worker tells its waiting parent why (hearsay-tools/cezarion#1
     const [notice, ...more] = notices(p.id, w.id);
     expect(more).toEqual([]);
     expect(notice).toMatchObject({ id: parkNoticeId(w.id, wait.id), recipientRunId: p.id, state: 'accepted' });
-    expect(notice!.text).toMatch(/It waits on: timer [0-9a-f-]+ at \S+ \(Opened by CEZ:MONITORING\.\)/);
-    expect(notice!.text).toContain('Its last message:\nWaiting on the load run.');
+    expect(notice!.text).toMatch(/It waits on: timer [0-9a-f-]+ at \S+ \(Re-check the load run\.\)/);
+    expect(notice!.text).toContain('Its last message:\n');
+    expect(notice!.text).toContain('Waiting on the load run.');
     // The parent's input commits with the message.
     expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === notice!.id)).toEqual([
       expect.objectContaining({ conversation: { senderRunId: w.id, recipientRunId: p.id, kind: 'progress' } })]);

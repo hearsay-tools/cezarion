@@ -65,8 +65,8 @@ function prompt(reply: Reply): string {
     case 'pr': return toolCall('cezar_wait', { kind: WAIT_KIND.pr, pr });
     case 'timer': return toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 600, note: 'model' });
     case 'process': return toolCall('cezar_wait', { kind: WAIT_KIND.process, pid: sleeper() });
-    case 'ask': return 'mock:ask';
-    case 'done': return 'mock:done';
+    case 'ask': return 'mock:cezar-ask';
+    case 'done': return 'mock:cezar-done';
     case 'nothing': return 'A plain reply.';
   }
 }
