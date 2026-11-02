@@ -197,3 +197,26 @@ matrix scheduling, coalescing, provider delivery or exactly-once rerun execution
 | `.github/scripts/coderabbit-admission.cjs` | `d0083f2c91775f607ffbdc7c4a115c69e5da0a4ce2ca65e95fcaf811774db411` |
 | `.github/workflows/coderabbit-reconcile.yml` | `c429e408578148082e2ca1b74144105771b258dccf1230cb46ced6693fe59d16` |
 | `.ai/skills/auto-merge/check.mjs` | `8c44e04e65b66e34ff6d768c71436fb76586f2e7a2cf3900a105efd38b5426a7` |
+
+
+## Incremental findings (2026-11-03)
+
+Merge base and regression `proof_base`:
+`a5559af6217316b802aa83b7c7f7b77e4e1b9579`, merged into the worker without
+rebasing (fast-forward; preserves main ancestry and all previous fixes).
+
+The policy import sweep starts at native review proof, CodeRabbit admission,
+reconciliation, queue admission and readiness. Their local transitive imports
+are `queue-ci-proof`, `coderabbit-admission`, `native-review-proof`, `review-threads`,
+`review-signal` and `release-bump-pr`. All but `queue-ci-proof` were already
+protected. CI also directly consumes `pr-test-proof`, which can authorize reusing
+PR tests, and `pr-test-input`, which supplies the exact input attestation and is
+imported by that proof. Protect both along with `queue-ci-proof`. The removed
+`review-ci-context.cjs` has no active file or import and needs no current entry.
+Eleven table-driven policy cases check this whole admission/proof helper set.
+
+The documentation correction records that manual thread reopening and resolution
+emit no review-thread event. Admission and ready/draft state update on the next
+reader/trigger; maintainers dispatch reconciliation with `pr_number` after either
+manual change and dispatch PR Readiness if draft state needs refreshing. Preserve
+the fork-author draft rule. No runtime or workflow redesign.
