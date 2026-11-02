@@ -4,6 +4,7 @@ valid:
   - 'class RunManager { dropActive(id) { this.active.delete(id); } }'
   - 'class RunManager { execute(id, state) { this.activate(id, state); this.dropActive(id); } }'
   - 'class RunManager { execute(id) { this.active.get(id); this.waiting.delete(id); } }'
+  - 'function inspect(host, id) { host.active.get(id); host.active.has(id); }'
 invalid:
   - 'class RunManager { execute(id, state) { this.active.set(id, state); } }'
   - 'class RunManager { execute(id) { this.active.delete(id); } }'
@@ -19,3 +20,6 @@ invalid:
     }
   - 'class RunManager { activate() { class Other { execute(id, state) { this.active.set(id, state); } } } }'
   - 'class RunManager { dropActive() { class Other { execute(id) { this.active.delete(id); } } } }'
+  - 'class Part { execute(id, state) { this.host.active.set(id, state); } }'
+  - 'class Part { execute(id) { this.host.active.delete(id); } }'
+  - 'function release(host, id) { host.active.delete(id); }'
