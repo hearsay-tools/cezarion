@@ -7,6 +7,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest'
 import { makeRunRecord, RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
+import { seedTranscript } from './seed-transcript'
 import { focusWithKeyboard, contrastSampleExpression } from './contrast'
 import { settleVisual, waitForSettledSample } from './visual-ready'
 // fixture-server starts: 1
@@ -47,6 +48,11 @@ beforeAll(async () => {
   rmSync(join(dir, `${runIds[0]}-artifacts`, publication.id), { recursive: true })
   const runs = runIds.map((id, i) => makeRunRecord({ id, title: i === 9 ? 'Source task nine' : `Source task ${String(i).padStart(2, '0')}`, task: 'Published report', status: RUN_STATUS.done }))
   writeFileSync(join(project, '.ai/cezar/runs.json'), JSON.stringify(runs))
+  seedTranscript(join(dir, `${runIds[14]}.ndjson`), JSON.stringify({
+    seq: 1, ts: '2026-11-01T12:14:00Z', type: 'item.completed',
+    item: { kind: 'message', id: 'shelf-integration-message', role: 'assistant',
+      text: `Published results: [Quarterly report](/p/shelf/tasks/${runIds[14]}/files?artifact=${ids[14]})` },
+  }) + '\n')
   rmSync(source)
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', project, '--port', '0', '--no-open'], { env })
   baseUrl = await waitForFixtureServer(server)
@@ -106,6 +112,39 @@ it('shows no matches, clears search, and isolates an empty project', () => {
   browser.waitForFunction(`document.body.textContent.includes('No published reports yet')`)
   expect(browser.waitForValue(`document.querySelectorAll('${ROW}').length`)).toBe(0)
   expect(browser.waitForValue(`document.querySelector('[data-route="reports"]').textContent`)).toContain('cez artifact publish')
+})
+
+it('opens the same reader from a conversation card and the shelf, then returns to each source', () => {
+  browser.setViewport(1440, 900)
+  browser.goto(`${baseUrl}/p/shelf/tasks/${runIds[14]}?thread=flat`)
+  const read = '[data-slot="report-card"] a'
+  const back = '[data-slot="report-bar"] button[aria-label="Back"]'
+  browser.waitForFunction(`document.querySelector('${read}') !== null`)
+  browser.click(read)
+  browser.waitForFunction(`document.querySelector('[data-route="task-report"][data-variant="pane"] ${FRAME}') !== null`)
+  const frame = `(() => {
+    const reader = document.querySelector('[data-route="task-report"]');
+    const frame = reader?.querySelector('${FRAME}');
+    return frame && { reader: reader.dataset.route, frame: frame.dataset.slot,
+      html: frame.getAttribute('srcdoc'), sandbox: frame.getAttribute('sandbox') };
+  })()`
+  const fromCard = browser.waitForValue(frame)
+  browser.click(back)
+  browser.waitForFunction(`document.querySelector('${FRAME}') === null && document.activeElement === document.querySelector('${read}')`)
+  expect(browser.url()).toContain(`/tasks/${runIds[14]}?thread=flat`)
+
+  browser.goto(baseUrl + path + '?q=quarterly')
+  browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 25`)
+  const row = `[data-report-id="${ids[14]}"]`
+  browser.evaluate(`document.querySelector('${row}').scrollIntoView({ block: 'center', behavior: 'instant' })`)
+  const scroll = browser.waitForValue<number>(`document.querySelector('${LIST}').scrollTop`, n => n > 0)
+  browser.click(row)
+  browser.waitForFunction(`document.querySelector('[data-route="task-report"][data-variant="route"] ${FRAME}') !== null`)
+  expect(browser.waitForValue(frame)).toEqual(fromCard)
+  browser.click(back)
+  browser.waitForFunction(`document.querySelector('${LIST}') !== null && document.activeElement?.getAttribute('data-report-id') === '${ids[14]}'`)
+  expect(browser.url()).toBe(baseUrl + path + '?q=quarterly')
+  expect(browser.waitForValue<number>(`document.querySelector('${LIST}').scrollTop`)).toBeCloseTo(scroll, 0)
 })
 
 it('shows a deleted snapshot as missing and drops reports after snapshot or task-history deletion', async () => {
