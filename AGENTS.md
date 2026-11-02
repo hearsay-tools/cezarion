@@ -611,9 +611,8 @@ The scan cannot see a shrunk product budget, so review checks that one.
 2. For a change to wait, turn-end, failure or step-settlement paths in
    `packages/cezar/src/workflows/run.ts` or `workflows/run/`, verify the parity suites
    ([Runner regressions ship with shared coverage](#runner-regressions-ship-with-shared-coverage)).
-3. Before the first push of a `packages/**` source or test change, require `npm run lint` and
-   the file-length guard to pass: use current Squeal results, or run both, the guard as `npm test -- packages/cezar/src/file-length.test.ts`.
-   If a pinned source shrinks, first run `FILE_LENGTH_UPDATE=1 npm test -- packages/cezar/src/file-length.test.ts`
+3. Before the first push of a `packages/**` source or test change, require `npm run lint`
+   to pass. If a pinned source shrinks, first run `FILE_LENGTH_UPDATE=1 npm run lint`
    to lower its pin; review and commit the baseline diff.
 4. Run the root `npm run typecheck` once when declarations matter (*Typecheck* above).
 5. Run the code-quality check and the auto-merge decision that the Dev flow bindings

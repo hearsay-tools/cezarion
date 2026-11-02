@@ -14,6 +14,7 @@ import {
   updateBaseline,
 } from '../ast-grep-rules.testkit.ts';
 import { readExemptions, scanRootImports } from './contract-root-import.ts';
+import { fileLengthProblems } from './file-length.ts';
 import { RULES } from './plugin.ts';
 import { compareSetters, readSetterBaseline, scanSetters, WEB_SRC } from './raw-query-setter.ts';
 import { readReaders, readsResumeTime } from './run-fact-reader.ts';
@@ -144,7 +145,7 @@ export function staleEntries(root = repoRoot): string[] {
 /** Every problem `npm run lint` reports, in one list. */
 export async function lint(): Promise<string[]> {
   const [oxlint, astGrep] = await Promise.all([oxlintProblems(repoRoot, LINT_PATHS), astGrepProblems()]);
-  return [...oxlint, ...astGrep, ...staleEntries()];
+  return [...oxlint, ...astGrep, ...staleEntries(), ...fileLengthProblems()];
 }
 
 if (import.meta.main) {
