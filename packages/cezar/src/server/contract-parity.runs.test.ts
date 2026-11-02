@@ -8,6 +8,7 @@ import type {
   fileLinkResultSchema,
   filePreviewDataSchema,
   artifactListSchema,
+  artifactMetadataResponseSchema,
   archiveFinishedResponseSchema,
   archivedRunsResponseSchema,
   cancelResponseSchema,
@@ -129,6 +130,7 @@ describe('src/contract/runs.ts matches the runs routes exactly', () => {
     Assert<Exact<z.infer<typeof fileLinkResultSchema>, Exclude<InferResponseType<Run['file-link']['$get'], 200>, ArrayBuffer>>>,
     Assert<Exact<z.infer<typeof filePreviewDataSchema>, InferResponseType<Run['artifacts'][':artifactId']['$get'], 200>>>,
     Assert<Exact<z.infer<typeof artifactListSchema>, InferResponseType<Run['artifacts']['$get'], 200>>>,
+    Assert<Exact<z.infer<typeof artifactMetadataResponseSchema>, InferResponseType<Run['artifacts'][':artifactId']['metadata']['$get'], 200>>>,
     // artifacts + local handoff
     Assert<Exact<z.infer<typeof openInCliResponseSchema>, OpenInCli200>>,
     Assert<Exact<z.infer<typeof runCommitsResponseSchema>, Commits200>>,

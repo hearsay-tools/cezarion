@@ -1,3 +1,4 @@
+import type { artifactParamsSchema } from '@open-mercato/cezar-contract/artifacts';
 import type { ExtractSchema } from 'hono/types';
 import { describe, expect, it } from 'vitest';
 import { archiveFinishedRequestSchema, createRunInputSchema, pinRunInputSchema } from '@open-mercato/cezar-contract/runs';
@@ -33,6 +34,8 @@ describe('every mutating route carries a typed body into AppType', () => {
 
   type Assert<T extends true> = T;
   type Mutual<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+
+  type _ArtifactMetadataParams = Assert<Mutual<z.infer<typeof artifactParamsSchema>, Schema['/api/v1/runs/:id/artifacts/:artifactId/metadata']['$get']['input']['param']>>;
 
   // Project-scoped routes are asserted on their unscoped spelling; the `/api/v1/p/:projectId`
   // mount is the same sub-app, so it stands or falls with this one.

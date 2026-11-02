@@ -187,7 +187,7 @@ import {
 } from '@open-mercato/cezar-contract/events';
 import { resolveAttachmentPath } from '../workflows/attachment-path.ts';
 import { artifactParamsSchema, fileLinkQuerySchema } from '@open-mercato/cezar-contract/artifacts';
-import { artifactDirectory, listArtifacts, readArtifact } from '../artifacts/store.ts';
+import { artifactDirectory, listArtifacts, readArtifact, readArtifactMetadata } from '../artifacts/store.ts';
 import { artifactPreview, loadFileLink, rasterMime } from '../artifacts/resolve.ts';
 import { isUntouchedCancelledRun, toPastedContent, type RunManager } from '../workflows/run.ts';
 import type { PastedContent } from '../workflows/run/types.ts';
@@ -3312,17 +3312,14 @@ export function createApp(deps: ServerDeps) {
         return result.state === 'incomplete' ? c.json(result, 409) : c.json(result, 200);
       } catch (error) { const failure = delegationFailure(error); return c.json(failure.body, failure.status); }
     })
-
     // Registered before the `/:id/...` routes so "archive-finished" and "read-all"
     // never match as a run id.
     .post('/runs/archive-finished', jsonZodValidator(archiveFinishedRequestSchema, { absent: {}, malformed: null }), (c) =>
       c.json(c.get('project').store.archiveFinished(c.req.valid('json').scope, c.req.valid('json').automation)))
-
     // The read-receipt sweep (#unread-done-items) — the mark-read twin of the archive
     // sweep above, and under the same registration-order guard.
     .post('/runs/read-all', jsonZodValidator(markAllReadRequestSchema, { absent: {}, malformed: null }), (c) =>
       c.json({ read: c.get('project').store.markAllRead(c.req.valid('json').automation) }))
-
     .post('/runs/:id/archive', jsonZodValidator(archiveSchema, { absent: ({}) }), async (c) => {
       const { store } = c.get('project');
       const id = c.req.param('id');
@@ -3335,7 +3332,6 @@ export function createApp(deps: ServerDeps) {
       const run = store.setArchived(id, parsed.data.archived !== false);
       return run ? c.json(run) : c.json({ error: 'not found' }, 404);
     })
-
     // Pin one task to the top of this project's list, or unpin it (#935). The archive route's
     // twin in every respect: an absent body pins (the common case), the answer is the updated
     // record, and the change rides the existing `run` SSE because `setPinned` touches. No new
@@ -3345,7 +3341,6 @@ export function createApp(deps: ServerDeps) {
       const run = store.setPinned(c.req.valid('param').id, c.req.valid('json').pinned !== false);
       return run ? c.json(run) : c.json({ error: 'not found' }, 404);
     })
-
     // Task webhook opt-in for one run (#589), valid in every state — handing a finished task to a
     // bot for follow-up is a real case. Turning it on sends one `task.subscribed` delivery with
     // the note; the note never reaches the agent session. Either direction leaves a durable
@@ -3370,7 +3365,6 @@ export function createApp(deps: ServerDeps) {
       if (notify) taskWebhooks.attach(project).subscribed(id, message);
       return c.json(run);
     })
-
     // The per-task off switch for that resume (the workspace setting is Settings → Resources).
     // Idempotent: a run with nothing pending answers 200 too, because "this task will not
     // resume itself" is equally true either way.
@@ -3381,14 +3375,12 @@ export function createApp(deps: ServerDeps) {
       manager.cancelAutoResume(id);
       return c.json({ cancelled: true as const });
     })
-
     .post('/runs/:id/read', (c) => {
       // No body: opening a thread marks it read, full stop. Stamps `seenAt = now` and
       // returns the updated record (which also rides the `run` SSE via `touch`).
       const run = c.get('project').store.setRead(c.req.param('id'));
       return run ? c.json(run) : c.json({ error: 'not found' }, 404);
     })
-
     .post('/runs/:id/unread', (c) => {
       // The mark-unread twin (#775) — bodyless like its read counterpart: clearing the
       // receipt is the whole action, so there is nothing to say about it. Sits under
@@ -3903,6 +3895,14 @@ export function createApp(deps: ServerDeps) {
       const entry = await readArtifact(artifactDirectory(dataDir, id), id, artifactId);
       if (!entry) return c.json({ error: 'Published file is missing or unavailable.' }, 404);
       return c.json(artifactPreview(entry.metadata, entry.bytes));
+    })
+    .get('/runs/:id/artifacts/:artifactId/metadata', paramZodValidator(artifactParamsSchema), async (c) => {
+      const { dataDir, store } = c.get('project');
+      const { id, artifactId } = c.req.valid('param');
+      if (!store.getRun(id)) return c.json({ error: 'not found' }, 404);
+      const artifact = await readArtifactMetadata(artifactDirectory(dataDir, id), id, artifactId);
+      if (!artifact) return c.json({ error: 'Published file is missing or unavailable.' }, 404);
+      return c.json({ artifact });
     })
     .get('/runs/:id/artifacts/:artifactId/download', paramZodValidator(artifactParamsSchema), async (c) => {
       const { dataDir, store } = c.get('project');

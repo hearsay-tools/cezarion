@@ -55,7 +55,7 @@ import {
   getRunDiff,
   getRunFile,
   getFileLink,
-  getArtifact,
+  getArtifact, getArtifactMetadata,
   getArtifacts,
   getRunHandoff,
   getAutomations,
@@ -1143,10 +1143,8 @@ export function useRunChanges(id: string | undefined, live = false) {
   })
 }
 
-/** One worktree path for the Files tab (R5): the root/dir listings the tree lazy-loads and
- *  the file entries the preview renders. `path` is '' for the worktree root and `undefined`
- *  while nothing is selected. Like /changes, a 409 ("no worktree — …") is an answer retries
- *  cannot change, so retries are off. Cached per (run, path) — re-expanding a folder is free. */
+/** Cached Files listing/preview per (run, path): '' is the root, undefined is no selection.
+ *  Like /changes, a 409 (no worktree) cannot change through retries, so retries are off. */
 export function useRunFile(id: string | undefined, path: string | undefined) {
   return useQuery({
     queryKey: queryKeys.runs.file(id ?? '', path ?? ''),
@@ -1155,12 +1153,14 @@ export function useRunFile(id: string | undefined, path: string | undefined) {
     retry: false,
   })
 }
-
 export function useFileLink(id: string, path: string | null) {
   return useQuery({ queryKey: [queryScope(), 'runs', 'file-link', id, path], queryFn: ({ signal }) => getFileLink(id, path!, { signal }), enabled: path !== null, retry: false })
 }
 export function useArtifact(id: string, artifactId: string | null) {
   return useQuery({ queryKey: [queryScope(), 'runs', 'artifact', id, artifactId], queryFn: ({ signal }) => getArtifact(id, artifactId!, { signal }), enabled: artifactId !== null, retry: false })
+}
+export function useArtifactMetadata(runId: string, artifactId: string | null) {
+  return useQuery({ queryKey: [queryScope(), 'runs', 'artifact-metadata', runId, artifactId], queryFn: ({ signal }) => getArtifactMetadata(runId, artifactId!, { signal }), enabled: artifactId !== null, retry: false })
 }
 export function useArtifacts(id: string) {
   return useQuery({ queryKey: [queryScope(), 'runs', 'artifacts', id], queryFn: ({ signal }) => getArtifacts(id, { signal }), retry: false, staleTime: 0, refetchOnWindowFocus: true })
