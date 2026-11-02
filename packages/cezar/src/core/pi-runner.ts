@@ -171,7 +171,6 @@ export class PiRunner implements AgentRunner {
       cli: 'pi',
       opts,
       onEvent,
-      textChunks,
       isOpen: () => open,
       turnId: () => piUi.turnId,
       humanAcksPending: () => humanPromptAcks > 0,
@@ -208,7 +207,7 @@ export class PiRunner implements AgentRunner {
       if (!open) return false;
       // A steer joins the running turn; only an idle prompt opens one (#505).
       const opensTurn = !piUi.turnId;
-      rpcInput.beginPrompt(opensTurn);
+      rpcInput.beginPrompt();
       const { message, images } = toPiPrompt(content);
       rpcInput.cancelAutoEnd();
       if (
@@ -454,8 +453,8 @@ export class PiRunner implements AgentRunner {
       result,
       sendMessage,
       // A synchronous transport failure already rejected the receipt, so it is still returned.
-      sendAgentMessage: (content, inputIds = [], options) =>
-        rpcInput.sendAgentMessage(content, inputIds, options, sendMessage, () => Boolean(inputError)),
+      sendAgentMessage: (content, inputIds = []) =>
+        rpcInput.sendAgentMessage(content, inputIds, sendMessage, () => Boolean(inputError)),
       // A written prompt cannot be unwritten; only stop reporting an acknowledged one as held.
       discardQueuedMessages: () => { humanHeld.length = 0; },
       holdsHumanInput: () => humanHeld.length > 0,

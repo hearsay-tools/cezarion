@@ -69,7 +69,7 @@ describe('model identity wiring (dry run)', () => {
     name: 'model-identity-test',
     source: 'built-in',
     steps: [
-      { id: 'work', prompt: '{{task}} mock:done' },
+      { id: 'work', prompt: '{{task}} mock:cezar-done' },
       { id: 'verify', command: 'true' },
     ],
   };

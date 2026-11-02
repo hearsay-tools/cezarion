@@ -256,12 +256,6 @@
     {
       "file": "packages/cezar/src/core/harness-parity-cells.testkit.ts",
       "rule": "test-enum-literal",
-      "site": "kind: 'human'",
-      "count": 1
-    },
-    {
-      "file": "packages/cezar/src/core/harness-parity-cells.testkit.ts",
-      "rule": "test-enum-literal",
       "site": "kind: 'pr'",
       "count": 2
     },
@@ -275,7 +269,7 @@
       "file": "packages/cezar/src/core/harness-parity-cells.testkit.ts",
       "rule": "test-enum-literal",
       "site": "phase: 'open'",
-      "count": 2
+      "count": 1
     },
     {
       "file": "packages/cezar/src/core/harness-parity-cells.testkit.ts",
@@ -305,7 +299,7 @@
       "file": "packages/cezar/src/core/harness-parity-cells.testkit.ts",
       "rule": "test-enum-literal",
       "site": "status: 'waiting'",
-      "count": 15
+      "count": 14
     },
     {
       "file": "packages/cezar/src/core/harness-parity-cells.testkit.ts",
@@ -3311,13 +3305,7 @@
       "file": "packages/cezar/src/workflows/human-waits.test.ts",
       "rule": "test-enum-literal",
       "site": "kind: 'human'",
-      "count": 4
-    },
-    {
-      "file": "packages/cezar/src/workflows/human-waits.test.ts",
-      "rule": "test-enum-literal",
-      "site": "kind: 'timer'",
-      "count": 2
+      "count": 3
     },
     {
       "file": "packages/cezar/src/workflows/human-waits.test.ts",
@@ -3329,13 +3317,13 @@
       "file": "packages/cezar/src/workflows/human-waits.test.ts",
       "rule": "test-enum-literal",
       "site": "phase: 'open'",
-      "count": 3
+      "count": 2
     },
     {
       "file": "packages/cezar/src/workflows/human-waits.test.ts",
       "rule": "test-enum-literal",
       "site": "source: 'agent'",
-      "count": 2
+      "count": 1
     },
     {
       "file": "packages/cezar/src/workflows/human-waits.test.ts",
@@ -3356,22 +3344,10 @@
       "count": 1
     },
     {
-      "file": "packages/cezar/src/workflows/human-waits.test.ts",
-      "rule": "test-enum-literal",
-      "site": "via: 'monitoring-line'",
-      "count": 1
-    },
-    {
       "file": "packages/cezar/src/workflows/immediate-delivery.test.ts",
       "rule": "test-enum-literal",
       "site": "source: 'agent'",
       "count": 3
-    },
-    {
-      "file": "packages/cezar/src/workflows/immediate-delivery.test.ts",
-      "rule": "test-enum-literal",
-      "site": "via: 'ask-line'",
-      "count": 1
     },
     {
       "file": "packages/cezar/src/workflows/maintenance-claims.test.ts",
@@ -3380,27 +3356,9 @@
       "count": 1
     },
     {
-      "file": "packages/cezar/src/workflows/monitoring-channel-order.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'waiting'",
-      "count": 1
-    },
-    {
-      "file": "packages/cezar/src/workflows/monitoring-turn.test.ts",
-      "rule": "test-enum-literal",
-      "site": "kind: 'human'",
-      "count": 1
-    },
-    {
       "file": "packages/cezar/src/workflows/monitoring-turn.test.ts",
       "rule": "test-enum-literal",
       "site": "phase: 'open'",
-      "count": 1
-    },
-    {
-      "file": "packages/cezar/src/workflows/monitoring-turn.test.ts",
-      "rule": "test-enum-literal",
-      "site": "via: 'no-wait'",
       "count": 1
     },
     {
@@ -3629,7 +3587,7 @@
       "file": "packages/cezar/src/workflows/run.test.ts",
       "rule": "test-enum-literal",
       "site": "kind: 'timer'",
-      "count": 3
+      "count": 2
     },
     {
       "file": "packages/cezar/src/workflows/run.test.ts",
@@ -3713,7 +3671,7 @@
       "file": "packages/cezar/src/workflows/run.test.ts",
       "rule": "test-enum-literal",
       "site": "via: 'monitoring-line'",
-      "count": 2
+      "count": 1
     },
     {
       "file": "packages/cezar/src/workflows/run.test.ts",
@@ -3857,13 +3815,13 @@
       "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
       "rule": "test-enum-literal",
       "site": "kind: 'timer'",
-      "count": 22
+      "count": 18
     },
     {
       "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
       "rule": "test-enum-literal",
       "site": "kind: 'worker'",
-      "count": 17
+      "count": 16
     },
     {
       "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
@@ -3881,13 +3839,13 @@
       "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
       "rule": "test-enum-literal",
       "site": "phase: 'open'",
-      "count": 31
+      "count": 29
     },
     {
       "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
       "rule": "test-enum-literal",
       "site": "source: 'agent'",
-      "count": 10
+      "count": 9
     },
     {
       "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
@@ -3899,7 +3857,7 @@
       "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
       "rule": "test-enum-literal",
       "site": "status: 'done'",
-      "count": 9
+      "count": 8
     },
     {
       "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
@@ -3941,13 +3899,7 @@
       "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
       "rule": "test-enum-literal",
       "site": "via: 'completion'",
-      "count": 11
-    },
-    {
-      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
-      "rule": "test-enum-literal",
-      "site": "via: 'monitoring-line'",
-      "count": 1
+      "count": 10
     },
     {
       "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
@@ -4037,7 +3989,7 @@
       "file": "packages/cezar/src/workflows/waits.test.ts",
       "rule": "test-enum-literal",
       "site": "phase: 'resolved'",
-      "count": 11
+      "count": 10
     },
     {
       "file": "packages/cezar/src/workflows/waits.test.ts",
@@ -4079,7 +4031,7 @@
       "file": "packages/cezar/src/workflows/waits.test.ts",
       "rule": "test-enum-literal",
       "site": "via: 'monitoring-line'",
-      "count": 3
+      "count": 1
     },
     {
       "file": "packages/cezar/src/workflows/waits.test.ts",
@@ -4198,18 +4150,6 @@
     {
       "file": "packages/cezar/src/workflows/worker-questions.test.ts",
       "rule": "test-enum-literal",
-      "site": "kind: 'timer'",
-      "count": 1
-    },
-    {
-      "file": "packages/cezar/src/workflows/worker-questions.test.ts",
-      "rule": "test-enum-literal",
-      "site": "phase: 'open'",
-      "count": 1
-    },
-    {
-      "file": "packages/cezar/src/workflows/worker-questions.test.ts",
-      "rule": "test-enum-literal",
       "site": "source: 'agent'",
       "count": 3
     },
@@ -4223,12 +4163,6 @@
       "file": "packages/cezar/src/workflows/worker-questions.test.ts",
       "rule": "test-enum-literal",
       "site": "source: 'cezar'",
-      "count": 1
-    },
-    {
-      "file": "packages/cezar/src/workflows/worker-questions.test.ts",
-      "rule": "test-enum-literal",
-      "site": "via: 'monitoring-line'",
       "count": 1
     },
     {

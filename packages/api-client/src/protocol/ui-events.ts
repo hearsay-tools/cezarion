@@ -230,8 +230,9 @@ export interface UiAskQuestion {
 }
 
 /**
- * The agent asked the user a structured multiple-choice question via a
- * `CEZ:ASK` marker. The run parks `waiting`; the cockpit renders clickable
+ * The agent asked the user a structured multiple-choice question: a
+ * `cezar_ask` card or a native runner ask (saved runs also hold asks from the
+ * retired `CEZ:ASK` text marker). The run parks `waiting`; the cockpit renders clickable
  * option chips. Resolution is client-side (the next user message closes the
  * card) — there is no `ask.resolved` event.
  */
@@ -240,7 +241,7 @@ export interface UiAskRequestedEvent {
   requestId: string
   questions: UiAskQuestion[]
   /** Markdown shown above the questions (hearsay-tools/cezarion#1458); absent on older asks,
-   *  native asks and an ask line without one. */
+   *  native asks and saved marker asks without one. */
   context?: string
 }
 

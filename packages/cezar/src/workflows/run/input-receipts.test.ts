@@ -88,7 +88,7 @@ function receiptFixture() {
   f.state.session = session;
   f.state.unreadInputIds = new Set([f.state.openingAgentInputId!]);
   const calls: string[] = [];
-  const turn: SessionTurn = { text: '', completedText: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
+  const turn: SessionTurn = { text: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
   const steps: receipts.InputReceiptSteps = {
     clearUnread: () => { calls.push('unread'); }, clearHeld: () => { calls.push('held'); },
     noteActivity: () => { calls.push('activity'); }, persistAttachment: vi.fn(() => null),
@@ -143,11 +143,11 @@ it.each([true, false])('routes an image once with its step id when saving succee
   expect(f.calls).toEqual([]);
 });
 
-it.each([{ type: 'text', text: 'answer\nCEZ:DONE' },
+it.each([{ type: 'text', text: 'answer\nCEZ:PR=12' },
   { type: 'tool-call', id: 'call', tool: 'Read', input: {} }, { type: 'tool-result', toolCallId: 'call', result: 'ok', isError: false }] satisfies AgentEvent[])('orders timer and activity effects for $type', event => {
   const f = receiptFixture();
   f.steps.noteActivity = () => { expect(f.turn.text).toBe(''); f.calls.push('activity'); };
-  const emit = vi.fn(() => { expect(f.turn.text).toBe('answer\nCEZ:DONE'); f.calls.push('emit'); });
+  const emit = vi.fn(() => { expect(f.turn.text).toBe('answer\nCEZ:PR=12'); f.calls.push('emit'); });
   const handled = receipts.handleReceiptEvent(f.context, f.host, f.steps, f.recipient.id, f.state, f.turn, event, 'step-text', emit);
   expect(handled).toBe(event.type === 'text');
   expect(f.calls).toEqual(event.type === 'text' ? ['unread', 'held', 'activity', 'emit'] : ['unread', 'held', 'activity']);
@@ -155,12 +155,12 @@ it.each([{ type: 'text', text: 'answer\nCEZ:DONE' },
   else expect(emit).not.toHaveBeenCalled();
 });
 
-it.each([true, false])('updates completed text and tail before UI and accepts opening only for continuation=%s', continuation => {
+it.each([true, false])('updates the tail before UI and accepts opening only for continuation=%s', continuation => {
   const f = receiptFixture();
   const sink = {} as UiEventSink;
   observeTurnWrites(f.turn, f.calls);
   f.steps.ui = (_id, _state, _sink, event) => {
-    if (event.type === 'item.completed') expect([f.turn.completedText, f.turn.tail]).toEqual(['complete', 'visible']);
+    if (event.type === 'item.completed') expect(f.turn.tail).toBe('visible');
     if (event.type === 'turn.started') expect(!!f.saved().agentInputs?.[0]?.deliveredAt).toBe(continuation);
     f.calls.push('ui');
   };
@@ -169,8 +169,8 @@ it.each([true, false])('updates completed text and tail before UI and accepts op
   callbacks.onUiEvent({ type: 'item.completed', item: { id: 'message', kind: 'message', role: 'assistant', text: 'complete' } });
   callbacks.onUiEvent({ type: 'turn.started', turnId: 'turn' });
   expect(f.calls).toEqual(continuation
-    ? ['completedText', 'tail', 'ui', 'completedText', 'tail', 'receipt', 'ui']
-    : ['completedText', 'tail', 'ui', 'completedText', 'tail', 'ui']);
+    ? ['tail', 'ui', 'tail', 'receipt', 'ui']
+    : ['tail', 'ui', 'tail', 'ui']);
 });
 
 it.each(['consume', 'opening', 'bundled', 'close'] as const)('warns and skips reconciliation after a refused %s checkpoint', operation => {
@@ -258,7 +258,7 @@ it.each(['deferred', 'inputs', 'register', 'record'] as const)('does not prepare
 });
 
 function observeTurnWrites(turn: SessionTurn, calls: string[]) {
-  for (const key of ['completedText', 'tail'] as const) {
+  for (const key of ['tail'] as const) {
     let value = turn[key];
     Object.defineProperty(turn, key, { get: () => value, set: (next: typeof value) => { calls.push(key); value = next; } });
   }

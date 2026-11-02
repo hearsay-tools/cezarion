@@ -56,7 +56,7 @@ export function stepKind(step: WorkflowStepDef): 'agent' | 'check' {
 }
 
 /**
- * Tell each chained agent step to complete its own goal before CEZ:DONE. An earlier step’s done
+ * Tell each chained agent step to complete its own goal before cezar_done. An earlier step’s done
  * report does not complete a later step’s work. Steps share the task and handoff journal.
  */
 export function chainStepNote(steps: WorkflowStepDef[], index: number): string | undefined {
@@ -81,7 +81,7 @@ export function chainStepNote(steps: WorkflowStepDef[], index: number): string |
     );
   }
   sentences.push(
-    `Signal done (call cezar_done, or end your message with a CEZ:DONE line when you have no cezar tools) only once step ${position}'s own goal is achieved, not just the run's overall task.`,
+    `Call cezar_done only once step ${position}'s own goal is achieved, not just the run's overall task.`,
   );
   // hearsay-tools/cezarion#1620: the step completes only on that signal.
   if (position < total) sentences.push(`Cezar starts step ${position + 1} only after that signal; a turn that ends without it keeps step ${position} open.`);

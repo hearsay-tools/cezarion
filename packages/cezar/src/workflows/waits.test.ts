@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ciWaitSchema } from '@open-mercato/cezar-contract/ci-wait';
 import type { PrWaitEntry, HumanWaitEntry, ProcessWaitEntry, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
-import { chargesBudget, ciWatchRequest, identicalWait, isCezarHumanWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, MONITORING_WAKE_NUDGE_MARKERS, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
+import { chargesBudget, ciWatchRequest, identicalWait, isCezarHumanWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
 
 // hearsay-tools/cezarion#1233: the wait list's pure helpers. RunManager behaviour lives in
 // the ci-wait*.test.ts files and the U-cells in waits-parity-cells.testkit.ts.
@@ -86,11 +86,6 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     expect(waitResultText(timer())).toBe(`Timer ${timer().id} fired. Continue toward the task goal; register another wait if you are still waiting.`);
     expect(waitResultText(timer({ via: 'monitoring-line' }))).toBe(MONITORING_WAKE_NUDGE);
     expect(waitResultText(timer({ via: 'schedule-wakeup' }))).toBe(MONITORING_WAKE_NUDGE);
-    // hearsay-tools/cezarion#1234: a session without cezar tools was taught the markers instead.
-    expect(waitResultText(timer({ via: 'monitoring-line' }), { tools: false })).toBe(MONITORING_WAKE_NUDGE_MARKERS);
-    expect(MONITORING_WAKE_NUDGE_MARKERS).toContain('end with CEZ:MONITORING');
-    // A session without cezar tools cannot register another wait, so its timer wake names the marker.
-    expect(waitResultText(timer({ note: 'check the deploy' }), { tools: false })).toBe(`Timer ${timer().id} fired: check the deploy. Continue toward the task goal. If the watched work is still pending, end your final message with CEZ:MONITORING.`);
     expect(MONITORING_WAKE_NUDGE).not.toContain('CEZ:');
     expect(isMonitoringTimer(timer())).toBe(false);
     expect(isMonitoringTimer(ci())).toBe(false);
@@ -104,20 +99,14 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
       `timer 33333333-3333-4333-8333-333333333333 at ${timer().deadline}. Call cezar_cancel_wait for any you no longer need.`);
   });
 
-  it('omits tool guidance without tools while retaining waits and human reply guidance', () => {
+  it('a question is answered by the reply; only the other waits are offered for cancel', () => {
     const human: HumanWaitEntry = { id: '55555555-5555-4555-8555-555555555555', kind: 'human', source: 'agent', via: 'cezar_ask',
       registeredAt: '2026-10-17T10:00:00.000Z', phase: 'open', turnId: 'turn-1', askSeq: 4 };
     const hidden: HumanWaitEntry = { ...human, source: 'cezar', via: 'no-wait' };
-    expect(openWaitsFooter([timer({ via: 'monitoring-line' })], { tools: false })).toBe(
-      `Still open: timer ${timer().id} at ${timer().deadline}.`);
-    expect(openWaitsFooter([human, ci()], { tools: false })).toBe(
-      `Still open: your question ${human.id} to the user; CI wait ${ci().id} for Acme/Repo#12, deadline ${ci().deadline}. The user's reply answers it.`);
-    expect(openWaitsFooter([human], { tools: false })).toBe(`Still open: your question ${human.id} to the user. The user's reply answers it.`);
-    expect(openWaitsFooter([hidden], { tools: false })).toBeUndefined();
-    expect(openWaitsFooter([], { tools: false })).toBeUndefined();
-    expect(openWaitsFooter([ci({ phase: 'resolved', result })], { tools: false })).toBeUndefined();
-    expect(openWaitsFooter([ci()], { tools: true })).toBe(
-      `Still open: CI wait ${ci().id} for Acme/Repo#12, deadline ${ci().deadline}. Call cezar_cancel_wait for any you no longer need.`);
+    expect(openWaitsFooter([human, ci()])).toBe(
+      `Still open: your question ${human.id} to the user; CI wait ${ci().id} for Acme/Repo#12, deadline ${ci().deadline}. The user's reply answers your question; call cezar_cancel_wait for any CI, worker, request, peer or process wait or timer you no longer need.`);
+    expect(openWaitsFooter([human])).toBe(`Still open: your question ${human.id} to the user. The user's reply answers it.`);
+    expect(openWaitsFooter([hidden])).toBeUndefined();
   });
 
   it('footer lists an open worker wait', () => {

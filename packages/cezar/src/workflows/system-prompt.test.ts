@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { HANDOFF_ONLY_INSTRUCTIONS as BASE_HANDOFF, handoffInstructions } from '../handoff.ts';
+import { handoffInstructions } from '../handoff.ts';
 import { artifactInstructions } from '../artifacts/lifecycle.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -21,10 +21,9 @@ import {
 
 // Publication guidance is additive for both fresh sessions and Continue; the
 // full prompt assertions below must still pin the unchanged handoff contract.
-const HANDOFF_INSTRUCTIONS = composeSystemPrompt(artifactInstructions('available'), BASE_HANDOFF);
 // hearsay-tools/cezarion#1234: the sessions below have cezar's tools, so they are taught the tools.
 // hearsay-tools/cezarion#1584: their opening message carries the handoff, so step 1 points there.
-const SESSION_HANDOFF = composeSystemPrompt(artifactInstructions('available'), handoffInstructions({ tools: true, handoffInjected: true }));
+const SESSION_HANDOFF = composeSystemPrompt(artifactInstructions('available'), handoffInstructions({ handoffInjected: true }));
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 const TERMINAL = new Set(['done', 'review', 'failed', 'cancelled']);
@@ -81,16 +80,6 @@ describe('composeSystemPrompt', () => {
     ['blank parts drop out', ['', '   ', H], H],
   ] as const)('%s', (_name, parts, expected) => {
     expect(composeSystemPrompt(...parts)).toBe(expected);
-  });
-});
-
-describe('handoff contract markers', () => {
-  it('teaches the CEZ:ASK structured-question marker with its schema (#473)', () => {
-    expect(HANDOFF_INSTRUCTIONS).toContain('CEZ:ASK');
-    expect(HANDOFF_INSTRUCTIONS).toContain('"questions"');
-    expect(HANDOFF_INSTRUCTIONS).toContain('"multiSelect"');
-    // It rides in the combined contract every agent step receives.
-    expect(HANDOFF_INSTRUCTIONS).toContain('CEZ:ASK');
   });
 });
 
@@ -208,14 +197,14 @@ describe('systemPrompt end-to-end (dry run)', () => {
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
-  // Agent step + trailing check. The prompt's `mock:done` makes the mock's turn signal done, which
+  // Agent step + trailing check. The prompt's `mock:cezar-done` makes the mock's turn signal done, which
   // completes the agent step (hearsay-tools/cezarion#1620), so the run reaches a terminal status
   // instead of parking at `waiting`.
   const workflow: WorkflowDef = {
     name: 'sysprompt-test',
     source: 'built-in',
     steps: [
-      { id: 'work', prompt: '{{task}} mock:done' },
+      { id: 'work', prompt: '{{task}} mock:cezar-done' },
       { id: 'verify', command: 'true' },
     ],
   };
@@ -224,7 +213,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
     name: '(planned)',
     source: 'built-in',
     steps: [
-      { id: 'review', name: 'om-auto-review-pr', skill: 'om-auto-review-pr', prompt: '{{task}} mock:done' },
+      { id: 'review', name: 'om-auto-review-pr', skill: 'om-auto-review-pr', prompt: '{{task}} mock:cezar-done' },
       { id: 'verify', command: 'true' },
     ],
   };
@@ -386,7 +375,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
   });
 
   it('mock:refs end to end: markers set the record, silence the wrong chip, and stay out of the transcript', async () => {
-    const id = await runToEnd({ task: 'do the thing mock:refs mock:done' });
+    const id = await runToEnd({ task: 'do the thing mock:refs mock:cezar-done' });
     const after = store.getRun(id);
     expect(after?.prNumber).toBe(4242);
     expect(after?.issueNumber).toBe(17);
@@ -461,8 +450,8 @@ describe('systemPrompt end-to-end (dry run)', () => {
     // than being swallowed by title construction.
     const worktreePath = record?.worktreePath;
     if (!worktreePath) throw new Error('run did not create its worktree');
-    // The step's prompt adds `mock:done` after the task, so the step signals done.
-    expect(readFileSync(join(worktreePath, 'notes.md'), 'utf8')).toContain(': 432 mock:done\n');
+    // The step's prompt adds `mock:cezar-done` after the task, so the step signals done.
+    expect(readFileSync(join(worktreePath, 'notes.md'), 'utf8')).toContain(': 432 mock:cezar-done\n');
   }, 30_000);
 
 });
@@ -549,7 +538,7 @@ describe('generated inbox retirement (dry run)', () => {
     rmSync(todosFile, { force: true });
     rmSync(inheritedTodos, { force: true });
 
-    const id = await runToEnd({ task: 'do the thing mock:done' });
+    const id = await runToEnd({ task: 'do the thing mock:cezar-done' });
 
     expect(capturedSystemPrompt()).toBe(composeSystemPrompt(CONFIG_PROMPT, SESSION_HANDOFF));
     expect(capturedSystemPrompt()).not.toContain('CEZ_TODOS_FILE');
@@ -561,7 +550,7 @@ describe('generated inbox retirement (dry run)', () => {
   }, 30_000);
 
   it('keeps the per-task handoff journal and lifecycle tools', async () => {
-    const id = await runToEnd({ task: 'do the thing mock:done' });
+    const id = await runToEnd({ task: 'do the thing mock:cezar-done' });
     expect(capturedSystemPrompt()).toContain('CEZ_HANDOFF_FILE');
     // hearsay-tools/cezarion#1234: the lifecycle rides in the same contract, as cezar tool calls.
     expect(capturedSystemPrompt()).toContain('call cezar_done');

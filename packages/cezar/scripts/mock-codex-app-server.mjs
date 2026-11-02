@@ -119,6 +119,14 @@ async function mcpToolGate(tool) {
     mcpToolApprovalRequest(key.slice('mcp_servers.'.length), tool));
   return reply.result?.action === 'accept';
 }
+// hearsay-tools/cezarion#2397: a reply that finishes, asks or waits calls that cezar tool over
+// the thread's MCP config (behind Codex's approval gate) before its turn ends. Returns '' or a
+// note for the text.
+const tools = () => import('./mock-ci-tool.mjs');
+async function lifecycle([name, args]) {
+  if (!await mcpToolGate(name)) return `\n\n(mock: ${name} rejected)`;
+  return (await tools()).lifecycleCall('codex', ciWire, name, args);
+}
 // #505 steering scenarios: the one turn that accepts `turn/steer`, while it is open.
 let steerTurn = null;
 let steerSerial = 0;
@@ -172,17 +180,15 @@ const afterSilentReplies = [
   [turnText => turnText.includes('mock:subagent-after-park'), replyWithParkedSubagent],
   [turnText => turnText.includes('mock:multi-pr-refs'), replyWithMultiplePrs],
   [turnText => turnText.includes('mock:turn-messages:'), replyWithTurnMessages],
-  [turnText => turnText.includes('mock:ask-snapshot'), replyWithAskSnapshot],
-  [turnText => turnText.includes('mock:ask-prose'), replyWithAskProse],
   [turnText => turnText.includes('mock:cezar-tool'), replyWithCezarTool],
   [turnText => turnText.includes('mock:ci-wait'), replyWithCiWait],
   [turnText => ['mock:steer-tool', 'mock:steer-late', 'mock:steer-race', 'mock:steer-strand'].find((marker) => turnText.includes(marker)), replyWithSteering],
   [turnText => turnText.includes('mock:agent-echo'), replyWithEcho],
-  [turnText => turnText.includes('mock:split-text'), replyWithSplitText],
   [turnText => turnText.includes('mock:ask-bad'), replyWithMalformedAsk],
-  [turnText => turnText.includes('mock:hold-done'), replyWithHeldDone],
-  [turnText => turnText.includes('mock:hold-ask'), replyWithHeldAsk],
-  [turnText => turnText.includes('mock:done'), replyWithDone],
+  [turnText => turnText.includes('mock:hold-cezar-done'), replyWithHeldDone],
+  [turnText => turnText.includes('mock:hold-cezar-ask'), replyWithHeldAsk],
+  [turnText => turnText.includes('mock:cezar-done'), replyWithDone],
+  [turnText => turnText.includes('mock:cezar-ask'), replyWithCezarAsk],
   [turnText => watchdogStall(turnText), acknowledgeWatchdog],
   [turnText => turnText.includes('mock:busy-progress'), replyWithBusyProgress],
   [turnText => turnText.includes('mock:hold-gated'), replyWithGatedHold],
@@ -236,12 +242,12 @@ function replyToMalformedAsk(msg) {
   emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
 }
 
-function replyToAsk(msg) {
+async function replyToAsk(msg) {
   const answer = msg.result.answers?.library?.answers;
   const freeText = msg.result.answers?.first?.answers;
   if (resumeAfterAsk && Array.isArray(answer) && answer[0] === 'Vitest') {
     resumeAfterAsk = false;
-    const text = 'Implemented the choice.\nCEZ:DONE';
+    const text = 'Implemented the choice.' + await lifecycle((await tools()).DONE);
     emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_answer', text: '' } } });
     emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'item_answer', delta: text } });
     emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_answer', text } } });
@@ -372,7 +378,7 @@ function threadSandbox(msg) {
 
 async function replyAutonomously(turnText, msg) {
   const { autonomousReply } = await import('./mock-autonomous.mjs');
-  emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: `autonomous-${++autonomousTurn}`, text: autonomousReply(turnText) } } });
+  emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: `autonomous-${++autonomousTurn}`, text: await autonomousReply(turnText, lifecycle) } } });
   emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
   return;
 }
@@ -408,7 +414,7 @@ async function replyWithFinalMessageNudge(silent) {
       emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'silent-nudge-prefix', text: silent.SLOW_DONE_PREFIX } } });
       await silent.sleep(silent.SLOW_DONE_TAIL_MS);
     }
-    const text = kind === 'standing' ? silent.FINAL_MESSAGE_STANDING : silent.SILENT_TAIL_DONE;
+    const text = await silent.finalNudgeText(kind, lifecycle);
     emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'silent-nudge-done', text } } });
   }
   emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
@@ -422,7 +428,8 @@ async function replyWithParkedHook(turnText, msg) {
     displayOrder: 0, startedAt: 1, status: 'completed', entries: [{ kind: 'context', text }],
   } } });
   emit(hook('hook-mid', 'postToolUse', 'Mid-turn hook context.'));
-  emit({ method: 'item/completed', params: { threadId: 'th_mock_1', item: { type: 'agentMessage', id: 'hook-parent', text: 'Watching.\nCEZ:MONITORING' } } });
+  const watching = 'Watching.' + await lifecycle((await tools()).wait());
+  emit({ method: 'item/completed', params: { threadId: 'th_mock_1', item: { type: 'agentMessage', id: 'hook-parent', text: watching } } });
   emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
   await afterParityPark(turnText);
   emit(hook('hook-late', 'stop', 'Late hook processed.'));
@@ -432,7 +439,8 @@ async function replyWithParkedHook(turnText, msg) {
 // Native thread attribution from collab-agent-tool-call.ndjson (#121/#401).
 async function replyWithParkedSubagent(turnText, msg) {
   emit({ method: 'item/started', params: { threadId: 'th_mock_1', item: { type: 'collabAgentToolCall', id: 'park-spawn', tool: 'spawnAgent', status: 'inProgress', receiverThreadIds: ['th_park_child'] } } });
-  emit({ method: 'item/completed', params: { threadId: 'th_mock_1', item: { type: 'agentMessage', id: 'park-parent', text: 'Watching the child.\nCEZ:MONITORING' } } });
+  const watching = 'Watching the child.' + await lifecycle((await tools()).wait());
+  emit({ method: 'item/completed', params: { threadId: 'th_mock_1', item: { type: 'agentMessage', id: 'park-parent', text: watching } } });
   emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
   await afterParityPark(turnText);
   emit({ method: 'item/started', params: { threadId: 'th_park_child', item: { type: 'commandExecution', id: 'late-read', command: 'cat README.md', status: 'inProgress' } } });
@@ -444,7 +452,7 @@ async function replyWithParkedSubagent(turnText, msg) {
 // #401: agentMessage completion without deltas (same item envelope as baseline).
 async function replyWithMultiplePrs(turnText, msg) {
   const { multiPrText, unrelatedPr } = await import('./mock-multi-pr.mjs');
-  const text = multiPrText(turnText);
+  const text = await multiPrText(turnText, lifecycle);
   emit({ method: 'item/completed', params: { threadId: 'th_mock_1', item: { type: 'reasoning', id: 'multi-thinking', summary: [unrelatedPr] } } });
   emit({ method: 'item/completed', params: { threadId: 'th_mock_1', item: { type: 'commandExecution', id: 'multi-tool', command: 'cat other.txt', aggregatedOutput: unrelatedPr, status: 'completed', exitCode: 0 } } });
   emit({ method: 'item/started', params: { threadId: 'th_mock_1', item: { type: 'collabAgentToolCall', id: 'multi-spawn', tool: 'spawnAgent', status: 'inProgress', receiverThreadIds: ['th_foreign_child'] } } });
@@ -488,18 +496,6 @@ function emitChannelMessage(messages, n, missing, refresh, id, text) {
   } else emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id, text: n === 1 && refresh ? `${messages[0]}\n${text}` : text } } });
 }
 
-function replyWithAskSnapshot(turnText, msg) {
-  emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'ask-snapshot', text: turnText.includes('mock:ask-snapshot-bad') ? 'CEZ:ASK {not valid json' : 'Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}' } } });
-  emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
-  return;
-}
-
-function replyWithAskProse(turnText, msg) {
-  emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'ask-prose', text: 'Use `CEZ:ASK {"questions":[]}` in your reply.\n> CEZ:ASK {not valid json' } } });
-  emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: 'turn_mock_1', status: 'completed' } } });
-  return;
-}
-
 async function replyWithCezarTool(turnText, msg) {
   const { toolPrompt } = await import('./mock-ci-tool.mjs');
   const tool = /mock:cezar-tool\s+([a-z_]+)/.exec(turnText)?.[1] ?? 'cezar_wait';
@@ -522,7 +518,7 @@ async function replyWithSteering(turnText, msg, steerScenario) {
   steerTurn = { id: turnId, steered: [], race: steerScenario === 'mock:steer-race', strand: steerScenario === 'mock:steer-strand' };
   const agent = (text) => emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId, item: { type: 'agentMessage', id: `item_steer_${++steerSerial}`, text } } });
   if (steerScenario === 'mock:steer-late') {
-    agent(`late window: final message already sent${turnText.includes('mock:done-late') ? '\n\nCEZ:DONE' : ''}`);
+    agent(`late window: final message already sent${turnText.includes('mock:late-cezar-done') ? await lifecycle((await tools()).DONE) : ''}`);
     await sleep(300);
     completeSteerTurn(turnId); // steers accepted in this window are never read
     return;
@@ -550,22 +546,6 @@ function replyWithEcho(turnText, msg) {
   return;
 }
 
-function replyWithSplitText(turnText, msg) {
-  // Deltas that split the marker itself, then the authoritative snapshot on
-  // `item/completed` — codex's real streaming shape. A runner emitting one
-  // v1 `text` per delta tears `CEZ:MONITORING` into `CEZ:` + `MONITORING`,
-  // which is #2 on codex's wire (harness parity S8).
-  const full = 'parity split text\n\nCEZ:MONITORING';
-  emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_sp1', text: '' } } });
-  for (const delta of ['parity split text\n\n', 'CEZ:', 'MONITORING']) {
-    emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'item_sp1', delta } });
-  }
-  emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_sp1', text: full } } });
-  emit({ method: 'thread/tokenUsage/updated', params: { threadId: 'th_mock_1', tokenUsage: { total: { totalTokens: 30, inputTokens: 20, outputTokens: 10 }, last: { totalTokens: 30, inputTokens: 20, outputTokens: 10 } } } });
-  emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
-  return;
-}
-
 function replyWithMalformedAsk(turnText, msg) {
   // `questions` is not an array of question objects, so `codexAskQuestions`
   // must reject it: no card renders, and the turn still ends once the
@@ -577,38 +557,43 @@ function replyWithMalformedAsk(turnText, msg) {
   return;
 }
 
-async function replyWithHeldDone(turnText, msg) {
-  await waitForMockRelease(400);
-  const full = 'parity hold-done: content after the pause\n\nCEZ:DONE';
-  emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_hd1', text: '' } } });
-  emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'item_hd1', delta: full } });
-  emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_hd1', text: full } } });
+/** One complete agent message, its usage, then the turn's end. */
+function emitMessageTurn(itemId, text) {
+  emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: itemId, text: '' } } });
+  emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId, delta: text } });
+  emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: itemId, text } } });
   emit({ method: 'thread/tokenUsage/updated', params: { threadId: 'th_mock_1', tokenUsage: { total: { totalTokens: 30, inputTokens: 20, outputTokens: 10 }, last: { totalTokens: 30, inputTokens: 20, outputTokens: 10 } } } });
   emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
+}
+
+async function replyWithHeldDone(turnText, msg) {
+  await waitForMockRelease(400);
+  const full = 'parity hold-done: content after the pause' + await lifecycle((await tools()).DONE);
+  emitMessageTurn('item_hd1', full);
   return;
 }
 
 async function replyWithHeldAsk(turnText, msg) {
   await waitForMockRelease(400);
-  const ask = 'Pick one.\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}';
-  emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_ha1', text: '' } } });
-  emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'item_ha1', delta: ask } });
-  emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_ha1', text: ask } } });
-  emit({ method: 'thread/tokenUsage/updated', params: { threadId: 'th_mock_1', tokenUsage: { total: { totalTokens: 30, inputTokens: 20, outputTokens: 10 }, last: { totalTokens: 30, inputTokens: 20, outputTokens: 10 } } } });
-  emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
+  const ask = 'Pick one.' + await lifecycle((await tools()).ask());
+  emitMessageTurn('item_ha1', ask);
   return;
 }
 
-function replyWithDone(turnText, msg) {
-  // A turn that DECLARES the task complete, so the run reaches cezar's
-  // review gate instead of parking for the user. A markerless turn-end
+async function replyWithDone(turnText, msg) {
+  // A turn that calls cezar_done, so the run reaches cezar's review gate
+  // instead of parking for the user. A turn that ends with no tool call
   // correctly parks as `waiting`, which is why harness parity R1 needs
   // this scenario rather than the baseline one.
-  const full = 'parity done: the task is complete\n\nCEZ:DONE';
-  emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_d1', text: '' } } });
-  emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'item_d1', delta: full } });
-  emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_d1', text: full } } });
-  emit({ method: 'thread/tokenUsage/updated', params: { threadId: 'th_mock_1', tokenUsage: { total: { totalTokens: 30, inputTokens: 20, outputTokens: 10 }, last: { totalTokens: 30, inputTokens: 20, outputTokens: 10 } } } });
+  const full = 'parity done: the task is complete' + await lifecycle((await tools()).DONE);
+  emitMessageTurn('item_d1', full);
+  return;
+}
+
+// The portable ask: cezar_ask, then the turn ends (the native ask is `mock:native-codex-ask`).
+async function replyWithCezarAsk(turnText, msg) {
+  const ask = 'Pick one.' + await lifecycle((await tools()).ask());
+  emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_ca1', text: ask } } });
   emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
   return;
 }
@@ -620,7 +605,7 @@ async function replyWithBusyProgress(turnText, msg) {
     emit({ method: 'item/commandExecution/outputDelta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'busy', delta: 'working\n' } });
     await new Promise(r => setTimeout(r, 100));
   }
-  const busy = 'busy complete\n\nCEZ:DONE';
+  const busy = 'busy complete' + await lifecycle((await tools()).DONE);
   emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_busy', text: '' } } });
   emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'item_busy', delta: busy } });
   emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_busy', text: busy } } });
@@ -689,7 +674,7 @@ function replyWithSubagentActivity(turnText, msg) {
   return;
 }
 
-function replyWithChildTurn(turnText, msg) {
+async function replyWithChildTurn(turnText, msg) {
   // A spawned sub-agent runs in its OWN child thread that emits a full turn
   // lifecycle over the shared connection. Its turn/completed must not end the
   // parent turn (#600): the parent is still working after the child finishes.
@@ -699,9 +684,10 @@ function replyWithChildTurn(turnText, msg) {
   emit({ method: 'item/started', params: { threadId: 'th_child', turnId: 'turn_child', item: { type: 'commandExecution', id: 'item_child', command: ['rg', 'requestUserInput'], cwd: '/repo', status: 'inProgress' } } });
   emit({ method: 'turn/completed', params: { threadId: 'th_child', turn: { id: 'turn_child', status: 'completed' } } });
   // Parent keeps streaming after the child's turn ended.
+  const working = 'Still working after the sub-agent.' + await lifecycle((await tools()).wait('Re-check the sub-agent.'));
   emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_p1', text: '' } } });
-  emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'item_p1', delta: 'Still working after the sub-agent.\nCEZ:MONITORING' } });
-  emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_p1', text: 'Still working after the sub-agent.\nCEZ:MONITORING' } } });
+  emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'item_p1', delta: working } });
+  emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_p1', text: working } } });
   emit({ method: 'item/completed', params: { threadId: 'th_child', turnId: 'turn_child', item: { type: 'agentMessage', id: 'item_child_text', text: 'Child review finished.' } } });
   // No completion for this second child item: parent turn-end must not flush it into v1.
   emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_child', turnId: 'turn_child', itemId: 'item_child_partial', delta: 'Child review still streaming.' } });
@@ -733,7 +719,7 @@ async function replyWithApproval(turnText, msg) {
   const resolved = turnText.includes('mock:approval-resolved');
   if (resolved || turnText.includes('mock:approval-turn-end')) {
     await waitForMockRelease();
-    emitSettledApproval(resolved);
+    await emitSettledApproval(resolved);
   }
   // Otherwise no turn/completed until the matching native JSON-RPC response arrives.
   return;
@@ -750,17 +736,17 @@ function emitApprovalRequest(turnText) {
       availableDecisions: ['accept', 'acceptForSession', 'decline', 'cancel'] } });
 }
 
-function emitSettledApproval(resolved) {
+async function emitSettledApproval(resolved) {
   const turnId = pendingApprovalTurn; pendingApprovalTurn = undefined;
   if (resolved) emit({ method: 'serverRequest/resolved', params: { threadId: 'th_mock_1', requestId: 'approval-1' } });
-  const text = resolved ? 'Native approval settled without a cockpit answer.\nCEZ:DONE'
-    : 'Turn ended with the approval still pending.\nCEZ:DONE';
+  const text = (resolved ? 'Native approval settled without a cockpit answer.'
+    : 'Turn ended with the approval still pending.') + await lifecycle((await tools()).DONE);
   emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId, item: { type: 'agentMessage', id: 'item_approval_settled', text } } });
   emit({ method: 'turn/completed', params: { threadId: 'th_mock_1', turn: { id: turnId, status: 'completed' } } });
 }
 
 function replyWithAsk(turnText, msg) {
-  resumeAfterAsk = turnText.includes('mock:resume-done');
+  resumeAfterAsk = turnText.includes('mock:resume-cezar-done');
   const questions = turnText.includes('multi free text')
     ? [{ id: 'first', header: 'First', question: 'First choice?', isOther: true, isSecret: false,
         options: [{ label: 'A', description: 'Option A.' }, { label: 'B', description: 'Option B.' }] },
@@ -890,9 +876,9 @@ function resolveClientRequest(msg) {
   return;
 }
 
-function replyToApproval(msg) {
+async function replyToApproval(msg) {
   const turnId = pendingApprovalTurn; pendingApprovalTurn = undefined;
-  const text = `${msg.error ? `Approval error: ${msg.error.code}` : `Approval response: ${JSON.stringify(msg.result)}`}\nCEZ:DONE`;
+  const text = `${msg.error ? `Approval error: ${msg.error.code}` : `Approval response: ${JSON.stringify(msg.result)}`}` + await lifecycle((await tools()).DONE);
   emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId,
     item: { type: 'agentMessage', id: 'item_approval_reply', text } } });
   emit({ method: 'serverRequest/resolved', params: { threadId: 'th_mock_1', requestId: msg.id } });

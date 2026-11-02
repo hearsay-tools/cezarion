@@ -41,6 +41,13 @@ export function ciErrorMessage(code: CiWaitErrorCode): string {
   return messages[code];
 }
 
+/** hearsay-tools/cezarion#2397: a launch refused because the lifecycle tools could not start. */
+export function toolsUnavailableMessage(detail: string, directory: string | undefined): string {
+  const where = directory ? `a private socket directory in ${directory}` : 'a private named pipe';
+  const fix = directory ? `Free space in ${directory} or fix its permissions` : 'Fix the cause';
+  return `Cezar tools could not start: ${detail}. Every agent session needs ${where}. ${fix}, then Continue the task.`;
+}
+
 // hearsay-tools/cezarion#1233: `cezar_wait` refusals. Each names what the agent can do next.
 const waitMessages: Partial<Record<WaitErrorCode, string>> = {
   timers_disabled: 'Automatic re-checks are turned off for this workspace (Park until resumed). Do not register a timer; end your turn and the user resumes the task.',

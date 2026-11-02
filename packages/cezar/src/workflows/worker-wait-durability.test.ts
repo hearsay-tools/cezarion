@@ -295,7 +295,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   });
 
   for (const mode of ['fresh', 'continuation'] as const) {
-    for (const marker of ['mock:done', 'mock:monitoring', 'mock:ask'] as const) {
+    for (const marker of ['mock:cezar-done', 'mock:cezar-wait', 'mock:cezar-ask'] as const) {
       it(`${mode}: worker wait precedes ${marker} except that a human ask wins`, async () => {
         const p = await parent(mode === 'fresh' ? marker : 'mock:hold');
         if (mode === 'continuation') {
@@ -306,7 +306,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(p.id)?.sessionEverOpened === true);
         }
         const w = await worker(p.id); const wait = register(p.id, [w.id]);
-        if (marker === 'mock:ask') {
+        // The Continue runs autonomous, where cezar_ask is refused (hearsay-tools/cezarion#2397):
+        // its worker wait parks the run as the other markers do.
+        if (marker === 'mock:cezar-ask' && mode === 'fresh') {
           await until(() => store.readEvents(p.id).some(event => event.type === 'ask.requested'));
           expect(waitOf(store.getRun(p.id))?.id).toBe(wait.id);
           expect(store.getRun(p.id)?.agentInputs?.some(input => input.deliveredAt)).not.toBe(true);
@@ -315,6 +317,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           expect(store.getRun(p.id)?.status).toBe('waiting');
           expect(semaphore.busy()).toBe(0);
           expect(store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).includes('autonomous — continuing'))).toBe(false);
+          if (marker === 'mock:cezar-ask') expect(store.readEvents(p.id).some(event => event.type === 'ask.requested')).toBe(false);
         }
       });
     }
@@ -323,7 +326,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   // The question is the parent's (hearsay-tools/cezarion#2410); the parent's wait expiring answers
   // nothing of it.
   it("a parent timeout leaves a waiting child's question unanswered", async () => {
-    const p = await parent(); grantSteer(p.id); const w = await worker(p.id, 'mock:ask');
+    const p = await parent(); grantSteer(p.id); const w = await worker(p.id, 'mock:cezar-ask');
     const wait = register(p.id, [w.id]); manager.enqueueOwnedRun(w.id);
     await until(() => store.readEvents(w.id).some(event => event.type === 'ask.requested'));
     vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(wait.deadline!);
@@ -347,7 +350,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(Date.parse(wait.deadline!) - Date.now()).toBeGreaterThan(599_000);
     expect(register(p.id, [w.id]).id).toBe(wait.id);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    manager.sendMessage(p.id, [{ type: 'text', text: 'mock:ask' }]);
+    manager.sendMessage(p.id, [{ type: 'text', text: 'mock:cezar-ask' }]);
     await until(() => store.readEvents(p.id).some(e => e.type === 'ask.requested'));
     expect(waitOf(store.getRun(p.id))?.id).toBe(wait.id);
     expect(register(p.id, [w.id]).id).toBe(wait.id);
@@ -530,7 +533,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   });
 
   it('preserves a delegated parent ask across restart and never uses a lifecycle prompt as its answer', async () => {
-    const p = await parent('mock:ask'); const w = await worker(p.id);
+    const p = await parent('mock:cezar-ask'); const w = await worker(p.id);
     await until(() => store.readEvents(p.id).some(e => e.type === 'ask.requested'));
     const delegation = store.getRun(p.id)!.delegation!;
     if (delegation.role !== 'root') throw Error('fixture');

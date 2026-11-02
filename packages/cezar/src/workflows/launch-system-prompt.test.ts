@@ -146,7 +146,7 @@ describe('launch system prompt at both sites (#1632)', () => {
     const webhooks = agentWebhooksPrompt(webhookCliCommand(), agentWebhooks(await registryEntry(projectId, repoRoot)));
     return [
       EXTRA, DELEGATION, automationsPrompt(automationCliCommand()), webhooks!,
-      artifactInstructions(spec.env?.CEZ_ARTIFACTS_DIR), handoffInstructions({ tools: !!spec.cezarTools, handoffInjected: true }),
+      artifactInstructions(spec.env?.CEZ_ARTIFACTS_DIR), handoffInstructions({ handoffInjected: true }),
     ];
   }
 

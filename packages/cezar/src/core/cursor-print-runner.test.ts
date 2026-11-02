@@ -233,33 +233,9 @@ describe('Cursor print logical session', () => {
     await session.result;
   });
 
-  it('parks a trailing CEZ:ASK until explicit human input and drops premature follow-ups', async () => {
-    const { spec, log } = fixture('portable-ask');
-    const events: AgentEvent[] = [];
-    const session = new CursorPrintRunner({ bin: mock, processOptions: { drainMs: 20 } })
-      .startSession(spec, event => events.push(event), { autoEndAfterFirstTurn: true });
-    expect(session.sendMessage([{ type: 'text', text: 'premature' }])).toBe(true);
-    // bound: wait for this native turn-end before sending the next input.
-    await expect.poll(() => turnEnds(events), { timeout: 10_000 }).toBe(1);
-    // bound: observe past Cursor print's 250 ms auto-end timer after the real child publishes CEZ:ASK.
-    await new Promise(resolve => setTimeout(resolve, 300));
-    expect(session.open).toBe(true);
-    expect(session.heldHumanInputCount?.()).toBe(0);
-    expect(session.sendAgentMessage([{ type: 'text', text: 'worker cannot answer' }])).toBe(false);
-    expect(logs(log)).toHaveLength(1);
-    expect(session.sendMessage([{ type: 'text', text: 'Library: Vitest' }])).toBe(true);
-    // bound: wait for this native turn-end before sending the next input.
-    await expect.poll(() => turnEnds(events), { timeout: 10_000 }).toBe(2);
-    expect(logs(log)).toHaveLength(2);
-    expect(logs(log)[1]?.resumeId).toBe(logs(log)[0]?.id);
-    expect(logs(log)[1]?.prompt).toContain('Library: Vitest');
-    session.end();
-    await session.result;
-  });
-
   it.each(['Library: Vitest', 'I prefer a different library', 'Library: decline'])(
     'sends the human reply %s as its own exact-resume turn', async reply => {
-      const { spec, log } = fixture('portable-ask');
+      const { spec, log } = fixture();
       const events: AgentEvent[] = [];
       const session = new CursorPrintRunner({ bin: mock, processOptions: { drainMs: 20 } })
         .startSession(spec, event => events.push(event));

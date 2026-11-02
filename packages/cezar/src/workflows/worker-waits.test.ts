@@ -12,7 +12,7 @@ import { RunStore } from '../runs/store.ts';
 import { readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { COMPLETION_NUDGE_NOTE, IDLE_TIMEOUT_MS } from './run.ts';
-import { gatedProviderFailure } from './waits-parity.testkit.ts';
+import { gate, gatedProviderFailure, thenSay, toolCall } from './waits-parity.testkit.ts';
 import {
   collect, controlledWire, delegatingParent, fixtureUpdateRun, manager, parent, restart, root, semaphore, store, until, useWorkerWaitFixture, waitOf, worker,
 } from './worker-wait.testkit.ts';
@@ -350,7 +350,7 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
   });
 
   it("the parent's answer to a worker question leaves the worker's earlier wait open", async () => {
-    const f = await conversing('mock:hold', 'mock:ask');
+    const f = await conversing('mock:hold', 'mock:cezar-ask');
     await until(() => eventsOf(f.w.id, 'worker-question-routed').length === 1 && store.getRun(f.w.id)?.status === 'waiting');
     const question = String(eventsOf(f.w.id, 'worker-question-routed')[0]!.messageId);
     const own = await say(f, 'worker', f.p.id, 'request', 'Which module? mock:hold');
@@ -375,13 +375,13 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
   });
 
   it('a worker message reaches a parent with a pending cezar_ask card beside it; the card stays answerable', async () => {
-    const f = await conversing('mock:ask');
+    const f = await conversing('mock:cezar-ask');
     await until(() => hasPendingAsk(store, f.p.id) === true);
     const askSeq = eventsOf(f.p.id, 'ask.requested')[0]!.seq;
     const send = vi.spyOn(sessionOf(f.p.id), 'sendAgentMessage');
     const id = await say(f, 'worker', f.p.id, 'progress', 'Still working');
     await until(() => delivered(f.p.id, id));
-    expect(send.mock.calls.find(call => call[1]?.includes(id))?.[2]).toEqual({ besideQuestion: true });
+    expect(send.mock.calls.some(call => call[1]?.includes(id))).toBe(true);
     // The card is still the one the human answers, with its askSeq.
     await until(() => hasPendingAsk(store, f.p.id) === true && store.getRun(f.p.id)?.status === 'waiting');
     expect(eventsOf(f.p.id, 'ask.requested')).toHaveLength(1);
@@ -390,13 +390,13 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
   });
 
   it('a worker with a routed question receives an unrelated parent message beside it', async () => {
-    const f = await conversing('mock:hold', 'mock:ask');
+    const f = await conversing('mock:hold', 'mock:cezar-ask');
     await until(() => eventsOf(f.w.id, 'worker-question-routed').length === 1 && store.getRun(f.w.id)?.status === 'waiting');
     const question = String(eventsOf(f.w.id, 'worker-question-routed')[0]!.messageId);
     const send = vi.spyOn(sessionOf(f.w.id), 'sendAgentMessage');
     const id = await say(f, 'parent', f.w.id, 'progress', 'Also lint');
     await until(() => delivered(f.w.id, id));
-    expect(send.mock.calls.find(call => call[1]?.includes(id))?.[2]).toEqual({ besideQuestion: true });
+    expect(send.mock.calls.some(call => call[1]?.includes(id))).toBe(true);
     // A message is not the answer: the question is still the parent's to answer.
     expect(answered(f.w.id)).toEqual([]);
     await until(() => store.getRun(f.w.id)?.status === 'waiting');
@@ -432,12 +432,22 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
 
   // hearsay-tools/cezarion#1301: a blocked done opens no completion wait, so a worker's request to
   // the nudged parent is ordinary input: delivered, with no wait to end.
+  // hearsay-tools/cezarion#2397: the tool refuses a done a live worker blocks, so the turn end's
+  // refusal nudge comes from a done the tool accepted before the worker was spawned in that turn.
   it('a parent nudged at a blocked done: a worker request is delivered with no completion wait to end', async () => {
-    const f = await conversing();
-    manager.sendMessage(f.p.id, [{ type: 'text', text: 'mock:done' }]);
+    const { p, service, callerFor } = await delegatingParent({ task: 'mock:hold', permissions: ['spawn', 'wait', 'steer'] });
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    const opened = join(root, `gate-${randomUUID()}`);
+    expect(manager.sendMessage(p.id, [{ type: 'text', text: `${toolCall('cezar_done', {})} ${gate(opened)} ${thenSay('All done.')}` }])).toBe(true);
+    await until(() => !!(runInternals(manager).active.get(p.id) as { doneRequested?: unknown } | undefined)?.doneRequested);
+    const w = await worker(p.id);
+    writeFileSync(opened, '');
+    const f = { p, w, service, parentCaller: callerFor(p.id), workerCaller: callerFor(w.id) };
     await until(() => store.readEvents(f.p.id).some(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE)) &&
       store.getRun(f.p.id)?.status === 'waiting');
     expect(waitOf(store.getRun(f.p.id))).toBeUndefined();
+    manager.enqueueOwnedRun(w.id);
+    await until(() => store.getRun(w.id)?.status === 'waiting');
     const id = await say(f, 'worker', f.p.id, 'request', 'Need a decision mock:hold');
     await until(() => delivered(f.p.id, id));
     const delegation = store.getRun(f.p.id)?.delegation;

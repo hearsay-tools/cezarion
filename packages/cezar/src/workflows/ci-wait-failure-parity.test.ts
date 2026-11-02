@@ -19,9 +19,10 @@ const lastCiWaitOf = (id: string) => [...(store.getRun(id)?.lastWaits ?? [])].re
 const parked = (id: string) => ciWaitOf(id)?.phase === 'open' && store.getRun(id)?.status === 'waiting';
 
 const externalResource = vi.hoisted(() => ({ supervisor: {} }));
-vi.mock('../ci-wait/resources.ts', () => ({ acquireCiResources: () => ({
-  supervisor: externalResource.supervisor, controller: async () => undefined, release() {},
-}) }));
+vi.mock('../ci-wait/resources.ts', async importOriginal => {
+  const original = await importOriginal<typeof import('../ci-wait/resources.ts')>();
+  return { acquireCiResources: (workspace: object) => ({ ...original.acquireCiResources(workspace), supervisor: externalResource.supervisor }) };
+});
 
 const identity = { prUrl: 'https://github.com/acme/repo/pull/12', repository: 'acme/repo', prNumber: 12, headSha: 'a'.repeat(40) };
 function github() {
@@ -39,7 +40,7 @@ function active(id: string) {
 // An earlier step completes only on its done (hearsay-tools/cezarion#1620): a turn that signals
 // it replaces the plain session close these cells once used to run the tail.
 function signalDone(id: string, runner: RunnerId): void {
-  expect(manager.sendMessage(id, [{ type: 'text', text: HARNESS_ADAPTERS[runner].scenarios.done! }])).toBe(true);
+  expect(manager.sendMessage(id, [{ type: 'text', text: HARNESS_ADAPTERS[runner].scenarios['cezar-done']! }])).toBe(true);
 }
 function register(id: string): Promise<Wait> {
   return manager.registerWait(id, { kind: 'pr', pr: identity.prUrl, timeout_seconds: 30 }, 'cezar_wait', active(id)!.ciGeneration);
@@ -133,7 +134,7 @@ describe('CI wait failure history through every native runner (hearsay-tools/cez
         : 'node -e "const fs=require(\'node:fs\');if(!fs.existsSync(\'check-retried\')){fs.writeFileSync(\'check-retried\',\'\');process.exit(1)}"';
       const run = manager.startRun({ name: 'ci-failure-chain', source: 'built-in', steps: [
         { id: 'first', prompt: adapter.scenarios['provider-error']! },
-        { id: 'later', prompt: adapter.scenarios.done! },
+        { id: 'later', prompt: adapter.scenarios['cezar-done']! },
         { id: 'check', command, onFail: { retry: outcome === 'source-retry' ? 'first' : 'later', max: 1 } },
       ] }, { runner, task: 'Recover CI and run the remaining workflow', worktree: false });
       await until(wire.held);
@@ -191,7 +192,7 @@ describe('CI wait failure history through every native runner (hearsay-tools/cez
       const adapter = HARNESS_ADAPTERS[runner];
       const run = await ownedChain(runner, { name: 'owned-ci-chain', source: 'built-in', steps: [
         { id: 'first', prompt: adapter.scenarios['provider-error']!, runner, agentProfile: 'default' },
-        { id: 'later', prompt: adapter.scenarios.done!, runner, agentProfile: 'default' },
+        { id: 'later', prompt: adapter.scenarios['cezar-done']!, runner, agentProfile: 'default' },
         { id: 'check', command: 'node -e "const fs=require(\'node:fs\');if(!fs.existsSync(\'check-retried\')){fs.writeFileSync(\'check-retried\',\'\');process.exit(1)}"', onFail: { retry: 'later', max: 1 } },
       ] });
       await until(wire.held);

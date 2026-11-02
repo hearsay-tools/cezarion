@@ -13,8 +13,8 @@ const { values } = parseArgs({ options: {
   'output-dir': { type: 'string' },
   case: { type: 'string' },
 } });
-if (!values.model || !values['output-dir'] || !['native-question', 'delegation', 'mcp', 'portable-ask', 'plugins', 'resume-missing', 'fields', 'plugin-lifecycle', 'errors'].includes(values.case)) {
-  process.stderr.write('Usage: probe-cursor-print.mjs --model <discovered-id> --output-dir <path> --case native-question|delegation|mcp|portable-ask|plugins|resume-missing|fields|plugin-lifecycle|errors\n');
+if (!values.model || !values['output-dir'] || !['native-question', 'delegation', 'mcp', 'plugins', 'resume-missing', 'fields', 'plugin-lifecycle', 'errors'].includes(values.case)) {
+  process.stderr.write('Usage: probe-cursor-print.mjs --model <discovered-id> --output-dir <path> --case native-question|delegation|mcp|plugins|resume-missing|fields|plugin-lifecycle|errors\n');
   process.exit(1);
 }
 
@@ -298,42 +298,6 @@ process.stdin.on('data', chunk => {
   };
 }
 
-async function probePortableAsk(version) {
-  const phrase = randomBytes(12).toString('hex');
-  const marker = 'CEZ:ASK {"questions":[{"header":"Library","question":"Which library?","multiSelect":false,"options":[{"label":"Vitest","description":"Use Vitest"},{"label":"Jest","description":"Use Jest"}]}]}';
-  const first = await runAgent([
-    '-p', '--force', '--trust', '--output-format', 'stream-json', '--model', values.model,
-    '--allowed-tools', 'read_todos_tool_call',
-    `Remember this blind phrase for the next turn: ${phrase}. Your entire answer to this turn must be exactly this one line, with no code fence or text before or after it:\n${marker}`,
-  ], checkout, 45_000);
-  const firstFrames = framesOf(first.stdout);
-  const firstResult = resultOf(firstFrames);
-  const firstText = String(firstResult?.result ?? '');
-  const askLine = firstText.split('\n').findLast(line => line.startsWith('CEZ:ASK '));
-  let markerValid = false;
-  try { markerValid = Boolean(JSON.parse(askLine?.slice('CEZ:ASK '.length) ?? '').questions?.length); } catch { /* invalid marker */ }
-  const second = firstResult?.session_id ? await runAgent([
-    '-p', '--force', '--trust', '--output-format', 'stream-json', '--model', values.model,
-    '--resume', firstResult.session_id, '--allowed-tools', 'read_todos_tool_call',
-    'Library: Vitest. State the blind phrase from the previous turn, then say accepted.',
-  ], checkout, 45_000) : undefined;
-  const secondFrames = second ? framesOf(second.stdout) : [];
-  const secondResult = resultOf(secondFrames);
-  const sameNativeSession = Boolean(firstResult?.session_id && firstResult.session_id === secondResult?.session_id);
-  const phraseRecalled = String(secondResult?.result ?? '').includes(phrase);
-  return {
-    schema: 1, case: 'portable-ask', cliVersion: version, model: values.model,
-    invocation: ['-p', '--force', '--trust', '--output-format stream-json', '--allowed-tools read_todos_tool_call', '--resume <exact native id>'],
-    markerTokenSeen: firstText.includes('CEZ:ASK'), markerSeen: Boolean(askLine), markerValid,
-    firstResultTextPresent: firstText.length > 0, explicitReplyDelivered: Boolean(second),
-    phraseRecalled, sameNativeSession,
-    fullCezarAskRoundTrip: false,
-    outcome: first.code === 0 && !first.timedOut && !first.truncated && markerValid
-      && second?.code === 0 && !second.timedOut && !second.truncated
-      && phraseRecalled && sameNativeSession ? 'pass' : 'blocked',
-  };
-}
-
 async function probePlugins(version) {
   // This project-local disable is a negative control. It never changes a
   // user's Cursor installation, marketplace state or Claude settings.
@@ -604,7 +568,7 @@ try {
   git(['worktree', 'add', '--quiet', '--detach', checkout, 'HEAD']);
   added = true;
 
-  const probes = { 'native-question': probeNativeQuestion, delegation: probeDelegation, mcp: probeMcp, 'portable-ask': probePortableAsk, plugins: probePlugins, 'resume-missing': probeResumeMissing, fields: probeFields, 'plugin-lifecycle': probePluginLifecycle, errors: probeErrors };
+  const probes = { 'native-question': probeNativeQuestion, delegation: probeDelegation, mcp: probeMcp, plugins: probePlugins, 'resume-missing': probeResumeMissing, fields: probeFields, 'plugin-lifecycle': probePluginLifecycle, errors: probeErrors };
   const summary = await probes[values.case](version.stdout.trim());
   mkdirSync(outputDir, { recursive: true });
   const output = join(outputDir, `print-${values.case}.json`);

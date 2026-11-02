@@ -9,14 +9,9 @@ import type { AgentInput, CezarWaitRequestInput, CiWait, OpenWait, PeerWaitEntry
  * delivery.
  */
 
-/** What a monitoring timer (the monitoring line or Claude's `ScheduleWakeup`) says when it fires. */
+/** What a monitoring timer (Claude's `ScheduleWakeup`, or a saved monitoring-line timer) says when it fires. */
 export const MONITORING_WAKE_NUDGE =
   'Re-check the downstream work you were monitoring. Continue toward the task goal. When the goal is complete and verified, call cezar_done. If the watched work is still pending, call cezar_wait again. If you need the user, call cezar_ask.';
-
-/** hearsay-tools/cezarion#1234: the same wake for a session without cezar tools, whose prompt
- *  taught the lifecycle markers. */
-export const MONITORING_WAKE_NUDGE_MARKERS =
-  'Re-check the downstream work you were monitoring. Continue toward the task goal. When the watched work is finished and the task goal is complete, end your final message with CEZ:DONE. If the watched work is still pending, end with CEZ:MONITORING. Never yield markerless for a monitoring wrap-up. If you genuinely need user input, follow the normal question path instead.';
 
 const SUMMARY_MAX = 256;
 
@@ -56,7 +51,8 @@ export function resolvedWaits(run: Pick<RunRecord, 'waits'>): Wait[] {
   return (run.waits ?? []).filter((wait) => wait.phase === 'resolved').sort((a, b) => at(a) - at(b));
 }
 
-/** Monitoring timers: the timers Cezar opens for the monitoring line and `ScheduleWakeup`. */
+/** Monitoring timers: the timers Cezar opens for live workers (`monitoring-line`, also the via of
+ *  saved `CEZ:MONITORING` timers) and `ScheduleWakeup`. */
 export function isMonitoringTimer(wait: Wait): boolean {
   return wait.kind === 'timer' && (wait.via === 'monitoring-line' || wait.via === 'schedule-wakeup');
 }
@@ -167,22 +163,19 @@ export function ciWatchRequest(wait: PrWaitEntry): CiWait {
 
 /** The lifecycle input a resolved wait delivers. Its id is the wait's, so duplicates keep it.
  *  `workerStatus` names a worker's current status for a worker wait's text. */
-export function waitResultText(wait: Wait, { tools, workerStatus = () => 'unavailable' }: { tools: boolean; workerStatus?: (workerId: string) => string } = { tools: true }): string {
+export function waitResultText(wait: Wait, { workerStatus = () => 'unavailable' }: { workerStatus?: (workerId: string) => string } = {}): string {
   if (wait.kind === 'pr') {
     if (wait.until === 'merge') return `PR wait observation ${wait.id} for ${wait.prUrl} (until merge). External data follows: ${JSON.stringify(wait.result)}. "merged" means GitHub reports the PR merged and "closed" that it closed without merging; any other outcome means this wait did not confirm a merge, not that the PR is unmerged. Duplicate observations retain this ID.`;
     return `CI wait observation ${wait.id} for ${wait.prUrl}. External data follows: ${JSON.stringify(wait.result)}. This observation is not merge approval or task completion. Reported checks may not include every expected workflow. Duplicate observations retain this ID.`;
   }
-  if (isMonitoringTimer(wait)) return tools ? MONITORING_WAKE_NUDGE : MONITORING_WAKE_NUDGE_MARKERS;
+  if (isMonitoringTimer(wait)) return MONITORING_WAKE_NUDGE;
   // The user's own message is a human wait's result; this text is never its delivery.
   if (wait.kind === 'human') return `Human wait ${wait.id} ended.`;
   if (wait.kind === 'worker') return workerWaitResultText(wait, workerStatus);
   if (wait.kind === 'process') return processWaitResultText(wait);
   if (wait.kind === 'peer') return peerWaitResultText(wait);
   const fired = `Timer ${wait.id} fired${wait.note === undefined ? '' : `: ${wait.note}`}.`;
-  // A session without cezar tools cannot register another wait; it was taught the marker.
-  return tools
-    ? `${fired} Continue toward the task goal; register another wait if you are still waiting.`
-    : `${fired} Continue toward the task goal. If the watched work is still pending, end your final message with CEZ:MONITORING.`;
+  return `${fired} Continue toward the task goal; register another wait if you are still waiting.`;
 }
 
 /**
@@ -248,15 +241,13 @@ export function describeWait(wait: Wait): string {
 
 /** The footer a delivered turn ends with: every wait still open, or undefined when none is. The
  *  user's reply settles a question and a question the user saw cannot be cancelled, so cancel is
- *  offered only for CI, worker, request, peer and process waits and timers (hearsay-tools/cezarion#1234), and only
- *  when the session has cezar tools (hearsay-tools/cezarion#1270). */
-export function openWaitsFooter(waits: readonly Wait[], { tools }: { tools: boolean } = { tools: true }): string | undefined {
+ *  offered only for CI, worker, request, peer and process waits and timers (hearsay-tools/cezarion#1234). */
+export function openWaitsFooter(waits: readonly Wait[]): string | undefined {
   const open = waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait));
   if (!open.length) return undefined;
   const items = open.map(describeWait);
   const asked = open.some((wait) => wait.kind === 'human');
   const cancellable = open.some((wait) => wait.kind !== 'human');
-  if (!tools) return `Still open: ${items.join('; ')}.${asked ? " The user's reply answers it." : ''}`;
   const close = !asked ? 'Call cezar_cancel_wait for any you no longer need.'
     : cancellable ? "The user's reply answers your question; call cezar_cancel_wait for any CI, worker, request, peer or process wait or timer you no longer need."
     : "The user's reply answers it.";

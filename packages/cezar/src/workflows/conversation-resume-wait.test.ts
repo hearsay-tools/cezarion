@@ -9,7 +9,7 @@ describe('request wait during a parent-resumed opening turn', { timeout: 30_000 
   it('does not treat the opening instruction as a new interruption, including after recovery', async () => {
     const release = join(root, 'opening-turn'); writeFileSync(release, 'go');
     controlledWire({ firstResultGate: release });
-    const p = await parent('mock:ask');
+    const p = await parent('mock:cezar-ask');
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id); manager.enqueueOwnedRun(w.id);
     await until(() => store.getRun(w.id)?.status === 'waiting');

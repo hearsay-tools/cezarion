@@ -11,7 +11,8 @@ import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, onTestFinished, vi } from 'vitest';
 import { workerWaitRequestSchema, type WorkerOperation, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { hasWorkerDeadline, workerWaitEntryToLegacy, workerWaitView, type DeadlinedWorkerWaitEntry, type WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
@@ -184,6 +185,7 @@ export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply
 }
 /** `replay` echoes each consumed line as the real CLI's `--replay-user-messages` does, so a human
  *  follow-up stops counting as held once its turn reads it. */
+const MOCK_CI_TOOL = pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'scripts', 'mock-ci-tool.mjs')).href;
 export function controlledWire(options: { firstResultGate?: string; humanAnswerGate?: string; replay?: boolean } = {}) {
   const wire = join(root, 'controlled-claude.cjs'); const received = join(root, 'human-answer-received.ndjson'); const initial = join(root, 'first-input-received');
   writeFileSync(wire, String.raw`#!/usr/bin/env node
@@ -200,8 +202,13 @@ if (options.replay && message.uuid) emit({ type: 'user', isReplay: true, uuid: m
 if (first) { first = false; fs.writeFileSync(${JSON.stringify(initial)}, 'received'); await wait(options.firstResultGate); }
 const humanAnswer = text.includes('human answer mock:hold');
 if (humanAnswer && options.humanAnswerGate) { fs.appendFileSync(received, JSON.stringify({ text }) + '\n'); await wait(options.humanAnswerGate); }
-const ask = !humanAnswer && text.includes('mock:ask') ? '\nCEZ:ASK ' + JSON.stringify({ questions: [{ header: 'Choice', question: 'Which framework?', options: [{ label: 'Vitest' }, { label: 'Other' }] }] }) : '';
-const reply = 'controlled wire reply' + ask + (!ask && text.includes('mock:done') ? '\n\nCEZ:DONE' : '');
+// hearsay-tools/cezarion#2397: the lifecycle scenarios call the cezar tool through the session's
+// MCP config with the native mocks' own client, then end the turn.
+const lifecycle = async (name, toolArgs) => (await import(${JSON.stringify(MOCK_CI_TOOL)})).lifecycleCall('claude', args, name, toolArgs);
+const ask = !humanAnswer && text.includes('mock:cezar-ask');
+const done = !ask && text.includes('mock:cezar-done');
+const reply = 'controlled wire reply' + (ask ? await lifecycle('cezar_ask', { context: 'A choice is needed before I continue.', questions: [{ header: 'Choice', question: 'Which framework?', options: [{ label: 'Vitest' }, { label: 'Other' }] }] })
+  : done ? await lifecycle('cezar_done', {}) : '');
 emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: reply }] } });
 emit({ type: 'result', subtype: 'success', result: reply, usage: { input_tokens: 1, output_tokens: 1 } });
 }); });

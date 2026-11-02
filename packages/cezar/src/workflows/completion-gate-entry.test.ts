@@ -127,17 +127,6 @@ describe('the completion gate outside a turn end', () => {
     expect(sent()).toBe(0);
   });
 
-  // A turn end with an ask line skips owed input; its monitoring line still opens the timer alias,
-  // as on main's `applyTurnEnd` (hearsay-tools/cezarion#1525 review).
-  it('a turn end with an ask line and a monitoring line opens the timer alias', () => {
-    state.atTurnBoundary = session;
-    const ask = { questions: [{ header: 'Choice', question: 'Which framework?', options: [{ label: 'Vitest' }, { label: 'Node' }] }] };
-    runInternals(manager).turnSettler.settleTurn(id, state, 'turn-end', { stepId: 'task', monitoring: true, humanGate: false, ask,
-      askNudged: false, done: false, nudgedLastTurn: false });
-    expect(store.getRun(id)?.waits?.some(wait => wait.kind === 'timer')).toBe(true);
-    expect(store.getRun(id)?.status).toBe('waiting');
-  });
-
   // A run an earlier entry already parked keeps that park: a second one would free its slot twice.
   it('at the boundary, a second refusal keeps the park the first one made and frees no second slot', () => {
     state.atTurnBoundary = session;
@@ -158,7 +147,7 @@ describe('the completion gate outside a turn end', () => {
     let seeded: string;
     const handoff = () => readFileSync(handoffPath(join(root, '.ai/cezar'), id), 'utf8');
     const turnEnd = () => runInternals(manager).turnSettler.settleTurn(id, state, 'turn-end', { stepId: 'task', monitoring: false, humanGate: false,
-      ask: null, askNudged: false, done: true, nudgedLastTurn: false });
+      ask: null, done: true, nudgedLastTurn: false });
     const ack = () => runInternals(manager).turnSettler.settleTurn(id, state, 'ack', runInternals(manager).turnSettler.boundaryTurn(id, state, session, true));
     beforeEach(() => {
       vi.mocked(runInternals(manager).runFinish.completionGate).mockReturnValue('held');
@@ -181,7 +170,7 @@ describe('the completion gate outside a turn end', () => {
       expect(turnEnd()).toBe(true);
       expect(runInternals(manager).runFinish.completionGate).toHaveBeenCalled();
       expect(state.doneAtBoundary).toBe(session);
-      expect(state.doneClose).toEqual({ via: 'done-line' });
+      expect(state.doneClose).toEqual({ via: 'cezar_done' });
       expect(state.heldHumanInputSince).toBeUndefined();
       expect(turns.words(id)).toEqual(['waiting']);
     });

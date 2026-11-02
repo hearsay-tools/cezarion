@@ -77,7 +77,7 @@ describe('worktree retention fires on a terminal transition (#483)', () => {
       source: 'built-in',
       steps: [{ id: 'task', name: 'Do it', prompt: '{{task}}' }],
     };
-    const record = manager.startRun(workflow, { task: 'mock:done tidy up', worktree: false });
+    const record = manager.startRun(workflow, { task: 'mock:cezar-done tidy up', worktree: false });
 
     const terminal = new Set(['done', 'review', 'failed', 'cancelled']);
     const deadline = Date.now() + 20_000;
