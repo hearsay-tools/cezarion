@@ -28,6 +28,7 @@ export const WAIT_CRITERIA = [
   // hearsay-tools/cezarion#1234: human waits.
   { id: 'U7h', scenario: 'ask', name: 'cezar_ask (an open question included) and a native ask land in the same wait list' },
   { id: 'U7k', scenario: 'ask', name: 'cezar_ask delivers its context to the human wait and the card' },
+  { id: 'U7a', scenario: 'baseline', name: 'cezar_done after cezar_ask in the same turn is refused and the question stays pending' },
   { id: 'U9h', scenario: 'provider-error', name: 'provider failure and clean close with a human wait open leave the run recoverable' },
   { id: 'U6', scenario: 'baseline', name: 'cezar_done is refused with live workers and with settled but uncollected workers, accepted once collected, and open waits are cancelled' },
   { id: 'U7d', scenario: 'baseline', name: 'cezar_done finishes through the done path in a message turn and in a Continue' },

@@ -432,7 +432,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       });
 
       it('registers every criterion', () => {
-        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U9h', 'U6', 'U7d', 'U7q', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U3n', 'U3r', 'U3d', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U19p', 'U19q', 'U19w', 'U20', 'U20u', 'U20h', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U24r', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27', 'R13', 'R18', 'R17']);
+        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U7a', 'U9h', 'U6', 'U7d', 'U7q', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U3n', 'U3r', 'U3d', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U19p', 'U19q', 'U19w', 'U20', 'U20u', 'U20h', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U24r', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27', 'R13', 'R18', 'R17']);
         for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
       });
 
@@ -1199,6 +1199,20 @@ function baseCells(runners: RunnerId[]): void {
       const wait = await expectHumanWaitAnswered(run.id, 'cezar_ask');
       expect(wait).toMatchObject({ context: ASK_CONTEXT, questions });
       expect(asks(run.id).at(-1)).toMatchObject({ context: ASK_CONTEXT, questions });
+    });
+
+    // hearsay-tools/cezarion#2442: a question asked earlier in the same turn is pending, so the
+    // done is refused and the task waits for the answer.
+    it(`${runner} U7a cezar_done after cezar_ask in the same turn is refused and the question stays pending`, async () => {
+      nativeWire(runner);
+      const task = `${toolCall('cezar_ask', { context: ASK_CONTEXT, questions })} ${toolCall('cezar_done', {})} ${thenSay('u7a asked, then tried to finish')}`;
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task, runner });
+      await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined);
+      expect(humanOpen(run.id)).toMatchObject([{ via: WAIT_VIA.cezar_ask, questions }]);
+      expect(asks(run.id)).toHaveLength(1);
+      expect(store.readEvents(run.id).some(event => event.type === 'lifecycle' && event.message === 'goal achieved — session closed')).toBe(false);
+      expect(JSON.stringify(store.readEvents(run.id))).toContain('human_question_pending');
+      expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
     });
 
     it(`${runner} U7h a native ask opens a human wait in the same wait list`, async () => {
