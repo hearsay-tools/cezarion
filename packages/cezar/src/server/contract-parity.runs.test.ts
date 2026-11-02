@@ -1,3 +1,4 @@
+import type { reportsResponseSchema } from '@open-mercato/cezar-contract/reports';
 import type { InferResponseType } from 'hono/client';
 import { hc } from 'hono/client';
 import { describe, expect, it } from 'vitest';
@@ -56,6 +57,8 @@ describe('src/contract/runs.ts matches the runs routes exactly', () => {
 
   type Runs = typeof client.api.v1.runs;
   type Run = Runs[':id'];
+
+  type _Reports = Assert<Exact<z.infer<typeof reportsResponseSchema>, InferResponseType<(typeof client.api.v1)['reports']['$get'], 200>>>;
 
   type RunsList200 = InferResponseType<Runs['$get'], 200>;
   type RunSummaries200 = InferResponseType<(typeof client.api.v1)['run-summaries']['$get'], 200>;

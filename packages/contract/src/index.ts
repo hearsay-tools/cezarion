@@ -61,3 +61,5 @@ export * from './config-requests.ts';
 export * from './workflow-file.ts';
 export * from './automation-storage.ts';
 export * from './self-update.ts';
+
+export * from './reports.ts';

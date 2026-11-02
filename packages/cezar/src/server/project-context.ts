@@ -478,6 +478,7 @@ export class ProjectContexts {
       const repoHandleController = new AbortController();
       this.repoHandleControllers.set(store, repoHandleController);
       armRepoHandle(store, project.root, repoHandleController.signal, this.deps.forgeFactory);
+      store.reports.start();
       return { id: project.id, root: project.root, dataDir, store, manager, automationStore, launchKey };
     } catch (err) {
       // A failed build must not leak the half-built context's subscriptions.

@@ -481,6 +481,20 @@ describe('RunDatabase', () => {
     });
   });
 
+  it('rolls back artifact removal with a refused history deletion, then commits both together', () => {
+    const db = openDb();
+    db.transaction({ upserts: [row('report-owner')], deletes: [] });
+    db.replaceArtifacts('report-owner', [{ id: 'report', runId: 'report-owner', name: 'report.html', title: 'Report', createdAt: '2026-11-01T00:00:00Z', size: 12 }]);
+    expect(() => db.transaction({ upserts: [], deletes: ['report-owner'], beforeCommit: () => { throw new Error('refused'); } })).toThrow();
+    expect(db.has('report-owner')).toBe(true);
+    expect(db.listArtifacts().map(a => a.id)).toEqual(['report']);
+    db.transaction({ upserts: [], deletes: ['report-owner'] });
+    expect(db.has('report-owner')).toBe(false);
+    expect(db.listArtifacts()).toEqual([]);
+    db.replaceArtifacts('report-owner', [{ id: 'report', runId: 'report-owner', name: 'report.html', createdAt: '2026-11-01T00:00:00Z', size: 12 }]);
+    expect(db.listArtifacts()).toEqual([]);
+  });
+
   describe('errors', () => {
     it('reports a newer schema version as unsupported and leaves the file alone', () => {
       RunDatabase.open(path).close();
@@ -509,13 +523,13 @@ describe('RunDatabase', () => {
     // which a schema-7 build would strip of its appointment and show as Needs you.
     // Schema 9 (hearsay-tools/cezarion#1446): records may carry process waits, which a schema-8
     // build would drop as unreadable.
-    it('creates a fresh database at schema 9, migrates a v3 one keeping its rows, and refuses version 10', () => {
-      expect(RUN_DATABASE_SCHEMA_VERSION).toBe(9);
+    it('creates a fresh database at schema 10, migrates a v3 one keeping its rows, and refuses version 11', () => {
+      expect(RUN_DATABASE_SCHEMA_VERSION).toBe(10);
       openDb().close();
       open.length = 0;
       const fresh = new DatabaseSync(path, { readOnly: true });
       try {
-        expect(fresh.prepare('PRAGMA user_version').get()).toEqual({ user_version: 9 });
+        expect(fresh.prepare('PRAGMA user_version').get()).toEqual({ user_version: 10 });
       } finally {
         fresh.close();
       }
@@ -524,14 +538,14 @@ describe('RunDatabase', () => {
       writer.close();
       open.length = 0;
       const v3 = new DatabaseSync(path);
-      v3.exec('PRAGMA user_version = 3');
+      v3.exec('DROP TABLE artifacts; PRAGMA user_version = 3');
       v3.close();
       expect(openDb().listRevisions().map((r) => r.id)).toEqual(['a']);
       for (const db of open.splice(0)) db.close();
       const migrated = new DatabaseSync(path);
       try {
-        expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 9 });
-        migrated.exec('PRAGMA user_version = 10');
+        expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 10 });
+        migrated.exec('PRAGMA user_version = 11');
       } finally {
         migrated.close();
       }
@@ -732,7 +746,7 @@ describe('RunDatabase', () => {
       writer.transaction({ upserts: [row('a')], deletes: [] });
       writer.close();
       const raw = new DatabaseSync(path);
-      raw.exec('DROP INDEX runs_unarchived; DROP INDEX runs_archived_roots; DROP INDEX runs_archive_on_merge; PRAGMA user_version = 1');
+      raw.exec('DROP TABLE artifacts; DROP INDEX runs_unarchived; DROP INDEX runs_archived_roots; DROP INDEX runs_archive_on_merge; PRAGMA user_version = 1');
       raw.close();
       const reader = RunDatabase.openReadOnly(path)!;
       open.push(reader);
@@ -751,7 +765,7 @@ describe('RunDatabase', () => {
       writer.transaction({ upserts: [row('a'), row('b')], deletes: [] });
       writer.close();
       const raw = new DatabaseSync(path);
-      raw.exec('DROP INDEX runs_unarchived; DROP INDEX runs_archived_roots; DROP INDEX runs_archive_on_merge; PRAGMA user_version = 1');
+      raw.exec('DROP TABLE artifacts; DROP INDEX runs_unarchived; DROP INDEX runs_archived_roots; DROP INDEX runs_archive_on_merge; PRAGMA user_version = 1');
       raw.close();
       const db = openDb();
       expect(db.listRevisions().map((r) => r.id)).toEqual(['a', 'b']);

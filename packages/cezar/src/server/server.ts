@@ -1,3 +1,4 @@
+import { reportsRoutes } from './reports-api.ts';
 import { automationCreateSchema, automationUpdateSchema, automationCheckRequestSchema, automationLogQuerySchema } from '@open-mercato/cezar-contract/automation-requests';
 import { providerConnectSchema, createAgentProfileSchema, openAgentAccountFileSchema, updateAgentProfileSchema, selectAgentProfileSchema, providerEnabledSchema, providerRetrySchema, providerRouteParamsSchema, agentProfileRouteParamsSchema } from '@open-mercato/cezar-contract/provider-requests';
 import { planSchema, parseWorkflowSchema } from '@open-mercato/cezar-contract/workflow-requests';
@@ -313,7 +314,6 @@ import {
   isSafeAssetFilename,
   resolveGetRequest,
 } from './static-ui.ts';
-
 export interface ServerDeps extends SelfUpdateServerDeps {
   /** Per-repository forge injection for embedded servers and tests. */
   forgeFactory?: ForgeFactory;
@@ -420,9 +420,7 @@ export interface ServerDeps extends SelfUpdateServerDeps {
   automationsChanged?: () => void;
   archiveOnMergeChanged?: () => void;
 }
-
 // ---- project-scoped routing (multi-project spec, step 2.2) -----------------
-
 /** Hono env for the mirrored project-route table: the scope resolver puts the
  *  request's `ProjectContext` on the context, handlers read `c.get('project')`. */
 export type ProjectApiEnv = { Variables: { project: ProjectContext; stoppedOnAdoption?: boolean } };
@@ -5071,6 +5069,7 @@ export function createApp(deps: ServerDeps) {
     .route('/', automationsRoutes)
     .route('/', agentWebhooksRoutes)
     .route('/', runsRoutes)
+    .route('/', reportsRoutes)
     .route('/', openTargetsRoutes)
     .route('/', worktreesRoutes)
     .route('/', sseRoutes)
@@ -5536,6 +5535,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     }
   });
   const startBackgroundServices = () => {
+    if (!deps.store.unavailable) deps.store.reports.start();
     archiveOnMerge.start();
     completionActions.start();
     void visibleProjects().then((projects) => {
