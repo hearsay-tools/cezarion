@@ -1305,6 +1305,83 @@ function readOptional(path: string): string | undefined {
   try { return readFileSync(path, 'utf8'); } catch { return undefined; }
 }
 
+type OwnedInputOptions = NonNullable<Parameters<typeof withOwnedInputRun>[3]>;
+
+function prepareOwnedInputEnvironment(backend: RunnerId, options: OwnedInputOptions): () => void {
+  const adapter = HARNESS_ADAPTERS[backend];
+  const savedBin = process.env[adapter.binEnv];
+  const savedExtraBins = (options.extraBackends ?? []).map(extra => [HARNESS_ADAPTERS[extra].binEnv, process.env[HARNESS_ADAPTERS[extra].binEnv]] as const);
+  for (const extra of options.extraBackends ?? []) process.env[HARNESS_ADAPTERS[extra].binEnv] = HARNESS_ADAPTERS[extra].mockBin;
+  const savedDry = process.env.CEZ_DRY_RUN;
+  const savedAutoName = process.env.CEZ_AUTONAME;
+  // The worker ignores Cezar's no-wait nudge (hearsay-tools/cezarion#1234) and reaches its plain
+  // park, so input delivery is what these fixtures decide. `options.env` may opt back in.
+  const env = { CEZ_MOCK_NUDGE_REPLY: 'plain', ...options.env };
+  const savedEnv = Object.keys(env).map(name => [name, process.env[name]] as const);
+  Object.assign(process.env, env);
+  // Naming is a separate auxiliary invocation, not part of input delivery.
+  process.env.CEZ_AUTONAME = '0';
+  process.env[adapter.binEnv] = options.mockBin ?? adapter.mockBin;
+  delete process.env.CEZ_DRY_RUN;
+  return () => {
+    if (savedBin === undefined) delete process.env[adapter.binEnv];
+    else process.env[adapter.binEnv] = savedBin;
+    for (const [name, saved] of savedExtraBins) {
+      if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
+    }
+    if (savedDry !== undefined) process.env.CEZ_DRY_RUN = savedDry;
+    if (savedAutoName === undefined) delete process.env.CEZ_AUTONAME;
+    else process.env.CEZ_AUTONAME = savedAutoName;
+    for (const [name, saved] of savedEnv) {
+      if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
+    }
+  };
+}
+
+async function createOwnedInputRepository(repoRoot: string): Promise<string> {
+  await execFileAsync('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+  await execFileAsync('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
+  await execFileAsync('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
+  await execFileAsync('git', ['config', 'user.name', 'test'], { cwd: repoRoot });
+  await execFileAsync('git', ['config', 'user.email', 'test@local'], { cwd: repoRoot });
+  writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
+  await execFileAsync('git', ['add', '-A'], { cwd: repoRoot });
+  await execFileAsync('git', ['commit', '-q', '-m', 'base'], { cwd: repoRoot });
+  const sha = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot })).stdout.trim();
+  return sha;
+}
+
+function createOwnedInputParent(store: RunStore): RunRecord {
+  const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
+  // A live root with its own unanswered question survives recovery without
+  // launching a parent process. A terminal root correctly cancels its workers.
+  store.updateRun(parent.id, { status: 'waiting' });
+  // It may message its workers, as provisioned roots do, so it answers their questions
+  // (hearsay-tools/cezarion#2410).
+  store.commitDelegation([{ id: parent.id, delegation: { role: 'root', permissions: ['spawn', 'steer'], receipts: [] } }]);
+  store.appendEvent(parent.id, { type: 'ask.requested', requestId: randomUUID(), questions: [{
+    header: 'Parent', question: 'Which parent task should follow?',
+    options: [{ label: 'First task' }, { label: 'Second task' }],
+  }] });
+  return parent;
+}
+
+async function createOwnedInputWorker(
+  store: RunStore, repoRoot: string, runId: string, parentRunId: string, sha: string,
+  backend: RunnerId, scenario: ScenarioName, options: OwnedInputOptions,
+): Promise<void> {
+  const workspace = await planOwnedWorkspace(repoRoot, runId, sha);
+  const workflowDef = options.workflowDef;
+  store.createOwnedRun({ title: 'worker', task: promptFor(backend, scenario), workflow: workflowDef?.name ?? 'quick-task', runner: backend,
+    ...(options.agentProfile === undefined ? {} : { agentProfile: options.agentProfile }),
+    ...(workflowDef ? { workflowDef } : {}),
+    steps: workflowDef
+      ? workflowDef.steps.map(step => ({ id: step.id, name: step.name ?? step.id, kind: stepKind(step) }))
+      : [{ id: 'task', name: 'Task', kind: 'agent' }] }, parentRunId, randomUUID(), {
+    role: 'worker', parentRunId, permissions: [], workspace,
+  }, 'a'.repeat(64), options.identity ?? { kind: 'internal', ...(workflowDef ? { workflowHash: workerWorkflowHash(workflowDef) } : {}) });
+}
+
 export async function withOwnedInputRun(
   backend: RunnerId,
   scenario: ScenarioName,
@@ -1333,21 +1410,7 @@ export async function withOwnedInputRun(
     noWaitNudgeReplyMs?: number;
   } = {},
 ): Promise<void> {
-  const adapter = HARNESS_ADAPTERS[backend];
-  const savedBin = process.env[adapter.binEnv];
-  const savedExtraBins = (options.extraBackends ?? []).map(extra => [HARNESS_ADAPTERS[extra].binEnv, process.env[HARNESS_ADAPTERS[extra].binEnv]] as const);
-  for (const extra of options.extraBackends ?? []) process.env[HARNESS_ADAPTERS[extra].binEnv] = HARNESS_ADAPTERS[extra].mockBin;
-  const savedDry = process.env.CEZ_DRY_RUN;
-  const savedAutoName = process.env.CEZ_AUTONAME;
-  // The worker ignores Cezar's no-wait nudge (hearsay-tools/cezarion#1234) and reaches its plain
-  // park, so input delivery is what these fixtures decide. `options.env` may opt back in.
-  const env = { CEZ_MOCK_NUDGE_REPLY: 'plain', ...options.env };
-  const savedEnv = Object.keys(env).map(name => [name, process.env[name]] as const);
-  Object.assign(process.env, env);
-  // Naming is a separate auxiliary invocation, not part of input delivery.
-  process.env.CEZ_AUTONAME = '0';
-  process.env[adapter.binEnv] = options.mockBin ?? adapter.mockBin;
-  delete process.env.CEZ_DRY_RUN;
+  const restoreEnvironment = prepareOwnedInputEnvironment(backend, options);
   const repoRoot = mkdtempSync(join(tmpdir(), `cez-owned-input-${backend}-`));
   // This fixture owns every native mock process; ambient host daemons cannot hold its new repo.
   const restoreProcesses = scopeFixtureProcesses();
@@ -1356,38 +1419,11 @@ export async function withOwnedInputRun(
   let runId: string | undefined;
   let drainBookkeeping = async () => {};
   try {
-    await execFileAsync('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
-    await execFileAsync('git', ['config', 'gc.auto', '0'], { cwd: repoRoot });
-    await execFileAsync('git', ['config', 'maintenance.auto', 'false'], { cwd: repoRoot });
-    await execFileAsync('git', ['config', 'user.name', 'test'], { cwd: repoRoot });
-    await execFileAsync('git', ['config', 'user.email', 'test@local'], { cwd: repoRoot });
-    writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
-    await execFileAsync('git', ['add', '-A'], { cwd: repoRoot });
-    await execFileAsync('git', ['commit', '-q', '-m', 'base'], { cwd: repoRoot });
-    const sha = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot })).stdout.trim();
+    const sha = await createOwnedInputRepository(repoRoot);
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-    // A live root with its own unanswered question survives recovery without
-    // launching a parent process. A terminal root correctly cancels its workers.
-    store.updateRun(parent.id, { status: 'waiting' });
-    // It may message its workers, as provisioned roots do, so it answers their questions
-    // (hearsay-tools/cezarion#2410).
-    store.commitDelegation([{ id: parent.id, delegation: { role: 'root', permissions: ['spawn', 'steer'], receipts: [] } }]);
-    store.appendEvent(parent.id, { type: 'ask.requested', requestId: randomUUID(), questions: [{
-      header: 'Parent', question: 'Which parent task should follow?',
-      options: [{ label: 'First task' }, { label: 'Second task' }],
-    }] });
+    const parent = createOwnedInputParent(store);
     runId = randomUUID();
-    const workspace = await planOwnedWorkspace(repoRoot, runId, sha);
-    const workflowDef = options.workflowDef;
-    store.createOwnedRun({ title: 'worker', task: promptFor(backend, scenario), workflow: workflowDef?.name ?? 'quick-task', runner: backend,
-      ...(options.agentProfile === undefined ? {} : { agentProfile: options.agentProfile }),
-      ...(workflowDef ? { workflowDef } : {}),
-      steps: workflowDef
-        ? workflowDef.steps.map(step => ({ id: step.id, name: step.name ?? step.id, kind: stepKind(step) }))
-        : [{ id: 'task', name: 'Task', kind: 'agent' }] }, parent.id, randomUUID(), {
-      role: 'worker', parentRunId: parent.id, permissions: [], workspace,
-    }, 'a'.repeat(64), options.identity ?? { kind: 'internal', ...(workflowDef ? { workflowHash: workerWorkflowHash(workflowDef) } : {}) });
+    await createOwnedInputWorker(store, repoRoot, runId, parent.id, sha, backend, scenario, options);
     manager = new RunManager(store, repoRoot, options);
     drainBookkeeping = trackTurnBookkeeping(manager);
     const adoptContext = async (context: { store: RunStore; manager: RunManager }) => {
@@ -1436,17 +1472,7 @@ export async function withOwnedInputRun(
       await drainBookkeeping();
       manager?.dispose();
       store?.close();
-      if (savedBin === undefined) delete process.env[adapter.binEnv];
-      else process.env[adapter.binEnv] = savedBin;
-      for (const [name, saved] of savedExtraBins) {
-        if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
-      }
-      if (savedDry !== undefined) process.env.CEZ_DRY_RUN = savedDry;
-      if (savedAutoName === undefined) delete process.env.CEZ_AUTONAME;
-      else process.env.CEZ_AUTONAME = savedAutoName;
-      for (const [name, saved] of savedEnv) {
-        if (saved === undefined) delete process.env[name]; else process.env[name] = saved;
-      }
+      restoreEnvironment();
       rmSync(repoRoot, { recursive: true, force: true });
     } finally { restoreProcesses(); }
   }
