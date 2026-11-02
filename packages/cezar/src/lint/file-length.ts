@@ -92,12 +92,12 @@ export function fileLengthProblems(update = process.env.FILE_LENGTH_UPDATE === '
   const lengths = sourceLengths();
   if (update) updateBaseline(lengths);
   if (!existsSync(baselinePath)) {
-    return ['packages/cezar/src/file-length.baseline.json:1 cez/file-length: Write the first baseline: FILE_LENGTH_UPDATE=1 npm run lint'];
+    return ['packages/cezar/src/file-length.baseline.json:1 file-length: Write the first baseline: FILE_LENGTH_UPDATE=1 npm run lint'];
   }
   const { unpinned, grown, stale } = compareLengths(lengths, readBaseline());
   const report = (entry: string, fix: string): string => {
     const at = entry.indexOf(':');
-    return `${entry.slice(0, at)}:1 cez/file-length: ${entry.slice(at + 2)}. ${fix}`;
+    return `${entry.slice(0, at)}:1 file-length: ${entry.slice(at + 2)}. ${fix}`;
   };
   return [
     ...unpinned.map((entry) => report(entry, 'Split the file; do not add it to the baseline')),

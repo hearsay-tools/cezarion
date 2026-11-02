@@ -16,7 +16,7 @@ command, it fails closed, and it does not depend on which tests a change selects
 3. **Stale entries**: an exemption, a reader-list entry or a baseline entry that no longer names
    a match fails, so the lists only shrink to what the code still needs.
 
-4. **File length**: every tracked non-test source file over 1,000 lines stays at or below its
+4. **File length** (`file-length`, a runner check): every tracked non-test source file over 1,000 lines stays at or below its
    pin in `packages/cezar/src/file-length.baseline.json`. Unpinned long files, grown pins and
    stale pins fail. `FILE_LENGTH_UPDATE=1 npm run lint` only lowers or drops existing pins.
 
