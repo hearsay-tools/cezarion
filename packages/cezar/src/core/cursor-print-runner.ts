@@ -373,6 +373,11 @@ class CursorPrintSession implements AgentSession {
     this.active = undefined;
     if (this.noProgress) clearTimeout(this.noProgress);
     this.noProgress = undefined;
+    if (this.retryModelAdmission(active, exitCode, signal, spawnError)) return;
+    this.settleTurn(active, exitCode, signal, spawnError);
+  }
+
+  private retryModelAdmission(active: ActiveTurn, exitCode: number | null, signal: NodeJS.Signals | null, spawnError: boolean): boolean {
     // This native rejection is before inference. Cursor's per-process parameter catalog
     // may be unavailable even though account-scoped preflight validated the exact selection.
     // One fresh process gets another chance; any init/work/result, signal, cancellation or
@@ -383,9 +388,13 @@ class CursorPrintSession implements AgentSession {
       // A consumer can stop the session while handling the note.
       if (!this.closing && this.isOpen) {
         this.launchTurn(active.args, active.prompt, active.receipt, true, active.env, active.heldHuman);
-        return;
+        return true;
       }
     }
+    return false;
+  }
+
+  private settleTurn(active: ActiveTurn, exitCode: number | null, signal: NodeJS.Signals | null, spawnError: boolean): void {
     if (active.receipt && !active.receipt.settled) {
       active.receipt.settled = true;
       if (active.resultSeen && !spawnError && exitCode === 0) active.receipt.resolve();
@@ -396,6 +405,10 @@ class CursorPrintSession implements AgentSession {
     // turn-end. Admit it at this boundary, after the old process settled.
     if (completedTurn && !this.errorReported) this.busy = false;
     if (completedTurn) this.emit({ type: 'turn-end' });
+    this.settleTerminalStatus(active, exitCode, signal, spawnError);
+  }
+
+  private settleTerminalStatus(active: ActiveTurn, exitCode: number | null, signal: NodeJS.Signals | null, spawnError: boolean): void {
     if (this.closing) { this.finish(); return; }
     if (spawnError) { this.fail('Cursor print process failed to start'); return; }
     if (exitCode !== 0 || signal !== null) {
