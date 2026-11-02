@@ -135,6 +135,24 @@ describe('project reports', () => {
     } finally { getRun.mockRestore(); warning.mockRestore(); }
   });
 
+  it('skips an unreadable source summary and fills the page with a readable report', async () => {
+    const broken = task('Broken'), good = task('Readable');
+    await publish(broken.id, 'broken.html');
+    const artifact = await publish(good.id, 'good.html');
+    for (const run of [broken, good]) store.updateRun(run.id, { status: RUN_STATUS.done });
+    store.flush(); await page();
+    const raw = new DatabaseSync(join(dataDir, 'runs.db'));
+    try { raw.prepare('UPDATE runs SET summary = ? WHERE id = ?').run('{broken', broken.id); }
+    finally { raw.close(); }
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const result = await page('?limit=1');
+      expect(result.reports).toEqual([expect.objectContaining({ id: artifact.id, taskTitle: 'Readable' })]);
+      expect(result.total).toBe(1); expect(result.nextCursor).toBeNull();
+      expect(warning).toHaveBeenCalledExactlyOnceWith(`[cez] Report source task could not be read: ${broken.id}`);
+    } finally { warning.mockRestore(); }
+  });
+
   it('never indexes foreign artifact directories or exposes reports through an unknown project', async () => {
     const foreign = RunStore.open(join(root, 'other'));
     try {

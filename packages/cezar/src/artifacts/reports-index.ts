@@ -22,9 +22,9 @@ export function reportsIndex(db: RunDatabase | null, store: RunStore, dataDir: s
 }
 const cursor = (row: IndexedArtifact): ReportCursor => [row.createdAt, row.id];
 const after = (row: IndexedArtifact, before: ReportCursor) => row.createdAt < before[0] || (row.createdAt === before[0] && row.id > before[1]);
-function report(row: ReportRow): Report {
+function report(row: ReportRow): Report | null {
   const summary = parseStoredSummary(row.summary);
-  if (!summary) throw new Error(`Source task ${row.runId} could not be read`);
+  if (!summary) return null;
   return { id: row.id, runId: row.runId, name: row.name, title: reportTitle(row), createdAt: row.createdAt, size: row.size,
     taskTitle: summary.title, taskStatus: summary.status };
 }
@@ -131,7 +131,12 @@ export class ReportsIndex {
       if (!rows.length) break;
       for (const row of rows) {
         before = cursor(row);
-        if (await this.present(row)) reports.push(report(row));
+        const entry = report(row);
+        if (!entry) {
+          this.db.reports.drop(row.id);
+          console.warn(`[cez] Report source task could not be read: ${row.runId}`);
+          missing++;
+        } else if (await this.present(row)) reports.push(entry);
         else missing++;
       }
     }
