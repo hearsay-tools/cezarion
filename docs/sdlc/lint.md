@@ -112,7 +112,7 @@ looped case). **Moved** cases now run in `npm run lint`; the scanner's fixture c
 
 | Family | File | Reason |
 | --- | --- | --- |
-| Browser wait discipline (M08) | `packages/web/src/test/e2e-wait-discipline.test.ts` | Its two-line and twelve-line windows depend on formatting; a lint rule would harden a heuristic without new evidence |
+| Browser wait discipline (M08) | `packages/web/src/test/e2e-wait-discipline.test.ts` | Its two-line and twelve-line windows depend on formatting; a lint rule would harden a heuristic without new evidence. The named cross-package exception in `check-clones.cjs` permits only `packages/cezar/src/lint/wait-baseline.ts` and `packages/web/src/test/wait-baseline.ts`; remove it when M08 moves into lint |
 | AGENTS.md byte budget (M12) | `.github/scripts/agents-md-budget.test.cjs` | A document budget, not a source rule; it costs under a millisecond in `node:test` |
 | Run-search readers (M13) | `packages/cezar/src/run-search-readers.test.ts` | Required-presence checks: a dead `matchesRunSearch(…)` call satisfies them, so they are not proof enough for a hard rule |
 
