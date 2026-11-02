@@ -1035,7 +1035,7 @@ describe('GitHub view sidebar list (#622)', () => {
     expect(sidebar.querySelector('[data-gh-filter="mine"]')?.getAttribute('href')).toBe('/p/shop/github/prs?filter=mine')
     await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => String(url) === '/api/v1/p/shop/github?limit=50')).toBe(true))
     // The shell never asked another project's GitHub while the URL names Shop.
-    expect(fetchMock.mock.calls.some(([url]) => /^\/api\/v1\/github\?/.test(String(url)))).toBe(false)
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith('/api/v1/github?'))).toBe(false)
   })
 
   it('keeps the task list where GitHub has no sidebar list: other views and forge-less projects', async () => {

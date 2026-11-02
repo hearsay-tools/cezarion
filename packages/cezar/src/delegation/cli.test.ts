@@ -310,7 +310,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
   });
   it('spawns a catalog workflow with --workflow and names the flag on an invalid value (#451)', async () => {
     const dir = join(f.root, '.ai/cezar/workflows'); mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'review.yaml'), 'name: review\nsteps:\n  - id: inspect\n    prompt: "{{task}}"\n  - id: verify\n    command: \"true\"\n');
+    writeFileSync(join(dir, 'review.yaml'), 'name: review\nsteps:\n  - id: inspect\n    prompt: "{{task}}"\n  - id: verify\n    command: "true"\n');
     expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--workflow', 'review', 'work'], env)).toBe(0);
     expect(f.store.getRun(json().workerId)).toMatchObject({ workflow: 'review', steps: [{ id: 'inspect', kind: 'agent' }, { id: 'verify', kind: 'check' }] });
     expect(await runWorkerCommand(['spawn', '--baseline', 'parent-head', '--request-id', randomUUID(), '--workflow', '', 'work'], env)).toBe(1);

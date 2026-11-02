@@ -57,8 +57,8 @@ export function diffWords(before: string, after: string): WordDiff | null {
   if (common / Math.max(a.length, b.length) < MIN_SIMILARITY) return null
 
   // Backtrack: tokens on the LCS path are "kept", everything else is changed.
-  const keptA = new Array<boolean>(a.length).fill(false)
-  const keptB = new Array<boolean>(b.length).fill(false)
+  const keptA = Array.from({ length: a.length }, () => false)
+  const keptB = Array.from({ length: b.length }, () => false)
   let i = a.length
   let j = b.length
   while (i > 0 && j > 0) {

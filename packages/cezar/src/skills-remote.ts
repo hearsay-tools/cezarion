@@ -79,7 +79,7 @@ export function safeRemoteFor(repo: string): string | null {
   //
   // `~/…` — git runs via execFile with no shell, so expand it here or git would
   // look for a directory literally named `~`.
-  if (/^~\//.test(value)) return join(homedir(), value.slice(2));
+  if (value.startsWith('~/')) return join(homedir(), value.slice(2));
   if (/^(\/|\.\/|\.\.\/)/.test(value)) return value;
   // Windows drive-letter path (`C:\repo`, `C:/repo`). Not a transport — no
   // scheme, and a leading `-` is already refused above — and win32 is a

@@ -1102,7 +1102,7 @@ export function createApp(deps: ServerDeps) {
       defaultRunner: config.defaultRunner,
       // Non-blocking: cached availability or null-until-warm — health must never pay a `gh`
       // shell-out (the bookmarklet aborts its port probe at 800 ms). See detectGithubCached.
-      forge: forge ? { kind: forge.kind, ...(forge.detectCached() ?? {}) } : null,
+      forge: forge ? { kind: forge.kind, ...forge.detectCached() } : null,
       capabilities: caps,
       // Workspace enumeration (multi-project spec) — additive, id+name ONLY.
       // NEVER `projects[].root` here: health is the one CORS-open route, and
@@ -4840,7 +4840,7 @@ export function createApp(deps: ServerDeps) {
       // selectable unless the operator opts into the fixed-model policy.
       defaultModels: modelsLocked
         ? nativeModels
-        : { ...nativeModels, ...(config.defaultModels ?? {}) },
+        : { ...nativeModels, ...config.defaultModels },
       modelsLocked,
       maxParallel: config.maxParallel,
       memoryLimitMb: config.memoryLimitMb ?? null,

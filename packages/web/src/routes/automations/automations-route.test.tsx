@@ -120,10 +120,10 @@ it('the Archived filter refetches the list with archived=only and back', async (
   mountAt('/automations', 'list')
   expect(await screen.findByText('Saved trigger')).not.toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Archived' }))
-  await waitFor(() => expect(urls.some((url) => /\/automations\?archived=only$/.test(url))).toBe(true))
+  await waitFor(() => expect(urls.some((url) => url.endsWith('/automations?archived=only'))).toBe(true))
   const count = urls.length
   fireEvent.click(screen.getByRole('button', { name: 'Archived' }))
-  await waitFor(() => expect(urls.slice(count).some((url) => /\/automations$/.test(url))).toBe(true))
+  await waitFor(() => expect(urls.slice(count).some((url) => url.endsWith('/automations'))).toBe(true))
 })
 
 // Review of #1465: the link the CLI and the agent tools print for an archived one-time schedule
@@ -140,7 +140,7 @@ it('an archived one-time schedule opens read-only with its task, inputs, log and
     calls.push({ url, method })
     if (url.includes('/automation-log?')) return json({ records: [{ seq: 1, ts: '2030-01-15T08:00:05Z', automationId: 'o1', revision: 2, result: 'launched', runId: 'run-9' }] })
     if (method === 'DELETE') return new Response(null, { status: 204 })
-    return /\/automations\?archived=include$/.test(url) ? json({ ...listBody, automations: [archived] }) : json({ error: 'not found' }, 404)
+    return url.endsWith('/automations?archived=include') ? json({ ...listBody, automations: [archived] }) : json({ error: 'not found' }, 404)
   }))
   mountAt('/automations/o1', 'edit')
   expect(await screen.findByText('Started its task.')).not.toBeNull()
@@ -164,7 +164,7 @@ it('the full log of an archived schedule offers no Retry task', async () => {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input)
     if (url.includes('/automation-log?')) return json({ records: [{ seq: 1, ts: '2030-01-15T08:00:05Z', automationId: 'o1', revision: 2, result: 'failed', reason: 'model gone', receiptId: 'r1' }] })
-    return /\/automations\?archived=include$/.test(url) ? json({ ...listBody, automations: [archived] }) : json({ error: 'not found' }, 404)
+    return url.endsWith('/automations?archived=include') ? json({ ...listBody, automations: [archived] }) : json({ error: 'not found' }, 404)
   }))
   mountAt('/automations/o1/log', 'log')
   expect(await screen.findByText('model gone')).not.toBeNull()
@@ -182,7 +182,7 @@ it('an archived schedule shows its failed-launch rows without Retry task', async
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input)
     if (url.includes('/automation-log?')) return json({ records: [{ seq: 1, ts: '2030-01-15T08:00:05Z', automationId: 'o1', revision: 2, result: 'failed', reason: 'model gone', receiptId: 'r1' }] })
-    return /\/automations\?archived=include$/.test(url) ? json({ ...listBody, automations: [archived] }) : json({ error: 'not found' }, 404)
+    return url.endsWith('/automations?archived=include') ? json({ ...listBody, automations: [archived] }) : json({ error: 'not found' }, 404)
   }))
   mountAt('/automations/o1', 'edit')
   expect(await screen.findByText('model gone')).not.toBeNull()

@@ -128,7 +128,7 @@ export function isPushedRoute(pathname: string): boolean {
 export function isPushedGitScreen(pathname: string, search: string): boolean {
   const flat = stripProjectPrefix(pathname)
   if (/^\/git\/?$/.test(flat)) return new URLSearchParams(search).get('view') === 'repo'
-  return /^\/git\//.test(flat)
+  return flat.startsWith('/git/')
 }
 
 /** The tab bar's fixed slots: the views that stay one tap away. Everything else lives in More. */

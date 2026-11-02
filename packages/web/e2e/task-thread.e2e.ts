@@ -105,7 +105,7 @@ beforeAll(async () => {
   )
   seedTranscript(join(dataRoot, '.ai/cezar/runs', `${LONG_RUN.id}.ndjson`),
     readFileSync(resolve(import.meta.dirname, 'fixtures/thread-run.ndjson'), 'utf8')
-      .split('\n').filter((line) => !/plan\.updated|TodoWrite|toolu_mock_todo|\"type\":\"plan\"/.test(line)).join('\n'))
+      .split('\n').filter((line) => !/plan\.updated|TodoWrite|toolu_mock_todo|"type":"plan"/.test(line)).join('\n'))
   seedTranscript(join(dataRoot, '.ai/cezar/runs', `${STEP_RUN.id}.ndjson`),
     readFileSync(resolve(import.meta.dirname, 'fixtures/thread-run.ndjson'), 'utf8'))
   for (const run of TYPO_RUNS) {

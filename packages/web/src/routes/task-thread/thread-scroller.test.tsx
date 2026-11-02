@@ -90,7 +90,7 @@ describe('ThreadRows — the threshold-switched renderer', () => {
   it('disables conversation overflow anchoring outside the phone-only media query', () => {
     const css = readFileSync(resolve(import.meta.dirname, 'session-layout.css'), 'utf8')
     const ungated = css.replace(/@media[^{]+\{[\s\S]*?\n\}/g, '')
-    expect(ungated).toMatch(/\[data-slot='session-conversation'\][^\{]*\{[^}]*overflow-anchor:\s*none/)
+    expect(ungated).toMatch(/\[data-slot='session-conversation'\][^{]*\{[^}]*overflow-anchor:\s*none/)
   })
 })
 

@@ -38,7 +38,7 @@ function fakeBrowser(pageScript?: string, evalError = false) {
     } else if (command === 'eval' && ${evalError}) {
       process.stdout.write(JSON.stringify({ success: false, error: 'tab closed' }))
     } else if (command === 'eval') {
-      process.stdout.write(JSON.stringify({ success: true, data: { result: ${pageScript ? `(() => { const dom = new JSDOM('<body><div id=clip style=\"overflow-x:hidden;overflow-y:visible\"><span class=target></span><span class=target></span></div></body>', { url: 'http://fake/p/x', runScripts: 'outside-only' }); dom.window.eval(${JSON.stringify(pageScript)}); return dom.window.eval(args[3]); })()` : `{ url: 'http://fake/p/x', target: { count: 0 } }`} } }))
+      process.stdout.write(JSON.stringify({ success: true, data: { result: ${pageScript ? `(() => { const dom = new JSDOM('<body><div id=clip style="overflow-x:hidden;overflow-y:visible"><span class=target></span><span class=target></span></div></body>', { url: 'http://fake/p/x', runScripts: 'outside-only' }); dom.window.eval(${JSON.stringify(pageScript)}); return dom.window.eval(args[3]); })()` : `{ url: 'http://fake/p/x', target: { count: 0 } }`} } }))
     } else if (command === 'get') {
       process.stdout.write(JSON.stringify({ success: true, data: { url: 'http://fake/p/x' } }))
     } else {
