@@ -175,6 +175,39 @@ describe('useThreadScroll — outside a shell scroller (jsdom, tests, storybook-
     scroller.remove()
   })
 
+  it('restores a report viewport through virtualizer offset and memory before late card focus', async () => {
+    const { result } = renderHook(() => useThreadScroll('report-restore'))
+    const scroller = document.createElement('main')
+    scroller.dataset.slot = 'main'
+    Object.defineProperties(scroller, { clientHeight: { value: 400 }, scrollHeight: { value: 2000 } })
+    const content = document.createElement('div')
+    scroller.append(content)
+    document.body.append(scroller)
+    act(() => result.current.attachContent(content))
+    let trackedOffset = 1600
+    const scrollTo = vi.fn((top: number) => { trackedOffset = top })
+    const scrollToIndex = vi.fn()
+    result.current.virtualizerRef.current = { scrollTo, scrollToIndex } as never
+    act(() => result.current.jumpToRow('report', 20, row => row.querySelector('button'), 740))
+    expect(scrollTo).toHaveBeenCalledExactlyOnceWith(740)
+    expect(scrollToIndex).not.toHaveBeenCalled()
+    expect(readThreadScroll('report-restore')).toEqual({ top: 740, atBottom: false })
+    const row = document.createElement('div')
+    row.dataset.rowKey = 'report'
+    const button = document.createElement('button')
+    row.append(button)
+    await act(async () => {
+      // Model virtua applying its tracked offset and mounting the previously absent card.
+      scroller.scrollTop = trackedOffset
+      content.append(row)
+    })
+    act(() => result.current.restickIfStuck())
+    expect(scroller.scrollTop).toBe(740)
+    expect(document.activeElement).toBe(button)
+    expect(readThreadScroll('report-restore')).toEqual({ top: 740, atBottom: false })
+    scroller.remove()
+  })
+
   it('focuses the focus target inside the jumped-to row (#1495)', () => {
     const { result } = renderHook(() => useThreadScroll('focus-target'))
     const scroller = document.createElement('main')

@@ -1443,8 +1443,12 @@ returns JSON with a Markdown link for the agent to share. When the owning projec
 is registered, the link keeps that project when copied or opened from another
 project. If ownership cannot be discovered, publication keeps the legacy task link.
 The Files tab also lists published artifacts. It previews text, Markdown and raster
-images; other formats can be downloaded. HTML/scripts never execute inside the cockpit, and embedded
-images in Markdown documents do not load automatically.
+images; other formats can be downloaded. Published HTML links in assistant replies also
+show report cards. **Read report** opens the sandboxed reader beside the conversation
+on wide screens, in the main area on medium screens, and full screen on phones.
+Back returns to the source card. Unopened cards fetch metadata only.
+Report scripts never execute, and embedded images in Markdown documents do not load
+automatically.
 
 Snapshots do not change when the original file changes. They survive worktree
 removal and are removed with task history, including normal history retention.

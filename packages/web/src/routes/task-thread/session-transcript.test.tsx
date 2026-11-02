@@ -888,3 +888,14 @@ describe('compact current permission context', () => {
     expect(screen.getByText('Older approval')).toBeTruthy()
   })
 })
+
+
+it.each(['agent', 'lifecycle'] as const)('keeps published references in %s notes outside assistant report cards', source => {
+  const publication = '[report.html](/tasks/r1/files?artifact=11111111-1111-4111-8111-111111111111)'
+  const entries: ThreadEntry[] = [{ kind: 'note', id: 'attributed-report-note', text: publication, tone: 'dim',
+    attribution: { source, parentRunId: 'parent-task' }, delivery: 'consumed' }]
+  render(<MemoryRouter><SessionTranscript runId="r1" viewId="main" sections={agentTranscriptSections('agent', entries)} mode="document" /></MemoryRouter>)
+  expect(screen.getByText(source === 'agent' ? /Agent input from parent parent-task/ : /Worker lifecycle context for parent parent-task/)).toBeTruthy()
+  expect(document.querySelector('[data-slot="note-line"]')?.textContent).toContain(publication)
+  expect(document.querySelector('[data-slot="report-card"]')).toBeNull()
+})

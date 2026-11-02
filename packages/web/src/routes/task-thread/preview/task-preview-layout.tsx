@@ -1,56 +1,57 @@
-import { useMemo, type ReactNode } from 'react'
-import { Outlet, useParams } from 'react-router'
+import { lazy, Suspense, useMemo, type ReactNode } from 'react'
+import { Outlet, useLocation, useParams } from 'react-router'
 
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 
 import { useHealth, useRun } from '@/api/queries'
 
+import { useReportSource } from '../report-source'
+import { ReportCardSourcesContext, useConversationReport } from '../report-selection'
+
 import { PreviewSplit } from './preview-split'
 import { PreviewPaneContext, usePreviewPaneState, worktreeRemoved, type PreviewPaneState } from './preview-state'
 import { useAgentPageLive } from './use-agent-page-live'
 
-/**
- * The layout every task tab sits in (#781). It owns the preview pane's state and the split, so
- * the header toggle shows on Session, Changes, Files, Commits and the issue and PR tabs alike,
- * and the pane survives switching between them.
- *
- * With the feature on, the tree is the same whether or not the pane is open: the tab's route
- * keeps its place in it, so opening or closing the pane never remounts the page the owner is
- * reading. With the feature off (the default) the tab renders bare, with no split around it, so
- * the default task view lays out exactly as it did before live preview existed. With the flag on,
- * a cold load that renders before health arrives wraps the tab once when it does; the tab's data
- * comes from the query cache, so that one remount costs a render, not a fetch.
- */
+const ReportReader = lazy(() => import('../../task-git/report-reader').then(module => { return { default: module.ReportReader } }))
+
+/** A stable split keeps the conversation mounted while reports and live preview share the pane.
+ * Reports work at shipped defaults; only live preview reads the opt-in event stream. */
 export function TaskPreviewLayout() {
   const { id } = useParams<{ id: string }>()
   const run = useRun(id)
+  const location = useLocation()
   const enabled = useHealth().data?.capabilities?.preview === true
   // One pane per task: another task starts from its own saved pane (hearsay-tools/cezarion#2077),
   // else closed. Only the pane state resets, so moving between tasks never remounts the tab (the
   // run header keeps its per-run state across it).
   const removed = run.data ? worktreeRemoved(run.data) : false
   const pane = usePreviewPaneState(id, removed)
-  if (!enabled) return <Outlet />
-  return (
-    <PreviewProvider id={id} run={run.data} pane={pane} removed={removed}>
-      <Outlet />
-    </PreviewProvider>
-  )
+  const report = useConversationReport(id)
+  const source = useReportSource(id, report.selection?.artifactId, report.sourceRunId)
+  const reader = report.selection ? <Suspense fallback={<p role="status">Loading report…</p>}>
+    <ReportReader key={`${id}:${report.selection.artifactId}`} runId={source.data ?? id ?? ''}
+      selection={{ artifactId: report.selection.artifactId }} fragment={location.hash} onBack={report.close} variant="pane" sourceLookup={source} />
+  </Suspense> : undefined
+  const content = enabled ? <PreviewProvider id={id} run={run.data} pane={pane} removed={removed} report={reader}><Outlet /></PreviewProvider>
+    : <PreviewSplit run={run.data} state={{ ...pane, open: false }} report={reader}><Outlet /></PreviewSplit>
+  return <ReportCardSourcesContext.Provider value={report.registry}>{content}</ReportCardSourcesContext.Provider>
 }
 
+
 /** Only with the feature on does the task view read its events for the agent's page. */
-function PreviewProvider({ id, run, pane, removed, children }: {
+function PreviewProvider({ id, run, pane, removed, children, report }: {
   id: string | undefined
   run: ApiRun | undefined
   pane: PreviewPaneState
   removed: boolean
   children: ReactNode
+  report: ReactNode
 }) {
   const agentLive = useAgentPageLive(id)
   const value = useMemo(() => ({ ...pane, worktreeRemoved: removed, agentLive }), [pane, removed, agentLive])
   return (
     <PreviewPaneContext.Provider value={value}>
-      <PreviewSplit run={run} state={pane}>
+      <PreviewSplit run={run} state={pane} report={report}>
         {children}
       </PreviewSplit>
     </PreviewPaneContext.Provider>
