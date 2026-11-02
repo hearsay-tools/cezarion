@@ -53,6 +53,27 @@ describe('session provisioning', () => {
     expect(instructions).toMatch(/--attach <path> \(repeatable; copies a git-ignored file from your worktree[^)]*commit those instead\)/);
     expect(instructions).toContain('baseline-file, parent-attachment or parent-file references');
   });
+  // hearsay-tools/cezarion#2440: listing --effort alone leaves the choice to inherited defaults.
+  it('teaches deliberate effort selection, supported levels and inheritance in the parent instructions', () => {
+    const { instructions } = provision()!;
+    expect(instructions).toMatch(/Before choosing a runner, model or effort, use .* discover runners, then .* discover models --runner=<name>\./);
+    expect(instructions).toContain('When overrides are allowed and effortLevels is nonempty, choose an explicit --effort level for the task from that list.');
+    expect(instructions).toContain('Do not leave effort on auto by habit.');
+    expect(instructions).toContain('An empty effortLevels list advertises no levels; absent metadata means support is unknown.');
+    expect(instructions).toContain('Do not guess supported levels or override locked native settings.');
+    expect(instructions).toContain('--effort <low|medium|high|xhigh|max|auto>');
+    expect(instructions).toContain('Omitting --effort or using --effort auto applies the same rules: same-runner workers inherit the parent\'s effort; workers on another runner leave effort to that runner.');
+    expect(instructions).toContain('--runner, --model and --effort fill only the steps that leave those fields unset');
+    expect(instructions).toContain('--runner codex --effort high --context');
+    expect(instructions).toContain('Use high here only when the selected model advertises it and overrides are allowed.');
+  });
+  it('teaches per-step settings when workflow models have no shared effort level', () => {
+    const { instructions } = provision()!;
+    expect(instructions).toContain('A spawn --effort pin applies to every agent step whose effort is unset.');
+    expect(instructions).toContain('Use a shared effort only when every affected step\'s model advertises that level; otherwise use a workflow with compatible per-step effort settings.');
+    expect(instructions).toContain('A high-only model and a low-only model need separate step settings.');
+    expect(instructions).toContain('Omission and auto do not clear an inherited effort pin.');
+  });
   it('provision text no longer says one active wait', () => {
     const { instructions } = provision()!;
     expect(instructions).not.toMatch(/one active wait|no automatic re-wait/i);
@@ -101,9 +122,11 @@ describe('session provisioning', () => {
     expect(root).toContain('Use native subagents for work that needs no separate worktree: research, code reading and focused analysis.');
     expect(root).toContain('For example, a subagent reads the parser and summarizes how it handles errors.');
     expect(root).toContain('Use Cezar workers for work that needs its own worktree, its own commits or a lifecycle Cezar tracks.');
+    expect(root).toContain('Also use a Cezar worker when the task needs a model available only through another runner, even if the work is research or analysis.');
     expect(root).toContain('Native subagents need no Cezar worker, worktree, collection or destruction.');
     expect(worker).toContain('You may use native subagents for research, code reading and focused analysis.');
     expect(worker).toContain('You cannot spawn Cezar workers.');
+    expect(worker).not.toContain('Also use a Cezar worker');
     for (const text of [root, worker]) {
       expect(text).toContain('You may message your own native subagents with your runner\'s tools.');
       expect(text).toMatch(/Reach another Cezar task only through .* message; never use your runner's native tools for that\./);
