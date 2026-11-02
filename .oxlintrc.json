@@ -16,6 +16,7 @@
     "cez/native-mock-source": "error",
     "cez/raw-query-setter": "error",
     "cez/run-fact-reader": "error",
+    "cez/run-history-reader": "error",
     "cez/undocumented-env-name": "error"
   },
   "ignorePatterns": ["**/node_modules/**", "**/dist/**"]
