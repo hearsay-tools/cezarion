@@ -70,19 +70,20 @@ looped case). **Moved** cases now run in `npm run lint`; the scanner's fixture c
 | Contract import boundaries (M01) | `packages/cezar/src/contract-import-boundaries.test.ts` | 2: no root import; each exemption still imports a root | 33 scanner cases; the api-client shim mirror, which compares files rather than scanning shapes |
 | Raw query setters (M02) | `packages/web/src/test/search-params-discipline.test.ts`, now `packages/cezar/src/lint/raw-query-setter.test.ts` | 1: no setter outside the baseline | 8 scanner cases; the exception-policy guard on the baseline |
 | Native mock boundaries (M03) | `packages/cezar/src/mock-source-boundary.test.ts` | 1: no test reads or swaps mock source | 9 scanner cases |
+| Active-run map ownership (M04) | `packages/cezar/src/workflows/run-active-pin.test.ts` (removed) | 2 ownership scans replaced by `active-run-map-write`; call-presence scan retired (hearsay-tools/cezarion#2419) | Harness parity R48 runs execute and Continue, checks active pins and release from memory |
 | Shared run-fact readers (M05) | `packages/cezar/src/run-fact-readers.test.ts` | 2: no finding; every listed reader still reads | 27 scanner cases |
 | Environment-name documentation (M11) | `packages/cezar/src/env-example.test.ts` | 1: every `CEZ_*` name documented | 4 scanner cases |
 | File-length budget (M12) | `packages/cezar/src/file-length.test.ts` | 1: no unpinned long file, grown pin or stale pin | 6 fixture cases |
 | Existing ast-grep enforcement | `packages/cezar/src/ast-grep-rules.test.ts` | 14: one repository scan per rule | Rule-file checks, the `ast-grep test` cases, the baseline helpers, the update mode helpers, binary resolution |
 
-22 cases moved. Update modes moved with them: `AST_GREP_RULES_UPDATE=1 npm run lint` and
-`FILE_LENGTH_UPDATE=1 npm run lint`.
+24 cases moved; M04's call-presence case retired. Update modes moved with them:
+`AST_GREP_RULES_UPDATE=1 npm run lint` and `FILE_LENGTH_UPDATE=1 npm run lint`.
+
 
 ### Deferred
 
 | Family | Current file(s) | Why not in this migration | Follow-up |
 | --- | --- | --- | --- |
-| Active-run map ownership (M04) | `packages/cezar/src/workflows/run-active-pin.test.ts` | Its 3 scans cut method bodies by indentation, and call presence does not prove execution, order or cleanup | hearsay-tools/cezarion#2419 |
 | Run-history readers (M06) | `packages/cezar/src/runs/history-readers.test.ts` | A per-line substring scan; not every `.ndjson` path is run history, so the rule must target ownership first | hearsay-tools/cezarion#2420 |
 | Unit wait discipline (M07) | `packages/cezar/src/test-wait-discipline.test.ts`, `packages/web/src/test/unit-wait-discipline.test.ts` | Three baselines, a cached full scan that fixture cases share, and a host timeout check to separate | hearsay-tools/cezarion#2421 |
 | Design guardian (M09) | `packages/web/src/design-guardian.test.ts` | Ten per-file rules fit lint; the token and control cases pin named files' content; the suite reads all sources at import | hearsay-tools/cezarion#2422 |
