@@ -407,13 +407,13 @@ function holdsNativeSubagents(run: RunRecord): boolean {
 }
 
 /** Whether the park keeps the session and a slot. Live children hold them even when their wait
- *  could not be saved (a full wait list); a park held only for them gives the slot back when the
- *  last one ends (`heldForSubagents`). */
+ *  could not be saved (a full wait list); a park whose own top wait keeps no slot gives it back when
+ *  the last child ends (`heldForSubagents`), also after its subagent wait closed early. */
 function parkHold(run: RunRecord, state: ActiveRun, top: WaitingOn['kind'] | undefined): { holdsSubagents: boolean; keepsSlot: boolean } {
   const waited = holdsNativeSubagents(run);
   const holdsSubagents = waited || liveSubagents(state) > 0;
   const topKeepsSlot = parkTopKeepsSlot(run, top);
-  state.heldForSubagents = (holdsSubagents && !topKeepsSlot && !waited) || undefined;
+  state.heldForSubagents = (liveSubagents(state) > 0 && !topKeepsSlot) || undefined;
   return { holdsSubagents, keepsSlot: holdsSubagents || topKeepsSlot };
 }
 

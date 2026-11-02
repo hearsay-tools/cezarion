@@ -385,6 +385,17 @@ describe('the subagent wait deadline (hearsay-tools/cezarion#2431)', () => {
     expect(internals().active.get(id)?.idleTimer).toBeDefined();
   });
 
+  it('a worker-led park whose subagent wait closed early still gives its slot back when the last child ends', async () => {
+    const { id, wait } = await parkedOnSubagents(['toolu_bg_01'], async runId => {
+      store.commitWait(runId, makeWorkerWait({ turnId: internals().active.get(runId)!.ciTurnId ?? 'turn' }));
+    });
+    expect(internals().line.inPool(id)).toBe(true);
+    store.commitOutcome(id, { kind: 'cancelled', waitIds: [wait.id] });
+    endChild(id, 'toolu_bg_01');
+    expect(internals().line.inPool(id)).toBe(false);
+    expect(internals().active.get(id)?.idleTimer).toBeDefined();
+  });
+
   it('a lost session with no subagent wait retries a failed transcript end', async () => {
     const id = await fullListParent();
     const real = store.appendEvent.bind(store);
