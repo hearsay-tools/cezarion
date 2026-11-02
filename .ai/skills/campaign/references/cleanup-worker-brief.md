@@ -36,7 +36,7 @@ coordinator a progress message with the SHA and what it moved or changed.
 
 Before the PR, in this order:
 1. Make the change. Grep tests, testkits and browser specs for every name you
-   move, rename or remove (AGENTS.md § Reader sweep).
+   move, rename or remove (.ai/skills/reader-sweep/SKILL.md).
 2. Read the applicable AGENTS.md area rules. Run npm run build -w @wjarka/cezarion
    once, then from packages/cezar the three
    tsc configs: tsconfig.json, tsconfig.test.json, tsconfig.scripts.json.
@@ -95,8 +95,8 @@ At the end: git checkout cez/<your 8-char id>; squeal stop in this worktree;
    silently on the next move.
    Require parity results for a risky PR: one that splits or merges
    functions, changes call order, shares code between two paths, or changes
-   tests. Use Squeal first, with AGENTS.md's parity gate and missing-verdict
-   fallback; without Squeal use npm test -- packages/cezar/src/core/*-parity.test.ts
+   tests. Use Squeal first, with the parity gate and missing-verdict fallback in
+   .ai/skills/validation/SKILL.md; without Squeal use npm test -- packages/cezar/src/core/*-parity.test.ts
    packages/cezar/src/workflows/*-parity.test.ts. A verbatim move relies on CI's
    Vitest shards unless the repo's area gate requires local results. Say which
    case applies in Verification.

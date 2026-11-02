@@ -12,7 +12,7 @@ import {
 } from './detached-process.ts';
 
 /**
- * The Process exits cases (AGENTS.md § Case tables) against the one helper that starts detached
+ * The Process exits cases (.ai/skills/load-bearing-change § Case tables) against the one helper that starts detached
  * processes (hearsay-tools/cezarion#1717, hearsay-tools/cezarion#1815). Every case runs real
  * process groups: a leader started through the helper, and the members it forks.
  */

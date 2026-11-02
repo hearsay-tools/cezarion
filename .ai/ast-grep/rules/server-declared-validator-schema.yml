@@ -3,7 +3,7 @@ language: typescript
 severity: warning
 message: >-
   Declare the request schema in packages/contract and import its value from
-  @open-mercato/cezar-contract/<module> (AGENTS.md § The HTTP API); server.ts only chains routes.
+  @open-mercato/cezar-contract/<module> (docs/areas/http-api.md); server.ts only chains routes.
 files:
   - packages/cezar/src/server/server.ts
 rule:

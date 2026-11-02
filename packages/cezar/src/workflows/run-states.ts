@@ -1,6 +1,6 @@
 /**
  * Every run state, every exit out of it and every wait kind, as data (hearsay-tools/cezarion#1804).
- * This file is the Transitions out table of AGENTS.md § Case tables: a change that adds or changes
+ * This file is the Transitions out table of .ai/skills/load-bearing-change § Case tables: a change that adds or changes
  * a run state declares its exits here first.
  *
  * Two levels. An exit (`RUN_EXITS`) is one kind of status write, with the statuses it may leave

@@ -396,8 +396,8 @@ test('verification bindings keep the final gate in CI and reserve local full bro
   assert.match(row[1], /npm run test:package/);
   assert.match(row[1], /Full gate in CI:.*`npm run test:e2e`/);
   assert.match(agents.match(/^\| Verification \|([^|]+)\|/m)?.[1] ?? '', /Full gate in CI:.*`npm run test:e2e`/);
-  assert.match(claude, /npm run test:e2e:local\s+# explicitly requested full local browser run/);
-  assert.match(agents, /npm run test:e2e:local\s+# explicitly requested full local browser run/);
+  const validation = fs.readFileSync(path.join(repoRoot, '.ai/skills/validation/SKILL.md'), 'utf8');
+  assert.match(validation, /npm run test:e2e:local\s+# explicitly requested full local browser run/);
   const ciDocs = fs.readFileSync(path.join(repoRoot, 'docs/sdlc/ci.md'), 'utf8');
   assert.match(ciDocs, /npm run test:e2e:local/);
 });
