@@ -19,7 +19,9 @@ describe('conversation report URL selection', () => {
 
 // History, source ownership and task switches use the real router; display fields never enter it.
 
-const restoreOpener = vi.fn()
+const restoreOpener = vi.fn((artifactId: string, _scrollTop?: number) => {
+  document.getElementById(`report-card-message-${artifactId}`)?.focus({ preventScroll: true })
+})
 afterEach(() => { cleanup(); restoreOpener.mockClear() })
 
 function Conversation() {
@@ -37,7 +39,7 @@ function Conversation() {
     <output data-testid="navigation">{navigationType}</output>
     <output data-testid="url">{location.pathname + location.search}</output>
     <output data-testid="source">{report.sourceRunId ?? 'none'}</output>
-    <button id={`report-card-message-${id}`} onClick={() => navigate(`?report=${id}&card=message`, { state: { reportCardEntry: true } })}>Read report</button>
+    <button id={`report-card-message-${id}`} onClick={() => navigate(`?report=${id}&card=message`, { state: { reportCardEntry: true, reportScrollTop: 740 } })}>Read report</button>
     <button onClick={report.close}>Close</button>
     <button onClick={() => navigate('/tasks/two')}>Other task</button>
     <button onClick={() => navigate(-1)}>History Back</button>
@@ -56,7 +58,7 @@ it('loads nothing without a selection and resolves the worker source from the pu
   fireEvent.click(screen.getByText('Close'))
   expect(screen.getByTestId('url').textContent).toBe('/tasks/one')
   expect(document.activeElement?.id).toBe(`report-card-message-${id}`)
-  expect(restoreOpener).toHaveBeenCalledWith(id)
+  expect(restoreOpener).toHaveBeenCalledWith(id, 740)
 })
 
 it('restores URL selection after a task switch without leaking it to the other task', () => {
@@ -70,7 +72,7 @@ it('restores URL selection after a task switch without leaking it to the other t
   fireEvent.click(screen.getByText('Close'))
   expect(screen.getByTestId('url').textContent).toBe('/tasks/one')
   expect(document.activeElement?.id).toBe(`report-card-message-${id}`)
-  expect(restoreOpener).toHaveBeenCalledWith(id)
+  expect(restoreOpener).toHaveBeenCalledWith(id, 740)
 })
 
 it('replaces an invalid selection and closes a cold bookmark without leaving the task', () => {

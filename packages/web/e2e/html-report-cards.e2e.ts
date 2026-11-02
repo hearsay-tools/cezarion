@@ -218,7 +218,7 @@ it('restores an offscreen source card after a cold virtualized report selection'
   browser.goto(`${base}${path}?thread=virtual&report=${publication.id}&card=${encodeURIComponent(messageKey)}`)
   browser.waitForFunction(`document.querySelector('[data-slot="thread-rows"]')?.dataset.virtualized === 'true' && document.querySelector('${FRAME}') !== null`)
   // Scroll the retained conversation away from its opener while the pane stays mounted.
-  browser.evaluate(`document.querySelector('[data-slot="main"]').scrollTo({ top: 100000, behavior: 'instant' })`)
+  browser.evaluate(`window.__cezThreadScrollTo(100000)`)
   browser.waitForFunction(`document.querySelector(${JSON.stringify(selector)}) === null`)
   browser.click(BACK)
   expectReturned(selector)
@@ -230,6 +230,33 @@ it('restores an offscreen source card after a cold virtualized report selection'
   })()`)
   expect(visible).toBe(true)
 })
+
+it('restores the saved virtual viewport and card focus after virtualizer compensation settles', () => {
+  const path = `/p/${projectId}/tasks/${virtualRunId}`
+  browser.goto(`${base}${path}?thread=flat`)
+  const buttonId = browser.waitForValue<string>(`document.querySelector('${READ}')?.id`)
+  const selector = `[id=${JSON.stringify(buttonId)}]`
+  const href = browser.waitForValue<string>(`document.querySelector(${JSON.stringify(selector)})?.getAttribute('href')`)
+  const selection = new URL(href, base).searchParams
+  browser.goto(`${base}${path}?thread=virtual&report=${publication.id}&card=${encodeURIComponent(selection.get('card')!)}`)
+  browser.waitForFunction(`document.querySelector('[data-slot="thread-rows"]')?.dataset.virtualized === 'true' && document.querySelector('${FRAME}') !== null`)
+  // First restore the offscreen row by its stable identity, rather than estimating its height.
+  browser.click(BACK)
+  expectReturned(selector)
+  settleVisual(browser, selector, { idle: true })
+  const before = waitForSettledSample<number>(browser, `document.querySelector('[data-slot="main"]').scrollTop`)
+  openReport(selector)
+  browser.evaluate(`window.__cezThreadScrollTo(100000)`)
+  browser.waitForFunction(`document.querySelector(${JSON.stringify(selector)}) === null`)
+  browser.click(BACK)
+  expectReturned(selector)
+  const after = waitForSettledSample<{ top: number; focused: boolean }>(browser, `(() => ({
+    top: document.querySelector('[data-slot="main"]').scrollTop,
+    focused: document.activeElement?.id === ${JSON.stringify(buttonId)}
+  }))()`, () => true, selector)
+  expect(after.focused).toBe(true)
+  expect(Math.abs(after.top - before)).toBeLessThanOrEqual(1)
+}, 120_000)
 
 it.each(['light', 'dark'])('fits a full-screen phone reader with accessible card controls in %s', theme => {
   browser.setViewport(360, 640)

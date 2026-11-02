@@ -21,7 +21,7 @@ const rows: TranscriptRowModel[] = [{ key: 'turn:old-message', scope: 'turn', co
 } }]
 const jumpToRow = vi.fn<ThreadScrollControls['jumpToRow']>()
 const register = vi.fn(() => vi.fn())
-const registerOpener = vi.fn((_key: string, _restore: (id: string) => void) => vi.fn())
+const registerOpener = vi.fn((_key: string, _restore: (id: string, top?: number) => void) => vi.fn())
 
 afterEach(() => { cleanup(); vi.clearAllMocks() })
 
@@ -60,8 +60,8 @@ describe('report registration before transcript virtualization', () => {
 
   it('restores an offscreen opener through the scroller and selects its exact button', () => {
     mount()
-    registerOpener.mock.calls[0]![1](artifactId)
-    expect(jumpToRow).toHaveBeenCalledWith('turn:old-message', 0, expect.any(Function))
+    registerOpener.mock.calls[0]![1](artifactId, 740)
+    expect(jumpToRow).toHaveBeenCalledWith('turn:old-message', 0, expect.any(Function), 740)
     const focusTarget = jumpToRow.mock.calls[0]![2]!
     const row = document.createElement('div')
     const other = document.createElement('button')

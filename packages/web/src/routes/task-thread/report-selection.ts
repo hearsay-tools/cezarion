@@ -12,7 +12,7 @@ export function parseReportSelection(params: URLSearchParams): { artifactId: str
 }
 
 /** A publication keeps its source run, including an owned worker in the same project. */
-export const ReportCardSourcesContext = createContext<{ register: (artifactId: string, runId: string) => () => void; registerOpener: (messageKey: string, restore: (artifactId: string) => void) => () => void } | null>(null)
+export const ReportCardSourcesContext = createContext<{ register: (artifactId: string, runId: string) => () => void; registerOpener: (messageKey: string, restore: (artifactId: string, scrollTop?: number) => void) => () => void } | null>(null)
 
 export function useConversationReport(runId: string | undefined) {
   const location = useLocation()
@@ -31,9 +31,9 @@ export function useConversationReport(runId: string | undefined) {
     // Keep the mapping while the task is mounted: a streaming row can leave the viewport.
     return () => undefined
   }, [runId])
-  const openers = useRef({ runId, callbacks: new Map<string, (artifactId: string) => void>() })
+  const openers = useRef({ runId, callbacks: new Map<string, (artifactId: string, scrollTop?: number) => void>() })
   if (openers.current.runId !== runId) openers.current = { runId, callbacks: new Map() }
-  const registerOpener = useCallback((messageKey: string, restore: (artifactId: string) => void) => {
+  const registerOpener = useCallback((messageKey: string, restore: (artifactId: string, scrollTop?: number) => void) => {
     openers.current.callbacks.set(messageKey, restore)
     return () => { if (openers.current.callbacks.get(messageKey) === restore) openers.current.callbacks.delete(messageKey) }
   }, [])
@@ -45,14 +45,7 @@ export function useConversationReport(runId: string | undefined) {
   useEffect(() => {
     const before = previous.current
     if (!selection && before && before.runId === runId && before.card) {
-      const button = document.getElementById(`report-card-${encodeURIComponent(before.card)}-${before.artifactId}`)
-      // The transcript owns pin-to-tail and virtual-row focus. Claim reading intent first,
-      // then restore the exact offset when the opener is already mounted.
-      openers.current.callbacks.get(before.card)?.(before.artifactId)
-      const scroller = document.querySelector<HTMLElement>('[data-slot="main"]')
-      if (scroller && before.scrollTop !== undefined) scroller.scrollTop = before.scrollTop
-      else button?.scrollIntoView?.({ block: 'nearest' })
-      if (button) button.focus({ preventScroll: true })
+      openers.current.callbacks.get(before.card)?.(before.artifactId, before.scrollTop)
     }
     previous.current = selection ? { ...selection, runId, scrollTop: (location.state as { reportScrollTop?: number } | null)?.reportScrollTop } : null
   }, [runId, selection, location.state])

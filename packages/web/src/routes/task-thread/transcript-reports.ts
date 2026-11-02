@@ -43,9 +43,9 @@ export function useTranscriptReports(runId: string, rows: readonly TranscriptRow
     for (const message of messages) {
       const references = reportReferences(message.text, context)
       for (const reference of references) cleanups.push(registry.register(reference.artifactId, reference.runId))
-      if (mode === 'document' && references.length > 0) cleanups.push(registry.registerOpener(message.messageKey, artifactId => {
+      if (mode === 'document' && references.length > 0) cleanups.push(registry.registerOpener(message.messageKey, (artifactId, scrollTop) => {
         const buttonId = reportButtonId(message.messageKey, artifactId)
-        controls.jumpToRow(message.rowKey, message.rowIndex, row => [...row.querySelectorAll<HTMLElement>('[id]')].find(element => element.id === buttonId) ?? null)
+        controls.jumpToRow(message.rowKey, message.rowIndex, row => [...row.querySelectorAll<HTMLElement>('[id]')].find(element => element.id === buttonId) ?? null, scrollTop)
       }))
     }
     return () => { for (const cleanup of cleanups) cleanup() }

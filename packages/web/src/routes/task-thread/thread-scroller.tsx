@@ -86,8 +86,8 @@ export interface ThreadScrollControls {
    *  give the late focus up (its question was answered). */
   jumpToLatest: (focusTarget?: (root: HTMLElement) => HTMLElement | null | false) => void
   /** Navigate within loaded history, through virtua when the target is unmounted. Focus goes to
-   *  `focusTarget(row)` when it returns an element, otherwise to the row itself. */
-  jumpToRow: (key: string, index: number, focusTarget?: (row: HTMLElement) => HTMLElement | null) => void
+   *  `focusTarget(row)` when it returns an element, otherwise to the row itself. A saved top restores the prior viewport through virtua. */
+  jumpToRow: (key: string, index: number, focusTarget?: (row: HTMLElement) => HTMLElement | null, savedTop?: number) => void
   /** Load one older page while preserving the current pixel anchor. */
   loadOlder: () => void
   /** Subscribe to the reader's scroll direction; returns the unsubscribe. */
@@ -324,7 +324,7 @@ export function useThreadScroll(
     : viewKeyRef.current === viewKey && focusGenerationRef.current === generation, [surface])
   useEffect(() => () => pendingFocusRef.current?.disconnect(), [viewKey, contentEl])
 
-  const jumpToRow = useCallback((key: string, index: number, focusTarget?: (row: HTMLElement) => HTMLElement | null) => {
+  const jumpToRow = useCallback((key: string, index: number, focusTarget?: (row: HTMLElement) => HTMLElement | null, savedTop?: number) => {
     const scroller = scrollElRef.current
     if (!scroller || !contentEl) return
     pendingRestoreRef.current = null
@@ -351,7 +351,8 @@ export function useThreadScroll(
     const header = scroller.querySelector<HTMLElement>('[data-slot="run-header"]')
     const inset = header && getComputedStyle(header).position === 'sticky' ? header.getBoundingClientRect().height : 0
     const handle = virtualizerRef.current
-    if (handle) handle.scrollToIndex(index, { align: 'start', ...(inset > 0 ? { offset: -inset } : {}) })
+    if (savedTop !== undefined) setOffset(savedTop)
+    else if (handle) handle.scrollToIndex(index, { align: 'start', ...(inset > 0 ? { offset: -inset } : {}) })
     else {
       const row = findRow()
       if (row) setOffset(scroller.scrollTop + row.getBoundingClientRect().top - scroller.getBoundingClientRect().top - inset)
@@ -362,7 +363,7 @@ export function useThreadScroll(
       pendingFocusRef.current = new MutationObserver(() => { focusRow() })
       pendingFocusRef.current.observe(contentEl, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] })
     }
-    saveThreadScroll(viewKey, { top: scroller.scrollTop, atBottom: false })
+    saveThreadScroll(viewKey, { top: savedTop ?? scroller.scrollTop, atBottom: false })
   }, [contentEl, setOffset, viewKey, bumpFocus])
 
   const jumpToLatest = useCallback((focusTarget?: (root: HTMLElement) => HTMLElement | null | false) => {

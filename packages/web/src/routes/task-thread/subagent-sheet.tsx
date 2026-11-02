@@ -51,7 +51,6 @@ export function SubagentSheet({
     const trigger = [...document.querySelectorAll<HTMLButtonElement>('[data-agent-id]')].find(button => button.dataset.agentId === agent?.id)
     restoreCleanup.current?.()
     restoreCleanup.current = registry?.registerOpener(messageKey, () => {
-      trigger?.scrollIntoView({ block: 'nearest' })
       trigger?.focus({ preventScroll: true })
     })
     openingReport.current = true
