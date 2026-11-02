@@ -141,6 +141,7 @@ export function focusWithKeyboard(browser: AgentBrowser, selector: string): void
   // in the page. `finished` keeps a cleanup failure from masking the error that got us there.
   let fromPredecessor = false
   let finished = false
+  let cleanupFailure: { error: unknown } | undefined
   try {
     const start = browser.waitForValue<{ ready: boolean; predecessor: string | null; top?: 'page busy' | 'holding' | 'anchor' }>(
       `(() => {
@@ -194,10 +195,11 @@ export function focusWithKeyboard(browser: AgentBrowser, selector: string): void
       try {
         browser.evaluate(`(() => { ${dropTabStart} })()`)
       } catch (cleanupError) {
-        if (finished) throw cleanupError
+        if (finished) cleanupFailure = { error: cleanupError }
       }
     }
   }
+  if (finished && cleanupFailure !== undefined) throw cleanupFailure.error
 }
 
 /**

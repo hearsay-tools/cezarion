@@ -322,7 +322,7 @@ describe('RunHeader phone layout under the top bar (#621)', () => {
     renderScreen()
     const header = document.querySelector('[data-slot="run-header"]') as HTMLElement
     expect(header.querySelector('[data-slot="run-mobile-actions"]')).toBeNull()
-    expect((header.firstElementChild?.firstElementChild as HTMLElement).getAttribute('data-slot')).toBe('run-tabs')
+    expect((header.firstElementChild!.firstElementChild as HTMLElement).getAttribute('data-slot')).toBe('run-tabs')
   })
 
   it('carries Archive on the git tabs in the actions row under the top bar, 44px tall', () => {

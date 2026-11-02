@@ -638,7 +638,7 @@ describe('group controls (#1607)', () => {
   const off = (...names: string[]) => ({ disabledTeamSkills: names.map((name) => ({ repo: 'acme/skills', name })) })
   const catalogWithout = (...names: string[]) => [...SKILLS, ...PLUGIN.filter((s) => !names.includes(s.name))]
   const lastOffList = () =>
-    (offListPuts().at(-1)?.body as { disabledTeamSkills: Array<{ repo: string; name: string }> }).disabledTeamSkills
+    (offListPuts().at(-1)!.body as { disabledTeamSkills: Array<{ repo: string; name: string }> }).disabledTeamSkills
       .map((ref) => `${ref.repo}:${ref.name}`)
       .sort()
 

@@ -111,7 +111,7 @@ describe('the prompt templates section', () => {
     fireEvent.click(saveButton())
     await waitFor(() => expect(putBody()).toBeDefined())
     expect(putBody()?.promptTemplates).toHaveLength(DEFAULT_PROMPT_TEMPLATES.length)
-    expect((putBody()?.promptTemplates?.[0] as { label: string }).label).toBe('Renamed template')
+    expect((putBody()!.promptTemplates![0] as { label: string }).label).toBe('Renamed template')
     expect(await screen.findByText('Prompt templates saved')).toBeTruthy()
   })
 

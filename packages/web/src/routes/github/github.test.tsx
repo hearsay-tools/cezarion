@@ -2447,8 +2447,8 @@ describe('the hand-to-agent run (legacy three-way body)', () => {
     await waitFor(() => expect(document.querySelector('[data-slot="gh-queued"]')).not.toBeNull())
     const posted = sent.find((request) => request.method === 'POST' && request.path === '/api/v1/runs')
     expect(posted?.body).toMatchObject({ workflow: 'quick-task' })
-    expect((posted?.body as { task: string }).task).toContain('Fix GitHub issue #142')
-    expect((posted?.body as { task: string }).task).toContain(ISSUE_142.url)
+    expect((posted!.body as { task: string }).task).toContain('Fix GitHub issue #142')
+    expect((posted!.body as { task: string }).task).toContain(ISSUE_142.url)
 
     expect(document.querySelector('[data-slot="gh-view-run"]')?.getAttribute('href')).toBe('/tasks/run-1')
     // The list row grows the queued flag.
@@ -2478,7 +2478,7 @@ describe('the hand-to-agent run (legacy three-way body)', () => {
 
     await waitFor(() => expect(document.querySelector('[data-slot="gh-queued"]')).not.toBeNull())
     const posted = sent.find((request) => request.method === 'POST' && request.path === '/api/v1/runs')
-    const { task } = posted?.body as { task: string }
+    const { task } = posted!.body as { task: string }
     expect(task).toContain('Port this one to develop and close original PR')
     expect(task).toContain('#142')
     expect(task).toContain(ISSUE_142.url)
@@ -2501,7 +2501,7 @@ describe('the hand-to-agent run (legacy three-way body)', () => {
     )
     const posted = sent.find((request) => request.method === 'POST' && request.path === '/api/v1/runs')
     expect(posted?.body).toMatchObject({ workflow: 'ship-it' })
-    expect((posted?.body as { task: string }).task).toContain('Use these skills where relevant: om-fix.')
+    expect((posted!.body as { task: string }).task).toContain('Use these skills where relevant: om-fix.')
   })
 
   it('skills without a workflow become the steps chain (spec 008)', async () => {

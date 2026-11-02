@@ -25,6 +25,12 @@ import { buildChildEnv } from '../core/agent-env.ts';
 import { ProjectContexts } from '../server/project-context.ts';
 import { readPersistedRuns, readPersistedText, seedRuns } from '../runs/run-store.testkit.ts';
 
+function delegationToken(spec: AgentRunSpec): string {
+  const token = spec.env?.CEZ_DELEGATION_TOKEN;
+  expect(token).toBeDefined();
+  return token!;
+}
+
 const until = (predicate: () => boolean) => vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15000, interval: 10 });
 /** The managers a fake session's run may belong to: the fixture's and any recovered one. */
 let liveManagers: () => RunManager[] = () => [];
@@ -85,7 +91,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     const workflow = grants ? { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!, ...grants }] } : QUICK_TASK_WORKFLOW;
     const parent = f.manager.startRun(workflow, { task: 'parent', runner: 'claude', ...settings, agentProfile: 'account-a', worktree: false });
     await until(() => sessions.length === 1);
-    const caller = controller.credentials.authenticate(sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN!)!;
+    const caller = controller.credentials.authenticate(delegationToken(sessions[0]!.spec))!;
     const pump = vi.spyOn(runInternals(f.manager).line, 'pump').mockResolvedValue();
     prepare?.(parent.id);
     const request = { task: 'child', baseline: 'HEAD', requestId: randomUUID(), ...spawnInputs };
@@ -133,7 +139,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
       expect(spec.systemPrompt).toContain('cezar');
       expect(spec.systemPrompt).toContain('--effort');
       expect(spec.systemPrompt).toContain('--workflow');
-      expect(controller.credentials.authenticate(spec.env?.CEZ_DELEGATION_TOKEN!)).toMatchObject({ runId: run.id });
+      expect(controller.credentials.authenticate(delegationToken(spec))).toMatchObject({ runId: run.id });
     }
     // These mocked roots still finish asynchronously after cancellation. Wait before
     // afterEach removes their repository, especially recovery's worktree metadata.
@@ -152,7 +158,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     ].join('\n'));
     const parent = f.manager.startRun(QUICK_TASK_WORKFLOW, { task: 'parent', runner: 'claude', worktree: false });
     await until(() => sessions.length === 1);
-    const caller = controller.credentials.authenticate(sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN!)!;
+    const caller = controller.credentials.authenticate(delegationToken(sessions[0]!.spec))!;
     const child = await controller.service.spawn(caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID(), workflow: 'review' });
     await until(() => sessions.length === 2);
     expect(sessions[1]!.spec.userPrompt).toContain('Review: child');
@@ -182,7 +188,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     ].join('\n'));
     f.manager.startRun(QUICK_TASK_WORKFLOW, { task: 'parent', runner: 'claude', worktree: false });
     await until(() => sessions.length === 1);
-    const caller = controller.credentials.authenticate(sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN!)!;
+    const caller = controller.credentials.authenticate(delegationToken(sessions[0]!.spec))!;
     const child = await controller.service.spawn(caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID(), workflow: 'review' });
     await until(() => sessions.length === 2);
     sessions[1]!.finish('stopped early');
@@ -490,7 +496,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     }
     const parent = f.manager.startRun(QUICK_TASK_WORKFLOW, { task: 'parent', runner: 'claude', worktree: false, ...(layout === 'named' ? { agentProfile: 'named-native-dir' } : {}) });
     await until(() => sessions.length === 1);
-    const caller = controller.credentials.authenticate(sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN!)!;
+    const caller = controller.credentials.authenticate(delegationToken(sessions[0]!.spec))!;
     const pump = vi.spyOn(runInternals(f.manager).line, 'pump').mockResolvedValue();
     const request = { task: 'child', baseline: 'HEAD', requestId: randomUUID() };
     const child = await controller.service.spawn(caller, request);
@@ -645,7 +651,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     if (runner === 'codex') await mergeWriteAgentAccounts(store => { store.accounts = [{ id: profile, provider: runner, configDir: home, label: '', addedAt: '' }]; });
     const parent = f.manager.startRun(QUICK_TASK_WORKFLOW, { task: 'parent', runner, agentProfile: profile, worktree: false });
     await until(() => sessions.length === 1);
-    const caller = controller.credentials.authenticate(sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN!)!;
+    const caller = controller.credentials.authenticate(delegationToken(sessions[0]!.spec))!;
     const pump = vi.spyOn(runInternals(f.manager).line, 'pump').mockResolvedValue();
     const child = await controller.service.spawn(caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID() });
     await mergeWriteAgentAccounts(store => { store.accounts = []; });
@@ -682,7 +688,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     // Provision guidance is appended; pin the selected skill without depending on that copy.
     expect(sessions[0]!.spec.systemPrompt).toContain('PARENT SKILL BODY 778');
     expect(sessions[0]!.spec.systemPrompt).toContain('parent extra');
-    const caller = controller.credentials.authenticate(sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN!)!;
+    const caller = controller.credentials.authenticate(delegationToken(sessions[0]!.spec))!;
     const pump = vi.spyOn(runInternals(f.manager).line, 'pump').mockResolvedValue();
     return { parent, caller, pump };
   }
@@ -704,7 +710,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     await until(() => sessions.some(s => s !== sessions[0] && s.spec.env?.CEZ_TASK_ID === parent.id));
     const resumedPump = vi.spyOn(runInternals(f.manager).line, 'pump').mockResolvedValue();
     const continued = sessions.find(s => s !== sessions[0] && s.spec.env?.CEZ_TASK_ID === parent.id)!;
-    const nextCaller = controller.credentials.authenticate(continued.spec.env?.CEZ_DELEGATION_TOKEN!)!;
+    const nextCaller = controller.credentials.authenticate(delegationToken(continued.spec))!;
     const second = await controller.service.spawn(nextCaller, { task: 'second', baseline: 'HEAD', requestId: randomUUID() });
     expect(resumedPump).toHaveBeenCalled();
     expect(f.store.getRun(first.workerId)?.systemPrompt).toBe(f.store.getRun(second.workerId)?.systemPrompt);
@@ -744,7 +750,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     const workflow = { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!, model: 'haiku', allowedTools: ['Read', 'Bash'], bashAllowlist: ['git status'] }] };
     const run = f.manager.startRun(workflow, { task: 'parent', runner: 'claude', model: 'opus', systemPrompt: 'parent restriction', worktree: false });
     await until(() => sessions.length === 1);
-    const first = sessions[0]!; const token = first.spec.env?.CEZ_DELEGATION_TOKEN!;
+    const first = sessions[0]!; const token = delegationToken(first.spec);
     expect(token).toBeTypeOf('string'); expect(first.spec.systemPrompt).not.toContain(token);
     expect(f.store.getRun(run.id)?.delegation).toMatchObject({ role: 'root' });
     const settings = executionSettings.delegationExecutionSettings(runInternals(f.manager).active.get(run.id));
@@ -763,14 +769,14 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     await until(() => sessions.some(s => s !== first && s.spec.cwd === f.root));
     const second = sessions.find(s => s !== first && s.spec.cwd === f.root)!;
     expect(second.spec.env?.CEZ_DELEGATION_TOKEN).not.toBe(token);
-    expect(controller.credentials.authenticate(second.spec.env?.CEZ_DELEGATION_TOKEN!)).toMatchObject({ runId: run.id });
-    second.finish(); await until(() => controller.credentials.authenticate(second.spec.env?.CEZ_DELEGATION_TOKEN!) === undefined);
+    expect(controller.credentials.authenticate(delegationToken(second.spec))).toMatchObject({ runId: run.id });
+    second.finish(); await until(() => controller.credentials.authenticate(delegationToken(second.spec)) === undefined);
   });
   it('keeps an empty tool grant and absent prompt pinned after acceptance and on worker Continue', async () => {
     const workflow = { ...QUICK_TASK_WORKFLOW, steps: [{ ...QUICK_TASK_WORKFLOW.steps[0]!, allowedTools: [], bashAllowlist: [] }] };
     const parent = f.manager.startRun(workflow, { task: 'parent', runner: 'claude', worktree: false });
     await until(() => sessions.length === 1);
-    const token = sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN!;
+    const token = delegationToken(sessions[0]!.spec);
     const pump = vi.spyOn(runInternals(f.manager).line, 'pump').mockResolvedValue();
     const child = await controller.service.spawn(controller.credentials.authenticate(token)!, { task: 'child', baseline: 'HEAD', requestId: randomUUID() });
     writeFileSync(join(f.root, '.ai/cezar/config.json'), JSON.stringify({ systemPrompt: 'later config must not enter accepted worker' }));
@@ -788,7 +794,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     await until(() => sessions.length === 3);
     expect(sessions[2]!.spec.toolGrant).toEqual({ kind: 'inherited', tools: [], bashAllowlist: [] });
     expect(sessions[2]!.spec.systemPrompt).not.toContain('later config');
-    expect(controller.credentials.authenticate(sessions[2]!.spec.env?.CEZ_DELEGATION_TOKEN!)).toMatchObject({ runId: child.workerId });
+    expect(controller.credentials.authenticate(delegationToken(sessions[2]!.spec))).toMatchObject({ runId: child.workerId });
     expect(f.store.getRun(parent.id)?.delegation).toMatchObject({ role: 'root' });
   });
   it('revokes a finished workflow step before preparation of the next session', async () => {
@@ -800,7 +806,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     const run = f.manager.startRun({ ...QUICK_TASK_WORKFLOW, steps: [{ id: 'one', prompt: '{{task}}' }, { id: 'two', prompt: '{{task}}' }] }, { task: 'parent', runner: 'claude', worktree: false });
     try {
       await until(() => sessions.length === 1);
-      const token = sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN!;
+      const token = delegationToken(sessions[0]!.spec);
       doneTurn(sessions[0]!, 'one'); await until(() => entered);
       expect(f.store.getRun(run.id)?.status).toBe('running');
       expect(controller.credentials.authenticate(token)).toBeUndefined();
@@ -809,7 +815,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   it.each(['cancel', 'failed', 'done'] as const)('revokes %s authority before a slow backend finishes', async transition => {
     const run = f.manager.startRun(QUICK_TASK_WORKFLOW, { task: 'parent', runner: 'claude', worktree: false });
     await until(() => sessions.length === 1);
-    const token = sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN!;
+    const token = delegationToken(sessions[0]!.spec);
     vi.spyOn(sessions[0]!.session, 'interrupt').mockImplementation(() => {});
     if (transition === 'cancel') f.manager.cancel(run.id);
     else f.store.updateRun(run.id, { status: transition });
@@ -822,7 +828,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   it('root session wait returns immediately, then controller shutdown revokes without terminalizing persisted work', async () => {
     const run = f.manager.startRun(QUICK_TASK_WORKFLOW, { task: 'parent', runner: 'claude', worktree: false });
     await until(() => sessions.length === 1);
-    const token = sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN!;
+    const token = delegationToken(sessions[0]!.spec);
     const caller = controller.credentials.authenticate(token)!;
     const child = await controller.service.spawn(caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID() });
     const response = await fetch(`${controller.url}/wait`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify({ workerIds: [child.workerId] }) });
@@ -846,7 +852,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
       await until(() => sessions.length >= 1);
       const recovered = sessions.find(s => s.spec.env?.CEZ_TASK_ID === run.id)!;
       expect(recovered.spec.env?.CEZ_DELEGATION_TOKEN).toBeTypeOf('string');
-      expect(controller.credentials.authenticate(recovered.spec.env?.CEZ_DELEGATION_TOKEN!)).toMatchObject({ projectId: 'lazy', runId: run.id });
+      expect(controller.credentials.authenticate(delegationToken(recovered.spec))).toMatchObject({ projectId: 'lazy', runId: run.id });
       recovered.finish(); await until(() => !context.manager.isActive(run.id));
     } finally { contexts.disposeAll(); }
   });

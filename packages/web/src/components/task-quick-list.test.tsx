@@ -244,7 +244,7 @@ describe('status section folding (#811)', () => {
     const tree = (runs: RunSummary[]) => <QueryClientProvider client={createQueryClient()}><MemoryRouter><TaskQuickList projectId="live" runs={runs} view="active" onViewChange={() => {}} /></MemoryRouter></QueryClientProvider>
     const { rerender } = render(tree([done, working]))
     fireEvent.click(screen.getByRole('button', { name: 'Finished 1' }))
-    act(() => (row('move')?.querySelector('a') as HTMLElement).focus())
+    act(() => (row('move')!.querySelector('a') as HTMLElement).focus())
     rerender(tree([done, { ...working, status: 'failed', finishedAt: ago(500) }]))
     const folded = screen.getByRole('button', { name: 'Finished 2' })
     expect(folded.getAttribute('aria-expanded')).toBe('false')

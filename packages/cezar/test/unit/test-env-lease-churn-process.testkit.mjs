@@ -27,6 +27,9 @@ const churn = [];
 let owner;
 let replacement;
 let member;
+let bodyFailed = false;
+let bodyError;
+const cleanupErrors = [];
 
 function stat(pid) {
   const text = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
@@ -115,23 +118,29 @@ try {
     await assert.rejects(acquireTestEnvLease(root, { token: owner.token }), /invalid inherited/);
   } finally { db.close(); }
   console.log(JSON.stringify({ samples: answers, unknownRetained: true, stableReclaimed: true }));
+} catch (error) {
+  bodyFailed = true;
+  bodyError = error;
 } finally {
   fs.readdirSync = originalReadDir;
   syncBuiltinESMExports();
   replacement?.release();
   owner?.release();
+  if (member) {
+    try { process.kill(-member, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') cleanupErrors.push(error); }
+  }
+  process.kill(parent.pid, 'SIGCONT');
   await Promise.all(churn.map(async child => {
     const exited = once(child, 'exit');
     try { process.kill(-child.pid, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
     await exited;
   }));
-  if (member) {
-    try { process.kill(-member, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
-  }
-  process.kill(parent.pid, 'SIGCONT');
   // Resume lets Node reap its child before the parent exits; never orphan zombies.
   if (member) await until(() => !fs.existsSync(`/proc/${member}/stat`), 'parent must reap its child');
   parent.stdin.end();
   await parentExit;
   fs.rmSync(root, { recursive: true, force: true });
 }
+
+if (bodyFailed) throw bodyError;
+if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'Process fixture cleanup failed');
