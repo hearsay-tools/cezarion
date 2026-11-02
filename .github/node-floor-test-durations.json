@@ -832,7 +832,7 @@
     "packages/web/src/test/agent-browser-launch.test.ts": 10.821915999999987,
     "packages/web/src/test/agent-browser-wait-value.test.ts": 7991.131179999999,
     "packages/web/src/test/api-client-subpaths.test.ts": 7.860612999999944,
-    "packages/web/src/test/card-2-contrast.test.ts": 645.5387599999999,
+    "packages/cezar/src/lint/card-2-contrast.test.ts": 645.5387599999999,
     "packages/web/src/test/e2e-socket-safe-tmpdir.test.ts": 9.715992,
     "packages/web/src/test/e2e-wait-discipline.test.ts": 2090.357779,
     "packages/web/src/test/failure-setup.test.ts": 11.798955999999976,

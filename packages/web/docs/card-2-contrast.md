@@ -55,4 +55,4 @@ component boundaries and CSS rules still need rendered contrast checks.
 The baseline identifies existing instances by file and opening JSX, including
 counts through duplicate entries. Remove an entry when fixing its instance;
 never add allowances. The lint rule rejects new instances; the lint runner rejects stale baseline entries.
-`src/test/card-2-contrast.test.ts` keeps the inline scanner fixtures without a repository scan.
+`../cezar/src/lint/card-2-contrast.test.ts` keeps the inline scanner fixtures without a repository scan.

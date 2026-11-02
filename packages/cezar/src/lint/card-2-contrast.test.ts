@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { expect, it } from 'vitest'
-import { scan as scanContrast } from '../../../cezar/src/lint/card-2-contrast.ts'
+import { scan as scanContrast } from './card-2-contrast.ts'
 
 // Explicit fixture palette: no repository reads belong to these scanner cases.
 const surfaces = new Set(['bg-card-2', 'bg-background', 'bg-black', 'bg-white'])

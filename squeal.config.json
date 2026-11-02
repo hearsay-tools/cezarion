@@ -53,7 +53,7 @@
       "packages/api-client/src/**",
       "packages/api-client/package.json"
     ],
-    "packages/web/src/test/card-2-contrast.test.ts": [
+    "packages/cezar/src/lint/card-2-contrast.test.ts": [
       "packages/cezar/src/lint/card-2-contrast.ts"
     ],
     "packages/web/e2e/*.e2e.ts": [
