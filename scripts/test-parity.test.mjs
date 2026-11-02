@@ -26,7 +26,7 @@ test('selects every nested parity file across packages and excludes dependencies
   ]);
 });
 
-test('requires an alive daemon for the same worktree; a store is insufficient', () => {
+test('distinguishes no registered daemon from a daemon for this worktree', () => {
   assert.equal(detectDaemon('/repo', () => alive('/repo')), 'squeal');
   assert.equal(detectDaemon('/repo', () => result({ schemaVersion: 1, worktreeRoot: '/repo', daemon: { state: 'down', since: null } })), null);
   assert.equal(detectDaemon('/repo', () => result({ available: false })), null);
@@ -42,20 +42,20 @@ test('discovers the installed launcher without PATH and handles absent Squeal', 
     return command === '/user/.local/bin/squeal' ? alive('/repo')
       : { error: { code: 'ENOENT' } };
   };
-  assert.equal(detectDaemon('/repo', run, '/user'), '/user/.local/bin/squeal');
+  assert.equal(detectDaemon('/repo', run, '/user', {}), '/user/.local/bin/squeal');
   assert.deepEqual(calls, ['squeal', '/user/.local/bin/squeal']);
   assert.equal(detectDaemon('/repo', () => ({ error: { code: 'ENOENT' } }), '/user'), null);
   assert.throws(() => detectDaemon('/repo', () => ({ error: new Error('permission') })), /permission/);
 });
 
-for (const [state, verdict, expected] of [
-  ['current', 'pass', 0], ['current', 'fail', 1], ['pending', 'pass', 1],
-  ['unknown', undefined, 1], ['stale', 'pass', 1], ['current', 'skip', 1],
+for (const [state, verdict, expected, label] of [
+  ['current', 'pass', 0, 'PASS'], ['current', 'fail', 1, 'FAIL'], ['pending', 'pass', 1, 'PENDING'],
+  ['unknown', undefined, 1, 'UNKNOWN'], ['stale', 'pass', 1, 'UNKNOWN'], ['current', 'skip', 1, 'UNKNOWN'],
 ]) {
   test(`reports ${state}/${verdict} by file`, () => {
     const lines = [];
     assert.equal(reportVerdicts(['a'], { selection: { testFiles: [{ path: 'a', state, verdict }] } }, line => lines.push(line)), expected);
-    assert.match(lines[0], /a:/);
+    assert.ok(lines[0].startsWith(`${label} a:`), lines[0]);
   });
 }
 
@@ -124,3 +124,13 @@ for (const untilStart of [false, true]) {
       daemon: { state: 'down', since: 123, stopped: true, untilStart } })), null);
   });
 }
+
+test('discovers the documented SQUEAL_BIN_DIR launcher override', () => {
+  const calls = [];
+  const run = command => {
+    calls.push(command);
+    return command === '/custom/bin/squeal' ? alive('/repo') : { error: { code: 'ENOENT' } };
+  };
+  assert.equal(detectDaemon('/repo', run, '/user', { SQUEAL_BIN_DIR: '/custom/bin' }), '/custom/bin/squeal');
+  assert.deepEqual(calls, ['squeal', '/custom/bin/squeal']);
+});

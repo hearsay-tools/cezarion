@@ -12,9 +12,9 @@ export function selectFiles(cwd) {
 }
 
 // A readable store alone does not mean a daemon is validating this worktree.
-export function detectDaemon(cwd, run = spawnSync, home = homedir()) {
-  const candidates = ['squeal', join(home, '.local/bin/squeal'),
-    join(home, '.codex/plugins/data/squeal-hearsay/bin/squeal')];
+export function detectDaemon(cwd, run = spawnSync, home = homedir(), env = process.env) {
+  // Documented launcher: https://github.com/hearsay-tools/squeal#install (SQUEAL_BIN_DIR overrides ~/.local/bin).
+  const candidates = ['squeal', join(env.SQUEAL_BIN_DIR ?? join(home, '.local/bin'), 'squeal')];
   for (const command of candidates) {
     const result = run(command, ['status', '--json'], { cwd, encoding: 'utf8' });
     if (result.error?.code === 'ENOENT') continue;
@@ -47,7 +47,10 @@ export function reportVerdicts(files, status, log) {
       entry.state === 'current' && entry.verdict === 'pass');
     const detail = matches.length ? matches.map(entry =>
       `${entry.state}/${entry.verdict ?? 'no verdict'}`).join(', ') : 'unknown/no verdict';
-    log(`${currentPass ? 'PASS' : 'FAIL'} ${file}: ${detail}`);
+    const label = currentPass ? 'PASS'
+      : matches.some(entry => entry.verdict === 'fail') ? 'FAIL'
+        : matches.some(entry => entry.state === 'pending') ? 'PENDING' : 'UNKNOWN';
+    log(`${label} ${file}: ${detail}`);
     passed = passed && currentPass;
   }
   return passed ? 0 : 1;
