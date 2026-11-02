@@ -5,6 +5,8 @@ import {
   parseDurationMinutes,
   resolveDelay,
   SCHEDULED_TASK_LIMITS,
+  utcMinute,
+  wallTimeAtOrAfter,
   SCHEDULED_TASK_NOTE,
   type ScheduleTaskAnswer,
   type ScheduleTaskRequest,
@@ -20,7 +22,9 @@ import { isOnceSchedule, type AutomationDefinition } from './types.ts';
 /**
  * hearsay-tools/cezarion#1465: `cezar_schedule_task` and `cezar_scheduled_tasks` over the same
  * service the HTTP routes call, bound to one project. The agent sees one-time schedules only: a
- * repeating automation's id answers `not_found`, so these tools never change one.
+ * repeating automation's id answers `not_found`, so these tools never change one. The agent gives
+ * and reads times in UTC, as in every other Cezar tool; the schedule is stored as a wall time in
+ * the cockpit's zone (or the zone it already has), so the cockpit shows it in local time.
  */
 type Refusal = { ok: false; code: ScheduledTaskRefusalCode; message: string };
 /** Stored shapes pass unknown keys through, so `'ok' in value` does not narrow them. */
@@ -30,9 +34,9 @@ const NOT_FOUND = refuse('not_found', 'No one-time schedule has this id in this 
 const fromStatus = (failure: { status: 400 | 404 | 409; error: string }): Refusal =>
   refuse(failure.status === 400 ? 'invalid_request' : failure.status === 404 ? 'not_found' : 'conflict', failure.error);
 
-/** The `at` a request names: its own, or its `delay` resolved from now in the zone. */
+/** The stored `at` a request names: its UTC `at` or its `delay` from now, as a wall time in the zone. */
 function wallTime(request: { at?: string | undefined; delay?: string | undefined }, zone: string, now: number): string | undefined {
-  if (request.at) return request.at;
+  if (request.at) return wallTimeAtOrAfter(Date.parse(request.at), zone);
   return request.delay ? resolveDelay(request.delay, now, zone) : undefined;
 }
 
@@ -51,9 +55,7 @@ export function createAutomationToolService(
       id: definition.id,
       name: definition.name,
       status: onceStatus(definition, project.automationStore.state(definition.id)) ?? 'paused',
-      due_at: schedule.at ?? '',
-      time_zone: schedule.timeZone ?? '',
-      resolved_instant: new Date(onceInstant(schedule) ?? 0).toISOString(),
+      due_at: utcMinute(onceInstant(schedule) ?? 0),
       ...(schedule.latestStartMinutes !== undefined ? { latest_start_minutes: schedule.latestStartMinutes } : {}),
       ...(runId ? { run_id: runId } : {}),
       ...(address ? { url: `${address.origin}/p/${address.projectId}/automations/${definition.id}` } : {}),
@@ -61,8 +63,8 @@ export function createAutomationToolService(
   };
 
   /** The schedule a request asks for, or the refusal that names why it cannot be one. */
-  const scheduleOf = (request: { at?: string | undefined; delay?: string | undefined; time_zone?: string | undefined; latest_start?: string | undefined }, stored?: NonNullable<AutomationDefinition['schedule']>) => {
-    const zone = request.time_zone ?? stored?.timeZone ?? deps.timeZone();
+  const scheduleOf = (request: { at?: string | undefined; delay?: string | undefined; latest_start?: string | undefined }, stored?: NonNullable<AutomationDefinition['schedule']>) => {
+    const zone = stored?.timeZone ?? deps.timeZone();
     if (!isValidTimeZone(zone)) return refuse('invalid_request', unknownTimeZoneMessage(zone));
     const at = wallTime(request, zone, now()) ?? stored?.at;
     const latest = request.latest_start !== undefined ? parseDurationMinutes(request.latest_start) : stored?.latestStartMinutes;
@@ -100,7 +102,7 @@ export function createAutomationToolService(
       if (request.action === 'list') {
         const listed = await service.list(project, { archived: request.archived });
         const tasks = listed.automations.filter(isOnceSchedule).map(view)
-          .sort((a, b) => a.resolved_instant.localeCompare(b.resolved_instant));
+          .sort((a, b) => a.due_at.localeCompare(b.due_at));
         return { ok: true, tasks: tasks.slice(0, SCHEDULED_TASK_LIMITS.list) };
       }
       const stored = onceDefinition(request.id);
@@ -111,7 +113,7 @@ export function createAutomationToolService(
         case 'enable': return settled(await service.enable(project, stored.id));
         case 'cancel': return settled(await service.cancel(project, stored.id));
         case 'update': {
-          const moves = request.at !== undefined || request.delay !== undefined || request.time_zone !== undefined || request.latest_start !== undefined;
+          const moves = request.at !== undefined || request.delay !== undefined || request.latest_start !== undefined;
           const schedule = moves ? scheduleOf(request, stored.schedule) : stored.schedule;
           if (schedule && isRefusal(schedule)) return schedule;
           const { workflow, runner, model, effort } = request;

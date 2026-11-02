@@ -328,6 +328,16 @@ describe('handoffInstructions', () => {
     expect(native.replace(/\n\nNative subagents: [^\n]*/, '')).toBe(plain);
   });
 
+  // Agents read UTC from Cezar's tools and local time from `date`, and told users UTC times as
+  // local ones. Every session learns that Cezar's times are UTC and which zone the user is in.
+  it('names the user\'s time zone and that Cezar tool times are UTC', () => {
+    const text = handoffInstructions({ timeZone: 'Europe/Warsaw' });
+    expect(text).toContain('Times: Cezar tools take and answer times in UTC, ending in Z, such as a wait\'s `deadline` or a scheduled task\'s `due_at`. The user\'s time zone is Europe/Warsaw.');
+    expect(text).toContain('Before you tell the user a time, convert it to Europe/Warsaw and name the zone.');
+    expect(text).toContain('`TZ=Europe/Warsaw date`');
+    expect(handoffInstructions()).toContain(`The user's time zone is ${Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'}.`);
+  });
+
   // hearsay-tools/cezarion#1428: agents asked about drafts and findings they never sent, once
   // after a plain ask and once after the content lived only in rejected tool-call arguments.
   // hearsay-tools/cezarion#1458: on Claude, assistant text between tool calls may never arrive, so

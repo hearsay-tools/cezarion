@@ -1052,6 +1052,8 @@ A launch that fails marks it **Failed**, and nothing retries on its own; **Retry
 relaunches the same receipt, so one schedule starts at most one task. Agents can create and manage
 one-time schedules with the `cezar_schedule_task` and `cezar_scheduled_tasks` tools, which exist
 only with `CEZ_AUTOMATIONS=1` and also create schedules paused unless the user asked for them to run.
+These tools take and answer the due time in UTC, like every other time in a Cezar tool; the
+schedule keeps a wall time in the cockpit's time zone, so the cockpit shows it in local time.
 
 Automation list counters use two windows. **Launched** counts every stored task with that
 automation's provenance, across definition revisions, including historical variants, completed and

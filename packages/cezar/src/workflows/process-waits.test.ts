@@ -58,6 +58,8 @@ describe('process waits through RunManager (hearsay-tools/cezarion#1446)', { tim
     await expect(register(run.id, { pid: sleeper(), exit_file: '/etc/cez-process-wait.exit' })).rejects.toMatchObject({ code: 'exit_file_outside' });
     const answer = await manager.cezarToolHandlers(run.id, generationOf(run.id)).registerWait({ kind: 'process', pid: sleeper(), exit_file: '../../x.exit', timeout_seconds: 60 }, 'cezar_wait', new AbortController().signal);
     expect(answer.answer).toMatchObject({ ok: false, code: 'exit_file_outside', message: expect.stringContaining('worktree') });
+    // A batch that writes its own exit file elsewhere is waited on by PID alone, never through a watcher.
+    expect(answer.answer).toMatchObject({ message: expect.stringContaining('leave exit_file out: wait on pid alone') });
     const interval = vi.spyOn(semaphore, 'monitoringWakeIntervalMinutes').mockReturnValue(null);
     await expect(register(run.id, { pid: sleeper() })).rejects.toMatchObject({ code: 'timers_disabled' });
     interval.mockReturnValue(5);
