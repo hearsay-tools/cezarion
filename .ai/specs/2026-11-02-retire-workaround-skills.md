@@ -1,6 +1,6 @@
 # Retire the workaround skills
 
-Status: approved by the owner on 2026-11-02 (task `0b8679f4`). Plan revision 1.
+Status: approved by the owner on 2026-11-02 (task `0b8679f4`). Plan revision 2: adds the owner constraints and changes slices 2.6, 3.1, 3.3, 4.2 and 4.3 to meet them.
 
 ## Goal
 
@@ -41,6 +41,15 @@ hold 481 lines. Most of the text exists for one of four reasons:
 
 ## Rules for every slice
 
+- **The app's behavior does not change.** Cezar's CLI, server, cockpit, stored state,
+  messages and defaults behave exactly as before at shipped settings. Only developer
+  tooling, tests, CI and docs change. A slice that needs an app behavior change is
+  excluded, and its skill text stays until a behavior-neutral fix exists (owner,
+  2026-11-02).
+- **No new cover-up.** No slice adds workaround prose, a rule that documents a problem
+  instead of removing it, a new baseline or allowlist entry, a skip, a retry, a longer
+  timeout or a "known issue" note. A new guard lands only when it passes with no
+  exceptions (owner, 2026-11-02).
 - **Delete a rule only with its replacement.** A PR that lands a fix also deletes the
   skill text that the fix makes unnecessary. A PR never deletes text before its
   replacement lands. This keeps every intermediate `main` usable.
@@ -101,7 +110,7 @@ Prerequisite: slices 1.2 and 1.3 merged (they edit `reader-sweep/SKILL.md`).
 | 2.3 | cleanup | Typed run fixtures: a `seedRuns(partials)` helper for browser and packaged tests, built on `makeRunRecord`; a lint rule refuses a raw `runs.json` write in a spec. | Renaming a `RunRecord` field fails typecheck in every fixture that sets it. |
 | 2.4 | cleanup | Burn down `test-enum-literal` and `test-enum-literal-tsx` baselines to 0 with a codemod, one directory per PR. | Both baselines are empty. |
 | 2.5 | feature | The spec map covers the server and the mocks: `e2e-spec-map.yml` also collects V8 coverage from the served server and `mock-*.mjs` processes; `test:e2e:affected` downloads the map when none is local. | An edit to one `mock-*.mjs` scenario selects only the specs that ran it. |
-| 2.6 | feature | Control locations in one table: messages that tell users where a control lives (API errors, CLI output, agent prompts) read one table in the contract package; a cockpit unit test checks each location against the navigation. | Renaming a settings tab without the table fails a test. |
+| 2.6 | feature | Control locations in one table: messages that tell users where a control lives (API errors, CLI output, agent prompts) read one table in the contract package; a cockpit unit test checks each location against the navigation. Every message text stays byte-identical. | Renaming a settings tab without the table fails a test. |
 
 **Exit:** every reader-sweep section except the general rule has a tool that replaces it.
 
@@ -112,9 +121,9 @@ a **Process exits** case table and a runner owner's review.
 
 | Slice | Type | Change | Done when |
 | --- | --- | --- | --- |
-| 3.1 | feature | Measure the 36 files over 60 s: time, CPU time and peak memory at several sizes. Add a shrink-only list of files over 60 s read from `.github/test-durations.json`. | A new file over 60 s fails the duration check. |
+| 3.1 | feature | Measure the 36 files over 60 s: time, CPU time and peak memory at several sizes. Record the result in the Phase 3 design spec. No list or baseline of slow files. | The design spec names the cost of each slow file and the fix for it. |
 | 3.2 | feature | Parity cells run the mock wire in-process through each runner's wire adapter; one real-process smoke cell stays per runner and wire. | Every parity file is under 60 s on CI; the smoke cells still fail on a broken wire. The Squeal wait bound and parity procedure are deleted. |
-| 3.3 | cleanup | Split files still over 60 s by row group. | The shrink-only list is empty. |
+| 3.3 | cleanup | Split files still over 60 s by row group. Then add a hard 60 s per-file cap with no exceptions. | Every Vitest file is under 60 s on CI and the cap is enforced. |
 
 **Exit:** no Vitest file over 60 s on CI; the validation skill has no wait-bound or
 parity text.
@@ -127,8 +136,8 @@ Slices 4.1 and 4.2 each need a design spec with a case table.
 | Slice | Type | Change | Done when |
 | --- | --- | --- | --- |
 | 4.1 | cleanup | Group `ActiveRun` fields by owner (turn boundary, waits, queue and slot, usage). One ast-grep "write outside owner" rule per group. The turn-boundary fields go behind one transition function. | Each group has one writing module and a rule with an empty baseline. |
-| 4.2 | feature | Slot release marks the pump due; one drain runs after the current operation. | No `releaseSlot` caller sees a changed timer set before return; parity suites pass. |
-| 4.3 | cleanup | A shrink-only baseline for `runInternals(`; new tests assert store rows, events and run state. | The baseline exists and shrinks in each PR that touches a listed file. |
+| 4.2 | cleanup | Slot release marks the pump due; one drain runs after the current operation. Dispatch only if a case table for every `releaseSlot` caller and the parity suites show no change in the app's observable behavior; otherwise exclude it and keep its skill text. | No `releaseSlot` caller sees a changed timer set before return; the parity suites and every user-visible outcome are unchanged. |
+| 4.3 | cleanup | Convert tests that call `runInternals(` to assert store rows, events and run state, file by file. Add a rule that refuses `runInternals(` only when no call site is left. No baseline. | `runInternals(` has no call sites and the rule is enforced. |
 | 4.4 | cleanup | Move the 4 remaining outcome writes into `RunStore.commitOutcome`. | The baseline is empty. |
 
 **Exit:** the handler side-effect and queue-head rules have nothing left to protect.
