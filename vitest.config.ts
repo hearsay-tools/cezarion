@@ -1,6 +1,9 @@
+import { checkWorkspaceResolution } from './scripts/check-workspace-resolution.mjs'
 import { defineConfig } from 'vitest/config'
 import CiTestSequencer from './.github/scripts/ci-test-sequencer.mjs'
 import KeepTestFilesInCoverage, { coverageRequested } from './.github/scripts/vitest-coverage-tests.mjs'
+
+checkWorkspaceResolution()
 
 // Four unit packages, one `npm test`. Each owns its own vitest config — this file only names
 // them, so `npm test -w <pkg>` and the whole-repo run execute the identical setup:
