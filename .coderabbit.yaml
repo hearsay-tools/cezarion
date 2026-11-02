@@ -1,0 +1,12 @@
+# yaml-language-server: $schema=https://www.coderabbit.ai/integrations/schema.v2.json
+# The App reviews on push, including drafts, before CI preflight. No round/spend
+# cap: the owner uses CodeRabbit's free open-source review. Admission is separate.
+reviews:
+  review_progress: true
+  fail_commit_status: true
+  auto_review:
+    enabled: true
+    drafts: true
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 0
+    labels: []

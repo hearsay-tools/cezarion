@@ -37,10 +37,10 @@ test('review-first DAG releases heavy work only after review, without waiting on
   for (const id of Object.keys(ci.jobs)) ancestors(id);
   for (const id of heavy) {
     assert.ok(ancestors(id).includes('review-result'), `${id} must be held by review`);
-    assert.ok(!ancestors('review').includes(id), `${id} must not hold review`);
+    assert.ok(!ancestors('review-result').includes(id), `${id} must not hold review`);
     assert.match(ci.jobs[id].if, /!cancelled\(\)/, 'intentional skips cannot invoke implicit success()');
   }
-  assert.equal(ci.jobs.review.needs, 'preflight');
+  assert.equal(ci.jobs['review-result'].needs, 'preflight');
 });
 for (const result of ['failure', 'cancelled', 'skipped', '']) {
   test(`review ${result} prevents all heavy jobs and a green aggregate`, () => {
@@ -100,37 +100,12 @@ test('exactly one applicable job owns the protected review name for main PRs and
 });
 
 test('always aggregates reject cancellation even if all retained prerequisites succeeded', () => {
-  const review = yaml.parse(fs.readFileSync(path.join(__dirname, '../workflows/automated-code-review.yml'), 'utf8'));
-  for (const job of [ci.jobs.preflight, ci.jobs.verify, ci.jobs['review-result'], ci.jobs['queue-review-result'], review.jobs['review-complete']]) {
+  for (const job of [ci.jobs.preflight, ci.jobs.verify, ci.jobs['review-result'], ci.jobs['queue-review-result']]) {
     const guard = job.steps.find(step => step.name === 'Reject a cancelled run');
     assert.ok(guard);
     assert.equal(evaluate(guard.if, { cancelled: () => true }), true);
     assert.notEqual(spawnSync('bash', ['-c', guard.run]).status, 0);
   }
-  assert.equal(evaluate(review.jobs['post-review'].if, { cancelled: () => true }), false, 'no mutation after cancellation');
-});
-
-test('reused/skipped review reads the live head and fresh bot threads before release', async () => {
-  const review = yaml.parse(fs.readFileSync(path.join(__dirname, '../workflows/automated-code-review.yml'), 'utf8'));
-  const script = review.jobs['post-review'].steps.find(step => step.id === 'post').with.script;
-  const execute = new (Object.getPrototypeOf(async function () {}).constructor)('require', 'github', 'context', 'core', 'process', script);
-  const outputs = {};
-  const state = { head: 'a', resolved: false };
-  const github = { rest: { pulls: { get: async () => ({ data: { head: { sha: state.head } } }) } },
-    graphql: async () => ({ repository: { pullRequest: { reviewThreads: {
-      nodes: [{ id: 'thread', isResolved: state.resolved, comments: { nodes: [{ databaseId: 1, author: { login: 'github-actions[bot]' } }] } }],
-      pageInfo: { hasNextPage: false },
-    } } } }) };
-  const load = name => name === './.github/scripts/automated-review.cjs' ? require('./automated-review.cjs') : require(name);
-  const run = () => execute(load, github, { repo: { owner: 'o', repo: 'r' } }, { setOutput: (key, value) => { outputs[key] = value; } },
-    { env: { PR_NUMBER: '7', HEAD_SHA: 'a', CAN_REVIEW: 'false' } });
-  await run(); assert.equal(outputs.open_threads, '1');
-  state.resolved = true;
-  await run(); assert.equal(outputs.open_threads, '0'); assert.equal(outputs.new_threads, '0');
-  state.head = 'new';
-  await assert.rejects(run(), /stale PR head/);
-  github.rest.pulls.get = async () => { throw new Error('API unavailable'); };
-  await assert.rejects(run(), /API unavailable/);
 });
 
 test('failed-test retry retains review, while a successful review-only retry releases blocked jobs', () => {

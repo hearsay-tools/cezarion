@@ -9,7 +9,10 @@
 // Flips made with the workflow token fire no workflow events, so the board is
 // synced inline after each flip; human flips arrive as their own events.
 
-const { listReviewThreads } = require('./automated-review.cjs');
+const { readCodeRabbitAdmission } = require('./coderabbit-admission.cjs');
+const { readNativeReview } = require('./native-review-proof.cjs');
+const { reader } = require('./queue-ci-proof.cjs');
+const { signalTarget } = require('./review-signal.cjs');
 
 const REVIEW_CHECK = 'Automated Code Review';
 const PASSING = new Set(['success', 'skipped', 'neutral']);
@@ -51,7 +54,7 @@ function evaluateChecks({ required, checkRuns, statuses = [] }) {
     const run = runs.get(name);
     if (run) {
       if (run.status !== 'completed') result.pending.push(name);
-      else if (!PASSING.has(run.conclusion)) result.failing.push(name);
+      else if (!(name === REVIEW_CHECK || name === 'Unit, build, E2E, and package' ? run.conclusion === 'success' : PASSING.has(run.conclusion))) result.failing.push(name);
       continue;
     }
     const state = states.get(name);
@@ -161,6 +164,27 @@ async function onPullRequest({ github, projectGithub, owner, repo, action, pull,
   return null;
 }
 
+async function followPull({ github, projectGithub, owner, repo, candidate, sha, checks, log }) {
+  const { data: live } = await github.rest.pulls.get({ owner, repo, pull_number: candidate.number });
+  if (live?.state !== 'open' || live.head?.sha !== sha || !sameRepo(live, owner, repo)) return;
+  let admitted = false;
+  try {
+    const proof = await readNativeReview({ github, owner, repo, pr: live });
+    const admission = await readCodeRabbitAdmission({ github, owner, repo, pullNumber: live.number, head: sha,
+      releaseAppBotLogin: process.env.RELEASE_APP_BOT_LOGIN });
+    admitted = checks.ready && proof.passed && admission.admitted;
+  } catch (error) {
+    log(`PR ${live.number}: fresh review proof unavailable: ${error.message}`);
+  }
+  const { data: final } = await github.rest.pulls.get({ owner, repo, pull_number: live.number });
+  if (final?.state !== 'open' || final.head?.sha !== sha || !sameRepo(final, owner, repo) || final.base?.ref !== 'main') return;
+  const draft = !admitted;
+  if (final.draft === draft) { log(`PR ${final.number}: readiness unchanged (admitted=${admitted}).`); return; }
+  await setDraft({ github, pull: final, draft });
+  log(`PR ${final.number}: ${draft ? 'converted back to draft' : 'marked ready for review'} from fresh admission.`);
+  await syncBoard({ projectGithub, owner, repo, pullNumber: final.number, draft, log });
+}
+
 async function markReadyWhenGreen({ github, projectGithub, owner, repo, sha, pullNumber = null, log }) {
   const pulls = (await openPullsForHead({ github, owner, repo, sha }))
     .filter((pull) => sameRepo(pull, owner, repo) && (pullNumber === null || pull.number === pullNumber));
@@ -168,18 +192,7 @@ async function markReadyWhenGreen({ github, projectGithub, owner, repo, sha, pul
   const required = await requiredCheckNames({ github, owner, repo, branch: 'main' });
   const checks = evaluateChecks({ required, ...(await readHeadChecks({ github, owner, repo, sha })) });
   for (const candidate of pulls) {
-    if (!candidate.draft) { log(`#${candidate.number} is already ready for review.`); continue; }
-    if (!checks.ready) {
-      log(`#${candidate.number} stays draft: pending [${checks.pending}] failing [${checks.failing}] missing [${checks.missing}].`);
-      continue;
-    }
-    const open = (await listReviewThreads({ github, owner, repo, pullNumber: candidate.number })).filter((thread) => !thread.isResolved).length;
-    if (open > 0) { log(`#${candidate.number} stays draft: ${open} review thread(s) unresolved.`); continue; }
-    const { data: live } = await github.rest.pulls.get({ owner, repo, pull_number: candidate.number });
-    if (live?.state !== 'open' || live.head?.sha !== sha || !live.draft) { log(`#${candidate.number} changed while checking; leaving it.`); continue; }
-    await setDraft({ github, pull: live, draft: false });
-    log(`#${candidate.number}: every required check passed on ${sha}; marked ready for review.`);
-    await syncBoard({ projectGithub, owner, repo, pullNumber: candidate.number, draft: false, log });
+    await followPull({ github, projectGithub, owner, repo, candidate, sha, checks, log });
   }
   return null;
 }
@@ -190,8 +203,19 @@ async function handleEvent({ github, projectGithub = null, owner, repo, eventNam
   }
   if (eventName === 'workflow_run') {
     const run = payload.workflow_run;
+    if (run?.name === 'CodeRabbit review signal') {
+      const read = reader(github, owner, repo, Date.now() + 60000, Date.now);
+      const target = await signalTarget(read, payload, `${owner}/${repo}`);
+      if (!target) return null;
+      return markReadyWhenGreen({ github, projectGithub, owner, repo, sha: target.head, pullNumber: target.number, log });
+    }
     if (run?.event !== 'pull_request_target' || typeof run.head_sha !== 'string') return log('Not a pull request run.');
     return markReadyWhenGreen({ github, projectGithub, owner, repo, sha: run.head_sha, log });
+  }
+  if (eventName === 'check_run') {
+    const { trustedCheck } = require('./coderabbit-admission.cjs');
+    if (!trustedCheck(payload.check_run)) return null;
+    return markReadyWhenGreen({ github, projectGithub, owner, repo, sha: payload.check_run.head_sha, log });
   }
   if (eventName === 'workflow_dispatch') {
     const pullNumber = Number(payload.inputs?.pr_number);

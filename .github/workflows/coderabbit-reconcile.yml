@@ -1,0 +1,47 @@
+name: Reconcile CodeRabbit admission
+
+# Default-branch control plane only. No PR checkout, model calls or secrets.
+on:
+  check_run:
+    types: [created, completed]
+  workflow_run:
+    workflows: [CI, CodeRabbit review signal]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR to re-check after resolving a thread by hand
+        required: true
+        type: number
+permissions: {}
+# Serialize writes, including different events for one head. GitHub may coalesce
+# pending events; manual dispatch is the recovery for missing/eventless changes.
+concurrency:
+  group: coderabbit-admission-reconciliation
+  cancel-in-progress: false
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      actions: write # Only targeted rerun; trusted script validates native provenance.
+    steps:
+      - name: Check out trusted reconciliation scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          RELEASE_APP_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
+        with:
+          retries: 0
+          script: |
+            const { reconcile } = require('./.github/scripts/coderabbit-reconcile.cjs');
+            const result = await reconcile({ github, ...context.repo, eventName: context.eventName,
+              payload: context.payload, releaseAppBotLogin: process.env.RELEASE_APP_BOT_LOGIN,
+              log: message => core.info(message) });
+            core.info(JSON.stringify(result));

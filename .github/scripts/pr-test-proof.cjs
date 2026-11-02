@@ -44,7 +44,7 @@ function requireCurrentPull(pull, head, base, fullName) {
       || pull.base.ref !== 'main' || pull.base.repo?.full_name !== fullName
       || pull.head.repo?.full_name !== fullName) throw new Error('Pull changed');
 }
-async function prTestProof({ github, owner, repo, eventName, group, now = Date.now }) {
+async function prTestProof({ github, owner, repo, eventName, group, now = Date.now, releaseAppBotLogin }) {
   const fallback = reason => ({ verified: false, reason });
   if (eventName !== 'merge_group') return fallback('not-merge-group');
   const read = reader(github, owner, repo, now() + 60000, now);
@@ -53,7 +53,7 @@ async function prTestProof({ github, owner, repo, eventName, group, now = Date.n
   try {
     const entry = await onlyEntry(read, owner, repo, group);
     await matchingMain(read, group.base_sha);
-    const admission = await mergeQueueAdmission({ github: bounded, owner, repo, group, now, allowInProgress: true });
+    const admission = await mergeQueueAdmission({ github: bounded, owner, repo, group, now, allowInProgress: true, releaseAppBotLogin });
     if (admission.pullNumber !== entry.pullRequest.number || admission.head !== entry.pullRequest.headRefOid) return fallback('entry-changed');
     const jobs = await readCiJobs(read, admission.runId);
     if (!successfulJobs(jobs, [...PR_TEST_JOBS, attestationName(group.base_sha, admission.head)])) return fallback('native-inputs-not-proven');

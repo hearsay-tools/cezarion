@@ -10,11 +10,12 @@ function fixture(fork = false) {
     { type: 'required_status_checks', parameters: { required_status_checks: ['Unit, build, E2E, and package', 'Automated Code Review'].map(context => ({ context, integration_id: 15368 })) } },
     { type: 'pull_request', parameters: { required_review_thread_resolution: true } }],
     entry: { id: 'entry', position: 1, headCommit: { oid: SHA }, baseCommit: { oid: BASE }, pullRequest: { number: 7, headRefOid: HEAD } },
-    pr: { number: 7, state: 'open', draft: false, base: { ref: 'main', repo: { full_name: 'o/r' } }, head: { sha: HEAD, ref: 'feature', repo: { full_name: headRepo } } },
+    pr: { number: 7, state: 'open', draft: false, base: { sha: BASE, ref: 'main', repo: { full_name: 'o/r' } }, head: { sha: HEAD, ref: 'feature', repo: { full_name: headRepo } } },
     run: { id: 20, run_attempt: 1, workflow_id: 3, path: '.github/workflows/ci.yml', event: 'pull_request_target',
       repository: { full_name: 'o/r' }, head_repository: { full_name: headRepo }, head_sha: HEAD, head_branch: 'feature',
       status: 'completed', conclusion: 'success', pull_requests: [{ number: 7, head: { sha: HEAD }, base: { ref: 'main' } }] },
     jobs: ['Unit, build, E2E, and package', 'Automated Code Review'].map((name, i) => ({ id: i + 1, name, status: 'completed', conclusion: 'success' })),
+    checks: [{ id: 100, name: 'CodeRabbit', app: { id: 347564, slug: 'coderabbitai' }, head_sha: HEAD, status: 'completed', conclusion: 'success' }],
     threads: [], calls: [],
   };
   const github = { request: async (route, args) => {
@@ -24,7 +25,8 @@ function fixture(fork = false) {
     if (route.endsWith('/rules/branches/{branch}')) data = s.rules;
     else if (route === 'POST /graphql') data = args.query.includes('mergeQueue(')
       ? { data: { repository: { mergeQueue: { entries: { nodes: s.entries ?? [s.entry], pageInfo: { hasNextPage: false } } } } } }
-      : { data: { repository: { pullRequest: { reviewThreads: { nodes: s.threads, pageInfo: { hasNextPage: args.variables.cursor ? false : !!s.nextThreads, endCursor: s.nextThreads ? 'next' : null } } } } } };
+      : { data: { repository: { pullRequest: { reviewThreads: { nodes: s.nextThreads && !args.variables.cursor ? Array.from({ length: 100 }, (_, i) => ({ id: `first-${i}`, isResolved: true })) : s.threads, pageInfo: { hasNextPage: args.variables.cursor ? false : !!s.nextThreads, endCursor: s.nextThreads ? 'next' : null } } } } } };
+    else if (route.endsWith('/commits/{ref}/check-runs')) data = { total_count: s.checks.length, check_runs: s.checks };
     else if (route.endsWith('/pulls/{pull_number}')) data = s.pr;
     else if (route.endsWith('/workflows/{workflow_id}')) data = { id: 3, path: '.github/workflows/ci.yml', state: 'active' };
     else if (route.endsWith('/workflows/{workflow_id}/runs')) data = { total_count: s.runs?.length ?? 1, workflow_runs: s.runs ?? [s.run] };

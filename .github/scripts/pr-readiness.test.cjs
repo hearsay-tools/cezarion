@@ -12,6 +12,7 @@ const {
   handleEvent,
 } = require('./pr-readiness.cjs');
 
+const { reviewState, reviewData } = require('./coderabbit.testkit.cjs');
 const workflowPath = path.join(__dirname, '..', 'workflows', 'pr-readiness.yml');
 const owner = 'o';
 const repo = 'r';
@@ -23,9 +24,11 @@ function pullFixture(overrides = {}) {
     number: 7,
     node_id: 'PR_7',
     state: 'open',
+    changed_files: 1,
+    user: { login: 'author' },
     draft: true,
-    head: { sha, repo: { full_name: `${owner}/${repo}` } },
-    base: { ref: 'main' },
+    head: { sha, ref: 'feature', repo: { full_name: `${owner}/${repo}` } },
+    base: { sha: 'b'.repeat(40), ref: 'main', repo: { full_name: `${owner}/${repo}` } },
     ...overrides,
   };
 }
@@ -38,6 +41,7 @@ function checkRun(id, name, conclusion, status = 'completed') {
 function fakeGithub(state = {}) {
   const calls = [];
   const s = {
+    ...reviewState(),
     pulls: [pullFixture()],
     rules: [{ type: 'required_status_checks', parameters: { required_status_checks: [{ context: VERIFY }] } }],
     checkRuns: [checkRun(1, VERIFY, 'success'), checkRun(2, REVIEW_CHECK, 'success')],
@@ -45,10 +49,18 @@ function fakeGithub(state = {}) {
     threads: [],
     ...state,
   };
+  s.run.pull_requests = s.pulls.map(p => ({ number: p.number, head: { sha: p.head.sha }, base: { ref: p.base.ref } }));
+  s.run.conclusion = 'success';
+  s.jobs[0].conclusion = 'success';
   const github = {
     calls,
     state: s,
-    request: async (route, params) => { calls.push(['request', route, params.branch]); return { data: s.rules }; },
+    request: async (route, params) => {
+      calls.push(['request', route, params.branch]);
+      if (route.endsWith('/rules/branches/{branch}')) return { data: s.rules };
+      s.pr = s.live?.(params.pull_number ?? 7) ?? s.pulls.find(p => p.number === (params.pull_number ?? 7)) ?? s.pulls[0];
+      return { data: structuredClone(reviewData(s, route, params)) };
+    },
     paginate: async (method, params) => method(params),
     rest: {
       pulls: {
@@ -93,7 +105,7 @@ test('evaluates the latest run per required check, and commit statuses as a fall
   const required = [VERIFY, REVIEW_CHECK, 'legacy/status'];
   assert.deepEqual(evaluateChecks({
     required,
-    checkRuns: [checkRun(1, VERIFY, 'failure'), checkRun(5, VERIFY, 'success'), checkRun(2, REVIEW_CHECK, 'skipped')],
+    checkRuns: [checkRun(1, VERIFY, 'failure'), checkRun(5, VERIFY, 'success'), checkRun(2, REVIEW_CHECK, 'success')],
     statuses: [{ context: 'legacy/status', state: 'success' }],
   }), { ready: true, pending: [], failing: [], missing: [] });
   assert.deepEqual(evaluateChecks({
@@ -115,10 +127,10 @@ test('marks a draft ready once every required check on its head is green', async
   assert.ok(github.calls.some(([name, ref]) => name === 'checks' && ref === sha), 'checks are read for the run head, not a branch');
 });
 
-test('a skipped review still lets the PR go ready once CI is green', async () => {
+test('a skipped protected review cannot replace native success', async () => {
   const github = fakeGithub({ checkRuns: [checkRun(1, VERIFY, 'success'), checkRun(2, REVIEW_CHECK, 'skipped')] });
   await completeRun(github);
-  assert.deepEqual(flips(github), [['markPullRequestReadyForReview', 'PR_7']]);
+  assert.deepEqual(flips(github), []);
 });
 
 test('a red, pending or missing required check keeps the PR draft', async () => {
@@ -132,7 +144,7 @@ test('a red, pending or missing required check keeps the PR draft', async () => 
     const github = fakeGithub({ checkRuns });
     const logs = await completeRun(github);
     assert.deepEqual(flips(github), [], JSON.stringify(checkRuns));
-    assert.match(logs.join('\n'), /stays draft/);
+    assert.match(logs.join('\n'), /readiness unchanged/);
   }
 });
 
@@ -144,7 +156,7 @@ test('an unresolved review thread of any author keeps the PR draft', async () =>
     ] });
     const logs = await completeRun(github);
     assert.deepEqual(flips(github), [], login);
-    assert.match(logs.join('\n'), /1 review thread\(s\) unresolved/);
+    assert.match(logs.join('\n'), /readiness unchanged/);
   }
 });
 
@@ -279,12 +291,12 @@ test('the readiness workflow runs trusted code with the least permissions that c
   const workflow = parse(source);
   assert.deepEqual(workflow.on.pull_request_target.types, ['opened', 'reopened', 'synchronize', 'ready_for_review', 'converted_to_draft']);
   assert.deepEqual(workflow.on.pull_request_target.branches, ['main']);
-  assert.deepEqual(workflow.on.workflow_run, { workflows: ['CI', 'Automated Code Review'], types: ['completed'] });
+  assert.deepEqual(workflow.on.workflow_run, { workflows: ['CI', 'CodeRabbit review signal'], types: ['completed'] });
   assert.equal(workflow.on.workflow_dispatch.inputs.pr_number.required, true);
   assert.deepEqual(workflow.permissions, {});
   assert.equal(workflow.concurrency['cancel-in-progress'], false, 'a flip must not be cancelled half-way');
   const job = workflow.jobs.readiness;
-  assert.deepEqual(job.permissions, { checks: 'read', contents: 'write', 'pull-requests': 'write', statuses: 'read' });
+  assert.deepEqual(job.permissions, { actions: 'read', checks: 'read', contents: 'write', 'pull-requests': 'write', statuses: 'read' });
   const [checkout, token, script] = job.steps;
   assert.equal(checkout.with.ref, '${{ github.event.repository.default_branch }}', 'the script always comes from the default branch');
   assert.equal(checkout.with['persist-credentials'], false);
@@ -300,4 +312,24 @@ test('the readiness workflow runs trusted code with the least permissions that c
   assert.match(script.with.script, /process\.env\.BOARD_TOKEN \? getOctokit\(process\.env\.BOARD_TOKEN\) : null/);
   assert.match(script.with.script, /require\('\.\/\.github\/scripts\/pr-readiness\.cjs'\)/);
   assert.equal(script.env.BOARD_TOKEN, '${{ steps.board_app.outputs.token }}');
+});
+
+for (const condition of ['pending', 'failed', 'reopened thread', 'native failure', 'native dispatch']) {
+  test(`ready state is revoked on fresh ${condition} despite historical green check names`, async () => {
+    const github = fakeGithub({ pulls: [pullFixture({ draft: false })] });
+    if (condition === 'pending') github.state.checks[0].status = 'in_progress';
+    if (condition === 'failed') github.state.checks[0].conclusion = 'failure';
+    if (condition === 'reopened thread') github.state.threads = [{ id: 't', isResolved: false, isOutdated: true }];
+    if (condition === 'native failure') github.state.jobs[0].conclusion = 'failure';
+    if (condition === 'native dispatch') github.state.run.event = 'workflow_dispatch';
+    await handleEvent({ github, owner, repo, eventName: 'check_run', payload: { check_run: {
+      name: 'CodeRabbit', app: { id: 347564, slug: 'coderabbitai' }, head_sha: sha,
+    } } });
+    assert.deepEqual(flips(github), [['convertPullRequestToDraft', 'PR_7']]);
+  });
+}
+test('a wrong-App provider wake cannot flip draft state', async () => {
+  const github = fakeGithub();
+  await handleEvent({ github, owner, repo, eventName: 'check_run', payload: { check_run: { name: 'CodeRabbit', app: { id: 1 }, head_sha: sha } } });
+  assert.deepEqual(github.calls, []);
 });

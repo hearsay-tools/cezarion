@@ -1,0 +1,50 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const yaml = require('yaml');
+const read = name => yaml.parse(fs.readFileSync(path.join(__dirname, '../workflows', name), 'utf8'));
+test('native protected review is read-only trusted-base admission after preflight', () => {
+  const ci = read('ci.yml'), gate = ci.jobs['review-result'];
+  assert.equal(ci.jobs.review, undefined);
+  assert.equal(fs.existsSync(path.join(__dirname, '../workflows/automated-code-review.yml')), false);
+  assert.equal(gate.needs, 'preflight');
+  assert.deepEqual(gate.permissions, { checks: 'read', contents: 'read', 'pull-requests': 'read' });
+  const checkout = gate.steps.find(s => s.uses?.startsWith('actions/checkout@'));
+  assert.equal(checkout.with.ref, '${{ github.sha }}'); assert.equal(checkout.with['persist-credentials'], false);
+  const script = gate.steps.find(s => s.name === 'Require fresh CodeRabbit execution and resolved threads');
+  assert.match(script.with.script, /readCodeRabbitAdmission/);
+  assert.match(script.with.script, /core.notice/); assert.match(script.with.script, /process.exitCode = 1/);
+  assert.doesNotMatch(script.with.script, /setFailed|createReview|createWorkflowDispatch/);
+  assert.doesNotMatch(JSON.stringify(gate), /secrets\.|OPENAI|ANTHROPIC/);
+});
+test('reconciler has only trusted default-branch triggers and targeted Actions write', () => {
+  const w = read('coderabbit-reconcile.yml'), job = w.jobs.reconcile;
+  assert.deepEqual(w.permissions, {});
+  assert.deepEqual(w.on.check_run.types, ['created', 'completed']);
+  assert.deepEqual(w.on.workflow_run, { workflows: ['CI', 'CodeRabbit review signal'], types: ['completed'] });
+  assert.equal(w.on.pull_request_review, undefined); assert.equal(w.on.pull_request_review_comment, undefined);
+  assert.equal(w.on.workflow_dispatch.inputs.pr_number.required, true);
+  assert.equal(w.concurrency['cancel-in-progress'], false);
+  assert.deepEqual(job.permissions, { contents: 'read', 'pull-requests': 'read', checks: 'read', actions: 'write' });
+  assert.equal(job.steps[0].with.ref, '${{ github.event.repository.default_branch }}');
+  assert.equal(job.steps[0].with['persist-credentials'], false);
+  assert.equal(job.steps[1].with.retries, 0);
+  assert.doesNotMatch(JSON.stringify(w), /secrets\.|refs\/pull\/|create-github-app-token/);
+});
+test('PR-context review signals have no permissions, secrets, checkout or trusted outputs', () => {
+  const w = read('coderabbit-review-signal.yml');
+  assert.deepEqual(w.permissions, {});
+  assert.deepEqual(w.jobs.signal.permissions, {});
+  assert.deepEqual(w.jobs.signal.steps, [{ run: 'true' }]);
+  assert.deepEqual(w.on.pull_request_review.types, ['submitted', 'edited', 'dismissed']);
+  assert.deepEqual(w.on.pull_request_review_comment.types, ['created', 'edited', 'deleted']);
+  assert.doesNotMatch(JSON.stringify(w), /secrets\.|checkout|outputs/);
+});
+test('automatic CodeRabbit reviews include drafts, incremental pushes and all labels with no auto-pause', () => {
+  const config = yaml.parse(fs.readFileSync(path.join(__dirname, '../../.coderabbit.yaml'), 'utf8'));
+  assert.deepEqual(config.reviews.auto_review, { enabled: true, drafts: true, auto_incremental_review: true,
+    auto_pause_after_reviewed_commits: 0, labels: [] });
+  assert.equal(config.reviews.review_progress, true); assert.equal(config.reviews.fail_commit_status, true);
+});

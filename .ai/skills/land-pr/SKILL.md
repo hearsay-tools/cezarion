@@ -51,7 +51,7 @@ Each item must hold at the same current head:
    and documented exemption that allow it; a missing or failed review is no
    exemption. A caller requiring actual model execution still needs that
    evidence. Zero threads remain open, and `needs-qa` has `qa-approved` when
-   present. Follow the repo's review-round rules for new heads and pushback.
+   present. Follow the repo's CodeRabbit admission and reconciliation rules for new heads and finding replies.
 6. **Owner paths:** run `node .ai/skills/auto-merge/check.mjs --title '<title>'`
    against the PR's committed head in its checkout (quote the actual title with
    `shellQuote`). A "gate or test harness" result or an `AGENTS.md` edit needs

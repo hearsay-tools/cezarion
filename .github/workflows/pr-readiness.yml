@@ -8,8 +8,10 @@ on:
     branches:
       - main
   workflow_run:
-    workflows: [CI, Automated Code Review]
+    workflows: [CI, CodeRabbit review signal]
     types: [completed]
+  check_run:
+    types: [created, completed]
   # Actions has no review-thread-resolved event: after resolving a thread by
   # hand, dispatch this to re-check a PR instead of waiting for the next run.
   workflow_dispatch:
@@ -22,7 +24,7 @@ on:
 permissions: {}
 
 concurrency:
-  group: pr-readiness-${{ github.event.pull_request.head.ref || github.event.workflow_run.head_branch || inputs.pr_number }}
+  group: pr-readiness-${{ github.event.pull_request.head.ref || github.event.workflow_run.head_branch || github.event.check_run.head_sha || inputs.pr_number }}
   cancel-in-progress: false
 
 jobs:
@@ -30,6 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      actions: read
       checks: read
       # convertPullRequestToDraft / markPullRequestReadyForReview refuse the
       # workflow token without it. No step checks out or pushes PR code.
@@ -61,6 +64,7 @@ jobs:
       - name: Follow the head's checks with draft state and board status
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
+          RELEASE_APP_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
           BOARD_TOKEN: ${{ steps.board_app.outputs.token }}
         with:
           script: |

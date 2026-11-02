@@ -23,8 +23,8 @@ const BLOCKED_TYPES = new Set(['feat'])
 // file through when its diff only deletes ('deletes') or only adds ('adds') lines.
 const NEVER = [
   { why: 'gate or test harness', globs: [
-    '.github/workflows/**', '.github/codex/**', '.github/schemas/**', '.github/actionlint.yaml',
-    '.github/scripts/{baseline-growth*,change-surface,change-surface-readers,automated-review,pr-readiness,require-e2e-passed,fetch-ci-results,release-*,pr-snapshot,node-floor-reporter,ci-test-sequencer,cockpit-test-sequencer,merge-recommendation*}.*',
+    '.coderabbit.yaml', '.coderabbit.yml', '.github/workflows/**', '.github/codex/**', '.github/schemas/**', '.github/actionlint.yaml',
+    '.github/scripts/{baseline-growth*,change-surface,change-surface-readers,coderabbit-*,native-review-proof,review-threads,review-signal,pr-readiness,require-e2e-passed,fetch-ci-results,release-*,pr-snapshot,node-floor-reporter,ci-test-sequencer,cockpit-test-sequencer,merge-recommendation*}.*',
     '.github/scripts/*.workflow.test.cjs',
     '**/vitest.config.ts', '**/vitest.setup.ts',
     'packages/web/e2e/{agent-browser,failure-setup,environment,fixture-server,held-browser-daemon,poll}.ts',
