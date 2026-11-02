@@ -12,6 +12,8 @@ import { cn } from '@/lib/utils'
 
 import { fullExecCommand } from './exec-command'
 import { Markdown } from './markdown'
+import { markdownLinks, isSafeHref } from './markdown-links'
+import { ReportCards } from './report-cards'
 import { splitToolTitle, streakLabel, type ContextGroupBlock } from './thread-groups'
 import { useThreadCardCache } from './thread-open-cards'
 import { isNearBottom } from './thread-scroll'
@@ -293,58 +295,6 @@ const STREAMDOWN_CHROME = [
   '[data-streamdown="code-block-header"]',
 ].join(',')
 
-/** Markdown links and bare/autolink URLs, in source order, so a Streamdown link *button*
- *  (link-safety has no `href` in the DOM) can be restored to an `<a>` on copy. */
-function withoutMarkdownCode(source: string): string {
-  const fence = '`'.repeat(3)
-  const tilde = '~'.repeat(3)
-  const noBacktickFences = source.split(fence).filter((_, index) => index % 2 === 0).join(' ')
-  const noFences = noBacktickFences.split(tilde).filter((_, index) => index % 2 === 0).join(' ')
-  return noFences.split('`').filter((_, index) => index % 2 === 0).join(' ')
-}
-
-function withoutMarkdownImages(source: string): string {
-  return source.replace(/!\[[^\]]*\]\([^)\s]*(?:\s+"[^"]*")?\)/g, ' ')
-}
-
-function visibleLinkLabel(raw: string): string {
-  return raw.replace(/\*\*/g, '').replace(/\*/g, '').replace(/__/g, '').replace(/~~/g, '').split('`').join('')
-}
-
-function isSafeHref(href: string): boolean {
-  const trimmed = href.trim()
-  if (trimmed === '' || trimmed.startsWith('#')) return true
-  if (/^(https?:|mailto:)/i.test(trimmed)) return true
-  if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return false
-  return true
-}
-
-function markdownLinks(source: string): { label: string, href: string }[] {
-  const text = withoutMarkdownCode(withoutMarkdownImages(source))
-  const defs = new Map<string, string>()
-  for (const match of text.matchAll(/^\s*\[([^\]]+)\]:\s*(\S+)/gm)) {
-    if (isSafeHref(match[2]!)) defs.set(match[1]!.toLowerCase(), match[2]!)
-  }
-  const body = text.replace(/^\s*\[[^\]]+\]:\s*\S+.*$/gm, ' ')
-  const links: { label: string, href: string }[] = []
-  const re = /(?<!!)\[([^\]]+)\](?:\(((?:[^()\s]|\([^)]*\))+)(?:\s+"[^"]*")?\)|\[([^\]]*)\])|<(https?:\/\/[^>\s]+)>|(https?:\/\/[^\s<]+)/g
-  for (const match of body.matchAll(re)) {
-    if (match[2]) {
-      if (isSafeHref(match[2])) links.push({ label: visibleLinkLabel(match[1]!), href: match[2] })
-      continue
-    }
-    if (match[1] !== undefined && match[3] !== undefined) {
-      const id = (match[3].length > 0 ? match[3] : match[1]).toLowerCase()
-      const href = defs.get(id)
-      if (href) links.push({ label: visibleLinkLabel(match[1]!), href })
-      continue
-    }
-    const href = (match[4] ?? match[5])?.replace(/[.,;:!?]+$/, '')
-    if (href && isSafeHref(href)) links.push({ label: href, href })
-  }
-  return links
-}
-
 function clipboardHtml(root: HTMLElement, source: string): string {
   const clone = root.cloneNode(true) as HTMLElement
   clone.querySelectorAll(STREAMDOWN_CHROME).forEach((node) => node.remove())
@@ -386,7 +336,7 @@ async function writeReplyClipboard(kind: 'html' | 'markdown', source: string, ro
  * An assistant message item, as markdown. `breaks` keeps the agent's single newlines visible
  * (#730): replies are chat prose, and CommonMark's newline-as-space flattened them into one line.
  */
-export function AssistantMessage({ text, ts }: { text: string; ts?: string | undefined }) {
+export function AssistantMessage({ text, ts, messageKey }: { text: string; ts?: string | undefined; messageKey?: string | undefined }) {
   const markdownRef = useRef<HTMLDivElement>(null)
   const [copied, setCopied] = useState<'html' | 'markdown' | null>(null)
   const [copyError, setCopyError] = useState<string | null>(null)
@@ -440,6 +390,7 @@ export function AssistantMessage({ text, ts }: { text: string; ts?: string | und
       <div ref={markdownRef}>
         <Markdown breaks>{text}</Markdown>
       </div>
+      <ReportCards text={text} messageKey={messageKey} />
     </ConversationMessage>
   )
 }
