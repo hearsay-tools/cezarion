@@ -102,7 +102,7 @@ describe('authenticated delegation HTTP family', () => {
   });
   it('accepts a catalog workflow on spawn and rejects a malformed one before the service (#451)', async () => {
     const dir = join(f.root, '.ai/cezar/workflows'); mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'review.yaml'), 'name: review\nsteps:\n  - id: inspect\n    prompt: "{{task}}"\n  - id: verify\n    command: \"true\"\n');
+    writeFileSync(join(dir, 'review.yaml'), 'name: review\nsteps:\n  - id: inspect\n    prompt: "{{task}}"\n  - id: verify\n    command: "true"\n');
     const created = await request('/spawn', { task: 'work', baseline: 'parent-head', requestId: randomUUID(), workflow: 'review' });
     expect(created.status).toBe(201);
     const { workerId } = workerSpawnResultSchema.parse(await created.json());

@@ -91,7 +91,7 @@ const WORKER_USAGE = { operations: [
 
 ] };
 const WORKER_HELP: Record<string, { args: string; description: string }> = {
-  resume: { args: '<worker-id> \"<instruction>\" --id <UUID>', description: 'Resume a settled owned worker with a request; --timeout-seconds accepts 1-86400.' },
+  resume: { args: '<worker-id> "<instruction>" --id <UUID>', description: 'Resume a settled owned worker with a request; --timeout-seconds accepts 1-86400.' },
   spawn: { args: '"<task>" --baseline <ref> --request-id <UUID>', description: 'Create an owned worker from a committed baseline.' },
   list: { args: '', description: 'List your owned workers, execution revisions and remaining cleanup resources.' },
   inspect: { args: '<worker-id>', description: 'Show worker state and input locations.' },

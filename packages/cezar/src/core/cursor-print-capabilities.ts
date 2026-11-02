@@ -96,7 +96,7 @@ export async function inspectCursorPrintCapabilities(
       const effort = parameters.find(option => ['effort', 'reasoning', 'reasoning_effort'].includes(option.id) &&
         option.options?.some(value => value.value === spec.effort));
       if (!effort) throw new Error('Cursor print requested effort is not advertised for the selected account');
-      const selection = /^([^\[\]]+)(?:\[([^\[\]]+)\])?$/.exec(model);
+      const selection = /^([^[\]]+)(?:\[([^[\]]+)\])?$/.exec(model);
       if (!selection) throw new Error('Cursor print cannot verify the requested model parameters');
       const embedded = new Map<string, string>();
       for (const entry of selection[2]?.split(',') ?? []) {

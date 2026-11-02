@@ -104,7 +104,7 @@ function piAdmits(wire, name) {
 }
 
 export async function ciPrompt(backend, wire, text) {
-  const pr = /mock:ci-wait(?:\s+(https:\/\/[^\s\"\\]+))?/.exec(text)?.[1] ?? 'https://github.com/owner/repo/pull/1';
+  const pr = /mock:ci-wait(?:\s+(https:\/\/[^\s"\\]+))?/.exec(text)?.[1] ?? 'https://github.com/owner/repo/pull/1';
   const result = await probeCiTool(backend, wire, pr);
   return JSON.stringify(result.response);
 }

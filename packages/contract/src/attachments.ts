@@ -21,7 +21,7 @@ export const FILE_ATTACHMENT_MEDIA_TYPES = [
 
 /** Does this media type travel as an inline image block the model can look at? */
 export function isImageMediaType(mediaType: string): boolean {
-  return /^image\//.test(mediaType);
+  return mediaType.startsWith('image/');
 }
 
 /** Is this something the composer may attach at all — an image, or one of the file types above? */

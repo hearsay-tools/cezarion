@@ -46,7 +46,7 @@ export async function runArtifactCommand(argv: string[], env: NodeJS.ProcessEnv)
     const owner = owningProjectId(config.projects, env.CEZ_ARTIFACTS_DIR!, metadata.runId);
     const prefix = owner ? `/p/${owner}` : '';
     const link = `${prefix}/tasks/${metadata.runId}/files?artifact=${metadata.id}`;
-    const label = metadata.name.replace(/[\r\n\u0000-\u001f\u007f]/g, ' ').replace(/[\\`*_{}\[\]()#+.!|<>~\-]/g, '\\$&');
+    const label = metadata.name.replace(/[\r\n\u0000-\u001f\u007f]/g, ' ').replace(/[\\`*_{}[\]()#+.!|<>~-]/g, '\\$&');
     console.log(JSON.stringify({ ...metadata, link, markdown: `[${label}](${link})` }));
     return 0;
   } catch (error) {
