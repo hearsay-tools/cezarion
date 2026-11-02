@@ -431,7 +431,10 @@ test('verification bindings keep the final gate in CI and reserve local full bro
 
 test('packaged tests stay typechecked after the application build', () => {
   const ci = workflow();
-  const steps = ci.jobs['build-and-package'].steps;
+  const job = ci.jobs['build-and-package'];
+  assert.deepEqual(job.needs, ['queue-proof', 'preflight', 'review-result']);
+  assert.doesNotMatch(job.if, /change-surface|bump_pr/);
+  const steps = job.steps;
   const build = steps.findIndex(step => step.run === 'npm run build');
   const check = steps.findIndex(step => step.run === 'npm run typecheck:package');
   const tests = steps.findIndex(step => step.run === 'npm run test:package');

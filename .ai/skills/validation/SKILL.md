@@ -133,7 +133,7 @@ To check a UI change by hand in a real browser, run `node .ai/scripts/qa-fixture
 (hearsay-tools/cezarion#1406); `packages/web/e2e/README.md` § Checking a UI change by hand
 says what it serves and how it stops.
 
-**Typecheck.** Run `npm run typecheck`; it checks all workspaces without building or writing `dist`.
+**Typecheck.** Run `npm run typecheck`; it checks all workspaces without building or writing `dist`. After `npm run build`, run `npm run typecheck:package` to check packaged tests.
 
 **In a unit test, a timeout is a hang guard, never the thing the test waits on.**
 Wait for the product's own signal: an event, a callback, a store write, a file
