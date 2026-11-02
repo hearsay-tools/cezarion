@@ -252,7 +252,7 @@ describe('the lifecycle prompt teaches the cezar tools', { timeout: 45_000 }, ()
     expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
     await until(() => prompts().length === 2 && store.getRun(run.id)?.status === 'waiting');
     for (const prompt of prompts()) {
-      expect(prompt).toContain(handoffInstructions({ handoffInjected: true }));
+      expect(prompt).toContain(handoffInstructions({ handoffInjected: true, nativeSubagents: true }));
       for (const marker of ['CEZ:DONE', 'CEZ:ASK', 'CEZ:MONITORING']) expect(prompt).not.toContain(marker);
     }
   });

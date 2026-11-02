@@ -1,0 +1,191 @@
+[
+  {
+    "type": "session.started",
+    "sessionId": "2431bg00-1284-4f0a-9b3c-7e6d5c4b3a21",
+    "backend": "claude",
+    "model": "claude-opus-5-5",
+    "cwd": "/repo",
+    "tools": [
+      "Agent",
+      "Bash",
+      "Read",
+      "SendMessage",
+      "TaskStop"
+    ]
+  },
+  {
+    "type": "turn.started",
+    "turnId": "turn_1"
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_bg_fixture_01",
+      "name": "Agent",
+      "toolKind": "task",
+      "title": "Agent: Research native-subagent park path",
+      "status": "running",
+      "input": {
+        "description": "Research native-subagent park path",
+        "prompt": "Read-only research. Report where a parent parks while native subagents run.",
+        "subagent_type": "general-purpose",
+        "run_in_background": true
+      }
+    }
+  },
+  {
+    "type": "item.updated",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_bg_fixture_01",
+      "name": "Agent",
+      "toolKind": "task",
+      "title": "Agent: Research native-subagent park path",
+      "status": "running",
+      "input": {
+        "description": "Research native-subagent park path",
+        "prompt": "Read-only research. Report where a parent parks while native subagents run.",
+        "subagent_type": "general-purpose",
+        "run_in_background": true
+      },
+      "background": true
+    }
+  },
+  {
+    "type": "item.updated",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_bg_fixture_01",
+      "name": "Agent",
+      "toolKind": "task",
+      "title": "Agent: Research native-subagent park path",
+      "status": "running",
+      "input": {
+        "description": "Research native-subagent park path",
+        "prompt": "Read-only research. Report where a parent parks while native subagents run.",
+        "subagent_type": "general-purpose",
+        "run_in_background": true
+      },
+      "background": true,
+      "output": "Async agent launched successfully.\nagentId: ae5425db92ce1ad93 (internal ID - do not mention to user.)\nThe agent is working in the background. You will be notified automatically when it completes."
+    }
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "item_1",
+      "role": "assistant",
+      "text": "The research agent runs in the background. I will continue when it reports."
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "item_1",
+      "role": "assistant",
+      "text": "The research agent runs in the background. I will continue when it reports."
+    }
+  },
+  {
+    "type": "turn.completed",
+    "turnId": "turn_1",
+    "stopReason": "end_turn",
+    "usage": {
+      "input": 8,
+      "output": 58,
+      "total": 32566,
+      "cacheRead": 30100,
+      "cacheWrite": 2400
+    },
+    "costUsd": 0.0412
+  },
+  {
+    "type": "usage.updated",
+    "usage": {
+      "input": 8,
+      "output": 58,
+      "total": 32566,
+      "cacheRead": 30100,
+      "cacheWrite": 2400
+    },
+    "costUsd": 0.0412
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "tool",
+      "id": "toolu_bg_fixture_01",
+      "name": "Agent",
+      "toolKind": "task",
+      "title": "Agent: Research native-subagent park path",
+      "status": "completed",
+      "input": {
+        "description": "Research native-subagent park path",
+        "prompt": "Read-only research. Report where a parent parks while native subagents run.",
+        "subagent_type": "general-purpose",
+        "run_in_background": true
+      },
+      "background": true,
+      "output": "Async agent launched successfully.\nagentId: ae5425db92ce1ad93 (internal ID - do not mention to user.)\nThe agent is working in the background. You will be notified automatically when it completes."
+    }
+  },
+  {
+    "type": "session.started",
+    "sessionId": "2431bg00-1284-4f0a-9b3c-7e6d5c4b3a21",
+    "backend": "claude",
+    "model": "claude-opus-5-5",
+    "cwd": "/repo",
+    "tools": [
+      "Agent",
+      "Bash",
+      "Read",
+      "SendMessage",
+      "TaskStop"
+    ]
+  },
+  {
+    "type": "item.started",
+    "item": {
+      "kind": "message",
+      "id": "item_2",
+      "role": "assistant",
+      "text": "The research agent reported: the parent parks only through the monitoring marker."
+    }
+  },
+  {
+    "type": "item.completed",
+    "item": {
+      "kind": "message",
+      "id": "item_2",
+      "role": "assistant",
+      "text": "The research agent reported: the parent parks only through the monitoring marker."
+    }
+  },
+  {
+    "type": "turn.completed",
+    "turnId": "turn_2",
+    "stopReason": "end_turn",
+    "usage": {
+      "input": 4,
+      "output": 20,
+      "total": 32824,
+      "cacheRead": 32500,
+      "cacheWrite": 300
+    },
+    "costUsd": 0.0198
+  },
+  {
+    "type": "usage.updated",
+    "usage": {
+      "input": 4,
+      "output": 20,
+      "total": 32824,
+      "cacheRead": 32500,
+      "cacheWrite": 300
+    },
+    "costUsd": 0.0198
+  }
+]

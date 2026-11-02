@@ -23,6 +23,7 @@ import { WaitRegistry } from './wait-registry.ts';
 import { WakeRetries } from './wake-retries.ts';
 import { WaitWatches } from './wait-watches.ts';
 import { HumanWaits } from './human-waits.ts';
+import { SubagentWaits } from './subagent-waits.ts';
 import { RunStart } from './run-start.ts';
 import { RunLine } from './run-line.ts';
 import { WorktreeAutosave } from './worktree-autosave.ts';
@@ -83,6 +84,7 @@ export interface RunModules {
   familyReconciler: FamilyReconciler;
   waitWatches: WaitWatches;
   waitRegistry: WaitRegistry;
+  subagentWaits: SubagentWaits;
   humanWaits: HumanWaits;
   sessionHelperHost: sessionEvents.SessionHelperHost;
   turnNudges: TurnNudges;
@@ -118,6 +120,8 @@ export interface RunModules {
 export interface FacadeHost {
   unreadInputGraceMs(): number;
   noWaitNudgeReplyMs(): number | undefined;
+  /** Test seams for the subagent wait's grace and deadline (hearsay-tools/cezarion#2431). */
+  subagentWaitMs(): { graceMs?: number | undefined; deadlineMs?: number | undefined };
   claimWorktreeReclaim(runId: string): ReturnType<MaintenanceClaims['claimWorktreeReclaim']>;
   pendingHumanAskSeq(runId: string): number | undefined;
   waitingBeforeFinalWorkflowStep(run: RunRecord): boolean;
@@ -278,6 +282,8 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     resolvePeerWait: (id, wait) => modules.waitRegistry.resolvePeerWait(id, wait), disarmWait: id => host.disarmWait(id),
     armWorkerDeadline: (id, wait, delay) => modules.waitWatches.armWorkerDeadline(id, wait, delay),
     settleWait: (id, waitId, result) => modules.waitWatches.settleWait(id, waitId, result), exitFileRoots: id => modules.waitWatches.exitFileRoots(id),
+    subagentSessionLive: id => modules.subagentWaits.sessionLive(id),
+    interruptSubagentWait: (id, waitId) => modules.subagentWaits.interrupt(id, waitId),
   });
   modules.waitRegistry = new WaitRegistry(context, {
     active: id => host.active.get(id), workerExecutionStopped: id => host.workerExecutionStopped(id),
@@ -292,6 +298,12 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     reparkWithoutWaits: (id, state) => modules.wakeAdmission.reparkWithoutWaits(id, state), waitOnUserWithoutSession: id => modules.wakeAdmission.waitOnUserWithoutSession(id),
     queueWaitWake: id => modules.wakeAdmission.queueWaitWake(id), retryWaitAdmission: id => modules.retries.retryWaitAdmission(id),
   }, MAX_AUTO_CONTINUES);
+  modules.subagentWaits = new SubagentWaits(context, {
+    active: host.active, isParked: id => modules.line.isParked(id), isAdmitted: id => modules.line.isAdmitted(id),
+    settleWait: (id, waitId, result) => modules.waitWatches.settleWait(id, waitId, result),
+    armWait: (id, wait) => modules.waitWatches.armWait(id, wait), disarmWait: id => host.disarmWait(id),
+    releaseHeldPark: (id, state) => { modules.wakeAdmission.leaveMonitoringPool(id); modules.turnSettler.armIdleTimer(id, state); },
+  }, host.subagentWaitMs().graceMs, host.subagentWaitMs().deadlineMs);
   modules.humanWaits = new HumanWaits(context, { routeWorkerQuestion: id => modules.workerQuestions.routeWorkerQuestion(id) }, MAX_AUTO_CONTINUES);
   modules.sessionHelperHost = {
     active: host.active, line: modules.line, humanWaits: modules.humanWaits, inputReceiptHost: modules.inputReceiptHost,
@@ -305,6 +317,8 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
     resumeParkedRun: (...args) => modules.inputDelivery.resumeParkedRun(...args),
     noteNoWaitNudgeContent: (...args) => modules.turnNudges.noteNoWaitNudgeContent(...args),
     parkedOnWorkers: id => modules.wakeAdmission.parkedOnWorkers(id),
+    trackSubagentEvent: (id, state, event) => modules.subagentWaits.trackEvent(id, state, event),
+    supersedeOnRunnerResume: id => modules.subagentWaits.supersedeOnRunnerResume(id),
     releaseSlot: () => modules.line.releaseSlot(),
     routeWorkerQuestion: id => modules.workerQuestions.routeWorkerQuestion(id),
   };
@@ -488,7 +502,7 @@ export function composeRunModules(context: RunModuleContext, host: FacadeHost): 
   }, modules.line, modules.attachments, modules.turnBookkeeper, modules.queuedInput, modules.continuationAcceptance, modules.workerExecutions);
   modules.turnSettler = new TurnSettler(context, {
     humanWaits: modules.humanWaits, line: modules.line, waitWatches: modules.waitWatches, waitRegistry: modules.waitRegistry,
-    workerQuestions: modules.workerQuestions, completionGateHost: modules.completionGateHost,
+    workerQuestions: modules.workerQuestions, completionGateHost: modules.completionGateHost, subagentWaits: modules.subagentWaits,
     move: (id, exit) => host.move(id, exit), releaseSlot: () => modules.line.releaseSlot(), completionGate: id => modules.runFinish.completionGate(id),
     cancelOpenWaits: id => modules.wakeAdmission.cancelOpenWaits(id), countAutomaticWakes: id => modules.wakeAdmission.automaticWakes(id),
     workerExecutionStopped: id => host.workerExecutionStopped(id), executionBlockedByRootFinish: run => host.executionBlockedByRootFinish(run),

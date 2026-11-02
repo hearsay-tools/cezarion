@@ -167,6 +167,13 @@ export interface UiToolItem {
   /** commandExecution / bash exit code, when the backend reports one. */
   exitCode?: number;
   parentItemId?: string;
+  /**
+   * A native subagent that outlives its spawn call (hearsay-tools/cezarion#2431): claude's
+   * backgrounded `Agent`/`Task` (`async_launched`, `task_started.is_backgrounded`). Only a root
+   * task item carries it. The item stays `running` until the runner reports the child's own end
+   * (claude `task_notification`), so a parent turn may end while it runs.
+   */
+  background?: true;
 }
 
 /** How a native hook run ended. `blocked` covers a blocking exit (claude exit 2) and a

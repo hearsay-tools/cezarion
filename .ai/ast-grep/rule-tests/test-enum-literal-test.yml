@@ -40,6 +40,7 @@ invalid:
   - "const x = { kind: 'worker' }"
   - "const x = { kind: 'process' }"
   - "const x = { kind: 'peer' }"
+  - "const x = { kind: 'subagent' }"
   - "const x = { kind: 'agent' }"
   - "const x = { kind: 'check' }"
   # phase
@@ -60,6 +61,7 @@ invalid:
   - "const x = { via: 'cez-worker-wait' }"
   - "const x = { via: 'completion' }"
   - "const x = { via: 'cez-message-wait' }"
+  - "const x = { via: 'native-subagents' }"
   # source
   - "const x = { source: 'agent' }"
   - "const x = { source: 'cezar' }"

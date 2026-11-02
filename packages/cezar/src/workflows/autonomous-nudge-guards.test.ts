@@ -39,7 +39,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
       sendMessage: vi.fn(() => true), sendAgentMessage: vi.fn(() => Promise.resolve()),
       end: vi.fn(), interrupt: vi.fn(), discardQueuedMessages: vi.fn(), holdsHumanInput: () => false,
     };
-    state = { cwd: root, cancelled: false, interrupt: () => {}, pendingHumanAsk: false, autonomous: true, session };
+    state = { cwd: root, cancelled: false, interrupt: () => {}, pendingHumanAsk: false, backgroundChildren: new Map(), autonomous: true, session };
   });
   afterEach(() => { clearIdleTimer(state); manager.dispose(); vi.useRealTimers(); store.close(); rmSync(root, { recursive: true, force: true }); });
 

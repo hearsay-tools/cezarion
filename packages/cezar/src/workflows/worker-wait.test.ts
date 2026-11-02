@@ -21,6 +21,7 @@ import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { withHeldAck } from '../core/owned-input-delivery.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { gate, thenSay, toolCall } from './waits-parity.testkit.ts';
+import { writeInput, type ActiveRun } from './active-run.ts';
 
 import {
   bookkeeping, captureState, checkpoint, collect, controlledWire, executions, fixtureUpdateRun,
@@ -238,8 +239,11 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const timer = store.getRun(p.id)?.waits?.find(wait => wait.kind === 'timer' && wait.via === 'monitoring-line');
     expect(timer).toBeDefined();
     const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
-    const engine = manager as unknown as { active: Map<string, { session: AgentSession }> };
-    engine.active.get(p.id)!.session.sendMessage([{ type: 'text', text: toolCall('cezar_done', {}) }]);
+    const engine = manager as unknown as { active: Map<string, ActiveRun> };
+    // Cezar's own write, as its nudges are, so the turn it starts is not the runner's
+    // (hearsay-tools/cezarion#2431 closes timers only on a turn the runner starts itself).
+    const state = engine.active.get(p.id)!;
+    writeInput(state, () => state.session!.sendMessage([{ type: 'text', text: toolCall('cezar_done', {}) }]));
     const refused = () => store.readEvents(p.id).filter(event => event.type === 'text' && String(event.text).includes('workers_outstanding') && String(event.text).includes(`worker stop ${w.id}`));
     await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && refused().length === 1 && store.getRun(p.id)?.status === 'waiting');
     expect(completionNudges(p.id)).toHaveLength(1);

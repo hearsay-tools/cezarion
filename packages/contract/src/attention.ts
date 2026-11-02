@@ -45,7 +45,8 @@ export type AttentionShape = 'filled' | 'ring' | 'workers';
  * order (hearsay-tools/cezarion#1496). A rung's label is copy and can carry a count; a reader that
  * decides something reads the id. Rung 8 has an id per PR target (merge since
  * hearsay-tools/cezarion#1425) and the process rung sits between CI and timer
- * (hearsay-tools/cezarion#1446). `unseen` is reserved: `isUnseen` never matches.
+ * (hearsay-tools/cezarion#1446). Native subagents a turn left running sit right after workers
+ * (hearsay-tools/cezarion#2431). `unseen` is reserved: `isUnseen` never matches.
  */
 export const ATTENTION_RUNGS = [
   'needs-permission',
@@ -55,6 +56,7 @@ export const ATTENTION_RUNGS = [
   'running',
   'usage-limit',
   'waiting-on-workers',
+  'waiting-on-subagents',
   'waiting-for-ci',
   'waiting-for-merge',
   'waiting-for-command',
@@ -116,7 +118,7 @@ export function workerWaitLabel(role: 'root' | 'worker', wait: Pick<WorkerWait, 
   return workers ? `waiting on ${workers} worker${workers === 1 ? '' : 's'}` : 'waiting on workers';
 }
 
-/** Presentation is exhaustive over rung ids; only worker waits need a dynamic label or shape. */
+/** Presentation is exhaustive over rung ids; only worker and subagent waits need a dynamic label or shape. */
 const PRESENTATION_OF_RUNG: Record<AttentionRung, Omit<Attention, 'rung'>> = {
   'needs-permission': { bucket: 'permission', tone: 'info', shape: 'filled', pulse: true, label: 'needs permission' },
   failed: { bucket: 'error', tone: 'danger', shape: 'filled', pulse: false, label: 'failed' },
@@ -125,6 +127,7 @@ const PRESENTATION_OF_RUNG: Record<AttentionRung, Omit<Attention, 'rung'>> = {
   running: { bucket: 'running', tone: 'running', shape: 'filled', pulse: true, label: 'running' },
   'usage-limit': { bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'usage limit' },
   'waiting-on-workers': { bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting on workers' },
+  'waiting-on-subagents': { bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting for subagents' },
   'waiting-for-ci': { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for CI' },
   'waiting-for-merge': { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for merge' },
   'waiting-for-command': { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for a command' },
@@ -164,6 +167,14 @@ function peerAttention(waitingOn: Extract<WaitingOn, { kind: 'peers' }>): Attent
   return { ...attentionOfRung('waiting-on-workers'), shape: 'ring', label: count ? `waiting on ${count} task${count === 1 ? '' : 's'}` : 'waiting on tasks' };
 }
 
+/** Native subagents the parent's turn left running (hearsay-tools/cezarion#2431): the robot glyph,
+ *  with the count of children still running. */
+function subagentAttention(waitingOn: Extract<WaitingOn, { kind: 'subagents' }>): Attention {
+  const count = waitingOn.count;
+  const attention = attentionOfRung('waiting-on-subagents');
+  return { ...attention, label: count ? `waiting for ${count} subagent${count === 1 ? '' : 's'}` : attention.label };
+}
+
 /** The parked portion of the ladder, after human, review and running attention. */
 function parkedRung(run: AttentionInput, waitingOn: WaitingOn | undefined): AttentionRung | undefined {
   if (run.status !== 'waiting' && run.status !== 'queued') return undefined;
@@ -176,6 +187,7 @@ function parkedRung(run: AttentionInput, waitingOn: WaitingOn | undefined): Atte
   switch (waitingOn?.kind) {
     case 'workers':
     case 'peers': return 'waiting-on-workers';
+    case 'subagents': return 'waiting-on-subagents';
     case 'pr': return waitingOn.until === 'merge' ? 'waiting-for-merge' : 'waiting-for-ci';
     case 'process': return 'waiting-for-command';
     case 'timer': return 'monitoring';
@@ -222,6 +234,7 @@ export function deriveAttention(run: AttentionInput): Attention {
   const rung = attentionRung(run, waitingOn);
   if (rung === 'waiting-on-workers' && waitingOn?.kind === 'workers') return workerAttention(run, waitingOn);
   if (rung === 'waiting-on-workers' && waitingOn?.kind === 'peers') return peerAttention(waitingOn);
+  if (rung === 'waiting-on-subagents' && waitingOn?.kind === 'subagents') return subagentAttention(waitingOn);
   return attentionOfRung(rung);
 }
 
@@ -262,6 +275,8 @@ const WEBHOOK_STATE_OF_RUNG: Record<AttentionRung, WebhookTrigger | undefined> =
   running: 'running',
   'usage-limit': undefined,
   'waiting-on-workers': 'waiting-workers',
+  // The owner chose the workers trigger for native subagents (hearsay-tools/cezarion#2431).
+  'waiting-on-subagents': 'waiting-workers',
   'waiting-for-ci': 'waiting-ci',
   'waiting-for-merge': 'waiting-other',
   'waiting-for-command': 'waiting-other',

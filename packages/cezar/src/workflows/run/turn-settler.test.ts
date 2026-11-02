@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createActiveRun } from '../active-run.ts';
 import type { AgentSession } from '../../core/agent-runner.ts';
-import { makeRunRecord, RUN_STATUS, WAIT_KIND, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { makeRunRecord, makeSubagentWait, RUN_STATUS, WAIT_KIND, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { UiEventSink } from '../../runs/ui-event-sink.ts';
 import * as rule from '../turn-end.ts';
 import type { CompletionRefusal } from '../completion-policy.ts';
@@ -52,6 +52,7 @@ function fixture() {
     chargeAutomaticWake: call('charge', 1), canAutoContinue: call('canContinue', true),
     sendTurnEndNudge: call('sendNudge', true), awaitCompletionNudgeReply: call('replyBound', undefined), noticeParkedWorker: call('notice', undefined),
     routeWorkerQuestion: call('route', undefined), settledTurnOutcome: call('outcome', undefined),
+    subagentWaits: { atTurnEnd: call('subagentsAtTurnEnd', undefined), holdsLiveSubagents: vi.fn(() => false) },
   };
   const semaphore = { monitoringWakeIntervalMinutes: call<number | null>('interval', 1) };
   const context = { store, semaphore } as unknown as RunModuleContext;
@@ -95,6 +96,18 @@ describe('turn settler entry orders', () => {
     f.settler.endTurn('run', f.state, { handle: () => undefined } as unknown as UiEventSink, { stepId: 'step', scheduleWakeup: undefined });
     order(f, ['humanWait', 'discard', 'state:noWaitNudged', 'prepareAsk', 'state:parkAfterAck']);
   });
+
+  // hearsay-tools/cezarion#2431: native subagents still running replace the monitoring timer.
+  for (const subagents of [true, false]) {
+    it(`turn-end ${subagents ? 'hands live subagents to the subagent wait before the rule decides, and opens no timer beside it' : 'without a subagent wait opens the timer ScheduleWakeup asks for'}`, () => {
+      const f = fixture();
+      f.host.subagentWaits.atTurnEnd.mockImplementation(() => { f.log.push('subagentsAtTurnEnd'); if (subagents) f.run.waits = [makeSubagentWait()]; });
+      decide({ kind: 'take-input' }, { kind: 'park' });
+      f.settler.endTurn('run', f.state, { handle: () => undefined } as unknown as UiEventSink, { stepId: 'step', scheduleWakeup: 300 });
+      expect(f.host.subagentWaits.atTurnEnd).toHaveBeenCalledWith('run', f.state, { sessionOpen: true, done: false, asks: false });
+      order(f, ['subagentsAtTurnEnd', 'state:parkAfterAck', ...(subagents ? [] : ['commitWait', 'armWait']), 'parkWaits']);
+    });
+  }
 
   it('ready calls the gate before clearing the pending nudge and dispatching the carrier', () => {
     const f = fixture();

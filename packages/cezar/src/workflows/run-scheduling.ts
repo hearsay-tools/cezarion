@@ -47,6 +47,8 @@ export function sessionlessWakePrompt(resolved: ReturnType<typeof resolvedWaits>
     ? 'Resume to receive the queued CI observation. End this opening turn so Cezar can deliver it; do not poll CI.'
     : resolved.some(wait => wait.kind === 'worker')
       ? 'Resume to receive the queued worker wait result. End this opening turn so Cezar can deliver it.'
+      : resolved.some(wait => wait.kind === 'subagent')
+        ? 'Resume to receive the queued subagent wait result: your native subagents are no longer running. End this opening turn so Cezar can deliver it.'
       : resolved.length ? 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.'
         : 'Resume to receive queued messages. End this opening turn so Cezar can deliver them.';
 }

@@ -202,6 +202,10 @@ ${injected ? HANDOFF_INJECTED_STEP : HANDOFF_READ_STEP}
 2. After every meaningful milestone (passing tests, a commit, a PR, a scope decision), append one terse timestamped line under "## Progress log", newest at the top.
 3. Before finishing or pausing, update "## Resume notes" with what's done, what's next and any blockers. Leave it empty only when the task is truly complete.`;
 
+/** hearsay-tools/cezarion#2431: a runner that reports its native subagents. Cezar waits on them, so
+ *  the agent just ends its turn; other background work keeps the timer guidance. */
+const NATIVE_SUBAGENTS_TOOLS = `Native subagents: when you end a turn while subagents you started in the background inside this session still run, just end the turn, with no cezar_wait timer for them. Cezar waits for them itself: it spends no automatic wake and wakes you once when they have all ended. Use cezar_wait for other background work.`;
+
 /** hearsay-tools/cezarion#1234: the lifecycle as tool calls. Every session has the tools
  *  (hearsay-tools/cezarion#2397). */
 const LIFECYCLE_TOOLS = `Lifecycle tools (cezar): End every turn with a cezar tool call that says what happens next. When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn. When a user decision or missing input is needed, call cezar_ask with the complete decision context and short questions. Put the full draft, findings, evidence and option meanings in context. Cezar shows context as Markdown above the card. Reasoning and rejected calls are hidden. Give a question 2–4 options to show them as choices, or leave its options out and the user types the answer. Once the call accepts the context and questions, end the turn and wait for the user. When you are waiting on something else, call cezar_wait with kind "pr" for a pull request's checks or its merge, or kind "timer" to re-check later, then end your turn. A human message or any resolved wait wakes you. The user's reply answers your question; PR waits and timers stay open until they resolve or you cancel them with cezar_cancel_wait. Never call cezar_done while anything is unfinished or unverified.`;
@@ -216,10 +220,13 @@ User-attached screenshots and files (PDF, TXT, MD) are saved as real files; thei
 
 /**
  * The handoff contract for one agent session: the journal, the lifecycle tools, then task
- * references and attachments. With `handoffInjected` the launch's opening message already carries
- * the file (hearsay-tools/cezarion#1584), so step 1 points there instead of asking for a read; the
+ * references and attachments. With `nativeSubagents` (a runner that reports them,
+ * hearsay-tools/cezarion#2431) it adds that Cezar waits for native subagents. With
+ * `handoffInjected` the launch's opening message already carries the file
+ * (hearsay-tools/cezarion#1584), so step 1 points there instead of asking for a read; the
  * writing duties never change.
  */
-export function handoffInstructions(opts: { handoffInjected?: boolean } = {}): string {
-  return `${handoffJournal(opts.handoffInjected ?? false)}\n\n${LIFECYCLE_TOOLS}\n\n${REFERENCES_AND_ATTACHMENTS}`;
+export function handoffInstructions(opts: { handoffInjected?: boolean; nativeSubagents?: boolean } = {}): string {
+  const subagents = opts.nativeSubagents ? `\n\n${NATIVE_SUBAGENTS_TOOLS}` : '';
+  return `${handoffJournal(opts.handoffInjected ?? false)}\n\n${LIFECYCLE_TOOLS}${subagents}\n\n${REFERENCES_AND_ATTACHMENTS}`;
 }

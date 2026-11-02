@@ -37,7 +37,7 @@ utils:
     kind: string
     has:
       kind: string_fragment
-      regex: '^(pr|timer|human|worker|process|peer|agent|check)$'
+      regex: '^(pr|timer|human|worker|process|peer|subagent|agent|check)$'
   # waitPhaseSchema
   phase-literal:
     kind: string
@@ -49,7 +49,7 @@ utils:
     kind: string
     has:
       kind: string_fragment
-      regex: '^(cezar_wait|cezar_wait_for_ci|cezar_ask|monitoring-line|schedule-wakeup|ask-line|native-ask|no-wait|budget|cez-worker-wait|completion|cez-message-wait)$'
+      regex: '^(cezar_wait|cezar_wait_for_ci|cezar_ask|monitoring-line|schedule-wakeup|ask-line|native-ask|no-wait|budget|cez-worker-wait|completion|cez-message-wait|native-subagents)$'
   # a wait's `source`
   source-literal:
     kind: string
