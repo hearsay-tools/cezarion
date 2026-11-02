@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { RUN_STATUS, WAIT_PHASE, makeHumanWait, makePeerWait, makeSubagentWait, makeTimerWait } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { blank } from '../test-wait-discipline.testkit.ts';
+import { blank } from '../lint/blank.ts';
 import {
   AUTOMATIC, RUN_EXITS, RUN_STATES, RUN_TRIGGERS, WAIT_KINDS, stateOf, statusOf, strictRunExits, takeRunExitViolations,
   throwRunExitViolations, transition, transitionVia, type RunState, type RunStateSpec, type TriggerRow,

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { blank } from '../test-wait-discipline.testkit.ts';
+import { blank } from '../lint/blank.ts';
 import { HELPER_MODULES } from './launcher.ts';
 
 /**

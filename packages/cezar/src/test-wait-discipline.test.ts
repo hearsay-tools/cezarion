@@ -2,21 +2,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import {
-  type Baseline,
-  baselines,
-  blank,
-  compareToBaseline,
-  readBaseline,
-  scanFile,
-  scannedFiles,
-  scanSource,
-  scanSuite,
-  shrinkBaseline,
-  SHORT_BOUND_MS,
-  tally,
-  type Site,
-} from './test-wait-discipline.testkit.ts';
+import { blank } from './lint/blank.ts';
+import { scanFile, scanSource, SHORT_BOUND_MS, type Site } from './lint/test-wait-discipline.ts';
+import { type Baseline, baselines, compareToBaseline, readBaseline, scannedFiles, scanSuite, shrinkBaseline, tally } from './lint/server-wait-baseline.ts';
 
 /**
  * The server unit tests' wait discipline, as a source scan (hearsay-tools/cezarion#1155). A bare

@@ -41,6 +41,7 @@ afterAll(() => {
 });
 
 const VIOLATIONS: Record<string, [string, string]> = {
+  'test-wait-discipline': ['packages/cezar/src/wait-violation.test.ts', 'await sleep(5);\n'],
   'card-2-contrast': ['packages/web/src/unsafe.tsx', '<p className="bg-card-2 text-danger text-xs">bad</p>'],
   'design-guardian': ['packages/web/src/design-violation.tsx', 'const value = "h-screen";\n'],
   'contract-root-import': ['packages/cezar/src/a.ts', "import { runRecordSchema } from '@open-mercato/cezar-contract';\n"],
@@ -53,6 +54,7 @@ const VIOLATIONS: Record<string, [string, string]> = {
 
 /** Each approved exception, by the rule it exercises. None may produce a finding. */
 const APPROVED: Record<string, string> = {
+  'packages/cezar/src/wait-approved.test.ts': 'await sleep(5); // bound: a negative window\n',
   'packages/web/src/routes/unknown-project.tsx': '<div className="bg-card-2"><span className="font-mono text-[11px] font-normal text-soft-foreground">old</span></div>',
 
   'packages/web/src/styles/index.ts': 'export const value = "h-dvh";',
