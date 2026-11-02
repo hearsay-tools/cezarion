@@ -11,6 +11,16 @@
   "baseline": {
     "onStart": "lookup-then-run-missing"
   },
+  "lint": {
+    "enabled": true,
+    "tools": [
+      "oxlint"
+    ],
+    "include": [
+      "packages/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}"
+    ],
+    "exclude": []
+  },
   "complexity": {
     "enabled": true
   },
@@ -25,6 +35,15 @@
     "packages/cezar/src/contract-import-boundaries.test.ts": [
       "packages/contract/src/**/*.ts",
       "packages/api-client/src/contract/**/*.ts"
+    ],
+    "packages/cezar/src/lint/lint-runner.test.ts": [
+      ".env.example",
+      "sgconfig.yml",
+      ".ai/ast-grep/**",
+      "packages/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}",
+      "packages/*/src/**/*.json",
+      "packages/web/src/styles/index.css",
+      "packages/web/{src,e2e}/**/*.css"
     ],
     "packages/cezar/src/lint/lint.test.ts": [
       ".oxlintrc.json",
