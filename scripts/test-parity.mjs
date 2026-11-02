@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { globSync } from 'node:fs';
+import { globSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -38,26 +38,56 @@ export function detectDaemon(cwd, run = spawnSync, home = homedir(), env = proce
   return null;
 }
 
-export function reportVerdicts(files, status, log) {
+function verdictRows(files, status) {
   const entries = status.selection?.testFiles ?? [];
-  let passed = true;
-  for (const file of files) {
+  return files.map(file => {
     const matches = entries.filter(entry => entry.path === file);
     const currentPass = matches.length > 0 && matches.every(entry =>
       entry.state === 'current' && entry.verdict === 'pass');
+    const pending = matches.some(entry => entry.state === 'pending');
     const detail = matches.length ? matches.map(entry =>
       `${entry.state}/${entry.verdict ?? 'no verdict'}`).join(', ') : 'unknown/no verdict';
     const label = currentPass ? 'PASS'
       : matches.some(entry => entry.verdict === 'fail') ? 'FAIL'
-        : matches.some(entry => entry.state === 'pending') ? 'PENDING' : 'UNKNOWN';
-    log(`${label} ${file}: ${detail}`);
-    passed = passed && currentPass;
+        : pending ? 'PENDING' : 'UNKNOWN';
+    return { file, label, detail, pending };
+  });
+}
+
+export function reportVerdicts(files, status, log) {
+  const rows = verdictRows(files, status);
+  for (const { file, label, detail } of rows) log(`${label} ${file}: ${detail}`);
+  return rows.every(row => row.label === 'PASS') ? 0 : 1;
+}
+
+function waitForVerdicts(command, files, { cwd, run, log, now }) {
+  const config = JSON.parse(readFileSync(join(cwd, 'squeal.config.json'), 'utf8'));
+  const cap = config.runner?.timeoutMs;
+  if (!Number.isSafeInteger(cap) || cap <= 0) {
+    throw new Error('squeal.config.json must give runner.timeoutMs as a positive integer');
   }
-  return passed ? 0 : 1;
+  const deadline = now() + cap + 5 * 60 * 1000;
+  let round = 0;
+  while (true) {
+    const wait = Math.max(1, Math.min(60000, deadline - now()));
+    const result = run(command, ['status', '--wait', String(wait), '--json', ...files], {
+      cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
+    });
+    if (result.error) throw result.error;
+    const status = JSON.parse(result.stdout);
+    const rows = verdictRows(files, status);
+    const pass = rows.filter(row => row.label === 'PASS').length;
+    const pending = rows.filter(row => row.pending).length;
+    log(`[test:parity] round ${++round}: ${pass} pass, ${pending} pending`);
+    if (pending === 0 || now() >= deadline) {
+      const code = reportVerdicts(files, status, log);
+      return result.status === 0 ? code : 1;
+    }
+  }
 }
 
 export function runParity({ cwd = process.cwd(), args = process.argv.slice(2),
-  run = spawnSync, log = console.log, home = homedir() } = {}) {
+  run = spawnSync, log = console.log, home = homedir(), now = Date.now } = {}) {
   if (args.some(arg => arg !== '--plan')) throw new Error('Use only --plan');
   const files = selectFiles(cwd);
   if (!files.length) throw new Error('No *-parity.test.ts files under packages/');
@@ -74,12 +104,7 @@ export function runParity({ cwd = process.cwd(), args = process.argv.slice(2),
     if (result.error) throw result.error;
     return result.status ?? 1;
   }
-  const result = run(command, ['status', '--wait', '60000', '--json', ...files], {
-    cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
-  });
-  if (result.error) throw result.error;
-  const code = reportVerdicts(files, JSON.parse(result.stdout), log);
-  return result.status === 0 ? code : 1;
+  return waitForVerdicts(command, files, { cwd, run, log, now });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

@@ -14,6 +14,7 @@ function fixture(t) {
     mkdirSync(dirname(join(cwd, file)), { recursive: true });
     writeFileSync(join(cwd, file), '');
   }
+  writeFileSync(join(cwd, 'squeal.config.json'), JSON.stringify({ runner: { timeoutMs: 2345 } }));
   return cwd;
 }
 const result = data => ({ status: 0, stdout: JSON.stringify(data) });
@@ -133,4 +134,44 @@ test('discovers the documented SQUEAL_BIN_DIR launcher override', () => {
   };
   assert.equal(detectDaemon('/repo', run, '/user', { SQUEAL_BIN_DIR: '/custom/bin' }), '/custom/bin/squeal');
   assert.deepEqual(calls, ['squeal', '/custom/bin/squeal']);
+});
+
+test('repeats a pending round until all parity files pass', t => {
+  const cwd = fixture(t);
+  const files = selectFiles(cwd);
+  let rounds = 0;
+  let time = 0;
+  const logs = [];
+  const run = (command, args) => {
+    if (!args.includes('--wait')) return alive(cwd);
+    time += 1000;
+    rounds++;
+    return result({ selection: { testFiles: files.map(path => ({
+      path, state: rounds === 1 ? 'pending' : 'current', verdict: rounds === 1 ? undefined : 'pass',
+    })) } });
+  };
+  assert.equal(runParity({ cwd, args: [], run, now: () => time, log: line => logs.push(line) }), 0);
+  assert.equal(rounds, 2);
+  assert.ok(logs.some(line => line.includes('round 1: 0 pass, 2 pending')));
+  assert.ok(logs.some(line => line.includes('round 2: 2 pass, 0 pending')));
+});
+
+test('stops pending rounds at the configured per-file cap plus five minutes', t => {
+  const cwd = fixture(t);
+  const files = selectFiles(cwd);
+  let time = 0;
+  const waits = [];
+  const logs = [];
+  const run = (command, args) => {
+    if (!args.includes('--wait')) return alive(cwd);
+    const wait = Number(args[2]);
+    waits.push(wait);
+    time += wait;
+    return { status: 3, stdout: JSON.stringify({ selection: { testFiles:
+      files.map(path => ({ path, state: 'pending' })) } }) };
+  };
+  assert.equal(runParity({ cwd, args: [], run, now: () => time, log: line => logs.push(line) }), 1);
+  assert.deepEqual(waits, [60000, 60000, 60000, 60000, 60000, 2345]);
+  assert.equal(time, 302345);
+  for (const file of files) assert.ok(logs.some(line => line.startsWith(`PENDING ${file}:`)));
 });
