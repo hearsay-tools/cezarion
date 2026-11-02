@@ -1,4 +1,3 @@
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseEffort } from '@open-mercato/cezar-contract/effort';

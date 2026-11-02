@@ -3,7 +3,7 @@ import type { ArchiveFinishedScope, ProcessUsage, RunRecord, RunSummary, RunStat
 import { isSweepable } from '@open-mercato/cezar-api-client/contract/run-predicates'
 import { matchesRunSearch } from '@open-mercato/cezar-api-client/contract/run-search'
 import { isUsageLimitHold } from '@open-mercato/cezar-api-client/contract/waits'
-import { isOwnedWorker, runTitle, type ListView } from '@/lib/task-groups'
+import { isOwnedWorker, runTitle } from '@/lib/task-groups'
 
 /**
  * The pure half of the Tasks table (the `/` overview): search, the header's archive count, the

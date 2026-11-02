@@ -10,8 +10,8 @@ import type { RunModuleContext } from './types.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { RunRecord } from '../../runs/store.ts';
 import type { AgentInput, WorkerWaitRequest } from '@open-mercato/cezar-contract/delegation';
-import { cezarAskRequestSchema, cezarWaitRequestSchema, WAIT_LIMIT, type AskErrorCode, type CezarAskRequest, type CezarWaitRequest, type CezarWaitRequestInput, type WaitErrorCode, type WaitVia, type Wait, type HumanWaitEntry, type PrWaitEntry, type TimerWaitEntry, type WorkerWaitEntry, type DeadlinedWorkerWaitEntry, type ProcessWaitEntry, type ProcessWaitResult, type PeerWaitEntry, type PeerWaitResult } from '@open-mercato/cezar-contract/waits';
-import type { CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
+import { cezarAskRequestSchema, cezarWaitRequestSchema, WAIT_LIMIT, type AskErrorCode, type CezarAskRequest, type CezarWaitRequest, type CezarWaitRequestInput, type WaitErrorCode, type WaitVia, type Wait, type HumanWaitEntry, type PrWaitEntry, type TimerWaitEntry, type WorkerWaitEntry, type DeadlinedWorkerWaitEntry, type ProcessWaitEntry, type PeerWaitEntry } from '@open-mercato/cezar-contract/waits';
+
 import type { CiWatcherSupervisor } from '../../ci-wait/supervisor.ts';
 import { askErrorMessage, waitErrorMessage } from '../../ci-wait/errors.ts';
 import { toolSessionRefusal } from './cezar-tools.ts';

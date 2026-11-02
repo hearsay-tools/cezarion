@@ -14,7 +14,6 @@ import {
   useHealth,
   useProjects,
   useRunsIndex,
-  workspaceQueryKeys,
 } from '@/api/queries'
 import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'

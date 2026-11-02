@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { askContextSchema, askRequestSchema } from './ask-schema.ts';
-import { ciPrIdentitySchema, ciPrUrlSchema, ciWaitErrorCodeSchema, ciWaitRequestSchema, ciWaitResultSchema, prWaitUntilSchema } from './ci-wait.ts';
+import { ciPrIdentitySchema, ciWaitErrorCodeSchema, ciWaitRequestSchema, ciWaitResultSchema, prWaitUntilSchema } from './ci-wait.ts';
 import { peerWaitResultSchema, refinePeerWaitResult, workerIdsSchema, workerOutcomeSchema, workerWaitModeSchema } from './delegation.ts';
 import type { DelegationState, PeerWaitView, RunDelegationSummary, WorkerCompletionWait, WorkerWait } from './delegation.ts';
 import { requestOutcomeSchema, type ConversationMessage } from './conversations.ts';

@@ -1,7 +1,7 @@
 import { sendRequestContext, sendAdmission, sendMessage, sendInput, type ConversationPair } from './conversation-send.ts';
 import { discoverTasks } from './task-discovery.ts';
 import { discoveredRunners, missingModelChoices, type HostDiscovery } from '../discovery/catalog.ts';
-import { assertConversationCapacity, assertFamilySender, byCreatedAtAndId, commitAccepted, familyPair, inboxEntryIn, isRootTask,
+import { assertConversationCapacity, assertFamilySender, byCreatedAtAndId, commitAccepted, familyPair, inboxEntryIn,
   orphanedPeerMessage, peerPair, takesPart, projectConversationEvents, reconcileConversationState, replyOutcomes, type InboxEntry } from './conversations.ts';
 export { rootDelegation } from './conversations.ts';
 import { collectWorkerEvidence, revalidateRetainedWorkerResult, workerRevision } from './results.ts';

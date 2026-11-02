@@ -1,6 +1,6 @@
 /** Structured human questions share one validation and acknowledgement policy
  * across runner delivery, compact history, and current cockpit attention. */
-import { z } from 'zod';
+
 import { humanAskClosedEventSchema, humanInputDeliveredEventSchema, type RunEvent } from './events.ts';
 
 export { ASK_LIMITS, askOptionSchema, askQuestionSchema, askRequestSchema } from './ask-schema.ts';
