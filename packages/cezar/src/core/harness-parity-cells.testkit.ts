@@ -60,7 +60,6 @@ import { explicitToolGrant } from './tool-grant.testkit.ts';
 import { describeToolGrantParity } from './tool-grant-parity-cells.testkit.ts';
 import { inputDeliveryOf } from './agent-runner.ts';
 import { agentTmpDir, resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
-import { appendTurnText } from '../workflows/run.ts';
 import * as gitWorktree from '../git-worktree.ts';
 import { cleanupCheckpoint, seedSettledFamily } from '../workflows/delegation-reconcile.testkit.ts';
 import { supportsProfiles } from './agent-profiles.ts';

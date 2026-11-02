@@ -4,7 +4,6 @@ import { Link as RouterLink, MemoryRouter, useLocation, useNavigate, type Naviga
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AppShell, routeOwnsScrollArrival, type AppShellProps } from './app-shell'
-import { NAV_ITEMS } from './nav-items'
 import { ThemeProvider } from './theme-provider'
 
 afterEach(() => {

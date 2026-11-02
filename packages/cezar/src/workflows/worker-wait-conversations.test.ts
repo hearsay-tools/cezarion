@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
+import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { parkNoticeId } from '../delegation/park-notice.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';

@@ -9,7 +9,7 @@ import { attentionFields } from '../task-cli/projections.ts';
 import { toolCall } from './waits-parity.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
-import { delegatingParent, deliveredBesideWorkerMessages, fixtureUpdateRun, manager, parent, queuedWake, register, store, root, terminal, worker, until, semaphore, useWorkerWaitFixture, waitOf, workerEntryOf } from './worker-wait.testkit.ts';
+import { delegatingParent, deliveredBesideWorkerMessages, fixtureUpdateRun, manager, parent, queuedWake, register, store, terminal, worker, until, semaphore, useWorkerWaitFixture, waitOf, workerEntryOf } from './worker-wait.testkit.ts';
 import { hasPendingAsk } from '../runs/run-store.testkit.ts';
 
 const ASK_PROMPT = toolCall('cezar_ask', { context: 'A choice is needed.', questions: [{ header: 'Choice', question: 'Which module?', options: [{ label: 'Parser' }, { label: 'Runner' }] }] });

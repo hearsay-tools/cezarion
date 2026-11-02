@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CURSOR_PROVIDER_ERROR_MAX_CHARS, sanitizeCursorProviderError } from './cursor-provider-error.ts';
+import { sanitizeCursorProviderError } from './cursor-provider-error.ts';
 
 describe('sanitizeCursorProviderError', () => {
   it('strips the Cursor error-envelope prefix and collapses whitespace', () => {

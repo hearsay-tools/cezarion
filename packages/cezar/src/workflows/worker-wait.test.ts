@@ -1,21 +1,15 @@
 import { randomUUID } from 'node:crypto';
-import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
-import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
+import { describe, expect, it, vi } from 'vitest';
 import {
   RUN_STATUS, STEP_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA, makeWorkerWait,
 } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { RunStore, type RunRecord } from '../runs/store.ts';
+import { type RunRecord } from '../runs/store.ts';
 import * as runnerFactory from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
-import { collectWorkerEvidence } from '../delegation/results.ts';
-import { planOwnedWorkspace } from '../delegation/workspace.ts';
-import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
-import { COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, RunManager } from './run.ts';
-import { currentUsage } from '../core/process-usage.ts';
+import { COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES } from './run.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { withHeldAck } from '../core/owned-input-delivery.testkit.ts';
@@ -24,9 +18,8 @@ import { gate, thenSay, toolCall } from './waits-parity.testkit.ts';
 import { writeInput, type ActiveRun } from './active-run.ts';
 
 import {
-  bookkeeping, captureState, checkpoint, collect, controlledWire, executions, fixtureUpdateRun,
-  manager, parent, queuedWake, register, reopenRuntime, restart, root, semaphore, setFailureState,
-  store, terminal, track, until, useWorkerWaitFixture, waitOf, lastWaitOf, workerEntryOf, worker,
+  checkpoint, collect, controlledWire, fixtureUpdateRun, manager, parent, register, restart, root, semaphore,
+  store, until, useWorkerWaitFixture, waitOf, lastWaitOf, worker,
 } from './worker-wait.testkit.ts';
 import { blockRunWrites, readPersistedRuns } from '../runs/run-store.testkit.ts';
 

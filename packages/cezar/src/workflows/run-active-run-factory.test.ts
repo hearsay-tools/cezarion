@@ -9,7 +9,7 @@ import { SUBAGENT_STATUS } from '@open-mercato/cezar-contract/test-factories.tes
 import { RunStore } from '../runs/store.ts';
 import type { Skill } from '../skills.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
-import { createActiveRun, type ActiveRun } from './active-run.ts';
+import { createActiveRun } from './active-run.ts';
 import { RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
 

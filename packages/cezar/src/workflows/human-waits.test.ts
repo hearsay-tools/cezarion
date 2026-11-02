@@ -13,7 +13,7 @@ import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { handoffInstructions } from '../handoff.ts';
 import { PROSE_HUMAN_GATE } from '../runs/transcript-facts.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
-import { eventCheckpoint, manager, parent, restart, root, semaphore, store, terminal, until, delegatingParent, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
+import { eventCheckpoint, manager, parent, restart, root, store, terminal, until, delegatingParent, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
 import { messagesPrompt } from './monitoring-turn.testkit.ts';
 import { MAX_AUTO_CONTINUES, NO_WAIT_NUDGE_NOTE } from './run.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';

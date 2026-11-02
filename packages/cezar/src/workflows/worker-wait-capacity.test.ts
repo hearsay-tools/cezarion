@@ -1,27 +1,18 @@
 import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
-import { execFileSync, spawn } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
-import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
-import { RunStore, type RunRecord } from '../runs/store.ts';
-import * as runnerFactory from '../core/runner-factory.ts';
-import { collectWorkerEvidence } from '../delegation/results.ts';
-import { planOwnedWorkspace } from '../delegation/workspace.ts';
-import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
-import { RunManager } from './run.ts';
-import { currentUsage } from '../core/process-usage.ts';
+import { describe, expect, it, vi } from 'vitest';
+import { type RunRecord } from '../runs/store.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS, answerAsParent } from '../core/harness-parity.testkit.ts';
 import { withHeldAck, withHeldResponse } from '../core/owned-input-delivery.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
 import {
-  bookkeeping, grantSteer, captureState, eventCheckpoint, checkpoint, collect, controlledWire, executions, fixtureUpdateRun,
-  manager, parent, queuedWake, register, reopenRuntime, restart, root, semaphore, setFailureState,
-  store, terminal, track, until, useWorkerWaitFixture, waitOf, workerEntryOf, worker,
+  bookkeeping, grantSteer, captureState, eventCheckpoint, collect, controlledWire, fixtureUpdateRun, manager,
+  parent, queuedWake, register, restart, root, semaphore, setFailureState, store, terminal, until,
+  useWorkerWaitFixture, waitOf, workerEntryOf, worker,
 } from './worker-wait.testkit.ts';
 import { toRunSummary } from '@open-mercato/cezar-contract/runs';
 import { blockRunWrites, readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
