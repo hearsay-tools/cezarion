@@ -265,7 +265,7 @@ test('a removal that fails partway keeps the owner marker, so the reaper can sti
   assert.equal(existsSync(dir), false)
 })
 
-test('hideHostCommands mirrors every PATH directory that holds a hidden command, without it (hearsay-tools/cezarion#1916)', { skip: process.platform === 'win32' ? 'POSIX PATH' : false }, (t) => {
+test('hideHostCommands mirrors every PATH directory that holds a hidden command, without it, and drops relative entries (hearsay-tools/cezarion#1916)', { skip: process.platform === 'win32' ? 'POSIX PATH' : false }, (t) => {
   const root = scratch(t)
   const withRunner = join(root, 'with-runner')
   const without = join(root, 'without')
@@ -275,9 +275,10 @@ test('hideHostCommands mirrors every PATH directory that holds a hidden command,
   symlinkSync('node-tool', join(withRunner, 'relative-link'))
   const missing = join(root, 'missing')
 
-  const path = hideHostCommands(['omp', 'pi'], join(root, 'mirror'), [withRunner, without, missing, 'relative'].join(delimiter))
+  // A relative or empty entry resolves against each spawn's working directory, which may hold a runner.
+  const path = hideHostCommands(['omp', 'pi'], join(root, 'mirror'), [withRunner, without, missing, 'relative', '', '.'].join(delimiter))
   const [mirror, ...rest] = path.split(delimiter)
-  assert.deepEqual(rest, [without, missing, 'relative'])
+  assert.deepEqual(rest, [without, missing])
   assert.ok(mirror.startsWith(join(root, 'mirror')))
   assert.deepEqual(readdirSync(mirror).sort(), ['node-tool', 'relative-link'])
   assert.equal(realpathSync(join(mirror, 'relative-link')), join(withRunner, 'node-tool'))

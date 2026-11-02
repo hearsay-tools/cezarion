@@ -290,16 +290,17 @@ export function stopSandboxProcesses(paths, {
 
 /**
  * A PATH in which every absolute directory that holds one of `names` is replaced by a mirror
- * under `mirrorRoot`: a directory of symlinks to every other entry. The named commands then
- * resolve as on a host without them. Server unit tests hide the runner CLIs this way, so a test
- * that starts one by its default name gets ENOENT on every host, as on CI, and never runs the
- * real one (hearsay-tools/cezarion#1916). Windows keeps its PATH.
+ * under `mirrorRoot`: a directory of symlinks to every other entry. Relative and empty entries
+ * go: they resolve against each spawn's working directory, so no mirror can stand in for them.
+ * The named commands then resolve as on a host without them. Server unit tests hide the runner
+ * CLIs this way, so a test that starts one by its default name gets ENOENT on every host, as on
+ * CI, and never runs the real one (hearsay-tools/cezarion#1916). Windows keeps its PATH: no
+ * Windows job runs these tests, and its commands resolve through PATHEXT names.
  */
 export function hideHostCommands(names, mirrorRoot, path = process.env.PATH ?? '') {
   if (process.platform === 'win32') return path
   const hidden = new Set(names)
-  return path.split(delimiter).map((dir, index) => {
-    if (!isAbsolute(dir)) return dir
+  return path.split(delimiter).filter((dir) => isAbsolute(dir)).map((dir, index) => {
     let entries
     try {
       entries = readdirSync(dir)
