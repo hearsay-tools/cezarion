@@ -10,11 +10,11 @@ async function openPulls(read) {
   const pulls = [];
   for (let page = 1; page <= 2; page++) {
     const rows = await read('GET /repos/{owner}/{repo}/pulls', { state: 'open', base: 'main', page, per_page: 100 });
-    if (!Array.isArray(rows) || rows.some(pr => !positive(pr?.number) || !validSha(pr.head?.sha))) throw new Error('Malformed open PRs');
+    if (!Array.isArray(rows) || rows.length > 100) throw new Error('Malformed open PR listing');
     pulls.push(...rows);
     if (rows.length < 100) return pulls;
   }
-  throw new Error('Open PR pagination limit; dispatch one PR');
+  throw new Error('Open PR pagination limit; reduce the open main PR inventory before retrying');
 }
 async function checkTarget(read, payload) {
   if (!['created', 'completed'].includes(payload.action) || !trustedCheck(payload.check_run)
@@ -31,7 +31,7 @@ async function workflowTarget(read, payload, fullName) {
   if (run.id !== source.id || run.run_attempt !== source.run_attempt || run.status !== 'completed'
     || run.event !== 'pull_request_target' || run.path !== '.github/workflows/ci.yml'
     || run.repository?.full_name !== fullName || run.head_sha !== source.head_sha) return null;
-  return { head: run.head_sha, sourceId: run.id, sourceAttempt: run.run_attempt };
+  return { head: run.head_sha };
 }
 async function eventTarget(read, eventName, payload, fullName) {
   if (payload.repository?.full_name !== fullName) throw new Error('Foreign event');
@@ -83,10 +83,17 @@ function rerunnable(run, now) {
   return run.status === 'completed' && run.run_attempt < 50 && Number.isFinite(created)
     && now - created >= 0 && now - created < 30 * 86400000;
 }
-async function reconcilePull({ github, owner, repo, pr, target, releaseAppBotLogin, now, deadline, sleep, log }) {
+async function nativeProof(args, pr, log) {
+  try { return await readNativeReview({ ...args, pr }); }
+  catch {
+    log(`PR ${pr.number}: native evidence unavailable or changed; skipped this PR.`);
+    return null;
+  }
+}
+async function reconcilePull({ github, owner, repo, pr, releaseAppBotLogin, now, deadline, sleep, log }) {
   const args = { github, owner, repo, now, deadline };
-  const proof = await readNativeReview({ ...args, pr });
-  if (target.sourceId && (target.sourceId !== proof.run.id || target.sourceAttempt !== proof.run.run_attempt)) return 'stale-event';
+  const proof = await nativeProof(args, pr, log);
+  if (!proof) return 'native-evidence-unavailable';
   if (!currentGate(proof)) {
     log(`PR ${pr.number}: native CI uses the old review workflow. Push a new head or start a new native run after rollout; targeted retries cannot replace its definition.`);
     return 'legacy-workflow';
@@ -104,13 +111,16 @@ async function reconcilePull({ github, owner, repo, pr, target, releaseAppBotLog
     return 'rerun-unavailable';
   }
   if (await desired() !== admitted) return 'changed';
-  const final = await readNativeReview({ ...args, pr });
+  const final = await nativeProof(args, pr, log);
+  if (!final) return 'native-evidence-unavailable';
   if (!unchangedJob(proof, final, job)) return 'changed';
   const read = reader(github, owner, repo, deadline, now);
-  const live = await read('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: pr.number });
+  let live;
+  try { live = await read('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: pr.number }); }
+  catch { return 'pull-evidence-unavailable'; }
   if (!sameLivePull(live, pr, `${owner}/${repo}`)) return 'changed';
   // No retry: a timeout can mean GitHub accepted the write. A later event reads
-  // the authoritative attempt before deciding again. Repository concurrency
+  // the authoritative attempt before deciding again. Per-PR concurrency
   // serializes this workflow's writes; external manual reruns remain observable.
   let ambiguous = false;
   try { await read('POST /repos/{owner}/{repo}/actions/jobs/{job_id}/rerun', { job_id: job.id }); }
@@ -125,21 +135,39 @@ async function reconcilePull({ github, owner, repo, pr, target, releaseAppBotLog
   log(`PR ${pr.number}: rerun native review job ${job.id}, run ${proof.run.id}, attempt ${proof.run.run_attempt}; admission=${admitted}.`);
   return 'rerun-requested';
 }
-async function reconcile({ github, owner, repo, eventName, payload, releaseAppBotLogin, now = Date.now, sleep = delay, log = () => {} }) {
+function eligiblePull(pr, fullName) {
+  return positive(pr?.number) && pr.state === 'open' && validSha(pr.head?.sha)
+    && typeof pr.head.ref === 'string' && pr.head.repo?.full_name === fullName
+    && pr.base?.ref === 'main' && pr.base.repo?.full_name === fullName;
+}
+async function discover({ github, owner, repo, eventName, payload, now = Date.now, log = () => {} }) {
   const deadline = now() + 120000, read = reader(github, owner, repo, deadline, now);
   const target = await eventTarget(read, eventName, payload, `${owner}/${repo}`);
-  if (!target) return [];
-  const pulls = target.number ? [await read('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: target.number })] : await openPulls(read);
-  const results = [];
+  if (!target) return { numbers: [] };
+  // Trusted discovery supplies a reliable PR number before job concurrency is
+  // selected. Automatic triggers cover coalesced events for other PRs too.
+  const pulls = eventName === 'workflow_dispatch'
+    ? [await read('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: target.number })]
+    : await openPulls(read);
+  const numbers = [];
   for (const pr of pulls) {
-    if (pr.head?.repo?.full_name !== `${owner}/${repo}`) {
-      log(`PR ${pr.number}: fork retries are manual. In native CI, rerun the Automated Code Review job after provider completion or thread resolution; this dispatcher does not retry forks.`);
+    if (!eligiblePull(pr, `${owner}/${repo}`)) {
+      log('Skipped ineligible or malformed PR; forks require a maintainer native review rerun.');
       continue;
     }
-    if (pr.state !== 'open' || pr.base?.ref !== 'main' || pr.base.repo?.full_name !== `${owner}/${repo}`
-      || (target.head && pr.head.sha !== target.head)) continue;
-    results.push(await reconcilePull({ github, owner, repo, pr, target, releaseAppBotLogin, now, deadline, sleep, log }));
+    if (!numbers.includes(pr.number)) numbers.push(pr.number);
   }
-  return results;
+  return { numbers };
 }
-module.exports = { reconcile, eventTarget, reviewJob, rerunnable, GATE_STEP };
+async function reconcile({ github, owner, repo, pullNumber, releaseAppBotLogin,
+  now = Date.now, sleep = delay, log = () => {} }) {
+  if (!positive(pullNumber)) throw new Error('Missing trusted discovery PR number');
+  const deadline = now() + 120000, read = reader(github, owner, repo, deadline, now);
+  const pr = await read('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: pullNumber });
+  if (pr?.number !== pullNumber || !eligiblePull(pr, `${owner}/${repo}`)) return 'ineligible';
+  // The admitted event is only a wake hint. Queue only PR identity, then prove
+  // the newest live head/run at the lock head; never carry historical proof.
+  return reconcilePull({ github, owner, repo, pr,
+    releaseAppBotLogin, now, deadline, sleep, log });
+}
+module.exports = { discover, reconcile, eventTarget, reviewJob, rerunnable, GATE_STEP };

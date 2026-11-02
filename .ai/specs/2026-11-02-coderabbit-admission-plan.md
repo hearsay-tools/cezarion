@@ -21,9 +21,9 @@ for preflight and the native protected review job. No model commands or PAT fall
    workflow with a read-only native `review-result`. Keep heavy dependencies and queue,
    push reuse, snapshot publication and verified bot skip guarantees.
 3. Reconcile genuine provider created/completed events, native CI completion and review
-   events. Resolve exact heads to open main PRs, ignore forks in this mutator, require
+   events. Discover open main PRs and create independent trusted PR jobs; ignore forks, require
    newest native run/attempt and successful preflight. Re-read before rerunning only
-   the completed native review job when admission differs. Serialize per repository,
+   the completed native review job when admission differs. Serialize per discovered PR,
    never retry ambiguous writes. No-op once outcomes agree. Limit to GitHub's 30-day,
    50-attempt rerun window. Manual `pr_number` handles eventless thread resolution.
 4. Readiness proves native protected checks and reads fresh admission, including revoking
@@ -91,30 +91,54 @@ observation reduces retry races but is not durable cross-execution deduplication
 Proof base: `b71de1afc9dff86036634948b83a5ab2074def0d`. Preserve the original
 implementation and the parent's docs policy correction. One commit per finding.
 
-The repository lock supplies write serialization and the acceptance-observation
-barrier. Keep both. GitHub replaces pending events within that lock, so every
-admitted trigger must sweep open same-repository main PRs. Event validation stays
-authoritative and precedes the sweep. Source CI run/attempt constraints apply only
-to the triggering PR; all other PRs prove their own newest native run independently.
+The original repository lock supplies write serialization and an acceptance
+observation barrier. A single 120-second sweep can starve later PRs, so trusted
+discovery now validates the event once and emits reliable PR numbers before
+job-level concurrency is chosen. Automatic triggers discover all open
+same-repository main PRs. Each matrix job has its own 120-second deadline and
+PR-number lock; max-parallel is four and fail-fast is false. Manual dispatch
+can scope the requested PR because it no longer shares a repository queue.
 
-| Sweep case | Required behavior |
+The old event-source equality and event-head filters guaranteed that an old event
+could not authorize old native proof. The replacement preserves that guarantee
+through `readNativeReview`: each job independently proves the newest native run
+for the exact live head/main/PR, successful preflight and the completed review job,
+then re-reads native identity and live PR before writing. There is no fallback to
+historical proof. Discovery still validates the official triggering event and
+run/attempt identity. An admitted event is only a wake hint, not authorization.
+Only trusted discovered PR numbers enter the matrix; no source run/head/attempt
+survives in the queued job. An old event replacing a newer pending event therefore
+cannot suppress current work. Signal merge SHA never selects a lock.
+
+The parent explicitly authorized dropping the source-equality freshness filter
+on 2026-11-03 after confirming it added no authorization beyond newest native
+proof and could suppress same-PR recovery. This supersedes the initial proposed
+source-scoping correction in this task's first plan revision.
+
+| Discovery / PR job case | Required behavior |
 | --- | --- |
-| B's pending event replaced by A's check, CI, signal or manual event | Surviving event reconciles both live PRs |
-| Triggering CI source run/attempt differs from matching PR's newest run | Skip matching PR; independently reconcile other PRs |
-| Signal association head differs from live triggering PR | Skip that PR; sweep unrelated PRs; never use signal merge SHA |
-| Invalid/foreign/spoofed trigger | No sweep or writes |
-| Unrelated PR has malformed identity or no valid native proof | Log/skip only that PR; continue |
+| B's pending event coalesces with A's check, CI or signal event | Surviving automatic discovery creates durable jobs for both PRs |
+| Valid triggering CI source run/attempt differs from newest native run | Prove and reconcile newest live native run for each PR |
+| Valid old signal association head differs from live PR | Re-read live head and newest native proof; never use merge SHA |
+| Invalid/foreign/spoofed trigger | No discovery or writes |
+| Unrelated PR has malformed identity or no valid native proof | Skip only that PR; other matrix jobs continue |
+| One job consumes its deadline or ambiguous-write observation window | Other jobs have independent deadlines and fail-fast is false |
 | Admission read fails for a proved green native gate | Preserve fail-closed revocation behavior |
-| Rerun acceptance remains ambiguous | Stop and report inspection needed; never retry POST |
+| Rerun acceptance remains ambiguous | Fail that job and report inspection needed; never retry POST |
 | Fork, closed or non-main PR | No mutation |
-| Large listing or exhausted deadline | Fail bounded; manual recovery, no unbounded pagination |
+| Large or malformed listing, exhausted discovery deadline | Fail bounded before emitting a partial matrix; manual recovery |
+| Multiple events for one PR | Same PR-number lock, fresh live proof; unchanged outcome is a no-op |
+| Late old source event replaces newer pending event for same PR | Queue only PR number; reconcile newest live head/run/attempt, never old proof |
 
-Retain two 100-row listing pages and the shared 120-second deadline. A full second
-page remains incomplete and fails closed. Validate listing structure globally,
-then skip malformed individual PRs. Native-proof read failures are per PR; ambiguous
-writes still stop the execution. No blind POST retry or whole-CI dispatch.
+Retain two 100-row listing pages and a 120-second discovery deadline. A full second
+page remains incomplete and fails closed. Per-PR deadlines are independent; each
+request remains capped at 10 seconds with no retries. Validate listing structure
+globally, then skip malformed individual rows. The workflow uses only trusted
+base scripts and discovered PR numbers; no PR checkout, model request or whole-CI dispatch.
+The locks and observation barriers do not claim exactly-once scheduling or durable
+cross-execution deduplication. GitHub delivery and coalescing still need live proof.
 
 Also protect `merge-queue-admission.cjs` in the auto-merge never-list, filter provider
 listings by check name and App ID while retaining exact identity validation, and
 scope draft automation documentation to same-repository PRs. Search active readers
-of the old target-only/coalescing descriptions and update them with the sweep.
+of the old target-only/coalescing descriptions and update them with discovery.

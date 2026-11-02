@@ -1,11 +1,14 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { reconcile, eventTarget } = require('./coderabbit-reconcile.cjs');
+const { discover, reconcile, eventTarget } = require('./coderabbit-reconcile.cjs');
 const { readNativeReview } = require('./native-review-proof.cjs');
 const { fixture, HEAD, BASE } = require('./coderabbit.testkit.cjs');
-function run(h, eventName = 'workflow_dispatch', extra = {}) {
-  return reconcile({ ...h, owner: 'o', repo: 'r', eventName, payload: { repository: { full_name: 'o/r' }, inputs: { pr_number: '7' }, ...extra } });
+async function run(h, eventName = 'workflow_dispatch', extra = {}) {
+  const args = { ...h, owner: 'o', repo: 'r' };
+  const { numbers } = await discover({ ...args, eventName,
+    payload: { repository: { full_name: 'o/r' }, inputs: { pr_number: '7' }, ...extra } });
+  return Promise.all(numbers.map(pullNumber => reconcile({ ...args, pullNumber })));
 }
 const checkEvent = h => ({ action: 'completed', check_run: structuredClone(h.s.checks[0]) });
 const ciEvent = h => ({ action: 'completed', workflow_run: structuredClone(h.s.run) });
@@ -116,7 +119,6 @@ for (const [name, mutate] of Object.entries({
   'foreign source': s => { s.signal.head_repository.full_name = 'fork/r'; },
   'wrong workflow': s => { s.signal.workflow_id = 9; },
   'wrong event': s => { s.signal.event = 'push'; },
-  'stale PR head': s => { s.signal.pull_requests[0].head.sha = BASE; },
 })) test(`signal rejects ${name}`, async () => {
   const h = fixture(), payload = signal(h); mutate(h.s);
   await run(h, 'workflow_run', payload); assert.deepEqual(h.s.writes, []);
@@ -132,4 +134,104 @@ test('an ambiguous response that accepted the rerun is observed without another 
   const h = fixture(); h.s.writeError = true;
   h.s.onRead = route => { if (h.s.writes.length && route.endsWith('/runs/{run_id}')) h.s.run.run_attempt++; };
   assert.deepEqual(await run(h), ['rerun-requested']); assert.deepEqual(h.s.writes, [30]);
+});
+
+function twoPulls() {
+  const a = fixture(), b = fixture();
+  b.s.pr.number = 8; b.s.pr.head.sha = 'c'.repeat(40); b.s.pr.head.ref = 'second';
+  b.s.run.id = 21; b.s.run.head_sha = b.s.pr.head.sha; b.s.run.head_branch = 'second';
+  b.s.run.pull_requests = [{ number: 8, head: { sha: b.s.pr.head.sha }, base: { ref: 'main' } }];
+  b.s.checks[0].id = 101; b.s.checks[0].head_sha = b.s.pr.head.sha;
+  b.s.jobs[0].id = 40;
+  const github = { request: async (route, args) => {
+    if (route === 'GET /repos/{owner}/{repo}/pulls') return { data: structuredClone(a.s.pulls ?? [a.s.pr, b.s.pr]) };
+    const second = args.pull_number === 8 || args.ref === b.s.pr.head.sha || args.head_sha === b.s.pr.head.sha
+      || args.run_id === 21 || args.job_id === 40 || args.check_run_id === 101 || args.variables?.number === 8;
+    return (second ? b : a).github.request(route, args);
+  } };
+  return { ...a, github, a, b };
+}
+for (const event of ['check_run', 'workflow_run', 'signal']) test(`coalesced B event is recovered by A's surviving ${event} event`, async () => {
+  const h = twoPulls();
+  const payload = event === 'check_run' ? checkEvent(h.a) : event === 'signal' ? signal(h.a) : ciEvent(h.a);
+  assert.deepEqual(await run(h, event === 'check_run' ? event : 'workflow_run', payload), ['rerun-requested', 'rerun-requested']);
+  assert.deepEqual(h.a.s.writes, [30]); assert.deepEqual(h.b.s.writes, [40]);
+});
+test('manual dispatch scopes one PR without a repository-wide queue', async () => {
+  const h = twoPulls();
+  assert.deepEqual(await run(h), ['rerun-requested']); assert.deepEqual(h.b.s.writes, []);
+});
+for (const change of ['newer run', 'newer attempt']) test(`valid old source with ${change} reconciles newest native proof for both PRs`, async () => {
+  const h = twoPulls(), payload = ciEvent(h.a), request = h.github.request;
+  const source = structuredClone(h.a.s.run);
+  if (change === 'newer run') h.a.s.run.id = 22;
+  else h.a.s.run.run_attempt = 2;
+  let sourceRead = true;
+  h.github.request = async (route, args) => {
+    if (sourceRead && route.endsWith('/runs/{run_id}') && args.run_id === source.id) {
+      sourceRead = false;
+      return { data: source };
+    }
+    return request(route, args);
+  };
+  assert.deepEqual(await run(h, 'workflow_run', payload), ['rerun-requested', 'rerun-requested']);
+  assert.deepEqual(h.a.s.writes, [30]); assert.deepEqual(h.b.s.writes, [40]);
+});
+for (const change of ['head', 'run', 'attempt']) test(`late old signal replaces newer pending event: read latest ${change} at PR lock head`, async () => {
+  const h = twoPulls(), args = { ...h, owner: 'o', repo: 'r' };
+  const payload = { repository: { full_name: 'o/r' }, ...signal(h.a) };
+  const { numbers } = await discover({ ...args, eventName: 'workflow_run', payload });
+  assert.deepEqual(numbers, [7, 8]);
+  if (change === 'head') {
+    h.a.s.pr.head.sha = 'd'.repeat(40); h.a.s.checks[0].head_sha = h.a.s.pr.head.sha;
+    h.a.s.run.head_sha = h.a.s.pr.head.sha; h.a.s.run.pull_requests[0].head.sha = h.a.s.pr.head.sha;
+  } else if (change === 'run') h.a.s.run.id = 22;
+  else h.a.s.run.run_attempt = 2;
+  const latest = { id: h.a.s.run.id, attempt: h.a.s.run.run_attempt, head: h.a.s.pr.head.sha };
+  assert.deepEqual(await Promise.all(numbers.map(pullNumber => reconcile({ ...args, pullNumber }))),
+    ['rerun-requested', 'rerun-requested']);
+  assert.ok(h.a.s.calls.some(([route, params]) => route.endsWith('/runs/{run_id}') && params.run_id === latest.id));
+  assert.ok(h.a.s.calls.some(([route, params]) => route.endsWith('/workflows/{workflow_id}/runs') && params.head_sha === latest.head));
+  assert.equal(h.a.s.run.run_attempt, latest.attempt + 1);
+  assert.deepEqual(h.a.s.writes, [30]); assert.deepEqual(h.b.s.writes, [40]);
+});
+for (const malformed of [null, { number: 9 }, { number: 9, head: null }]) test('malformed PR listing row does not block valid PRs', async () => {
+  const h = twoPulls(); h.a.s.pulls = [malformed, h.b.s.pr];
+  assert.deepEqual(await run(h, 'check_run', checkEvent(h.a)), ['rerun-requested']);
+  assert.deepEqual(h.b.s.writes, [40]);
+});
+test('missing native CI for A does not block B', async () => {
+  const h = twoPulls(); h.a.s.runs = [];
+  assert.deepEqual(await run(h, 'check_run', checkEvent(h.a)), ['native-evidence-unavailable', 'rerun-requested']);
+  assert.deepEqual(h.a.s.writes, []); assert.deepEqual(h.b.s.writes, [40]);
+});
+test('invalid event cannot start discovery or writes for any PR', async () => {
+  const h = twoPulls(), payload = checkEvent(h.a); payload.check_run.app.id = 1;
+  assert.deepEqual(await run(h, 'check_run', payload), []);
+  assert.deepEqual(h.a.s.calls, []); assert.deepEqual(h.b.s.calls, []);
+});
+test('each matrix job has a new deadline even after another PR exhausts its budget', async () => {
+  const h = twoPulls(), args = { ...h, owner: 'o', repo: 'r' };
+  const discovery = await discover({ ...args, eventName: 'check_run', payload: { repository: { full_name: 'o/r' }, ...checkEvent(h.a) } });
+  assert.deepEqual(discovery.numbers, [7, 8]);
+  h.a.s.onRead = route => { if (route.endsWith('/pulls/{pull_number}')) h.a.s.clock += 120001; };
+  await assert.rejects(() => reconcile({ ...args, pullNumber: 7 }), /deadline/);
+  assert.equal(await reconcile({ ...args, pullNumber: 8 }), 'rerun-requested');
+  assert.deepEqual(h.b.s.writes, [40]);
+});
+test('one PR ambiguous write fails independently while another PR completes', async () => {
+  const h = twoPulls(), args = { ...h, owner: 'o', repo: 'r' };
+  h.a.s.writeError = true;
+  const { numbers } = await discover({ ...args, eventName: 'check_run', payload: { repository: { full_name: 'o/r' }, ...checkEvent(h.a) } });
+  const results = await Promise.allSettled(numbers.map(pullNumber => reconcile({ ...args, pullNumber })));
+  assert.equal(results[0].status, 'rejected'); assert.match(results[0].reason.message, /acceptance not yet visible/);
+  assert.equal(results[1].value, 'rerun-requested');
+  assert.deepEqual(h.a.s.writes, [30]); assert.deepEqual(h.b.s.writes, [40]);
+});
+
+test('valid old signal association wakes the current head without authorizing historical proof', async () => {
+  const h = fixture(), payload = signal(h);
+  h.s.signal.pull_requests[0].head.sha = BASE;
+  assert.deepEqual(await run(h, 'workflow_run', payload), ['rerun-requested']);
+  assert.deepEqual(h.s.writes, [30]);
 });

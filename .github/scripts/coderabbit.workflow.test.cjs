@@ -20,13 +20,27 @@ test('native protected review is read-only trusted-base admission after prefligh
   assert.doesNotMatch(JSON.stringify(gate), /secrets\.|OPENAI|ANTHROPIC/);
 });
 test('reconciler has only trusted default-branch triggers and targeted Actions write', () => {
-  const w = read('coderabbit-reconcile.yml'), job = w.jobs.reconcile;
+  const w = read('coderabbit-reconcile.yml'), job = w.jobs.reconcile, discovery = w.jobs.discover;
   assert.deepEqual(w.permissions, {});
   assert.deepEqual(w.on.check_run.types, ['created', 'completed']);
   assert.deepEqual(w.on.workflow_run, { workflows: ['CI', 'CodeRabbit review signal'], types: ['completed'] });
   assert.equal(w.on.pull_request_review, undefined); assert.equal(w.on.pull_request_review_comment, undefined);
   assert.equal(w.on.workflow_dispatch.inputs.pr_number.required, true);
-  assert.equal(w.concurrency['cancel-in-progress'], false);
+  assert.equal(w.concurrency, undefined, 'discovery cannot be coalesced across PRs');
+  assert.deepEqual(job.concurrency, { group: 'coderabbit-admission-pr-${{ matrix.pr }}', 'cancel-in-progress': false });
+  assert.equal(job.needs, 'discover');
+  assert.equal(job.if, "needs.discover.outputs.numbers != '[]'");
+  assert.deepEqual(job.strategy, { 'fail-fast': false, 'max-parallel': 4,
+    matrix: { pr: '${{ fromJSON(needs.discover.outputs.numbers) }}' } });
+  assert.deepEqual(discovery.permissions, { contents: 'read', 'pull-requests': 'read', checks: 'read', actions: 'read' });
+  assert.equal(discovery.steps[0].with.ref, '${{ github.event.repository.default_branch }}');
+  assert.equal(discovery.steps[0].with['persist-credentials'], false);
+  assert.equal(discovery.steps[1].with.retries, 0);
+  assert.match(discovery.steps[1].with.script, /await discover/);
+  assert.match(discovery.steps[1].with.script, /core.setOutput\('numbers'/);
+  assert.equal(job.steps[1].env.RECONCILE_TARGET, undefined, 'queue only PR identity');
+  assert.deepEqual(discovery.outputs, { numbers: '${{ steps.discover.outputs.numbers }}' });
+  assert.equal(job.steps[1].env.RECONCILE_PR, '${{ matrix.pr }}');
   assert.deepEqual(job.permissions, { contents: 'read', 'pull-requests': 'read', checks: 'read', actions: 'write' });
   assert.equal(job.steps[0].with.ref, '${{ github.event.repository.default_branch }}');
   assert.equal(job.steps[0].with['persist-credentials'], false);
