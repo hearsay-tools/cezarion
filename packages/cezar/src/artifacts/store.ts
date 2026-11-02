@@ -12,6 +12,10 @@ const MAX_METADATA_BYTES = 32 * 1024;
 const MAX_RUN_BYTES = 64 * 1024 * 1024;
 const MAX_ARTIFACTS = 64;
 const MAX_DIRECTORY_ENTRIES = 1024;
+class InvalidArtifactError extends Error {}
+class ArtifactLimitError extends Error {}
+class RedirectedArtifactError extends Error {}
+
 const readFlags = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
 const TITLE_PREFIX_BYTES = 64 * 1024;
@@ -79,14 +83,18 @@ function validateContext(directory: string, runId: string): void {
   z.uuid().parse(runId);
   if (!isAbsolute(directory) || basename(directory) !== `${runId}-artifacts`) throw new Error('Invalid artifact task directory');
 }
+/** Resolve only the trusted data root; runs and task redirects remain forbidden. */
+export function artifactRunsRoot(dataDir: string): string {
+  return join(realpathSync(resolve(dataDir)), 'runs');
+}
 export function artifactDirectory(dataDir: string, runId: string): string {
   z.uuid().parse(runId);
-  // The server's trusted data root may have an OS alias (e.g. macOS /var).
-  // Only canonicalize that root; runs/task entry redirects remain forbidden.
-  let root = resolve(dataDir);
-  try { root = realpathSync(root); } catch { /* absent storage reads as unavailable */ }
-  return join(root, 'runs', `${runId}-artifacts`);
+  let root: string;
+  try { root = artifactRunsRoot(dataDir); }
+  catch { root = join(resolve(dataDir), 'runs'); } // Preserve unavailable-storage behavior for public readers.
+  return join(root, `${runId}-artifacts`);
 }
+
 function sameFile(a: BigIntStats, b: BigIntStats): boolean {
   return a.dev === b.dev && a.ino === b.ino;
 }
@@ -99,8 +107,9 @@ async function boundedRead(path: string, limit: number, stored = false, prefixBy
   const file = await open(path, readFlags);
   try {
     const before = await file.stat({ bigint: true });
-    if (!before.isFile() || before.size > BigInt(limit) || (stored && before.nlink !== 1n)) throw new Error('Artifact must be a bounded regular file');
-    if (expectedSize !== undefined && before.size !== BigInt(expectedSize)) throw new Error('Artifact size mismatch');
+    if (before.size > BigInt(limit)) throw new ArtifactLimitError('Artifact must be a bounded regular file');
+    if (!before.isFile() || (stored && before.nlink !== 1n)) throw new InvalidArtifactError('Artifact must be a bounded regular file');
+    if (expectedSize !== undefined && before.size !== BigInt(expectedSize)) throw new InvalidArtifactError('Artifact size mismatch');
     const expectedRead = Math.min(Number(before.size), prefixBytes ?? Number(before.size));
     const buffer = Buffer.alloc(prefixBytes === undefined ? expectedRead + 1 : expectedRead);
     let count = 0;
@@ -136,11 +145,27 @@ async function storageDirectory(path: string, create = false): Promise<Directory
     const handle = file;
     const original = await handle.stat({ bigint: true });
     const check = async () => {
-      if (await realpath(absolute) !== absolute || !sameFile(original, await lstat(absolute, { bigint: true }))) throw new Error('Redirected artifact storage');
+      if (await realpath(absolute) !== absolute || !sameFile(original, await lstat(absolute, { bigint: true }))) throw new RedirectedArtifactError('Redirected artifact storage');
     };
     await check();
     return { path: process.platform === 'linux' ? `/proc/self/fd/${handle.fd}` : absolute, check, close: () => handle.close() };
   } catch (error) { await file?.close(); throw error; }
+}
+
+/** Internal index access uses the reader's anchored, no-follow storage validation. */
+async function inspectArtifactStorageForIndex<T>(directory: string, inspect: (root: Directory) => Promise<T>): Promise<
+  { state: 'read'; value: T } | { state: 'missing' } | { state: 'indeterminate'; error: unknown }
+> {
+  let root: Directory | undefined;
+  try {
+    root = await storageDirectory(directory);
+    const value = await inspect(root);
+    await root.check();
+    return { state: 'read', value };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { state: 'missing' };
+    return { state: 'indeterminate', error };
+  } finally { await root?.close(); }
 }
 
 async function* entries(path: string): AsyncGenerator<string> {
@@ -243,7 +268,7 @@ export async function publishArtifact(directory: string, runId: string, source: 
     // unchanged, so reread and compare: any mutation that landed before this second
     // read surfaces as differing bytes. Later mutations stay covered by the snapshot.
     const reread = await boundedRead(source, MAX_FILE_BYTES);
-    if (!bytes.equals(reread)) throw new Error('File changed while publishing or reading artifact');
+    if (!bytes.equals(reread)) throw new InvalidArtifactError('File changed while publishing or reading artifact');
     await checkCapacity(root, bytes.length);
     const metadata = publishedArtifactSchema.parse({ id: randomUUID(), runId, name: basename(source), sourcePath: resolve(source), createdAt: new Date().toISOString(), size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
     pending = join(root.path, `.pending-${metadata.id}`);
@@ -264,7 +289,7 @@ export async function publishArtifact(directory: string, runId: string, source: 
   }
 }
 
-async function readEntry(root: Directory, runId: string, id: string, metadataOnly = false): Promise<{ metadata: PublishedArtifact; bytes: Buffer } | null> {
+async function readEntry(root: Directory, runId: string, id: string, metadataOnly = false, strict = false): Promise<{ metadata: PublishedArtifact; bytes: Buffer } | null> {
   if (!z.uuid().safeParse(id).success) return null;
   let entry: FileHandle | undefined;
   try {
@@ -272,22 +297,23 @@ async function readEntry(root: Directory, runId: string, id: string, metadataOnl
     entry = await open(join(root.path, id), readFlags | constants.O_DIRECTORY);
     const path = process.platform === 'linux' ? `/proc/self/fd/${entry.fd}` : join(root.path, id);
     const metadata = publishedArtifactSchema.parse(JSON.parse((await boundedRead(join(path, 'metadata.json'), MAX_METADATA_BYTES, true)).toString('utf8')));
-    if (metadata.runId !== runId || metadata.id !== id || metadata.size > MAX_FILE_BYTES) return null;
+    if (metadata.runId !== runId || metadata.id !== id) return null;
+    if (metadata.size > MAX_FILE_BYTES) throw new ArtifactLimitError('Artifact file byte limit exceeded');
     const prefix = /\.html?$/i.test(metadata.name) ? TITLE_PREFIX_BYTES : 0;
     const bytes = await boundedRead(join(path, 'content'), MAX_FILE_BYTES, true, metadataOnly ? prefix : undefined, metadata.size);
     if (!metadataOnly && createHash('sha256').update(bytes).digest('hex') !== metadata.sha256) return null;
-    if (!sameFile(await entry.stat({ bigint: true }), await lstat(join(root.path, id), { bigint: true }))) return null;
+    if (!sameFile(await entry.stat({ bigint: true }), await lstat(join(root.path, id), { bigint: true }))) throw new RedirectedArtifactError('Redirected artifact storage');
     await root.check();
     return { metadata: { ...metadata, title: artifactTitle(metadata.name, bytes) }, bytes };
-  } catch { return null; } finally { await entry?.close(); }
+  } catch (error) { if (strict) throw error; return null; } finally { await entry?.close(); }
 }
-async function readStoredArtifact(directory: string, runId: string, id: string, metadataOnly: boolean): Promise<{ metadata: PublishedArtifact; bytes: Buffer } | null> {
+async function readStoredArtifact(directory: string, runId: string, id: string, metadataOnly: boolean, strict = false): Promise<{ metadata: PublishedArtifact; bytes: Buffer } | null> {
   let root: Directory | undefined;
   try {
     validateContext(directory, runId);
     root = await storageDirectory(directory);
-    return await readEntry(root, runId, id, metadataOnly);
-  } catch { return null; } finally { await root?.close(); }
+    return await readEntry(root, runId, id, metadataOnly, strict);
+  } catch (error) { if (strict) throw error; return null; } finally { await root?.close(); }
 }
 export async function readArtifact(directory: string, runId: string, id: string): Promise<{ metadata: PublishedArtifact; bytes: Buffer } | null> {
   return readStoredArtifact(directory, runId, id, false);
@@ -295,6 +321,54 @@ export async function readArtifact(directory: string, runId: string, id: string)
 export async function readArtifactMetadata(directory: string, runId: string, id: string): Promise<PublishedArtifact | null> {
   return (await readStoredArtifact(directory, runId, id, true))?.metadata ?? null;
 }
+type IndexResult<T> = { state: 'read'; value: T } | { state: 'missing' } | { state: 'indeterminate'; error: unknown };
+function indexReadFailure(error: unknown): Exclude<IndexResult<never>, { state: 'read' }> {
+  if (error instanceof InvalidArtifactError || error instanceof SyntaxError || error instanceof z.ZodError || (error as NodeJS.ErrnoException).code === 'ENOENT') return { state: 'missing' };
+  return { state: 'indeterminate', error };
+}
+/** Internal index read: an I/O failure cannot prove that a published snapshot is gone. */
+export async function readArtifactMetadataForIndex(directory: string, runId: string, id: string): Promise<
+  { state: 'read'; artifact: PublishedArtifact } | { state: 'missing' } | { state: 'indeterminate'; error: unknown }
+> {
+  try {
+    const entry = await readStoredArtifact(directory, runId, id, true, true);
+    return entry ? { state: 'read', artifact: entry.metadata } : { state: 'missing' };
+  } catch (error) { return indexReadFailure(error); }
+}
+
+/** Shares the public list's validated bounded walk and per-entry reader, preserving uncertain IDs. */
+export async function scanArtifactsForIndex(directory: string, runId: string): Promise<IndexResult<{ artifacts: PublishedArtifact[]; indeterminate: string[] }>> {
+  validateContext(directory, runId);
+  return inspectArtifactStorageForIndex(directory, async root => {
+    const artifacts: PublishedArtifact[] = [], indeterminate: string[] = [];
+    let bytes = 0;
+    for await (const id of entries(root.path)) {
+      let entry;
+      try { entry = await readEntry(root, runId, id, true, true); }
+      catch (error) {
+        if (error instanceof ArtifactLimitError) throw error; // A cap failure invalidates the whole scan.
+        if (indexReadFailure(error).state === 'indeterminate') indeterminate.push(id);
+        continue;
+      }
+      if (!entry) continue;
+      artifacts.push(entry.metadata); bytes += entry.metadata.size;
+      if (artifacts.length > MAX_ARTIFACTS || bytes > MAX_RUN_BYTES) throw new ArtifactLimitError('Artifact task capacity exceeded');
+    }
+    return { artifacts, indeterminate };
+  });
+}
+
+/** Page checks use the same validated storage components and per-file cap as the reader. */
+export async function checkArtifactContentForIndex(directory: string, runId: string, id: string, size: number): Promise<IndexResult<boolean>> {
+  validateContext(directory, runId); z.uuid().parse(id);
+  return inspectArtifactStorageForIndex(join(directory, id), async root => {
+    const file = await lstat(join(root.path, 'content'));
+    if (file.isSymbolicLink()) throw new RedirectedArtifactError('Redirected artifact storage');
+    if (file.size > MAX_FILE_BYTES) throw new ArtifactLimitError('Artifact file byte limit exceeded');
+    return file.isFile() && file.nlink === 1 && file.size === size;
+  });
+}
+
 export async function listArtifacts(directory: string, runId: string): Promise<PublishedArtifact[]> {
   let root: Directory | undefined;
   try {

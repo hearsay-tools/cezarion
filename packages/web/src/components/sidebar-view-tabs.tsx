@@ -6,9 +6,6 @@ import { cn } from '@/lib/utils'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from './ui/dropdown-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/tooltip'
 
-/** Primary tabs that fit beside the More button with the widest active label unclipped. */
-const MAX_PRIMARY_WITH_MORE = 5
-
 export function SidebarViewTabs({ items, activeTo, needsYou = false, onNavigate }: {
   items: NavItem[]
   activeTo: string | null
@@ -17,11 +14,9 @@ export function SidebarViewTabs({ items, activeTo, needsYou = false, onNavigate 
 }) {
   const [open, setOpen] = useState(false)
   const nav = useRef<HTMLElement>(null)
-  const optional = items.filter(item => item.to === '/automations')
-  // Six primary tabs PLUS More cannot fit a 264px column without truncating the active label
-  // (a fixed "Workflows" needs 265px of 239px): when More exists, Workflows rides in it too.
-  const crowded = optional.length > 0 && items.length - optional.length > MAX_PRIMARY_WITH_MORE
-  const overflow = crowded ? items.filter(item => item.to === '/workflows' || optional.includes(item)) : optional
+  // Reports always needs More. Keep Workflows beside it so five primary tabs fit unclipped.
+  // Filtering preserves the existing NAV_ITEMS order, including optional Automations first.
+  const overflow = items.filter(item => ['/automations', '/workflows', '/reports'].includes(item.to))
   const primary = items.filter(item => !overflow.includes(item))
   const overflowActive = overflow.some(item => item.to === activeTo)
   const moveFocus = (event: KeyboardEvent) => {

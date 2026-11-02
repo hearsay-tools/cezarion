@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 import { tmpdir, hostname } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { artifactDirectory, listArtifacts, publishArtifact, readArtifact, readArtifactMetadata, artifactTitle } from './store.ts';
+import { artifactDirectory, listArtifacts, publishArtifact, readArtifact, readArtifactMetadata, readArtifactMetadataForIndex, artifactTitle } from './store.ts';
 
 let root: string;
 let dir: string;
@@ -401,4 +401,46 @@ describe('report metadata', () => {
     await link(join(entry, 'content'), join(root, 'hardlink'));
     expect(await readArtifactMetadata(dir, runId, metadata.id)).toBeNull();
   });
+});
+
+it('distinguishes an indeterminate metadata read for the index while keeping public metadata behavior', async () => {
+  const { metadata } = await fixture();
+  const actualOpen = fs.open;
+  const fault = vi.spyOn(fs, 'open').mockImplementation((...args) => {
+    if (String(args[0]).endsWith('/metadata.json')) return Promise.reject(Object.assign(new Error('temporary I/O failure'), { code: 'EIO' }));
+    return actualOpen(...args);
+  });
+  expect(await readArtifactMetadata(dir, runId, metadata.id)).toBeNull();
+  expect(await readArtifactMetadataForIndex(dir, runId, metadata.id)).toMatchObject({ state: 'indeterminate' });
+  fault.mockRestore();
+  expect(await readArtifactMetadataForIndex(dir, runId, metadata.id)).toMatchObject({ state: 'read', artifact: { id: metadata.id } });
+  await writeFile(join(dir, metadata.id, 'metadata.json'), '{broken');
+  expect(await readArtifactMetadataForIndex(dir, runId, metadata.id)).toEqual({ state: 'missing' });
+});
+
+it('keeps a redirect detected during the per-entry read indeterminate for the index', async () => {
+  const runId = randomUUID(), dir = artifactDirectory(root, runId);
+  const source = join(root, 'redirect.html'); await writeFile(source, '<title>Report</title>');
+  const artifact = await publishArtifact(dir, runId, source);
+  const actual = fs.realpath;
+  let calls = 0;
+  vi.spyOn(fs, 'realpath').mockImplementation(async (...args) => {
+    const value = await actual(...args);
+    return ++calls >= 3 ? value + '-redirected' : value;
+  });
+  expect(await readArtifactMetadataForIndex(dir, runId, artifact.id)).toMatchObject({ state: 'indeterminate' });
+  expect(await readArtifactMetadata(dir, runId, artifact.id)).toBeNull();
+});
+
+it('treats a snapshot identity change during a bounded read as indeterminate', async () => {
+  const runId = randomUUID(), directory = artifactDirectory(root, runId);
+  const source = join(root, 'unstable.html'); await writeFile(source, '<title>Report</title>');
+  const artifact = await publishArtifact(directory, runId, source);
+  const actual = fs.lstat;
+  vi.spyOn(fs, 'lstat').mockImplementation(async (...args) => {
+    const stat = await actual(...args);
+    return String(args[0]).endsWith('/content') ? Object.assign(Object.create(stat), { ino: BigInt(stat.ino) + 1n }) : stat;
+  });
+  expect(await readArtifactMetadataForIndex(directory, runId, artifact.id)).toMatchObject({ state: 'indeterminate' });
+  expect(await readArtifactMetadata(directory, runId, artifact.id)).toBeNull();
 });

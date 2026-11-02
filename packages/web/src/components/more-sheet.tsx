@@ -25,6 +25,7 @@ type Row = { to: string; label: string; icon: ComponentType<SVGProps<SVGSVGEleme
 const FIXED_ROWS: readonly { to: string; label: string }[] = [
   { to: '/skills', label: 'Skills' },
   { to: '/workflows', label: 'Workflows' },
+  { to: '/reports', label: 'Reports' },
   { to: '/settings', label: 'Project settings' },
 ]
 

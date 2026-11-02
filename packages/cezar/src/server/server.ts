@@ -1,3 +1,4 @@
+import { reportsRoutes } from './reports-api.ts';
 import { automationCreateSchema, automationUpdateSchema, automationCheckRequestSchema, automationLogQuerySchema } from '@open-mercato/cezar-contract/automation-requests';
 import { providerConnectSchema, createAgentProfileSchema, openAgentAccountFileSchema, updateAgentProfileSchema, selectAgentProfileSchema, providerEnabledSchema, providerRetrySchema, providerRouteParamsSchema, agentProfileRouteParamsSchema } from '@open-mercato/cezar-contract/provider-requests';
 import { planSchema, parseWorkflowSchema } from '@open-mercato/cezar-contract/workflow-requests';
@@ -146,11 +147,7 @@ import { detectEnvironment } from '../core/backend-detect.ts';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import type { ContentBlock } from '../core/agent-runner.ts';
 import { AGENT_MODELS_LOCKED_ERROR, agentModelsLocked } from '../core/agent-model-policy.ts';
-import {
-  PROVIDER_IDS,
-  ProviderAuthService,
-  type ProviderId,
-} from '../core/provider-auth.ts';
+import { PROVIDER_IDS, ProviderAuthService, type ProviderId } from '../core/provider-auth.ts';
 import { applyProviderEnablement } from '../core/provider-availability.ts';
 import { RunnerModelCatalog } from '../core/runner-model-catalog.ts';
 import { currentUsage, onUsage } from '../core/process-usage.ts';
@@ -5071,6 +5068,7 @@ export function createApp(deps: ServerDeps) {
     .route('/', automationsRoutes)
     .route('/', agentWebhooksRoutes)
     .route('/', runsRoutes)
+    .route('/', reportsRoutes)
     .route('/', openTargetsRoutes)
     .route('/', worktreesRoutes)
     .route('/', sseRoutes)
@@ -5536,6 +5534,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     }
   });
   const startBackgroundServices = () => {
+    if (!deps.store.unavailable) deps.store.reports.start();
     archiveOnMerge.start();
     completionActions.start();
     void visibleProjects().then((projects) => {

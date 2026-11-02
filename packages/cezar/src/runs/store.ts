@@ -1,3 +1,4 @@
+import { reportsIndex, type ReportsIndex } from '../artifacts/reports-index.ts';
 import { stageCommit, stageLoaded, stageDurableUpdate, stageDebouncedUpdate, stageConversation, stageArchiveFields, stagePullRequests, stageStepUpdate, redactPatch, redactText } from './record-write-rules.ts';
 import { workerDeletionProof } from './worker-deletion-proof.ts';
 import { listPeerTaskSummaries, parseStoredSummary, type PeerTaskPageOptions } from './run-summary-page.ts';
@@ -1223,6 +1224,7 @@ export class RunStore extends EventEmitter {
   /** `null` once the store is closed, and in a `RunStore.unavailable` store (nothing is written,
    *  nothing is evicted). */
   private db: RunDatabase | null = null;
+  get reports(): ReportsIndex { return reportsIndex(this.db, this, this.dataDir, this.openFailure); }
   /** Why `open` failed, in a `RunStore.unavailable` store. */
   private openFailure: RunStoreOpenError | undefined;
   private persistence: RunStorePersistence | undefined;
@@ -1360,9 +1362,7 @@ export class RunStore extends EventEmitter {
 
   /** Why this store has no database, when it is `RunStore.unavailable`'s: its runs are unknown,
    *  not absent. */
-  get unavailable(): RunStoreOpenError | undefined {
-    return this.openFailure;
-  }
+  get unavailable(): RunStoreOpenError | undefined { return this.openFailure; }
 
   /**
    * Open-time load: the live rows, the finished rows a load normalization repairs, then the

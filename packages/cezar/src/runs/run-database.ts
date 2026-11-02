@@ -1,3 +1,5 @@
+import { toRunRow, toRunBindings, writeMetadata } from './run-database-row.ts';
+import { reportRows, REPORTS_MIGRATION, type IndexedArtifact } from './report-rows.ts';
 import { readPeerSummaryPage, toSummaryRow, type PeerSummaryPageQuery } from './run-database-peer-page.ts';
 import { accessSync, closeSync, constants, existsSync, openSync, readSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -18,7 +20,7 @@ export const RUNS_IMPORT_COMPLETE_KEY = 'import-complete';
 /** `PRAGMA user_version` of a database this build created. A higher number means a newer cezar
  *  wrote it; that is refused rather than read, because a newer schema may store what this one
  *  would silently drop on its next write. */
-export const RUN_DATABASE_SCHEMA_VERSION = 9;
+export const RUN_DATABASE_SCHEMA_VERSION = 10;
 
 /**
  * The oldest `user_version` the READ-ONLY reader can read as it stands (`openReadOnly`). It never
@@ -218,6 +220,7 @@ const MIGRATIONS: readonly string[] = [
   --
   -- No live recompute: isLiveRecord already calls a row with an open wait live, of any kind.
   `,
+  REPORTS_MIGRATION,
 ];
 
 /** What the caller writes for one run. Optional columns may be omitted or null. */
@@ -506,26 +509,6 @@ export const ARCHIVED_ROOT = 'archived = 1 AND parent_run_id IS NULL';
 type SqlRow = Record<string, unknown>;
 
 
-function toRunRow(row: SqlRow): RunRow {
-  return {
-    seq: row.seq as number,
-    id: row.id as string,
-    createdAt: row.created_at as string,
-    finishedAt: row.finished_at as string | null,
-    status: row.status as string,
-    archived: row.archived === 1,
-    live: row.live === 1,
-    parentRunId: row.parent_run_id as string | null,
-    clientRequestId: row.client_request_id as string | null,
-    groupId: row.group_id as string | null,
-    worktreePath: row.worktree_path as string | null,
-    branch: row.branch as string | null,
-    baseBranch: row.base_branch as string | null,
-    revision: row.revision as number,
-    data: row.data as string,
-    summary: row.summary as string,
-  };
-}
 
 function validateChanges(changes: RunDatabaseChanges): void {
   const upserted = new Set<string>();
@@ -890,6 +873,10 @@ export class RunDatabase {
     }));
   }
 
+  get reports() { return this.run(() => reportRows(this.db, work => this.run(work))); }
+  replaceArtifacts(id: string, artifacts: readonly IndexedArtifact[], revision?: number): void { this.run(() => this.reports.replace(id, artifacts, revision)); }
+  listArtifacts(): IndexedArtifact[] { return this.run(() => this.reports.list()); }
+
   getMeta(key: string): string | undefined {
     const row = this.run(() => this.statements.getMeta.get(key));
     return row ? (row.value as string) : undefined;
@@ -918,39 +905,22 @@ export class RunDatabase {
         }
         if (changes.fence) claims = this.checkFence(changes.fence);
         for (const id of changes.deletes) {
+          this.reports.deleteRun(id);
           this.statements.delete.run(id);
           this.statements.deleteMeta.run(`issue-attribution:${id}`);
         }
         const revision = changes.upserts.length > 0 ? this.nextSequence(COMMIT_SEQ_KEY) : 0;
         for (const row of changes.upserts) {
-          const inserted = this.statements.upsert.get({
-            id: row.id,
-            createdAt: row.createdAt,
-            finishedAt: row.finishedAt ?? null,
-            status: row.status,
-            archived: row.archived ? 1 : 0,
-            live: row.live ? 1 : 0,
-            parentRunId: row.parentRunId ?? null,
-            clientRequestId: row.clientRequestId ?? null,
-            groupId: row.groupId ?? null,
-            worktreePath: row.worktreePath ?? null,
-            branch: row.branch ?? null,
-            baseBranch: row.baseBranch ?? null,
-            revision,
-            data: row.data,
-            summary: row.summary,
-          });
+          this.reports.markDirty(row.id, row.live, revision);
+          const inserted = this.statements.upsert.get(toRunBindings(row, revision));
           // Revision binding makes an older writer invalidate this optional repair cache.
           if (row.issueAttributionCurrent) this.statements.setMeta.run(`issue-attribution:${row.id}`, String(revision));
           else this.statements.deleteMeta.run(`issue-attribution:${row.id}`);
           revisions.set(row.id, revision);
           seqs.set(row.id, inserted!.seq as number);
         }
-        for (const [key, value] of Object.entries(changes.meta ?? {})) {
-          if (value === null) this.statements.deleteMeta.run(key);
-          else this.statements.setMeta.run(key, value);
-        }
-        for (const [key, value] of Object.entries(changes.beforeCommit?.() ?? {})) this.statements.setMeta.run(key, value);
+        writeMetadata(this.statements, changes.meta ?? {});
+        writeMetadata(this.statements, changes.beforeCommit?.() ?? {});
         this.db.exec('COMMIT');
       } catch (error) {
         rollback(this.db);

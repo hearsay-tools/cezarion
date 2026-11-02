@@ -36,16 +36,9 @@ const scoped = (projectId: string, path: string) => `/p/${projectId}${path}`
 /** Only the boot project has a forge; its seeded siblings are bare repos. */
 const hasForge = (projectId: string) => projectId === bootProject && forgeAvailable
 
-/** More views, in nav order. Automations is opt-in; with it present, a project that
- *  shows six other views (the forge one) also moves Workflows into More — sidebar-view-tabs.tsx
- *  allows five primary tabs beside the button. A forge-less sibling has five and keeps Workflows. */
+/** Keep NAV_ITEMS order, including optional Automations before Workflows and Reports. */
 function expectedOverflowHrefs(projectId: string): string[] {
-  const optional = [
-    // Schedules need no GitHub remote; the capability alone gates Automations (#766).
-    ...(automationsAvailable ? ['/automations'] : []),
-  ]
-  const crowded = optional.length > 0 && hasForge(projectId)
-  return [...optional, ...(crowded ? ['/workflows'] : [])].map((path) => scoped(projectId, path))
+  return [...(automationsAvailable ? ['/automations'] : []), '/workflows', '/reports'].map(path => scoped(projectId, path))
 }
 
 /** The main-row tab links every group renders: the health-gated list minus the More views. */
