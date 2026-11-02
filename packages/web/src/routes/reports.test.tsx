@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { REPORTS_QUERY_MAX } from '@open-mercato/cezar-api-client/contract/reports'
 import { ReportsRoute } from './reports'
 
 const mocks = vi.hoisted(() => ({ useReports: vi.fn() }))
@@ -38,6 +39,18 @@ describe('Reports shelf', () => {
     await waitFor(() => expect(screen.getByTestId('location').textContent).toContain('q=forecast'))
     fireEvent.click(screen.getByRole('button', { name: 'Clear search' }))
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/p/shop/reports'))
+  })
+
+  it('caps typed search and URL search at the shared contract maximum', async () => {
+    mocks.useReports.mockReturnValue(result())
+    mount('/p/shop/reports?q=' + 'a'.repeat(REPORTS_QUERY_MAX + 1))
+    const input = screen.getByRole('textbox', { name: 'Search reports' }) as HTMLInputElement
+    expect(input.maxLength).toBe(REPORTS_QUERY_MAX)
+    expect(input.value).toBe('a'.repeat(REPORTS_QUERY_MAX))
+    expect(mocks.useReports).toHaveBeenLastCalledWith('a'.repeat(REPORTS_QUERY_MAX))
+    fireEvent.change(input, { target: { value: 'b'.repeat(REPORTS_QUERY_MAX + 1) } })
+    await waitFor(() => expect(input.value).toBe('b'.repeat(REPORTS_QUERY_MAX)))
+    expect(mocks.useReports).toHaveBeenLastCalledWith('b'.repeat(REPORTS_QUERY_MAX))
   })
 
   it('uses server titles and source-task links, and records the shelf as the reader source', async () => {

@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { reportsResponseSchema } from '@open-mercato/cezar-contract/reports';
+import { reportsResponseSchema, REPORTS_QUERY_MAX } from '@open-mercato/cezar-contract/reports';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { artifactDirectory, publishArtifact } from '../artifacts/store.ts';
@@ -365,6 +365,27 @@ describe('project reports', () => {
     const response = await apiRequest(app, '/api/v1/p/default/reports');
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ error: expect.stringContaining('Run history is damaged') });
+  });
+
+  it('ignores live legacy task IDs and clears their impossible artifact retry markers', async () => {
+    const good = task(), legacy = task('Legacy');
+    const report = await publish(good.id);
+    store.updateRun(legacy.id, { status: RUN_STATUS.running }); store.flush(); store.close();
+    const raw = new DatabaseSync(join(dataDir, 'runs.db'));
+    try {
+      raw.prepare("UPDATE runs SET id = ?, data = json_set(data, '$.id', ?), summary = json_set(summary, '$.id', ?) WHERE id = ?").run('run-1', 'run-1', 'run-1', legacy.id);
+      raw.prepare('INSERT INTO meta (key, value) VALUES (?, ?)').run('reports-dirty:run-1', '1');
+    } finally { raw.close(); }
+    store = RunStore.open(dataDir);
+    expect((await page()).reports.map(row => row.id)).toEqual([report.id]);
+    const read = new DatabaseSync(join(dataDir, 'runs.db'), { readOnly: true });
+    try { expect(read.prepare('SELECT value FROM meta WHERE key = ?').get('reports-dirty:run-1')).toBeUndefined(); }
+    finally { read.close(); }
+  });
+
+  it('accepts the shared maximum search length and refuses a longer query', async () => {
+    expect((await get(`?q=${'a'.repeat(REPORTS_QUERY_MAX)}`)).status).toBe(200);
+    expect((await get(`?q=${'a'.repeat(REPORTS_QUERY_MAX + 1)}`)).status).toBe(400);
   });
 
   it('validates query shapes and opaque cursors', async () => {

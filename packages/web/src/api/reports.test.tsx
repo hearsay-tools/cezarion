@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { ReactNode } from 'react'
+import { REPORTS_QUERY_MAX } from '@open-mercato/cezar-api-client/contract/reports'
 import { getReports, useReports } from './reports'
 import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 
@@ -24,5 +25,13 @@ it('uses a project-owned key and encoded search, validates the response and fetc
 })
 it('rejects a malformed response instead of rendering an empty shelf', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ reports: [] }))))
+  await expect(getReports('shop', '')).rejects.toThrow()
+})
+it('caps outgoing search and refuses a response cursor outside the request contract', async () => {
+  const fetcher = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ reports: [], total: 0, nextCursor: null })))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ reports: [], total: 0, nextCursor: 'a'.repeat(1025) })))
+  vi.stubGlobal('fetch', fetcher)
+  await getReports('shop', 'a'.repeat(REPORTS_QUERY_MAX + 1))
+  expect(new URL(String(fetcher.mock.calls[0]![0]), 'http://localhost').searchParams.get('q')).toHaveLength(REPORTS_QUERY_MAX)
   await expect(getReports('shop', '')).rejects.toThrow()
 })

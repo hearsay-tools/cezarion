@@ -24,7 +24,8 @@ behind the running listener. `reports-backfill-complete` in `meta` records a com
 an indeterminate scan leaves it absent for retry.
 Run-row transactions mark `reports-dirty:<runId>` when a row is or was live. Reconciliation
 clears a marker only when its numeric revision is no newer than the directory read. Shelf queries reconcile
-live and dirty runs; a transition from a live to a terminal status reconciles the settled run
+live and dirty runs; legacy non-UUID task IDs cannot own artifacts, so reconciliation skips
+them and removes their impossible retry markers; a transition from a live to a terminal status reconciles the settled run
 and dirty runs. Read, pin and archive events on terminal runs do not start reconciliation.
 Listing pages through joined summaries, checks content only for the selected page and fills
 past missing files. Index directory scans and page checks use the artifact reader’s anchored

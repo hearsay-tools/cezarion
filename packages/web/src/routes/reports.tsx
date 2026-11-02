@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from 'react'
 import { useLocation, useNavigationType } from 'react-router'
 import { useReports } from '@/api/reports'
+import { REPORTS_QUERY_MAX } from '@open-mercato/cezar-api-client/contract/reports'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Link } from '@/lib/project-router'
@@ -15,7 +16,7 @@ export function ReportsRoute() {
   const location = useLocation()
   const navigationType = useNavigationType()
   const [params, write] = useSearchParamsWriter()
-  const q = params.get('q') ?? ''
+  const q = (params.get('q') ?? '').slice(0, REPORTS_QUERY_MAX)
   const result = useReports(q)
   const scroller = useRef<HTMLDivElement>(null)
   const restored = useRef('')
@@ -42,7 +43,7 @@ export function ReportsRoute() {
   }, [key, result.data, result.hasNextPage, result.isFetchingNextPage, result.isFetchNextPageError, result.fetchNextPage, location.state, navigationType])
 
   const search = (value: string) => write(current => {
-    if (value) current.set('q', value)
+    if (value) current.set('q', value.slice(0, REPORTS_QUERY_MAX))
     else current.delete('q')
     positions.delete(location.pathname + '?' + current.toString())
     return current
@@ -50,7 +51,7 @@ export function ReportsRoute() {
   return <section data-route="reports" className="flex h-full min-h-0 flex-col">
     <header className="flex shrink-0 flex-col gap-3 border-b border-border p-4">
       <h1 className="text-lg font-semibold">Reports</h1>
-      <Input aria-label="Search reports" placeholder="Search reports or source tasks" value={q} onChange={event => search(event.target.value)} className="min-h-11" />
+      <Input maxLength={REPORTS_QUERY_MAX} aria-label="Search reports" placeholder="Search reports or source tasks" value={q} onChange={event => search(event.target.value)} className="min-h-11" />
     </header>
     <div ref={scroller} data-slot="reports-list" className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 [scrollbar-gutter:stable]">
       {result.isPending ? <p role="status">Loading reports…</p> : result.isError ? <div role="alert" className="flex flex-col items-start gap-3">

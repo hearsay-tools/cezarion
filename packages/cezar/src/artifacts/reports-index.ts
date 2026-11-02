@@ -67,12 +67,17 @@ export class ReportsIndex {
       if (scan.state !== 'read') return;
       for (const entry of scan.value) {
         const id = entry.name.replace(/-artifacts$/, '');
-        if ((entry.isDirectory() || entry.isSymbolicLink()) && entry.name.endsWith('-artifacts') && z.uuid().safeParse(id).success && this.db.has(id)) {
-          if (!await this.indexRun(id)) complete = false;
+        if ((entry.isDirectory() || entry.isSymbolicLink()) && entry.name.endsWith('-artifacts') && this.db.has(id)) {
+          if (this.supportedRun(id) && !await this.indexRun(id)) complete = false;
         }
       }
       if (!this.closed && complete) this.db.transaction({ upserts: [], deletes: [], meta: { [REPORTS_BACKFILL_KEY]: new Date().toISOString() } });
     });
+  }
+  private supportedRun(id: string): boolean {
+    if (z.uuid().safeParse(id).success) return true;
+    this.db.reports.deleteRun(id); // Legacy task IDs cannot own published snapshots or retry markers.
+    return false;
   }
   reconcile(includeLive = true, settledId?: string): Promise<void> {
     return this.serial(async () => {
@@ -80,10 +85,11 @@ export class ReportsIndex {
       const ids = new Set(this.db.reports.dirty());
       if (includeLive) for (const row of this.db.listLive()) ids.add(row.id);
       if (settledId) ids.add(settledId);
-      for (const id of ids) await this.indexRun(id);
+      for (const id of ids) if (this.supportedRun(id)) await this.indexRun(id);
     });
   }
   private async indexRun(runId: string): Promise<boolean> {
+    if (!this.supportedRun(runId)) return true;
     const previous = this.db.reports.forRun(runId);
     const revision = this.db.revisionOf(runId);
     const directory = artifactDirectory(this.dataDir, runId);
@@ -112,6 +118,7 @@ export class ReportsIndex {
     return complete;
   }
   private async present(row: ReportRow): Promise<boolean | null> {
+    if (!this.supportedRun(row.runId)) return false;
     const check = await inspectArtifactStorageForIndex(join(artifactDirectory(this.dataDir, row.runId), row.id), path => lstat(join(path, 'content')));
     if (check.state === 'indeterminate') {
       this.db.reports.retry(row.runId, this.db.revisionOf(row.runId));
