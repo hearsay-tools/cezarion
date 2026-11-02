@@ -17,7 +17,7 @@ BUILD_ROOT="$PWD/.ai/qa/peck-build/cezar"
 sh .ai/scripts/build-e2e.sh "$BUILD_ROOT"
 ```
 
-This existing build script compiles the actual service and cockpit into an ignored directory. It links the installed dependencies and bundled mock runners. It builds the cockpit with `VITE_CEZ_E2E=1`, the repository's browser verification mode, which pins its display clock and background polling. It does not replace task search, archive, rename, pin, filtering, read state, prompt-template, sidebar-limit, or appearance behavior. Allow up to three minutes for the build on a loaded host. Keep the checkout and its dependencies in place while this build runs.
+This existing build script compiles the actual service and cockpit into an ignored directory. It links the installed dependencies and bundled mock runners. It builds the cockpit with `VITE_CEZ_E2E=1`, the repository's browser verification mode, which pins its display clock and background polling. The controls in these specs use their real app implementations. Allow up to three minutes for the build on a loaded host. Keep the checkout and its dependencies in place while this build runs.
 
 ## Fresh data
 
@@ -28,7 +28,7 @@ RUN_ROOT="$(mktemp -d /tmp/cezar-peck-XXXXXX)"
 node peck/seed.mjs peck/fixtures/project-tasks.json "$RUN_ROOT"
 ```
 
-Eight specs share the Given tables in `project-tasks.json`. For `prompt-templates.md`, use its own exact Given data instead:
+Twelve specs share the Given tables in `project-tasks.json`. For `prompt-templates.md`, use its own exact Given data instead:
 
 ```sh
 RUN_ROOT="$(mktemp -d /tmp/cezar-peck-XXXXXX)"
@@ -44,7 +44,7 @@ Each run has these separate stores:
 - `$RUN_ROOT/projects/river-docs/.ai/cezar/`: the other project's run store.
 - `$RUN_ROOT/tmp/`: process temporary files.
 
-The helper refuses a nonempty destination. It creates two local Git repositories with a `main` branch and one commit each. Neither has a remote. Start with a fresh browser context and empty cookies, local storage and session storage for each spec. Use a **1440 × 900 desktop viewport**. Unfiltered result counts are hidden on phone layouts.
+The helper refuses a nonempty destination. It creates two local Git repositories with a `main` branch and one commit each. Neither has a remote. Start with a fresh browser context and empty cookies, local storage and session storage for each spec. Use a **1440 × 900 desktop viewport**, except for `mobile-navigation.md`, which needs **390 × 844** before its first navigation and throughout its run. Keep default zoom and text scaling. Unfiltered result counts are hidden on phone layouts.
 
 ## Seed mapping
 
@@ -117,9 +117,17 @@ For `sidebar-limits.md`, the setting belongs to the selected project. Use the nu
 
 For `prompt-templates.md`, use `New template label`, `New template text`, and `Add template`. Existing row fields are `Label for <label>` and `Text for <label>`. Each row repeats `Delete template`; use the one in the row named by the step. `Save` persists the whole list. Wait for `Prompt templates saved` after each save. Empty new instruction text disables Add template; empty text in an existing row disables Save and shows `Every template needs both a label and text.`. A refused action with a disabled button needs no click. To clear the existing text, focus its field, select all, and press Backspace; wait for the inline reason before recording the refusal. Reloading discards that invalid draft. No task is submitted and no skills are assigned in this spec.
 
+For `desktop-project-rail.md`, use **1440 × 900** with fresh browser storage. The rail starts collapsed. `Expand projects` and `Collapse projects` are its accessible button names; the expanded button visibly says `Collapse`. Full project names in the rail are separate from the current project name in the task sidebar. Wait for the rail animation and label fade to finish before recording each state. Keep the same viewport and sidebar width for comparisons. Expansion requires enough room for the main content; the prescribed viewport has that room. The browser saves the rail choice under `cez-project-rail-expanded`.
+
+For `mobile-navigation.md`, set **390 × 844** before opening the Page URL. Read the visible phone controls; desktop navigation remains mounted but hidden. `More` in the bottom Views bar opens the More dialog. After Escape, wait for that sheet to close before using `Switch project: cedar-tools`. That button opens the Navigation drawer. Select the project link named `river-docs`; its accessible name also includes its current status. Wait for the drawer to close and the river-docs task card to load before recording the selection. Open `Invoice partner migration` from its main card. Use the task page's `Back` button to return to that list. The bottom Views bar and floating New task link appear on the list and are absent from the task page. Keep screenshots at the phone viewport; scroll only when needed to inspect a task below the visible portion of the list. Navigation drawers and sheets have entrance and exit animations.
+
+For `task-group-folds.md`, use `Collapse groups` and `Expand groups` above the main task groups. The sidebar's identically named Finished group is independent. These are visibility controls: the main caption keeps its task count while rows are folded. A matching search reveals folded rows temporarily. To clear `Search tasks`, focus the field, select all, and press Backspace; wait for the query to leave the URL before recording the folded result. Folding is browser-local, under `cez-task-list-folds`, with separate entries for each project, list view, and group. Keep the same browser context for the reload steps.
+
+For `task-delete.md`, open the named task first, then use `Run actions` and its `Delete task…` menu item. This opens the `Delete task permanently?` dialog. Step 2 leaves that dialog open; Cancel dismisses it. Step 4 opens it again; step 5 uses `Delete task` inside it. Wait for the dialog to close and navigation to finish before checking the main list. These seeded terminal tasks have no worktree, branch, or stored transcript, so the spec checks visible task deletion and project isolation. It does not assert filesystem cleanup. Each spec uses its own fixture, so deletion does not affect another scenario.
+
 For `cockpit-appearance.md`, keep the desktop viewport fixed at **1440 × 900**, with a fresh browser context, default zoom, and normal text scaling. The default theme is Dark, density is Comfortable, and reading width is Narrow. Select the radios named `Light`, `Dark`, and `Compact` in their named groups; `Compact for real` is a separate option. These controls apply immediately, with no Save button. Theme is browser-local (`cez-theme` in local storage). Density and reading width are stored in the isolated workspace's `$RUN_ROOT/home/ui-state.json` and mirrored in browser storage.
 
-**The appearance spec requires screenshots.** Capture a viewport screenshot and the accessibility tree before step 1 and after every Behavior step. Keep the initial Comfortable image and the Dark image before Compact for the spacing and text-size comparisons. Wait for fonts, the selected radio, and color transitions to settle before capture. An accessibility-tree-only verifier cannot judge color, spacing, or layout; it must report that capability gap instead of inferring them from radio state. Do not inject styles, set theme keys directly, or replace visible checks with CSS-class checks. Screenshots from the existing app show dark surfaces with light text, near-white surfaces with dark text, and settings navigation left of the main panel. The preview title keeps its text size when Compact reduces gaps. The specs do not prescribe RGB values, pixel positions, or relative ages.
+**The visual specs require screenshots:** `cockpit-appearance.md`, `desktop-project-rail.md`, and `mobile-navigation.md`. Capture a viewport screenshot and the accessibility tree before step 1 and after every Behavior step. Keep each spec at its prescribed viewport. Keep the initial compact rail image for the rail-width and sidebar-width comparisons. For appearance, keep the initial Comfortable image and the Dark image before Compact for the spacing and text-size comparisons. Wait for fonts, the selected radio, and color transitions to settle before capture. An accessibility-tree-only verifier cannot judge color, spacing, or layout; it must report that capability gap instead of inferring them from radio state. Do not inject styles, set theme keys directly, or replace visible checks with CSS-class checks. Screenshots from the existing app show dark surfaces with light text, near-white surfaces with dark text, and settings navigation left of the main panel. The preview title keeps its text size when Compact reduces gaps. The specs do not prescribe RGB values, pixel positions, or relative ages.
 
 Wait for each visible result before recording the page or taking the next action. In particular, wait for the confirmation dialog to leave the accessibility tree after Cancel or confirmation; its closing animation briefly hides the page behind it. Search renders immediately but writes its query into the URL after a debounce. Do not reload until the URL reflects the intended search, if testing a reload with a search.
 
@@ -127,9 +135,9 @@ Fresh browser storage keeps task groups open. If a reused browser has folded the
 
 ## Stop and restart
 
-None of the supplied specs requests a process restart. All except task-search reload browser pages to check persistence, including saved filters and settings.
+None of the supplied specs requests a process restart. All except task-search reload browser pages to check persistence, including saved filters, settings, rail width, group folds, and task deletion. The mobile spec checks a direct reload of the selected project’s route.
 
-For a process restart, send SIGINT to the supervised foreground process and wait for it to exit. Run the same Start command with the same `RUN_ROOT`, `BUILD_ROOT`, port and environment. Keep the existing data and browser context; do not run the seed helper again. The SQLite store holds archive choices, saved titles, pins, and read state. Project `ui-state.json` holds templates and sidebar limits. Workspace `ui-state.json` holds density. Browser storage holds theme; keep that browser context for browser reload checks. To clean up, stop the process and close its browser context before deleting only that run's temporary directory.
+For a process restart, send SIGINT to the supervised foreground process and wait for it to exit. Run the same Start command with the same `RUN_ROOT`, `BUILD_ROOT`, port and environment. Keep the existing data and browser context; do not run the seed helper again. The SQLite store holds archive choices, saved titles, pins, and read state. Project `ui-state.json` holds templates and sidebar limits. Workspace `ui-state.json` holds density. Browser storage holds theme, rail expansion, and task-group folds; keep that browser context for browser reload checks. To clean up, stop the process and close its browser context before deleting only that run's temporary directory.
 
 ## Needs and sources of variation
 
@@ -137,14 +145,14 @@ For a process restart, send SIGINT to the supervised foreground process and wait
 - `CEZ_DRY_RUN=1` selects bundled mock runners. These specs never submit a new task or resume a task. All seeded tasks are terminal. The prompt-template fixture has no tasks.
 - `CEZ_PROJECT_WARMUP=0` keeps other-project startup lazy. The second project is registered and has its own seeded store; warming it is not necessary for the selected project's list.
 - `CEZ_AUTOMATIONS=0` keeps the automation scheduler off. There are no seeded schedules, timers, live sessions or webhooks.
-- The repositories have no remotes. GitHub refreshes and merge checks have no work to do. Normal optional catalog/update checks are outside these criteria; no external response is needed for any of these nine features.
+- The repositories have no remotes. GitHub refreshes and merge checks have no work to do. Normal optional catalog/update checks are outside these criteria; no external response is needed for any of these thirteen features.
 - Seed timestamps are fixed UTC dates. The browser verification build pins its display clock. Do not assert relative ages or localized time strings; the specs do not depend on them.
 - The server binds to loopback. A browser in a separate container needs access to that same loopback listener, or both processes must run in the same network namespace. No authentication token is needed on the local listener.
 - Keep each run on its own port and `RUN_ROOT`. Do not share the workspace registry, SQLite files, browser context, or fixture Git directories between runs.
 
 ## Verification performed
 
-On 2026-11-02, all nine scenarios were walked in headless Chromium through `agent-browser` 0.40.0, using this seed helper and the repository's browser verification build. Each scenario used a fresh data directory and browser session. The criteria matched the recorded accessibility trees and, for appearance, screenshots:
+On 2026-11-02, all thirteen scenarios were walked in headless Chromium through `agent-browser` 0.40.0, using this seed helper and the repository's browser verification build. Each scenario used a fresh data directory and browser session. The criteria matched the recorded accessibility trees and, for the three visual specs, screenshots:
 
 | Spec | Criteria | Checked behavior |
 |------|----------|------------------|
@@ -157,5 +165,9 @@ On 2026-11-02, all nine scenarios were walked in headless Chromium through `agen
 | `sidebar-limits.md` | 20 | Invalid zero, saved cap, sidebar/main-list difference, project isolation, Unlimited, and reload. |
 | `prompt-templates.md` | 20 | Add, save, empty-text refusal, discard invalid draft, delete, project exclusion, and reload. |
 | `cockpit-appearance.md` | 20 | Dark/light colors, selected radios, preview readability, left navigation, tighter spacing with unchanged title size, and reload. |
+| `desktop-project-rail.md` | 20 | Project marks and full names, wider rail, unchanged sidebar width, narrower main content, no overlap, and reload in both states. |
+| `mobile-navigation.md` | 20 | Stacked cards, fixed bottom bar, floating New task, bottom sheet order, left drawer, project switch, task-page Back, and reload. |
+| `task-group-folds.md` | 18 | Folded rows with unchanged count, separate sidebar, temporary search reveal, clear, expand, and reload. |
+| `task-delete.md` | 20 | Exact confirmation, cancellation, deletion, remaining counts, archived and other-project tasks, and reload. |
 
 The seed helper also passed `node --check peck/seed.mjs`. No application source was changed. The Identity text uses the approved exception for this app's account-free local access. The template-only fixture has no task or completion-state model to seed.
