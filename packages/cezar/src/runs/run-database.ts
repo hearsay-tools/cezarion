@@ -1,20 +1,27 @@
+import { toRunRow, writeMetadata } from './run-database-row.ts';
+import { reportRows, REPORTS_MIGRATION, type IndexedArtifact } from './report-rows.ts';
 import { readPeerSummaryPage, toSummaryRow, type PeerSummaryPageQuery } from './run-database-peer-page.ts';
 import { accessSync, closeSync, constants, existsSync, openSync, readSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
+
 /**
  * Synchronous SQLite storage for opaque run JSON, summaries and query columns. All writes use
  * transaction(); failures leave database files intact and return typed errors.
  */
+
 export const RUNS_DB_FILE = 'runs.db';
+
 /** `meta` key whose presence means the legacy `runs.json` import committed (or there was nothing
  *  to import): from then on this database is authoritative and `runs.json` is history. Written in
  *  the same transaction as the imported rows, so it can never describe a half-finished import. */
 export const RUNS_IMPORT_COMPLETE_KEY = 'import-complete';
+
 /** `PRAGMA user_version` of a database this build created. A higher number means a newer cezar
  *  wrote it; that is refused rather than read, because a newer schema may store what this one
  *  would silently drop on its next write. */
 export const RUN_DATABASE_SCHEMA_VERSION = 10;
+
 /**
  * The oldest `user_version` the READ-ONLY reader can read as it stands (`openReadOnly`). It never
  * migrates, so a project this build has not opened yet is still at the version an earlier build
@@ -23,9 +30,11 @@ export const RUN_DATABASE_SCHEMA_VERSION = 10;
  * a table or column a reader queries.
  */
 export const RUN_DATABASE_READABLE_FROM = 1;
+
 /** How long a statement waits on another connection's lock before failing as busy. Short on
  *  purpose: the store runs on the event loop, and a blocked write is a blocked cockpit. */
 const BUSY_TIMEOUT_MS = 50;
+
 /**
  * Forward-only migrations: entry `i` takes a database from `user_version` i to i + 1. Never edit
  * a shipped entry; append a new one and raise `RUN_DATABASE_SCHEMA_VERSION`.
@@ -211,15 +220,9 @@ const MIGRATIONS: readonly string[] = [
   --
   -- No live recompute: isLiveRecord already calls a row with an open wait live, of any kind.
   `,
-  `
-  CREATE TABLE artifacts (
-    id TEXT PRIMARY KEY, run_id TEXT NOT NULL, name TEXT NOT NULL,
-    title TEXT, created_at TEXT NOT NULL, size INTEGER NOT NULL
-  ) STRICT;
-  CREATE INDEX artifacts_created_at ON artifacts (created_at DESC, id);
-  CREATE INDEX artifacts_run_id ON artifacts (run_id);
-  `,
+  REPORTS_MIGRATION,
 ];
+
 /** What the caller writes for one run. Optional columns may be omitted or null. */
 export interface RunRowInput {
   id: string;
@@ -241,6 +244,7 @@ export interface RunRowInput {
   /** The record's summary projection, serialized. */
   summary: string;
 }
+
 export interface RunRow {
   /** Insertion order: assigned by the row's first insert, never changed (see the schema). */
   seq: number;
@@ -260,6 +264,7 @@ export interface RunRow {
   data: string;
   summary: string;
 }
+
 export interface RunSummaryRow {
   seq: number;
   id: string;
@@ -267,6 +272,7 @@ export interface RunSummaryRow {
   revision: number;
   summary: string;
 }
+
 /** What branch cleanup and git-log attribution read about one run, without its record. */
 export interface BranchOwnerRow {
   id: string;
@@ -277,13 +283,12 @@ export interface BranchOwnerRow {
   baseBranch: string | null;
   summary: string;
 }
-export interface IndexedArtifact {
-  id: string; runId: string; name: string; title?: string | undefined; createdAt: string; size: number;
-}
+
 export interface RunRevision {
   id: string;
   revision: number;
 }
+
 export interface RunDatabaseChanges {
   upserts: readonly RunRowInput[];
   deletes: readonly string[];
@@ -301,10 +306,12 @@ export interface RunDatabaseChanges {
    *  private metadata, written in the same commit. */
   beforeCommit?: () => Readonly<Record<string, string>> | void;
 }
+
 /** A family a fenced write touches: held at `generation`, or to `take` in that same transaction if
  *  its claim is still exactly as the writer judged it (absent, or a dead owner's) — the claim a
  *  busy database kept the writer from taking before. */
 export type RunFenceClaim = { generation: number } | { take: { session: string; generation: number } | null };
+
 export interface RunWriteFence {
   owner: { session: string; pid: number; startToken: string | null };
   /** Each family this change set writes. */
@@ -313,6 +320,7 @@ export interface RunWriteFence {
    *  and the family the row belongs to. */
   rows: ReadonlyMap<string, { revision: number | null; family: string }>;
 }
+
 export interface RunDatabaseCommit {
   /** The revision each upserted row now has. */
   revisions: Map<string, number>;
@@ -323,6 +331,7 @@ export interface RunDatabaseCommit {
   /** Nothing was written: the `onlyIfMetaAbsent` key was present. */
   skipped: boolean;
 }
+
 /** One family's owner in `run_claims`. */
 export interface RunClaim {
   family: string;
@@ -331,6 +340,7 @@ export interface RunClaim {
   startToken: string | null;
   generation: number;
 }
+
 /** A row a fenced write found other than its writer last saw it. */
 export interface RunRowConflict {
   id: string;
@@ -338,6 +348,7 @@ export interface RunRowConflict {
   /** The row as it stands, or undefined when another writer deleted it. */
   current: RunRow | undefined;
 }
+
 /** One `run_conflicts` row: the original, local and current versions of a conflicted run. */
 export interface RunConflictEvidence {
   runId: string;
@@ -349,13 +360,16 @@ export interface RunConflictEvidence {
   currentRevision: number | null;
   currentData: string | null;
 }
+
 export type RunDatabaseErrorKind = 'busy' | 'permission' | 'disk-full' | 'corrupt' | 'unsupported-schema' | 'conflict' | 'other';
+
 /** Every failure this module reports. `kind` is the discriminant; the subclasses exist so a
  *  caller can also `instanceof` the one case it handles. */
 export class RunDatabaseError extends Error {
   readonly kind: RunDatabaseErrorKind;
   /** SQLite's primary result code, when the failure came from SQLite. */
   readonly sqliteCode: number | undefined;
+
   constructor(kind: RunDatabaseErrorKind, message: string, options: { sqliteCode?: number; cause?: unknown } = {}) {
     super(message, { cause: options.cause });
     this.name = new.target.name;
@@ -363,6 +377,7 @@ export class RunDatabaseError extends Error {
     this.sqliteCode = options.sqliteCode;
   }
 }
+
 /** Another connection holds the lock past the busy timeout. Transient: retry later. */
 export class RunDatabaseBusyError extends RunDatabaseError {}
 /** The file or its directory cannot be opened or written by this user. */
@@ -371,25 +386,30 @@ export class RunDatabasePermissionError extends RunDatabaseError {}
 export class RunDatabaseDiskFullError extends RunDatabaseError {}
 /** The file is not a database, or a page is malformed. Never reset by this module. */
 export class RunDatabaseCorruptError extends RunDatabaseError {}
+
 /** The database was written by a newer cezar whose schema this build does not know. */
 export class RunDatabaseUnsupportedSchemaError extends RunDatabaseError {
   readonly found: number;
   readonly supported: number;
+
   constructor(found: number, supported: number) {
     super('unsupported-schema', `runs database schema ${found} is newer than this cezar supports (${supported})`);
     this.found = found;
     this.supported = supported;
   }
 }
+
 /** A fenced write found rows changed, created or deleted under it, or its claim gone. Nothing was
  *  written. `conflicts` names every such row of the change set, each with its current row. */
 export class RunConflictError extends RunDatabaseError {
   readonly conflicts: readonly RunRowConflict[];
+
   constructor(conflicts: readonly RunRowConflict[]) {
     super('conflict', `runs database: ${conflicts.map((c) => `${c.id} (${c.reason})`).join(', ')} changed under this writer`);
     this.conflicts = conflicts;
   }
 }
+
 // SQLite primary result codes (https://sqlite.org/rescode.html). node:sqlite reports the
 // EXTENDED code in `errcode`; its low byte is the primary code.
 const SQLITE_PERM = 3;
@@ -401,6 +421,7 @@ const SQLITE_FULL = 13;
 const SQLITE_CANTOPEN = 14;
 const SQLITE_AUTH = 23;
 const SQLITE_NOTADB = 26;
+
 /**
  * Map a node:sqlite error (`code: 'ERR_SQLITE_ERROR'`, numeric `errcode`) to its typed class.
  * Anything that is not a SQLite error — a closed connection, a bad argument — passes through
@@ -439,6 +460,7 @@ export function toRunDatabaseError(error: unknown, path?: string): unknown {
       return new RunDatabaseError('other', message, options);
   }
 }
+
 /** Whether this user is refused read-write access to the database file, or (when the file does
  *  not exist yet) to the directory that would hold it. */
 function accessDenied(path: string): boolean {
@@ -451,8 +473,10 @@ function accessDenied(path: string): boolean {
     return true;
   }
 }
+
 /** The 16 bytes every SQLite database file starts with (https://sqlite.org/fileformat.html). */
 const SQLITE_HEADER = Buffer.from('SQLite format 3\0', 'latin1');
+
 /**
  * Refuse a non-empty file that does not start with the SQLite header before SQLite sees it.
  * SQLite would also report it as not a database, but closing that connection deletes the `-wal`
@@ -472,6 +496,7 @@ function assertDatabaseHeader(path: string): void {
   if (header.length === 0 || header.equals(SQLITE_HEADER)) return;
   throw new RunDatabaseCorruptError('corrupt', `runs database: ${path} is not a database`, { sqliteCode: SQLITE_NOTADB });
 }
+
 const ROW_COLUMNS = 'seq, id, created_at, finished_at, status, archived, live, parent_run_id, client_request_id, group_id, worktree_path, branch, base_branch, revision, data, summary';
 /** Newest first, runs created in the same millisecond in insertion order (`seq`): the one order
  *  every list read uses. */
@@ -480,27 +505,11 @@ const NEWEST_FIRST = 'ORDER BY created_at DESC, seq';
 const SUMMARY_SELECT = 'SELECT seq, id, created_at, revision, summary FROM runs';
 /** An archived run that is not an owned worker: what the run lists' archived window counts (#864). */
 export const ARCHIVED_ROOT = 'archived = 1 AND parent_run_id IS NULL';
+
 type SqlRow = Record<string, unknown>;
-function toRunRow(row: SqlRow): RunRow {
-  return {
-    seq: row.seq as number,
-    id: row.id as string,
-    createdAt: row.created_at as string,
-    finishedAt: row.finished_at as string | null,
-    status: row.status as string,
-    archived: row.archived === 1,
-    live: row.live === 1,
-    parentRunId: row.parent_run_id as string | null,
-    clientRequestId: row.client_request_id as string | null,
-    groupId: row.group_id as string | null,
-    worktreePath: row.worktree_path as string | null,
-    branch: row.branch as string | null,
-    baseBranch: row.base_branch as string | null,
-    revision: row.revision as number,
-    data: row.data as string,
-    summary: row.summary as string,
-  };
-}
+
+
+
 function validateChanges(changes: RunDatabaseChanges): void {
   const upserted = new Set<string>();
   for (const row of changes.upserts) {
@@ -511,11 +520,13 @@ function validateChanges(changes: RunDatabaseChanges): void {
     if (upserted.has(id)) throw new TypeError(`run ${id} is both upserted and deleted in one transaction`);
   }
 }
+
 /** `meta` key of the database-wide commit sequence every upsert stamps as its row's revision. */
 const COMMIT_SEQ_KEY = 'commit-seq';
 /** `meta` key of the sequence every claim acquisition takes its generation from. */
 const CLAIM_GENERATION_KEY = 'claim-generation';
 const CLAIM_COLUMNS = 'family, session, pid, start_token, generation';
+
 function toRunClaim(row: SqlRow): RunClaim {
   return {
     family: row.family as string,
@@ -525,6 +536,7 @@ function toRunClaim(row: SqlRow): RunClaim {
     generation: row.generation as number,
   };
 }
+
 export class RunDatabase {
   private readonly db: DatabaseSync;
   private readonly path: string;
@@ -566,6 +578,7 @@ export class RunDatabase {
     insertConflict: StatementSync;
     listConflicts: StatementSync;
   };
+
   private constructor(db: DatabaseSync, path: string) {
     this.db = db;
     this.path = path;
@@ -625,6 +638,7 @@ export class RunDatabase {
       listConflicts: db.prepare('SELECT * FROM run_conflicts ORDER BY seq'),
     };
   }
+
   /**
    * Open (creating if absent) the database at `path` and bring its schema up to date. The
    * directory must already exist; creating it is the caller's decision. On any failure the
@@ -654,6 +668,7 @@ export class RunDatabase {
       throw typed;
     }
   }
+
   /**
    * Open an existing readable database without creating it, migrating it or changing journal mode.
    * Return null before a readable schema exists; refuse newer schemas. WAL/SHM coordination may
@@ -678,25 +693,30 @@ export class RunDatabase {
       throw toRunDatabaseError(error, path);
     }
   }
+
   get(id: string): RunRow | undefined {
     const row = this.run(() => this.statements.get.get(id));
     return row ? toRunRow(row) : undefined;
   }
+
   /** The rows for `ids` that exist, in no particular order. */
   getMany(ids: readonly string[]): RunRow[] {
     if (ids.length === 0) return [];
     return this.run(() => this.statements.getMany.all(JSON.stringify(ids))).map(toRunRow);
   }
+
   /** Summaries newest first (`created_at` descending, then insertion order). Archived runs are included,
    *  as every list route includes them. Without a limit, every row. */
   listSummaries(options: { limit?: number } = {}): RunSummaryRow[] {
     const limit = options.limit ?? -1;
     return this.run(() => this.statements.listSummaries.all(limit)).map(toSummaryRow);
   }
+
   /** A bounded root-only page, with exclusions applied before SQL offset/limit. */
   listPeerSummaries(options: PeerSummaryPageQuery): RunSummaryRow[] {
     return this.run(() => readPeerSummaryPage(this.db, options));
   }
+
   /**
    * The run lists' window (#864), newest first: every unarchived row, plus the newest
    * `archivedLimit` archived roots. Archived workers are never in it — no list renders them, and
@@ -706,11 +726,13 @@ export class RunDatabase {
     const statement = options.roots ? this.statements.listRootWindowSummaries : this.statements.listWindowSummaries;
     return this.run(() => statement.all(archivedLimit)).map(toSummaryRow);
   }
+
   /** The summary rows of `ids` that exist, in no particular order. */
   getSummaries(ids: readonly string[]): RunSummaryRow[] {
     if (ids.length === 0) return [];
     return this.run(() => this.statements.getSummaries.all(JSON.stringify(ids))).map(toSummaryRow);
   }
+
   /** Every root row (archived or not) whose stored summary contains each `prefilter` token,
    *  lowercased, newest first: the candidates of a run search (#864), which the caller still
    *  checks with `matchesRunSearch`. No tokens, every root. */
@@ -719,6 +741,7 @@ export class RunDatabase {
     this.visitRootSummaries(prefilter, (row) => { rows.push(row); return true; });
     return rows;
   }
+
   /** The rows `searchRootSummaries` answers, one at a time, until `visit` answers false: a search
    *  that needs only its first matches stops reading there. */
   visitRootSummaries(prefilter: readonly string[], visit: (row: RunSummaryRow) => boolean,
@@ -733,14 +756,17 @@ export class RunDatabase {
       }
     });
   }
+
   /** Every row, newest first (`created_at` descending, then insertion order). */
   listAll(): RunRow[] {
     return this.run(() => this.statements.listAll.all()).map(toRunRow);
   }
+
   /** The rows `RunStore.open` holds in memory: those whose `live` column is set, in insertion order. */
   listLive(): RunRow[] {
     return this.run(() => this.statements.listLive.all()).map(toRunRow);
   }
+
   /** The workers of one parent, newest first. */
   listByParent(parentId: string): RunRow[] {
     return this.run(() => this.statements.listByParent.all(parentId)).map(toRunRow);
@@ -847,41 +873,9 @@ export class RunDatabase {
     }));
   }
 
-  /** Rebuildable HTML snapshot cache. Never insert for a deleted or foreign run. */
-  replaceArtifacts(runId: string, artifacts: readonly IndexedArtifact[], revision?: number): void {
-    this.run(() => {
-      this.db.exec('BEGIN IMMEDIATE');
-      try {
-        this.db.prepare('DELETE FROM artifacts WHERE run_id = ?').run(runId);
-        if (this.statements.revisionOf.get(runId)) {
-          const insert = this.db.prepare('INSERT INTO artifacts (id, run_id, name, title, created_at, size) VALUES (?, ?, ?, ?, ?, ?)');
-          for (const a of artifacts) insert.run(a.id, runId, a.name, a.title ?? null, a.createdAt, a.size);
-        }
-        this.db.prepare('DELETE FROM meta WHERE key = ? AND value = ?').run(`reports-dirty:${runId}`, String(revision));
-        this.db.exec('COMMIT');
-      } catch (error) { rollback(this.db); throw error; }
-    });
-  }
-
-  listDirtyReportRuns(): string[] {
-    return this.run(() => this.db.prepare("SELECT key FROM meta WHERE key >= 'reports-dirty:' AND key < 'reports-dirty;'").all())
-      .map(row => (row.key as string).slice('reports-dirty:'.length));
-  }
-
-  private markReportDirty(row: RunRowInput, revision: number): void {
-    const wasLive = this.db.prepare('SELECT live FROM runs WHERE id = ?').get(row.id)?.live === 1;
-    if (row.live || wasLive) this.statements.setMeta.run(`reports-dirty:${row.id}`, String(revision));
-  }
-
-  listArtifacts(): IndexedArtifact[] {
-    return this.run(() => this.db.prepare('SELECT a.* FROM artifacts a JOIN runs r ON r.id = a.run_id ORDER BY a.created_at DESC, a.id').all())
-      .map(row => ({ id: row.id as string, runId: row.run_id as string, name: row.name as string,
-        ...(row.title === null ? {} : { title: row.title as string }), createdAt: row.created_at as string, size: row.size as number }));
-  }
-
-  dropArtifact(id: string): void {
-    this.run(() => this.db.prepare('DELETE FROM artifacts WHERE id = ?').run(id));
-  }
+  get reports() { return this.run(() => reportRows(this.db, work => this.run(work))); }
+  replaceArtifacts(id: string, artifacts: readonly IndexedArtifact[], revision?: number): void { this.run(() => this.reports.replace(id, artifacts, revision)); }
+  listArtifacts(): IndexedArtifact[] { return this.run(() => this.reports.list()); }
 
   getMeta(key: string): string | undefined {
     const row = this.run(() => this.statements.getMeta.get(key));
@@ -911,14 +905,13 @@ export class RunDatabase {
         }
         if (changes.fence) claims = this.checkFence(changes.fence);
         for (const id of changes.deletes) {
-          this.db.prepare('DELETE FROM artifacts WHERE run_id = ?').run(id);
-          this.statements.deleteMeta.run(`reports-dirty:${id}`);
+          this.reports.deleteRun(id);
           this.statements.delete.run(id);
           this.statements.deleteMeta.run(`issue-attribution:${id}`);
         }
         const revision = changes.upserts.length > 0 ? this.nextSequence(COMMIT_SEQ_KEY) : 0;
         for (const row of changes.upserts) {
-          this.markReportDirty(row, revision);
+          this.reports.markDirty(row.id, row.live, revision);
           const inserted = this.statements.upsert.get({
             id: row.id,
             createdAt: row.createdAt,
@@ -942,8 +935,8 @@ export class RunDatabase {
           revisions.set(row.id, revision);
           seqs.set(row.id, inserted!.seq as number);
         }
-        this.writeMeta(changes.meta ?? {});
-        this.writeMeta(changes.beforeCommit?.() ?? {});
+        writeMetadata(this.statements, changes.meta ?? {});
+        writeMetadata(this.statements, changes.beforeCommit?.() ?? {});
         this.db.exec('COMMIT');
       } catch (error) {
         rollback(this.db);
@@ -951,13 +944,6 @@ export class RunDatabase {
       }
     });
     return { revisions, seqs, claims, skipped };
-  }
-
-  private writeMeta(values: Readonly<Record<string, string | null>>): void {
-    for (const [key, value] of Object.entries(values)) {
-      if (value === null) this.statements.deleteMeta.run(key);
-      else this.statements.setMeta.run(key, value);
-    }
   }
 
   /** Inside a write transaction: take the claims the fence asks for, then throw `RunConflictError`

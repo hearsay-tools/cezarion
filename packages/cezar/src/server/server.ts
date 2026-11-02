@@ -147,11 +147,7 @@ import { detectEnvironment } from '../core/backend-detect.ts';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import type { ContentBlock } from '../core/agent-runner.ts';
 import { AGENT_MODELS_LOCKED_ERROR, agentModelsLocked } from '../core/agent-model-policy.ts';
-import {
-  PROVIDER_IDS,
-  ProviderAuthService,
-  type ProviderId,
-} from '../core/provider-auth.ts';
+import { PROVIDER_IDS, ProviderAuthService, type ProviderId } from '../core/provider-auth.ts';
 import { applyProviderEnablement } from '../core/provider-availability.ts';
 import { RunnerModelCatalog } from '../core/runner-model-catalog.ts';
 import { currentUsage, onUsage } from '../core/process-usage.ts';
@@ -314,6 +310,7 @@ import {
   isSafeAssetFilename,
   resolveGetRequest,
 } from './static-ui.ts';
+
 export interface ServerDeps extends SelfUpdateServerDeps {
   /** Per-repository forge injection for embedded servers and tests. */
   forgeFactory?: ForgeFactory;
@@ -420,7 +417,9 @@ export interface ServerDeps extends SelfUpdateServerDeps {
   automationsChanged?: () => void;
   archiveOnMergeChanged?: () => void;
 }
+
 // ---- project-scoped routing (multi-project spec, step 2.2) -----------------
+
 /** Hono env for the mirrored project-route table: the scope resolver puts the
  *  request's `ProjectContext` on the context, handlers read `c.get('project')`. */
 export type ProjectApiEnv = { Variables: { project: ProjectContext; stoppedOnAdoption?: boolean } };

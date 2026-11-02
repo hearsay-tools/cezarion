@@ -63,3 +63,4 @@ export * from './automation-storage.ts';
 export * from './self-update.ts';
 
 export * from './reports.ts';
+export * from './report-title.ts';

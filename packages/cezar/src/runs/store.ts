@@ -1,4 +1,4 @@
-import { ReportsIndex } from '../artifacts/reports-index.ts';
+import { reportsIndex, type ReportsIndex } from '../artifacts/reports-index.ts';
 import { stageCommit, stageLoaded, stageDurableUpdate, stageDebouncedUpdate, stageConversation, stageArchiveFields, stagePullRequests, stageStepUpdate, redactPatch, redactText } from './record-write-rules.ts';
 import { workerDeletionProof } from './worker-deletion-proof.ts';
 import { listPeerTaskSummaries, parseStoredSummary, type PeerTaskPageOptions } from './run-summary-page.ts';
@@ -65,6 +65,7 @@ import { waitInputId } from '../workflows/waits.ts';
 import { applyOutcomes, type OutcomeDependencies, type RunOutcome } from './outcome-commit.ts';
 import { assertConversationIdFree, type ConversationIdentity } from './conversation-identity.ts';
 export { ConversationIdInUseError } from './conversation-identity.ts';
+
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import {
   ARCHIVED_ROOT, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunConflictError, RunDatabase, RunDatabaseBusyError,
@@ -77,8 +78,10 @@ import { ColdReadCache, storedRow, type StoredRow } from './cold-reads.ts';
 import { assertNoLegacyCockpit, assertNoLegacyWriter, backUpLegacyIndex, LEGACY_INDEX_FILE, LegacyWriterError, readLegacyIndex } from './legacy-index.ts';
 import { RunStoreOpenError, toRunStoreOpenError } from './store-open-error.ts';
 import { claimOwnerLive, closeClaimSession, openClaimSession, type ClaimOwner } from './run-claims.ts';
+
 /** Per-store persistence adapter; the second argument is the normal fenced transaction. */
 export type RunStorePersistence = (changes: RunDatabaseChanges, transaction: RunDatabase['transaction']) => RunDatabaseCommit;
+
 export type RunStatus = 'queued' | 'running' | 'waiting' | 'review' | 'done' | 'failed' | 'cancelled';
 export type StepStatus =
   | 'pending'
@@ -89,6 +92,7 @@ export type StepStatus =
   | 'failed'
   | 'cancelled'
   | 'skipped';
+
 /**
  * A runner id as it may appear in a PERSISTED record, normalized to the three
  * ids the rest of cezar speaks (#547).
@@ -111,7 +115,9 @@ export type StepStatus =
 const storedRunnerSchema = z
   .enum([...RUNNER_IDS, 'claude-cli'])
   .transform((id) => (id === 'claude-cli' ? ('claude' as const) : id));
+
 const stepStateSchema = contractStepStateSchema.extend({ backend: storedRunnerSchema.optional() });
+
 /** Exported for `./run-index.ts`, the read-only reader of the same records. Nothing else should
  *  parse a stored run — see `reconcileLoadedRun` for why a second parser is a correctness risk. */
 export const runRecordSchema = contractRunRecordSchema.extend({
@@ -147,6 +153,7 @@ export const runRecordSchema = contractRunRecordSchema.extend({
   /** The handoff file's autosave records (hearsay-tools/cezarion#1809); unreadable drops the field. */
   handoffRecords: contractRunRecordSchema.shape.handoffRecords.catch(undefined),
 });
+
 /** The keys an older record used for parks. Schema 4 reads the CI and monitoring ones into
  *  `waits`; phase 4b (hearsay-tools/cezarion#1236) reads the pending-question summary into a human
  *  wait. None is written again (spec 2026-10-17-unified-waits, § Compatibility). */
@@ -1217,11 +1224,7 @@ export class RunStore extends EventEmitter {
   /** `null` once the store is closed, and in a `RunStore.unavailable` store (nothing is written,
    *  nothing is evicted). */
   private db: RunDatabase | null = null;
-  private reportsCache?: ReportsIndex;
-  get reports(): ReportsIndex {
-    if (!this.db) throw this.openFailure ?? new Error('runs database unavailable');
-    return this.reportsCache ??= new ReportsIndex(this.db, this, this.dataDir);
-  }
+  get reports(): ReportsIndex { return reportsIndex(this.db, this, this.dataDir, this.openFailure); }
   /** Why `open` failed, in a `RunStore.unavailable` store. */
   private openFailure: RunStoreOpenError | undefined;
   private persistence: RunStorePersistence | undefined;
@@ -1323,7 +1326,6 @@ export class RunStore extends EventEmitter {
       if (db.getMeta(RUNS_IMPORT_COMPLETE_KEY) === undefined) importLegacyIndex(db, dataDir);
       store.db = db;
       store.owner = openClaimSession();
-      void store.reports;
       if (!maintenance) {
         store.loadHeldRows();
         store.warmTranscriptFacts();
@@ -1360,9 +1362,7 @@ export class RunStore extends EventEmitter {
 
   /** Why this store has no database, when it is `RunStore.unavailable`'s: its runs are unknown,
    *  not absent. */
-  get unavailable(): RunStoreOpenError | undefined {
-    return this.openFailure;
-  }
+  get unavailable(): RunStoreOpenError | undefined { return this.openFailure; }
 
   /**
    * Open-time load: the live rows, the finished rows a load normalization repairs, then the

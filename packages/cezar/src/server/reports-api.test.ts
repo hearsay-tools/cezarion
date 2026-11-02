@@ -1,3 +1,4 @@
+import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
@@ -40,6 +41,16 @@ describe('project reports', () => {
     finally { db.close(); }
   });
 
+  it('rebuilds cache rows after removing the backfill marker, without losing snapshots or task history', async () => {
+    const run = task(); const artifact = await publish(run.id); await page();
+    store.close();
+    const raw = new DatabaseSync(join(dataDir, 'runs.db'));
+    raw.prepare('DELETE FROM meta WHERE key = ?').run(REPORTS_BACKFILL_KEY);
+    raw.exec('DELETE FROM artifacts'); raw.close();
+    store = RunStore.open(dataDir);
+    expect((await page()).reports.map(a => a.id)).toEqual([artifact.id]);
+  });
+
   it('reconciles publications made by live tasks after backfill and on committed settlement without a query', async () => {
     const run = task();
     store.reports.start();
@@ -71,6 +82,23 @@ describe('project reports', () => {
     expect((await page()).reports.map(a => a.id)).toContain(artifactId);
   });
 
+  it('indexes only the settling task and ignores archive events from finished tasks', async () => {
+    const settled = task('Settling'), active = task('Still running');
+    store.reports.start(); await page();
+    const a = await publish(settled.id), b = await publish(active.id);
+    store.updateRun(settled.id, { status: RUN_STATUS.done }); store.flush();
+    await vi.waitFor(() => expect(store.reports).toBeTruthy());
+    // The public serialized barrier completes the settlement work without including live tasks.
+    await store.reports.reconcile(false);
+    const raw = new DatabaseSync(join(dataDir, 'runs.db'), { readOnly: true });
+    try {
+      expect(raw.prepare('SELECT id FROM artifacts').all().map(row => row.id)).toEqual([a.id]);
+      store.updateRun(settled.id, { archived: true }); store.flush();
+      await store.reports.reconcile(false);
+      expect(raw.prepare('SELECT id FROM artifacts WHERE id = ?').get(b.id)).toBeUndefined();
+    } finally { raw.close(); }
+  });
+
   it('paginates newest first with stable ties and searches title, file name, and the shared source-task predicate', async () => {
     const run = task('Distinct task');
     const a = await publish(run.id, 'budget.html', 'Income');
@@ -85,6 +113,26 @@ describe('project reports', () => {
     expect((await page('?q=distinct')).total).toBe(2);
     expect((await page('?q=quick-task')).total).toBe(2);
     expect((await page('?q=absent')).total).toBe(0);
+  });
+
+  it('fills a page past missing content and lists from summaries without full-record reads', async () => {
+    const run = task();
+    await publish(run.id, 'first.html'); await publish(run.id, 'second.html');
+    await publish(run.id, 'third.html');
+    store.updateRun(run.id, { status: RUN_STATUS.done }); store.flush();
+    await page();
+    const initial = await page('?limit=1');
+    const missing = initial.reports[0]!;
+    rmSync(join(artifactDirectory(dataDir, run.id), missing.id, 'content'));
+    const getRun = vi.spyOn(store, 'getRun');
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const next = await page('?limit=1');
+      expect(next.reports).toHaveLength(1);
+      expect(next.reports[0]!.id).not.toBe(missing.id);
+      expect(next.total).toBe(2); expect(next.nextCursor).toBeTruthy();
+      expect(getRun).not.toHaveBeenCalled();
+    } finally { getRun.mockRestore(); warning.mockRestore(); }
   });
 
   it('never indexes foreign artifact directories or exposes reports through an unknown project', async () => {
@@ -139,6 +187,14 @@ describe('project reports', () => {
     expect(store.reports.start()).toBeUndefined();
     expect(backfill).toHaveBeenCalledOnce();
     backfill.mockRestore();
+  });
+
+  it('refuses an unavailable store instead of reporting an empty project', async () => {
+    const unavailable = RunStore.unavailable(dataDir, new RunStoreOpenError('corrupt', join(dataDir, 'runs.db'), 'Run history is damaged'));
+    const app = createApp({ repoRoot: root, store: unavailable, manager: {} as RunManager, version: 'test' });
+    const response = await apiRequest(app, '/api/v1/p/default/reports');
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: expect.stringContaining('Run history is damaged') });
   });
 
   it('validates query shapes and opaque cursors', async () => {
