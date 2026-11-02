@@ -17,20 +17,38 @@ rule:
     - all:
         - pattern: $RECEIVER.active.set($$$)
         - not:
-            inside:
-              kind: method_definition
-              has:
-                field: name
-                regex: ^activate$
-              stopBy:
-                kind: method_definition
+            all:
+              - pattern: this.active.$METHOD($$$)
+              - inside:
+                  kind: class_declaration
+                  has:
+                    field: name
+                    regex: ^RunManager$
+                  stopBy:
+                    kind: class_declaration
+              - inside:
+                  kind: method_definition
+                  has:
+                    field: name
+                    regex: ^activate$
+                  stopBy:
+                    kind: method_definition
     - all:
         - pattern: $RECEIVER.active.delete($$$)
         - not:
-            inside:
-              kind: method_definition
-              has:
-                field: name
-                regex: ^dropActive$
-              stopBy:
-                kind: method_definition
+            all:
+              - pattern: this.active.$METHOD($$$)
+              - inside:
+                  kind: class_declaration
+                  has:
+                    field: name
+                    regex: ^RunManager$
+                  stopBy:
+                    kind: class_declaration
+              - inside:
+                  kind: method_definition
+                  has:
+                    field: name
+                    regex: ^dropActive$
+                  stopBy:
+                    kind: method_definition
