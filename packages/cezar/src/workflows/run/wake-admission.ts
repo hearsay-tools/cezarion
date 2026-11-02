@@ -12,6 +12,7 @@ import { runsAwaitingPeer } from '../wait-scope.ts';
 import { transitionVia, type RunExitId } from '../run-states.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
 import type { ActiveRun } from '../active-run.ts';
+import { liveSubagents } from './subagent-waits.ts';
 import { clearIdleTimer } from './input-timers.ts';
 import { canProceedWithRun } from './run-guards.ts';
 import * as wakeLedger from './wake-ledger.ts';
@@ -170,8 +171,7 @@ export class WakeAdmission {
     }
     clearIdleTimer(state);
     const top = computeWaitingOn(run)?.kind;
-    const holdsSubagents = holdsNativeSubagents(run);
-    const keepsSlot = holdsSubagents || parkTopKeepsSlot(run, top);
+    const { holdsSubagents, keepsSlot } = parkHold(run, state, top);
     // A park that frees its slot publishes the intent first: a refused write throws and keeps it.
     if (keepsSlot) {
       this.host.move(runId, 'park');
@@ -404,6 +404,17 @@ export class WakeAdmission {
  *  and a slot, whichever wait ranks first (hearsay-tools/cezarion#2431). */
 function holdsNativeSubagents(run: RunRecord): boolean {
   return openWaits(run).some((wait) => wait.kind === 'subagent');
+}
+
+/** Whether the park keeps the session and a slot. Live children hold them even when their wait
+ *  could not be saved (a full wait list); a park held only for them gives the slot back when the
+ *  last one ends (`heldForSubagents`). */
+function parkHold(run: RunRecord, state: ActiveRun, top: WaitingOn['kind'] | undefined): { holdsSubagents: boolean; keepsSlot: boolean } {
+  const waited = holdsNativeSubagents(run);
+  const holdsSubagents = waited || liveSubagents(state) > 0;
+  const topKeepsSlot = parkTopKeepsSlot(run, top);
+  state.heldForSubagents = (holdsSubagents && !topKeepsSlot && !waited) || undefined;
+  return { holdsSubagents, keepsSlot: holdsSubagents || topKeepsSlot };
 }
 
 /** A CI, process or timer park keeps its slot, and so does a wake due now with nothing open. */

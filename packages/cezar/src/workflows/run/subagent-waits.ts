@@ -226,7 +226,7 @@ export class SubagentWaits {
     if (this.context.disposed()) return;
     const wait = openSubagentWaitOf(this.context.store.getRun(runId));
     if (wait) this.interrupt(runId, wait.id);
-    else if (state && liveSubagents(state)) this.endStoppedChildren(runId);
+    else if (state && liveSubagents(state) && !this.endStoppedChildren(runId)) this.armRetry(runId);
   }
 
   /**
@@ -241,12 +241,15 @@ export class SubagentWaits {
     this.host.settleWait(runId, waitId, { reason: 'interrupted' });
   }
 
-  private armRetry(runId: string, waitId: string): void {
+  /** Write the stopped children's ends again later: through the wait while it is open, or on their
+   *  own when no wait held them. */
+  private armRetry(runId: string, waitId?: string): void {
     const timer = setTimeout(() => {
       if (this.retries.get(runId) !== timer) return;
       this.retries.delete(runId);
-      const open = openWaits(this.context.store.getRun(runId) ?? {}).some(entry => entry.id === waitId);
-      if (open && !this.context.disposed()) this.interrupt(runId, waitId);
+      if (this.context.disposed()) return;
+      if (waitId === undefined) { if (!this.endStoppedChildren(runId)) this.armRetry(runId); return; }
+      if (openWaits(this.context.store.getRun(runId) ?? {}).some(entry => entry.id === waitId)) this.interrupt(runId, waitId);
     }, Math.min(this.deadlineMs / 2, INTERRUPT_RETRY_MS));
     timer.unref?.();
     this.retries.set(runId, timer);

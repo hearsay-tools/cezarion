@@ -4,7 +4,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
-import type { SubagentWaitEntry, Wait } from '@open-mercato/cezar-contract/waits';
+import { WAIT_LIMIT, type SubagentWaitEntry, type Wait } from '@open-mercato/cezar-contract/waits';
 import { makePeerWait, makeWorkerWait, RUN_STATUS, SUBAGENT_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { ToolStatus, UiEvent, UiToolItem } from '../core/ui-events.ts';
 import { UiEventSink } from '../runs/ui-event-sink.ts';
@@ -363,6 +363,41 @@ describe('the subagent wait deadline (hearsay-tools/cezarion#2431)', () => {
     append.mockRestore();
     expect(backgroundEnds(id).map(([child, status]) => [child, status])).toEqual([['toolu_bg_01', 'declined']]);
     expect(entryOf(id, wait.id) ?? settledOf(id, wait.id)).toMatchObject({ result: { reason: 'interrupted' } });
+  });
+
+  /** A parent with its first turn held and a full wait list, so no subagent wait fits. */
+  async function fullListParent() {
+    const { run, release } = await heldParent();
+    startChild(run.id, 'toolu_bg_01');
+    for (let index = 0; index < WAIT_LIMIT; index += 1) store.commitWait(run.id, makePeerWait({ turnId: 'full' }));
+    release();
+    await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting && internals().line.isParked(run.id));
+    expect(subagentWait(run.id)).toBeUndefined();
+    return run.id;
+  }
+
+  it('a full wait list leaves no room for the subagent wait, yet the park keeps the session and slot until the last child ends', async () => {
+    const id = await fullListParent();
+    expect(internals().line.inPool(id)).toBe(true);
+    expect(internals().active.get(id)?.idleTimer).toBeUndefined();
+    endChild(id, 'toolu_bg_01');
+    expect(internals().line.inPool(id)).toBe(false);
+    expect(internals().active.get(id)?.idleTimer).toBeDefined();
+  });
+
+  it('a lost session with no subagent wait retries a failed transcript end', async () => {
+    const id = await fullListParent();
+    const real = store.appendEvent.bind(store);
+    let refuse = true;
+    const append = vi.spyOn(store, 'appendEvent').mockImplementation((runId, event) => {
+      if (refuse && event.type === 'item.completed') { refuse = false; throw Error('injected: disk full'); }
+      return real(runId, event);
+    });
+    internals().subagentWaits.afterSessionGone(id, internals().active.get(id));
+    expect(backgroundEnds(id)).toEqual([]);
+    await until(() => backgroundEnds(id).length > 0);
+    append.mockRestore();
+    expect(backgroundEnds(id).map(([child, status]) => [child, status])).toEqual([['toolu_bg_01', 'declined']]);
   });
 
   it('the deadline wakes the parent and spends one wake', async () => {
