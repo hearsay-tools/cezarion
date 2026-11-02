@@ -91,6 +91,9 @@ describe('the cez rules under oxlint', () => {
     'readFileSync(this.eventsPath(id))',
     'readFileSync(`${id}.ndjson`)',
     'readFileSync(id + ".ndjson.br")',
+    'readFileSync(id\n + ".ndjson")',
+    'readFileSync(`${id}` + ".ndjson")',
+    'import { historyPaths as pathsForRun } from "./runs/history-file.ts"; readFileSync(pathsForRun(dir, id).plain);',
   ])('refuses direct transcript access under oxlint: %s', async (source) => {
     const file = 'packages/cezar/src/raw.ts';
     const result = await oxlintProblems(seeded({ [file]: source }), ['packages']);
