@@ -18,6 +18,7 @@ import { fileLengthProblems } from './file-length.ts';
 import { RULES } from './plugin.ts';
 import { compareSetters, readSetterBaseline, scanSetters, WEB_SRC } from './raw-query-setter.ts';
 import { readReaders, readsResumeTime } from './run-fact-reader.ts';
+import { historyAccesses, historyReadersFile, readHistoryReaders } from './run-history-reader.ts';
 import { repoRoot } from './source-rule.ts';
 
 /**
@@ -131,6 +132,7 @@ export function staleEntries(root = repoRoot): string[] {
       problems.push(`${READERS} cez/run-fact-reader: ${file} no longer reads autoResumeAt; remove it from the list`);
     }
   }
+  problems.push(...staleHistoryReaders(root));
   const baseline = readSetterBaseline(join(root, SETTERS));
   const actual = [...new Set(baseline.map((entry) => entry.file))].flatMap((file) => {
     const text = source(`${WEB_SRC}${file}`);
@@ -140,6 +142,17 @@ export function staleEntries(root = repoRoot): string[] {
     problems.push(`${SETTERS} cez/raw-query-setter: ${entry.file} no longer has ${entry.site}; remove the entry`);
   }
   return problems;
+}
+
+/** Each exception must still match its own access kind, not another helper in that file. */
+export function staleHistoryReaders(root = repoRoot): string[] {
+  return readHistoryReaders(join(root, historyReadersFile)).flatMap((entry) => {
+    const path = join(root, entry.file);
+    const sites = existsSync(path) ? historyAccesses(readFileSync(path, 'utf8')) : [];
+    return sites.some((site) => site.kind === entry.kind) ? [] : [
+      `${historyReadersFile} cez/run-history-reader: ${entry.file} no longer has ${entry.kind}; remove its exemption`,
+    ];
+  });
 }
 
 /** Every problem `npm run lint` reports, in one list. */

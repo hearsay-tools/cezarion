@@ -44,6 +44,7 @@ const VIOLATIONS: Record<string, [string, string]> = {
   'native-mock-source': ['packages/cezar/test/b.test.ts', "const text = readFileSync(adapter.mockBin, 'utf8');\n"],
   'raw-query-setter': ['packages/web/src/c.tsx', "import { useSearchParams } from 'react-router';\nconst [p, setP] = useSearchParams();\n"],
   'run-fact-reader': ['packages/web/src/lib/d.ts', "const held = attention.label === 'usage limit';\n"],
+  'run-history-reader': ['packages/cezar/src/raw-history.ts', 'const text = readFileSync(historyPaths(dir, id).plain);\n'],
   'undocumented-env-name': ['packages/cezar/scripts/e.mjs', 'const flag = process.env.CEZ_NOT_DOCUMENTED_ANYWHERE;\n'],
 };
 
@@ -60,6 +61,8 @@ const APPROVED: Record<string, string> = {
   // run-fact-reader: a listed reader, and a test spelling the hold as its oracle.
   'packages/web/src/lib/tasks-table.ts': 'const at = run.autoResumeAt;\n',
   'packages/cezar/src/i.test.ts': "until(() => run.status === 'waiting' && run.autoResumeAt !== undefined);\n",
+  'packages/cezar/src/fixed-history-name.ts': 'readFileSync("prefix".concat("run.ndjson"));\n',
+  'packages/cezar/src/runs/history-stream.ts': 'const paths = historyPaths(dir, id);\n',
   // undocumented-env-name: a documented name, a mock control, and a test.
   'packages/cezar/src/j.ts': "const a = process.env.CEZ_DRY_RUN; const b = env.CEZ_MOCK_ANYTHING;\n",
   'packages/cezar/src/k.test.ts': 'const c = process.env.CEZ_NOT_DOCUMENTED_ANYWHERE;\n',
@@ -84,6 +87,24 @@ describe('the cez rules under oxlint', () => {
   it('passes every approved exception', () => {
     expect(problems.filter((p) => Object.keys(APPROVED).some((file) => p.startsWith(`${file}:`)))).toEqual([]);
   });
+
+  it.each([
+    'readFileSync(this.eventsPath(id))',
+    'readFileSync(`${id}.ndjson`)',
+    'readFileSync(id + ".ndjson.br")',
+    'readFileSync(id\n + ".ndjson")',
+    'readFileSync(id + (".ndjson"))',
+    'readFileSync(`${id}.ndjson` /* explanation */ + ".br")',
+    'readFileSync(`${id}.ndjson${compressed ? ".br" : ""}`)',
+    'readFileSync(`${id}${".ndjson"}`)',
+    'readFileSync(prefix.concat(runId, ".ndjson"))',
+    'readFileSync(`${id}` + ".ndjson")',
+    'import { historyPaths as pathsForRun } from "./runs/history-file.ts"; readFileSync(pathsForRun(dir, id).plain);',
+  ])('refuses direct transcript access under oxlint: %s', async (source) => {
+    const file = 'packages/cezar/src/raw.ts';
+    const result = await oxlintProblems(seeded({ [file]: source }), ['packages']);
+    expect(result).toEqual([expect.stringContaining('cez(run-history-reader)')]);
+  }, OXLINT_TIMEOUT_MS);
 
   it('fails a file oxlint cannot parse', () => {
     expect(problems).toContainEqual(expect.stringMatching(/^packages\/cezar\/src\/broken\.ts:1:\d+ oxlint: /));
@@ -110,6 +131,7 @@ describe('lint fails closed', () => {
 describe('stale entries', () => {
   const lists = {
     'packages/cezar/src/lint/contract-root-import.baseline.json': JSON.stringify({ files: { 'packages/api-client/src/index.ts': 'barrel', 'packages/web/src/gone.ts': 'gone' } }),
+    'packages/cezar/src/lint/run-history-readers.json': JSON.stringify({ entries: [] }),
     'packages/cezar/src/lint/resume-time-readers.json': JSON.stringify({ files: { 'packages/web/src/lib/reads.ts': 'reads', 'packages/web/src/lib/stopped.ts': 'stopped' } }),
     'packages/web/src/test/search-params-discipline.baseline.json': JSON.stringify({ sites: [{ file: 'routes/x.tsx', site: '[query, setQuery] = useSearchParams()', reason: 'r' }] }),
     'packages/api-client/src/index.ts': "export * from '@open-mercato/cezar-contract';\n",
