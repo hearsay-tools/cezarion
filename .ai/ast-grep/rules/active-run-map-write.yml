@@ -20,17 +20,17 @@ rule:
             all:
               - pattern: this.active.$METHOD($$$)
               - inside:
-                  kind: class_declaration
-                  has:
-                    field: name
-                    regex: ^RunManager$
-                  stopBy:
-                    kind: class_declaration
-              - inside:
                   kind: method_definition
                   has:
                     field: name
                     regex: ^activate$
+                  inside:
+                    kind: class_body
+                    inside:
+                      kind: class_declaration
+                      has:
+                        field: name
+                        regex: ^RunManager$
                   stopBy:
                     kind: method_definition
     - all:
@@ -39,16 +39,16 @@ rule:
             all:
               - pattern: this.active.$METHOD($$$)
               - inside:
-                  kind: class_declaration
-                  has:
-                    field: name
-                    regex: ^RunManager$
-                  stopBy:
-                    kind: class_declaration
-              - inside:
                   kind: method_definition
                   has:
                     field: name
                     regex: ^dropActive$
+                  inside:
+                    kind: class_body
+                    inside:
+                      kind: class_declaration
+                      has:
+                        field: name
+                        regex: ^RunManager$
                   stopBy:
                     kind: method_definition

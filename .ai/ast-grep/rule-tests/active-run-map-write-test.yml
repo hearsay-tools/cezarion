@@ -29,3 +29,7 @@ invalid:
   - 'class Part { dropActive(id) { this.active.delete(id); } }'
   - 'class RunManager { activate(id, state) { this.host.active.set(id, state); } }'
   - 'class RunManager { dropActive(id) { host.active.delete(id); } }'
+  - 'class RunManager { other() { const nested = { activate(id, state) { this.active.set(id, state); } }; } }'
+  - 'class RunManager { other() { const nested = { dropActive(id) { this.active.delete(id); } }; } }'
+  - 'class RunManager { activate() { const nested = { activate(id, state) { this.active.set(id, state); } }; } }'
+  - 'class RunManager { dropActive() { const nested = { dropActive(id) { this.active.delete(id); } }; } }'
