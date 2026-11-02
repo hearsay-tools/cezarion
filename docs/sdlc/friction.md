@@ -279,6 +279,12 @@ work for an issue that already has a task.
 A friction fix often adds a rule that agents must follow. First ask whether code, a
 test or a script can make the rule unnecessary. If so, file that change, and write
 the rule only until it lands, citing the issue that removes it.
+Put `<!-- until: <owner>/<repo>#<n> -->` on its own line beside the rule or
+at the end of the rule's line. The weekly workaround-expiry workflow scans
+tracked Markdown files and reports markers whose issue is closed, including
+issues in other repositories. It reads literal markers even in code examples;
+use placeholders when showing the syntax. It opens or updates one cleanup issue
+by exact title. With no expired markers, it leaves any existing issue unchanged.
 
 `AGENTS.md` loads on every agent turn, so put the rule in the narrowest document that
 the tasks it governs already read:

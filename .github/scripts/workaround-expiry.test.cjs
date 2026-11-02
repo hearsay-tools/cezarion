@@ -1,0 +1,116 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { execFileSync } = require('node:child_process');
+const yaml = require('yaml');
+const { markersIn, expiredMarkers, updateCleanupIssue, TITLE } = require('./workaround-expiry.cjs');
+
+const workflow = yaml.parse(fs.readFileSync(path.join(__dirname, '../workflows/workaround-expiry.yml'), 'utf8'));
+
+test('workflow finds a marker on a closed issue in its own test and publishes it', async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workaround-expiry-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', args, { cwd: root, stdio: 'pipe' });
+  git('init');
+  fs.writeFileSync(path.join(root, 'rules.md'), 'Rule <!-- until: hearsay-tools/cezarion#2492 -->\r\n<!-- until: hearsay-tools/squeal#95 -->\n<!-- until: example/repo#1 -->');
+  fs.writeFileSync(path.join(root, 'untracked.md'), '<!-- until: example/repo#2 -->');
+  fs.writeFileSync(path.join(root, 'ignored.txt'), '<!-- until: example/repo#3 -->');
+  git('add', 'rules.md', 'ignored.txt');
+  const step = workflow.jobs.report.steps.find(s => s.run);
+  const [, script, flag] = step.run.split(' ');
+  const { run } = require(path.resolve(__dirname, '../..', script));
+  const calls = [], reports = [];
+  const result = await run({ root, repository: 'hearsay-tools/cezarion', publish: flag === '--publish', print: text => reports.push(JSON.parse(text)), api: async (endpoint, method, data) => {
+    calls.push({ endpoint, method, data });
+    if (endpoint === 'repos/hearsay-tools/cezarion/issues/2492') return { state: 'closed' };
+    if (endpoint === 'repos/hearsay-tools/squeal/issues/95') return { state: 'closed' };
+    if (endpoint === 'repos/example/repo/issues/1') return { state: 'open' };
+    if (method === 'POST') return { number: 9 };
+    if (endpoint.includes('?state=open')) return [];
+    assert.fail(`Unexpected API call: ${endpoint}`);
+  } });
+  assert.deepEqual(result, { action: 'create', number: 9 });
+  assert.equal(reports[0].markers.length, 3);
+  assert.deepEqual(reports[0].expired.map(m => [m.line, m.issue]), [[1, 'hearsay-tools/cezarion#2492'], [2, 'hearsay-tools/squeal#95']]);
+  const body = calls.find(c => c.method === 'POST').data.body;
+  assert.match(body, /rules\.md.*:1/);
+  assert.match(body, /https:\/\/github.com\/hearsay-tools\/squeal\/issues\/95/);
+  assert.doesNotMatch(body, /example\/repo/);
+});
+
+test('literal reader accepts standalone, inline, repeated and fenced markers; rejects malformed markers', () => {
+  const text = ['<!-- until: a/b#1 -->', 'Rule <!-- until: a/b#2 --> <!-- until: a/b#3 -->', '```', '<!-- until: a/b#4 -->', '```', '<!-- until: a/b#0 -->', '<!-- until: a/b#x -->', '<!-- until: b#1 -->', '<!-- until: a/b#1', '<!-- until: a/b#01 -->'].join('\n');
+  assert.deepEqual(markersIn('x.md', text).map(m => m.issue), ['a/b#1', 'a/b#2', 'a/b#3', 'a/b#4']);
+});
+
+test('resolution is cached and an open issue is not expired', async () => {
+  let calls = 0;
+  const result = await expiredMarkers(markersIn('x.md', '<!-- until: a/b#1 -->\n<!-- until: a/b#1 -->'), async () => { calls++; return 'open'; });
+  assert.deepEqual(result, []);
+  assert.equal(calls, 1);
+});
+
+test('failed or invalid resolution fails instead of treating a marker as open', async () => {
+  const markers = markersIn('x.md', '<!-- until: a/b#1 -->');
+  await assert.rejects(expiredMarkers(markers, async () => { throw new Error('unavailable'); }), /unavailable/);
+  await assert.rejects(expiredMarkers(markers, async () => 'unknown'), /Invalid issue state/);
+});
+
+test('open-or-update finds the exact title on a later page and updates instead of creating', async () => {
+  const calls = [];
+  const result = await updateCleanupIssue('a/b', [{ file: 'rules.md', line: 1, issue: 'a/b#1' }], async (endpoint, method, data) => {
+    calls.push({ endpoint, method, data });
+    if (method === 'PATCH') return {};
+    if (endpoint.endsWith('page=1')) return Array.from({ length: 100 }, (_, number) => ({ title: 'Other', number }));
+    return [{ title: TITLE, number: 7, pull_request: {} }, { title: TITLE, number: 8 }];
+  });
+  assert.deepEqual(result, { action: 'update', number: 8 });
+  assert.equal(calls.at(-1).endpoint, 'repos/a/b/issues/8');
+  assert.equal(calls.at(-1).method, 'PATCH');
+  assert.equal(calls.some(c => c.method === 'POST'), false);
+});
+
+test('no expired markers leaves an existing issue unchanged without API calls', async () => {
+  assert.deepEqual(await updateCleanupIssue('a/b', [], () => assert.fail('unexpected API call')), { action: 'none' });
+});
+
+test('workflow is weekly, dispatchable, serialized and uses only contents read and issues write', () => {
+  assert.equal(workflow.on.schedule.length, 1);
+  assert.equal(workflow.on.schedule[0].cron, '23 7 * * 1');
+  assert.deepEqual(workflow.on.workflow_dispatch, {});
+  assert.deepEqual(workflow.permissions, {});
+  assert.deepEqual(workflow.jobs.report.permissions, { contents: 'read', issues: 'write' });
+  assert.equal(workflow.concurrency['cancel-in-progress'], false);
+  assert.match(workflow.jobs.report.if, /default_branch/);
+  assert.equal(workflow.jobs.report.steps[0].with['persist-credentials'], false);
+});
+
+test('CLI uses gh api for resolution and publishes through stdin with no network', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workaround-expiry-cli-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  execFileSync('git', ['init'], { cwd: root, stdio: 'pipe' });
+  fs.writeFileSync(path.join(root, 'rule.md'), '<!-- until: external/repo#7 -->');
+  execFileSync('git', ['add', 'rule.md'], { cwd: root });
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ type: 'commonjs' }));
+  fs.writeFileSync(path.join(root, 'gh'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+if (args[0] !== 'api') process.exit(2);
+if (args[1] === 'repos/external/repo/issues/7' && args.includes('GET')) console.log('{"state":"closed"}');
+else if (args[1].includes('?state=open')) console.log('[]');
+else if (args.includes('POST') && args.includes('--input') && args.at(-1) === '-') {
+  const body = JSON.parse(fs.readFileSync(0, 'utf8'));
+  fs.writeFileSync('published.json', JSON.stringify(body));
+  console.log('{"number":8}');
+} else process.exit(3);
+`, { mode: 0o755 });
+  const stdout = execFileSync(process.execPath, [path.join(__dirname, 'workaround-expiry.cjs'), '--publish'], {
+    cwd: root, encoding: 'utf8', env: { ...process.env, PATH: root + path.delimiter + process.env.PATH, GITHUB_REPOSITORY: 'local/repo' },
+  });
+  assert.equal(JSON.parse(stdout).expired[0].issue, 'external/repo#7');
+  const published = JSON.parse(fs.readFileSync(path.join(root, 'published.json'), 'utf8'));
+  assert.equal(published.title, TITLE);
+  assert.match(published.body, /external\/repo\/issues\/7/);
+});
