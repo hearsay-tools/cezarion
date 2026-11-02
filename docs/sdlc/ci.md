@@ -87,9 +87,12 @@ counts are diagnostic only: splitting a clone can count a boundary line twice.
 This uses jscpd's detected pairs, not an exhaustive comparison of all file pairs.
 Moving duplication within one pair can pass within its token ceiling.
 
-Cross-package clones always fail, including inherited copies. Within one file,
-the existing fingerprint rule still rejects new fragments. Scan/report errors
-fail the gate. The comparison saves a temporary fingerprint baseline during the
+Cross-package clones always fail, including inherited copies, except for the
+named file pair in the checker's exception list. Within one file, the sum of
+reported same-file clone tokens has its own merge-base ceiling. Equal or smaller
+totals pass, including re-cut fragments; an increase or a new same-file total
+fails. A file cannot borrow allowance from another file or cross-file pair.
+Scan/report errors fail the gate. The comparison saves a temporary fingerprint baseline during the
 first scan and removes all temporary inputs and reports on exit; it adds no
 persistent baseline file or migration.
 
