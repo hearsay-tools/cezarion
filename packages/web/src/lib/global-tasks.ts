@@ -3,7 +3,7 @@ import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-cl
 import { matchesRunSearch, type RunSearchExtras } from '@open-mercato/cezar-api-client/contract/run-search'
 
 import { shownReferenceNumbers } from '@/lib/tasks-table'
-import { allProjectTags } from '@/lib/project-tags'
+
 import { isOwnedWorker, runTitle } from '@/lib/task-groups'
 import { matchesOrigin, parseOrigin, type TaskOrigin } from '@/lib/task-origin'
 

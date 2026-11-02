@@ -10,7 +10,7 @@ import { useRepoCommit } from '@/api/queries'
 import type { LogEntry, RepoInfo, RepoResponse, RepoTracking } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { CommitDiffPanel } from '@/components/diff/commit-diff-panel'
-import { Button } from '@/components/ui/button'
+
 import { useIsDesktop } from '@/lib/use-desktop'
 import { cn } from '@/lib/utils'
 

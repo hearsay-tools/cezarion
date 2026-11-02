@@ -29,7 +29,6 @@ import {
   automationIdOf,
   stepStateSchema as contractStepStateSchema,
   queuedMessageSchema,
-  continuationMessageSchema,
   toRunSummary,
   runRecordSchema as contractRunRecordSchema,
   runPullRequestSchema,
@@ -61,7 +60,7 @@ import { archivePullRequests, pullRequestKey, mergePullRequests } from './pull-r
 import { extractTaskRefs, isRepoScopedRef, MAX_REF, promptNamesRepo, refUrlRepo } from './task-refs.ts';
 // Type-only module (zod + nothing else), so this cannot cycle back into the store.
 import { workflowDefSchema } from '../workflows/types.ts';
-import { waitInputId } from '../workflows/waits.ts';
+
 import { applyOutcomes, type OutcomeDependencies, type RunOutcome } from './outcome-commit.ts';
 import { assertConversationIdFree, type ConversationIdentity } from './conversation-identity.ts';
 export { ConversationIdInUseError } from './conversation-identity.ts';

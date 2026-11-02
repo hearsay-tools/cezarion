@@ -25,7 +25,6 @@ import type {
   AutomationRetryResponse,
   AutomationCreateResponse,
   AutomationResponse,
-  AutomationDefinition,
   CreateAutomationInput,
   UpdateAutomationInput,
   AgentConfigListing,
@@ -161,7 +160,7 @@ import {
   repoPullConfirmationSchema,
   repoPullResponseSchema,
 } from '@open-mercato/cezar-api-client/contract/repo'
-import type { Ok, OkJson } from '@open-mercato/cezar-api-client'
+import type { OkJson } from '@open-mercato/cezar-api-client'
 import type { ClientResponse } from 'hono/client'
 import type { ResponseFormat } from 'hono/types'
 import type { AppType } from '@wjarka/cezarion/app-type'
