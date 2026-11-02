@@ -5,7 +5,7 @@
  * Both inputs are finite Unix timestamps in milliseconds.
  */
 export function isLeaseExpired(nowMs: number, expiresAtMs: number): boolean {
-  return nowMs > expiresAtMs;
+  return nowMs >= expiresAtMs;
 }
 
 /**
