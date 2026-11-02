@@ -92,7 +92,7 @@ describe('the cez rules under oxlint', () => {
 
   it('selects the lint bridge when the contrast palette stylesheet changes', () => {
     const squeal = JSON.parse(readFileSync(join(repoRoot, 'squeal.config.json'), 'utf8')) as { inputs: Record<string, string[]> };
-    expect(squeal.inputs['packages/cezar/src/lint/lint.test.ts']).toContain('packages/web/src/styles/index.css');
+    expect(squeal.inputs['packages/cezar/src/lint/lint-runner.test.ts']).toContain('packages/web/src/styles/index.css');
   });
 
   it('turns every cez rule on, and every other entry is a known built-in', () => {

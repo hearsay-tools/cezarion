@@ -45,16 +45,6 @@
       "packages/web/src/styles/index.css",
       "packages/web/{src,e2e}/**/*.css"
     ],
-    "packages/cezar/src/lint/lint.test.ts": [
-      ".oxlintrc.json",
-      ".env.example",
-      "sgconfig.yml",
-      ".ai/ast-grep/**",
-      "packages/**/*.{ts,tsx,mts,cts,js,jsx,mjs,cjs}",
-      "packages/*/src/**/*.json",
-      "packages/web/src/styles/index.css",
-      "packages/web/{src,e2e}/**/*.css"
-    ],
     "packages/web/src/design-guardian.test.ts": [
       "packages/web/src/styles/index.css",
       "packages/web/src/routes/task-lists.css",

@@ -43,7 +43,7 @@ never a pass.
 | Where | How |
 | --- | --- |
 | CI | The required `Typecheck` job's `Lint` step. The job runs on every change surface, docs-only included, so no test selection skips lint |
-| Squeal | The bridge test `packages/cezar/src/lint/lint.test.ts` runs the whole lint after an edit, until Squeal runs oxlint itself (hearsay-tools/cezarion#2426) |
+| Squeal | Its oxlint provider loads `.oxlintrc.json` and the `cez` JS plugin after an edit. `packages/cezar/src/lint/lint-runner.test.ts` runs `lintWithoutOxlint()` for ast-grep, stale entries, file length, CSS and wait-discipline checks (hearsay-tools/cezarion#2426) |
 | By hand | `npm run lint` from the repository root, about 5 s on an idle host |
 
 ## The `cez` rules
