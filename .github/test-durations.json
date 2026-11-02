@@ -641,7 +641,6 @@
     "packages/cezar/src/workflows/request-completion.test.ts": 5897,
     "packages/cezar/src/workflows/resume-diagnostics-parity.test.ts": 34267,
     "packages/cezar/src/workflows/retention-wiring.test.ts": 3289,
-    "packages/cezar/src/workflows/run-active-pin.test.ts": 9,
     "packages/cezar/src/workflows/run-active-run-factory.test.ts": 17336,
     "packages/cezar/src/workflows/run-isolation.test.ts": 2228,
     "packages/cezar/src/workflows/run-lease.test.ts": 1017,
