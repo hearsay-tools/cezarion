@@ -872,7 +872,6 @@ function StepCard({
   step,
   index,
   skills,
-  dragging,
   insertBefore,
   onRemove,
   onMoveUp,

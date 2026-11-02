@@ -266,7 +266,7 @@ export class RunManager {
     this.offSemaphore();
     clearInterval(this.queueWatchdog);
     clearInterval(this.repoRediscovery);
-    for (const [runId, state] of this.active) {
+    for (const state of this.active.values()) {
       state.revokeCiTools?.(); state.revokeCiTools = undefined;
       state.revokeDelegation?.(); state.revokeDelegation = undefined;
       clearIdleTimer(state);

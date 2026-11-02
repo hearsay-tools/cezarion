@@ -568,16 +568,6 @@ function foldedLength(task: string, stack: Array<{ text: string }>): number {
 const GLOBAL_BODY_LIMIT = 32 * 1024 * 1024; // 32 MiB
 const UI_STATE_BODY_LIMIT = 128 * 1024; // 128 KiB
 
-/** The name half of a Host header — `localhost:4321` → `localhost`,
- *  `[::1]:4321` → `[::1]`. A bracketed IPv6 literal keeps its brackets
- *  (`isLoopbackHost` strips them itself); an unbracketed IPv6 spelling is
- *  nonstandard in a Host header and simply fails the loopback test closed. */
-function stripHostPort(host: string): string {
-  const bracketed = /^(\[[^\]]+\])(?::\d+)?$/.exec(host);
-  if (bracketed?.[1]) return bracketed[1];
-  return host.replace(/:\d+$/, '');
-}
-
 /**
  * HTTP content negotiation for the two routes that serve more than one FORMAT on one path:
  * `GET /repo/commit/:sha` (a structured payload or the legacy text blob) and
@@ -4309,7 +4299,7 @@ export function createApp(deps: ServerDeps) {
     // (spec "Legacy aliases" — widening it would be a silent behavioral break;
     // the all-project stream arrives as `/api/workspace/events` in step 2.8).
     .get('/events', (c) => {
-      const { dataDir, store } = c.get('project');
+      const { store } = c.get('project');
       return streamSSENoBuffer(c, async (stream) => {
         const onRun = (run: RunRecord) => void stream.writeSSE({ event: 'run', data: JSON.stringify(run) });
         const onDeleted = (id: string) =>

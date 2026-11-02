@@ -41,7 +41,7 @@ function updateActionState(props: ApplicationUpdateControlProps) {
 }
 
 /** The same compact control is rendered in the desktop sidebar and mobile drawer. */
-export function ApplicationUpdateControl({ version, latestVersion, state, onApplyUpdate, onRestart, error, busy = false, offline = false }: ApplicationUpdateControlProps) {
+export function ApplicationUpdateControl({ version, latestVersion, state, onApplyUpdate, onRestart, busy = false, offline = false }: ApplicationUpdateControlProps) {
   const [confirmOpen, setConfirmOpen] = React.useState(false)
   const [tooltipOpen, setTooltipOpen] = React.useState(false)
   const restartTrigger = React.useRef<HTMLButtonElement>(null)
