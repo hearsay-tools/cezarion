@@ -25,7 +25,7 @@ for preflight and the native protected review job. No model commands or PAT fall
    newest native run/attempt and successful preflight. Re-read before rerunning only
    the completed native review job when admission differs. Serialize per discovered PR,
    never retry ambiguous writes. No-op once outcomes agree. Limit to GitHub's 30-day,
-   50-attempt rerun window. Manual `pr_number` handles eventless thread resolution.
+   50-attempt rerun window. Manual `pr_number` handles eventless thread reopening and resolution.
 4. Readiness proves native protected checks and reads fresh admission, including revoking
    readiness. Queue reads the same admission in addition to its native proof; existing
    fork queue support remains. Add `checks: read` to every affected reader.
@@ -40,7 +40,7 @@ for preflight and the native protected review job. No model commands or PAT fall
 | --- | --- |
 | Missing or pending execution | Block; created/completed event or CI completion reconciles |
 | Completed/success and every thread resolved | Pass after fresh head/provider read |
-| Success with any open thread, including outdated | Block; review event or manual resolution dispatch reconciles |
+| Success with any open thread, including outdated | Block on the next read; review event or manual reopening/resolution dispatch reconciles |
 | Skipped, neutral, provider failure | Block; no automatic model request |
 | Spoofed App/name, stale head, older success behind newer failure | Block; exact trusted newest execution only |
 | Head/provider changes during reads | Block; next genuine event retries reconciliation |
@@ -49,8 +49,8 @@ for preflight and the native protected review job. No model commands or PAT fall
 | Bot author/branch without verified files | Normal provider gate |
 | Provider completes before CI, or CI before provider | Other completion reconciles once native job completes |
 | Unchanged desired outcome | No rerun; prevents feedback loops |
-| New pending review or reopened thread on same head | Revoke readiness and rerun green native review to red |
-| Manual hand resolution with no event | Dispatch reconciliation with PR number; read only, then targeted rerun |
+| New pending review or reopened thread on same head | On the next trigger, revoke readiness and rerun green native review to red; dispatch after manual reopening |
+| Manual reopening or resolution with no event | Dispatch reconciliation with PR number; read only, then targeted rerun; dispatch PR Readiness if needed |
 | Fork PR | Reader/queue can verify it; reconciler ignores it; maintainer reruns native review job in Actions; readiness preserves author control |
 | Disabled CI, old run or 50 attempts | Stop; report manual recovery, never whole-CI dispatch fallback |
 
@@ -215,8 +215,53 @@ imported by that proof. Protect both along with `queue-ci-proof`. The removed
 `review-ci-context.cjs` has no active file or import and needs no current entry.
 Eleven table-driven policy cases check this whole admission/proof helper set.
 
-The documentation correction records that manual thread reopening and resolution
-emit no review-thread event. Admission and ready/draft state update on the next
+The documentation correction records that GitHub Actions has no review-thread event for manual reopening or resolution. Admission and ready/draft state update on the next
 reader/trigger; maintainers dispatch reconciliation with `pr_number` after either
 manual change and dispatch PR Readiness if draft state needs refreshing. Preserve
 the fork-author draft rule. No runtime or workflow redesign.
+
+
+### Incremental validation
+
+Policy source revision: `4b104846c522052fe5ae946c76387d691b5f8972`.
+The following docs commit leaves JavaScript and workflows unchanged.
+
+- Disposable scratch at `a5559af62`, with its own frozen pnpm install: copied
+  current `auto-merge-admission.test.cjs` unchanged. Command:
+  `node --import ./scripts/test-git-env.mjs --test .github/scripts/auto-merge-admission.test.cjs`.
+  Baseline has **8 pass / 3 fail**: only `queue-ci-proof`, `pr-test-proof` and
+  `pr-test-input` incorrectly qualify. Copying only the fixed policy source
+  makes the same eleven tests **all pass**. No test/API adapter is needed.
+- Mandatory bundled quality against `a5559af62`: **1/1 changed function**,
+  eleven tests pass, maximum complexity **1** / CRAP **1**. The policy change is
+  a module-level constant; only the updated test callback changes function body.
+- Full-PR bundled quality pins merged main
+  `9dbe93aa4b36593ec0f46af09338ae50083e36a7` (the original `190a4d6d5` baseline
+  would now include unrelated main changes). **235/235 functions** across 21
+  files, **326 tests pass**, maximum complexity **20**, CRAP **23.237885**.
+  Function count stays stable; policy cases add ten executed tests. Both checks
+  use the bundled `check.mjs --runner node --node-import scripts/test-git-env.mjs`
+  with relevant `--test` selections; full-PR includes `pr-test-proof.test.cjs`.
+- `npm run lint`, citations, `git diff --check`, pinned actionlint/shellcheck
+  with CI warning severity pass. Auto-merge against `a5559af62` correctly says
+  **DOES NOT QUALIFY** for the policy path. Workflow files are byte-identical
+  to `a5559af62`; no new live dispatch was requested.
+- Squeal returned a current policy-file pass at revision **11**, after 16.1 s;
+  no known worktree failures, with 273 other test files pending at that capture.
+  A later report had all 90 slow files pending; no full/slow-suite pass is claimed.
+  Later docs-only edits do not change the tested policy source. No new friction
+  distinct from the already filed `hearsay-tools/squeal#138` was observed.
+- Reader sweep covers CODE_REVIEW, CI readiness/recovery, SDLC, the AGENTS review
+  recovery binding, auto-merge follow guidance and this plan. AGENTS has no byte
+  growth. Fork draft control and maintainer native-rerun guidance remain separate.
+
+Current policy SHA-256:
+`ec22a1f24b47c01225618dc865107d7aa702958b06569c056a191d8031e35f04`.
+Current policy regression SHA-256:
+`a313796acddd3248f96a524825883b3c73387cd3ed2a54c4906c8c61b2c4f508`.
+The prior reconcile/admission/workflow hashes remain unchanged.
+
+Published task snapshots: incremental quality
+`1e78f321-d6d5-4d05-b817-bf9c4e88dc84`, updated full-PR quality
+`8e5b6d57-2284-47d0-ac6d-1007ea6ff20a`, unchanged-test red/green proof
+`1e55f546-ba31-4106-9f74-8df2a9dce71a`.
