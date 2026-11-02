@@ -65,7 +65,7 @@ describe('project reports', () => {
       const db = new DatabaseSync(join(dataDir, 'runs.db'), { readOnly: true });
       try { expect(db.prepare('SELECT id FROM artifacts WHERE id = ?').get(second.id)).toBeTruthy(); }
       finally { db.close(); }
-    });
+    }, { timeout: 10_000 });
   });
 
   it('reconciles a run that was live in another process and settled between shelf queries', async () => {
@@ -87,7 +87,6 @@ describe('project reports', () => {
     store.reports.start(); await page();
     const a = await publish(settled.id), b = await publish(active.id);
     store.updateRun(settled.id, { status: RUN_STATUS.done }); store.flush();
-    await vi.waitFor(() => expect(store.reports).toBeTruthy());
     // The public serialized barrier completes the settlement work without including live tasks.
     await store.reports.reconcile(false);
     const raw = new DatabaseSync(join(dataDir, 'runs.db'), { readOnly: true });

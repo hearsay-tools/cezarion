@@ -185,8 +185,7 @@ field list). It never returns another project's rows.
 
 - Route `/p/<project>/reports`, with `q` in the URL. It is listed in
   `PAGE_TITLE_ROUTES`.
-- Navigation (owner, 2026-11-01): Reports goes in More, beside Workflows: the
-  sidebar overflow menu and the phone More sheet. No primary tab moves.
+- Navigation (owner, 2026-11-01; refinement, 2026-11-02): More always exists on desktop; Workflows and Reports (and Automations when on) sit in More; five primary tabs remain; the phone More sheet lists Reports beside Workflows.
 - Rows show the title, the source task (a link to the task) and the published
   date. Tapping a row navigates to the reader route with `readerFrom` set to
   the shelf, so Back returns to the shelf.
@@ -257,7 +256,7 @@ source view. The `needs-qa` gate on each issue records it.
 | --- | --- |
 | Q1 Title | HTML `<title>`, else the file name (D1) |
 | Q2 Cards | One card per report, after the message text |
-| Q3 Navigation | In More, beside Workflows |
+| Q3 Navigation | Refined 2026-11-02: More always exists on desktop; Workflows and Reports (and Automations when on) sit in More; five primary tabs remain; the phone More sheet lists Reports beside Workflows. |
 | Merge authority | The coordinator merges through land-pr after CI and review are clear and the owner added `qa-approved` |
 
 The owner also accepted the technical decisions listed in this spec.

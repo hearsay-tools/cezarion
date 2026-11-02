@@ -75,6 +75,19 @@ describe('AppShell', () => {
     expect((await screen.findByRole('menuitem', { name: 'Workflows' })).getAttribute('aria-current')).toBe('page')
   })
 
+  it.each([false, true])('keeps Reports beside Workflows in More with automations=%s', async automationsAvailable => {
+    renderShell('/reports', { automationsAvailable })
+    const more = within(nav()).getByRole('button', { name: 'More views' })
+    expect(more.getAttribute('data-active')).toBe('true')
+    expect(allNavLinks().map(a => a.getAttribute('aria-label'))).toEqual(['Tasks', 'Git', 'GitHub', 'Skills', 'Settings'])
+    fireEvent.keyDown(more, { key: 'Enter' })
+    await screen.findByRole('menuitem', { name: 'Reports' })
+    expect(screen.getAllByRole('menuitem').map(item => item.textContent)).toEqual([
+      ...(automationsAvailable ? ['Automations'] : []), 'Workflows', 'Reports',
+    ])
+    expect(screen.getByRole('menuitem', { name: 'Reports' }).getAttribute('aria-current')).toBe('page')
+  })
+
   it('never shrinks the active tab so its label is not truncated beside the overflow button', () => {
     renderShell('/settings', { })
     const active = within(nav()).getByRole('link', { current: 'page' })
@@ -104,9 +117,9 @@ describe('AppShell', () => {
     expect(actions.querySelector('[data-sidebar-item="new-task"]')).not.toBeNull()
   })
 
-  it('omits overflow when no optional view is available and keeps version in footer', () => {
+  it('keeps Reports overflow without optional views and keeps version in footer', () => {
     renderShell('/', { automationsAvailable: false, forgeAvailable: false, version: '1.2.3' })
-    expect(within(nav()).queryByRole('button', { name: 'More views' })).toBeNull()
+    expect(within(nav()).queryByRole('button', { name: 'More views' })).not.toBeNull()
     expect(within(nav()).queryByRole('link', { name: 'GitHub' })).toBeNull()
     expect(footer().querySelector('[data-slot="version-chip"]')?.textContent).toBe('v1.2.3')
   })
@@ -338,11 +351,11 @@ describe('AppShell', () => {
   })
 
   it('renders primary views as named router links', () => {
-    // No optional view, so no More button: all six views are tabs.
+    // Reports always supplies More; Workflows shares it to keep five primary tabs.
     renderShell('/', { automationsAvailable: false })
     const links = allNavLinks()
-    expect(links.map(a => a.getAttribute('aria-label'))).toEqual(['Tasks', 'Git', 'GitHub', 'Skills', 'Workflows', 'Settings'])
-    expect(links.map(a => a.getAttribute('href'))).toEqual(['/', '/git', '/github', '/skills', '/workflows', '/settings'])
+    expect(links.map(a => a.getAttribute('aria-label'))).toEqual(['Tasks', 'Git', 'GitHub', 'Skills', 'Settings'])
+    expect(links.map(a => a.getAttribute('href'))).toEqual(['/', '/git', '/github', '/skills', '/settings'])
   })
 
   // R6 Step 1.1: no forge, no GitHub tab — the nav item disappears entirely (spec's
@@ -351,7 +364,7 @@ describe('AppShell', () => {
     renderShell('/', { forgeAvailable: false })
     const links = allNavLinks()
     expect(links.map((a) => a.getAttribute('href'))).not.toContain('/github')
-    expect(links).toHaveLength(5)
+    expect(links).toHaveLength(4)
   })
 
   // #801: same degradation for the opt-in automations capability — the item disappears, it does
@@ -360,7 +373,7 @@ describe('AppShell', () => {
     renderShell('/', { automationsAvailable: false })
     const links = allNavLinks()
     expect(links.map((a) => a.getAttribute('href'))).not.toContain('/automations')
-    expect(links).toHaveLength(6)
+    expect(links).toHaveLength(5)
   })
 
   it('shows Automations in overflow once the capability is on', async () => {

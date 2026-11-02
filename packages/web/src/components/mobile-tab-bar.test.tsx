@@ -90,10 +90,10 @@ describe('More sheet', () => {
   const open = () => fireEvent.click(within(bar()).getByRole('button', { name: 'More' }))
   const sheet = () => screen.getByRole('dialog', { name: 'More' })
 
-  it('lists Skills, Workflows and Project settings, without flagged rows when flags are off', () => {
+  it('lists Skills, Workflows, Reports and Project settings, without flagged rows when flags are off', () => {
     renderBar('/')
     open()
-    expect(within(sheet()).getAllByRole('link').map((a) => a.textContent)).toEqual(['Skills', 'Workflows', 'Project settings'])
+    expect(within(sheet()).getAllByRole('link').map((a) => a.textContent)).toEqual(['Skills', 'Workflows', 'Reports', 'Project settings'])
     expect(within(sheet()).queryByText('Shown when their flag is on')).toBeNull()
     expect(within(sheet()).getByText('cezarion')).toBeTruthy()
   })
