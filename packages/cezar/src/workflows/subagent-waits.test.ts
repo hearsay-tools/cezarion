@@ -184,7 +184,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
   it('a question asked while the subagent wait is open keeps the session and its slot, with no idle close', async () => {
     const { id, wait } = await parkedOnSubagents();
     const turns = turnEnds(id);
-    expect(manager.sendMessage(id, [{ type: 'text', text: 'mock:ask which one?' }])).toBe(true);
+    expect(manager.sendMessage(id, [{ type: 'text', text: 'mock:cezar-ask which one?' }])).toBe(true);
     await until(() => turnEnds(id) > turns && store.getRun(id)?.status === RUN_STATUS.waiting && internals().line.isParked(id));
     expect(store.getRun(id)?.waits?.some(entry => entry.kind === WAIT_KIND.human && entry.phase === WAIT_PHASE.open)).toBe(true);
     expect(entryOf(id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open });
@@ -194,7 +194,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
   });
 
   it('a first turn that asks with children running opens the wait beside the question and keeps the session and slot', async () => {
-    const { run, release } = await heldParent(undefined, 'mock:ask which one?');
+    const { run, release } = await heldParent(undefined, 'mock:cezar-ask which one?');
     startChild(run.id, 'toolu_bg_01');
     release();
     await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting && internals().line.isParked(run.id));
@@ -206,7 +206,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
   });
 
   it('a child end beside the question wakes the parent once; its park keeps the question and gives the slot back', async () => {
-    const { run, release } = await heldParent(undefined, 'mock:ask which one?');
+    const { run, release } = await heldParent(undefined, 'mock:cezar-ask which one?');
     startChild(run.id, 'toolu_bg_01');
     release();
     await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting && internals().line.isParked(run.id));
@@ -316,7 +316,7 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
   });
 
   it('a restart ends the children of a question park and resolves its subagent wait interrupted', async () => {
-    const { run, release } = await heldParent(undefined, 'mock:ask which one?');
+    const { run, release } = await heldParent(undefined, 'mock:cezar-ask which one?');
     startChild(run.id, 'toolu_bg_01');
     release();
     await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting && internals().line.isParked(run.id));
