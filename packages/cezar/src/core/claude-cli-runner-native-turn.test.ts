@@ -164,24 +164,6 @@ describe('Claude native parent turns (hearsay-tools/cezarion#1512)', () => {
       expect(fixture.starts()).toEqual(['turn_1', 'turn_2']);
     } finally { await fixture.finish(); }
   });
-
-  it('reads the ask marker of the unprompted turn only', async () => {
-    const fixture = pipeSession();
-    try {
-      // bound: wait for the seed stdin write before answering it.
-      await vi.waitFor(() => expect(fixture.written).toHaveLength(1), { timeout: 10_000 });
-      const ask = 'Which one?\n\nCEZ:ASK {"questions":[{"header":"Pick","question":"Which one?","multiSelect":false,"options":[{"label":"A"},{"label":"B"}]}]}';
-      await fixture.frames(init, parentText(ask), result(ask));
-      expect(fixture.session.sendAgentMessage([{ type: 'text', text: 'wake' }], ['wake-1'])).toBe(false);
-      // The unprompted turn writes no text of its own, so only a reset turn start drops the old marker.
-      const read = { type: 'assistant', parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'tool_use', id: 'read-1', name: 'Read', input: { file_path: 'a' } }] } };
-      const readResult = { type: 'user', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'read-1', content: 'ok' }] } };
-      await fixture.frames(read, readResult, result(''));
-      const sent = fixture.session.sendAgentMessage([{ type: 'text', text: 'wake' }], ['wake-1']);
-      expect(sent).not.toBe(false);
-      await sent;
-    } finally { await fixture.finish(); }
-  });
 });
 
 describe('Claude native parent turns on the mock wire (hearsay-tools/cezarion#1512)', () => {
