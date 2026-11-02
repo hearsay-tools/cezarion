@@ -104,9 +104,17 @@ export class SubagentWaits {
     const wait = openSubagentWaitOf(this.context.store.getRun(runId));
     const live = liveSubagents(state);
     if (wait && !live) { this.supersede(runId, [wait.id]); return; }
-    if (!live || !turn.sessionOpen || turn.done || turn.asks || state.pendingHumanAsk || state.pendingPermissions?.size) return;
+    if (!live || !turn.sessionOpen || turn.done) return;
+    // A question or a permission request keeps an open wait current but opens none.
     if (wait) this.refreshWait(runId, state, wait);
-    else this.openSubagentWait(runId, state);
+    else if (!turn.asks && !state.pendingHumanAsk && !state.pendingPermissions?.size) this.openSubagentWait(runId, state);
+  }
+
+  /** Whether the run waits on native subagents that still run in its session: then a park for the
+   *  user keeps the session and its slot, so no idle close stops them (hearsay-tools/cezarion#2431). */
+  holdsLiveSubagents(runId: string): boolean {
+    const state = this.host.active.get(runId);
+    return !!state && liveSubagents(state) > 0 && openSubagentWaitOf(this.context.store.getRun(runId)) !== undefined;
   }
 
   /** The children the wait saves: the session's own, the running ones first, within the bound. */

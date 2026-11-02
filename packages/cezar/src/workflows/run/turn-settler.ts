@@ -448,8 +448,9 @@ export class TurnSettler {
     if (stepId) this.context.store.updateStep(runId, stepId, { status: 'waiting' });
     this.context.store.flush();
     this.host.line.park(runId);
-    this.host.leaveMonitoringPool(runId);
-    this.armIdleTimer(runId, state);
+    // Native subagents still running in this session keep it and its slot beside the question.
+    if (this.host.subagentWaits.holdsLiveSubagents(runId)) this.host.line.joinPool(runId);
+    else { this.host.leaveMonitoringPool(runId); this.armIdleTimer(runId, state); }
     this.host.releaseSlot();
     this.host.queueWaitWake(runId);
   }

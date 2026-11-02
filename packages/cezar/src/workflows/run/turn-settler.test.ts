@@ -52,7 +52,7 @@ function fixture() {
     chargeAutomaticWake: call('charge', 1), canAutoContinue: call('canContinue', true), tryAutonomousNudge: call('askNudge', false),
     sendTurnEndNudge: call('sendNudge', true), awaitCompletionNudgeReply: call('replyBound', undefined), noticeParkedWorker: call('notice', undefined),
     routeWorkerQuestion: call('route', undefined), settledTurnOutcome: call('outcome', undefined),
-    subagentWaits: { atTurnEnd: call('subagentsAtTurnEnd', undefined) },
+    subagentWaits: { atTurnEnd: call('subagentsAtTurnEnd', undefined), holdsLiveSubagents: vi.fn(() => false) },
   };
   const semaphore = { monitoringWakeIntervalMinutes: call<number | null>('interval', 1) };
   const context = { store, semaphore } as unknown as RunModuleContext;

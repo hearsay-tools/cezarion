@@ -164,14 +164,26 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     const { id, wait } = await parkedOnSubagents();
     const real = store.commitOutcome.bind(store);
     const commit = vi.spyOn(store, 'commitOutcome').mockImplementation((runId, outcome, ...rest) => {
-      if (outcome.kind === 'cancelled') throw Error('injected: disk full');
+      if (!Array.isArray(outcome) && (outcome as { kind?: string }).kind === 'cancelled') throw Error('injected: disk full');
       return real(runId, outcome, ...rest);
     });
     emitUi(id, { type: 'turn.started', turnId: 'turn_runner' });
-    expect(commit.mock.calls.some(([, outcome]) => outcome.kind === 'cancelled')).toBe(true);
+    expect(commit.mock.calls.some(([, outcome]) => !Array.isArray(outcome) && (outcome as { kind?: string }).kind === 'cancelled')).toBe(true);
     commit.mockRestore();
     expect(entryOf(id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open });
     expect(internals().waitWatches.waitTimers.has(wait.id)).toBe(true);
+  });
+
+  it('a question asked while the subagent wait is open keeps the session and its slot, with no idle close', async () => {
+    const { id, wait } = await parkedOnSubagents();
+    const turns = turnEnds(id);
+    expect(manager.sendMessage(id, [{ type: 'text', text: 'mock:ask which one?' }])).toBe(true);
+    await until(() => turnEnds(id) > turns && store.getRun(id)?.status === RUN_STATUS.waiting && internals().line.isParked(id));
+    expect(store.getRun(id)?.waits?.some(entry => entry.kind === WAIT_KIND.human && entry.phase === WAIT_PHASE.open)).toBe(true);
+    expect(entryOf(id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open });
+    expect(internals().line.inPool(id)).toBe(true);
+    expect(internals().active.get(id)?.idleTimer).toBeUndefined();
+    expect(internals().active.get(id)?.session?.open).toBe(true);
   });
 
   it('a duplicate child end changes nothing and wakes nothing', async () => {
