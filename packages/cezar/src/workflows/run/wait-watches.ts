@@ -3,7 +3,7 @@ import type { RunRecord } from '../../runs/store.ts';
 import { familyOf } from './run-guards.ts';
 import { ciWatchRequest, type WaitResult } from '../waits.ts';
 import { ciWaitResultSchema, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
-import type { Wait, WorkerWaitEntry, PrWaitEntry, ProcessWaitEntry, ProcessWaitResult, PeerWaitEntry, PeerWaitResult } from '@open-mercato/cezar-contract/waits';
+import type { Wait, WorkerWaitEntry, PrWaitEntry, ProcessWaitEntry, ProcessWaitResult, PeerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import type { CiWatcherSupervisor } from '../../ci-wait/supervisor.ts';
 import { ProcessWaitSupervisor } from '../../process-wait/supervisor.ts';
 import type { ExitFileRoots } from '../../process-wait/exit-file.ts';

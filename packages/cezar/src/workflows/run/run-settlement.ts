@@ -209,7 +209,7 @@ export class RunSettlement {
     if (completed?.workflowDef && waitingIndex >= 0) {
       return this.settleResumedWorkflowStep(runId, state, stepId, completed, completed.workflowDef, waitingIndex, close);
     }
-    return this.succeedContinuation(runId, stepId);
+    return this.succeedContinuation(runId);
   }
 
   /** The Continue finished the workflow step it resumed: queue the workflow remainder, or settle
@@ -245,11 +245,11 @@ export class RunSettlement {
       return undefined;
     }
     this.context.store.updateRun(runId, { workflowResumeStepId: undefined });
-    return this.succeedContinuation(runId, stepId);
+    return this.succeedContinuation(runId);
   }
 
   /** Settle the run after a successful Continue. */
-  async succeedContinuation(runId: string, stepId: string): Promise<void> {
+  async succeedContinuation(runId: string): Promise<void> {
     await this.host.settleSuccess(runId);
   }
 

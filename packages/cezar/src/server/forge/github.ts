@@ -205,14 +205,6 @@ export const ghCheckRunSchema = z.object({
 });
 const ghStatusCheckRollup = z.array(ghCheckRunSchema).nullish();
 
-// The list tier no longer requests `statusCheckRollup` (#664) — it is hydrated lazily per
-// on-screen PR row (`fetchGithubChecks`). `checks` is set to `null` on list rows; the schema
-// keeps no rollup field because the list call never asks for it.
-const ghPrSchema = ghIssueSchema.extend({
-  isDraft: z.boolean().default(false),
-  additions: z.number().default(0),
-  deletions: z.number().default(0),
-});
 const ghPrViewSchema = z.object({
   number: z.number(),
   url: z.string(),

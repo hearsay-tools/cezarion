@@ -2202,6 +2202,7 @@ function workersCells(runners: RunnerId[]): void {
         await until(() => turnEnds(p.id) > turns && (nudgeNotes(p.id).length === 2 || workerWaits(p.id).length > 0 || humanOpen(p.id).some(wait => wait.via === 'completion')));
         expect(workerWaits(p.id)).toEqual([]);
         expect(nudgeNotes(p.id)).toHaveLength(2);
+        await until(() => prompted(runner, liveRefusal(next)).length > 0);
         expect(prompted(runner, liveRefusal(next))).toHaveLength(1);
         await until(() => noReplyNotes(p.id).length === 2 && gated(p.id));
         expect(workerWaits(p.id)).toEqual([]);

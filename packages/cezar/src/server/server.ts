@@ -4,7 +4,7 @@ import { providerConnectSchema, createAgentProfileSchema, openAgentAccountFileSc
 import { planSchema, parseWorkflowSchema } from '@open-mercato/cezar-contract/workflow-requests';
 import { uiStateBody } from '@open-mercato/cezar-contract/ui-state-requests';
 import { queuedMessagePatchSchema, continueSchema, archiveSchema, openInSchema } from '@open-mercato/cezar-contract/run-requests';
-import { queryValue, refreshQuery, waitQuery, modelDiscoveryQuerySchema, strictRefreshQuerySchema, browseQuerySchema, worktreeFilesQuerySchema } from '@open-mercato/cezar-contract/query-requests';
+import { refreshQuery, waitQuery, modelDiscoveryQuerySchema, strictRefreshQuerySchema, browseQuerySchema, worktreeFilesQuerySchema } from '@open-mercato/cezar-contract/query-requests';
 import { mergeNumberParams, prChangesParams, prChangesQuery, mergeBodySchema } from '@open-mercato/cezar-contract/github-requests';
 import { gitCommitSchema, reclaimBodySchema, repoBranchSchema } from '@open-mercato/cezar-contract/repo-requests';
 import { setConfigSchema, setAgentConfigSchema } from '@open-mercato/cezar-contract/config-requests';
@@ -46,14 +46,14 @@ import type { ApiRun, ArchivedRunsResponse, RunSummary, RunsSearchResponse } fro
 import { ARCHIVED_RUNS_PAGE_DEFAULT } from '@open-mercato/cezar-contract/run-limits';
 import { RUNS_SEARCH_PER_PROJECT_MAX, archivedRunsQuerySchema, runSummariesQuerySchema, runsSearchQuerySchema } from '@open-mercato/cezar-contract/runs';
 import { automationListQuerySchema } from '@open-mercato/cezar-contract/automations';
-import { automationScheduleSchema, nextOccurrence } from '@open-mercato/cezar-contract/automation-schedule';
+
 import { localTimeZone } from '@open-mercato/cezar-contract/zoned-time';
 import { DelegationService } from '../delegation/service.ts';
 import { workerCapacity } from '../delegation/capacity.ts';
 import type { DelegationController } from '../delegation/provision.ts';
 import { delegationFailure } from '../delegation/routes.ts';
 import { githubItemParamsSchema } from '@open-mercato/cezar-contract/github';
-import { createRunInputSchema, toRunSummary } from '@open-mercato/cezar-contract/runs';
+import { createRunInputSchema } from '@open-mercato/cezar-contract/runs';
 import { workerEmptyRequestSchema, runRelationshipsSchema } from '@open-mercato/cezar-contract/delegation';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -62,7 +62,7 @@ import { createAutomationService, onceCreateAnswer } from '../automations/servic
 import { createAutomationToolService } from '../automations/tool-adapter.ts';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
 import { AutomationCandidateChangedError, GithubPoller } from '../automations/github-poller.ts';
-import { githubBaselineState } from '../automations/github-baseline.ts';
+
 import { ProjectAutomationScheduler, WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
 import { AutomationProjectUnavailableError, SCHEDULE_LEASE_HELD_REASON, ScheduleRunner, type ScheduleRunnerHandle } from '../automations/schedule-runner.ts';
 import {
@@ -70,18 +70,14 @@ import {
   launchScheduledRun,
   rebaselineIdleAutomations,
   reconcileAutomationReceipts,
-  validateAutomationPrompt,
 } from '../automations/task-template.ts';
 import {
-  automationFiltersSchema,
-  automationTaskSchema,
   isGithubAutomation,
   isScheduleAutomation,
-  type AutomationDefinition,
 } from '../automations/types.ts';
 import type { IncomingMessage, Server } from 'node:http';
 import { access, constants as fsConstants, mkdir, readFile, realpath, stat, unlink, writeFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
+
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Hono, type Context } from 'hono';
@@ -144,7 +140,7 @@ import {
   taskWebhooks as taskWebhookList,
 } from '../workspace/webhooks.ts';
 import { detectEnvironment } from '../core/backend-detect.ts';
-import { RUNNER_IDS } from '../core/agent-runner.ts';
+
 import type { ContentBlock } from '../core/agent-runner.ts';
 import { AGENT_MODELS_LOCKED_ERROR, agentModelsLocked } from '../core/agent-model-policy.ts';
 import { PROVIDER_IDS, ProviderAuthService, type ProviderId } from '../core/provider-auth.ts';
@@ -153,7 +149,6 @@ import { RunnerModelCatalog } from '../core/runner-model-catalog.ts';
 import { currentUsage, onUsage } from '../core/process-usage.ts';
 import { WORKFLOWS_DIR, loadWorkflows } from '../workflows/load.ts';
 import {
-  QUICK_TASK_WORKFLOW,
   normalizeWorkflowDoc,
   skillStackOf,
   skillsToSteps,
@@ -165,7 +160,7 @@ import { discoverSkills, type Skill } from '../skills.ts';
 import { createSelfUpdateRoutes, type SelfUpdateServerDeps } from './self-update-routes.ts';
 import { getTeamSkillsCached, refreshTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
 import { readHandoff, renderHandoffRecords } from '../handoff.ts';
-import { ARCHIVED_WINDOW, type RepoHandle, type RunEvent, type RunRecord, type RunStatus, type RunStore } from '../runs/store.ts';
+import { ARCHIVED_WINDOW, type RepoHandle, type RunRecord, type RunStatus, type RunStore } from '../runs/store.ts';
 import {
   HistoryCursorError,
   deriveRunContextEvents,
@@ -260,18 +255,18 @@ import { mergeWriteWorkspaceUiState, readWorkspaceUiState } from '../workspace/u
 import { checkoutRepo, type CloneRunner } from './checkout.ts';
 import { createProject, listGithubOwners, type CommandRunner } from './create-project.ts';
 import { armPreview, ProjectContexts, projectWarmupEnabled, sweepRegisteredPreviewLeftovers, type ProjectContext } from './project-context.ts';
-import { reviewGateEnabled } from '../runs/review-gate.ts';
+
 import { readProjectUiState, readUiState, writeProjectUiState } from '../ui-state.ts';
 import { agentHomePaths, expandTilde } from '../paths.ts';
 import { isLoopbackHostHeader, normalizeHostname, resolveCapabilities } from './capabilities.ts';
-import { applicationUpdateInputSchema, type ApplicationUpdateState } from '@open-mercato/cezar-contract/application-update';
+import { applicationUpdateInputSchema } from '@open-mercato/cezar-contract/application-update';
 import { ApplicationUpdateConflictError, ApplicationUpdateFailureError, type ApplicationUpdateServiceLike } from '../application-update/service.ts';
 import { createSocketHub, socketHubRoute, type SocketHub, type WsUpgradeVerdict } from './ws.ts';
 import { attachUpgradeRouter } from './upgrade-router.ts';
 import { createPreviewSockets } from './preview-sockets.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
-import { parseRemote, forgeKindOfRemote, forgeRepositoryUrl, resolveForge, forgeWebRoot, resolveForgeRoot, type ForgeFactory, type ForgeAvailability } from './forge/index.ts';
+import { parseRemote, forgeKindOfRemote, forgeRepositoryUrl, resolveForge, forgeWebRoot, resolveForgeRoot, type ForgeFactory } from './forge/index.ts';
 import { refNumberFromUrl } from '@open-mercato/cezar-contract/run-search';
 import { GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './forge/index.ts';
 import type { CockpitOwnership } from './cockpit-ownership.ts';
@@ -572,16 +567,6 @@ function foldedLength(task: string, stack: Array<{ text: string }>): number {
 // it only ever carries small GUI prefs.
 const GLOBAL_BODY_LIMIT = 32 * 1024 * 1024; // 32 MiB
 const UI_STATE_BODY_LIMIT = 128 * 1024; // 128 KiB
-
-/** The name half of a Host header — `localhost:4321` → `localhost`,
- *  `[::1]:4321` → `[::1]`. A bracketed IPv6 literal keeps its brackets
- *  (`isLoopbackHost` strips them itself); an unbracketed IPv6 spelling is
- *  nonstandard in a Host header and simply fails the loopback test closed. */
-function stripHostPort(host: string): string {
-  const bracketed = /^(\[[^\]]+\])(?::\d+)?$/.exec(host);
-  if (bracketed?.[1]) return bracketed[1];
-  return host.replace(/:\d+$/, '');
-}
 
 /**
  * HTTP content negotiation for the two routes that serve more than one FORMAT on one path:
@@ -4314,7 +4299,7 @@ export function createApp(deps: ServerDeps) {
     // (spec "Legacy aliases" — widening it would be a silent behavioral break;
     // the all-project stream arrives as `/api/workspace/events` in step 2.8).
     .get('/events', (c) => {
-      const { dataDir, store } = c.get('project');
+      const { store } = c.get('project');
       return streamSSENoBuffer(c, async (stream) => {
         const onRun = (run: RunRecord) => void stream.writeSSE({ event: 'run', data: JSON.stringify(run) });
         const onDeleted = (id: string) =>

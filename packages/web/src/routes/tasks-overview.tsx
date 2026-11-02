@@ -182,7 +182,6 @@ export function TasksOverview({
   const [origin, setOrigin] = useOriginOrOwn(originProp, onOriginChange)
   const [detailedTable, setDetailedTable] = React.useState(false)
   const headerRef = React.useRef<HTMLElement>(null)
-  const archiveSelected = React.useRef(false)
   const all = runs ?? []
   const derived = useProjectTaskGroups({ all, view, query, origin, archivedPages, archivedTotal, automationName })
   const { groups, needle } = derived
@@ -1427,14 +1426,6 @@ function Dash() {
   return <span className="text-xs text-soft-foreground">—</span>
 }
 
-function Sep() {
-  return (
-    <span className="text-soft-foreground" aria-hidden="true">
-      ·
-    </span>
-  )
-}
-
 function BranchChip({ branch }: { branch: string }) {
   return (
     <span
@@ -1620,7 +1611,7 @@ function useArchivedPages(runs: readonly RunSummary[] | undefined, view: ListVie
   total: number | undefined
   search: (needle: string) => void
 } {
-  const writer = useRunCacheWriter()
+  useRunCacheWriter()
   const queryClient = useQueryClient()
   const [typed, setTyped] = React.useState('')
   const [needle, setNeedle] = React.useState('')

@@ -46,7 +46,7 @@ export function SidebarProjectHeader({ onNavigate }: { onNavigate?: (() => void)
   const markRef = useRef<HTMLSpanElement>(null)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   const [menuOffset, setMenuOffset] = useState(0)
-  const { health, registry, projectId, project, root, name, branch } = useActiveProjectIdentity()
+  const { health, registry, projectId, root, name, branch } = useActiveProjectIdentity()
   const local = health.data?.capabilities.localHandoff === true
   const identity = name ?? (registry.isPending ? 'Loading project…' : 'Project unavailable')
   const detail = [local ? root : undefined, branch].filter(Boolean).join(' · ')

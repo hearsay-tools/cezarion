@@ -120,7 +120,6 @@ import type {
   ProviderStatusResponse,
   ReferenceStatus,
   RunRecord,
-  RunSummary,
   SelectAgentProfileInput,
   SetAgentConfigInput,
   UpdateAgentProfileInput,

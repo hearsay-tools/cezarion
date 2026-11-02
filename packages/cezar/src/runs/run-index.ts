@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { runSummarySchema, toRunSummary, type RunSummary } from '@open-mercato/cezar-contract/runs';
 
 import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, type RunSummaryRow } from './run-database.ts';
-import { decodeRunRecord, holdsWorkerWait, LEGACY_INDEX_FILE, reconcileLoadedRun, rescopeRun, parseRunRecords, type RepoHandle, type RunRecord } from './store.ts';
+import { decodeRunRecord, LEGACY_INDEX_FILE, reconcileLoadedRun, rescopeRun, parseRunRecords, type RepoHandle, type RunRecord } from './store.ts';
 import { matchesRunSearch, searchTokens, sqlPrefilterTokens } from '@open-mercato/cezar-contract/run-search';
 
 /** A cold project's runs as list rows, and whether older archived roots were left out. */

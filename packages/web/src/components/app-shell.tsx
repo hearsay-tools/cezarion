@@ -4,7 +4,7 @@ import { ChevronDownIcon, FolderIcon, MenuIcon, PlusIcon, SearchIcon, ShieldChec
 import { ChevronLeftIcon } from 'lucide-react'
 import * as React from 'react'
 import type { ReactNode } from 'react'
-import { Link as RouterLink, matchPath, useLocation, useNavigationType } from 'react-router'
+import { matchPath, useLocation, useNavigationType } from 'react-router'
 
 import { openCommandPalette } from '@/components/command-palette'
 import { DrawerGlobal, DrawerIdentity, DrawerProjects, DrawerUpdate, MenuButtonPills, elsewhereSignal, menuButtonLabel, type DrawerTools, type MobileProjectNav } from '@/components/mobile-projects'

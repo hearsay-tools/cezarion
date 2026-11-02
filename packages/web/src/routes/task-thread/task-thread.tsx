@@ -192,7 +192,7 @@ export function ThreadView({
    *  header's other three tabs, have no such effect to suppress. */
   onMarkedUnread?: ((runId: string) => void) | undefined
 }) {
-  const projectId = useActiveProjectId()
+  useActiveProjectId()
   const runs = useRuns()
   // A voice "tell it" proposal fills this composer's draft (spec 2026-10-21-voice-mode). The
   // store reaches the composer through its handle, registered for this run while it is mounted.

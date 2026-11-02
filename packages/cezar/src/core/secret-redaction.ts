@@ -51,10 +51,6 @@ const TOKEN_PATTERNS: readonly RegExp[] = [
   /glpat-[0-9A-Za-z_-]{20,}/g, // GitLab PAT
 ];
 
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 /** Collect the concrete secret values present in `env` (deduped, longest
  *  first so a value that contains another is replaced whole). */
 export function collectSecretValues(env: NodeJS.ProcessEnv = process.env): string[] {
