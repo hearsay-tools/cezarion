@@ -90,13 +90,13 @@ moves the wait-discipline scans into lint).
 | 1.5 (hearsay-tools/cezarion#2492) | feature | Expiry markers. Mark each remaining workaround rule with `<!-- until: <issue> -->`. A weekly workflow lists markers whose issue is closed and opens or updates one cleanup issue. | The workflow finds a marker on a closed issue in its own test. |
 | 1.6 (hearsay-tools/cezarion#1122) | feature | Typecheck never writes `dist`. Map `@wjarka/cezarion/app-type` to the server source in `packages/web/tsconfig.json` `paths`; remove `pretypecheck`; move the packaged tests to a `tsconfig.package.json` checked after the build in CI; `typecheck:server` runs the three server configs. Fallback if server sources fail under web options: `tsc -b` project references that emit declarations to an ignored directory. Reuses hearsay-tools/cezarion#1122. | `npm run typecheck` passes in a never-built worktree and writes nothing under `dist`; CI still typechecks the packaged tests. The typecheck section shrinks to one line. |
 | 1.7 (hearsay-tools/cezarion#2493) | feature | `npm run test:package -- <files>` takes repo-root paths. It builds when `dist` is older than the sources, or stops and prints the build command. | In an unbuilt worktree no run fails with `Cannot find module …/dist/…`. |
-| 1.8 (hearsay-tools/cezarion#2494) | feature | `npm run test:parity` runs every `*-parity.test.ts` file. hearsay-tools/cezarion#1783 later adds per-path selection. | `AGENTS.md` "Before opening a PR" step 2 names the command; the skill section is gone. |
+| 1.8 (hearsay-tools/cezarion#2494) | feature | `npm run test:parity` covers every `*-parity.test.ts` file: when a Squeal daemon validates the worktree it reads their verdicts through `squeal status --wait`, otherwise it runs them through `npm test --`. hearsay-tools/cezarion#1783 later adds per-path selection. | `AGENTS.md` "Before opening a PR" step 2 names the command; the skill section is gone. |
 | 1.9 (hearsay-tools/cezarion#2495) | feature | Fail fast without `node_modules`: the Vitest setupFiles of packages/cezar and packages/web, the e2e globalSetup, and the node:test import hook scripts/test-git-env.mjs (one shared check; there is no root Vitest global setup) stop with "run `pnpm install --frozen-lockfile`" when a workspace package resolves outside the worktree. | A run in a worktree without `node_modules` exits non-zero with that message. |
 | 1.10 (hearsay-tools/cezarion#2496) | feature | A skipped browser run exits non-zero unless the caller passes an explicit flag; CI passes it where it needs exit 0, and its aggregate still fails on skipped. Reader sweep on the exit contract, including `BACKWARD_COMPATIBILITY.md` and the e2e README. | Locally, `npm run test:e2e` without a browser exits non-zero; CI is unchanged. |
 | 1.11 (hearsay-tools/cezarion#2497) | feature | Unsharded `npm test` is safe: `vitest.config.ts` sets the default `maxWorkers` from free memory and CPU count. | A plain `npm test` finishes on a 24-CPU, 47 GiB host; the OOM warning is gone. |
 
-**Exit:** on `main`, the validation skill holds only the Squeal wait bound and the
-parity procedure (removed in Phase 3) and the `CI owns the final gate` policy; slices 1.6
+**Exit:** on `main`, the validation skill holds only the generic Squeal wait bound
+(removed in Phase 3) and the `CI owns the final gate` policy; slices 1.6
 to 1.11 work as their done lines say; `ci.workflow.test.cjs` reads no skill.
 
 ### Phase 2 — Tests own their data and start state
@@ -122,11 +122,10 @@ a **Process exits** case table and a runner owner's review.
 | Slice | Type | Change | Done when |
 | --- | --- | --- | --- |
 | 3.1 | feature | Measure the 36 files over 60 s: time, CPU time and peak memory at several sizes. Record the result in the Phase 3 design spec. No list or baseline of slow files. | The design spec names the cost of each slow file and the fix for it. |
-| 3.2 | feature | Parity cells run the mock wire in-process through each runner's wire adapter; one real-process smoke cell stays per runner and wire. | Every parity file is under 60 s on CI; the smoke cells still fail on a broken wire. The Squeal wait bound and parity procedure are deleted. |
+| 3.2 | feature | Parity cells run the mock wire in-process through each runner's wire adapter; one real-process smoke cell stays per runner and wire. | Every parity file is under 60 s on CI; the smoke cells still fail on a broken wire. The Squeal wait bound is deleted. |
 | 3.3 | cleanup | Split files still over 60 s by row group. Then add a hard 60 s per-file cap with no exceptions. | Every Vitest file is under 60 s on CI and the cap is enforced. |
 
-**Exit:** no Vitest file over 60 s on CI; the validation skill has no wait-bound or
-parity text.
+**Exit:** no Vitest file over 60 s on CI; the validation skill has no wait-bound text.
 
 ### Phase 4 — Run lifecycle ownership
 
