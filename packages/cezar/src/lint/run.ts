@@ -142,14 +142,15 @@ export function staleEntries(root = repoRoot): string[] {
   for (const entry of compareSetters(actual, baseline).stale) {
     problems.push(`${SETTERS} cez/raw-query-setter: ${entry.file} no longer has ${entry.site}; remove the entry`);
   }
-  for (const entry of new Set(readContrastBaseline(root))) {
-    const separator = entry.indexOf(': ')
-    const file = entry.slice(0, separator)
-    const text = source(`${WEB_SRC}${file}`)
-    const actual = text === undefined ? [] : scanContrast(text, paletteSurfaces()).map(site => `${file}: ${site}`)
-    const expected = readContrastBaseline(root).filter(site => site === entry).length
+  const contrastBaseline = readContrastBaseline(root);
+  for (const entry of new Set(contrastBaseline)) {
+    const separator = entry.indexOf(': ');
+    const file = entry.slice(0, separator);
+    const text = source(`${WEB_SRC}${file}`);
+    const actual = text === undefined ? [] : scanContrast(text, paletteSurfaces()).map(site => `${file}: ${site}`);
+    const expected = contrastBaseline.filter(site => site === entry).length;
     if (actual.filter(site => site === entry).length < expected) {
-      problems.push(`${contrastBaselineFile} cez/card-2-contrast: stale entry ${entry}. Fix new sites; remove fixed entries from the baseline. Never add allowances. (hearsay-tools/cezarion#1133, hearsay-tools/cezarion#2423).`)
+      problems.push(`${contrastBaselineFile} cez/card-2-contrast: stale entry ${entry}. Fix new sites; remove fixed entries from the baseline. Never add allowances. (hearsay-tools/cezarion#1133, hearsay-tools/cezarion#2423).`);
     }
   }
   return problems;

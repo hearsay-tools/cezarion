@@ -44,7 +44,8 @@
       ".oxlintrc.json",
       ".env.example",
       "packages/cezar/src/lint/**",
-      "packages/web/src/test/search-params-discipline.baseline.json"
+      "packages/web/src/test/search-params-discipline.baseline.json",
+      "packages/web/src/test/card-2-contrast.baseline.json"
     ],
     "packages/cezar/src/contract-subpaths.test.ts": [
       "packages/contract/src/**",
@@ -53,9 +54,7 @@
       "packages/api-client/package.json"
     ],
     "packages/web/src/test/card-2-contrast.test.ts": [
-      "packages/web/src/**/*.tsx",
-      "packages/web/src/test/card-2-contrast.baseline.json",
-      "packages/web/src/styles/index.css"
+      "packages/cezar/src/lint/card-2-contrast.ts"
     ],
     "packages/web/e2e/*.e2e.ts": [
       "packages/contract/src/**",
