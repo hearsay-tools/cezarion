@@ -1744,7 +1744,7 @@ For iteration, run affected test files or `npm run test:changed` (inspect with
 `-- --plan`; override the local main comparison with `-- --base=<ref>`).
 The changed-test command includes staged, unstaged and untracked changes and
 falls back to full Vitest on shared/configuration/unknown input or missing Git
-history. It is not a substitute for final verification. See `AGENTS.md` § Validation
+history. It is not a substitute for final verification. See `.ai/skills/validation/SKILL.md`
 for targeted browser commands and the final-gate/evidence-reuse policy.
 
 Both `npm run typecheck:web` and

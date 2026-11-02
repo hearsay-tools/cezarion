@@ -361,7 +361,7 @@ Limits:
   the file.
 - Styles and server code select every spec.
 - The map does not hold text assertions. When you change visible copy, also search the specs for
-  the old and the new string (AGENTS.md § Reader sweep).
+  the old and the new string ([reader sweep](../../../.ai/skills/reader-sweep/SKILL.md)).
 - A selected pass is not a full-suite pass. CI runs every spec.
 
 ## The project the shared env serves
@@ -392,7 +392,7 @@ Seeded NDJSON transcripts must go through `seedTranscript` from `seed-transcript
 ## Seed the catalog entries a spec relies on
 
 When a test change removes a hidden catalog dependency, follow
-[AGENTS.md’s regression-proof rule](../../../AGENTS.md#regression-proof): run the
+[the regression-proof rule](../../../.ai/skills/load-bearing-change/SKILL.md#regression-proof): run the
 old test with the dependency absent, then the fixed test under the same conditions,
 even when no failure was observed. Record the evidence in the PR description, in the form
 above.
@@ -432,7 +432,7 @@ membership against its own fixture skills only, so unrelated catalog entries can
 
 A built-in that a spec tests as product behavior, such as the `quick-task` workflow a new task
 runs, is not a catalog entry in this sense. A change that removes one still searches the specs
-first, as the [AGENTS.md reader sweep](../../../AGENTS.md#reader-sweep) says.
+first, as the [reader sweep](../../../.ai/skills/reader-sweep/SKILL.md) says.
 
 ## A plain dry-run reply parks on a "Next step" card
 

@@ -1,6 +1,6 @@
 # Regression proof recipes
 
-[AGENTS.md § Changing a mechanism](../../AGENTS.md#regression-proof) says when a
+[The load-bearing-change skill](../../.ai/skills/load-bearing-change/SKILL.md#regression-proof) says when a
 regression test needs proof that it fails without the fix. This page holds the
 recipes. Each keeps the task's tracked files in place, so Squeal never runs a
 swapped version, and none uses the shared git stash stack.

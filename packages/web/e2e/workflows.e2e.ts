@@ -326,6 +326,8 @@ describe('workflow builder against the live dry-run server', () => {
       '      retry: fix',
       '      max: 2',
     ].join('\n')
+    // The case before this one leaves the page scrolled; how far depends on the catalog's length.
+    browser.evaluate(`document.querySelector('[data-slot="wb-import"]').scrollIntoView({ block: 'center' })`)
     browser.click('[data-slot="wb-import"]')
     browser.fill('[data-slot="wb-import-text"]', pasted)
     // The expanded import card can place its actions below the nested page viewport.
