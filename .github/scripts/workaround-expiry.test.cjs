@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 const yaml = require('yaml');
 const { markersIn, expiredMarkers, updateCleanupIssue, TITLE } = require('./workaround-expiry.cjs');
 
@@ -113,4 +113,20 @@ else if (args.includes('POST') && args.includes('--input') && args.at(-1) === '-
   const published = JSON.parse(fs.readFileSync(path.join(root, 'published.json'), 'utf8'));
   assert.equal(published.title, TITLE);
   assert.match(published.body, /external\/repo\/issues\/7/);
+});
+
+
+test('CLI failure reports the cause and issue endpoint without forwarding gh stderr', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workaround-expiry-error-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  execFileSync('git', ['init'], { cwd: root, stdio: 'pipe' });
+  fs.writeFileSync(path.join(root, 'rule.md'), '<!-- until: external/repo#7 -->');
+  execFileSync('git', ['add', 'rule.md'], { cwd: root });
+  fs.writeFileSync(path.join(root, 'gh'), '#!/bin/sh\necho fixture-private-response >&2\nexit 1\n', { mode: 0o755 });
+  const result = spawnSync(process.execPath, [path.join(__dirname, 'workaround-expiry.cjs'), '--publish'], {
+    cwd: root, encoding: 'utf8', env: { ...process.env, PATH: root + path.delimiter + process.env.PATH, GITHUB_REPOSITORY: 'local/repo' },
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Workaround expiry report failed: GitHub API GET repos\/external\/repo\/issues\/7 failed: exit 1/);
+  assert.doesNotMatch(result.stderr, /fixture-private-response/);
 });

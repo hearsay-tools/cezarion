@@ -20,10 +20,19 @@ function trackedMarkers(root = process.cwd()) {
 function ghApi(endpoint, method = 'GET', data) {
   const args = ['api', endpoint, '--method', method];
   if (data) args.push('--input', '-');
-  return JSON.parse(execFileSync('gh', args, {
-    encoding: 'utf8', input: data ? JSON.stringify(data) : undefined,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  }));
+  let response;
+  try {
+    response = execFileSync('gh', args, {
+      encoding: 'utf8', input: data ? JSON.stringify(data) : undefined,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (error) {
+    // Do not forward gh stderr: it can contain server responses or credentials.
+    const reason = Number.isInteger(error.status) ? `exit ${error.status}` : 'could not start gh';
+    throw new Error(`GitHub API ${method} ${endpoint} failed: ${reason}`);
+  }
+  try { return JSON.parse(response); }
+  catch { throw new Error(`GitHub API ${method} ${endpoint} returned invalid JSON`); }
 }
 
 async function expiredMarkers(markers, resolveIssue) {
@@ -32,7 +41,7 @@ async function expiredMarkers(markers, resolveIssue) {
   for (const marker of markers) {
     if (!states.has(marker.issue)) {
       const state = await resolveIssue(marker.issue);
-      if (!['open', 'closed'].includes(state)) throw new Error('Invalid issue state');
+      if (!['open', 'closed'].includes(state)) throw new Error(`Invalid issue state for ${marker.issue}`);
       states.set(marker.issue, state);
     }
     if (states.get(marker.issue) === 'closed') expired.push(marker);
@@ -84,5 +93,5 @@ async function run({ root, repository, publish = false, api = ghApi, print = con
 module.exports = { TITLE, markersIn, trackedMarkers, expiredMarkers, updateCleanupIssue, run };
 if (require.main === module) {
   run({ repository: process.env.GITHUB_REPOSITORY, publish: process.argv.includes('--publish') })
-    .catch(() => { console.error('Workaround expiry report failed; no complete report is available.'); process.exitCode = 1; });
+    .catch(error => { console.error(`Workaround expiry report failed: ${error.message}`); process.exitCode = 1; });
 }
