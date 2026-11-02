@@ -149,12 +149,12 @@ try {
   })
   await attemptCleanup('CDP detach', detach)
   await attemptCleanup('browser close', () => browser.close())
-  if (cleanupFailures.length) {
-    throw new AggregateError(
-      proofFailed ? [proofError, ...cleanupFailures] : cleanupFailures,
-      proofFailed ? 'Settings fixture proof and cleanup failed' : 'Settings fixture cleanup failed',
-      proofFailed ? { cause: proofError } : undefined,
-    )
-  }
-  if (proofFailed) throw proofError
 }
+if (cleanupFailures.length) {
+  throw new AggregateError(
+    proofFailed ? [proofError, ...cleanupFailures] : cleanupFailures,
+    proofFailed ? 'Settings fixture proof and cleanup failed' : 'Settings fixture cleanup failed',
+    proofFailed ? { cause: proofError } : undefined,
+  )
+}
+if (proofFailed) throw proofError

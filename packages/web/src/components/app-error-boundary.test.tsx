@@ -78,7 +78,7 @@ describe('AppErrorBoundary', () => {
     const logged = vi.mocked(console.error).mock.calls
     const ours = logged.find((call) => call[0] === 'cezar cockpit: uncaught render error')
     expect(ours, JSON.stringify(logged.map((call) => call[0]))).toBeDefined()
-    expect((ours?.[1] as Error).message).toBe('boom')
+    expect((ours![1] as Error).message).toBe('boom')
   })
 
   it('shows a message for a thrown non-Error too', () => {

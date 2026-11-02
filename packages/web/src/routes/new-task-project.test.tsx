@@ -357,7 +357,7 @@ describe('switching project', () => {
     // The unscoped legacy endpoint must never see it — that would run the task in the wrong repo.
     expect(requests.some((r) => r.method === 'POST' && r.url === '/api/v1/runs')).toBe(false)
     const posted = requests.find((r) => r.method === 'POST' && r.url === `/api/v1/p/${OTHER}/runs`)
-    expect((posted?.body as { task?: string }).task).toBe('Ship the storefront')
+    expect((posted!.body as { task?: string }).task).toBe('Ship the storefront')
 
     // Started runs land on the selected project's thread URL, and the other draft is intact.
     await waitFor(() => expect(pathname()).toBe(`/p/${OTHER}/tasks/run-1`))

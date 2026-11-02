@@ -491,7 +491,7 @@ describe('POST /api/v1/projects/checkout', () => {
     const progress = seen.filter((s) => s.event === 'checkout-progress');
     expect(progress.length).toBeGreaterThan(0);
     expect(progress.every((s) => (s.data as { checkoutId: string }).checkoutId === 'co-9')).toBe(true);
-    expect((progress.at(-1)?.data as { phase: string }).phase).toBe('done');
+    expect((progress.at(-1)!.data as { phase: string }).phase).toBe('done');
     expect(seen.filter((s) => s.event === 'project-added')).toEqual([
       { event: 'project-added', data: { project: body.project } },
     ]);
