@@ -1,5 +1,5 @@
-import { defined } from '@open-mercato/cezar-api-client/contract/defined'
 "use client"
+import { defined } from '@open-mercato/cezar-api-client/contract/defined'
 
 import * as React from "react"
 import { CheckIcon, ChevronRightIcon, CircleIcon } from "@/components/design-icons"

@@ -173,8 +173,8 @@ interface ChangeBlock {
 
 /** Pair del[i] ↔ add[i] and compute word-level marks for each pair (null-safe past min length). */
 function pairBlock(dels: HunkLine[], adds: HunkLine[]): ChangeBlock {
-  const delSpans: (WordSpan[] | undefined)[] = new Array<WordSpan[] | undefined>(dels.length)
-  const addSpans: (WordSpan[] | undefined)[] = new Array<WordSpan[] | undefined>(adds.length)
+  const delSpans: (WordSpan[] | undefined)[] = Array.from({ length: dels.length })
+  const addSpans: (WordSpan[] | undefined)[] = Array.from({ length: adds.length })
   const pairs = Math.min(dels.length, adds.length)
   for (let i = 0; i < pairs; i++) {
     const words = diffWords(dels[i]!.text, adds[i]!.text)

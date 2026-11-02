@@ -457,7 +457,7 @@ function githubLabels(
   openItems: readonly GithubItem[],
   fullList: readonly GithubItem[],
 ) {
-  const labelColors = { ...(searchPayload?.labelColors ?? {}), ...(gh.labelColors ?? {}) }
+  const labelColors = { ...searchPayload?.labelColors, ...gh.labelColors }
   const labelOptions = allLabels([...openItems, ...fullList, ...(searchPayload?.items ?? [])])
   return { labelColors, labelOptions }
 }
