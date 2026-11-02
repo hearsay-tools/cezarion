@@ -135,6 +135,7 @@ for (const mode of ['fresh', 'continuation'] as const) {
       resultSpies.push(vi.spyOn(session.result, 'finally'));
       const closed = track(id, session);
       // Observe when the caller waits for process termination.
+      // oxlint-disable-next-line unicorn/no-thenable -- This test thenable observes when the caller awaits process termination.
       return { then: (...args: Parameters<typeof closed.then>) => {
         boundary.resolve('termination'); return closed.then(...args);
       } } as Promise<void>;

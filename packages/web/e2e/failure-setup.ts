@@ -22,6 +22,7 @@ import { beginFailureSpec, beginFailureTest, configureFailureCapture, lastAttach
  */
 const specName = (file: string) => basename(file).replace(/\.e2e\.ts$/, '')
 
+// oxlint-disable-next-line no-empty-pattern -- Vitest 4 requires a destructured first parameter to read fixtures.
 beforeAll(({}, suite) => {
   const filepath = 'filepath' in suite ? suite.filepath : suite.file.filepath
   beginFailureSpec(specName(filepath))
