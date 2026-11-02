@@ -35,6 +35,8 @@ describe('run history ownership', () => {
     'const path = id + ".ndjson" + (".br");',
     'const path = `${id}.ndjson` /* explanation */ + ".br";',
     'const path = `${id}.ndjson${compressed ? ".br" : ""}`;',
+    'const path = `${id}${".ndjson"}`;',
+    'const path = ((id as string) + (".ndjson" satisfies string))!;',
     'const path = id + ".ndjson" + ".tmp";',
     'const path = `${id}.ndjson` + ".tmp";',
     'const path = `${id}` + ".ndjson";',
@@ -58,12 +60,23 @@ describe('run history ownership', () => {
     'readFileSync(("fixed" + "prefix") + ".ndjson");',
     'return `fixed` + ".ndjson";',
     'const name = `fixed.ndjson`;',
+    'const name = `${".ndjson"}`;',
+    'const name = (("fixed" as string) + (".ndjson" satisfies string))!;',
+    'const name = `${id /* .ndjson */}`;',
     'import data from "./fixture.ndjson";',
     'const text = readHistoryText(dir, id);',
     'const path = `${id}.json`;',
     'return "fixed"\n + ".ndjson";',
   ])('passes non-path code: %s', (source) => {
     expect(scanHistoryReaders(other, source)).toEqual([]);
+  });
+
+  it('does not parse files outside the raw ndjson prefilter', () => {
+    expect(historyAccesses('let x = ;')).toEqual([]);
+  });
+
+  it('refuses malformed source instead of hiding a path', () => {
+    expect(() => historyAccesses('const path = `${id}.ndjson`; let x = ;')).toThrow();
   });
 
   it('preserves source offsets when blanking literals and comments', () => {
@@ -77,7 +90,7 @@ describe('run history ownership', () => {
   it('passes each reasoned exception and refuses it in another file', () => {
     const samples = {
       historyPaths: 'historyPaths(dir, id)',
-      'eventsPath-declaration': 'private eventsPath(runId: string): string {',
+      'eventsPath-declaration': 'class Store { private eventsPath(runId: string): string { return ""; } }',
       'eventsPath-append': 'appendFileSync(this.eventsPath(runId), line)',
       'dynamic-path': 'const path = `${id}.ndjson`;',
       eventsPath: 'this.eventsPath(id)',
