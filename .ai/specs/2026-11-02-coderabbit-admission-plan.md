@@ -142,3 +142,58 @@ Also protect `merge-queue-admission.cjs` in the auto-merge never-list, filter pr
 listings by check name and App ID while retaining exact identity validation, and
 scope draft automation documentation to same-repository PRs. Search active readers
 of the old target-only/coalescing descriptions and update them with discovery.
+
+
+## Correction validation (2026-11-03)
+
+Final JavaScript/workflow source revision: `26a45e1dae922ae1505930dd0003d1a99b29bd36`.
+The following commit changes only draft-policy documentation and this evidence.
+Parent safety review of this revision found no blockers. Parent owns integration,
+push, final bare CI dispatch and provider-thread replies; this worker did none.
+
+- Baseline red proof: disposable detached worktree at `b71de1afc`, its own frozen
+  pnpm dependencies, 13 selected tests fail for the reported defects. Only the
+  test `run` helper adapts to the old whole-event reconciler API; fixture and
+  assertion semantics are unchanged. No import/setup failure counts as proof.
+- Red selection: `node --import ./scripts/test-git-env.mjs --test
+  --test-name-pattern 'small queue|unrelated CI|coalesced B|valid old source|malformed PR listing|missing native CI|reconciler has|valid old signal association'`
+  against `auto-merge-admission.test.cjs`, `coderabbit-admission.test.cjs`,
+  `coderabbit-reconcile.test.cjs` and `coderabbit.workflow.test.cjs` under
+  `.github/scripts/`. Fixed source with the full current tests: **101 pass**.
+- Changed-function measurement against `b71de1afc`: **37/37 functions**, six files,
+  101 tests pass; maximum complexity **15**, maximum CRAP **15**.
+- Full-PR measurement against `190a4d6d57f1d13dc957efa4c24d317543579b27`:
+  **235/235 functions**, 21 files, 316 tests pass; maximum complexity **20**,
+  maximum CRAP **23.237885**. Limits are complexity >20 / CRAP >30. The initial
+  207-function / 20-file / 292-test implementation report is superseded.
+- Both measurements use the bundled `check.mjs --runner node --node-import
+  scripts/test-git-env.mjs`, with their pinned `--base` and relevant `--test`
+  files. The full-PR selection includes the unchanged `pr-test-proof.test.cjs`
+  consumer; omitting it leaves that function without coverage. Exact commands,
+  every function row and source hashes are in the published reports.
+- `npm run lint`, pinned actionlint **1.7.12**, shellcheck **0.11.0** with CI's
+  `SHELLCHECK_OPTS=--severity=warning`, citations and `git diff --check` pass.
+  An initial actionlint call omitted that severity and reported inherited
+  informational SC2016 in `ci.yml`; the exact CI invocation passes.
+- Auto-merge decision against the full PR baseline: **DOES NOT QUALIFY**, as
+  expected for review-gate/policy changes. No auto-merge action was taken.
+- Reader sweep updated CODE_REVIEW, CI recovery, workflow concurrency assertions
+  and this plan. Fork draft policy is separate from native-gate rerun guidance.
+- Squeal reached revision 7 / current source HEAD after delayed revision
+  application and database-lock messages. Current selected verdicts were pending
+  in that capture; fresh bundled checks above verify the source. At the preceding
+  revision 6 status, 87 of 90 slow files were pending; no full or slow-suite pass
+  is claimed. Friction filed as `hearsay-tools/squeal#138` using its template.
+
+Published task `fd575290-d087-452d-a025-9c17045cd90b` snapshots:
+changed-function report `7daff09e-c52e-4cf3-bf07-5be695c98380`, full-PR report
+`86989e45-c491-46e9-8e79-41a18f9b6c85`, red/green proof
+`c7e923da-0aad-4299-ae61-6aea58077427`. Local fixtures do not prove GitHub's live
+matrix scheduling, coalescing, provider delivery or exactly-once rerun execution.
+
+| Source | SHA-256 |
+| --- | --- |
+| `.github/scripts/coderabbit-reconcile.cjs` | `cfa93266ac51c8b2e685c9ae45bef87cd4507b797ca063f7cf5c39953a760149` |
+| `.github/scripts/coderabbit-admission.cjs` | `d0083f2c91775f607ffbdc7c4a115c69e5da0a4ce2ca65e95fcaf811774db411` |
+| `.github/workflows/coderabbit-reconcile.yml` | `c429e408578148082e2ca1b74144105771b258dccf1230cb46ced6693fe59d16` |
+| `.ai/skills/auto-merge/check.mjs` | `8c44e04e65b66e34ff6d768c71436fb76586f2e7a2cf3900a105efd38b5426a7` |
