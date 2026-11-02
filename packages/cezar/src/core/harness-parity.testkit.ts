@@ -1382,6 +1382,62 @@ async function createOwnedInputWorker(
   }, 'a'.repeat(64), options.identity ?? { kind: 'internal', ...(workflowDef ? { workflowHash: workerWorkflowHash(workflowDef) } : {}) });
 }
 
+interface OwnedInputState {
+  store: RunStore | undefined;
+  manager: RunManager | undefined;
+  runId: string | undefined;
+  drainBookkeeping: () => Promise<void>;
+}
+
+async function restartOwnedInputRun(
+  state: OwnedInputState, repoRoot: string, parentRunId: string, options: OwnedInputOptions,
+  beforeOpen?: (dataDir: string) => void,
+): Promise<{ store: RunStore; manager: RunManager }> {
+  state.store!.flush();
+  const dataDir = join(repoRoot, '.ai/cezar');
+  const index = readPersistedRuns(dataDir);
+  // The transcripts belong to the checkpoint too: the cancel that stops the processes below
+  // writes its own events (a worker's question closes when it stops,
+  // hearsay-tools/cezarion#2410), which a real crash never wrote. Their facts are a cache
+  // written behind them, so recovery rebuilds those from the restored transcripts.
+  const histories = [parentRunId, state.runId!].map(id => [historyPaths(dataDir, id).plain, readOptional(historyPaths(dataDir, id).plain)] as const);
+  // Stop only test-owned processes, then restore the precise pre-crash disk
+  // checkpoint. No fake manager/session: recovery opens a new real store.
+  state.manager!.cancel(state.runId!);
+  await waitFor(() => !state.manager!.isActive(state.runId!));
+  await state.drainBookkeeping();
+  state.manager!.dispose();
+  state.store!.close();
+  seedRuns(dataDir, index);
+  for (const [path, content] of histories) {
+    if (content === undefined) rmSync(path, { force: true });
+    else writeFileSync(path, content);
+  }
+  for (const id of [parentRunId, state.runId!]) rmSync(historyPaths(dataDir, id).facts, { force: true });
+  beforeOpen?.(join(repoRoot, '.ai/cezar'));
+  state.store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
+  state.manager = new RunManager(state.store, repoRoot, options);
+  state.drainBookkeeping = trackTurnBookkeeping(state.manager);
+  await state.manager.recover();
+  return { store: state.store, manager: state.manager };
+}
+
+async function teardownOwnedInputRun(
+  state: OwnedInputState, repoRoot: string, restoreEnvironment: () => void, restoreProcesses: () => void,
+): Promise<void> {
+  try {
+    if (state.runId && state.manager) {
+      state.manager.cancel(state.runId);
+      await waitFor(() => !state.manager!.isActive(state.runId!));
+    }
+    await state.drainBookkeeping();
+    state.manager?.dispose();
+    state.store?.close();
+    restoreEnvironment();
+    rmSync(repoRoot, { recursive: true, force: true });
+  } finally { restoreProcesses(); }
+}
+
 export async function withOwnedInputRun(
   backend: RunnerId,
   scenario: ScenarioName,
@@ -1414,67 +1470,26 @@ export async function withOwnedInputRun(
   const repoRoot = mkdtempSync(join(tmpdir(), `cez-owned-input-${backend}-`));
   // This fixture owns every native mock process; ambient host daemons cannot hold its new repo.
   const restoreProcesses = scopeFixtureProcesses();
-  let store: RunStore | undefined;
-  let manager: RunManager | undefined;
-  let runId: string | undefined;
-  let drainBookkeeping = async () => {};
+  const state: OwnedInputState = { store: undefined, manager: undefined, runId: undefined, drainBookkeeping: async () => {} };
   try {
     const sha = await createOwnedInputRepository(repoRoot);
-    store = RunStore.open(join(repoRoot, '.ai/cezar'));
-    const parent = createOwnedInputParent(store);
-    runId = randomUUID();
-    await createOwnedInputWorker(store, repoRoot, runId, parent.id, sha, backend, scenario, options);
-    manager = new RunManager(store, repoRoot, options);
-    drainBookkeeping = trackTurnBookkeeping(manager);
+    state.store = RunStore.open(join(repoRoot, '.ai/cezar'));
+    const parent = createOwnedInputParent(state.store);
+    state.runId = randomUUID();
+    await createOwnedInputWorker(state.store, repoRoot, state.runId, parent.id, sha, backend, scenario, options);
+    state.manager = new RunManager(state.store, repoRoot, options);
+    state.drainBookkeeping = trackTurnBookkeeping(state.manager);
     const adoptContext = async (context: { store: RunStore; manager: RunManager }) => {
-      await drainBookkeeping();
-      store = context.store;
-      manager = context.manager;
-      drainBookkeeping = trackTurnBookkeeping(manager);
+      await state.drainBookkeeping();
+      state.store = context.store;
+      state.manager = context.manager;
+      state.drainBookkeeping = trackTurnBookkeeping(state.manager);
     };
-    const restart = async (beforeOpen?: (dataDir: string) => void) => {
-      store!.flush();
-      const dataDir = join(repoRoot, '.ai/cezar');
-      const index = readPersistedRuns(dataDir);
-      // The transcripts belong to the checkpoint too: the cancel that stops the processes below
-      // writes its own events (a worker's question closes when it stops,
-      // hearsay-tools/cezarion#2410), which a real crash never wrote. Their facts are a cache
-      // written behind them, so recovery rebuilds those from the restored transcripts.
-      const histories = [parent.id, runId!].map(id => [historyPaths(dataDir, id).plain, readOptional(historyPaths(dataDir, id).plain)] as const);
-      // Stop only test-owned processes, then restore the precise pre-crash disk
-      // checkpoint. No fake manager/session: recovery opens a new real store.
-      manager!.cancel(runId!);
-      await waitFor(() => !manager!.isActive(runId!));
-      await drainBookkeeping();
-      manager!.dispose();
-      store!.close();
-      seedRuns(dataDir, index);
-      for (const [path, content] of histories) {
-        if (content === undefined) rmSync(path, { force: true });
-        else writeFileSync(path, content);
-      }
-      for (const id of [parent.id, runId!]) rmSync(historyPaths(dataDir, id).facts, { force: true });
-      beforeOpen?.(join(repoRoot, '.ai/cezar'));
-      store = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-      manager = new RunManager(store, repoRoot, options);
-      drainBookkeeping = trackTurnBookkeeping(manager);
-      await manager.recover();
-      return { store, manager };
-    };
-    const answer = (text: string) => answerAsParent(store!, manager!, parent.id, runId!, text);
-    await body({ repoRoot, runId, parentRunId: parent.id, store, manager, answer, restart, adoptContext });
+    const restart = (beforeOpen?: (dataDir: string) => void) => restartOwnedInputRun(state, repoRoot, parent.id, options, beforeOpen);
+    const answer = (text: string) => answerAsParent(state.store!, state.manager!, parent.id, state.runId!, text);
+    await body({ repoRoot, runId: state.runId, parentRunId: parent.id, store: state.store, manager: state.manager, answer, restart, adoptContext });
   } finally {
-    try {
-      if (runId && manager) {
-        manager.cancel(runId);
-        await waitFor(() => !manager!.isActive(runId!));
-      }
-      await drainBookkeeping();
-      manager?.dispose();
-      store?.close();
-      restoreEnvironment();
-      rmSync(repoRoot, { recursive: true, force: true });
-    } finally { restoreProcesses(); }
+    await teardownOwnedInputRun(state, repoRoot, restoreEnvironment, restoreProcesses);
   }
 }
 
