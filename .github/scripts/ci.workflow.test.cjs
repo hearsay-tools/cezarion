@@ -405,6 +405,8 @@ test('verification bindings keep the final gate in CI and reserve local full bro
     for (const job of Object.values(ci.jobs ?? {})) {
       for (const step of job.steps ?? []) {
         assert.doesNotMatch(step.run ?? '', /test:e2e:local/, `${name} must not run the local full browser script`);
+        assert.ok(!(step.run ?? '').includes(manifest.scripts['test:e2e:local']),
+          `${name} must not run the local full browser command directly`);
       }
     }
   }
