@@ -4,9 +4,9 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { parse } from '@babel/parser';
 import type { BaselineEntry as Entry } from './wait-baseline.ts';
-import type { AwaitExpression, BinaryExpression, BlockStatement, CallExpression, Comment, DoWhileStatement, File, ForStatement, Identifier, MemberExpression, Node, ObjectExpression, UnaryExpression, WhileStatement } from '@babel/types';
-import { sizeNumber, calleeOf, vitestBound, testingLibraryBound, contains, writes, placeAt, readerFor } from './unit-wait-values.ts';
-import { compares, iterations, earliest, ends, exits, pollDeadline } from './unit-wait-deadlines.ts';
+import type { AwaitExpression, CallExpression, Comment, DoWhileStatement, File, ForStatement, Node, WhileStatement } from '@babel/types';
+import { sizeNumber, calleeOf, vitestBound, testingLibraryBound, contains, placeAt, readerFor } from './unit-wait-values.ts';
+import { pollDeadline } from './unit-wait-deadlines.ts';
 
 /**
  * A scan of the cockpit unit tests for the three ways a test waits on a clock instead of on the

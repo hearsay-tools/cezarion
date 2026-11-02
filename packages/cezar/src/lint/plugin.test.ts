@@ -1,8 +1,9 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { oxlintProblems, staleEntries } from './run.ts';
+import { oxlintBin, oxlintProblems, staleEntries } from './run.ts';
 import { DESIGN_SAMPLES } from './design-guardian.testkit.ts';
 import { RULES } from './plugin.ts';
 import { repoRoot } from './source-rule.ts';
@@ -17,10 +18,12 @@ import { repoRoot } from './source-rule.ts';
 // loaded host, and the runner's own 300 s process timeout stays the outer limit.
 const OXLINT_TIMEOUT_MS = 120_000;
 
-const config = JSON.parse(readFileSync(join(repoRoot, '.oxlintrc.json'), 'utf8')) as { jsPlugins: string[]; rules: Record<string, string> };
+const config = JSON.parse(readFileSync(join(repoRoot, '.oxlintrc.json'), 'utf8')) as { jsPlugins: string[]; plugins: string[]; rules: Record<string, string | [string, object]> };
 const plugin = join(repoRoot, 'packages/cezar/src/lint/plugin.ts');
+// Scanner fixtures test cez exceptions independently of built-in policy.
+const cezOnly = { ...config, plugins: [], rules: Object.fromEntries(Object.entries(config.rules).filter(([rule]) => rule.startsWith('cez/'))), jsPlugins: [plugin] };
 
-function tree(files: Record<string, string>, oxlintrc: object = { ...config, jsPlugins: [plugin] }): string {
+function tree(files: Record<string, string>, oxlintrc: object = cezOnly): string {
   const root = mkdtempSync(join(tmpdir(), 'cez-lint-'));
   writeFileSync(join(root, '.oxlintrc.json'), JSON.stringify(oxlintrc));
   for (const [file, text] of Object.entries(files)) {
@@ -92,9 +95,13 @@ describe('the cez rules under oxlint', () => {
     expect(squeal.inputs['packages/cezar/src/lint/lint.test.ts']).toContain('packages/web/src/styles/index.css');
   });
 
-  it('turn every rule of the plugin on in .oxlintrc.json, and nothing else', () => {
-    expect(Object.keys(config.rules).sort()).toEqual(RULES.map((rule) => `cez/${rule.name}`).sort());
-    expect(Object.values(config.rules)).toEqual(RULES.map(() => 'error'));
+  it('turns every cez rule on, and every other entry is a known built-in', () => {
+    const cez = Object.entries(config.rules).filter(([rule]) => rule.startsWith('cez/'));
+    expect(cez.map(([rule]) => rule).sort()).toEqual(RULES.map((rule) => `cez/${rule.name}`).sort());
+    expect(cez.map(([, severity]) => severity)).toEqual(RULES.map(() => 'error'));
+    const catalog = JSON.parse(execFileSync(process.execPath, [oxlintBin(), '--rules', '-f', 'json'], { encoding: 'utf8' })) as Array<{ scope: string; value: string }>;
+    const known = new Set(catalog.map(({ scope, value }) => scope === 'eslint' ? value : `${scope}/${value}`));
+    for (const rule of Object.keys(config.rules).filter((name) => !name.startsWith('cez/'))) expect(known.has(rule)).toBe(true);
   });
 
   it.each(Object.entries(VIOLATIONS))('%s reports its seeded violation with file, line and rule', (rule, [file]) => {
@@ -134,15 +141,34 @@ describe('the cez rules under oxlint', () => {
 
 describe('lint fails closed', () => {
   it('when the plugin does not load', { timeout: OXLINT_TIMEOUT_MS }, async () => {
-    const root = seeded({ 'packages/cezar/src/a.ts': 'export const a = 1;\n' }, { ...config, jsPlugins: ['./missing-plugin.ts'] });
+    const root = seeded({ 'packages/cezar/src/a.ts': 'export const a = 1;\n' }, { ...cezOnly, jsPlugins: ['./missing-plugin.ts'] });
     expect(await oxlintProblems(root, ['packages'])).toEqual([expect.stringMatching(/^oxlint failed \(exit \d+\): /)]);
   });
 
   it('when the config leaves a cez rule off', { timeout: OXLINT_TIMEOUT_MS }, async () => {
-    const rules = { ...config.rules, 'cez/run-fact-reader': 'off' };
-    const root = seeded({ 'packages/cezar/src/a.ts': 'export const a = 1;\n' }, { ...config, jsPlugins: [plugin], rules });
-    expect(await oxlintProblems(root, ['packages'])).toEqual([`oxlint ran ${RULES.length - 1} rules, but the cez plugin defines ${RULES.length}: enable exactly the cez rules in .oxlintrc.json`]);
+    const rules = { ...cezOnly.rules, 'cez/run-fact-reader': 'off' };
+    const root = seeded({ 'packages/cezar/src/a.ts': 'export const a = 1;\n' }, { ...cezOnly, rules });
+    expect(await oxlintProblems(root, ['packages'])).toEqual([`oxlint ran ${RULES.length - 1} rules, but .oxlintrc.json turns on ${RULES.length} (${RULES.length} cez + 0 built-in)`]);
   });
+
+  it('runs an explicitly listed built-in rule', { timeout: OXLINT_TIMEOUT_MS }, async () => {
+    const root = seeded({ 'packages/cezar/src/a.ts': 'debugger;\n' }, { ...cezOnly, rules: { ...cezOnly.rules, 'no-debugger': 'error' } });
+    expect(await oxlintProblems(root, ['packages'])).toEqual([expect.stringContaining('eslint(no-debugger)')]);
+  });
+
+  it('when a built-in plugin is missing', { timeout: OXLINT_TIMEOUT_MS }, async () => {
+    const root = seeded({ 'packages/cezar/src/a.ts': 'export const a = 1;\n' }, { ...cezOnly, rules: { ...cezOnly.rules, 'unicorn/no-new-array': 'error' } });
+    expect(await oxlintProblems(root, ['packages'])).toEqual([
+      '.oxlintrc.json: built-in rule unicorn/no-new-array requires plugin unicorn in plugins',
+      `oxlint ran ${RULES.length} rules, but .oxlintrc.json turns on ${RULES.length + 1} (${RULES.length} cez + 1 built-in)`,
+    ]);
+  });
+
+  it('when a category can add implicit rules', { timeout: OXLINT_TIMEOUT_MS }, async () => {
+    const root = seeded({ 'packages/cezar/src/a.ts': 'export const a = 1;\n' }, { ...cezOnly, categories: { correctness: 'error' } });
+    expect(await oxlintProblems(root, ['packages'])).toContain('.oxlintrc.json: category correctness must be off; list built-in rules explicitly');
+  });
+
 });
 
 describe('stale entries', () => {

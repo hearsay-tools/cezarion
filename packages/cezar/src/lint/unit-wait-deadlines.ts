@@ -1,6 +1,6 @@
-import type { AwaitExpression, BinaryExpression, BlockStatement, CallExpression, Comment, DoWhileStatement, File, ForStatement, Identifier, MemberExpression, Node, ObjectExpression, UnaryExpression, WhileStatement } from '@babel/types';
+import type { BinaryExpression, BlockStatement, ForStatement, Identifier, Node } from '@babel/types';
 import { walk, isFunction, namesWritten, type Where, type Sleep } from './unit-wait-discipline.ts';
-import { numberOf, sizeNumber, keyName, sizedOutside, clockCall, contains, type Use, type Probe, definition, writes, valuesOf, isNumber, smallest, nameReader, valueOf } from './unit-wait-values.ts';
+import { numberOf, sizeNumber, keyName, sizedOutside, clockCall, contains, type Use, type Probe, definition, writes, valuesOf, isNumber, nameReader, valueOf } from './unit-wait-values.ts';
 
 /** A bound on how long a loop runs, in milliseconds: `unreadable` when one exists the scan cannot evaluate, `undefined` when there is none. */
 export type Bound = number | 'unreadable' | undefined
