@@ -86,6 +86,7 @@ const GithubRoute = lazy(() =>
 
 /** Lazy because the builder carries dnd-kit (R6 Step 1.6) — drag machinery only this surface
  *  uses, so only this surface pays for it. */
+const ReportsRoute = lazy(() => import('./routes/reports').then(m => ({ default: m.ReportsRoute })))
 const WorkflowsRoute = lazy(() =>
   import('./routes/workflows/workflows').then((m) => ({ default: m.WorkflowsRoute })),
 )
@@ -324,6 +325,7 @@ const PAGE_TITLE_ROUTES = [
   { pattern: '/automations/*', pageLabel: 'Automations' },
   { pattern: '/skills', pageLabel: 'Skills' },
   { pattern: '/inbox', pageLabel: 'Inbox' },
+  { pattern: '/reports', pageLabel: 'Reports' },
   { pattern: '/workflows/*', pageLabel: 'Workflows' },
   { pattern: '/settings/*', pageLabel: 'Settings' },
 ] as const
@@ -548,6 +550,10 @@ function projectScopeRoute(capabilities: HealthResponse['capabilities'] | undefi
       <Route path="inbox" element={<InboxRoute />} />
       {/* The workflow builder (R6 Step 1.6): /workflows opens the canvas on the repo's first
           saved chain, /workflows/:name deep-links a specific one. */}
+      <Route
+        path="reports"
+        element={<Suspense fallback={<p role="status">Loading reports…</p>}><ReportsRoute /></Suspense>}
+      />
       <Route
         path="workflows"
         element={

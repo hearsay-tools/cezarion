@@ -1,0 +1,11 @@
+.reports-row { position: relative; }
+.reports-open { display: flex; align-items: center; min-block-size: 44px; }
+.reports-open::after { content: ''; position: absolute; inset: 0; }
+.reports-task { position: relative; z-index: 1; display: flex; align-items: center; min-block-size: 44px; }
+.reports-open:focus-visible { outline: 2px solid transparent; }
+.reports-row:has(.reports-open:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
+.reports-task:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.reports-row:active { background: var(--sidebar-row-selected); }
+@media (hover: hover) and (pointer: fine) {
+  .reports-row:hover { background: var(--sidebar-row-hover); }
+}
