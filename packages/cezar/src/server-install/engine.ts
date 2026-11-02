@@ -7,6 +7,7 @@ import {
   CANCEL,
   PreflightError,
   type InstallContext,
+  type InstallStep,
   type PlatformStrategy,
   type Runner,
   type ServerState,
@@ -163,6 +164,77 @@ function setupInstallRecord(state: ServerState, strategy: PlatformStrategy, opts
   return freshInstall;
 }
 
+async function runInstallStep(step: InstallStep, ctx: InstallContext, opts: RunOptions): Promise<RunStatus | undefined> {
+  const { state } = ctx;
+  // `--reinstall` forces every step; `--reconfigure` forces the named ones.
+  const forced = opts.reinstall === true || opts.reconfigure.has(step.id);
+  if (!forced && isResolved(state.steps[step.id])) {
+    ctx.ui.info(`= ${step.title} (already done)`);
+    return;
+  }
+  // Already satisfied on the box (fresh install, nothing recorded yet)?
+  if (!forced && (await step.check(ctx))) {
+    state.steps[step.id] = { status: 'done', created: state.steps[step.id]?.created ?? null };
+    await ctx.save();
+    ctx.ui.info(`= ${step.title} (already present)`);
+    return;
+  }
+
+  if (step.optional) {
+    // `--yes` = accept safe defaults, and the safe default for an optional
+    // step (SSL against a real domain, autostart) is to SKIP it — never run
+    // it non-interactively against placeholder input.
+    if (ctx.assumeYes) {
+      recordOutcome(state, step.id, 'skipped');
+      await ctx.save();
+      ctx.ui.info(`— ${step.title} (skipped: --yes)`);
+      return;
+    }
+    const proceed = await ctx.ui.confirm({ message: `Set up ${step.title}?`, initialValue: true });
+    if (proceed === CANCEL) {
+      recordOutcome(state, step.id, 'pending');
+      await ctx.save();
+      ctx.ui.warn(`Cancelled at "${step.title}". Progress saved — re-run to resume.`);
+      return 'cancelled';
+    }
+    if (proceed !== true) {
+      recordOutcome(state, step.id, 'skipped');
+      await ctx.save();
+      ctx.ui.info(`— ${step.title} (skipped)`);
+      return;
+    }
+  }
+
+  try {
+    const created = await step.run(ctx);
+    state.steps[step.id] = { status: 'done', created };
+    state.updatedAt = opts.now;
+    await ctx.save();
+  } catch (err) {
+    if (err instanceof StepSkipped) {
+      recordOutcome(state, step.id, 'skipped');
+      await ctx.save();
+      ctx.ui.info(`— ${step.title} (skipped: ${err.message})`);
+      return;
+    }
+    if (err instanceof StepCancelled) {
+      recordOutcome(state, step.id, 'pending');
+      await ctx.save();
+      ctx.ui.warn(`Cancelled at "${step.title}". Progress saved — re-run to resume.`);
+      return 'cancelled';
+    }
+    if (err instanceof StepAborted) {
+      recordOutcome(state, step.id, 'failed');
+      await ctx.save();
+      ctx.ui.error(`Stopped at "${step.title}": ${err.message}`);
+      return 'failed';
+    }
+    recordOutcome(state, step.id, 'failed');
+    await ctx.save();
+    throw err;
+  }
+}
+
 export async function runInstall(strategy: PlatformStrategy, opts: RunOptions): Promise<RunResult> {
   const release = acquireLock(opts.instance);
   try {
@@ -195,73 +267,8 @@ export async function runInstall(strategy: PlatformStrategy, opts: RunOptions): 
     }
 
     for (const step of steps) {
-      // `--reinstall` forces every step; `--reconfigure` forces the named ones.
-      const forced = opts.reinstall === true || opts.reconfigure.has(step.id);
-      if (!forced && isResolved(state.steps[step.id])) {
-        ctx.ui.info(`= ${step.title} (already done)`);
-        continue;
-      }
-      // Already satisfied on the box (fresh install, nothing recorded yet)?
-      if (!forced && (await step.check(ctx))) {
-        state.steps[step.id] = { status: 'done', created: state.steps[step.id]?.created ?? null };
-        await ctx.save();
-        ctx.ui.info(`= ${step.title} (already present)`);
-        continue;
-      }
-
-      if (step.optional) {
-        // `--yes` = accept safe defaults, and the safe default for an optional
-        // step (SSL against a real domain, autostart) is to SKIP it — never run
-        // it non-interactively against placeholder input.
-        if (ctx.assumeYes) {
-          recordOutcome(state, step.id, 'skipped');
-          await ctx.save();
-          ctx.ui.info(`— ${step.title} (skipped: --yes)`);
-          continue;
-        }
-        const proceed = await ctx.ui.confirm({ message: `Set up ${step.title}?`, initialValue: true });
-        if (proceed === CANCEL) {
-          recordOutcome(state, step.id, 'pending');
-          await ctx.save();
-          ctx.ui.warn(`Cancelled at "${step.title}". Progress saved — re-run to resume.`);
-          return { status: 'cancelled', state };
-        }
-        if (proceed !== true) {
-          recordOutcome(state, step.id, 'skipped');
-          await ctx.save();
-          ctx.ui.info(`— ${step.title} (skipped)`);
-          continue;
-        }
-      }
-
-      try {
-        const created = await step.run(ctx);
-        state.steps[step.id] = { status: 'done', created };
-        state.updatedAt = opts.now;
-        await ctx.save();
-      } catch (err) {
-        if (err instanceof StepSkipped) {
-          recordOutcome(state, step.id, 'skipped');
-          await ctx.save();
-          ctx.ui.info(`— ${step.title} (skipped: ${err.message})`);
-          continue;
-        }
-        if (err instanceof StepCancelled) {
-          recordOutcome(state, step.id, 'pending');
-          await ctx.save();
-          ctx.ui.warn(`Cancelled at "${step.title}". Progress saved — re-run to resume.`);
-          return { status: 'cancelled', state };
-        }
-        if (err instanceof StepAborted) {
-          recordOutcome(state, step.id, 'failed');
-          await ctx.save();
-          ctx.ui.error(`Stopped at "${step.title}": ${err.message}`);
-          return { status: 'failed', state };
-        }
-        recordOutcome(state, step.id, 'failed');
-        await ctx.save();
-        throw err;
-      }
+      const status = await runInstallStep(step, ctx, opts);
+      if (status) return { status, state };
     }
 
     const requiredAllDone = steps
