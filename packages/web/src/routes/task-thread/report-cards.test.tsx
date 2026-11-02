@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { TaskFileContext } from './file-links'
 import { AssistantMessage, UserBubble } from './thread-items'
-import { ReportCards, reportReferences } from './report-cards'
+import { ReportCards, ReportOpenContext, reportReferences } from './report-cards'
 
 const { metadata } = vi.hoisted(() => ({ metadata: vi.fn() }))
 vi.mock('@/api/queries', () => ({ useArtifactMetadata: metadata }))
@@ -56,6 +56,17 @@ describe('report cards', () => {
     expect(card.previousElementSibling?.textContent).toContain('The answer remains.')
     expect(card.closest('[data-slot="assistant-message"]')).toBeTruthy()
     expect(container.querySelector('[data-slot="user-bubble"] [data-slot="report-card"]')).toBeNull()
+  })
+
+  it('closes the containing sheet before navigating to the reader', () => {
+    metadata.mockReturnValue({ isPending: false, data: { artifact: { name: 'findings.html', title: 'Findings' } } })
+    const close = vi.fn(() => expect(screen.getByRole('status').textContent).not.toContain('?report='))
+    render(<MemoryRouter initialEntries={['/p/project-1/tasks/run-1']}><TaskFileContext.Provider value={context}>
+      <ReportOpenContext.Provider value={close}><ReportCards text={text} messageKey="message-1" /></ReportOpenContext.Provider><Location />
+    </TaskFileContext.Provider></MemoryRouter>)
+    fireEvent.click(screen.getByRole('link', { name: 'Read report' }))
+    expect(close).toHaveBeenCalledOnce()
+    expect(screen.getByRole('status').textContent).toContain(`?report=${artifactId}`)
   })
 
   it('copies the message as plain HTML links without card controls', async () => {

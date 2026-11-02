@@ -64,6 +64,7 @@ function AgentRow({ agent, onSelect }: { agent: SubagentSummary; onSelect?: ((id
       {onSelect ? (
         <button
           type="button"
+          data-agent-id={agent.id}
           onClick={() => onSelect(agent.id)}
           aria-haspopup="dialog"
           className="flex min-h-5 w-full min-w-0 items-center gap-2.5 rounded-sm text-left hover:bg-muted/50"

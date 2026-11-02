@@ -1,6 +1,7 @@
+import { LIVE_PROTOCOL } from '@open-mercato/cezar-api-client/contract/live-coordination'
 import { execFileSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
@@ -17,6 +18,7 @@ import { settleVisual, waitForSettledSample } from './visual-ready'
 const runId = randomUUID()
 const otherRunId = randomUUID()
 const virtualRunId = randomUUID()
+const agentRunId = randomUUID()
 const projectId = 'report-cards'
 const evidence = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_issue-2401')
 const CARD = '[data-slot="report-card"]'
@@ -51,7 +53,7 @@ beforeAll(async () => {
     cwd: project, env: { ...env, CEZ_TASK_ID: otherRunId, CEZ_ARTIFACTS_DIR: join(project, '.ai/cezar/runs', `${otherRunId}-artifacts`) }, encoding: 'utf8',
   }))
   rmSync(source)
-  const records = [[runId, 'Report card source'], [otherRunId, 'Other conversation'], [virtualRunId, 'Long report conversation']].map(([id, title]) => makeRunRecord({
+  const records = [[runId, 'Report card source'], [otherRunId, 'Other conversation'], [virtualRunId, 'Long report conversation'], [agentRunId, 'Agent report conversation']].map(([id, title]) => makeRunRecord({
     id: id!, title: title!, task: 'Review the published results.', status: RUN_STATUS.done, createdAt: '2026-11-01T08:00:00Z',
   }))
   writeFileSync(join(project, '.ai/cezar/runs.json'), JSON.stringify(records))
@@ -59,6 +61,13 @@ beforeAll(async () => {
   const events = [text, `A second message names the same report: ${publication.markdown}`].map((message, n) => ({
     seq: n + 1, ts: '2026-11-01T08:01:00Z', type: 'item.completed', item: { kind: 'message', id: `report-message-${n}`, role: 'assistant', text: message },
   }))
+  // Keep the recorded native agent attribution and replace only its message text.
+  const agentEvents = readFileSync(join(import.meta.dirname, 'fixtures/subagents-run.ndjson'), 'utf8').trim().split('\n').map(line => {
+    const event = JSON.parse(line)
+    if (event.item?.kind === 'message') event.item.text += ` ${publication.markdown}`
+    return JSON.stringify(event)
+  }).join('\n')
+  seedTranscript(join(project, '.ai/cezar/runs', `${agentRunId}.ndjson`), agentEvents + '\n')
   seedTranscript(join(project, '.ai/cezar/runs', `${runId}.ndjson`), events.map(event => JSON.stringify(event)).join('\n') + '\n')
   const longMessages = [
     ...Array.from({ length: 20 }, (_, n) => `Earlier analysis ${n}: ${'The investigation continues. '.repeat(8)}`),
@@ -252,3 +261,55 @@ it.each(['light', 'dark'])('fits a full-screen phone reader with accessible card
   expectReturned()
   browser.setViewport(1440, 900)
 })
+
+it.each([360, 1440])('opens and closes a report from the agent sheet at %ipx', width => {
+  browser.setViewport(width, 640)
+  // Cold history omits agent message children (hearsay-tools/cezarion#2463).
+  // Capture the real shared-worker subscription and deliver a native live message,
+  // as thread-scroll.e2e.ts does. Keep the normal history requests and transport.
+  browser.goto(base + `/p/${projectId}/`)
+  browser.waitForFunction(`document.querySelector('[data-route="tasks"]') !== null`)
+  browser.evaluate(`(() => {
+    const post = MessagePort.prototype.postMessage;
+    MessagePort.prototype.postMessage = function(message, ...rest) {
+      if (message?.type === 'sync' && message.version === ${LIVE_PROTOCOL}) {
+        const entry = message.entries.find(entry => entry.demand.kind === 'run' && entry.demand.runId === '${agentRunId}');
+        if (entry) window.__reportLive = { port: this, epoch: message.epoch, entry };
+      }
+      return post.call(this, message, ...rest);
+    };
+    history.pushState(null, '', '/p/${projectId}/tasks/${agentRunId}');
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  })()`)
+  browser.waitForFunction(`window.__reportLive !== undefined && document.querySelector('[data-slot="run-activity-dock"]') !== null`)
+  browser.evaluate(`(() => {
+    const current = window.__reportLive;
+    current.port.dispatchEvent(new MessageEvent('message', { data: {
+      version: ${LIVE_PROTOCOL}, type: 'frame', epoch: current.epoch, id: current.entry.id,
+      frame: { type: 'event', projectId: '${projectId}', runId: '${agentRunId}', name: 'ui-event', event: {
+        type: 'item.completed', seq: 1000, ts: '2026-11-01T08:02:00Z', stepId: 'task',
+        item: { kind: 'message', id: 'live-agent-report', role: 'assistant', parentItemId: 'toolu_task_a_1', text: ${JSON.stringify(`Live agent report: ${publication.markdown}`)} }
+      } }
+    } }));
+  })()`)
+  const activity = '[data-slot="run-activity-dock"]'
+  browser.waitForFunction(`document.querySelector('${activity} > button') !== null`)
+  browser.evaluate(`document.querySelector('${activity} > button').scrollIntoView({ block: 'center' })`)
+  settleVisual(browser, activity, { idle: true })
+  browser.click(`${activity} > button`)
+  const dock = '[data-slot="run-activity-subagents"]'
+  browser.waitForFunction(`document.querySelector('${dock} > button') !== null`)
+  browser.evaluate(`document.querySelector('${dock} > button').scrollIntoView({ block: 'center' })`)
+  settleVisual(browser, dock, { idle: true })
+  browser.click(`${dock} > button`)
+  browser.click('[data-slot="agent-item"] button')
+  const sheetRead = '[data-slot="subagent-sheet"] [data-slot="report-card"] a'
+  browser.waitForFunction(`document.querySelector('${sheetRead}') !== null`)
+  settleVisual(browser, '[data-slot="subagent-sheet"]', { idle: true })
+  browser.click(sheetRead)
+  browser.waitForFunction(`document.querySelector('[data-slot="subagent-sheet"]') === null && document.querySelector('${FRAME}') !== null`)
+  settleVisual(browser, READER, { idle: true })
+  expect(browser.evaluate(`(() => { const button = document.querySelector('${BACK}'); const r = button.getBoundingClientRect(); return button.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); })()`)).toBe(true)
+  browser.click(BACK)
+  browser.waitForFunction(`document.querySelector('${FRAME}') === null && !new URLSearchParams(location.search).has('report') && document.activeElement === document.querySelector('[data-agent-id="toolu_task_a_1"]')`)
+}, 120_000)

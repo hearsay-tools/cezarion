@@ -1,6 +1,9 @@
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
-import type { ReactNode } from 'react'
+import { useContext, useEffect, useRef, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
+
+import { ReportCardSourcesContext } from './report-selection'
+import { ReportOpenContext } from './report-cards'
 
 import type { SubagentSummary } from './subagent-dock'
 import type { ThreadAsk, ThreadPermission, ThreadEntry } from './thread-state'
@@ -38,17 +41,36 @@ export function SubagentSheet({
   taskTitles?: TaskTitleMap | undefined
   recipientBackends?: RecipientBackendMap | undefined
 }) {
+  const registry = useContext(ReportCardSourcesContext)
+  const restoreCleanup = useRef<(() => void) | undefined>(undefined)
+  const openingReport = useRef(false)
+  useEffect(() => {
+    return () => { restoreCleanup.current?.() }
+  }, [registry, runId])
+  const openReport = (messageKey: string) => {
+    const trigger = [...document.querySelectorAll<HTMLButtonElement>('[data-agent-id]')].find(button => button.dataset.agentId === agent?.id)
+    restoreCleanup.current?.()
+    restoreCleanup.current = registry?.registerOpener(messageKey, () => {
+      trigger?.scrollIntoView({ block: 'nearest' })
+      trigger?.focus({ preventScroll: true })
+    })
+    openingReport.current = true
+    onClose()
+  }
   return (
     <Sheet open={agent !== undefined} onOpenChange={(open) => { if (!open) onClose() }}>
       <SheetContent
         data-slot="subagent-sheet"
         side="right"
+        onCloseAutoFocus={event => {
+          if (openingReport.current) { event.preventDefault(); openingReport.current = false }
+        }}
         // Wider than the default `sm:max-w-sm`: this panel carries tool cards and diffs,
         // not a settings form.
         className="flex min-h-0 w-full gap-0 p-0 sm:max-w-xl"
       >
         {agent !== undefined ? (
-          <SheetBody runId={runId} renderAsk={renderAsk} renderPermission={renderPermission} agent={agent} entries={entries} taskTitles={taskTitles} recipientBackends={recipientBackends} />
+          <ReportOpenContext.Provider value={openReport}><SheetBody runId={runId} renderAsk={renderAsk} renderPermission={renderPermission} agent={agent} entries={entries} taskTitles={taskTitles} recipientBackends={recipientBackends} /></ReportOpenContext.Provider>
         ) : null}
       </SheetContent>
     </Sheet>

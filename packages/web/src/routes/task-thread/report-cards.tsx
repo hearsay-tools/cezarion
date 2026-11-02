@@ -9,6 +9,9 @@ import { TaskFileContext, taskFileHref, type TaskFileContextValue } from './file
 import { markdownLinks } from './markdown-links'
 import { ReportCardSourcesContext } from './report-selection'
 
+/** A modal host closes before the reader opens. */
+export const ReportOpenContext = createContext<((messageKey: string) => void) | undefined>(undefined)
+
 /** The stable row identity belongs to the transcript, including nested entry scopes. */
 export const ReportMessageKeyContext = createContext<string | undefined>(undefined)
 
@@ -55,6 +58,7 @@ export function ReportCards({ text, messageKey }: { text: string; messageKey?: s
 
 function ReportCard({ reference, messageKey }: { reference: ReportReference; messageKey: string }) {
   const { artifactId, runId, label, href } = reference
+  const onOpen = useContext(ReportOpenContext)
   const sources = useContext(ReportCardSourcesContext)
   useLayoutEffect(() => sources?.register(artifactId, runId), [sources, artifactId, runId])
   const metadata = useArtifactMetadata(runId, artifactId)
@@ -86,6 +90,7 @@ function ReportCard({ reference, messageKey }: { reference: ReportReference; mes
       onClick={event => {
         if (event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
         event.preventDefault()
+        onOpen?.(messageKey)
         const reportScrollTop = state.reportScrollTop ?? document.querySelector<HTMLElement>('[data-slot="main"]')?.scrollTop
         void navigate(destination, { state: { ...state, reportScrollTop } })
       }}

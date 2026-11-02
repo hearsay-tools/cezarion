@@ -1,11 +1,17 @@
-import { cleanup, fireEvent, render } from '@testing-library/react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { UiToolItem } from '@open-mercato/cezar-api-client'
 
+import { MemoryRouter } from 'react-router'
 import { SubagentSheet } from './subagent-sheet'
 import type { SubagentSummary } from './subagent-dock'
 import type { ThreadEntry } from './thread-state'
+
+vi.mock('@/api/queries', async importOriginal => ({
+  ...await importOriginal<typeof import('@/api/queries')>(),
+  useArtifactMetadata: () => ({ isPending: false, data: { artifact: { name: 'findings.html', title: 'Findings' } } }),
+}))
 
 afterEach(cleanup)
 
@@ -49,6 +55,15 @@ describe('SubagentSheet — open/close', () => {
     expect(sheet()).not.toBeNull()
     expect(sheet()!.getAttribute('role')).toBe('dialog')
     expect(sheet()!.textContent).toContain('Audit the auth flow')
+  })
+
+  it('closes the modal when its report card opens the reader', () => {
+    const close = vi.fn()
+    render(<MemoryRouter initialEntries={['/tasks/r1']}><SubagentSheet runId="r1" agent={agent()} entries={[
+      textChild('report', '[findings](/tasks/r1/files?artifact=11111111-1111-4111-8111-111111111111)'),
+    ]} onClose={close} /></MemoryRouter>)
+    fireEvent.click(screen.getByRole('link', { name: 'Read report' }))
+    expect(close).toHaveBeenCalledOnce()
   })
 
   it('asks to close on Escape', () => {
