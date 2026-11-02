@@ -114,6 +114,34 @@ function originOf(url: string | undefined): string {
   }
 }
 
+/** Builds the CDP parameters without changing the input defaults. */
+export function mouseEventParams(msg: Extract<PreviewClientMessage, { t: 'mouse' }>) {
+    return {
+    type: msg.type,
+    x: msg.x,
+    y: msg.y,
+    button: msg.button ?? 'none',
+    buttons: msg.buttons ?? 0,
+    clickCount: msg.clickCount ?? 0,
+    deltaX: msg.deltaX ?? 0,
+    deltaY: msg.deltaY ?? 0,
+    modifiers: msg.modifiers ?? 0,
+  };
+}
+
+/** Builds the CDP parameters without changing the input defaults. */
+export function keyEventParams(msg: Extract<PreviewClientMessage, { t: 'key' }>) {
+    return {
+    type: msg.type,
+    key: msg.key ?? '',
+    code: msg.code ?? '',
+    ...(msg.type === 'keyUp' ? {} : { text: msg.text ?? '' }),
+    modifiers: msg.modifiers ?? 0,
+    windowsVirtualKeyCode: msg.vk ?? 0,
+    ...(msg.commands ? { commands: msg.commands } : {}),
+  };
+}
+
 export class PreviewSession {
   /** The page's current top-level URL, as Chromium last reported it. */
   url?: string;
@@ -283,29 +311,11 @@ export class PreviewSession {
       }
       case 'mouse':
         if (ACTIVE_MOUSE.has(msg.type)) this.expectFrame();
-        await this.cdp.send('Input.dispatchMouseEvent', {
-          type: msg.type,
-          x: msg.x,
-          y: msg.y,
-          button: msg.button ?? 'none',
-          buttons: msg.buttons ?? 0,
-          clickCount: msg.clickCount ?? 0,
-          deltaX: msg.deltaX ?? 0,
-          deltaY: msg.deltaY ?? 0,
-          modifiers: msg.modifiers ?? 0,
-        });
+        await this.cdp.send('Input.dispatchMouseEvent', mouseEventParams(msg));
         return;
       case 'key':
         if (msg.type !== 'keyUp') this.expectFrame();
-        await this.cdp.send('Input.dispatchKeyEvent', {
-          type: msg.type,
-          key: msg.key ?? '',
-          code: msg.code ?? '',
-          ...(msg.type === 'keyUp' ? {} : { text: msg.text ?? '' }),
-          modifiers: msg.modifiers ?? 0,
-          windowsVirtualKeyCode: msg.vk ?? 0,
-          ...(msg.commands ? { commands: msg.commands } : {}),
-        });
+        await this.cdp.send('Input.dispatchKeyEvent', keyEventParams(msg));
         return;
       case 'insertText':
         this.expectFrame();
