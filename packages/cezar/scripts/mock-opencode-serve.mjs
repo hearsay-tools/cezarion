@@ -864,10 +864,7 @@ async function replyWithGatedHold(body) {
   send({ type: 'message.part.updated', properties: { part: {
     id: 'prt_mock_hold_gated', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: gated,
   } } });
-  send({ type: 'message.updated', properties: { info: info({
-    cost: 0.0001, tokens: { input: 20, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
-  }) } });
-  setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
+  sendUsageThenIdle();
   return;
 }
 
@@ -881,10 +878,7 @@ async function replyWithHold(body) {
     send({ type: 'message.part.updated', properties: { part: {
       id: 'prt_mock_hold', messageID: MESSAGE_ID, sessionID: SESSION_ID, type: 'text', text: held,
     } } });
-    send({ type: 'message.updated', properties: { info: info({
-      cost: 0.0001, tokens: { input: 20, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
-    }) } });
-    setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 30);
+    sendUsageThenIdle();
   }, 250);
   return;
 }
