@@ -69,6 +69,15 @@ describe('test runs never read the host home (hearsay-tools/cezarion#1361)', () 
     expect(cache.startsWith(process.env.TMPDIR! + sep)).toBe(false);
   });
 
+  // hearsay-tools/cezarion#1916, hearsay-tools/cezarion#2453: a test that started a host runner CLI
+  // by its default name ran the real one (omp unpacked 120 MB into every sandbox home). CI has
+  // none of them, so every host now resolves them as CI does: not found. No Windows job runs these
+  // tests, and the setup keeps the Windows PATH.
+  it.skipIf(process.platform === 'win32').each(['claude', 'codex', 'opencode', 'pi', 'omp', 'agent', 'cursor-agent'])('vitest.setup.ts hides the host %s from PATH', (command) => {
+    const run = spawnSync(command, ['--version'], { encoding: 'utf8', timeout: 10_000 }); // bound: a real CLI found by mistake must not hang the file
+    expect((run.error as NodeJS.ErrnoException | undefined)?.code, run.stdout).toBe('ENOENT');
+  });
+
   it('every agent home resolves inside the sandbox', () => {
     const home = process.env.HOME!;
     for (const [agent, path] of Object.entries(agentHomePaths())) expect(path.startsWith(home + sep), `${agent}: ${path}`).toBe(true);
