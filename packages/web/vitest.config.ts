@@ -10,6 +10,10 @@ export default mergeConfig(
     test: {
       name: 'web',
       environment: 'jsdom',
+      // Node 26 exposes undefined localStorage without --localstorage-file. Disable
+      // the Node globals so Vitest installs jsdom's per-window storage instead
+      // (hearsay-tools/cezarion#2454). Node 24 accepts this flag too.
+      execArgv: ['--no-experimental-webstorage'],
       setupFiles: ['./vitest.setup.ts'],
       include: ['src/**/*.test.{ts,tsx}'],
     },
