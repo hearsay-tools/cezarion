@@ -138,6 +138,31 @@ async function withdrawRemoteSettings(ctx: InstallContext, port: number, why: st
   ctx.ui.info(`Withdrew the remote settings grant for port ${port} (${why}). \`cez remote-settings enable --port ${port}\` grants it again.`);
 }
 
+function setupInstallRecord(state: ServerState, strategy: PlatformStrategy, opts: RunOptions): boolean {
+  if (state.platform && state.platform !== strategy.id) {
+    throw new PreflightError(
+      `this host already has a ${state.platform} install recorded — run \`server-uninstall\` first to switch platforms`,
+    );
+  }
+  state.platform = strategy.id;
+  // Record instance identity so the file is self-describing and later
+  // uninstall/deploy runs (and `server-instances/` listings) agree on it.
+  state.instance = opts.instance ?? state.instance ?? 'default';
+  if (opts.domain) state.domain = opts.domain;
+  // Proxy mode + bind host are recorded before `steps(ctx)` runs, because the
+  // platform selects its step list from them (external proxy ⇒ no nginx/SSL).
+  if (opts.externalProxy !== undefined) state.externalProxy = opts.externalProxy;
+  if (opts.bindHost) state.bindHost = opts.bindHost;
+  // A caller-supplied port wins (a new named instance auto-picks a free one);
+  // otherwise keep whatever the resumed record already carries.
+  if (opts.port) state.primaryPort = opts.port;
+  // Only a re-run of a completed real install keeps a grant; a dry-run preview record does not count.
+  const freshInstall = state.installed !== true;
+  state.createdAt ??= opts.now;
+  state.updatedAt = opts.now;
+  return freshInstall;
+}
+
 export async function runInstall(strategy: PlatformStrategy, opts: RunOptions): Promise<RunResult> {
   const release = acquireLock(opts.instance);
   try {
@@ -145,27 +170,7 @@ export async function runInstall(strategy: PlatformStrategy, opts: RunOptions): 
     // buildContext reconciles dry-run records first, so a preview of platform A
     // never blocks a real install of platform B (the reset clears `platform`).
     const ctx = buildContext(state, opts);
-    if (state.platform && state.platform !== strategy.id) {
-      throw new PreflightError(
-        `this host already has a ${state.platform} install recorded — run \`server-uninstall\` first to switch platforms`,
-      );
-    }
-    state.platform = strategy.id;
-    // Record instance identity so the file is self-describing and later
-    // uninstall/deploy runs (and `server-instances/` listings) agree on it.
-    state.instance = opts.instance ?? state.instance ?? 'default';
-    if (opts.domain) state.domain = opts.domain;
-    // Proxy mode + bind host are recorded before `steps(ctx)` runs, because the
-    // platform selects its step list from them (external proxy ⇒ no nginx/SSL).
-    if (opts.externalProxy !== undefined) state.externalProxy = opts.externalProxy;
-    if (opts.bindHost) state.bindHost = opts.bindHost;
-    // A caller-supplied port wins (a new named instance auto-picks a free one);
-    // otherwise keep whatever the resumed record already carries.
-    if (opts.port) state.primaryPort = opts.port;
-    // Only a re-run of a completed real install keeps a grant; a dry-run preview record does not count.
-    const freshInstall = state.installed !== true;
-    state.createdAt ??= opts.now;
-    state.updatedAt = opts.now;
+    const freshInstall = setupInstallRecord(state, strategy, opts);
 
     await strategy.preflight(ctx); // throws PreflightError to refuse politely
     // A grant left on this port belongs to a cockpit that is gone; a completed install keeps its own.
