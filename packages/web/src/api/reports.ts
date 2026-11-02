@@ -17,6 +17,7 @@ export function useReports(q: string) {
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam, signal }) => getReports(scope, q, pageParam, signal),
     getNextPageParam: page => page.nextCursor ?? undefined,
+    staleTime: 0,
     refetchOnWindowFocus: true,
   })
 }

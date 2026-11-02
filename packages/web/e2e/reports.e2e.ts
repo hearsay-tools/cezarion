@@ -107,3 +107,18 @@ it('shows no matches, clears search, and isolates an empty project', () => {
   expect(browser.waitForValue(`document.querySelectorAll('${ROW}').length`)).toBe(0)
   expect(browser.waitForValue(`document.querySelector('[data-route="reports"]').textContent`)).toContain('cez artifact publish')
 })
+
+it('shows a deleted snapshot as missing and drops reports after snapshot or task-history deletion', async () => {
+  browser.goto(baseUrl + path)
+  browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 25`)
+  rmSync(join(root, 'project/.ai/cezar/runs', `${runIds[0]}-artifacts`, ids[0]!, 'content'))
+  browser.click(`[data-report-id="${ids[0]}"]`)
+  browser.waitForFunction(`document.body.textContent.includes('Report missing or deleted')`)
+  browser.click('[data-slot="report-bar"] button[aria-label="Back"]')
+  browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 24`)
+  const response = await fetch(`${baseUrl}/api/v1/p/shelf/runs/${runIds[1]}`, { method: 'DELETE' })
+  expect(response.status).toBe(200)
+  // The mounted shelf receives run-deleted and refetches through the shared debounce.
+  browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 23`)
+  expect(browser.waitForValue(`document.querySelector('[data-report-id="${ids[1]}"]') === null`)).toBe(true)
+})
