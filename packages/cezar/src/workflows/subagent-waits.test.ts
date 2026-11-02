@@ -193,6 +193,36 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     expect(internals().active.get(id)?.session?.open).toBe(true);
   });
 
+  it('a first turn that asks with children running opens the wait beside the question and keeps the session and slot', async () => {
+    const { run, release } = await heldParent(undefined, 'mock:ask which one?');
+    startChild(run.id, 'toolu_bg_01');
+    release();
+    await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting && internals().line.isParked(run.id));
+    // The question ranks first for the user; the wait carries the children's deadline and restart.
+    expect(deriveAttention(store.getRun(run.id)!).rung).toBe('needs-you');
+    expect(subagentWait(run.id)).toMatchObject({ children: [{ id: 'toolu_bg_01', status: SUBAGENT_STATUS.running }] });
+    expect(internals().line.inPool(run.id)).toBe(true);
+    expect(internals().active.get(run.id)?.idleTimer).toBeUndefined();
+  });
+
+  it('a child end beside the question wakes the parent once; its park keeps the question and gives the slot back', async () => {
+    const { run, release } = await heldParent(undefined, 'mock:ask which one?');
+    startChild(run.id, 'toolu_bg_01');
+    release();
+    await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting && internals().line.isParked(run.id));
+    const wait = subagentWait(run.id)!;
+    const turns = turnEnds(run.id);
+    endChild(run.id, 'toolu_bg_01');
+    await until(() => settledOf(run.id, wait.id)?.phase === WAIT_PHASE.delivered && turnEnds(run.id) > turns && internals().line.isParked(run.id));
+    const parked = store.getRun(run.id)!;
+    expect(deriveAttention(parked).rung).toBe('needs-you');
+    expect(parked.waits?.map(entry => [entry.kind, entry.phase])).toEqual([[WAIT_KIND.human, WAIT_PHASE.open]]);
+    expect(inputsNaming(run.id, `Subagent wait ${wait.id}`)).toEqual([expect.objectContaining({ deliveredAt: expect.any(String) })]);
+    expect(internals().line.inPool(run.id)).toBe(false);
+    expect(internals().active.get(run.id)?.idleTimer).toBeDefined();
+    expect(wakes(run.id)).toBe(0);
+  });
+
   it('past the child bound the saved wait keeps the latest ends, so a new child\'s end is never dropped', async () => {
     const ids = Array.from({ length: 33 }, (_, index) => `toolu_bg_${String(index).padStart(2, '0')}`);
     const { id, wait } = await parkedOnSubagents(ids);
@@ -283,6 +313,19 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     await restart();
     await until(() => settledOf(id, wait.id)?.phase === WAIT_PHASE.delivered);
     expect(backgroundEnds(id).map(([child, status]) => [child, status])).toEqual(ids.map(child => [child, 'declined']));
+  });
+
+  it('a restart ends the children of a question park and resolves its subagent wait interrupted', async () => {
+    const { run, release } = await heldParent(undefined, 'mock:ask which one?');
+    startChild(run.id, 'toolu_bg_01');
+    release();
+    await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting && internals().line.isParked(run.id));
+    const wait = subagentWait(run.id)!;
+    await restart();
+    const now = () => entryOf(run.id, wait.id) ?? settledOf(run.id, wait.id);
+    await until(() => backgroundEnds(run.id).length > 0 && now()?.phase !== WAIT_PHASE.open);
+    expect(now()).toMatchObject({ result: { reason: 'interrupted' } });
+    expect(backgroundEnds(run.id)).toEqual([['toolu_bg_01', 'declined', 'Background research toolu_bg_01', startStep(run.id, 'toolu_bg_01')]]);
   });
 
   it('a restart with no session resolves the wait interrupted and continues the run once, free', async () => {

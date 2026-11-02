@@ -107,9 +107,10 @@ export class SubagentWaits {
     const live = liveSubagents(state);
     if (wait && !live) { this.supersede(runId, [wait.id]); return; }
     if (!live || !turn.sessionOpen || turn.done) return;
-    // A question or a permission request keeps an open wait current but opens none.
+    // A question opens the wait too: the children keep running beside it, and the wait carries
+    // their deadline and their restart. The question still ranks first for the user.
     if (wait) this.refreshWait(runId, state, wait);
-    else if (!turn.asks && !state.pendingHumanAsk && !state.pendingPermissions?.size) this.openSubagentWait(runId, state);
+    else if (!state.pendingPermissions?.size) this.openSubagentWait(runId, state);
   }
 
   /** Whether native subagents still run in the run's session: then a park for the user keeps the
