@@ -86,7 +86,7 @@ export interface Baseline {
 
 export const baselineTail =
   'Keyed by file, rule and the line text so a moved line does not churn it. ' +
-  'This list only shrinks: fix a site, then run TEST_WAIT_DISCIPLINE_UPDATE=1 npm test -- packages/cezar/src/test-wait-discipline.test.ts. ' +
+  'This list only shrinks: fix a site, then run TEST_WAIT_DISCIPLINE_UPDATE=1 npm run lint. ' +
   'Rules: AGENTS.md § Validation.';
 
 export const baselines: readonly Baseline[] = [
@@ -114,7 +114,7 @@ export function readBaseline(path = baselinePath): BaselineEntry[] {
  * cover stays a failure, so the only way to land one is to wait on the product's signal or give
  * the bound a reason. A baseline that does not exist yet is written once from `actual`, which is
  * how a new rule lands its first list. Run through
- * `TEST_WAIT_DISCIPLINE_UPDATE=1 npm test -- packages/cezar/src/test-wait-discipline.test.ts`.
+ * `TEST_WAIT_DISCIPLINE_UPDATE=1 npm run lint`.
  */
 export function shrinkBaseline(actual: BaselineEntry[], baseline: Baseline = baselines[0]!): void {
   if (!existsSync(baseline.path)) {

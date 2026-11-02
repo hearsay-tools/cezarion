@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { blank } from './lint/blank.ts';
 import { scanFile, scanSource, SHORT_BOUND_MS, type Site } from './lint/test-wait-discipline.ts';
-import { type Baseline, baselines, compareToBaseline, readBaseline, scannedFiles, scanSuite, shrinkBaseline, tally } from './lint/server-wait-baseline.ts';
+import { type Baseline, baselines, compareToBaseline, readBaseline, shrinkBaseline, tally } from './lint/server-wait-baseline.ts';
 
 /**
  * The server unit tests' wait discipline, as a source scan (hearsay-tools/cezarion#1155). A bare
@@ -1265,58 +1265,4 @@ describe('the baseline', () => {
       });
     });
   });
-});
-
-describe('the server unit suite', () => {
-  // One read of each file for every whole-suite assertion below.
-  let scanned: ReturnType<typeof scanSuite> | undefined;
-  const suite = () => (scanned ??= scanSuite());
-
-  it('scans every test and testkit under packages/cezar/src, and not its own files', () => {
-    const files = scannedFiles();
-    expect(files.length).toBeGreaterThan(300);
-    expect(files).toContain('core/harness-parity.testkit.ts');
-    expect(files.some((f) => f.startsWith('test-wait-discipline.'))).toBe(false);
-    expect(files.some((f) => f.includes('__fixtures__/') || f.includes('node_modules/'))).toBe(false);
-  });
-
-  it('reads every scanned file to its end: no string, template or comment is left open', () => {
-    const where = suite().errors.map((e) => `  ${e.file}:${e.line} unterminated ${e.construct}: ${e.text}`).join('\n');
-    expect(
-      suite().errors,
-      `The scan read these as unterminated, so everything after them went unread. Fix the scan's blanking in test-wait-discipline.testkit.ts:\n${where}`,
-    ).toEqual([]);
-  });
-
-  const remedy: Record<string, string> = {
-    'poll-deadline':
-      'A poll loop needs a deadline of 10 s or more, read from the clock in the loop or its function (or attempts x interval ' +
-      'with literals). Add one, or state why the loop ends as a `// bound: <reason>` comment on its first line (AGENTS.md § Validation)',
-  };
-  for (const baseline of baselines) {
-    it(`has no ${baseline.what} outside its baseline, and the baseline names no site that is gone`, () => {
-      const sites = suite().sites.filter((s) => baseline.rules.includes(s.rule));
-      const actual = tally(sites);
-      // Update mode shrinks the baseline to what the suite has now; it never adds to it.
-      if (process.env.TEST_WAIT_DISCIPLINE_UPDATE === '1') shrinkBaseline(actual, baseline);
-      const { added, stale } = compareToBaseline(actual, readBaseline(baseline.path));
-      const where = (entries: typeof added) =>
-        entries
-          .flatMap((e) => sites.filter((s) => s.file === e.file && s.rule === e.rule && s.site === e.site).map((s) => `  ${s.file}:${s.line} [${s.rule}] ${s.site}`))
-          .join('\n');
-      const listed = (entries: typeof stale) => entries.map((e) => `  ${e.file} [${e.rule}] ×${e.count}: ${e.site}`).join('\n');
-      expect(
-        added,
-        `New ${baseline.what} found. ` +
-          (remedy[baseline.rules[0] ?? ''] ??
-            'Wait on the product\'s own signal, or state the bound\'s reason at the site as a `// bound: <reason>` comment (AGENTS.md § Validation)') +
-          `. Never add a site to ${baseline.path}:\n${where(added)}`,
-      ).toEqual([]);
-      expect(
-        stale,
-        `Baseline entries no longer found; shrink ${baseline.path} ` +
-          `(TEST_WAIT_DISCIPLINE_UPDATE=1 npm test -- packages/cezar/src/test-wait-discipline.test.ts does it):\n${listed(stale)}`,
-      ).toEqual([]);
-    });
-  }
 });

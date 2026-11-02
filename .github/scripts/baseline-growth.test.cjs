@@ -213,3 +213,28 @@ for (const [name, file] of [
     assert.equal(added.status, 0, added.stdout + added.stderr);
   });
 }
+
+// Moved M07 scanners and their fixtures keep the old guard's owner-review requirement.
+test('auto-merge protects moved unit wait scanners and fixtures while permitting added cases', (t) => {
+  const r = repository(t);
+  const files = [
+    'blank.ts', 'server-wait-syntax.ts', 'server-wait-deadlines.ts', 'server-wait-baseline.ts',
+    'test-wait-discipline.ts', 'unit-wait-values.ts', 'unit-wait-deadlines.ts',
+    'unit-wait-baseline.ts', 'unit-wait-discipline.ts', 'unit-wait-discipline.test.ts',
+    'wait-discipline-runner.ts',
+  ].map(file => `packages/cezar/src/lint/${file}`);
+  const fixture = "export const expected = 1;\n";
+  for (const file of files) r.write(file, fixture);
+  r.base = r.commit();
+  for (const file of files) {
+    r.write(file, fixture.replace('= 1', '= 0'));
+    const changed = autoMerge(r, r.commit());
+    assert.equal(changed.status, 1, changed.stdout + changed.stderr);
+    assert.match(changed.stdout, /guard test change/);
+    r.write(file, fixture);
+  }
+  r.write(files[0], fixture + 'export const another = 2;\n');
+  const added = autoMerge(r, r.commit());
+  assert.equal(added.status, 0, added.stdout + added.stderr);
+});
+

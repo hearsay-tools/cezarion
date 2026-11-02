@@ -27,7 +27,7 @@ import {
  * Each rule in `.ai/ast-grep/rules` matches a syntax tree, and its baseline records the matches
  * the repository carried when the rule landed. `npm run lint` scans the repository and fails a
  * match beyond the baseline with the rule's message, which names the owner to use instead. The baseline can only shrink, the same
- * shape `test-wait-discipline.test.ts` uses for the unit tests' waits. The rules' own cases
+ * shape `lint/server-wait-baseline.ts` uses for the unit tests' waits. The rules' own cases
  * live in `.ai/ast-grep/rule-tests`, so a rule that stops matching cannot go dead unseen.
  */
 // bound: each case below starts the ast-grep binary, a second on an idle host. This is a hang

@@ -52,7 +52,7 @@ import { iterations, isNumber, earliest, UNREAD, heldValues, declaredHere, value
  * resets, a flag set in a branch. A loop with no bound on the list is reported, unless `// bound: <reason>` accepts it. A loop
  * over a collection or a stream ends with it, and a count of passes that sleep nothing says nothing in milliseconds.
  *
- * `test-wait-discipline.test.ts` runs it against every `*.test.ts` and `*.testkit.ts` under
+ * `cez/test-wait-discipline` runs it against every `*.test.ts` and `*.testkit.ts` under
  * `packages/cezar/src` and compares the tally with two checked-in baselines that can only shrink,
  * so today's sites stay where they are and no new one lands without a reason. The poll loops have
  * a baseline of their own, so a change to one list never conflicts with a change to the other.

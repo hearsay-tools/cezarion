@@ -1041,6 +1041,7 @@
     "packages/web/src/test/search-params-discipline.test.ts": 389,
     "packages/web/src/test/session-layout.test.ts": 7,
     "packages/web/src/test/transcript-measurements.test.ts": 58,
+    "packages/cezar/src/lint/unit-wait-discipline.test.ts": 1688,
     "packages/web/src/test/unit-wait-discipline.test.ts": 1688,
     "packages/web/src/test/visual-ready.test.ts": 84,
     "packages/web/src/test/wait-baseline.test.ts": 21,

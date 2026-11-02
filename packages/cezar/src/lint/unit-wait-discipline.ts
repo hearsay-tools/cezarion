@@ -10,7 +10,7 @@ import { compares, iterations, earliest, ends, exits, pollDeadline } from './uni
 
 /**
  * A scan of the cockpit unit tests for the three ways a test waits on a clock instead of on the
- * product (hearsay-tools/cezarion#1203). The server's twin is `packages/cezar/src/test-wait-discipline.testkit.ts`;
+ * product (hearsay-tools/cezarion#1203). The server's twin is `packages/cezar/src/lint/test-wait-discipline.ts`;
  * this one reads a syntax tree, since the cockpit tests are TSX and a wait can span many lines.
  *
  * - `short-bound`: Vitest's `vi.waitFor`, `vi.waitUntil` or `expect.poll` with no bound (they give up
@@ -59,7 +59,7 @@ import { compares, iterations, earliest, ends, exits, pollDeadline } from './uni
  * That is for a wait that asserts something does NOT happen within a window, which keeps a short
  * timeout on purpose (`vitest.setup.ts` says so), and for a timer that is not a wait on the product.
  *
- * `unit-wait-discipline.test.ts` runs it over every cockpit unit test and compares the tally with a
+ * `cez/unit-wait-discipline` runs it over every cockpit unit test and compares the tally with a
  * checked-in baseline that can only shrink.
  */
 
@@ -295,7 +295,7 @@ export function scanTree(root = srcDir, dir = root): Site[] {
   })
 }
 
-/** Shrink the baseline through `UNIT_WAIT_DISCIPLINE_UPDATE=1 npm test -- unit-wait-discipline`: a site it does not
+/** Shrink the baseline through `UNIT_WAIT_DISCIPLINE_UPDATE=1 npm run lint`: a site it does not
  *  cover stays a failure. The first shrink writes the baseline from the sites the tests carry the day the ratchet lands. */
 export const {
   read: readBaseline,
@@ -307,7 +307,7 @@ export const {
   comment:
     'Bare sleeps, short wait bounds and unbounded poll loops the cockpit unit tests carried when the ratchet landed (hearsay-tools/cezarion#1203). ' +
     'Keyed by file, rule and the line text so a moved line does not churn it. ' +
-    'This list only shrinks: fix a site, then run UNIT_WAIT_DISCIPLINE_UPDATE=1 npm test -- unit-wait-discipline. ' +
+    'This list only shrinks: fix a site, then run UNIT_WAIT_DISCIPLINE_UPDATE=1 npm run lint. ' +
     'Rules: AGENTS.md § Validation.',
 })
 

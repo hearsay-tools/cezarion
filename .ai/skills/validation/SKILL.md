@@ -180,9 +180,11 @@ races its own fixture's startup (hearsay-tools/cezarion#1144,
 hearsay-tools/cezarion#1146). Any bound that remains states its reason at the
 call site, as a `// bound: <reason>` comment. Baselines that only shrink hold
 the rest: bare sleeps, waits under the floor (Vitest's 1 s default counts) and
-poll loops with no deadline, in `packages/cezar/src/test-wait-discipline.test.ts`
-(server, 10 s) and `packages/web/src/test/unit-wait-discipline.test.ts` (cockpit,
-3 s). A new site gets the product's signal or a `// bound:` reason, never a
+poll loops with no deadline, in `npm run lint`: `cez/test-wait-discipline`
+(server, 10 s) and `cez/unit-wait-discipline` (cockpit, 3 s).
+The three baselines keep their paths. Shrink them with
+`TEST_WAIT_DISCIPLINE_UPDATE=1 npm run lint` (server) or
+`UNIT_WAIT_DISCIPLINE_UPDATE=1 npm run lint` (cockpit). A new site gets the product's signal or a `// bound:` reason, never a
 baseline entry; a failing scan names the command that shrinks its baseline.
 The scan cannot see a shrunk product budget, so review checks that one.
 
