@@ -127,10 +127,13 @@ export class SubagentWaits {
     this.host.releaseHeldPark(runId, state);
   }
 
-  /** The children the wait saves: the session's own, the running ones first, within the bound. */
+  /** The children the wait saves: the session's own, the running ones first, then the latest ends,
+   *  within the bound. */
   private children(state: ActiveRun): SubagentChild[] {
     const own = [...state.backgroundChildren].filter(([, child]) => child.session === state.session).map(([id, child]) => ({ id, status: child.status }));
-    return [...own.filter(child => child.status === 'running'), ...own.filter(child => child.status !== 'running')].slice(0, SUBAGENT_WAIT_CHILD_LIMIT);
+    const running = own.filter(child => child.status === 'running').slice(0, SUBAGENT_WAIT_CHILD_LIMIT);
+    const room = SUBAGENT_WAIT_CHILD_LIMIT - running.length;
+    return [...running, ...(room > 0 ? own.filter(child => child.status !== 'running').slice(-room) : [])];
   }
 
 

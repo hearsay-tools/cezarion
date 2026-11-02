@@ -200,6 +200,18 @@ describe('the subagent wait (hearsay-tools/cezarion#2431)', () => {
     expect(internals().active.get(run.id)?.idleTimer).toBeDefined();
   });
 
+  it('past the child bound the saved wait keeps the latest ends, so a new child\'s end is never dropped', async () => {
+    const ids = Array.from({ length: 33 }, (_, index) => `toolu_bg_${String(index).padStart(2, '0')}`);
+    const { id, wait } = await parkedOnSubagents(ids);
+    for (const child of ids.slice(0, 32)) endChild(id, child, 'failed');
+    endChild(id, 'toolu_bg_32', 'failed');
+    await until(() => settledOf(id, wait.id)?.phase !== undefined && settledOf(id, wait.id)?.phase !== WAIT_PHASE.open);
+    const saved = (settledOf(id, wait.id) as SubagentWaitEntry).children.map(child => child.id);
+    expect(saved).toHaveLength(32);
+    expect(saved.at(-1)).toBe('toolu_bg_32');
+    expect(saved).not.toContain('toolu_bg_00');
+  });
+
   it('a duplicate child end changes nothing and wakes nothing', async () => {
     const { id, wait } = await parkedOnSubagents();
     const turns = turnEnds(id);
