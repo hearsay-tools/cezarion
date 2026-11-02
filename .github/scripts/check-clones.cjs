@@ -8,6 +8,11 @@ const path = require('node:path');
 const git = (cwd, args, options = {}) => execFileSync('git', args, { cwd, encoding: 'utf8', ...options });
 const eligible = (name) => /^packages\/[^/]+\/src\//.test(name) || name.startsWith('packages/cezar/scripts/');
 
+const crossPackageExceptions = [{
+  files: ['packages/cezar/src/lint/wait-baseline.ts', 'packages/web/src/test/wait-baseline.ts'],
+  reason: 'The cockpit unit wait rule moved into lint in hearsay-tools/cezarion#2421; the browser wait discipline, M08, stays in packages/web and may not import packages/cezar by relative path; remove this entry when M08 moves into lint.',
+}];
+
 /** All scan inputs are trusted paths materialized under packages/<workspace>/. */
 function packageOf(root, name) {
   const relative = path.relative(root, name).split(path.sep);
@@ -70,7 +75,9 @@ function summarize(scratch, duplicates) {
     if (!Number.isSafeInteger(tokens) || tokens <= 0 || typeof isNew !== 'boolean') throw new Error('Invalid clone accounting');
     const location = `${first}:${firstFile.start} ↔ ${second}:${secondFile.start}`;
     if (packageOf(scratch, firstFile.name) !== packageOf(scratch, secondFile.name)) {
-      forbidden.push(`Cross-package clone: ${location}`);
+      const excepted = crossPackageExceptions.some(({ files }) =>
+        files.includes(first) && files.includes(second));
+      if (!excepted) forbidden.push(`Cross-package clone: ${location}`);
     } else if (first === second) {
       if (isNew) forbidden.push(`New same-file clone: ${location}`);
     } else {

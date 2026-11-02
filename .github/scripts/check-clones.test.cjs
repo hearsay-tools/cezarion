@@ -168,3 +168,26 @@ test('same-file fingerprints and empty committed trees retain their policy', () 
     assert.match(recut.stdout, /New same-file clone/);
   } finally { fs.rmSync(repo, { recursive: true, force: true }); }
 });
+
+test('named wait-baseline exception allows only its unordered file pair', () => {
+  const server = 'packages/cezar/src/lint/wait-baseline.ts';
+  const web = 'packages/web/src/test/wait-baseline.ts';
+  const other = 'packages/contract/src/other.ts';
+  const summary = (clones) => summarize(reportRoot, clones);
+  const base = summary([]);
+  for (const [first, second] of [[server, web], [web, server]]) {
+    const clone = reportedClone(first, second, 100);
+    clone.firstFile.start = 42;
+    clone.secondFile.start = 99;
+    assert.deepEqual(compare(base, summary([clone])), []);
+    for (const tokens of [undefined, NaN, -1, 0, 1.5]) {
+      assert.throws(() => summary([reportedClone(first, second, tokens)]), /Invalid clone accounting/);
+    }
+    clone.firstFile.start = 0;
+    assert.throws(() => summary([clone]), /Invalid clone location/);
+  }
+  for (const first of [server, web]) {
+    assert.match(compare(base, summary([reportedClone(first, other, 100)]))[0], /Cross-package clone/);
+  }
+  assert.match(compare(base, summary([reportedClone('packages/demo/src/a.ts', other, 100)]))[0], /Cross-package clone/);
+});
