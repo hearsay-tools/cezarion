@@ -5,7 +5,7 @@
  *
  * THIS FILE IS THE ONLY PLACE RAW HEX MAY APPEAR. Everything else — components, pages, tests —
  * goes through the tokens below (Tailwind utilities like `bg-card`, or `var(--…)` for the
- * non-color tokens). The design-guardian test (Step 4.4) enforces that.
+ * non-color tokens). The design-guardian lint rule (Step 4.4) enforces that.
  */
 
 @import "tailwindcss";

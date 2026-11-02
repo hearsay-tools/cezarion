@@ -13,7 +13,7 @@ describe('design guardian scanner', () => {
   it.each(Object.entries(DESIGN_SAMPLES))('%s reports its original name and real line', (name, token) => {
     const findings = guardianFindings(sampleFile(name), `// ignored\nconst value = "${token}";`);
     expect(findings).toEqual([expect.objectContaining({ line: 2, message: expect.stringContaining(`${name} —`) })]);
-    expect(findings[0]?.message).toContain(token);
+    expect(findings[0]?.message).toContain(name === 'no-dark-variant' ? 'dark:' : token);
   });
 
   it('covers every original rule', () => {
