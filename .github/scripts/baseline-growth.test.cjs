@@ -200,6 +200,7 @@ for (const [name, file] of [
   ['design guardian', 'packages/cezar/src/lint/design-guardian.test.ts'],
   ['server wait discipline', 'packages/cezar/src/test-wait-discipline.test.ts'],
   ['unit wait discipline', 'packages/cezar/src/lint/unit-wait-discipline.test.ts'],
+  ['wait runner', 'packages/cezar/src/lint/wait-discipline-runner.test.ts'],
 ]) {
   test(`auto-merge protects the moved ${name} fixtures while permitting added cases`, (t) => {
     const r = repository(t);

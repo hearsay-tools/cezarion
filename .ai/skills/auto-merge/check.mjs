@@ -35,6 +35,7 @@ const NEVER = [
     'packages/cezar/src/{contract-import-boundaries,contract-subpaths,test-wait-discipline,pack-check}.test.ts',
     'packages/cezar/src/lint/card-2-contrast.test.ts',
     'packages/cezar/src/lint/design-guardian.test.ts',
+    'packages/cezar/src/lint/wait-discipline-runner.test.ts',
     'packages/cezar/src/lint/{blank,server-wait-*,test-wait-discipline,unit-wait-*,wait-baseline,wait-discipline-runner}.ts',
 
     'packages/cezar/test/e2e/inline-contract.test.ts',
