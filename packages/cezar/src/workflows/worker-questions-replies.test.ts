@@ -5,7 +5,7 @@ import { manager, store, until, waitOf, worker } from './worker-wait.testkit.ts'
 import { hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { eventsOf, steeringParent, askedPair, answered, said, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
 
-describe("worker questions route to the parent (#505)", { timeout: 45_000 }, () => {
+describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { timeout: 45_000 }, () => {
   useWorkerQuestionsFixture();
 
 it('a correlated parent reply unblocks the worker without human input', async () => {

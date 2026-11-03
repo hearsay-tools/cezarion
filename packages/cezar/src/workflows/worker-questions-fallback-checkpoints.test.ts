@@ -6,7 +6,7 @@ import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { WAIT_KIND, WAIT_VIA, WAIT_SOURCE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { conversationOf, eventsOf, idleWorker, steer, expectFallbackIntact, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
 
-describe("worker questions route to the parent (#505)", { timeout: 45_000 }, () => {
+describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { timeout: 45_000 }, () => {
   useWorkerQuestionsFixture();
 
 // hearsay-tools/cezarion#1301: a refused Continue changes nothing, so it supersedes nothing.

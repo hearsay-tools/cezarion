@@ -7,7 +7,7 @@ import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { conversationOf, eventsOf, cezarAnswered, noHumanCard, askedPair, said, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
 
-describe("worker questions route to the parent (#505)", { timeout: 45_000 }, () => {
+describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { timeout: 45_000 }, () => {
   useWorkerQuestionsFixture();
 
 // The worker's own routing marker keeps the question the parent's when the parent's ledger cannot

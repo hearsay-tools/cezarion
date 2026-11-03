@@ -7,7 +7,7 @@ import { fixtureUpdateRun, manager, root, store, until, worker } from './worker-
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { eventsOf, cezarAnswered, noHumanCard, steeringParent, askedPair, answered, said, fillConversation, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
 
-describe("worker questions route to the parent (#505)", { timeout: 45_000 }, () => {
+describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { timeout: 45_000 }, () => {
   useWorkerQuestionsFixture();
 
 it('answers the worker for the parent when the conversation has no room for its reply', async () => {

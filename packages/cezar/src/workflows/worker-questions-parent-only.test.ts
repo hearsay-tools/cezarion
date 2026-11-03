@@ -3,7 +3,7 @@ import { eventCheckpoint, manager, restart, store, until } from './worker-wait.t
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { eventsOf, askedPair, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
 
-describe("worker questions route to the parent (#505)", { timeout: 45_000 }, () => {
+describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { timeout: 45_000 }, () => {
   useWorkerQuestionsFixture();
 
 it('keeps a routed question parent-only', async () => {

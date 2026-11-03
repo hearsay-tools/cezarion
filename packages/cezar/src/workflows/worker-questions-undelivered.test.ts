@@ -6,7 +6,7 @@ import { manager, spendWorkerBudget, store, until, worker } from './worker-wait.
 import { hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { conversationOf, eventsOf, cezarAnswered, closedAs, noHumanCard, steeringParent, fillInbox, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
 
-describe("worker questions route to the parent (#505)", { timeout: 45_000 }, () => {
+describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { timeout: 45_000 }, () => {
   useWorkerQuestionsFixture();
 
 it('answers the worker for the parent when the parent cannot take another message, once', async () => {

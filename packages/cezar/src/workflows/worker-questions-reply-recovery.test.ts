@@ -7,7 +7,7 @@ import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';
 import { conversationOf, closedAs, noHumanCard, askedPair, answered, said, expectSettledParentRefusal, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
 
-describe("worker questions route to the parent (#505)", { timeout: 45_000 }, () => {
+describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { timeout: 45_000 }, () => {
   useWorkerQuestionsFixture();
 
 // A crash after the parent's cancellation committed, before the family pass that ends its workers.

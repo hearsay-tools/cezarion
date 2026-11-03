@@ -10,7 +10,7 @@ import { gate, thenSay, toolCall } from './waits-parity.testkit.ts';
 import { requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';
 import { conversationOf, eventsOf, closedAs, noHumanCard, steeringParent, askedPair, expectSettledParentRefusal, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
 
-describe("worker questions route to the parent (#505)", { timeout: 45_000 }, () => {
+describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { timeout: 45_000 }, () => {
   useWorkerQuestionsFixture();
 
 // The turn end's completion gate still holds a done the tool accepted when a worker's question

@@ -9,7 +9,7 @@ import type { RunOutcome } from '../runs/outcome-commit.ts';
 import type { RunRecord } from '../runs/store.ts';
 import { conversationOf, eventsOf, cezarAnswered, noHumanCard, idleWorker, steer, askedPair, answered, said, useWorkerQuestionsFixture } from './worker-questions.testkit.ts';
 
-describe("worker questions route to the parent (#505)", { timeout: 45_000 }, () => {
+describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { timeout: 45_000 }, () => {
   useWorkerQuestionsFixture();
 
 // hearsay-tools/cezarion#1301: Cezar's fallback question does not hold what the plain park let
