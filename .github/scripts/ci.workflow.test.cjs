@@ -89,7 +89,7 @@ test('pull request CI runs npm run test:e2e as a Cockpit browser E2E job', () =>
   assert.equal(setup.with['node-version'], 'lts/*');
   assert.equal(setup.with['check-latest'], true);
   const steps = stepsText(job);
-  assert.ok(steps.includes('npm run test:e2e -- --shard=${{ matrix.shard }}/4'));
+  assert.ok(steps.includes('npm run test:e2e -- --allow-skip --shard=${{ matrix.shard }}/4'));
   assert.match(steps, /require-e2e-passed\.cjs/);
 });
 

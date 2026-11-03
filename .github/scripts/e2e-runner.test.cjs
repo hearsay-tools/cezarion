@@ -105,11 +105,12 @@ test('bootstrap failure prevents filtered test execution and reports failure', (
   assert.match(r.stderr, /TEST_E2E_STATUS=failed/);
 });
 
-test('unavailable browser skips filtered runs without executing tests', (t) => {
+test('unavailable browser exits 3 without executing tests', (t) => {
   const r = run(t, ['smoke.e2e.ts', '-t', 'opens drawer'], { installed: false });
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 3, r.stderr);
   assert.deepEqual(r.tests, []);
   assert.match(r.stdout, /TEST_E2E_STATUS=skipped/);
+  assert.match(r.stderr, /E2E SKIPPED/);
 });
 
 test('default local run selects the full suite', (t) => {
@@ -119,9 +120,9 @@ test('default local run selects the full suite', (t) => {
   assert.ok(!r.tests.some((arg) => arg.startsWith('--shard')));
 });
 
-test('unavailable browser remains a local skip even with a shard', (t) => {
+test('unavailable browser fails even with a shard', (t) => {
   const r = run(t, ['--shard=1/4'], { installed: false });
-  assert.equal(r.status, 0, r.stderr);
+  assert.equal(r.status, 3, r.stderr);
   assert.match(r.stdout, /TEST_E2E_STATUS=skipped/);
   assert.deepEqual(r.tests, []);
 });
@@ -137,4 +138,25 @@ test('a temporary checkout does not inherit another checkout lease', (t) => {
   const r = run(t, [], { inheritedEnv: { ...process.env, TEST_ENV_LEASE_TOKEN: 'other-checkout', TEST_ENV_LEASE_ENTRY: 'other-entry', TEST_ENV_LEASE_BOOTSTRAPPED: '1' } });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /TEST_E2E_STATUS=passed/);
+});
+
+for (const installed of [false, true]) {
+  test(`--allow-skip is consumed only by the wrapper (browser installed: ${installed})`, (t) => {
+    const r = run(t, ['smoke.e2e.ts', '--allow-skip'], { installed });
+    assert.equal(r.status, 0, r.stderr);
+    assert.deepEqual(r.boot, []);
+    assert.ok(!r.tests.includes('--allow-skip'));
+    assert.match(r.stdout, installed ? /TEST_E2E_STATUS=passed/ : /TEST_E2E_STATUS=skipped/);
+  });
+}
+for (const options of [{ exit: 1 }, { bootExit: 1 }]) {
+  test(`--allow-skip does not hide failure ${JSON.stringify(options)}`, (t) => {
+    const r = run(t, ['--allow-skip'], options);
+    assert.equal(r.status, 1, r.stderr);
+    assert.match(r.stderr, /TEST_E2E_STATUS=failed/);
+  });
+}
+test('--allow-skip after the separator remains a Vitest argument', (t) => {
+  const r = run(t, ['--', '--allow-skip'], { installed: false });
+  assert.equal(r.status, 3, r.stderr);
 });

@@ -365,7 +365,7 @@ export async function runLocalSuite({ repoRoot = ownRoot, scratchRoot, buildSour
     }
 
     await Promise.all(lanes.map(async (lane) => {
-      const exit = await runProcess('sh', ['.ai/scripts/e2e.sh', `--shard=${lane.shard}`], {
+      const exit = await runProcess('sh', ['.ai/scripts/e2e.sh', '--allow-skip', `--shard=${lane.shard}`], {
         cwd: lane.root, env: lane.env, logPath: lane.logPath, running,
       });
       const output = readFileSync(lane.logPath, 'utf8');
