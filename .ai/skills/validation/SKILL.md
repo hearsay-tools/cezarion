@@ -100,14 +100,7 @@ rather than treating it as a pass. Import graphs do not cover every runtime
 dependency, so this command is only iteration feedback, never a replacement for
 CI's final gate.
 
-**Packaged CLI E2E runs by hand.** Packaged tests (`npm run test:package`,
-`packages/cezar/test/e2e/*.test.ts`) exercise built output, and Squeal never runs
-them, with or without its daemon. Run `npm run build` from the repo root after
-relevant source changes; then, from `packages/cezar`, run
-`node --import ../../scripts/test-git-env.mjs --import tsx --test <files>` with
-paths relative to that directory (e.g. `test/e2e/task-cli.test.ts`). In an unbuilt worktree they fail with a
-`Cannot find module` error naming a missing `dist/` module; an assertion failure
-is a real failure that needs investigation.
+**Packaged CLI E2E runs by hand.** Run `npm run test:package -- <repo-root paths>`.
 
 **Browser E2E.** Cockpit browser E2E is a separate command from packaged CLI E2E — it boots the real app and
 drives it in a real Chrome through the `agent-browser` provider (`.ai/browsers/agent-browser.md`):

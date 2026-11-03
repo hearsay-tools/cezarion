@@ -90,7 +90,7 @@ Where readers hide, searched from the repo root (replace the example values):
 Require passing results for the specs and fixtures the sweep selects. Read browser specs
 through Squeal (`squeal status --wait 60000 <files>`, then `squeal run --slow --wait 60000`
 if slow results are not current), or without it run `npm run test:e2e -- <specs>` (one
-call takes several specs). Run packaged fixtures by hand after a fresh build
+call takes several specs). Run packaged fixtures with `npm run test:package -- <repo-root paths>`
 ([validation skill](../validation/SKILL.md) → *Packaged CLI E2E runs by hand*). Dry-run park fixtures also need the
 unit parity suites in
 [Runner regressions ship with shared coverage](../../../docs/areas/runners.md#runner-regressions-ship-with-shared-coverage).
