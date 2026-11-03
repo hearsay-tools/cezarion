@@ -24,7 +24,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
-    runs-on: ubicloud-standard-2
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       SHUFFLE_SEED: ${{ inputs.seed || github.run_id }}
