@@ -364,7 +364,7 @@ describe('task quick-list', () => {
  *
  * Same deliberate limitation as above: every fixture status is terminal, so the live/queued
  * columns cannot be exercised here (a serve boot recovers non-terminal runs). Those are covered
- * by the jsdom suite (`src/routes/tasks-overview.test.tsx`), which drives the components with
+ * by the jsdom suite (`src/routes/tasks-overview-route.test.tsx`), which drives the components with
  * queued/running records and a stubbed usage stream directly.
  */
 describe('tasks table overview', () => {
