@@ -1,83 +1,118 @@
-name: Reconcile CodeRabbit admission
+name: NON-MERGE CodeRabbit App sender pilot
 
-# Default-branch control plane only. No PR checkout, model calls or secrets.
+# Disposable branch-only probe. NEVER MERGE: this replaces automatic admission
+# reconciliation only on cez/1327c24a. The parent dispatches after the initial
+# automatic vendor review finishes. No checkout, PR code, merge or CI rerun.
 on:
-  check_run:
-    types: [created, completed]
-  workflow_run:
-    workflows: [CI, CodeRabbit review signal]
-    types: [completed]
   workflow_dispatch:
     inputs:
       pr_number:
-        description: PR to re-check after resolving a thread by hand
+        description: Open draft pilot PR from cez/1327c24a into main
         required: true
         type: number
 permissions: {}
-# Discovery validates the event and supplies reliable PR numbers before locking.
-# Independent events select at most four associated PRs; empty provider
-# associations use bounded inventory lookup for matching current heads only.
 jobs:
-  discover:
+  sender-pilot:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository == 'hearsay-tools/cezarion' &&
+      github.ref == 'refs/heads/cez/1327c24a'
     runs-on: ubuntu-latest
     timeout-minutes: 3
-    permissions:
-      contents: read
-      pull-requests: read
-      checks: read
-      actions: read
-    outputs:
-      numbers: ${{ steps.discover.outputs.numbers }}
-    steps:
-      - name: Check out trusted discovery scripts
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          persist-credentials: false
-      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        id: discover
-        with:
-          retries: 0
-          script: |
-            const { discover } = require('./.github/scripts/coderabbit-reconcile.cjs');
-            const result = await discover({ github, ...context.repo, eventName: context.eventName,
-              payload: context.payload, log: message => core.info(message) });
-            core.setOutput('numbers', JSON.stringify(result.numbers));
-  reconcile:
-    needs: discover
-    if: needs.discover.outputs.numbers != '[]'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    strategy:
-      fail-fast: false
-      max-parallel: 4
-      matrix:
-        pr: ${{ fromJSON(needs.discover.outputs.numbers) }}
-    # Different trigger kinds use the same lock after trusted PR discovery.
-    # A coalesced job still reads this PR's live state when it gets the lock.
+    permissions: {}
+    # Serialize marker inspection and the one POST across repeat dispatches.
     concurrency:
-      group: coderabbit-admission-pr-${{ matrix.pr }}
+      group: coderabbit-sender-pilot-1327c24a-${{ inputs.pr_number }}
       cancel-in-progress: false
-    permissions:
-      contents: read
-      pull-requests: read
-      checks: read
-      actions: write # Only targeted rerun; trusted script validates native provenance.
     steps:
-      - name: Check out trusted reconciliation scripts
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Create repository-scoped sender App token
+        id: sender-app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1
         with:
-          ref: ${{ github.event.repository.default_branch }}
-          persist-credentials: false
-      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-pull-requests: write
+      - name: Verify pilot and send one deduplicated review command
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          RELEASE_APP_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
-          RECONCILE_PR: ${{ matrix.pr }}
+          APP_SLUG: ${{ steps.sender-app.outputs.app-slug }}
+          EXPECTED_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
+          PILOT_PR: ${{ inputs.pr_number }}
+          PILOT_WORKFLOW_SHA: ${{ github.workflow_sha }}
         with:
-          retries: 0
+          github-token: ${{ steps.sender-app.outputs.token }}
+          retries: 0 # Never retry a comment POST with an ambiguous outcome.
           script: |
-            const { reconcile } = require('./.github/scripts/coderabbit-reconcile.cjs');
-            const result = await reconcile({ github, ...context.repo,
-              pullNumber: Number(process.env.RECONCILE_PR),
-              releaseAppBotLogin: process.env.RELEASE_APP_BOT_LOGIN, log: message => core.info(message) });
-            core.info(JSON.stringify(result));
+            const branch = 'cez/1327c24a';
+            const repository = 'hearsay-tools/cezarion';
+            const { owner, repo } = context.repo;
+            const slug = process.env.APP_SLUG;
+            const login = process.env.EXPECTED_BOT_LOGIN;
+            const head = process.env.PILOT_WORKFLOW_SHA;
+            const rawNumber = process.env.PILOT_PR;
+            const pullNumber = Number(rawNumber);
+            if (!/^[a-z0-9][a-z0-9-]*$/.test(slug ?? '') || `${slug}[bot]` !== login) {
+              throw new Error('Sender App slug does not match RELEASE_APP_BOT_LOGIN.');
+            }
+            if (context.eventName !== 'workflow_dispatch' ||
+                `${owner}/${repo}` !== repository || context.ref !== `refs/heads/${branch}` ||
+                !/^[a-f0-9]{40}$/.test(head ?? '') || !/^[1-9]\d*$/.test(rawNumber ?? '') ||
+                !Number.isSafeInteger(pullNumber)) {
+              throw new Error('Invalid pilot dispatch identity, head or PR number.');
+            }
+            const marker = `<!-- coderabbit-sender-pilot:${branch}:${head} -->`;
+            const body = `@coderabbitai full review\n\n${marker}`;
+            const requireLivePilot = async () => {
+              const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: pullNumber });
+              if (pr.state !== 'open' || pr.draft !== true || pr.base?.ref !== 'main' ||
+                  pr.base?.repo?.full_name !== repository || pr.head?.repo?.full_name !== repository ||
+                  pr.head?.repo?.id !== context.payload.repository.id ||
+                  pr.head?.ref !== branch || pr.head?.sha !== head) {
+                throw new Error('PR must be the open draft same-repository main-target pilot at the workflow SHA.');
+              }
+            };
+            const receipt = (comment, outcome) => {
+              if (!Number.isSafeInteger(comment.id) || comment.id <= 0 ||
+                  comment.user?.login !== login || comment.user?.type !== 'Bot' ||
+                  comment.body !== body ||
+                  comment.html_url !== `https://github.com/${repository}/pull/${pullNumber}#issuecomment-${comment.id}`) {
+                throw new Error('Unverified comment receipt. Inspect manually; do not retry the write.');
+              }
+              core.info(JSON.stringify({ outcome, head, comment_id: comment.id,
+                author: comment.user.login, url: comment.html_url }));
+            };
+            await requireLivePilot();
+            let complete = false;
+            const matches = [];
+            // Inspect at most 500 comments. A full final page is not completeness.
+            for (let page = 1; page <= 5; page++) {
+              const { data: comments } = await github.rest.issues.listComments({
+                owner, repo, issue_number: pullNumber, per_page: 100, page
+              });
+              if (!Array.isArray(comments) || comments.length > 100) {
+                throw new Error('Invalid comment history; refusing to post.');
+              }
+              matches.push(...comments.filter(comment => comment.body?.includes(marker)));
+              if (comments.length < 100) { complete = true; break; }
+            }
+            if (!complete || matches.length > 1) {
+              throw new Error('Incomplete comment history or duplicate marker; inspect manually.');
+            }
+            if (matches.length === 1) {
+              receipt(matches[0], 'already-posted');
+              return;
+            }
+            // Re-read after comment inspection, immediately before the only write.
+            await requireLivePilot();
+            let comment;
+            try {
+              ({ data: comment } = await github.rest.issues.createComment({
+                owner, repo, issue_number: pullNumber, body
+              }));
+            } catch {
+              core.setFailed('Comment POST failed or its outcome is ambiguous. Inspect live comments before any later dispatch; this run will not retry.');
+              return;
+            }
+            receipt(comment, 'posted');
