@@ -1,3 +1,4 @@
+import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 /**
  * R2 step 2.1 — the RunManager's protocol-v2 persistence policy, executable:
  *
@@ -226,7 +227,7 @@ describe('golden-fixture replay through a real RunStore', () => {
         title: 't',
         workflow: 'w',
         task: 't',
-        steps: [{ id: 's1', name: 'S', kind: 'agent' }],
+        steps: [{ id: 's1', name: 'S', kind: STEP_KIND.agent }],
       });
       const busTypes: string[] = [];
       store.on('event', ({ event }) => busTypes.push(event.type));

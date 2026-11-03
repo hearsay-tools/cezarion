@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -65,7 +66,7 @@ describe('RunStore client request id', () => {
 
   it('loads a record written before the fields existed', () => {
     mkdirSync(dataDir, { recursive: true });
-    seedRuns(dataDir, [{ id: 'old', title: 'o', workflow: 'w', task: 't', status: 'done',
+    seedRuns(dataDir, [{ id: 'old', title: 'o', workflow: 'w', task: 't', status: RUN_STATUS.done,
       createdAt: '2026-01-01T00:00:00.000Z', tokensUsed: 0, archived: false, steps: [] }]);
     const store = RunStore.open(dataDir);
     expect(store.getRun('old')?.clientRequestId).toBeUndefined();

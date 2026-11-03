@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { chmodSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, writeFileSync, writeSync, closeSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,7 +35,7 @@ function row(id: string, overrides: Partial<RunRowInput> = {}): RunRowInput {
   return {
     id,
     createdAt: `2026-10-0${id.length % 9}T00:00:00.000Z`,
-    status: 'done',
+    status: RUN_STATUS.done,
     archived: false,
     live: false,
     data: JSON.stringify({ id, payload: 'full' }),
@@ -78,7 +79,7 @@ describe('RunDatabase', () => {
           finishedAt: '2026-10-05T01:00:00.000Z', parentRunId: 'p', live: true, clientRequestId: 'req-1', groupId: 'g',
           worktreePath: '/repo/.ai/cezar/worktrees/a', branch: 'cez/a', baseBranch: 'main',
         }),
-        row('bb', { archived: true, status: 'failed' }),
+        row('bb', { archived: true, status: RUN_STATUS.failed }),
       ],
       deletes: [],
     });
@@ -87,7 +88,7 @@ describe('RunDatabase', () => {
       id: 'a',
       createdAt: '2026-10-01T00:00:00.000Z',
       finishedAt: '2026-10-05T01:00:00.000Z',
-      status: 'done',
+      status: RUN_STATUS.done,
       archived: false,
       live: true,
       parentRunId: 'p',
@@ -101,7 +102,7 @@ describe('RunDatabase', () => {
       summary: JSON.stringify({ id: 'a' }),
     });
     expect(db.get('bb')).toMatchObject({
-      archived: true, status: 'failed', live: false, finishedAt: null, parentRunId: null, clientRequestId: null,
+      archived: true, status: RUN_STATUS.failed, live: false, finishedAt: null, parentRunId: null, clientRequestId: null,
       groupId: null, worktreePath: null, branch: null, baseBranch: null,
     });
     expect(db.get('missing')).toBeUndefined();
@@ -112,7 +113,7 @@ describe('RunDatabase', () => {
   it('bumps the revision on every upsert of an existing row and reports the new revisions', () => {
     const db = openDb();
     expect(db.transaction({ upserts: [row('a'), row('b')], deletes: [] }).revisions).toEqual(new Map([['a', 1], ['b', 1]]));
-    expect(db.transaction({ upserts: [row('a', { status: 'running' })], deletes: [] }).revisions).toEqual(new Map([['a', 2]]));
+    expect(db.transaction({ upserts: [row('a', { status: RUN_STATUS.running })], deletes: [] }).revisions).toEqual(new Map([['a', 2]]));
     db.transaction({ upserts: [row('a')], deletes: [] });
     expect(db.listRevisions()).toEqual([{ id: 'a', revision: 3 }, { id: 'b', revision: 1 }]);
     expect(db.get('a')?.revision).toBe(3);
@@ -133,7 +134,7 @@ describe('RunDatabase', () => {
     // The second upsert violates NOT NULL, after a delete and a successful upsert already ran.
     const broken = { ...row('c'), status: null } as unknown as RunRowInput;
     expect(() => db.transaction({
-      upserts: [row('a', { status: 'running' }), broken],
+      upserts: [row('a', { status: RUN_STATUS.running }), broken],
       deletes: ['b'],
       meta: { importedAt: 'after' },
     })).toThrow(RunDatabaseError);
@@ -151,7 +152,7 @@ describe('RunDatabase', () => {
     db.transaction({ upserts: [row('a')], deletes: [] });
     const first = db.get('a')!.revision;
     db.transaction({ upserts: [], deletes: ['a'] });
-    db.transaction({ upserts: [row('a', { status: 'running' })], deletes: [] });
+    db.transaction({ upserts: [row('a', { status: RUN_STATUS.running })], deletes: [] });
     // Per-row counters restarted at 1 here, so (id, revision) named two different rows over time.
     expect(db.get('a')!.revision).toBeGreaterThan(first);
     expect(db.transaction({ upserts: [row('b')], deletes: [] }).revisions.get('b')).toBeGreaterThan(db.get('a')!.revision);
@@ -231,7 +232,7 @@ describe('RunDatabase', () => {
     expect(first.skipped).toBe(false);
     let ran = false;
     const second = db.transaction({
-      upserts: [row('a', { status: 'cancelled' }), row('b')], deletes: [], meta: { [RUNS_IMPORT_COMPLETE_KEY]: 'two' },
+      upserts: [row('a', { status: RUN_STATUS.cancelled }), row('b')], deletes: [], meta: { [RUNS_IMPORT_COMPLETE_KEY]: 'two' },
       onlyIfMetaAbsent: RUNS_IMPORT_COMPLETE_KEY, beforeCommit: () => { ran = true; },
     });
     expect(second).toMatchObject({ skipped: true, revisions: new Map() });
@@ -259,11 +260,11 @@ describe('RunDatabase', () => {
   it('persists across close and reopen', () => {
     const first = RunDatabase.open(path);
     first.transaction({ upserts: [row('a'), row('b')], deletes: [], meta: { import: 'complete' } });
-    first.transaction({ upserts: [row('a', { status: 'cancelled' })], deletes: ['b'] });
+    first.transaction({ upserts: [row('a', { status: RUN_STATUS.cancelled })], deletes: ['b'] });
     first.close();
 
     const second = openDb();
-    expect(second.get('a')).toMatchObject({ status: 'cancelled', revision: 2 });
+    expect(second.get('a')).toMatchObject({ status: RUN_STATUS.cancelled, revision: 2 });
     expect(second.get('b')).toBeUndefined();
     expect(second.getMeta('import')).toBe('complete');
   });
@@ -330,12 +331,12 @@ describe('RunDatabase', () => {
         owner: owner('s1'), claims: new Map([['a', { generation: gen }]]), rows: new Map([['a', { revision, family: 'a' }]]),
       });
       // As seen: commits.
-      db.transaction({ upserts: [row('a', { status: 'running' })], deletes: [], fence: fence(seen) });
+      db.transaction({ upserts: [row('a', { status: RUN_STATUS.running })], deletes: [], fence: fence(seen) });
       const now = db.get('a')!;
       // A stale revision, a stale generation, or "expected absent" over a real row: nothing is written.
       for (const [stale, reason] of [[fence(seen), 'changed'], [fence(now.revision, generation + 99), 'claim-lost'], [fence(null), 'created']] as const) {
         let caught: unknown;
-        try { db.transaction({ upserts: [row('a', { status: 'failed' })], deletes: [], meta: { touched: 'yes' }, fence: stale }); } catch (error) { caught = error; }
+        try { db.transaction({ upserts: [row('a', { status: RUN_STATUS.failed })], deletes: [], meta: { touched: 'yes' }, fence: stale }); } catch (error) { caught = error; }
         expect(caught).toBeInstanceOf(RunConflictError);
         expect((caught as RunConflictError).kind).toBe('conflict');
         expect((caught as RunConflictError).conflicts).toEqual([{ id: 'a', reason, current: now }]);
@@ -361,7 +362,7 @@ describe('RunDatabase', () => {
       db.releaseClaims('s1');
       db.takeClaims(owner('s2'), [{ family: 'a', expect: null }]);
       const before = db.getClaim('a');
-      expect(() => db.transaction({ upserts: [row('a', { status: 'failed' })], deletes: [], fence: { ...take(null), rows: new Map([['a', { revision: db.get('a')!.revision, family: 'a' }]]) } }))
+      expect(() => db.transaction({ upserts: [row('a', { status: RUN_STATUS.failed })], deletes: [], fence: { ...take(null), rows: new Map([['a', { revision: db.get('a')!.revision, family: 'a' }]]) } }))
         .toThrow(expect.objectContaining({ conflicts: [expect.objectContaining({ id: 'a', reason: 'claim-lost' })] }));
       expect(db.getClaim('a')).toEqual(before);
       expect(db.get('a')?.status).toBe('done');
@@ -382,8 +383,8 @@ describe('RunDatabase', () => {
     function seed(db: RunDatabase): void {
       db.transaction({
         upserts: [
-          row('live-1', { createdAt: '2026-10-03T00:00:00.000Z', status: 'running', live: true }),
-          row('live-2', { createdAt: '2026-10-04T00:00:00.000Z', status: 'failed', live: true }),
+          row('live-1', { createdAt: '2026-10-03T00:00:00.000Z', status: RUN_STATUS.running, live: true }),
+          row('live-2', { createdAt: '2026-10-04T00:00:00.000Z', status: RUN_STATUS.failed, live: true }),
           row('done-1', { createdAt: '2026-10-01T00:00:00.000Z' }),
           row('w-1', { createdAt: '2026-10-02T00:00:00.000Z', parentRunId: 'root-1', branch: 'cez/w-1' }),
           row('w-2', { createdAt: '2026-10-05T00:00:00.000Z', parentRunId: 'root-1' }),
@@ -433,7 +434,7 @@ describe('RunDatabase', () => {
       expect(db.listBranchOwners().map((r) => [r.id, r.branch, r.baseBranch]).sort()).toEqual([
         ['tree-new', 'cez/new', null], ['tree-old', 'cez/old', 'main'], ['w-1', 'cez/w-1', null],
       ]);
-      expect(db.listBranchOwners().find((r) => r.id === 'tree-old')).toMatchObject({ status: 'done', archived: false, summary: JSON.stringify({ id: 'tree-old' }) });
+      expect(db.listBranchOwners().find((r) => r.id === 'tree-old')).toMatchObject({ status: RUN_STATUS.done, archived: false, summary: JSON.stringify({ id: 'tree-old' }) });
       expect(db.findResourceHolders({ branch: 'cez/new', worktreePath: '/w/old' }).sort()).toEqual(['tree-new', 'tree-old']);
       expect(db.findResourceHolders({ branch: 'cez/none', worktreePath: '/w/none' })).toEqual([]);
     });

@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
@@ -19,11 +20,11 @@ import { RunStoreOpenError } from './store-open-error.ts';
 const STORE_MODULE = fileURLToPath(new URL('./store.ts', import.meta.url));
 
 const step = (id: string, over: Record<string, unknown> = {}) => ({
-  id, name: id, kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, ...over,
+  id, name: id, kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, ...over,
 });
 /** A stored record as JSON: on purpose not a `RunRecord`, since tests store what this schema does not know. */
 const record = (id: string, over: Record<string, unknown> = {}) => ({
-  id, title: `run ${id}`, workflow: 'quick-task', task: `task ${id}`, status: 'done',
+  id, title: `run ${id}`, workflow: 'quick-task', task: `task ${id}`, status: RUN_STATUS.done,
   createdAt: `2026-09-0${Math.min(id.length, 9)}T00:00:00.000Z`, tokensUsed: 0, archived: false, steps: [] as unknown[],
   ...over,
 });
@@ -130,7 +131,7 @@ describe('fields this cezar does not know (the raw-record codec)', () => {
     })]));
     const store = open();
     store.updateRun('a', { title: 'renamed' });
-    store.updateStep('a', 's2', { status: 'failed' });
+    store.updateStep('a', 's2', { status: STEP_STATUS.failed });
     store.setPinned('a', false);
     store.close();
 
@@ -142,7 +143,7 @@ describe('fields this cezar does not know (the raw-record codec)', () => {
     const row = persisted('a');
     expect(row.title).toBe('renamed');
     expect(row.fromNewerCezar).toEqual({ nested: ['kept'] });
-    expect(row.steps).toEqual([step('s1', { iterations: 2, stepFromNewerCezar: 42 }), step('s2', { status: 'failed' })]);
+    expect(row.steps).toEqual([step('s1', { iterations: 2, stepFromNewerCezar: 42 }), step('s2', { status: STEP_STATUS.failed })]);
     expect(row).not.toHaveProperty('pinned');
     expect(row).not.toHaveProperty('pinnedAt');
   });

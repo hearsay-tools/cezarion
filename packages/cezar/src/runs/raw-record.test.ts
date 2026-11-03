@@ -1,3 +1,4 @@
+import { STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it } from 'vitest';
 
 import { collectRawExtras, encodeRawRecord } from './raw-record.ts';
@@ -10,7 +11,7 @@ const roundTrip = (raw: unknown, parsed: unknown, current: unknown) =>
 
 describe('collectRawExtras', () => {
   it('finds nothing when the parse kept every field', () => {
-    const raw = { id: 'a', steps: [{ id: 's1', status: 'done' }], tags: ['x'] };
+    const raw = { id: 'a', steps: [{ id: 's1', status: STEP_STATUS.done }], tags: ['x'] };
     expect(collectRawExtras(raw, structuredClone(raw))).toBeUndefined();
   });
 
@@ -57,11 +58,11 @@ describe('encodeRawRecord', () => {
   });
 
   it('follows keyed array elements by id, through reordering, removal and insertion', () => {
-    const raw = { id: 'a', steps: [{ id: 's1', status: 'done', hint: 'one' }, { id: 's2', status: 'pending', hint: 'two' }] };
-    const parsed = { id: 'a', steps: [{ id: 's1', status: 'done' }, { id: 's2', status: 'pending' }] };
-    const current = { id: 'a', steps: [{ id: 'new', status: 'pending' }, { id: 's2', status: 'running' }] };
+    const raw = { id: 'a', steps: [{ id: 's1', status: STEP_STATUS.done, hint: 'one' }, { id: 's2', status: STEP_STATUS.pending, hint: 'two' }] };
+    const parsed = { id: 'a', steps: [{ id: 's1', status: STEP_STATUS.done }, { id: 's2', status: STEP_STATUS.pending }] };
+    const current = { id: 'a', steps: [{ id: 'new', status: STEP_STATUS.pending }, { id: 's2', status: STEP_STATUS.running }] };
     expect(roundTrip(raw, parsed, current)).toEqual({
-      id: 'a', steps: [{ id: 'new', status: 'pending' }, { id: 's2', status: 'running', hint: 'two' }],
+      id: 'a', steps: [{ id: 'new', status: STEP_STATUS.pending }, { id: 's2', status: STEP_STATUS.running, hint: 'two' }],
     });
   });
 

@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { Worker } from 'node:worker_threads';
 import { tmpdir } from 'node:os';
@@ -84,7 +85,7 @@ describe('RunStore transcript facts (#880)', () => {
     const { dir, store } = openStore();
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     store.appendEvent(run.id, { type: 'conversation-message', projectionId: 'p:before' });
-    store.updateRun(run.id, { status: 'done', finishedAt: new Date().toISOString() });
+    store.updateRun(run.id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
     store.setArchived(run.id, true);
     await store.historyIdle();
     expect(existsSync(historyPaths(dir, run.id).plain)).toBe(false);
@@ -128,7 +129,7 @@ describe('RunStore transcript facts off the request path (#880)', () => {
     const { dir, store } = openStore();
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     store.appendEvent(run.id, { type: 'conversation-message', projectionId: 'p:1' });
-    store.updateRun(run.id, { status: 'done', finishedAt: new Date().toISOString() });
+    store.updateRun(run.id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
     store.setArchived(run.id, true);
     await store.historyIdle();
     const { compressed, facts } = historyPaths(dir, run.id);
@@ -193,9 +194,9 @@ describe('off-loop store readiness (hearsay-tools/cezarion#906)', () => {
     const { dir, store } = openStore();
     const historical = seedSettledFamily(store, dir);
     const other = store.createRun({ title: 'other', task: 'task', workflow: 'w', steps: [] });
-    store.updateRun(other.id, { status: 'done' });
+    store.updateRun(other.id, { status: RUN_STATUS.done });
     const live = seedSettledFamily(store, dir);
-    store.updateRun(live.parentId, { status: 'waiting' });
+    store.updateRun(live.parentId, { status: RUN_STATUS.waiting });
     const ids = [historical.parentId, historical.workerId, other.id, live.parentId, live.workerId];
     for (const id of ids) store.appendEvent(id, { type: 'text', text: id });
     store.close(); stores.pop();
@@ -215,7 +216,7 @@ describe('off-loop store readiness (hearsay-tools/cezarion#906)', () => {
     const { dir, store } = openStore();
     const family = seedSettledFamily(store, dir);
     const others = Array.from({ length: 120 }, () => store.createRun({ title: 'other', task: 'task', workflow: 'w', steps: [] }).id);
-    for (const id of others) store.updateRun(id, { status: 'done' });
+    for (const id of others) store.updateRun(id, { status: RUN_STATUS.done });
     store.close(); stores.pop();
     const requested: string[] = [];
     const request = TranscriptFactsQueue.prototype.request;

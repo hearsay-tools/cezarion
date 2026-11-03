@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -59,7 +60,7 @@ function finishedRun(
 ): RunRecord {
   return {
     id,
-    status: 'done',
+    status: RUN_STATUS.done,
     createdAt: finishedAt,
     finishedAt,
     worktreePath: path,

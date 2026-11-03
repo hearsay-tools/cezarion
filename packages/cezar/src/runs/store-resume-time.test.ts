@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentInput, Wait } from '@open-mercato/cezar-contract';
-import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import {
+  RUN_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 
 import { readPersistedRuns } from './run-store.testkit.ts';
 import { RunStore } from './store.ts';
@@ -26,9 +32,9 @@ function setup() {
   const store = RunStore.open(dir, { keepLive: true });
   cleanups.push(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
   const hold = (id: string, extra: Parameters<RunStore['updateRun']>[1] = {}) => {
-    store.updateRun(id, { status: 'waiting', autoResumeAt: AT, autoResumeAttempts: 2, ...extra });
+    store.updateRun(id, { status: RUN_STATUS.waiting, autoResumeAt: AT, autoResumeAttempts: 2, ...extra });
     store.flush();
-    expect(committed(id)).toMatchObject({ status: 'waiting', autoResumeAt: AT });
+    expect(committed(id)).toMatchObject({ status: RUN_STATUS.waiting, autoResumeAt: AT });
   };
   const committed = (id: string) => readPersistedRuns(dir).find((row) => row.id === id);
   const root = () => {
@@ -42,7 +48,7 @@ function setup() {
 function resolvedTimer(): Wait {
   const now = new Date().toISOString();
   return {
-    id: randomUUID(), kind: 'timer', source: 'agent', via: 'cezar_wait', registeredAt: now, deadline: now, phase: 'resolved',
+    id: randomUUID(), kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait, registeredAt: now, deadline: now, phase: WAIT_PHASE.resolved,
     resolvedAt: now, turnId: 'turn-1', seconds: 60,
   } as Wait;
 }
@@ -56,7 +62,7 @@ describe('a commit that leaves waiting', () => {
     const input: AgentInput = { id: wait.id, parentRunId: id, source: 'lifecycle', text: 'wake', createdAt: new Date().toISOString() };
     store.commitWait(id, wait, input);
     store.commitOutcome(id, { kind: 'delivered', inputIds: [wait.id], at: new Date().toISOString() }, { patch: { status: RUN_STATUS.running } });
-    expect(committed(id)).toMatchObject({ status: 'running', autoResumeAttempts: 2 });
+    expect(committed(id)).toMatchObject({ status: RUN_STATUS.running, autoResumeAttempts: 2 });
     expect(committed(id)).not.toHaveProperty('autoResumeAt');
     expect(store.getRun(id)?.autoResumeAt).toBeUndefined();
   });
@@ -66,7 +72,7 @@ describe('a commit that leaves waiting', () => {
     const id = root();
     store.commitRootFinishIntent(id);
     expect(store.commitRootFinishCancellation(id)).toBe(true);
-    expect(committed(id)).toMatchObject({ status: 'cancelled', autoResumeAttempts: 2 });
+    expect(committed(id)).toMatchObject({ status: RUN_STATUS.cancelled, autoResumeAttempts: 2 });
     expect(committed(id)).not.toHaveProperty('autoResumeAt');
     expect(store.getRun(id)?.autoResumeAt).toBeUndefined();
   });
@@ -91,7 +97,7 @@ describe('a commit that leaves waiting', () => {
     }, 'a'.repeat(64));
     hold(worker.id);
     store.commitWorkerCancellation(worker.id);
-    expect(committed(worker.id)).toMatchObject({ status: 'cancelled', autoResumeAttempts: 2 });
+    expect(committed(worker.id)).toMatchObject({ status: RUN_STATUS.cancelled, autoResumeAttempts: 2 });
     expect(committed(worker.id)).not.toHaveProperty('autoResumeAt');
     expect(store.getRun(worker.id)?.autoResumeAt).toBeUndefined();
   });
@@ -105,7 +111,7 @@ describe('a commit that stays waiting', () => {
     hold(id);
     const wait = resolvedTimer();
     store.commitWait(id, wait);
-    expect(committed(id)).toMatchObject({ status: 'waiting', autoResumeAt: AT, autoResumeAttempts: 2 });
+    expect(committed(id)).toMatchObject({ status: RUN_STATUS.waiting, autoResumeAt: AT, autoResumeAttempts: 2 });
     expect(store.getRun(id)?.autoResumeAt).toBe(AT);
   });
 });

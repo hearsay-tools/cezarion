@@ -23,7 +23,7 @@ import {
   workerWorkspaceSchema,
   delegationErrorResponseSchema,
 } from '@open-mercato/cezar-contract/delegation';
-import { RUN_STATUS, WAIT_SOURCE } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, WAIT_SOURCE, WORKER_OUTCOME_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { agentInputEventSchema } from '@open-mercato/cezar-contract/events';
 import type { DelegationState } from '@open-mercato/cezar-contract';
 import { RunStore, runRecordSchema } from './store.ts';
@@ -42,7 +42,7 @@ const workspace = {
   path: `/managed/${workerId}`, branch: `cez/${workerId.slice(0, 8)}`, baselineSha,
 };
 const root: DelegationState = { role: 'root', permissions: ['spawn', 'wait'], receipts: [] };
-const outcome = { workerId, status: 'done' as const, observedAt: now };
+const outcome = { workerId, status: WORKER_OUTCOME_STATUS.done, observedAt: now };
 const wait = { id: randomUUID(), workerIds: [workerId], deadline: now, phase: 'registered', outcomes: [] };
 const destruction = { requestedAt: now, phase: 'requested', remaining: ['process', 'worktree', 'branch'] };
 const input = { title: 'fix tests', task: 'fix tests', workflow: 'quick-task', steps: [] };
@@ -152,13 +152,13 @@ describe('delegation schemas', () => {
     expect(agentInputSchema.safeParse({ ...agentInput, source: 'human' }).success).toBe(false);
     expect(agentInputSchema.safeParse({ ...agentInput, deliveredAt: 'yesterday' }).success).toBe(false);
     expect(agentInputEventSchema.parse({ seq: 1, ts: now, type: 'agent-input', input: agentInput })).toMatchObject({ input: agentInput });
-    const record = { ...input, id: workerId, status: 'queued', createdAt: now, tokensUsed: 0, agentInputs: [agentInput] };
+    const record = { ...input, id: workerId, status: RUN_STATUS.queued, createdAt: now, tokensUsed: 0, agentInputs: [agentInput] };
     expect(runRecordSchema.parse(record).agentInputs).toEqual([agentInput]);
     expect(runRecordSchema.parse(record).delegation).toBeUndefined();
   });
 
   it('describes bounded inspection, relationships, diff and explicit operation outcomes', () => {
-    const inspection = { workerId, parentRunId, status: 'done', workspace, outcome };
+    const inspection = { workerId, parentRunId, status: workerInspectionSchema.shape.status.enum.done, workspace, outcome };
     expect(workerInspectionSchema.parse(inspection)).toEqual(inspection);
     expect(runRelationshipsSchema.parse({ workers: [inspection] })).toEqual({ workers: [inspection] });
     expect(runRelationshipsSchema.safeParse({ workers: Array(1024).fill(inspection) }).success).toBe(true);
@@ -326,7 +326,7 @@ describe('RunStore durable delegation', () => {
 
   it('Finish cancellation atomically retires intent, fails closed on write failure and rejects late success', () => {
     const run = parent();
-    store.updateRun(run.id, { status: 'waiting' });
+    store.updateRun(run.id, { status: RUN_STATUS.waiting });
     store.commitRootFinishIntent(run.id);
     const before = readPersistedText(dataDir);
     const snapshot = structuredClone(store.getRun(run.id));
@@ -340,12 +340,12 @@ describe('RunStore durable delegation', () => {
     } finally { release(); }
     expect(store.commitRootFinishCancellation(run.id)).toBe(true);
     const cancelled = openTestRunStore(dataDir, { keepLive: true }).getRun(run.id);
-    expect(cancelled).toMatchObject({ status: 'cancelled', delegation: root });
+    expect(cancelled).toMatchObject({ status: RUN_STATUS.cancelled, delegation: root });
     expect(cancelled?.delegation).not.toHaveProperty('finishRequestedAt');
     expect(store.commitRootFinishSuccess(run.id, 'done')).toBe(false);
     expect(store.commitRootFinishCancellation(run.id)).toBe(false);
     // Even if a human continuation has already parked again, the old diff is obsolete.
-    store.updateRun(run.id, { status: 'waiting' });
+    store.updateRun(run.id, { status: RUN_STATUS.waiting });
     expect(store.commitRootFinishSuccess(run.id, 'review')).toBe(false);
     expect(store.getRun(run.id)?.status).toBe('waiting');
   });
@@ -474,7 +474,7 @@ describe('RunStore durable delegation', () => {
       ]));
     });
     const created = store.createOwnedRun({ ...input, runner: 'codex', model: 'model', agentProfile: 'account' }, run.id, requestId, metadata, requestHash);
-    expect(created).toMatchObject({ id: workerId, delegation: metadata, status: 'queued', runner: 'codex', model: 'model', agentProfile: 'account' });
+    expect(created).toMatchObject({ id: workerId, delegation: metadata, status: RUN_STATUS.queued, runner: 'codex', model: 'model', agentProfile: 'account' });
     expect(emitted.sort()).toEqual([run.id, workerId].sort());
     store.close();
     store = openTestRunStore(dataDir, { keepLive: true });

@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -35,9 +36,9 @@ afterAll(() => {
 
 /** Whether the prefilter keeps `run`'s stored row: the same row the store would write. */
 function keeps(run: RunSearchRun, tokens: readonly string[]): boolean {
-  const summary = JSON.stringify({ status: 'done', createdAt: '2026-10-03T21:09:02.000Z', archived: true, tokensUsed: 0, ...run });
+  const summary = JSON.stringify({ status: RUN_STATUS.done, createdAt: '2026-10-03T21:09:02.000Z', archived: true, tokensUsed: 0, ...run });
   db.transaction({
-    upserts: [{ id: 'row', createdAt: '2026-10-03T21:09:02.000Z', status: 'done', archived: true, live: false, data: '{}', summary }],
+    upserts: [{ id: 'row', createdAt: '2026-10-03T21:09:02.000Z', status: RUN_STATUS.done, archived: true, live: false, data: '{}', summary }],
     deletes: [],
   });
   let kept = false;

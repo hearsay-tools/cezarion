@@ -1,3 +1,11 @@
+import {
+  RUN_STATUS,
+  STEP_KIND,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -41,7 +49,7 @@ describe('TaskWebhook', () => {
   });
 
   const create = (notify: boolean) =>
-    store.createRun({ title: 't', workflow: 'quick-task', task: 'do it', notify, steps: [{ id: 's', name: 's', kind: 'agent' }] });
+    store.createRun({ title: 't', workflow: 'quick-task', task: 'do it', notify, steps: [{ id: 's', name: 's', kind: STEP_KIND.agent }] });
   /** Opted in AFTER creation, so a case about transitions sees no creation-time task.subscribed. */
   const optedIn = () => {
     const run = create(false);
@@ -68,8 +76,8 @@ describe('TaskWebhook', () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl, {}, ['running', 'needs-you']);
     const run = create(true);
-    store.updateRun(run.id, { status: 'running' });
-    store.updateRun(run.id, { status: 'waiting' });
+    store.updateRun(run.id, { status: RUN_STATUS.running });
+    store.updateRun(run.id, { status: RUN_STATUS.waiting });
     await webhook.idle();
 
     expect(calls.map((call) => [call.body.event, call.body.previousStatus, call.body.status, call.body.state])).toEqual([
@@ -84,7 +92,7 @@ describe('TaskWebhook', () => {
       projectId: 'proj',
       runId: run.id,
       url: `http://127.0.0.1:4321/p/proj/tasks/${run.id}`,
-      task: { id: run.id, status: 'waiting', notify: true },
+      task: { id: run.id, status: RUN_STATUS.waiting, notify: true },
     });
     expect(store.getRun(run.id)?.webhook?.lastDeliveredAt).toBeTruthy();
   });
@@ -93,7 +101,7 @@ describe('TaskWebhook', () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl);
     const quiet = create(false);
-    store.updateRun(quiet.id, { status: 'running' });
+    store.updateRun(quiet.id, { status: RUN_STATUS.running });
     await webhook.idle();
     expect(calls).toEqual([]);
   });
@@ -104,7 +112,7 @@ describe('TaskWebhook', () => {
     const run = create(true);
     await webhook.idle();
     expect(calls.map((call) => call.body.event)).toEqual(['task.subscribed']);
-    expect(calls[0]!.body).toMatchObject({ runId: run.id, status: 'queued', previousStatus: null, seq: 1 });
+    expect(calls[0]!.body).toMatchObject({ runId: run.id, status: RUN_STATUS.queued, previousStatus: null, seq: 1 });
     expect(calls[0]!.body).not.toHaveProperty('message');
   });
 
@@ -112,10 +120,10 @@ describe('TaskWebhook', () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl);
     const run = optedIn();
-    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: RUN_STATUS.running });
     // The ask lands mid-turn, while the run still runs; the park is what enters Needs you.
-    store.commitWait(run.id, { id: '00000000-0000-4000-8000-0000000000ac', kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: '2026-09-05T00:00:00.000Z', phase: 'open', turnId: 'turn-1' });
-    store.updateRun(run.id, { status: 'waiting' });
+    store.commitWait(run.id, { id: '00000000-0000-4000-8000-0000000000ac', kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask, registeredAt: '2026-09-05T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1' });
+    store.updateRun(run.id, { status: RUN_STATUS.waiting });
     await webhook.idle();
     expect(calls.map((call) => [call.body.event, call.body.state, call.body.previousStatus])).toEqual([
       ['task.question', 'needs-you', 'running'],
@@ -127,11 +135,11 @@ describe('TaskWebhook', () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl);
     const run = optedIn();
-    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: RUN_STATUS.running });
     const questions = [{ header: 'Choice', question: 'Which module?', options: [{ label: 'Parser' }, { label: 'Runner' }] }];
     store.appendEvent(run.id, { type: 'ask.requested', requestId: 'ask-1', context: '## Findings', questions });
-    store.commitWait(run.id, { id: '00000000-0000-4000-8000-0000000000ad', kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: '2026-09-05T00:00:00.000Z', phase: 'open', turnId: 'turn-1', context: '## Findings', questions });
-    store.updateRun(run.id, { status: 'waiting' });
+    store.commitWait(run.id, { id: '00000000-0000-4000-8000-0000000000ad', kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask, registeredAt: '2026-09-05T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1', context: '## Findings', questions });
+    store.updateRun(run.id, { status: RUN_STATUS.waiting });
     await webhook.idle();
     expect(calls.map((call) => call.body.event)).toEqual(['task.question']);
     expect(calls[0]!.body.task).toMatchObject({ question: questions, questionContext: '## Findings' });
@@ -150,10 +158,10 @@ describe('TaskWebhook', () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl);
     const run = optedIn();
-    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: RUN_STATUS.running });
     for (const ask of asks) store.appendEvent(run.id, { type: 'ask.requested', ...ask });
-    store.commitWait(run.id, { id: '00000000-0000-4000-8000-0000000000ae', kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: '2026-09-05T00:00:00.000Z', phase: 'open', turnId: 'turn-1' });
-    store.updateRun(run.id, { status: 'waiting' });
+    store.commitWait(run.id, { id: '00000000-0000-4000-8000-0000000000ae', kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask, registeredAt: '2026-09-05T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1' });
+    store.updateRun(run.id, { status: RUN_STATUS.waiting });
     await webhook.idle();
     expect(calls.map((call) => call.body.event)).toEqual(['task.question']);
     expect(calls[0]!.body.task).toMatchObject(expected);
@@ -164,11 +172,11 @@ describe('TaskWebhook', () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl);
     const run = optedIn();
-    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: RUN_STATUS.running });
     const asked = store.appendEvent(run.id, { type: 'ask.requested', requestId: 'ask-1', context: 'ctx', questions: choice });
     store.appendEvent(run.id, { type: 'human-input-delivered', askSeq: asked.seq, source: 'human' });
-    store.commitWait(run.id, { id: '00000000-0000-4000-8000-0000000000af', kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: '2026-09-05T00:00:00.000Z', phase: 'open', turnId: 'turn-1' });
-    store.updateRun(run.id, { status: 'waiting' });
+    store.commitWait(run.id, { id: '00000000-0000-4000-8000-0000000000af', kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask, registeredAt: '2026-09-05T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1' });
+    store.updateRun(run.id, { status: RUN_STATUS.waiting });
     await webhook.idle();
     expect(calls.map((call) => call.body.event)).toEqual(['task.question']);
     expect(calls[0]!.body.task).not.toHaveProperty('question');
@@ -180,15 +188,15 @@ describe('TaskWebhook', () => {
     const webhook = attach(fetchImpl);
     const enter = (patch: Parameters<RunStore['updateRun']>[1]) => {
       const run = optedIn();
-      store.updateRun(run.id, { status: 'running' });
+      store.updateRun(run.id, { status: RUN_STATUS.running });
       store.updateRun(run.id, patch);
     };
-    enter({ status: 'waiting' });
-    enter({ status: 'failed' });
-    enter({ status: 'waiting', autoResumeAt: '2026-10-20T23:00:00.000Z' });
-    enter({ status: 'done' });
-    enter({ status: 'cancelled' });
-    enter({ status: 'queued' });
+    enter({ status: RUN_STATUS.waiting });
+    enter({ status: RUN_STATUS.failed });
+    enter({ status: RUN_STATUS.waiting, autoResumeAt: '2026-10-20T23:00:00.000Z' });
+    enter({ status: RUN_STATUS.done });
+    enter({ status: RUN_STATUS.cancelled });
+    enter({ status: RUN_STATUS.queued });
     await webhook.idle();
     expect(calls.map((call) => call.body.state).sort()).toEqual(['cancelled', 'done', 'failed', 'needs-you']);
   });
@@ -197,8 +205,8 @@ describe('TaskWebhook', () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl, {}, []);
     const run = create(true);
-    store.updateRun(run.id, { status: 'running' });
-    store.updateRun(run.id, { status: 'done' });
+    store.updateRun(run.id, { status: RUN_STATUS.running });
+    store.updateRun(run.id, { status: RUN_STATUS.done });
     await webhook.idle();
     expect(calls.map((call) => call.body.event)).toEqual(['task.subscribed']);
   });
@@ -207,10 +215,10 @@ describe('TaskWebhook', () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl, {}, ['running']);
     const run = optedIn();
-    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: RUN_STATUS.running });
     store.updateRun(run.id, { title: 'renamed' });
-    store.updateRun(run.id, { status: 'waiting' });
-    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: RUN_STATUS.waiting });
+    store.updateRun(run.id, { status: RUN_STATUS.running });
     await webhook.idle();
     expect(calls.map((call) => [call.body.state, call.body.seq])).toEqual([['running', 1], ['running', 2]]);
   });
@@ -222,11 +230,11 @@ describe('TaskWebhook', () => {
       resolveProject: async () => ({ id: 'proj', webhooks: [{ ...target, triggers }] }),
     });
     const first = optedIn();
-    store.updateRun(first.id, { status: 'running' });
+    store.updateRun(first.id, { status: RUN_STATUS.running });
     await webhook.idle();
     triggers = ['running'];
     const second = optedIn();
-    store.updateRun(second.id, { status: 'running' });
+    store.updateRun(second.id, { status: RUN_STATUS.running });
     await webhook.idle();
     expect(calls.map((call) => call.body.runId)).toEqual([second.id]);
   });
@@ -236,20 +244,20 @@ describe('TaskWebhook', () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl, {}, ['waiting-ci']);
     const run = optedIn();
-    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: RUN_STATUS.running });
     const now = Date.now();
-    store.commitWait(run.id, { id: '55555555-5555-4555-8555-555555555555', kind: 'pr', source: 'agent', via: 'cezar_wait',
-      registeredAt: new Date(now).toISOString(), deadline: new Date(now + 1_800_000).toISOString(), phase: 'open', turnId: 'turn-1',
+    store.commitWait(run.id, { id: '55555555-5555-4555-8555-555555555555', kind: WAIT_KIND.pr, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
+      registeredAt: new Date(now).toISOString(), deadline: new Date(now + 1_800_000).toISOString(), phase: WAIT_PHASE.open, turnId: 'turn-1',
       prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, headSha: 'a'.repeat(40), generation: 'gen-1', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true });
-    store.updateRun(run.id, { status: 'waiting' });
+    store.updateRun(run.id, { status: RUN_STATUS.waiting });
     store.updateRun(run.id, { title: 'still on CI' });
-    store.updateRun(run.id, { status: 'running' });
-    store.updateRun(run.id, { status: 'waiting' });
+    store.updateRun(run.id, { status: RUN_STATUS.running });
+    store.updateRun(run.id, { status: RUN_STATUS.waiting });
     await webhook.idle();
     expect(calls.map((call) => call.body.event)).toEqual(['task.status', 'task.status']);
     expect(calls.at(-1)!.body).toMatchObject({
-      event: 'task.status', state: 'waiting-ci', status: 'waiting', previousStatus: 'running',
-      task: { status: 'waiting', attentionLabel: 'waiting for CI' },
+      event: 'task.status', state: 'waiting-ci', status: RUN_STATUS.waiting, previousStatus: 'running',
+      task: { status: RUN_STATUS.waiting, attentionLabel: 'waiting for CI' },
     });
   });
 
@@ -257,10 +265,10 @@ describe('TaskWebhook', () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl, {}, WEBHOOK_TRIGGERS.filter((trigger) => trigger !== 'needs-you'));
     const run = optedIn();
-    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: RUN_STATUS.running });
     // No wait kind the store writes today lacks an option, so the record a later kind would
     // produce goes straight to the subscriber, on the emission the store fires for every write.
-    const parked = { ...store.getRun(run.id)!, status: 'waiting' as const, waitingOn: { kind: 'future-wait' } };
+    const parked = { ...store.getRun(run.id)!, status: RUN_STATUS.waiting, waitingOn: { kind: 'future-wait' } };
     store.emit('run', parked);
     await webhook.idle();
     // The store's own record is still `running`; only the emitted one parked.
@@ -281,7 +289,7 @@ describe('TaskWebhook', () => {
     const { calls, fetchImpl } = recorder(() => new Response('down', { status: 503 }));
     const webhook = attach(fetchImpl);
     const run = optedIn();
-    store.updateRun(run.id, { status: 'done' });
+    store.updateRun(run.id, { status: RUN_STATUS.done });
     await webhook.idle();
 
     expect(calls).toHaveLength(WEBHOOK_ATTEMPTS);
@@ -306,7 +314,7 @@ describe('TaskWebhook', () => {
     }) as unknown as typeof fetch;
     const webhook = attach(timeoutFetch, { timeoutMs: 10 });
     const run = optedIn();
-    store.updateRun(run.id, { status: 'done' });
+    store.updateRun(run.id, { status: RUN_STATUS.done });
     await webhook.idle();
     expect(calls).toHaveLength(WEBHOOK_ATTEMPTS);
     expect(store.getRun(run.id)?.webhook?.lastError).toBe('Bot: timed out');
@@ -317,7 +325,7 @@ describe('TaskWebhook', () => {
     const { calls, fetchImpl } = recorder(() => new Response(null, { status: 401 }));
     const webhook = attach(fetchImpl);
     const run = optedIn();
-    store.updateRun(run.id, { status: 'done' });
+    store.updateRun(run.id, { status: RUN_STATUS.done });
     await webhook.idle();
     expect(calls).toHaveLength(1);
     expect(store.getRun(run.id)?.webhook?.lastError).toBe('Bot: HTTP 401');
@@ -327,12 +335,12 @@ describe('TaskWebhook', () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl, { dryRun: true });
     const run = optedIn();
-    store.updateRun(run.id, { status: 'done' });
+    store.updateRun(run.id, { status: RUN_STATUS.done });
     await webhook.idle();
     expect(calls).toEqual([]);
     const logged = store.readEvents(run.id).filter((event) => event.type === 'webhook.dry-run');
     expect(logged).toHaveLength(1);
-    expect(logged[0]).toMatchObject({ event: 'task.status', payload: { status: 'done', previousStatus: 'queued', state: 'done' } });
+    expect(logged[0]).toMatchObject({ event: 'task.status', payload: { status: RUN_STATUS.done, previousStatus: 'queued', state: 'done' } });
     expect(JSON.stringify(logged[0])).not.toContain('secret-token');
   });
 
@@ -349,8 +357,8 @@ describe('TaskWebhook', () => {
       }),
     });
     const run = optedIn();
-    store.updateRun(run.id, { status: 'running' });
-    store.updateRun(run.id, { status: 'done' });
+    store.updateRun(run.id, { status: RUN_STATUS.running });
+    store.updateRun(run.id, { status: RUN_STATUS.done });
     await webhook.idle();
     const sent = (url: string) => calls.filter((call) => call.url === url).map((call) => [call.body.state, call.body.seq, call.body.webhook]);
     expect(sent('https://a.example/hook')).toEqual([['done', 1, { id: 'a', name: 'Done bot' }]]);
@@ -372,8 +380,8 @@ describe('TaskWebhook', () => {
       }),
     });
     const run = optedIn();
-    store.updateRun(run.id, { status: 'running' });
-    store.updateRun(run.id, { status: 'done' });
+    store.updateRun(run.id, { status: RUN_STATUS.running });
+    store.updateRun(run.id, { status: RUN_STATUS.done });
     await webhook.idle();
     expect(calls.filter((call) => call.url.startsWith('https://a.'))).toHaveLength(WEBHOOK_ATTEMPTS);
     expect(calls.filter((call) => call.url.startsWith('https://b.'))).toHaveLength(1);
@@ -403,7 +411,7 @@ describe('TaskWebhook', () => {
       }),
     });
     const run = optedIn();
-    store.updateRun(run.id, { status: 'done' });
+    store.updateRun(run.id, { status: RUN_STATUS.done });
     // bound: the fast webhook's one POST; the slow one stays held until released below.
     await expect.poll(() => calls.filter((call) => call.url.startsWith('https://b.')).length, { timeout: 10_000 }).toBe(1);
     release();
@@ -424,10 +432,10 @@ describe('TaskWebhook', () => {
     let resolved = 0;
     const webhook = attach(fetchImpl, { resolveProject: async () => { resolved += 1; return { id: 'proj', webhooks }; } });
     const run = optedIn();
-    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: RUN_STATUS.running });
     // bound: the first POST starts and is held until released below.
     await expect.poll(() => calls.length, { timeout: 10_000 }).toBe(1);
-    store.updateRun(run.id, { status: 'done' });
+    store.updateRun(run.id, { status: RUN_STATUS.done });
     // bound: the second change is dispatched against the settings as they were, then queued.
     await expect.poll(() => resolved, { timeout: 10_000 }).toBe(2);
     webhooks = edit(webhooks);
@@ -452,14 +460,14 @@ describe('TaskWebhook', () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl, { resolveProject: async () => ({ id: 'proj', webhooks: [] }) });
     const run = create(true);
-    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: RUN_STATUS.running });
     await webhook.idle();
     expect(calls).toEqual([]);
   });
 
   it('does not report runs that already existed when it attached', async () => {
     const run = create(true);
-    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: RUN_STATUS.running });
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl);
     store.updateRun(run.id, { title: 'renamed' });
@@ -495,7 +503,7 @@ describe('TaskWebhooks', () => {
     expect(hooks.attach({ id: 'default', root, store })).toBe(hook);
 
     const run = store.createRun({ title: 't', workflow: 'quick-task', task: 't', notify: true, steps: [] });
-    store.updateRun(run.id, { status: 'done' });
+    store.updateRun(run.id, { status: RUN_STATUS.done });
     // bound: negative window. A delivery that was not held would reach the recorder within a few event-loop turns of the status change; 20 ms covers them.
     await new Promise((done) => setTimeout(done, 20));
     expect(calls).toEqual([]);

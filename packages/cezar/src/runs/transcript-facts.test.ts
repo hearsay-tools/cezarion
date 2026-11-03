@@ -1,3 +1,4 @@
+import { WORKER_OUTCOME_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -118,9 +119,9 @@ describe('transcript facts fold', () => {
 
   it('keys worker outcomes by wait, worker and revision', () => {
     const facts = emptyFacts();
-    expect(foldEvent(facts, ev('worker-outcome', { waitId: 'w', outcome: { workerId: 'x', status: 'done' } }))).toBe(true);
-    expect(foldEvent(facts, ev('worker-outcome', { waitId: 'w', outcome: { workerId: 'x', status: 'done', revision: 0 } }))).toBe(false);
-    expect(foldEvent(facts, ev('worker-outcome', { waitId: 'w', outcome: { workerId: 'x', status: 'done', revision: 2 } }))).toBe(true);
+    expect(foldEvent(facts, ev('worker-outcome', { waitId: 'w', outcome: { workerId: 'x', status: WORKER_OUTCOME_STATUS.done } }))).toBe(true);
+    expect(foldEvent(facts, ev('worker-outcome', { waitId: 'w', outcome: { workerId: 'x', status: WORKER_OUTCOME_STATUS.done, revision: 0 } }))).toBe(false);
+    expect(foldEvent(facts, ev('worker-outcome', { waitId: 'w', outcome: { workerId: 'x', status: WORKER_OUTCOME_STATUS.done, revision: 2 } }))).toBe(true);
     expect(facts.workerOutcomeKeys).toEqual([workerOutcomeKey('w', 'x', 0), 'w:x:2']);
     expect(workerOutcomeKey('w', 'x', 0)).toBe('w:x:0');
   });
