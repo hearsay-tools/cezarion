@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { AgentBrowser, configureFailureCapture, OPEN_OVERLAY_PROBE } from '../../e2e/agent-browser'
+import { resetBrowserPage } from '../../e2e/browser-page'
 
 /**
  * A stand-in `agent-browser` that records every invocation and answers `{ success: true }`.
@@ -70,9 +71,9 @@ describe('AgentBrowser auto-wait (#405)', () => {
   it('restores the setup route and viewport after a case visits another page', () => {
     const { browser, commands } = open({ evalResult: { width: 1440, height: 900 } })
     browser.goto('http://fixture.test/p/example/tasks')
-    browser.resetPage()
+    resetBrowserPage(browser)
     browser.goto('http://fixture.test/p/example/settings')
-    browser.resetPage()
+    resetBrowserPage(browser)
     expect(commands().filter(args => args[0] === 'open')).toEqual([
       ['open', 'http://fixture.test/p/example/tasks'],
       ['open', 'about:blank'],
@@ -85,6 +86,21 @@ describe('AgentBrowser auto-wait (#405)', () => {
       ['set', 'viewport', '1440', '900'], ['set', 'viewport', '1440', '900'],
     ])
     expect(commands().filter(args => args[1] === 'window.scrollTo(0, 0)')).toHaveLength(2)
+  })
+
+  it('keeps the setup mobile viewport, scale and route readiness predicate', () => {
+    const { browser, commands } = open({ evalResult: { width: 390, height: 844 } })
+    browser.setViewport(390, 844, 2)
+    browser.goto('http://fixture.test/p/mobile/tasks')
+    browser.waitForFunction('document.querySelector("[data-route=tasks]") !== null')
+    resetBrowserPage(browser)
+    expect(commands().filter(args => args[0] === 'set')).toEqual([
+      ['set', 'viewport', '390', '844', '2'], ['set', 'viewport', '390', '844', '2'],
+    ])
+    expect(commands().filter(args => args[0] === 'wait')).toEqual([
+      ['wait', '--fn', 'document.querySelector("[data-route=tasks]") !== null'],
+      ['wait', '--fn', 'document.querySelector("[data-route=tasks]") !== null'],
+    ])
   })
 
   it('creates a tab through the provider lifecycle and returns its CDP target', () => {

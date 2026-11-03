@@ -8,6 +8,7 @@ const capture = vi.hoisted(() => ({
 }))
 vi.mock('vitest', async (original) => ({ ...await original<typeof import('vitest')>(), ...hooks }))
 vi.mock('../../e2e/agent-browser', () => capture)
+vi.mock('../../e2e/browser-page', () => capture)
 import '../../e2e/failure-setup'
 
 afterEach(() => { vi.clearAllMocks(); vi.restoreAllMocks() })

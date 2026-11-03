@@ -1,7 +1,8 @@
 import { basename } from 'node:path'
 import { beforeAll, beforeEach } from 'vitest'
 
-import { beginFailureSpec, beginFailureTest, configureFailureCapture, lastAttachedBrowser, resetBrowserPages } from './agent-browser'
+import { beginFailureSpec, beginFailureTest, configureFailureCapture, lastAttachedBrowser } from './agent-browser'
+import { resetBrowserPages } from './browser-page'
 
 /**
  * Failure bundles for every spec (#408), registered once here rather than in each file.

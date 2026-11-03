@@ -2,6 +2,8 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { attached, rememberReadiness, rememberRoute, rememberViewport } from './browser-page'
+export { lastAttachedBrowser } from './browser-page'
 import { visualSampleExpression } from './visual-ready'
 import { tmpdirExceedsSocketBudget } from '../../../.ai/scripts/resolve-browser-launch.mjs'
 import { readTestEnvDescriptor } from '../../../.ai/scripts/test-env-inputs.mjs'
@@ -108,18 +110,6 @@ function nextBundleDir(): string {
   }
 }
 
-/** Every seam attached and not yet closed, oldest first. */
-const attached: AgentBrowser[] = []
-
-/** The seam most recently attached and not yet closed — how `failure-setup.ts`'s
- *  `onTestFailed` hook reaches the browser a spec holds in its own module scope.
- *
- *  A stack, not a single slot: `github.e2e.ts` keeps its main browser open and attaches a
- *  short-lived one per state, and its `finally` closes that one before `onTestFailed` runs.
- *  Closing it must hand the hook back to the main browser, not to nothing. */
-export function lastAttachedBrowser(): AgentBrowser | null {
-  return attached.at(-1) ?? null
-}
 
 type FailureReason =
   | { kind: 'wait-selector'; action: 'click' | 'hover' | 'fill'; selector: string }
@@ -513,13 +503,6 @@ export async function bootProjectId(baseUrl: string): Promise<string> {
   return bootProject
 }
 
-/** Restore every session a spec keeps open; fixture servers retain their own route. */
-export function resetBrowserPages(): void {
-  for (const browser of attached) browser.resetPage()
-}
-
-const CASE_VIEWPORT = { width: 1440, height: 900 }
-
 export class AgentBrowser {
   // A unique session per run, per the descriptor's rules — never attach to a user's profile.
   private constructor(
@@ -648,21 +631,9 @@ export class AgentBrowser {
     return (parsed.data ?? {}) as Record<string, unknown>
   }
 
-  private setupRoute = 'about:blank'
-  private caseRoute: string | undefined
-
-  /** Freeze the route prepared by beforeAll, then discard the previous case's document. */
-  resetPage(): void {
-    this.caseRoute ??= this.setupRoute
-    this.goto('about:blank')
-    this.setViewport(CASE_VIEWPORT.width, CASE_VIEWPORT.height)
-    if (this.caseRoute !== 'about:blank') this.goto(this.caseRoute)
-    this.evaluate('window.scrollTo(0, 0)')
-  }
-
   /** operation: open */
   goto(url: string): void {
-    if (this.caseRoute === undefined) this.setupRoute = url
+    rememberRoute(this, url)
     this.settleFontsBeforeLeaving()
     this.run(['open', url])
   }
@@ -735,6 +706,7 @@ export class AgentBrowser {
    *  tap that opened it, it is mounted, "visible", and still entirely off-screen — sampling it in
    *  that window answers every question wrong. */
   waitForFunction(js: string): void {
+    rememberReadiness(this, js)
     try {
       this.run(['wait', '--fn', js], defaultWaitTimeoutMs() + 2_000)
     } catch (cause) {
@@ -1113,6 +1085,7 @@ export class AgentBrowser {
    *  observers run after frame callbacks and update at default priority, so a spec reading those
    *  still waits on the DOM it reads. */
   setViewport(width: number, height: number, scale?: number): void {
+    rememberViewport(this, width, height, scale)
     this.run(['set', 'viewport', String(width), String(height), ...(scale === undefined ? [] : [String(scale)])])
     this.waitForValue<{ width: number; height: number } | null>(
       `new Promise((resolve) => requestAnimationFrame(() => resolve({ width: innerWidth, height: innerHeight })))`,
