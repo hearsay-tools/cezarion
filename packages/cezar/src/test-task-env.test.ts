@@ -183,6 +183,7 @@ it('records its sandbox', () => {
     writeFileSync(config, `export default ${JSON.stringify({ test: {
       environment: 'node', include: [fixture],
       setupFiles: [setup, join(repo, 'packages/cezar/vitest.setup.ts')],
+      sequence: { setupFiles: 'list' },
       passWithNoTests: false, maxWorkers: 1,
     } })}`);
     const env = Object.fromEntries(['PATH', 'SystemRoot', 'SYSTEMROOT', 'ComSpec', 'PATHEXT']
@@ -198,12 +199,14 @@ it('records its sandbox', () => {
     expect(stopped.status, stopped.stdout + stopped.stderr).not.toBe(0);
     const [left] = readFileSync(log, 'utf8').trim().split('\n');
     expect(basename(left!)).toMatch(/^cez-vitest-tmp-/);
+    expect(left!.startsWith(root + sep)).toBe(true);
     expect(existsSync(left!), 'SIGKILL runs no cleanup').toBe(true);
 
     const next = run('0');
     expect(next.status, next.stdout + next.stderr).toBe(0);
     const [, own] = readFileSync(log, 'utf8').trim().split('\n');
     expect(existsSync(left!)).toBe(false);
+    expect(own!.startsWith(root + sep)).toBe(true);
     expect(existsSync(own!)).toBe(false);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
