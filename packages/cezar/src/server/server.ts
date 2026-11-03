@@ -1,5 +1,5 @@
 import { reportsRoutes } from './reports-api.ts';
-import { mergeConfig } from './config-merge.ts';
+import { writeMergedConfig } from './config-merge.ts';
 import { automationCreateSchema, automationUpdateSchema, automationCheckRequestSchema, automationLogQuerySchema } from '@open-mercato/cezar-contract/automation-requests';
 import { providerConnectSchema, createAgentProfileSchema, openAgentAccountFileSchema, updateAgentProfileSchema, selectAgentProfileSchema, providerEnabledSchema, providerRetrySchema, providerRouteParamsSchema, agentProfileRouteParamsSchema } from '@open-mercato/cezar-contract/provider-requests';
 import { planSchema, parseWorkflowSchema } from '@open-mercato/cezar-contract/workflow-requests';
@@ -201,7 +201,7 @@ import {
   pushCurrentBranch,
   readWorktreePath,
 } from './git-changes.ts';
-import { loadConfig, resolveWorktreeRetention, updateConfigFile, type CezConfig } from '../config.ts';
+import { loadConfig, resolveWorktreeRetention, type CezConfig } from '../config.ts';
 import { resolveWorktreeSetup } from '../worktree-setup.ts';
 import { findConfigFile } from '../agent-config/catalog.ts';
 import { readConfigFile, statConfigPath, writeConfigFile } from '../agent-config/files.ts';
@@ -4863,17 +4863,8 @@ export function createApp(deps: ServerDeps) {
       if (parsed.data.worktreeSetup !== undefined && !capabilities().settingsAdmin) {
         return c.json({ error: WORKTREE_SETUP_HOSTED_ERROR }, 409);
       }
-      let refused: string | undefined;
-      try {
-        // A file only the schema refuses is merged into. One that is not a JSON object is never
-        // overwritten: the user's keys in it would be lost.
-        refused = await updateConfigFile(dataDir, (current) => {
-          const raw = current.raw;
-          return raw ? { write: mergeConfig(raw, parsed.data), result: undefined } : { refuse: current.ok ? undefined : current.issue };
-        });
-      } catch (err) {
-        return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
-      }
+      const refused = await writeMergedConfig(dataDir, parsed.data).catch((err: unknown) => ({ failed: err instanceof Error ? err.message : String(err) }));
+      if (typeof refused === 'object') return c.json({ error: refused.failed }, 500);
       if (refused !== undefined) return c.json({ error: refused }, 409);
       if (parsed.data.archiveOnMerge !== undefined) deps.archiveOnMergeChanged?.();
       // Pre-R6 answer shape ({baseBranch, defaultRunner}) + additive R6 fields.
