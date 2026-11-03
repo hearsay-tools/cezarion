@@ -141,6 +141,71 @@ const timer = setInterval(() => {
     get git() { return git; }, get gitExit() { return gitExit; }, get saveTask() { return saveTask; } };
 }
 
+async function startSettlement({ store, manager, runId, answer }: SettlementFixture,
+  backend: RunnerId, continuation: boolean, outcome: SettlementOutcome): Promise<void> {
+  const prompt = HARNESS_ADAPTERS[backend].scenarios['provider-error']!;
+  if (continuation) {
+    await reopenSettled({ store, manager, runId, answer }, backend, outcome, prompt);
+    if (outcome === 'success') {
+      // bound: the continued native turn must park before Finish.
+      await waitFor(() => store.getRun(runId)?.status === 'waiting', FIXTURE_STEP_MS);
+    }
+  } else if (outcome === 'failed') {
+    store.updateRun(runId, { task: prompt });
+    manager.enqueueOwnedRun(runId);
+  }
+  if (outcome !== 'failed' && !(continuation && outcome === 'cancelled')) expect(manager.finish(runId)).toBe(true);
+}
+
+async function settleAndAssertRefusal({ store, manager, runId }: SettlementFixture,
+  outcome: SettlementOutcome, bin: string, dir: string, holder: number, unrelated: ChildProcess,
+  interception: ReturnType<typeof installGitHolder>): Promise<void> {
+  const gitPid = interception.git!.pid!;
+  // bound: observe the Git leader's actual exit after releasing it.
+  await waitFor(() => { try { process.kill(gitPid, 0); return false; } catch { return true; } });
+  if (outcome === 'cancelled') expect(manager.cancel(runId)).toBe(true);
+  // bound: the first blocked report can precede the first holder poll under load ("process
+  // inspection pending; retained cwd holder PIDs: none", seen in the full suite at load
+  // 30+); the refusal below quotes the latest report, so wait for the one naming the holder.
+  await waitFor(() => store.readEvents(runId).some(event => event.type === 'note' && String(event.message).includes('termination not confirmed') &&
+    String(event.message).includes(`holder PIDs: ${holder}`)), 5000);
+  // bound: wait for settlement and the real turn-end diff stat. Independence
+  // from cleanup is proven by the live holder below, not by elapsed time.
+  await waitFor(() => !manager.isActive(runId), FIXTURE_STEP_MS);
+  expect(outcome === 'success' ? ['done', 'review'] : [outcome]).toContain(store.getRun(runId)?.status);
+  expect(store.getRun(runId)?.stopping).toBeUndefined();
+  expect(store.readWorkerExecution(runId)?.phase).toBe('complete');
+  const refusal = manager.continueRun(runId, { text: 'another writer' });
+  expect(refusal.ok).toBe(false);
+  expect(refusal.error).toContain(String(holder));
+  expect(refusal.error).not.toContain(String(unrelated.pid));
+  expect(manager.claimForPublish(runId)).toBeNull();
+  expect(manager.claimWorktreeReclaim(runId)).toBeNull();
+  expect(manager.claimForBranchCleanup([runId])).toBeNull();
+  expect(() => process.kill(holder!, 0)).not.toThrow();
+  expect(unrelated.exitCode).toBeNull();
+  expect(existsSync(join(bin, 'signalled'))).toBe(false);
+  expect(readFileSync(join(dir, 'progress.txt'), 'utf8')).toBe('recover me\n');
+  expect(existsSync(join(bin, 'unexpected-writer'))).toBe(false);
+  expect(existsSync(join(dir, 'unexpected-tail'))).toBe(false);
+}
+
+async function recoverWithReplacement({ store, manager, runId, repoRoot, adoptContext }: SettlementFixture,
+  bin: string, holder: number, setReplacement: (context: { store: RunStore; manager: RunManager }) => void): Promise<void> {
+  writeFileSync(join(bin, 'move'), 'move');
+  // bound: the holder must move its real cwd before replacement-manager recovery.
+  await waitFor(() => readlinkSync(`/proc/${holder!}/cwd`) === bin);
+  manager.dispose(); store.close();
+  const reopened = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
+  const replacement = { store: reopened, manager: new RunManager(reopened, repoRoot) };
+  setReplacement(replacement);
+  await adoptContext(replacement);
+  expect(replacement.manager.continueRun(runId, { text: 'after replacement' }).ok).toBe(false);
+  expect(replacement.manager.claimForPublish(runId)).toBeNull();
+  expect(replacement.manager.claimWorktreeReclaim(runId)).toBeNull();
+  expect(replacement.manager.claimForBranchCleanup([runId])).toBeNull();
+}
+
 describe('harness parity — settlement during blocked autosave', () => {
   for (const backend of RUNNER_IDS) {
     for (const continuation of [false, true]) {
@@ -153,14 +218,14 @@ describe('harness parity — settlement during blocked autosave', () => {
           // Finish/idle close saves through real Git; at 500 ms that save can time out
           // on a loaded host and retain an unproven-termination blocker, which refuses
           // the Continue below (hearsay-tools/cezarion#1095, same as R25).
-          let budget: { timeoutMs: number; killGraceMs: number; confirmMs: number } | undefined;
+          let budget: SaveBudget | undefined;
           vi.spyOn(worktrees, 'autosaveCommit').mockImplementation((dir, reason, options) =>
             save(dir, reason, { ...options, ...budget }));
           vi.spyOn(console, 'warn').mockImplementation(() => undefined);
           try {
             const hasTail = continuation && outcome === 'cancelled';
             await withOwnedInputRun(backend, hasTail ? 'cezar-ask' : 'baseline', async (fixture) => {
-              const { store, manager, runId, repoRoot, adoptContext, answer } = fixture;
+              const { store, manager, runId, repoRoot } = fixture;
               await parkForSettlement(fixture, continuation, outcome, hasTail);
               const bin = mkdtempSync(join(tmpdir(), 'cez-settlement-git-'));
               let replacement: { store: RunStore; manager: RunManager } | undefined;
@@ -169,18 +234,7 @@ describe('harness parity — settlement during blocked autosave', () => {
               let holder: number | undefined;
               const interception = installGitHolder(bin, value => { budget = value; });
               try {
-                const prompt = HARNESS_ADAPTERS[backend].scenarios['provider-error']!;
-                if (continuation) {
-                  await reopenSettled({ store, manager, runId, answer }, backend, outcome, prompt);
-                  if (outcome === 'success') {
-                    // bound: the continued native turn must park before Finish.
-                    await waitFor(() => store.getRun(runId)?.status === 'waiting', FIXTURE_STEP_MS);
-                  }
-                } else if (outcome === 'failed') {
-                  store.updateRun(runId, { task: prompt });
-                  manager.enqueueOwnedRun(runId);
-                }
-                if (outcome !== 'failed' && !(continuation && outcome === 'cancelled')) expect(manager.finish(runId)).toBe(true);
+                await startSettlement(fixture, backend, continuation, outcome);
                 // bound: fixture startup ends when the real detached holder publishes a complete PID.
                 await waitFor(() => readPid(join(bin, 'holder')) !== undefined, FIXTURE_STEP_MS);
                 if (hasTail) expect(store.getRun(runId)?.steps.slice(0, 2).map(step => step.status)).toEqual(['done', 'pending']);
@@ -197,46 +251,9 @@ setInterval(() => require('node:child_process').spawn(process.execPath, ['-e', '
                 unrelatedExit = new Promise(resolve => unrelated!.once('exit', resolve));
                 writeFileSync(join(bin, 'exit'), 'exit');
                 interception.releaseIndex();
-                const gitPid = interception.git!.pid!;
-                // bound: observe the Git leader's actual exit after releasing it.
-                await waitFor(() => { try { process.kill(gitPid, 0); return false; } catch { return true; } });
-                if (outcome === 'cancelled') expect(manager.cancel(runId)).toBe(true);
-                // bound: the first blocked report can precede the first holder poll under load ("process
-                // inspection pending; retained cwd holder PIDs: none", seen in the full suite at load
-                // 30+); the refusal below quotes the latest report, so wait for the one naming the holder.
-                await waitFor(() => store.readEvents(runId).some(event => event.type === 'note' && String(event.message).includes('termination not confirmed') &&
-                  String(event.message).includes(`holder PIDs: ${holder}`)), 5000);
-                // bound: wait for settlement and the real turn-end diff stat. Independence
-                // from cleanup is proven by the live holder below, not by elapsed time.
-                await waitFor(() => !manager.isActive(runId), FIXTURE_STEP_MS);
-                expect(outcome === 'success' ? ['done', 'review'] : [outcome]).toContain(store.getRun(runId)?.status);
-                expect(store.getRun(runId)?.stopping).toBeUndefined();
-                expect(store.readWorkerExecution(runId)?.phase).toBe('complete');
-                const refusal = manager.continueRun(runId, { text: 'another writer' });
-                expect(refusal.ok).toBe(false);
-                expect(refusal.error).toContain(String(holder));
-                expect(refusal.error).not.toContain(String(unrelated.pid));
-                expect(manager.claimForPublish(runId)).toBeNull();
-                expect(manager.claimWorktreeReclaim(runId)).toBeNull();
-                expect(manager.claimForBranchCleanup([runId])).toBeNull();
-                expect(() => process.kill(holder!, 0)).not.toThrow();
-                expect(unrelated.exitCode).toBeNull();
-                expect(existsSync(join(bin, 'signalled'))).toBe(false);
-                expect(readFileSync(join(dir, 'progress.txt'), 'utf8')).toBe('recover me\n');
-                expect(existsSync(join(bin, 'unexpected-writer'))).toBe(false);
-                expect(existsSync(join(dir, 'unexpected-tail'))).toBe(false);
+                await settleAndAssertRefusal(fixture, outcome, bin, dir, holder, unrelated, interception);
                 if (!continuation && outcome === 'failed') {
-                  writeFileSync(join(bin, 'move'), 'move');
-                  // bound: the holder must move its real cwd before replacement-manager recovery.
-                  await waitFor(() => readlinkSync(`/proc/${holder!}/cwd`) === bin);
-                  manager.dispose(); store.close();
-                  const reopened = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
-                  replacement = { store: reopened, manager: new RunManager(reopened, repoRoot) };
-                  await adoptContext(replacement);
-                  expect(replacement.manager.continueRun(runId, { text: 'after replacement' }).ok).toBe(false);
-                  expect(replacement.manager.claimForPublish(runId)).toBeNull();
-                  expect(replacement.manager.claimWorktreeReclaim(runId)).toBeNull();
-                  expect(replacement.manager.claimForBranchCleanup([runId])).toBeNull();
+                  await recoverWithReplacement(fixture, bin, holder, context => { replacement = context; });
                 }
               } finally {
                 interception.deadlineClock.mockRestore();
