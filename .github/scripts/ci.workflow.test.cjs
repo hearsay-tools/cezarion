@@ -18,16 +18,15 @@ function stepsText(job) {
   return JSON.stringify(job.steps);
 }
 
-test('push classifier fetches only its source commit and keeps full history for PR checks', () => {
+test('the classifier fetches one commit, and history only for the events whose baseline check reads it', () => {
   const { runInNewContext } = require('node:vm');
   const job = workflow().jobs['classify-pr'];
   const checkout = job.steps.find(step => step.name === 'Check out trusted classifier');
-  const depth = checkout.with['fetch-depth'];
-  assert.equal(typeof depth, 'string', 'fetch depth must depend on the event');
-  const expression = depth.slice(3, -2).trim();
-  for (const event of ['push', 'pull_request_target', 'workflow_dispatch', 'merge_group']) {
-    assert.equal(runInNewContext(expression, { github: { event_name: event } }), event === 'push' ? 1 : 0, event);
-  }
+  assert.equal(checkout.with['fetch-depth'], 1, 'a depth of 0 fetches every branch and tag');
+  const history = job.steps.find(step => step.name === 'Fetch the history the baseline check compares');
+  const fetches = (event, valid = '') => runInNewContext(history.if, { github: { event_name: event }, steps: { 'resolve-dispatch': { outputs: { valid } } } });
+  assert.deepEqual(['push', 'merge_group', 'workflow_dispatch', 'pull_request_target'].map(event => fetches(event)), [false, false, false, true]);
+  assert.equal(fetches('workflow_dispatch', 'true'), true, 'a dispatched release PR runs the baseline check');
   assert.equal(job['timeout-minutes'], 5);
   assert.equal(checkout.with['persist-credentials'], false);
 });
@@ -676,11 +675,17 @@ test('baseline growth is required through trusted classify-pr with default PR ev
   assert.match(checkout.with.ref, /pull_request.base.sha/);
   assert.doesNotMatch(checkout.with.ref, /pull_request.head/);
   assert.equal(checkout.with['persist-credentials'], false);
-  assert.equal(require('node:vm').runInNewContext(checkout.with['fetch-depth'].slice(3, -2), { github: { event_name: 'pull_request_target' } }), 0);
+  assert.equal(checkout.with['fetch-depth'], 1);
   assert.equal(job.permissions.contents, 'read');
   assert.equal(job.permissions['pull-requests'], 'read');
   const check = job.steps[checkIndex];
   assert.equal(check.if, "github.event_name == 'pull_request_target' || steps['resolve-dispatch'].outputs.valid == 'true'");
+  // The check measures from the merge base of the workflow commit and the PR head, so only the events
+  // that run it fetch history, and only that commit's.
+  const history = job.steps.findIndex(step => step.name === 'Fetch the history the baseline check compares');
+  assert.ok(checkoutIndex < history && history < checkIndex);
+  assert.equal(job.steps[history].if, check.if);
+  assert.equal(job.steps[history].run, 'git fetch --no-tags --unshallow origin "$GITHUB_SHA"');
   // The checkout is the event's base.sha, which can predate the gate; the workflow's own commit cannot.
   // A dispatch runs at the dispatched PR head, so only the checked-out trusted base may supply its gate.
   assert.deepEqual(await baselineGateSources(check.with.script, 'pull_request_target'), ['workflow-sha:.github/scripts/baseline-growth.cjs']);
@@ -706,7 +711,7 @@ test('the complexity gate runs the workflow commit and reads the pull request he
   assert.equal(ref({}), 'workflow-sha');
   assert.equal(ref({ merge_group: { base_sha: 'group-base-sha' } }), 'group-base-sha');
   assert.equal(checkouts[0].with['persist-credentials'], false);
-  assert.equal(checkouts[0].with['fetch-depth'], 0);
+  assert.equal(checkouts[0].with['fetch-depth'], 1);
   assert.doesNotMatch(JSON.stringify(job), /base\.sha|refs\/pull\/\{0\}\/merge|allow-unsafe-pr-checkout/);
   assert.deepEqual(job.permissions, { contents: 'read', 'pull-requests': 'read' });
   const install = job.steps.find(step => /^pnpm install/.test(step.run ?? ''));
@@ -781,7 +786,7 @@ function complexityGateFixture(t) {
   t.after(() => fs.rmSync(bin, { recursive: true, force: true }));
   fs.writeFileSync(path.join(bin, 'gh'), '#!/bin/sh\nprintf \'%s\\n\' "$FAKE_PR"\n', { mode: 0o755 });
   const step = workflow().jobs['complexity-gate'].steps.find(candidate => candidate.name === 'Reject function complexity growth');
-  const run = (env) => spawnSync('bash', ['-e', '-c', step.run], { cwd: dir, encoding: 'utf8', env: {
+  const run = (env, cwd = dir) => spawnSync('bash', ['-e', '-c', step.run], { cwd, encoding: 'utf8', env: {
     PATH: `${bin}:${process.env.PATH}`, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GH_TOKEN: 'unused',
     GITHUB_REPOSITORY: 'owner/repo', PR_NUMBER: '7', EXPECTED_HEAD_SHA: head, EVENT_NAME: 'pull_request_target',
     GITHUB_SHA: tip, FAKE_PR: JSON.stringify({ head: { sha: head }, labels: [] }), ...env,
@@ -799,10 +804,10 @@ function complexityGateFixture(t) {
     git('checkout', '-q', 'main');
     return { prHead, groupHead };
   };
-  const group = (groupHead, number, env = {}) => run({
+  const group = (groupHead, number, env = {}, cwd = dir) => run({
     EVENT_NAME: 'merge_group', GROUP_BASE_SHA: tip, GROUP_HEAD_SHA: groupHead, GITHUB_SHA: groupHead,
     GROUP_HEAD_REF: `refs/heads/gh-readonly-queue/main/pr-${number}-${groupHead}`, PR_NUMBER: '', EXPECTED_HEAD_SHA: '', ...env,
-  });
+  }, cwd);
   return { dir, git, run, head, tip, forkPoint, queued, group };
 }
 
@@ -871,11 +876,83 @@ test('a bare dispatch gates the dispatched commit against main', (t) => {
   assert.match(result.stdout, /over: complexity 21 \(new function; limit 20\)/);
 });
 
+// The gate job's own checkout of `ref` from the fixture, as actions/checkout fetches it: a depth of 0
+// fetches every branch and tag, any other depth fetches that many commits of `ref`. Then the job's
+// history step, when its condition holds for `event`.
+function gateCheckout(t, f, ref, event) {
+  const { runInNewContext } = require('node:vm');
+  const steps = workflow().jobs['complexity-gate'].steps;
+  const depth = steps.find(step => step.uses?.startsWith('actions/checkout@')).with['fetch-depth'];
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'cezar-gate-checkout-'));
+  t.after(() => fs.rmSync(work, { recursive: true, force: true }));
+  const git = (...args) => {
+    const result = spawnSync('git', args, { cwd: work, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  git('init', '-q');
+  git('remote', 'add', 'origin', `file://${f.dir}`);
+  if (depth === 0) git('fetch', '-q', 'origin', '+refs/heads/*:refs/remotes/origin/*', '+refs/tags/*:refs/tags/*');
+  else git('fetch', '-q', '--no-tags', `--depth=${depth}`, 'origin', ref);
+  git('checkout', '-q', '--detach', ref);
+  fs.symlinkSync(path.join(repoRoot, 'node_modules'), path.join(work, 'node_modules'));
+  const history = steps.find(step => step.name === 'Fetch the history the gate compares');
+  if (history && runInNewContext(history.if, { github: { event_name: event } })) {
+    const fetched = spawnSync('bash', ['-e', '-c', history.run], { cwd: work, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
+    assert.equal(fetched.status, 0, fetched.stderr);
+  }
+  return { work, git };
+}
+
+test('every complexity gate event works from a one-commit checkout and never fetches unrelated branches', (t) => {
+  const f = complexityGateFixture(t);
+  // A branch the gates never compare, like the large unmerged branches on the real remote.
+  f.git('checkout', '-q', '-b', 'unrelated', f.forkPoint);
+  fs.writeFileSync(path.join(f.dir, 'unrelated.bin'), 'x'.repeat(4096));
+  f.git('add', '-A');
+  f.git('commit', '-qm', 'unrelated');
+  const unrelated = f.git('rev-parse', 'HEAD');
+  f.git('checkout', '-q', 'main');
+  const { prHead, groupHead } = f.queued(8);
+  const lacksUnrelated = ({ git }) => assert.ok(!git('rev-list', '--all').split('\n').includes(unrelated), 'an unrelated branch was fetched');
+
+  const pr = gateCheckout(t, f, f.tip, 'pull_request_target');
+  const failed = f.run({}, pr.work);
+  assert.equal(failed.status, 1, failed.stdout + failed.stderr);
+  assert.match(failed.stdout, /over: complexity 21 \(new function; limit 20\)/);
+  assert.doesNotMatch(failed.stdout, /later/, 'the merge base is the fork point, as with full history');
+  lacksUnrelated(pr);
+
+  const queue = gateCheckout(t, f, f.tip, 'merge_group');
+  const combined = f.group(groupHead, 8, {}, queue.work);
+  assert.equal(combined.status, 1, combined.stdout + combined.stderr);
+  assert.match(combined.stdout, /shared: complexity 21 \(was 20 at the merge base; limit 20\)/);
+  assert.equal(queue.git('rev-parse', '--is-shallow-repository'), 'true', 'a merge group reads no history beyond its base');
+  assert.notEqual(queue.git('cat-file', '-t', prHead), '', 'the group head brings the pull request commit');
+  lacksUnrelated(queue);
+
+  const dispatch = gateCheckout(t, f, f.head, 'workflow_dispatch');
+  const bare = f.run({ EVENT_NAME: 'workflow_dispatch', GITHUB_SHA: f.head, PR_NUMBER: '', EXPECTED_HEAD_SHA: '' }, dispatch.work);
+  assert.equal(bare.status, 1, bare.stdout + bare.stderr);
+  assert.match(bare.stdout, /over: complexity 21 \(new function; limit 20\)/);
+  lacksUnrelated(dispatch);
+});
+
+test('the classifier and the clone gate fetch history the same way as the complexity gate', () => {
+  const ci = workflow();
+  const complexity = ci.jobs['complexity-gate'];
+  const clone = ci.jobs['clone-gate'];
+  assert.deepEqual(clone.steps.slice(0, 2), complexity.steps.slice(0, 2));
+  assert.equal(complexity.steps[1].if, "github.event_name != 'merge_group'");
+  const checkout = ci.jobs['classify-pr'].steps.find(step => step.name === 'Check out trusted classifier');
+  assert.equal(checkout.with['fetch-depth'], 1);
+});
+
 test('clone gate uses trusted tooling and is required for PRs and merge groups', () => {
   const ci = workflow();
   const gate = ci.jobs['clone-gate'];
   const complexity = ci.jobs['complexity-gate'];
-  assert.deepEqual(gate.steps.slice(0, 4), complexity.steps.slice(0, 4));
+  assert.deepEqual(gate.steps.slice(0, 5), complexity.steps.slice(0, 5));
   assert.equal(gate.if, complexity.if);
   assert.deepEqual(gate.permissions, { contents: 'read', 'pull-requests': 'read' });
   assert.ok(ci.jobs.verify.needs.includes('clone-gate'));

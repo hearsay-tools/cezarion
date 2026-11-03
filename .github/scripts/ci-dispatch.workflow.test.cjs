@@ -61,7 +61,8 @@ process.stdout.write(JSON.stringify(value));
           fs.copyFileSync(path.join(__dirname, name), path.join(dir, '.github/scripts', name));
         }
       }
-      if (!step.run) continue;
+      // The checkout above is simulated by copying scripts, so there is no history to fetch.
+      if (!step.run || step.name === 'Fetch the history the baseline check compares') continue;
       const output = path.join(dir, `${step.id}.output`);
       const stepEnv = Object.fromEntries(Object.entries(step.env || {}).map(([key, value]) => [key, String(evaluate(value, context) ?? '')]));
       const result = spawnSync('bash', ['-e', '-c', step.run], { cwd: dir, env: { ...env, ...stepEnv, GITHUB_OUTPUT: output }, encoding: 'utf8' });

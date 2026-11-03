@@ -202,9 +202,14 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha || steps['resolve-dispatch'].outputs.base_sha || github.event.merge_group.base_sha || github.sha }}
           persist-credentials: false
-          # Push classification returns false without reading history. Avoid
-          # fetching every branch and tag before that constant result.
-          fetch-depth: ${{ github.event_name == 'push' && 1 || 0 }}
+          # One commit. A depth of 0 fetches every branch and tag, about six times
+          # main's own history, and took up to 3.5 minutes on a busy host.
+          fetch-depth: 1
+      # The baseline check measures from the merge base of the workflow commit and
+      # the PR head, so it needs their history; other events read none.
+      - name: Fetch the history the baseline check compares
+        if: github.event_name == 'pull_request_target' || steps['resolve-dispatch'].outputs.valid == 'true'
+        run: git fetch --no-tags --unshallow origin "$GITHUB_SHA"
       # Required through classify-pr -> verify, including docs/infra-only PRs.
       # Only trusted base code runs here; the head is read from Git as data.
       - name: Reject baseline growth
@@ -305,7 +310,14 @@ jobs:
         with:
           ref: ${{ github.event.merge_group.base_sha || github.sha }}
           persist-credentials: false
-          fetch-depth: 0
+          # One commit. A depth of 0 fetches every branch and tag; see classify-pr.
+          fetch-depth: 1
+      # A merge group head's parent is the group base, so fetching the head in the
+      # gate step is enough. Pull requests and dispatches compare with a merge base
+      # further back, so they fetch the full history of this commit and main only.
+      - name: Fetch the history the gate compares
+        if: github.event_name != 'merge_group'
+        run: git fetch --no-tags --unshallow origin +refs/heads/main:refs/remotes/origin/main
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
@@ -382,7 +394,14 @@ jobs:
         with:
           ref: ${{ github.event.merge_group.base_sha || github.sha }}
           persist-credentials: false
-          fetch-depth: 0
+          # One commit. A depth of 0 fetches every branch and tag; see classify-pr.
+          fetch-depth: 1
+      # A merge group head's parent is the group base, so fetching the head in the
+      # gate step is enough. Pull requests and dispatches compare with a merge base
+      # further back, so they fetch the full history of this commit and main only.
+      - name: Fetch the history the gate compares
+        if: github.event_name != 'merge_group'
+        run: git fetch --no-tags --unshallow origin +refs/heads/main:refs/remotes/origin/main
       - name: Set up pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
