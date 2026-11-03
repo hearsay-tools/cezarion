@@ -97,12 +97,17 @@ jobs:
       - name: Report served-server peak memory
         run: |
           node --input-type=module <<'NODE'
-          import { readFileSync } from 'node:fs';
+          import { readFileSync, readdirSync } from 'node:fs';
+          import { basename, join } from 'node:path';
           const { app: { pid } } = JSON.parse(readFileSync('.ai/qa/test-env.json', 'utf8'));
-          const status = readFileSync(`/proc/${pid}/status`, 'utf8');
-          const peak = status.match(/^VmHWM:\s+(\d+) kB$/m)?.[1];
-          if (!peak) throw new Error('the served server has no peak RSS measurement');
-          console.log(`Served server peak RSS: ${peak} KiB`);
+          const root = process.env.E2E_SPEC_MAP_NODE_DIR;
+          const samples = readdirSync(root, { recursive: true, encoding: 'utf8' })
+            .filter(file => basename(file).startsWith(`server-${pid}-`) || basename(file) === `shared-startup-${pid}.json`)
+            .map(file => JSON.parse(readFileSync(join(root, file), 'utf8')).peakRssKiB)
+            .filter(value => Number.isFinite(value) && value > 0);
+          console.log(samples.length
+            ? `Served server peak RSS: ${Math.max(...samples)} KiB`
+            : 'Served server peak RSS: unavailable (no server coverage snapshot)');
           NODE
 
       - name: Build the cockpit again with source maps

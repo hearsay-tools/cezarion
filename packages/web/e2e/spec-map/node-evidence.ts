@@ -14,15 +14,26 @@ interface CoverageFunction {
 }
 interface CoverageScript { url: string; functions: CoverageFunction[] }
 
-function lineAt(code: string, offset: number): number {
-  return code.slice(0, offset).split('\n').length
+function lineStarts(code: string): number[] {
+  return [0, ...Array.from(code.matchAll(/\n/g), (match) => match.index + 1)]
+}
+
+function lineAt(starts: number[], offset: number): number {
+  let low = 0
+  let high = starts.length
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2)
+    if (starts[middle]! <= offset) low = middle + 1
+    else high = middle
+  }
+  return low
 }
 
 /** Translate generated server lines through the source map emitted by the harness build. */
-function position(file: string, code: string, offset: number, root: string, map: TraceMap | null) {
-  const line = lineAt(code, offset)
+function position(file: string, starts: number[], offset: number, root: string, map: TraceMap | null) {
+  const line = lineAt(starts, offset)
   if (!map) return { source: relative(root, file), line }
-  const column = offset - (code.lastIndexOf('\n', offset - 1) + 1)
+  const column = offset - (starts[line - 1] ?? 0)
   const original = originalPositionFor(map, { line, column })
   if (!original.source || !original.line) return null
   const source = relative(root, resolve(dirname(file), original.source))
@@ -38,13 +49,13 @@ export function scriptFunctions(script: CoverageScript, root: string): FunctionE
   const server = file.startsWith(join(root, '.ai/qa/build/cezar/dist/')) && existsSync(`${file}.map`)
   if ((!mock && !server) || !existsSync(file)) return []
   const map = server ? new TraceMap(readFileSync(`${file}.map`, 'utf8'), `${file}.map`) : null
-  const code = readFileSync(file, 'utf8')
+  const starts = lineStarts(readFileSync(file, 'utf8'))
   const result: FunctionEvidence[] = []
   for (const fn of script.functions) {
     const range = fn.ranges[0]
     if (!range) continue
-    const start = position(file, code, range.startOffset, root, map)
-    const end = position(file, code, Math.max(range.startOffset, range.endOffset - 1), root, map)
+    const start = position(file, starts, range.startOffset, root, map)
+    const end = position(file, starts, Math.max(range.startOffset, range.endOffset - 1), root, map)
     if (!start || !end || start.source !== end.source) continue
     result.push({ source: start.source, start: start.line, end: end.line, executed: range.count > 0 })
   }

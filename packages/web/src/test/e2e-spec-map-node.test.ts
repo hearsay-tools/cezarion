@@ -218,7 +218,8 @@ test('retains shared startup function execution across later spec resets', async
   const startupFile = join(directory, `shared-startup-${child.pid}.json`)
   await beginNodeCapture(directory, 'packages/web/e2e/boot-first.e2e.ts')
   const initial = readFileSync(startupFile, 'utf8')
-  const startup = JSON.parse(initial) as { result: ReturnType<typeof results> }
+  const startup = JSON.parse(initial) as { result: ReturnType<typeof results>; peakRssKiB: number }
+  expect(startup.peakRssKiB).toBeGreaterThan(0)
   expect(startup.result.find(script => script.url.endsWith('/dist/index.js'))?.functions)
     .toEqual(expect.arrayContaining([expect.objectContaining({ functionName: 'boot', ranges: expect.arrayContaining([expect.objectContaining({ count: 1 })]) })]))
   await endNodeCapture(directory, 'packages/web/e2e/boot-first.e2e.ts')

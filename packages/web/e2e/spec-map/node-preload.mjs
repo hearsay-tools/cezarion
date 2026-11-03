@@ -86,14 +86,15 @@ async function install(root, owner) {
   function snapshot(spec, startup = false) {
     session.post('Profiler.takePreciseCoverage', (error, result) => {
       if (error) throw error;
+      const evidence = { ...result, peakRssKiB: process.resourceUsage().maxRSS };
       if (startup) {
-        writeRecord(join(root, `shared-startup-${process.pid}.json`), result);
+        writeRecord(join(root, `shared-startup-${process.pid}.json`), evidence);
         return;
       }
       if (!spec) return;
       const dir = join(root, basename(spec, '.e2e.ts'), 'node');
       mkdirSync(dir, { recursive: true });
-      writeRecord(join(dir, `server-${process.pid}-${sequence++}.json`), result);
+      writeRecord(join(dir, `server-${process.pid}-${sequence++}.json`), evidence);
     });
   }
   function patchCreation() {
