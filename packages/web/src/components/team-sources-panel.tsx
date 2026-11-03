@@ -57,7 +57,9 @@ function useSourceMutation<T>(write: (body: T) => Promise<TeamSkillSourcesRespon
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: write,
-    onSuccess: (answer, body) => {
+    onSuccess: async (answer, body) => {
+      // A read sent before the change would land after it and bring the old list back.
+      await queryClient.cancelQueries({ queryKey: skillSourcesKey(), exact: true })
       queryClient.setQueryData(skillSourcesKey(), answer)
       invalidateSkillLists(queryClient)
       done?.(body)

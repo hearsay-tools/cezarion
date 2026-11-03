@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { queryKeys } from '@/api/queries'
+import { skillSourcesKey } from '@/api/skill-sources-client'
 import { createQueryClient } from '@/api/query-client'
 import type { TeamSkillSource, TeamSkillSourcesResponse } from '@open-mercato/cezar-api-client'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
@@ -23,8 +24,13 @@ const source = (over: Partial<TeamSkillSource> & Pick<TeamSkillSource, 'repo'>):
   ...over,
 })
 
-function serve(initial: Partial<TeamSkillSourcesResponse> = {}, { failAdd }: { failAdd?: string } = {}) {
+/** While set, a GET of the sources answers only when the test calls `release`, with the list as
+ *  it was when the GET arrived. */
+let heldReads: { release: () => void } | undefined
+
+function serve(initial: Partial<TeamSkillSourcesResponse> = {}, { failAdd, holdReads = false }: { failAdd?: string; holdReads?: boolean } = {}) {
   requests = []
+  heldReads = undefined
   let state: TeamSkillSourcesResponse = { sources: [], editable: true, configIssue: null, ...initial }
   const json = (payload: unknown, status = 200) =>
     new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } })
@@ -40,6 +46,10 @@ function serve(initial: Partial<TeamSkillSourcesResponse> = {}, { failAdd }: { f
         return json(state)
       }
       if (url !== '/api/v1/skills/sources') return new Promise<never>(() => {})
+      if (method === 'GET' && holdReads && requests.filter((r) => r.method === 'GET').length > 1) {
+        const snapshot = state
+        return new Promise<Response>((resolve) => { heldReads = { release: () => resolve(json(snapshot)) } })
+      }
       if (method === 'POST') {
         if (failAdd) return json({ error: failAdd }, 409)
         state = { ...state, sources: [...state.sources, source({ repo: String(body?.repo), ref: String(body?.ref ?? 'main'), status: { state: 'ok', skillCount: 1 } })] }
@@ -173,6 +183,20 @@ describe('TeamSourcesPanel', () => {
     await waitFor(() => expect(rowFor('acme/skills')).toBeNull())
     expect(client.getQueryState(queryKeys.skillsReady)?.isInvalidated).toBe(true)
     expect(client.getQueryState(queryKeys.importableSkillsReady)?.isInvalidated).toBe(true)
+  })
+
+  it('a source read already in flight does not overwrite the answer of a later change', async () => {
+    serve({ sources: [source({ repo: 'acme/skills' }), source({ repo: 'acme/other' })] }, { holdReads: true })
+    const client = renderPanel()
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    void client.refetchQueries({ queryKey: skillSourcesKey() })
+    await waitFor(() => expect(heldReads).toBeDefined())
+    fireEvent.click(rowFor('acme/other')!.querySelector('[data-slot="skill-source-remove"]')!)
+    await waitFor(() => expect(rowFor('acme/other')).toBeNull())
+    await act(async () => heldReads!.release())
+    // bound: the held read settles in microtasks; this guards only against a hang
+    await waitFor(() => expect(client.isFetching({ queryKey: skillSourcesKey() })).toBe(0))
+    expect(rowFor('acme/other')).toBeNull()
   })
 
   it('is read-only on a remote cockpit', async () => {
