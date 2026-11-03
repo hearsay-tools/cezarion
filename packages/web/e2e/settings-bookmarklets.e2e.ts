@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, readTestEnv, servedRoot } from './agent-browser'
 
@@ -91,6 +91,11 @@ afterAll(() => {
   rmSync(resolve(skillsDir, `${BETA}.md`), { force: true })
   if (createdSkillsDir) rmSync(skillsDir, { recursive: true, force: true })
   browser?.close()
+})
+
+beforeEach(() => {
+  browser.goto(`${baseUrl}/settings/bookmarklets`)
+  browser.waitForFunction(`document.querySelector('[data-slot="bookmarklet-panel"]') !== null`)
 })
 
 describe('settings → bookmarklets against the live dry-run server', () => {

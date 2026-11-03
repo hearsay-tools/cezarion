@@ -71,6 +71,8 @@ describe('settings → appearance against the live dry-run server', () => {
   })
 
   it('flipping the theme flips the root class and persists across a reload', () => {
+    browser.goto(`${baseUrl}/settings/global/appearance`)
+    browser.waitForFunction(`document.querySelector('[data-route="settings-global-appearance"]') !== null`)
     clickAppearanceControl(browser, 'theme', 'light')
     browser.waitForFunction(`document.documentElement.classList.contains('light')`)
 
@@ -112,6 +114,11 @@ describe('settings → appearance against the live dry-run server', () => {
   })
 
   it('compact density measurably tightens the spacing scale', async () => {
+    browser.goto(`${baseUrl}/settings/global/appearance`)
+    browser.waitForFunction(`document.querySelector('[data-route="settings-global-appearance"]') !== null`)
+    clickAppearanceControl(browser, 'density', 'comfortable')
+    await waitForServerAppearance(baseUrl, (a) => a.density === 'comfortable')
+    browser.waitForFunction(`document.documentElement.dataset.density === undefined`)
     const header = `document.querySelector('[data-route="settings-global-appearance"] header')`
     const section = `document.querySelector('[data-slot="appearance-section"]')`
     // The #622 board's one-line header is a fixed 16/28 bar, so density leaves it alone; the
