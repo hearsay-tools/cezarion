@@ -22,8 +22,8 @@ import { apiRequest } from '../server/loopback-request.testkit.ts';
  * above the seam.
  *
  * `describeHarnessParity` defines every cell. `harness-parity.test.ts` runs the
- * matrix guard and the single-runner cells, and each `harness-<runner>-parity.test.ts`
- * runs one runner's cells (hearsay-tools/cezarion#1288).
+ * matrix guard and the single-runner cells, and each `harness-<runner>-<part>-parity.test.ts`
+ * runs one part of a runner's cells (hearsay-tools/cezarion#1288).
  */
 import { TranscriptFactsQueue } from '../runs/transcript-facts-queue.ts';
 import { historyPaths } from '../runs/history-file.ts';
@@ -65,7 +65,7 @@ import {
 import { createRunner } from './runner-factory.ts';
 import { shellQuote } from './shell-env.ts';
 import { explicitToolGrant } from './tool-grant.testkit.ts';
-import { describeToolGrantParity } from './tool-grant-parity-cells.testkit.ts';
+import { TOOL_GRANT_CASES, describeToolGrantParity } from './tool-grant-parity-cells.testkit.ts';
 import { inputDeliveryOf } from './agent-runner.ts';
 import { agentTmpDir, resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
 import * as gitWorktree from '../git-worktree.ts';
@@ -674,46 +674,6 @@ const CONTROL_CRITERIA = [
   { id: 'PR2', scenario: 'multi-pr-refs' },
 ] as const;
 
-/**
- * Register one cell. An exempt cell still produces a named test that fails the
- * day the backend gains the thing — see `ExemptionKind` for the two ways that
- * is pinned. Never relax an assertion to accommodate an exemption; delete the
- * exemption instead.
- */
-function parityRow<T = SeamObservation>(
-  backend: RunnerId,
-  criterion: SeamCriterion<T>,
-  observe: () => Promise<T>,
-): void {
-  const exempt = exemptionFor(criterion.id, backend);
-  if (!exempt) {
-    it(
-      `${backend} ${criterion.name}`,
-      async () => {
-        criterion.assert(await observe());
-      },
-      45_000,
-    );
-    return;
-  }
-  if (exempt.kind === 'scenario-unconstructible') {
-    it(`${backend} is exempt from ${criterion.id} — ${exempt.reason}`, () => {
-      // The pin: no prompt is declared, so nothing can drive this row here. Add
-      // one and this fails, which is the signal to make the row live.
-      expect(HARNESS_ADAPTERS[backend].scenarios[criterion.scenario]).toBeUndefined();
-    });
-    return;
-  }
-  it(
-    `${backend} is exempt from ${criterion.id} — ${exempt.reason}`,
-    async () => {
-      const obs = await observe();
-      expect(() => criterion.assert(obs)).toThrow();
-    },
-    45_000,
-  );
-}
-
 // Group 8 — #505: agent input reaches a running turn and its reading is reported.
 interface InputObservation {
   readonly obs: SeamObservation;
@@ -937,17 +897,6 @@ type StoredEvent = Record<string, unknown>;
 const joinedText = (events: readonly StoredEvent[]) => events.filter(event => event.type === 'text').map(event => event.text).join('');
 const permissionResolutionsOf = (events: readonly StoredEvent[]) => events.filter(event => event.type === 'permission.resolved');
 
-/** Registers the exemption cell when there is one; P1's shape for every lifecycle criterion. */
-function permissionExemption(id: string, backend: RunnerId, scenario: ScenarioName): boolean {
-  const exemption = exemptionFor(id, backend);
-  if (!exemption) return false;
-  it(`${backend} ${id} exemption — ${exemption.reason}`, () => {
-    expect(exemption.kind).toBe('scenario-unconstructible');
-    expect(HARNESS_ADAPTERS[backend].scenarios[scenario]).toBeUndefined();
-  });
-  return true;
-}
-
 /** A fresh `CEZ_MOCK_RELEASE_FILE` path; the mock waits for the file before its next step. */
 async function withRelease<T>(body: (release: string) => Promise<T>): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), 'cez-permission-'));
@@ -970,20 +919,97 @@ const RETIREMENTS = [
   { id: 'P4', scenario: 'approval-turn-end', text: 'Turn ended with the approval still pending.' },
 ] as const;
 
-export const harnessParityFile = (backend: RunnerId): string => `harness-${backend}-parity.test.ts`;
+export type HarnessParityPart = 'session' | 'run' | 'ownership' | 'settlement' | 'provider' | 'owned-input';
 
-// Each runner's cells run from their own `harness-<runner>-parity.test.ts`: one file runs serially,
-// and every runner's cells in one file outgrew Squeal's 600 s per-file cap (hearsay-tools/cezarion#1288).
-// `harness-parity.test.ts` runs the matrix guard and the single-runner cells.
-export function describeHarnessParity(scope: RunnerId | 'once'): void {
-  const runners: RunnerId[] = scope === 'once' ? [] : [scope];
-  // Vitest fails a suite with no test, so a describe that holds only runner cells is not registered
-  // in the once file.
-  const describeRunners = (name: string, body: () => void): void => {
-    if (scope !== 'once') describe(name, body);
+// Adjacent semantic families; every group below belongs to exactly one part.
+export const HARNESS_PARITY_GROUPS: Readonly<Record<HarnessParityPart, readonly string[]>> = {
+  provider: ['provider'],
+  session: ['seam', 'session', 'input', 'governed', 'native-message', 'spec', 'tools', 'cdp', 'tool-grants'],
+  run: ['run', 'diagnostics', 'child', 'hooks', 'answer', 'monitoring', 'prs'],
+  'owned-input': ['owned'],
+  ownership: ['continue', 'restart', 'owner', 'adopt', 'stop'],
+  settlement: ['cleanup', 'multi-continue', 'superseded', 'disposal', 'scratch', 'permission', 'default-permission', 'retirement-P3', 'retirement-P4', 'permission-failure', 'malformed', 'early-permission', 'late-permission', 'mcp'],
+};
+
+export const harnessParityFile = (backend: RunnerId, part: HarnessParityPart): string =>
+  `harness-${backend}-${part}-parity.test.ts`;
+
+// The once file keeps matrix guards and single-runner checks. Runner parts own disjoint groups.
+type HarnessRegistration = Pick<typeof import('vitest'), 'describe' | 'it' | 'beforeAll' | 'afterAll'> & {
+  toolGrants: typeof describeToolGrantParity;
+  allGroups?: boolean;
+};
+
+export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessParityPart } | 'once',
+  registration: HarnessRegistration = { describe, it, beforeAll, afterAll, toolGrants: describeToolGrantParity }): void {
+  const { describe, it, beforeAll, afterAll } = registration;
+  /**
+   * Register one cell. An exempt cell still produces a named test that fails the
+   * day the backend gains the thing — see `ExemptionKind` for the two ways that
+   * is pinned. Never relax an assertion to accommodate an exemption; delete the
+   * exemption instead.
+   */
+  function parityRow<T = SeamObservation>(
+    backend: RunnerId,
+    criterion: SeamCriterion<T>,
+    observe: () => Promise<T>,
+  ): void {
+    const exempt = exemptionFor(criterion.id, backend);
+    if (!exempt) {
+      it(
+        `${backend} ${criterion.name}`,
+        async () => {
+          criterion.assert(await observe());
+        },
+        45_000,
+      );
+      return;
+    }
+    if (exempt.kind === 'scenario-unconstructible') {
+      it(`${backend} is exempt from ${criterion.id} — ${exempt.reason}`, () => {
+        // The pin: no prompt is declared, so nothing can drive this row here. Add
+        // one and this fails, which is the signal to make the row live.
+        expect(HARNESS_ADAPTERS[backend].scenarios[criterion.scenario]).toBeUndefined();
+      });
+      return;
+    }
+    it(
+      `${backend} is exempt from ${criterion.id} — ${exempt.reason}`,
+      async () => {
+        const obs = await observe();
+        expect(() => criterion.assert(obs)).toThrow();
+      },
+      45_000,
+    );
+  }
+
+  /** Registers the exemption cell when there is one; P1's shape for every lifecycle criterion. */
+  function permissionExemption(id: string, backend: RunnerId, scenario: ScenarioName): boolean {
+    const exemption = exemptionFor(id, backend);
+    if (!exemption) return false;
+    it(`${backend} ${id} exemption — ${exemption.reason}`, () => {
+      expect(exemption.kind).toBe('scenario-unconstructible');
+      expect(HARNESS_ADAPTERS[backend].scenarios[scenario]).toBeUndefined();
+    });
+    return true;
+  }
+
+  const runners: RunnerId[] = scope === 'once' ? [] : [scope.runner];
+  const registeredGroups: string[] = [];
+  const describeRunners = (group: string, name: string, body: () => void, once = false): void => {
+    registeredGroups.push(group);
+    if (scope === 'once') {
+      if (once) describe(name, body);
+      return;
+    }
+    // Iterate rather than use includes: duplicate routes register twice and fail the guard.
+    if (registration.allGroups) { describe(name, body); return; }
+    for (const selected of HARNESS_PARITY_GROUPS[scope.part]) {
+      if (selected === group) describe(name, body);
+    }
   };
 
-  describeRunners('harness parity — seam tier', () => {
+  describeRunners('seam', 'harness parity — seam tier', () => {
     for (const backend of runners) {
       for (const criterion of SEAM_CRITERIA) {
         parityRow(backend, criterion, () => driveSeam(backend, criterion.scenario));
@@ -992,9 +1018,11 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   });
 
   // hearsay-tools/cezarion#1810: the Tool-list kinds case table, one cell per case and runner.
-  describeToolGrantParity(scope);
+  describeRunners('tool-grants', 'harness parity — tool grants', () => {
+    registration.toolGrants(scope === 'once' ? 'once' : scope.runner);
+  }, true);
 
-  describeRunners('harness parity — input delivery (#505)', () => {
+  describeRunners('input', 'harness parity — input delivery (#505)', () => {
     for (const backend of runners) {
       it(`${backend} I0 declares its input delivery`, () => {
         expect(['steer', 'boundary']).toContain(inputDeliveryOf(createRunner(backend)).mode);
@@ -1006,7 +1034,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
     }
   });
 
-  describe('harness parity — recoverable skill diagnostics (hearsay-tools/cezarion#723, hearsay-tools/cezarion#1265)', () => {
+  describeRunners('diagnostics', 'harness parity — recoverable skill diagnostics (hearsay-tools/cezarion#723, hearsay-tools/cezarion#1265)', () => {
     for (const backend of runners) {
       for (const continuation of [false, true]) {
         const id = continuation ? 'R45' : 'R44';
@@ -1054,12 +1082,12 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         }, 45_000);
       }
     }
-  });
+  }, true);
 
   // #779: only the live set is in memory. A finished run is read back from runs.db; Continue loads
   // it into the held set (the `continue` pin), `runContinuation` pins it through the same `activate`
   // helper `execute` uses, and it leaves memory again once the continuation settles.
-  describeRunners('harness parity — Continue on a finished run (#779)', () => {
+  describeRunners('continue', 'harness parity — Continue on a finished run (#779)', () => {
     for (const backend of runners) {
       parityRow<{ pins: string[]; left: boolean; heldWhileContinuing: boolean; leftAgain: boolean; obs: RunObservation }>(backend, {
         id: 'R48', name: 'R48 Continue loads a finished run into memory and lets it go after it settles', scenario: 'cezar-done',
@@ -1096,7 +1124,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   // #779: older controllers could cancel a root and leave its Finish intent on the record. Restart
   // repairs that in the delegation sweep, which since #779 reaches only what `open` loads; a finished
   // root the sweep missed would be refused by every Continue ("parent finish is pending") for good.
-  describeRunners('harness parity — restart repairs a stale root Finish intent (#779)', () => {
+  describeRunners('restart', 'harness parity — restart repairs a stale root Finish intent (#779)', () => {
     for (const backend of runners) {
       parityRow<{ repaired: boolean; left: boolean; continued: { ok: boolean; error?: string }; final: RunRecord | undefined }>(backend, {
         id: 'R49', name: "R49 restart clears a cancelled root's stale Finish intent and Continue resumes it", scenario: 'cezar-done',
@@ -1147,7 +1175,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   // keepLive) settled every live row as interrupted and saved it, so the owner's parked run — whose
   // row only the owner's whole-file saves used to put back — loaded `failed` at the next restart and
   // its question could no longer be answered there. A run another live process claims is left alone.
-  describeRunners('harness parity — a second process leaves a parked run to its owner (#779)', () => {
+  describeRunners('owner', 'harness parity — a second process leaves a parked run to its owner (#779)', () => {
     for (const backend of runners) {
       parityRow<{ afterHeadless: string | undefined; afterRestart: string | undefined; answered: { ok: boolean; error?: string }; final: RunRecord | undefined }>(backend, {
         id: 'R50', name: 'R50 a headless open beside the owner leaves its parked run waiting, and a restart still answers it', scenario: 'ask',
@@ -1194,7 +1222,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   // #779 plan step 3: a control (archive, Stop, Continue…) on a run whose owning process died adopts
   // it first. Adopting settles it — nothing is resumed behind the user's back, whichever runner it
   // used — and Continue is the one control that starts its agent again, on its own session.
-  describeRunners('harness parity — adopting a dead owner\'s run mid-turn (#779)', () => {
+  describeRunners('adopt', 'harness parity — adopting a dead owner\'s run mid-turn (#779)', () => {
     for (const backend of runners) {
       parityRow<{ adopted: boolean; startedByAdoption: string[]; settled: RunRecord | undefined; continued: { ok: boolean; error?: string }; startedByContinue: string[]; resumed: RunRecord | undefined }>(backend, {
         id: 'R51', name: 'R51 adopting a dead owner\'s run mid-turn starts no agent, and Continue resumes it', scenario: 'hold',
@@ -1255,7 +1283,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
 
   // #779: Stop is the control an adoption carries out itself. The run it stops ends cancelled, as an
   // accepted Stop always reads, rather than interrupted, whichever runner it used; nothing starts.
-  describeRunners('harness parity — Stop on a dead owner\'s run mid-turn (#779)', () => {
+  describeRunners('stop', 'harness parity — Stop on a dead owner\'s run mid-turn (#779)', () => {
     for (const backend of runners) {
       parityRow<{ adopted: boolean; started: string[]; stopped: RunRecord | undefined }>(backend, {
         id: 'R52', name: 'R52 Stop on a dead owner\'s run mid-turn ends it cancelled and starts no agent', scenario: 'hold',
@@ -1305,7 +1333,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
     }
   });
 
-  describeRunners('harness parity — seam tier, session control', () => {
+  describeRunners('session', 'harness parity — seam tier, session control', () => {
     for (const backend of runners) {
       // #708: permission discovery at startup must not break any runner's fresh,
       // resumed or subsequent human turns. Codex's native wire enforces Baseline;
@@ -1457,9 +1485,9 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
     }
   });
 
-  describeRunners('harness parity — run tier', () => {
+  const runRows = (criteria: readonly RunCriterion[]): void => {
     for (const backend of runners) {
-      for (const criterion of RUN_CRITERIA) {
+      for (const criterion of criteria) {
         const exempt = exemptionFor(criterion.id, backend);
         if (exempt?.kind === 'scenario-unconstructible') {
           it(`${backend} is exempt from ${criterion.id} — ${exempt.reason}`, () => {
@@ -1480,13 +1508,15 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         );
       }
     }
-  });
+  };
+  describeRunners('provider', 'harness parity — unavailable provider', () => runRows(RUN_CRITERIA.filter(row => row.id === 'R17')));
+  describeRunners('run', 'harness parity — run tier', () => runRows(RUN_CRITERIA.filter(row => row.id !== 'R17')));
 
   // #121/#401: release native child frames only AFTER the manager has parked.
   // Waiting for the final wire-derived event prevents a green test that returned
   // before the late frames were read. OpenCode discards closed child scopes;
   // its passive usage barrier proves those frames crossed the SSE transport.
-  describeRunners('harness parity — late child attention', () => {
+  describeRunners('child', 'harness parity — late child attention', () => {
     for (const backend of runners) {
       const exempt = exemptionFor('R15', backend);
       if (exempt) {
@@ -1536,7 +1566,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   // #961: native hook frames reach the event log and nothing else. A hook that
   // completes after the run parked (Squeal's async `waiter`) must neither wake the
   // run, move its wake time, nor open a turn; the mid-turn hook must not end one.
-  describeRunners('harness parity — hooks never move run state', () => {
+  describeRunners('hooks', 'harness parity — hooks never move run state', () => {
     for (const backend of runners) {
       const exempt = exemptionFor('R77', backend);
       if (exempt) {
@@ -1582,7 +1612,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
 
   // #398: a native answer's turn boundary must not ask the human to prompt again.
   // R6 deliberately tests markerless owned-input draining; it cannot prove completion.
-  describeRunners('harness parity — answer to completion run tier', () => {
+  describeRunners('answer', 'harness parity — answer to completion run tier', () => {
     for (const backend of runners) {
       const exempt = exemptionFor('R26', backend);
       if (exempt) {
@@ -1634,7 +1664,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
     }
   });
 
-  describeRunners('harness parity — owned input run tier', () => {
+  describeRunners('owned', 'harness parity — owned input run tier', () => {
     for (const backend of runners) {
       it(`${backend} R6 queues before/during asks and drains only after the parent's answer`, async () => {
         await withOwnedInputRun(backend, 'ask', async ({ store, manager, repoRoot, runId, parentRunId, answer }) => {
@@ -2177,7 +2207,16 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
       });
 
       it('runs every runner\'s cells from its own file', () => {
-        for (const backend of RUNNER_IDS) expect(existsSync(new URL(`./${harnessParityFile(backend)}`, import.meta.url)), backend).toBe(true);
+        const routes = Object.values(HARNESS_PARITY_GROUPS).flat();
+        expect([...routes].sort()).toEqual([...registeredGroups].sort());
+        expect(new Set(registeredGroups).size).toBe(registeredGroups.length);
+        for (const backend of RUNNER_IDS) for (const part of Object.keys(HARNESS_PARITY_GROUPS) as HarnessParityPart[]) {
+          const file = harnessParityFile(backend, part);
+          expect(existsSync(new URL(`./${file}`, import.meta.url)), file).toBe(true);
+          const source = readFileSync(new URL(`./${file}`, import.meta.url), 'utf8');
+          expect(source, file).toContain(`describeHarnessParity({ runner: '${backend}', part: '${part}' });`);
+          expect(source.match(/describeHarnessParity\(/g), file).toHaveLength(1);
+        }
       });
 
       it('every runner id has an adapter', () => {
@@ -2224,7 +2263,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   // added only where a runner's cross-session tool is separate from subagent messaging (Codex's
   // message board, OpenCode's task_id). Every other runner is a named `capability-absent`
   // exemption, pinned the other way round: its governed wire equals the ordinary one.
-  describeRunners('harness parity — D1 governed cross-session controls', () => {
+  describeRunners('governed', 'harness parity — D1 governed cross-session controls', () => {
     for (const backend of runners) {
       const exempt = exemptionFor('D1', backend);
       for (const resume of [false, true]) {
@@ -2324,7 +2363,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   // Claude refuses inbound peer messages on every launch. Each other runner is a named
   // `capability-absent` exemption, pinned the other way round: its default wire carries no
   // cross-session control, so the day cezar adds one, its exemption must go.
-  describeRunners('harness parity — D3 native cross-session messaging at shipped defaults', () => {
+  describeRunners('native-message', 'harness parity — D3 native cross-session messaging at shipped defaults', () => {
     for (const backend of runners) {
       const exempt = exemptionFor('D3', backend);
       for (const resume of [false, true]) {
@@ -2356,7 +2395,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
     }
   });
 
-  describe('harness parity — AgentRunSpec support declarations', () => {
+  describeRunners('spec', 'harness parity — AgentRunSpec support declarations', () => {
     if (scope === 'once') {
       it('every runner id builds its own runner, declaring every AgentRunSpec field with a reason', () => {
         for (const backend of RUNNER_IDS) {
@@ -2438,7 +2477,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         }
       });
     }
-  });
+  }, true);
 
   // #781: the `cezarTools` cell, live. One shared cezar tool list feeds every
   // runner's own wire (Claude's MCP config and generated allow-list entry, Codex
@@ -2447,7 +2486,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   // `cezar_preview_serve` and `cezar_preview_stop` are listed under `CEZ_PREVIEW=1` exactly, and
   // `cezar_schedule_task` and `cezar_scheduled_tasks` under `CEZ_AUTOMATIONS=1` (hearsay-tools/cezarion#1465).
   // Each cell turns both opt-ins on or off together; tools.ts's unit tests pin each flag alone.
-  describeRunners('harness parity — cezarTools list behind CEZ_PREVIEW', () => {
+  describeRunners('tools', 'harness parity — cezarTools list behind CEZ_PREVIEW', () => {
     const wait = { id: '11111111-1111-4111-8111-111111111111', generation: 'gen', turnId: 'turn', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true, prUrl: 'https://github.com/owner/repo/pull/1', repository: 'owner/repo', prNumber: 1, headSha: 'a'.repeat(40), registeredAt: '2026-09-22T00:00:00.000Z', deadline: '2026-09-22T00:30:00.000Z', phase: 'registered' as const };
     // hearsay-tools/cezarion#1305: pi also runs the default list, which admits the tools through no allowlist.
     const lists = (backend: RunnerId) => [
@@ -2490,7 +2529,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   // process, which the agent's Bash inherits. The session comes from the real tool controller and
   // `previewCdpSession`, the gate RunManager uses. `mock-env-record.mjs`, preloaded through
   // NODE_OPTIONS, records each mock's own process env.
-  describeRunners('harness parity — preview CDP address in the agent env', () => {
+  describeRunners('cdp', 'harness parity — preview CDP address in the agent env', () => {
     for (const backend of runners) for (const enabled of [true, false]) {
       it(`${backend} R125 ${enabled ? 'carries' : 'omits'} CEZ_PREVIEW_CDP_URL with CEZ_PREVIEW ${enabled ? 'on' : 'off'}`, async () => {
         vi.stubEnv('CEZ_PREVIEW', enabled ? '1' : '');
@@ -2533,7 +2572,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
 
   // #661: native runner completion precedes the real durable cleanup checkpoint.
   // Every adapter supplies baseline; there is no wire exemption for this path.
-  describeRunners('harness parity — terminal cleanup reconciliation', () => {
+  describeRunners('cleanup', 'harness parity — terminal cleanup reconciliation', () => {
     for (const backend of runners) {
       for (const enabled of [true, false]) {
         const criterion = enabled ? 'R20' : 'R21';
@@ -2564,7 +2603,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   });
 
   // #473: successful settlement closes intermediate Continues left by idle close.
-  describeRunners('harness parity — multi-Continue settlement', () => {
+  describeRunners('multi-continue', 'harness parity — multi-Continue settlement', () => {
     for (const backend of runners) {
       for (const status of ['done', 'review', 'cancelled'] as const) {
         const criterion = status === 'done' ? 'R28' : status === 'review' ? 'R29' : 'R30';
@@ -2618,7 +2657,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
     }
   });
 
-  describeRunners('harness parity — inactive Finish superseded by Continue', () => {
+  describeRunners('superseded', 'harness parity — inactive Finish superseded by Continue', () => {
     for (const backend of runners) {
       for (const queued of [false, true]) {
         const criterion = queued ? 'R34' : 'R33';
@@ -2682,7 +2721,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
     }
   });
 
-  describeRunners('harness parity — accepted Finish across disposal', () => {
+  describeRunners('disposal', 'harness parity — accepted Finish across disposal', () => {
     for (const backend of runners) {
       for (const continuation of [false, true]) {
         const criterion = continuation ? 'R32' : 'R31';
@@ -2740,7 +2779,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   });
 
   // #515: task scratch outlives a process, on both workflow and Continue paths.
-  describeRunners('harness parity — live task scratch', () => {
+  describeRunners('scratch', 'harness parity — live task scratch', () => {
     for (const backend of runners) {
       it(`${backend} R22 retains scratch across idle close and Continue, then reaps on finish`, async () => {
         await driveRun(backend, 'baseline', record => record?.status === 'waiting', 30_000,
@@ -2814,7 +2853,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   // that a live model follows the instruction. Markerless output must still wait.
   // hearsay-tools/cezarion#1234: every runner honors cezarTools, so every session here is taught
   // the lifecycle tools instead of the markers.
-  describeRunners('harness parity — monitoring wrap-up contract (#399)', () => {
+  describeRunners('monitoring', 'harness parity — monitoring wrap-up contract (#399)', () => {
     const promptRules = [
       'When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn.',
       'call cezar_wait with kind "pr" for a pull request\'s checks or its merge, or kind "timer" to re-check later, then end your turn.',
@@ -2939,7 +2978,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   });
 
   // hearsay-tools/cezarion#922: every task-owned declaration, through each native runner wire.
-  describeRunners('harness parity — multi-pr collection', () => {
+  describeRunners('prs', 'harness parity — multi-pr collection', () => {
     for (const backend of runners) {
       for (const continuation of [false, true]) {
         it(`${backend} ${continuation ? 'PR2' : 'PR1'} multi-pr retains fresh and continued declarations`, async () => {
@@ -2964,7 +3003,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
     }
   });
 
-  describeRunners('native permission routing (hearsay-tools/cezarion#1049)', () => {
+  describeRunners('permission', 'native permission routing (hearsay-tools/cezarion#1049)', () => {
     for (const backend of runners) {
       const exemption = exemptionFor('P1', backend);
       if (exemption) {
@@ -3024,7 +3063,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
     }
   });
 
-  describeRunners('default permission asks (hearsay-tools/cezarion#1266)', () => {
+  describeRunners('default-permission', 'default permission asks (hearsay-tools/cezarion#1266)', () => {
     for (const backend of runners) {
       const exemption = exemptionFor('P2', backend);
       if (exemption) {
@@ -3045,7 +3084,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   });
 
   for (const { id, scenario, text } of RETIREMENTS) {
-    describeRunners(`${id} ${PERMISSION_CRITERIA.find(c => c.id === id)!.name} (hearsay-tools/cezarion#1266)`, () => {
+    describeRunners(`retirement-${id}`, `${id} ${PERMISSION_CRITERIA.find(c => c.id === id)!.name} (hearsay-tools/cezarion#1266)`, () => {
       for (const backend of runners) {
         if (permissionExemption(id, backend, scenario)) continue;
         it(`${backend} ${id} retires the card, its capability and the run's pending permission`, async () => {
@@ -3083,7 +3122,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
     });
   }
 
-  describeRunners(`P5 ${PERMISSION_CRITERIA.find(c => c.id === 'P5')!.name} (hearsay-tools/cezarion#1266)`, () => {
+  describeRunners('permission-failure', `P5 ${PERMISSION_CRITERIA.find(c => c.id === 'P5')!.name} (hearsay-tools/cezarion#1266)`, () => {
     for (const backend of runners) {
       if (permissionExemption('P5', backend, 'approval-reply-fails')) continue;
       it(`${backend} P5 replaces the card it could not deliver and keeps the run waiting`, async () => {
@@ -3137,7 +3176,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
     }
   });
 
-  describeRunners(`P6 ${PERMISSION_CRITERIA.find(c => c.id === 'P6')!.name} (hearsay-tools/cezarion#1266)`, () => {
+  describeRunners('malformed', `P6 ${PERMISSION_CRITERIA.find(c => c.id === 'P6')!.name} (hearsay-tools/cezarion#1266)`, () => {
     for (const backend of runners) {
       if (permissionExemption('P6', backend, 'approval-malformed')) continue;
       it(`${backend} P6 refuses the malformed request natively and the turn goes on`, async () => {
@@ -3153,7 +3192,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
     }
   });
 
-  describeRunners(`P7 ${PERMISSION_CRITERIA.find(c => c.id === 'P7')!.name} (hearsay-tools/cezarion#1266)`, () => {
+  describeRunners('early-permission', `P7 ${PERMISSION_CRITERIA.find(c => c.id === 'P7')!.name} (hearsay-tools/cezarion#1266)`, () => {
     for (const backend of runners) {
       if (permissionExemption('P7', backend, 'permission-classify')) continue;
       // Agent input reaches a session only through `sendAgentMessage`, so the cell drives the seam.
@@ -3192,7 +3231,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
     }
   });
 
-  describeRunners(`P8 ${PERMISSION_CRITERIA.find(c => c.id === 'P8')!.name} (hearsay-tools/cezarion#1266)`, () => {
+  describeRunners('late-permission', `P8 ${PERMISSION_CRITERIA.find(c => c.id === 'P8')!.name} (hearsay-tools/cezarion#1266)`, () => {
     for (const backend of runners) {
       if (permissionExemption('P8', backend, 'permission-late')) continue;
       // A session's own close (autoEndAfterFirstTurn) lives at the seam.
@@ -3242,7 +3281,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
 
   // cezar's own tools are covered where they run: Codex rows of ci-wait-parity park only
   // when the mock's MCP tool gate lets cezar_wait through unasked.
-  describeRunners('MCP tool approval routing (hearsay-tools/cezarion#1294)', () => {
+  describeRunners('mcp', 'MCP tool approval routing (hearsay-tools/cezarion#1294)', () => {
     for (const backend of runners) {
       const exemption = exemptionFor('P9', backend);
       if (exemption) {
@@ -3279,4 +3318,18 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
       }
     }
   });
+}
+
+/** Collect the real row registrations without starting their hooks or test bodies. */
+export function harnessParityRegistrations(runner: RunnerId, part?: HarnessParityPart): string[] {
+  const names: string[] = [];
+  describeHarnessParity({ runner, part: part ?? 'session' }, {
+    describe: ((_name: string, body: () => void) => body()) as typeof describe,
+    it: ((name: string) => { names.push(name); }) as typeof it,
+    beforeAll: (() => undefined) as typeof beforeAll,
+    afterAll: (() => undefined) as typeof afterAll,
+    toolGrants: () => { for (const entry of TOOL_GRANT_CASES) names.push(`${runner} tool grant ${entry.id}`); },
+    allGroups: part === undefined,
+  });
+  return names;
 }
