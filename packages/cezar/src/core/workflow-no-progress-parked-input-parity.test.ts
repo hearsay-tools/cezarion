@@ -1,3 +1,3 @@
 import { describeWorkflowNoProgressParity } from './workflow-no-progress-parity.testkit.ts';
 
-describeWorkflowNoProgressParity(0);
+describeWorkflowNoProgressParity('parked-input');

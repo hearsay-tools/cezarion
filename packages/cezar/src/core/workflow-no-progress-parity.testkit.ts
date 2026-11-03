@@ -46,60 +46,62 @@ function controlDeadlines(killEscalation: boolean, onDeadlineArmed?: () => void)
 
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
-const PARTS: readonly (readonly string[])[] = [
-  [
-    "claude N2",
-    "codex N2",
-    "omp N2",
-    "claude N6",
-    "claude N4",
-    "cursor N4",
-    "omp N4",
-    "opencode N4",
-    "opencode N3",
-    "omp N8",
-    "claude N8",
-    "pi N4",
-    "codex N8",
-    "opencode N8",
-    "opencode N7",
-    "codex N1",
-    "pi N8",
-    "omp N7",
-    "opencode N1",
-    "pi N7",
-    "pi N1",
-    "cursor N8",
-    "omp N1",
-    "codex N6"
-  ],
-  [
-    "opencode N2",
-    "cursor N2",
-    "pi N2",
-    "cursor N3",
-    "cursor N7",
-    "cursor N6",
+const PARTS: Readonly<Record<string, readonly string[]>> = {
+  "progress": [
     "claude N1",
-    "pi N3",
-    "codex N4",
-    "claude N3",
-    "cursor N5",
+    "claude N2",
+    "codex N1",
+    "codex N2",
     "cursor N1",
-    "opencode N5",
+    "cursor N2",
+    "omp N1",
+    "omp N2",
+    "opencode N1",
+    "opencode N2",
+    "pi N1",
+    "pi N2"
+  ],
+  "parked-input": [
+    "claude N3",
+    "claude N4",
+    "claude N6",
+    "claude N8",
+    "codex N3",
+    "codex N4",
+    "codex N6",
+    "codex N8",
+    "cursor N3",
+    "cursor N4",
+    "cursor N6",
+    "cursor N8",
+    "omp N3",
+    "omp N4",
+    "omp N6",
+    "omp N8",
+    "opencode N3",
+    "opencode N4",
+    "opencode N6",
+    "opencode N8",
+    "pi N3",
+    "pi N4",
+    "pi N6",
+    "pi N8"
+  ],
+  "process-exit": [
     "claude N5",
     "claude N7",
-    "codex N3",
-    "codex N7",
-    "pi N5",
     "codex N5",
-    "omp N3",
-    "omp N6",
+    "codex N7",
+    "cursor N5",
+    "cursor N7",
     "omp N5",
-    "pi N6",
-    "opencode N6"
+    "omp N7",
+    "opencode N5",
+    "opencode N7",
+    "pi N5",
+    "pi N7"
   ]
-];
+};
 
 export function describeWorkflowNoProgressParity(part: ParityPart, collect?: ParityCollector): void {
   const { describe, it } = partitionParity(part, PARTS, collect);
