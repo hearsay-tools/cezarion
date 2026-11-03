@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { readPid, requirePid } from '../pid-file.testkit.ts';
 import { join } from 'node:path';
@@ -100,7 +101,7 @@ describe('managed open-turn inactivity — #470', () => {
               return;
             }
             if (row.id === 'N8') {
-              expect(manager.steerWorker(runId, { id: randomUUID(), source: 'agent', parentRunId, text: 'mock:no-progress-ack-only', createdAt: new Date().toISOString() })).toBe('queued');
+              expect(manager.steerWorker(runId, { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId, text: 'mock:no-progress-ack-only', createdAt: new Date().toISOString() })).toBe('queued');
               await waitFor(() => store.getRun(runId)?.agentInputs?.[0]?.deliveredAt !== undefined);
             } else if (row.id === 'N4') {
               manager.finish(runId);

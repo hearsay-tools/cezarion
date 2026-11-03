@@ -147,7 +147,7 @@ describe('delegation schemas', () => {
   });
 
   it('retains attributed input in records and typed transcript events', () => {
-    const agentInput = { id: randomUUID(), source: 'agent', parentRunId, text: 'use tests', createdAt: now };
+    const agentInput = { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId, text: 'use tests', createdAt: now };
     expect(agentInputSchema.parse(agentInput)).toEqual(agentInput);
     expect(agentInputSchema.safeParse({ ...agentInput, source: 'human' }).success).toBe(false);
     expect(agentInputSchema.safeParse({ ...agentInput, deliveredAt: 'yesterday' }).success).toBe(false);
@@ -200,7 +200,7 @@ describe('RunStore durable delegation', () => {
   const afterExpiry = new Date(Date.now() + 180_000).toISOString();
 
   function conversationInputs(runId: string) {
-    const first = { id: randomUUID(), source: 'agent' as const, parentRunId: runId, text: 'first', createdAt: now,
+    const first = { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: runId, text: 'first', createdAt: now,
       conversation: { senderRunId: workerId, recipientRunId: runId, kind: 'progress' as const } };
     const second = { ...first, id: randomUUID(), text: 'second' };
     store.commitAgentInputs(runId, [first, second]);

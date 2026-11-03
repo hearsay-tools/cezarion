@@ -1,10 +1,11 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { runRecordSchema as contractRunRecordSchema } from '@open-mercato/cezar-contract/runs';
+import { runRecordSchema as contractRunRecordSchema , runWorktreeSetupSchema } from '@open-mercato/cezar-contract/runs';
 import { historyPaths } from './history-file.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
 import { RUNS_DB_FILE, RunDatabase } from './run-database.ts';
@@ -2982,7 +2983,7 @@ describe('RunStore — agent input consumption receipts (#505)', () => {
 
   it('round-trips inputs with and without consumedAt', () => {
     const parentRunId = randomUUID();
-    const input = (id: string, extra: Record<string, string>) => ({ id, source: 'agent', parentRunId, text: 'hello',
+    const input = (id: string, extra: Record<string, string>) => ({ id, source: agentInputSchema.shape.source.enum.agent, parentRunId, text: 'hello',
       createdAt: '2026-09-23T10:00:00.000Z', deliveredAt: '2026-09-23T10:00:01.000Z', ...extra });
     const inputs = [input(randomUUID(), {}), input(randomUUID(), { consumedAt: '2026-09-23T10:00:05.000Z' })];
     seedRuns(dataDir, [{ ...LEGACY_RUN, agentInputs: inputs }]);
@@ -2997,7 +2998,7 @@ describe('RunStore — replaying accepted but unread input after a crash (#505)'
 
   it('requeues only inputs still awaiting a read, keeping pre-#505 receipts intact', () => {
     const parentRunId = randomUUID();
-    const base = { source: 'agent', parentRunId, text: 'hello', createdAt: '2026-09-23T10:00:00.000Z', deliveredAt: '2026-09-23T10:00:01.000Z' };
+    const base = { source: agentInputSchema.shape.source.enum.agent, parentRunId, text: 'hello', createdAt: '2026-09-23T10:00:00.000Z', deliveredAt: '2026-09-23T10:00:01.000Z' };
     const unread = { ...base, id: randomUUID(), awaitingRead: true };
     const read = { ...base, id: randomUUID(), consumedAt: '2026-09-23T10:00:02.000Z' };
     const historical = { ...base, id: randomUUID() };
@@ -3070,7 +3071,7 @@ describe('RunRecord.worktreeSetup (#917)', () => {
   afterEach(() => { rmSync(dataDir, { recursive: true, force: true }); });
 
   const settled = {
-    status: 'done' as const,
+    status: runWorktreeSetupSchema.shape.status.enum.done,
     startedAt: '2026-10-07T10:00:00.000Z',
     finishedAt: '2026-10-07T10:00:05.000Z',
     durationMs: 5000,

@@ -1,3 +1,4 @@
+import { skillSchema } from '@open-mercato/cezar-contract/skills';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 /**
  * #790: a skill-driven task must keep `skillSystemPrompt` on Continue and
@@ -50,7 +51,7 @@ function expectedSkillPrompt(repoRoot: string): string {
     description: SKILL_DESCRIPTION,
     body: SKILL_BODY,
     path: join(repoRoot, '.ai/cezar/skills', SKILL_NAME, 'SKILL.md'),
-    source: 'cezar',
+    source: skillSchema.shape.source.enum.cezar,
   });
 }
 

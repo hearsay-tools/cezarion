@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -25,7 +26,7 @@ describe('worker inbox holds nonfinal agent completion', { timeout: 30_000 }, ()
 
   it.each(['release', 'expiry', 'ack'] as const)('keeps the agent→check recipient live until inbox %s', async action => {
     const { run, sender, gate } = await startChain();
-    const input = { id: randomUUID(), parentRunId: run.id, source: 'agent' as const,
+    const input = { id: randomUUID(), parentRunId: run.id, source: agentInputSchema.shape.source.enum.agent,
       text: 'Review this before checking mock:cezar-done', createdAt: new Date().toISOString(),
       conversation: { senderRunId: sender.id, recipientRunId: run.id, kind: 'progress' as const } };
     store.commitAgentInputs(run.id, [input]);

@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { createApp } from '../server/server.ts';
 import { apiRequest } from '../server/loopback-request.testkit.ts';
@@ -841,7 +842,7 @@ async function leavesMemory(store: RunStore, runId: string): Promise<boolean> {
 }
 
 const agentInput = (parentRunId: string, text = '/owned-skill mock:agent-echo parent steering'): AgentInput => ({
-  id: randomUUID(), source: 'agent', parentRunId, text, createdAt: new Date().toISOString(),
+  id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId, text, createdAt: new Date().toISOString(),
 });
 
 // ---- AgentRunSpec support declarations (#284) ------------------------------

@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { runInternals } from './run-internals.testkit.ts';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -1997,7 +1998,7 @@ function workersCells(runners: RunnerId[]): void {
     it(`${runner} U9u after an upgrade, a parent whose message stand-in a provider took before the crash resumes`, async () => {
       const messageId = randomUUID(), now = new Date().toISOString();
       const { p } = await restartLegacyParked(wait => ({ id: randomUUID(), workerIds: [], outcomes: [], deadline: wait.deadline, phase: 'wake-pending', reason: 'message', wakeId: messageId }),
-        (parentId, workerId) => [{ id: messageId, parentRunId: parentId, source: 'agent', text: 'Worker progress u9u', createdAt: now, deliveredAt: now,
+        (parentId, workerId) => [{ id: messageId, parentRunId: parentId, source: agentInputSchema.shape.source.enum.agent, text: 'Worker progress u9u', createdAt: now, deliveredAt: now,
           conversation: { senderRunId: workerId, recipientRunId: parentId, kind: 'progress' } }]);
       await until(() => store.getRun(p.id)?.steps.some(step => step.id === 'continue-1') === true || terminal.includes(store.getRun(p.id)?.status ?? ''));
       expect(store.getRun(p.id)?.steps.some(step => step.id === 'continue-1')).toBe(true);

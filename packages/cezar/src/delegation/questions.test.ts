@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { conversationMessageSchema } from '@open-mercato/cezar-contract/conversations';
@@ -44,7 +45,7 @@ describe('parent-routed worker questions (#505)', () => {
   });
   it('treats only a reply to that question as its answer', () => {
     const message = questionMessage({ ...base, now: '2026-09-24T10:00:00.000Z' });
-    const input = (kind: 'reply' | 'progress' | 'follow-up', requestId?: string): AgentInput => ({ id: randomUUID(), source: 'agent', parentRunId: P,
+    const input = (kind: 'reply' | 'progress' | 'follow-up', requestId?: string): AgentInput => ({ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: P,
       text: 'Postgres', createdAt: '2026-09-24T10:01:00.000Z', conversation: { senderRunId: P, recipientRunId: W, kind, ...(requestId ? { requestId } : {}) } });
     expect(answersQuestion(message, input('reply', message.id))).toBe(true);
     expect(answersQuestion(message, input('progress'))).toBe(false);

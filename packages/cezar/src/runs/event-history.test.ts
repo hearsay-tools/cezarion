@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import * as fsPromises from 'node:fs/promises';
@@ -432,7 +433,7 @@ it('compact context keeps the latest valid pending ask when a malformed ask foll
 it('returns conversation-only history and groups delivery/replay with the same message identity', async () => {
   const senderRunId='11111111-1111-4111-8111-111111111111', recipientRunId='22222222-2222-4222-8222-222222222222', id='33333333-3333-4333-8333-333333333333';
   const message={id,senderRunId,recipientRunId,kind:'request',text:'Please review',createdAt:'2026-09-08T12:00:00.000Z',requestHash:'a'.repeat(64),state:'accepted'};
-  const events=[{seq:1,type:'conversation-message',message,delivery:'queued'}, {seq:2,type:'conversation-message',message,delivery:'delivered'}, {seq:3,type:'request-outcome',outcome:{requestId:id,status:'replied',observedAt:message.createdAt}}, {seq:4,type:'agent-input',input:{id,source:'agent',parentRunId:senderRunId,text:message.text,createdAt:message.createdAt,deliveredAt:message.createdAt,conversation:{senderRunId,recipientRunId,kind:'request'}}}];
+  const events=[{seq:1,type:'conversation-message',message,delivery:'queued'}, {seq:2,type:'conversation-message',message,delivery:'delivered'}, {seq:3,type:'request-outcome',outcome:{requestId:id,status:'replied',observedAt:message.createdAt}}, {seq:4,type:'agent-input',input:{id,source:agentInputSchema.shape.source.enum.agent,parentRunId:senderRunId,text:message.text,createdAt:message.createdAt,deliveredAt:message.createdAt,conversation:{senderRunId,recipientRunId,kind:'request'}}}];
   const page=await pageFrom(events);
   expect(page.itemCount).toBe(1);
   expect(page.events.map(event=>event.seq)).toEqual([1,2,3,4]);

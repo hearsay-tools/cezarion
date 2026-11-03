@@ -16,6 +16,8 @@ import {
 } from './state.ts';
 import { freshServerState } from './types.ts';
 
+const UNKNOWN_FUTURE_INSTALLER_STATUS = 'running';
+
 describe('server state', () => {
   let home: string;
   const original = process.env.CEZ_HOME;
@@ -155,7 +157,7 @@ describe('server state', () => {
         futureField: { keep: 'me' },
         steps: {
           deps: { status: 'done', created: { artifacts: [] } },
-          'future-step': { status: 'running', created: null }, // unknown status
+          'future-step': { status: UNKNOWN_FUTURE_INSTALLER_STATUS, created: null }, // unknown status
         },
       }),
     );

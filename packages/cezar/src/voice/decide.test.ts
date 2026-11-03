@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AskQuestion } from '@open-mercato/cezar-contract/ask';
-import { voiceDecisionSchema, type VoiceDecideRequest } from '@open-mercato/cezar-contract/voice';
+import { voiceDecisionSchema, type VoiceDecideRequest , voiceStatusSchema } from '@open-mercato/cezar-contract/voice';
 import { buildVoiceQuestions, decideVoice } from './decide.ts';
 import { FakeVoiceEngine } from './fake-engine.ts';
 import { VoiceEngineError, textKey, type DecisionEngine, type EngineAnswer, type EngineQuestion, type VoiceEngineState } from './engine.ts';
@@ -105,7 +105,7 @@ describe('decideVoice: open', () => {
 
   it('turns a numbered position into a number', async () => {
     const { decision } = await decide(stub({ ...opening, project_action: { choice: 'open' }, status: { choice: 'failed' }, position: { choice: '3' } }));
-    expect(decision).toMatchObject({ action: 'open', status: 'failed', position: 3 });
+    expect(decision).toMatchObject({ action: 'open', status: voiceStatusSchema.enum.failed, position: 3 });
   });
 
   it('offers alternatives when the status is unsure', async () => {
@@ -117,7 +117,7 @@ describe('decideVoice: open', () => {
         position: { choice: '2' },
       }),
     );
-    expect(decision).toMatchObject({ action: 'open', alternatives: [{ status: 'done', position: 2 }, { status: 'failed', position: 2 }] });
+    expect(decision).toMatchObject({ action: 'open', alternatives: [{ status: voiceStatusSchema.enum.done, position: 2 }, { status: voiceStatusSchema.enum.failed, position: 2 }] });
   });
 
   it('is unclear when the open status or position is none', async () => {

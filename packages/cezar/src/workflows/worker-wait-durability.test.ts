@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { type WorkerWait } from '@open-mercato/cezar-contract/delegation';
+import { type WorkerWait , agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { currentUsage } from '../core/process-usage.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
@@ -63,7 +63,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       return { ...row, waits: row.waits.filter((found: { id: string }) => found.id !== wait.id),
         delegation: { ...row.delegation, wait: { id: wait.id, workerIds: [w.id], revisions: entry.revisions, deadline: entry.deadline,
           phase: 'wake-pending', reason: 'outcome', outcomes: [{ workerId: w.id, status: WORKER_OUTCOME_STATUS.done, observedAt: new Date().toISOString() }], wakeId: replyId } },
-        agentInputs: [...row.agentInputs ?? [], { id: replyId, source: 'agent', parentRunId: p.id, text: body, createdAt: new Date().toISOString(),
+        agentInputs: [...row.agentInputs ?? [], { id: replyId, source: agentInputSchema.shape.source.enum.agent, parentRunId: p.id, text: body, createdAt: new Date().toISOString(),
           conversation: { senderRunId: w.id, recipientRunId: p.id, kind: 'reply', requestId: randomUUID() } }] };
     });
     const submit = vi.spyOn(InputDelivery.prototype, 'submitAgentInput');
@@ -483,7 +483,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     // delivery was committed, but the stand-in was not yet retired nor the parent resumed.
     const messageId = randomUUID(); const now = new Date().toISOString();
     const { p, disk } = await legacyParked(wait => ({ id: randomUUID(), workerIds: [], outcomes: [], deadline: wait.deadline, phase: 'wake-pending', reason: 'message', wakeId: messageId }),
-      (p, w) => [{ id: messageId, parentRunId: p.id, source: 'agent', text: 'Worker progress, delivered before the crash', createdAt: now, deliveredAt: now,
+      (p, w) => [{ id: messageId, parentRunId: p.id, source: agentInputSchema.shape.source.enum.agent, text: 'Worker progress, delivered before the crash', createdAt: now, deliveredAt: now,
         conversation: { senderRunId: w.id, recipientRunId: p.id, kind: 'progress' } }]);
     await restart(false, disk);
     await until(() => store.getRun(p.id)?.steps.some(step => step.id === 'continue-1') === true || terminal.includes(store.getRun(p.id)?.status ?? ''));
@@ -499,7 +499,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const messageId = randomUUID(); const now = new Date().toISOString();
     const claim = { receiptId: randomUUID(), generation: randomUUID(), expiresAt: now, acknowledgedAt: now };
     const { p, disk } = await legacyParked(wait => ({ id: randomUUID(), workerIds: [], outcomes: [], deadline: wait.deadline, phase: 'wake-pending', reason: 'message', wakeId: messageId }),
-      (p, w) => [{ id: messageId, parentRunId: p.id, source: 'agent', text: 'Worker progress, read through the inbox', createdAt: now, deliveredAt: now,
+      (p, w) => [{ id: messageId, parentRunId: p.id, source: agentInputSchema.shape.source.enum.agent, text: 'Worker progress, read through the inbox', createdAt: now, deliveredAt: now,
         conversation: { senderRunId: w.id, recipientRunId: p.id, kind: 'progress' }, inboxClaim: claim }]);
     await restart(false, disk);
     expect(store.getRun(p.id)?.status).toBe('waiting');

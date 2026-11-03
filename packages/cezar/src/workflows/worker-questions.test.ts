@@ -126,7 +126,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
   /** 32 undelivered inputs fill the parent's inbox (plain input, so nothing wakes it). */
   const fillInbox = (parentId: string) => {
     const now = new Date().toISOString();
-    fixtureUpdateRun(parentId, { agentInputs: Array.from({ length: 32 }, () => ({ id: randomUUID(), source: 'agent' as const, parentRunId: parentId, text: 'queued', createdAt: now })) });
+    fixtureUpdateRun(parentId, { agentInputs: Array.from({ length: 32 }, () => ({ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: parentId, text: 'queued', createdAt: now })) });
   };
 
   it('answers the worker for the parent when the parent cannot take another message, once', async () => {
@@ -238,7 +238,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
   }
   const steer = (workerId: string, parentRunId: string, text: string) => {
     const id = randomUUID();
-    return { id, result: manager.steerWorker(workerId, { id, source: 'agent', parentRunId, text, createdAt: new Date().toISOString() }) };
+    return { id, result: manager.steerWorker(workerId, { id, source: agentInputSchema.shape.source.enum.agent, parentRunId, text, createdAt: new Date().toISOString() }) };
   };
 
   // hearsay-tools/cezarion#1301: Cezar's fallback question does not hold what the plain park let
@@ -713,7 +713,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     const state = conversationOf(f.p.id)!;
     store.commitConversation(f.p.id, { messages: [...state.messages, { id, ...attribution, text: 'mock:agent-echo Use the parser', createdAt: now, requestHash: 'c'.repeat(64), state: 'accepted' }],
       outcomes: [...state.outcomes, { requestId: f.questionId, status: 'replied', observedAt: now, replyId: id }] },
-    { recipientRunId: f.w.id, input: { id, source: 'agent', parentRunId: f.p.id, text: 'mock:agent-echo Use the parser', createdAt: now, conversation: attribution } });
+    { recipientRunId: f.w.id, input: { id, source: agentInputSchema.shape.source.enum.agent, parentRunId: f.p.id, text: 'mock:agent-echo Use the parser', createdAt: now, conversation: attribution } });
     await restart(false, undefined, eventCheckpoint());
     await until(() => answered(f.w.id).length === 1);
     await until(() => said(f.w.id, 'Use the parser'));
@@ -996,7 +996,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
   it('admits the reply even when steering filled the worker inbox', async () => {
     const f = await askedPair();
     try {
-      const steer = () => manager.steerWorker(f.w.id, { id: randomUUID(), source: 'agent', parentRunId: f.p.id, text: 'mock:agent-echo steer', createdAt: new Date().toISOString() });
+      const steer = () => manager.steerWorker(f.w.id, { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: f.p.id, text: 'mock:agent-echo steer', createdAt: new Date().toISOString() });
       for (let i = 0; i < 32; i++) steer();
       expect(() => steer()).toThrow(expect.objectContaining({ code: 'capacity_limit' }));
       await f.reply('mock:agent-echo Use the parser');

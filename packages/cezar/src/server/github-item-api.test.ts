@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Hono } from 'hono';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { githubItemResponseSchema } from '@open-mercato/cezar-contract/github';
+import { githubItemResponseSchema , githubItemSchema } from '@open-mercato/cezar-contract/github';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
@@ -69,7 +69,7 @@ describe('the github item API', () => {
     const res = await apiRequest(app, '/api/v1/github/items/pr/128');
     expect(res.status).toBe(200);
     const body = githubItemResponseSchema.parse(await res.json());
-    expect(body).toMatchObject({ available: true, item: { kind: 'pr', number: 128 }, labelColors: { tests: 'c5def5' } });
+    expect(body).toMatchObject({ available: true, item: { kind: githubItemSchema.shape.kind.enum.pr, number: 128 }, labelColors: { tests: 'c5def5' } });
     expect(spies.fetch).toHaveBeenCalledWith(expect.any(String), 'pr', 128, false);
   });
 

@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import {
   RUN_STATUS,
   STEP_KIND,
@@ -62,7 +63,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
       case 'native-ask': state.pendingHumanAsk = true; break;
       case 'persisted-ask': store.appendEvent(id, { type: 'ask.requested', requestId: randomUUID(), ...ask }); break;
       case 'closed': state.session = { ...session, open: false }; break;
-      case 'queued-input': store.commitAgentInputs(id, [{ id: randomUUID(), source: 'agent', parentRunId: randomUUID(), text: 'Read this first', createdAt: new Date().toISOString() }]); break;
+      case 'queued-input': store.commitAgentInputs(id, [{ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: randomUUID(), text: 'Read this first', createdAt: new Date().toISOString() }]); break;
       case 'unread-input': state.unreadInputIds = new Set([randomUUID()]); break;
       case 'input-flight': state.agentInputFlight = { session, inputIds: [randomUUID()] }; break;
       // A worker wait is a list entry (hearsay-tools/cezarion#1235, #1301).

@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { expect, it } from 'vitest';
 import type { AgentInput, ConversationMessage } from '@open-mercato/cezar-contract';
@@ -12,7 +13,7 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
         await waitFor(() => store.getRun(runId)?.status === 'waiting');
         const messages: ConversationMessage[] = [];
         const enqueue = (text: string): AgentInput => {
-          const input: AgentInput = { id: randomUUID(), source: 'agent', parentRunId, text, createdAt: new Date().toISOString(),
+          const input: AgentInput = { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId, text, createdAt: new Date().toISOString(),
             conversation: { senderRunId: parentRunId, recipientRunId: runId, kind: 'progress' } };
           messages.push({ id: input.id, ...input.conversation!, text, createdAt: input.createdAt, requestHash: 'a'.repeat(64), state: 'accepted' });
           store.commitConversation(parentRunId, { messages: [...messages], outcomes: [] }, { recipientRunId: runId, input });
@@ -58,7 +59,7 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
         manager.enqueueOwnedRun(runId);
         await waitFor(() => store.getRun(runId)?.status === 'waiting');
         const enqueue = (text: string): AgentInput => {
-          const input: AgentInput = { id: randomUUID(), source: 'agent', parentRunId, text, createdAt: new Date().toISOString(),
+          const input: AgentInput = { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId, text, createdAt: new Date().toISOString(),
             conversation: { senderRunId: parentRunId, recipientRunId: runId, kind: 'progress' } };
           store.commitAgentInputs(runId, [...(store.getRun(runId)?.agentInputs ?? []), input]); return input;
         };

@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
@@ -59,7 +60,7 @@ describe('conversation settlement', () => {
     const { root, worker, request } = records();
     const byRun = new Map<string, Array<Record<string, unknown>>>();
     const eventsOf = (id: string) => { if (!byRun.has(id)) byRun.set(id, []); return byRun.get(id)!; };
-    worker.agentInputs = [{ id: request.id, source: 'agent', parentRunId: root.id, text: request.text, createdAt: now,
+    worker.agentInputs = [{ id: request.id, source: agentInputSchema.shape.source.enum.agent, parentRunId: root.id, text: request.text, createdAt: now,
       deliveredAt: '2026-09-08T20:00:01.000Z', consumedAt: '2026-09-08T20:00:05.000Z' }];
     const store = { getRun: (id: string) => [root, worker].find(run => run.id === id), readEvents: (id: string) => eventsOf(id),
       hasProjection: (id: string, projectionId: string) => eventsOf(id).some(event => event.projectionId === projectionId),
