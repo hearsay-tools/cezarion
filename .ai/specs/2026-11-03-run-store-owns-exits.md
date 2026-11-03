@@ -1,0 +1,168 @@
+# Let the run store own run exits
+
+Decision record: [ADR 0056](../../docs/adr/0056-let-the-run-store-own-run-exits.md). Glossary:
+[Run exit](../../GLOSSARY.md#run-exit). Baseline: `main` at `60f6a9557`. Designed with the owner
+on 2026-11-03 (architecture review, task f5410885). Slice 4.4 of epic hearsay-tools/cezarion#2487
+(hearsay-tools/cezarion#2523) is slice S0 here.
+
+Functions are named, with line numbers only as of the baseline; every slice moves them.
+
+## Problem
+
+`RunStore` (`runs/store.ts`) has about 117 public members. A caller must know rules the store
+could enforce:
+
+- **Which exit may write which status.** `RUN_EXITS` (`workflows/run-states.ts`) declares 22
+  exits. Callers apply it in three ways: `RunManager.move`, a `status: transition(…)` value in a
+  patch, or `transitionVia` around five store commits that write a status themselves. The check
+  runs only in tests, and there it throws before the write, so a test takes a different path from
+  the app.
+- **Which fields an exit settles.** 66 call sites each choose their own `finishedAt`,
+  `currentStepId`, `activity`, step and Finish-intent changes. Sites of one exit disagree (see
+  § Differences).
+- **Durable or debounced.** `updateRun` decides from the patch's fields.
+- **Which record rules run.** `record-write-rules.ts` keeps one rule list per write path. Four of
+  the five commits after it was extracted fixed a rule that one path skipped
+  (hearsay-tools/cezarion#2376 to hearsay-tools/cezarion#2382).
+
+Seven writers bypass the table: six in the `run-status-write-outside-transition` baseline and
+`setLiveStatus`, which the rule misses because its status is a variable.
+
+## Decisions
+
+1. **One entry point.** `RunStore` changes a status only by applying a run exit:
+   "move run R by exit E", with extra fields the exit cannot know (an error message, a step id).
+   `updateRun` and every other store method lose `status` from their patch types.
+2. **The exit table lives in `runs/`** (`runs/run-exits.ts`). Each exit declares: `from`, `to`,
+   the fields it settles, an optional named guard, and its durability. `workflows/run-states.ts`
+   keeps `RUN_STATES`, `RUN_TRIGGERS` and `WAIT_KINDS` and imports the exits.
+3. **One behavior for an undeclared transition.** The store writes it and records a violation.
+   Production logs one warning. The test setup fails the test in `afterEach`. Nothing throws in
+   the write path. `strictRunExits()` changes only how a violation is reported.
+4. **Durability belongs to the exit**, with today's rule unchanged: a plain Finish stays
+   debounced so a locked database cannot stop cleanup; Done with a completion option, handoff
+   records and the archive options commit at once. The record rules become one ordered pipeline.
+   A rule that differs between the saves on purpose is a named difference in that pipeline.
+5. **Guarded exits replace status-writing commits.** `commitParked`, `commitRootFinishSuccess`,
+   `commitRootFinishCancellation`, `commitWorkerCancellation` and `commitAutoResumeWithdrawal`
+   become exits with a named guard; a failed guard writes nothing and returns false.
+   `transitionVia` is deleted.
+6. **The bypass writers become exits** (§ Table C). Then `run-status-write-outside-transition`
+   and its baseline are deleted: the type refuses a status outside an exit.
+7. **Slice 4.4 removes the four outcome baseline entries at their cause**: `commitOutcome`
+   returns the waits it settled, and the outcome module provides the receipt fields of the
+   `conversation-message` event. PR hearsay-tools/cezarion#2572.
+
+## Slices
+
+One pull request per slice, in order, because each touches `store.ts`. S1 starts beside this spec's own pull request. Each slice changes no app
+behavior unless its row says so. Each slice runs `npm run test:parity` before push when it
+touches a turn-end, wait or settlement path.
+
+| Slice | Change | Removes | Behavior change |
+|---|---|---|---|
+| S0 | Slice 4.4 (Decision 7) | outcome baseline | none |
+| S1 | Move `RUN_EXITS` to `runs/run-exits.ts`; Decision 3 | the throw in the write path | tests only: an undeclared transition now writes, then fails the test |
+| S2 | `RunStore.move(id, exit, extras)`. `RunManager.move` and the five `status: transition(…)` patches call it. `status` leaves `updateRun`'s patch type | `transition()` | none |
+| S3 | Decision 5 | `transitionVia`, five commits | none |
+| S4 | Decision 6, including `setLiveStatus` | status rule and baseline | none |
+| S5 | Each exit settles the fields all its sites agree on (Table A). A site that does more passes an explicit extra; a site that does less uses a named variant of the exit | hand-written clears in 66 sites | none |
+| S6 | Decision 4 | `WRITE_PATH_RULES` path lists, `UpdateHooks` | none |
+| S7 | Normalize Table B, one commit per row, each with a red test where it fixes a bug | the S5 extras and variants | yes, per row (§ Table B targets) |
+
+## Case tables
+
+### Table A: exits and what they settle
+
+"Settles" is what every call site does today; the exit will own it. "Sites" counts call sites at
+the baseline. SRF is `settledRootFinishPatch` (retires the root's Finish intent), which `move`
+adds for every exit whose status is `failed`. Durability: D debounced, C commit.
+
+| Exit | from → to | Sites | Settles (all sites agree) | Guard | Durability |
+|---|---|---|---|---|---|
+| start | queued, running, waiting → running | 3 | nothing | none | D |
+| start-held | queued → queued | 1 | `startedAt ??= now`, runner, systemPrompt, modelIdentity, `invalidAsk` cleared | none | D |
+| requeue | queued, running, failed → queued | 6 | `currentStepId` cleared | none | D |
+| continue-line | waiting, review, done, failed, cancelled → queued | 3 | `error`, `finishedAt`, `currentStepId` cleared | none | D; worker C (`commitWorkerContinuation`) |
+| continue-now | same → running | 1 | `error`, `finishedAt` cleared; `currentStepId` = the step | none | D; worker C |
+| park | running, queued, waiting → waiting | 14 | nothing | none (`commitParked`: also `activity` and the step, in one commit) | D; C at `parkOnWaits` without a slot |
+| park-for-wake | queued, waiting → waiting | 1 | nothing | none | D |
+| hold | failed, waiting → waiting | 1 + `failed.legacy-hold` | `finishedAt` cleared; `autoResumeAt` set | none | D |
+| resume | waiting → running | 4 | nothing | none | D; C inside `commitOutcome` at `sendAgentInput` |
+| succeed, succeed-review | running, waiting → done, review | 2 | SRF, `finishedAt` = now, `currentStepId` and `autoResumeAttempts` cleared | root Finish: waiting, root, intent pending | C when done and opted in, or root Finish; else D |
+| accept-review | review → done | 1 + `review.draft-pr` | nothing in common | none | as succeed |
+| fail-start | queued, running → failed | 7 | `error`, `finishedAt` = now, SRF | none | D |
+| fail | running, waiting → failed | 4 | `error`, `finishedAt` = now, `currentStepId` cleared, SRF | none | D |
+| fail-continue | running, waiting, cancelled → failed | 1 | as fail | none | D |
+| fail-interrupted | queued, running, waiting → failed | 1 + `live.read-only` | fixed `error`, `finishedAt` | none | D |
+| fail-crash | queued, running, waiting → failed | 2 | `error`, `finishedAt` = now, SRF | none | D |
+| withdraw-hold | waiting → failed | 1 + `hold.archive` | `autoResumeAt`, `autoResumeAttempts` cleared | usage-limit hold | C |
+| cancel | queued, running, waiting → cancelled | 12 + `live.stopping` + `queued.orphaned` | `finishedAt` set | root Finish cancel: root, intent pending, waiting or cancelled | D; C for root Finish cancel |
+| stop-worker | all but cancelled → cancelled | 2 | `finishedAt` = now (overwrites) | role worker | C |
+| cancel-late | queued, running, waiting, done, review, failed → cancelled | 1 | `finishedAt`, `currentStepId` cleared | none | D |
+
+Every exit also passes the store's status-driven rules: the stale-resume rule clears
+`autoResumeAt` off a run that is not `waiting`, and a completion action is retired off a run that
+is not `done` or not opted in.
+
+### Table B: differences between sites of one exit
+
+S5 keeps every row as it is (owner, 2026-11-03). S7 normalizes them. "Today" is the behavior at shipped defaults.
+
+| # | Exit | Today | Sites |
+|---|---|---|---|
+| B1 | fail-start | 4 of 7 sites clear `currentStepId`; 3 leave it | leave: `checkpointQueuedWorker`, `reviveQueuedRun`, `reviveQueuedWorker` |
+| B2 | fail-crash | neither site clears `currentStepId` | `failCrashedContinuation`, `launchQueuedRun` |
+| B3 | cancel | 5 of 10 `move` sites leave `currentStepId`; no `move` site retires the Finish intent (`reconcileFamilyPass` repairs it later) | leave: `cancelQueuedRun`, `cancelRunWithoutSession`, `settleStoppedContinuation`, both in `startExecution` |
+| B4 | `finishedAt` on a terminal exit | overwritten with now: `commitWorkerCancellation`, `commitAutoResumeWithdrawal`, every `move`; kept (`??=`): `commitRootFinishCancellation`, every store load-time writer, Draft PR | as listed |
+| B5 | succeed | `commitRootFinishSuccess` clears `activity` and settles steps in its commit; `commitOrdinarySuccess` does neither in its patch (steps by side calls) | both |
+| B6 | accept-review | Finish sets no `finishedAt` and retires the intent; Draft PR sets `finishedAt ??= now` and no SRF | `finish`, `POST /runs/:id/pr` |
+| B7 | continue-line | the usage-limit Continue writes it twice: `acceptResumedContinuation`, then `dispatchAcceptedContinuation` | both |
+| B8 | park | step → waiting is in the commit at one site (`parkOnWaits` without a slot), a side call at five, set earlier at two (`settleIdleClosedRun`, `settleIncompleteStep`), absent at six | side calls: `completionGate`, `handlePermissionRequested`, `handleNativeAskRequested`, `parkForUser`, `parkOnWaits` with a slot |
+| B9 | requeue, park, continue-line, cancel | four requeue sites, six park sites, `acceptUntouchedContinuation` and `cancelQueuedRun` call `store.flush()` right after a debounced write: a second save, not atomic with the write | as listed |
+
+### Table C: writers outside the table
+
+| Writer | Writes | Condition | Exit | Trigger row |
+|---|---|---|---|---|
+| `store.ts:clearPendingAutoResume` | failed, `finishedAt ??= now` | archiving a usage-limit hold | withdraw-hold | `hold.archive` |
+| `store.ts:settleLoadedStop` | cancelled, steps cancelled | `run.stopping` on load, **no status check** | cancel (only from a live status) | `live.stopping` |
+| `store.ts:restoreLoadedUsageLimitHold` | waiting, `finishedAt` cleared | schema-7 row: failed with `autoResumeAt` | hold | `failed.legacy-hold` |
+| `store.ts:failLoadedInterruptedRun` | failed, fixed error, steps failed | store opened without `keepLive`, engine-owned row | fail-interrupted | `live.read-only` |
+| `store.ts:settleOrphanedRun` | cancelled | untouched queued run whose process is gone | cancel | `queued.orphaned` |
+| `store.ts:setLiveStatus` | running→waiting, waiting→running | legacy wait rows (`upgradeLegacyWaits`) | park, resume | `running.legacy`, `plain.legacy` |
+| `server.ts` `POST /runs/:id/pr` | done, `finishedAt ??= now`, `pullRequestUrl` | publish succeeded; **no status check in the route** | accept-review (only from review) | `review.draft-pr` |
+
+Two rows have no status check today: `settleLoadedStop` and the Draft PR route. S4 must show the
+status each can meet. A status outside the exit's `from` becomes a recorded violation under
+Decision 3, not a refusal.
+
+### Transitions out
+
+The state table does not change. `RUN_TRIGGERS` keeps every row; each row's `exit` names an exit
+from `runs/run-exits.ts`, and its `via` names the store's exit entry point instead of
+`transitionVia` or a bypass writer. `run-states.test.ts` keeps checking that every non-final
+state has an automatic exit or a recorded human-only reason.
+
+### Table B targets (S7)
+
+| # | Target rule | Reason |
+|---|---|---|
+| B1, B2, B3 | Every terminal exit (done, review, failed, cancelled) clears `currentStepId` and retires the root's Finish intent | A settled run points at no step; Finish has no meaning after the run settled. The family reconciler stops being the repair path for cancel |
+| B4 | A terminal exit keeps an existing `finishedAt` (`??=`), except `continue-*` and `hold`, which clear it | The first settlement time is the fact; a later writer on a settled run only repairs |
+| B5 | Both success paths clear `activity` and settle running or waiting steps in the same write | One exit, one result |
+| B6 | accept-review sets `finishedAt ??= now` and retires the Finish intent on both paths | As B3 and B4 |
+| B7 | The usage-limit Continue writes `continue-line` once | The second write repeats the first |
+| B8 | `park` settles the current step to waiting in the same write | As B5 |
+| B9 | Kept; recorded only. The follow-up `flush()` stays until S6 gives each exit its durability | S6 decides it |
+
+## Open decisions
+
+- **Refusing an undeclared transition in production** (ADR 0056) — after the S1 warnings have run
+  on the dev channel.
+
+## Coordination
+
+Epic hearsay-tools/cezarion#2487 slice 4.1 (hearsay-tools/cezarion#2520) groups `ActiveRun`
+fields in `workflows/run/*`. S2 and S5 shrink the patch literals in those files but do not touch
+`ActiveRun`. The epic's planner gets each slice's PR number.
