@@ -59,33 +59,30 @@ export function blankSource(source: string): BlankedSource {
   let last = -1;
   const n = source.length;
   let i = 0;
-  while (i < n) {
-    const ch = source[i];
-    const top = stack.at(-1);
-    if (top?.kind === 'template') {
-      let j = i;
-      while (j < n && source[j] !== '`' && !(source[j] === '$' && source[j + 1] === '{')) j += source[j] === '\\' ? 2 : 1;
-      wipe(i, Math.min(j, n));
-      if (j >= n) break;
-      if (source[j] === '`') {
-        stack.pop();
-        last = j;
-        i = j + 1;
-      } else {
-        stack.push({ kind: 'slot', offset: j, depth: 0 });
-        last = j + 1;
-        i = j + 2;
-      }
-      continue;
+  const scanTemplate = (): boolean => {
+    let j = i;
+    while (j < n && source[j] !== '`' && !(source[j] === '$' && source[j + 1] === '{')) j += source[j] === '\\' ? 2 : 1;
+    wipe(i, Math.min(j, n));
+    if (j >= n) return false;
+    if (source[j] === '`') {
+      stack.pop();
+      last = j;
+      i = j + 1;
+    } else {
+      stack.push({ kind: 'slot', offset: j, depth: 0 });
+      last = j + 1;
+      i = j + 2;
     }
-    const next = source[i + 1];
+    return true;
+  };
+  const scanComment = (ch: string | undefined, next: string | undefined): boolean => {
     if (ch === '/' && next === '/') {
       lineComments.push(i);
       const end = source.indexOf('\n', i);
       comments.push([i, end === -1 ? n : end]);
       wipe(i, end === -1 ? n : end);
       i = end === -1 ? n : end;
-      continue;
+      return true;
     }
     if (ch === '/' && next === '*') {
       const close = source.indexOf('*/', i + 2);
@@ -94,39 +91,37 @@ export function blankSource(source: string): BlankedSource {
       comments.push([i, end]);
       wipe(i, end);
       i = end;
-      continue;
+      return true;
     }
-    if (ch === "'" || ch === '"') {
-      let j = i + 1;
-      while (j < n && source[j] !== ch && source[j] !== '\n') j += source[j] === '\\' ? 2 : 1;
-      j = Math.min(j, n);
-      wipe(i + 1, j);
-      if (source[j] === ch) {
-        last = j;
-        i = j + 1;
-      } else {
-        unterminated.push({ construct: 'string', offset: i });
-        last = i;
-        i = j;
-      }
-      continue;
+    return false;
+  };
+  const scanString = (ch: string): void => {
+    let j = i + 1;
+    while (j < n && source[j] !== ch && source[j] !== '\n') j += source[j] === '\\' ? 2 : 1;
+    j = Math.min(j, n);
+    wipe(i + 1, j);
+    if (source[j] === ch) {
+      last = j;
+      i = j + 1;
+    } else {
+      unterminated.push({ construct: 'string', offset: i });
+      last = i;
+      i = j;
     }
-    if (ch === '`') {
-      stack.push({ kind: 'template', offset: i });
-      i += 1;
-      continue;
+  };
+  const scanRegex = (): boolean => {
+    const end = regexEnd(source, i);
+    if (end !== -1) {
+      wipe(i + 1, end);
+      let j = end + 1;
+      while (j < n && /[a-z]/.test(source[j] ?? '')) j += 1;
+      last = j - 1;
+      i = j;
+      return true;
     }
-    if (ch === '/' && regexMayStart(source, last, closedHead)) {
-      const end = regexEnd(source, i);
-      if (end !== -1) {
-        wipe(i + 1, end);
-        let j = end + 1;
-        while (j < n && /[a-z]/.test(source[j] ?? '')) j += 1;
-        last = j - 1;
-        i = j;
-        continue;
-      }
-    }
+    return false;
+  };
+  const scanCode = (ch: string | undefined, top: (typeof stack)[number] | undefined): void => {
     if (ch === '(') parens.push(headsStatement(source, i, comments));
     else if (ch === ')') closedHead = parens.pop() ?? false;
     if (top?.kind === 'slot') {
@@ -135,13 +130,33 @@ export function blankSource(source: string): BlankedSource {
         if (top.depth === 0) {
           stack.pop();
           i += 1;
-          continue;
+          return;
         }
         top.depth -= 1;
       }
     }
     if (ch !== undefined && !/\s/.test(ch)) last = i;
     i += 1;
+  };
+  while (i < n) {
+    const ch = source[i];
+    const top = stack.at(-1);
+    if (top?.kind === 'template') {
+      if (!scanTemplate()) break;
+      continue;
+    }
+    if (scanComment(ch, source[i + 1])) continue;
+    if (ch === "'" || ch === '"') {
+      scanString(ch);
+      continue;
+    }
+    if (ch === '`') {
+      stack.push({ kind: 'template', offset: i });
+      i += 1;
+      continue;
+    }
+    if (ch === '/' && regexMayStart(source, last, closedHead) && scanRegex()) continue;
+    scanCode(ch, top);
   }
   const open = stack.at(-1);
   if (open) unterminated.push({ construct: open.kind === 'template' ? 'template' : 'substitution', offset: open.offset });
