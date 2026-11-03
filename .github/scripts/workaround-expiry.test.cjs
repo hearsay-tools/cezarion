@@ -52,10 +52,15 @@ test('resolution is cached and an open issue is not expired', async () => {
   assert.equal(calls, 1);
 });
 
-test('failed or invalid resolution fails instead of treating a marker as open', async () => {
-  const markers = markersIn('x.md', '<!-- until: a/b#1 -->');
-  await assert.rejects(expiredMarkers(markers, async () => { throw new Error('unavailable'); }), /unavailable/);
-  await assert.rejects(expiredMarkers(markers, async () => 'unknown'), /Invalid issue state/);
+test('failed or invalid resolution is recorded without discarding readable issues', async () => {
+  const markers = markersIn('x.md', '<!-- until: a/b#1 -->\n<!-- until: a/b#1 -->');
+  const unchecked = [];
+  assert.deepEqual(await expiredMarkers(markers, async () => { throw new Error('unavailable'); }, unchecked), []);
+  assert.equal(unchecked.length, 2);
+  assert.equal(unchecked[0].message, 'could not check: a/b#1 (API error)');
+  const invalid = [];
+  await expiredMarkers(markers, async () => 'unknown', invalid);
+  assert.equal(invalid[0].status, 'API error');
 });
 
 test('open-or-update finds the exact title on a later page and updates instead of creating', async () => {
@@ -98,6 +103,9 @@ test('CLI uses gh api for resolution and publishes through stdin with no network
 const fs = require('node:fs');
 const args = process.argv.slice(2);
 if (args[0] !== 'api') process.exit(2);
+const projection = args[args.indexOf('--jq') + 1];
+const expected = args[1].includes('?state=open') ? '[.[] | {number, title, pull_request}]' : args.includes('GET') ? '{state}' : '{number}';
+if (!args.includes('--jq') || projection !== expected) process.exit(4);
 if (args[1] === 'repos/external/repo/issues/7' && args.includes('GET')) console.log('{"state":"closed"}');
 else if (args[1].includes('?state=open')) console.log('[]');
 else if (args.includes('POST') && args.includes('--input') && args.at(-1) === '-') {
@@ -123,10 +131,42 @@ test('CLI failure reports the cause and issue endpoint without forwarding gh std
   fs.writeFileSync(path.join(root, 'rule.md'), '<!-- until: external/repo#7 -->');
   execFileSync('git', ['add', 'rule.md'], { cwd: root });
   fs.writeFileSync(path.join(root, 'gh'), '#!/bin/sh\necho fixture-private-response >&2\nexit 1\n', { mode: 0o755 });
+  const result = spawnSync(process.execPath, [path.join(__dirname, 'workaround-expiry.cjs')], {
+    cwd: root, encoding: 'utf8', env: { ...process.env, PATH: root + path.delimiter + process.env.PATH, GITHUB_REPOSITORY: 'local/repo' },
+  });
+  assert.equal(result.status, 1);
+  assert.match(result.stdout, /could not check: external\/repo#7 \(exit 1\)/);
+  assert.doesNotMatch(result.stderr, /fixture-private-response/);
+});
+
+
+test('CLI publishes readable expired and unreadable markers together, then exits non-zero', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'workaround-expiry-partial-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  execFileSync('git', ['init'], { cwd: root, stdio: 'pipe' });
+  fs.writeFileSync(path.join(root, 'rule.md'), '<!-- until: public/repo#1 -->\n<!-- until: private/repo#2 -->');
+  execFileSync('git', ['add', 'rule.md'], { cwd: root });
+  fs.writeFileSync(path.join(root, 'package.json'), JSON.stringify({ type: 'commonjs' }));
+  fs.writeFileSync(path.join(root, 'gh'), `#!/usr/bin/env node
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+if (args[1] === 'repos/public/repo/issues/1') console.log('{"state":"closed"}');
+else if (args[1] === 'repos/private/repo/issues/2') { console.error('gh: Not Found (HTTP 404) private-response'); process.exit(1); }
+else if (args[1].includes('?state=open')) console.log('[]');
+else if (args.includes('POST')) {
+  fs.writeFileSync('published.json', fs.readFileSync(0, 'utf8'));
+  console.log('{"number":8}');
+} else process.exit(3);
+`, { mode: 0o755 });
   const result = spawnSync(process.execPath, [path.join(__dirname, 'workaround-expiry.cjs'), '--publish'], {
     cwd: root, encoding: 'utf8', env: { ...process.env, PATH: root + path.delimiter + process.env.PATH, GITHUB_REPOSITORY: 'local/repo' },
   });
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /Workaround expiry report failed: GitHub API GET repos\/external\/repo\/issues\/7 failed: exit 1/);
-  assert.doesNotMatch(result.stderr, /fixture-private-response/);
+  const report = JSON.parse(result.stdout);
+  assert.equal(report.expired[0].issue, 'public/repo#1');
+  assert.equal(report.unchecked[0].message, 'could not check: private/repo#2 (404)');
+  const published = JSON.parse(fs.readFileSync(path.join(root, 'published.json'), 'utf8'));
+  assert.match(published.body, /public\/repo\/issues\/1/);
+  assert.match(published.body, /could not check: private\/repo#2 \(404\)/);
+  assert.doesNotMatch(result.stdout + result.stderr + published.body, /private-response/);
 });
