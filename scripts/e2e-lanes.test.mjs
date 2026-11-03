@@ -94,7 +94,7 @@ echo TEST_E2E_STATUS=passed
   for (const lane of result.lanes) {
     const log = readFileSync(lane.logPath, 'utf8');
     assert.match(log, /TEST_E2E_STATUS=passed/);
-    assert.ok(log.includes(`${lane.root} ${lane.namespace} --shard=${lane.shard}`));
+    assert.ok(log.includes(`${lane.root} ${lane.namespace} --allow-skip --shard=${lane.shard}`));
     assert.equal(existsSync(lane.root), false);
   }
 });
@@ -107,6 +107,15 @@ test('one failing shard makes the full local run fail and retains its log', asyn
   assert.equal(result.status, 'failed');
   assert.equal(result.lanes.find((lane) => lane.shard === '3/4').status, 'failed');
   assert.match(readFileSync(result.lanes.find((lane) => lane.shard === '3/4').logPath, 'utf8'), /TEST_E2E_STATUS=failed/);
+});
+
+test('a browser skip after lane bootstrap retains the skipped result', async (t) => {
+  const { root, repo } = fixture(t);
+  writeFileSync(join(repo, '.ai/scripts/test-env-up.sh'), '#!/bin/sh\nmkdir -p .ai/qa\nprintf \'{"browser":{"installed":true},"baseUrl":"http://127.0.0.1:%s"}\\n\' "${E2E_BROWSER_NAMESPACE##*-}" > .ai/qa/test-env.json\n');
+  writeFileSync(join(repo, '.ai/scripts/e2e.sh'), '#!/bin/sh\necho TEST_E2E_STATUS=skipped\ncase " $* " in *" --allow-skip "*) exit 0;; *) exit 3;; esac\n');
+  const result = await runLocalSuite({ repoRoot: repo, scratchRoot: join(root, 'scratch'), buildSource: async () => {} });
+  assert.equal(result.status, 'skipped');
+  assert.ok(result.lanes.every((lane) => lane.status === 'skipped'));
 });
 
 test('missing browser reports skipped without claiming a full-suite pass', async (t) => {

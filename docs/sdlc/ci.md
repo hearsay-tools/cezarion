@@ -137,7 +137,7 @@ exactly the `engines.node` minimum (Node 24.21.0):
 - Four Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/4 --maxWorkers=4` for N=1..4.
 - The required typecheck job uses `blacksmith-2vcpu-ubuntu-2404` (2 vCPU, 8 GB) for PRs and manual dispatches, and `ubuntu-24.04` for pushes and merge groups. It runs pinned workflow lint, issue-citation checking and `npm run typecheck` for all change surfaces, including docs, infrastructure and release bumps. It keeps the minimum-Node setup and its bounded retry.
 - The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It builds server declarations, then runs Node unit tests, the full application build, packaged CLI E2E typecheck and tests, and release-package dry-run packing. The explicit server build preserves the preparation that typecheck supplied before the split. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
-- Four cockpit browser E2E shards on `ubicloud-standard-2` (2 vCPU, 8 GB RAM, Ubuntu 24.04 x64) each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
+- Four cockpit browser E2E shards on `ubicloud-standard-2` (2 vCPU, 8 GB RAM, Ubuntu 24.04 x64) each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --allow-skip --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
 
 The Ubicloud trial moves only the four browser CI shards to the lowest x64 tier,
 `ubicloud-standard-2`. The Vitest and coverage trials on that tier hit the existing
@@ -202,7 +202,8 @@ and browser namespaces. It is the final local full-suite gate and retains lane l
 under `.ai/qa/local-runs/`. A skipped browser exits nonzero there, since it did not
 verify the full suite. CI keeps four separate serial shards on its matrix.
 `npm run test:e2e` without arguments still runs the full sequential suite,
-with the existing environment reuse and skip-exit-0 behavior. For iteration use
+with the existing environment reuse. A missing browser exits 3 unless the caller
+passes `--allow-skip` to permit exit 0. For iteration use
 `npm run test:e2e -- smoke.e2e.ts -t 'test name'`. Optional `--force` and
 `--force-rebuild` go only to environment bootstrap; other arguments (including
 `--shard=N/M`, spec paths and test-name filters) go to Vitest with quoting preserved.

@@ -4,11 +4,8 @@
 #
 # Exit codes (documented contract — the pipeline depends on these):
 #   0  + TEST_E2E_STATUS=passed   every selected spec passed (filters are not a full gate)
-#   0  + TEST_E2E_STATUS=skipped  the browser provider could not be provisioned on this
-#                                 machine (no network / unsupported platform / sandbox).
-#                                 Loud, greppable, and deliberately non-blocking — a machine
-#                                 that cannot run a browser must not masquerade as a failure,
-#                                 and must not masquerade as a pass either.
+#   3  + TEST_E2E_STATUS=skipped  the browser provider could not be provisioned.
+#   0  + TEST_E2E_STATUS=skipped  same skip, explicitly permitted by --allow-skip.
 #   non-zero + TEST_E2E_STATUS=failed  a spec failed, or the env could not boot.
 set -eu
 
@@ -38,13 +35,14 @@ skip() {
 
 EOF
   echo "TEST_E2E_STATUS=skipped"
-  exit 0
+  exit "$SKIP_EXIT"
 }
 
 # Consume only our bootstrap flags; Vitest owns spec paths, -t, --shard, etc.
 # The for loop snapshots the original arguments. Rotate each retained argument
 # onto the end of "$@" without flattening quoted patterns or evaluating shell text.
 # A literal -- ends wrapper parsing as well as Vitest option parsing.
+SKIP_EXIT=3
 FORCE=
 FORCE_REBUILD=
 # --server-env=CEZ_NAME=value opt-ins for the shared server (hearsay-tools/cezarion#1045);
@@ -60,6 +58,7 @@ for arg in "$@"; do
     continue
   fi
   case "$arg" in
+    --allow-skip) SKIP_EXIT=0 ;;
     --force) FORCE=--force ;;
     --force-rebuild) FORCE_REBUILD=--force-rebuild ;;
     --server-env=*[[:space:]]*)

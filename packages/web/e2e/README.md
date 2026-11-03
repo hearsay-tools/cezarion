@@ -268,11 +268,12 @@ Local exit contract of `npm run test:e2e`:
 | Exit     | Marker                    | Meaning                                                                                                           |
 | -------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | 0        | `TEST_E2E_STATUS=passed`  | every selected spec passed; a filtered run is not a full-suite pass                                                                                                 |
-| 0        | `TEST_E2E_STATUS=skipped` | agent-browser could not be provisioned (no network / unsupported platform); prints a loud banner — **not** a pass |
+| 3        | `TEST_E2E_STATUS=skipped` | agent-browser could not be provisioned (no network / unsupported platform); prints a loud banner — **not** a pass |
+| 0        | `TEST_E2E_STATUS=skipped` | same skip, explicitly permitted with `npm run test:e2e -- --allow-skip` |
 | non-zero | `TEST_E2E_STATUS=failed`  | a spec failed, or the env could not boot                                                                          |
 
 `npm run test:e2e:local` prints the same marker but exits nonzero on `skipped` as well as
-`failed` (§ Full local suite in four lanes). Pull request CI pipes the `test:e2e` log through
+`failed` (§ Full local suite in four lanes). Pull request CI passes `--allow-skip` to keep log collection successful, then pipes the `test:e2e` log through
 `.github/scripts/require-e2e-passed.cjs` and fails on skipped or failed.
 
 The server boots on a free port with `CEZ_DRY_RUN=1` (agent CLIs mocked — no login, no network) from the
