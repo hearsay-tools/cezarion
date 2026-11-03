@@ -145,42 +145,44 @@ function liveProvisioning(fixture: Fixture): Promise<void> | undefined {
     .active.get(fixture.runId)?.liveSkillProvisioning;
 }
 
-const PARTS: readonly (readonly string[])[] = [
-  [
-    "cursor R94",
-    "codex R94",
-    "claude R94",
-    "omp R94",
-    "claude R95",
-    "omp R93",
+const PARTS: Readonly<Record<string, readonly string[]>> = {
+  "start-and-stop": [
     "claude R92",
-    "codex R95",
-    "omp R95",
-    "pi R93",
+    "claude R96",
     "codex R92",
-    "pi R92",
-    "pi R96",
+    "codex R96",
+    "cursor R92",
+    "cursor R96",
+    "omp R92",
     "omp R96",
-    "codex R96"
+    "opencode R92",
+    "opencode R96",
+    "pi R92",
+    "pi R96"
   ],
-  [
-    "cursor R95",
-    "cursor R93",
+  "continue-and-slash": [
     "claude R93",
-    "opencode R94",
+    "claude R95",
     "codex R93",
+    "codex R95",
+    "cursor R93",
+    "cursor R95",
+    "omp R93",
+    "omp R95",
     "opencode R93",
     "opencode R95",
-    "cursor R92",
-    "pi R94",
-    "pi R95",
-    "omp R92",
-    "opencode R92",
-    "cursor R96",
-    "claude R96",
-    "opencode R96"
+    "pi R93",
+    "pi R95"
+  ],
+  "recovery": [
+    "claude R94",
+    "codex R94",
+    "cursor R94",
+    "omp R94",
+    "opencode R94",
+    "pi R94"
   ]
-];
+};
 
 export function describeSkillProvisionParity(part: ParityPart, collect?: ParityCollector): void {
   const { describe, it } = partitionParity(part, PARTS, collect);

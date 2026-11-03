@@ -1,3 +1,3 @@
 import { describeSkillProvisionParity } from './skill-provision-parity.testkit.ts';
 
-describeSkillProvisionParity(1);
+describeSkillProvisionParity('continue-and-slash');
