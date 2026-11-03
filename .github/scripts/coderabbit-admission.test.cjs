@@ -19,12 +19,32 @@ for (const [state, status, conclusion] of [
   ['pending', 'queued', null], ['pending', 'in_progress', null], ['skipped', 'completed', 'skipped'],
   ['neutral', 'completed', 'neutral'], ['failure', 'completed', 'failure'], ['cancelled', 'completed', 'cancelled'],
   ['timed_out', 'completed', 'timed_out'], ['action_required', 'completed', 'action_required'],
+  ['stale', 'completed', 'stale'],
   ['unknown', 'completed', null], ['unknown', 'invented', 'success'],
 ]) test(`classifies provider ${status}/${conclusion} without recovery`, async () => {
   const h = fixture(); Object.assign(h.s.checks[0], { status, conclusion });
   const result = await admission(h);
   assert.equal(result.providerState, state); assert.equal(result.admitted, false);
-  assert.equal(result.recoveryEligible, false); assert.ok(result.action.length);
+  assert.equal(result.recoveryEligible, false);
+  assert.match(result.action, state === 'pending' ? /Wait for the current CodeRabbit execution/ : /Inspect the trusted CodeRabbit check and App installation/);
+  assert.doesNotMatch(result.action, /Resolve every open review thread/);
+});
+for (const state of ['success', 'pending', 'no-files', 'failure', 'missing']) test(`open threads and ${state} provider give guidance for every blocker`, async () => {
+  const h = fixture(); h.s.threads = [{ id: 'open', isResolved: false }];
+  if (state === 'pending') h.s.checks[0].status = 'queued';
+  if (state === 'no-files') Object.assign(h.s.checks[0], { conclusion: 'skipped', output: { title: 'No files to review' } });
+  if (state === 'failure') h.s.checks[0].conclusion = 'failure';
+  if (state === 'missing') h.s.checks = [];
+  const result = await admission(h);
+  assert.equal(result.admitted, false);
+  assert.equal(result.reason, 'unresolved-threads');
+  assert.equal(result.providerState, state);
+  assert.equal(result.recoveryEligible, state === 'no-files');
+  assert.match(result.action, /^Resolve every open review thread\./);
+  if (state === 'success') assert.equal(result.action, 'Resolve every open review thread.');
+  if (state === 'pending') assert.match(result.action, /Wait for the current CodeRabbit execution/);
+  if (state === 'no-files') assert.match(result.action, /@coderabbitai full review; inspect the recovery claim before any manual retry/);
+  if (['failure', 'missing'].includes(state)) assert.match(result.action, /Inspect the trusted CodeRabbit check and App installation/);
 });
 test('no-files recovery requires exact title on the newest trusted skipped execution', async () => {
   const h = fixture(); Object.assign(h.s.checks[0], { conclusion: 'neutral', output: { title: 'No files to review' } });
@@ -42,7 +62,9 @@ test('a changed no-files title during reread fails closed', async () => {
 });
 test('exact latest App execution and all resolved threads admit without review objects or check PR associations', async () => {
   const h = fixture(); h.s.threads = [{ id: 'outdated-resolved', isResolved: true, isOutdated: true }];
-  assert.equal((await admission(h)).admitted, true);
+  const result = await admission(h);
+  assert.equal(result.admitted, true);
+  assert.equal(result.action, '');
   assert.equal(h.s.calls.filter(([route]) => route.endsWith('/commits/{ref}/check-runs')).length, 2);
   assert.ok(h.s.calls.every(([, args]) => args.request.timeout <= 10000 && args.request.retries === 0));
 });
@@ -110,9 +132,18 @@ function exception(h, kind) {
 }
 for (const kind of ['release', 'upstream']) test(`verified ${kind} exception skips provider, but never open threads`, async () => {
   const h = fixture(); exception(h, kind);
-  assert.equal((await admission(h)).admitted, true);
+  const admitted = await admission(h);
+  assert.equal(admitted.admitted, true);
   h.s.threads = [{ id: 't', isResolved: false }];
-  assert.equal((await admission(h)).admitted, false);
+  const blocked = await admission(h);
+  assert.equal(blocked.admitted, false);
+  assert.equal(blocked.reason, 'unresolved-threads');
+  assert.equal(blocked.providerState, 'exception');
+  assert.equal(blocked.exception, kind === 'release' ? 'release-stamps' : 'upstream-ledger');
+  assert.equal(blocked.recoveryEligible, false);
+  assert.equal(blocked.action, 'Resolve every open review thread.');
+  assert.equal(admitted.action, '');
+  assert.ok(h.s.calls.every(([route]) => !route.endsWith('/commits/{ref}/check-runs')));
 });
 for (const [name, mutate] of Object.entries({
   'code file': h => { h.s.files[0].filename = 'src/evil.ts'; },
