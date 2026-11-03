@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { expect, it } from 'vitest'
 import { nodeCaptureComplete, nodeEvidence, scriptFunctions } from '../../e2e/spec-map/node-evidence'
-import { buildMap } from '../../e2e/spec-map/spec-map'
+import { buildMap, mapProblems } from '../../e2e/spec-map/spec-map'
 
 it('keeps executed and unexecuted mock functions separate in the published map', () => {
   const root = mkdtempSync(join(tmpdir(), 'cez-node-evidence-'))
@@ -63,4 +63,30 @@ it('maps server function offsets back to TypeScript and refuses missing process 
       .toEqual([{ source, start: 1, end: 1, executed: true }])
 
   } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+it('bounds server functions by every original position when mappings move backwards', () => {
+  const root = mkdtempSync(join(tmpdir(), 'cez-node-reordered-'))
+  try {
+    const generated = join(root, '.ai/qa/build/cezar/dist/reordered.js')
+    mkdirSync(dirname(generated), { recursive: true })
+    const code = 'function used() {\n first();\n second();\n}\n'
+    writeFileSync(generated, code)
+    writeFileSync(`${generated}.map`, JSON.stringify({ version: 3, names: [],
+      sources: ['../../../../../packages/cezar/src/reordered.ts'], mappings: 'AASA;AAeA;AAVA;AAPA',
+    }))
+    const functions = scriptFunctions({ url: pathToFileURL(generated).href,
+      functions: [{ ranges: [{ startOffset: 0, endOffset: code.length, count: 1 }] }] }, root)
+    expect(functions).toEqual([{ source: 'packages/cezar/src/reordered.ts', start: 8, end: 25, executed: true }])
+  } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+
+it('refuses publication when a captured server function has invalid source bounds', () => {
+  const source = 'packages/cezar/src/reordered.ts'
+  const map = buildMap({ 'packages/web/e2e/smoke.e2e.ts': {
+    status: 'passed', executed: ['packages/web/src/main.tsx'], loaded: [],
+    functions: [{ source, start: 25, end: 8, executed: true }],
+  } }, new Map(), 'a'.repeat(40), 'now')
+  expect(mapProblems(map, [], 0.9)).toContain(`invalid function ranges for ${source}`)
 })

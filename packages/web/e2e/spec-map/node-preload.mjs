@@ -27,6 +27,7 @@ async function install(root, owner) {
   let sequence = 0;
   let spawnSequence = 0;
   const owners = new Map();
+  const coverageDirectory = owner ? process.env.NODE_V8_COVERAGE : undefined;
   if (!owner) {
     session.connect();
     session.post('Profiler.enable');
@@ -58,7 +59,7 @@ async function install(root, owner) {
     server.once('error', reject);
     server.listen(socket, () => {
       server.unref();
-      const manifest = { socket, pid: process.pid, spec: owner ?? privateSpec, taskId: process.env.CEZ_TASK_ID };
+      const manifest = { socket, pid: process.pid, spec: owner ?? privateSpec, taskId: process.env.CEZ_TASK_ID, coverageDirectory };
       writeRecord(join(root, owner ? 'processes' : 'servers', `${process.pid}.json`), manifest);
       if (!owner && !process.env.E2E_SPEC_MAP_SPEC) writeRecord(join(root, 'control.json'), manifest);
       resolve();
@@ -66,6 +67,11 @@ async function install(root, owner) {
   });
   process.on('exit', () => {
     if (!owner) snapshot(active);
+    else if (coverageDirectory) {
+      takeCoverage();
+      writeRecord(join(coverageDirectory, `completed-${process.pid}.json`),
+        { pid: process.pid, spec: owner, taskId: process.env.CEZ_TASK_ID });
+    }
     try { unlinkSync(socket); } catch {}
   });
   {

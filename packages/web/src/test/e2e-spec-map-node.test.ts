@@ -265,3 +265,41 @@ test('keeps the mock capture endpoint out of TypeScript loader threads', () => {
   expect(child.status).toBe(0)
   expect(child.stdout).toContain('loaded')
 })
+
+test.each([true, false])('uses the final coverage receipt only for matching process identity (%s)', async (validReceipt) => {
+  const { directory } = await fixture()
+  const spec = 'packages/web/e2e/exit-race.e2e.ts'
+  await beginNodeCapture(directory, spec)
+  const { child } = await fixture({ directory, spec })
+  writeFileSync(join(directory, 'mock-case.mjs'), `
+    import { createServer } from 'node:net';
+    import { readFileSync, writeFileSync, unlinkSync } from 'node:fs';
+    import { join } from 'node:path';
+    function scenario() { return 42; } scenario();
+    const socket = '/tmp/cez-map-exit-' + process.pid + '.sock';
+    const server = createServer(() => process.exit(0));
+    server.listen(socket, () => {
+      const file = join(process.env.E2E_SPEC_MAP_NODE_DIR, 'processes', process.pid + '.json');
+      const manifest = JSON.parse(readFileSync(file, 'utf8'));
+      writeFileSync(file, JSON.stringify({ ...manifest, socket }));
+      console.log('ready');
+    });
+    process.on('exit', () => {
+      if (!${validReceipt}) {
+        const file = join(process.env.NODE_V8_COVERAGE, 'completed-' + process.pid + '.json');
+        const receipt = JSON.parse(readFileSync(file, 'utf8'));
+        writeFileSync(file, JSON.stringify({ ...receipt, taskId: 'a different task' }));
+      }
+      try { unlinkSync(socket); } catch {}
+    });
+  `)
+  const ready = once(child.stdout, 'data')
+  child.stdin.write('seeded-task\n')
+  await ready
+  const capture = endNodeCapture(directory, spec)
+  if (!validReceipt) { await expect(capture).rejects.toThrow(); return }
+  await capture
+  expect(nodeCaptureComplete(directory, spec)).toBe(true)
+  expect(results(join(directory, 'exit-race/node')).find(script => script.url.endsWith('/mock-case.mjs'))?.functions)
+    .toEqual(expect.arrayContaining([expect.objectContaining({ functionName: 'scenario' })]))
+})

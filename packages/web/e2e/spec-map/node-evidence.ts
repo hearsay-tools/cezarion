@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { originalPositionFor, TraceMap } from '@jridgewell/trace-mapping'
+import { eachMapping, originalPositionFor, TraceMap } from '@jridgewell/trace-mapping'
 
 export interface FunctionEvidence {
   source: string
@@ -35,10 +35,23 @@ function position(file: string, starts: number[], offset: number, root: string, 
   if (!map) return { source: relative(root, file), line }
   const column = offset - (starts[line - 1] ?? 0)
   const original = originalPositionFor(map, { line, column })
-  if (!original.source || !original.line) return null
-  const source = relative(root, resolve(dirname(file), original.source))
+  return repositoryPosition(file, root, original.source, original.line)
+}
+
+function repositoryPosition(file: string, root: string, originalSource: string | null, line: number | null) {
+  if (!originalSource || !line) return null
+  const source = relative(root, resolve(dirname(file), originalSource))
   if (!source.startsWith('packages/') || source.includes('/node_modules/')) return null
-  return { source, line: original.line }
+  return { source, line }
+}
+
+function mappingPositions(map: TraceMap | null, starts: number[], file: string, root: string) {
+  const positions: Array<{ offset: number; position: ReturnType<typeof repositoryPosition> }> = []
+  if (map) eachMapping(map, (mapping) => {
+    positions.push({ offset: (starts[mapping.generatedLine - 1] ?? 0) + mapping.generatedColumn,
+      position: repositoryPosition(file, root, mapping.source, mapping.originalLine) })
+  })
+  return positions
 }
 
 /** Function ranges use original-source line numbers at the map commit. */
@@ -50,14 +63,24 @@ export function scriptFunctions(script: CoverageScript, root: string): FunctionE
   if ((!mock && !server) || !existsSync(file)) return []
   const map = server ? new TraceMap(readFileSync(`${file}.map`, 'utf8'), `${file}.map`) : null
   const starts = lineStarts(readFileSync(file, 'utf8'))
+  const points = mappingPositions(map, starts, file, root)
+  const offsets = points.map(point => point.offset)
   const result: FunctionEvidence[] = []
   for (const fn of script.functions) {
     const range = fn.ranges[0]
     if (!range) continue
     const start = position(file, starts, range.startOffset, root, map)
     const end = position(file, starts, Math.max(range.startOffset, range.endOffset - 1), root, map)
-    if (!start || !end || start.source !== end.source) continue
-    result.push({ source: start.source, start: start.line, end: end.line, executed: range.count > 0 })
+    const positions = [start, end, ...points.slice(lineAt(offsets, range.startOffset - 1),
+      lineAt(offsets, range.endOffset - 1)).map(point => point.position)]
+    const spans = new Map<string, { start: number; end: number }>()
+    for (const point of positions) {
+      if (!point) continue
+      const span = spans.get(point.source)
+      spans.set(point.source, { start: Math.min(span?.start ?? point.line, point.line),
+        end: Math.max(span?.end ?? point.line, point.line) })
+    }
+    for (const [source, span] of spans) result.push({ source, ...span, executed: range.count > 0 })
   }
   return result
 }

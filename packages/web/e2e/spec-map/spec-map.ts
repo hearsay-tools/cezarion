@@ -191,6 +191,12 @@ export interface Expectation {
  */
 export function mapProblems(map: SpecMap, expectations: Expectation[], minEvidence: number): string[] {
   const problems: string[] = []
+  for (const [source, ranges] of Object.entries(map.functions ?? {})) {
+    if (ranges.some(range => !Number.isInteger(range.start) || range.start < 1
+      || !Number.isInteger(range.end) || range.end < range.start)) {
+      problems.push(`invalid function ranges for ${source}`)
+    }
+  }
   const withEvidence = map.specs.length - map.incomplete.length
   if (map.specs.length === 0 || withEvidence / map.specs.length < minEvidence) {
     problems.push(
