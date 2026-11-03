@@ -115,7 +115,7 @@ adds for every exit whose status is `failed`. Durability: D debounced, C commit.
 | park-for-wake | queued, waiting → waiting | 1 | nothing | none | D |
 | hold | failed, waiting → waiting | 1 + `failed.legacy-hold` | `finishedAt` cleared; `autoResumeAt` set | none | D |
 | resume | waiting → running | 4 | nothing | none | D by exit; C by enclosing commit (`commitOutcome` at `sendAgentInput`) |
-| succeed, succeed-review | running, waiting → done, review | 1 (`commitOrdinarySuccess`) | SRF, `finishedAt` = now, `currentStepId` and `autoResumeAttempts` cleared | none | D by exit; C by record (completion option) |
+| succeed, succeed-review | running, waiting → done, review | 1 (`commitOrdinarySuccess`) | SRF, `finishedAt` = now, `currentStepId` and `autoResumeAttempts` cleared | none | D by exit; `succeed` only: C by record (completion option), since only `done` takes the record rule |
 | succeed-root, succeed-root-review | waiting → done, review | 1 (`settleSuccessWork`) | as succeed, plus the Finish intent retired, `activity` cleared, running or waiting steps done (`finishedAt ??= now`), in one commit | root with a pending Finish intent; else no write, returns false | C by exit |
 | accept-review | review → done | 1 + `review.draft-pr` | nothing in common | none | D by exit; C by record |
 | fail-start | queued, running → failed | 7 | `error`, `finishedAt` = now, SRF | none | D |
