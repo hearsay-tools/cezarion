@@ -1,7 +1,7 @@
 # Parallel speculative merge-queue builds
 
-Issue: hearsay-tools/cezarion#2610. Status: design, for owner approval. Owner decisions
-recorded 2026-11-03. Implementation follows in separate issues (§ Follow-up issues).
+Issue: hearsay-tools/cezarion#2610. Status: **approved** by the owner on 2026-11-03.
+Owner decisions recorded 2026-11-03. Implementation follows in separate issues (§ Follow-up issues).
 
 ## Goal
 
@@ -237,13 +237,13 @@ Rows that "cannot happen" at k=1 are why the serial queue never needed them.
    without its fix ([`docs/sdlc/regression-proof.md`](../../docs/sdlc/regression-proof.md)).
 2. **Pre-activation exercise.** The sandbox is a new repository in the `hearsay-tools`
    org, for example `hearsay-tools/merge-queue-sandbox`.
-   - **Who creates it.** The owner creates it, or approves in follow-up issue 4 that an
-     agent creates it. Creating it is an outward action, so it needs that approval.
+   - **Who creates it.** An agent. The owner approved on 2026-11-03 that an agent creates,
+     uses and then archives this public repository. Follow-up issue 4 records the approval.
    - **Visibility.** It must be public: on the Free plan, merge queues work only on
      public repositories in an organization.
    - **Contents.** A trivial workflow, the queue lookup from § Design 2, and a ruleset
      of the same shape with k=2.
-   - **Afterwards.** Archive or delete it.
+   - **Afterwards.** The agent archives it.
 
    Enqueue three trivial PRs and record:
    - the entry `position`, `headCommit` and `baseCommit` that GraphQL reports (S5);
@@ -311,6 +311,6 @@ Filed after the owner approves this spec:
    two-merge pushes (§ Design 4).
 3. **Weekly queue metric, run by hand.** A read-only script that prints the pilot
    metrics (§ Rollout step 4) from the Actions and GraphQL APIs. No schedule.
-4. **Pre-activation exercise and pilot.** The owner's approval to create the public
-   sandbox repository, the sandbox exercise (§ Rollout step 2), then
+4. **Pre-activation exercise and pilot.** The sandbox repository, which an agent creates,
+   uses and archives (owner approval, 2026-11-03), the sandbox exercise (§ Rollout step 2), then
    the owner's ruleset change and the 7-day pilot read-out. Depends on 1, 2 and 3.
