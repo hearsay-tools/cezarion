@@ -43,25 +43,41 @@ function useSkillSources() {
 }
 
 /**
- * Read every skill list a source feeds again, the `wait=1` reads too: one still in flight from
- * before the change would otherwise land later and bring a removed source's skills back.
+ * The keys a source change touches, read for the project that is open now. A write captures them
+ * when it starts, so an answer that lands after a project switch never touches the other
+ * project's cache.
  */
-function invalidateSkillLists(queryClient: QueryClient) {
-  for (const queryKey of [queryKeys.skills, queryKeys.skillsReady, queryKeys.importableSkills, queryKeys.importableSkillsReady]) {
-    void queryClient.invalidateQueries({ queryKey, exact: true })
+function sourceKeys() {
+  return {
+    sources: skillSourcesKey(),
+    // The `wait=1` reads too: one still in flight from before the change would otherwise land
+    // later and bring a removed source's skills back.
+    lists: [queryKeys.skills, queryKeys.skillsReady, queryKeys.importableSkills, queryKeys.importableSkillsReady],
   }
 }
 
-/** Writes answer the new source list; the skill lists it feeds are read again. */
+function invalidateSkillLists(queryClient: QueryClient, keys = sourceKeys()) {
+  for (const queryKey of keys.lists) void queryClient.invalidateQueries({ queryKey, exact: true })
+}
+
+/**
+ * Writes answer the new source list; the skill lists it feeds are read again. Two writes can
+ * answer out of order, so the source list is also read again after each one: the last read
+ * reflects every write the server finished.
+ */
 function useSourceMutation<T>(write: (body: T) => Promise<TeamSkillSourcesResponse>, done?: (body: T) => void) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: write,
-    onSuccess: async (answer, body) => {
+    mutationFn: async (body: T) => {
+      const keys = sourceKeys()
+      return { answer: await write(body), keys }
+    },
+    onSuccess: async ({ answer, keys }, body) => {
       // A read sent before the change would land after it and bring the old list back.
-      await queryClient.cancelQueries({ queryKey: skillSourcesKey(), exact: true })
-      queryClient.setQueryData(skillSourcesKey(), answer)
-      invalidateSkillLists(queryClient)
+      await queryClient.cancelQueries({ queryKey: keys.sources, exact: true })
+      queryClient.setQueryData(keys.sources, answer)
+      void queryClient.invalidateQueries({ queryKey: keys.sources, exact: true })
+      invalidateSkillLists(queryClient, keys)
       done?.(body)
     },
     onError: (error) => toast(error.message, { tone: 'danger' }),

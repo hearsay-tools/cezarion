@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { queryKeys } from '@/api/queries'
 import { skillSourcesKey } from '@/api/skill-sources-client'
+import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { createQueryClient } from '@/api/query-client'
 import type { TeamSkillSource, TeamSkillSourcesResponse } from '@open-mercato/cezar-api-client'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
@@ -27,10 +28,16 @@ const source = (over: Partial<TeamSkillSource> & Pick<TeamSkillSource, 'repo'>):
 /** While set, a GET of the sources answers only when the test calls `release`, with the list as
  *  it was when the GET arrived. */
 let heldReads: { release: () => void } | undefined
+/** While set, a write answers only when the test calls `release`, with the list it made. */
+let heldWrites: Array<{ method: string; release: () => void }> = []
 
-function serve(initial: Partial<TeamSkillSourcesResponse> = {}, { failAdd, holdReads = false }: { failAdd?: string; holdReads?: boolean } = {}) {
+function serve(
+  initial: Partial<TeamSkillSourcesResponse> = {},
+  { failAdd, holdReads = false, holdWrites = [] }: { failAdd?: string; holdReads?: boolean; holdWrites?: string[] } = {},
+) {
   requests = []
   heldReads = undefined
+  heldWrites = []
   let state: TeamSkillSourcesResponse = { sources: [], editable: true, configIssue: null, ...initial }
   const json = (payload: unknown, status = 200) =>
     new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } })
@@ -41,9 +48,13 @@ function serve(initial: Partial<TeamSkillSourcesResponse> = {}, { failAdd, holdR
       const method = init?.method ?? 'GET'
       const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : undefined
       requests.push({ method, url, body })
+      const answer = (method: string, made: TeamSkillSourcesResponse) => {
+        if (!holdWrites.includes(method)) return json(made)
+        return new Promise<Response>((resolve) => { heldWrites.push({ method, release: () => resolve(json(made)) }) })
+      }
       if (url === '/api/v1/skills/sources/retry') {
         state = { ...state, sources: state.sources.map((s) => (s.repo === body?.repo ? { ...s, status: { state: 'ok', skillCount: 1 } } : s)) }
-        return json(state)
+        return answer('RETRY', state)
       }
       if (url !== '/api/v1/skills/sources') return new Promise<never>(() => {})
       if (method === 'GET' && holdReads && requests.filter((r) => r.method === 'GET').length > 1) {
@@ -58,7 +69,7 @@ function serve(initial: Partial<TeamSkillSourcesResponse> = {}, { failAdd, holdR
         state = { ...state, sources: state.sources.map((s) => (s.repo === body?.repo ? { ...s, enabled: Boolean(body?.enabled), status: { state: 'idle' } } : s)) }
       }
       if (method === 'DELETE') state = { ...state, sources: state.sources.filter((s) => s.repo !== body?.repo) }
-      return json(state)
+      return method === 'GET' ? json(state) : answer(method, state)
     }),
   )
 }
@@ -197,6 +208,43 @@ describe('TeamSourcesPanel', () => {
     // bound: the held read settles in microtasks; this guards only against a hang
     await waitFor(() => expect(client.isFetching({ queryKey: skillSourcesKey() })).toBe(0))
     expect(rowFor('acme/other')).toBeNull()
+  })
+
+  it('two writes that answer out of order still end on the server list', async () => {
+    serve({
+      sources: [
+        source({ repo: 'acme/broken', status: { state: 'error', cause: 'fetch-failed', detail: 'no access.', skillCount: 0 } }),
+        source({ repo: 'acme/other' }),
+      ],
+    }, { holdWrites: ['RETRY'] })
+    renderPanel()
+    await waitFor(() => expect(rows()).toHaveLength(2))
+    fireEvent.click(rowFor('acme/broken')!.querySelector('[data-slot="skill-source-retry"]')!)
+    await waitFor(() => expect(heldWrites).toHaveLength(1))
+    fireEvent.click(rowFor('acme/other')!.querySelector('[data-slot="skill-source-remove"]')!)
+    await waitFor(() => expect(rowFor('acme/other')).toBeNull())
+    // The Retry answer was made before the Remove, so it still lists the removed source.
+    await act(async () => heldWrites[0]!.release())
+    await waitFor(() => expect(rowFor('acme/broken')?.textContent).toContain('1 skill'))
+    await waitFor(() => expect(rowFor('acme/other')).toBeNull())
+  })
+
+  it('a write that answers after a project switch writes only its own project cache', async () => {
+    serve({ sources: [source({ repo: 'acme/skills' })] }, { holdWrites: ['DELETE'] })
+    const client = renderPanel()
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    const openKey = skillSourcesKey()
+    fireEvent.click(rowFor('acme/skills')!.querySelector('[data-slot="skill-source-remove"]')!)
+    await waitFor(() => expect(heldWrites).toHaveLength(1))
+    try {
+      setApiScope('other-project')
+      client.setQueryData(skillSourcesKey(), { sources: [source({ repo: 'other/skills' })], editable: true, configIssue: null })
+      await act(async () => heldWrites[0]!.release())
+      await waitFor(() => expect(client.getQueryData<TeamSkillSourcesResponse>(openKey)?.sources).toEqual([]))
+      expect(client.getQueryData<TeamSkillSourcesResponse>(skillSourcesKey())?.sources.map((s) => s.repo)).toEqual(['other/skills'])
+    } finally {
+      setApiScope(null)
+    }
   })
 
   it('is read-only on a remote cockpit', async () => {
