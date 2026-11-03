@@ -18,7 +18,7 @@ import { createApp } from './server.ts';
  * total that actually matters).
  *
  * The manager is faked so each rung can be selected deterministically — the real
- * engine's queued/starting/live states are covered in `workflows/run.test.ts`.
+ * engine's queued/starting/live states are covered in `workflows/run-queued-delivery.test.ts`.
  */
 describe('queued prompt stack routes (#472)', () => {
   let repoRoot: string;

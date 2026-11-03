@@ -1866,7 +1866,7 @@ tasks retain no wall-clock cap. The tests shorten only `DEFAULT_RUN_TIMEOUT_MS`;
 manager, runners, transports and terminal signals remain real.
 
 Intermediate question rows **Q1 and Q3–Q10** (hearsay-tools/cezarion#427) live in
-`core/workflow-ask-parity.test.ts` and the shared parity guard. Every
+`core/workflow-ask-cells.testkit.ts` and the shared parity guard. Every
 `RUNNER_IDS` adapter drives the `cezar-ask` scenario, one `cezar_ask` call over its
 native wire. No wire exemption is needed. The rows cover same-session answers and
 trailing checks (Q1), final interactive asks (Q3), idle close and a second question
@@ -1926,7 +1926,7 @@ acknowledgement races the nudge; no native-wire cell exercises it now.
 Owned-worker terminal settlement and explicit question/worker/CI waits retain
 their existing policies.
 
-**H1–H5** (hearsay-tools/cezarion#486, H4–H5 hearsay-tools/cezarion#1112) live in `core/workflow-followup-parity.test.ts`
+**H1–H5** (hearsay-tools/cezarion#486, H4–H5 hearsay-tools/cezarion#1112) live in `core/workflow-followup-cells.testkit.ts`
 and the same parity guard. A human follow-up sent via `manager.sendMessage` while a
 turn is running must reach the agent without a resend when that turn calls
 `cezar_done` (H1), must be dropped when the same turn parks on `cezar_ask` (H2), and a
@@ -2018,7 +2018,7 @@ and runs as a fresh turn after the `cezar_ask` park while the card is pending �
 H2 assertion does not pin that.
 
 No-wait nudge rows **F1–F11** live in
-`core/workflow-final-message-parity.test.ts` and the same parity guard. They were written for the
+`core/workflow-final-message-cells.testkit.ts` and the same parity guard. They were written for the
 final-message nudge (hearsay-tools/cezarion#544), which the no-wait nudge absorbed
 (hearsay-tools/cezarion#1234): a silent tail is a turn end with no wait, so it gets the same one
 nudge, reply bound and settled outcome. Every adapter covers a reasoning-or-tool tail with no later

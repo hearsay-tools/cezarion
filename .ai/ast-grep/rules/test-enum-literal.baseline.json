@@ -194,12 +194,6 @@
       "count": 20
     },
     {
-      "file": "packages/cezar/src/workflows/run.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'running'",
-      "count": 1
-    },
-    {
       "file": "packages/cezar/src/worktree-setup.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'done'",
