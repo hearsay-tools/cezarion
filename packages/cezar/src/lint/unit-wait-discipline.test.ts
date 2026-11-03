@@ -1,11 +1,10 @@
 import { compareToBaseline, readBaseline, shrinkBaseline, tally, writeBaseline } from './wait-baseline.ts';
 // @vitest-environment node
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
-  baselinePath,
   unitBaseline,
   FLOOR_MS,
   scanSource,

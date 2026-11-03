@@ -1,5 +1,5 @@
 import { sizedOutside } from './test-wait-discipline.ts';
-import { blank, skipSpaceBack, skipSpaceForward } from './blank.ts';
+import { skipSpaceBack, skipSpaceForward } from './blank.ts';
 import { closeOf, argsOf, namedNumbers, literalMs, type PollLoop, type Entry, track, paramsStart } from './server-wait-syntax.ts';
 
 /** `Date.now()`, `performance.now()` and `process.hrtime()`, the clocks a deadline is read from. */

@@ -2,8 +2,8 @@ import type { SourceRule } from './source-rule.ts';
 import { baselines } from './server-wait-baseline.ts';
 import { compareToBaseline, readBaseline, tally } from './wait-baseline.ts';
 import { type ScanError, blankSource } from './blank.ts';
-import { closeOf, type Item, argsOf, numericLiteral, numeric, literalMs, VITEST_DEFAULT_MS, isShort, isShortDeadline, type PollLoop, pollLoops, type Entry, track, paramsStart } from './server-wait-syntax.ts';
-import { iterations, isNumber, earliest, UNREAD, heldValues, declaredHere, valueText, literalBound, type LoopSleep, runsEveryPass, pollDeadline } from './server-wait-deadlines.ts';
+import { closeOf, type Item, argsOf, numericLiteral, literalMs, VITEST_DEFAULT_MS, isShort, isShortDeadline, type PollLoop, pollLoops, type Entry, track, paramsStart } from './server-wait-syntax.ts';
+import { isNumber, UNREAD, heldValues, declaredHere, valueText, literalBound, type LoopSleep, runsEveryPass, pollDeadline } from './server-wait-deadlines.ts';
 
 /**
  * A source scan of the server unit tests for the three ways a test waits on the wall clock instead
