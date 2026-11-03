@@ -1,15 +1,16 @@
-import { seedRuns, recordedRun } from './seed-runs'
 import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seedRuns, recordedRun } from './seed-runs'
 import { seedTranscript } from './seed-transcript'
-
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import recordJson from './fixtures/subagents-run.record.json'
+
 const record = recordedRun(recordJson)
 // fixture-server starts: 2
 
@@ -305,7 +306,7 @@ describe('the Agents dock against a dry-run OMP sub-agent', () => {
     const created = await fetch(`${ompBase}/api/v1/runs`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ task: 'mock:subagent review the change', workflow: 'quick-task', runner: 'omp' }),
+      body: JSON.stringify(({ task: 'mock:subagent review the change', workflow: 'quick-task', runner: 'omp' } satisfies Partial<RunRecord>)),
     })
     // A refused POST fails here, at its cause, not as a 120 s wait for a run that never existed.
     if (!created.ok) throw new Error(`POST /api/v1/runs answered ${created.status}: ${await created.text()}`)

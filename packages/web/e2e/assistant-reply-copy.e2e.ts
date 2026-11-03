@@ -1,12 +1,12 @@
-import { seedRuns, recordedRun } from './seed-runs'
-import { makeRunRecord, RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import type { ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seedRuns, recordedRun } from './seed-runs'
 import { seedTranscript } from './seed-transcript'
-
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
@@ -17,6 +17,7 @@ import {
   type ContrastSample,
 } from './contrast'
 import recordJson from './fixtures/thread-run.record.json'
+
 const record = recordedRun(recordJson)
 // fixture-server starts: 1
 
@@ -27,16 +28,16 @@ const record = recordedRun(recordJson)
  */
 const sessionId = `e2e-assistant-reply-copy-${process.pid}`
 const RUN_ID = 'aaaaaaaa-0927-4222-8333-bbbbbbbbbbbb'
-const RUN = makeRunRecord({
+const RUN = ({
   ...record,
   id: RUN_ID,
   title: 'Assistant reply copy',
   titleSummary: 'Assistant reply copy',
   task: 'Show the plan.',
   status: RUN_STATUS.review,
-  steps: [record.steps[0]],
+  steps: [record.steps[0]!],
   pullRequestUrl: undefined,
-})
+} satisfies Partial<RunRecord>)
 const REPLY = [
   '## Heading',
   '',

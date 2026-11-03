@@ -1,12 +1,15 @@
 import { execFileSync, type ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-
+import { seedRuns, recordedRun } from './seed-runs'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
-import record from './fixtures/thread-run.record.json'
+import recordJson from './fixtures/thread-run.record.json'
+
+const record = recordedRun(recordJson)
 // fixture-server starts: 1
 
 /**
@@ -98,7 +101,7 @@ beforeAll(async () => {
   mkdirSync(join(dataRoot, '.ai/cezar/runs'), { recursive: true })
   buildWorktree(worktree)
 
-  const run = {
+  const run = ({
     ...record,
     id: RUN_ID,
     title: 'A task that committed a great many times',
@@ -107,10 +110,10 @@ beforeAll(async () => {
     worktreePath: worktree,
     branch: `cez/${RUN_ID.slice(0, 8)}`,
     baseBranch: 'main',
-    steps: [record.steps[0]],
+    steps: [record.steps[0]!],
     pullRequestUrl: undefined,
-  }
-  writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([run], null, 2), 'utf8')
+  } satisfies Partial<RunRecord>)
+  seedRuns(dataRoot, [run])
 
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'],
     { env: fixtureServeEnv(dataRoot), stdio: 'ignore' },

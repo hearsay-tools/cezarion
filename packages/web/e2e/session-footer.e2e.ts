@@ -1,16 +1,21 @@
 import type { ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, expect, it } from 'vitest'
-
+import { seedRuns, recordedRun } from './seed-runs'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { largeThreadEvents } from './fixtures/make-large-thread'
-import record from './fixtures/thread-run.record.json'
+import recordJson from './fixtures/thread-run.record.json'
 import { seedTranscript } from './seed-transcript'
 import { openSessionActivityRow } from './session-activity'
 import { waitForSettledSample } from './visual-ready'
+const record = recordedRun(recordJson)
+
+
+
 // fixture-server starts: 1
 
 const runId = 'aaaaaaaa-1111-4222-8333-bbbbbbbbcccc'
@@ -25,9 +30,9 @@ let project: string
 beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-session-footer-'))
   mkdirSync(join(dataRoot, '.ai/cezar/runs'), { recursive: true })
-  writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([runId, shortId].map(id => ({
-    ...record, id, steps: [record.steps[0]], pullRequestUrl: undefined,
-  }))))
+  seedRuns(dataRoot, [runId, shortId].map(id => ({
+    ...record, id, steps: [record.steps[0]!], pullRequestUrl: undefined,
+  } satisfies Partial<RunRecord>)))
   seedTranscript(join(dataRoot, '.ai/cezar/runs', `${runId}.ndjson`), largeThreadEvents(60).map(event => JSON.stringify(event)).join('\n') + '\n')
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(dataRoot), stdio: 'pipe',

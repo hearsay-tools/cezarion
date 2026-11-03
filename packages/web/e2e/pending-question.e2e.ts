@@ -1,10 +1,12 @@
 import type { ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { RUN_STATUS, STEP_STATUS, STEP_KIND, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-
+import { seedRuns } from './seed-runs'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { contrastSampleExpression, type ContrastSample } from './contrast'
 import { captureFixtureServer, spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
@@ -23,7 +25,7 @@ const LATER_MESSAGES = 260
 const ASK_CONTEXT = Array.from({ length: 40 }, (_, index) => `Context paragraph ${index + 1}: keep the full proposal visible in the transcript.`).join('\n\n')
 
 const lines: Array<Record<string, unknown>> = [
-  { type: 'step-start', stepId: 'task', name: 'Do the task', kind: 'agent', iteration: 1 },
+  { type: 'step-start', stepId: 'task', name: 'Do the task', kind: STEP_KIND.agent, iteration: 1 },
   { type: 'session.started', sessionId: 'a0000000-0000-4000-8000-000000001495', backend: 'claude', stepId: 'task' },
   { type: 'turn.started', turnId: 'turn_1', stepId: 'task' },
   { type: 'ask.requested', stepId: 'task', requestId: 'answered-question', context: 'The earlier proposal stays visible.', questions: [{ header: 'Earlier', question: 'Which branch is the base?', options: [{ label: 'main' }, { label: 'develop' }] }, { header: 'Notes', question: 'Which notes should I keep?', options: [{ label: 'Default notes' }, { label: 'No notes' }] }] },
@@ -41,15 +43,15 @@ for (let index = 1; index <= LATER_MESSAGES; index += 1) {
 }
 const events = lines.map((line, index) => ({ ...line, seq: index + 1, ts: new Date(Date.parse(now) + index * 10).toISOString(), runId: RUN_ID }))
 
-const record = (id: string, title: string, extra: Record<string, unknown> = {}) => ({
-  id, title, titleSummary: title, task: title, workflow: 'quick-task', runner: 'claude', status: 'done', createdAt: now,
-  tokensUsed: 0, archived: false, steps: [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }], ...extra,
-})
+const record = (id: string, title: string, extra: Partial<RunRecord> = {}) => ({
+  id, title, titleSummary: title, task: title, workflow: 'quick-task', runner: 'claude', status: RUN_STATUS.done, createdAt: now,
+  tokensUsed: 0, archived: false, steps: [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0 }], ...extra,
+} satisfies Partial<RunRecord>)
 const RUNS = [
   record(RUN_ID, 'Answer a question far above the tail', {
-    status: 'waiting',
-    steps: [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0, sessionId: 'a0000000-0000-4000-8000-000000001495' }],
-    waits: [{ id: randomUUID(), kind: 'human', source: 'agent', via: 'ask-line', registeredAt: now, phase: 'open', turnId: 'turn_2', askSeq: pendingSeq }],
+    status: RUN_STATUS.waiting,
+    steps: [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status: STEP_STATUS.running, iterations: 1, tokensUsed: 0, sessionId: 'a0000000-0000-4000-8000-000000001495' }],
+    waits: [{ id: randomUUID(), kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA["ask-line"], registeredAt: now, phase: WAIT_PHASE.open, turnId: 'turn_2', askSeq: pendingSeq }],
   }),
   record(OTHER_ID, 'Another finished task'),
 ]
@@ -73,7 +75,7 @@ let diagnostics: ReturnType<typeof captureFixtureServer> | undefined
 beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-pending-question-'))
   mkdirSync(join(dataRoot, '.ai/cezar/runs'), { recursive: true })
-  writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify(RUNS, null, 2), 'utf8')
+  seedRuns(dataRoot, RUNS)
   seedTranscript(join(dataRoot, '.ai/cezar/runs', `${RUN_ID}.ndjson`), events.map(event => JSON.stringify(event)).join('\n') + '\n')
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(dataRoot, { CEZ_AUTONAME: '0' }),

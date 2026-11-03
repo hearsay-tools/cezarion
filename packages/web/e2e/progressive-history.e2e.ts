@@ -2,16 +2,22 @@ import type { ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seedRuns, recordedRun } from './seed-runs'
 import { seedTranscript } from './seed-transcript'
-
 import { captureFixtureServer, spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { largeThreadEvents } from './fixtures/make-large-thread'
-import record from './fixtures/thread-run.record.json'
+import recordJson from './fixtures/thread-run.record.json'
 import { waitForStatus } from './poll'
 import { settleVisual, waitForSettledSample } from './visual-ready'
 import { HISTORY_BOUNDARY_SLACK_PX, isNearHistoryStart } from '../src/routes/task-thread/thread-scroll'
+const record = recordedRun(recordJson)
+
+
+
 // fixture-server starts: 1
 
 const repoRoot = resolve(import.meta.dirname, '../../..')
@@ -19,29 +25,29 @@ const artifactsDir = resolve(repoRoot, '.ai/qa/artifacts_e2e')
 const sessionId = `e2e-progressive-history-${process.pid}`
 const RUN_ID = 'cccccccc-1111-4222-8333-dddddddddddd'
 const RUN_B_ID = 'eeeeeeee-1111-4222-8333-ffffffffffff'
-const RUN = {
+const RUN = ({
   ...record,
   id: RUN_ID,
   title: 'Progressively page a very long session',
   titleSummary: 'Progressively page a long session',
   task: 'Inspect a long session without downloading the archive.',
-  status: 'running',
+  status: RUN_STATUS.running,
   finishedAt: undefined,
   // Same local day as the rewritten event `ts` below. The record fixture's createdAt is
   // 2026-07-14; events are restamped to 2026-07-30. After #435 that 16-day gap inserted a
   // day-separator as the first non-task row, and `preserves a virtual history anchor
   // behind the task prefix` timed out waiting on `turn-seq-2768:day-separator`.
   createdAt: '2026-07-30T00:00:00.000Z',
-  steps: [record.steps[0]],
+  steps: [record.steps[0]!],
   pullRequestUrl: undefined,
-}
-const RUN_B = {
+} satisfies Partial<RunRecord>)
+const RUN_B = ({
   ...RUN,
   id: RUN_B_ID,
   title: 'Restore a second long session without jumping',
   titleSummary: 'Restore a second long session',
   task: 'Keep a second long session at its cached reading position.',
-}
+} satisfies Partial<RunRecord>)
 
 const contextPrefix = [
   {
@@ -63,7 +69,7 @@ const contextPrefix = [
       name: 'Task',
       toolKind: 'task',
       title: 'Task: watch current history work',
-      status: 'running',
+      status: RUN_STATUS.running,
     },
   },
 ]
@@ -260,7 +266,7 @@ function parkCurrentThread(): number {
 beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-progressive-history-'))
   mkdirSync(join(dataRoot, '.ai/cezar/runs'), { recursive: true })
-  writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([RUN, RUN_B], null, 2), 'utf8')
+  seedRuns(dataRoot, [RUN, RUN_B])
   for (const runId of [RUN_ID, RUN_B_ID]) {
     seedTranscript(
       join(dataRoot, '.ai/cezar/runs', `${runId}.ndjson`),

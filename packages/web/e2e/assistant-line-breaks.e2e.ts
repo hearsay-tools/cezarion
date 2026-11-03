@@ -1,16 +1,17 @@
-import { seedRuns, recordedRun } from './seed-runs'
-import { makeRunRecord, RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import type { ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seedRuns, recordedRun } from './seed-runs'
 import { seedTranscript } from './seed-transcript'
-
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import recordJson from './fixtures/thread-run.record.json'
+
 const record = recordedRun(recordJson)
 // fixture-server starts: 1
 
@@ -25,16 +26,16 @@ const repoRoot = resolve(import.meta.dirname, '../../..')
 const artifactsDir = resolve(repoRoot, '.ai/qa/artifacts_e2e')
 const sessionId = `e2e-assistant-line-breaks-${process.pid}`
 const RUN_ID = 'aaaaaaaa-7300-4222-8333-bbbbbbbbbbbb'
-const RUN = makeRunRecord({
+const RUN = ({
   ...record,
   id: RUN_ID,
   title: 'Assistant line breaks',
   titleSummary: 'Assistant line breaks',
   task: 'Show the plan.',
   status: RUN_STATUS.review,
-  steps: [record.steps[0]],
+  steps: [record.steps[0]!],
   pullRequestUrl: undefined,
-})
+} satisfies Partial<RunRecord>)
 const LONG = 'a-very-long-unbroken-token-'.repeat(12)
 const REPLY = [
   'Step one done',

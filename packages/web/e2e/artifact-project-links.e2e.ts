@@ -3,8 +3,10 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
+import { seedRuns } from './seed-runs'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { settleVisual } from './visual-ready'
@@ -47,11 +49,11 @@ beforeAll(async () => {
   bootPublication = publish(boot, bootRun)
   rmSync(source)
   for (const [project, id] of [[owner, ownerRun], [boot, bootRun]]) {
-    const run: RunRecord = {
+    const run: RunRecord = ({
       id: id!, task: publication.markdown, title: 'Published artifact link', workflow: 'quick-task',
-      status: 'done', archived: false, createdAt: '2026-10-04T08:00:00Z', tokensUsed: 0, steps: [],
-    }
-    writeFileSync(join(project!, '.ai/cezar/runs.json'), JSON.stringify([run]))
+      status: RUN_STATUS.done, archived: false, createdAt: '2026-10-04T08:00:00Z', tokensUsed: 0, steps: [],
+    } satisfies Partial<RunRecord>)
+    seedRuns(project!, [run])
   }
   mkdirSync(evidenceDir, { recursive: true })
   writeFileSync(join(evidenceDir, 'publication.json'), JSON.stringify(publication, null, 2))

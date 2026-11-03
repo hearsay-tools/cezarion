@@ -3,8 +3,9 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, expect, it } from 'vitest'
 import { makeRunRecord, RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import { afterAll, beforeAll, expect, it } from 'vitest'
+import { seedRuns } from './seed-runs'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { seedTranscript } from './seed-transcript'
@@ -47,7 +48,7 @@ beforeAll(async () => {
   // Keep exactly the seeded rows, even though the CLI published one additional valid id.
   rmSync(join(dir, `${runIds[0]}-artifacts`, publication.id), { recursive: true })
   const runs = runIds.map((id, i) => makeRunRecord({ id, title: i === 9 ? 'Source task nine' : `Source task ${String(i).padStart(2, '0')}`, task: 'Published report', status: RUN_STATUS.done }))
-  writeFileSync(join(project, '.ai/cezar/runs.json'), JSON.stringify(runs))
+  seedRuns(project, runs)
   seedTranscript(join(dir, `${runIds[14]}.ndjson`), JSON.stringify({
     seq: 1, ts: '2026-11-01T12:14:00Z', type: 'item.completed',
     item: { kind: 'message', id: 'shelf-integration-message', role: 'assistant',

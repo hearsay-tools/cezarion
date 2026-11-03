@@ -1,16 +1,17 @@
-import { normalizeColorSample } from './contrast'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-
+import { seedRuns } from './seed-runs'
+import { normalizeColorSample } from './contrast'
 import { waitForSettledSample } from './visual-ready'
 import { expandedRailSampleExpression } from './project-rail-ready'
 import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, readTestEnv, servedRoot } from './agent-browser'
 import { contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
 import { readSharedProjects, snapshotSharedHome, writeSharedProjects } from './workspace-registry'
-
 /**
  * The project rail (#618), end to end: a needs-you run in a project you are NOT standing in lights
  * that project's mark, the two pills carry the right segments in the right places and inks, and
@@ -40,7 +41,7 @@ let restoreHome: () => void
 
 const now = Date.now()
 const ago = (ms: number) => new Date(now - ms).toISOString()
-const record = (id: string, status: string, extra: Record<string, unknown> = {}) => ({
+const record = (id: string, status: RunRecord['status'], extra: Partial<RunRecord> = {}) => ({
   id,
   title: `rail ${id}`,
   workflow: 'default',
@@ -51,7 +52,7 @@ const record = (id: string, status: string, extra: Record<string, unknown> = {})
   archived: false,
   steps: [],
   ...extra,
-})
+} satisfies Partial<RunRecord>)
 
 beforeAll(async () => {
   baseUrl = readTestEnv().baseUrl
@@ -62,14 +63,11 @@ beforeAll(async () => {
   const otherRoot = join(seedDir, 'other')
   execFileSync('git', ['init', '-q', '-b', 'main', otherRoot], { stdio: 'ignore' })
   mkdirSync(join(otherRoot, '.ai/cezar'), { recursive: true })
-  writeFileSync(
-    join(otherRoot, '.ai/cezar/runs.json'),
-    JSON.stringify([
-      record('rail-review', 'review', { finishedAt: ago(30 * 60_000) }),
-      record('rail-failed', 'failed', { finishedAt: ago(20 * 60_000), error: 'boom' }),
-      record('rail-done', 'done', { finishedAt: ago(10 * 60_000) }),
-    ]),
-  )
+  seedRuns(otherRoot, [
+      record('rail-review', RUN_STATUS.review, { finishedAt: ago(30 * 60_000) }),
+      record('rail-failed', RUN_STATUS.failed, { finishedAt: ago(20 * 60_000), error: 'boom' }),
+      record('rail-done', RUN_STATUS.done, { finishedAt: ago(10 * 60_000) }),
+    ])
 
   const existingBoot = readSharedProjects().find((project) => project.id === bootProject)
   const fillers = FILLERS.map((project) => {

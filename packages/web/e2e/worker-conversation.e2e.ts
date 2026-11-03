@@ -1,16 +1,19 @@
 import type { ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seedRuns, recordedRun } from './seed-runs'
 import { seedTranscript } from './seed-transcript'
-
 import { settleVisual, waitForSettledSample } from './visual-ready'
 import { messageClockExpression } from './transcript-measurements'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
-import record from './fixtures/thread-run.record.json'
+import recordJson from './fixtures/thread-run.record.json'
+
+const record = recordedRun(recordJson)
 // fixture-server starts: 1
 
 // Real store/history/reducer/rendering, not live provider execution. Deliberately
@@ -55,9 +58,9 @@ beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'cezar-worker-cards-'))
   mkdirSync(join(root, '.ai/cezar/runs'), { recursive: true })
   mkdirSync(artifacts, { recursive: true })
-  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([
+  seedRuns(root, [
     [parent, 'Parent coordinator'], [alpha, 'Alpha'], [bravo, 'Bravo — parser review and integration worker'], [large, 'Long conversation'], [diagnostics, 'Delivery feedback'],
-  ].map(([id, title]) => ({ ...record, id, title, titleSummary: title, task: 'Coordinate the workers.', pullRequestUrl: undefined }))))
+  ].map(([id, title]) => ({ ...record, id: id!, title: title!, titleSummary: title, task: 'Coordinate the workers.', pullRequestUrl: undefined } satisfies Partial<RunRecord>)))
   for (const [id, padding] of [[parent, 0], [large, 70]] as const) {
     const lines = events(padding).map((event, n) => ({ seq: n + 1, ts: '2026-09-20T12:05:00Z', ...event }))
     // The long transcript has its own sender identity, keeping direction truthful.

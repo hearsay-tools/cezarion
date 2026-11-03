@@ -10,7 +10,7 @@ export function recordedRun(value: unknown): RunRecord {
 
 /** Seed the legacy import file before the fixture server opens its run store. */
 export function seedRuns(dataRoot: string, partials: readonly Partial<RunRecord>[]): void {
-  const records = partials.map(partial => runRecordSchema.parse(makeRunRecord(partial)))
+  const records = partials.map(partial => makeRunRecord(partial))
   mkdirSync(join(dataRoot, '.ai/cezar'), { recursive: true })
   writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify(records, null, 2), 'utf8')
 }

@@ -2,7 +2,10 @@ import type { ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seedRuns } from './seed-runs'
 import { waitForSettledSample as rawSettledSample } from './visual-ready'
 import { normalizeColorExpression, normalizeColorSample } from './contrast'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
@@ -29,19 +32,19 @@ beforeAll(async () => {
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
   mkdirSync(join(root, '.ai/skills'), { recursive: true })
   for (const name of ['review', 'ship']) writeFileSync(join(root, `.ai/skills/${name}.md`), `---\ndescription: ${name} the changes\n---\nCheck the work.\n`)
-  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([...['one', 'two'].map((id) => ({
-    id, title: `Review task ${id}`, task: 'Check the work', workflow: 'default', status: 'review', tokensUsed: 0,
+  seedRuns(root, [...['one', 'two'].map((id) => ({
+    id, title: `Review task ${id}`, task: 'Check the work', workflow: 'default', status: RUN_STATUS.review, tokensUsed: 0,
     createdAt: new Date().toISOString(), finishedAt: new Date().toISOString(), archived: false, steps: [],
     // One reference, on the row this spec hovers: the pointer path keeps it a real link (#617 01b).
     ...(id === 'two' ? { referencedPullRequestUrl: 'https://github.com/o/r/pull/594' } : {}),
     // #729: both rows are handed off, so the glyph is sampled on the selected and the hover fill.
     notify: true,
-  })),
+  } satisfies Partial<RunRecord>)),
     // An unread finished run (#617 01c): the flat nav's Tasks `tasks-unread` count. Never opened
     // by this spec, so it stays unread.
-    { id: 'fin', title: 'Finished task', task: 'Check the work', workflow: 'default', status: 'done', tokensUsed: 0,
-      createdAt: new Date(Date.now() - 7_200_000).toISOString(), finishedAt: new Date(Date.now() - 7_200_000).toISOString(), archived: false, steps: [] },
-  ]))
+    ({ id: 'fin', title: 'Finished task', task: 'Check the work', workflow: 'default', status: RUN_STATUS.done, tokensUsed: 0,
+      createdAt: new Date(Date.now() - 7_200_000).toISOString(), finishedAt: new Date(Date.now() - 7_200_000).toISOString(), archived: false, steps: [] } satisfies Partial<RunRecord>),
+  ])
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })

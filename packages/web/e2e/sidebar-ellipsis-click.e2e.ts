@@ -1,8 +1,11 @@
 import type { ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { RUN_STATUS, STEP_STATUS, STEP_KIND } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seedRuns } from './seed-runs'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
@@ -31,14 +34,14 @@ beforeAll(async () => {
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
   const finished = new Date(Date.now() - 60 * 60_000).toISOString()
   // Three references with long numbers: wider than the default 264px column's meta line.
-  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([{
+  seedRuns(root, [({
     id, title: 'Designing remote MCP operations', task: 'Designing remote MCP operations', workflow: 'quick-task',
-    runner: 'claude', status: 'failed', createdAt: finished, finishedAt: finished, tokensUsed: 0, archived: false, pinned: true,
+    runner: 'claude', status: RUN_STATUS.failed, createdAt: finished, finishedAt: finished, tokensUsed: 0, archived: false, pinned: true,
     pullRequestUrl: 'https://github.com/o/r/pull/47240001',
     referencedPullRequestUrl: 'https://github.com/o/r/pull/47120002',
     referencedIssueUrl: 'https://github.com/o/r/issues/46390003',
-    steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'failed', iterations: 1, tokensUsed: 0, sessionId: 'ellipsis-fixture' }],
-  }]))
+    steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent, status: STEP_STATUS.failed, iterations: 1, tokensUsed: 0, sessionId: 'ellipsis-fixture' }],
+  } satisfies Partial<RunRecord>)])
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })
