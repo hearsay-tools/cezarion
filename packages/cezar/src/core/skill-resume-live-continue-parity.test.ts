@@ -1,3 +1,3 @@
 import { describeSkillResumeParity } from './skill-resume-parity.testkit.ts';
 
-describeSkillResumeParity(1);
+describeSkillResumeParity('live-continue');

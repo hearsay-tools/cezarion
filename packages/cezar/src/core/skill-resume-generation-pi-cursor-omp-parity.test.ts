@@ -1,3 +1,3 @@
 import { describeSkillResumeParity } from './skill-resume-parity.testkit.ts';
 
-describeSkillResumeParity(4);
+describeSkillResumeParity('generation-pi-cursor-omp');

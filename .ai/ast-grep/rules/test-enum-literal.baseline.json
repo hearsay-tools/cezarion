@@ -170,12 +170,6 @@
       "count": 1
     },
     {
-      "file": "packages/cezar/src/core/skill-resume-parity.test.ts",
-      "rule": "test-enum-literal",
-      "site": "source: 'cezar'",
-      "count": 1
-    },
-    {
       "file": "packages/cezar/src/core/ui-events.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'running'",

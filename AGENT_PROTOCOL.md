@@ -1764,7 +1764,7 @@ parked run waiting, and a restart still answers it. R51: adopting a dead owner's
 middle of a turn starts no agent, and Continue resumes it. R52: Stop on a dead owner's run in
 the middle of a turn ends it as cancelled and starts no agent. No runner is exempt.
 
-**R53–R57** (hearsay-tools/cezarion#790), in `core/skill-resume-parity.test.ts`, drive every
+**R53–R57** (hearsay-tools/cezarion#790), in `core/skill-resume-parity.testkit.ts`, drive every
 `RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire on a skill-driven task.
 R53: a live Continue resends `skillSystemPrompt` before the extra prompt on `resent`
 runners (claude, pi, omp) and does not duplicate it on an `in-thread` same-session resume

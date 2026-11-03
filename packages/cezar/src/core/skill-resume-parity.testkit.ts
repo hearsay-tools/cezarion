@@ -347,67 +347,67 @@ function assertContinuationSkill(
   }
 }
 
-const PARTS: readonly (readonly string[])[] = [
-  [
-    "cursor R100",
-    "claude R53",
-    "pi R57",
-    "codex fresh-session continuation includes the skill",
-    "claude R59",
-    "omp R59"
+const PARTS: Readonly<Record<string, readonly string[]>> = {
+  "generation-claude-codex-opencode": [
+    "claude R100",
+    "codex R100",
+    "opencode R100"
   ],
-  [
-    "opencode R100",
-    "opencode R54",
+  "generation-pi-cursor-omp": [
+    "cursor R100",
+    "omp R100",
+    "pi R100"
+  ],
+  "live-continue": [
+    "claude R53",
+    "claude R55",
+    "codex R53",
+    "codex R55",
+    "cursor R53",
+    "cursor R55",
+    "omp R53",
+    "omp R55",
     "opencode R53",
-    "opencode fresh-session continuation includes the skill",
+    "opencode R55",
+    "pi R53",
+    "pi R55"
+  ],
+  "recovery": [
+    "claude R54",
+    "claude R59",
     "codex R54",
     "codex R59",
-    "cursor R56"
-  ],
-  [
-    "claude R100",
-    "cursor R53",
-    "opencode R55",
-    "claude R54",
-    "codex R53",
-    "pi R54",
-    "omp R55"
-  ],
-  [
-    "codex R100",
-    "opencode R57",
-    "cursor R55",
-    "opens a fresh session with the skill, one note, and a new session id",
+    "cursor R54",
     "cursor R59",
+    "omp R54",
+    "omp R59",
+    "opencode R54",
     "opencode R59",
-    "pi R53",
-    "codex R56"
+    "pi R54",
+    "pi R59"
   ],
-  [
-    "pi R100",
+  "session-identity": [
     "claude R57",
     "codex R57",
-    "codex R55",
-    "claude R55",
-    "pi R59",
-    "pi R55",
-    "omp R56",
-    "every runner declares systemPromptOnResume"
-  ],
-  [
-    "omp R100",
     "cursor R57",
-    "cursor R54",
-    "cursor fresh-session continuation includes the skill",
     "omp R57",
-    "omp R54",
-    "omp R53",
+    "opencode R57",
+    "pi R57"
+  ],
+  "wire-and-fallback": [
+    "claude R56",
+    "codex R56",
+    "codex fresh-session continuation includes the skill",
+    "cursor R56",
+    "cursor fresh-session continuation includes the skill",
+    "every runner declares systemPromptOnResume",
+    "omp R56",
     "opencode R56",
-    "pi R56",
-    "claude R56"
+    "opencode fresh-session continuation includes the skill",
+    "opens a fresh session with the skill, one note, and a new session id",
+    "pi R56"
   ]
-];
+};
 
 export function describeSkillResumeParity(part: ParityPart, collect?: ParityCollector): void {
   const { describe, it } = partitionParity(part, PARTS, collect);

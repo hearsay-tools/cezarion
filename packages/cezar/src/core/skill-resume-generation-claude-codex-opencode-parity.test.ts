@@ -1,3 +1,3 @@
 import { describeSkillResumeParity } from './skill-resume-parity.testkit.ts';
 
-describeSkillResumeParity(5);
+describeSkillResumeParity('generation-claude-codex-opencode');
