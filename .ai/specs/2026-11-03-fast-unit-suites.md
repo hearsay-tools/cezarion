@@ -17,13 +17,12 @@ worktree. Other tasks on the host can still compete for CPU and I/O.
 Before timing, stop this worktree's Squeal daemon:
 
 ```sh
-/home/agent/.codex/plugins/data/squeal-hearsay/bin/squeal stop --until-start
+squeal stop --until-start
 ```
 
 The stop succeeded at Squeal revision 0. The primer reported 1,144 loaded test
 files, 90 slow files, 13 current slow files and 77 pending. These inherited
-verdicts are not the measurements below. The installed Codex launcher reports
-0.1.390; the Claude plugin reports 0.1.392. Squeal stayed stopped during timing.
+verdicts are not the measurements below. Squeal stayed stopped during timing.
 No `squeal run --slow` was used.
 
 For each file, collect test names with `npm exec -- vitest list <file> --json`.
@@ -44,9 +43,8 @@ nproc
 
 Raw logs, exact argument arrays, selected and total case counts, starting load,
 CPU count, start/end times, exit status and command PID live under the ignored
-`.ai/qa/2516/` directory. `measure.py` runs files and sizes in sequence. Its
-controller PID is 4102848; it runs in persistent command session 38370. These
-are local evidence paths, not tool-readable baselines or a slow-file allowlist.
+`.ai/qa/2516/` directory. `measure.py` runs files and sizes in sequence in a persistent command session.
+These are local evidence paths, not tool-readable baselines or a slow-file allowlist.
 The table below is a record, not an input to any guard.
 
 CPU seconds are GNU time's user plus system seconds, including reaped child
@@ -73,7 +71,7 @@ was deleted by hearsay-tools/cezarion#2446. Measure the other 35, not a recreate
 copy of the removed test. Fresh CI also selects
 `delegation/provision-workflows.test.ts` and `delegation/workspace.test.ts`.
 
-Passed main run **41334112445**, SHA
+Passed main run **41334112445**, from **2026-11-01**, SHA
 `05a1ee28989378319a0f982b7696b276858c89b4`, executed four shards with
 `--maxWorkers=4`. Use its per-file passed suite-summary lines. The more recent
 passed main run 41639284504 at the measurement SHA skipped the Vitest jobs and
@@ -144,7 +142,21 @@ importing the real runner factory or `RunManager`. Match only the selected
 spawn and every unrelated child-process export. Git, discovery, `tsx`, process
 probes and real lifecycle fixtures remain real.
 
-**Proposed changed runner-source lines: none.** The same applies to
+**Proposed changed runner-source lines: none.** This does not mean no shipped
+files change. `packages/cezar/package.json` includes `scripts` in its published
+files, and CEZ_DRY_RUN executes these scripts. Extracting scenario engines changes
+the shipped wrappers `mock-claude.mjs`, `mock-codex-app-server.mjs`,
+`mock-opencode-serve.mjs`, `mock-pi-rpc.mjs`, `mock-cursor-print.mjs` and
+`mock-omp-rpc.mjs` under `packages/cezar/scripts/`, plus their new shared engine
+modules. Any shared control helper imported by those engines must be listed in
+the 3.2 diff review too. Dry-run output must stay byte-identical, not merely
+semantically similar. The 3.2 PR must record the raw-frame before/after comparison
+for **every extracted scenario**, with the same inputs and original defaults.
+Keep wrapper changes to imports and explicit dependencies; put the virtual child
+and interception code in testkits. The smallest-seam and unchanged-default rule
+applies to these shipped scripts as strictly as to runner source.
+
+No source-line change is proposed in
 `session-process.ts` and `runner-runtime.ts`. No constructor option, environment
 flag or application dependency injection is needed. The shipped default path
 executes the identical source, imports, spawn arguments, timers, parser and
@@ -304,7 +316,7 @@ prove frame and event ordering, not OS cleanup.
 | EOF no usable evidence | Same `${backend} unknown automatic EOF cleanup fails but still reaps the live child (%s)` (unavailable/timeout) | Keep real |
 | Explicit cleanup intent | Same `${backend} explicit ${intent} ${when} wins over unknown automatic cleanup` (end/interrupt × before EOF/during probe/after TERM) | Keep real |
 | Interrupt preserves KILL deadline | Same `${backend} interrupt during automatic cleanup keeps the earlier KILL deadline` | Keep real |
-| stdin closes/errors while live | core/omp-input-pipe.test.ts `${backend} surfaces closed-input failure S29`; `fails queued-before-ready writes even when the child would exit zero` | Preserve current transport tests; Cursor one-shot print has declared construction gap |
+| stdin closes/errors while live | core/omp-input-pipe.test.ts `${backend} surfaces closed-input failure S29`; `fails queued-before-ready writes even when the child would exit zero` | Preserve current transport tests; Cursor has no live writable follow-up stdin after prompt admission: print closes stdin after one prompt and queues human follow-ups for a new child. `PARITY_EXEMPTIONS` in `core/harness-parity.testkit.ts:763` declares S29 `scenario-unconstructible`; `core/omp-input-pipe.test.ts` registers the inverted exemption assertion |
 | Leader owns process group | core/runner-shutdown-parity.test.ts S26 `the session leader leads its own process group` | Keep real |
 | Stop kills group/preserves setsid | Same S27 `stop ends the leader's process group but not a setsid child` | Keep real |
 | Escalation reaches group | Same S28 `end escalation reaches the whole process group` | Keep real |
@@ -367,7 +379,7 @@ All evidence in detached-process.test.ts.
 | Zombie main thread, live port-holding threads | `counts it running while another thread holds its port, and stops it only once the port is free` | Preserve real |
 | Intentional unowned launch survives starter | startAndForget `keeps nothing alive: its caller exits while the process runs and before the settle window ends` asserts child remains alive | Preserve; distinct from owned cleanup |
 
-No tracked files changed. No tests ran.
+
 
 
 ## Slice 3.3 plan
@@ -377,29 +389,65 @@ row and have thin files register disjoint groups. A guard must prove that every
 criterion/runner pair appears exactly once across those files. Do not replace
 coverage with skips, retries, higher timeouts or runner exemptions.
 
-Add a reporter that records Vitest's actual test-module execution duration,
-including that file's hooks and teardown, using the same clock as the per-file
-suite summary. It must run on every shard. At the end of each shard, fail if
-any completed file takes **60,000 ms or more**, or if a collected file has no
-completed measurement. Keep only completed Vitest files in this check, not
-modules imported by a test. A crashed worker or skipped shard must also fail the
-required aggregate. Print path, measured milliseconds and the hard limit.
+The design target is **at most 40 s per file on CI**, with a hard failure at
+60 s. The 20 s gap gives load headroom. Use measured post-3.2 CI durations to
+choose row groups. If a proposed group exceeds 40 s, split it again or remove
+its measured cause. Do not aim for a 55–59 s file. The final per-file plan below
+assigns groups and budgets; all budgets need confirmation on the actual CI
+worker count, not extrapolation from local one-worker wall time.
 
-Upload raw per-shard timing records tagged with exact head SHA, run ID, shard
-identity, maxWorkers and reporter version. The existing required aggregate must
-read all four artifacts from the current run, reject missing, duplicate or
-foreign-SHA records, and fail any value at or above the limit. The live shard
-reporter fails locally in CI; the aggregate proves complete coverage. Neither
-reads the historical duration manifest, this document's table, a baseline, an
-allowlist or a prior run's median to decide admission. The sequencer may keep
-using its scheduling hints independently.
+Add one Vitest reporter in every shard. At file completion, read the actual
+module execution duration used by Vitest's suite summary, including that file's
+hooks and teardown. Fail the shard when any completed file takes **60,000 ms or
+more**. Print its path, measured duration and the hard limit. A crashed worker
+must already fail Vitest; a collected file without a completed verdict must not
+be treated as a passing duration. Reporter tests pin those paths as well as the
+59,999 / 60,000 / 60,001 ms boundary.
 
-Prove the cap with a synthetic reporter input at 59,999 ms, 60,000 ms and
-60,001 ms; missing file, crashed worker, missing shard and wrong-SHA artifacts
-must fail. Show one real over-limit suite turns the shard and required aggregate
-red. Land the cap only on a head where every real Vitest file passes all four
-shards under the actual CI worker count. If one remains slow, fix its cause or
-split its rows first. No exception list and no allowance for historical files.
+Keep the existing required aggregate that needs all four shard jobs to pass.
+This is sufficient: a failed reporter fails its shard, and missing/skipped shards
+cannot satisfy the required aggregate for a run that owes tests. A separate
+artifact admission system adds no failure coverage here and is not proposed.
+Optional timing artifacts can help analysis; they never admit a failing shard.
+The guard reads live measurements only. It does not read this table, the
+historical manifest, a baseline, an allowlist or an earlier run's median.
+
+Merge-queue reuse must reuse only successful PR test evidence for the exact
+immutable tested head/tree allowed by the existing evidence contract. The PR
+Vitest run enforces the cap on all four shards. A changed head needs fresh
+cap-enforcing PR evidence; queue reuse must not turn missing evidence, evidence
+from before the reporter landed, or another head's timing pass into admission.
+Prove this with the existing evidence/queue tests in the 3.3 PR. The main run
+that skips Vitest is evidence reuse, not a fresh measurement of file durations.
+
+Land the cap only after every real Vitest file passes in CI. First fix causes or
+split rows for any file over the 40 s target. Then demonstrate all four shards
+pass with the reporter. No exceptions, skip, retry or longer timeout.
+
+### Removing the Squeal wait bound
+
+`squeal.config.json` currently sets `runner.timeoutMs` to 900,000 ms. The bound
+in `.ai/skills/validation/SKILL.md` (the `squeal-wait-bound` section) handles
+unknown verdicts at that cap and files still pending after cap plus five
+minutes. Faster CI alone does not prove that this escape path is unnecessary:
+Squeal queue latency, local load and missing verdicts must also be measured.
+
+The 3.2 PR records time from the first verdict wait at its exact revision to a
+current Squeal verdict for the heaviest changed parity files, with starting and
+ending load average, nproc, Squeal state, file count, queue delay and file
+execution time. Trigger the actual shared-testkit invalidation, not only a
+single warm cached cell. All affected files must reach current passing verdicts
+without the targeted-run escape path, unknown results or a cap timeout. Compare
+these verdict times with the unchanged 900 s cap and 1,200 s pending bound.
+Do not increase either value to obtain a pass.
+
+Remove the bound with the replacement, per the campaign rule. If any parity
+file still requires it after 3.2, the 3.2 report must name that file, measured
+queue/execution cause and its 3.3 split or cause fix. Keep the bound until that
+fix lands and repeat the verdict measurement. If the issue is Squeal failing to
+queue a file rather than suite cost, a row split does not fix it; resolve that
+cause before claiming the bound obsolete. The cap lands only after the final
+file fix, and the bound disappears only with measured current verdict evidence.
 
 ## Required case tables
 
