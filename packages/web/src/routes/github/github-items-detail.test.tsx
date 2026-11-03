@@ -1,7 +1,6 @@
 import { ISSUE_142, ISSUE_139, PR_137, GITHUB, COMMENT_TEXT, COMMENT_IMAGE, REVIEW_CHANGES, THREAD, type SentRequest, jsonResponse, stubFetch, renderAt, renderGithubInMain, rows, detail, ghList, ghListHandle, dragGithubList, changesRequested, health, compactHiddenFlags } from './github.testkit'
 import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 
-import path from 'node:path'
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { queryKeys } from '@/api/queries'
