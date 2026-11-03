@@ -39,7 +39,7 @@ export function rememberRoute(browser: AgentBrowser, route: string): void {
 
 export function rememberReadiness(browser: AgentBrowser, ready: string): void {
   const page = setupPage(browser)
-  if (!page.frozen) page.ready = ready
+  if (!page.frozen && page.ready === undefined) page.ready = ready
 }
 
 export function rememberViewport(browser: AgentBrowser, width: number, height: number, scale?: number): void {

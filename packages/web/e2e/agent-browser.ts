@@ -1100,8 +1100,8 @@ export class AgentBrowser {
   }
 
   /** Emulate the accessibility preference in the real browser, including CSS media queries. */
-  setReducedMotion(): void {
-    this.run(['set', 'media', 'reduced-motion'])
+  setReducedMotion(reduced = true): void {
+    this.run(['set', 'media', ...(reduced ? ['reduced-motion'] : [])])
   }
 
   /** operation: interact (`click`). Waits for the target first; see `awaitTarget`.

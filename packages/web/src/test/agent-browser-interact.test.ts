@@ -93,14 +93,23 @@ describe('AgentBrowser auto-wait (#405)', () => {
     browser.setViewport(390, 844, 2)
     browser.goto('http://fixture.test/p/mobile/tasks')
     browser.waitForFunction('document.querySelector("[data-route=tasks]") !== null')
+    browser.waitForFunction('document.activeElement.tagName === "BUTTON"')
     resetBrowserPage(browser)
     expect(commands().filter(args => args[0] === 'set')).toEqual([
       ['set', 'viewport', '390', '844', '2'], ['set', 'viewport', '390', '844', '2'],
     ])
     expect(commands().filter(args => args[0] === 'wait')).toEqual([
       ['wait', '--fn', 'document.querySelector("[data-route=tasks]") !== null'],
+      ['wait', '--fn', 'document.activeElement.tagName === "BUTTON"'],
       ['wait', '--fn', 'document.querySelector("[data-route=tasks]") !== null'],
     ])
+  })
+
+  it('can restore the default motion preference after enabling reduced motion', () => {
+    const { browser, commands } = open()
+    browser.setReducedMotion()
+    browser.setReducedMotion(false)
+    expect(commands()).toEqual([['set', 'media', 'reduced-motion'], ['set', 'media']])
   })
 
   it('creates a tab through the provider lifecycle and returns its CDP target', () => {
