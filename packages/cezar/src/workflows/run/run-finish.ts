@@ -3,7 +3,7 @@ import type { RunRecord, RunStore } from '../../runs/store.ts';
 import { doneErrorMessage } from '../../ci-wait/errors.ts';
 import { openCompletionRequests, recordRequestRefusal, settledRootFinishPatch, type CompletionRefusal } from '../completion-policy.ts';
 import type { ActiveRun } from '../active-run.ts';
-import type { RunExitId } from '../run-states.ts';
+import type { RunExitId } from '../../runs/run-exits.ts';
 import { openWaitList, openWaits } from '../waits.ts';
 import { toolSessionRefusal } from './cezar-tools.ts';
 import { clearIdleTimer, clearAutosaveTimer } from './input-timers.ts';

@@ -9,7 +9,7 @@ import { accountHeldFor, sessionlessWakePrompt } from '../run-scheduling.ts';
 import { executionAccount } from '../execution-account.ts';
 import { chargesBudgetMessage, isMonitoringTimer, openWaits, resolvedWaits, waitInputId, waitResultText } from '../waits.ts';
 import { runsAwaitingPeer } from '../wait-scope.ts';
-import { transitionVia, type RunExitId } from '../run-states.ts';
+import { transitionVia, type RunExitId } from '../../runs/run-exits.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
 import type { ActiveRun } from '../active-run.ts';
 import { liveSubagents } from './subagent-waits.ts';

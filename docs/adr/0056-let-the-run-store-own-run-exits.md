@@ -41,10 +41,12 @@ unknown fields) and ADR 0021 (outcomes commit with what they depend on) still ho
 still holds: `RunManager` stays the facade and its modules call the store's exit entry point
 through their context.
 
-Implementation: [run-states.ts](../../packages/cezar/src/workflows/run-states.ts),
+Implementation: [run-exits.ts](../../packages/cezar/src/runs/run-exits.ts),
+[run-states.ts](../../packages/cezar/src/workflows/run-states.ts),
 [store.ts](../../packages/cezar/src/runs/store.ts),
 [record-write-rules.ts](../../packages/cezar/src/runs/record-write-rules.ts),
 [2026-11-03-run-store-owns-exits.md](../../.ai/specs/2026-11-03-run-store-owns-exits.md).
 
-Coverage: [run-states.test.ts](../../packages/cezar/src/workflows/run-states.test.ts),
+Coverage: [run-exits.test.ts](../../packages/cezar/src/runs/run-exits.test.ts),
+[run-states.test.ts](../../packages/cezar/src/workflows/run-states.test.ts),
 [store.test.ts](../../packages/cezar/src/runs/store.test.ts).

@@ -6,7 +6,7 @@ import type { CommitSource, RunRecord } from '../../runs/store.ts';
 import type { Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { historyDeletionPending, executionBlockedByRootFinish } from './run-guards.ts';
 import { repairFailedRootFinish } from '../completion-policy.ts';
-import { transitionVia } from '../run-states.ts';
+import { transitionVia } from '../../runs/run-exits.ts';
 import { reconcileConversationState, projectConversationEvents, settledRunFamilies } from '../../delegation/conversations.ts';
 import { reconcileWorkerEntry } from '../../delegation/wait.ts';
 import { workerOutcome } from '../../runs/delegation-state.ts';

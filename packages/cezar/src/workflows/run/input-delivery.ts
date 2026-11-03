@@ -9,7 +9,7 @@ import type { PastedContent } from '../pasted-content.ts';
 import { contentBlocksOf, pastedAttachmentsNote } from '../pasted-content.ts';
 import { startCompletionCycle } from '../completion-policy.ts';
 import { chargesBudget, hasPrWait, isMonitoringTimer, openWaitsFooter, resolvedWaits, waitInputId } from '../waits.ts';
-import { transition, type RunExitId } from '../run-states.ts';
+import { transition, type RunExitId } from '../../runs/run-exits.ts';
 import { DelegationPolicyError } from '../../delegation/policy.ts';
 import { enqueueAgentInput, agentInputBatch } from '../../delegation/input.ts';
 import { acknowledgedBatch } from '../outcome-batches.ts';

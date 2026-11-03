@@ -3,7 +3,7 @@ import { parseUsageLimit } from '../../core/usage-limit.ts';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
 import { formatWakeInstant } from '../run-scheduling.ts';
-import { transitionVia, type RunExitId } from '../run-states.ts';
+import { transitionVia, type RunExitId } from '../../runs/run-exits.ts';
 import type { RunModuleContext } from './types.ts';
 
 interface AutoResumeHost {
