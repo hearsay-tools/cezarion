@@ -157,12 +157,13 @@ describe('the review gate against a live parked run', () => {
       }).observe(document.body, { childList: true, subtree: true })
       return true
     })()`)
-    // Since 2.4 the thread is a pinned chat surface: content that is merely NEAR the bottom
-    // can sit in the band the sticky composer dock floats over. Scroll fully down so the
-    // accept row is clear of it, like a reader would.
-    browser.evaluate(
-      `(() => { const m = document.querySelector('[data-slot="main"]'); m.scrollTop = m.scrollHeight })()`,
-    )
+    browser.waitForFunction(`document.querySelector('[data-slot="diff-file"]') !== null`)
+    browser.evaluate(`document.querySelector('[data-slot="review-accept"]').scrollIntoView({ block: 'center' })`)
+    browser.waitForFunction(`(() => {
+      const button = document.querySelector('[data-slot="review-accept"]')
+      const rect = button.getBoundingClientRect()
+      return button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
+    })()`)
     browser.click('[data-slot="review-accept"]')
 
     await waitForStatus(baseUrl, runId, ['done'])
