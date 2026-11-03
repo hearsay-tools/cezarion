@@ -154,6 +154,21 @@ it('a run stopped mid-file leaves no sandbox once the next run starts (hearsay-t
   mkdirSync(join(repo, '.ai/qa'), { recursive: true });
   const scratch = mkdtempSync(join(repo, '.ai/qa/unit-env-'));
   try {
+    // Other workers legitimately reap dead owners in /tmp. Keep both nested runs in
+    // one private root so only the next run can reap the killed worker's sandbox.
+    const root = join(scratch, 'sandboxes');
+    mkdirSync(root);
+    const setup = join(scratch, 'sandbox-root.setup.mjs');
+    writeFileSync(setup, `
+import { vi } from 'vitest';
+vi.mock(${JSON.stringify(join(repo, 'scripts/test-sandbox.mjs'))}, async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    createTestSandbox: (prefix) => actual.createTestSandbox(prefix, ${JSON.stringify(root)}),
+  };
+});
+`);
     const log = join(scratch, 'sandboxes.log');
     const fixture = join(scratch, 'sandbox.test.ts');
     writeFileSync(fixture, `
@@ -167,7 +182,8 @@ it('records its sandbox', () => {
     const config = join(scratch, 'vitest.config.mjs');
     writeFileSync(config, `export default ${JSON.stringify({ test: {
       environment: 'node', include: [fixture],
-      setupFiles: [join(repo, 'packages/cezar/vitest.setup.ts')],
+      setupFiles: [setup, join(repo, 'packages/cezar/vitest.setup.ts')],
+      sequence: { setupFiles: 'list' },
       passWithNoTests: false, maxWorkers: 1,
     } })}`);
     const env = Object.fromEntries(['PATH', 'SystemRoot', 'SYSTEMROOT', 'ComSpec', 'PATHEXT']
@@ -183,12 +199,14 @@ it('records its sandbox', () => {
     expect(stopped.status, stopped.stdout + stopped.stderr).not.toBe(0);
     const [left] = readFileSync(log, 'utf8').trim().split('\n');
     expect(basename(left!)).toMatch(/^cez-vitest-tmp-/);
+    expect(left!.startsWith(root + sep)).toBe(true);
     expect(existsSync(left!), 'SIGKILL runs no cleanup').toBe(true);
 
     const next = run('0');
     expect(next.status, next.stdout + next.stderr).toBe(0);
     const [, own] = readFileSync(log, 'utf8').trim().split('\n');
     expect(existsSync(left!)).toBe(false);
+    expect(own!.startsWith(root + sep)).toBe(true);
     expect(existsSync(own!)).toBe(false);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
