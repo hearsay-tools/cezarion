@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { computeWaitingOn, type WaitingOnInput, type WorkerWaitEntry } from './waits.ts';
 import { ATTENTION_RANK, ATTENTION_RUNGS, DEFAULT_WEBHOOK_TRIGGERS, deriveAttention, deriveWebhookState, WEBHOOK_TRIGGERS, workerWaitLabel, type Attention, type AttentionInput, type AttentionRung } from './attention.ts';
 import type { RunStatus } from './runs.ts';
-import { makePeerWait, makeSubagentWait, makeTimerWait, RUN_STATUS, SUBAGENT_STATUS, WAIT_PHASE } from './test-factories.testkit.ts';
+import { WAIT_KIND,WAIT_SOURCE,WAIT_VIA,WORKER_OUTCOME_STATUS, makePeerWait, makeSubagentWait, makeTimerWait, RUN_STATUS, SUBAGENT_STATUS, WAIT_PHASE } from './test-factories.testkit.ts';
 
 /**
  * The attention ladder, pinned where it now lives (#553/#609). The cockpit's
@@ -15,10 +15,12 @@ import { makePeerWait, makeSubagentWait, makeTimerWait, RUN_STATUS, SUBAGENT_STA
 const run = (over: Partial<AttentionInput> & { status: RunStatus }): AttentionInput => ({ ...over });
 
 /** An open human wait; `shown` once the user sees its card (`askSeq`). */
-const humanWait = (shown = false) => ({
-  kind: 'human' as const, id: '33333333-3333-4333-8333-333333333334', source: 'agent' as const, via: 'cezar_ask' as const,
-  registeredAt: '2026-10-21T14:00:00.000Z', phase: 'open' as const, turnId: 'turn-1', ...(shown ? { askSeq: 7 } : {}),
-}) as unknown as NonNullable<AttentionInput['waits']>[number];
+const humanWait = (shown = false) => {
+  return ({
+    kind: WAIT_KIND.human, id: '33333333-3333-4333-8333-333333333334', source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask,
+    registeredAt: '2026-10-21T14:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1', ...(shown ? { askSeq: 7 } : {}),
+  }) as unknown as NonNullable<AttentionInput['waits']>[number];
+};
 
 /** Every `RunStatus`, spelled out: a new status must get an explicit answer, not the chain's last `return`. */
 const ALL_STATUSES: readonly RunStatus[] = ['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled'];
@@ -57,7 +59,7 @@ describe('deriveAttention', () => {
   });
 
   it('is pure — the same record twice is the same answer, and the record is untouched', () => {
-    const record = run({ status: 'waiting' });
+    const record = run({ status: RUN_STATUS.waiting });
     const frozen = JSON.stringify(record);
     expect(deriveAttention(record)).toEqual(deriveAttention(record));
     expect(JSON.stringify(record)).toBe(frozen);
@@ -71,8 +73,8 @@ describe('deriveAttention', () => {
 
   // The #609 contract: `waiting` is attention whether or not a structured question is pending.
   it('treats waiting as attention with or without an open human wait', () => {
-    expect(deriveAttention(run({ status: 'waiting' }))).toMatchObject({ bucket: 'waiting', label: 'needs you' });
-    expect(deriveAttention(run({ status: 'waiting', waits: [humanWait()] }))).toMatchObject({ bucket: 'waiting', label: 'needs you' });
+    expect(deriveAttention(run({ status: RUN_STATUS.waiting }))).toMatchObject({ bucket: 'waiting', label: 'needs you' });
+    expect(deriveAttention(run({ status: RUN_STATUS.waiting, waits: [humanWait()] }))).toMatchObject({ bucket: 'waiting', label: 'needs you' });
   });
 
   // Rung 3 (phase 4b, hearsay-tools/cezarion#1236): a question the user sees waits on them at any
@@ -81,55 +83,55 @@ describe('deriveAttention', () => {
   it('reads a shown human wait as Needs you at any live status', () => {
     for (const status of ['waiting', 'running', 'queued'] as const) {
       expect(deriveAttention(run({ status, waits: [humanWait(true)] }))).toMatchObject({ bucket: 'waiting', label: 'needs you' });
-      expect(deriveAttention(run({ status, waitingOn: { kind: 'human', shown: true } }))).toMatchObject({ bucket: 'waiting', label: 'needs you' });
+      expect(deriveAttention(run({ status, waitingOn: { kind: WAIT_KIND.human, shown: true } }))).toMatchObject({ bucket: 'waiting', label: 'needs you' });
     }
-    expect(deriveAttention(run({ status: 'running', waits: [humanWait()] })).label).toBe('running');
-    expect(deriveAttention(run({ status: 'queued', waits: [humanWait()] })).label).toBe('queued');
+    expect(deriveAttention(run({ status: RUN_STATUS.running, waits: [humanWait()] })).label).toBe('running');
+    expect(deriveAttention(run({ status: RUN_STATUS.queued, waits: [humanWait()] })).label).toBe('queued');
     // A finished run's leftovers are history; review and failed keep their own rungs.
-    expect(deriveAttention(run({ status: 'review', waits: [humanWait(true)] })).label).toBe('needs review');
-    expect(deriveAttention(run({ status: 'failed', waits: [humanWait(true)] })).label).toBe('failed');
-    expect(deriveAttention(run({ status: 'done', waits: [humanWait(true)] })).label).toBe('done');
+    expect(deriveAttention(run({ status: RUN_STATUS.review, waits: [humanWait(true)] })).label).toBe('needs review');
+    expect(deriveAttention(run({ status: RUN_STATUS.failed, waits: [humanWait(true)] })).label).toBe('failed');
+    expect(deriveAttention(run({ status: RUN_STATUS.done, waits: [humanWait(true)] })).label).toBe('done');
   });
 
   it('reads a usage-limited waiting run as usage limit, not as Needs you', () => {
-    expect(deriveAttention(run({ status: 'waiting', autoResumeAt: '2026-10-21T15:00:00.000Z' }))).toEqual({
+    expect(deriveAttention(run({ status: RUN_STATUS.waiting, autoResumeAt: '2026-10-21T15:00:00.000Z' }))).toEqual({
       rung: 'usage-limit', bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'usage limit',
     });
-    expect(deriveAttention(run({ status: 'running', autoResumeAt: '2026-08-03T19:33:53.000Z' })).label).toBe('running');
+    expect(deriveAttention(run({ status: RUN_STATUS.running, autoResumeAt: '2026-08-03T19:33:53.000Z' })).label).toBe('running');
   });
 
   it('reads a failed run as failed, whatever autoResumeAt it carries', () => {
-    expect(deriveAttention(run({ status: 'failed', autoResumeAt: '2026-08-03T19:33:53.000Z' })).label).toBe('failed');
+    expect(deriveAttention(run({ status: RUN_STATUS.failed, autoResumeAt: '2026-08-03T19:33:53.000Z' })).label).toBe('failed');
   });
 
   it('an open human wait outranks the usage limit, and the usage limit outranks workers', () => {
-    const human = { kind: 'human' as const, id: '33333333-3333-4333-8333-333333333333', source: 'agent' as const, via: 'cezar_ask' as const,
-      registeredAt: '2026-10-21T14:00:00.000Z', phase: 'open' as const, turnId: 'turn-1' } as unknown as NonNullable<AttentionInput['waits']>[number];
-    expect(deriveAttention(run({ status: 'waiting', autoResumeAt: '2026-10-21T15:00:00.000Z', waits: [human] })).label).toBe('needs you');
-    expect(deriveAttention(run({ status: 'waiting', autoResumeAt: '2026-10-21T15:00:00.000Z', delegation: { role: 'root' }, waits: [workerEntry()] } as AttentionInput)).label).toBe('usage limit');
+    const human = { kind: WAIT_KIND.human, id: '33333333-3333-4333-8333-333333333333', source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask,
+      registeredAt: '2026-10-21T14:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1' } as unknown as NonNullable<AttentionInput['waits']>[number];
+    expect(deriveAttention(run({ status: RUN_STATUS.waiting, autoResumeAt: '2026-10-21T15:00:00.000Z', waits: [human] })).label).toBe('needs you');
+    expect(deriveAttention(run({ status: RUN_STATUS.waiting, autoResumeAt: '2026-10-21T15:00:00.000Z', delegation: { role: 'root' }, waits: [workerEntry()] } as AttentionInput)).label).toBe('usage limit');
   });
 
   it('a usage limit outranks a resolved worker wake, which waits for the appointment, not capacity', () => {
-    const record = { status: 'waiting', autoResumeAt: '2026-10-21T15:00:00.000Z', delegation: { role: 'root' }, waits: [workerEntry({ phase: 'resolved' })] } as AttentionInput;
+    const record = { status: RUN_STATUS.waiting, autoResumeAt: '2026-10-21T15:00:00.000Z', delegation: { role: 'root' }, waits: [workerEntry({ phase: WAIT_PHASE.resolved })] } as AttentionInput;
     expect(deriveAttention(record).label).toBe('usage limit');
   });
 });
 
 // hearsay-tools/cezarion#1496: one id per rung; the label is copy and can carry a count.
 describe('rung ids', () => {
-  const pr = (until: 'checks' | 'merge') => ({ kind: 'pr' as const, until, waitId: '11111111-1111-4111-8111-111111111111', prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:40:00.000Z' });
+  const pr = (until: 'checks' | 'merge') => ({ kind: WAIT_KIND.pr, until, waitId: '11111111-1111-4111-8111-111111111111', prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:40:00.000Z' });
   const table: ReadonlyArray<[AttentionRung, string, AttentionInput]> = [
-    ['needs-permission', 'needs permission', { status: 'running', hasPendingPermission: true }],
-    ['failed', 'failed', { status: 'failed' }],
-    ['needs-you', 'needs you', { status: 'waiting' }],
-    ['needs-you', 'needs you', { status: 'running', waitingOn: { kind: 'human', shown: true } }],
-    ['needs-review', 'needs review', { status: 'review' }],
-    ['running', 'running', { status: 'running' }],
-    ['usage-limit', 'usage limit', { status: 'waiting', autoResumeAt: '2026-10-17T16:00:00.000Z' }],
-    ['waiting-on-workers', 'waiting on 2 workers', { status: 'waiting', waitingOn: { kind: 'workers', count: 2 } }],
-    ['waiting-on-workers', 'waiting on workers', { status: 'waiting', waitingOn: { kind: 'workers', count: 0 } }],
-    ['waiting-on-workers', 'waiting on worker replies', { status: 'waiting', waitingOn: { kind: 'workers', count: 1, replies: true } }],
-    ['waiting-on-workers', 'waiting on parent reply', { status: 'waiting', delegation: { role: 'worker' }, waitingOn: { kind: 'workers', count: 1 } } as AttentionInput],
+    ['needs-permission', 'needs permission', { status: RUN_STATUS.running, hasPendingPermission: true }],
+    ['failed', 'failed', { status: RUN_STATUS.failed }],
+    ['needs-you', 'needs you', { status: RUN_STATUS.waiting }],
+    ['needs-you', 'needs you', { status: RUN_STATUS.running, waitingOn: { kind: WAIT_KIND.human, shown: true } }],
+    ['needs-review', 'needs review', { status: RUN_STATUS.review }],
+    ['running', 'running', { status: RUN_STATUS.running }],
+    ['usage-limit', 'usage limit', { status: RUN_STATUS.waiting, autoResumeAt: '2026-10-17T16:00:00.000Z' }],
+    ['waiting-on-workers', 'waiting on 2 workers', { status: RUN_STATUS.waiting, waitingOn: { kind: 'workers', count: 2 } }],
+    ['waiting-on-workers', 'waiting on workers', { status: RUN_STATUS.waiting, waitingOn: { kind: 'workers', count: 0 } }],
+    ['waiting-on-workers', 'waiting on worker replies', { status: RUN_STATUS.waiting, waitingOn: { kind: 'workers', count: 1, replies: true } }],
+    ['waiting-on-workers', 'waiting on parent reply', { status: RUN_STATUS.waiting, delegation: { role: 'worker' }, waitingOn: { kind: 'workers', count: 1 } } as AttentionInput],
     // hearsay-tools/cezarion#1995: a peer request's reply, and named peer tasks.
     ['waiting-on-workers', 'waiting on replies', { status: RUN_STATUS.waiting, waitingOn: { kind: 'workers', count: 1, replies: true, peers: true } }],
     ['waiting-on-workers', 'waiting on 2 tasks', { status: RUN_STATUS.waiting, waitingOn: { kind: 'peers', count: 2 } }],
@@ -138,14 +140,14 @@ describe('rung ids', () => {
     ['waiting-on-subagents', 'waiting for 1 subagent', { status: RUN_STATUS.waiting, waits: [makeSubagentWait()] }],
     ['waiting-on-subagents', 'waiting for 2 subagents', { status: RUN_STATUS.waiting, waitingOn: { kind: 'subagents', count: 2 } }],
     ['waiting-on-subagents', 'waiting for subagents', { status: RUN_STATUS.waiting, waitingOn: { kind: 'subagents', count: 0 } }],
-    ['waiting-for-ci', 'waiting for CI', { status: 'waiting', waitingOn: pr('checks') }],
-    ['waiting-for-merge', 'waiting for merge', { status: 'waiting', waitingOn: pr('merge') }],
-    ['waiting-for-command', 'waiting for a command', { status: 'waiting', waitingOn: { kind: 'process', waitId: '77777777-7777-4777-8777-777777777777', pid: 4242, deadline: '2026-10-17T15:30:00.000Z' } }],
-    ['monitoring', 'monitoring', { status: 'waiting', waitingOn: { kind: 'timer', waitId: '22222222-2222-4222-8222-222222222222', at: '2026-10-17T15:05:00.000Z' } }],
-    ['waiting-for-capacity', 'waiting for capacity', { status: 'waiting', waitWakePending: true }],
-    ['queued', 'queued', { status: 'queued' }],
-    ['done', 'done', { status: 'done' }],
-    ['cancelled', 'cancelled', { status: 'cancelled' }],
+    ['waiting-for-ci', 'waiting for CI', { status: RUN_STATUS.waiting, waitingOn: pr('checks') }],
+    ['waiting-for-merge', 'waiting for merge', { status: RUN_STATUS.waiting, waitingOn: pr('merge') }],
+    ['waiting-for-command', 'waiting for a command', { status: RUN_STATUS.waiting, waitingOn: { kind: WAIT_KIND.process, waitId: '77777777-7777-4777-8777-777777777777', pid: 4242, deadline: '2026-10-17T15:30:00.000Z' } }],
+    ['monitoring', 'monitoring', { status: RUN_STATUS.waiting, waitingOn: { kind: WAIT_KIND.timer, waitId: '22222222-2222-4222-8222-222222222222', at: '2026-10-17T15:05:00.000Z' } }],
+    ['waiting-for-capacity', 'waiting for capacity', { status: RUN_STATUS.waiting, waitWakePending: true }],
+    ['queued', 'queued', { status: RUN_STATUS.queued }],
+    ['done', 'done', { status: RUN_STATUS.done }],
+    ['cancelled', 'cancelled', { status: RUN_STATUS.cancelled }],
   ];
 
   it.each(table)('reads %s with the label %j', (rung, label, input) => {
@@ -160,18 +162,18 @@ describe('rung ids', () => {
 /** A worker wait is a list entry (hearsay-tools/cezarion#1235), Cezar's completion wait included
  *  (hearsay-tools/cezarion#1301): `delegation.wait` is never read. */
 const workerEntry = (over: Partial<WorkerWaitEntry> = {}): WorkerWaitEntry => ({
-  kind: 'worker', id: '88888888-8888-4888-8888-888888888880', source: 'agent', via: 'cezar_wait', registeredAt: '2026-10-19T10:00:00.000Z',
-  deadline: '2026-10-19T10:10:00.000Z', phase: 'open', turnId: 'turn-1', timeoutSeconds: 600, workerIds: ['child'], revisions: [], outcomes: [],
+  kind: WAIT_KIND.worker, id: '88888888-8888-4888-8888-888888888880', source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait, registeredAt: '2026-10-19T10:00:00.000Z',
+  deadline: '2026-10-19T10:10:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1', timeoutSeconds: 600, workerIds: ['child'], revisions: [], outcomes: [],
   ...over,
 } as WorkerWaitEntry);
 const completionEntry = (over: Partial<WorkerWaitEntry> = {}): WorkerWaitEntry => {
-  const { deadline: _deadline, timeoutSeconds: _timeout, ...entry } = workerEntry({ source: 'cezar', via: 'completion', ...over });
+  const { deadline: _deadline, timeoutSeconds: _timeout, ...entry } = workerEntry({ source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion, ...over });
   return { ...entry, mode: 'all' } as WorkerWaitEntry;
 };
 
 describe('delegation rungs', () => {
   const parkedRoot = (waits: WorkerWaitEntry[] = [workerEntry()]): AttentionInput => ({
-    status: 'waiting', waits, delegation: { role: 'root' },
+    status: RUN_STATUS.waiting, waits, delegation: { role: 'root' },
   } as unknown as AttentionInput);
 
   it.each(['open', 'resolved'] as const)('distinguishes a %s worker wait without masking human attention', (phase) => {
@@ -191,13 +193,13 @@ describe('delegation rungs', () => {
     expect(deriveAttention(parkedRoot([completionEntry({ workerIds: ['a', 'b'] })]))).toEqual({
       rung: 'waiting-on-workers', bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting on 2 workers',
     });
-    expect(deriveAttention(parkedRoot([completionEntry({ phase: 'resolved' })])).label).toBe('waiting for capacity');
+    expect(deriveAttention(parkedRoot([completionEntry({ phase: WAIT_PHASE.resolved })])).label).toBe('waiting for capacity');
   });
 
   it('never reads an old row\'s delegation.wait', () => {
-    const legacy = { status: 'waiting', delegation: { role: 'root', wait: { phase: 'parked', workerIds: ['a'], outcomes: [] } } } as unknown as AttentionInput;
+    const legacy = { status: RUN_STATUS.waiting, delegation: { role: 'root', wait: { phase: 'parked', workerIds: ['a'], outcomes: [] } } } as unknown as AttentionInput;
     expect(deriveAttention(legacy)).toMatchObject({ bucket: 'waiting', label: 'needs you' });
-    const pending = { status: 'queued', delegation: { role: 'root', wait: { phase: 'wake-pending', workerIds: ['a'], outcomes: [] } } } as unknown as AttentionInput;
+    const pending = { status: RUN_STATUS.queued, delegation: { role: 'root', wait: { phase: 'wake-pending', workerIds: ['a'], outcomes: [] } } } as unknown as AttentionInput;
     expect(deriveAttention(pending).label).toBe('queued');
   });
 
@@ -207,31 +209,31 @@ describe('delegation rungs', () => {
   });
 
   it('a wake-pending parent with a pending human ask stays Needs you', () => {
-    const record = { ...parkedRoot(), waits: [workerEntry({ phase: 'resolved' }), humanWait()] } as AttentionInput;
+    const record = { ...parkedRoot(), waits: [workerEntry({ phase: WAIT_PHASE.resolved }), humanWait()] } as AttentionInput;
     expect(deriveAttention(record)).toMatchObject({ bucket: 'waiting', label: 'needs you' });
   });
 
   it('a queued leftover wake-pending parent is waiting for capacity, not queued', () => {
-    const record = { ...parkedRoot([workerEntry({ phase: 'resolved' })]), status: 'queued' as const };
+    const record = { ...parkedRoot([workerEntry({ phase: WAIT_PHASE.resolved })]), status: RUN_STATUS.queued };
     expect(deriveAttention(record)).toEqual({
       rung: 'waiting-for-capacity', bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity',
     });
   });
 
   it('running still wins over leftover wake-pending', () => {
-    const record = { ...parkedRoot([workerEntry({ phase: 'resolved' })]), status: 'running' as const };
+    const record = { ...parkedRoot([workerEntry({ phase: WAIT_PHASE.resolved })]), status: RUN_STATUS.running };
     expect(deriveAttention(record)).toEqual({
       rung: 'running', bucket: 'running', tone: 'running', shape: 'filled', pulse: true, label: 'running',
     });
   });
 
   it('a queued leftover wake-pending parent with a shown question is Needs you', () => {
-    const record = { ...parkedRoot(), status: 'queued' as const, waits: [workerEntry({ phase: 'resolved' }), humanWait(true)] } as AttentionInput;
+    const record = { ...parkedRoot(), status: RUN_STATUS.queued, waits: [workerEntry({ phase: WAIT_PHASE.resolved }), humanWait(true)] } as AttentionInput;
     expect(deriveAttention(record)).toMatchObject({ bucket: 'waiting', label: 'needs you' });
   });
 
   it('labels a legacy-shape worker wait by the workers that have not reported yet', () => {
-    const outcome = (workerId: string) => ({ workerId, status: 'done' as const, observedAt: '2026-09-05T00:00:00.000Z' });
+    const outcome = (workerId: string) => ({ workerId, status: WORKER_OUTCOME_STATUS.done, observedAt: '2026-09-05T00:00:00.000Z' });
     expect(workerWaitLabel('root', { workerIds: ['a', 'b'], outcomes: [outcome('a')] })).toBe('waiting on 1 worker');
     expect(workerWaitLabel('root', { workerIds: ['a', 'b'], outcomes: [outcome('a'), outcome('b')] })).toBe('waiting on workers');
     expect(workerWaitLabel('root', { requestIds: ['r'], workerIds: [], outcomes: [] })).toBe('waiting on worker replies');
@@ -246,13 +248,13 @@ describe('delegation rungs', () => {
   });
 
   it('an invalid delegation never hides a waiting run', () => {
-    const invalid = { status: 'waiting', delegation: { role: 'invalid', reason: 'x' } } as unknown as AttentionInput;
+    const invalid = { status: RUN_STATUS.waiting, delegation: { role: 'invalid', reason: 'x' } } as unknown as AttentionInput;
     expect(deriveAttention(invalid)).toMatchObject({ bucket: 'waiting', label: 'needs you' });
   });
 });
 
 it('keeps a native permission prompt above worker-wait attention (hearsay-tools/cezarion#1049)', () => {
-  const waiting = { status: 'waiting' as const, hasPendingPermission: true, waits: [workerEntry()], delegation: { role: 'root' as const } };
+  const waiting = { status: RUN_STATUS.waiting, hasPendingPermission: true, waits: [workerEntry()], delegation: { role: 'root' as const } };
   expect(deriveAttention(waiting as AttentionInput)).toMatchObject({ bucket: 'permission', label: 'needs permission' });
 });
 
@@ -261,75 +263,75 @@ it('keeps a native permission prompt above worker-wait attention (hearsay-tools/
  *  `waits` but no `waitingOn` key, so the rows below pass RECORDS. */
 describe('open waits', () => {
   const openCi = () => ({
-    kind: 'pr' as const, id: '11111111-1111-4111-8111-111111111111', source: 'agent' as const, via: 'cezar_wait' as const,
-    registeredAt: '2026-10-17T15:10:00.000Z', deadline: '2026-10-17T15:40:00.000Z', phase: 'open' as const, turnId: 'turn-1',
+    kind: WAIT_KIND.pr, id: '11111111-1111-4111-8111-111111111111', source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
+    registeredAt: '2026-10-17T15:10:00.000Z', deadline: '2026-10-17T15:40:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1',
     prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, headSha: 'a'.repeat(40),
     generation: 'gen-1', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true,
   });
   const openTimer = () => ({
-    kind: 'timer' as const, id: '22222222-2222-4222-8222-222222222222', source: 'agent' as const, via: 'cezar_wait' as const,
-    registeredAt: '2026-10-17T15:00:00.000Z', deadline: '2026-10-17T15:05:00.000Z', phase: 'open' as const, turnId: 'turn-1',
+    kind: WAIT_KIND.timer, id: '22222222-2222-4222-8222-222222222222', source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
+    registeredAt: '2026-10-17T15:00:00.000Z', deadline: '2026-10-17T15:05:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1',
     seconds: 300,
   });
 
   it('reads a waiting record parked on a process wait as running, waiting for a command (hearsay-tools/cezarion#1446)', () => {
-    const waitingOn = { kind: 'process' as const, waitId: '77777777-7777-4777-8777-777777777777', pid: 4242, deadline: '2026-10-17T15:30:00.000Z' };
-    expect(deriveAttention({ status: 'waiting', waitingOn })).toEqual({ rung: 'waiting-for-command', bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for a command' });
+    const waitingOn = { kind: WAIT_KIND.process, waitId: '77777777-7777-4777-8777-777777777777', pid: 4242, deadline: '2026-10-17T15:30:00.000Z' };
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waitingOn })).toEqual({ rung: 'waiting-for-command', bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for a command' });
   });
 
   it('reads a waiting record with an open CI or timer wait as running, not Needs you', () => {
-    expect(deriveAttention({ status: 'waiting', waits: [openCi()] })).toMatchObject({ bucket: 'running', shape: 'ring', label: 'waiting for CI' });
-    expect(deriveAttention({ status: 'waiting', waits: [openTimer()] })).toMatchObject({ bucket: 'running', shape: 'ring', label: 'monitoring' });
-    expect(deriveAttention({ status: 'waiting', waits: [openCi()] })).toEqual({
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [openCi()] })).toMatchObject({ bucket: 'running', shape: 'ring', label: 'waiting for CI' });
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [openTimer()] })).toMatchObject({ bucket: 'running', shape: 'ring', label: 'monitoring' });
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [openCi()] })).toEqual({
       rung: 'waiting-for-ci', bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for CI',
     });
   });
 
   // hearsay-tools/cezarion#1425: a PR wait's target names what the run waits for.
   it('labels an open PR merge wait waiting for merge', () => {
-    expect(deriveAttention({ status: 'waiting', waitingOn: { kind: 'pr', until: 'merge', waitId: '11111111-1111-4111-8111-111111111111',
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waitingOn: { kind: WAIT_KIND.pr, until: 'merge', waitId: '11111111-1111-4111-8111-111111111111',
       prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:40:00.000Z' } } as never))
       .toMatchObject({ bucket: 'running', shape: 'ring', label: 'waiting for merge' });
   });
 
   it('keeps an open human signal above the wait', () => {
-    expect(deriveAttention({ status: 'waiting', waits: [openCi(), humanWait()] }).label).toBe('needs you');
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [openCi(), humanWait()] }).label).toBe('needs you');
     // The transcript-context argument the cockpit passes says the same.
-    expect(deriveAttention({ status: 'waiting', waitingOn: { kind: 'human' }, waits: [openCi()] }).label).toBe('needs you');
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waitingOn: { kind: WAIT_KIND.human }, waits: [openCi()] }).label).toBe('needs you');
   });
 
   it('follows a summary\'s waitingOn when the row carries no waits', () => {
     expect(deriveAttention({
-      status: 'waiting',
-      waitingOn: { kind: 'pr', until: 'checks', waitId: '11111111-1111-4111-8111-111111111111', prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:40:00.000Z' },
+      status: RUN_STATUS.waiting,
+      waitingOn: { kind: WAIT_KIND.pr, until: 'checks', waitId: '11111111-1111-4111-8111-111111111111', prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:40:00.000Z' },
     }).label).toBe('waiting for CI');
-    expect(deriveAttention({ status: 'waiting', waitingOn: { kind: 'timer', waitId: '22222222-2222-4222-8222-222222222222', at: '2026-10-17T15:05:00.000Z' } }).label).toBe('monitoring');
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waitingOn: { kind: WAIT_KIND.timer, waitId: '22222222-2222-4222-8222-222222222222', at: '2026-10-17T15:05:00.000Z' } }).label).toBe('monitoring');
   });
 
   // Rung 10: a resolved wait is a wake owed to the agent; until its turn starts the run waits for
   // a slot, not for the user.
   it('reads a waiting record with only a resolved wait as waiting for capacity', () => {
-    const resolved = { ...openCi(), phase: 'resolved' as const, resolvedAt: '2026-10-17T15:20:00.000Z' };
+    const resolved = { ...openCi(), phase: WAIT_PHASE.resolved, resolvedAt: '2026-10-17T15:20:00.000Z' };
     const capacity = { rung: 'waiting-for-capacity', bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' };
-    expect(deriveAttention({ status: 'waiting', waits: [resolved] })).toEqual(capacity);
-    expect(deriveAttention({ status: 'waiting', waits: [{ ...openTimer(), phase: 'resolved' as const }] })).toEqual(capacity);
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [resolved] })).toEqual(capacity);
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [{ ...openTimer(), phase: WAIT_PHASE.resolved }] })).toEqual(capacity);
     // A summary carries the flag instead of the list.
-    expect(deriveAttention({ status: 'waiting', waitWakePending: true })).toEqual(capacity);
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waitWakePending: true })).toEqual(capacity);
     // An open CI or timer wait still names what the run waits on.
-    expect(deriveAttention({ status: 'waiting', waits: [resolved, openTimer()] }).label).toBe('monitoring');
-    expect(deriveAttention({ status: 'waiting', waits: [{ ...openTimer(), phase: 'resolved' as const }, openCi()] }).label).toBe('waiting for CI');
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [resolved, openTimer()] }).label).toBe('monitoring');
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [{ ...openTimer(), phase: WAIT_PHASE.resolved }, openCi()] }).label).toBe('waiting for CI');
     // An open human signal still wins.
-    expect(deriveAttention({ status: 'waiting', waits: [resolved, humanWait()] }).label).toBe('needs you');
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [resolved, humanWait()] }).label).toBe('needs you');
     // Delivered and cancelled entries are no wake.
-    expect(deriveAttention({ status: 'waiting', waits: [{ ...resolved, phase: 'delivered' as const }] }).label).toBe('needs you');
-    expect(deriveAttention({ status: 'running', waits: [resolved] }).label).toBe('running');
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [{ ...resolved, phase: WAIT_PHASE.delivered }] }).label).toBe('needs you');
+    expect(deriveAttention({ status: RUN_STATUS.running, waits: [resolved] }).label).toBe('running');
   });
 
   // Workers outrank CI and timers (`computeWaitingOn`), and a worker park keeps its open waits
   // (hearsay-tools/cezarion#1233): the workers' label and their owed wake stay on top.
   it('keeps a parked or wake-pending worker wait above open CI and timer waits', () => {
     const root = (phase: 'parked' | 'wake-pending', waits: unknown[]) => ({
-      status: 'waiting', waits: [...waits, workerEntry({ workerIds: ['a'], phase: phase === 'parked' ? 'open' : 'resolved' })], delegation: { role: 'root' },
+      status: RUN_STATUS.waiting, waits: [...waits, workerEntry({ workerIds: ['a'], phase: phase === 'parked' ? 'open' : 'resolved' })], delegation: { role: 'root' },
     } as unknown as AttentionInput);
     for (const waits of [[openTimer()], [openCi()], [openCi(), openTimer()]]) {
       expect(deriveAttention(root('parked', waits))).toMatchObject({ shape: 'workers', label: 'waiting on 1 worker' });
@@ -341,10 +343,10 @@ describe('open waits', () => {
   });
 
   it('leaves every other status alone', () => {
-    expect(deriveAttention({ status: 'running', waits: [openCi()] }).label).toBe('running');
-    expect(deriveAttention({ status: 'review', waits: [openCi()] }).label).toBe('needs review');
-    expect(deriveAttention({ status: 'failed', waits: [openCi()] }).label).toBe('failed');
-    expect(deriveAttention({ status: 'waiting' }).label).toBe('needs you'); // no wait: unchanged fallback
+    expect(deriveAttention({ status: RUN_STATUS.running, waits: [openCi()] }).label).toBe('running');
+    expect(deriveAttention({ status: RUN_STATUS.review, waits: [openCi()] }).label).toBe('needs review');
+    expect(deriveAttention({ status: RUN_STATUS.failed, waits: [openCi()] }).label).toBe('failed');
+    expect(deriveAttention({ status: RUN_STATUS.waiting }).label).toBe('needs you'); // no wait: unchanged fallback
   });
 });
 
@@ -352,14 +354,14 @@ describe('open waits', () => {
 describe('computeWaitingOn and worker entries', () => {
   const ids = (n: number) => Array.from({ length: n }, (_, i) => `99999999-9999-4999-8999-99999999999${i}`);
   const workerWait = (id: string, workerIds: string[], reported: string[] = []): WorkerWaitEntry => ({
-    kind: 'worker', id, source: 'agent', via: 'cezar_wait', registeredAt: '2026-10-19T10:00:00.000Z',
-    deadline: '2026-10-19T10:10:00.000Z', phase: 'open', turnId: 'turn-1', timeoutSeconds: 600,
+    kind: WAIT_KIND.worker, id, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait, registeredAt: '2026-10-19T10:00:00.000Z',
+    deadline: '2026-10-19T10:10:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1', timeoutSeconds: 600,
     workerIds, revisions: [],
-    outcomes: reported.map((workerId) => ({ workerId, status: 'done' as const, observedAt: '2026-10-19T10:03:00.000Z' })),
+    outcomes: reported.map((workerId) => ({ workerId, status: WORKER_OUTCOME_STATUS.done, observedAt: '2026-10-19T10:03:00.000Z' })),
   });
   const ci = {
-    kind: 'pr' as const, id: '11111111-1111-4111-8111-111111111111', source: 'agent' as const, via: 'cezar_wait' as const,
-    registeredAt: '2026-10-19T10:00:00.000Z', deadline: '2026-10-19T10:30:00.000Z', phase: 'open' as const, turnId: 'turn-1',
+    kind: WAIT_KIND.pr, id: '11111111-1111-4111-8111-111111111111', source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
+    registeredAt: '2026-10-19T10:00:00.000Z', deadline: '2026-10-19T10:30:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1',
     prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, headSha: 'a'.repeat(40), generation: 'gen-1', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true,
   };
 
@@ -375,7 +377,7 @@ describe('computeWaitingOn and worker entries', () => {
     expect(computeWaitingOn({ waits: [workerWait('88888888-8888-4888-8888-888888888884', [a!, b!]), workerWait('88888888-8888-4888-8888-888888888885', [c!])] }))
       .toEqual({ kind: 'workers', count: 3 });
     // Only open entries count.
-    expect(computeWaitingOn({ waits: [{ ...waits[0]!, phase: 'resolved' as const }] })).toBeUndefined();
+    expect(computeWaitingOn({ waits: [{ ...waits[0]!, phase: WAIT_PHASE.resolved }] })).toBeUndefined();
   });
 
   it('a worker entry outranks an open ci wait', () => {
@@ -386,8 +388,8 @@ describe('computeWaitingOn and worker entries', () => {
   it('a human wait outranks a worker entry', () => {
     const [a] = ids(1);
     const waits = [workerWait('88888888-8888-4888-8888-888888888881', [a!])];
-    expect(computeWaitingOn({ waits: [...waits, humanWait()] })).toEqual({ kind: 'human' });
-    expect(computeWaitingOn({ waits: [...waits, humanWait(true)] })).toEqual({ kind: 'human', shown: true });
+    expect(computeWaitingOn({ waits: [...waits, humanWait()] })).toEqual({ kind: WAIT_KIND.human });
+    expect(computeWaitingOn({ waits: [...waits, humanWait(true)] })).toEqual({ kind: WAIT_KIND.human, shown: true });
   });
 
   // The attention rung for list entries and summaries (previously fell through to "needs you").
@@ -395,39 +397,39 @@ describe('computeWaitingOn and worker entries', () => {
     const [a, b] = ids(2);
     const entry = workerWait('88888888-8888-4888-8888-888888888881', [a!, b!]);
     const expected = { rung: 'waiting-on-workers', bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting on 2 workers' };
-    expect(deriveAttention({ status: 'waiting', waits: [entry] })).toEqual(expected);
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [entry] })).toEqual(expected);
     // With CI beside it, workers still name the run.
-    expect(deriveAttention({ status: 'waiting', waits: [ci, entry] })).toEqual(expected);
-    expect(deriveAttention({ status: 'waiting', waits: [workerWait('88888888-8888-4888-8888-888888888881', [a!])] }).label).toBe('waiting on 1 worker');
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [ci, entry] })).toEqual(expected);
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [workerWait('88888888-8888-4888-8888-888888888881', [a!])] }).label).toBe('waiting on 1 worker');
     // Every worker reported but the wait is still open: no number.
-    expect(deriveAttention({ status: 'waiting', waits: [workerWait('88888888-8888-4888-8888-888888888881', [a!], [a!])] }).label).toBe('waiting on workers');
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [workerWait('88888888-8888-4888-8888-888888888881', [a!], [a!])] }).label).toBe('waiting on workers');
   });
 
   it('reads a summary carrying only waitingOn workers the same way', () => {
-    expect(deriveAttention({ status: 'waiting', waitingOn: { kind: 'workers', count: 2 } }))
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waitingOn: { kind: 'workers', count: 2 } }))
       .toEqual({ rung: 'waiting-on-workers', bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting on 2 workers' });
-    expect(deriveAttention({ status: 'waiting', waitingOn: { kind: 'workers', count: 0 } }).label).toBe('waiting on workers');
-    expect(deriveAttention({ status: 'waiting', waitingOn: { kind: 'human' } }).label).toBe('needs you');
-    expect(deriveAttention({ status: 'running', waitingOn: { kind: 'workers', count: 1 } }).label).toBe('running');
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waitingOn: { kind: 'workers', count: 0 } }).label).toBe('waiting on workers');
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waitingOn: { kind: WAIT_KIND.human } }).label).toBe('needs you');
+    expect(deriveAttention({ status: RUN_STATUS.running, waitingOn: { kind: 'workers', count: 1 } }).label).toBe('running');
   });
 
   it('keeps the parent-reply and worker-reply wording for request entries', () => {
     const request: WorkerWaitEntry = {
-      kind: 'worker', id: '88888888-8888-4888-8888-888888888881', source: 'agent', via: 'cezar_wait', registeredAt: '2026-10-19T10:00:00.000Z',
-      deadline: '2026-10-19T10:10:00.000Z', phase: 'open', turnId: 'turn-1', timeoutSeconds: 600,
+      kind: WAIT_KIND.worker, id: '88888888-8888-4888-8888-888888888881', source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait, registeredAt: '2026-10-19T10:00:00.000Z',
+      deadline: '2026-10-19T10:10:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1', timeoutSeconds: 600,
       requestIds: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1'], requestOutcomes: [],
     };
-    expect(deriveAttention({ status: 'waiting', waits: [request], delegation: { role: 'root' } } as unknown as AttentionInput))
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [request], delegation: { role: 'root' } } as unknown as AttentionInput))
       .toMatchObject({ shape: 'workers', label: 'waiting on worker replies' });
-    expect(deriveAttention({ status: 'waiting', waits: [request], delegation: { role: 'worker' } } as unknown as AttentionInput))
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [request], delegation: { role: 'worker' } } as unknown as AttentionInput))
       .toEqual({ rung: 'waiting-on-workers', bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting on parent reply' });
     // A summary has no entries: a worker still reads as waiting on its parent.
-    expect(deriveAttention({ status: 'waiting', waitingOn: { kind: 'workers', count: 1 }, delegation: { role: 'worker' } } as unknown as AttentionInput).label)
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waitingOn: { kind: 'workers', count: 1 }, delegation: { role: 'worker' } } as unknown as AttentionInput).label)
       .toBe('waiting on parent reply');
     // A root's summary says so through `waitingOn.replies`, which only request entries set.
     const waitingOn = computeWaitingOn({ waits: [request], delegation: { role: 'root' } } as unknown as WaitingOnInput);
     expect(waitingOn).toEqual({ kind: 'workers', count: 1, replies: true });
-    expect(deriveAttention({ status: 'waiting', waitingOn, delegation: { role: 'root' } } as unknown as AttentionInput).label)
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waitingOn, delegation: { role: 'root' } } as unknown as AttentionInput).label)
       .toBe('waiting on worker replies');
     expect(computeWaitingOn({ waits: [request, workerWait('88888888-8888-4888-8888-888888888882', ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2'])] }))
       .toEqual({ kind: 'workers', count: 2 });
@@ -437,42 +439,42 @@ describe('computeWaitingOn and worker entries', () => {
     const entry = workerWait('88888888-8888-4888-8888-888888888881', ids(1));
     const completion = completionEntry({ id: '88888888-8888-4888-8888-888888888882', workerIds: ['a', 'b'] });
     expect(computeWaitingOn({ waits: [entry, completion] })).toEqual({ kind: 'workers', count: 3 });
-    expect(deriveAttention({ status: 'waiting', waits: [entry, completion] } as unknown as AttentionInput).label).toBe('waiting on 3 workers');
-    const summary = { status: 'waiting', delegation: { role: 'root' }, waitingOn: { kind: 'workers', count: 3 } } as unknown as AttentionInput;
+    expect(deriveAttention({ status: RUN_STATUS.waiting, waits: [entry, completion] } as unknown as AttentionInput).label).toBe('waiting on 3 workers');
+    const summary = { status: RUN_STATUS.waiting, delegation: { role: 'root' }, waitingOn: { kind: 'workers', count: 3 } } as unknown as AttentionInput;
     expect(deriveAttention(summary).label).toBe('waiting on 3 workers');
-    expect(deriveAttention({ ...summary, waitingOn: { kind: 'human' } }).label).toBe('needs you');
+    expect(deriveAttention({ ...summary, waitingOn: { kind: WAIT_KIND.human } }).label).toBe('needs you');
   });
 });
 
 // hearsay-tools/cezarion#1356: the state a project webhook filters on, read off the same ladder.
 describe('deriveWebhookState', () => {
-  const ci = { kind: 'pr' as const, until: 'checks' as const, waitId: '11111111-1111-4111-8111-111111111111', prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:40:00.000Z' };
-  const timer = { kind: 'timer' as const, waitId: '22222222-2222-4222-8222-222222222222', at: '2026-10-17T15:05:00.000Z' };
+  const ci = { kind: WAIT_KIND.pr, until: 'checks' as const, waitId: '11111111-1111-4111-8111-111111111111', prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:40:00.000Z' };
+  const timer = { kind: WAIT_KIND.timer, waitId: '22222222-2222-4222-8222-222222222222', at: '2026-10-17T15:05:00.000Z' };
   const cases: ReadonlyArray<[string, AttentionInput, ReturnType<typeof deriveWebhookState>]> = [
-    ['a plain waiting run', { status: 'waiting' }, 'needs-you'],
-    ['a pending question', { status: 'waiting', waitingOn: { kind: 'human' } }, 'needs-you'],
-    ['a question shown during a wake turn', { status: 'running', waitingOn: { kind: 'human', shown: true } }, 'needs-you'],
-    ['a question not shown yet during its turn', { status: 'running', waitingOn: { kind: 'human' } }, 'running'],
-    ['a review', { status: 'review' }, 'needs-you'],
-    ['a live permission request on a running run', { status: 'running', hasPendingPermission: true }, 'needs-you'],
-    ['a failed run', { status: 'failed' }, 'failed'],
-    ['a usage-limited run', { status: 'waiting', autoResumeAt: '2026-10-17T16:00:00.000Z' }, undefined],
-    ['a done run', { status: 'done' }, 'done'],
-    ['a cancelled run', { status: 'cancelled' }, 'cancelled'],
-    ['a running run', { status: 'running' }, 'running'],
-    ['a queued run', { status: 'queued' }, undefined],
-    ['a root on its workers', { status: 'waiting', delegation: { role: 'root' }, waitingOn: { kind: 'workers', count: 2 } } as AttentionInput, 'waiting-workers'],
-    ['a worker on its parent\'s reply', { status: 'waiting', delegation: { role: 'worker' }, waitingOn: { kind: 'workers', count: 1, replies: true } } as AttentionInput, 'waiting-workers'],
-    ['a CI wait', { status: 'waiting', waitingOn: ci }, 'waiting-ci'],
+    ['a plain waiting run', { status: RUN_STATUS.waiting }, 'needs-you'],
+    ['a pending question', { status: RUN_STATUS.waiting, waitingOn: { kind: WAIT_KIND.human } }, 'needs-you'],
+    ['a question shown during a wake turn', { status: RUN_STATUS.running, waitingOn: { kind: WAIT_KIND.human, shown: true } }, 'needs-you'],
+    ['a question not shown yet during its turn', { status: RUN_STATUS.running, waitingOn: { kind: WAIT_KIND.human } }, 'running'],
+    ['a review', { status: RUN_STATUS.review }, 'needs-you'],
+    ['a live permission request on a running run', { status: RUN_STATUS.running, hasPendingPermission: true }, 'needs-you'],
+    ['a failed run', { status: RUN_STATUS.failed }, 'failed'],
+    ['a usage-limited run', { status: RUN_STATUS.waiting, autoResumeAt: '2026-10-17T16:00:00.000Z' }, undefined],
+    ['a done run', { status: RUN_STATUS.done }, 'done'],
+    ['a cancelled run', { status: RUN_STATUS.cancelled }, 'cancelled'],
+    ['a running run', { status: RUN_STATUS.running }, 'running'],
+    ['a queued run', { status: RUN_STATUS.queued }, undefined],
+    ['a root on its workers', { status: RUN_STATUS.waiting, delegation: { role: 'root' }, waitingOn: { kind: 'workers', count: 2 } } as AttentionInput, 'waiting-workers'],
+    ['a worker on its parent\'s reply', { status: RUN_STATUS.waiting, delegation: { role: 'worker' }, waitingOn: { kind: 'workers', count: 1, replies: true } } as AttentionInput, 'waiting-workers'],
+    ['a CI wait', { status: RUN_STATUS.waiting, waitingOn: ci }, 'waiting-ci'],
     ['a root on named peer tasks', { status: RUN_STATUS.waiting, waitingOn: { kind: 'peers', count: 1 } }, 'waiting-other'],
-    ['a timer wait', { status: 'waiting', waitingOn: timer }, 'waiting-timer'],
+    ['a timer wait', { status: RUN_STATUS.waiting, waitingOn: timer }, 'waiting-timer'],
     // hearsay-tools/cezarion#2431: the owner chose the workers trigger.
     ['a root on native subagents', { status: RUN_STATUS.waiting, waitingOn: { kind: 'subagents', count: 1 } }, 'waiting-workers'],
     // hearsay-tools/cezarion#1446: no option of its own, so the catch-all.
-    ['a process wait', { status: 'waiting', waitingOn: { kind: 'process', waitId: '77777777-7777-4777-8777-777777777777', pid: 4242, deadline: '2026-10-17T15:30:00.000Z' } }, 'waiting-other'],
+    ['a process wait', { status: RUN_STATUS.waiting, waitingOn: { kind: WAIT_KIND.process, waitId: '77777777-7777-4777-8777-777777777777', pid: 4242, deadline: '2026-10-17T15:30:00.000Z' } }, 'waiting-other'],
     // A usage-limit park is parked on a clock, as the scheduled resume it replaces was: no state.
-    ['a usage-limit wait', { status: 'waiting', waitingOn: { kind: 'usage-limit', at: '2026-10-17T16:00:00.000Z' } }, undefined],
-    ['a resolved wait owed a wake', { status: 'waiting', waitWakePending: true }, undefined],
+    ['a usage-limit wait', { status: RUN_STATUS.waiting, waitingOn: { kind: 'usage-limit', at: '2026-10-17T16:00:00.000Z' } }, undefined],
+    ['a resolved wait owed a wake', { status: RUN_STATUS.waiting, waitWakePending: true }, undefined],
   ];
 
   it.each(cases)('reads %s', (_name, input, state) => {
@@ -480,7 +482,7 @@ describe('deriveWebhookState', () => {
   });
 
   it('reads an unknown wait kind as waiting-other', () => {
-    expect(deriveWebhookState({ status: 'waiting', waitingOn: { kind: 'future' } } as unknown as AttentionInput)).toBe('waiting-other');
+    expect(deriveWebhookState({ status: RUN_STATUS.waiting, waitingOn: { kind: 'future' } } as unknown as AttentionInput)).toBe('waiting-other');
   });
 
   it('only ever answers a trigger, and the default is the four that end a task or need a person', () => {

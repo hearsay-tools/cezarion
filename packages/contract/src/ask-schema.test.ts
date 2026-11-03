@@ -1,3 +1,4 @@
+import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from './test-factories.testkit.ts';
 import { describe, expect, it } from 'vitest';
 import { ASK_LIMITS, askRequestSchema } from './ask-schema.ts';
 import { cezarAskRequestSchema, humanWaitEntrySchema } from './waits.ts';
@@ -25,8 +26,8 @@ describe('ask context', () => {
   });
 
   it('stores context on a human wait, and parses a wait recorded without it', () => {
-    const wait = { id: '00000000-0000-4000-8000-000000000001', kind: 'human', source: 'agent', via: 'cezar_ask',
-      registeredAt: '2026-10-22T00:00:00.000Z', phase: 'open', turnId: 't', questions };
+    const wait = { id: '00000000-0000-4000-8000-000000000001', kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask,
+      registeredAt: '2026-10-22T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 't', questions };
     expect(humanWaitEntrySchema.parse(wait)).toEqual(wait);
     expect(humanWaitEntrySchema.parse({ ...wait, context: '## Draft' })).toMatchObject({ context: '## Draft' });
   });

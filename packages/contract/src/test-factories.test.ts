@@ -32,14 +32,14 @@ import {
 
 describe('the run record factory', () => {
   it('builds a record the contract accepts, and a step it accepts', () => {
-    expect(runRecordSchema.parse(makeRunRecord())).toMatchObject({ status: 'done', archived: false });
-    expect(stepStateSchema.parse(makeStepState())).toMatchObject({ kind: 'agent' });
+    expect(runRecordSchema.parse(makeRunRecord())).toMatchObject({ status: RUN_STATUS.done, archived: false });
+    expect(stepStateSchema.parse(makeStepState())).toMatchObject({ kind: STEP_KIND.agent });
   });
 
   it('applies the overrides over the defaults and keeps the rest', () => {
     const record = makeRunRecord({ status: RUN_STATUS.running, title: 'mine', steps: [makeStepState({ status: STEP_STATUS.running })] });
-    expect(record).toMatchObject({ status: 'running', title: 'mine', workflow: 'quick-task' });
-    expect(record.steps[0]).toMatchObject({ status: 'running', kind: 'agent' });
+    expect(record).toMatchObject({ status: RUN_STATUS.running, title: 'mine', workflow: 'quick-task' });
+    expect(record.steps[0]).toMatchObject({ status: STEP_STATUS.running, kind: STEP_KIND.agent });
   });
 
   it('gives each record its own id unless a test names one', () => {
@@ -78,8 +78,8 @@ describe('the wait factories', () => {
 
   it('apply the overrides, and an entry stays valid with them', () => {
     const wait = makeTimerWait({ phase: WAIT_PHASE.resolved, via: WAIT_VIA['monitoring-line'], note: 'check CI' });
-    expect(waitSchema.parse(wait)).toMatchObject({ kind: 'timer', phase: 'resolved', via: 'monitoring-line', note: 'check CI' });
-    expect(makeWorkerRequestWait({ source: WAIT_SOURCE.cezar })).toMatchObject({ source: 'cezar' });
+    expect(waitSchema.parse(wait)).toMatchObject({ kind: WAIT_KIND.timer, phase: WAIT_PHASE.resolved, via: WAIT_VIA['monitoring-line'], note: 'check CI' });
+    expect(makeWorkerRequestWait({ source: WAIT_SOURCE.cezar })).toMatchObject({ source: WAIT_SOURCE.cezar });
   });
 
   it('refuse a field the entry does not have, at compile time', () => {
