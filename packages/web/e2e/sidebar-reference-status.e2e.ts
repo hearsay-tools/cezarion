@@ -46,7 +46,7 @@ beforeAll(async () => {
     createdAt: new Date(now - index * 60_000).toISOString(), finishedAt: new Date(now - index * 60_000).toISOString(),
     // Pinned rows bypass the sidebar recent-row cap, so every status is actually painted.
     tokensUsed: 0, archived: false, pinned: true,
-    ...(isIssue(status) ? { referencedIssueUrl: `https://github.com/o/r/issues/${600 + index}` } : { pullRequestUrl: `https://github.com/o/r/pull/${600 + index}` }),
+    ...(isIssue(status) ? ({ referencedIssueUrl: `https://github.com/o/r/issues/${600 + index}` } satisfies Partial<RunRecord>) : ({ pullRequestUrl: `https://github.com/o/r/pull/${600 + index}` } satisfies Partial<RunRecord>)),
     steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, sessionId: 'reference-fixture' }],
   } satisfies Partial<RunRecord>))
   seedRuns(root, records)

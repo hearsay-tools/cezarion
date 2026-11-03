@@ -36,7 +36,7 @@ beforeAll(async () => {
     id, title: `Review task ${id}`, task: 'Check the work', workflow: 'default', status: RUN_STATUS.review, tokensUsed: 0,
     createdAt: new Date().toISOString(), finishedAt: new Date().toISOString(), archived: false, steps: [],
     // One reference, on the row this spec hovers: the pointer path keeps it a real link (#617 01b).
-    ...(id === 'two' ? { referencedPullRequestUrl: 'https://github.com/o/r/pull/594' } : {}),
+    ...(id === 'two' ? ({ referencedPullRequestUrl: 'https://github.com/o/r/pull/594' } satisfies Partial<RunRecord>) : {}),
     // #729: both rows are handed off, so the glyph is sampled on the selected and the hover fill.
     notify: true,
   } satisfies Partial<RunRecord>)),

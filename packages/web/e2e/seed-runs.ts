@@ -11,8 +11,13 @@ export function recordedRun<T extends object>(value: T & NoUnknownRunKeys<T>): R
 }
 
 /** Seed the legacy import file before the fixture server opens its run store. */
-export function seedRuns(dataRoot: string, partials: readonly Partial<RunRecord>[]): void {
-  const records = partials.map(partial => makeRunRecord(partial))
+export function seedRuns(dataRoot: string, partials: readonly (Partial<RunRecord> & { id: string })[]): void {
+  const ids = new Set<string>()
+  const records = partials.map(partial => {
+    if (ids.has(partial.id)) throw new Error(`Duplicate seed run id: ${partial.id}`)
+    ids.add(partial.id)
+    return makeRunRecord(partial)
+  })
   mkdirSync(join(dataRoot, '.ai/cezar'), { recursive: true })
   writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify(records, null, 2), 'utf8')
 }

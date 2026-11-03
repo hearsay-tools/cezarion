@@ -24,7 +24,7 @@ beforeAll(async () => {
   mkdirSync(artifacts, { recursive: true })
   const runs = [RUN_STATUS.waiting, RUN_STATUS.done, RUN_STATUS.running].flatMap((status, section) => Array.from({ length: 4 }, (_, i) => ({
     id: `limit-${section}-${i}`, title: `${['Needs attention', 'Finished task', 'Working task'][section]} ${i + 1}`, task: 'Sidebar fixture',
-    workflow: 'quick-task', runner: 'claude', status: status === RUN_STATUS.running ? RUN_STATUS.waiting : status, ...(status === RUN_STATUS.running ? { autoResumeAt: new Date(Date.now() + 86_400_000).toISOString() } : {}), createdAt: new Date(Date.now() - i * 60000).toISOString(),
+    workflow: 'quick-task', runner: 'claude', status: status === RUN_STATUS.running ? RUN_STATUS.waiting : status, ...(status === RUN_STATUS.running ? ({ autoResumeAt: new Date(Date.now() + 86_400_000).toISOString() } satisfies Partial<RunRecord>) : {}), createdAt: new Date(Date.now() - i * 60000).toISOString(),
     tokensUsed: 0, archived: false, steps: [],
   } satisfies Partial<RunRecord>)))
   seedRuns(root, runs)
