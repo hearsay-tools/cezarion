@@ -1,3 +1,4 @@
+import { githubItemSchema } from '@open-mercato/cezar-api-client/contract/github'
 import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -34,7 +35,7 @@ export const ISSUE_139: GithubItem = {
 }
 
 export const PR_137: GithubItem = {
-  kind: 'pr',
+  kind: githubItemSchema.shape.kind.enum.pr,
   number: 137,
   title: 'Stream tokens over SSE',
   author: 'grace',
