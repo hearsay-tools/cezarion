@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 type Cell = { name: string; body: () => void | Promise<void>; timeout: number | undefined };
-export type ParityPart = number | 'all';
+export type ParityPart = string;
 export type ParityCollector = (name: string) => void;
 
 /** Stable cell identity, including the autonomous constructor variants. */
@@ -14,7 +14,7 @@ export function parityCellKey(name: string): string {
 }
 
 /** Collect before opening a suite: a part must not register empty describes. */
-export function partitionParity(part: ParityPart, parts: readonly (readonly string[])[], collect?: ParityCollector) {
+export function partitionParity(part: ParityPart, parts: Readonly<Record<string, readonly string[]>>, collect?: ParityCollector) {
   let cells: Cell[] = [];
   return {
     it(name: string, body: () => void | Promise<void>, timeout?: number): void {
@@ -48,16 +48,18 @@ export function checkParityRegistration(
   });
   expect([...new Set(registeredPairs)].sort()).toEqual([...pairs].sort());
   const actual: string[] = [];
+  const entryImport = `import { ${register.name} } from './${family}.testkit.ts';`;
   const files = readdirSync(new URL('.', import.meta.url)).filter(file =>
-    file === `${family}.test.ts` || new RegExp(`^${family}-part-\\d+\\.test\\.ts$`).test(file));
+    file.endsWith('.test.ts') && !file.endsWith('-registration.test.ts') &&
+    readFileSync(new URL(file, import.meta.url), 'utf8').includes(entryImport));
   expect(files.length).toBeGreaterThan(1);
   for (const file of files) {
     const source = readFileSync(new URL(file, import.meta.url), 'utf8');
     expect(source, file).toContain(`import { ${register.name} } from './${family}.testkit.ts';`);
-    const calls = [...source.matchAll(/^(describe\w+Parity)\((\d+)\);$/gm)];
+    const calls = [...source.matchAll(/^(describe\w+Parity)\('([^']+)'\);$/gm)];
     expect(calls, file).toHaveLength(1);
     expect(calls[0]![1], file).toBe(register.name);
-    register(Number(calls[0]![2]), name => actual.push(name));
+    register(calls[0]![2]!, name => actual.push(name));
   }
   expect(new Set(expected).size).toBe(expected.length);
   expect(actual.sort()).toEqual(expected.sort());

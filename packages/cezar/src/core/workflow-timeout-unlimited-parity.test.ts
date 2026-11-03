@@ -1,3 +1,3 @@
 import { describeWorkflowTimeoutParity } from './workflow-timeout-parity.testkit.ts';
 
-describeWorkflowTimeoutParity(0);
+describeWorkflowTimeoutParity('unlimited');

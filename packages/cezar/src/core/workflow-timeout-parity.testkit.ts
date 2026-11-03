@@ -12,48 +12,48 @@ vi.mock('./runner-runtime.ts', async importOriginal => ({
   DEFAULT_RUN_TIMEOUT_MS: 150,
 }));
 
-const PARTS: readonly (readonly string[])[] = [
-  [
+const PARTS: Readonly<Record<string, readonly string[]>> = {
+  "unlimited": [
     "claude T1",
-    "cursor T2",
-    "cursor T5",
-    "claude T5",
-    "codex T2",
-    "codex T5",
-    "codex T1",
-    "omp T2",
-    "omp T1",
-    "pi T6",
-    "claude T6",
-    "opencode T6",
-    "codex T6",
-    "omp T3",
-    "codex T3",
-    "cursor T4",
-    "omp T4"
-  ],
-  [
-    "cursor T1",
-    "opencode T2",
-    "opencode T1",
-    "opencode T5",
     "claude T2",
+    "claude T6",
+    "codex T1",
+    "codex T2",
+    "codex T6",
+    "cursor T1",
+    "cursor T2",
     "cursor T6",
+    "omp T1",
+    "omp T2",
+    "omp T6",
+    "opencode T1",
+    "opencode T2",
+    "opencode T6",
     "pi T1",
     "pi T2",
-    "pi T5",
-    "omp T5",
-    "omp T6",
-    "cursor T3",
-    "opencode T3",
+    "pi T6"
+  ],
+  "authored-and-standalone": [
     "claude T3",
+    "claude T4",
+    "claude T5",
+    "codex T3",
+    "codex T4",
+    "codex T5",
+    "cursor T3",
+    "cursor T4",
+    "cursor T5",
+    "omp T3",
+    "omp T4",
+    "omp T5",
+    "opencode T3",
+    "opencode T4",
+    "opencode T5",
     "pi T3",
     "pi T4",
-    "opencode T4",
-    "claude T4",
-    "codex T4"
+    "pi T5"
   ]
-];
+};
 
 export function describeWorkflowTimeoutParity(part: ParityPart, collect?: ParityCollector): void {
   const { describe, it } = partitionParity(part, PARTS, collect);
