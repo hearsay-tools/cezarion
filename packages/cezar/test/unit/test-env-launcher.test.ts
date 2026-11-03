@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { cpSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { basename, join, resolve } from 'node:path';
@@ -82,6 +82,9 @@ function makeFixture(withSetsid: boolean): { root: string; path: string } {
   copyFileSync(join(repoRoot, '.ai/scripts/build-e2e.sh'), join(root, '.ai/scripts/build-e2e.sh'));
   copyFileSync(join(repoRoot, '.ai/scripts/e2e-served-repo.mjs'), join(root, '.ai/scripts/e2e-served-repo.mjs'));
   copyFileSync(join(repoRoot, '.ai/scripts/e2e-lanes.mjs'), join(root, '.ai/scripts/e2e-lanes.mjs'));
+  copyFileSync(join(repoRoot, '.ai/scripts/e2e-catalogs.mjs'), join(root, '.ai/scripts/e2e-catalogs.mjs'));
+  mkdirSync(join(root, 'packages/web/e2e/fixtures'), { recursive: true });
+  cpSync(join(repoRoot, 'packages/web/e2e/fixtures/catalogs'), join(root, 'packages/web/e2e/fixtures/catalogs'), { recursive: true });
   // The real postbuild bundles the contract; here it only records which dist it was handed.
   mkdirSync(join(root, 'packages/cezar/scripts'), { recursive: true });
   writeFileSync(join(root, 'packages/cezar/scripts/inline-contract.mjs'),
