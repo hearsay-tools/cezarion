@@ -125,19 +125,19 @@ baseline. Inspect the diff and baseline for these cases before deciding origin.
 
 ## Curried arrows and transformed coverage
 
-The matcher first uses exact function-body positions. For an arrow whose body
-is another arrow, it can also use an exact Istanbul declaration endpoint: the
-parsed arrow's start plus one column, with the same body end line. This handles
+The matcher first uses exact function-body positions. For any expression-bodied
+arrow, including cast object literals and returned arrows, it can also use an
+exact Istanbul declaration endpoint: the parsed arrow's start plus one column, with the same body end line. This handles
 source maps that move a returned arrow's body start into its parent's parameter
 list. Each coverage entry can belong to only one function. Names, entry order
 and nearby positions cannot resolve ambiguous matches.
 
-Called outer stages and uncalled returned stages keep separate call counters.
-The directly returned arrow's entire span is excluded from its parent's
-statement attribution, including mapped statements that drift into the returned
-arrow's signature. That parent has no independent body statements, so its own
-call counter determines 100% or 0%. The returned function keeps its own body
-statements, and the CRAP formula is unchanged. An absent counter is not evidence that a function was uncalled.
+Called and uncalled curried stages keep separate counters. The directly
+returned arrow's span is excluded from its parent's statement attribution,
+including mapped statements in the returned arrow's signature. A parent with
+no independent statements uses its own call counter for 100% or 0% coverage.
+The returned function keeps its body statements. CRAP is unchanged; a missing
+counter does not mean the function was uncalled.
 
 Some transforms lose both exact anchors, including the middle stage of a
 multiline three-stage arrow in the tested Vitest V8 transform. Missing or
