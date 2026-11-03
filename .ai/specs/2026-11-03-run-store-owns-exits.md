@@ -94,7 +94,7 @@ touches a turn-end, wait or settlement path.
 | S4a | Decision 6: every writer in Table C applies an exit. The store's load-time and archive writers use `applyExit` (`runs/run-exits.ts`) on the record in hand, and `move` writes through it. The Draft PR route takes its own exit, `draft-pr` (review, done, failed, cancelled → done); a Stop on load takes `cancel-late` | the status rule's baseline entries | none |
 | S4b | `status` leaves `updateRun`'s patch type; test fixtures that set a status move to a `setRunStatus` testkit helper | status rule and baseline | none |
 | S5 | Each exit settles the fields all its sites agree on (Table A). A site that does more passes an explicit extra; a site that does less uses a named variant of the exit | hand-written clears in 66 sites | none |
-| S6 | Decision 4 | `WRITE_PATH_RULES` path lists, `UpdateHooks` | none |
+| S6 | Decision 4. Each exit declares its durability; `RunStore.move` takes it from the record rule (`doneCommits`), then the exit, never from its extras. `updateRun` keeps its field rule (handoff records, completion options) for writes that are not exits. The record rules become one ordered list, `RECORD_WRITE_RULES`, that every write path runs with its path as input; a rule one update save skips names its difference. `UpdateHooks` keeps what the store owns: redaction, the repository, the transcript and the save | `WRITE_PATH_RULES` path lists, ten of the fifteen `UpdateHooks` | none |
 | S7 | Normalize Table B, one commit per row, each with a red test where it fixes a bug | the S5 extras and variants | yes, per row (§ Table B targets) |
 
 ## Case tables
@@ -159,7 +159,7 @@ S5 keeps every row as it is (owner, 2026-11-03). S7 normalizes them. "Today" is 
 
 | Writer | Writes | Condition | Exit | Trigger row |
 |---|---|---|---|---|
-| `store.ts:clearPendingAutoResume` | failed, `finishedAt ??= now` | archiving a usage-limit hold | withdraw-hold | `hold.archive` |
+| `store.ts:clearPendingAutoResume` (since S6 `record-write-rules.ts:withdrawHold`) | failed, `finishedAt ??= now` | archiving a usage-limit hold | withdraw-hold | `hold.archive` |
 | `store.ts:settleLoadedStop` | cancelled, steps cancelled | `run.stopping` on load, **no status check** | cancel-late | `live.stopping`, `settled.stopping` |
 | `store.ts:restoreLoadedUsageLimitHold` | waiting, `finishedAt` cleared | schema-7 row: failed with `autoResumeAt` | hold | `failed.legacy-hold` |
 | `store.ts:failLoadedInterruptedRun` | failed, fixed error, steps failed | store opened without `keepLive`, engine-owned row | fail-interrupted | `live.read-only` |

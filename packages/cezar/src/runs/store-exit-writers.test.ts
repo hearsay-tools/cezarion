@@ -123,7 +123,7 @@ describe('setLiveStatus in upgradeLegacyWaits (running.legacy, plain.legacy)', (
   });
 });
 
-describe('clearPendingAutoResume on archive (hold.archive)', () => {
+describe('withdrawHold on archive (hold.archive)', () => {
   const cleanups: Array<() => void> = [];
   afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
   const open = () => {

@@ -8,6 +8,7 @@ import { AUTONOMOUS_CRITERIA, driveRun, driveSeam, exemptionFor, promptFor, wait
 import { handoffPath } from '../handoff.ts';
 import { MAX_AUTO_CONTINUES } from '../workflows/run.ts';
 import { hasPendingAsk, readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { RUN_EXITS } from '../runs/run-exits.ts';
 import { watchTurnOutcomes } from '../workflows/turn-outcomes.testkit.ts';
 import { WAIT_KIND, WAIT_PHASE, RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 
@@ -282,7 +283,9 @@ describe('autonomous turn-end parity — #426', () => {
             type: 'ask.requested', requestId: randomUUID(),
             questions: [{ header: 'Prior', question: 'A prior unanswered question?', options: [{ label: 'Yes' }, { label: 'No' }] }],
           });
-          const updates = vi.spyOn(store, 'updateRun');
+          // Every status write applies a run exit through the store's move (ADR 0056).
+          const moves = vi.spyOn(store, 'move');
+          const statusWrites = () => moves.mock.calls.filter(([id]) => id === runId).map(([, exit]) => RUN_EXITS[exit].to);
           // A refused cezar_ask answers the agent and leaves no run event; the registry's warning is its trace.
           const warnings = vi.spyOn(console, 'warn');
           const askRefusals = () => warnings.mock.calls.filter(([message]) => String(message).includes('wait registration refused: autonomous_run')).length;
@@ -325,7 +328,7 @@ describe('autonomous turn-end parity — #426', () => {
           function assertDoneOutcome(): void {
             expect(store.getRun(runId)?.status).toBe('done');
             expect(notes).toHaveLength(row.id === 'A8' ? 0 : 1);
-            expect(updates.mock.calls.filter(([id]) => id === runId).map(([, patch]) => patch.status)).not.toContain('waiting');
+            expect(statusWrites()).not.toContain(RUN_STATUS.waiting);
             expect(turns.words(runId)).not.toContain('waiting');
             if (row.id !== 'A8') expect(turns.words(runId)).toContain('running (autonomous nudge)');
             const stepId = store.getRun(runId)!.steps.at(-1)!.id;
@@ -347,9 +350,9 @@ describe('autonomous turn-end parity — #426', () => {
             expect(askRefusals()).toBeGreaterThanOrEqual(1);
             expect(events.filter(e => e.type === 'ask.requested' || e.type === 'human-input-delivered')).toEqual([]);
             expect(events.filter(e => e.type === 'user-message' && String(e.text).startsWith('Continue working autonomously'))).toEqual([]);
-            expect(updates.mock.calls.filter(([id, patch]) => id === runId && patch.status === 'waiting')).toHaveLength(1);
+            expect(statusWrites().filter(status => status === RUN_STATUS.waiting)).toHaveLength(1);
           }
-          updates.mockRestore();
+          moves.mockRestore();
           warnings.mockRestore();
         });
       }, row.id === 'A5' || row.id === 'A11' || row.id === 'A12' ? CAP_ROW_TIMEOUT_MS : 30_000);

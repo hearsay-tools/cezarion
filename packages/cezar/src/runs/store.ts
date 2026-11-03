@@ -56,13 +56,14 @@ import { capacityError, workerCapacity } from '../delegation/capacity.ts';
 import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { collectSecretValues, redactDeep } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
-import { archivePullRequests, pullRequestKey, mergePullRequests } from './pull-requests.ts';
-import { extractTaskRefs, isRepoScopedRef, MAX_REF, promptNamesRepo, refUrlRepo } from './task-refs.ts';
+import { archivePullRequests, pullRequestKey } from './pull-requests.ts';
+import { isRepoScopedRef, promptNamesRepo, refUrlRepo } from './task-refs.ts';
 // Type-only module (zod + nothing else), so this cannot cycle back into the store.
 import { workflowDefSchema } from '../workflows/types.ts';
 
 import { applyOutcomes, type OutcomeDependencies, type OutcomeReceipt, type RunOutcome } from './outcome-commit.ts';
-import { applyExit, RUN_EXITS, type RunExitId, type RunExitSpec, type RunPatch } from './run-exits.ts';
+import { ISSUE_URL_RE, originatingIssue, PR_URL_RE, refUrlNumber, referencedPrDeclaration, rescopeRun, resolveIssueReference, resolveReferencedRef, restoreOriginatingIssue, trackReferencedIssues, trackReferencedPrs } from './run-references.ts';
+import { applyExit, doneCommits, exitDurability, RUN_EXITS, type ExitDurability, type RunExitId, type RunExitSpec, type RunPatch } from './run-exits.ts';
 import { assertConversationIdFree, type ConversationIdentity } from './conversation-identity.ts';
 export { ConversationIdInUseError } from './conversation-identity.ts';
 
@@ -517,17 +518,11 @@ const MAX_RUNS_KEPT = 300;
  *  through `GET /run-summaries/archived` and the workspace search. */
 export const ARCHIVED_WINDOW = 200;
 
-const PR_URL_RE = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/\d+/;
-const ISSUE_URL_RE = /https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/issues\/\d+/;
 // The transcript auto-link is convenience only (the cockpit's own `gh pr create` path sets the
 // URL authoritatively). Adopt a PR URL ONLY when the agent actually CREATED one — a task that
 // reviews or merely references an existing PR must not get mislabeled with its number (#fake-pr).
 const CREATED_PR_RE =
   /\b(?:gh\s+pr\s+create|pull\s*request\s+created|created\s+(?:a\s+)?(?:draft\s+)?(?:pr|pull\s*request)|opened\s+(?:a\s+)?(?:draft\s+)?pull\s*request)\b/i;
-
-/** Referenced-tier working-set cap (spec 2026-07-16-pr-autodiscovery): past
- *  this many distinct PRs the conversation is a survey, not a subject. */
-const MAX_PR_CANDIDATES = 8;
 
 /** The repository a project IS, as `resolveRepoHandle` reports it. `null`/absent means "unknown",
  *  which is a real and common state (no `gh`, no remote, a non-git root) — never an error. */
@@ -539,23 +534,6 @@ export type RepoHandle = { owner: string; name: string };
  * invisible to the janitor, #407). Reasoning items are skipped: thinking text
  * speculates about PRs the task never touches.
  */
-/**
- * Archiving IS resigning from a task, so an archived run can never carry a pending usage-limit
- * resume (spec 2026-08-03-auto-resume-after-usage-limit). The rule lives HERE rather than in the
- * archive route because the bulk "Archive finished" sweep never goes through that route, and a
- * user who archives fifty finished tasks has resigned from all fifty.
- *
- * The engine needs no telling: its timer re-reads the record before it fires and no sweep re-arms
- * an archived run, so a cleared field is the whole cancellation.
- */
-function clearPendingAutoResume(run: RunRecord): void {
-  // A withdrawn appointment settles the run failed with its kept error (hearsay-tools/cezarion#1236),
-  // the state a usage-limited run was in before it waited.
-  if (isUsageLimitHold(run)) Object.assign(run, applyExit(run, 'withdraw-hold', { finishedAt: run.finishedAt ?? new Date().toISOString() }));
-  run.autoResumeAt = undefined;
-  run.autoResumeAttempts = undefined;
-}
-
 function eventTextFragments(event: Record<string, unknown>): string[] {
   const fragments: string[] = [];
   for (const key of ['text', 'result', 'message'] as const) {
@@ -627,104 +605,6 @@ function eventAgentTextFragments(event: Record<string, unknown>): string[] {
     }
   }
   return fragments;
-}
-
-/**
- * Resolve declarations and prompt-supported candidates without guessing through ambiguity. Apply
- * repository scope to the winner only; filtering candidates first could promote an otherwise
- * ambiguous reference.
- */
-function resolveReferencedRef(
-  candidates: string[],
-  task: string,
-  declared?: number,
-  handle?: RepoHandle | null,
-): string | undefined {
-  const resolved = resolveCandidate(candidates, task, declared);
-  if (resolved === undefined) return undefined;
-  return isRepoScopedRef(resolved, task, handle) ? resolved : undefined;
-}
-
-/** Resolve prompt evidence before the repository veto — see `resolveReferencedRef`. */
-function resolveCandidate(candidates: string[], task: string, declared?: number): string | undefined {
-  if (declared !== undefined) return candidates.find((url) => url.endsWith(`/${declared}`));
-  if (candidates.length === 1) return candidates[0];
-  // Repository-qualified prompt URLs distinguish equal numbers in different repositories.
-  // Extract whole references with the collectors' grammar so /42 cannot match /420.
-  const promptUrls = new Set([
-    ...task.matchAll(new RegExp(PR_URL_RE.source, 'g')),
-    ...task.matchAll(new RegExp(ISSUE_URL_RE.source, 'g')),
-  ].map((match) => match[0]));
-  const exact = candidates.filter((url) => promptUrls.has(url));
-  if (exact.length > 0) return exact.length === 1 ? exact[0] : undefined;
-  const named = candidates.filter((url) => {
-    const num = url.split('/').pop() ?? '';
-    // `\d` boundaries only: they reject `170` inside `4170` yet still match a
-    // number written as `#4170`, ` 4170`, or inside a pasted `…/pull/4170`.
-    return num !== '' && new RegExp(`(?<!\\d)#?${num}(?!\\d)`).test(task);
-  });
-  return named.length === 1 ? named[0] : undefined;
-}
-
-/** The number a forge URL's last segment names (`…/pull/402` → 402), or undefined. */
-function refUrlNumber(url: string | undefined): number | undefined {
-  if (!url) return undefined;
-  const n = Number(url.split('/').pop());
-  return Number.isInteger(n) && n > 0 && n < MAX_REF ? n : undefined;
-}
-
-/**
- * Ignore a created-PR declaration when resolving the referenced subject, so a task can retain
- * both its original subject and its new PR.
- */
-function referencedPrDeclaration(run: RunRecord): number | undefined {
-  const declared = run.markerRefs?.pr;
-  if (declared === undefined) return undefined;
-  return declared === refUrlNumber(run.pullRequestUrl) ? undefined : declared;
-}
-
-/** Prompt attribution survives declarations of follow-up issues. Bare hashes become issues
- * only after an issue signal; explicit PR prompts never acquire an invented issue identity. */
-function originatingIssue(run: RunRecord): number | undefined {
-  // Only an issue-led subject is stable attribution. Mentions inside comparisons or
-  // background instructions remain evidence, but an agent declaration may supersede them.
-  const prompt = run.task.trimStart()
-    .replace(/^(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+|i\s+(?:want|would\s+like)\s+you\s+to\s+)/i, '')
-    .replace(/^(?:please\s+)?(?:fix|resolve|address|implement|investigate|review|work(?:\s+on)?)\s+/i, '');
-  const subject = /^(?:(?:the\s+)?(?:(?:github|fork|upstream)\s+)?issue\s*|(?:fork|upstream)\s+)?(?:https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/\d+|(?:[\w.-]+\/[\w.-]+)?#?\d+)\b/i.exec(prompt);
-  if (!subject) return undefined;
-  const refs = extractTaskRefs(subject[0]);
-  return refs.issueNumber ?? ((run.issueNumber !== undefined || run.markerRefs?.issue !== undefined)
-    ? refs.ambiguousNumber : undefined);
-}
-
-function referencedIssueDeclaration(run: RunRecord): number | undefined {
-  return run.markerRefs?.issue === undefined ? undefined : originatingIssue(run) ?? run.markerRefs.issue;
-}
-
-function resolveIssueReference(run: RunRecord, handle?: RepoHandle | null): string | undefined {
-  const declared = referencedIssueDeclaration(run);
-  const candidates = run.referencedIssueCandidates ?? [];
-  // Prompt URLs remain evidence even in legacy records without a candidate working set.
-  const promptUrls = [...new Set([...run.task.matchAll(new RegExp(ISSUE_URL_RE.source, 'g'))]
-    .map(match => match[0]).filter(url => refUrlNumber(url) === declared))];
-  if (promptUrls.length > 1) return undefined;
-  if (promptUrls.length === 1) return resolveReferencedRef(promptUrls, run.task, declared, handle);
-  // A number cannot choose between two repositories' issues with that same number.
-  if (declared !== undefined && new Set(candidates.filter(url => refUrlNumber(url) === declared)).size > 1) {
-    return undefined;
-  }
-  return resolveReferencedRef(candidates, run.task, declared, handle);
-}
-
-function restoreOriginatingIssue(run: RunRecord): void {
-  const origin = originatingIssue(run);
-  if (origin === undefined || run.markerRefs?.issue === undefined) return;
-  run.issueNumber = origin;
-  delete run.referencedIssueNumberSeeded;
-  if (run.referencedIssueCandidates !== undefined || refUrlNumber(run.referencedIssueUrl) !== origin) {
-    run.referencedIssueUrl = resolveIssueReference(run);
-  }
 }
 
 /**
@@ -847,50 +727,6 @@ export function settleOrphanedRun(run: RunRecord, opts: { stop?: boolean | undef
     Object.assign(run, applyExit(run, 'cancel', { finishedAt: run.finishedAt ?? new Date().toISOString() }));
   }
   return reconcileLoadedRun(run, { keepLive: false });
-}
-
-/**
- * Drop this run's referenced PR/issue if the project's handle proves it foreign and the prompt
- * does not corroborate it (#945). Returns whether anything changed.
- *
- * One-directional by construction: it only ever clears fields, so a record written by an older
- * cezar — or read by one after this ran — is never worse off, and a downgrade sees a record whose
- * format is untouched and whose cleared fields were already optional.
- */
-export function rescopeRun(run: RunRecord, handle?: RepoHandle | null): boolean {
-  let changed = false;
-  if (handle && run.pullRequests) {
-    const entries = run.pullRequests.map(entry => {
-      if (entry.source !== 'declared' || !entry.url || isRepoScopedRef(entry.url, run.task, handle)) return entry;
-      // Revoke an uncorroborated URL, preserving the accepted declaration and its order.
-      return { number: entry.number, source: entry.source };
-    });
-    const next = mergePullRequests(undefined, entries, `https://github.com/${handle.owner}/${handle.name}`);
-    if (!isDeepStrictEqual(next, run.pullRequests)) { run.pullRequests = next; changed = true; }
-  }
-  if (
-    run.referencedPullRequestUrl &&
-    !isRepoScopedRef(run.referencedPullRequestUrl, run.task, handle)
-  ) {
-    run.referencedPullRequestUrl = undefined;
-    changed = true;
-  }
-  if (
-    run.referencedIssueUrl &&
-    !isRepoScopedRef(run.referencedIssueUrl, run.task, handle)
-  ) {
-    run.referencedIssueUrl = undefined;
-    changed = true;
-    // Take back the number this janitor seeded from that very URL — the same revoke
-    // `trackReferencedIssues` performs when ambiguity clears a resolution. A `prNumber`-style
-    // number the prompt, namer or a marker owns is NOT ours to touch, which is exactly what
-    // `referencedIssueNumberSeeded` records.
-    if (run.referencedIssueNumberSeeded) {
-      run.issueNumber = undefined;
-      run.referencedIssueNumberSeeded = undefined;
-    }
-  }
-  return changed;
 }
 
 /**
@@ -2285,8 +2121,8 @@ export class RunStore extends EventEmitter {
     // A prompt that pastes a PR or issue URL is already about that item — seed
     // both referenced tiers so queued runs can expose the reference before the
     // first agent event (#407, #554).
-    this.trackReferencedPrs(run, input.task);
-    this.trackReferencedIssues(run, input.task);
+    trackReferencedPrs(run, input.task, this.repoHandle);
+    trackReferencedIssues(run, input.task, this.repoHandle);
     return run;
   }
 
@@ -2851,15 +2687,16 @@ export class RunStore extends EventEmitter {
     }
   }
 
-  /** Move run `id` by `exit` (ADR 0056): its status and `extras` in one `updateRun` write, checked
-   *  against the record that write changes. A run this store cannot write is neither checked nor
-   *  written. A guarded exit (one with `settle`) commits at once instead, and writes nothing when
-   *  its guard fails: undefined, or its `refused` error. `stepId` names the step its settle sets. */
+  /** Move run `id` by `exit` (ADR 0056): its status and `extras` in one write, checked against the
+   *  record that write changes. A run this store cannot write is neither checked nor written. The
+   *  exit decides how the write persists (`exitDurability`), never the extras. A guarded exit (one
+   *  with `settle`) commits at once, and writes nothing when its guard fails: undefined, or its
+   *  `refused` error. `stepId` names the step its settle sets. */
   move(id: string, exit: RunExitId, extras: RunPatch = {}, stepId?: string): RunRecord | undefined {
     const spec: RunExitSpec = RUN_EXITS[exit];
     if (!spec.settle) {
       const run = this.record(id);
-      return run && this.updateRun(id, applyExit(run, exit, extras));
+      return run && this.writeRun(id, run, applyExit(run, exit, extras), exitDurability(exit, run));
     }
     const run = this.peek(id);
     if (!run || (spec.guard && !spec.guard(run))) {
@@ -2871,31 +2708,28 @@ export class RunStore extends EventEmitter {
     return this.peek(id);
   }
 
+  /** A write that is not a run exit. It commits at once when it changes handoff records or a
+   *  completion option, else the next save writes it. A status in the patch, which only test
+   *  fixtures still write, takes the exit's record rule (`doneCommits`). */
   updateRun(id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps'>>): RunRecord | undefined {
     const run = this.record(id);
     if (!run) return undefined;
+    const committed = (patch.status === 'done' && doneCommits(run)) || patch.handoffRecords !== undefined ||
+      patch.archiveWhenDone !== undefined || patch.autoMergePr !== undefined;
+    return this.writeRun(id, run, patch, committed ? 'committed' : 'debounced');
+  }
+
+  /** One update of the held record `run`: committed at once, or written to the record for the next
+   *  save. A debounced write is best-effort, so a locked database cannot stop cleanup. */
+  private writeRun(id: string, run: RunRecord, patch: Partial<Omit<RunRecord, 'id' | 'steps'>>, durability: ExitDurability): RunRecord | undefined {
     const hooks = {
       redact: (text: string) => this.redactText(text),
-      refUrlNumber,
       repoHandle: this.repoHandle,
       restore: () => restoreHistory(this.dataDir, id),
-      withdrawHold: clearPendingAutoResume,
-      clearPin,
-      hasPrUrl: (text: string) => PR_URL_RE.test(text),
-      hasIssueUrl: (text: string) => ISSUE_URL_RE.test(text),
-      trackReferencedPrs: (record: RunRecord, text: string) => this.trackReferencedPrs(record, text),
-      trackReferencedIssues: (record: RunRecord, text: string) => this.trackReferencedIssues(record, text),
-      resolveReferencedPr: (record: RunRecord) => resolveReferencedRef(
-        record.referencedPrCandidates!, record.task, referencedPrDeclaration(record), this.repoHandle),
-      resolveIssueReference: (record: RunRecord) => resolveIssueReference(record, this.repoHandle),
-      rescopeRun: (record: RunRecord) => rescopeRun(record, this.repoHandle),
       archive: (record: RunRecord, archived: boolean) => this.applyArchived(record, archived),
       touch: (record: RunRecord) => this.touch(record),
     };
-    // Opted-in completion and handoff records require the durable path. Default-off Finish
-    // keeps its best-effort write so a locked database cannot stop cleanup.
-    if ((patch.status === 'done' && (run.archiveWhenDone || run.autoMergePr)) || patch.handoffRecords !== undefined ||
-      patch.archiveWhenDone !== undefined || patch.autoMergePr !== undefined) {
+    if (durability === 'committed') {
       this.commitIndex(new Map([[id, stageDurableUpdate(run, patch, hooks)]]));
       return this.record(id);
     }
@@ -3314,7 +3148,7 @@ export class RunStore extends EventEmitter {
           run.referencedPullRequestUrl = resolved;
           changed = true;
         }
-      } else if (!run.pullRequestUrl && PR_URL_RE.test(haystack) && this.trackReferencedPrs(run, haystack)) {
+      } else if (!run.pullRequestUrl && PR_URL_RE.test(haystack) && trackReferencedPrs(run, haystack, this.repoHandle)) {
         changed = true;
       }
       // Issue links feed their own referenced tier regardless of PR state —
@@ -3322,79 +3156,13 @@ export class RunStore extends EventEmitter {
       // (spec 2026-07-21-report-ref-discovery).
       if (
         ISSUE_URL_RE.test(haystack) &&
-        this.trackReferencedIssues(run, haystack, agentHaystack)
+        trackReferencedIssues(run, haystack, this.repoHandle, agentHaystack)
       ) {
         changed = true;
       }
       if (changed) this.touch(run);
     }
     return full;
-  }
-
-  /**
-   * Fold every PR URL in `haystack` into the run's referenced-tier working
-   * set and re-resolve `referencedPullRequestUrl` (spec
-   * 2026-07-16-pr-autodiscovery). Mutates the record in place — the caller
-   * owns persistence/fan-out — and reports whether anything changed.
-   */
-  private trackReferencedPrs(run: RunRecord, haystack: string): boolean {
-    const seen = new Set(run.referencedPrCandidates ?? []);
-    const before = seen.size;
-    for (const match of haystack.matchAll(new RegExp(PR_URL_RE.source, 'g'))) {
-      if (seen.size >= MAX_PR_CANDIDATES) break;
-      seen.add(match[0]);
-    }
-    if (seen.size === before) return false;
-    run.referencedPrCandidates = [...seen];
-    run.referencedPullRequestUrl = resolveReferencedRef(
-      run.referencedPrCandidates,
-      run.task,
-      referencedPrDeclaration(run),
-      this.repoHandle,
-    );
-    return true;
-  }
-
-  /**
-   * The issue-side mirror of `trackReferencedPrs` (spec
-   * 2026-07-21-report-ref-discovery): fold every issue URL in `haystack` into
-   * the working set and re-resolve `referencedIssueUrl`. An unambiguous
-   * resolution also seeds `issueNumber` when nothing owns that field yet —
-   * marker and namer both outrank this janitor and overwrite it freely.
-   */
-  private trackReferencedIssues(
-    run: RunRecord,
-    haystack: string,
-    seedHaystack = haystack,
-  ): boolean {
-    const seen = new Set(run.referencedIssueCandidates ?? []);
-    const before = seen.size;
-    for (const match of haystack.matchAll(new RegExp(ISSUE_URL_RE.source, 'g'))) {
-      if (seen.size >= MAX_PR_CANDIDATES) break;
-      seen.add(match[0]);
-    }
-    const candidatesChanged = seen.size !== before;
-    if (candidatesChanged) run.referencedIssueCandidates = [...seen];
-    const prev = run.referencedIssueUrl;
-    run.referencedIssueUrl = resolveIssueReference(run, this.repoHandle);
-    let numberChanged = false;
-    if (run.markerRefs?.issue === undefined && ISSUE_URL_RE.test(seedHaystack)) {
-      if (run.referencedIssueUrl && run.issueNumber === undefined) {
-        const n = Number(run.referencedIssueUrl.split('/').pop());
-        if (Number.isInteger(n) && n > 0) {
-          run.issueNumber = n;
-          run.referencedIssueNumberSeeded = true;
-          numberChanged = true;
-        }
-      } else if (!run.referencedIssueUrl && prev && run.referencedIssueNumberSeeded) {
-        // Ambiguity revoked the resolution — take back the number this janitor
-        // seeded from it. No chip beats a wrong chip.
-        delete run.issueNumber;
-        delete run.referencedIssueNumberSeeded;
-        numberChanged = true;
-      }
-    }
-    return candidatesChanged || run.referencedIssueUrl !== prev || numberChanged;
   }
 
   /**
@@ -4313,5 +4081,5 @@ function archiveDigest(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 function archiveFields(run: RunRecord, archived: boolean, now: string): void {
-  stageArchiveFields(run, archived, now, clearPendingAutoResume, clearPin);
+  stageArchiveFields(run, archived, now);
 }

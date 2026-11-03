@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { makeRunRecord, RUN_STATUS, WAIT_SOURCE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { AgentInput, ConversationState } from '@open-mercato/cezar-contract';
 import {
-  WRITE_PATH_RULES, redactText, stageArchiveFields, stageCommit, stageConversation,
-  stageDebouncedUpdate, stageDurableUpdate, stageLoaded, stagePullRequests, stageStepUpdate,
+  RECORD_WRITE_RULES, WRITE_PATHS, redactText, stageArchiveFields, stageCommit, stageConversation,
+  stageDebouncedUpdate, stageDurableUpdate, stageLoaded, stagePullRequests, stageStepUpdate, writePathRules,
 } from './record-write-rules.ts';
 import type { RunRecord } from './store.ts';
 
@@ -14,38 +14,53 @@ const issue = 'https://github.com/example/project/issues/7';
 const redact = (text: string) => text.replaceAll('secret', '[REDACTED]');
 function hooks(log: string[] = []): Parameters<typeof stageDebouncedUpdate>[2] {
   return {
-    redact, withdrawHold: vi.fn(), clearPin: vi.fn(), refUrlNumber: (value: string | undefined) => value ? Number(value.split('/').pop()) : undefined,
+    redact,
     restore: () => { log.push('restore'); },
-    hasPrUrl: () => true, hasIssueUrl: () => true,
-    trackReferencedPrs: () => { log.push('collect-pr'); }, trackReferencedIssues: () => { log.push('collect-issue'); },
-    resolveReferencedPr: () => { log.push('resolve-pr'); return url; },
-    resolveIssueReference: () => { log.push('resolve-issue'); return issue; },
-    rescopeRun: () => { log.push('rescope'); },
-    archive: (run: RunRecord, archived: boolean) => { log.push('archive'); stageArchiveFields(run, archived, at, vi.fn(), vi.fn()); },
+    archive: (run: RunRecord, archived: boolean) => { log.push('archive'); stageArchiveFields(run, archived, at); },
     touch: () => { log.push('touch'); },
   };
 }
 function commit(run: RunRecord, previous?: RunRecord, blocker?: string) {
   return stageCommit(new Map([[run.id, run]]), {
     peek: () => previous, completionArchiveBlocker: () => blocker,
-    stageArchive: (staged, next, archived) => { stageArchiveFields(next, archived, at, vi.fn(), vi.fn()); staged.set(next.id, next); },
+    stageArchive: (staged, next, archived) => { stageArchiveFields(next, archived, at); staged.set(next.id, next); },
   }).get(run.id)!;
 }
 
 afterEach(() => vi.unstubAllEnvs());
 
 describe('record write paths without a database', () => {
+  // Today's order on each path, read from the code before S6 made one list of the rules (Decision
+  // 4). It differs from the old per-path declarations where they were stale: the durable save
+  // resolves task references since hearsay-tools/cezarion#2377, and writes its staged copy.
   it.each([
     ['commit', ['stale-resume', 'completion-actions']],
-    ['durableUpdate', ['issue-seed', 'pull-requests', 'restore', 'redact-patch', 'archive-fields']],
+    ['durableUpdate', ['issue-seed', 'pull-requests', 'restore', 'redact-patch', 'assign', 'task-references', 'archive-fields']],
     ['debouncedUpdate', ['issue-seed', 'pull-requests', 'restore', 'redact-patch', 'assign', 'retire-completion-action', 'stale-resume', 'task-references', 'archive-or-touch']],
     ['loaded', ['stale-resume']],
-    ['conversation', ['redact-messages', 'parse-delegation', 'redact-input', 'parse-input', 'append-input']],
+    ['conversation', ['redact-messages', 'parse-delegation', 'find-recipient', 'redact-input', 'parse-input', 'append-input']],
     ['pullRequests', ['merge-pull-requests']],
-    ['archiveFields', ['archive-time', 'store-owned:withdraw-hold', 'store-owned:clear-pin']],
+    ['archiveFields', ['archive-time', 'withdraw-hold', 'clear-pin']],
     ['stepUpdate', ['redact-step-error']],
-  ] as const)('declares the ordered %s rules', (path, rules) => {
-    expect(WRITE_PATH_RULES[path]).toEqual(rules);
+  ] as const)('runs the ordered %s rules', (path, rules) => {
+    expect(writePathRules(path)).toEqual(rules);
+  });
+
+  it('runs every rule on some path, and names a rule once', () => {
+    expect(RECORD_WRITE_RULES.filter(rule => !rule.on.some(path => WRITE_PATHS.includes(path))).map(rule => rule.id)).toEqual([]);
+    expect(new Set(RECORD_WRITE_RULES.map(rule => rule.id)).size).toBe(RECORD_WRITE_RULES.length);
+  });
+
+  // The class of hearsay-tools/cezarion#2377 to hearsay-tools/cezarion#2382: a rule one save
+  // skipped. The durable save is durableUpdate, then its commit.
+  it('names the difference of every rule that only one update save runs, or that the saves apply apart', () => {
+    const durable = (rule: (typeof RECORD_WRITE_RULES)[number]) => rule.on.includes('durableUpdate') || rule.on.includes('commit');
+    const one = RECORD_WRITE_RULES.filter((rule) => {
+      return durable(rule) !== rule.on.includes('debouncedUpdate');
+    });
+    expect(one.map(rule => rule.id)).toEqual(['retire-completion-action', 'completion-actions', 'archive-fields', 'archive-or-touch']);
+    expect(RECORD_WRITE_RULES.filter(rule => rule.difference).map(rule => rule.id))
+      .toEqual(['assign', 'retire-completion-action', 'stale-resume', 'completion-actions', 'archive-fields', 'archive-or-touch']);
   });
 
   // One rule on every path (hearsay-tools/cezarion#2322): a resume time stays only on a `waiting`
@@ -122,33 +137,34 @@ describe('record write paths without a database', () => {
     const before = structuredClone(run);
     const log: string[] = [];
     const stage = debounced ? stageDebouncedUpdate : stageDurableUpdate;
-    const next = stage(run, { task: 'edited', status: RUN_STATUS.running }, hooks(log)) ?? run;
-    expect(log).toEqual(['collect-pr', 'collect-issue', 'resolve-pr', 'resolve-issue', 'rescope', ...(debounced ? ['touch'] : [])]);
+    const next = stage(run, { task: `edited ${url} ${issue}`, status: RUN_STATUS.running }, hooks(log)) ?? run;
+    expect(log).toEqual(debounced ? ['touch'] : []);
     expect(next.referencedPullRequestUrl).toBe(url);
+    expect(next.referencedIssueUrl).toBe(issue);
     expect(next.issueNumber).toBe(7);
+    expect(next.referencedIssueNumberSeeded).toBe(true);
     // The durable path stages a copy: the commit retires the stale resume and replaces the held record.
     expect(next.autoResumeAt).toBe(debounced ? undefined : at);
     if (!debounced) expect(run).toEqual(before);
   });
 
   it.each([undefined, issue])('revokes or updates a number seeded by task resolution: %s', resolved => {
-    const run = makeRunRecord({ referencedIssueCandidates: [issue], issueNumber: 3, referencedIssueNumberSeeded: true });
-    const callbacks = hooks(); callbacks.resolveIssueReference = () => resolved;
-    stageDebouncedUpdate(run, { task: 'edited' }, callbacks);
+    // Two candidates: the edited task picks one by its URL, or names neither and resolves none.
+    const run = makeRunRecord({ referencedIssueCandidates: [issue, issue.replace(/7$/, '8')], issueNumber: 3, referencedIssueNumberSeeded: true });
+    stageDebouncedUpdate(run, { task: resolved ? `edited ${resolved}` : 'edited' }, hooks());
     expect(run.issueNumber).toBe(resolved ? 7 : undefined);
     expect(run.referencedIssueNumberSeeded).toBe(resolved ? true : undefined);
   });
 
   it.each([true, false])('sets archive fields and retires appointments only on archive=%s', archived => {
     const run = makeRunRecord({ status: RUN_STATUS.waiting, autoResumeAt: at, autoResumeAttempts: 2, pinned: true, pinnedAt: at });
-    const withdraw = vi.fn((next: RunRecord) => { expect(next.archivedAt).toBe(at); expect(next.pinned).toBe(true); });
-    stageArchiveFields(run, archived, at, withdraw, next => { delete next.pinned; delete next.pinnedAt; });
-    expect(withdraw).toHaveBeenCalledTimes(archived ? 1 : 0);
+    stageArchiveFields(run, archived, at);
     expect(run.archived).toBe(archived);
     expect(run.archivedAt).toBe(archived ? at : undefined);
-    expect(run.status).toBe(RUN_STATUS.waiting);
-    expect(run.autoResumeAt).toBe(at);
-    expect(run.autoResumeAttempts).toBe(2);
+    // Archiving withdraws the usage-limit hold: the run settles failed, its appointment gone.
+    expect(run.status).toBe(archived ? RUN_STATUS.failed : RUN_STATUS.waiting);
+    expect(run.autoResumeAt).toBe(archived ? undefined : at);
+    expect(run.autoResumeAttempts).toBe(archived ? undefined : 2);
     expect(run.pinned).toBe(archived ? undefined : true);
     expect(run.manualUnarchivedAt).toBe(archived ? undefined : at);
   });
