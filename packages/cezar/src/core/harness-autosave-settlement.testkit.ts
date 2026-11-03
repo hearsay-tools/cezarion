@@ -207,11 +207,11 @@ async function recoverWithReplacement({ store, manager, runId, repoRoot, adoptCo
 }
 
 export function describeAutosaveSettlement(outcome: 'failed' | 'cancelled' | 'success',
-  registration = { describe, it }): void {
+  registration = { describe, it }, continuations: readonly boolean[] = [false, true]): void {
   const { describe, it } = registration;
   describe('harness parity — settlement during blocked autosave', () => {
     for (const backend of RUNNER_IDS) {
-      for (const continuation of [false, true]) {
+      for (const continuation of continuations) {
           const row = (outcome === 'failed' ? 61 : outcome === 'cancelled' ? 63 : 65) + Number(continuation);
           it(`${backend} R${row} ${continuation ? 'Continue' : 'fresh'} ${outcome} settles with a detached Git holder`, async () => {
             vi.stubEnv('CEZ_DELEGATION', '1');

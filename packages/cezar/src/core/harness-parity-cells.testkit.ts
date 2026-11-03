@@ -79,6 +79,7 @@ import {
   withSkillParentRun,
   promptFor,
   driveRun,
+  driveUnavailableProvider,
   driveSeam,
   lastIndexWhere,
   textEvents,
@@ -1503,7 +1504,8 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
             ? `${backend} is exempt from ${criterion.id} — ${exempt.reason}`
             : `${backend} ${criterion.name}`,
           async () => {
-            const obs = await driveRun(backend, criterion.scenario, criterion.settled, criterion.timeoutMs);
+            const drive = criterion.id === 'R17' ? driveUnavailableProvider : driveRun;
+            const obs = await drive(backend, criterion.scenario, criterion.settled, criterion.timeoutMs);
             if (exempt) expect(() => criterion.assert(obs)).toThrow();
             else criterion.assert(obs);
           },
