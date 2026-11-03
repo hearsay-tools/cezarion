@@ -1,3 +1,5 @@
+import { workerCollectedResultSchema } from '@open-mercato/cezar-contract/delegation';
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runPersistence } from '../runs/run-store.testkit.ts';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { randomUUID } from 'node:crypto';
@@ -38,7 +40,7 @@ describe('parent-owned collected worker results', () => {
     execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '-qm', 'worker'], { cwd: path });
     const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: path, encoding: 'utf8' }).trim();
     const event = f.store.appendEvent(run.id, { type: 'text', text: 'Implemented. ' + 'x'.repeat(4100) });
-    f.store.updateRun(run.id, { status: 'review' });
+    f.store.updateRun(run.id, { status: RUN_STATUS.review });
     const generation = f.store.commitWorkerExecutionStart(run.id); f.store.commitWorkerExecutionComplete(run.id, generation);
     const result = await f.service.collect(f.caller, { workerId: run.id });
     expect(result).toMatchObject({ workerId: run.id, revision: 0, baselineSha: f.sha, outcome: 'review-ready', partial: false,
@@ -59,7 +61,7 @@ describe('parent-owned collected worker results', () => {
     execFileSync('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '-qm', 'older'], { cwd: path });
     f.store.appendEvent(run.id, { type: 'text', text: 'Older worker done' });
     const generation = f.store.commitWorkerExecutionStart(run.id); f.store.commitWorkerExecutionComplete(run.id, generation);
-    f.store.updateRun(run.id, { status: 'done', worktreePath: path });
+    f.store.updateRun(run.id, { status: RUN_STATUS.done, worktreePath: path });
     expect((await f.service.collect(f.caller, { workerId: run.id })).diff.state).toBe('available');
 
     await removeWorktree(f.root, path, undefined, { reclaimOwnedDirectory: true });
@@ -77,8 +79,8 @@ describe('parent-owned collected worker results', () => {
   it('never turns tool output into a summary and marks failures and running evidence partial', async () => {
     const run = await worker(); f.store.appendEvent(run.id, { type: 'tool-result', result: 'Success!' });
     let result = await f.service.collect(f.caller, { workerId: run.id });
-    expect(result).toMatchObject({ outcome: 'running', status: 'queued', partial: true, summary: { state: 'unavailable', reason: 'no-assistant-output' } });
-    f.store.updateRun(run.id, { status: 'failed', error: 'provider interrupted' });
+    expect(result).toMatchObject({ outcome: 'running', status: workerCollectedResultSchema.shape.status.enum.queued, partial: true, summary: { state: 'unavailable', reason: 'no-assistant-output' } });
+    f.store.updateRun(run.id, { status: RUN_STATUS.failed, error: 'provider interrupted' });
     f.store.appendEvent(run.id, { type: 'item.completed', item: { kind: 'message', role: 'assistant', text: 'Partial analysis' } });
     result = await f.service.collect(f.caller, { workerId: run.id });
     expect(result).toMatchObject({ outcome: 'failed', partial: true, error: 'provider interrupted', summary: { state: 'available', text: 'Partial analysis' } });
@@ -86,14 +88,14 @@ describe('parent-owned collected worker results', () => {
   it('rejects collection that races a new accepted execution revision', async () => {
     const run = await worker();
     const collecting = f.service.collect(f.caller, { workerId: run.id });
-    f.store.commitWorkerContinuation(run.id, { status: 'queued' });
+    f.store.commitWorkerContinuation(run.id, { status: RUN_STATUS.queued });
     await expect(collecting).rejects.toMatchObject({ code: 'incompatible_state' });
     expect(f.store.readWorkerResult(f.parent.id, run.id)).toBeUndefined();
   });
   it('retains historical evidence but does not reuse a previous execution assistant summary', async () => {
-    const run = await worker(); f.store.appendEvent(run.id, { type: 'text', text: 'Old summary' }); f.store.updateRun(run.id, { status: 'review' });
+    const run = await worker(); f.store.appendEvent(run.id, { type: 'text', text: 'Old summary' }); f.store.updateRun(run.id, { status: RUN_STATUS.review });
     const old = await f.service.collect(f.caller, { workerId: run.id });
-    f.store.commitWorkerContinuation(run.id, { status: 'queued' });
+    f.store.commitWorkerContinuation(run.id, { status: RUN_STATUS.queued });
     expect(f.store.readWorkerResult(f.parent.id, run.id)).toEqual(old);
     const result = await f.service.collect(f.caller, { workerId: run.id });
     expect(result).toMatchObject({ revision: 1, partial: true, summary: { state: 'unavailable' } });
@@ -195,7 +197,7 @@ describe('parent-owned collected worker results', () => {
   });
   it('a stopped public status is partial and unsettled until private termination is proven', async () => {
     const run = await worker(); const generation = f.store.commitWorkerExecutionStart(run.id);
-    f.store.updateRun(run.id, { status: 'cancelled', error: 'interrupted' });
+    f.store.updateRun(run.id, { status: RUN_STATUS.cancelled, error: 'interrupted' });
     expect(await f.service.collect(f.caller, { workerId: run.id })).toMatchObject({ settled: false, partial: true, summary: { state: 'unavailable' } });
     f.store.commitWorkerExecutionComplete(run.id, generation);
     expect(await f.service.collect(f.caller, { workerId: run.id })).toMatchObject({ settled: true, partial: true });
@@ -220,7 +222,7 @@ describe('unchanged worker results (hearsay-tools/cezarion#879)', () => {
     const { workerId } = await f.service.spawn(f.caller, { task: 'work', baseline: 'HEAD', requestId: randomUUID() });
     await ensureOwnedWorkspace(f.root, f.store.getRun(workerId)!);
     f.store.appendEvent(workerId, { type: 'text', text: 'Done.' });
-    f.store.updateRun(workerId, { status: 'review' });
+    f.store.updateRun(workerId, { status: RUN_STATUS.review });
     const generation = f.store.commitWorkerExecutionStart(workerId); f.store.commitWorkerExecutionComplete(workerId, generation);
     const result = await f.service.collect(f.caller, { workerId });
     const dir = dirname(f.store.workerResultSnapshotPath(f.parent.id, workerId, randomUUID()));

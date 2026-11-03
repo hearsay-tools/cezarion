@@ -1,3 +1,10 @@
+import {
+  RUN_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { openTestRunStore } from '../runs/run-store.testkit.ts';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers, managerDisposed } from '../workflows/fixture-cleanup.testkit.ts';
@@ -40,8 +47,8 @@ export async function removeAfterOwnedWork(root: string, ownedWork: Promise<void
  *  (hearsay-tools/cezarion#1235, #1301): no session is needed to seed it. Returns its id. */
 export function seedWorkerWait(store: RunStore, parentId: string, workerIds: string[]): string {
   const id = randomUUID(); const now = Date.now();
-  store.commitWait(parentId, { kind: 'worker', id, source: 'agent', via: 'cez-worker-wait', registeredAt: new Date(now).toISOString(),
-    deadline: new Date(now + 600_000).toISOString(), timeoutSeconds: 600, phase: 'open', turnId: 'turn-1', mode: 'all',
+  store.commitWait(parentId, { kind: WAIT_KIND.worker, id, source: WAIT_SOURCE.agent, via: WAIT_VIA['cez-worker-wait'], registeredAt: new Date(now).toISOString(),
+    deadline: new Date(now + 600_000).toISOString(), timeoutSeconds: 600, phase: WAIT_PHASE.open, turnId: 'turn-1', mode: 'all',
     workerIds, revisions: workerIds.map(workerId => ({ workerId, revision: 0 })), outcomes: [] });
   return id;
 }
@@ -83,7 +90,7 @@ export function fixture(options: WorkerCleanupOptions = {}): { root: string; sha
   // Scheduler admission is deliberately held: service acceptance must be durable before it.
   const pump = vi.spyOn(runInternals(manager).line, 'pump').mockResolvedValue();
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', runner: 'claude', model: 'opus', effort: 'high', steps: [] });
-  store.updateRun(parent.id, { status: 'running', worktreePath: root, delegation: { role: 'root', permissions: ['spawn', 'inspect', 'steer', 'stop', 'destroy', 'diff', 'wait'], receipts: [] } });
+  store.updateRun(parent.id, { status: RUN_STATUS.running, worktreePath: root, delegation: { role: 'root', permissions: ['spawn', 'inspect', 'steer', 'stop', 'destroy', 'diff', 'wait'], receipts: [] } });
   const credentials = new CredentialRegistry();
   const token = credentials.issue('project', parent.id, randomUUID());
   const caller = credentials.authenticate(token)!;

@@ -1,3 +1,4 @@
+import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { ConversationMessage, Wait } from '@open-mercato/cezar-contract';
@@ -8,8 +9,8 @@ import { PARK_NOTICE_EXCERPT_MAX, formatParkNoticeText, messagedParentSince, par
 const worker = randomUUID();
 const parent = randomUUID();
 const wait = randomUUID();
-const timer: Extract<Wait, { kind: 'timer' }> = { id: randomUUID(), kind: 'timer', source: 'agent', via: 'monitoring-line', registeredAt: '2026-10-20T12:13:00.000Z',
-  seconds: 600, deadline: '2026-10-20T12:23:00.000Z', phase: 'open', turnId: 'monitoring', note: 'Opened by CEZ:MONITORING.' };
+const timer: Extract<Wait, { kind: 'timer' }> = { id: randomUUID(), kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent, via: WAIT_VIA['monitoring-line'], registeredAt: '2026-10-20T12:13:00.000Z',
+  seconds: 600, deadline: '2026-10-20T12:23:00.000Z', phase: WAIT_PHASE.open, turnId: 'monitoring', note: 'Opened by CEZ:MONITORING.' };
 let seq = 0;
 const event = (type: string, fields: Record<string, unknown> = {}): RunEvent => ({ seq: ++seq, ts: `2026-10-20T12:${String(10 + seq).padStart(2, '0')}:00.000Z`, type, ...fields });
 
@@ -22,14 +23,14 @@ describe('park notices (hearsay-tools/cezarion#1327)', () => {
 
   const message = (fields: Partial<ConversationMessage>): ConversationMessage => ({ id: randomUUID(), senderRunId: parent, recipientRunId: worker,
     kind: 'request', text: 'check', createdAt: '2026-10-20T12:13:00.000Z', requestHash: 'hash', state: 'accepted', ...fields } as ConversationMessage);
-  const workerWait = (fields: Record<string, unknown>): Wait => ({ id: randomUUID(), kind: 'worker', source: 'agent', via: 'cezar_wait',
-    registeredAt: '2026-10-20T12:13:00.000Z', deadline: '2026-10-20T12:23:00.000Z', phase: 'open', ...fields } as Wait);
+  const workerWait = (fields: Record<string, unknown>): Wait => ({ id: randomUUID(), kind: WAIT_KIND.worker, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
+    registeredAt: '2026-10-20T12:13:00.000Z', deadline: '2026-10-20T12:23:00.000Z', phase: WAIT_PHASE.open, ...fields } as Wait);
 
   it('picks the first open wait that selects the worker, by its ID or by a request to it, with no notice from it yet', () => {
     const request = randomUUID();
     const byId = workerWait({ workerIds: [worker] });
     const byRequest = workerWait({ requestIds: [request] });
-    const waits = [timer, workerWait({ workerIds: [worker], phase: 'delivered' }), workerWait({ workerIds: [randomUUID()] }), byId, byRequest];
+    const waits = [timer, workerWait({ workerIds: [worker], phase: WAIT_PHASE.delivered }), workerWait({ workerIds: [randomUUID()] }), byId, byRequest];
     const messages = [message({ id: request })];
     expect(parkNoticeWait(worker, waits, messages)).toBe(byId);
     expect(parkNoticeWait(worker, waits, [...messages, message({ id: parkNoticeId(worker, byId.id) })])).toBe(byRequest);
@@ -80,7 +81,7 @@ describe('park notices (hearsay-tools/cezarion#1327)', () => {
   });
 
   it('says a worker with no open wait waits for its parent, and leaves out settled waits and a missing message', () => {
-    const settled: Wait = { ...timer, id: randomUUID(), phase: 'delivered' } as Wait;
+    const settled: Wait = { ...timer, id: randomUUID(), phase: WAIT_PHASE.delivered } as Wait;
     const text = formatParkNoticeText({ workerRunId: worker, waitId: wait, waits: [settled] });
     expect(text).toContain('It has no open wait: it waits for a message from you.');
     expect(text).not.toContain(settled.id);

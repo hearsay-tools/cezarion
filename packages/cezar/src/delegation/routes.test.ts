@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, WORKER_OUTCOME_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -9,7 +10,16 @@ import { Hono } from 'hono';
 import { createDelegationRoutes } from './routes.ts';
 import { fixture, seedWorkerWait } from './service.testkit.ts';
 import { conversationSendResultSchema, conversationInspectResultSchema, inboxReserveResultSchema, inboxReceiptResultSchema, requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';
-import { workerListResultSchema, delegationErrorResponseSchema, workerSpawnResultSchema, workerInspectionSchema, workerSteerResultSchema, workerStopResultSchema, workerDestroyResultSchema } from '@open-mercato/cezar-contract/delegation';
+import {
+  workerListResultSchema,
+  delegationErrorResponseSchema,
+  workerSpawnResultSchema,
+  workerInspectionSchema,
+  workerSteerResultSchema,
+  workerStopResultSchema,
+  workerDestroyResultSchema,
+  workerListEntrySchema,
+} from '@open-mercato/cezar-contract/delegation';
 import { seedRuns } from '../runs/run-store.testkit.ts';
 
 describe('authenticated delegation HTTP family', () => {
@@ -33,7 +43,7 @@ describe('authenticated delegation HTTP family', () => {
     expect(response.status).toBe(200);
     const result = workerListResultSchema.parse(await response.json());
     expect(result.workers).toHaveLength(1);
-    expect(result.workers[0]).toMatchObject({ workerId, parentRunId: f.parent.id, status: 'queued', revision: 3,
+    expect(result.workers[0]).toMatchObject({ workerId, parentRunId: f.parent.id, status: workerListEntrySchema.shape.status.enum.queued, revision: 3,
       settled: false, destroyed: false, workspace: { path: worker.delegation.workspace.path }, destroy: { remaining: ['worktree', 'branch'] } });
     expect(JSON.stringify(result)).not.toContain(other.id);
     // A second root's worker is neither listed nor leaked, even through a stale receipt.
@@ -58,13 +68,13 @@ describe('authenticated delegation HTTP family', () => {
     const first = await spawn();
     const second = await spawn();
     const generation = f.store.commitWorkerExecutionStart(first.workerId);
-    f.store.updateRun(first.workerId, { status: 'done' });
+    f.store.updateRun(first.workerId, { status: RUN_STATUS.done });
     expect(workerListResultSchema.parse(await (await request('/list')).json()).workers[0]).toMatchObject({ workerId: first.workerId, settled: false });
     expect(f.store.commitWorkerExecutionComplete(first.workerId, generation)).toBe(true);
     const result = workerListResultSchema.parse(await (await request('/list')).json());
     expect(result.workers).toHaveLength(2);
-    expect(result.workers[0]).toMatchObject({ workerId: first.workerId, status: 'done', settled: true, revision: 0 });
-    expect(result.workers[1]).toMatchObject({ workerId: second.workerId, status: 'queued', settled: false, revision: 0 });
+    expect(result.workers[0]).toMatchObject({ workerId: first.workerId, status: workerListEntrySchema.shape.status.enum.done, settled: true, revision: 0 });
+    expect(result.workers[1]).toMatchObject({ workerId: second.workerId, status: workerListEntrySchema.shape.status.enum.queued, settled: false, revision: 0 });
     const parent = f.store.getRun(f.parent.id)!;
     if (parent.delegation?.role !== 'root') throw Error('parent');
     f.store.updateRun(parent.id, { delegation: { ...parent.delegation, permissions: ['spawn'] } });
@@ -95,7 +105,7 @@ describe('authenticated delegation HTTP family', () => {
     expect((await request(`/${workerId}?offset=1`)).status).toBe(400);
     const inspection = await f.service.inspect(f.caller, { workerId });
     vi.spyOn(f.service, 'inspect').mockResolvedValue({ ...inspection, inputs: [],
-      outcome: { workerId, status: 'done', observedAt: new Date().toISOString(), summary: 'x'.repeat(4_000) } });
+      outcome: { workerId, status: WORKER_OUTCOME_STATUS.done, observedAt: new Date().toISOString(), summary: 'x'.repeat(4_000) } });
     const result = await (await request('/list')).json() as { workers: Record<string, unknown>[] };
     expect(result.workers[0]).not.toHaveProperty('inputs');
     expect(result.workers[0]).not.toHaveProperty('outcome');
@@ -106,7 +116,7 @@ describe('authenticated delegation HTTP family', () => {
     const created = await request('/spawn', { task: 'work', baseline: 'parent-head', requestId: randomUUID(), workflow: 'review' });
     expect(created.status).toBe(201);
     const { workerId } = workerSpawnResultSchema.parse(await created.json());
-    expect(f.store.getRun(workerId)).toMatchObject({ workflow: 'review', steps: [{ kind: 'agent' }, { kind: 'check' }] });
+    expect(f.store.getRun(workerId)).toMatchObject({ workflow: 'review', steps: [{ kind: STEP_KIND.agent }, { kind: STEP_KIND.check }] });
     expect((await request('/spawn', { task: 'work', baseline: 'parent-head', requestId: randomUUID(), workflow: '' })).status).toBe(400);
     const unknown = await request('/spawn', { task: 'work', baseline: 'parent-head', requestId: randomUUID(), workflow: 'absent' });
     expect(unknown.status).toBe(400);
@@ -123,7 +133,7 @@ describe('authenticated delegation HTTP family', () => {
     expect(conversationSendResultSchema.parse(await response.json())).toMatchObject({ message: { senderRunId: f.parent.id, recipientRunId: workerId, kind: 'request' }, delivery: 'queued' });
     const followup = await request('/follow-up', { id: randomUUID(), recipientRunId: workerId, kind: 'follow-up', requestId: input.id, text: 'More detail' });
     expect(followup.status).toBe(200); conversationSendResultSchema.parse(await followup.json());
-    const token = f.credentials.issue('project', workerId, randomUUID()); f.store.updateRun(workerId, { status: 'running' });
+    const token = f.credentials.issue('project', workerId, randomUUID()); f.store.updateRun(workerId, { status: RUN_STATUS.running });
     const reply = await request('/reply', { id: randomUUID(), recipientRunId: f.parent.id, kind: 'reply', requestId: input.id, text: 'index.ts' }, { authorization: `Bearer ${token}` });
     expect(reply.status).toBe(200); expect(conversationSendResultSchema.parse(await reply.json()).outcome?.status).toBe('replied');
     const inspected = await request('/conversation', { recipientRunId: workerId });
@@ -132,7 +142,7 @@ describe('authenticated delegation HTTP family', () => {
     expect(requestOutcomeSchema.parse(await cancelled.json()).status).toBe('replied');
   });
   it('validates inbox bodies and scopes receipts to the authenticated session', async () => {
-    const { workerId } = await spawn(); f.store.updateRun(workerId, { status: 'running' });
+    const { workerId } = await spawn(); f.store.updateRun(workerId, { status: RUN_STATUS.running });
     const workerToken = f.credentials.issue('project', workerId, randomUUID());
     const sent = await request('/send', { id: randomUUID(), recipientRunId: workerId, kind: 'progress', text: 'Read me' });
     expect(sent.status).toBe(200);
@@ -150,7 +160,7 @@ describe('authenticated delegation HTTP family', () => {
     expect((await request('/inbox/ack', { receiptId: batch.receiptId! }, { authorization: `Bearer ${currentToken}` })).status).toBe(403);
   });
   it('ACKs and releases only the supplied live receipt', async () => {
-    const { workerId } = await spawn(); f.store.updateRun(workerId, { status: 'running' });
+    const { workerId } = await spawn(); f.store.updateRun(workerId, { status: RUN_STATUS.running });
     const token = f.credentials.issue('project', workerId, randomUUID());
     await request('/send', { id: randomUUID(), recipientRunId: workerId, kind: 'progress', text: 'First' });
     const first = inboxReserveResultSchema.parse(await (await request('/inbox', {}, { authorization: `Bearer ${token}` })).json());
@@ -282,7 +292,7 @@ describe('authenticated delegation HTTP family', () => {
       id: waitId, workerIds: [workerId], phase: 'wake-pending', reason: 'cancelled', wakeId: waitId,
       deadline: new Date().toISOString(), outcomes: [],
     } } }]);
-    f.store.updateRun(parent.id, { status: 'queued' });
+    f.store.updateRun(parent.id, { status: RUN_STATUS.queued });
     const token = kind === 'worker' ? f.credentials.issue('project', workerId, randomUUID())
       : kind === 'foreign' ? f.credentials.issue('elsewhere', parent.id, randomUUID()) : f.token;
     const before = structuredClone(f.store.listRuns());

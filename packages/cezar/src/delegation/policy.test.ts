@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { workerOperationSchema, type WorkerOperation } from '@open-mercato/cezar-contract/delegation';
@@ -22,7 +23,7 @@ function caller(runId: string = parentId, project: string = projectId): Caller {
 }
 function root(): RunRecord {
   return runRecordSchema.parse({
-    id: parentId, title: 'parent', task: 'task', workflow: 'quick-task', status: 'running',
+    id: parentId, title: 'parent', task: 'task', workflow: 'quick-task', status: RUN_STATUS.running,
     createdAt: now, tokensUsed: 0, steps: [],
     delegation: { role: 'root', permissions: operations, receipts: [] },
   });
@@ -93,7 +94,7 @@ describe('parent-only delegation policy', () => {
     for (const status of ['queued', 'review', 'done', 'failed', 'cancelled'] as const) {
       denied(() => authorize(operation, caller(), { ...root(), status }), 'incompatible_state');
     }
-    expect(() => authorize(operation, caller(), { ...root(), status: 'waiting' })).not.toThrow();
+    expect(() => authorize(operation, caller(), { ...root(), status: RUN_STATUS.waiting })).not.toThrow();
   });
 
   it.each(targeted)('scopes %s reads and mutations equally for absent/unrelated/invalid targets', operation => {
@@ -151,9 +152,9 @@ describe('parent-only delegation policy', () => {
     if (destroyed.delegation?.role !== 'worker') throw new Error('fixture');
     destroyed.delegation.destroy = { requestedAt: now, phase: 'complete', remaining: [] };
     for (const target of [
-      { ...worker(), status: 'cancelled' as const },
-      { ...worker(), status: 'done' as const, stopping: true },
-      { ...destroyed, status: 'done' as const },
+      { ...worker(), status: RUN_STATUS.cancelled },
+      { ...worker(), status: RUN_STATUS.done, stopping: true },
+      { ...destroyed, status: RUN_STATUS.done },
     ]) {
       expect(() => authorizeWorker(caller(), target, 'steer', root(), projectId))
         .toThrowError(expect.objectContaining({ code: 'incompatible_state', message: 'Worker no longer accepts steering.' }));
@@ -195,9 +196,9 @@ describe('parent-only delegation policy', () => {
     // Incomplete cleanup keeps the slot; only a verified complete destroy releases it.
     const owned = worker();
     if (owned.delegation?.role !== 'worker') throw new Error('fixture');
-    runs.set(workerId, { ...owned, status: 'done', delegation: { ...owned.delegation, destroy: { requestedAt: now, phase: 'incomplete', remaining: ['branch'] } } });
+    runs.set(workerId, { ...owned, status: RUN_STATUS.done, delegation: { ...owned.delegation, destroy: { requestedAt: now, phase: 'incomplete', remaining: ['branch'] } } });
     denied(() => authorizeSpawn(caller(), parent, projectId, getRun), 'capacity_limit');
-    runs.set(workerId, { ...owned, status: 'done', delegation: { ...owned.delegation, destroy: { requestedAt: now, phase: 'complete', remaining: [] } } });
+    runs.set(workerId, { ...owned, status: RUN_STATUS.done, delegation: { ...owned.delegation, destroy: { requestedAt: now, phase: 'complete', remaining: [] } } });
     expect(() => authorizeSpawn(caller(), runRecordSchema.parse(JSON.parse(JSON.stringify(parent))), projectId, getRun)).not.toThrow();
     expect(() => authorizeWorker(caller(), worker(), 'inspect', parent, projectId)).not.toThrow();
   });

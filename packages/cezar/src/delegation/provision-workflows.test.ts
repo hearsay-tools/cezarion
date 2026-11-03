@@ -17,7 +17,7 @@ import { planOwnedWorkspace } from './workspace.ts';
 import { fixture, waitForOwnedWork } from './service.testkit.ts';
 import { DelegationController } from './provision.ts';
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
-import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { agentHomePaths, claudeStateFilePath } from '../paths.ts';
@@ -103,7 +103,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     if (mode === 'restart') {
       // A restart: the old store goes too, or it would still own the parent's family.
       f.manager.dispose(); sessions[0]!.finish();
-      f.store.updateRun(accepted.parent.id, { status: 'waiting' }); f.store.close();
+      f.store.updateRun(accepted.parent.id, { status: RUN_STATUS.waiting }); f.store.close();
       const store = openTestRunStore(join(f.root, '.ai/cezar'), { keepLive: true });
       const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager); recoveredStores.push(store);
       controller.attachProject({ id: 'restarted', root: f.root, store, manager });
@@ -119,7 +119,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
       : QUICK_TASK_WORKFLOW;
     let run;
     if (mode === 'recovery') {
-      run = f.store.createRun({ title: 'queued', task: 'recover', workflow: 'quick-task', runner: backend, steps: [{ id: 'task', name: 'Task', kind: 'agent' }] });
+      run = f.store.createRun({ title: 'queued', task: 'recover', workflow: 'quick-task', runner: backend, steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] });
       await f.manager.recover();
     } else run = f.manager.startRun(workflow, { task: 'parent', runner: backend, worktree: false });
     await until(() => sessions.length === 1);
@@ -172,7 +172,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     await until(() => f.store.getRun(child.workerId)?.status === 'done');
     const worker = f.store.getRun(child.workerId)!;
     expect(worker.steps.map(step => ({ id: step.id, kind: step.kind, status: step.status, iterations: step.iterations }))).toEqual([
-      { id: 'inspect', kind: 'agent', status: 'done', iterations: 2 }, { id: 'verify', kind: 'check', status: 'done', iterations: 2 },
+      { id: 'inspect', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 2 }, { id: 'verify', kind: STEP_KIND.check, status: STEP_STATUS.done, iterations: 2 },
     ]);
     expect(f.store.readEvents(child.workerId).filter(event => event.type === 'check-output')).toHaveLength(2);
     expect(f.store.getRun(parent.id)?.delegation).toMatchObject({ role: 'root' });
@@ -218,7 +218,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     else {
       const { store } = await launchAccepted(a, mode);
       await until(() => store.getRun(worker.id)?.status === 'failed' || sessions.length > 1);
-      expect(store.getRun(worker.id)).toMatchObject({ status: 'failed', error: expect.stringContaining('workflow') });
+      expect(store.getRun(worker.id)).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('workflow') });
     }
     expect(sessions).toHaveLength(mode === 'continue' ? 2 : 1);
   });
@@ -362,11 +362,11 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     // The durable shape a crash leaves behind after a continuation was accepted but not yet
     // launched: a pending synthetic `continue-1` step and its message, on a `queued` record.
     const worker = f.store.getRun(a.child.workerId)!;
-    f.store.addStep(worker.id, { id: 'continue-1', name: 'Continue', kind: 'agent', synthetic: 'continuation' });
-    f.store.updateRun(worker.id, { status: 'queued', finishedAt: undefined,
+    f.store.addStep(worker.id, { id: 'continue-1', name: 'Continue', kind: STEP_KIND.agent, synthetic: 'continuation' });
+    f.store.updateRun(worker.id, { status: RUN_STATUS.queued, finishedAt: undefined,
       continuationMessage: { id: 'continue-1', text: 'again', origin: 'human', createdAt: new Date().toISOString() } });
     f.manager.dispose(); sessions[0]!.finish();
-    f.store.updateRun(a.parent.id, { status: 'waiting' }); f.store.close();
+    f.store.updateRun(a.parent.id, { status: RUN_STATUS.waiting }); f.store.close();
     const store = openTestRunStore(join(f.root, '.ai/cezar'), { keepLive: true });
     const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager); recoveredStores.push(store);
     controller.attachProject({ id: 'restarted', root: f.root, store, manager });
@@ -408,7 +408,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     else {
       const { store } = await launchAccepted(a, mode);
       await until(() => store.getRun(worker.id)?.status === 'failed' || sessions.length > 1);
-      expect(store.getRun(worker.id)).toMatchObject({ status: 'failed', error: expect.stringContaining('context') });
+      expect(store.getRun(worker.id)).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('context') });
     }
     expect(sessions).toHaveLength(mode === 'continue' ? 2 : 1);
   });
@@ -432,7 +432,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     const expectedSessions = mode === 'continue' ? 3 : 2;
     if (damage === 'both-changed') {
       await until(() => store.getRun(a.child.workerId)?.status === 'failed' || sessions.length === expectedSessions);
-      expect(store.getRun(a.child.workerId)).toMatchObject({ status: 'failed', error: expect.stringContaining('context input') });
+      expect(store.getRun(a.child.workerId)).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('context input') });
       expect(sessions).toHaveLength(expectedSessions - 1);
     } else {
       await until(() => sessions.length === expectedSessions);
@@ -459,7 +459,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     const store = openTestRunStore(join(f.root, '.ai/cezar'), { keepLive: true });
     const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager); recoveredStores.push(store);
     // Keep root live without restarting its old session; this case concerns only the worker.
-    store.updateRun(a.parent.id, { status: 'waiting' });
+    store.updateRun(a.parent.id, { status: RUN_STATUS.waiting });
     controller.attachProject({ id: 'grants-reopened', root: f.root, store, manager });
     if (mode === 'continue') expect(manager.continueRun(a.child.workerId, { text: 'again' }).ok).toBe(true);
     else await manager.recover();
@@ -481,7 +481,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     else {
       const { store } = await launchAccepted(a, mode);
       await until(() => store.getRun(a.child.workerId)?.status === 'failed' || sessions.length > 1);
-      expect(store.getRun(a.child.workerId)).toMatchObject({ status: 'failed', error: expect.stringContaining('identity') });
+      expect(store.getRun(a.child.workerId)).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('identity') });
     }
     expect(sessions).toHaveLength(mode === 'continue' ? 2 : 1);
   });
@@ -536,7 +536,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     else {
       const { store } = await launchAccepted(a, mode);
       await until(() => store.getRun(a.child.workerId)?.status === 'failed' || sessions.length > 1);
-      expect(store.getRun(a.child.workerId)).toMatchObject({ status: 'failed', error: expect.stringContaining('layout') });
+      expect(store.getRun(a.child.workerId)).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('layout') });
     }
     expect(sessions).toHaveLength(mode === 'continue' ? 2 : 1);
   });
@@ -547,7 +547,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     vi.spyOn(engine, 'agentEnv').mockImplementation((...args) => ({ ...prepare(...args), CLAUDE_CONFIG_DIR: a.home }));
     const { store } = await launchAccepted(a, 'queued');
     await until(() => store.getRun(a.child.workerId)?.status === 'failed' || sessions.length > 1);
-    expect(store.getRun(a.child.workerId)).toMatchObject({ status: 'failed', error: expect.stringContaining('layout') }); expect(sessions).toHaveLength(1);
+    expect(store.getRun(a.child.workerId)).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('layout') }); expect(sessions).toHaveLength(1);
   });
   it.each(['queued', 'restart', 'continue'] as const)('refuses missing private Claude layout evidence on %s', async mode => {
     const a = await acceptClaudeLayout('native');
@@ -562,7 +562,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     else {
       const { store } = await launchAccepted(a, mode);
       await until(() => store.getRun(a.child.workerId)?.status === 'failed' || sessions.length > 1);
-      expect(store.getRun(a.child.workerId)).toMatchObject({ status: 'failed', error: expect.stringContaining('identity') });
+      expect(store.getRun(a.child.workerId)).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('identity') });
     }
     expect(sessions).toHaveLength(mode === 'continue' ? 2 : 1);
   });
@@ -665,7 +665,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   });
   it('supports only deliberately marked internal primitive workers, never missing identity evidence', async () => {
     const workspace = await planOwnedWorkspace(f.root, randomUUID(), f.sha);
-    const worker = f.store.createOwnedRun({ title: 'internal', task: 'internal', runner: 'claude', workflow: 'quick-task', steps: [{ id: 'task', name: 'Task', kind: 'agent' }] }, f.parent.id, randomUUID(), { role: 'worker', permissions: [], parentRunId: f.parent.id, workspace }, '0'.repeat(64));
+    const worker = f.store.createOwnedRun({ title: 'internal', task: 'internal', runner: 'claude', workflow: 'quick-task', steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] }, f.parent.id, randomUUID(), { role: 'worker', permissions: [], parentRunId: f.parent.id, workspace }, '0'.repeat(64));
     expect(f.store.readWorkerIdentity(worker.id)).toEqual({ kind: 'internal' });
     f.manager.enqueueOwnedRun(worker.id); await until(() => sessions.length === 1);
     expect(sessions[0]!.spec.env?.CLAUDE_CONFIG_DIR).toBeUndefined();
@@ -720,7 +720,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     const legacyPrompt = 'Selected skill: /legacy\n\nSkill instructions:\nLEGACY BODY';
     const workspace = await planOwnedWorkspace(f.root, randomUUID(), f.sha);
     const worker = f.store.createOwnedRun({ title: 'legacy', task: 'legacy', runner: 'claude', workflow: 'quick-task', systemPrompt: legacyPrompt,
-      steps: [{ id: 'task', name: 'Task', kind: 'agent' }] }, f.parent.id, randomUUID(),
+      steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] }, f.parent.id, randomUUID(),
     { role: 'worker', permissions: [], parentRunId: f.parent.id, workspace }, '0'.repeat(64));
     const assertInlinePrompt = (spec: AgentRunSpec) => {
       expect(spec.systemPrompt?.slice(0, legacyPrompt.length)).toBe(legacyPrompt);
@@ -732,10 +732,10 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     await until(() => sessions.length === 2); assertInlinePrompt(sessions[1]!.spec);
     sessions[1]!.finish(); expect(await f.manager.awaitRunTermination(worker.id, 15000)).toBe(true);
     // Persist a queued Continue, then restart through recover(), rather than checking reload alone.
-    f.store.addStep(worker.id, { id: 'continue-2', name: 'Continue', kind: 'agent', synthetic: 'continuation' });
-    f.store.updateRun(worker.id, { status: 'queued', finishedAt: undefined, currentStepId: undefined,
+    f.store.addStep(worker.id, { id: 'continue-2', name: 'Continue', kind: STEP_KIND.agent, synthetic: 'continuation' });
+    f.store.updateRun(worker.id, { status: RUN_STATUS.queued, finishedAt: undefined, currentStepId: undefined,
       continuationMessage: { id: 'continue-2', text: 'recover legacy', origin: 'human', createdAt: new Date().toISOString() } });
-    f.store.updateRun(f.parent.id, { status: 'waiting' }); f.store.close(); f.manager.dispose();
+    f.store.updateRun(f.parent.id, { status: RUN_STATUS.waiting }); f.store.close(); f.manager.dispose();
     const store = openTestRunStore(join(f.root, '.ai/cezar'), { keepLive: true }); recoveredStores.push(store);
     expect(store.getRun(worker.id)?.systemPrompt).toBe(legacyPrompt);
     const manager = createFixtureManager(store, f.root); recoveredManagers.push(manager);
@@ -843,7 +843,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   });
   it('attaches lazy project provisioning before recovery can launch a session', async () => {
     // A persisted queued ordinary task becomes a root only in the recovered session.
-    const run = f.store.createRun({ title: 'queued', task: 'recover', workflow: 'quick-task', runner: 'claude', steps: [{ id: 'task', name: 'Task', kind: 'agent' }] });
+    const run = f.store.createRun({ title: 'queued', task: 'recover', workflow: 'quick-task', runner: 'claude', steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] });
     // A restart into a lazily built context: the old manager and store go first.
     f.manager.dispose(); f.store.close();
     const contexts = new ProjectContexts({ listProjects: async () => [{ id: 'lazy', root: f.root, status: 'ok' }], prepareManager: project => controller.attachProject(project) });

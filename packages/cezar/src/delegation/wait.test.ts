@@ -1,3 +1,4 @@
+import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { workerWaitRequestSchema, type WorkerOutcome, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
@@ -104,8 +105,8 @@ describe('request selections in the shared wait', () => {
 
 // hearsay-tools/cezarion#1235 phase 3a: the same rules, applied to a `worker` entry in the wait list.
 describe('reconcileWorkerEntry', () => {
-  const entry: DeadlinedWorkerWaitEntry = { id: randomUUID(), kind: 'worker', source: 'agent', via: 'cezar_wait', registeredAt: now,
-    deadline: wait.deadline, timeoutSeconds: 600, turnId: 'turn', phase: 'open', workerIds: [workerId], revisions: [], outcomes: [] };
+  const entry: DeadlinedWorkerWaitEntry = { id: randomUUID(), kind: WAIT_KIND.worker, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait, registeredAt: now,
+    deadline: wait.deadline, timeoutSeconds: 600, turnId: 'turn', phase: WAIT_PHASE.open, workerIds: [workerId], revisions: [], outcomes: [] };
   it('reconcileWorkerEntry keeps first observations and matches revisions', () => {
     const selected = { ...entry, revisions: [{ workerId, revision: 1 }], outcomes: [outcome('review')] };
     expect(reconcileWorkerEntry(selected, [outcome('done')], now)).toEqual({ entry: { ...selected, outcomes: [] } });
@@ -127,7 +128,7 @@ describe('reconcileWorkerEntry', () => {
     // Unrelated workers change nothing.
     expect(reconcileWorkerEntry(entry, [{ ...outcome('done'), workerId: other }], now).entry).toBe(entry);
     // A settled entry is never reconciled again.
-    const resolved = { ...entry, phase: 'resolved' as const, result: { reason: 'outcome' as const } };
+    const resolved = { ...entry, phase: WAIT_PHASE.resolved, result: { reason: 'outcome' as const } };
     expect(reconcileWorkerEntry(resolved, [outcome('done')], now)).toEqual({ entry: resolved });
   });
   it('reconcileWorkerEntry settles request entries by their own outcomes only', () => {

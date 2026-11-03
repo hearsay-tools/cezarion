@@ -26,7 +26,7 @@ it('bounds batches without splitting messages or crossing lifecycle inputs', () 
 });
 
 const input: AgentInput = { id: randomUUID(), source: 'agent', parentRunId: randomUUID(), text: '/skill mock:agent-echo steering', createdAt: '2026-09-06T12:00:00.000Z' };
-const run = (patch: Partial<RunRecord> = {}): RunRecord => ({ id: randomUUID(), title: 'task', task: 'task', workflow: 'quick-task', status: 'running', createdAt: input.createdAt, tokensUsed: 0, archived: false, steps: [], ...patch });
+const run = (patch: Partial<RunRecord> = {}): RunRecord => ({ id: randomUUID(), title: 'task', task: 'task', workflow: 'quick-task', status: RUN_STATUS.running, createdAt: input.createdAt, tokensUsed: 0, archived: false, steps: [], ...patch });
 
 describe('attributed input queue', () => {
   it('never selects input while a human ask is pending', () => {
@@ -259,7 +259,7 @@ async function withInboxRun(check: (f: { store: RunStore; manager: RunManager; d
     sendAgentMessage: content => { sent.push(JSON.stringify(content)); return Promise.resolve(); }, discardQueuedMessages() {}, holdsHumanInput() { return false; }, end() {}, interrupt() {} };
   const state = { session, pendingHumanAsk: false, cancelled: false };
   const record = store.createRun({ title: 'inbox', task: 'inbox', workflow: 'quick-task', steps: [] });
-  store.updateRun(record.id, { status: 'running' });
+  store.updateRun(record.id, { status: RUN_STATUS.running });
   store.commitDelegation([{ id: record.id, delegation: { role: 'root', permissions: [], receipts: [], conversation: { messages: [], outcomes: [] } } }]);
   (manager as unknown as { active: Map<string, object> }).active.set(record.id, state);
   const enqueue = (text: string) => {
@@ -340,7 +340,7 @@ it.each(['live', 'expired'] as const)('restart recovers a %s receipt and expiry 
     const first = enqueue('recovered input'), generation = randomUUID();
     const receipt = manager.reserveInboxInputs(runId, generation, [first.id])!;
     // A restart: the old store goes too, or it would still own the run.
-    store.updateRun(runId, { status: 'waiting' }); store.close(); manager.dispose();
+    store.updateRun(runId, { status: RUN_STATUS.waiting }); store.close(); manager.dispose();
     vi.setSystemTime(Date.now() + (mode === 'live' ? 60_000 : 120_001));
     const reopened = RunStore.open(dir, { keepLive: true }), recovered = new RunManager(reopened, dir);
     // Hold scheduler admission while observing the real durable wake produced by expiry.
@@ -371,7 +371,7 @@ it('a continuation refused across several admission retries writes the retained 
   await withInboxRun(async ({ store, manager, dir, runId, enqueue }) => {
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     enqueue('owed message');
-    store.updateRun(runId, { status: 'waiting' }); store.close(); manager.dispose();
+    store.updateRun(runId, { status: RUN_STATUS.waiting }); store.close(); manager.dispose();
     const reopened = RunStore.open(dir, { keepLive: true }), recovered = new RunManager(reopened, dir);
     const pump = vi.spyOn(runInternals(recovered).line, 'pump').mockResolvedValue();
     const resume = vi.spyOn(recovered, 'continueRun');
@@ -445,7 +445,7 @@ it('restart after durable inbox ACK retires the wake without creating a continua
     store.claimInboxInputs(runId, [first.id], { receiptId, generation, expiresAt: new Date(Date.now() + 120_000).toISOString() });
     store.commitDelegation([{ id: runId, delegation: { role: 'root', permissions: [], receipts: [],
       wait: { id: randomUUID(), workerIds: [], outcomes: [], deadline: new Date().toISOString(), phase: 'wake-pending', reason: 'message', wakeId: first.id } } }]);
-    store.updateRun(runId, { status: 'waiting' });
+    store.updateRun(runId, { status: RUN_STATUS.waiting });
     // Simulate the crash boundary after the atomic ACK and before manager reconciliation.
     store.ackInboxInputs(runId, receiptId, generation, new Date().toISOString());
     manager.dispose(); store.close();

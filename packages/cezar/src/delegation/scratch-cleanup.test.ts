@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { once } from 'node:events';
@@ -25,10 +26,10 @@ describe('durable scratch cleanup evidence', () => {
 
   async function completed(location = 'local') {
     const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-    store.updateRun(parent.id, { status: 'waiting', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    store.updateRun(parent.id, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     const run = await worker(parent.id);
     const generation = store.commitWorkerExecutionStart(run.id);
-    store.updateRun(run.id, { status: 'cancelled' }); store.commitWorkerExecutionComplete(run.id, generation);
+    store.updateRun(run.id, { status: RUN_STATUS.cancelled }); store.commitWorkerExecutionComplete(run.id, generation);
     manager.pauseWorkerCleanup();
     const dataDir = join(root, '.ai/cezar'), scratch = location === 'local' ? agentTmpDir(dataDir, run.id) : agentTmpEnv(dataDir, run.id, {}).TMPDIR!;
     if (location === 'fallback') {
@@ -218,7 +219,7 @@ describe('durable scratch cleanup evidence', () => {
     seedRuns(dataDir, rows); reopenRuntime();
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
-      await manager.recover(); store.updateRun(run.id, { status: 'cancelled' });
+      await manager.recover(); store.updateRun(run.id, { status: RUN_STATUS.cancelled });
       await vi.advanceTimersByTimeAsync(120_000);
       expect(store.deleteRun(run.id)).toBe(false);
       expect(existsSync(join(scratch, 'keep'))).toBe(true);
@@ -231,7 +232,7 @@ describe('durable scratch cleanup evidence', () => {
 
   it.runIf(process.platform === 'linux')('ambient denial never refuses admission or reuse; a readable holder of retained paths does (hearsay-tools/cezarion#889)', async () => {
     const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-    store.updateRun(parent.id, { status: 'waiting', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    store.updateRun(parent.id, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     const run = await worker(parent.id);
     if (run.delegation?.role !== 'worker') throw Error('missing worker');
     const scratch = agentTmpDir(join(root, '.ai/cezar'), run.id);
@@ -242,7 +243,7 @@ describe('durable scratch cleanup evidence', () => {
       expect(agentTmpDirMayExist(join(root, '.ai/cezar'), run.id)).toBe(false);
       const generation = store.commitWorkerExecutionStart(run.id);
       expect(store.readWorkerExecution(run.id)).toMatchObject({ generation, phase: 'starting' });
-      store.updateRun(run.id, { status: 'cancelled' }); store.commitWorkerExecutionComplete(run.id, generation);
+      store.updateRun(run.id, { status: RUN_STATUS.cancelled }); store.commitWorkerExecutionComplete(run.id, generation);
       manager.pauseWorkerCleanup();
       mkdirSync(scratch, { recursive: true }); writeFileSync(join(scratch, 'retained'), 'task files');
       // An unreadable cwd is no evidence even inside the retained scratch.
@@ -298,10 +299,10 @@ describe('scratch reprobe cadence (hearsay-tools/cezarion#879)', () => {
 
   async function completed() {
     const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-    store.updateRun(parent.id, { status: 'waiting', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    store.updateRun(parent.id, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     const run = await worker(parent.id);
     const generation = store.commitWorkerExecutionStart(run.id);
-    store.updateRun(run.id, { status: 'cancelled' }); store.commitWorkerExecutionComplete(run.id, generation);
+    store.updateRun(run.id, { status: RUN_STATUS.cancelled }); store.commitWorkerExecutionComplete(run.id, generation);
     manager.pauseWorkerCleanup();
     const dataDir = join(root, '.ai/cezar'), scratch = agentTmpDir(dataDir, run.id);
     mkdirSync(scratch, { recursive: true }); writeFileSync(join(scratch, 'keep'), 'durable');

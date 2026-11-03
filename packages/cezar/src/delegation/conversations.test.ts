@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { ConversationMessage } from '@open-mercato/cezar-contract';
@@ -7,8 +8,8 @@ const now = '2026-09-08T20:00:00.000Z';
 /** The store's `getRun` over a fixed set of runs. */
 const lookupOf = (runs: readonly RunRecord[]) => (id: string) => runs.find(run => run.id === id);
 function records() {
-  const root = { id: randomUUID(), status: 'running', delegation: { role: 'root', permissions: [], receipts: [], conversation: { messages: [], outcomes: [] } } } as unknown as RunRecord;
-  const worker = { id: randomUUID(), status: 'running', delegation: { role: 'worker' } } as unknown as RunRecord;
+  const root = { id: randomUUID(), status: RUN_STATUS.running, delegation: { role: 'root', permissions: [], receipts: [], conversation: { messages: [], outcomes: [] } } } as unknown as RunRecord;
+  const worker = { id: randomUUID(), status: RUN_STATUS.running, delegation: { role: 'worker' } } as unknown as RunRecord;
   const request: ConversationMessage = { id: randomUUID(), senderRunId: root.id, recipientRunId: worker.id, kind: 'request', text: 'question', createdAt: now, deadline: '2026-09-08T20:10:00.000Z', requestHash: 'a'.repeat(64), state: 'accepted' };
   if (root.delegation?.role !== 'root') throw Error('fixture'); root.delegation.conversation!.messages.push(request);
   return { root, worker, request };
