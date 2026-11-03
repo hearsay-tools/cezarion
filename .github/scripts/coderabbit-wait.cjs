@@ -13,7 +13,7 @@ async function waitForCodeRabbitAdmission({ now = Date.now, sleep = delay, log =
     try {
       admission = await readCodeRabbitAdmission({ ...args, now, deadline: Math.min(deadline, now() + 60000) });
     } catch (error) {
-      if (error.message === 'deadline' && now() >= deadline) break;
+      if (now() >= deadline) break;
       // A provider can finish between the snapshot's two reads. Discard mixed
       // evidence; the next snapshot must still prove the original expected head.
       if (error.message !== 'Review evidence changed while reading') throw error;

@@ -127,6 +127,21 @@ test('snapshot deadline before the overall deadline remains an error', async () 
   await assert.rejects(() => wait(h), /deadline/);
 });
 
+test('request abort at the overall deadline returns a normal blocked result', async () => {
+  const h = fixture(), start = h.now(); h.s.checks = [];
+  const request = h.github.request;
+  h.github.request = async (...args) => {
+    if (h.now() > start) {
+      h.s.clock = start + 20 * 60 * 1000;
+      throw new DOMException('request deadline', 'TimeoutError');
+    }
+    return request(...args);
+  };
+  const result = await wait(h);
+  assert.equal(result.admitted, false);
+  assert.equal(result.reason, 'provider-wait-timeout');
+});
+
 test('provider completion during a snapshot discards mixed evidence and reads again', async () => {
   const h = fixture(); h.s.checks[0].status = 'in_progress'; h.s.checks[0].conclusion = null;
   let reads = 0, polls = 0;

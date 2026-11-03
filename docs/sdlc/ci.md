@@ -279,9 +279,11 @@ with at most 40 fresh admission reads spaced 30 seconds apart. Missing checks
 and queued or running checks wait, including a running review that already has
 open findings. Completed provider results and completed reviews with open threads
 return immediately. A snapshot that changes during its read is discarded and
-read again; other API/schema/head errors remain errors. Each snapshot keeps the
+read again; other API/schema/head errors before the overall deadline remain errors. Each snapshot keeps the
 60-second read and 10-second request limits, clipped to the overall wait deadline.
-The job has a 25-minute limit for checkout, waiting and reporting. This holds an
+The shared reader enforces request cancellation through an abort signal; the
+numeric timeout option alone is ignored by github-script v9. The job has a
+25-minute limit for checkout, waiting and reporting. This holds an
 Actions runner during the wait. Readiness, queue admission and reconciliation
 still use the immediate reader. See [the pending-review plan](../../.ai/specs/2026-11-03-coderabbit-pending-plan.md).
 

@@ -17,7 +17,7 @@ protected-check provenance or the heavy-job graph. No model requests or new flag
 
 Only missing and pending provider states wait. Retry the narrow changing-snapshot
 error with fresh evidence; never grant admission from an inconsistent snapshot.
-Other API/schema/head errors remain errors. Return settled admission immediately.
+Other API/schema/head errors before the overall deadline remain errors. Return settled admission immediately.
 After timeout, fail with a clear notice; later existing reconciliation can retry.
 The current marker remains the marker for the admission policy on main.
 
@@ -42,3 +42,17 @@ terminal results, head changes, and changing snapshots without real-time sleeps.
 Use Squeal for affected Node tests, then the complete changed-function quality
 fallback, citations and pinned workflow lint. Dispatch final branch CI because
 native PR CI reads main's workflow; the dispatch does not exercise native review.
+
+## Timeout enforcement correction
+
+The CodeRabbit walkthrough raised a request-timeout concern outside inline
+threads. Inspection of pinned github-script v9 confirmed that its fetch wrapper
+forwards `request.signal` and ignores `request.timeout`. The shared metadata
+reader now supplies `AbortSignal.timeout(min(10 seconds, remaining deadline))`.
+The legacy numeric option remains for compatible clients. A request abort after
+the overall wait expires returns the normal blocked timeout; earlier failures
+remain errors. The new loopback regression starts a real fetch, aborts it when
+the server receives the request, and verifies cancellation at both deadline caps.
+Without the signal the request completes successfully, so the regression fails.
+
+Source: https://github.com/actions/github-script/blob/3a2844b7e9c422d3c10d287c895573f7108da1b3/dist/index.js#L61442
