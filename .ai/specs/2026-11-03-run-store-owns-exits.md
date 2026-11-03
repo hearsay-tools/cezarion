@@ -51,6 +51,10 @@ Seven writers bypass the table: six in the `run-status-write-outside-transition`
    - **by an enclosing commit**: an exit applied inside another commit (`resume` inside
      `commitOutcome`, `continue-*` inside `commitWorkerContinuation`) commits with it.
 
+   Precedence, first match wins: an enclosing commit, then the record rule, then the exit's own
+   declaration. Only an exit declared debounced can be raised to committed; nothing lowers a
+   committed exit. So one status write always persists the same way for the same record and call.
+
    The one call-site choice today, `parkOnWaits` committing a park only when the run gives up its
    slot, becomes its own exit, `park-release` (same `from` and `to` as `park`, committed, clears
    `activity`, sets the step to waiting). Table A marks each exit's way.
@@ -59,9 +63,9 @@ Seven writers bypass the table: six in the `run-status-write-outside-transition`
    become exits. Four have a precondition and get a named guard. A failed guard keeps the
    method's failure behavior today:
    - root Finish success and cancellation (a root with a pending Finish intent): write nothing,
-     return false. They differ from `succeed`, `succeed-review` and `cancel` in guard and
-     durability, so they become their own committed exits: `succeed-root`, `succeed-root-review`
-     and `cancel-root`, with the same `from` and `to` as the exits they mirror;
+     return false. They differ from `succeed`, `succeed-review` and `cancel` in guard, `from` set
+     and durability, so they become their own committed exits: `succeed-root`,
+     `succeed-root-review` and `cancel-root` (Table A rows);
    - worker cancellation (role worker): throw, because a non-worker here is a caller error;
    - the hold withdrawal (a usage-limit hold): write no status.
 
@@ -111,7 +115,8 @@ adds for every exit whose status is `failed`. Durability: D debounced, C commit.
 | park-for-wake | queued, waiting → waiting | 1 | nothing | none | D |
 | hold | failed, waiting → waiting | 1 + `failed.legacy-hold` | `finishedAt` cleared; `autoResumeAt` set | none | D |
 | resume | waiting → running | 4 | nothing | none | D by exit; C by enclosing commit (`commitOutcome` at `sendAgentInput`) |
-| succeed, succeed-review | running, waiting → done, review | 2 | SRF, `finishedAt` = now, `currentStepId` and `autoResumeAttempts` cleared | root Finish: waiting, root, intent pending | D by exit; C by record (completion option); root Finish: C by exit (`succeed-root`, `succeed-root-review`, Decision 5) |
+| succeed, succeed-review | running, waiting → done, review | 1 (`commitOrdinarySuccess`) | SRF, `finishedAt` = now, `currentStepId` and `autoResumeAttempts` cleared | none | D by exit; C by record (completion option) |
+| succeed-root, succeed-root-review | waiting → done, review | 1 (`settleSuccessWork`) | as succeed, plus the Finish intent retired, `activity` cleared, running or waiting steps done (`finishedAt ??= now`), in one commit | root with a pending Finish intent; else no write, returns false | C by exit |
 | accept-review | review → done | 1 + `review.draft-pr` | nothing in common | none | D by exit; C by record |
 | fail-start | queued, running → failed | 7 | `error`, `finishedAt` = now, SRF | none | D |
 | fail | running, waiting → failed | 4 | `error`, `finishedAt` = now, `currentStepId` cleared, SRF | none | D |
@@ -119,7 +124,8 @@ adds for every exit whose status is `failed`. Durability: D debounced, C commit.
 | fail-interrupted | queued, running, waiting → failed | 1 + `live.read-only` | fixed `error`, `finishedAt` | none | D |
 | fail-crash | queued, running, waiting → failed | 2 | `error`, `finishedAt` = now, SRF | none | D |
 | withdraw-hold | waiting → failed | 1 + `hold.archive` | `autoResumeAt`, `autoResumeAttempts` cleared | usage-limit hold | C |
-| cancel | queued, running, waiting → cancelled | 12 + `live.stopping` + `queued.orphaned` | `finishedAt` set | root Finish cancel: root, intent pending, waiting or cancelled | D by exit; root Finish cancel: C by exit (`cancel-root`, Decision 5) |
+| cancel | queued, running, waiting → cancelled | 10 + `live.stopping` + `queued.orphaned` | `finishedAt` set | none | D by exit |
+| cancel-root | waiting, cancelled → cancelled | 2 (`cancel`, `reconcileFamilyPass` repair) | Finish intent retired, `finishedAt ??= now`, in one commit | root with a pending Finish intent; else no write, returns false | C by exit |
 | stop-worker | all but cancelled → cancelled | 2 | `finishedAt` = now (overwrites) | role worker | C |
 | cancel-late | queued, running, waiting, done, review, failed → cancelled | 1 | `finishedAt`, `currentStepId` cleared | none | D |
 
@@ -136,7 +142,7 @@ S5 keeps every row as it is (owner, 2026-11-03). S7 normalizes them. "Today" is 
 | B1 | fail-start | 4 of 7 sites clear `currentStepId`; 3 leave it | leave: `checkpointQueuedWorker`, `reviveQueuedRun`, `reviveQueuedWorker` |
 | B2 | fail-crash | neither site clears `currentStepId` | `failCrashedContinuation`, `launchQueuedRun` |
 | B3 | cancel | 5 of 10 `move` sites leave `currentStepId`; no `move` site retires the Finish intent (`reconcileFamilyPass` repairs it later) | leave: `cancelQueuedRun`, `cancelRunWithoutSession`, `settleStoppedContinuation`, both in `startExecution` |
-| B4 | `finishedAt` on a settling exit | overwritten with now: `commitWorkerCancellation`, `commitAutoResumeWithdrawal`, every `move`; kept (`??=`): `commitRootFinishCancellation`, every store load-time writer, Draft PR | as listed |
+| B4 | `finishedAt` on a settling exit | overwritten with now: `commitWorkerCancellation`, `commitAutoResumeWithdrawal`, `commitRootFinishSuccess`, every `move`; kept (`??=`): `commitRootFinishCancellation`, every store load-time writer, Draft PR | as listed |
 | B5 | succeed | `commitRootFinishSuccess` clears `activity` and settles steps in its commit; `commitOrdinarySuccess` does neither in its patch (steps by side calls) | both |
 | B6 | accept-review | Finish sets no `finishedAt` and retires the intent; Draft PR sets `finishedAt ??= now` and no SRF | `finish`, `POST /runs/:id/pr` |
 | B7 | continue-line | the usage-limit Continue writes it twice: `acceptResumedContinuation`, then `dispatchAcceptedContinuation` | both |

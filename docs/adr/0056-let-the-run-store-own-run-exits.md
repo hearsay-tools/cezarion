@@ -31,7 +31,7 @@ records a violation; production logs a warning, and the test setup fails the tes
 (`afterEach`). Nothing throws in the write path, so a test runs the path the app runs. Refusing an
 undeclared transition in production is a later decision that needs the warnings as evidence.
 
-Each exit keeps today's durability. A plain Finish stays on the debounced save so a locked
+Each exit keeps today's durability. An enclosing commit, then a record rule (an exit to `done` with a completion option), can raise a debounced exit to committed; nothing lowers a committed one. A plain Finish stays on the debounced save so a locked
 database cannot stop cleanup; Done with a completion option, handoff records and the archive
 options commit at once. The record rules run as one ordered pipeline on both saves. A rule that
 differs between them on purpose is a named difference in that pipeline, not a separate list.
