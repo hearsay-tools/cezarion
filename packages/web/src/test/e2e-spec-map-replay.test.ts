@@ -22,7 +22,7 @@ it('rebuilds browser and server evidence from an allowlisted raw archive in a fr
       put(join(repo, 'packages/cezar/src/a.ts'), 'export function used() {}')
     }
     execFileSync('git', ['init', '-q'], { cwd: target })
-    execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '--allow-empty', '-qm', 'fixture'], { cwd: target })
+    execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '--no-gpg-sign', '--allow-empty', '-qm', 'fixture'], { cwd: target })
     const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: target, encoding: 'utf8' }).trim()
     const served = join(original, '.ai/qa/build/cezar/web/dist/assets/x.js')
     const mapped = join(capture, 'sourcemaps/assets/x.js')
