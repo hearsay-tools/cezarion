@@ -6,7 +6,7 @@ import { createServer } from 'node:net';
 import { mkdirSync, writeFileSync, unlinkSync, renameSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createHash } from 'node:crypto';
+import crypto, { createHash } from 'node:crypto';
 import { takeCoverage } from 'node:v8';
 
 const root = process.env.E2E_SPEC_MAP_NODE_DIR;
@@ -28,6 +28,7 @@ async function install(root, owner) {
     session.post('Profiler.enable');
     session.post('Profiler.startPreciseCoverage', { callCount: true, detailed: true });
     if (active) expectServer(active);
+    patchCreation();
     patchSpawn();
   }
   const server = createServer(connection => {
@@ -84,15 +85,27 @@ async function install(root, owner) {
       writeRecord(join(dir, `server-${process.pid}-${sequence++}.json`), result);
     });
   }
+  function patchCreation() {
+    const original = crypto.randomUUID;
+    crypto.randomUUID = function() {
+      const id = original.apply(this, arguments);
+      if (active) owners.set(id, active);
+      return id;
+    };
+  }
   function patchSpawn() {
     const original = childProcess.spawn;
     childProcess.spawn = function(command, args, options) {
       const opts = Array.isArray(args) ? options : args;
       const task = opts?.env?.CEZ_TASK_ID;
-      if (task && active && !owners.has(task)) owners.set(task, active);
-      const spec = owners.get(task);
       const childArgs = Array.isArray(args) ? args : [];
-      if (spec && [command, ...childArgs].some(arg => /[/\\]mock-[^/\\]+\.mjs$/.test(arg))) {
+      const isMock = [command, ...childArgs].some(arg => /[/\\]mock-[^/\\]+\.mjs$/.test(arg));
+      if (task && isMock && !owners.has(task)) {
+        writeRecord(join(root, `ambiguous-task-${task}.json`), { taskId: task });
+        if (active) owners.set(task, active);
+      }
+      const spec = owners.get(task);
+      if (spec && isMock) {
         const directory = join(root, basename(spec, '.e2e.ts'), 'node', 'tasks', task, `${process.pid}-${spawnSequence++}`);
         mkdirSync(directory, { recursive: true });
         writeRecord(join(directory, 'expected.json'), { spec, taskId: task });

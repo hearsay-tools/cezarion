@@ -74,9 +74,10 @@ jobs:
       - name: Enable harness-only Node coverage
         run: |
           echo "E2E_SPEC_MAP_NODE_DIR=$RUNNER_TEMP/spec-map/logs" >> "$GITHUB_ENV"
-          echo "NODE_OPTIONS=--import=$GITHUB_WORKSPACE/packages/web/e2e/spec-map/node-preload.mjs" >> "$GITHUB_ENV"
 
       - name: Boot the test environment
+        env:
+          NODE_OPTIONS: --import=${{ github.workspace }}/packages/web/e2e/spec-map/node-preload.mjs
         run: |
           sh .ai/scripts/test-env-up.sh
           node -e 'const d = JSON.parse(require("fs").readFileSync(".ai/qa/test-env.json", "utf8")); if (!d.browser?.installed) { console.error(d.browser?.notes || "agent-browser is unavailable"); process.exit(1) }'
@@ -85,6 +86,7 @@ jobs:
       # always runs it. The merge job refuses a map with too little evidence.
       - name: Run the browser suite with V8 function logs
         env:
+          NODE_OPTIONS: --import=${{ github.workspace }}/packages/web/e2e/spec-map/node-preload.mjs
           E2E_SPEC_MAP_LOG_DIR: ${{ runner.temp }}/spec-map/logs
         run: |
           set +e

@@ -31,7 +31,13 @@ async function fixture(existing?: { directory: string; spec: string }, executabl
   writeFileSync(entry, `
     const { spawn } = require('node:child_process');
     let child;
+    let created;
     process.stdin.on('data', task => {
+      if (task.toString().trim() === 'create') {
+        created = require('node:crypto').randomUUID({ disableEntropyCache: true });
+        console.log('created:' + created); return;
+      }
+      if (task.toString().trim() === 'launch-created') task = Buffer.from(created);
       if (task.toString().trim() === 'stop') {
         child.once('exit', (code, signal) => console.log('stopped:' + signal));
         child.kill('SIGTERM'); return;
@@ -149,4 +155,37 @@ test('captures an executable mock supplied as the spawn command', async () => {
   await endNodeCapture(directory, spec)
   expect(results(join(directory, 'executable', 'node')).find(script => script.url.endsWith('/mock-case.mjs'))?.functions)
     .toEqual(expect.arrayContaining([expect.objectContaining({ functionName: 'scenario' })]))
+})
+
+
+test('attributes a delayed first spawn to the spec that created its task UUID', async () => {
+  const { directory, child } = await fixture()
+  const first = 'packages/web/e2e/created-first.e2e.ts'
+  const second = 'packages/web/e2e/started-second.e2e.ts'
+  await beginNodeCapture(directory, first)
+  const created = once(child.stdout, 'data')
+  child.stdin.write('create\n')
+  const taskId = (await created)[0].toString().trim().slice('created:'.length)
+  expect(taskId).toMatch(/^[0-9a-f-]{36}$/)
+  await endNodeCapture(directory, first)
+  await beginNodeCapture(directory, second)
+  const ready = once(child.stdout, 'data')
+  child.stdin.write('launch-created\n')
+  await ready
+  await endNodeCapture(directory, second)
+  expect(results(join(directory, 'created-first', 'node')).some(script => script.url.endsWith('/mock-case.mjs'))).toBe(true)
+  expect(results(join(directory, 'started-second', 'node')).some(script => script.url.endsWith('/mock-case.mjs'))).toBe(false)
+  expect(readdirSync(directory).some(file => file.startsWith('ambiguous-task-'))).toBe(false)
+})
+
+test('marks a task with unknown creation ownership as ambiguous', async () => {
+  const { directory, child } = await fixture()
+  const spec = 'packages/web/e2e/unknown-task.e2e.ts'
+  await beginNodeCapture(directory, spec)
+  const ready = once(child.stdout, 'data')
+  child.stdin.write('unknown-task\n')
+  await ready
+  await endNodeCapture(directory, spec)
+  expect(JSON.parse(readFileSync(join(directory, 'ambiguous-task-unknown-task.json'), 'utf8')))
+    .toEqual({ taskId: 'unknown-task' })
 })

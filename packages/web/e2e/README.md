@@ -331,6 +331,7 @@ The `E2E spec map` workflow records which specs run cockpit code, server functio
 The shared server reports precise V8 coverage between specs. Mock coverage stays with the
 spec and task that started the process, even when that process survives into another spec.
 The source-map build must match the served browser JavaScript byte for byte.
+A task without a known creating spec makes Node evidence incomplete.
 Failed specs and specs without complete evidence stay incomplete and always run for mapped edits.
 
 The selector downloads the newest successful map from `main` with `gh` into

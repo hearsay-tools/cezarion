@@ -52,6 +52,8 @@ it('maps server function offsets back to TypeScript and refuses missing process 
     expect(nodeCaptureComplete(logs, spec)).toBe(false)
     writeFileSync(join(node, 'tasks/task/1/coverage-1.json'), JSON.stringify({ result: [] }))
     expect(nodeCaptureComplete(logs, spec)).toBe(true)
+    writeFileSync(join(logs, 'ambiguous-task-unknown.json'), '{}')
+    expect(nodeCaptureComplete(logs, spec)).toBe(false)
     expect(nodeEvidence(logs, spec, root)).toEqual([{ source, start: 1, end: 1, executed: true }])
     expect(nodeEvidence(logs, 'packages/web/e2e/missing.e2e.ts', root)).toEqual([])
   } finally { rmSync(root, { recursive: true, force: true }) }
