@@ -1,5 +1,5 @@
 import { execFileSync, type ChildProcess } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, expect, it } from 'vitest'
@@ -7,7 +7,7 @@ import { afterAll, beforeAll, expect, it } from 'vitest'
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
-// fixture-server starts: 2
+// fixture-server starts: 3
 
 let browser: AgentBrowser
 let server: ChildProcess
@@ -222,42 +222,60 @@ it('lets Model occupy the freed desktop track when Runner is unavailable', () =>
 })
 
 it('shows the fractional-width Model prefix when pi / grok-4.6 fits at three-column width', async () => {
-  await stopFixtureServer(server)
-  writeFileSync(join(root, '.ai/cezar/config.json'), JSON.stringify({
-    defaultModels: { pi: 'grok-4.6' },
-  }))
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', baseUrl.split(':').at(-1)!, '--no-open'], {
-    env: fixtureServeEnv(root, { CEZ_OPENCODE_BIN: join(root, 'opencode-fixture'), CEZ_PI_BIN: join(root, 'pi-fixture') }), stdio: 'ignore',
-  })
-  baseUrl = await waitForFixtureServer(server, { expectedOrigin: baseUrl })
-  browser.setViewport(viewportWidth(1440), 900)
-  browser.evaluate(`localStorage.setItem('cez-sidebar-width', '420')`)
-  browser.goto(`${baseUrl}/new`)
-  browser.waitForFunction(`document.querySelector('[data-slot="runner-pill"]')?.checkVisibility() === true`)
-  browser.click('[data-slot="runner-pill"]')
-  browser.waitForFunction(`document.querySelector('[data-testid="runner-pill-menu"] [role="menuitemradio"]') !== null`)
-  const index = browser.evaluate(`[...document.querySelectorAll('[data-testid="runner-pill-menu"] [role="menuitemradio"]')].findIndex(el => el.textContent.includes('pi CLI')) + 1`) as number
-  expect(index).toBeGreaterThan(0)
-  browser.click(`[data-testid="runner-pill-menu"] [role="menuitemradio"]:nth-child(${index})`)
-  browser.waitForFunction(`document.querySelector('[data-slot="model-pill"]')?.getAttribute('aria-label') === 'Model · grok-4.6'`)
-  browser.waitForFunction(`document.querySelector('[data-testid="runner-pill-menu"]') === null`)
-  const facts = waitForSettledSample(browser, `(() => {
-    const group = document.querySelector('[data-slot="agent-options"]');
-    const pill = group.querySelector('[data-slot="model-pill"]');
-    const label = pill.querySelector('[data-slot="picker-label"]');
-    const fullWidth = label.previousElementSibling.getBoundingClientRect().width;
-    const slotWidth = label.getBoundingClientRect().width;
-    return { groupWidth: group.getBoundingClientRect().width, fullWidth, slotWidth, text: label.textContent };
-  })()`) as { groupWidth: number; fullWidth: number; slotWidth: number; text: string }
-  expect(facts.groupWidth).toBeGreaterThanOrEqual(550)
-  expect(facts.fullWidth % 1).toBeGreaterThan(0.01)
-  expect(facts.fullWidth).toBeLessThanOrEqual(facts.slotWidth + 0.5)
-  expect(facts.text).toBe('Model · grok-4.6')
-  expect(layout().incorrectPrefixes).toEqual([])
-  mkdirSync(join(import.meta.dirname, '../../../.ai/qa/artifacts_issue-522'), { recursive: true })
-  browser.screenshot(join(import.meta.dirname, '../../../.ai/qa/artifacts_issue-522/522-new-task-short-1440.png'), { viewport: true })
-  browser.setViewport(375, 800)
-  browser.waitForFunction(`document.querySelector('[data-slot="model-pill"]')?.getAttribute('aria-label') === 'Model · grok-4.6'`)
-  expect(layout().incorrectPrefixes).toEqual([])
-  browser.screenshot(join(import.meta.dirname, '../../../.ai/qa/artifacts_issue-522/522-new-task-short-375.png'), { viewport: true })
+  const configPath = join(root, '.ai/cezar/config.json')
+  const originalConfig = readFileSync(configPath, 'utf8')
+  try {
+    await stopFixtureServer(server)
+    writeFileSync(join(root, '.ai/cezar/config.json'), JSON.stringify({
+      defaultModels: { pi: 'grok-4.6' },
+    }))
+    server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', baseUrl.split(':').at(-1)!, '--no-open'], {
+      env: fixtureServeEnv(root, { CEZ_OPENCODE_BIN: join(root, 'opencode-fixture'), CEZ_PI_BIN: join(root, 'pi-fixture') }), stdio: 'ignore',
+    })
+    baseUrl = await waitForFixtureServer(server, { expectedOrigin: baseUrl })
+    browser.setViewport(viewportWidth(1440), 900)
+    browser.evaluate(`localStorage.setItem('cez-sidebar-width', '420')`)
+    browser.goto(`${baseUrl}/new`)
+    browser.waitForFunction(`document.querySelector('[data-slot="runner-pill"]')?.checkVisibility() === true`)
+    browser.click('[data-slot="runner-pill"]')
+    browser.waitForFunction(`document.querySelector('[data-testid="runner-pill-menu"] [role="menuitemradio"]') !== null`)
+    const index = browser.evaluate(`[...document.querySelectorAll('[data-testid="runner-pill-menu"] [role="menuitemradio"]')].findIndex(el => el.textContent.includes('pi CLI')) + 1`) as number
+    expect(index).toBeGreaterThan(0)
+    browser.click(`[data-testid="runner-pill-menu"] [role="menuitemradio"]:nth-child(${index})`)
+    browser.waitForFunction(`document.querySelector('[data-slot="model-pill"]')?.getAttribute('aria-label') === 'Model · grok-4.6'`)
+    browser.waitForFunction(`document.querySelector('[data-testid="runner-pill-menu"]') === null`)
+    const facts = waitForSettledSample(browser, `(() => {
+      const group = document.querySelector('[data-slot="agent-options"]');
+      const pill = group.querySelector('[data-slot="model-pill"]');
+      const label = pill.querySelector('[data-slot="picker-label"]');
+      const fullWidth = label.previousElementSibling.getBoundingClientRect().width;
+      const slotWidth = label.getBoundingClientRect().width;
+      return { groupWidth: group.getBoundingClientRect().width, fullWidth, slotWidth, text: label.textContent };
+    })()`) as { groupWidth: number; fullWidth: number; slotWidth: number; text: string }
+    expect(facts.groupWidth).toBeGreaterThanOrEqual(550)
+    expect(facts.fullWidth % 1).toBeGreaterThan(0.01)
+    expect(facts.fullWidth).toBeLessThanOrEqual(facts.slotWidth + 0.5)
+    expect(facts.text).toBe('Model · grok-4.6')
+    expect(layout().incorrectPrefixes).toEqual([])
+    mkdirSync(join(import.meta.dirname, '../../../.ai/qa/artifacts_issue-522'), { recursive: true })
+    browser.screenshot(join(import.meta.dirname, '../../../.ai/qa/artifacts_issue-522/522-new-task-short-1440.png'), { viewport: true })
+    browser.setViewport(375, 800)
+    browser.waitForFunction(`document.querySelector('[data-slot="model-pill"]')?.getAttribute('aria-label') === 'Model · grok-4.6'`)
+    expect(layout().incorrectPrefixes).toEqual([])
+    browser.screenshot(join(import.meta.dirname, '../../../.ai/qa/artifacts_issue-522/522-new-task-short-375.png'), { viewport: true })
+  } finally {
+    await stopFixtureServer(server)
+    writeFileSync(configPath, originalConfig)
+    server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', baseUrl.split(':').at(-1)!, '--no-open'], {
+      env: fixtureServeEnv(root, { CEZ_OPENCODE_BIN: join(root, 'opencode-fixture'), CEZ_PI_BIN: join(root, 'pi-fixture') }), stdio: 'ignore',
+    })
+    baseUrl = await waitForFixtureServer(server, { expectedOrigin: baseUrl })
+    browser.goto(`${baseUrl}/new`)
+    browser.evaluate(`(() => {
+      localStorage.removeItem('cez-sidebar-width')
+      for (const key of Object.keys(localStorage)) {
+        if (key === 'cez-new-task-draft' || key.startsWith('cez-new-task-draft:')) localStorage.removeItem(key)
+      }
+    })()`)
+  }
 })

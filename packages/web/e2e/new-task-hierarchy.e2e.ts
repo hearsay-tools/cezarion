@@ -2,7 +2,7 @@ import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
@@ -73,7 +73,13 @@ function geometry() {
   })()` ) as { prompt: { bottom: number }; context: { top: number; bottom: number }; submission: { top: number; right: number; bottom: number }; execution: { top: number; left: number; bottom: number }; agent: { top: number; bottom: number }; mode: { top: number; bottom: number }; overflow: boolean; clipped: string[]; small: string[] }
 }
 
-beforeAll(() => {
+beforeEach(() => {
+  browser.goto(`${baseUrl}/new`)
+  browser.evaluate(`(() => {
+    for (const key of Object.keys(localStorage)) {
+      if (key === 'cez-new-task-draft' || key.startsWith('cez-new-task-draft:')) localStorage.removeItem(key)
+    }
+  })()`)
   browser.goto(`${baseUrl}/new`)
   browser.waitForFunction(`document.querySelector('[data-slot="source-pill"]')?.textContent.includes('Skill')`)
 })
@@ -91,8 +97,16 @@ describe('New Task hierarchy (#168)', () => {
 
   for (const reduced of [false, true]) {
     describe(reduced ? 'reduced motion' : 'normal motion', () => {
-      beforeAll(() => {
-        if (reduced) browser.setReducedMotion()
+      beforeEach(async () => {
+        const url = browser.url()
+        await browser.withCdp(async request => {
+          const { targetInfos } = await request('Target.getTargets')
+          const target = targetInfos.find((target: { type: string; url: string }) => target.type === 'page' && target.url === url)
+          const { sessionId } = await request('Target.attachToTarget', { targetId: target.targetId, flatten: true })
+          await request('Emulation.setEmulatedMedia', {
+            features: [{ name: 'prefers-reduced-motion', value: reduced ? 'reduce' : 'no-preference' }],
+          }, sessionId)
+        })
         browser.fill(prompt, 'Verify the task composer')
       })
       it.each(matrix)('$width $theme $density: hierarchy, focus, target sizes, no clipping', ({ width, theme, density }) => {

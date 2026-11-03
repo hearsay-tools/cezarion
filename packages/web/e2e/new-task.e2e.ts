@@ -2,7 +2,7 @@ import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
 import { dismissWithEscape } from './contrast'
@@ -87,6 +87,32 @@ afterAll(async () => {
   await stopFixtureServer(server)
   if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
 })
+
+beforeEach(() => {
+  browser.goto(`${baseUrl}${scoped('/')}`)
+  browser.evaluate(`(() => {
+    for (const key of Object.keys(localStorage)) {
+      if (key === 'cez-new-task-draft' || key.startsWith('cez-new-task-draft:')) localStorage.removeItem(key)
+    }
+  })()`)
+  browser.goto(`${baseUrl}${scoped('/new')}`)
+  browser.waitForFunction(`(() => {
+    const source = document.querySelector('[data-slot="source-pill"]')
+    const input = document.querySelector('[data-slot="composer"] textarea')
+    return source !== null && !source.textContent.includes('…') && input !== null && !input.disabled
+  })()`)
+})
+
+function pickSpecWriter() {
+  browser.click('[data-slot="source-pill"]')
+  browser.waitForFunction(`document.querySelector('[data-slot="source-menu"]') !== null`)
+  browser.evaluate(`{
+    const item = document.querySelector('[data-slot="source-option"][data-source-ref="spec-writer"]')
+    const label = item.querySelector('span')
+    label.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
+    label.click()
+  }`)
+}
 
 describe('the full-screen /new against a live dry-run server', () => {
   it.each([
@@ -260,6 +286,8 @@ describe('the full-screen /new against a live dry-run server', () => {
   })
 
   it('the ✕ takes the picked skill back off, and the selected row toggles it off too', () => {
+    pickSpecWriter()
+    browser.waitForFunction(`document.querySelector('[data-slot="source-pill-clear"]') !== null`)
     // One click, no menu — the affordance the report asked for.
     browser.click('[data-slot="source-pill-clear"]')
     browser.waitForFunction(
@@ -270,16 +298,6 @@ describe('the full-screen /new against a live dry-run server', () => {
     browser.screenshot(`${artifactsDir}/new-task-source-empty.png`)
 
     // The same state from inside the list: pick it, then pick it again.
-    const pickSpecWriter = () => {
-      browser.click('[data-slot="source-pill"]')
-      browser.waitForFunction(`document.querySelector('[data-slot="source-menu"]') !== null`)
-      browser.evaluate(`{
-        const item = document.querySelector('[data-slot="source-option"][data-source-ref="spec-writer"]')
-        const label = item.querySelector('span')
-        label.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
-        label.click()
-      }`)
-    }
     pickSpecWriter()
     browser.waitForFunction(
       `document.querySelector('[data-slot="source-pill"]')?.textContent.includes('spec-writer')`,
@@ -288,8 +306,6 @@ describe('the full-screen /new against a live dry-run server', () => {
     browser.waitForFunction(
       `document.querySelector('[data-slot="source-pill"]')?.dataset.sourceKind === 'none'`,
     )
-
-    // Leave it picked: the next spec submits from here.
     pickSpecWriter()
     browser.waitForFunction(
       `document.querySelector('[data-slot="source-pill"]')?.textContent.includes('spec-writer')`,
@@ -297,6 +313,7 @@ describe('the full-screen /new against a live dry-run server', () => {
   })
 
   it('type + submit → the thread; the run record carries the exact skill chain', async () => {
+    pickSpecWriter()
     // The multi-select picker stays open while choosing skills; dismiss before typing.
     browser.press('Escape')
     browser.waitForFunction(`document.querySelector('[data-slot="source-menu"]') === null`)
@@ -335,6 +352,11 @@ describe('the full-screen /new against a live dry-run server', () => {
   }, 90_000)
 
   it('back on /new the skill is gone with the task it ran; iPhone hero screenshot', () => {
+    pickSpecWriter()
+    browser.waitForFunction(`document.querySelector('[data-slot="source-menu"]') === null`)
+    browser.fill('[data-slot="composer"] textarea', 'Draft a spec for the new-task hero e2e.')
+    browser.click('[aria-label="Start task"]')
+    browser.waitForFunction(`location.pathname.startsWith('${scoped('/tasks/')}')`)
     browser.click(`[data-slot="sidebar"] a[href="${scoped('/new')}"]`)
     // The started skill does NOT follow the user into the next task — the whole point of the
     // empty state. A fresh composer picks nothing and shows the invitation. Waiting on the
