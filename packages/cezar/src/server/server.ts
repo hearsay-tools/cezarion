@@ -4863,12 +4863,18 @@ export function createApp(deps: ServerDeps) {
       if (parsed.data.worktreeSetup !== undefined && !capabilities().settingsAdmin) {
         return c.json({ error: WORKTREE_SETUP_HOSTED_ERROR }, 409);
       }
+      let refused: string | undefined;
       try {
-        // A missing or malformed file starts fresh; a file only the schema refuses is merged into.
-        await updateConfigFile(dataDir, (current) => ({ write: mergeConfig(current.ok ? current.raw : current.raw ?? {}, parsed.data), result: undefined }));
+        // A file only the schema refuses is merged into. One that is not a JSON object is never
+        // overwritten: the user's keys in it would be lost.
+        refused = await updateConfigFile(dataDir, (current) => {
+          const raw = current.raw;
+          return raw ? { write: mergeConfig(raw, parsed.data), result: undefined } : { refuse: current.ok ? undefined : current.issue };
+        });
       } catch (err) {
         return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
       }
+      if (refused !== undefined) return c.json({ error: refused }, 409);
       if (parsed.data.archiveOnMerge !== undefined) deps.archiveOnMergeChanged?.();
       // Pre-R6 answer shape ({baseBranch, defaultRunner}) + additive R6 fields.
       return c.json(await configAnswer(repoRoot, await loadConfig(repoRoot)));

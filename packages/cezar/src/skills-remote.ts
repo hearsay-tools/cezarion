@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { lstat, mkdir, readdir, readFile, realpath, rename, rm, rmdir, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
-import { loadConfig, type SkillsRepoRef } from './config.ts';
+import { DEFAULT_SKILLS_REF, loadConfig, type SkillsRepoRef } from './config.ts';
 import { parseFrontmatter, type Skill } from './skills.ts';
 import { isSafeSkillsRef, SKILLS_REPO_FORMATS, skillsRepoKind, type TeamSourceStatus } from '@open-mercato/cezar-contract/skill-sources';
 
@@ -159,7 +159,8 @@ export async function fetchAll(bareDir: string): Promise<void> {
 
 /**
  * Resolve a safe source ref to an immutable commit. A full SHA must name that exact commit and
- * never falls back to a moving ref. Branch/tag resolution may use the normal candidates.
+ * never falls back to a moving ref. A branch or tag resolves as itself; only the default ref
+ * (`main`) may fall back to `HEAD`.
  */
 async function resolveRef(bareDir: string, ref: string): Promise<string | null> {
   if (!isSafeRef(ref)) return null;
@@ -173,7 +174,10 @@ async function resolveRef(bareDir: string, ref: string): Promise<string | null> 
     // Pinned means pinned: only accept when rev-parse names exactly this commit.
     return probe.ok && probe.stdout.trim() === sha ? sha : null;
   }
-  for (const candidate of [ref, `refs/heads/${ref}`, 'HEAD']) {
+  // Only the default ref falls back to the clone's HEAD, for a repo whose default branch is not
+  // `main`. A ref someone chose that the repo lacks is an error, not the default branch's skills.
+  const candidates = ref === DEFAULT_SKILLS_REF ? [ref, `refs/heads/${ref}`, 'HEAD'] : [ref, `refs/heads/${ref}`];
+  for (const candidate of candidates) {
     const probe = await git(
       ['rev-parse', '--verify', '--quiet', `${candidate}^{commit}`],
       LIST_TIMEOUT_MS,

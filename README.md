@@ -1465,8 +1465,9 @@ only intended review material, never credentials or unrelated private files.
 ## Configuration (optional)
 
 Zero config is the default — everything below is opt-in via
-`.ai/cezar/config.json` (a missing or invalid file simply uses the defaults, and
-never blocks startup):
+`.ai/cezar/config.json` (a missing or malformed file uses the defaults, a bad value
+falls back to its own default, and nothing blocks startup; the cockpit never saves
+over a file that is not valid JSON):
 
 ```jsonc
 {

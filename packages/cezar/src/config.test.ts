@@ -289,6 +289,17 @@ describe('loadConfig skillsRepos under the test environment (#359)', () => {
     expect((await loadConfig(repoRoot)).skillsRepos).toEqual([{ repo: 'acme/team-skills', ref: 'main', enabled: true }]);
   });
 
+  it('drops only a bad skillsRepos entry and a bad key, keeping the rest (hearsay-tools/cezarion#279)', async () => {
+    write({ maxParallel: 99, reviewGate: true, skillsRepos: [{ repo: 'acme/a' }, { repo: '' }, 'junk', { repo: 'acme/b', ref: 'v2' }] });
+    const config = await loadConfig(repoRoot);
+    expect(config.skillsRepos).toEqual([
+      { repo: 'acme/a', ref: 'main', enabled: true },
+      { repo: 'acme/b', ref: 'v2', enabled: true },
+    ]);
+    expect(config.maxParallel).toBe(2);
+    expect(config.reviewGate).toBe(true);
+  });
+
   it('defaults to no team skills outside vitest too — the default is not an env seam', async () => {
     vi.stubEnv('VITEST', '');
     try {
@@ -424,7 +435,7 @@ describe('readRawConfig and updateConfigFile (hearsay-tools/cezarion#279)', () =
     expect(await readRawConfig(dataDir)).toEqual({ ok: true, raw: { mine: 1, skillsRepos: [{ repo: 'a/b' }] } });
   });
 
-  it('reports malformed JSON, a non-object and a value loadConfig would drop', async () => {
+  it('reports malformed JSON, a non-object and a skillsRepos value the page cannot show', async () => {
     for (const text of ['{ nope', '[]', JSON.stringify({ skillsRepos: [{ repo: '' }] })]) {
       writeFileSync(path(), text);
       const read = await readRawConfig(dataDir);

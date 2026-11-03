@@ -8,13 +8,17 @@ import { RUNNER_IDS } from './core/agent-runner.ts';
 /**
  * Optional advanced config at `.ai/cezar/config.json`. Zero-config rule:
  * a missing file behaves exactly like the default below, an unreadable or
- * invalid file degrades to the default too (never blocks startup). `skillsRepos`
+ * invalid file degrades to the default too (never blocks startup); a bad value drops only its
+ * own key, or its own `skillsRepos` entry. `skillsRepos`
  * defaults to `[]`: no team skills until a repo lists its own sources.
  */
+/** The ref a `skillsRepos` entry without one reads. */
+export const DEFAULT_SKILLS_REF = 'main';
+
 const skillsRepoSchema = z.object({
   /** `owner/name` (GitHub shorthand), a full git URL, or a local/file:// path. */
   repo: z.string().min(1),
-  ref: z.string().min(1).default('main'),
+  ref: z.string().min(1).default(DEFAULT_SKILLS_REF),
   /** False keeps the source listed on the Skills page but loads none of its skills (hearsay-tools/cezarion#279). */
   enabled: z.boolean().default(true),
 });
@@ -156,19 +160,43 @@ function withMachineDefaults(raw: unknown, machine: WorkspaceConfig['agentDefaul
  */
 export async function loadConfig(repoRoot: string): Promise<CezConfig> {
   const machine = (await loadWorkspaceConfig()).agentDefaults;
-  let raw: string;
+  let raw: unknown = {};
   try {
-    raw = await readFile(join(repoRoot, '.ai/cezar', 'config.json'), 'utf8');
+    raw = JSON.parse(await readFile(join(repoRoot, '.ai/cezar', 'config.json'), 'utf8'));
   } catch {
-    return configSchema.parse(withMachineDefaults({}, machine));
+    // A missing file or malformed JSON degrades to the default.
   }
-  try {
-    const parsed = configSchema.safeParse(withMachineDefaults(JSON.parse(raw), machine));
+  return parseLeniently(withMachineDefaults(raw, machine));
+}
+
+/** Most bad values one file can hold before the parse gives up and answers the defaults. */
+const MAX_REPAIRS = 64;
+
+/**
+ * Parse a config object, dropping only what the schema refuses (hearsay-tools/cezarion#279): a bad
+ * `skillsRepos` entry drops that entry, and any other bad key drops that key to its default. One
+ * mistake no longer discards every team source and setting in the file.
+ */
+function parseLeniently(input: unknown): CezConfig {
+  let value: unknown = input && typeof input === 'object' && !Array.isArray(input) ? { ...(input as Record<string, unknown>) } : {};
+  for (let repairs = 0; repairs < MAX_REPAIRS; repairs++) {
+    const parsed = configSchema.safeParse(value);
     if (parsed.success) return parsed.data;
-  } catch {
-    // fall through — malformed JSON degrades to the default
+    value = withoutRefused(value as Record<string, unknown>, parsed.error.issues[0]?.path ?? []);
   }
-  return configSchema.parse(withMachineDefaults({}, machine));
+  return configSchema.parse({});
+}
+
+function withoutRefused(raw: Record<string, unknown>, path: readonly PropertyKey[]): Record<string, unknown> {
+  const [key, index] = path;
+  if (typeof key !== 'string') return {};
+  const next = { ...raw };
+  if (key === 'skillsRepos' && typeof index === 'number' && Array.isArray(raw.skillsRepos)) {
+    next.skillsRepos = raw.skillsRepos.filter((_entry, at) => at !== index);
+  } else {
+    delete next[key];
+  }
+  return next;
 }
 
 /** Why `.ai/cezar/config.json` cannot be read, as the Skills page shows it. */
@@ -181,8 +209,8 @@ export type RawConfigRead = { ok: true; raw: Record<string, unknown> } | { ok: f
 
 /**
  * The raw `.ai/cezar/config.json` object, or why it cannot be used. A missing file is `{}`.
- * Malformed JSON, a non-object, or a value `loadConfig` would throw away (it falls back to the
- * whole default) is an issue: a writer that merged into it would replace the user's file.
+ * Malformed JSON or a non-object is an issue: a writer that merged into it would replace the
+ * user's file. So is a `skillsRepos` value its schema refuses, which the Skills page cannot show.
  */
 export async function readRawConfig(dataDir: string): Promise<RawConfigRead> {
   let text: string;
@@ -199,10 +227,13 @@ export async function readRawConfig(dataDir: string): Promise<RawConfigRead> {
     return { ok: false, issue: configIssue(error) };
   }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, issue: configIssue('it is not a JSON object') };
-  const parsed = configSchema.safeParse(raw);
-  if (!parsed.success) {
-    const first = parsed.error.issues[0];
-    return { ok: false, issue: configIssue(`${first?.path.join('.') || 'value'}: ${first?.message ?? 'invalid'}`), raw: raw as Record<string, unknown> };
+  // The Skills page edits `skillsRepos` as written, so an entry it cannot show blocks its writes.
+  // A bad value in another key is kept as written: `loadConfig` drops only that key.
+  const sources = configSchema.shape.skillsRepos.safeParse((raw as Record<string, unknown>).skillsRepos);
+  if (!sources.success) {
+    const first = sources.error.issues[0];
+    const where = ['skillsRepos', ...(first?.path ?? [])].join('.');
+    return { ok: false, issue: configIssue(`${where}: ${first?.message ?? 'invalid'}`), raw: raw as Record<string, unknown> };
   }
   return { ok: true, raw: raw as Record<string, unknown> };
 }
@@ -210,12 +241,12 @@ export async function readRawConfig(dataDir: string): Promise<RawConfigRead> {
 /**
  * The `skillsRepos` sources switched off with `enabled: false` (hearsay-tools/cezarion#279), read synchronously for the
  * run's skill readers, which apply them as they are now (`enabledSkills`). An unreadable file
- * switches nothing off; `loadConfig` then lists no sources at all.
+ * switches nothing off; `loadConfig` then lists no sources at all. A bad entry is dropped, as there.
  */
 export function readDisabledSkillsReposSync(repoRoot: string): SkillsRepoRef[] {
   try {
-    const parsed = configSchema.safeParse(JSON.parse(readFileSync(join(repoRoot, '.ai/cezar', 'config.json'), 'utf8')));
-    return parsed.success ? parsed.data.skillsRepos.filter((src) => !src.enabled).map(({ repo, ref }) => ({ repo, ref })) : [];
+    const config = parseLeniently(JSON.parse(readFileSync(join(repoRoot, '.ai/cezar', 'config.json'), 'utf8')));
+    return config.skillsRepos.filter((src) => !src.enabled).map(({ repo, ref }) => ({ repo, ref }));
   } catch {
     return [];
   }

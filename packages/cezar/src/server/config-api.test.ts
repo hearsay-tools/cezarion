@@ -302,6 +302,20 @@ describe('the config API', () => {
     expect(res.status).toBe(400);
   });
 
+  it('PUT never overwrites a config.json that is not a JSON object (hearsay-tools/cezarion#279)', async () => {
+    writeFileSync(configPath(), '{ "baseBranch": "develop", oops');
+    const res = await put({ reviewGate: true });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: string }).error).toMatch(/^\.ai\/cezar\/config\.json cannot be read: /);
+    expect(readFileSync(configPath(), 'utf8')).toBe('{ "baseBranch": "develop", oops');
+  });
+
+  it('PUT still merges into a file only the schema refuses', async () => {
+    writeFileSync(configPath(), JSON.stringify({ maxParallel: 99, mine: 1 }));
+    expect((await put({ reviewGate: true })).status).toBe(200);
+    expect(rawFile()).toEqual({ maxParallel: 99, mine: 1, reviewGate: true });
+  });
+
   it('a hosted cockpit cannot write worktreeSetup', async () => {
     const savedRemote = process.env.CEZ_REMOTE;
     process.env.CEZ_REMOTE = '1';

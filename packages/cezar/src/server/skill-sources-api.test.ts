@@ -157,10 +157,19 @@ describe('the team skill sources API', () => {
     expect(readFileSync(configPath(), 'utf8')).toBe('{ nope');
   });
 
-  it('a value the schema refuses also blocks writes, since loadConfig would drop the whole file', async () => {
-    const text = JSON.stringify({ maxParallel: 99, skillsRepos: [] });
+  it('a bad value in another key is kept, and the source write goes through', async () => {
+    writeFileSync(configPath(), JSON.stringify({ maxParallel: 99 }));
+    const repo = sourceRepo('a');
+    expect((await sources()).configIssue).toBeNull();
+    expect((await add({ repo })).status).toBe(200);
+    expect(rawFile()).toEqual({ maxParallel: 99, skillsRepos: [{ repo }] });
+    expect(await teamNames()).toEqual(['a']);
+  });
+
+  it('a skillsRepos entry the page cannot show blocks its writes', async () => {
+    const text = JSON.stringify({ skillsRepos: [{ repo: '' }] });
     writeFileSync(configPath(), text);
-    expect((await sources()).configIssue).toContain('maxParallel');
+    expect((await sources()).configIssue).toContain('skillsRepos.0.repo');
     expect((await send('POST', '/skills/sources', { repo: sourceRepo('a') })).status).toBe(409);
     expect(readFileSync(configPath(), 'utf8')).toBe(text);
   });
@@ -187,6 +196,25 @@ describe('the team skill sources API', () => {
     expect(retry.status).toBe(200);
     await waitForTeamSkills(repoRoot);
     expect((await sources()).sources[1]?.status).toMatchObject({ state: 'error', cause: 'fetch-failed' });
+  });
+
+  it('names a branch the repo does not have, instead of serving the default branch', async () => {
+    const repo = sourceRepo('greet');
+    await add({ repo, ref: 'nope' });
+    expect((await sources()).sources[0]?.status).toEqual({
+      state: 'error',
+      cause: 'ref-not-found',
+      detail: `The ref "nope" was not found in ${repo}.`,
+      skillCount: 0,
+    });
+    expect(await teamNames()).toEqual([]);
+  });
+
+  it('the default ref still reads a repo whose default branch is not main', async () => {
+    const repo = sourceRepo('greet');
+    execFileSync('git', ['branch', '-m', 'main', 'trunk'], { cwd: repo });
+    await add({ repo });
+    expect((await sources()).sources[0]?.status).toEqual({ state: 'ok', skillCount: 1 });
   });
 
   it('names a pinned commit the repo does not have', async () => {
