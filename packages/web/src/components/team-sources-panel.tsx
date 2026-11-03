@@ -260,10 +260,13 @@ export function statusText(source: TeamSkillSource): string {
       if (status.cause === 'ref-not-found') {
         return `${status.detail} Check the ref, or remove the source and add it with another ref.${kept}`
       }
-      return `Could not fetch: ${status.detail} Check the network and your access to the repo, then Retry.${kept}`
+      return `Could not fetch: ${sentence(status.detail)} Check the network and your access to the repo, then Retry.${kept}`
     }
   }
 }
+
+/** git's own message, ended as a sentence so the advice after it reads apart. */
+const sentence = (text: string) => (/[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`)
 
 /** Why the form cannot add these values, or null. The server checks the same rules. */
 function formProblem(repo: string, ref: string): string | null {

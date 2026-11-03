@@ -193,6 +193,8 @@ describe('statusText', () => {
     expect(failed('refused-format')).toContain('Remove it, then add it as owner/name')
     expect(failed('ref-not-found')).toBe('The ref "x" was not found in r. Check the ref, or remove the source and add it with another ref.')
     expect(failed('fetch-failed', 3)).toContain('Skills from an earlier fetch still show.')
+    const gitSays = statusText(source({ repo: 'r', status: { state: 'error', cause: 'fetch-failed', detail: "fatal: 'r' does not exist", skillCount: 0 } }))
+    expect(gitSays).toBe("Could not fetch: fatal: 'r' does not exist. Check the network and your access to the repo, then Retry.")
     expect(statusText(source({ repo: 'r', status: { state: 'loading' } }))).toBe('Fetching…')
     expect(statusText(source({ repo: 'r', status: { state: 'ok', skillCount: 1 } }))).toBe('1 skill')
   })
