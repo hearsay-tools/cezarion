@@ -29,7 +29,15 @@ import { TranscriptFactsQueue } from '../runs/transcript-facts-queue.ts';
 import { historyPaths } from '../runs/history-file.ts';
 import { MONITORING_TURN_CRITERIA, MONITORING_ACK_CRITERIA, MONITORING_ORDER_CRITERIA } from '../workflows/monitoring-turn.testkit.ts';
 import { WAIT_CRITERIA } from '../workflows/waits-parity.testkit.ts';
-import { RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
+import {
+  RUN_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_VIA,
+  STEP_KIND,
+  STEP_STATUS,
+  WAIT_SOURCE,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { TimerWaitEntry } from '@open-mercato/cezar-contract';
 import type { RunManager } from '../workflows/run.ts';
 import { randomUUID } from 'node:crypto';
@@ -516,7 +524,7 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
     settled: (record) => record?.status === 'waiting',
     assert: (obs) => {
       // hearsay-tools/cezarion#1233: `waiting` plus an open timer reads as monitoring.
-      expect(obs.record).toMatchObject({ status: 'waiting' });
+      expect(obs.record).toMatchObject({ status: RUN_STATUS.waiting });
       expect(timerWakeOf(obs.record)).toBeDefined();
       expect(deriveAttention(obs.record!).label).toBe('monitoring');
     },
@@ -528,7 +536,7 @@ const RUN_CRITERIA: readonly RunCriterion[] = [
     scenario: 'subagent',
     settled: (record) => record?.status === 'waiting',
     assert: (obs) => {
-      expect(obs.record).toMatchObject({ status: 'waiting' });
+      expect(obs.record).toMatchObject({ status: RUN_STATUS.waiting });
       expect(timerWakeOf(obs.record)).toBeDefined();
       expect(deriveAttention(obs.record!).label).toBe('monitoring');
     },
@@ -1113,7 +1121,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             await drainFixtureManagers(repoRoot);
             store.close();
             // The snapshot an older controller left: cancelled, intent still on it, no conversation.
-            seedRuns(dataDir, records.map((record) => record.id !== runId ? record : { ...record, status: 'cancelled',
+            seedRuns(dataDir, records.map((record) => record.id !== runId ? record : { ...record, status: RUN_STATUS.cancelled,
               delegation: { role: 'root', permissions: [], receipts: [], finishRequestedAt: new Date().toISOString() } }));
             const rebooted = RunStore.open(dataDir, { keepLive: true });
             const recovered = createFixtureManager(rebooted, repoRoot);
@@ -1193,7 +1201,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         assert: ({ adopted, startedByAdoption, settled, continued, startedByContinue, resumed }) => {
           expect(adopted).toBe(true);
           expect(startedByAdoption).toEqual([]);
-          expect(settled).toMatchObject({ status: 'failed', error: expect.stringContaining('interrupted') });
+          expect(settled).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('interrupted') });
           expect(continued).toEqual({ ok: true });
           // Continue resumes the session the dead owner opened, through the one continuation path.
           expect(startedByContinue).toEqual(['runContinuation']);
@@ -1254,7 +1262,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         assert: ({ adopted, started, stopped }) => {
           expect(adopted).toBe(true);
           expect(started).toEqual([]);
-          expect(stopped).toMatchObject({ status: 'cancelled' });
+          expect(stopped).toMatchObject({ status: RUN_STATUS.cancelled });
           expect(stopped?.error).toBeUndefined();
           expect(stopped?.stopping).toBeUndefined();
           expect(stopped?.steps.some((step) => step.status === 'running' || step.status === 'waiting')).toBe(false);
@@ -1495,7 +1503,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           await driveRun(backend, { prompt: `${promptFor(backend, 'subagent-after-park')} parity-release=${release}` },
             record => record?.status === 'waiting', 30_000,
             async ({ store, runId }) => {
-              expect(store.getRun(runId)).toMatchObject({ status: 'waiting' });
+              expect(store.getRun(runId)).toMatchObject({ status: RUN_STATUS.waiting });
               const wake = timerWakeOf(store.getRun(runId));
               expect(wake).toBeDefined();
               const before = store.readEvents(runId).length;
@@ -1510,8 +1518,8 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
                   backend === 'opencode'
                     ? event.type === 'usage.updated' && (event.usage as { total?: number } | undefined)?.total === 424242
                     : JSON.stringify(event).includes('Post-park child update processed.')));
-                expect({ ...store.getRun(runId), monitoringWakeAt: timerWakeOf(store.getRun(runId)) }).toMatchObject({ status: 'waiting', monitoringWakeAt: wake });
-                for (const change of changes) expect(change).toEqual({ status: 'waiting', monitoringWakeAt: wake });
+                expect({ ...store.getRun(runId), monitoringWakeAt: timerWakeOf(store.getRun(runId)) }).toMatchObject({ status: RUN_STATUS.waiting, monitoringWakeAt: wake });
+                for (const change of changes) expect(change).toEqual({ status: RUN_STATUS.waiting, monitoringWakeAt: wake });
                 const after = store.readEvents(runId).slice(before);
                 expect(after.some(event => event.type === 'turn.started')).toBe(false);
                 const childItems = (backend === 'opencode' ? store.readEvents(runId).slice(0, before) : after)
@@ -1545,7 +1553,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           await driveRun(backend, { prompt: `${promptFor(backend, 'hook-after-park')} parity-release=${release}` },
             record => record?.status === 'waiting', 30_000,
             async ({ store, runId }) => {
-              expect(store.getRun(runId)).toMatchObject({ status: 'waiting' });
+              expect(store.getRun(runId)).toMatchObject({ status: RUN_STATUS.waiting });
               const wake = timerWakeOf(store.getRun(runId));
               expect(wake).toBeDefined();
               const before = store.readEvents(runId).length;
@@ -1557,8 +1565,8 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
               try {
                 writeFileSync(release, 'go');
                 await waitFor(() => store.readEvents(runId).slice(before).some(event => JSON.stringify(event).includes('Late hook processed.')));
-                expect({ ...store.getRun(runId), monitoringWakeAt: timerWakeOf(store.getRun(runId)) }).toMatchObject({ status: 'waiting', monitoringWakeAt: wake });
-                for (const change of changes) expect(change).toEqual({ status: 'waiting', monitoringWakeAt: wake });
+                expect({ ...store.getRun(runId), monitoringWakeAt: timerWakeOf(store.getRun(runId)) }).toMatchObject({ status: RUN_STATUS.waiting, monitoringWakeAt: wake });
+                for (const change of changes) expect(change).toEqual({ status: RUN_STATUS.waiting, monitoringWakeAt: wake });
                 expect(store.readEvents(runId).slice(before).some(event => event.type === 'turn.started')).toBe(false);
                 const hooks = store.readEvents(runId)
                   .filter(event => event.type === 'item.completed' && (event.item as { kind?: string } | undefined)?.kind === 'hook')
@@ -1802,7 +1810,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           const run = store.getRun(runId)!;
           expect(run.error).toBeUndefined();
           expect(run.steps.map(step => ({ id: step.id, kind: step.kind, status: step.status }))).toEqual([
-            { id: 'inspect', kind: 'agent', status: 'done' }, { id: 'verify', kind: 'check', status: 'done' },
+            { id: 'inspect', kind: STEP_KIND.agent, status: STEP_STATUS.done }, { id: 'verify', kind: STEP_KIND.check, status: STEP_STATUS.done },
           ]);
           expect(store.readEvents(runId).filter(e => e.type === 'check-output')).toMatchObject([{ stepId: 'verify', exitCode: 0 }]);
           if (run.delegation?.role !== 'worker') throw new Error('expected worker');
@@ -1820,7 +1828,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           await waitFor(() => !manager.isActive(runId), 30_000);
           const worker = store.getRun(runId)!;
           expect(worker.error).toBeUndefined();
-          expect(worker.steps.map(step => ({ id: step.id, status: step.status }))).toEqual([{ id: 'task', status: 'done' }]);
+          expect(worker.steps.map(step => ({ id: step.id, status: step.status }))).toEqual([{ id: 'task', status: STEP_STATUS.done }]);
           if (worker.delegation?.role !== 'worker') throw new Error('expected worker');
           const childRecording = readRecording(worker.delegation.workspace.path, name).join('\n');
           expect(childRecording).toContain('parent extra');
@@ -1844,7 +1852,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           await waitFor(() => !manager.isActive(runId), 30_000);
           const run = store.getRun(runId)!;
           expect(run.error).toBeUndefined();
-          expect(run.steps.map(step => ({ id: step.id, status: step.status }))).toEqual([{ id: 'task', status: 'done' }]);
+          expect(run.steps.map(step => ({ id: step.id, status: step.status }))).toEqual([{ id: 'task', status: STEP_STATUS.done }]);
           if (run.delegation?.role !== 'worker') throw new Error('expected worker');
           // Read the backend mock's argv/requests and stdin in the worker's own cwd.
           // Normalized events cannot prove that the skill reached the provider.
@@ -1880,7 +1888,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             expect(run.error).toBeUndefined();
             // Each step launched on ITS runner under ITS pinned account; the run-level runner is the first step's.
             expect(run.steps.map(step => ({ id: step.id, status: step.status, backend: step.backend, profileId: step.profileId }))).toEqual([
-              { id: 'first', status: 'done', backend, profileId: 'default' }, { id: 'second', status: 'done', backend: other, profileId: 'default' },
+              { id: 'first', status: STEP_STATUS.done, backend, profileId: 'default' }, { id: 'second', status: STEP_STATUS.done, backend: other, profileId: 'default' },
             ]);
             expect(run.runner).toBe(backend);
           }, { workflowDef, identity, agentProfile: 'default', extraBackends: [other] });
@@ -2454,7 +2462,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         const controller = await CiToolController.start();
         const dir = mkdtempSync(join(tmpdir(), 'cez-tools-list-'));
         try {
-          const session = controller.provision({ registerWait: async () => ({ answer: { ok: true, wait_id: wait.id, kind: 'pr', deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: 'pr', source: 'agent', via: 'cezar_wait', phase: 'open' } }), ask: async () => ({ ok: false, code: 'unavailable', message: 'none' }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }), finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', completes: 'task', open_waits: [] }) });
+          const session = controller.provision({ registerWait: async () => ({ answer: { ok: true, wait_id: wait.id, kind: WAIT_KIND.pr, deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: WAIT_KIND.pr, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait, phase: WAIT_PHASE.open } }), ask: async () => ({ ok: false, code: 'unavailable', message: 'none' }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }), finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', completes: 'task', open_waits: [] }) });
           const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, toolGrant, env: { ...session.env, CEZ_MOCK_ARGS_FILE: join(dir, 'wire'), CEZ_MOCK_CI_PR: wait.prUrl, CEZ_MOCK_CI_RESULT: join(dir, 'result'), CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
           expect(obs.v1.filter((event) => event.type === 'error')).toEqual([]);
           const waits = ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'];
@@ -2718,7 +2726,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
                   expect(completed.finishedAt).toBeDefined();
                   expect(completed.currentStepId).toBeUndefined();
                   expect(completed.steps).toHaveLength(continuation ? 2 : 1);
-                  for (const step of completed.steps) expect(step).toMatchObject({ status: 'done', finishedAt: expect.any(String) });
+                  for (const step of completed.steps) expect(step).toMatchObject({ status: STEP_STATUS.done, finishedAt: expect.any(String) });
                 } finally {
                   release?.('changed');
                   diff.mockRestore();
@@ -2978,7 +2986,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             await waitFor(() => store.readEvents(runId).filter(event => event.type === 'permission.requested').length === 2);
             const request = store.readEvents(runId).filter(event => event.type === 'permission.requested')[1]!;
             expect(request.requestId).not.toBe(first.requestId);
-            expect(store.getRun(runId)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
+            expect(store.getRun(runId)).toMatchObject({ status: RUN_STATUS.waiting, hasPendingPermission: true });
             const old = (first.options as Array<{ id: string }>)[0]!;
             expect(manager.respondPermission(runId, first.requestId as string, old.id)).toBe(false);
             const choice = (request.options as Array<{ id: string; label: string }>).find(option => option.label.toLowerCase().includes(decision))!;
@@ -2989,7 +2997,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             beforeStart: context => { repoRoot = context.repoRoot; },
             during: async ({ store, manager, runId }) => {
               await waitFor(() => store.readEvents(runId).some(event => event.type === 'permission.requested'));
-              expect(store.getRun(runId)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
+              expect(store.getRun(runId)).toMatchObject({ status: RUN_STATUS.waiting, hasPendingPermission: true });
               const request = store.readEvents(runId).find(event => event.type === 'permission.requested')!;
               const options = request.options as Array<{ id: string; label: string }>;
               const choice = options.find(option => option.label.toLowerCase().includes(decision));
@@ -3054,7 +3062,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
                 await waitFor(() => store.readEvents(runId).some(event => event.type === 'permission.requested'));
                 const request = store.readEvents(runId).find(event => event.type === 'permission.requested')!;
                 requestId = request.requestId as string;
-                expect(store.getRun(runId)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
+                expect(store.getRun(runId)).toMatchObject({ status: RUN_STATUS.waiting, hasPendingPermission: true });
                 expect(manager.sendMessage(runId, [{ type: 'text', text: 'accept' }])).toBe(false);
                 writeFileSync(release, 'go');
                 await waitFor(() => store.readEvents(runId).some(event => event.type === 'permission.resolved' && event.requestId === requestId));
@@ -3103,7 +3111,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
               await waitFor(() => requests().length === 2 &&
                 store.readEvents(runId).some(event => event.type === 'permission.resolved' && event.requestId === first.requestId));
             } finally { store.off('run', recordChange); }
-            for (const change of changes) expect(change).toEqual({ status: 'waiting', hasPendingPermission: true });
+            for (const change of changes) expect(change).toEqual({ status: RUN_STATUS.waiting, hasPendingPermission: true });
             const events = store.readEvents(runId);
             const fresh = requests()[1]!;
             freshId = fresh.requestId as string;
@@ -3112,7 +3120,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             expect(events.findIndex(event => event.type === 'permission.requested' && event.requestId === freshId)).toBeLessThan(oldResolution);
             expect(events[oldResolution]).toMatchObject({ reason: expect.any(String) });
             expect(events[oldResolution]).not.toHaveProperty('optionId');
-            expect(store.getRun(runId)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
+            expect(store.getRun(runId)).toMatchObject({ status: RUN_STATUS.waiting, hasPendingPermission: true });
             expect(manager.respondPermission(runId, first.requestId as string, firstChoice.id)).toBe(false);
             expect(manager.sendMessage(runId, [{ type: 'text', text: 'accept' }])).toBe(false);
             const retry = await answerThroughRoute(repoRoot, store, manager, runId, fresh, optionPicked(fresh, pick).id);
@@ -3252,7 +3260,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             beforeStart: context => { repoRoot = context.repoRoot; },
             during: async ({ store, manager, runId }) => {
               await waitFor(() => store.readEvents(runId).some(event => event.type === 'permission.requested'));
-              expect(store.getRun(runId)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
+              expect(store.getRun(runId)).toMatchObject({ status: RUN_STATUS.waiting, hasPendingPermission: true });
               const request = store.readEvents(runId).find(event => event.type === 'permission.requested')!;
               expect(request.title).toBe('Codex requests an MCP tool call');
               const choice = (request.options as Array<{ id: string; label: string }>).find(option => option.label === label)!;
