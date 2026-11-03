@@ -61,6 +61,46 @@
           "line": 5,
           "column": null
         }
+      },
+      "6": {
+        "start": {
+          "line": 7,
+          "column": 10
+        },
+        "end": {
+          "line": 7,
+          "column": null
+        }
+      },
+      "7": {
+        "start": {
+          "line": 7,
+          "column": 31
+        },
+        "end": {
+          "line": 7,
+          "column": 54
+        }
+      },
+      "8": {
+        "start": {
+          "line": 8,
+          "column": 13
+        },
+        "end": {
+          "line": 8,
+          "column": null
+        }
+      },
+      "9": {
+        "start": {
+          "line": 8,
+          "column": 28
+        },
+        "end": {
+          "line": 8,
+          "column": null
+        }
       }
     },
     "fnMap": {
@@ -135,6 +175,54 @@
           }
         },
         "line": 5
+      },
+      "3": {
+        "name": "g",
+        "decl": {
+          "start": {
+            "line": 7,
+            "column": 12
+          },
+          "end": {
+            "line": 7,
+            "column": 14
+          }
+        },
+        "loc": {
+          "start": {
+            "line": 7,
+            "column": 29
+          },
+          "end": {
+            "line": 7,
+            "column": 56
+          }
+        },
+        "line": 7
+      },
+      "4": {
+        "name": "(anonymous_4)",
+        "decl": {
+          "start": {
+            "line": 8,
+            "column": 13
+          },
+          "end": {
+            "line": 8,
+            "column": 18
+          }
+        },
+        "loc": {
+          "start": {
+            "line": 8,
+            "column": 28
+          },
+          "end": {
+            "line": 8,
+            "column": null
+          }
+        },
+        "line": 8
       }
     },
     "branchMap": {
@@ -223,12 +311,18 @@
       "2": 1,
       "3": 1,
       "4": 1,
-      "5": 0
+      "5": 0,
+      "6": 1,
+      "7": 1,
+      "8": 1,
+      "9": 1
     },
     "f": {
       "0": 2,
       "1": 1,
-      "2": 0
+      "2": 0,
+      "3": 1,
+      "4": 1
     },
     "b": {
       "0": [
@@ -243,8 +337,8 @@
     },
     "meta": {
       "lastBranch": 3,
-      "lastFunction": 3,
-      "lastStatement": 6,
+      "lastFunction": 5,
+      "lastStatement": 10,
       "seen": {
         "s:2:13:2:Infinity": 0,
         "f:2:13:2:23": 0,
@@ -257,7 +351,13 @@
         "s:5:13:5:Infinity": 4,
         "f:5:13:5:23": 2,
         "s:5:53:5:Infinity": 5,
-        "b:5:42:5:53": 2
+        "b:5:42:5:53": 2,
+        "s:7:10:7:Infinity": 6,
+        "f:7:12:7:14": 3,
+        "s:7:31:7:54": 7,
+        "s:8:13:8:Infinity": 8,
+        "f:8:13:8:18": 4,
+        "s:8:28:8:Infinity": 9
       },
       "fnNames": {}
     }

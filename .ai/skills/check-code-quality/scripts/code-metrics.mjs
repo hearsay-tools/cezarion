@@ -172,7 +172,7 @@ export function measureCoverage(source, functions, entry) {
   const matches = matchCoverageFunctions(functions, entry.fnMap);
   return new Map(functions.map(fn => {
     const id = matches.get(fn);
-    if (id === undefined) return [fn, unavailable('Function does not match the coverage source positions. Regenerate coverage; for curried arrows, see references/tool.md for the block-bodied rewrite.')];
+    if (id === undefined) return [fn, unavailable('Function does not match the coverage source positions. Regenerate coverage; for expression-bodied arrows, see references/tool.md for the block-bodied rewrite.')];
     const calls = entry.f[id];
     if (!Number.isFinite(calls) || calls < 0) throw new Error('Invalid function counter in coverage report.');
     const lines = hits.get(fn);

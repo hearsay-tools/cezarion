@@ -143,8 +143,8 @@ Some transforms lose both exact anchors, including the middle stage of a
 multiline three-stage arrow in the tested Vitest V8 transform. Missing or
 ambiguous matches still produce unavailable coverage, null CRAP and exit 2;
 the report points here. Regenerating the same source map may repeat the failure.
-Rewrite the affected stage as a block-bodied function that returns the next
-arrow, then collect fresh coverage with the same `--test` and `--project` flags:
+Rewrite the unmatched expression-bodied arrow with a block body and an explicit
+`return`, then collect fresh coverage with the same `--test` and `--project` flags:
 
 ```ts
 // Before

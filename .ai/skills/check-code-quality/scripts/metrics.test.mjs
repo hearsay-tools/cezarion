@@ -475,6 +475,8 @@ test('real V8 coverage places single-line and multiline cast object arrows', () 
     ['single', 'available', 2, 100, 2],
     ['multi', 'available', 1, 100, 2],
     ['unused', 'available', 0, 0, 6],
+    ['g', 'available', 1, 100, 1],
+    ['f', 'available', 1, 100, 1],
   ]);
 });
 
@@ -503,4 +505,26 @@ test('expression arrow declaration anchors reject missing, shifted, duplicate an
     assert.equal(result.coverage.status, 'unavailable', mutate.toString());
     assert.equal(result.crap, null);
   }
+});
+
+test('unmatched expression arrows name the block-bodied rewrite', () => {
+  const source = 'const f = (r: R) => (m as unknown as { g(r: R): boolean }).g(r);';
+  const functions = analyzeSource(source, 'source.ts');
+  const entry = { fnMap: {}, f: {}, statementMap: {}, s: {} };
+  const result = measureCoverage(source, functions, entry).get(functions[0]);
+  assert.equal(result.coverage.status, 'unavailable');
+  assert.match(result.coverage.reason, /for expression-bodied arrows.*references\/tool\.md.*block-bodied rewrite/);
+});
+
+test('real V8 coverage matches a call through a type-asserted receiver', () => {
+  const fixture = new URL('./fixtures/expression-arrows/', import.meta.url);
+  const source = readFileSync(new URL('source.ts', fixture), 'utf8');
+  const entry = JSON.parse(readFileSync(new URL('coverage.json', fixture), 'utf8'))['source.ts'];
+  const functions = analyzeSource(source, 'source.ts');
+  const fn = functions.find(fn => fn.name === 'f');
+  const result = measureCoverage(source, functions, entry).get(fn);
+  assert.equal(result.coverage.status, 'available');
+  assert.equal(result.coverage.calls, 1);
+  assert.equal(result.coverage.percent, 100);
+  assert.equal(result.crap, 1);
 });
