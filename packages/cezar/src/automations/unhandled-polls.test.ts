@@ -1,13 +1,16 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { GithubPoller } from './github-poller.ts';
 import { ProjectAutomationScheduler } from './scheduler.ts';
 import { AutomationStore } from './store.ts';
 import type { GithubAutomationDefinition } from './types.ts';
 
 const dirs: string[] = [];
+// Keep fixture events inside the seven-day history window as the host date changes.
+beforeEach(() => vi.useFakeTimers({ now: Date.parse('2026-10-28T00:00:00Z'), toFake: ['Date'] }));
+afterEach(() => vi.useRealTimers());
 afterEach(async () => Promise.all(dirs.splice(0).map(dir => rm(dir, { recursive: true, force: true }))));
 const epoch = Date.parse('2026-10-27T00:00:00Z');
 const at = (seconds: number) => new Date(epoch + seconds * 1000).toISOString();

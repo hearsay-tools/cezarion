@@ -494,3 +494,60 @@ Published task snapshots: affected quality
 `ca36741b-db18-4090-9caa-acf76d292b28`, full source-hash/coverage JSON
 `b4f15089-3c59-4914-bbf0-d6ce81a21fca`, red/green proof
 `c939212b-0dae-4b60-b63d-9da5bc5a302a`.
+
+
+## Poll history test clock repair (2026-11-03)
+
+Before changing the test, preserve its guarantee: only previously unhandled
+matching issues launch, no more than two per check, and reopening the store
+continues discovery across the 100 handled receipts. Both history modes retain
+the same launch and request-count assertions. Runtime lookback behavior remains
+unchanged.
+
+CI run `41550415578`, attempt 1, job `125637188923` fails at the history=true
+launch assertion: `expected [] to deeply equal [ 101, 102, 103, 104, 105 ]`.
+Native run `41550421039`, job `125637864602` reports the same failure. The test
+uses fixture epoch `2026-10-27T00:00:00Z`; scheduler `pollWindow` derives the
+seven-day history start from `Date.now()`. On November 3, the fixed events fall
+outside that window. This is a calendar dependency in the test, not a production
+window defect. Parent branch `844d2a222` is merged before this test-only change.
+
+Use a Date-only fake clock at `2026-10-28T00:00:00Z` before each test and restore
+real time after each test. Leave timers real and keep all assertions.
+`proof_base=844d2a222`: in a disposable worktree with its own dependencies, run
+the original file at the current November 3 host date, confirm the intended
+assertion failure, then copy only the fixed test and run the same command.
+
+| Case | Preserved behavior | Clock dependence |
+| --- | --- | --- |
+| History enabled | Launch 101 through 105 across reopened stores; bounded work | Fixture events stay within seven days |
+| History disabled | Same unhandled/restart guarantees | Explicit activation baseline still applies |
+| Other cases in file | Existing overlap, retry and receipt assertions remain | One explicit fixture clock |
+| After each test, including assertion failure | Real Date restored; temp directories removed | No clock leakage |
+
+
+### Poll clock validation evidence
+
+- Proof base `844d2a2220ca1b8e0c0fc363209a48ac2714fb7f`; disposable worktree
+  had its own frozen dependencies. At host date November 3, unchanged test:
+  **12 pass, one intended history=true assertion failure**, expected 101–105,
+  received empty array. Copy only fixed test: **13/13 pass** with the same
+  `npm test -- --passWithNoTests=false` file selection. Scratch removed.
+- Mandatory affected bundled quality against that base: **2/2 changed
+  functions**, both hooks have complexity **1**, body line coverage **100%**,
+  CRAP **1**. Coverage execution also passes all **13 tests**. This incremental
+  report covers the test-only fix; earlier full-PR script measurements remain
+  recorded separately. No runtime source or declaration changed.
+- Test SHA-256: `31affa3a743c61aa6cb1f01cde145f0d93d6271ee8ba8b401715dc00c4c03841`.
+  Parent read-only safety review found no blocker. No assertions were changed;
+  production history window and scheduler behavior are unchanged.
+- Published snapshots: regression proof `232855bc-607d-435b-b873-2442038d10b1`,
+  quality Markdown `a6d5b48f-2dcb-438d-b581-67bf798e6911`, quality JSON
+  `1dffdfc9-0960-45c3-be9b-8e40732e0a0d`.
+- Final lint passes all 10 Cezar rules and 15 ast-grep rules; citations and
+  diff checks pass. Squeal revision **33** reports the selected file current
+  and passing after 28.1 seconds. At that capture zero failures were known;
+  363 other files / 5898 tests remained pending. No full-suite or slow-suite
+  pass is claimed. The first selected wait timed out; the second returned a
+  current result. This adds no distinct friction beyond existing
+  `hearsay-tools/squeal#138`.
