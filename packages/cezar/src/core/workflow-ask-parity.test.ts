@@ -1,3 +1,5 @@
+import { autoEndObservationClock } from './observation-clock.testkit.ts';
+import { AUTO_END_DELAY_MS } from './runner-runtime.ts';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -40,6 +42,7 @@ describe('intermediate workflow ASK parity — #427', () => {
   for (const backend of RUNNER_IDS) for (const row of WORKFLOW_ASK_CRITERIA) {
     const modes = row.id === 'Q7' ? ['fresh', 'continuation'] : ['fresh'];
     for (const mode of modes) it(`${backend} ${row.id} ${row.name} (${mode})`, async () => {
+      let clock: ReturnType<typeof autoEndObservationClock> | undefined;
       let expireDeadline: (() => void) | undefined;
       const workflowDef = workflowDefSchema.parse({ name: 'question-chain', source: 'file', steps: [
         { id: 'implement', prompt: '{{task}}', ...(row.id === 'Q8' ? { timeoutMs: STEP_TIMEOUT_MS } : {}) },
@@ -75,9 +78,11 @@ describe('intermediate workflow ASK parity — #427', () => {
           ]);
           expect(checks()).toEqual([]);
           const session = manager['active'].get(runId)!.session!;
-          // Cross the runners' 250ms one-shot-close window before answering.
-          // bound: observe past the real runner's 250 ms auto-end timer before answering its pending ask.
-          await new Promise(resolve => setTimeout(resolve, 350));
+          // The ask is durable before the native turn ends. Reach that boundary first.
+          await waitFor(() => manager['active'].get(runId)?.atTurnBoundary === session);
+          expect(clock!.captured).toBe(0);
+          await clock!.advance(AUTO_END_DELAY_MS + 100);
+          expect(clock!.captured).toBe(0);
           if (row.id !== 'Q8') expect(session.open).toBe(true);
           expect(runInternals(manager).line.busySlots()).toBe(0);
 
@@ -156,7 +161,8 @@ describe('intermediate workflow ASK parity — #427', () => {
           expect(run().steps.find(s => s.id === 'verify')?.status).toBe('pending');
           expect(checks()).toEqual([]);
           expect(runInternals(manager).line.busySlots()).toBe(0);
-        }, { workflowDef, autonomous: row.id === 'Q9', beforeCleanup: () => vi.restoreAllMocks(), beforeStart: () => {
+        }, { workflowDef, autonomous: row.id === 'Q9', beforeCleanup: () => { clock?.restore(); vi.restoreAllMocks(); }, beforeStart: () => {
+          if (row.id !== 'Q9') clock = autoEndObservationClock();
           if (row.id === 'Q8') expireDeadline = holdStepDeadline();
         } });
     }, 30_000);

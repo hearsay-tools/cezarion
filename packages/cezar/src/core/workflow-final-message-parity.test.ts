@@ -1,3 +1,4 @@
+import { observationClock } from './observation-clock.testkit.ts';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -10,6 +11,18 @@ import type { UiEvent } from './ui-events.ts';
 import { FINAL_MESSAGE_CRITERIA, HARNESS_ADAPTERS, driveSeam, exemptionFor, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 import { NO_WAIT_NO_REPLY_NOTE, NO_WAIT_NUDGE_NOTE } from '../workflows/run.ts';
 import { watchTurnOutcomes } from '../workflows/turn-outcomes.testkit.ts';
+
+function replyObservationClock(manager: Parameters<typeof runInternals>[0]) {
+  let armingReply = false;
+  const clock = observationClock(() => armingReply);
+  const owner = runInternals(manager).turnNudges;
+  const arm = owner.armNoWaitNudgeReplyTimer.bind(owner);
+  const arming = vi.spyOn(owner, 'armNoWaitNudgeReplyTimer').mockImplementation((...args) => {
+    armingReply = true;
+    try { arm(...args); } finally { armingReply = false; }
+  });
+  return { clock, arming };
+}
 
 // Poll native process/store signals while the product's reply clock is frozen.
 async function waitForNativeContent(ready: () => boolean): Promise<void> {
@@ -109,15 +122,22 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
           await withOwnedInputRun(backend, 'silent-tail-no-reply', async ({ store, manager, runId }) => {
             const turns = watchTurnOutcomes();
             const startSeq = store.readEvents(runId).length;
-            manager.enqueueOwnedRun(runId);
-            await waitFor(() => nudgeNotes(store.readEvents(runId).slice(startSeq)).length === 1);
-            expect(store.getRun(runId)?.status).toBe('running');
-            expect(runInternals(manager).line.busySlots()).toBe(1);
-            // bound: observe the real silent-tail-no-reply child for 150 ms before the 300 ms reply deadline; no early park may release its slot.
-            await new Promise(resolve => setTimeout(resolve, 150));
-            expect(store.getRun(runId)?.status).toBe('running');
-            expect(runInternals(manager).line.busySlots()).toBe(1);
-            await waitFor(() => store.getRun(runId)?.status === 'waiting');
+            const { clock, arming } = replyObservationClock(manager);
+            try {
+              manager.enqueueOwnedRun(runId);
+              await waitForNativeContent(() => clock.captured === 1 &&
+                manager['active'].get(runId)?.noWaitNudgeReplyTimer !== undefined);
+              expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
+              expect(store.getRun(runId)?.status).toBe('running');
+              expect(runInternals(manager).line.busySlots()).toBe(1);
+              await clock.advance(150);
+              expect(store.getRun(runId)?.status).toBe('running');
+              expect(runInternals(manager).line.busySlots()).toBe(1);
+              expect(noReplyNotes(store.readEvents(runId))).toHaveLength(0);
+              await clock.advance(150);
+              await waitForNativeContent(() => store.getRun(runId)?.status === 'waiting');
+              expect(clock.captured).toBe(1);
+            } finally { arming.mockRestore(); clock.restore(); }
             expect(runInternals(manager).line.busySlots()).toBe(0);
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
             expect(noReplyNotes(store.readEvents(runId))).toHaveLength(1);
@@ -211,35 +231,20 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
               // Cursor starts a new print process for the nudge. Its startup must not
               // consume F10's 300 ms content budget (hearsay-tools/cezarion#1511).
               // Freeze only that budget: process-drain and other timers keep real time.
-              const realSetTimeout = globalThis.setTimeout;
-              vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldClearNativeTimers: true });
-              const fakeSetTimeout = globalThis.setTimeout;
-              let armingReply = false;
-              let replyTimers = 0;
-              const timerOwner = runInternals(manager).turnNudges;
-              const armReply = timerOwner.armNoWaitNudgeReplyTimer.bind(timerOwner);
-              const armClock = vi.spyOn(timerOwner, 'armNoWaitNudgeReplyTimer').mockImplementation((...args) => {
-                armingReply = true;
-                try { armReply(...args); } finally { armingReply = false; }
-              });
-              const replyClock = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((...args: Parameters<typeof setTimeout>) => {
-                if (!armingReply) return realSetTimeout(...args);
-                replyTimers++;
-                return fakeSetTimeout(...args);
-              }) as typeof setTimeout);
+              const { clock, arming: armClock } = replyObservationClock(manager);
               try {
                 manager.enqueueOwnedRun(runId);
                 await waitForNativeContent(() => store.readEvents(runId).slice(startSeq).some(e =>
                   e.type === 'text' && String(e.text).includes('Working on the wrap-up.')));
                 expect(armClock).toHaveBeenCalledOnce();
-                expect(replyTimers).toBe(1);
+                expect(clock.captured).toBe(1);
                 expect(manager['active'].get(runId)?.noWaitNudgeReplyTimer).toBeUndefined();
                 // The native mock holds DONE until this test crosses the reply bound.
-                await vi.advanceTimersByTimeAsync(300);
+                await clock.advance(300);
                 expect(store.getRun(runId)?.status).toBe('running');
                 expect(runInternals(manager).line.busySlots()).toBe(1);
                 expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
-              } finally { armClock.mockRestore(); replyClock.mockRestore(); vi.useRealTimers(); }
+              } finally { armClock.mockRestore(); clock.restore(); }
               writeFileSync(join(gateRoot, 'done'), 'go');
             } else manager.enqueueOwnedRun(runId);
             await waitFor(() => store.getRun(runId)?.status === 'done' || store.getRun(runId)?.status === 'waiting');

@@ -72,6 +72,40 @@ afterAll(() => {
 
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
+const FINISHED_RUN_STATUSES: ReadonlySet<RunRecord['status']> = new Set([RUN_STATUS.done, RUN_STATUS.review, RUN_STATUS.failed, RUN_STATUS.cancelled]);
+
+/** Observe durable updates and owned operation settlement; time only bounds a missing signal. */
+function waitForProduct(manager: RunManager, store: RunStore, predicate: () => boolean, ms = 15_000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let queued = false;
+    const finish = (error?: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      store.off('run', schedule);
+      store.off('event', schedule);
+      offWork();
+      if (error) reject(error); else resolve();
+    };
+    const check = () => {
+      queued = false;
+      if (settled) return;
+      try { if (predicate()) finish(); } catch (error) { finish(error); }
+    };
+    const schedule = () => {
+      if (queued || settled) return;
+      queued = true;
+      queueMicrotask(check);
+    };
+    const offWork = runInternals(manager).context.work.onSettle(schedule);
+    // bound: preserve the caller's original per-transition hang guard without polling.
+    const timer = setTimeout(() => finish(new Error('condition not met in time')), ms);
+    store.on('run', schedule);
+    store.on('event', schedule);
+    check();
+  });
+}
 
 const TURN_TEXT =
   "I'll catch the AuthError in the login handler so wrong passwords answer 401.\n\nDetails follow.";
@@ -342,11 +376,8 @@ describe('RunManager reported cost accounting', () => {
 
     const record = manager.startRun(workflow, { task: 'cost accounting', runner: 'claude', worktree: false });
     const waitForCost = async (cost: number) => {
-      const deadline = Date.now() + 15_000;
-      while (store.getRun(record.id)?.status !== 'done' || (store.getRun(record.id)?.steps.length ?? 0) < launches) {
-        if (Date.now() > deadline) throw new Error('cost run did not finish');
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
+      await waitForProduct(manager, store, () => store.getRun(record.id)?.status === 'done' && !manager.isActive(record.id) &&
+        (store.getRun(record.id)?.steps.length ?? 0) >= launches);
       expect(store.getRun(record.id)?.costUsd).toBeCloseTo(cost);
     };
     await waitForCost(3.94);
@@ -365,11 +396,7 @@ describe('RunManager reported cost accounting', () => {
       const record = manager.startRun(workflow, {
         task: 'mock:auth-error', runner: 'claude', worktree: false,
       });
-      const deadline = Date.now() + 15_000;
-      while (store.getRun(record.id)?.status !== 'failed') {
-        if (Date.now() > deadline) throw new Error('Claude error run did not finish');
-        await new Promise((resolve) => setTimeout(resolve, 25));
-      }
+      await waitForProduct(manager, store, () => store.getRun(record.id)?.status === 'failed');
       expect(store.getRun(record.id)?.costUsd).toBe(0);
     } finally {
       if (previous === undefined) delete process.env.CEZ_DRY_RUN;
@@ -1027,11 +1054,7 @@ describe('a chain of 2 selected skills runs BOTH steps, in order (#410)', () => 
     const record = manager.startRun(workflow, { task: 'mock:cezar-done fix the PR', worktree: false });
 
     const terminal = new Set(['done', 'review', 'failed', 'cancelled']);
-    const deadline = Date.now() + 20_000;
-    while (!terminal.has(store.getRun(record.id)?.status ?? '')) {
-      if (Date.now() > deadline) throw new Error('run did not finish in time');
-      await new Promise((r) => setTimeout(r, 100));
-    }
+    await waitForProduct(manager, store, () => terminal.has(store.getRun(record.id)?.status ?? '') && !manager.isActive(record.id), 20_000);
 
     const finished = store.getRun(record.id);
     expect(finished?.worktree).toBe(false);
@@ -1115,11 +1138,7 @@ describe('a single agent step plus a check step gets NO chain note (#410)', () =
     const record = manager.startRun(workflow, { task: 'mock:cezar-done fix the login bug', worktree: false });
 
     const terminal = new Set(['done', 'review', 'failed', 'cancelled']);
-    const deadline = Date.now() + 20_000;
-    while (!terminal.has(store.getRun(record.id)?.status ?? '')) {
-      if (Date.now() > deadline) throw new Error('run did not finish in time');
-      await new Promise((r) => setTimeout(r, 100));
-    }
+    await waitForProduct(manager, store, () => terminal.has(store.getRun(record.id)?.status ?? '') && !manager.isActive(record.id), 20_000);
 
     expect(store.getRun(record.id)?.steps.map((s) => ({ id: s.id, status: s.status }))).toEqual([
       { id: 'implement', status: STEP_STATUS.done },
@@ -1188,13 +1207,12 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
-  const waitFor = async (id: string, pred: (r: RunRecord | undefined) => boolean, ms = 15_000) => {
-    const deadline = Date.now() + ms;
-    while (!pred(store.getRun(id))) {
-      if (Date.now() > deadline) throw new Error('condition not met in time');
-      await new Promise((r) => setTimeout(r, 50));
-    }
-  };
+  const waitFor = (id: string, pred: (r: RunRecord | undefined) => boolean, ms = 15_000) =>
+    waitForProduct(manager, store, () => {
+      const record = store.getRun(id);
+      const terminal = record && FINISHED_RUN_STATUSES.has(record.status);
+      return pred(record) && (!terminal || !manager.isActive(id));
+    }, ms);
 
   const publishedWaiting = (id: string, ready = () => true): Promise<RunRecord> =>
     new Promise((resolve) => {
@@ -2438,13 +2456,12 @@ describe('cezar_ask parks as waiting and emits ask.requested (#473)', () => {
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
-  const waitFor = async (id: string, pred: (r: RunRecord | undefined) => boolean, ms = 15_000) => {
-    const deadline = Date.now() + ms;
-    while (!pred(store.getRun(id))) {
-      if (Date.now() > deadline) throw new Error('condition not met in time');
-      await new Promise((r) => setTimeout(r, 50));
-    }
-  };
+  const waitFor = (id: string, pred: (r: RunRecord | undefined) => boolean, ms = 15_000) =>
+    waitForProduct(manager, store, () => {
+      const record = store.getRun(id);
+      const terminal = record && FINISHED_RUN_STATUSES.has(record.status);
+      return pred(record) && (!terminal || !manager.isActive(id));
+    }, ms);
 
   const readEvents = (id: string): Array<Record<string, unknown>> =>
     readFileSync(join(repoRoot, '.ai/cezar/runs', `${id}.ndjson`), 'utf8')
@@ -3152,11 +3169,7 @@ describe('queued stacking reaches the backend (#472)', () => {
     manager.editQueuedMessage(second.id, typo!.id, { text: 'STACKEDONE corrected' });
 
     const terminal = new Set(['done', 'review', 'failed', 'cancelled']);
-    const deadline = Date.now() + 40_000;
-    while (!terminal.has(store.getRun(second.id)?.status ?? '')) {
-      if (Date.now() > deadline) throw new Error('queued run did not finish in time');
-      await new Promise((r) => setTimeout(r, 100));
-    }
+    await waitForProduct(manager, store, () => terminal.has(store.getRun(second.id)?.status ?? '') && !manager.isActive(second.id), 40_000);
 
     // The mock records the head of each session's userText, one line per spawned
     // session. The second run's line must carry the folded prompt.
@@ -3266,13 +3279,7 @@ describe('native Codex requestUserInput parks and resumes the run (#565)', () =>
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
-  const waitFor = async (predicate: () => boolean, ms = 15_000) => {
-    const deadline = Date.now() + ms;
-    while (!predicate()) {
-      if (Date.now() > deadline) throw new Error('condition not met in time');
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  };
+  const waitFor = (predicate: () => boolean, ms = 15_000) => waitForProduct(manager, store, predicate, ms);
 
   it('persists the ask, parks immediately, then routes the answer to the pending RPC', async () => {
     const record = manager.startRun(workflow, {
@@ -3352,13 +3359,7 @@ describe('registry /skill expansion survives a continuation (#811)', () => {
       .split('\n')
       .map((line) => JSON.parse(line) as { type: string; text?: string; stepId?: string });
 
-  const waitFor = async (predicate: () => boolean, ms = 20_000) => {
-    const deadline = Date.now() + ms;
-    while (!predicate()) {
-      if (Date.now() > deadline) throw new Error('condition not met in time');
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  };
+  const waitFor = (predicate: () => boolean, ms = 20_000) => waitForProduct(manager, store, predicate, ms);
 
   /** A finished run, ready for the cockpit's Reply composer. The dry-run mock ends its
    *  turn with no marker, so the run parks at `waiting` with the session open — closing
@@ -3369,7 +3370,7 @@ describe('registry /skill expansion survives a continuation (#811)', () => {
     runId = record.id;
     await waitFor(() => store.getRun(record.id)?.status === 'waiting');
     expect(manager.finish(record.id)).toBe(true);
-    await waitFor(() => ['done', 'review'].includes(store.getRun(record.id)?.status ?? ''));
+    await waitFor(() => ['done', 'review'].includes(store.getRun(record.id)?.status ?? '') && !manager.isActive(record.id));
     return record.id;
   };
 
@@ -3486,13 +3487,7 @@ describe("registry /skill expansion on a fresh run's opening prompt (#87)", () =
     return raw.split('\n').map((line) => JSON.parse(line) as { type: string; text?: string; stepId?: string });
   };
 
-  const waitFor = async (predicate: () => boolean, ms = 20_000) => {
-    const deadline = Date.now() + ms;
-    while (!predicate()) {
-      if (Date.now() > deadline) throw new Error('condition not met in time');
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  };
+  const waitFor = (predicate: () => boolean, ms = 20_000) => waitForProduct(manager, store, predicate, ms);
 
   it('expands the opening prompt before it reaches the backend', async () => {
     const record = manager.startRun(SINGLE_STEP, {
