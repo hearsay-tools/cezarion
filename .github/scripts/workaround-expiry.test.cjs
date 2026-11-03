@@ -40,9 +40,29 @@ test('workflow finds a marker on a closed issue in its own test and publishes it
   assert.doesNotMatch(body, /example\/repo/);
 });
 
-test('literal reader accepts standalone, inline, repeated and fenced markers; rejects malformed markers', () => {
+test('reader accepts standalone, inline and repeated markers; rejects malformed markers', () => {
   const text = ['<!-- until: a/b#1 -->', 'Rule <!-- until: a/b#2 --> <!-- until: a/b#3 -->', '```', '<!-- until: a/b#4 -->', '```', '<!-- until: a/b#0 -->', '<!-- until: a/b#x -->', '<!-- until: b#1 -->', '<!-- until: a/b#1', '<!-- until: a/b#01 -->'].join('\n');
-  assert.deepEqual(markersIn('x.md', text).map(m => m.issue), ['a/b#1', 'a/b#2', 'a/b#3', 'a/b#4']);
+  assert.deepEqual(markersIn('x.md', text).map(m => m.issue), ['a/b#1', 'a/b#2', 'a/b#3']);
+});
+
+test('reader skips backtick and tilde fences and reports the marker after each closing fence', () => {
+  for (const character of ['`', '~']) {
+    for (const length of [3, 4]) {
+      const fence = character.repeat(length);
+      const text = [fence + ' markdown', '<!-- until: a/b#1 -->', fence, '<!-- until: a/b#2 -->'].join('\r\n');
+      assert.deepEqual(markersIn('rules.md', text), [{ file: 'rules.md', line: 4, issue: 'a/b#2' }]);
+    }
+  }
+});
+
+test('only matching fences of sufficient length and no trailing text close a block', () => {
+  const text = ['   ```` markdown', '<!-- until: a/b#1 -->', '~~~', '```', '```` trailing', '<!-- until: a/b#2 -->', '  `````  ', '<!-- until: a/b#3 -->', '~~~', '<!-- until: a/b#4 -->'].join('\n');
+  assert.deepEqual(markersIn('rules.md', text), [{ file: 'rules.md', line: 8, issue: 'a/b#3' }]);
+});
+
+test('inline runs, indented code and invalid backtick info do not open a fence', () => {
+  const text = ['Text ```', '<!-- until: a/b#1 -->', '    ~~~', '<!-- until: a/b#2 -->', '``` info`', '<!-- until: a/b#3 -->'].join('\n');
+  assert.deepEqual(markersIn('rules.md', text).map(m => m.issue), ['a/b#1', 'a/b#2', 'a/b#3']);
 });
 
 test('resolution is cached and an open issue is not expired', async () => {

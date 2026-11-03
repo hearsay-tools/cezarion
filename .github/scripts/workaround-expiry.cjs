@@ -4,11 +4,25 @@ const path = require('node:path');
 
 const TITLE = 'Remove workaround rules whose replacement issue closed';
 
-// Literal marker reader, not a Markdown renderer: fenced examples count too.
+// Read marker comments outside fenced code, preserving source line numbers.
 function markersIn(file, text) {
-  return text.split(/\r?\n/).flatMap((line, index) =>
-    [...line.matchAll(/<!-- until: ([A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_.-]+#[1-9][0-9]*) -->/g)]
-      .map(match => ({ file, line: index + 1, issue: match[1] })));
+  const markers = [];
+  let fence;
+  for (const [index, line] of text.split(/\r?\n/).entries()) {
+    const delimiter = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (delimiter && delimiter[1][0] === fence[0] && delimiter[1].length >= fence.length && /^[ \t]*$/.test(delimiter[2])) fence = undefined;
+      continue;
+    }
+    if (delimiter && (delimiter[1][0] === '~' || !delimiter[2].includes('`'))) {
+      fence = delimiter[1];
+      continue;
+    }
+    for (const match of line.matchAll(/<!-- until: ([A-Za-z0-9][A-Za-z0-9-]*\/[A-Za-z0-9_.-]+#[1-9][0-9]*) -->/g)) {
+      markers.push({ file, line: index + 1, issue: match[1] });
+    }
+  }
+  return markers;
 }
 
 function trackedMarkers(root = process.cwd()) {

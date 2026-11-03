@@ -284,8 +284,7 @@ at the end of the rule's line. The weekly workaround-expiry workflow scans
 tracked Markdown files and reports markers whose issue is closed, including
 issues in other repositories. Unreadable issues appear in the log and cleanup
 issue alongside expired markers; the run exits non-zero after publishing them.
-It reads literal markers even in code examples;
-use placeholders when showing the syntax. It opens or updates one cleanup issue
+It opens or updates one cleanup issue
 by exact title. With no expired markers, it leaves any existing issue unchanged.
 
 `AGENTS.md` loads on every agent turn, so put the rule in the narrowest document that
