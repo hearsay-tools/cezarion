@@ -1,3 +1,7 @@
+import { checkWorkspaceResolution } from '../../scripts/check-workspace-resolution.mjs'
+
+checkWorkspaceResolution()
+
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { configure } from '@testing-library/react'

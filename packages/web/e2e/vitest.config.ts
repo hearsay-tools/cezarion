@@ -1,5 +1,8 @@
+import { checkWorkspaceResolution } from '../../../scripts/check-workspace-resolution.mjs'
 import { defineConfig } from 'vitest/config'
 import CockpitTestSequencer from '../../../.github/scripts/cockpit-test-sequencer.mjs'
+
+checkWorkspaceResolution()
 
 /**
  * The root configuration exposes this project to Squeal's slow tier. `npm test` selects

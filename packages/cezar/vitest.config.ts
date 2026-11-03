@@ -1,4 +1,7 @@
+import { checkWorkspaceResolution } from '../../scripts/check-workspace-resolution.mjs'
 import { defineConfig } from 'vitest/config'
+
+checkWorkspaceResolution()
 
 // The service + CLI suite: Node ESM, no DOM, no bundler. `test/` is deliberately NOT included
 // — those are the node:test suites (`npm run test:unit`, `npm run test:package`), which pack

@@ -1,6 +1,10 @@
+import { checkWorkspaceResolution } from '../../scripts/check-workspace-resolution.mjs'
 import { defineConfig, mergeConfig } from 'vitest/config'
 
-import viteConfig from './vite.config'
+checkWorkspaceResolution()
+
+// Keep plugin imports behind the install check, including when Vite bundles this config.
+const { default: viteConfig } = await import(new URL('./vite.config.ts', import.meta.url).href)
 
 // Reuse the build config verbatim (root, React plugin, `@` → packages/web/src) and only add the
 // test layer, so a component under test resolves its imports exactly like the shipped bundle.
