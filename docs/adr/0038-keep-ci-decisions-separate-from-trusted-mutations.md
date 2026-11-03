@@ -14,6 +14,10 @@ newest trusted exact-head check reports success or skipped with exact title
 `No files to review`, and all review threads resolve (owner policy, 2026-11-03).
 The named skip is a provider decision, not proof of model execution. A default-branch reconciler can
 retry only the native review gate; a PR-context review signal grants no authority.
+Only the new admission marker permits promotion. A green historical execution-only
+CodeRabbit job supports revocation after a fresh validated rejection shared by both
+policies. A failed historical job requires a fresh native run, so no-files admission
+cannot create a retry loop. Reusable model workflows are never rerun.
 See [the replacement plan](../../.ai/specs/2026-11-02-coderabbit-admission-plan.md)
 and [the no-files policy](../../.ai/specs/2026-11-03-coderabbit-skipped-recovery-plan.md).
 

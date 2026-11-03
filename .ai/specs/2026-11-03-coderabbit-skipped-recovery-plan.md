@@ -21,9 +21,8 @@ verified exceptions, native provenance, readiness, queue membership and rules.
 Remove the unproven automatic full-review comment and claim mechanism entirely,
 including its modules, tests, `recoveryEligible` field, sender token, optional
 secret reads and checks-write permission. Restore targeted native-gate reruns
-and read-only checks permission, with a new policy marker to reject old
-success-only jobs. No model request or new
-credential dependency remains. Classification and actionable blocker guidance stay.
+and read-only checks permission. The new policy marker prevents promotion
+through old success-only jobs. No model request or new credential dependency remains. Classification and actionable blocker guidance stay.
 
 ## Incident evidence
 
@@ -70,24 +69,49 @@ GitHub rerun scheduling.
 
 ## Rollout boundary and marker sweep
 
-Use only `Require fresh CodeRabbit admission and resolved threads` as the current
-native gate marker. The old `Require fresh CodeRabbit execution and resolved threads`
-marker is legacy. Installed CI runs check out immutable `github.sha`; rerunning an
-old job retains its success-only reader. Accepting it as current would repeatedly
-rerun a failed no-files gate until the attempt cap. Refuse it without a POST and
-instruct a fresh native run after rollout. Never accept both markers as equivalent.
+The new `Require fresh CodeRabbit admission and resolved threads` marker is
+required for promotion. The historical `Require fresh CodeRabbit execution and
+resolved threads` marker supports revocation only. Installed CI runs check out
+immutable `github.sha`; rerunning an old job retains its success-only reader.
+Never promote a failed old job under the new no-files policy: it would fail again
+and repeat until the attempt cap. A fresh admitted decision on an old green job
+is a no-op. A validated rejection by both policies can revoke an old green job.
+The older reusable `automated-code-review.yml` model workflow remains refused in
+every direction; reconciliation never requests a model.
 
-Update all marker readers: ci.yml, reconcile GATE_STEP, coderabbit.testkit and
-workflow contract tests. Keep the old marker only in the explicit legacy refusal
-regression and this explanation. The existing admission plan is historical.
-CODE_REVIEW delegates policy to the CI guide and needs no copy change.
+### Corrected guarantee before changing tests (finding 4458439516)
 
-| Native gate / provider decision | Action | Exit |
+Proof base for this follow-up: `2244dd8e7`. The new-only marker previously stopped
+retry loops, but also removed the old green gate's path to revoke admission after
+threads reopened or provider evidence became pending/failed. Restore that existing
+revocation guarantee with directional compatibility, keeping promotion exclusive
+to the new marker. No setting or credential changes.
+
+Read the live native run/job after the PR lock, classify its policy, and allow an
+old execution-only job only while its native result is green. Read fresh validated
+shared admission twice. Only false admission can request its targeted revocation.
+A historical reader error cannot prove a shared policy rejection and makes no POST;
+current-policy reader errors retain existing fail-closed green revocation. Recheck
+native identity, policy, job and live head before the one POST, then observe the
+accepted attempt under the existing 120-second budget and per-PR serialization.
+
+| Native gate / live admission | Action | Exit |
 | --- | --- | --- |
-| Old execution marker / trusted no-files / native failure | Legacy refusal, no POST | Push new head or start fresh native run after rollout |
-| New admission marker / trusted no-files / native failure | Exactly one targeted rerun | Native job completion |
-| New admission marker / trusted no-files / native success | No-op | Future evidence change |
-| No marker or former reusable model workflow | Existing legacy refusal | Fresh native run |
+| Current admission marker / failed / admitted (including no-files) | One targeted rerun to green | Native completion |
+| Current admission marker / green / rejected | One targeted revocation | Native completion |
+| Historical execution marker / green / success or no-files admitted | No-op | Future provider/thread change |
+| Historical execution marker / green / unresolved thread (outdated included) | One targeted revocation | Old job fails on the unresolved thread |
+| Historical execution marker / green / pending, latest failure, generic skip or other validated shared rejection | One targeted revocation | Old success-only reader also rejects |
+| Historical execution marker / failed / no-files or any other evidence | Legacy refusal with fresh-native-run guidance; no POST | Fresh native run after rollout |
+| Historical execution marker / green / admission read fails or changes | No POST | Fresh validated evidence or native run |
+| Historical green revoked, then provider reports no-files | Failed old gate remains legacy; no POST | Fresh native run; no retry loop |
+| Former reusable model workflow, even if a native marker appears | Legacy refusal; no POST | Fresh native run |
+| Marker, native run/attempt/job, provider/head or admission changes before POST | Existing changed/unavailable refusal | Fresh event/manual dispatch |
+
+Marker readers are `ci.yml`, reconcile policy classification, `coderabbit.testkit`
+and workflow contract tests. Keep the new marker in native fixtures. Keep the old
+marker only in the compatibility classifier, dedicated directional tests and this
+explanation. CODE_REVIEW delegates policy to the CI guide and needs no copy change.
 
 ## Regression evidence
 
@@ -110,13 +134,13 @@ node --import ./scripts/test-git-env.mjs --test --test-name-pattern='old executi
 ```
 
 Baseline reconciler: **2 intended assertion failures**, 0 pass, 0 skipped.
-The old marker requests a rerun instead of returning `legacy-workflow`; the new
+The failed old-marker case requests a rerun instead of returning `legacy-workflow`; the new
 marker returns `legacy-workflow` instead of requesting the rerun. Copy only fixed
 `coderabbit-reconcile.cjs`: **2 pass**, 0 fail, 0 skipped. Fixed assertions prove
-old-marker no POST and new-marker one targeted native rerun. No setup, import,
+failed old-marker no POST and new-marker one targeted native rerun. No setup, import,
 timeout or empty-selection failure counts as proof. Scratch worktree removed.
 
-## Final local validation
+## Initial implementation validation (2244dd8e7)
 
 - Parent source review found no required code correction. The marker change fixes
   the parent's concrete historical-reader retry finding before integration.
@@ -144,7 +168,7 @@ node .ai/skills/check-code-quality/scripts/check.mjs --base 666efc213 --runner n
   not prove provider event delivery, hosted rerun scheduling or queue semantics.
 - Reader sweep covers the two gate markers, recovery field/modules/token steps,
   native/workflow fixtures, readiness, queue, AGENTS, SDLC, CI guide and ADR 0038.
-  The old execution marker remains only in the explicit legacy test and policy
+  At that revision the old execution marker remains only in the explicit legacy test and policy
   explanation. The prior admission plan is explicitly historical. CODE_REVIEW
   points to current policy and retains its distinct validation-suite meaning of
   a permitted skip. Squeal's queued final waits and pinned-version `lint.tools`
@@ -158,3 +182,56 @@ source hashes `8c759e45-b4aa-4278-a766-017bdbde7016`, and red/green proof
 `3fced9e7-dbb1-4358-8380-38b1e77c0908`. All eight measured source hashes match
 the final files. `origin/main` resolved to `64d58f93f851ce1be70fa5ba156dd69214cbc1e5`;
 its merge-base with this branch is the pinned proof/quality base `666efc213`.
+
+## Directional compatibility validation (finding 4458439516)
+
+The parent and its native reviewer accepted the corrected source at SHA-256
+`4d976a09a5883b8ba1744c940ecf2fb7eca3fed34c0ec49204313eaa2eaf0dec`.
+No unrelated package tests or runtime files changed.
+
+A disposable worktree at `2244dd8e75f89f0b8d5d6f2b78eb2788512e5157` had its own
+`pnpm install --frozen-lockfile`. Copy only the current reconciliation test, then run:
+
+```sh
+node --import ./scripts/test-git-env.mjs --test --test-name-pattern='historical green is revoked for' .github/scripts/coderabbit-reconcile.test.cjs
+```
+
+Baseline: **7 intended assertion failures**, 0 pass, 0 skipped. Each records no
+native rerun POST (`actual: []`) instead of the expected one job ID (`[30]`). The
+cases are reopened threads, outdated reopened threads, pending provider, latest
+provider failure, generic skip, missing provider and untrusted provider. Copy
+only fixed `coderabbit-reconcile.cjs` and repeat: **7 pass**, 0 fail, 0 skipped.
+Each now records exactly one targeted native rerun and four provider reads.
+
+The fixed scratch also passes the three directional promotion/loop guards:
+
+```sh
+node --import ./scripts/test-git-env.mjs --test --test-name-pattern='failed old execution-only native gate|trusted no-files decision refreshes|historical revocation followed by no-files' .github/scripts/coderabbit-reconcile.test.cjs
+```
+
+**3 pass**, 0 fail, 0 skipped: failed historical/no-files makes no POST, failed
+current/no-files makes one POST, and a revoked old job remains refused after a
+later no-files decision. Scratch worktree removed after preserving output.
+
+The complete main-base bundled check uses the same five-file command recorded
+above, with output `.ai/qa/coderabbit-directional/code-quality.md`: **65/65 changed
+functions** across eight files pass. Maximum complexity **18**; maximum CRAP
+**18.0098876953125**. Its focused coverage run passes **262 tests**, 0 fail, 0
+skipped, including historical/current read-error direction, native policy/run/
+attempt/job/head races, model-workflow refusal and admitted historical no-ops.
+All eight measured source hashes match the final files. Main's merge-base remains
+`666efc21312a64ec39629546fe33082e1fdff779`.
+
+`npm run lint` passes all 10 cez and 16 ast-grep rules. Citations and diff checks
+pass. Verified actionlint 1.7.12 passes both review workflows with the same flags
+recorded above; no workflow source changes in this follow-up. No declarations
+change, so typecheck remains outside this patch. Full CI remains parent-owned.
+Squeal's focused five-file results are current with no known failures; final
+revision/global/slow accounting is reported to the parent at settlement. No
+full-suite pass is inferred. Existing Squeal friction remains tracked in
+hearsay-tools/squeal#139 and hearsay-tools/squeal#141; no duplicate or GitHub write.
+
+Published follow-up snapshots, same task: quality Markdown
+`34c0ccdf-d9dc-4d96-92ea-54569efba879`, full quality JSON
+`f1edbbc0-edff-4037-b40c-d45ea3acc74a`, and regression proof
+`5528826c-6888-494f-9164-76f79eec48b6`.
