@@ -30,18 +30,20 @@ const PARTS: Readonly<Record<string, readonly string[]>> = {
     "pi C1",
     "pi C2"
   ],
-  "session-close": [
+  "clean-close": [
     "claude C3",
-    "claude C4",
     "codex C3",
-    "codex C4",
     "cursor C3",
-    "cursor C4",
     "omp C3",
-    "omp C4",
     "opencode C3",
+    "pi C3"
+  ],
+  "idle-close": [
+    "claude C4",
+    "codex C4",
+    "cursor C4",
+    "omp C4",
     "opencode C4",
-    "pi C3",
     "pi C4"
   ],
   "recovery": [

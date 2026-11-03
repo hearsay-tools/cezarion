@@ -1,3 +1,3 @@
 import { describeWorkflowStepCompletionParity } from './workflow-step-completion-parity.testkit.ts';
 
-describeWorkflowStepCompletionParity('session-close');
+describeWorkflowStepCompletionParity('clean-close');
