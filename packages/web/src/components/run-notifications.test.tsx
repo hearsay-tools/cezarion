@@ -1,3 +1,10 @@
+import {
+  RUN_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { openHumanWait } from '@/test/run-summary-fixture'
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
 import { act, cleanup, render } from '@testing-library/react'
@@ -35,7 +42,7 @@ function run(over: Partial<RunRecord> = {}): RunRecord {
     title: 'Normalize the agent-event protocol',
     workflow: 'default',
     task: 'normalize the protocol',
-    status: 'running',
+    status: RUN_STATUS.running,
     createdAt: '2026-07-14T10:00:00.000Z',
     tokensUsed: 0,
     archived: false,
@@ -93,9 +100,9 @@ describe('RunNotifications', () => {
   it('notifies when a run enters waiting while the tab is hidden', () => {
     const constructed = stubNotification('granted')
     hideTab()
-    const { patch } = mount({ notifications: { enabled: true } }, [run({ status: 'running' })])
+    const { patch } = mount({ notifications: { enabled: true } }, [run({ status: RUN_STATUS.running })])
 
-    patch([run({ status: 'waiting' })])
+    patch([run({ status: RUN_STATUS.waiting })])
 
     expect(constructed).toEqual([
       {
@@ -109,11 +116,11 @@ describe('RunNotifications', () => {
     const constructed = stubNotification('granted')
     hideTab()
     const { patch } = mount({ notifications: { enabled: true } }, [
-      run({ id: 'a', status: 'running' }),
-      run({ id: 'b', status: 'running' }),
+      run({ id: 'a', status: RUN_STATUS.running }),
+      run({ id: 'b', status: RUN_STATUS.running }),
     ])
 
-    patch([run({ id: 'a', status: 'review' }), run({ id: 'b', status: 'failed' })])
+    patch([run({ id: 'a', status: RUN_STATUS.review }), run({ id: 'b', status: RUN_STATUS.failed })])
 
     expect(constructed.map((n) => [n.options?.tag, n.options?.body])).toEqual([
       ['cezar-run-a', 'Task needs review'],
@@ -124,7 +131,7 @@ describe('RunNotifications', () => {
   it('the seeded list never notifies — a run already waiting at mount is the dot’s job', () => {
     const constructed = stubNotification('granted')
     hideTab()
-    mount({ notifications: { enabled: true } }, [run({ status: 'waiting' })])
+    mount({ notifications: { enabled: true } }, [run({ status: RUN_STATUS.waiting })])
     expect(constructed).toEqual([])
   })
 
@@ -132,8 +139,8 @@ describe('RunNotifications', () => {
     const constructed = stubNotification('granted')
     hideTab()
     for (const uiState of [{}, { notifications: { enabled: false } }] as WorkspaceUiState[]) {
-      const { patch } = mount(uiState, [run({ status: 'running' })])
-      patch([run({ status: 'waiting' })])
+      const { patch } = mount(uiState, [run({ status: RUN_STATUS.running })])
+      patch([run({ status: RUN_STATUS.waiting })])
     }
     expect(constructed).toEqual([])
   })
@@ -141,24 +148,24 @@ describe('RunNotifications', () => {
   it('a visible tab stays silent', () => {
     const constructed = stubNotification('granted')
     hideTab(false)
-    const { patch } = mount({ notifications: { enabled: true } }, [run({ status: 'running' })])
-    patch([run({ status: 'waiting' })])
+    const { patch } = mount({ notifications: { enabled: true } }, [run({ status: RUN_STATUS.running })])
+    patch([run({ status: RUN_STATUS.waiting })])
     expect(constructed).toEqual([])
   })
 
   it('permission denied degrades to silence — no construction, no throw', () => {
     const constructed = stubNotification('denied')
     hideTab()
-    const { patch } = mount({ notifications: { enabled: true } }, [run({ status: 'running' })])
-    patch([run({ status: 'waiting' })])
+    const { patch } = mount({ notifications: { enabled: true } }, [run({ status: RUN_STATUS.running })])
+    patch([run({ status: RUN_STATUS.waiting })])
     expect(constructed).toEqual([])
   })
 
   it('no Notification API at all degrades to silence', () => {
     vi.stubGlobal('Notification', undefined)
     hideTab()
-    const { patch } = mount({ notifications: { enabled: true } }, [run({ status: 'running' })])
-    expect(() => patch([run({ status: 'waiting' })])).not.toThrow()
+    const { patch } = mount({ notifications: { enabled: true } }, [run({ status: RUN_STATUS.running })])
+    expect(() => patch([run({ status: RUN_STATUS.waiting })])).not.toThrow()
   })
 
   it('a constructor that throws (Android Chrome) is swallowed — the courtesy never crashes the app', () => {
@@ -168,8 +175,8 @@ describe('RunNotifications', () => {
     })
     ;(Throwing as unknown as { permission: string }).permission = 'granted'
     vi.stubGlobal('Notification', Throwing)
-    const { patch } = mount({ notifications: { enabled: true } }, [run({ status: 'running' })])
-    expect(() => patch([run({ status: 'waiting' })])).not.toThrow()
+    const { patch } = mount({ notifications: { enabled: true } }, [run({ status: RUN_STATUS.running })])
+    expect(() => patch([run({ status: RUN_STATUS.waiting })])).not.toThrow()
     expect(Throwing).toHaveBeenCalledOnce()
   })
 
@@ -177,11 +184,11 @@ describe('RunNotifications', () => {
     const constructed = stubNotification('granted')
     hideTab()
     const { client, patch } = mount({ notifications: { enabled: false } }, [
-      run({ status: 'running' }),
+      run({ status: RUN_STATUS.running }),
     ])
 
     // The transition happens with the toggle off…
-    patch([run({ status: 'waiting' })])
+    patch([run({ status: RUN_STATUS.waiting })])
     expect(constructed).toEqual([])
 
     // …then the user enables (Settings PUT lands in the same cache). The macrotask flush lets
@@ -191,20 +198,20 @@ describe('RunNotifications', () => {
 
     // A token tick re-announces the unchanged waiting state — still no notification, because
     // the transition was observed (and remembered) while the toggle was off.
-    patch([run({ status: 'waiting', tokensUsed: 42 })])
+    patch([run({ status: RUN_STATUS.waiting, tokensUsed: 42 })])
     expect(constructed).toEqual([])
 
     // A REAL new transition after enabling does notify.
-    patch([run({ status: 'running', tokensUsed: 50 })])
-    patch([run({ status: 'review', tokensUsed: 51 })])
+    patch([run({ status: RUN_STATUS.running, tokensUsed: 50 })])
+    patch([run({ status: RUN_STATUS.review, tokensUsed: 51 })])
     expect(constructed.map((n) => n.options?.body)).toEqual(['Task needs review'])
   })
 
   it('ignores unrelated cache updates (a detail query moving is not the run list)', () => {
     const constructed = stubNotification('granted')
     hideTab()
-    const { client } = mount({ notifications: { enabled: true } }, [run({ status: 'running' })])
-    act(() => client.setQueryData(queryKeys.runs.detail('r1'), run({ status: 'waiting' })))
+    const { client } = mount({ notifications: { enabled: true } }, [run({ status: RUN_STATUS.running })])
+    act(() => client.setQueryData(queryKeys.runs.detail('r1'), run({ status: RUN_STATUS.waiting })))
     expect(constructed).toEqual([])
   })
 })
@@ -216,9 +223,9 @@ void _statuses
 it('notifies once when a parked worker wait gains a human ask without changing status', () => {
   const constructed = stubNotification('granted')
   hideTab()
-  const parked = run({ status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [] },
+  const parked = run({ status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: [], receipts: [] },
     // A worker wait is a wait-list entry (hearsay-tools/cezarion#1301).
-    waits: [{ kind: 'worker', id: '10000000-0000-4000-8000-000000000003', source: 'agent', via: 'cez-worker-wait', registeredAt: '2026-09-05T00:00:00.000Z', deadline: '2026-09-06T00:00:00.000Z', phase: 'open', turnId: 'turn-1', timeoutSeconds: 600, workerIds: ['child'], revisions: [], outcomes: [] }] } as Partial<RunRecord>)
+    waits: [{ kind: WAIT_KIND.worker, id: '10000000-0000-4000-8000-000000000003', source: WAIT_SOURCE.agent, via: WAIT_VIA['cez-worker-wait'], registeredAt: '2026-09-05T00:00:00.000Z', deadline: '2026-09-06T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1', timeoutSeconds: 600, workerIds: ['child'], revisions: [], outcomes: [] }] } as Partial<RunRecord>)
   const { patch } = mount({ notifications: { enabled: true } }, [parked])
   patch([{ ...parked, tokensUsed: 10 }])
   expect(constructed).toHaveLength(0)
@@ -244,7 +251,7 @@ describe('project-owned run lists', () => {
     if (beforeMount) client.setQueryData(key, [run()])
     render(<QueryClientProvider client={client}><RunNotifications /></QueryClientProvider>)
     if (!beforeMount) act(() => client.setQueryData(key, [run()]))
-    act(() => client.setQueryData(key, [run({ status: 'waiting' })]))
+    act(() => client.setQueryData(key, [run({ status: RUN_STATUS.waiting })]))
     expect(constructed.map(n => n.options?.body)).toEqual(['Task needs you'])
   })
 
@@ -254,11 +261,11 @@ describe('project-owned run lists', () => {
     const { client, patch } = mount({ notifications: { enabled: true } }, [run()])
     setApiScope('secondary')
     patch([run({ id: 'secondary-run' })])
-    patch([run({ id: 'secondary-run', status: 'waiting' })])
-    act(() => client.setQueryData(['default', 'runs', 'list'], [run({ status: 'waiting' })]))
+    patch([run({ id: 'secondary-run', status: RUN_STATUS.waiting })])
+    act(() => client.setQueryData(['default', 'runs', 'list'], [run({ status: RUN_STATUS.waiting })]))
     setApiScope(null)
-    patch([run({ status: 'running' })])
-    patch([run({ status: 'waiting' })])
+    patch([run({ status: RUN_STATUS.running })])
+    patch([run({ status: RUN_STATUS.waiting })])
     expect(constructed.map(n => n.options?.tag)).toEqual([
       'cezar-run-secondary-run', 'cezar-run-r1', 'cezar-run-r1',
     ])
@@ -271,17 +278,17 @@ describe('project-owned run lists', () => {
     const alias = ['boot', 'runs', 'list']
     const other = ['secondary', 'runs', 'list']
     act(() => client.setQueryData(alias, [run()]))
-    patch([run({ status: 'waiting' })])
+    patch([run({ status: RUN_STATUS.waiting })])
     act(() => client.setQueryData(other, [run({ id: 'other' })]))
     // An unrelated tick must not let an alias's old running row rewind the task.
     act(() => client.setQueryData(alias, [run({ tokensUsed: 2 })]))
-    act(() => client.setQueryData(alias, [run({ status: 'waiting' })]))
-    patch([run({ status: 'waiting', tokensUsed: 3 })])
+    act(() => client.setQueryData(alias, [run({ status: RUN_STATUS.waiting })]))
+    patch([run({ status: RUN_STATUS.waiting, tokensUsed: 3 })])
     expect(constructed).toHaveLength(1)
-    patch([run({ status: 'running' })])
-    act(() => client.setQueryData(alias, [run({ status: 'running' })]))
-    patch([run({ status: 'waiting' })])
-    act(() => client.setQueryData(alias, [run({ status: 'waiting' })]))
+    patch([run({ status: RUN_STATUS.running })])
+    act(() => client.setQueryData(alias, [run({ status: RUN_STATUS.running })]))
+    patch([run({ status: RUN_STATUS.waiting })])
+    act(() => client.setQueryData(alias, [run({ status: RUN_STATUS.waiting })]))
     expect(constructed).toHaveLength(2)
   })
 
@@ -290,11 +297,11 @@ describe('project-owned run lists', () => {
     hideTab()
     const { client } = mount({ notifications: { enabled: true } }, [])
     const key = ['secondary', 'runs', 'list']
-    act(() => client.setQueryData(key, [run({ status: 'waiting' })]))
-    act(() => client.setQueryData(key, [run({ status: 'waiting', tokensUsed: 1 })]))
+    act(() => client.setQueryData(key, [run({ status: RUN_STATUS.waiting })]))
+    act(() => client.setQueryData(key, [run({ status: RUN_STATUS.waiting, tokensUsed: 1 })]))
     act(() => client.setQueryData(key, [run()]))
     act(() => client.removeQueries({ queryKey: key, exact: true }))
-    act(() => client.setQueryData(key, [run({ status: 'waiting' })]))
+    act(() => client.setQueryData(key, [run({ status: RUN_STATUS.waiting })]))
     expect(constructed).toHaveLength(0)
   })
 })
@@ -309,12 +316,12 @@ it.each([false, true])('uses the newest silent alias baseline (loaded before mou
   const fresh = ['boot', 'runs', 'list']
   // Insert fresh first to prove freshness, rather than cache insertion order, picks the baseline.
   if (beforeMount) client.setQueryData(fresh, [run()], { updatedAt: 200 })
-  client.setQueryData(stale, [run({ status: 'waiting' })], { updatedAt: 100 })
+  client.setQueryData(stale, [run({ status: RUN_STATUS.waiting })], { updatedAt: 100 })
   render(<QueryClientProvider client={client}><RunNotifications /></QueryClientProvider>)
   if (!beforeMount) act(() => client.setQueryData(fresh, [run()], { updatedAt: 200 }))
   expect(constructed).toHaveLength(0)
-  act(() => client.setQueryData(stale, [run({ status: 'waiting' })]))
-  act(() => client.setQueryData(fresh, [run({ status: 'waiting' })]))
+  act(() => client.setQueryData(stale, [run({ status: RUN_STATUS.waiting })]))
+  act(() => client.setQueryData(fresh, [run({ status: RUN_STATUS.waiting })]))
   expect(constructed).toHaveLength(1)
 })
 
@@ -323,15 +330,15 @@ it('does not rearm a notified transition when a newly loaded alias is stale', ()
   const constructed = stubNotification()
   hideTab()
   const { client, patch } = mount({ notifications: { enabled: true } }, [run()])
-  patch([run({ status: 'waiting' })])
+  patch([run({ status: RUN_STATUS.waiting })])
   expect(constructed).toHaveLength(1)
   const alias = ['boot', 'runs', 'list']
   // A first fetch can complete after SSE with a snapshot from before that transition.
   act(() => client.setQueryData(alias, [run()]))
-  act(() => client.setQueryData(alias, [run({ status: 'waiting' })]))
+  act(() => client.setQueryData(alias, [run({ status: RUN_STATUS.waiting })]))
   expect(constructed).toHaveLength(1)
   patch([run()])
-  patch([run({ status: 'waiting' })])
+  patch([run({ status: RUN_STATUS.waiting })])
   expect(constructed).toHaveLength(2)
 })
 
@@ -346,19 +353,19 @@ it.each([false, true])('ignores a pre-transition fetch on an observed alias (cat
   const response = new Promise<RunRecord[]>(done => { resolve = done })
   let pending!: Promise<RunRecord[]>
   act(() => { pending = client.fetchQuery({ queryKey: alias, queryFn: () => response, staleTime: 0 }) })
-  patch([run({ status: 'waiting' })])
-  act(() => client.setQueryData(alias, [run({ status: 'waiting' }), run({ id: 'other' })]))
+  patch([run({ status: RUN_STATUS.waiting })])
+  act(() => client.setQueryData(alias, [run({ status: RUN_STATUS.waiting }), run({ id: 'other' })]))
   await act(async () => {
-    resolve([run(), run({ id: 'other', status: 'waiting' })])
+    resolve([run(), run({ id: 'other', status: RUN_STATUS.waiting })])
     await pending
   })
   // The stale r1 row cannot rewind its live transition; the unaffected other row reconciles.
   expect(constructed.map(n => n.options?.tag)).toEqual(['cezar-run-r1', 'cezar-run-other'])
-  if (catchUp) act(() => client.setQueryData(alias, [run({ status: 'waiting' }), run({ id: 'other', status: 'waiting' })]))
+  if (catchUp) act(() => client.setQueryData(alias, [run({ status: RUN_STATUS.waiting }), run({ id: 'other', status: RUN_STATUS.waiting })]))
   expect(constructed).toHaveLength(2)
   // A fetch started after the transition is authoritative and may rearm the task.
   await act(async () => { await client.fetchQuery({ queryKey: alias, queryFn: async () => [run()], staleTime: 0 }) })
-  await act(async () => { await client.fetchQuery({ queryKey: alias, queryFn: async () => [run({ status: 'waiting' })], staleTime: 0 }) })
+  await act(async () => { await client.fetchQuery({ queryKey: alias, queryFn: async () => [run({ status: RUN_STATUS.waiting })], staleTime: 0 }) })
   expect(constructed).toHaveLength(3)
 })
 
@@ -372,12 +379,12 @@ it('does not replace a silent baseline with an older first alias response', asyn
   let resolve!: (runs: RunRecord[]) => void
   const response = new Promise<RunRecord[]>(done => { resolve = done })
   const pending = client.fetchQuery({ queryKey: alias, queryFn: () => response })
-  client.setQueryData(['default', 'runs', 'list'], [run({ status: 'waiting' })])
+  client.setQueryData(['default', 'runs', 'list'], [run({ status: RUN_STATUS.waiting })])
   render(<QueryClientProvider client={client}><RunNotifications /></QueryClientProvider>)
   await act(async () => { resolve([run()]); await pending })
-  act(() => client.setQueryData(alias, [run({ status: 'waiting' })]))
+  act(() => client.setQueryData(alias, [run({ status: RUN_STATUS.waiting })]))
   expect(constructed).toHaveLength(0)
   act(() => client.setQueryData(alias, [run()]))
-  act(() => client.setQueryData(alias, [run({ status: 'waiting' })]))
+  act(() => client.setQueryData(alias, [run({ status: RUN_STATUS.waiting })]))
   expect(constructed).toHaveLength(1)
 })

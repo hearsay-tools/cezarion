@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { act, cleanup, renderHook } from '@testing-library/react'
 import type { KeyboardEvent } from 'react'
 import { useState } from 'react'
@@ -147,7 +148,7 @@ function selectedItem() {
   return click
 }
 
-const failed = (over: Parameters<typeof voiceRun>[0] = {}): RunSummary => voiceRun({ status: 'failed', ...over })
+const failed = (over: Parameters<typeof voiceRun>[0] = {}): RunSummary => voiceRun({ status: RUN_STATUS.failed, ...over })
 
 describe('looksLikeSentence', () => {
   it('needs two words after trimming', () => {
@@ -186,7 +187,7 @@ describe('useVoiceCommand', () => {
   })
 
   it('ignores a decision for text that has since changed', async () => {
-    mocks.runs = [failed({ id: 'a', title: 'Alpha' }), voiceRun({ id: 'b', title: 'Bravo', status: 'done' })]
+    mocks.runs = [failed({ id: 'a', title: 'Alpha' }), voiceRun({ id: 'b', title: 'Bravo', status: RUN_STATUS.done })]
     const harness = setup()
     type(harness, 'open the next failed task')
     await advance(300)
@@ -433,7 +434,7 @@ describe('useVoiceCommand', () => {
 
   it('describes a waiting tell for the confirmation panel until the user types', async () => {
     mocks.openRunId = 'r1'
-    mocks.runs = [voiceRun({ id: 'r1', title: 'Fix flaky shard', status: 'waiting' })]
+    mocks.runs = [voiceRun({ id: 'r1', title: 'Fix flaky shard', status: RUN_STATUS.waiting })]
     voiceStore.registerComposer({
       runId: 'r1',
       getDraft: () => '',
@@ -457,7 +458,7 @@ describe('useVoiceCommand', () => {
 
   it('names the task in the answer panel and keeps a refusal beside it', async () => {
     mocks.openRunId = 'r1'
-    mocks.runs = [voiceRun({ id: 'r1', title: 'Fix flaky shard', status: 'waiting' })]
+    mocks.runs = [voiceRun({ id: 'r1', title: 'Fix flaky shard', status: RUN_STATUS.waiting })]
     voiceStore.registerAskCard(card(['Library', 'Build']))
     const harness = setup()
     await proposeAnswer(harness, 1, [option(0, 'Vitest')])
@@ -512,7 +513,7 @@ describe('useVoiceCommand', () => {
   })
 
   it('numbered alternatives pick with "two"', async () => {
-    mocks.runs = [failed({ id: 'a', title: 'Alpha' }), voiceRun({ id: 'c', title: 'Charlie', status: 'done' })]
+    mocks.runs = [failed({ id: 'a', title: 'Alpha' }), voiceRun({ id: 'c', title: 'Charlie', status: RUN_STATUS.done })]
     const harness = setup({ text: 'open the next failed one' })
     enter(harness)
     await answer(calls[0], {
@@ -796,7 +797,7 @@ describe('useVoiceCommand', () => {
   })
 
   it('a preview candidate acts when clicked, for the context it was shown in only', async () => {
-    mocks.runs = [failed({ id: 'a', title: 'Alpha' }), voiceRun({ id: 'c', title: 'Charlie', status: 'done' })]
+    mocks.runs = [failed({ id: 'a', title: 'Alpha' }), voiceRun({ id: 'c', title: 'Charlie', status: RUN_STATUS.done })]
     const harness = setup({ text: 'open the next failed one' })
     await advance(300)
     await answer(calls[0], {
@@ -824,7 +825,7 @@ describe('useVoiceCommand', () => {
   })
 
   it('numbered choices are dropped when the open task changes', async () => {
-    mocks.runs = [failed({ id: 'a', title: 'Alpha' }), voiceRun({ id: 'c', title: 'Charlie', status: 'done' })]
+    mocks.runs = [failed({ id: 'a', title: 'Alpha' }), voiceRun({ id: 'c', title: 'Charlie', status: RUN_STATUS.done })]
     const harness = setup({ text: 'open the next failed one' })
     enter(harness)
     await answer(calls[0], {
@@ -895,7 +896,7 @@ describe('useVoiceCommand', () => {
   })
 
   it('ends a choice when the page changes', async () => {
-    mocks.runs = [failed({ id: 'a', title: 'Alpha' }), voiceRun({ id: 'c', title: 'Charlie', status: 'done' })]
+    mocks.runs = [failed({ id: 'a', title: 'Alpha' }), voiceRun({ id: 'c', title: 'Charlie', status: RUN_STATUS.done })]
     const harness = setup({ text: 'open the next failed one' })
     enter(harness)
     await answer(calls[0], {
@@ -946,7 +947,7 @@ describe('useVoiceCommand', () => {
 
   it('names the task in the answer and tell rows', async () => {
     mocks.openRunId = 'r1'
-    mocks.runs = [voiceRun({ id: 'r1', title: 'Fix flaky shard', status: 'waiting' })]
+    mocks.runs = [voiceRun({ id: 'r1', title: 'Fix flaky shard', status: RUN_STATUS.waiting })]
     voiceStore.registerAskCard(card(['Library', 'Build']))
     const harness = setup()
     type(harness, 'answer vitest to question one')
@@ -961,7 +962,7 @@ describe('useVoiceCommand', () => {
   })
 
   it('drops a preview and a choice when the project changes under an open palette', async () => {
-    mocks.runs = [failed({ id: 'a', title: 'Alpha' }), voiceRun({ id: 'c', title: 'Charlie', status: 'done' })]
+    mocks.runs = [failed({ id: 'a', title: 'Alpha' }), voiceRun({ id: 'c', title: 'Charlie', status: RUN_STATUS.done })]
     const harness = setup({ text: 'open the next failed one' })
     await advance(300)
     await answer(calls[0], {

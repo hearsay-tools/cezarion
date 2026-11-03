@@ -14,7 +14,13 @@ import { ReferenceStatusProvider, ReferenceStatusRegistry } from '@/components/r
 import { QuickListBuckets, SidebarSessionScope, TaskQuickList, TaskQuickListContainer } from '@/components/task-quick-list'
 import { resetSwipeStore } from '@/components/use-swipe-to-archive'
 import { groupRuns } from '@/lib/task-groups'
-import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import {
+  RUN_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { timerWait, workerWait } from '@/test/wait-fixtures'
 
 const NOW = Date.parse('2026-07-14T12:00:00.000Z')
@@ -34,7 +40,7 @@ function run(over: Partial<RunRecord> = {}): RunSummary {
     title: `Task ${seq}`,
     workflow: 'default',
     task: `task ${seq}`,
-    status: 'done',
+    status: RUN_STATUS.done,
     createdAt: ago(60_000),
     tokensUsed: 0,
     archived: false,
@@ -117,7 +123,7 @@ describe('status section folding (#811)', () => {
 
   describe('focus across live status moves', () => {
     afterEach(() => vi.unstubAllGlobals())
-    const working = () => [run({ id: 'work', status: 'running' })]
+    const working = () => [run({ id: 'work', status: RUN_STATUS.running })]
     const tree = (runs: RunSummary[]) => <QueryClientProvider client={createQueryClient()}><MemoryRouter>
       <button type="button">Outside navigation</button>
       <TaskQuickList projectId="focus" runs={runs} view="active" onViewChange={() => {}} />
@@ -129,10 +135,10 @@ describe('status section folding (#811)', () => {
     }
 
     it('retains an individual run link across an unfolded status move', () => {
-      const working = run({ id: 'work', status: 'running' })
+      const working = run({ id: 'work', status: RUN_STATUS.running })
       const { rerender } = render(tree([working]))
       act(() => control('[data-run-id="work"] a').focus())
-      rerender(tree([{ ...working, status: 'done' }]))
+      rerender(tree([{ ...working, status: RUN_STATUS.done }]))
       expect(document.activeElement).toBe(control('[data-run-id="work"] a'))
     })
 
@@ -143,7 +149,7 @@ describe('status section folding (#811)', () => {
       const outside = screen.getByRole('button', { name: 'Outside navigation' })
       act(() => outside.focus())
       if (blurred) act(() => outside.blur())
-      rerender(tree(runs.map(member => ({ ...member, status: 'done' as const }))))
+      rerender(tree(runs.map(member => ({ ...member, status: RUN_STATUS.done }))))
       expect(document.activeElement).toBe(blurred ? document.body : outside)
     })
 
@@ -168,7 +174,7 @@ describe('status section folding (#811)', () => {
   })
 
   it('starts expanded, folds independently, and remembers each section after remount', () => {
-    const runs = [run({ id: 'ask', status: 'waiting' }), run({ id: 'done' }), run({ id: 'work', status: 'running' })]
+    const runs = [run({ id: 'ask', status: RUN_STATUS.waiting }), run({ id: 'done' }), run({ id: 'work', status: RUN_STATUS.running })]
     renderList({ runs })
     const toggle = screen.getByRole('button', { name: 'Finished 1' })
     expect(toggle.getAttribute('aria-expanded')).toBe('true')
@@ -186,14 +192,14 @@ describe('status section folding (#811)', () => {
   })
 
   it('shows full task counts and live attention for folded sections, including capped rows', () => {
-    const runs = [run({ id: 'a', status: 'waiting' }), run({ id: 'b', status: 'waiting' }), run({ id: 'c' })]
+    const runs = [run({ id: 'a', status: RUN_STATUS.waiting }), run({ id: 'b', status: RUN_STATUS.waiting }), run({ id: 'c' })]
     renderList({ runs, rowLimit: 1 })
     const toggle = screen.getByRole('button', { name: 'Needs you 2' })
     fireEvent.click(toggle)
     expect(within(toggle).getByRole('img', { name: 'needs you' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Finished 1' })).toBeTruthy()
     cleanup()
-    renderList({ runs: [...runs, run({ id: 'new', status: 'review' })], rowLimit: 1 })
+    renderList({ runs: [...runs, run({ id: 'new', status: RUN_STATUS.review })], rowLimit: 1 })
     expect(screen.getByRole('button', { name: 'Needs you 3' }).getAttribute('aria-expanded')).toBe('false')
     expect(row('a')).toBeNull()
   })
@@ -239,13 +245,13 @@ describe('status section folding (#811)', () => {
   })
 
   it('moves live updates into saved folded sections without duplication, retaining attention and focus', () => {
-    const done = run({ id: 'done', status: 'done', finishedAt: ago(1000) })
-    const working = run({ id: 'move', status: 'running' })
+    const done = run({ id: 'done', status: RUN_STATUS.done, finishedAt: ago(1000) })
+    const working = run({ id: 'move', status: RUN_STATUS.running })
     const tree = (runs: RunSummary[]) => <QueryClientProvider client={createQueryClient()}><MemoryRouter><TaskQuickList projectId="live" runs={runs} view="active" onViewChange={() => {}} /></MemoryRouter></QueryClientProvider>
     const { rerender } = render(tree([done, working]))
     fireEvent.click(screen.getByRole('button', { name: 'Finished 1' }))
     act(() => (row('move')!.querySelector('a') as HTMLElement).focus())
-    rerender(tree([done, { ...working, status: 'failed', finishedAt: ago(500) }]))
+    rerender(tree([done, { ...working, status: RUN_STATUS.failed, finishedAt: ago(500) }]))
     const folded = screen.getByRole('button', { name: 'Finished 2' })
     expect(folded.getAttribute('aria-expanded')).toBe('false')
     expect(document.activeElement).toBe(folded)
@@ -276,10 +282,10 @@ describe('TaskQuickList', () => {
   it('renders the buckets in the mockup order with their runs', () => {
     renderList({
       runs: [
-        run({ id: 'a', title: 'Structured changes endpoint', status: 'review', pinned: true }),
+        run({ id: 'a', title: 'Structured changes endpoint', status: RUN_STATUS.review, pinned: true }),
         run({ id: 'pin', title: 'Kept', pinned: true }),
-        run({ id: 'b', title: 'Normalize agent-event protocol', status: 'running' }),
-        run({ id: 'c', title: 'README parallel-agents tagline', status: 'done' }),
+        run({ id: 'b', title: 'Normalize agent-event protocol', status: RUN_STATUS.running }),
+        run({ id: 'c', title: 'README parallel-agents tagline', status: RUN_STATUS.done }),
       ],
     })
 
@@ -302,7 +308,7 @@ describe('TaskQuickList', () => {
         run({
           id: 'pr1',
           title: 'Has a PR',
-          status: 'review',
+          status: RUN_STATUS.review,
           pullRequestUrl: 'https://github.com/o/r/pull/7',
         }),
       ],
@@ -360,7 +366,7 @@ describe('TaskQuickList', () => {
           id: 'sum',
           title: 'fix the login bug plz',
           titleSummary: 'Catch AuthError in the login handler',
-          status: 'review',
+          status: RUN_STATUS.review,
           pullRequestUrl: 'https://github.com/o/r/pull/9',
         }),
         run({ id: 'raw', title: 'fix the search crash' }),
@@ -383,8 +389,8 @@ describe('TaskQuickList', () => {
   it('shows the diff pair when a turn recorded one, and nothing when none exists', () => {
     renderList({
       runs: [
-        run({ id: 'diffed', title: 'Has a diff', status: 'review', diffStat: { adds: 42, dels: 7, files: 3 } }),
-        run({ id: 'plain', title: 'No diff yet', status: 'review' }),
+        run({ id: 'diffed', title: 'Has a diff', status: RUN_STATUS.review, diffStat: { adds: 42, dels: 7, files: 3 } }),
+        run({ id: 'plain', title: 'No diff yet', status: RUN_STATUS.review }),
       ],
     })
 
@@ -401,8 +407,8 @@ describe('TaskQuickList', () => {
   it('flags a repointed-worktree diff so the sidebar number explains itself (#751)', () => {
     renderList({
       runs: [
-        run({ id: 'review', title: 'Review PR 694', status: 'review', diffStat: { adds: 1, dels: 0, files: 1, repointed: true } }),
-        run({ id: 'own', title: 'Own work', status: 'review', diffStat: { adds: 42, dels: 7, files: 3 } }),
+        run({ id: 'review', title: 'Review PR 694', status: RUN_STATUS.review, diffStat: { adds: 1, dels: 0, files: 1, repointed: true } }),
+        run({ id: 'own', title: 'Own work', status: RUN_STATUS.review, diffStat: { adds: 42, dels: 7, files: 3 } }),
       ],
     })
 
@@ -429,11 +435,11 @@ describe('TaskQuickList', () => {
     it('paints one dot per row, from deriveAttention', () => {
       renderList({
         runs: [
-          run({ id: 'w', status: 'waiting' }),
-          run({ id: 'v', status: 'review' }),
-          run({ id: 'r', status: 'running' }),
-          run({ id: 'd', status: 'done' }),
-          run({ id: 'f', status: 'failed' }),
+          run({ id: 'w', status: RUN_STATUS.waiting }),
+          run({ id: 'v', status: RUN_STATUS.review }),
+          run({ id: 'r', status: RUN_STATUS.running }),
+          run({ id: 'd', status: RUN_STATUS.done }),
+          run({ id: 'f', status: RUN_STATUS.failed }),
         ],
       })
       expect(dotOf('w')?.getAttribute('data-tone')).toBe('pending')
@@ -448,7 +454,7 @@ describe('TaskQuickList', () => {
     })
 
     it('pulses the transitioning rows only', () => {
-      renderList({ runs: [run({ id: 'r', status: 'running' }), run({ id: 'd', status: 'done' })] })
+      renderList({ runs: [run({ id: 'r', status: RUN_STATUS.running }), run({ id: 'd', status: RUN_STATUS.done })] })
       expect(dotOf('r')?.className).toContain('animate-pulse')
       expect(dotOf('d')?.className).not.toContain('animate-pulse')
     })
@@ -458,8 +464,8 @@ describe('TaskQuickList', () => {
     it('appears only when the run has a pullRequestUrl, and opens it', () => {
       renderList({
         runs: [
-          run({ id: 'with', title: 'Has a PR', status: 'review', pullRequestUrl: 'https://github.com/o/r/pull/7' }),
-          run({ id: 'without', title: 'No PR', status: 'review' }),
+          run({ id: 'with', title: 'Has a PR', status: RUN_STATUS.review, pullRequestUrl: 'https://github.com/o/r/pull/7' }),
+          run({ id: 'without', title: 'No PR', status: RUN_STATUS.review }),
         ],
       })
 
@@ -479,7 +485,7 @@ describe('TaskQuickList', () => {
           run({
             id: 'ref',
             title: 'Review task',
-            status: 'review',
+            status: RUN_STATUS.review,
             referencedPullRequestUrl: 'https://github.com/o/r/pull/4170',
           }),
         ],
@@ -501,7 +507,7 @@ describe('TaskQuickList', () => {
 
     it('sits on the meta line as plain text, after the state word and before the age (#617)', () => {
       renderList({
-        runs: [run({ id: 'x', title: 'Has a PR', status: 'review', pullRequestUrl: 'https://github.com/o/r/pull/7' })],
+        runs: [run({ id: 'x', title: 'Has a PR', status: RUN_STATUS.review, pullRequestUrl: 'https://github.com/o/r/pull/7' })],
       })
       // Title on line one; state word, reference and age on line two.
       expect(rowsIn('Needs you')).toEqual(['Has a PRneeds review · #7 · 1m'])
@@ -513,7 +519,7 @@ describe('TaskQuickList', () => {
           run({
             id: 'iss',
             title: '788: implementing readable task names',
-            status: 'running',
+            status: RUN_STATUS.running,
             referencedIssueUrl: 'https://github.com/o/r/issues/788',
           }),
         ],
@@ -543,7 +549,7 @@ describe('TaskQuickList', () => {
           run({
             id: 'dedup',
             title: '775: implementing comment threads',
-            status: 'review',
+            status: RUN_STATUS.review,
             pullRequestUrl: 'https://github.com/o/r/pull/775',
           }),
         ],
@@ -566,7 +572,7 @@ describe('TaskQuickList', () => {
           run({
             id: 'two',
             title: '788: implementing readable task names',
-            status: 'review',
+            status: RUN_STATUS.review,
             pullRequestUrl: 'https://github.com/o/r/pull/790',
             referencedIssueUrl: 'https://github.com/o/r/issues/788',
           }),
@@ -594,7 +600,7 @@ describe('TaskQuickList', () => {
           run({
             id: 'worst',
             title: '775: implementing comment threads across the whole thread view',
-            status: 'done',
+            status: RUN_STATUS.done,
             finishedAt: ago(60_000),
             diffStat: { adds: 59_514, dels: 12_160, files: 208 },
             pullRequestUrl: 'https://github.com/o/r/pull/775',
@@ -633,11 +639,11 @@ describe('TaskQuickList', () => {
           run({
             id: 'old',
             title: 'Old',
-            status: 'done',
+            status: RUN_STATUS.done,
             createdAt: ago(9 * 3_600_000),
             finishedAt: ago(2 * 3_600_000),
           }),
-          run({ id: 'new', title: 'New', status: 'running', createdAt: ago(4 * 60_000) }),
+          run({ id: 'new', title: 'New', status: RUN_STATUS.running, createdAt: ago(4 * 60_000) }),
         ],
       })
       expect(metadataText(row('old'))).toBe('Old2h')
@@ -651,8 +657,8 @@ describe('TaskQuickList', () => {
     it('shows the queue position instead of an age for queued runs', () => {
       renderList({
         runs: [
-          run({ id: 'q1', title: 'First', status: 'queued', createdAt: ago(120_000) }),
-          run({ id: 'q2', title: 'Second', status: 'queued', createdAt: ago(60_000) }),
+          run({ id: 'q1', title: 'First', status: RUN_STATUS.queued, createdAt: ago(120_000) }),
+          run({ id: 'q2', title: 'Second', status: RUN_STATUS.queued, createdAt: ago(60_000) }),
         ],
       })
       // The position rides in the state word (`queued #2`), in place of an age.
@@ -669,7 +675,7 @@ describe('TaskQuickList', () => {
           run({
             id: 'qref',
             title: '788: queued on an issue',
-            status: 'queued',
+            status: RUN_STATUS.queued,
             createdAt: ago(120_000),
             referencedIssueUrl: 'https://github.com/o/r/issues/788',
           }),
@@ -684,7 +690,7 @@ describe('TaskQuickList', () => {
           run({
             id: 'aged',
             title: 'Finished with a PR',
-            status: 'done',
+            status: RUN_STATUS.done,
             finishedAt: ago(2 * 3_600_000),
             pullRequestUrl: 'https://github.com/o/r/pull/9',
           }),
@@ -701,8 +707,8 @@ describe('TaskQuickList', () => {
       renderList(
         {
           runs: [
-            run({ id: 'own', title: 'Own PR', status: 'review', pullRequestUrl: 'https://github.com/o/r/pull/7' }),
-            run({ id: 'foreign', title: 'Foreign PR', status: 'review', pullRequestUrl: 'https://github.com/x/y/pull/8' }),
+            run({ id: 'own', title: 'Own PR', status: RUN_STATUS.review, pullRequestUrl: 'https://github.com/o/r/pull/7' }),
+            run({ id: 'foreign', title: 'Foreign PR', status: RUN_STATUS.review, pullRequestUrl: 'https://github.com/x/y/pull/8' }),
           ],
         },
         '/',
@@ -721,8 +727,8 @@ describe('TaskQuickList', () => {
     it('renders pinned runs in their status section after Needs you, once', () => {
       renderList({
         runs: [
-          run({ id: 'waiting', title: 'Wants you', status: 'waiting' }),
-          run({ id: 'kept', title: 'The one I live in', status: 'done', pinned: true }),
+          run({ id: 'waiting', title: 'Wants you', status: RUN_STATUS.waiting }),
+          run({ id: 'kept', title: 'The one I live in', status: RUN_STATUS.done, pinned: true }),
         ],
         onTogglePin: vi.fn(),
       })
@@ -736,7 +742,7 @@ describe('TaskQuickList', () => {
     it('offers Pin on an ordinary row and Unpin on a pinned one, reporting the state asked for', () => {
       const onTogglePin = vi.fn()
       renderList({
-        runs: [run({ id: 'plain', status: 'done' }), run({ id: 'kept', status: 'done', pinned: true })],
+        runs: [run({ id: 'plain', status: RUN_STATUS.done }), run({ id: 'kept', status: RUN_STATUS.done, pinned: true })],
         onTogglePin,
       })
 
@@ -750,7 +756,7 @@ describe('TaskQuickList', () => {
 
     it('does not keep the pin visible on the current unpinned task', () => {
       renderList({
-        runs: [run({ id: 'open', status: 'running' })],
+        runs: [run({ id: 'open', status: RUN_STATUS.running })],
         currentRunId: 'open',
         onTogglePin: vi.fn(),
       })
@@ -768,7 +774,7 @@ describe('TaskQuickList', () => {
       // phone (where this same list IS the drawer) there was no way to reach it at all. The
       // honest axis is the pointer, not the viewport — the drawer keeps the sidebar's fixed
       // 232px, so a `md:` rule would have been wrong in both directions.
-      renderList({ runs: [run({ id: 'plain', status: 'done' })], onTogglePin: vi.fn() })
+      renderList({ runs: [run({ id: 'plain', status: RUN_STATUS.done })], onTogglePin: vi.fn() })
       const pin = document.querySelector('[data-slot="pin-toggle"]') as HTMLElement
       expect(pin.className).toContain('no-hover:opacity-100')
       // …and big enough for a thumb there, where 20px is not a target — in a slot that is
@@ -781,28 +787,28 @@ describe('TaskQuickList', () => {
     })
 
     it('paints no pin control at all when no container wired one', () => {
-      renderList({ runs: [run({ id: 'plain', status: 'done' })] })
+      renderList({ runs: [run({ id: 'plain', status: RUN_STATUS.done })] })
       expect(document.querySelector('[data-slot="pin-toggle"]')).toBeNull()
     })
 
     it('paints the pin on the Automations tab too', () => {
-      renderList({ view: 'automations', runs: [auto({ id: 'nightly', status: 'done' })], onTogglePin: vi.fn() })
+      renderList({ view: 'automations', runs: [auto({ id: 'nightly', status: RUN_STATUS.done })], onTogglePin: vi.fn() })
       expect(row('nightly')?.querySelector('[data-slot="pin-toggle"]')).not.toBeNull()
     })
 
     it('keeps the status dot on a pinned row', () => {
-      renderList({ runs: [run({ id: 'kept', status: 'waiting', pinned: true })], onTogglePin: vi.fn() })
+      renderList({ runs: [run({ id: 'kept', status: RUN_STATUS.waiting, pinned: true })], onTogglePin: vi.fn() })
       expect(dotOf('kept')?.getAttribute('data-tone')).toBe('pending')
     })
   })
 
   describe('the Active/Automations tabs (#1332)', () => {
     const runs = () => [
-      run({ id: 'a', status: 'running' }),
-      run({ id: 'b', status: 'waiting' }),
-      run({ id: 'c', status: 'done', archived: true }),
-      auto({ id: 'n', status: 'done' }),
-      auto({ id: 'gone', status: 'done', archived: true }),
+      run({ id: 'a', status: RUN_STATUS.running }),
+      run({ id: 'b', status: RUN_STATUS.waiting }),
+      run({ id: 'c', status: RUN_STATUS.done, archived: true }),
+      auto({ id: 'n', status: RUN_STATUS.done }),
+      auto({ id: 'gone', status: RUN_STATUS.done, archived: true }),
     ]
 
     it('shows counts and which view is on', () => {
@@ -829,7 +835,7 @@ describe('TaskQuickList', () => {
     })
 
     it('renders no count for an empty bucket', () => {
-      renderList({ runs: [run({ status: 'running' })] })
+      renderList({ runs: [run({ status: RUN_STATUS.running })] })
       // "Automations 0" is noise — an empty bucket says so by being empty.
       expect(screen.getByRole('button', { name: /Automations/ }).textContent).toBe('Automations')
     })
@@ -846,13 +852,13 @@ describe('TaskQuickList', () => {
       expect(document.querySelector('[data-slot="waiting-dot"]')).toBeNull()
       second.unmount()
 
-      renderList({ runs: [run({ id: 'x' }), auto({ id: 'asks', status: 'waiting' })], view: 'active' })
+      renderList({ runs: [run({ id: 'x' }), auto({ id: 'asks', status: RUN_STATUS.waiting })], view: 'active' })
       expect(automationsDot()).not.toBeNull()
       expect(activeDot()).toBeNull()
     })
 
     it('lists automation tasks in their status sections on the Automations tab', () => {
-      renderList({ runs: [...runs(), auto({ id: 'asks', status: 'waiting' })], view: 'automations' })
+      renderList({ runs: [...runs(), auto({ id: 'asks', status: RUN_STATUS.waiting })], view: 'automations' })
       expect(rowsIn('Needs you')).toHaveLength(1)
       expect(rowsIn('Finished')).toHaveLength(1)
       expect(row('n')).not.toBeNull()
@@ -876,7 +882,7 @@ describe('TaskQuickList', () => {
     })
 
     it('says there are no automation tasks', () => {
-      renderList({ runs: [run({ status: 'done' }), auto({ archived: true })], view: 'automations' })
+      renderList({ runs: [run({ status: RUN_STATUS.done }), auto({ archived: true })], view: 'automations' })
       expect(screen.getByText('No automation tasks.')).not.toBeNull()
     })
   })
@@ -933,7 +939,7 @@ describe('TaskQuickListContainer', () => {
   })
 
   it('renders the live run list', async () => {
-    renderContainer([run({ id: 'live', title: 'A real run', status: 'running' })])
+    renderContainer([run({ id: 'live', title: 'A real run', status: RUN_STATUS.running })])
     expect(await screen.findByText('A real run')).not.toBeNull()
     expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/v1/run-summaries?archived=recent')
   })
@@ -955,7 +961,7 @@ describe('TaskQuickListContainer', () => {
         sent.push({ path, body: typeof init.body === 'string' ? JSON.parse(init.body) : undefined })
         return new Response('{}', { status: 200 })
       }
-      return new Response(JSON.stringify([run({ id: 'live', title: 'A real run', status: 'running' })]), {
+      return new Response(JSON.stringify([run({ id: 'live', title: 'A real run', status: RUN_STATUS.running })]), {
         status: 200,
       })
     })
@@ -976,9 +982,9 @@ describe('TaskQuickListContainer', () => {
 
   it('caps sidebar history at ten rows while retaining every pinned task', async () => {
     renderContainer([
-      ...Array.from({ length: 14 }, (_, i) => run({ id: `recent-${i}`, title: `Recent ${i}`, status: 'done' })),
-      run({ id: 'pinned', title: 'Pinned history', status: 'done', pinned: true }),
-      run({ id: 'attention-pin', title: 'Pinned attention', status: 'waiting', pinned: true }),
+      ...Array.from({ length: 14 }, (_, i) => run({ id: `recent-${i}`, title: `Recent ${i}`, status: RUN_STATUS.done })),
+      run({ id: 'pinned', title: 'Pinned history', status: RUN_STATUS.done, pinned: true }),
+      run({ id: 'attention-pin', title: 'Pinned attention', status: RUN_STATUS.waiting, pinned: true }),
     ])
     await screen.findByText('Pinned history')
     expect(document.querySelectorAll('[data-slot="task-row"]')).toHaveLength(12)
@@ -1012,7 +1018,7 @@ describe('TaskQuickListContainer', () => {
   })
 
   it('drives the sidebar Active/Automations view', async () => {
-    renderContainer([run({ id: 'a', status: 'running' }), auto({ id: 'b', status: 'done' })])
+    renderContainer([run({ id: 'a', status: RUN_STATUS.running }), auto({ id: 'b', status: RUN_STATUS.done })])
 
     await waitFor(() => expect(row('a')).not.toBeNull())
     expect(row('b')).toBeNull()
@@ -1042,7 +1048,7 @@ describe('SidebarSessionScope', () => {
     fetchMock.mockImplementation(async (input) => {
       const path = String(input).replace('?archived=recent', '')
       if (path === '/api/v1/run-summaries') {
-        return new Response(JSON.stringify([run({ id: sharedId, status: 'running' })]), { status: 200 })
+        return new Response(JSON.stringify([run({ id: sharedId, status: RUN_STATUS.running })]), { status: 200 })
       }
       if (path === '/api/v1/projects') {
         return new Response(
@@ -1076,7 +1082,7 @@ describe('SidebarSessionScope', () => {
       return new Response(JSON.stringify({ error: 'not found' }), { status: 404 })
     })
     const client = createQueryClient()
-    client.setQueryData(['shop', 'runs', 'list'], [run({ id: sharedId, status: 'waiting' })])
+    client.setQueryData(['shop', 'runs', 'list'], [run({ id: sharedId, status: RUN_STATUS.waiting })])
     render(
       <QueryClientProvider client={client}>
         <ListViewProvider>
@@ -1094,7 +1100,7 @@ describe('SidebarSessionScope', () => {
 
   it('does not double-count a scoped run list that also sits in that project cache', async () => {
     setApiScope('shop')
-    const shopRun = run({ id: 'shop-only', status: 'waiting' })
+    const shopRun = run({ id: 'shop-only', status: RUN_STATUS.waiting })
     fetchMock.mockImplementation(async () => new Response(JSON.stringify({ error: 'not found' }), { status: 404 }))
     const client = createQueryClient()
     client.setQueryData(workspaceQueryKeys.projects, {
@@ -1142,7 +1148,7 @@ it('hides owned worker rows without changing ordinary titles', () => {
 })
 
 it('does not nest a worker under its parent even when their statuses put them in different buckets', () => {
-  const child = run({ id: 'child', status: 'running', title: 'Check result', delegation: { role: 'worker', permissions: [], parentRunId: 'parent', workspace: { ownerRunId: 'child', resourceId: 'child', kind: 'owned-isolated', path: '/child', branch: 'cez/child', baselineSha: 'a'.repeat(40) } } })
+  const child = run({ id: 'child', status: RUN_STATUS.running, title: 'Check result', delegation: { role: 'worker', permissions: [], parentRunId: 'parent', workspace: { ownerRunId: 'child', resourceId: 'child', kind: 'owned-isolated', path: '/child', branch: 'cez/child', baselineSha: 'a'.repeat(40) } } })
   renderList({ runs: [child, run({ id: 'parent', title: 'Build feature' })] })
   expect(row('child')).toBeNull()
   expect(row('parent')).not.toBeNull()
@@ -1195,7 +1201,7 @@ describe('the calmer row (#617)', () => {
   const parked = (id: string, workers = 2) => run({
     id,
     title: 'Assessing reviewer agent',
-    status: 'waiting',
+    status: RUN_STATUS.waiting,
     delegation: { role: 'root', permissions: [], receipts: [] },
     waits: [workerWait({ workerIds: Array.from({ length: workers }, (_, i) => `00000000-0000-4000-8000-00000000000${i + 1}`) })],
   } as Partial<RunRecord>)
@@ -1281,8 +1287,8 @@ describe('the calmer row (#617)', () => {
   it('puts the unread marker in the trailing slot, in the outcome colour', () => {
     renderList({
       runs: [
-        run({ id: 'd', status: 'done', finishedAt: ago(1_000) }),
-        run({ id: 'f', status: 'failed', finishedAt: ago(1_000) }),
+        run({ id: 'd', status: RUN_STATUS.done, finishedAt: ago(1_000) }),
+        run({ id: 'f', status: RUN_STATUS.failed, finishedAt: ago(1_000) }),
       ],
       onTogglePin: vi.fn(),
     })
@@ -1298,7 +1304,7 @@ describe('the calmer row (#617)', () => {
   })
 
   it('shows the violet robot for a parent waiting on its workers, with a counted label, in the same dot slot', () => {
-    renderList({ runs: [parked('p'), run({ id: 'r', status: 'running' })] })
+    renderList({ runs: [parked('p'), run({ id: 'r', status: RUN_STATUS.running })] })
     const dot = dotOf('p') as HTMLElement
     expect(dot.getAttribute('data-shape')).toBe('workers')
     expect(dot.getAttribute('data-tone')).toBe('running')
@@ -1314,9 +1320,9 @@ describe('the calmer row (#617)', () => {
 
   it('paints the monitoring ring and the queued ring apart from running and cancelled', () => {
     renderList({ runs: [
-      run({ id: 'm', status: 'waiting', waits: [timerWait()] } as Partial<RunRecord>),
-      run({ id: 'q', status: 'queued' }),
-      run({ id: 'c', status: 'cancelled' }),
+      run({ id: 'm', status: RUN_STATUS.waiting, waits: [timerWait()] } as Partial<RunRecord>),
+      run({ id: 'q', status: RUN_STATUS.queued }),
+      run({ id: 'c', status: RUN_STATUS.cancelled }),
     ] })
     expect(dotOf('m')?.getAttribute('data-shape')).toBe('ring')
     expect(dotOf('q')?.getAttribute('data-shape')).toBe('ring')
@@ -1361,9 +1367,9 @@ describe('meta-line state words (#617, the issue\'s list exactly)', () => {
 
   it('omits the state word where the dot already says it — needs you, done, cancelled — and keeps references and age', () => {
     renderList({ runs: [
-      run({ id: 'you', status: 'waiting', ...ref }),
-      run({ id: 'done', status: 'done', ...ref }),
-      run({ id: 'gone', status: 'cancelled', ...ref }),
+      run({ id: 'you', status: RUN_STATUS.waiting, ...ref }),
+      run({ id: 'done', status: RUN_STATUS.done, ...ref }),
+      run({ id: 'gone', status: RUN_STATUS.cancelled, ...ref }),
     ] })
     for (const id of ['you', 'done', 'gone']) {
       expect(stateOf(id), id).toBeNull()
@@ -1374,15 +1380,15 @@ describe('meta-line state words (#617, the issue\'s list exactly)', () => {
   it('says it for every state the issue lists', () => {
     const workers = { role: 'root', permissions: [], receipts: [] }
     renderList({ runs: [
-      run({ id: 'mon', status: 'waiting', waits: [timerWait()] } as Partial<RunRecord>),
-      run({ id: 'run', status: 'running' }),
-      run({ id: 'rev', status: 'review' }),
-      run({ id: 'fail', status: 'failed' }),
+      run({ id: 'mon', status: RUN_STATUS.waiting, waits: [timerWait()] } as Partial<RunRecord>),
+      run({ id: 'run', status: RUN_STATUS.running }),
+      run({ id: 'rev', status: RUN_STATUS.review }),
+      run({ id: 'fail', status: RUN_STATUS.failed }),
       // Already due: no time left to name, so the word is `usage limit` alone.
-      run({ id: 'sched', status: 'waiting', autoResumeAt: ago(60_000) }),
-      run({ id: 'q', status: 'queued' }),
-      run({ id: 'wk', status: 'waiting', delegation: workers, waits: [workerWait({ workerIds: ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002'] })] } as Partial<RunRecord>),
-      run({ id: 'rep', status: 'waiting', delegation: workers, waits: [workerWait({ workerIds: [], requestIds: ['00000000-0000-4000-8000-000000000009'] })] } as Partial<RunRecord>),
+      run({ id: 'sched', status: RUN_STATUS.waiting, autoResumeAt: ago(60_000) }),
+      run({ id: 'q', status: RUN_STATUS.queued }),
+      run({ id: 'wk', status: RUN_STATUS.waiting, delegation: workers, waits: [workerWait({ workerIds: ['00000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000002'] })] } as Partial<RunRecord>),
+      run({ id: 'rep', status: RUN_STATUS.waiting, delegation: workers, waits: [workerWait({ workerIds: [], requestIds: ['00000000-0000-4000-8000-000000000009'] })] } as Partial<RunRecord>),
     ] })
     expect(stateOf('mon')).toMatch(/^monitoring, next check /)
     expect(stateOf('run')).toBeNull()
@@ -1426,15 +1432,15 @@ describe('references on a device that cannot hover (#617 01b)', () => {
 })
 
 it('says when a usage-limited run resumes, in the meta line (#617 01b)', () => {
-  renderList({ runs: [run({ id: 's', status: 'waiting', autoResumeAt: new Date(NOW + 12 * 60_000).toISOString() })] })
+  renderList({ runs: [run({ id: 's', status: RUN_STATUS.waiting, autoResumeAt: new Date(NOW + 12 * 60_000).toISOString() })] })
   expect(row('s')?.querySelector('[data-slot="task-row-state"]')?.textContent).toBe('usage limit, resumes in 12m')
 })
 
 // Phase 4b (hearsay-tools/cezarion#1236): the label stays `monitoring`; the meta line says when.
 it('says when a timer park checks next, in the meta line', () => {
   const at = new Date(NOW + 5 * 60_000).toISOString()
-  renderList({ runs: [run({ id: 'm', status: 'waiting', waits: [{ kind: 'timer', id: '00000000-0000-4000-8000-0000000000d1', source: 'agent', via: 'cezar_wait',
-    registeredAt: new Date(NOW).toISOString(), deadline: at, phase: 'open', turnId: 'turn-1', seconds: 300 }] })] })
+  renderList({ runs: [run({ id: 'm', status: RUN_STATUS.waiting, waits: [{ kind: WAIT_KIND.timer, id: '00000000-0000-4000-8000-0000000000d1', source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
+    registeredAt: new Date(NOW).toISOString(), deadline: at, phase: WAIT_PHASE.open, turnId: 'turn-1', seconds: 300 }] })] })
   const time = new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(new Date(at))
   const sameDay = new Date(at).toDateString() === new Date(NOW).toDateString()
   const text = sameDay ? time : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(at))
@@ -1444,8 +1450,8 @@ it('says when a timer park checks next, in the meta line', () => {
 // hearsay-tools/cezarion#1446: a process wait says when it gives up, in the meta line.
 it('says until when a process wait waits, in the meta line', () => {
   const at = new Date(NOW + 30 * 60_000).toISOString()
-  renderList({ runs: [run({ id: 'p', status: 'waiting', waits: [{ kind: 'process', id: '00000000-0000-4000-8000-0000000000d2', source: 'agent', via: 'cezar_wait',
-    registeredAt: new Date(NOW).toISOString(), deadline: at, phase: 'open', turnId: 'turn-1', timeoutSeconds: 1800, pid: 4242 }] })] })
+  renderList({ runs: [run({ id: 'p', status: RUN_STATUS.waiting, waits: [{ kind: WAIT_KIND.process, id: '00000000-0000-4000-8000-0000000000d2', source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
+    registeredAt: new Date(NOW).toISOString(), deadline: at, phase: WAIT_PHASE.open, turnId: 'turn-1', timeoutSeconds: 1800, pid: 4242 }] })] })
   const time = new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(new Date(at))
   const sameDay = new Date(at).toDateString() === new Date(NOW).toDateString()
   const text = sameDay ? time : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(at))
@@ -1479,9 +1485,9 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
 
   it('leads the meta line with the send glyph for notify: true — and only then', () => {
     renderList({ runs: [
-      run({ id: 'on', status: 'running', notify: true, pullRequestUrl: 'https://github.com/o/r/pull/594' }),
-      run({ id: 'off', status: 'running', notify: false }),
-      run({ id: 'unset', status: 'running' }),
+      run({ id: 'on', status: RUN_STATUS.running, notify: true, pullRequestUrl: 'https://github.com/o/r/pull/594' }),
+      run({ id: 'off', status: RUN_STATUS.running, notify: false }),
+      run({ id: 'unset', status: RUN_STATUS.running }),
     ] })
     const on = glyph('on')
     expect(on).not.toBeNull()
@@ -1501,15 +1507,15 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
   })
 
   it('keeps the meta line colour on the open row, so the glyph follows the selected step-up', () => {
-    renderList({ runs: [run({ id: 'on', status: 'running', notify: true })], currentRunId: 'on' })
+    renderList({ runs: [run({ id: 'on', status: RUN_STATUS.running, notify: true })], currentRunId: 'on' })
     expect(metaEl('on').className).toContain('text-muted-foreground')
     expect(glyph('on')?.getAttribute('class')).not.toMatch(/text-/)
   })
 
   it('shows on a row with no other meta, and on a worker row', () => {
     renderList({ runs: [
-      run({ id: 'solo', status: 'queued', notify: true }),
-      run({ id: 'w', status: 'running', notify: true, delegation: { role: 'worker', permissions: [], receipts: [] } as never }),
+      run({ id: 'solo', status: RUN_STATUS.queued, notify: true }),
+      run({ id: 'w', status: RUN_STATUS.running, notify: true, delegation: { role: 'worker', permissions: [], receipts: [] } as never }),
     ] })
     expect(glyph('solo')).not.toBeNull()
     expect(glyph('w')).not.toBeNull()
@@ -1517,7 +1523,7 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
 
   it('renders the same glyph on a device that cannot hover', () => {
     stubMedia({ noHover: true, desktop: true })
-    renderList({ runs: [run({ id: 'on', status: 'running', notify: true })] })
+    renderList({ runs: [run({ id: 'on', status: RUN_STATUS.running, notify: true })] })
     expect(glyph('on')).not.toBeNull()
     expect(metaEl('on').textContent).toBe('1m')
   })
@@ -1546,21 +1552,21 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
     const age = (id: string) => metaEl(id).querySelector('[data-slot="task-row-age"]')
 
     it('takes the age off together with its separator, never ellipsizing it', () => {
-      renderList({ runs: [run({ id: 't', status: 'running', notify: true, pullRequestUrl: 'https://github.com/o/r/pull/594' })] })
+      renderList({ runs: [run({ id: 't', status: RUN_STATUS.running, notify: true, pullRequestUrl: 'https://github.com/o/r/pull/594' })] })
       expect(age('t')).toBeNull()
       expect(metaEl('t').textContent).toBe('#594')
       expect(glyph('t')).not.toBeNull()
     })
 
     it('does the same for a row that is not notifying', () => {
-      renderList({ runs: [run({ id: 't', status: 'running' })] })
+      renderList({ runs: [run({ id: 't', status: RUN_STATUS.running })] })
       expect(age('t')).toBeNull()
       expect(metaEl('t').textContent).toBe('\u00a0')
     })
 
     it('keeps the age while the line fits, and restores it when the column grows', () => {
       client = 130
-      renderList({ runs: [run({ id: 't', status: 'running' })] })
+      renderList({ runs: [run({ id: 't', status: RUN_STATUS.running })] })
       expect(age('t')?.textContent).toBe('1m')
       client = 100
       resize()
@@ -1571,7 +1577,7 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
     })
 
     it('does not flicker at the boundary: the decision uses the width WITH the age, not the line it just shortened', () => {
-      renderList({ runs: [run({ id: 't', status: 'running' })] })
+      renderList({ runs: [run({ id: 't', status: RUN_STATUS.running })] })
       expect(age('t')).toBeNull()
       // The bare line (80) fits in 100, but the age line (120) does not — repeated observer
       // callbacks must keep the age off instead of toggling it every frame.
@@ -1601,7 +1607,7 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
       })
       try {
         client = 130
-        renderList({ runs: [run({ id: 't', status: 'running' })] })
+        renderList({ runs: [run({ id: 't', status: RUN_STATUS.running })] })
         expect(age('t')).not.toBeNull()
         client = 125 // still fits 120: a box-measured width (130) would drop the age here
         resize()
@@ -1618,7 +1624,7 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
     it('does not loop when web fonts have already resolved', async () => {
       Object.defineProperty(document, 'fonts', { configurable: true, value: { status: 'loading', ready: Promise.resolve() } })
       try {
-        renderList({ runs: [run({ id: 't', status: 'running' })] })
+        renderList({ runs: [run({ id: 't', status: RUN_STATUS.running })] })
         await act(async () => { await Promise.resolve(); await Promise.resolve() })
         expect(age('t')).toBeNull()
         for (let i = 0; i < 3; i += 1) {
@@ -1643,7 +1649,7 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
       const resizeChip = (chip: Element, width: number) =>
         act(() => watchers.filter((w) => w.targets.includes(chip)).forEach((w) => w.cb([{ target: chip, contentRect: { width } }])))
       client = 130
-      renderList({ runs: [run({ id: 't', status: 'running', pullRequestUrl: 'https://github.com/o/r/pull/594' })] })
+      renderList({ runs: [run({ id: 't', status: RUN_STATUS.running, pullRequestUrl: 'https://github.com/o/r/pull/594' })] })
       expect(age('t')).not.toBeNull()
       const chip = metaEl('t').querySelector('[data-slot="pr-chip"]') as Element
       expect(watchers.some((w) => w.targets.includes(chip))).toBe(true)
@@ -1691,7 +1697,7 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
           <MemoryRouter>
             <ReferenceStatusRegistry>
               <ReferenceStatusProvider projectId="p" repoBase="https://github.com/o/r" requests={[{ projectId: 'p', kind: 'PR', number: 594 }]}>
-                <TaskQuickList runs={[run({ id: 't', status: 'running', pullRequestUrl: 'https://github.com/o/r/pull/594' })]} view="active" now={NOW} onViewChange={vi.fn()} />
+                <TaskQuickList runs={[run({ id: 't', status: RUN_STATUS.running, pullRequestUrl: 'https://github.com/o/r/pull/594' })]} view="active" now={NOW} onViewChange={vi.fn()} />
               </ReferenceStatusProvider>
             </ReferenceStatusRegistry>
           </MemoryRouter>
@@ -1739,7 +1745,7 @@ describe('notifying glyph and age-first overflow on the meta line (#729)', () =>
           <MemoryRouter>
             <ReferenceStatusRegistry>
               <ReferenceStatusProvider projectId="p" repoBase="https://github.com/o/r" requests={[{ projectId: 'p', kind: 'PR', number: 594 }]}>
-                <TaskQuickList runs={[run({ id: 't', status: 'running', pullRequestUrl: 'https://github.com/o/r/pull/594' })]} view="active" now={NOW} onViewChange={vi.fn()} />
+                <TaskQuickList runs={[run({ id: 't', status: RUN_STATUS.running, pullRequestUrl: 'https://github.com/o/r/pull/594' })]} view="active" now={NOW} onViewChange={vi.fn()} />
               </ReferenceStatusProvider>
             </ReferenceStatusRegistry>
           </MemoryRouter>
@@ -1770,12 +1776,12 @@ describe('sidebar archive (#780)', () => {
   it('puts the archive button on finished rows only, Finished and Pinned alike', () => {
     renderList({
       runs: [
-        run({ id: 'fin', title: 'Done one', status: 'done' }),
-        run({ id: 'pinned-fin', title: 'Pinned done', status: 'failed', pinned: true }),
-        run({ id: 'live', status: 'running' }),
-        run({ id: 'ask', status: 'waiting' }),
-        run({ id: 'sched', status: 'waiting', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
-        run({ id: 'pinned-live', status: 'running', pinned: true }),
+        run({ id: 'fin', title: 'Done one', status: RUN_STATUS.done }),
+        run({ id: 'pinned-fin', title: 'Pinned done', status: RUN_STATUS.failed, pinned: true }),
+        run({ id: 'live', status: RUN_STATUS.running }),
+        run({ id: 'ask', status: RUN_STATUS.waiting }),
+        run({ id: 'sched', status: RUN_STATUS.waiting, autoResumeAt: new Date(NOW + 600_000).toISOString() }),
+        run({ id: 'pinned-live', status: RUN_STATUS.running, pinned: true }),
       ],
       onTogglePin: vi.fn(),
       onArchiveRun: vi.fn(),
@@ -1826,7 +1832,7 @@ describe('sidebar archive (#780)', () => {
     fireEvent.click(button)
     expect(onSweep).toHaveBeenCalledWith('unpinned')
     cleanup()
-    renderList({ runs: [run({ id: 'live', status: 'running' })], onSweep })
+    renderList({ runs: [run({ id: 'live', status: RUN_STATUS.running })], onSweep })
     expect(groupButton('unpinned')).toBeNull()
   })
 
@@ -1839,14 +1845,14 @@ describe('sidebar archive (#780)', () => {
 
   it('offers no sweep when only pins or scheduled runs are present', () => {
     const onSweep = vi.fn()
-    renderList({ runs: [run({ id: 'p1', pinned: true, status: 'done' }), run({ id: 'p2', pinned: true, status: 'running' })], onSweep, onTogglePin: vi.fn() })
+    renderList({ runs: [run({ id: 'p1', pinned: true, status: RUN_STATUS.done }), run({ id: 'p2', pinned: true, status: RUN_STATUS.running })], onSweep, onTogglePin: vi.fn() })
     expect(document.querySelectorAll('[data-action="archive-group"]')).toHaveLength(0)
     cleanup()
     // Review Focus 3: a pinned run that is only waiting out a usage limit has nothing to sweep.
     renderList({
       runs: [
-        run({ id: 'p3', pinned: true, status: 'running' }),
-        run({ id: 'p4', pinned: true, status: 'waiting', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
+        run({ id: 'p3', pinned: true, status: RUN_STATUS.running }),
+        run({ id: 'p4', pinned: true, status: RUN_STATUS.waiting, autoResumeAt: new Date(NOW + 600_000).toISOString() }),
       ],
       onSweep,
     })
@@ -1923,11 +1929,11 @@ describe('swipe to archive on touch (#780 §7)', () => {
   it('wraps only finished, non-scheduled rows in a pan-y swipe surface', () => {
     renderList({
       runs: [
-        run({ id: 'fin', status: 'done' }),
-        run({ id: 'pin', status: 'cancelled', pinned: true }),
-        run({ id: 'live', status: 'running' }),
-        run({ id: 'ask', status: 'waiting' }),
-        run({ id: 'sched', status: 'waiting', autoResumeAt: new Date(NOW + 600_000).toISOString() }),
+        run({ id: 'fin', status: RUN_STATUS.done }),
+        run({ id: 'pin', status: RUN_STATUS.cancelled, pinned: true }),
+        run({ id: 'live', status: RUN_STATUS.running }),
+        run({ id: 'ask', status: RUN_STATUS.waiting }),
+        run({ id: 'sched', status: RUN_STATUS.waiting, autoResumeAt: new Date(NOW + 600_000).toISOString() }),
       ],
       onArchiveRun: vi.fn(),
       onTogglePin: vi.fn(),
@@ -2002,7 +2008,7 @@ describe('swipe to archive on touch (#780 §7)', () => {
 
   it('keeps the task link focused when finishing moves a pin into Finished', () => {
     const client = createQueryClient()
-    const live = run({ id: 'flip', title: 'Flip', status: 'running', pinned: true })
+    const live = run({ id: 'flip', title: 'Flip', status: RUN_STATUS.running, pinned: true })
     const tree = (record: RunSummary) => (
       <QueryClientProvider client={client}>
         <MemoryRouter>
@@ -2015,7 +2021,7 @@ describe('swipe to archive on touch (#780 §7)', () => {
     link.focus()
     expect(surface('flip')).toBeNull()
     // The status move remounts the row in Finished, but keyboard focus follows it.
-    rerender(tree({ ...live, status: 'done', finishedAt: ago(1_000) }))
+    rerender(tree({ ...live, status: RUN_STATUS.done, finishedAt: ago(1_000) }))
     expect(document.activeElement).toBe(row('flip')?.querySelector('a'))
     expect(bucket('Finished').contains(document.activeElement)).toBe(true)
     expect(surface('flip')).not.toBeNull()
@@ -2054,8 +2060,8 @@ describe('complete compact sidebar references', () => {
     expect(trigger.closest('a')).toBeNull()
   })
   it('omits the running state word in Working but keeps monitoring', () => {
-    const working = run({ title: 'Working task', status: 'running' })
-    const monitoring = run({ title: 'Monitoring task', status: 'waiting', waits: [timerWait()] } as Partial<RunRecord>)
+    const working = run({ title: 'Working task', status: RUN_STATUS.running })
+    const monitoring = run({ title: 'Monitoring task', status: RUN_STATUS.waiting, waits: [timerWait()] } as Partial<RunRecord>)
     const { container } = renderList({ runs: [working, monitoring] })
     const row = (id: string) => container.querySelector(`[data-run-id="${id}"]`)!
     expect(row(working.id).querySelector('[data-slot="task-row-state"]')).toBeNull()

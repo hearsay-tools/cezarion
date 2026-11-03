@@ -1,3 +1,10 @@
+import {
+  RUN_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { summaryOf } from '@/test/run-summary-fixture'
 import { openHumanWait } from '@/test/run-summary-fixture'
 import { QueryClientProvider } from '@tanstack/react-query'
@@ -64,7 +71,7 @@ function run(overrides: Partial<RunRecord> & { id: string; title: string }): Run
   return summaryOf({
     workflow: 'build',
     task: 'do the thing',
-    status: 'running',
+    status: RUN_STATUS.running,
     createdAt: '2026-07-14T10:00:00Z',
     tokensUsed: 0,
     archived: false,
@@ -81,7 +88,7 @@ function indexed(
   overrides: Partial<RunIndexEntry> & { id: string; projectId: string; title: string },
 ): RunIndexEntry {
   return {
-    status: 'done',
+    status: RUN_STATUS.done,
     createdAt: '2026-07-14T10:00:00Z',
     archived: false,
     workflow: 'build',
@@ -511,8 +518,8 @@ describe('Tasks group', () => {
       // spelled `/p/<boot>/…` rather than leaning on the legacy flat redirect to land.
       projects: [project({ id: 'cezar' })],
       runs: [
-        run({ id: 'r-old', title: 'Old fix', status: 'done', createdAt: '2026-07-13T10:00:00Z' }),
-        run({ id: 'r-new', title: 'Fix the flaky test', status: 'waiting', createdAt: '2026-07-14T10:00:00Z' }),
+        run({ id: 'r-old', title: 'Old fix', status: RUN_STATUS.done, createdAt: '2026-07-13T10:00:00Z' }),
+        run({ id: 'r-new', title: 'Fix the flaky test', status: RUN_STATUS.waiting, createdAt: '2026-07-14T10:00:00Z' }),
       ],
     })
     openWith({ metaKey: true })
@@ -561,7 +568,7 @@ describe('Tasks group', () => {
 describe('Recently finished group', () => {
   /** A finished run nobody has opened since it finished — what `isUnread` calls unread. */
   const done = (id: string, title: string, finishedAt: string, seenAt?: string) =>
-    run({ id, title, status: 'done', createdAt: '2026-07-10T10:00:00Z', finishedAt, seenAt })
+    run({ id, title, status: RUN_STATUS.done, createdAt: '2026-07-10T10:00:00Z', finishedAt, seenAt })
 
   it('sits directly under New task, newest-finished first, and lists nothing else', async () => {
     renderPalette({
@@ -570,7 +577,7 @@ describe('Recently finished group', () => {
         done('r-new', 'Landed second', '2026-07-15T10:00:00Z'),
         // Already seen since it finished → read, so it belongs under Tasks.
         done('r-seen', 'Already read', '2026-07-13T10:00:00Z', '2026-07-13T11:00:00Z'),
-        run({ id: 'r-live', title: 'Still running', status: 'running' }),
+        run({ id: 'r-live', title: 'Still running', status: RUN_STATUS.running }),
       ],
     })
     openWith({ metaKey: true })
@@ -591,7 +598,7 @@ describe('Recently finished group', () => {
     renderPalette({
       runs: [
         done('r-unread', 'Landed', '2026-07-15T10:00:00Z'),
-        run({ id: 'r-live', title: 'Still running', status: 'running' }),
+        run({ id: 'r-live', title: 'Still running', status: RUN_STATUS.running }),
       ],
     })
     openWith({ metaKey: true })
@@ -605,13 +612,13 @@ describe('Recently finished group', () => {
     renderPalette({
       projects: [project({ id: 'cezar' }), project({ id: 'shop' })],
       entry: '/p/cezar/',
-      runs: [run({ id: 'r-live', title: 'Still running', status: 'running' })],
+      runs: [run({ id: 'r-live', title: 'Still running', status: RUN_STATUS.running })],
       indexed: [
         indexed({
           id: 'r-shop',
           projectId: 'shop',
           title: 'Checkout crash',
-          status: 'failed',
+          status: RUN_STATUS.failed,
           finishedAt: '2026-07-15T10:00:00Z',
         }),
       ],
@@ -626,7 +633,7 @@ describe('Recently finished group', () => {
   })
 
   it('renders no Unread group when nothing finished unseen', async () => {
-    renderPalette({ runs: [run({ id: 'r-live', title: 'Still running', status: 'running' })] })
+    renderPalette({ runs: [run({ id: 'r-live', title: 'Still running', status: RUN_STATUS.running })] })
     openWith({ metaKey: true })
     await screen.findByText('Still running')
 
@@ -647,7 +654,7 @@ describe('Recently finished group', () => {
           id: 'r-parked',
           projectId: 'shop',
           title: 'Waiting out the limit',
-          status: 'waiting',
+          status: RUN_STATUS.waiting,
           autoResumeAt: '2026-07-15T14:00:00Z',
         }),
       ],
@@ -670,7 +677,7 @@ describe('Recently finished group', () => {
         run({
           id: 'r-filed',
           title: 'Filed away',
-          status: 'done',
+          status: RUN_STATUS.done,
           finishedAt: '2026-07-15T10:00:00Z',
           archived: true,
         }),
@@ -726,7 +733,7 @@ describe('ranking', () => {
 
 describe('searching', () => {
   const finished = (id: string, title: string) =>
-    run({ id, title, status: 'done', finishedAt: '2026-07-15T10:00:00Z' })
+    run({ id, title, status: RUN_STATUS.done, finishedAt: '2026-07-15T10:00:00Z' })
 
   it('drops the Recently finished section, so near-misses cannot sit above the exact match', async () => {
     renderPalette({
@@ -879,9 +886,9 @@ describe('Tasks across projects', () => {
       projects: REGISTRY,
       entry: '/p/cezar/',
       // The live list has the run's CURRENT status; the index still says it was running.
-      runs: [run({ id: 'r-mine', title: 'Fix the flaky test', status: 'review' })],
+      runs: [run({ id: 'r-mine', title: 'Fix the flaky test', status: RUN_STATUS.review })],
       indexed: [
-        indexed({ id: 'r-mine', projectId: 'cezar', title: 'Fix the flaky test', status: 'running' }),
+        indexed({ id: 'r-mine', projectId: 'cezar', title: 'Fix the flaky test', status: RUN_STATUS.running }),
         indexed({ id: 'r-shop', projectId: 'shop', title: 'Checkout crash' }),
       ],
     })
@@ -1142,13 +1149,13 @@ describe('the pure ordering helpers', () => {
 
 it('preserves parked-parent wait phases without listing owned workers', async () => {
   const workerId = '10000000-0000-4000-8000-000000000002'
-  const live = run({ id: 'live-parent', title: 'Live parent', status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [] },
+  const live = run({ id: 'live-parent', title: 'Live parent', status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: [], receipts: [] },
     // A worker wait is a wait-list entry (hearsay-tools/cezarion#1301).
-    waits: [{ kind: 'worker', id: '10000000-0000-4000-8000-000000000003', source: 'agent', via: 'cez-worker-wait', registeredAt: '2026-09-05T00:00:00.000Z', deadline: '2026-09-06T00:00:00.000Z', phase: 'open', turnId: 'turn-1', timeoutSeconds: 600, workerIds: [workerId], revisions: [], outcomes: [] }] } as Parameters<typeof run>[0])
+    waits: [{ kind: WAIT_KIND.worker, id: '10000000-0000-4000-8000-000000000003', source: WAIT_SOURCE.agent, via: WAIT_VIA['cez-worker-wait'], registeredAt: '2026-09-05T00:00:00.000Z', deadline: '2026-09-06T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1', timeoutSeconds: 600, workerIds: [workerId], revisions: [], outcomes: [] }] } as Parameters<typeof run>[0])
   const liveWorker = run({
     id: 'live-worker',
     title: 'Secret worker title',
-    status: 'running',
+    status: RUN_STATUS.running,
     delegation: {
       role: 'worker',
       permissions: [],
@@ -1165,7 +1172,7 @@ it('preserves parked-parent wait phases without listing owned workers', async ()
   })
   renderPalette({ projects: [project({ id: 'cezar' }), project({ id: 'other' })], runs: [live, liveWorker], indexed: [
     { ...live, id: 'indexed-parent', title: 'Indexed parent', projectId: 'other', delegation: { role: 'root' }, waitingOn: { kind: 'workers', count: 0 } },
-    { ...live, id: 'indexed-worker', title: 'Indexed worker unique', status: 'running', projectId: 'other', delegation: { role: 'worker', parentRunId: 'parent' } },
+    { ...live, id: 'indexed-worker', title: 'Indexed worker unique', status: RUN_STATUS.running, projectId: 'other', delegation: { role: 'worker', parentRunId: 'parent' } },
   ] })
   openWith({ metaKey: true })
   await screen.findByText('Indexed parent')
@@ -1183,9 +1190,9 @@ it('preserves parked-parent wait phases without listing owned workers', async ()
 })
 
 it('preserves pending human attention in live and indexed palette rows', async () => {
-  const live = run({ id: 'live-asking', title: 'Live question', status: 'waiting', waits: [openHumanWait(1)], delegation: { role: 'root', permissions: [], receipts: [] } })
+  const live = run({ id: 'live-asking', title: 'Live question', status: RUN_STATUS.waiting, waits: [openHumanWait(1)], delegation: { role: 'root', permissions: [], receipts: [] } })
   renderPalette({ projects: [project({ id: 'cezar' }), project({ id: 'other' })], runs: [live], indexed: [
-    { ...live, id: 'indexed-asking', title: 'Indexed question', projectId: 'other', delegation: { role: 'root' }, waitingOn: { kind: 'human', shown: true } },
+    { ...live, id: 'indexed-asking', title: 'Indexed question', projectId: 'other', delegation: { role: 'root' }, waitingOn: { kind: WAIT_KIND.human, shown: true } },
   ] })
   openWith({ metaKey: true })
   await screen.findByText('Indexed question')
