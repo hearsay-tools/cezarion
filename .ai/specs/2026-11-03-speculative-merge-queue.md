@@ -295,20 +295,24 @@ Rows that "cannot happen" at k=1 are why the serial queue never needed them.
   `merge_group` run for the same PR on a different base while the PR stays in the
   queue, with no removal event for that PR between the two runs. An invalidated run
   is waste. It counts in neither the numerator nor the denominator.
-- **Failures (numerator).** Every other completed run whose conclusion is
-  `failure`, `cancelled` or `timed_out`. This includes:
+- **Removed for another cause.** The run's own entry may be removed for a cause
+  other than this run's checks. The removal event's reason is then neither
+  `failed_checks` nor a check timeout, for example a human removal, a PR-head change or a later
+  conflict. Such a run counts in neither the numerator nor the denominator,
+  whether or not a replacement run starts. A replacement run is classified on its
+  own.
+- **Merge conflicts at build time.** The conflict removes the entry before a run
+  exists, so it counts nowhere.
+- **Denominator.** Every other completed run.
+- **Failures (numerator).** Each run in the denominator whose conclusion is
+  `failure`, `cancelled` or `timed_out`. Its entry is removed for its own checks
+  (`failed_checks` or a check timeout). This includes:
   - a check timeout;
   - an admission API error or deadline (row 18);
   - a job cancelled by its own timeout.
-- **Manual removal.** When a human removes the run's own entry, the run counts in
-  neither the numerator nor the denominator.
-- **Merge conflicts.** A conflict removes the entry before a run exists, so it counts
-  nowhere.
-- **Denominator.** Every completed run that is not invalidated and not manually
-  removed.
 - **Serial baseline under this rule.** About 23%: 27 failures plus 1 job-timeout
-  cancel, over 120 runs, before manual removals are excluded. The model used 22.5%,
-  which counts failures only. Under the serial queue, no run was invalidated.
+  cancel, over 120 runs, before runs removed for another cause are excluded. The
+  model used 22.5%, which counts failures only. Under the serial queue, no run was invalidated.
   hearsay-tools/cezarion#2625 recomputes the exact baseline under this rule.
 
 hearsay-tools/cezarion#2625 implements this rule.
