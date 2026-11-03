@@ -279,6 +279,40 @@ Rows that "cannot happen" at k=1 are why the serial queue never needed them.
 - queue failure rate above 30%;
 - runner-minutes per merge above 179 (128 × 1.4).
 
+**The cost baseline.**
+- 128 is the modeled serial cost at a 22.5% failure rate with no native-suite reuse.
+  The owner chose it as the baseline (Q3).
+- The measured serial cost, 117, includes the 8% of runs that reused native suites.
+- Measured against 117, the 179 limit is +53%. The difference is deliberate: two
+  builds lose most reuse by design (§ Design 3). So the limit is set from the
+  no-reuse serial cost, and lost reuse is part of what the pilot pays for.
+- Lowering the limit to 164 (117 × 1.4) needs an owner decision.
+
+**How the failure rate is counted.** The rate is per queue run: completed
+`merge_group` runs of `ci.yml` in the window.
+
+- **Invalidated runs.** A run is invalidated when GitHub starts a later
+  `merge_group` run for the same PR on a different base while the PR stays in the
+  queue, with no removal event for that PR between the two runs. An invalidated run
+  is waste. It counts in neither the numerator nor the denominator.
+- **Failures (numerator).** Every other completed run whose conclusion is
+  `failure`, `cancelled` or `timed_out`. This includes:
+  - a check timeout;
+  - an admission API error or deadline (row 18);
+  - a job cancelled by its own timeout.
+- **Manual removal.** When a human removes the run's own entry, the run counts in
+  neither the numerator nor the denominator.
+- **Merge conflicts.** A conflict removes the entry before a run exists, so it counts
+  nowhere.
+- **Denominator.** Every completed run that is not invalidated and not manually
+  removed.
+- **Serial baseline under this rule.** About 23%: 27 failures plus 1 job-timeout
+  cancel, over 120 runs, before manual removals are excluded. The model used 22.5%,
+  which counts failures only. Under the serial queue, no run was invalidated.
+  hearsay-tools/cezarion#2625 recomputes the exact baseline under this rule.
+
+hearsay-tools/cezarion#2625 implements this rule.
+
 Also roll back on any correctness signal:
 
 - a `main` commit with no exact queue run;
