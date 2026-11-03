@@ -1894,7 +1894,7 @@ emits a failure and interrupts the runner; it never synthesizes process exit or
 releases capacity early. Standalone wall-clock limits remain unchanged.
 
 Autonomous turn-end rows **A1–A14** live in
-`core/workflow-autonomous-parity.test.ts` and the same parity guard (hearsay-tools/cezarion#426).
+`core/workflow-autonomous-parity.testkit.ts` and the same parity guard (hearsay-tools/cezarion#426).
 Every adapter covers fresh and Continue nudges, a refused `cezar_ask` (A3/A4), the
 40-nudge cap, non-autonomous parking, a `cezar_wait` timer park with no nudge (A7),
 `cezar_done` with no nudge (A8) and persisted-question priority (A10). A9 preserves
