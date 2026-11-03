@@ -551,6 +551,8 @@ node .github/scripts/queue-metrics.cjs --from 2026-11-01 --to 2026-11-03 --json
 
 It only reads, through authenticated `gh api` calls, and needs no configuration.
 A date covers its whole UTC day. A `YYYY-MM-DDTHH:MM:SSZ` time is an exact bound.
+Each runs and search query covers one UTC day, because GitHub returns at most
+1,000 results per query.
 
 - **Runner-minutes**: the jobs of completed `merge_group` runs of `ci.yml`, each
   rounded up to a whole minute. An `ubicloud-*` label is Ubicloud. A GitHub image

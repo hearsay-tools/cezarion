@@ -103,6 +103,37 @@ test('a client error stops the script with exit code 1 and no report', async () 
   assert.match(err, /^queue-metrics: gh: Forbidden \(HTTP 403\)\n$/);
 });
 
+test('a multi-day window reads one UTC day per query and counts a boundary result once', async () => {
+  const days = ['2026-11-01T12:00:00Z..2026-11-02T00:00:00Z', '2026-11-02T00:00:00Z..2026-11-03T00:00:00Z',
+    '2026-11-03T00:00:00Z..2026-11-03T06:00:00Z'];
+  const midnight = { ...queueRun(7, 'success', SHA('m')), created_at: '2026-11-02T00:00:00Z' };
+  const merged = { number: 7, mergedAt: '2026-11-02T00:00:00Z',
+    timelineItems: { nodes: [{ createdAt: '2026-11-01T23:50:00Z' }] } };
+  const queried = { runs: [], search: [] };
+  const gh = async args => {
+    const created = /&created=([^&]+)&/.exec(args[1])?.[1];
+    if (args[1].includes('/runs?event=merge_group&created=')) {
+      queried.runs.push(created);
+      const rows = created.includes('2026-11-02T00:00:00Z') ? [midnight] : [];
+      return JSON.stringify({ total_count: rows.length, workflow_runs: rows });
+    }
+    if (args[1].includes('/runs?event=push')) return JSON.stringify({ total_count: 0, workflow_runs: [] });
+    if (args[1].includes('/jobs?')) return JSON.stringify({ total_count: 0, jobs: [] });
+    if (args[1].includes('/compare/')) return 'identical\n';
+    const q = args.find(arg => arg.startsWith('q='));
+    queried.search.push(/merged:(\S+)/.exec(q)[1]);
+    const nodes = q.includes('2026-11-02T00:00:00Z') ? [merged] : [];
+    return JSON.stringify({ data: { search: { issueCount: nodes.length, pageInfo: { hasNextPage: false }, nodes } } });
+  };
+  const { code, out, err } = await run(['--from', '2026-11-01T12:00:00Z', '--to', '2026-11-03T06:00:00Z', '--repo', 'o/r', '--json'], gh);
+  assert.equal(err, '');
+  assert.equal(code, 0);
+  assert.deepEqual(queried, { runs: days, search: days });
+  const metrics = JSON.parse(out);
+  assert.equal(metrics.queue.completed, 1);
+  assert.equal(metrics.merges.total, 1);
+});
+
 test('window options: dates are whole UTC days, the default is the last 7 days', () => {
   const now = Date.parse('2026-11-08T10:30:15.400Z');
   assert.deepEqual(parseOptions(['--from', '2026-11-01', '--to', '2026-11-03'], now),

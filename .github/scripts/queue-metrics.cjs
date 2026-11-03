@@ -99,18 +99,37 @@ const trimRun = run => ({ id: run.id, run_attempt: run.run_attempt, event: run.e
 
 const inWindow = (at, { from, to }) => { const ms = Date.parse(at); return ms >= from && ms < to; };
 
+// The runs list and the search return at most LIST_CAP results per query, so each query covers one UTC day.
+// Date bounds are inclusive, so a result on a day boundary comes back twice.
+function dayChunks({ from, to }) {
+  const chunks = [];
+  for (let start = from; start < to;) {
+    const end = Math.min(to, (Math.floor(start / DAY) + 1) * DAY);
+    chunks.push({ from: start, to: end });
+    start = end;
+  }
+  return chunks;
+}
+
+async function readByDay(window, readDay, key) {
+  const unique = new Map();
+  for (const rows of await mapLimit(dayChunks(window), readDay)) for (const row of rows) unique.set(row[key], row);
+  return [...unique.values()];
+}
+
 async function readRuns(api, repo, window, event) {
-  const created = `${iso(window.from)}..${iso(window.to)}`;
   const branch = event === 'push' ? '&branch=main' : '';
-  const runs = await api.list(`repos/${repo}/actions/workflows/ci.yml/runs?event=${event}${branch}&created=${created}&exclude_pull_requests=true`, 'workflow_runs');
+  const runs = await readByDay(window, day => api.list(
+    `repos/${repo}/actions/workflows/ci.yml/runs?event=${event}${branch}&created=${iso(day.from)}..${iso(day.to)}&exclude_pull_requests=true`,
+    'workflow_runs'), 'id');
   return runs.filter(run => inWindow(run.created_at, window)).map(trimRun);
 }
 
 const readJobs = async (api, repo, runId) =>
   (await api.list(`repos/${repo}/actions/runs/${runId}/jobs?filter=all`, 'jobs')).map(trimJob);
 
-async function readQueueMerges(api, repo, window) {
-  const q = `repo:${repo} is:pr is:merged base:main merged:${iso(window.from)}..${iso(window.to)}`;
+async function readMergedDay(api, repo, day) {
+  const q = `repo:${repo} is:pr is:merged base:main merged:${iso(day.from)}..${iso(day.to)}`;
   const prs = [];
   let cursor;
   do {
@@ -121,6 +140,11 @@ async function readQueueMerges(api, repo, window) {
       enqueuedAt: pr.timelineItems.nodes.map(node => node.createdAt) })));
     cursor = search.pageInfo.hasNextPage ? search.pageInfo.endCursor : undefined;
   } while (cursor);
+  return prs;
+}
+
+async function readQueueMerges(api, repo, window) {
+  const prs = await readByDay(window, day => readMergedDay(api, repo, day), 'number');
   return prs.filter(pr => inWindow(pr.mergedAt, window));
 }
 
