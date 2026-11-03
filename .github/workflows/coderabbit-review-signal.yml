@@ -1,0 +1,17 @@
+name: CodeRabbit review signal
+# Review events use PR merge-ref context. This signal has no token permissions,
+# secrets, checkout or outputs. Trusted workflow_run consumers only use official
+# source metadata to locate a PR, then read all admission facts independently.
+on:
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+permissions: {}
+jobs:
+  signal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    permissions: {}
+    steps:
+      - run: 'true'

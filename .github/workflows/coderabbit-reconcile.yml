@@ -1,0 +1,83 @@
+name: Reconcile CodeRabbit admission
+
+# Default-branch control plane only. No PR checkout, model calls or secrets.
+on:
+  check_run:
+    types: [created, completed]
+  workflow_run:
+    workflows: [CI, CodeRabbit review signal]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: PR to re-check after resolving a thread by hand
+        required: true
+        type: number
+permissions: {}
+# Discovery validates the event and supplies reliable PR numbers before locking.
+# Independent events select at most four associated PRs; empty provider
+# associations use bounded inventory lookup for matching current heads only.
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      actions: read
+    outputs:
+      numbers: ${{ steps.discover.outputs.numbers }}
+    steps:
+      - name: Check out trusted discovery scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        id: discover
+        with:
+          retries: 0
+          script: |
+            const { discover } = require('./.github/scripts/coderabbit-reconcile.cjs');
+            const result = await discover({ github, ...context.repo, eventName: context.eventName,
+              payload: context.payload, log: message => core.info(message) });
+            core.setOutput('numbers', JSON.stringify(result.numbers));
+  reconcile:
+    needs: discover
+    if: needs.discover.outputs.numbers != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        pr: ${{ fromJSON(needs.discover.outputs.numbers) }}
+    # Different trigger kinds use the same lock after trusted PR discovery.
+    # A coalesced job still reads this PR's live state when it gets the lock.
+    concurrency:
+      group: coderabbit-admission-pr-${{ matrix.pr }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+      actions: write # Only targeted rerun; trusted script validates native provenance.
+    steps:
+      - name: Check out trusted reconciliation scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          RELEASE_APP_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
+          RECONCILE_PR: ${{ matrix.pr }}
+        with:
+          retries: 0
+          script: |
+            const { reconcile } = require('./.github/scripts/coderabbit-reconcile.cjs');
+            const result = await reconcile({ github, ...context.repo,
+              pullNumber: Number(process.env.RECONCILE_PR),
+              releaseAppBotLogin: process.env.RELEASE_APP_BOT_LOGIN, log: message => core.info(message) });
+            core.info(JSON.stringify(result));

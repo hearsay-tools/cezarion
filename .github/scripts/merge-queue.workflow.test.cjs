@@ -61,7 +61,7 @@ test('queue always runs the complete immutable combined revision and no paid rev
     assert.equal(checkout.with['persist-credentials'], false);
     assert.ok(Object.values(ci.jobs[id].permissions).every(p => p === 'read'));
   }
-  for (const id of ['review', 'publish-snapshot', 'prepare-pr-snapshot']) assert.equal(evaluate(ci.jobs[id].if, ctx), false, id);
+  for (const id of ['review-result', 'publish-snapshot', 'prepare-pr-snapshot']) assert.equal(evaluate(ci.jobs[id].if, ctx), false, id);
   assert.equal(evaluate(ci.jobs['queue-admission'].if, ctx), true);
   const checkout = ci.jobs['queue-admission'].steps[0];
   assert.equal(evaluate(checkout.with.ref, ctx), ctx.github.event.merge_group.base_sha);
@@ -112,7 +112,7 @@ test('required review name cannot pass from a skipped model call on a queue even
 test('dispatch remains full verification and cancellation prevents publishing', () => {
   const ci = workflow(); const ctx = context('workflow_dispatch');
   for (const id of ['typecheck', 'build-and-package', 'vitest', 'cockpit-browser']) assert.equal(evaluate(ci.jobs[id].if, ctx), true);
-  for (const id of ['review', 'queue-admission', 'review-result', 'publish-snapshot', 'prepare-pr-snapshot']) assert.equal(evaluate(ci.jobs[id].if, ctx), false, id);
+  for (const id of ['queue-admission', 'review-result', 'publish-snapshot', 'prepare-pr-snapshot']) assert.equal(evaluate(ci.jobs[id].if, ctx), false, id);
   ctx.github.event_name = 'push'; ctx.cancelled = () => true;
   assert.equal(evaluate(ci.jobs['publish-snapshot'].if, ctx), false);
 });

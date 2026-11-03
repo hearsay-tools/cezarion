@@ -42,6 +42,18 @@ closing-linked issue cards: draft is `In progress`, ready is `In review`. Let th
 workflow make those changes; do not run `gh pr ready` or move cards to `In review`
 by hand. The [board binding](AGENTS.md#dev-flow-bindings) holds the details.
 
+Readiness uses fresh evidence from the current head for every event, including
+human draft or ready changes. CodeRabbit reviews drafts and incremental pushes
+automatically, without a label filter or auto-pause. After preflight, the native
+`Automated Code Review` gate requires successful current-head execution from the
+trusted CodeRabbit App and resolved review threads before heavy verification.
+Readiness and queue admission also read that evidence. After manually reopening
+or resolving a thread, dispatch **Reconcile CodeRabbit admission** with
+`pr_number`, then **PR Readiness** if draft state needs refreshing. Manual thread
+changes do not emit a workflow event. Fork PRs retain their author's draft state
+and need a maintainer's native review-job rerun. See
+[CI review policy](CODE_REVIEW.md#ci-surface-rules) for recovery and exceptions.
+
 Labels still carry routing, ownership and human stops. The tracker adapter keeps
 its [label guards](.ai/trackers/github.md#label-guards) and the configured groups
 in [.ai/agentic.config.json](.ai/agentic.config.json). A `merge-queue` label does

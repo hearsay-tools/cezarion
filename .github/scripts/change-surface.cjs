@@ -2,8 +2,8 @@ const fs = require('node:fs');
 const tty = require('node:tty');
 
 // Docs: paths no Vitest test or cockpit browser spec reads (testReadDocuments
-// below names the exceptions). A change confined to them skips both suites and
-// the automated review; scripts/test-changed.mjs skips the same set through
+// below names the exceptions). A change confined to them skips both suites;
+// scripts/test-changed.mjs skips the same set through
 // isDocsPath. build-and-package still runs every node:test file, so a docs
 // path that only a node:test file reads stays docs; put a check on a docs file
 // there (hearsay-tools/cezarion#2166). change-surface-readers.test.cjs fails
@@ -37,10 +37,10 @@ const testReadDocuments = [
 // docs/superpowers/specs/2026-09-25-infra-only-change-surface-design.md).
 // Exact-file allowlist on purpose: a new or renamed file fails closed to
 // full-matrix until deliberately listed here, and harness files — ci.yml,
-// automated-code-review.yml, ci-benchmark.yml,
+// coderabbit-reconcile.yml, ci-benchmark.yml,
 // release.yml and nightly.yml (both run `npm test` themselves — #565 review),
 // change-surface.cjs, require-e2e-passed.cjs, ci-test-sequencer.mjs,
-// automated-review.cjs, release-bump-pr.cjs, the *.workflow.test.cjs pins —
+// coderabbit-admission.cjs, release-bump-pr.cjs, the *.workflow.test.cjs pins —
 // must never appear (issue constraint #5: a PR that widens skips or alters a
 // harness that executes product suites runs the suites it affects).
 // Engine-script tests stay covered: they run under `npm run test:unit` inside

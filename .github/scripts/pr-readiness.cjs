@@ -2,20 +2,23 @@
 
 // Draft follows the head (#603): Ready for review means a human can look now,
 // because agentic work and every required check on THIS head are done.
-//   - A new head (opened, reopened, synchronize) converts the PR back to draft.
+//   - An unverified live head converts the PR back to draft on its next wake.
 //   - A completed CI or Automated Code Review run marks the PR ready once every
 //     required check on the live head passes and no review thread is open.
 //   - The linked issues' board cards follow: draft → In progress, ready → In review.
 // Flips made with the workflow token fire no workflow events, so the board is
 // synced inline after each flip; human flips arrive as their own events.
 
-const { listReviewThreads } = require('./automated-review.cjs');
+const { readCodeRabbitAdmission } = require('./coderabbit-admission.cjs');
+const { readNativeReview } = require('./native-review-proof.cjs');
+const { positive } = require('./queue-ci-proof.cjs');
+const { discover: discoverAdmission, eligiblePull } = require('./coderabbit-reconcile.cjs');
 
 const REVIEW_CHECK = 'Automated Code Review';
 const PASSING = new Set(['success', 'skipped', 'neutral']);
 const BOARD = { draft: 'In progress', ready: 'In review' };
 const DONE_STATUS = 'done';
-const NEW_HEAD_ACTIONS = new Set(['opened', 'reopened', 'synchronize']);
+const PULL_ACTIONS = new Set(['opened', 'reopened', 'synchronize', 'ready_for_review', 'converted_to_draft']);
 
 async function requiredCheckNames({ github, owner, repo, branch }) {
   const { data: rules } = await github.request('GET /repos/{owner}/{repo}/rules/branches/{branch}', { owner, repo, branch, per_page: 100 });
@@ -51,7 +54,7 @@ function evaluateChecks({ required, checkRuns, statuses = [] }) {
     const run = runs.get(name);
     if (run) {
       if (run.status !== 'completed') result.pending.push(name);
-      else if (!PASSING.has(run.conclusion)) result.failing.push(name);
+      else if (!(name === REVIEW_CHECK || name === 'Unit, build, E2E, and package' ? run.conclusion === 'success' : PASSING.has(run.conclusion))) result.failing.push(name);
       continue;
     }
     const state = states.get(name);
@@ -68,11 +71,6 @@ async function readHeadChecks({ github, owner, repo, sha }) {
   const checkRuns = await github.paginate(github.rest.checks.listForRef, { owner, repo, ref: sha, per_page: 100 });
   const { data: combined } = await github.rest.repos.getCombinedStatusForRef({ owner, repo, ref: sha, per_page: 100 });
   return { checkRuns, statuses: combined?.statuses || [] };
-}
-
-async function openPullsForHead({ github, owner, repo, sha, base = 'main' }) {
-  const pulls = await github.paginate(github.rest.pulls.list, { owner, repo, state: 'open', base, per_page: 100 });
-  return pulls.filter((pull) => pull?.head?.sha === sha && pull.base?.ref === base);
 }
 
 async function setDraft({ github, pull, draft }) {
@@ -146,61 +144,52 @@ function sameRepo(pull, owner, repo) {
   return pull?.head?.repo?.full_name === `${owner}/${repo}`;
 }
 
-async function onPullRequest({ github, projectGithub, owner, repo, action, pull, log }) {
-  if (!sameRepo(pull, owner, repo)) return log(`#${pull?.number} comes from a fork; draft state is left to its author.`);
-  if (NEW_HEAD_ACTIONS.has(action)) {
-    if (!pull.draft) {
-      await setDraft({ github, pull, draft: true });
-      log(`#${pull.number}: new head ${pull.head.sha}; converted back to draft until its checks pass.`);
-    }
-    return syncBoard({ projectGithub, owner, repo, pullNumber: pull.number, draft: true, log });
+async function followPull({ github, projectGithub, owner, repo, candidate, sha, checks, deadline, log }) {
+  const { data: live } = await github.rest.pulls.get({ owner, repo, pull_number: candidate.number });
+  if (live?.state !== 'open' || live.head?.sha !== sha || !sameRepo(live, owner, repo)) return;
+  let admitted = false;
+  try {
+    const proof = await readNativeReview({ github, owner, repo, pr: live, deadline });
+    const admission = await readCodeRabbitAdmission({ github, owner, repo, pullNumber: live.number, head: sha, deadline,
+      releaseAppBotLogin: process.env.RELEASE_APP_BOT_LOGIN });
+    admitted = checks.ready && proof.passed && admission.admitted;
+  } catch (error) {
+    log(`PR ${live.number}: fresh review proof unavailable: ${error.message}`);
   }
-  if (action === 'ready_for_review' || action === 'converted_to_draft') {
-    return syncBoard({ projectGithub, owner, repo, pullNumber: pull.number, draft: action === 'converted_to_draft', log });
+  const { data: final } = await github.rest.pulls.get({ owner, repo, pull_number: live.number });
+  if (final?.state !== 'open' || final.head?.sha !== sha || !sameRepo(final, owner, repo) || final.base?.ref !== 'main') return;
+  const draft = !admitted;
+  if (final.draft === draft) log(`PR ${final.number}: readiness unchanged (admitted=${admitted}).`);
+  else {
+    await setDraft({ github, pull: final, draft });
+    log(`PR ${final.number}: ${draft ? 'converted back to draft' : 'marked ready for review'} from fresh admission.`);
   }
-  return null;
+  await syncBoard({ projectGithub, owner, repo, pullNumber: final.number, draft, log });
 }
 
-async function markReadyWhenGreen({ github, projectGithub, owner, repo, sha, pullNumber = null, log }) {
-  const pulls = (await openPullsForHead({ github, owner, repo, sha }))
-    .filter((pull) => sameRepo(pull, owner, repo) && (pullNumber === null || pull.number === pullNumber));
-  if (pulls.length === 0) return log(`No open same-repository PR on main has head ${sha}.`);
+async function discoverReadiness({ github, owner, repo, eventName, payload, log = () => {} }) {
+  if (eventName !== 'pull_request_target') {
+    return discoverAdmission({ github, owner, repo, eventName, payload, log });
+  }
+  if (payload.repository?.full_name !== `${owner}/${repo}`) throw new Error('Foreign event');
+  if (!PULL_ACTIONS.has(payload.action) || !positive(payload.pull_request?.number)) return { numbers: [] };
+  const number = payload.pull_request.number;
+  const { data: live } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+  return { numbers: live?.number === number && eligiblePull(live, `${owner}/${repo}`) ? [number] : [] };
+}
+
+async function refreshReadiness({ github, projectGithub = null, owner, repo, pullNumber,
+  now = Date.now, log = () => {} }) {
+  if (!positive(pullNumber)) throw new Error('Missing trusted readiness PR number');
+  const deadline = now() + 120000;
+  // The workflow's PR-number lock is already held. Re-read all mutable state;
+  // an old event can wake this PR but cannot supply a head or draft decision.
+  const { data: live } = await github.rest.pulls.get({ owner, repo, pull_number: pullNumber });
+  if (live?.number !== pullNumber || !eligiblePull(live, `${owner}/${repo}`)) return;
   const required = await requiredCheckNames({ github, owner, repo, branch: 'main' });
+  const sha = live.head.sha;
   const checks = evaluateChecks({ required, ...(await readHeadChecks({ github, owner, repo, sha })) });
-  for (const candidate of pulls) {
-    if (!candidate.draft) { log(`#${candidate.number} is already ready for review.`); continue; }
-    if (!checks.ready) {
-      log(`#${candidate.number} stays draft: pending [${checks.pending}] failing [${checks.failing}] missing [${checks.missing}].`);
-      continue;
-    }
-    const open = (await listReviewThreads({ github, owner, repo, pullNumber: candidate.number })).filter((thread) => !thread.isResolved).length;
-    if (open > 0) { log(`#${candidate.number} stays draft: ${open} review thread(s) unresolved.`); continue; }
-    const { data: live } = await github.rest.pulls.get({ owner, repo, pull_number: candidate.number });
-    if (live?.state !== 'open' || live.head?.sha !== sha || !live.draft) { log(`#${candidate.number} changed while checking; leaving it.`); continue; }
-    await setDraft({ github, pull: live, draft: false });
-    log(`#${candidate.number}: every required check passed on ${sha}; marked ready for review.`);
-    await syncBoard({ projectGithub, owner, repo, pullNumber: candidate.number, draft: false, log });
-  }
-  return null;
-}
-
-async function handleEvent({ github, projectGithub = null, owner, repo, eventName, payload, log = () => {} }) {
-  if (eventName === 'pull_request_target') {
-    return onPullRequest({ github, projectGithub, owner, repo, action: payload.action, pull: payload.pull_request, log });
-  }
-  if (eventName === 'workflow_run') {
-    const run = payload.workflow_run;
-    if (run?.event !== 'pull_request_target' || typeof run.head_sha !== 'string') return log('Not a pull request run.');
-    return markReadyWhenGreen({ github, projectGithub, owner, repo, sha: run.head_sha, log });
-  }
-  if (eventName === 'workflow_dispatch') {
-    const pullNumber = Number(payload.inputs?.pr_number);
-    if (!Number.isSafeInteger(pullNumber) || pullNumber <= 0) throw new Error('pr_number must be a positive integer.');
-    const { data: pull } = await github.rest.pulls.get({ owner, repo, pull_number: pullNumber });
-    if (pull?.state !== 'open') return log(`#${pullNumber} is not open.`);
-    return markReadyWhenGreen({ github, projectGithub, owner, repo, sha: pull.head.sha, pullNumber, log });
-  }
-  return log(`Ignoring ${eventName}.`);
+  return followPull({ github, projectGithub, owner, repo, candidate: live, sha, checks, deadline, log });
 }
 
 module.exports = {
@@ -209,8 +198,8 @@ module.exports = {
   requiredCheckNames,
   latestByName,
   evaluateChecks,
-  openPullsForHead,
   boardMoves,
   syncBoard,
-  handleEvent,
+  discoverReadiness,
+  refreshReadiness,
 };

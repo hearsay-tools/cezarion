@@ -192,7 +192,7 @@ jobs:
           esac
           echo "surface=$surface" >> "$GITHUB_OUTPUT"
 
-  # Shared with automated-code-review via release-bump-pr.cjs:
+  # Shared with CodeRabbit admission via release-bump-pr.cjs:
   # bot author + release/v* head is not enough — the live PR file list must match
   # the release-finalization allowlist or Vitest/E2E still run.
   classify-pr:
@@ -552,7 +552,7 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-  # Cheap deterministic checks precede paid review and heavy verification.
+  # Cheap deterministic checks precede review admission and heavy verification.
   preflight:
     name: Review preflight
     needs: [queue-proof, change-surface, classify-pr, complexity-gate, clone-gate, typecheck]
@@ -1031,28 +1031,6 @@ jobs:
         if: cancelled()
         run: exit 1
 
-  # Review gates heavy PR verification. Only trusted posting receives write scopes.
-  # Explicit status functions permit intentional skips without implicit success().
-  review:
-    name: Review
-    needs: preflight
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main' }}
-    permissions:
-      actions: read
-      checks: read
-      contents: write
-      issues: read
-      pull-requests: write
-    uses: ./.github/workflows/automated-code-review.yml
-    with:
-      preflight_result: ${{ needs.preflight.result }}
-      caller_run_id: ${{ github.run_id }}
-      caller_attempt: ${{ github.run_attempt }}
-      caller_head: ${{ github.event.pull_request.head.sha }}
-    secrets:
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-
   # Queue admission reads trusted base code and existing native PR-head review.
   queue-admission:
     name: Validate reviewed queue entry
@@ -1061,6 +1039,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
+      checks: read
       contents: read
       actions: read
       pull-requests: read
@@ -1071,12 +1050,14 @@ jobs:
           ref: ${{ github.event.merge_group.base_sha }}
           persist-credentials: false
       - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          RELEASE_APP_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
         with:
           retries: 0
           script: |
             const { mergeQueueAdmission } = require('./.github/scripts/merge-queue-admission.cjs');
             try {
-              const admission = await mergeQueueAdmission({ github, ...context.repo, group: context.payload.merge_group });
+              const admission = await mergeQueueAdmission({ github, ...context.repo, group: context.payload.merge_group, releaseAppBotLogin: process.env.RELEASE_APP_BOT_LOGIN });
               await core.summary.addHeading('Existing PR-head review admission').addRaw(JSON.stringify(admission)).write();
             } catch {
               core.setFailed('Queue admission could not verify current native PR CI/review, membership and rules. Inspect the queue and retry; do not bypass.');
@@ -1085,11 +1066,12 @@ jobs:
   # Distinct inactive names prevent a skipped job supplying a protected check.
   review-result:
     name: ${{ (github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main') && 'Automated Code Review' || 'PR review (not applicable)' }}
-    needs: [preflight, review]
+    needs: preflight
     if: always() && github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      checks: read
       contents: read
       pull-requests: read
     steps:
@@ -1097,25 +1079,33 @@ jobs:
         env:
           CANCELLED: ${{ job.status == 'cancelled' }}
           PREFLIGHT_RESULT: ${{ needs.preflight.result }}
-          REVIEW_RESULT: ${{ needs.review.result }}
         run: |
           test "$CANCELLED" = false
           if [ "$PREFLIGHT_RESULT" != success ]; then
             echo "::notice::Preflight ended '$PREFLIGHT_RESULT'. Fix it, then use Re-run failed jobs." >&2
             exit 1
           fi
-          if [ "$REVIEW_RESULT" != success ]; then
-            echo "::notice::The review ended '$REVIEW_RESULT'. Its Review verdict job names the reason; heavy verification has not been released." >&2
-            exit 1
-          fi
-      - name: Require the current PR head before releasing verification
+      - name: Check out trusted review admission scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Require fresh CodeRabbit execution and resolved threads
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
-        run: |
-          live_head="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .head.sha)"
-          test "$live_head" = "$EXPECTED_HEAD"
+          RELEASE_APP_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
+        with:
+          retries: 0
+          script: |
+            const { readCodeRabbitAdmission } = require('./.github/scripts/coderabbit-admission.cjs');
+            const admission = await readCodeRabbitAdmission({ github, ...context.repo,
+              pullNumber: context.payload.pull_request.number, head: context.payload.pull_request.head.sha,
+              releaseAppBotLogin: process.env.RELEASE_APP_BOT_LOGIN });
+            await core.summary.addHeading('CodeRabbit admission').addRaw(JSON.stringify(admission)).write();
+            if (!admission.admitted) {
+              core.notice(`CodeRabbit admission blocked: ${admission.reason}. The reconciler refreshes this job after provider/CI/review events. For eventless thread resolution, dispatch Reconcile CodeRabbit admission with pr_number.`);
+              process.exitCode = 1;
+            }
       - name: Reject a cancelled run
         if: cancelled()
         run: exit 1
@@ -1318,6 +1308,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions:
+      checks: read
       contents: read
       actions: read
       pull-requests: read
@@ -1332,13 +1323,15 @@ jobs:
           persist-credentials: false
       - id: proof
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3
+        env:
+          RELEASE_APP_BOT_LOGIN: ${{ vars.RELEASE_APP_BOT_LOGIN }}
         with:
           retries: 0
           script: |-
             core.setOutput('verified', 'false');
             const { prTestProof } = require('./.github/scripts/pr-test-proof.cjs');
             const proof = await prTestProof({ github, ...context.repo,
-              eventName: context.eventName, group: context.payload.merge_group });
+              eventName: context.eventName, group: context.payload.merge_group, releaseAppBotLogin: process.env.RELEASE_APP_BOT_LOGIN });
             core.setOutput('verified', String(proof.verified));
             if (proof.verified) core.setOutput('source', proof.url);
             await core.summary.addHeading('Native PR test evidence').addRaw(JSON.stringify(proof)).write();

@@ -48,7 +48,7 @@ function harness(snapshots) {
 }
 
 // Legacy verification-context consumers can read the aggregate while the run
-// is still in progress. Review-first model jobs use review-ci-context.cjs instead.
+// is still in progress. Current admission uses native-review-proof.cjs instead.
 test('legacy required-success context accepts completed verification while the run is still active', () => {
   const reviewJob = job({ databaseId: 103, name: 'Review / codex-review', status: 'in_progress', conclusion: '' });
   const h = harness([{ jobs: [job(), publish(), reviewJob] }]);

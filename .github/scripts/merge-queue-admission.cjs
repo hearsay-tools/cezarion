@@ -1,5 +1,5 @@
 'use strict';
-const { listReviewThreads } = require('./automated-review.cjs');
+const { readCodeRabbitAdmission } = require('./coderabbit-admission.cjs');
 const { CI_PATH, VERIFY, REVIEW, validSha, positive, reader, readCiRuns, readCiJobs, successfulJobs, newest } = require('./queue-ci-proof.cjs');
 const QUEUE_QUERY = `query($owner: String!, $repo: String!) {
   repository(owner: $owner, name: $repo) {
@@ -74,7 +74,7 @@ function requireStableRun(run, finalRun, finalLatest, eligible) {
   if (!eligible(finalRun) || finalRun.id !== run.id || finalRun.run_attempt !== run.run_attempt
     || finalLatest?.id !== run.id || finalLatest.run_attempt !== run.run_attempt || !eligible(finalLatest)) throw new Error('Native CI changed');
 }
-async function mergeQueueAdmission({ github, owner, repo, group, now = Date.now, allowInProgress = false }) {
+async function mergeQueueAdmission({ github, owner, repo, group, now = Date.now, allowInProgress = false, releaseAppBotLogin }) {
   requireGroup(group);
   const read = reader(github, owner, repo, now() + 120000, now);
   const graphql = boundedGraphql(read);
@@ -93,8 +93,8 @@ async function mergeQueueAdmission({ github, owner, repo, group, now = Date.now,
   const eligible = r => nativeRun(r, fullName, workflow.id, entry, pr) && nativeSuccess(r, allowInProgress);
   if (!eligible(run)) throw new Error('Current native PR CI/review has not passed');
   if (!successfulJobs(await readCiJobs(read, run.id), [VERIFY, REVIEW])) throw new Error('Native CI/review gates missing');
-  const threads = await listReviewThreads({ github: { graphql }, owner, repo, pullNumber: pr.number });
-  if (threads.some(t => !t.isResolved)) throw new Error('Unresolved review threads');
+  const admission = await readCodeRabbitAdmission({ github, owner, repo, pullNumber: pr.number, head: pr.head.sha, releaseAppBotLogin, now });
+  if (!admission.admitted) throw new Error(`Unresolved or unsuccessful CodeRabbit admission: ${admission.reason}`);
   const finalRun = await read('GET /repos/{owner}/{repo}/actions/runs/{run_id}', { run_id: run.id });
   const finalLatest = newest(await runs());
   requireStableRun(run, finalRun, finalLatest, eligible);

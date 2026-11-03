@@ -27,7 +27,7 @@ async function pages(read, route, args, field) {
   for (let page = 1; page <= 2; page++) {
     const data = await read(route, { ...args, page, per_page: 100 });
     if (!Number.isSafeInteger(data?.total_count) || data.total_count < 0 || data.total_count > 200
-      || !Array.isArray(data[field])) throw new Error('incomplete-metadata');
+      || !Array.isArray(data[field]) || data[field].length > 100) throw new Error('incomplete-metadata');
     if (total !== undefined && total !== data.total_count) throw new Error('changing-metadata');
     total = data.total_count;
     result.push(...data[field]);
@@ -96,4 +96,4 @@ async function queueCiProof({ github, owner, repo, eventName, ref, sha, now = Da
   }
 }
 module.exports = { queueCiProof, REQUIRED_QUEUE_JOBS, VERIFY, REVIEW, CI_PATH, validSha, positive,
-  reader, readCiRuns, readCiJobs, successfulJobs, newest };
+  reader, pages, readCiRuns, readCiJobs, successfulJobs, newest };

@@ -1,5 +1,8 @@
 # CI and automated-review budget
 
+Superseded 2026-11-02: [CodeRabbit admission replacement](2026-11-02-coderabbit-admission-plan.md) replaces custom provider execution, caps and manual rejudge. Historical design retained below.
+
+
 Status: proposed · Date: 2026-09-15 · Relates: ruleset 22473654 Protect main, `.github/workflows/ci.yml`, `.github/workflows/automated-code-review.yml`
 
 ## TLDR

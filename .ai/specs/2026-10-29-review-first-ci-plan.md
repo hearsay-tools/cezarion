@@ -1,5 +1,8 @@
 # Review before expensive CI verification
 
+Superseded 2026-11-02: [CodeRabbit admission replacement](2026-11-02-coderabbit-admission-plan.md) replaces custom provider execution, caps and manual rejudge. Historical design retained below.
+
+
 Status: implemented; local proof complete; live GitHub proof remains with parent · Date: 2026-10-29
 
 Implementation base and `proof_base`: `97335b3521fe485c80d40a7d76ceaaa56ec12119`

@@ -80,7 +80,7 @@ test('queue proof executes only trusted base code with read scopes and no paid r
   const job = ci().jobs['pr-test-proof'];
   assert.equal(job.steps[0].with.ref, '${{ github.event.merge_group.base_sha }}');
   assert.equal(job.steps[0].with['persist-credentials'], false);
-  assert.deepEqual(job.permissions, { contents: 'read', actions: 'read', 'pull-requests': 'read' });
+  assert.deepEqual(job.permissions, { checks: 'read', contents: 'read', actions: 'read', 'pull-requests': 'read' });
   for (const event of ['pull_request_target', 'merge_group', 'push', 'workflow_dispatch']) assert.equal(evaluate(job.if, context(event)), event === 'merge_group');
   assert.equal(job['timeout-minutes'], 2);
   assert.equal(job.steps[1].with.retries, 0);

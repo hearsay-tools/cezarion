@@ -57,3 +57,28 @@ test('final admission keeps rejecting an in-progress workflow even when required
   const h = fixture(); h.s.run.status = 'in_progress'; h.s.run.conclusion = null;
   await assert.rejects(h.run, /has not passed/);
 });
+
+for (const kind of ['pending', 'newer failure', 'wrong app', 'skipped', 'missing']) test(`queue ignores historical native green when CodeRabbit is ${kind}`, async () => {
+  const h = fixture();
+  if (kind === 'pending') h.s.checks[0].status = 'in_progress';
+  if (kind === 'newer failure') h.s.checks.push({ ...h.s.checks[0], id: 101, conclusion: 'failure' });
+  if (kind === 'wrong app') h.s.checks[0].app.id = 1;
+  if (kind === 'skipped') h.s.checks[0].conclusion = 'skipped';
+  if (kind === 'missing') h.s.checks = [];
+  await assert.rejects(h.run, /CodeRabbit admission/);
+});
+for (const kind of ['release', 'upstream']) test(`queue preserves fully verified ${kind} exception without provider execution`, async () => {
+  const h = fixture(); h.s.checks = []; h.s.pr.changed_files = 1;
+  h.s.pr.user = { login: 'release-app[bot]' };
+  h.s.pr.head.ref = kind === 'release' ? 'release/v1.2.3' : 'upstream-scan/weekly'; h.s.run.head_branch = h.s.pr.head.ref;
+  const github = { request: async (route, args) => {
+    if (route.endsWith('/pulls/{pull_number}/files')) return { data: [{ status: 'modified', filename: kind === 'release' ? 'packages/cezar/package.json' : '.ai/upstream/ledger.yaml' }] };
+    if (route.endsWith('/contents/{path}')) {
+      const text = JSON.stringify({ version: args.ref === BASE ? '1.2.2' : '1.2.3' });
+      return { data: { type: 'file', encoding: 'base64', content: Buffer.from(text).toString('base64'), size: text.length } };
+    }
+    return h.github.request(route, args);
+  } };
+  const { mergeQueueAdmission } = require('./merge-queue-admission.cjs');
+  assert.equal((await mergeQueueAdmission({ github, owner: 'o', repo: 'r', group: h.s.group, releaseAppBotLogin: 'release-app[bot]' })).pullNumber, 7);
+});

@@ -115,10 +115,8 @@
       "AGENTS.md",
       ".github/agents-md.baseline.json"
     ],
-    ".github/scripts/automated-code-review.workflow.test.cjs": [
-      ".github/codex/prompts/review.md",
-      ".github/schemas/review-findings.schema.json",
-      "AGENTS.md"
+    ".github/scripts/coderabbit.workflow.test.cjs": [
+      ".coderabbit.yaml"
     ],
     ".github/scripts/issue-intake.workflow.test.cjs": [
       ".github/codex/prompts/issue-intake.md",
