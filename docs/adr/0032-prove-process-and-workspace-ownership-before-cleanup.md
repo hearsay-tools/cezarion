@@ -35,7 +35,7 @@ depend on a later scan finding the app.
 
 Implementation: [session-process.ts](../../packages/cezar/src/core/session-process.ts), [process-liveness.ts](../../packages/cezar/src/delegation/process-liveness.ts), [workspace.ts](../../packages/cezar/src/delegation/workspace.ts).
 
-Coverage: [session-process.test.ts](../../packages/cezar/src/core/session-process.test.ts), [process-liveness.test.ts](../../packages/cezar/src/delegation/process-liveness.test.ts), [workspace.test.ts](../../packages/cezar/src/delegation/workspace.test.ts).
+Coverage: [session-process.test.ts](../../packages/cezar/src/core/session-process.test.ts), [process-liveness.test.ts](../../packages/cezar/src/delegation/process-liveness.test.ts), [workspace.test.ts](../../packages/cezar/src/delegation/workspace.test.ts), [workspace-destruction-identity.test.ts](../../packages/cezar/src/delegation/workspace-destruction-identity.test.ts), [workspace-destruction-refs.test.ts](../../packages/cezar/src/delegation/workspace-destruction-refs.test.ts) and [workspace-generic-cleanup.test.ts](../../packages/cezar/src/delegation/workspace-generic-cleanup.test.ts).
 
 ### Waiting for the test-app watcher
 
