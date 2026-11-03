@@ -1153,6 +1153,7 @@ describe('global tasks page', () => {
     renderPage()
 
     const hint = await screen.findByText(/Tag connected repositories in/)
+    expect(hint.textContent).toBe('Tag connected repositories in Settings → Projects to group their tasks together here.')
     // …and it is a real door, not a sentence naming a place the reader has to go find.
     expect(
       hint.querySelector('a[href="/settings/global/projects"]')?.textContent,

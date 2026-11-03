@@ -1,6 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
+import { controlLocation } from '@open-mercato/cezar-api-client/contract/control-locations'
 import { openRunIn, reclaimRunWorktree, reclaimWorktrees } from '@/api/client'
 import { queryKeys, useOpenTargets, useWorktrees } from '@/api/queries'
 import type { WorktreeInfo } from '@open-mercato/cezar-api-client'
@@ -125,7 +126,7 @@ export function WorktreesPanel() {
               ? 'Retention is unlimited ('
               : `Retention keeps the newest ${keep} finished checkout${keep === 1 ? '' : 's'} (`}
             <Link to="/settings/worktrees" data-slot="worktrees-retention-link" className="underline-offset-2 hover:text-foreground hover:underline">
-              Settings › Worktrees
+              {controlLocation('worktrees', ' › ')}
             </Link>
             {keep === 0 ? '), so nothing is reclaimed on its own.' : ') and reclaims the rest.'}
             {' '}Reclaim removes the directory only; the branch stays, so its work stays recoverable.

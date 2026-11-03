@@ -3,6 +3,7 @@ import { ArchiveIcon, ChevronDownIcon, ChevronRightIcon } from '@/components/des
 import { SendIcon } from 'lucide-react'
 import { useQueries } from '@tanstack/react-query'
 import * as React from 'react'
+import { controlLocation } from '@open-mercato/cezar-api-client/contract/control-locations'
 import { isSweepable } from '@open-mercato/cezar-api-client/contract/run-predicates'
 import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { useSidebarArchive } from '@/components/sidebar-archive'
@@ -265,7 +266,7 @@ function SectionCutLink({ section, shown, total, scope, view }: {
       onClick={onNavigate}
       data-slot="section-cut-link"
       aria-label={`${section}: showing ${shown} of ${total}, see all`}
-      title={`The sidebar shows ${shown} of ${total} ${section} tasks. Click to see all of them. Change the limit in Settings → Sidebar.`}
+      title={`The sidebar shows ${shown} of ${total} ${section} tasks. Click to see all of them. Change the limit in ${controlLocation('sidebar')}.`}
       className="mr-auto -ml-1 flex min-h-[44px] min-w-[44px] shrink-0 items-center rounded-[4px] px-1 text-[11px] font-normal text-soft-foreground tabular-nums underline decoration-dotted underline-offset-[3px] hover:text-foreground focus-visible:outline-2 focus-visible:outline-link-foreground md:min-h-[26px] md:min-w-0 no-hover:min-h-[44px] no-hover:min-w-[44px]"
     >
       {shown} of {total}
