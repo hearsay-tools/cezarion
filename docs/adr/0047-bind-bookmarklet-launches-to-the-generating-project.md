@@ -24,4 +24,4 @@ CSP observation.
 
 Implementation: [bookmarklet.ts](../../packages/web/src/lib/bookmarklet.ts), [launch-key.ts](../../packages/cezar/src/server/launch-key.ts), [BACKWARD_COMPATIBILITY.md](../../BACKWARD_COMPATIBILITY.md).
 
-Coverage: [bookmarklet.test.ts](../../packages/web/src/lib/bookmarklet.test.ts), [new-task.test.tsx](../../packages/web/src/routes/new-task.test.tsx), [route-parity.test.ts](../../packages/cezar/src/server/route-parity.test.ts).
+Coverage: [bookmarklet.test.ts](../../packages/web/src/lib/bookmarklet.test.ts), [new-task-launch-planning.test.tsx](../../packages/web/src/routes/new-task-launch-planning.test.tsx), [route-parity.test.ts](../../packages/cezar/src/server/route-parity.test.ts).

@@ -877,7 +877,7 @@ describe('unknown project ids', () => {
 
 /** The bookmarklet contract (spec 011), protected by BACKWARD_COMPATIBILITY.md:
  *  `/new?skill=&ref=&auto=1&key=`. Since R4 Step 1.3 `auto=1` arms the real unattended start
- *  (the full matrix lives in routes/new-task.test.tsx); this file keeps the URL contract —
+ *  (the full matrix lives in routes/new-task-launch-planning.test.tsx); this file keeps the URL contract —
  *  through the legacy redirect, exactly as a saved bookmarklet arrives. */
 describe('/new query params', () => {
   const textarea = () =>
