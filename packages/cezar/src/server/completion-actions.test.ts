@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,7 +14,7 @@ afterEach(() => cleanup.splice(0).forEach(fn => fn()));
 function fixture(patch: Partial<RunRecord> = {}) {
   const root = mkdtempSync(join(tmpdir(), 'cez-complete-actions-')), dir = join(root, '.ai/cezar');
   const id = randomUUID(), token = randomUUID(), sha = 'a'.repeat(40), branch = 'cez/task';
-  const record = { id, title: 'task', task: 'task', workflow: 'quick-task', steps: [], status: 'done', tokensUsed: 0,
+  const record = { id, title: 'task', task: 'task', workflow: 'quick-task', steps: [], status: RUN_STATUS.done, tokensUsed: 0,
     createdAt: '2026-01-01T00:00:00.000Z', archived: false, archiveWhenDone: true, autoMergePr: true,
     completionAction: { id: token, phase: 'pending' }, branch, worktreePath: join(root, 'worktree'),
     pullRequests: [{ number: 12, url: 'https://github.com/o/r/pull/12', source: 'created' }], ...patch };
@@ -75,7 +76,7 @@ it.each(['disable', 'continue', 'restore', 'stop', 'branch'] as const)('invalida
   const f = fixture(), c = f.coordinator();
   f.read.mockImplementationOnce(async () => {
     if (change === 'disable') f.store().updateRun(f.id, { autoMergePr: false });
-    if (change === 'continue') f.store().updateRun(f.id, { status: 'running' });
+    if (change === 'continue') f.store().updateRun(f.id, { status: RUN_STATUS.running });
     if (change === 'restore') { f.store().setArchived(f.id, true); f.store().setArchived(f.id, false); }
     if (change === 'stop') c.stop();
     if (change === 'branch') f.store().updateRun(f.id, { branch: 'changed' });

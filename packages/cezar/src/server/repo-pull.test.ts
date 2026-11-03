@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -113,7 +114,7 @@ describe('project checkout pull', () => {
   });
   it('does not gate a settled review session', async () => {
     const run = store.createRun({ title: 'review', task: 'review', workflow: 'quick-task', steps: [] });
-    store.updateRun(run.id, { status: 'review' });
+    store.updateRun(run.id, { status: RUN_STATUS.review });
     expect((await post()).status).toBe(200);
   });
   it.each(['modified', 'untracked', 'staged'])('asks before pulling with %s files, and keeps unrelated edits on confirmation', async (kind) => {

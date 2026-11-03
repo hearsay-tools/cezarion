@@ -1,3 +1,4 @@
+import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -105,7 +106,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
       workflow: 'mixed',
       task: 'work',
       runner: 'claude',
-      steps: [{ id: 'implement', name: 'Implement', kind: 'agent' }],
+      steps: [{ id: 'implement', name: 'Implement', kind: STEP_KIND.agent }],
     });
     store.updateStep(run.id, 'implement', { backend: 'codex' });
 
@@ -138,7 +139,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
       workflow: 'quick-task',
       task: 'work',
       runner: 'opencode',
-      steps: [{ id: 'work', name: 'Work', kind: 'agent' }],
+      steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }],
     });
 
     store.appendEvent(run.id, {
@@ -396,7 +397,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
         workflow: 'quick-task',
         task: 'work',
         runner: 'claude',
-        steps: [{ id: 'implement', name: 'Implement', kind: 'agent' }],
+        steps: [{ id: 'implement', name: 'Implement', kind: STEP_KIND.agent }],
       });
       store.updateStep(run.id, 'implement', { profileId: 'work' });
       store.appendEvent(run.id, {
@@ -434,7 +435,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
         workflow: 'quick-task',
         task: 'work',
         runner: 'claude',
-        steps: [{ id: 'implement', name: 'Implement', kind: 'agent' }],
+        steps: [{ id: 'implement', name: 'Implement', kind: STEP_KIND.agent }],
       });
       store.updateStep(run.id, 'implement', { profileId: 'work' });
       store.appendEvent(run.id, {
@@ -485,7 +486,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
         task: 'work',
         runner: 'claude',
         agentProfile: 'work',
-        steps: [{ id: 'implement', name: 'Implement', kind: 'agent' }],
+        steps: [{ id: 'implement', name: 'Implement', kind: STEP_KIND.agent }],
       });
       store.updateStep(run.id, 'implement', { backend: 'codex' });
       store.appendEvent(run.id, {
@@ -515,7 +516,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
         workflow: 'quick-task',
         task: 'work',
         runner: 'claude',
-        steps: [{ id: 'implement', name: 'Implement', kind: 'agent' }],
+        steps: [{ id: 'implement', name: 'Implement', kind: STEP_KIND.agent }],
       });
       store.updateStep(run.id, 'implement', { profileId: 'gone' });
       store.appendEvent(run.id, {
@@ -579,7 +580,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
         workflow: 'quick-task',
         task: 'work',
         runner: 'claude',
-        steps: [{ id: 'implement', name: 'Implement', kind: 'agent' }],
+        steps: [{ id: 'implement', name: 'Implement', kind: STEP_KIND.agent }],
       });
       store.updateStep(run.id, 'implement', { profileId: 'work' });
       store.appendEvent(run.id, {
@@ -621,7 +622,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
         workflow: 'quick-task',
         task: 'work',
         runner: 'claude',
-        steps: [{ id: 'implement', name: 'Implement', kind: 'agent' }],
+        steps: [{ id: 'implement', name: 'Implement', kind: STEP_KIND.agent }],
       });
       store.updateStep(run.id, 'implement', { profileId: 'work' });
       store.appendEvent(run.id, {
@@ -684,7 +685,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
         workflow: 'quick-task',
         task: 'work',
         runner: 'claude',
-        steps: [{ id: 'implement', name: 'Implement', kind: 'agent' }],
+        steps: [{ id: 'implement', name: 'Implement', kind: STEP_KIND.agent }],
       });
       store.updateStep(run.id, 'implement', { profileId: 'work' });
       store.appendEvent(run.id, {

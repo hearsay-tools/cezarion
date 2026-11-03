@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { registerPreviewServer } from '../preview/run-tools.ts';
 import { spawn, type ChildProcess } from 'node:child_process';
@@ -40,7 +41,7 @@ describe('ProjectContexts', () => {
 
   it('leases a cold store without recovery, and context build waits for its release', async () => {
     const dataDir = join(rootA, '.ai/cezar');
-    seedRuns(dataDir, [{ id: 'interrupted', title: 'task', task: 'task', workflow: 'quick-task', steps: [], status: 'running', tokensUsed: 0, archived: false, createdAt: '2026-01-01T00:00:00.000Z' }]);
+    seedRuns(dataDir, [{ id: 'interrupted', title: 'task', task: 'task', workflow: 'quick-task', steps: [], status: RUN_STATUS.running, tokensUsed: 0, archived: false, createdAt: '2026-01-01T00:00:00.000Z' }]);
     const prepared = vi.fn();
     const contexts = new ProjectContexts({ listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }], prepareManager: prepared });
     let release!: () => void;
@@ -75,7 +76,7 @@ describe('ProjectContexts', () => {
   it('imports a legacy-only cold store without normalizing live work or building a manager', async () => {
     const dataDir = join(rootA, '.ai/cezar');
     mkdirSync(dataDir, { recursive: true });
-    const legacy = [{ id: 'interrupted', title: 'task', task: 'task', workflow: 'quick-task', steps: [], status: 'running', tokensUsed: 0, archived: false, createdAt: '2026-01-01T00:00:00.000Z' }];
+    const legacy = [{ id: 'interrupted', title: 'task', task: 'task', workflow: 'quick-task', steps: [], status: RUN_STATUS.running, tokensUsed: 0, archived: false, createdAt: '2026-01-01T00:00:00.000Z' }];
     writeFileSync(join(dataDir, 'runs.json'), JSON.stringify(legacy));
     const prepared = vi.fn();
     const contexts = new ProjectContexts({ listProjects: async () => [{ id: 'a', root: rootA, status: 'not-git' }], prepareManager: prepared });

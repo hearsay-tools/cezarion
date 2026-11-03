@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -219,7 +220,7 @@ describe('task webhook API', () => {
     it('turns notify off in any state and records it', async () => {
       await setWebhook({ url: 'https://bot.example/hook', token: 't' });
       const { id } = run();
-      store.updateRun(id, { status: 'done', notify: true });
+      store.updateRun(id, { status: RUN_STATUS.done, notify: true });
       const res = await send(`/api/v1/runs/${id}/notify`, 'POST', { notify: false });
       expect(res.status).toBe(200);
       expect(store.getRun(id)?.notify).toBeUndefined();
@@ -243,7 +244,7 @@ describe('task webhook API', () => {
         // is exactly what an opted-in bot is waiting for.
         mkdirSync(join(other, '.ai/cezar'), { recursive: true });
         seedRuns(join(other, '.ai/cezar'), [{
-          id: 'live', title: 'live', task: 'live', workflow: 'quick-task', status: 'running', notify: true,
+          id: 'live', title: 'live', task: 'live', workflow: 'quick-task', status: RUN_STATUS.running, notify: true,
           createdAt: '2026-09-25T10:00:00.000Z', tokensUsed: 0, archived: false, steps: [],
         }]);
         const entry = await registerProject(other);
