@@ -105,9 +105,7 @@ CI's final gate.
 them, with or without its daemon. Run `npm run build` from the repo root after
 relevant source changes; then, from `packages/cezar`, run
 `node --import ../../scripts/test-git-env.mjs --import tsx --test <files>` with
-paths relative to that directory (e.g. `test/e2e/task-cli.test.ts`). Pass packaged
-paths to `node --test`, never to `squeal status`: it gives them no result and no
-warning (hearsay-tools/squeal#83). In an unbuilt worktree they fail with a
+paths relative to that directory (e.g. `test/e2e/task-cli.test.ts`). In an unbuilt worktree they fail with a
 `Cannot find module` error naming a missing `dist/` module; an assertion failure
 is a real failure that needs investigation.
 
@@ -141,10 +139,8 @@ from this worktree before checking web sources; direct `tsc --noEmit` does not.
 The full root typecheck runs web first, preparing declarations once for all four
 workspace checks.
 
-To typecheck without rebuilding `packages/cezar/dist`, for example while Squeal
-is validating, run the three server configs from `packages/cezar`. The root
-`npm run typecheck` rebuilds `dist` first, and Squeal then marks dozens of
-passing checks UNKNOWN (hearsay-tools/squeal#33).
+To typecheck without rebuilding `packages/cezar/dist`, run the three server
+configs from `packages/cezar`.
 
 ```bash
 ./node_modules/.bin/tsc --noEmit -p tsconfig.json          # shipped sources only
@@ -166,7 +162,7 @@ root. It checks `packages/contract/tsconfig.test.json`, because that package's
 `tsconfig.json` leaves out its tests too. Run the root `npm run typecheck` once
 before a PR when declarations matter: a cockpit edit, or a server change that
 the cockpit reads through `AppType` or that a `test/e2e/` file imports from
-`dist`. Expect the UNKNOWN burst then.
+`dist`.
 
 **In a unit test, a timeout is a hang guard, never the thing the test waits on.**
 Wait for the product's own signal: an event, a callback, a store write, a file
