@@ -66,16 +66,6 @@ Where readers hide, searched from the repo root (replace the example values):
   grep -lF 'Automations' packages/web/e2e/*.e2e.ts
   ```
 
-<!-- until: hearsay-tools/cezarion#2515 -->
-- **A cockpit control renamed or removed**: server and contract sources, by its old label
-  and the navigation text that led to it. Update messages that tell users where to find
-  the control, including API errors, CLI output and agent prompts; do not replace every
-  match blindly.
-
-  ```bash
-  rg -n -F -e 'Task webhook' -e 'Settings → General →' packages/cezar/src packages/contract/src
-  ```
-
 <!-- until: hearsay-tools/cezarion#2514 -->
 - **Dry-run turn-end behavior changed** — the `packages/cezar/scripts/mock-*.mjs` mocks,
   the turn-end rule, attention, or the human-ask summary: the browser and packaged
