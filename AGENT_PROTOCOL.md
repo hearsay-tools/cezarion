@@ -1411,7 +1411,7 @@ mock models Codex's MCP tool gate, so Codex rows of `ci-wait-parity`,
 `ci-tools` H1 and U0 fail if cezar's own server loses `approve`. Runners whose
 wires carry no MCP tool approval request have named exemptions.
 
-**R72/R73** (hearsay-tools/cezarion#994), in `workflows/ci-wait-failure-parity.test.ts`,
+**R72/R73** (hearsay-tools/cezarion#994), in `workflows/ci-wait-final-recovery-parity.test.ts`,
 drive every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native provider-error
 wire with a pending CI wait, on fresh and scheduler-owned continuation attempts.
 The failed step retains its error, finish timestamp and `session.ended(error)`;

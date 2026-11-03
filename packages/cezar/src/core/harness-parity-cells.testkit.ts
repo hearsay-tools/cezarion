@@ -599,7 +599,7 @@ const CONTROL_CRITERIA = [
   // R79 also reports a periodic commit that leaves the closing turn-end flush clean.
   { id: 'R78', scenario: 'baseline' },
   { id: 'R79', scenario: 'baseline' },
-  // hearsay-tools/cezarion#994: workflows/ci-wait-failure-parity.test.ts,
+  // hearsay-tools/cezarion#994: workflows/ci-wait-failure-parity.testkit.ts,
   // failed fresh/continued CI attempts retain history through scheduler recovery.
   { id: 'R72', scenario: 'provider-error' },
   { id: 'R73', scenario: 'provider-error' },
