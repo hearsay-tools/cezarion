@@ -1,9 +1,11 @@
 import { execFileSync, type ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-
+import { seedRuns } from './seed-runs'
 import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, restoreContrastQaDefaults, type ContrastSample } from './contrast'
@@ -44,10 +46,10 @@ let automations = false
 
 const scoped = (path: string) => `/p/${project}${path}`
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString()
-const record = (id: string, status: string, extra: Record<string, unknown> = {}) => ({
+const record = (id: string, status: RunRecord['status'], extra: Partial<RunRecord> = {}) => ({
   id, title: id === RUN_ID ? RUN_TITLE : `tab bar ${id}`, workflow: 'default', task: `tab bar ${id}`, status,
   createdAt: ago(60 * 60_000), finishedAt: ago(30 * 60_000), tokensUsed: 0, archived: false, steps: [], ...extra,
-})
+} satisfies Partial<RunRecord>)
 
 beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'cez-tab-bar-'))
@@ -58,10 +60,10 @@ beforeAll(async () => {
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
   // A run in review (the Tasks tab's amber "needs you" badge) and a finished one; the reviewed run
   // carries a changed-file tally, which is the Changes tab's count.
-  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([
-    record(RUN_ID, 'review', { diffStat: { adds: 12, dels: 3, files: 3 } }),
-    record('tab-bar-done', 'done'),
-  ]))
+  seedRuns(root, [
+    record(RUN_ID, RUN_STATUS.review, { diffStat: { adds: 12, dels: 3, files: 3 } }),
+    record('tab-bar-done', RUN_STATUS.done),
+  ])
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root, { CEZ_AUTOMATIONS: '1' }), stdio: 'ignore',
   })

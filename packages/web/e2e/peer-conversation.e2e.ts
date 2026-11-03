@@ -1,16 +1,21 @@
 import type { ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { WAIT_SOURCE } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-
+import { seedRuns, recordedRun } from './seed-runs'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, type ContrastSample } from './contrast'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import record from './fixtures/thread-run.record.json'
+import recordJson from './fixtures/thread-run.record.json'
 import { seedTranscript } from './seed-transcript'
 import { waitForSettledSample } from './visual-ready'
 // fixture-server starts: 1
+const record = recordedRun(recordJson)
+
+
 
 // Peer messages in a coordinator's thread (hearsay-tools/cezarion#1992): a request to a peer the
 // run list names, its reply, a progress message beside an open question, and a request to a peer
@@ -34,7 +39,7 @@ const events = [
     conversation: { senderRunId: schemaPeer, recipientRunId: self, kind: 'progress', relationship: 'peer' },
     // An `AgentInput` origin, not a wait source.
     // ast-grep-ignore: test-enum-literal
-    source: 'agent',
+    source: WAIT_SOURCE.agent,
   } },
   projection(toDeleted),
   { type: 'request-outcome', outcome: { requestId: toDeleted.id, status: 'deleted', observedAt: '2026-10-28T12:05:00Z' } },
@@ -54,8 +59,8 @@ beforeAll(async () => {
   mkdirSync(join(root, '.ai/cezar/runs'), { recursive: true })
   mkdirSync(artifacts, { recursive: true })
   // `deletedPeer` has no record: the run list does not name it and a direct read answers 404.
-  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([[self, 'Coordinator'], [schemaPeer, 'Schema task']]
-    .map(([id, title]) => ({ ...record, id, title, titleSummary: title, task: 'Coordinate the peers.', pullRequestUrl: undefined }))))
+  seedRuns(root, [[self, 'Coordinator'], [schemaPeer, 'Schema task']]
+    .map(([id, title]) => ({ ...record, id: id!, title: title!, titleSummary: title, task: 'Coordinate the peers.', pullRequestUrl: undefined } satisfies Partial<RunRecord>)))
   seedTranscript(join(root, '.ai/cezar/runs', `${self}.ndjson`),
     events.map((event, n) => JSON.stringify({ seq: n + 1, ts: '2026-10-28T12:05:00Z', ...event })).join('\n') + '\n')
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], { env: fixtureServeEnv(root), stdio: 'ignore' })

@@ -2,8 +2,10 @@ import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-
+import { seedRuns } from './seed-runs'
 import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { artifactsDir } from './github-fixture'
@@ -92,17 +94,17 @@ beforeAll(async () => {
     writeFileSync(join(path, 'payload.bin'), Buffer.alloc(512 * 1024, 1))
     return path
   }
-  const run = (dir: string, id: string, extra: Record<string, unknown>) => ({
-    id, title: `Task ${id}`, workflow: 'default', task: id, status: 'done', createdAt: ago(7_200_000), finishedAt: ago(3_600_000),
+  const run = (dir: string, id: string, extra: Partial<RunRecord>) => ({
+    id, title: `Task ${id}`, workflow: 'default', task: id, status: RUN_STATUS.done, createdAt: ago(7_200_000), finishedAt: ago(3_600_000),
     tokensUsed: 0, archived: false, steps: [], worktreePath: worktree(dir, id), branch: `cez/${id}`, ...extra,
-  })
-  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([
+  } satisfies Partial<RunRecord>)
+  seedRuns(root, [
     run(root, 'wt-done', { title: 'Finished but retained' }),
-    run(root, 'wt-review', { title: 'Waiting for review', status: 'review', finishedAt: undefined }),
+    run(root, 'wt-review', { title: 'Waiting for review', status: RUN_STATUS.review, finishedAt: undefined }),
     // A finished task whose branch holds work main lacks, its worktree already reclaimed.
     { ...run(root, 'nl-task', { title: 'Work that never landed', branch: 'cez/nl-task' }), worktreePath: undefined },
-  ]))
-  writeFileSync(join(rootB, '.ai/cezar/runs.json'), JSON.stringify([run(rootB, 'b-only', { title: 'B only worktree' })]))
+  ])
+  seedRuns(rootB, [run(rootB, 'b-only', { title: 'B only worktree' })])
 
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',

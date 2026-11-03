@@ -1,9 +1,10 @@
 import type { ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
+import { seedRuns } from './seed-runs'
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
@@ -27,12 +28,12 @@ const chip = (origin: string) => `[data-slot="origin-filter"] [data-origin="${or
 const fixture = (id: string, status: RunRecord['status'], extra: Partial<RunRecord> = {}): RunRecord => ({
   id, title: `Groups ${id}`, task: `Groups ${id}`, workflow: 'quick-task', status,
   archived: false, createdAt: '2026-10-20T10:00:00Z', tokensUsed: 0, steps: [], ...extra,
-})
+} satisfies Partial<RunRecord>)
 
 beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'cez-groups-'))
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
-  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([
+  seedRuns(root, [
     fixture('review', 'review'),
     fixture('done', 'done'),
     fixture('failed', 'failed'),
@@ -40,7 +41,7 @@ beforeAll(async () => {
       automationTrigger: { automationId: 'nightly-sweep', automationRevision: 1, receiptId: 'r1', trigger: 'schedule', occurrenceAt: '2026-10-20T04:00:00Z' },
     }),
     fixture('old', 'done', { archived: true }),
-  ]))
+  ])
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })

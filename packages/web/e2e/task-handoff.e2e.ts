@@ -1,10 +1,12 @@
 import type { ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { waitForSettledSample } from './visual-ready'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
+import { seedRuns } from './seed-runs'
+import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
 import { applyContrastQaVariant, contrastSampleExpression, restoreContrastQaDefaults, type ContrastSample } from './contrast'
@@ -26,15 +28,15 @@ const dialog = '[data-slot="handoff-dialog"]'
 const submit = '[data-action="handoff-submit"]'
 const chip = '[data-slot="notifying-chip"]'
 const fixture = (id: string): RunRecord => ({
-  id, title: `Hand off ${id}`, task: `Hand off ${id}`, workflow: 'quick-task', status: 'review',
+  id, title: `Hand off ${id}`, task: `Hand off ${id}`, workflow: 'quick-task', status: RUN_STATUS.review,
   archived: false, createdAt: '2026-09-25T10:00:00Z', tokensUsed: 0, steps: [],
-})
+} satisfies Partial<RunRecord>)
 
 beforeAll(async () => {
   mkdirSync(artifacts, { recursive: true })
   root = mkdtempSync(join(tmpdir(), 'cez-handoff-'))
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
-  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([fixture('desktop'), fixture('mobile')]))
+  seedRuns(root, [fixture('desktop'), fixture('mobile')])
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })

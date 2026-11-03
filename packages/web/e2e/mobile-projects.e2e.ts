@@ -1,14 +1,15 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-
+import { seedRuns } from './seed-runs'
 import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, readTestEnv, servedRoot } from './agent-browser'
 import { readSharedProjects, snapshotSharedHome, writeSharedProjects } from './workspace-registry'
 import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, restoreContrastQaDefaults, type ContrastSample } from './contrast'
-
 /**
  * #620: the phone's top bar and project drawer, against the shared dry-run environment plus one
  * seeded second project (the way `project-rail.e2e.ts` seeds its own): a run in review, a failed
@@ -30,7 +31,7 @@ let restoreHome: () => void
 
 const OTHER = { id: 'e2e-mobile-other', name: 'e2e mobile other' }
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString()
-const record = (id: string, status: string, extra: Record<string, unknown> = {}) => ({
+const record = (id: string, status: RunRecord['status'], extra: Partial<RunRecord> = {}) => ({
   id,
   title: `mobile ${id}`,
   workflow: 'default',
@@ -41,7 +42,7 @@ const record = (id: string, status: string, extra: Record<string, unknown> = {})
   archived: false,
   steps: [],
   ...extra,
-})
+} satisfies Partial<RunRecord>)
 
 beforeAll(async () => {
   baseUrl = readTestEnv().baseUrl
@@ -51,14 +52,11 @@ beforeAll(async () => {
   const otherRoot = join(seedDir, 'other')
   execFileSync('git', ['init', '-q', '-b', 'main', otherRoot], { stdio: 'ignore' })
   mkdirSync(join(otherRoot, '.ai/cezar'), { recursive: true })
-  writeFileSync(
-    join(otherRoot, '.ai/cezar/runs.json'),
-    JSON.stringify([
-      record('mobile-review', 'review', { finishedAt: ago(30 * 60_000) }),
-      record('mobile-failed', 'failed', { finishedAt: ago(20 * 60_000), error: 'boom' }),
-      record('mobile-done', 'done', { finishedAt: ago(10 * 60_000) }),
-    ]),
-  )
+  seedRuns(otherRoot, [
+      record('mobile-review', RUN_STATUS.review, { finishedAt: ago(30 * 60_000) }),
+      record('mobile-failed', RUN_STATUS.failed, { finishedAt: ago(20 * 60_000), error: 'boom' }),
+      record('mobile-done', RUN_STATUS.done, { finishedAt: ago(10 * 60_000) }),
+    ])
   const existingBoot = readSharedProjects().find((project) => project.id === projectId)
   writeSharedProjects([
     existingBoot ?? {

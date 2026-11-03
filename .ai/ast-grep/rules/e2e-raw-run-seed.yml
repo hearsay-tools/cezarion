@@ -1,0 +1,45 @@
+id: e2e-raw-run-seed
+language: typescript
+severity: warning
+message: >-
+  Seed browser runs with seedRuns from ./seed-runs, not a raw runs.json write.
+  Typed fixture fields must fail typecheck when RunRecord changes (hearsay-tools/cezarion#2512).
+files:
+  - packages/web/e2e/**/*.e2e.ts
+utils:
+  run-path:
+    any:
+      - kind: string
+        has: { kind: string_fragment, regex: '(^|[/\\])runs\.json$' }
+      - kind: template_string
+        has: { kind: string_fragment, regex: '(^|[/\\])runs\.json$' }
+rule:
+  kind: call_expression
+  has:
+    field: function
+    regex: '(^|\.)(writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream)$'
+  any:
+    - has:
+        kind: arguments
+        has:
+          nthChild: 1
+          any:
+            - matches: run-path
+            - has: { matches: run-path, stopBy: end }
+    - all:
+        - any:
+            - pattern: $WRITE($PATH)
+            - pattern: $WRITE($PATH, $$$ARGS)
+        - inside:
+            kind: program
+            stopBy: end
+            has:
+              kind: variable_declarator
+              has: { field: name, pattern: $PATH }
+              all:
+                - has:
+                    field: value
+                    any:
+                      - matches: run-path
+                      - has: { matches: run-path, stopBy: end }
+              stopBy: end
