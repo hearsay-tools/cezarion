@@ -40,11 +40,18 @@ describe('harness autosave settlement part registration', () => {
       describe: ((_name: string, body: () => void) => body()) as typeof describe,
       it: ((name: string) => { names.push(name); }) as typeof it,
     };
-    for (const [suffix, outcome] of [['', 'failed'], ['-cancel', 'cancelled'], ['-success', 'success']] as const) {
+    for (const [suffix, outcome] of [['', 'failed'], ['-success', 'success']] as const) {
       const source = readFileSync(new URL(`./harness-autosave-settlement${suffix}.test.ts`, import.meta.url), 'utf8');
       expect(source).toContain(`describeAutosaveSettlement('${outcome}');`);
       expect(source.match(/describeAutosaveSettlement\(/g)).toHaveLength(1);
       describeAutosaveSettlement(outcome, registration);
+    }
+    for (const suffix of ['-cancel', '-cancel-continue']) {
+      const source = readFileSync(new URL(`./harness-autosave-settlement${suffix}.test.ts`, import.meta.url), 'utf8');
+      expect(source.match(/describeAutosaveSettlement\(/g)).toHaveLength(1);
+      const calls = [...source.matchAll(/describeAutosaveSettlement\('cancelled', undefined, \[(true|false)\]\);/g)];
+      expect(calls).toHaveLength(1);
+      for (const call of calls) describeAutosaveSettlement('cancelled', registration, [call[1] === 'true']);
     }
     const churn = readFileSync(new URL('./harness-autosave-settlement-churn.test.ts', import.meta.url), 'utf8');
     expect(churn.match(/describeAutosaveChurn\(/g)).toHaveLength(1);
