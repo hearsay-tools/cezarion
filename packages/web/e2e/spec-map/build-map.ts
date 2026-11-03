@@ -37,14 +37,14 @@ export function partial(args: string[], repoRoot = REPO_ROOT): void {
     args,
     options: {
       logs: { type: 'string' }, served: { type: 'string' }, sourcemaps: { type: 'string' },
-      results: { type: 'string' }, out: { type: 'string' },
+      results: { type: 'string' }, out: { type: 'string' }, 'node-logs': { type: 'string' },
     },
   })
   const { logs, served, sourcemaps, results, out } = values
   if (!logs || !served || !sourcemaps || !results || !out) throw new Error('partial needs --logs, --served, --sourcemaps, --results and --out')
   assertSameJavaScript(served, sourcemaps)
   const statuses = specStatuses(JSON.parse(readFileSync(results, 'utf8')), repoRoot)
-  const map = partialMap(logs, statuses, new Bundle(served, sourcemaps, repoRoot))
+  const map = partialMap(logs, statuses, new Bundle(served, sourcemaps, repoRoot), values['node-logs'], repoRoot)
   write(out, map)
   const withEvidence = Object.values(map.specs).filter((spec) => spec.executed.length > 0).length
   console.log(`spec map: ${withEvidence} of ${statuses.size} specs left V8 evidence`)

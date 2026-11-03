@@ -3,9 +3,9 @@
 // Iteration feedback only: CI still runs every spec.
 //
 // The spec map, built on each push to main by .github/workflows/e2e-spec-map.yml, links each
-// cockpit source file to the specs that ran it in a real browser. The selector diffs the working
+// cockpit source file and covered Node functions to the specs that ran them. The selector diffs the working
 // tree against the map's own commit, so a map older than the branch base still answers for every
-// change since. A change the map cannot answer for (server code, styles, the test environment)
+// change since. A change the map cannot answer for (unmapped server code, styles, the test environment)
 // selects every spec. packages/web/e2e/README.md § Choosing specs for a change has the rules.
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
@@ -51,7 +51,17 @@ export function mapProblem(value) {
   }
   if (typeof value.sources !== 'object' || value.sources === null) return 'it has no sources';
   const bad = Object.entries(value.sources).find(([, indexes]) => !isIndexList(indexes, value.specs.length));
-  return bad ? `its entry for ${bad[0]} is not a list of spec indexes` : null;
+  if (bad) return `its entry for ${bad[0]} is not a list of spec indexes`;
+  if (value.functions !== undefined) {
+    if (!value.functions || typeof value.functions !== 'object') return 'its functions are not an object';
+    for (const [file, entries] of Object.entries(value.functions)) {
+      if (!Array.isArray(entries) || entries.some(entry => !Number.isInteger(entry.start) || entry.start < 1
+        || !Number.isInteger(entry.end) || entry.end < entry.start || !isIndexList(entry.specs, value.specs.length))) {
+        return `its function ranges for ${file} are invalid`;
+      }
+    }
+  }
+  return null;
 }
 
 export function readMap(file) {
@@ -187,7 +197,7 @@ const reaches = (set, file) => set.has(file) || [...set].some(entry => entry.end
 const UNIT_TEST = /\.(?:test|testkit)\.[cm]?[jt]sx?$|^packages\/[^/]+\/src\/test\/|\/__snapshots__\//;
 const BUNDLED = /^packages\/(?:web|api-client)\/src\/.+\.tsx?$/;
 const EVERY_SPEC = [
-  [/^packages\/cezar\//, 'server or CLI code: the map holds cockpit code only'],
+  [/^packages\/cezar\//, 'server or CLI code without function evidence'],
   [/^packages\/contract\//, 'the contract, which the server reads too'],
   [/^packages\/web\//, 'a cockpit build input or a style: the map holds JavaScript only'],
   [/^\.ai\/scripts\//, 'the test environment'],
@@ -212,14 +222,43 @@ function e2eFileSpecs(file, readers) {
   return every('an e2e file no spec names: a spec may read it through a computed path');
 }
 
+/** Choose the innermost recorded function enclosing each changed old-source line range. */
+export function functionSpecs(file, map, readers, ranges) {
+  if (!ranges?.length) return every('no line evidence for this change');
+  const entries = map.functions[file];
+  const indexes = new Set();
+  for (const { start, end } of ranges) {
+    const enclosing = entries.filter(fn => fn.start <= start && fn.end >= end);
+    if (enclosing.length === 0) return every('the changed lines have no function evidence');
+    const width = Math.min(...enclosing.map(fn => fn.end - fn.start));
+    for (const fn of enclosing.filter(fn => fn.end - fn.start === width)) {
+      for (const index of fn.specs) indexes.add(index);
+    }
+  }
+  return { specs: [...new Set([...indexes].map(index => map.specs[index]).concat(readers))],
+    reason: 'the specs that ran the changed functions', mapped: true };
+}
+
+/** Old-source hunk lines; insertions include both neighbours so a boundary stays conservative. */
+export function changedLines(diff) {
+  return [...diff.matchAll(/^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@/gm)].map(match => {
+    const line = Number(match[1]);
+    const count = match[2] === undefined ? 1 : Number(match[2]);
+    return { start: Math.max(1, line), end: count === 0 ? line + 1 : line + count - 1 };
+  });
+}
+
 /** The specs one changed file selects: a list, or null for every spec, with the reason. */
-export function classify(file, { map, graph }) {
+export function classify(file, { map, graph, changes }) {
   if (isDocsPath(file)) return none('documentation');
   if (reaches(graph.setup, file)) return every('the browser suite setup loads it');
   const readers = [...graph.specs].filter(([, set]) => reaches(set, file)).map(([spec]) => spec);
   if (file.startsWith(`${SPEC_DIR}/`)) return e2eFileSpecs(file, readers);
   if (UNIT_TEST.test(file)) return none('a unit test file');
   if (BUNDLED.test(file)) return mappedSpecs(file, map, readers);
+  if (map.functions?.[file] && /^packages\/cezar\/(?:src\/|scripts\/mock-[^/]+\.mjs$)/.test(file)) {
+    return functionSpecs(file, map, readers, changes?.get(file));
+  }
   if (file.startsWith('.github/')) return none('CI configuration the browser suite does not load');
   return every(EVERY_SPEC.find(([pattern]) => pattern.test(file))[1]);
 }
@@ -228,8 +267,8 @@ export function classify(file, { map, graph }) {
  * The specs a change selects. A spec the map lists as incomplete runs whenever a bundled source
  * changed, because its evidence may be missing the file.
  */
-export function selectSpecs({ files, map, graph, specFiles }) {
-  const lines = files.map(file => ({ file, ...classify(file, { map, graph }) }));
+export function selectSpecs({ files, map, graph, specFiles, changes }) {
+  const lines = files.map(file => ({ file, ...classify(file, { map, graph, changes }) }));
   if (lines.some(line => line.specs === null)) return { lines, all: true, specs: specFiles };
   const chosen = new Set(lines.flatMap(line => line.specs));
   if (lines.some(line => line.mapped)) for (const spec of map.incomplete) chosen.add(spec);
@@ -299,7 +338,13 @@ function chooseSpecs(root, run, loaded, specFiles) {
     return { all: true, specs: specFiles, problem };
   }
   const files = changedFiles(run, loaded.map.commit);
-  return selectSpecs({ files, map: loaded.map, graph: referenceGraph(root, specFiles), specFiles });
+  const changes = new Map();
+  for (const file of files.filter(file => loaded.map.functions?.[file])) {
+    try {
+      changes.set(file, changedLines(run('git', ['diff', '--no-ext-diff', '--no-renames', '--unified=0', loaded.map.commit, '--', file])));
+    } catch { /* Missing line evidence selects every spec. */ }
+  }
+  return selectSpecs({ files, map: loaded.map, graph: referenceGraph(root, specFiles), specFiles, changes });
 }
 
 export function main(argv) {

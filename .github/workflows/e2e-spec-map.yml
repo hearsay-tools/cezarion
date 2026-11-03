@@ -71,7 +71,13 @@ jobs:
 
       # The same bootstrap `npm run test:e2e` runs: install, the VITE_CEZ_E2E=1 build, the
       # server and the browser provider. A capture without a browser is no evidence.
+      - name: Enable harness-only Node coverage
+        run: |
+          echo "E2E_SPEC_MAP_NODE_DIR=$RUNNER_TEMP/spec-map/logs" >> "$GITHUB_ENV"
+
       - name: Boot the test environment
+        env:
+          NODE_OPTIONS: --import=${{ github.workspace }}/packages/web/e2e/spec-map/node-preload.mjs
         run: |
           sh .ai/scripts/test-env-up.sh
           node -e 'const d = JSON.parse(require("fs").readFileSync(".ai/qa/test-env.json", "utf8")); if (!d.browser?.installed) { console.error(d.browser?.notes || "agent-browser is unavailable"); process.exit(1) }'
@@ -80,12 +86,29 @@ jobs:
       # always runs it. The merge job refuses a map with too little evidence.
       - name: Run the browser suite with V8 function logs
         env:
+          NODE_OPTIONS: --import=${{ github.workspace }}/packages/web/e2e/spec-map/node-preload.mjs
           E2E_SPEC_MAP_LOG_DIR: ${{ runner.temp }}/spec-map/logs
         run: |
           set +e
           npm exec -- vitest run --config packages/web/e2e/spec-map/vitest.config.ts --shard="$SHARD/2" \
             --reporter=default --reporter=json --outputFile.json="$RUNNER_TEMP/spec-map/results.json"
           echo "The browser suite exited $?."
+
+      - name: Report served-server peak memory
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, readdirSync } from 'node:fs';
+          import { basename, join } from 'node:path';
+          const { app: { pid } } = JSON.parse(readFileSync('.ai/qa/test-env.json', 'utf8'));
+          const root = process.env.E2E_SPEC_MAP_NODE_DIR;
+          const samples = readdirSync(root, { recursive: true, encoding: 'utf8' })
+            .filter(file => basename(file).startsWith(`server-${pid}-`) || basename(file) === `shared-startup-${pid}.json`)
+            .map(file => JSON.parse(readFileSync(join(root, file), 'utf8')).peakRssKiB)
+            .filter(value => Number.isFinite(value) && value > 0);
+          console.log(samples.length
+            ? `Served server peak RSS: ${Math.max(...samples)} KiB`
+            : 'Served server peak RSS: unavailable (no server coverage snapshot)');
+          NODE
 
       - name: Build the cockpit again with source maps
         run: |
@@ -98,16 +121,45 @@ jobs:
         run: |
           node packages/web/e2e/spec-map/build-map.ts partial \
             --logs "$RUNNER_TEMP/spec-map/logs" \
+            --node-logs "$RUNNER_TEMP/spec-map/logs" \
             --served .ai/qa/build/cezar/web/dist \
             --sourcemaps "$RUNNER_TEMP/spec-map/sourcemaps" \
             --results "$RUNNER_TEMP/spec-map/results.json" \
             --out "$RUNNER_TEMP/spec-map/partial/shard-$SHARD.json"
+          node --input-type=module <<'NODE'
+          import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+          import { join, basename } from 'node:path';
+          const root = process.env.E2E_SPEC_MAP_NODE_DIR;
+          const records = readdirSync(root, { recursive: true, encoding: 'utf8' })
+            .filter(file => /^(?:control|ambiguous-task-.*|expected|expected-server-.*|[0-9]+)\.json$/.test(basename(file)))
+            .map(file => ({ file, ...JSON.parse(readFileSync(join(root, file), 'utf8')) }));
+          writeFileSync(`${process.env.RUNNER_TEMP}/spec-map/partial/capture-${process.env.SHARD}.txt`, JSON.stringify({ records, files: readdirSync(root, { recursive: true, encoding: 'utf8' }) }));
+          NODE
 
       - name: Upload the evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: e2e-spec-map-partial-${{ matrix.shard }}
           path: ${{ runner.temp }}/spec-map/partial/
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Archive allowlisted replay evidence
+        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' }}
+        env:
+          CAPTURE_COMMIT: ${{ github.sha }}
+        run: |
+          node packages/web/e2e/spec-map/replay.ts archive \
+            --repo "$GITHUB_WORKSPACE" --capture "$RUNNER_TEMP/spec-map" \
+            --commit "$CAPTURE_COMMIT" --out "$RUNNER_TEMP/capture-$SHARD.jsonl.gz"
+          node --input-type=module -e 'import { statSync } from "node:fs"; console.log(`Replay archive: ${statSync(process.argv[1]).size} bytes`)' "$RUNNER_TEMP/capture-$SHARD.jsonl.gz"
+
+      - name: Upload raw replay evidence
+        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: e2e-spec-map-replay-${{ matrix.shard }}
+          path: ${{ runner.temp }}/capture-${{ matrix.shard }}.jsonl.gz
           if-no-files-found: error
           retention-days: 1
 

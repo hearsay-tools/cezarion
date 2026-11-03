@@ -1,6 +1,8 @@
 import { mkdirSync } from 'node:fs'
 import { basename, join } from 'node:path'
-import { expect } from 'vitest'
+import { afterAll, expect } from 'vitest'
+
+import { beginNodeCapture, endNodeCapture } from './node-control.ts'
 
 import { captureBrowserArgs } from './v8-log.ts'
 
@@ -29,3 +31,10 @@ if (!spec) throw new Error('spec-map capture: Vitest named no test file for this
 const dir = join(root, basename(spec, '.e2e.ts'))
 mkdirSync(dir, { recursive: true })
 process.env.AGENT_BROWSER_ARGS = captureBrowserArgs(scope[INHERITED] ?? '', dir)
+
+const nodeRoot = process.env.E2E_SPEC_MAP_NODE_DIR
+if (nodeRoot) {
+  process.env.E2E_SPEC_MAP_SPEC = spec
+  await beginNodeCapture(nodeRoot, spec)
+  afterAll(async () => { await endNodeCapture(nodeRoot, spec) })
+}
