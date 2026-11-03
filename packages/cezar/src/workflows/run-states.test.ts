@@ -28,7 +28,7 @@ function uncovered(states: Readonly<Record<RunState, RunStateSpec>>, rows: reado
     if (spec.final) continue;
     const automatic = rows.some((row) => row.states.includes(state) && automaticExit(row, state));
     if (automatic && spec.humanOnly) problems.push(`${state} has an automatic exit and a human-only reason`);
-    if (!automatic && !spec.humanOnly?.trim()) problems.push(`${state} has no automatic exit and no recorded reason`);
+    if (!automatic && !spec.humanOnly?.trim()) problems.push(`${state} has no automatic exit and no recorded reason; add an automatic exit in RUN_TRIGGERS or a humanOnly reason in RUN_STATES (workflows/run-states.ts)`);
   }
   return problems;
 }
@@ -41,7 +41,7 @@ describe('run states and their exits (hearsay-tools/cezarion#1804)', () => {
   // The open-mercato/cezar#661 shape: a park whose only automatic exit was removed.
   it('names a state whose automatic exit is removed', () => {
     const rows = RUN_TRIGGERS.filter((row) => row.id !== 'timer.fires');
-    expect(uncovered(RUN_STATES, rows)).toEqual(['waiting:timer has no automatic exit and no recorded reason']);
+    expect(uncovered(RUN_STATES, rows)).toEqual(['waiting:timer has no automatic exit and no recorded reason; add an automatic exit in RUN_TRIGGERS or a humanOnly reason in RUN_STATES (workflows/run-states.ts)']);
   });
 
   it('gives every wait kind an automatic resolution or a human-only reason', () => {

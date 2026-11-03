@@ -128,25 +128,12 @@ says what it serves and how it stops.
 
 **Typecheck.** Run `npm run typecheck`; it checks all workspaces without building or writing `dist`. After `npm run build`, run `npm run typecheck:package` to check packaged tests.
 
-**In a unit test, a timeout is a hang guard, never the thing the test waits on.**
-Wait for the product's own signal: an event, a callback, a store write, a file
-the fixture publishes. A test that proves something did NOT happen moves past
-the window with fake timers, or says at the call site why it needs real time.
-Size a bound per step, not per row or sequence: a loop of N turns gets a
-per-turn budget, or a window that restarts on each sign of progress
-(hearsay-tools/cezarion#1145). A product budget a test shrinks, such as a Git
-timeout or an autosave budget, applies only to the step it exercises and never
-races its own fixture's startup (hearsay-tools/cezarion#1144,
-hearsay-tools/cezarion#1146). Any bound that remains states its reason at the
-call site, as a `// bound: <reason>` comment. Baselines that only shrink hold
-the rest: bare sleeps, waits under the floor (Vitest's 1 s default counts) and
-poll loops with no deadline, in `npm run lint`: `cez/test-wait-discipline`
-(server, 10 s) and `cez/unit-wait-discipline` (cockpit, 3 s).
-The three baselines keep their paths. Shrink them with
-`TEST_WAIT_DISCIPLINE_UPDATE=1 npm run lint` (server) or
-`UNIT_WAIT_DISCIPLINE_UPDATE=1 npm run lint` (cockpit). A new site gets the product's signal or a `// bound:` reason, never a
-baseline entry; a failing scan names the command that shrinks its baseline.
-The scan cannot see a shrunk product budget, so review checks that one.
+Wait for the product's own signal. A test that proves something did not happen
+uses fake timers or states at the call site why it needs real time.
+Size a bound per step, or use a window that restarts on progress.
+A shrunk product budget applies only to its step and never races its fixture's
+startup; review checks it because the scan cannot.
+Wait guards: `cez/test-wait-discipline` and `cez/unit-wait-discipline` in `npm run lint`.
 
 
 ## CI owns the final gate

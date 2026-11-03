@@ -9,8 +9,7 @@ import type { RunRecord } from './store.ts';
  * transaction, `recordCommits` reads the committed rows through a new connection: what a store
  * reopened after a crash at that point loads. An outcome committed apart from what it depends on
  * shows up as one snapshot that holds the outcome without it, however the test ends; the final
- * state and the in-memory record never show that (.ai/skills/load-bearing-change § Commit an outcome with what it
- * depends on, or after it).
+ * state and the in-memory record never show that (`outcome-write-outside-commit-outcome`).
  */
 export interface CommitRecorder {
   /** The run as each transaction since `recordCommits` left it, in commit order (absent: no row). */
