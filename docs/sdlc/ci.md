@@ -793,7 +793,8 @@ review-thread resolution and no-bypass protection.
 
 #### Two speculative builds
 
-The [speculative merge-queue spec](../../.ai/specs/2026-11-03-speculative-merge-queue.md) (hearsay-tools/cezarion#2622)
+The speculative merge-queue spec, `.ai/specs/2026-11-03-speculative-merge-queue.md`
+(hearsay-tools/cezarion#2622; on `main` after merge),
 lets the queue build two entries at once. Entry 2 is built on entry 1's group
 head, and each PR still lands as its own tested commit. Admission accepts build
 concurrency 1 or 2, so the code lands before the ruleset change and behaves as
@@ -827,7 +828,7 @@ its head SHA and fails closed.
 | 18 | Admission API error, deadline or changing evidence | GitHub API | Actions | Entry fails closed and is removed, so it counts as a queue failure. The PR stays open | As today |
 | 19 | Docs-only entry at position 2 (once hearsay-tools/cezarion#2615 lands) | PR content | Classifier | The group diff `base..head` is that PR's own diff, so the skip is valid. Main proof: first parent = ref base | As today |
 | 20 | Entry at position 2, native suites passed | — | `pr-test-proof` | Base is not `main`, so full suites run | Cannot happen |
-| 21 | Entry at position 1 on `main`, PR up to date, entries behind it | — | `pr-test-proof` | Reuse allowed (today: blocked by the entries behind) | Reuse allowed |
+| 21 | Entry at position 1 on `main`, PR up to date, entries behind it | — | `pr-test-proof` | Full suites: the entries behind block reuse until hearsay-tools/cezarion#2624 lands; then reuse is allowed | As at k=2 |
 | 22 | An invalidated run finishes green later | Old run completes | Actions | Its group never merges, and its SHA never reaches `main`. It is counted as waste in the pilot metric | Cannot happen |
 | 23 | Manual re-run of a failed queue run | Human | Human | The entry was already removed; the run proves nothing for a new group. Requeue the PR | As today |
 | 24 | GitHub reports entry 2's `baseCommit` as `main`, not entry 1's head (S5 false) | GitHub data model | GitHub | Entry 2's admission fails closed on every build. The pre-activation exercise catches this before the pilot. Then the lookup changes to: base = the position-1 head, checked through the ref name | — |
