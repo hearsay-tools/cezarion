@@ -7,6 +7,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { PROJECT_CATALOGS, replaceProjectCatalogs } from './e2e-catalogs.mjs';
+
 const ownRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const COUNT = 4;
 // build-e2e.sh's mirror of the server package; never the production packages/cezar/dist.
@@ -22,8 +24,13 @@ function changedPaths(repoRoot, baseRef) {
   return new Set(Buffer.concat([changed, untracked]).toString('utf8').split('\0').filter(Boolean));
 }
 
-function copyCurrentEdits(repoRoot, laneRoot, baseRef) {
+function isCatalogPath(relative) {
+  return PROJECT_CATALOGS.some(path => relative === path || relative.startsWith(`${path}/`));
+}
+
+function copyCurrentEdits(repoRoot, laneRoot, baseRef, fixedCatalogs = false) {
   for (const relative of changedPaths(repoRoot, baseRef)) {
+    if (fixedCatalogs && isCatalogPath(relative)) continue;
     const source = join(repoRoot, relative);
     const target = join(laneRoot, relative);
     rmSync(target, { recursive: true, force: true });
@@ -219,13 +226,14 @@ export function syncCurrentEdits({ repoRoot, root }) {
       git(root, 'checkout', '--quiet', head, '--', relative);
     }
   }
-  copyCurrentEdits(repoRoot, root, head);
+  copyCurrentEdits(repoRoot, root, head, owner.fixedCatalogs);
   return true;
 }
 
-export function createLane({ repoRoot, scratchRoot, index, baseRef = 'HEAD' }) {
+export function createLane({ repoRoot, scratchRoot, index, baseRef = 'HEAD', fixedCatalogs = false }) {
   const laneRoot = cloneIsolatedCheckout({ repoRoot, root: join(scratchRoot, `lane-${index}`), baseRef });
   try {
+    if (fixedCatalogs) replaceProjectCatalogs(laneRoot);
     linkBuiltAssets(repoRoot, laneRoot);
     return laneRoot;
   } catch (error) {
@@ -342,7 +350,7 @@ export async function runLocalSuite({ repoRoot = ownRoot, scratchRoot, buildSour
     // Boot sequentially: the first lane installs the browser provider once before peers use it.
     for (let index = 1; index <= COUNT; index += 1) {
       if (interrupted) throw new Error('local E2E run interrupted');
-      const root = createLane({ repoRoot, scratchRoot: scratch, index, baseRef });
+      const root = createLane({ repoRoot, scratchRoot: scratch, index, baseRef, fixedCatalogs: true });
       const namespace = (browserRunId + index - 1).toString(36).padStart(7, '0');
       const env = { ...process.env, E2E_PREBUILT_ASSETS: '1', E2E_BROWSER_NAMESPACE: namespace };
       const lane = { index, root, namespace, shard: `${index}/${COUNT}`, env,

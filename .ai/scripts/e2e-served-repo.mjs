@@ -7,6 +7,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { cloneIsolatedCheckout, removeLane, syncCurrentEdits } from './e2e-lanes.mjs';
 
+import { replaceProjectCatalogs } from './e2e-catalogs.mjs';
+
 const args = process.argv.slice(2);
 const sync = args[0] === '--sync';
 const [repoRoot, target] = sync ? args.slice(1) : args;
@@ -15,7 +17,11 @@ if (!repoRoot || !target) {
   process.exit(2);
 }
 try {
-  if (sync) process.exit(syncCurrentEdits({ repoRoot, root: target }) ? 0 : 3);
+  if (sync) {
+    if (!syncCurrentEdits({ repoRoot, root: target })) process.exit(3);
+    replaceProjectCatalogs(target);
+    process.exit(0);
+  }
   // Inside the checkout the clone must be ignored: its own edits are copied from the
   // checkout's untracked files, and an unignored clone would copy itself into itself.
   // check-ignore exits 0 ignored, 1 not ignored, 128 for a path outside the repository.
@@ -29,7 +35,9 @@ try {
       throw new Error(`refusing to replace ${target}: it is not a served E2E clone of ${repoRoot} (${error.message})`);
     }
   }
-  process.stdout.write(`${realpathSync(cloneIsolatedCheckout({ repoRoot, root: target }))}\n`);
+  cloneIsolatedCheckout({ repoRoot, root: target });
+  replaceProjectCatalogs(target);
+  process.stdout.write(`${realpathSync(target)}\n`);
 } catch (error) {
   process.stderr.write(`${error instanceof Error ? error.message : error}\n`);
   process.exit(1);

@@ -130,6 +130,9 @@ test('missing browser reports skipped without claiming a full-suite pass', async
 test('CLI exits nonzero when the full local suite skips for a missing browser', (t) => {
   const { repo } = fixture(t);
   writeFileSync(join(repo, '.ai/scripts/build-e2e.sh'), '#!/bin/sh\nexit 0\n');
+  cpSync(new URL('../.ai/scripts/e2e-catalogs.mjs', import.meta.url), join(repo, '.ai/scripts/e2e-catalogs.mjs'));
+  mkdirSync(join(repo, 'packages/web/e2e/fixtures'), { recursive: true });
+  cpSync(new URL('../packages/web/e2e/fixtures/catalogs', import.meta.url), join(repo, 'packages/web/e2e/fixtures/catalogs'), { recursive: true });
   writeFileSync(join(repo, '.ai/scripts/e2e-lanes.mjs'), readFileSync(new URL('../.ai/scripts/e2e-lanes.mjs', import.meta.url)));
   writeFileSync(join(repo, '.ai/scripts/test-env-up.sh'), '#!/bin/sh\nmkdir -p .ai/qa\necho \'{"browser":{"installed":false},"baseUrl":"http://127.0.0.1:1"}\' > .ai/qa/test-env.json\n');
   const run = spawnSync(process.execPath, [join(repo, '.ai/scripts/e2e-lanes.mjs')], { cwd: repo, encoding: 'utf8' });
@@ -600,4 +603,76 @@ test('pnpm lanes expose package dependencies and resolve workspace links inside 
     assert.equal(readFileSync(join(lane, 'packages/web/node_modules/@open-mercato/cezar-api-client/current.txt'), 'utf8'), 'lane source');
     assert.equal(readFileSync(join(repo, 'packages/api-client/current.txt'), 'utf8'), 'verified source');
   } finally { removeLane({ repoRoot: repo, laneRoot: lane }); }
+});
+
+// Exercise the public served-clone command so both prepare and reuse keep the contract.
+import { PROJECT_CATALOGS } from '../.ai/scripts/e2e-catalogs.mjs';
+const catalogFixtures = new URL('../packages/web/e2e/fixtures/catalogs/', import.meta.url);
+const servedCommand = new URL('../.ai/scripts/e2e-served-repo.mjs', import.meta.url);
+
+function catalogFiles(root) {
+  if (!existsSync(root)) return {};
+  return Object.fromEntries(readdirSync(root, { recursive: true, withFileTypes: true })
+    .filter(entry => entry.isFile())
+    .map(entry => [join(entry.parentPath, entry.name).slice(root.length + 1), readFileSync(join(entry.parentPath, entry.name), 'utf8')])
+    .sort(([a], [b]) => a.localeCompare(b)));
+}
+
+function assertFixedCatalogs(root) {
+  for (const relative of PROJECT_CATALOGS) {
+    const source = relative === '.ai/skills' ? 'skills' : relative === '.ai/cezar/workflows' ? 'workflows' : undefined;
+    assert.deepEqual(catalogFiles(join(root, relative)), source ? catalogFiles(new URL(source, catalogFixtures).pathname) : {}, relative);
+  }
+}
+
+test('served prepare and sync replace checkout skills and workflows with fixed catalogs', (t) => {
+  const { root, repo } = fixture(t);
+  for (const relative of PROJECT_CATALOGS) {
+    mkdirSync(join(repo, relative), { recursive: true });
+    for (let i = 0; i < 5; i++) writeFileSync(join(repo, relative, `dummy-${i}.md`), `dummy skill ${i}\n`);
+  }
+  writeFileSync(join(repo, '.ai/cezar/workflows/dummy.yaml'), 'name: dummy\nskills: [dummy-0]\n');
+  gitText(repo, 'add', '.');
+  gitText(repo, 'commit', '-qm', 'checkout catalogs');
+  const target = join(root, 'served');
+  const run = (...args) => spawnSync(process.execPath, [servedCommand.pathname, ...args], { encoding: 'utf8' });
+  const prepared = run(repo, target);
+  assert.equal(prepared.status, 0, prepared.stderr);
+  t.after(() => removeLane({ repoRoot: repo, laneRoot: target }));
+  assertFixedCatalogs(target);
+  assert.equal(gitText(target, 'status', '--porcelain'), '');
+  assert.equal(gitText(target, 'diff', 'HEAD'), '');
+  assert.equal(gitText(target, 'log', '--format=%H'), gitText(repo, 'log', '--format=%H'));
+  assert.equal(gitText(target, 'rev-parse', 'HEAD'), gitText(repo, 'rev-parse', 'HEAD'));
+  // Exercise deletion, edits and untracked additions on reuse, plus stale served-only rows.
+  rmSync(join(repo, '.ai/skills/dummy-0.md'));
+  writeFileSync(join(repo, '.ai/skills/dummy-1.md'), 'edited checkout skill\n');
+  writeFileSync(join(repo, '.ai/skills/extra.md'), 'untracked checkout skill\n');
+  writeFileSync(join(repo, '.ai/cezar/workflows/extra.yaml'), 'name: extra\nskills: [dummy-1]\n');
+  writeFileSync(join(target, '.ai/skills/stale.md'), 'served-only skill\n');
+  writeFileSync(join(repo, 'kept.txt'), 'current source edit\n');
+  const synced = run('--sync', repo, target);
+  assert.equal(synced.status, 0, synced.stderr);
+  assertFixedCatalogs(target);
+  assert.equal(gitText(target, 'status', '--porcelain'), 'M kept.txt');
+  assert.equal(gitText(target, 'diff', 'HEAD'), gitText(repo, 'diff', 'HEAD', '--', 'kept.txt'));
+  assert.equal(gitText(target, 'log', '--format=%H'), gitText(repo, 'log', '--format=%H'));
+  assert.equal(readFileSync(join(target, 'kept.txt'), 'utf8'), 'current source edit\n');
+  gitText(repo, 'add', 'kept.txt');
+  gitText(repo, 'commit', '-qm', 'moved HEAD');
+  assert.equal(run('--sync', repo, target).status, 3);
+});
+
+test('local lanes serve the same fixed catalogs', (t) => {
+  const { root, repo } = fixture(t);
+  mkdirSync(join(repo, '.ai/skills'), { recursive: true });
+  writeFileSync(join(repo, '.ai/skills/checkout.md'), 'checkout skill\n');
+  gitText(repo, 'add', '.ai/skills/checkout.md');
+  gitText(repo, 'commit', '-qm', 'checkout skill');
+  const original = privateLane(t, repo, root, 2);
+  const lane = createLane({ repoRoot: repo, scratchRoot: join(root, 'scratch'), index: 1, fixedCatalogs: true });
+  t.after(() => removeLane({ repoRoot: repo, laneRoot: lane }));
+  assertFixedCatalogs(lane);
+  assert.equal(gitText(lane, 'status', '--porcelain'), gitText(original, 'status', '--porcelain'));
+  assert.equal(gitText(lane, 'rev-parse', 'HEAD'), gitText(repo, 'rev-parse', 'HEAD'));
 });

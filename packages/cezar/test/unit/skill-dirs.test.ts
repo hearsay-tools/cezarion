@@ -29,3 +29,11 @@ test('the project skill dirs the hint promises are the ones discovery actually s
     ],
   );
 });
+
+// The harness must replace every repo catalog that the served server can discover.
+import { WORKFLOWS_DIR } from '../../src/workflows/load.js';
+import { PROJECT_CATALOGS } from '../../../../.ai/scripts/e2e-catalogs.mjs';
+
+test('the e2e fixture catalogs cover every project discovery directory', () => {
+  assert.deepEqual(PROJECT_CATALOGS, [...SKILL_DIRS.map(({ dir }) => dir), WORKFLOWS_DIR]);
+});
