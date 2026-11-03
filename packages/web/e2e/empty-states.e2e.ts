@@ -2,7 +2,7 @@ import type { ChildProcess } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
@@ -51,7 +51,7 @@ afterAll(async () => {
 })
 
 describe('tasks overview — no tasks yet', () => {
-  beforeAll(() => {
+  beforeEach(() => {
     browser.goto(`${baseUrl}${scoped('/')}`)
     // The empty state is async: it may render only after /api/v1/runs has answered [].
     browser.waitForFunction(`document.querySelector('[data-slot="tasks-empty"]') !== null`)
@@ -90,7 +90,7 @@ describe('tasks overview — no tasks yet', () => {
 })
 
 describe('the 404 route', () => {
-  beforeAll(() => {
+  beforeEach(() => {
     browser.goto(`${baseUrl}${scoped('/definitely-not-a-route')}`)
     browser.waitForFunction(`document.querySelector('[data-route="not-found"]') !== null`)
   })
