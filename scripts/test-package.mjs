@@ -59,7 +59,8 @@ function fingerprints(repo, env) {
 
 export function recordBuild(repo, env = process.env) {
   if (requiredOutputs.some(file => !existsSync(join(repo, file)))) throw new Error('Cannot stamp an incomplete build');
-  const outputs = outputRoots.flatMap(path => treeFiles(join(repo, path))).map(file => relative(repo, file)).sort();
+  const outputs = outputRoots.flatMap(path => treeFiles(join(repo, path))).sort()
+    .map(file => ({ path: relative(repo, file), digest: digest(readFileSync(file)) }));
   const stamp = { ...fingerprints(repo, env), outputs };
   mkdirSync(dirname(stampPath(repo)), { recursive: true });
   writeFileSync(stampPath(repo), JSON.stringify(stamp));
@@ -71,7 +72,8 @@ export function needsBuild(repo, env = process.env) {
     const current = fingerprints(repo, env);
     return stamp.inputs !== current.inputs || stamp.environment !== current.environment ||
       !Array.isArray(stamp.outputs) || stamp.outputs.length === 0 ||
-      stamp.outputs.some(file => typeof file !== 'string' || !existsSync(join(repo, file))) ||
+      stamp.outputs.some(file => typeof file?.path !== 'string' ||
+        !existsSync(join(repo, file.path)) || digest(readFileSync(join(repo, file.path))) !== file.digest) ||
       requiredOutputs.some(file => !existsSync(join(repo, file)));
   } catch {
     return true;

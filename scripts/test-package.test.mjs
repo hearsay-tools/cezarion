@@ -114,3 +114,13 @@ test('Vite environment and dotenv changes invalidate a completed build', t => {
     assert.equal(needsBuild(root, env), false);
   }
 });
+
+
+test('changed output bytes invalidate a completed build', t => {
+  const { root, put } = fixture(t);
+  for (const file of ['dist/index.js', 'dist/contract/index.js', 'web/dist/index.html', 'README.md', 'dist/server/server.js']) put(`packages/cezar/${file}`, 2000);
+  recordBuild(root);
+  assert.equal(needsBuild(root), false);
+  put('packages/cezar/dist/server/server.js', 3000);
+  assert.equal(needsBuild(root), true);
+});
