@@ -4,6 +4,7 @@ import { defaultMaxWorkers } from './.github/scripts/vitest-worker-count.cjs'
 import { defineConfig } from 'vitest/config'
 import CiTestSequencer from './.github/scripts/ci-test-sequencer.mjs'
 import KeepTestFilesInCoverage, { coverageRequested } from './.github/scripts/vitest-coverage-tests.mjs'
+import FileDurationReporter from './.github/scripts/vitest-file-duration.mjs'
 
 checkWorkspaceResolution()
 
@@ -33,6 +34,8 @@ export default defineConfig({
       'default',
       ...(process.env.GITHUB_ACTIONS === 'true' ? [['github-actions', { jobSummary: { title: 'Vitest Test Report' } }] as const] : []),
       ...(coverageRequested() ? [new KeepTestFilesInCoverage()] : []),
+      // Only ci.yml's Vitest shard step opts in; local and Squeal runs stay unchanged.
+      ...(process.env.VITEST_FILE_DURATION_CAP === '1' ? [new FileDurationReporter()] : []),
     ],
     // Opt in with `--coverage` (CI's PR/dispatch test shards do). V8 coverage of the code the tests load,
     // test files included, written where the ignored `.ai/qa/` directory keeps it. The default
