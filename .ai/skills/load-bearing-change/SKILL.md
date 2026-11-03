@@ -51,12 +51,15 @@ or worker park (`workflows/run.ts`). No other event calls back, so a state whose
 on-by-default exit is "a human types something" is a dead end, however well it renders. The plan carries a **Transitions out** case table (below).
 
 Outcome writes: `outcome-write-outside-commit-outcome` names the commit helper.
+A cleanup write uses `bestEffort` and must never throw past cleanup.
+Outside the run store, commit an outcome atomically with or after what it depends on, and test each crash boundary on the committed row, not the final state or the in-memory object.
 
 **Test the path with no live session.** When changing a path that reads
 `this.active.get(runId)`, add a test with no session. Restart recovery and scheduler
 continuations can reach the path before a session exists; an absent entry must still
 produce the required durable outcome and a usable next step.
 
+Find every construction site of a shared in-memory object by grepping its type, not its field, and give it one factory where a new required field fails to compile.
 Construction and skills access: `active-run-literal`, `active-run-map-write`, `skills-read-outside-enabled-skills` and `skills-write-outside-load-run-skills` name their owners.
 
 **List each handler's side effects, in order, before you merge handlers into one.** The

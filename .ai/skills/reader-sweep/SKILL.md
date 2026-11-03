@@ -11,7 +11,7 @@ that name it — and update each one, or state in the plan or PR why it stays. S
 the old and the new form, because a reader can assert that something is present or that
 it is absent. Inspect every match: common names match unrelated text, and compatibility
 names, intentional refusal tests, legacy-row conversion tests and historical references
-stay. The `active-run-literal` guard names the construction site for `ActiveRun`, and
+stay. The general construction-site rule in the [load-bearing-change skill](../load-bearing-change/SKILL.md) covers shared in-memory objects, and
 the Task routing rows for run search, pending asks and skills list their readers.
 
 Where readers hide, searched from the repo root (replace the example values):
