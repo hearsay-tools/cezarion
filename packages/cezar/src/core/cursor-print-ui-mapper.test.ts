@@ -2,8 +2,11 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import type { UiEvent } from './ui-events.ts';
-import { createCursorPrintUiState, mapCursorPrintMessage, mapCursorPrintStreamEvent } from './cursor-print-ui-mapper.ts';
+import { PLAN_STATUSES, createCursorPrintUiState, mapCursorPrintMessage, mapCursorPrintStreamEvent } from './cursor-print-ui-mapper.ts';
+
+const PLAN_STATUS = z.enum(PLAN_STATUSES).enum;
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), '__fixtures__', 'cursor');
 
@@ -30,13 +33,13 @@ describe('Cursor print mapper', () => {
     };
     expect(start('todo-1', [
       { id: 'a', content: 'Read', status: 'in_progress' },
-      { id: 'b', content: 'Write', status: 'pending' },
+      { id: 'b', content: 'Write', status: PLAN_STATUS.pending },
     ], false)).toContainEqual({ type: 'plan.updated', entries: [
-      { content: 'Read', status: 'in_progress' }, { content: 'Write', status: 'pending' },
+      { content: 'Read', status: 'in_progress' }, { content: 'Write', status: PLAN_STATUS.pending },
     ] });
     expect(start('todo-2', [{ id: 'a', content: 'Read', status: 'completed' }], true))
       .toContainEqual({ type: 'plan.updated', entries: [
-        { content: 'Read', status: 'completed' }, { content: 'Write', status: 'pending' },
+        { content: 'Read', status: 'completed' }, { content: 'Write', status: PLAN_STATUS.pending },
       ] });
   });
   it('maps two native print turns as one logical session with independent golden expectations', () => {

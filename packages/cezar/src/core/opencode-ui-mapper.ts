@@ -505,7 +505,7 @@ function planEntriesOf(input: unknown): PlanEntry[] | undefined {
   return entries;
 }
 
-const PLAN_STATUSES: readonly PlanStatus[] = ['pending', 'in_progress', 'completed', 'cancelled'];
+export const PLAN_STATUSES: readonly PlanStatus[] = ['pending', 'in_progress', 'completed', 'cancelled'];
 
 /** `patch` parts snapshot applied file changes → a completed edit-tool item
  *  carrying `diffs` (unified when the wire includes content; the older

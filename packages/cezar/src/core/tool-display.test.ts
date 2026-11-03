@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
+import { PLAN_STATUSES } from './claude-ui-mapper.ts';
 
 import { toolDisplay, type ToolDisplay } from '@open-mercato/cezar-contract/tool-display';
+
+const PLAN_STATUS = z.enum(PLAN_STATUSES).enum;
 
 describe('toolDisplay', () => {
   describe('known tools across backends', () => {
@@ -174,7 +178,7 @@ describe('toolDisplay', () => {
       // ---- plan: claude TodoWrite, opencode todowrite, codex todoList/plan ----
       {
         name: 'TodoWrite',
-        input: { todos: [{ content: 'x', status: 'pending' }] },
+        input: { todos: [{ content: 'x', status: PLAN_STATUS.pending }] },
         expected: { toolKind: 'plan', title: 'Update plan' },
       },
       { name: 'todowrite', expected: { toolKind: 'plan', title: 'Update plan' } },

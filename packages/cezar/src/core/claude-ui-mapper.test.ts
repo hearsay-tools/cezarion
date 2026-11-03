@@ -13,10 +13,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import type { AgentEvent } from './agent-runner.ts';
 import type { UiEvent } from './ui-events.ts';
 import {
+  PLAN_STATUSES,
   claudeTurnStarted,
   createClaudeUiState,
   mapClaudeMessage,
@@ -25,6 +27,8 @@ import {
 } from './claude-ui-mapper.ts';
 import { ClaudeCliRunner } from './claude-cli-runner.ts';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
+
+const PLAN_STATUS = z.enum(PLAN_STATUSES).enum;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(HERE, '__fixtures__', 'claude');
@@ -393,14 +397,14 @@ describe('mapClaudeMessage edge cases', () => {
               type: 'tool_use',
               id: 'toolu_t',
               name: 'TodoWrite',
-              input: { todos: [{ content: 'ok', status: 'pending' }, { content: 'bad status', status: 'later' }, { status: 'pending' }, 'junk'] },
+              input: { todos: [{ content: 'ok', status: PLAN_STATUS.pending }, { content: 'bad status', status: 'later' }, { status: PLAN_STATUS.pending }, 'junk'] },
             },
           ],
         },
       },
       state,
     );
-    expect(good.events.at(-1)).toEqual({ type: 'plan.updated', entries: [{ content: 'ok', status: 'pending' }] });
+    expect(good.events.at(-1)).toEqual({ type: 'plan.updated', entries: [{ content: 'ok', status: PLAN_STATUS.pending }] });
 
     const bad = mapClaudeMessage(
       { type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_t2', name: 'TodoWrite', input: { todos: 'nope' } }] } },
@@ -455,7 +459,7 @@ describe('mapClaudeMessage edge cases', () => {
     state = landed.state;
     expect(landed.events.at(-1)).toEqual({
       type: 'plan.updated',
-      entries: [{ content: 'Wire the dock', status: 'pending', activeForm: 'Wiring the dock' }],
+      entries: [{ content: 'Wire the dock', status: PLAN_STATUS.pending, activeForm: 'Wiring the dock' }],
     });
 
     const second = create(state, 'toolu_c2', 'Add tests', '2');
@@ -463,8 +467,8 @@ describe('mapClaudeMessage edge cases', () => {
     expect(second.events.at(-1)).toEqual({
       type: 'plan.updated',
       entries: [
-        { content: 'Wire the dock', status: 'pending', activeForm: 'Wiring the dock' },
-        { content: 'Add tests', status: 'pending' },
+        { content: 'Wire the dock', status: PLAN_STATUS.pending, activeForm: 'Wiring the dock' },
+        { content: 'Add tests', status: PLAN_STATUS.pending },
       ],
     });
 
@@ -475,7 +479,7 @@ describe('mapClaudeMessage edge cases', () => {
       type: 'plan.updated',
       entries: [
         { content: 'Wire the dock', status: 'in_progress', activeForm: 'Wiring the dock' },
-        { content: 'Add tests', status: 'pending' },
+        { content: 'Add tests', status: PLAN_STATUS.pending },
       ],
     });
 
@@ -513,7 +517,7 @@ describe('mapClaudeMessage edge cases', () => {
     state = created.state;
     expect(created.events.at(-1)).toEqual({
       type: 'plan.updated',
-      entries: [{ content: 'New task', status: 'pending' }],
+      entries: [{ content: 'New task', status: PLAN_STATUS.pending }],
     });
 
     // The id the mapper would have guessed ('1') must not touch the new task…
@@ -547,7 +551,7 @@ describe('mapClaudeMessage edge cases', () => {
         { content: 'Beta', status: 'completed' },
         // Gap at #3 (deleted before the resume): ids are the harness's, not a
         // dense index, so the mapper must key on them verbatim.
-        { content: 'Gamma', status: 'pending' },
+        { content: 'Gamma', status: PLAN_STATUS.pending },
       ],
     });
 
@@ -591,7 +595,7 @@ describe('mapClaudeMessage edge cases', () => {
     for (const body of ['No tasks yet', 'Tasks:\n#1 [pending] Real task', '#1 (pending) Real task']) {
       const listed = mapClaudeMessage(taskResult('toolu_l1', body), used.state);
       expect(listed.events.map((event) => event.type)).toEqual(['item.completed']);
-      expect(listed.state.tasks.get('1')).toEqual({ content: 'Real task', status: 'pending' });
+      expect(listed.state.tasks.get('1')).toEqual({ content: 'Real task', status: PLAN_STATUS.pending });
     }
     // An errored TaskList is likewise inert.
     const errored = mapClaudeMessage(taskResult('toolu_l1', '#1 [pending] Other', true), used.state);
@@ -631,14 +635,14 @@ describe('mapClaudeMessage edge cases', () => {
     expect(sub.state.pendingTaskCreates.size).toBe(0);
     const subResult = mapClaudeMessage(taskResult('toolu_c2', 'Task #1 created successfully: Sub task'), sub.state);
     expect(subResult.events.map((event) => event.type)).toEqual(['item.completed']);
-    expect([...subResult.state.tasks.values()]).toEqual([{ content: 'Main task', status: 'pending' }]);
+    expect([...subResult.state.tasks.values()]).toEqual([{ content: 'Main task', status: PLAN_STATUS.pending }]);
 
     // A subagent's TaskList describes ITS tasks, so it must not resync the main
     // plan either — the result side needs the same guard as the call side.
     const subList = mapClaudeMessage(taskUse('toolu_l1', 'TaskList', {}, 'toolu_agent'), state);
     const subListed = mapClaudeMessage(taskResult('toolu_l1', '#1 [completed] Sub task'), subList.state);
     expect(subListed.events.map((event) => event.type)).toEqual(['item.completed']);
-    expect([...subListed.state.tasks.values()]).toEqual([{ content: 'Main task', status: 'pending' }]);
+    expect([...subListed.state.tasks.values()]).toEqual([{ content: 'Main task', status: PLAN_STATUS.pending }]);
 
     // A subagent's TaskUpdate must not move a main-agent row.
     const subUpdate = mapClaudeMessage(
@@ -646,7 +650,7 @@ describe('mapClaudeMessage edge cases', () => {
       state,
     );
     expect(subUpdate.events.map((event) => event.type)).toEqual(['item.started']);
-    expect([...subUpdate.state.tasks.values()]).toEqual([{ content: 'Main task', status: 'pending' }]);
+    expect([...subUpdate.state.tasks.values()]).toEqual([{ content: 'Main task', status: PLAN_STATUS.pending }]);
   });
 
   it('tolerates `running` as an alias for in_progress, though the schema has no such status', () => {
@@ -668,7 +672,7 @@ describe('mapClaudeMessage edge cases', () => {
     state = deleted.state;
     expect(deleted.events.at(-1)).toEqual({
       type: 'plan.updated',
-      entries: [{ content: 'Task B', status: 'pending' }],
+      entries: [{ content: 'Task B', status: PLAN_STATUS.pending }],
     });
 
     // The harness does not renumber after a delete — Task B stays '2' and the
@@ -679,7 +683,7 @@ describe('mapClaudeMessage edge cases', () => {
     expect(progressed.events.at(-1)).toEqual({
       type: 'plan.updated',
       entries: [
-        { content: 'Task B', status: 'pending' },
+        { content: 'Task B', status: PLAN_STATUS.pending },
         { content: 'Task C', status: 'completed' },
       ],
     });
@@ -701,7 +705,7 @@ describe('mapClaudeMessage edge cases', () => {
     state = created.state;
     expect(created.events.at(-1)).toEqual({
       type: 'plan.updated',
-      entries: [{ content: 'Old name', status: 'pending' }],
+      entries: [{ content: 'Old name', status: PLAN_STATUS.pending }],
     });
 
     const renamed = mapClaudeMessage(
@@ -711,7 +715,7 @@ describe('mapClaudeMessage edge cases', () => {
     state = renamed.state;
     expect(renamed.events.at(-1)).toEqual({
       type: 'plan.updated',
-      entries: [{ content: 'New name', status: 'pending', activeForm: 'Doing the new thing' }],
+      entries: [{ content: 'New name', status: PLAN_STATUS.pending, activeForm: 'Doing the new thing' }],
     });
 
     // A metadata-only update that changes nothing we render stays silent.
