@@ -81,10 +81,17 @@ function sameLivePull(live, pr, fullName) {
   return live.state === 'open' && live.head?.sha === pr.head.sha && live.base?.ref === 'main'
     && live.head.repo?.full_name === fullName && live.base.repo?.full_name === fullName;
 }
-const GATE_STEP = 'Require fresh CodeRabbit execution and resolved threads';
-function currentGate(proof) {
-  return !proof.run.referenced_workflows?.some(w => w.path?.includes('/automated-code-review.yml@'))
-    && proof.jobs.some(j => j.name === REVIEW && j.steps?.some(step => step.name === GATE_STEP));
+const GATE_STEP = 'Require fresh CodeRabbit admission and resolved threads';
+const EXECUTION_GATE_STEP = 'Require fresh CodeRabbit execution and resolved threads';
+function gatePolicy(proof) {
+  if (proof.run.referenced_workflows?.some(w => w.path?.includes('/automated-code-review.yml@'))) return null;
+  const steps = proof.jobs.find(j => j.name === REVIEW)?.steps;
+  if (steps?.some(step => step.name === GATE_STEP)) return 'admission';
+  return steps?.some(step => step.name === EXECUTION_GATE_STEP) ? 'execution-only' : null;
+}
+function refuseLegacy(pr, log) {
+  log(`PR ${pr.number}: native CI uses an older review policy. Push a new head or start a new native run after rollout; targeted retries cannot replace its definition.`);
+  return 'legacy-workflow';
 }
 function reviewJob(proof) {
   const matches = proof.jobs.filter(j => j.name === REVIEW);
@@ -109,17 +116,22 @@ async function reconcilePull({ github, owner, repo, pr, releaseAppBotLogin, now,
   const args = { github, owner, repo, now, deadline };
   const proof = await nativeProof(args, pr, log);
   if (!proof) return 'native-evidence-unavailable';
-  if (!currentGate(proof)) {
-    log(`PR ${pr.number}: native CI uses the old review workflow. Push a new head or start a new native run after rollout; targeted retries cannot replace its definition.`);
-    return 'legacy-workflow';
-  }
+  const policy = gatePolicy(proof);
+  if (!policy) return refuseLegacy(pr, log);
   const job = reviewJob(proof);
   if (!job) return 'job-not-completed-or-preflight-failed';
+  // An immutable success-only reader can revoke shared rejections, but cannot
+  // promote a failed historical job under the newer no-files admission policy.
+  if (policy === 'execution-only' && job.conclusion !== 'success') return refuseLegacy(pr, log);
   const admission = () => readCodeRabbitAdmission({ ...args, pullNumber: pr.number, head: pr.head.sha, releaseAppBotLogin });
-  // A failed reader cannot authorize anything. Rerun a historical green to make
-  // its native gate fail closed too; never turn an API error into an approval.
-  const desired = async () => { try { return (await admission()).admitted; } catch { return false; } };
+  // Current-policy read failures still revoke green. Historical jobs need a
+  // validated rejection: an error alone cannot prove that their reader fails.
+  const desired = async () => {
+    try { return (await admission()).admitted; }
+    catch { return policy === 'admission' ? false : null; }
+  };
   const admitted = await desired();
+  if (admitted === null) return 'review-evidence-unavailable';
   if (admitted === (job.conclusion === 'success')) return 'unchanged';
   if (!rerunnable(proof.run, now())) {
     log(`PR ${pr.number}: native CI cannot rerun (30 days / 50 attempts / active run). Repair CI or push a new head; no dispatch fallback.`);
@@ -128,7 +140,7 @@ async function reconcilePull({ github, owner, repo, pr, releaseAppBotLogin, now,
   if (await desired() !== admitted) return 'changed';
   const final = await nativeProof(args, pr, log);
   if (!final) return 'native-evidence-unavailable';
-  if (!unchangedJob(proof, final, job)) return 'changed';
+  if (gatePolicy(final) !== policy || !unchangedJob(proof, final, job)) return 'changed';
   const read = reader(github, owner, repo, deadline, now);
   let live;
   try { live = await read('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: pr.number }); }

@@ -82,3 +82,16 @@ for (const kind of ['release', 'upstream']) test(`queue preserves fully verified
   const { mergeQueueAdmission } = require('./merge-queue-admission.cjs');
   assert.equal((await mergeQueueAdmission({ github, owner: 'o', repo: 'r', group: h.s.group, releaseAppBotLogin: 'release-app[bot]' })).pullNumber, 7);
 });
+
+for (const fork of [false, true]) test(`queue accepts trusted no-files with native green and blocks unresolved threads (fork=${fork})`, async () => {
+  const h = fixture(fork); Object.assign(h.s.checks[0], { conclusion: 'skipped', output: { title: 'No files to review' } });
+  assert.equal((await h.run()).pullNumber, 7);
+  h.s.threads = [{ id: 'open', isResolved: false, isOutdated: true }];
+  await assert.rejects(h.run, /Unresolved/);
+});
+
+test('trusted no-files cannot replace a skipped native review job', async () => {
+  const h = fixture(); Object.assign(h.s.checks[0], { conclusion: 'skipped', output: { title: 'No files to review' } });
+  h.s.jobs[1].conclusion = 'skipped';
+  await assert.rejects(h.run, /Native CI\/review gates missing/);
+});

@@ -13,7 +13,7 @@ test('native protected review is read-only trusted-base admission after prefligh
   assert.deepEqual(gate.permissions, { checks: 'read', contents: 'read', 'pull-requests': 'read' });
   const checkout = gate.steps.find(s => s.uses?.startsWith('actions/checkout@'));
   assert.equal(checkout.with.ref, '${{ github.sha }}'); assert.equal(checkout.with['persist-credentials'], false);
-  const script = gate.steps.find(s => s.name === 'Require fresh CodeRabbit execution and resolved threads');
+  const script = gate.steps.find(s => s.name === 'Require fresh CodeRabbit admission and resolved threads');
   assert.match(script.with.script, /readCodeRabbitAdmission/);
   assert.match(script.with.script, /core.notice/); assert.match(script.with.script, /process.exitCode = 1/);
   assert.doesNotMatch(script.with.script, /setFailed|createReview|createWorkflowDispatch/);
