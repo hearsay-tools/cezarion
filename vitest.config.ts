@@ -1,4 +1,6 @@
 import { checkWorkspaceResolution } from './scripts/check-workspace-resolution.mjs'
+import { availableParallelism, freemem } from 'node:os'
+import { defaultMaxWorkers } from './.github/scripts/vitest-worker-count.cjs'
 import { defineConfig } from 'vitest/config'
 import CiTestSequencer from './.github/scripts/ci-test-sequencer.mjs'
 import KeepTestFilesInCoverage, { coverageRequested } from './.github/scripts/vitest-coverage-tests.mjs'
@@ -15,6 +17,7 @@ checkWorkspaceResolution()
 // the four unit projects; `npm run test:e2e` selects the browser config after bootstrap.
 export default defineConfig({
   test: {
+    maxWorkers: defaultMaxWorkers(freemem(), availableParallelism()),
     // The suites are still being grown; a project that currently matches no file must not
     // fail the validation gate. Root-level only — vitest rejects this inside a project.
     passWithNoTests: true,
