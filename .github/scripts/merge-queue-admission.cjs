@@ -3,17 +3,17 @@ const { readCodeRabbitAdmission } = require('./coderabbit-admission.cjs');
 const { CI_PATH, VERIFY, REVIEW, validSha, positive, reader, readCiRuns, readCiJobs, successfulJobs, newest } = require('./queue-ci-proof.cjs');
 const QUEUE_QUERY = `query($owner: String!, $repo: String!) {
   repository(owner: $owner, name: $repo) {
-    mergeQueue(branch: "main") { entries(first: 1) {
+    mergeQueue(branch: "main") { entries(first: 2) {
       nodes { id position headCommit { oid } baseCommit { oid } pullRequest { number headRefOid } }
       pageInfo { hasNextPage }
     } }
   }
 }`;
-function requireSerialRules(rules) {
+function requireQueueRules(rules) {
   if (!Array.isArray(rules)) throw new Error('Missing effective rules');
   const queues = rules.filter(r => r.type === 'merge_queue');
   const p = queues[0]?.parameters;
-  if (queues.length !== 1 || p?.merge_method !== 'SQUASH' || p.max_entries_to_build !== 1
+  if (queues.length !== 1 || p?.merge_method !== 'SQUASH' || ![1, 2].includes(p.max_entries_to_build)
     || p.min_entries_to_merge !== 1 || p.max_entries_to_merge !== 1
     || p.grouping_strategy !== 'ALLGREEN' || p.check_response_timeout_minutes !== 45) throw new Error('Unsupported queue settings');
   for (const name of [VERIFY, REVIEW]) {
@@ -25,13 +25,19 @@ function requireSerialRules(rules) {
   }
 }
 function entryFrom(data, group) {
-  const entries = data?.repository?.mergeQueue?.entries;
-  const e = entries?.nodes?.[0];
-  // Later queued entries may exist; serial build + position one identifies this build.
-  if (!Array.isArray(entries?.nodes) || entries.nodes.length !== 1 || typeof e?.id !== 'string' || !e.id
-    || e.position !== 1 || e.headCommit?.oid !== group.head_sha || e.baseCommit?.oid !== group.base_sha
-    || !positive(e.pullRequest?.number) || !validSha(e.pullRequest?.headRefOid)) throw new Error('Queue entry does not match group');
+  // The build window holds at most two entries; this build's entry is the one with the group's head.
+  const nodes = data?.repository?.mergeQueue?.entries?.nodes;
+  const matches = Array.isArray(nodes) ? nodes.filter(n => n?.headCommit?.oid === group.head_sha) : [];
+  const e = matches[0];
+  if (matches.length !== 1 || typeof e.id !== 'string' || !e.id || !onChain(nodes, e, group)
+    || e.baseCommit?.oid !== group.base_sha || !positive(e.pullRequest?.number) || !validSha(e.pullRequest?.headRefOid)) throw new Error('Queue entry does not match group');
   return e;
+}
+// Entry 2 is built on entry 1's group head; entry 1 is built on main.
+function onChain(nodes, entry, group) {
+  if (entry.position === 1) return true;
+  const first = nodes.filter(n => n?.position === 1);
+  return entry.position === 2 && first.length === 1 && first[0].headCommit?.oid === group.base_sha;
 }
 function validPull(pr, fullName, entry) {
   return pr?.number === entry.pullRequest.number && pr.state === 'open' && pr.draft === false
@@ -79,7 +85,7 @@ async function mergeQueueAdmission({ github, owner, repo, group, now = Date.now,
   const read = reader(github, owner, repo, now() + 120000, now);
   const graphql = boundedGraphql(read);
   const rules = () => read('GET /repos/{owner}/{repo}/rules/branches/{branch}', { branch: 'main', per_page: 100 });
-  requireSerialRules(await rules());
+  requireQueueRules(await rules());
   const queue = () => graphql(QUEUE_QUERY, { owner, repo });
   const entry = entryFrom(await queue(), group);
   const pull = () => read('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: entry.pullRequest.number });
@@ -98,10 +104,10 @@ async function mergeQueueAdmission({ github, owner, repo, group, now = Date.now,
   const finalRun = await read('GET /repos/{owner}/{repo}/actions/runs/{run_id}', { run_id: run.id });
   const finalLatest = newest(await runs());
   requireStableRun(run, finalRun, finalLatest, eligible);
-  requireSerialRules(await rules());
+  requireQueueRules(await rules());
   const finalEntry = entryFrom(await queue(), group);
   if (finalEntry.id !== entry.id || finalEntry.pullRequest.number !== pr.number
     || finalEntry.pullRequest.headRefOid !== pr.head.sha || !validPull(await pull(), fullName, entry)) throw new Error('Queue or PR changed');
   return { pullNumber: pr.number, head: pr.head.sha, runId: run.id, attempt: run.run_attempt };
 }
-module.exports = { mergeQueueAdmission, requireSerialRules, entryFrom, QUEUE_QUERY, nativeSuccess };
+module.exports = { mergeQueueAdmission, requireQueueRules, entryFrom, QUEUE_QUERY, nativeSuccess };

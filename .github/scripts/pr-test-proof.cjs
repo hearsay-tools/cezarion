@@ -8,7 +8,8 @@ const PR_TEST_JOBS = [
 ];
 async function onlyEntry(read, owner, repo, group) {
   const response = await read('POST /graphql', { query: QUEUE_QUERY, variables: { owner, repo } });
-  if (response.errors || response.data?.repository?.mergeQueue?.entries?.pageInfo?.hasNextPage !== false) {
+  const entries = response.data?.repository?.mergeQueue?.entries;
+  if (response.errors || entries?.pageInfo?.hasNextPage !== false || entries.nodes?.length !== 1) {
     throw new Error('Queue is not a known single entry');
   }
   return entryFrom(response.data, group);

@@ -1,6 +1,12 @@
 'use strict';
 const { mergeQueueAdmission } = require('./merge-queue-admission.cjs');
-const SHA = 'a'.repeat(40), BASE = 'b'.repeat(40), HEAD = 'c'.repeat(40);
+const SHA = 'a'.repeat(40), BASE = 'b'.repeat(40), HEAD = 'c'.repeat(40), MAIN = 'd'.repeat(40);
+// Place the fixture's entry second, built on an entry whose group head is the fixture's base.
+function secondEntry(s) {
+  s.entry.position = 2;
+  s.first = { id: 'first', position: 1, headCommit: { oid: BASE }, baseCommit: { oid: MAIN }, pullRequest: { number: 6, headRefOid: 'e'.repeat(40) } };
+  s.entries = [s.first, s.entry];
+}
 function fixture(fork = false) {
   const headRepo = fork ? 'fork/r' : 'o/r';
   const s = {
@@ -37,4 +43,4 @@ function fixture(fork = false) {
   } };
   return { s, github, run: () => mergeQueueAdmission({ github, owner: 'o', repo: 'r', group: s.group }) };
 }
-module.exports = { fixture, SHA, BASE, HEAD };
+module.exports = { fixture, secondEntry, SHA, BASE, HEAD, MAIN };

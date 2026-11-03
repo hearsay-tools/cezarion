@@ -1,21 +1,44 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { fixture, SHA, BASE, HEAD } = require('./merge-queue.testkit.cjs');
+const { fixture, secondEntry, SHA, BASE, HEAD, MAIN } = require('./merge-queue.testkit.cjs');
 for (const fork of [false, true]) test(`valid reviewed native head admitted (fork=${fork})`, async () => {
   const h = fixture(fork); assert.equal((await h.run()).pullNumber, 7);
+});
+for (const [label, mutate] of Object.entries({
+  'build concurrency 2': s => { s.rules[0].parameters.max_entries_to_build = 2; },
+  'entry 1 with an entry behind': s => { s.entries = [s.entry, { ...s.entry, id: 'next', position: 2, headCommit: { oid: MAIN }, baseCommit: { oid: SHA } }]; },
+  'entry 2 built on entry 1': secondEntry,
+  'entry 2 at build concurrency 2': s => { secondEntry(s); s.rules[0].parameters.max_entries_to_build = 2; },
+})) test(`admission accepts: ${label}`, async () => {
+  const h = fixture(); mutate(h.s); assert.equal((await h.run()).pullNumber, 7);
+});
+test('entry 2 that moves to position 1 before the final reread is admitted', async () => {
+  const h = fixture(); secondEntry(h.s); let reads = 0;
+  h.s.onRead = (route, args) => {
+    if (route === 'POST /graphql' && args.query.includes('mergeQueue(') && ++reads === 2) {
+      h.s.entries = [h.s.entry]; h.s.entry.position = 1;
+    }
+  };
+  // Entry 1 merged between the reads: entry 2 is now first, and its base is main.
+  assert.equal((await h.run()).pullNumber, 7); assert.equal(reads, 2);
 });
 for (const [label, mutate] of Object.entries({
   'missing entry': s => { s.entries = []; },
   'duplicate entry': s => { s.entries = [s.entry, s.entry]; },
   'wrong combined SHA': s => { s.entry.headCommit.oid = HEAD; },
   'wrong base': s => { s.entry.baseCommit.oid = HEAD; },
-  'second entry': s => { s.entry.position = 2; },
+  'second entry without a first': s => { s.entry.position = 2; },
+  'third position': s => { secondEntry(s); s.entry.position = 3; },
+  'second entry not built on the first': s => { secondEntry(s); s.first.headCommit.oid = MAIN; },
+  'second entry beside two firsts': s => { secondEntry(s); s.entries = [s.first, { ...s.first, id: 'other' }, s.entry]; },
+  'stale group': s => { secondEntry(s); s.entry.headCommit.oid = HEAD; },
   'changed PR head': s => { s.pr.head.sha = SHA; },
   'draft': s => { s.pr.draft = true; },
   'closed': s => { s.pr.state = 'closed'; },
   'wrong target': s => { s.pr.base.ref = 'release'; },
-  'parallel builds': s => { s.rules[0].parameters.max_entries_to_build = 2; },
+  'build concurrency 3': s => { s.rules[0].parameters.max_entries_to_build = 3; },
+  'build concurrency 0': s => { s.rules[0].parameters.max_entries_to_build = 0; },
   'multi merge': s => { s.rules[0].parameters.max_entries_to_merge = 2; },
   'missing rule': s => { s.rules = []; },
   'foreign Actions integration': s => { s.rules[1].parameters.required_status_checks[0].integration_id = 2; },

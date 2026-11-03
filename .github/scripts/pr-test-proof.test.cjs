@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const { prTestProof, PR_TEST_JOBS } = require('./pr-test-proof.cjs');
 const { CI_PATH } = require('./queue-ci-proof.cjs');
 const { attestationName } = require('./pr-test-input.cjs');
-const { fixture: admissionFixture, SHA, BASE, HEAD } = require('./merge-queue.testkit.cjs');
+const { fixture: admissionFixture, secondEntry, SHA, BASE, HEAD, MAIN } = require('./merge-queue.testkit.cjs');
 function fixture() {
   const h = admissionFixture(); const { s } = h;
   s.pr.base.sha = BASE;
@@ -38,6 +38,8 @@ test('reuses only complete attested native suites for the single unchanged queue
 });
 for (const [name, mutate] of Object.entries({
   'more entries': s => { s.hasNextPage = true; },
+  'entry behind': s => { s.entries = [s.entry, { ...s.entry, id: 'next', position: 2, headCommit: { oid: MAIN }, baseCommit: { oid: SHA } }]; },
+  'entry 2 built on entry 1': s => { secondEntry(s); s.main = MAIN; s.rules[0].parameters.max_entries_to_build = 2; },
   'unknown pagination': s => { s.hasNextPage = undefined; },
   'no queue entry': s => { s.entries = []; },
   'multiple entry records': s => { s.entries = [s.entry, s.entry]; },
@@ -75,7 +77,7 @@ for (const [name, mutate] of Object.entries({
   'foreign repository': s => { s.run.repository.full_name = 'evil/r'; },
   'wrong PR association': s => { s.run.pull_requests[0].number = 9; },
   'unresolved review': s => { s.threads = [{ id: 'thread', isResolved: false }]; },
-  'rules changed': s => { s.rules[0].parameters.max_entries_to_build = 2; },
+  'rules changed': s => { s.rules[0].parameters.max_entries_to_build = 3; },
   'API error': s => { s.fail = true; },
   'git API error': s => { s.gitError = true; },
 })) test(`full queue test fallback: ${name}`, async () => {

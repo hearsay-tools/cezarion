@@ -339,8 +339,8 @@ A merge group runs the same gate on the combined commit, against the base SHA it
 pull requests that each stay at or under 20 cannot add up to growth. The scripts come from the group's
 base SHA, because `github.sha` there is the combined commit and holds the pull request's own copy. The
 `baseline-growth` label is read live from the one pull request that the group's ref
-(`refs/heads/gh-readonly-queue/main/pr-<N>-<sha>`) names; the queue is serial, and any other ref reads no
-label, so growth then fails. The job's name is in the queue proof roster (`REQUIRED_QUEUE_JOBS`).
+(`refs/heads/gh-readonly-queue/main/pr-<N>-<sha>`) names. The merge count is 1, so each group holds one
+pull request at build concurrency 1 or 2. Any other ref reads no label, so growth then fails. The job's name is in the queue proof roster (`REQUIRED_QUEUE_JOBS`).
 
 A failure names each function, both complexity values, the `metrics.mjs` commands that print them
 and the decision points (`--breakdown`). Reproduce a run from the repository root:
@@ -711,9 +711,13 @@ identity, parents or the event still execute on the queue commit.
 
 The required `Automated Code Review` check verifies existing PR-head review
 admission. It does not call a model to review combined code. The helper comes
-from the group's immutable base SHA. It requires the first live queue entry to
-match both group SHAs, effective serial queue rules, an unchanged open non-draft
-main PR, successful current native `pull_request_target` CI/review from this
+from the group's immutable base SHA. It reads the first two live queue entries,
+the build window, and requires exactly one entry whose head and base equal the
+group SHAs, at position 1 or 2. At position 2, the position-1 entry's head must
+equal the group base, so the build sits on the chain GitHub reports. An entry
+that moves from position 2 to 1 during its build, because entry 1 merged, passes
+the final reread. It also requires the reviewed queue rules (build concurrency 1
+or 2, every other setting exact), an unchanged open non-draft main PR, successful current native `pull_request_target` CI/review from this
 repository's `ci.yml`, fresh exact-head CodeRabbit admission, and no unresolved review threads. Dispatches and unrelated
 same-name checks cannot supply review admission. Missing or changing evidence
 fails closed. GitHub owns queue persistence; no cockpit session is required.
@@ -746,11 +750,12 @@ SHA, reuse succeeds, and absent proof forces full fallback. Fixture tests and a
 branch dispatch do not prove live queue semantics or equal cost.
 
 After the implementation lands and that evidence is accepted, proposed settings
-are squash, build concurrency 1, minimum/maximum merge count 1, only passing
+are squash, build concurrency 1 or 2 (§ Two speculative builds), minimum/maximum merge count 1, only passing
 entries (`ALLGREEN`), and a 45-minute check timeout. Keep both required checks
 (`Unit, build, E2E, and package` and `Automated Code Review`) bound to GitHub Actions,
 review-thread resolution, strict checks false, all other protections, and no
-bypass actors. The admission helper rejects other queue settings. Enable the
+bypass actors. The admission helper rejects other queue settings, including
+build concurrency 3 or more and any merge count above 1. Enable the
 queue requirement only after required checks can run. Do not auto-enqueue a
 backlog or jump the queue. Confirm external merge tools distinguish enqueueing
 from actual merging before adoption; documentation here does not update them.
@@ -785,6 +790,50 @@ Reverting reuse restores full verification on future pushes. Queue rollback is
 maintainer-owned: inspect active entries, remove only the queue requirement and
 restore the behind-main policy. Retain full main CI, both required checks,
 review-thread resolution and no-bypass protection.
+
+#### Two speculative builds
+
+The [speculative merge-queue spec](../../.ai/specs/2026-11-03-speculative-merge-queue.md) (hearsay-tools/cezarion#2622)
+lets the queue build two entries at once. Entry 2 is built on entry 1's group
+head, and each PR still lands as its own tested commit. Admission accepts build
+concurrency 1 or 2, so the code lands before the ruleset change and behaves as
+before at 1. The owner changes only `max_entries_to_build` in ruleset 22473654,
+after the pre-activation exercise in the spec. Rollback sets it back to 1; it
+needs no code revert, because admission accepts both values at every read.
+
+Each group ref names one PR, because the merge count is 1. A group whose entry
+is gone, for example after a failure ahead invalidated it, finds no entry with
+its head SHA and fails closed.
+
+| # | State / case | Trigger | Who or what fires it | Behavior at k=2 | At rollback (k=1) |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Two entries building; entry 1 finishes first and passes | Required checks succeed | GitHub | Entry 1 merges; `main` = its group head; main-push proof reuses its run. Entry 2 keeps building on that commit | As today |
+| 2 | Entry 2 passes before entry 1 | Entry 2 checks succeed first | GitHub | Entry 2 waits. It merges after entry 1 merges | Cannot happen: one build |
+| 3 | Both pass; GitHub pushes `main` straight to entry 2's head | Both green | GitHub | One push. Proof reuses entry 2's run (exact SHA). Entry 1's head gets no own `main` push run. Snapshot publishing covers entry 2's SHA, which contains entry 1 | Cannot happen |
+| 4 | Entry 1 fails (flaky or real) | A required check fails | GitHub | Entry 1 removed; PR stays open. Entry 2's group is invalidated and built again on `main`. The old entry-2 run keeps running (Q4) and authorizes nothing | Entry 1 removed; next entry builds |
+| 5 | Entry 1 removed by a human | Manual removal | Authorized human | As row 4 | As today |
+| 6 | Entry 1 times out (45 min) | Check timeout | GitHub | As row 4 | As today |
+| 7 | Entry 1's PR head changes | Push to the PR | Author, then GitHub | GitHub removes entry 1; as row 4 | As today |
+| 8 | Entry 2 fails while entry 1 builds | A required check fails | GitHub | Entry 2 removed; entry 1 unaffected. The next queued entry builds on entry 1's group head | Cannot happen |
+| 9 | Entry 2's PR head changes, or a human removes it | Push or removal | Author or human | Entry 2 removed; entry 1 unaffected | Not building yet: removed from the queue |
+| 10 | Queue reordered or an entry jumps ahead | Human action | Authorized human | GitHub builds again with new groups. A stale group's admission finds no matching entry and fails closed | As today |
+| 11 | Entry 2 conflicts with entry 1 | Group commit cannot be built | GitHub | Entry 2 removed with `merge_conflict`; PR stays open | Conflict found when it reaches the head |
+| 12 | Entry 1 changes `ci.yml` | PR content | Author | Entry 2's run uses its group head's workflow, which holds entry 1's change. Entry 2 cannot reuse native suites anyway (base is not `main`) | As today: the next entry runs the merged workflow |
+| 13 | Entry 1 changes the admission or proof helpers | PR content | Author | Entry 2 runs entry 1's helpers from its base (G3). If entry 1 fails, entry 2 is built again on `main`'s helpers | Entry 2 runs them after entry 1 merges |
+| 14 | Entry 2 changes `ci.yml` | PR content | Author | Its own run uses the group head's workflow; helpers come from its base; no reuse. Same as today | As today |
+| 15 | Ruleset set back to 1 with two entries in flight | Owner edits ruleset 22473654 | Owner | Admission accepts 1 or 2 at every read, so in-flight builds stay valid. If GitHub invalidates entry 2, it is built again later | — |
+| 16 | Ruleset set to 3 or more, or batching enabled, without a spec change | Owner edits ruleset | Owner | Admission rejects every entry. The queue fails every build until the owner reverts the setting or this spec and the allowlist change | Same |
+| 17 | `main` moves outside the queue | Push with bypass | Nobody: the ruleset has no bypass actors | Cannot happen. If it did, GitHub rebuilds every group on the new `main` | Same |
+| 18 | Admission API error, deadline or changing evidence | GitHub API | Actions | Entry fails closed and is removed, so it counts as a queue failure. The PR stays open | As today |
+| 19 | Docs-only entry at position 2 (once hearsay-tools/cezarion#2615 lands) | PR content | Classifier | The group diff `base..head` is that PR's own diff, so the skip is valid. Main proof: first parent = ref base | As today |
+| 20 | Entry at position 2, native suites passed | — | `pr-test-proof` | Base is not `main`, so full suites run | Cannot happen |
+| 21 | Entry at position 1 on `main`, PR up to date, entries behind it | — | `pr-test-proof` | Reuse allowed (today: blocked by the entries behind) | Reuse allowed |
+| 22 | An invalidated run finishes green later | Old run completes | Actions | Its group never merges, and its SHA never reaches `main`. It is counted as waste in the pilot metric | Cannot happen |
+| 23 | Manual re-run of a failed queue run | Human | Human | The entry was already removed; the run proves nothing for a new group. Requeue the PR | As today |
+| 24 | GitHub reports entry 2's `baseCommit` as `main`, not entry 1's head (S5 false) | GitHub data model | GitHub | Entry 2's admission fails closed on every build. The pre-activation exercise catches this before the pilot. Then the lookup changes to: base = the position-1 head, checked through the ref name | — |
+| 25 | GitHub cancels invalidated runs itself | GitHub behavior | GitHub | Less waste than the model; no correctness change | — |
+
+Rows that "cannot happen" at k=1 are why the serial queue never needed them.
 
 ### Local ratchet baseline merges
 

@@ -363,7 +363,7 @@ jobs:
               echo "::error::The merge group head could not be fetched." >&2
               exit 1
             fi
-            # The queue is serial (docs/sdlc/ci.md), so the group's ref names its one pull request.
+            # The merge count is 1 (docs/sdlc/ci.md), so the group's ref names its one pull request.
             # A ref of another shape reads no label, and growth then fails.
             if [[ "$GROUP_HEAD_REF" =~ ^refs/heads/gh-readonly-queue/main/pr-([0-9]+)-[0-9a-f]{40}$ ]]; then
               pr="$(gh api "repos/$GITHUB_REPOSITORY/pulls/${BASH_REMATCH[1]}")"
