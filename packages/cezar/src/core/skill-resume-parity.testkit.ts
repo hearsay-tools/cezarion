@@ -360,9 +360,11 @@ function assertContinuationSkill(
 }
 
 const PARTS: Readonly<Record<string, readonly string[]>> = {
-  "generation-claude-codex-opencode": [
+  "generation-claude-codex": [
     "claude R100",
-    "codex R100",
+    "codex R100"
+  ],
+  "generation-opencode": [
     "opencode R100"
   ],
   "generation-pi-cursor-omp": [
@@ -384,18 +386,20 @@ const PARTS: Readonly<Record<string, readonly string[]>> = {
     "pi R53",
     "pi R55"
   ],
-  "recovery": [
+  "recovery-prompt": [
     "claude R54",
-    "claude R59",
     "codex R54",
-    "codex R59",
     "cursor R54",
-    "cursor R59",
     "omp R54",
-    "omp R59",
     "opencode R54",
+    "pi R54"
+  ],
+  "recovery-before-session-event": [
+    "claude R59",
+    "codex R59",
+    "cursor R59",
+    "omp R59",
     "opencode R59",
-    "pi R54",
     "pi R59"
   ],
   "session-identity": [
