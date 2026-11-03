@@ -1,9 +1,9 @@
 import { runInternals } from './run-internals.testkit.ts';
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it as registerTest, onTestFinished, vi } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { RUN_STATUS, STEP_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { toRunSummary } from '@open-mercato/cezar-contract/runs';
@@ -33,6 +33,8 @@ import { ciNativeMessages, ciNativeSteers, gate, gatedProviderFailure, MESSAGE_W
 // hearsay-tools/cezarion#1233: every runner opens, cancels and survives CI and timer waits on its
 // own native wire. The production tool controller, bundled tool, runner, store and scheduler stay
 // real; only GitHub (metadata and the watch) is controlled.
+
+const it = registerTest;
 
 const pr = 'https://github.com/acme/repo/pull/12';
 /** Each settled turn's outcome in the current cell (hearsay-tools/cezarion#1809). */
@@ -401,21 +403,64 @@ async function completionParkOnMessenger(runner: RunnerId) {
 
 const timerText = (wait: Wait, note: string) => `Timer ${wait.id} fired: ${note}. Continue toward the task goal; register another wait if you are still waiting.`;
 
-// Each runner's cells run from their own files: one file runs serially, and every runner's cells in
-// one file outgrew a CI shard's time limit (hearsay-tools/cezarion#1301). One runner's cells in one
-// file then outgrew Squeal's 600 s per-file cap on a loaded host, so each runner has two files:
-// `waits-<runner>-parity.test.ts` runs the `base` rows and `waits-<runner>-workers-parity.test.ts`
-// the `workers` rows (hearsay-tools/cezarion#1288). `waits-<runner>-process-parity.test.ts` runs the
-// process-wait rows, and `waits-<runner>-entries-parity.test.ts` the U27 turn-end entry axis
-// (hearsay-tools/cezarion#1525), so those rows grow neither file. `waits-parity.test.ts` runs the
-// criteria guard and the single-runner cells.
-export type WaitParityPart = 'base' | 'workers' | 'process' | 'entries';
-export const WAIT_PARITY_FILES: Readonly<Record<WaitParityPart, (runner: RunnerId) => string>> = {
-  base: runner => `waits-${runner}-parity.test.ts`,
-  workers: runner => `waits-${runner}-workers-parity.test.ts`,
-  process: runner => `waits-${runner}-process-parity.test.ts`,
-  entries: runner => `waits-${runner}-entries-parity.test.ts`,
+// A failed run cannot wake itself. Its absence shows at once, and no admission retry or backoff is left to start one later.
+const expectNoWakeFor = (id: string) => {
+  expect(store.getRun(id)?.status).toBe('failed');
+  expect(manager.isActive(id)).toBe(false);
+  expect(runInternals(manager).line.queue).not.toContain(id);
+  expect(runInternals(manager).retries.wakeRetries.has(id)).toBe(false);
+  expect(runInternals(manager).retries.wakeBackoffs.has(id)).toBe(false);
 };
+async function timerWaits(id: string) {
+  const tools = manager.cezarToolHandlers(id, engine().active.get(id)!.ciGeneration);
+  const timerWait = async (seconds: number, note: string) => {
+    const registered = await tools.registerWait({ kind: WAIT_KIND.timer, seconds, note }, 'cezar_wait', new AbortController().signal);
+    if (!('wait' in registered)) throw Error('registration refused');
+    return registered.wait;
+  };
+  return { timer: await timerWait(60, 'u14'), later: await timerWait(7200, 'u14 later') };
+}
+/** Continue delivers every held result once, and the run parks and finishes as usual. */
+async function continueDelivers(runner: RunnerId, id: string, timer: Wait, later: Wait) {
+  expect(manager.continueRun(id, { text: 'go on' })).toEqual({ ok: true });
+  // The store marks a wake delivered before the mock records the prompt it read; wait for both.
+  await until(() => settled(id, timer.id)?.phase === 'delivered' && settled(id, later.id)?.phase === 'delivered'
+    && prompted(runner, `Timer ${timer.id} fired`).length > 0 && prompted(runner, `Timer ${later.id} fired`).length > 0);
+  expect(prompted(runner, `Timer ${timer.id} fired`)).toHaveLength(1);
+  expect(prompted(runner, `Timer ${later.id} fired`)).toHaveLength(1);
+  expect(inputsFor(id, timer.id)).toHaveLength(1);
+  await until(() => store.getRun(id)?.status === 'waiting');
+  expect(manager.finish(id)).toBe(true);
+  await until(() => terminal.includes(store.getRun(id)?.status ?? ''));
+}
+
+// Six base parts cover registration/budgets, input, delivery/failures, asks/replies,
+// done and answers. Seven worker parts cover mixed waits/notices, recovery, conversations,
+// refusals/requests, completion, completion replies and closed-session recovery/fallback (hearsay-tools/cezarion#2519).
+// Earlier runner/base/worker splits: hearsay-tools/cezarion#1301, hearsay-tools/cezarion#1288.
+// Process and entry axes stay separate (hearsay-tools/cezarion#1525); the once file
+// checks registration and runs the single-runner cells.
+export type WaitParityPart = keyof typeof WAIT_PARITY_CELLS;
+const WAIT_PARITY_CELLS = {
+  registration: registrationCells,
+  input: inputCells,
+  delivery: deliveryCells,
+  asks: asksCells,
+  done: doneCells,
+  answers: answersCells,
+  mixed: mixedCells,
+  recovery: recoveryCells,
+  conversations: conversationsCells,
+  refusal: refusalCells,
+  completion: completionCells,
+  'completion-replies': completionRepliesCells,
+  closed: closedCells,
+  process: processCells,
+  entries: entriesCells,
+};
+export const WAIT_PARITY_FILES = Object.fromEntries(
+  Object.keys(WAIT_PARITY_CELLS).map(part => [part, (runner: RunnerId) => `waits-${runner}-${part}-parity.test.ts`]),
+) as Record<WaitParityPart, (runner: RunnerId) => string>;
 
 export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPart } | 'once'): void {
   const runnersFor = (part: WaitParityPart): RunnerId[] => scope !== 'once' && scope.part === part ? [scope.runner] : [];
@@ -426,8 +471,28 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
 
     if (scope === 'once') {
       it('runs every runner\'s cells from its own file', () => {
+        const files = readdirSync(new URL('.', import.meta.url)).filter(file =>
+          /^waits-.*-parity\.test\.ts$/.test(file) && readFileSync(new URL(`./${file}`, import.meta.url), 'utf8').includes('describeWaitParity('));
+        expect(files.sort()).toEqual(RUNNER_IDS.flatMap(runner => Object.values(WAIT_PARITY_FILES).map(file => file(runner))).sort());
         for (const runner of RUNNER_IDS) for (const file of Object.values(WAIT_PARITY_FILES)) {
           expect(existsSync(new URL(`./${file(runner)}`, import.meta.url)), file(runner)).toBe(true);
+        }
+      });
+
+      it('registers every criterion and runner in exactly one part', () => {
+        for (const runner of RUNNER_IDS) {
+          const owners = new Map<string, string[]>();
+          for (const part of Object.keys(WAIT_PARITY_CELLS) as WaitParityPart[]) {
+            const criteria = new Set<string>();
+            const collect = ((title: string) => { criteria.add(title.split(' ')[1]!); }) as typeof registerTest;
+            WAIT_PARITY_CELLS[part]([runner], collect);
+            for (const criterion of criteria) owners.set(criterion, [...(owners.get(criterion) ?? []), part]);
+            const file = WAIT_PARITY_FILES[part](runner);
+            const source = readFileSync(new URL(`./${file}`, import.meta.url), 'utf8');
+            expect(source.match(/describeWaitParity\([^;]+\)/g), file).toEqual([`describeWaitParity({ runner: '${runner}', part: '${part}' })`]);
+          }
+          expect([...owners.keys()].sort()).toEqual(WAIT_CRITERIA.map(row => row.id).sort());
+          for (const [criterion, parts] of owners) expect(parts, `${runner} ${criterion}`).toHaveLength(1);
         }
       });
 
@@ -439,16 +504,13 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       singleRunnerCells();
     }
 
-    baseCells(runnersFor('base'));
-    workersCells(runnersFor('workers'));
-    entriesCells(runnersFor('entries'));
-    processCells(runnersFor('process'));
+    for (const part of Object.keys(WAIT_PARITY_CELLS) as WaitParityPart[]) WAIT_PARITY_CELLS[part](runnersFor(part));
   });
 }
 
 // Each part's cells, one group per `WaitParityPart`, registered for each runner in `runners`.
 // `describeWaitParity` passes a file's own runner to its part's group and no runner to the others.
-function baseCells(runners: RunnerId[]): void {
+function registrationCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
   for (const runner of runners) {
     it(`${runner} U26 a launch whose cezar tools cannot start fails with the cause, frees its slot, and the next launch after the repair is taught the tools`, async () => {
       nativeWire(runner);
@@ -535,6 +597,168 @@ function baseCells(runners: RunnerId[]): void {
       expect(agentWaits(run.id)).toEqual([]);
     });
 
+    it(`${runner} U10 timer wakes stop at the automatic-wake budget; one admitted turn is charged once`, async () => {
+      nativeWire(runner);
+      const release = join(root, 'u10-release');
+      process.env.CEZ_MOCK_RELEASE_FILE = release;
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['hold-gated']!, runner });
+      await until(() => store.readEvents(run.id).some(event => event.type === 'turn.started'));
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const open = async (seconds: number, note: string) => {
+        const registered = await tools.registerWait({ kind: WAIT_KIND.timer, seconds, note }, 'cezar_wait', new AbortController().signal);
+        if (!('wait' in registered)) throw Error('registration refused');
+        return registered.wait;
+      };
+      const first = await open(60, 'u10 first'), second = await open(61, 'u10 second'), last = await open(62, 'u10 last');
+      store.updateRun(run.id, { automaticWakes: 39, waitDeliveryFailures: 2 });
+      // What a crash after any commit would leave (hearsay-tools/cezarion#1805): every committed row.
+      const commits = recordCommits(join(root, '.ai/cezar'));
+      // Two timers resolve before one boundary: one admitted turn carries both and spends one wake.
+      fireTimer(first.id); fireTimer(second.id);
+      await until(() => store.getRun(run.id)?.waits?.filter(wait => wait.phase === 'resolved').length === 2);
+      writeFileSync(release, '');
+      await until(() => settled(run.id, first.id)?.phase === 'delivered' && settled(run.id, second.id)?.phase === 'delivered');
+      await until(() => prompted(runner, timerText(first, 'u10 first')).length > 0);
+      expect(prompted(runner, timerText(first, 'u10 first')).at(-1)).toContain(timerText(second, 'u10 second'));
+      expect(store.getRun(run.id)?.automaticWakes).toBe(40);
+      const charged = store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith('automatic timer wake-up ('));
+      expect(charged.map(event => event.message)).toEqual(['automatic timer wake-up (40/40)']);
+      // The delivery, its charge and the cleared failure count are one commit: no committed row
+      // holds a delivered timer without its charge.
+      commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(wait => [first.id, second.id].includes(wait.id) && wait.phase === 'delivered') ||
+        (row.automaticWakes === 40 && row.waitDeliveryFailures === undefined && row.lastWaits.filter(wait => wait.phase === 'delivered').length === 2), 'a delivered timer and its charge');
+      expect(commits.rows(run.id).some(row => row?.lastWaits?.some(wait => wait.id === first.id && wait.phase === 'delivered'))).toBe(true);
+      await until(() => parkedOn(run.id, store.getRun(run.id)?.waits?.find(wait => wait.id === last.id)));
+      const turns = turnEnds(run.id);
+      // The budget is spent: the next timer to come due is cancelled and wakes nothing.
+      fireTimer(last.id);
+      await until(() => settled(run.id, last.id)?.phase === 'cancelled');
+      await flushMicrotasks();
+      expect(inputsFor(run.id, last.id)).toEqual([]);
+      expect(prompted(runner, `Timer ${last.id} fired`)).toEqual([]);
+      expect(turnEnds(run.id)).toBe(turns);
+      expect(store.readEvents(run.id).some(event => event.type === 'note' && event.message === `automatic timer wake-up cap reached (40); timer ${last.id} cancelled`)).toBe(true);
+      // hearsay-tools/cezarion#1234: the spent budget leaves a cezar human wait, so the run waits on the user.
+      expect(store.getRun(run.id)?.waits ?? []).toMatchObject([{ kind: WAIT_KIND.human, via: WAIT_VIA.budget, source: WAIT_SOURCE.cezar, phase: WAIT_PHASE.open }]);
+      expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
+      expect(runInternals(manager).line.monitoring.has(run.id)).toBe(false);
+    });
+
+    it(`${runner} U10 a timer due while a charged batch awaits its acknowledgement is cancelled at the cap, and CI still wakes`, async () => {
+      const external = github();
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner });
+      await until(() => store.getRun(run.id)?.status === 'waiting');
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const open = async (request: Parameters<typeof tools.registerWait>[0]) => {
+        const registered = await tools.registerWait(request, 'cezar_wait', new AbortController().signal);
+        if (!('wait' in registered)) throw Error('registration refused');
+        return registered.wait;
+      };
+      const first = await open({ kind: WAIT_KIND.timer, seconds: 60, note: 'u10 first' });
+      const second = await open({ kind: WAIT_KIND.timer, seconds: 61, note: 'u10 second' });
+      const ci = await open({ kind: WAIT_KIND.pr, pr, timeout_seconds: 600 });
+      const state = engine().active.get(run.id)!;
+      store.updateRun(run.id, { automaticWakes: 39 });
+      // The first wake reaches the native wire; its provider acknowledgement is held.
+      let release!: () => void;
+      const gate = new Promise<void>(resolve => { release = resolve; });
+      const send = state.session.sendAgentMessage.bind(state.session);
+      vi.spyOn(state.session, 'sendAgentMessage').mockImplementation((content, ids) => {
+        const ack = send(content, ids);
+        return ack && ack.then(() => gate);
+      });
+      fireTimer(first.id);
+      await until(() => prompted(runner, timerText(first, 'u10 first')).length > 0);
+      expect(settled(run.id, first.id)).toBeUndefined();
+      // The pending batch already holds the last wake of the budget.
+      fireTimer(second.id);
+      await until(() => settled(run.id, second.id)?.phase === 'cancelled');
+      expect(inputsFor(run.id, second.id)).toEqual([]);
+      release();
+      await until(() => settled(run.id, first.id)?.phase === 'delivered');
+      expect(store.getRun(run.id)?.automaticWakes).toBe(40);
+      const notes = () => store.readEvents(run.id).filter(event => event.type === 'note').map(event => String(event.message));
+      expect(notes().filter(note => note.startsWith('automatic timer wake-up ('))).toEqual(['automatic timer wake-up (40/40)']);
+      expect(notes()).toContain(`automatic timer wake-up cap reached (40); timer ${second.id} cancelled`);
+      expect(prompted(runner, `Timer ${second.id} fired`)).toEqual([]);
+      // A CI result is an external event: it still wakes the agent at the cap and is not charged.
+      await until(() => parkedOn(run.id, waitOfKind(run.id, 'pr')));
+      external.settle();
+      await until(() => settled(run.id, ci.id)?.phase === 'delivered' && prompted(runner, `CI wait observation ${ci.id}`).length > 0);
+      expect(store.getRun(run.id)?.automaticWakes).toBe(40);
+    });
+    // hearsay-tools/cezarion#1234: the budget is on the record, so a new session does not refill it.
+    it(`${runner} U16 a scheduler continuation keeps the automatic-wake budget and a human Continue resets it`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+      await until(() => store.getRun(run.id)?.status === 'waiting');
+      const { timer } = await timerWaits(run.id);
+      store.updateRun(run.id, { automaticWakes: 39 });
+      engine().active.get(run.id)!.session.end();
+      await until(() => !manager.isActive(run.id));
+      fireTimer(timer.id);
+      await until(() => settled(run.id, timer.id)?.phase === 'delivered');
+      expect(store.getRun(run.id)?.automaticWakes).toBe(40);
+      expect(store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith('automatic timer wake-up ('))
+        .map(event => event.message)).toEqual(['automatic timer wake-up (40/40)']);
+      await until(() => store.getRun(run.id)?.status === 'waiting' && manager.isActive(run.id));
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const refused = await tools.registerWait({ kind: WAIT_KIND.timer, seconds: 60 }, 'cezar_wait', new AbortController().signal);
+      expect(refused.answer).toMatchObject({ ok: false, code: 'wake_budget_spent' });
+      engine().active.get(run.id)!.session.end();
+      await until(() => !manager.isActive(run.id));
+      expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
+      expect(store.getRun(run.id)?.automaticWakes).toBe(0);
+      await until(() => store.getRun(run.id)?.status === 'waiting');
+      expect(manager.finish(run.id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+    });
+
+    // Recovery fires an overdue timer before any session exists. At the spent budget it wakes
+    // nothing, and once no wait is left the run must still wait on the user through a wait.
+    it(`${runner} U16b timers due at the spent budget with no live session are cancelled, and the last one opens a budget human wait the user answers`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+      await until(() => store.getRun(run.id)?.status === 'waiting');
+      const { timer, later } = await timerWaits(run.id);
+      store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES });
+      engine().active.get(run.id)!.session.end();
+      await until(() => !manager.isActive(run.id));
+      fireTimer(timer.id);
+      await until(() => settled(run.id, timer.id)?.phase === 'cancelled');
+      // The other timer is still open: the run waits on it, not on the user.
+      expect(humanOpen(run.id)).toEqual([]);
+      fireTimer(later.id);
+      await until(() => settled(run.id, later.id)?.phase === 'cancelled' && humanOpen(run.id)[0]?.askSeq !== undefined);
+      expect(humanOpen(run.id)).toMatchObject([{ via: WAIT_VIA.budget, source: WAIT_SOURCE.cezar, phase: WAIT_PHASE.open }]);
+      expect(store.getRun(run.id)?.status).toBe('waiting');
+      expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
+      expect(manager.isActive(run.id)).toBe(false);
+      const [budget] = humanOpen(run.id);
+      const commits = recordCommits(join(root, '.ai/cezar'));
+      expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
+      await until(() => settled(run.id, budget!.id)?.phase === 'delivered');
+      expect(store.getRun(run.id)?.automaticWakes ?? 0).toBe(0);
+      // hearsay-tools/cezarion#1805: the restarted budget and the answered wait are committed with
+      // the Continue they come from, never before it.
+      const step = store.getRun(run.id)!.steps.at(-1)!.id;
+      commits.expectEveryCommit(run.id, row => {
+        return (row.automaticWakes === MAX_AUTO_CONTINUES && !row.lastWaits?.some(wait => wait.id === budget!.id && wait.phase === 'delivered')) ||
+          row.continuationMessage?.text === 'carry on' || row.steps.some(entry => entry.id === step && entry.status !== 'pending');
+      }, 'a restarted budget and its Continue');
+      await until(() => store.getRun(run.id)?.status === 'waiting' && manager.isActive(run.id));
+      expect(manager.finish(run.id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+    });
+
+    // Clearing the wake counters is bookkeeping: a refused write may not stop a cleanup from
+    // stopping the run.
+  }
+}
+
+function inputCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
+  for (const runner of runners) {
     it(`${runner} U2 ci and timer open: the timer wakes, ci stays open and is in the footer, the turn end re-parks without re-registering, the later ci result is delivered`, async () => {
       const external = github();
       nativeWire(runner);
@@ -703,98 +927,11 @@ function baseCells(runners: RunnerId[]): void {
       });
     }
 
-    it(`${runner} U10 timer wakes stop at the automatic-wake budget; one admitted turn is charged once`, async () => {
-      nativeWire(runner);
-      const release = join(root, 'u10-release');
-      process.env.CEZ_MOCK_RELEASE_FILE = release;
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['hold-gated']!, runner });
-      await until(() => store.readEvents(run.id).some(event => event.type === 'turn.started'));
-      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
-      const open = async (seconds: number, note: string) => {
-        const registered = await tools.registerWait({ kind: WAIT_KIND.timer, seconds, note }, 'cezar_wait', new AbortController().signal);
-        if (!('wait' in registered)) throw Error('registration refused');
-        return registered.wait;
-      };
-      const first = await open(60, 'u10 first'), second = await open(61, 'u10 second'), last = await open(62, 'u10 last');
-      store.updateRun(run.id, { automaticWakes: 39, waitDeliveryFailures: 2 });
-      // What a crash after any commit would leave (hearsay-tools/cezarion#1805): every committed row.
-      const commits = recordCommits(join(root, '.ai/cezar'));
-      // Two timers resolve before one boundary: one admitted turn carries both and spends one wake.
-      fireTimer(first.id); fireTimer(second.id);
-      await until(() => store.getRun(run.id)?.waits?.filter(wait => wait.phase === 'resolved').length === 2);
-      writeFileSync(release, '');
-      await until(() => settled(run.id, first.id)?.phase === 'delivered' && settled(run.id, second.id)?.phase === 'delivered');
-      await until(() => prompted(runner, timerText(first, 'u10 first')).length > 0);
-      expect(prompted(runner, timerText(first, 'u10 first')).at(-1)).toContain(timerText(second, 'u10 second'));
-      expect(store.getRun(run.id)?.automaticWakes).toBe(40);
-      const charged = store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith('automatic timer wake-up ('));
-      expect(charged.map(event => event.message)).toEqual(['automatic timer wake-up (40/40)']);
-      // The delivery, its charge and the cleared failure count are one commit: no committed row
-      // holds a delivered timer without its charge.
-      commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(wait => [first.id, second.id].includes(wait.id) && wait.phase === 'delivered') ||
-        (row.automaticWakes === 40 && row.waitDeliveryFailures === undefined && row.lastWaits.filter(wait => wait.phase === 'delivered').length === 2), 'a delivered timer and its charge');
-      expect(commits.rows(run.id).some(row => row?.lastWaits?.some(wait => wait.id === first.id && wait.phase === 'delivered'))).toBe(true);
-      await until(() => parkedOn(run.id, store.getRun(run.id)?.waits?.find(wait => wait.id === last.id)));
-      const turns = turnEnds(run.id);
-      // The budget is spent: the next timer to come due is cancelled and wakes nothing.
-      fireTimer(last.id);
-      await until(() => settled(run.id, last.id)?.phase === 'cancelled');
-      await flushMicrotasks();
-      expect(inputsFor(run.id, last.id)).toEqual([]);
-      expect(prompted(runner, `Timer ${last.id} fired`)).toEqual([]);
-      expect(turnEnds(run.id)).toBe(turns);
-      expect(store.readEvents(run.id).some(event => event.type === 'note' && event.message === `automatic timer wake-up cap reached (40); timer ${last.id} cancelled`)).toBe(true);
-      // hearsay-tools/cezarion#1234: the spent budget leaves a cezar human wait, so the run waits on the user.
-      expect(store.getRun(run.id)?.waits ?? []).toMatchObject([{ kind: WAIT_KIND.human, via: WAIT_VIA.budget, source: WAIT_SOURCE.cezar, phase: WAIT_PHASE.open }]);
-      expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
-      expect(runInternals(manager).line.monitoring.has(run.id)).toBe(false);
-    });
+  }
+}
 
-    it(`${runner} U10 a timer due while a charged batch awaits its acknowledgement is cancelled at the cap, and CI still wakes`, async () => {
-      const external = github();
-      nativeWire(runner);
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner });
-      await until(() => store.getRun(run.id)?.status === 'waiting');
-      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
-      const open = async (request: Parameters<typeof tools.registerWait>[0]) => {
-        const registered = await tools.registerWait(request, 'cezar_wait', new AbortController().signal);
-        if (!('wait' in registered)) throw Error('registration refused');
-        return registered.wait;
-      };
-      const first = await open({ kind: WAIT_KIND.timer, seconds: 60, note: 'u10 first' });
-      const second = await open({ kind: WAIT_KIND.timer, seconds: 61, note: 'u10 second' });
-      const ci = await open({ kind: WAIT_KIND.pr, pr, timeout_seconds: 600 });
-      const state = engine().active.get(run.id)!;
-      store.updateRun(run.id, { automaticWakes: 39 });
-      // The first wake reaches the native wire; its provider acknowledgement is held.
-      let release!: () => void;
-      const gate = new Promise<void>(resolve => { release = resolve; });
-      const send = state.session.sendAgentMessage.bind(state.session);
-      vi.spyOn(state.session, 'sendAgentMessage').mockImplementation((content, ids) => {
-        const ack = send(content, ids);
-        return ack && ack.then(() => gate);
-      });
-      fireTimer(first.id);
-      await until(() => prompted(runner, timerText(first, 'u10 first')).length > 0);
-      expect(settled(run.id, first.id)).toBeUndefined();
-      // The pending batch already holds the last wake of the budget.
-      fireTimer(second.id);
-      await until(() => settled(run.id, second.id)?.phase === 'cancelled');
-      expect(inputsFor(run.id, second.id)).toEqual([]);
-      release();
-      await until(() => settled(run.id, first.id)?.phase === 'delivered');
-      expect(store.getRun(run.id)?.automaticWakes).toBe(40);
-      const notes = () => store.readEvents(run.id).filter(event => event.type === 'note').map(event => String(event.message));
-      expect(notes().filter(note => note.startsWith('automatic timer wake-up ('))).toEqual(['automatic timer wake-up (40/40)']);
-      expect(notes()).toContain(`automatic timer wake-up cap reached (40); timer ${second.id} cancelled`);
-      expect(prompted(runner, `Timer ${second.id} fired`)).toEqual([]);
-      // A CI result is an external event: it still wakes the agent at the cap and is not charged.
-      await until(() => parkedOn(run.id, waitOfKind(run.id, 'pr')));
-      external.settle();
-      await until(() => settled(run.id, ci.id)?.phase === 'delivered' && prompted(runner, `CI wait observation ${ci.id}`).length > 0);
-      expect(store.getRun(run.id)?.automaticWakes).toBe(40);
-    });
-
+function deliveryCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
+  for (const runner of runners) {
     it(`${runner} U12 a wait result beside a pending portable question is checkpointed only on its delayed provider acknowledgement, and the question stays answerable`, async () => {
       if (exemptionFor('U12', runner)) {
         expect(exemptionFor('U12', runner)?.kind).toBe('capability-absent');
@@ -896,103 +1033,6 @@ function baseCells(runners: RunnerId[]): void {
     });
 
     // A held result wakes nothing: the wake is queued synchronously inside the resolution, so its
-    // absence shows at once, and no admission retry or backoff is left to start one later.
-    const expectNoWakeFor = (id: string) => {
-      expect(store.getRun(id)?.status).toBe('failed');
-      expect(manager.isActive(id)).toBe(false);
-      expect(runInternals(manager).line.queue).not.toContain(id);
-      expect(runInternals(manager).retries.wakeRetries.has(id)).toBe(false);
-      expect(runInternals(manager).retries.wakeBackoffs.has(id)).toBe(false);
-    };
-    async function timerWaits(id: string) {
-      const tools = manager.cezarToolHandlers(id, engine().active.get(id)!.ciGeneration);
-      const timerWait = async (seconds: number, note: string) => {
-        const registered = await tools.registerWait({ kind: WAIT_KIND.timer, seconds, note }, 'cezar_wait', new AbortController().signal);
-        if (!('wait' in registered)) throw Error('registration refused');
-        return registered.wait;
-      };
-      return { timer: await timerWait(60, 'u14'), later: await timerWait(7200, 'u14 later') };
-    }
-    /** Continue delivers every held result once, and the run parks and finishes as usual. */
-    async function continueDelivers(id: string, timer: Wait, later: Wait) {
-      expect(manager.continueRun(id, { text: 'go on' })).toEqual({ ok: true });
-      // The store marks a wake delivered before the mock records the prompt it read; wait for both.
-      await until(() => settled(id, timer.id)?.phase === 'delivered' && settled(id, later.id)?.phase === 'delivered'
-        && prompted(runner, `Timer ${timer.id} fired`).length > 0 && prompted(runner, `Timer ${later.id} fired`).length > 0);
-      expect(prompted(runner, `Timer ${timer.id} fired`)).toHaveLength(1);
-      expect(prompted(runner, `Timer ${later.id} fired`)).toHaveLength(1);
-      expect(inputsFor(id, timer.id)).toHaveLength(1);
-      await until(() => store.getRun(id)?.status === 'waiting');
-      expect(manager.finish(id)).toBe(true);
-      await until(() => terminal.includes(store.getRun(id)?.status ?? ''));
-    }
-
-    // hearsay-tools/cezarion#1234: the budget is on the record, so a new session does not refill it.
-    it(`${runner} U16 a scheduler continuation keeps the automatic-wake budget and a human Continue resets it`, async () => {
-      nativeWire(runner);
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
-      await until(() => store.getRun(run.id)?.status === 'waiting');
-      const { timer } = await timerWaits(run.id);
-      store.updateRun(run.id, { automaticWakes: 39 });
-      engine().active.get(run.id)!.session.end();
-      await until(() => !manager.isActive(run.id));
-      fireTimer(timer.id);
-      await until(() => settled(run.id, timer.id)?.phase === 'delivered');
-      expect(store.getRun(run.id)?.automaticWakes).toBe(40);
-      expect(store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith('automatic timer wake-up ('))
-        .map(event => event.message)).toEqual(['automatic timer wake-up (40/40)']);
-      await until(() => store.getRun(run.id)?.status === 'waiting' && manager.isActive(run.id));
-      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
-      const refused = await tools.registerWait({ kind: WAIT_KIND.timer, seconds: 60 }, 'cezar_wait', new AbortController().signal);
-      expect(refused.answer).toMatchObject({ ok: false, code: 'wake_budget_spent' });
-      engine().active.get(run.id)!.session.end();
-      await until(() => !manager.isActive(run.id));
-      expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
-      expect(store.getRun(run.id)?.automaticWakes).toBe(0);
-      await until(() => store.getRun(run.id)?.status === 'waiting');
-      expect(manager.finish(run.id)).toBe(true);
-      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
-    });
-
-    // Recovery fires an overdue timer before any session exists. At the spent budget it wakes
-    // nothing, and once no wait is left the run must still wait on the user through a wait.
-    it(`${runner} U16b timers due at the spent budget with no live session are cancelled, and the last one opens a budget human wait the user answers`, async () => {
-      nativeWire(runner);
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
-      await until(() => store.getRun(run.id)?.status === 'waiting');
-      const { timer, later } = await timerWaits(run.id);
-      store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES });
-      engine().active.get(run.id)!.session.end();
-      await until(() => !manager.isActive(run.id));
-      fireTimer(timer.id);
-      await until(() => settled(run.id, timer.id)?.phase === 'cancelled');
-      // The other timer is still open: the run waits on it, not on the user.
-      expect(humanOpen(run.id)).toEqual([]);
-      fireTimer(later.id);
-      await until(() => settled(run.id, later.id)?.phase === 'cancelled' && humanOpen(run.id)[0]?.askSeq !== undefined);
-      expect(humanOpen(run.id)).toMatchObject([{ via: WAIT_VIA.budget, source: WAIT_SOURCE.cezar, phase: WAIT_PHASE.open }]);
-      expect(store.getRun(run.id)?.status).toBe('waiting');
-      expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
-      expect(manager.isActive(run.id)).toBe(false);
-      const [budget] = humanOpen(run.id);
-      const commits = recordCommits(join(root, '.ai/cezar'));
-      expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
-      await until(() => settled(run.id, budget!.id)?.phase === 'delivered');
-      expect(store.getRun(run.id)?.automaticWakes ?? 0).toBe(0);
-      // hearsay-tools/cezarion#1805: the restarted budget and the answered wait are committed with
-      // the Continue they come from, never before it.
-      const step = store.getRun(run.id)!.steps.at(-1)!.id;
-      commits.expectEveryCommit(run.id, row => {
-        return (row.automaticWakes === MAX_AUTO_CONTINUES && !row.lastWaits?.some(wait => wait.id === budget!.id && wait.phase === 'delivered')) ||
-          row.continuationMessage?.text === 'carry on' || row.steps.some(entry => entry.id === step && entry.status !== 'pending');
-      }, 'a restarted budget and its Continue');
-      await until(() => store.getRun(run.id)?.status === 'waiting' && manager.isActive(run.id));
-      expect(manager.finish(run.id)).toBe(true);
-      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
-    });
-
-    // Clearing the wake counters is bookkeeping: a refused write may not stop a cleanup from
-    // stopping the run.
     it(`${runner} U9c with a delivery-failure count on the record and the store refusing writes, Finish still stops the run`, async () => {
       nativeWire(runner);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
@@ -1027,7 +1067,7 @@ function baseCells(runners: RunnerId[]): void {
       expect(store.getRun(run.id)?.waits?.find(wait => wait.id === later.id)?.phase).toBe('resolved');
       expectNoWakeFor(run.id);
       failure.lift();
-      await continueDelivers(run.id, timer, later);
+      await continueDelivers(runner, run.id, timer, later);
     });
 
     it(`${runner} U14 a session that keeps closing cleanly before its wait result is delivered stops at the delivery bound, the run fails keeping its result, and Continue delivers it once`, async () => {
@@ -1058,7 +1098,7 @@ function baseCells(runners: RunnerId[]): void {
         expect(store.getRun(run.id)?.waits?.find(wait => wait.id === later.id)?.phase).toBe('resolved');
         expectNoWakeFor(run.id);
         closing = false;
-        await continueDelivers(run.id, timer, later);
+        await continueDelivers(runner, run.id, timer, later);
       } finally {
         store.off('event', closeAtTurnEnd);
       }
@@ -1181,6 +1221,11 @@ function baseCells(runners: RunnerId[]): void {
       });
     }
 
+  }
+}
+
+function asksCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
+  for (const runner of runners) {
     it(`${runner} U7h cezar_ask, an open question included, opens a human wait in the same wait list`, async () => {
       nativeWire(runner);
       // The open question has no options: the card crosses this runner's wire without them.
@@ -1287,6 +1332,130 @@ function baseCells(runners: RunnerId[]): void {
       await until(() => settled(run.id, registered.wait_id)?.phase === 'delivered' && answered(run.id, asks(run.id)[0]!.seq));
     });
 
+    it(`${runner} U5a a nudge the agent answers with cezar_ask parks on that question after one extra turn`, async () => {
+      nativeWire(runner);
+      delete process.env.CEZ_MOCK_NUDGE_REPLY;
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+      await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined);
+      expect(prompted(runner, NO_WAIT_NUDGE)).toHaveLength(1);
+      expect(turnEnds(run.id)).toBe(2);
+      expect(store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith(NO_WAIT_NUDGE_NOTE))).toHaveLength(1);
+      const wait = await expectHumanWaitAnswered(run.id, 'cezar_ask');
+      expect(wait).toMatchObject({ source: WAIT_SOURCE.agent, questions: [expect.objectContaining({ header: 'Next step' })] });
+      expect(manager.finish(run.id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+    });
+
+    // Finish answers Cezar's own human wait; it keeps the agent's question (the #151 guard).
+    it(`${runner} U5c a root parked on its no-wait human wait is finished by the user, and an agent question still blocks it`, async () => {
+      nativeWire(runner);
+      const asRoot = (task: string) => {
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task });
+        store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+        return run;
+      };
+      const plain = asRoot(HARNESS_ADAPTERS[runner].scenarios.baseline!);
+      await until(() => gated(plain.id));
+      expect(humanOpen(plain.id)).toMatchObject([{ via: WAIT_VIA['no-wait'], source: WAIT_SOURCE.cezar }]);
+      expect(manager.finishBlockedReason(plain.id)).toBeUndefined();
+      expect(manager.finish(plain.id)).toBe(true);
+      await until(() => store.getRun(plain.id)?.status === 'done' && !manager.isActive(plain.id));
+      delete process.env.CEZ_MOCK_NUDGE_REPLY;
+      const asked = asRoot(HARNESS_ADAPTERS[runner].scenarios.baseline!);
+      await until(() => pendingQuestion(asked.id));
+      expect(humanOpen(asked.id)).toMatchObject([{ via: WAIT_VIA.cezar_ask, source: WAIT_SOURCE.agent }]);
+      expect(manager.finishBlockedReason(asked.id)).toBe('Answer the pending human question before finishing.');
+      expect(manager.finish(asked.id)).toBe(false);
+      expect(manager.cancel(asked.id)).toBe(true);
+      await until(() => !manager.isActive(asked.id));
+    });
+
+    // Cezar's own wait is no question (hearsay-tools/cezarion#1234): it raises no human gate, so the
+    // run takes what a plain park took before it, and a wait the agent registers replaces it.
+    it(`${runner} U5d the no-wait human wait raises no question, and the agent's own wait replaces it`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+      await until(() => gated(run.id));
+      const noWait = humanOpen(run.id)[0]!;
+      expect(noWait).toMatchObject({ via: WAIT_VIA['no-wait'], source: WAIT_SOURCE.cezar });
+      expect(store.readEvents(run.id).find(event => event.seq === noWait.askSeq)).toMatchObject({ type: 'note', message: NO_WAIT_NOTE });
+      expect(store.transcriptFacts(run.id).pendingGateSeq).toBeUndefined();
+      expect(hasPendingAsk(store, run.id)).toBeFalsy();
+      expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
+      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+      const registered = await tools.registerWait({ kind: WAIT_KIND.timer, seconds: 60, note: 'u5d' }, 'cezar_wait', new AbortController().signal);
+      if (!('wait' in registered)) throw Error('registration refused');
+      expect(store.getRun(run.id)?.lastWaits?.find(wait => wait.id === noWait.id)?.phase).toBe('cancelled');
+      expect(humanOpen(run.id)).toEqual([]);
+      await until(() => parkedOn(run.id, waitOfKind(run.id, 'timer')));
+      expect(deriveAttention(store.getRun(run.id)!).label).toBe('monitoring');
+    });
+
+    // hearsay-tools/cezarion#1260: Finish ends the task, so it closes the agent's unanswered question
+    // instead of leaving an answerable card that hides the one-click Continue, with or without a session.
+    it(`${runner} U18 Finish on a run parked on an agent question closes the question without answering it`, async () => {
+      nativeWire(runner);
+      delete process.env.CEZ_MOCK_NUDGE_REPLY;
+      const finishParked = async (closeFirst: boolean) => {
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+        await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined);
+        const askSeq = store.transcriptFacts(run.id).pendingAsk!.seq;
+        if (closeFirst) {
+          engine().active.get(run.id)!.session.end();
+          await until(() => !manager.isActive(run.id));
+          expect(pendingQuestion(run.id)).toBe(true);
+        }
+        expect(manager.finish(run.id)).toBe(true);
+        await until(() => terminal.includes(store.getRun(run.id)?.status ?? '') && !manager.isActive(run.id));
+        const events = store.readEvents(run.id);
+        expect(events.filter(event => event.type === 'human-ask-closed')).toEqual([expect.objectContaining({ askSeq, reason: 'finish' })]);
+        expect(events.filter(event => event.type === 'human-input-delivered')).toEqual([]);
+        expect(pendingAskOf(events)).toBeUndefined();
+        expect(store.transcriptFacts(run.id).pendingGateSeq).toBeUndefined();
+        expect(hasPendingAsk(store, run.id)).toBeFalsy();
+      };
+      await finishParked(false);
+      await finishParked(true);
+    });
+
+    // No prose classification (hearsay-tools/cezarion#1234): a question the agent only wrote gets
+    // the nudge, like any turn end with no wait.
+    it(`${runner} U17 a question in prose without a wait no longer parks the run by itself`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: messagesPrompt(runner, ['Should I use Vitest?']) });
+      const proseGates = () => store.readEvents(run.id).filter(event => event.type === 'note' && event.code === PROSE_HUMAN_GATE);
+      await until(() => gated(run.id) || proseGates().length > 0);
+      expect(proseGates()).toEqual([]);
+      expect(prompted(runner, NO_WAIT_NUDGE)).toHaveLength(1);
+      expect(humanOpen(run.id)).toMatchObject([{ via: WAIT_VIA['no-wait'], source: WAIT_SOURCE.cezar }]);
+      // Beside a timer it raises no gate either: the run parks on the agent's timer.
+      expect(manager.sendMessage(run.id, [{ type: 'text', text: `${toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 60, note: 'u17' })} ${thenSay('Should I use Vitest?')}` }])).toBe(true);
+      await until(() => parkedOn(run.id, viaOf(run.id, WAIT_VIA.cezar_wait)) || proseGates().length > 0);
+      expect(proseGates()).toEqual([]);
+      expect(humanOpen(run.id)).toEqual([]);
+      expect(deriveAttention(store.getRun(run.id)!).label).toBe('monitoring');
+      expect(manager.finish(run.id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+    });
+
+    it(`${runner} U15 an autonomous run is nudged with the autonomous wording until the budget, then opens a budget human wait`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['autonomous-cap']!, autonomous: true });
+      store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES - 2 });
+      await until(() => gated(run.id));
+      expect(prompted(runner, AUTONOMOUS_NUDGE)).toHaveLength(2);
+      expect(prompted(runner, NO_WAIT_NUDGE)).toEqual([]);
+      expect(humanOpen(run.id)).toMatchObject([{ kind: WAIT_KIND.human, via: WAIT_VIA.budget, source: WAIT_SOURCE.cezar, phase: WAIT_PHASE.open }]);
+      expect(store.getRun(run.id)?.automaticWakes).toBe(MAX_AUTO_CONTINUES);
+      expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
+      expect(manager.finish(run.id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+    });
+  }
+}
+
+function doneCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
+  for (const runner of runners) {
     it(`${runner} U6 cezar_done is refused with live workers and with settled but uncollected workers, accepted once collected, and open waits are cancelled`, async () => {
       const external = github();
       nativeWire(runner);
@@ -1428,6 +1597,11 @@ function baseCells(runners: RunnerId[]): void {
     // (open-mercato/cezar#472) is queued beside the waits. When it answers the question, the answered
     // wait and the removed queue entry are one commit: a reopened store never replays an answer it
     // shows delivered, nor shows the question open after dropping the answer.
+  }
+}
+
+function answersCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
+  for (const runner of runners) {
     it(`${runner} U7q a deferred message that answers the question removes its queue entry in the answer's commit`, async () => {
       nativeWire(runner);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
@@ -1568,129 +1742,10 @@ function baseCells(runners: RunnerId[]): void {
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });
 
-    it(`${runner} U5a a nudge the agent answers with cezar_ask parks on that question after one extra turn`, async () => {
-      nativeWire(runner);
-      delete process.env.CEZ_MOCK_NUDGE_REPLY;
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
-      await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined);
-      expect(prompted(runner, NO_WAIT_NUDGE)).toHaveLength(1);
-      expect(turnEnds(run.id)).toBe(2);
-      expect(store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith(NO_WAIT_NUDGE_NOTE))).toHaveLength(1);
-      const wait = await expectHumanWaitAnswered(run.id, 'cezar_ask');
-      expect(wait).toMatchObject({ source: WAIT_SOURCE.agent, questions: [expect.objectContaining({ header: 'Next step' })] });
-      expect(manager.finish(run.id)).toBe(true);
-      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
-    });
-
-    // Finish answers Cezar's own human wait; it keeps the agent's question (the #151 guard).
-    it(`${runner} U5c a root parked on its no-wait human wait is finished by the user, and an agent question still blocks it`, async () => {
-      nativeWire(runner);
-      const asRoot = (task: string) => {
-        const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task });
-        store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
-        return run;
-      };
-      const plain = asRoot(HARNESS_ADAPTERS[runner].scenarios.baseline!);
-      await until(() => gated(plain.id));
-      expect(humanOpen(plain.id)).toMatchObject([{ via: WAIT_VIA['no-wait'], source: WAIT_SOURCE.cezar }]);
-      expect(manager.finishBlockedReason(plain.id)).toBeUndefined();
-      expect(manager.finish(plain.id)).toBe(true);
-      await until(() => store.getRun(plain.id)?.status === 'done' && !manager.isActive(plain.id));
-      delete process.env.CEZ_MOCK_NUDGE_REPLY;
-      const asked = asRoot(HARNESS_ADAPTERS[runner].scenarios.baseline!);
-      await until(() => pendingQuestion(asked.id));
-      expect(humanOpen(asked.id)).toMatchObject([{ via: WAIT_VIA.cezar_ask, source: WAIT_SOURCE.agent }]);
-      expect(manager.finishBlockedReason(asked.id)).toBe('Answer the pending human question before finishing.');
-      expect(manager.finish(asked.id)).toBe(false);
-      expect(manager.cancel(asked.id)).toBe(true);
-      await until(() => !manager.isActive(asked.id));
-    });
-
-    // Cezar's own wait is no question (hearsay-tools/cezarion#1234): it raises no human gate, so the
-    // run takes what a plain park took before it, and a wait the agent registers replaces it.
-    it(`${runner} U5d the no-wait human wait raises no question, and the agent's own wait replaces it`, async () => {
-      nativeWire(runner);
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
-      await until(() => gated(run.id));
-      const noWait = humanOpen(run.id)[0]!;
-      expect(noWait).toMatchObject({ via: WAIT_VIA['no-wait'], source: WAIT_SOURCE.cezar });
-      expect(store.readEvents(run.id).find(event => event.seq === noWait.askSeq)).toMatchObject({ type: 'note', message: NO_WAIT_NOTE });
-      expect(store.transcriptFacts(run.id).pendingGateSeq).toBeUndefined();
-      expect(hasPendingAsk(store, run.id)).toBeFalsy();
-      expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
-      const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
-      const registered = await tools.registerWait({ kind: WAIT_KIND.timer, seconds: 60, note: 'u5d' }, 'cezar_wait', new AbortController().signal);
-      if (!('wait' in registered)) throw Error('registration refused');
-      expect(store.getRun(run.id)?.lastWaits?.find(wait => wait.id === noWait.id)?.phase).toBe('cancelled');
-      expect(humanOpen(run.id)).toEqual([]);
-      await until(() => parkedOn(run.id, waitOfKind(run.id, 'timer')));
-      expect(deriveAttention(store.getRun(run.id)!).label).toBe('monitoring');
-    });
-
-    // hearsay-tools/cezarion#1260: Finish ends the task, so it closes the agent's unanswered question
-    // instead of leaving an answerable card that hides the one-click Continue, with or without a session.
-    it(`${runner} U18 Finish on a run parked on an agent question closes the question without answering it`, async () => {
-      nativeWire(runner);
-      delete process.env.CEZ_MOCK_NUDGE_REPLY;
-      const finishParked = async (closeFirst: boolean) => {
-        const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
-        await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined);
-        const askSeq = store.transcriptFacts(run.id).pendingAsk!.seq;
-        if (closeFirst) {
-          engine().active.get(run.id)!.session.end();
-          await until(() => !manager.isActive(run.id));
-          expect(pendingQuestion(run.id)).toBe(true);
-        }
-        expect(manager.finish(run.id)).toBe(true);
-        await until(() => terminal.includes(store.getRun(run.id)?.status ?? '') && !manager.isActive(run.id));
-        const events = store.readEvents(run.id);
-        expect(events.filter(event => event.type === 'human-ask-closed')).toEqual([expect.objectContaining({ askSeq, reason: 'finish' })]);
-        expect(events.filter(event => event.type === 'human-input-delivered')).toEqual([]);
-        expect(pendingAskOf(events)).toBeUndefined();
-        expect(store.transcriptFacts(run.id).pendingGateSeq).toBeUndefined();
-        expect(hasPendingAsk(store, run.id)).toBeFalsy();
-      };
-      await finishParked(false);
-      await finishParked(true);
-    });
-
-    // No prose classification (hearsay-tools/cezarion#1234): a question the agent only wrote gets
-    // the nudge, like any turn end with no wait.
-    it(`${runner} U17 a question in prose without a wait no longer parks the run by itself`, async () => {
-      nativeWire(runner);
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: messagesPrompt(runner, ['Should I use Vitest?']) });
-      const proseGates = () => store.readEvents(run.id).filter(event => event.type === 'note' && event.code === PROSE_HUMAN_GATE);
-      await until(() => gated(run.id) || proseGates().length > 0);
-      expect(proseGates()).toEqual([]);
-      expect(prompted(runner, NO_WAIT_NUDGE)).toHaveLength(1);
-      expect(humanOpen(run.id)).toMatchObject([{ via: WAIT_VIA['no-wait'], source: WAIT_SOURCE.cezar }]);
-      // Beside a timer it raises no gate either: the run parks on the agent's timer.
-      expect(manager.sendMessage(run.id, [{ type: 'text', text: `${toolCall('cezar_wait', { kind: WAIT_KIND.timer, seconds: 60, note: 'u17' })} ${thenSay('Should I use Vitest?')}` }])).toBe(true);
-      await until(() => parkedOn(run.id, viaOf(run.id, WAIT_VIA.cezar_wait)) || proseGates().length > 0);
-      expect(proseGates()).toEqual([]);
-      expect(humanOpen(run.id)).toEqual([]);
-      expect(deriveAttention(store.getRun(run.id)!).label).toBe('monitoring');
-      expect(manager.finish(run.id)).toBe(true);
-      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
-    });
-
-    it(`${runner} U15 an autonomous run is nudged with the autonomous wording until the budget, then opens a budget human wait`, async () => {
-      nativeWire(runner);
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['autonomous-cap']!, autonomous: true });
-      store.updateRun(run.id, { automaticWakes: MAX_AUTO_CONTINUES - 2 });
-      await until(() => gated(run.id));
-      expect(prompted(runner, AUTONOMOUS_NUDGE)).toHaveLength(2);
-      expect(prompted(runner, NO_WAIT_NUDGE)).toEqual([]);
-      expect(humanOpen(run.id)).toMatchObject([{ kind: WAIT_KIND.human, via: WAIT_VIA.budget, source: WAIT_SOURCE.cezar, phase: WAIT_PHASE.open }]);
-      expect(store.getRun(run.id)?.automaticWakes).toBe(MAX_AUTO_CONTINUES);
-      expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
-      expect(manager.finish(run.id)).toBe(true);
-      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
-    });
   }
 }
 
-function workersCells(runners: RunnerId[]): void {
+function mixedCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
   for (const runner of runners) {
     it(`${runner} U2w ci and worker open: the worker resolving wakes the agent with ci still open and in the footer, and the later ci result is delivered`, async () => {
       const external = github();
@@ -1867,6 +1922,11 @@ function workersCells(runners: RunnerId[]): void {
       await until(() => store.getRun(p.id)?.status === 'waiting');
     });
 
+  }
+}
+
+function recoveryCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
+  for (const runner of runners) {
     it(`${runner} U9w provider failure with a worker wait open leaves the run recoverable and the next resolution delivers`, async () => {
       const wire = gatedProviderFailure(root, runner);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
@@ -2020,6 +2080,11 @@ function workersCells(runners: RunnerId[]): void {
       await until(() => store.getRun(p.id)?.status === 'waiting');
     });
 
+  }
+}
+
+function conversationsCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
+  for (const runner of runners) {
     it(`${runner} U19 a worker message beside a pending portable question is delivered and the question stays answerable`, async () => {
       const f = await conversingParent(runner);
       expect(manager.sendMessage(f.p.id, [{ type: 'text', text: askPrompt() }])).toBe(true);
@@ -2130,6 +2195,11 @@ function workersCells(runners: RunnerId[]): void {
 
     // hearsay-tools/cezarion#1301: a blocked done at the turn end is answered with the refusal
     // `cezar_done` gives mid-turn, as one automatic turn, and Cezar opens no wait.
+  }
+}
+
+function refusalCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
+  for (const runner of runners) {
     for (const settledWorker of [false, true]) {
       it(`${runner} ${settledWorker ? 'U20u a done blocked by a settled, uncollected worker gets the uncollected refusal nudge without the will-wait sentence' : 'U20 a done blocked by live workers at the turn end gets one refusal nudge with the will-wait sentence and opens no wait'}`, async () => {
         const p = await workerParent(runner);
@@ -2304,6 +2374,11 @@ function workersCells(runners: RunnerId[]): void {
     });
 
     // hearsay-tools/cezarion#1301: the turn that answers the refusal nudge ends on done again.
+  }
+}
+
+function completionCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
+  for (const runner of runners) {
     it(`${runner} U21 an ignored refusal with live workers parks on a Cezar worker wait that settlement wakes`, async () => {
       const reply = repliesDoneAgain();
       const p = await workerParent(runner);
@@ -2413,6 +2488,11 @@ function workersCells(runners: RunnerId[]): void {
       await waitAt('completion-wake-repark', () => store.getRun(f.p.id)?.status === 'waiting');
     });
 
+  }
+}
+
+function completionRepliesCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
+  for (const runner of runners) {
     it(`${runner} U21h an ignored refusal with only uncollected results parks on Cezar's human wait`, async () => {
       const reply = repliesDoneAgain();
       const p = await workerParent(runner);
@@ -2514,6 +2594,11 @@ function workersCells(runners: RunnerId[]): void {
     // hearsay-tools/cezarion#1301: a queued refusal is owed input, and a reopened session that closes
     // before Cezar submits it is a failed delivery, as U14's: one copy, the delivery bound, and the
     // run fails keeping it. A legacy accepted Finish takes the same path.
+  }
+}
+
+function closedCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
+  for (const runner of runners) {
     for (const legacy of [false, true]) {
       it(`${runner} U22c a refusal whose reopened sessions keep closing cleanly is queued once, stops at the delivery bound, and Continue delivers it once${legacy ? ' (legacy Finish)' : ''}`, async () => {
         retryAtOnce();
@@ -2850,11 +2935,7 @@ function workersCells(runners: RunnerId[]): void {
   }
 }
 
-// hearsay-tools/cezarion#1525: every turn end settles through one method. Each of U5, U6, U11, U20
-// and U20u is settled from each entry: the fresh step's turn end, a Continue's, and an
-// acknowledgement that lands after its turn ended. Each cell checks the settled outcome's word
-// (`turn-outcomes.testkit.ts`) besides the status and the waits.
-function entriesCells(runners: RunnerId[]): void {
+function entriesCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
   for (const runner of runners) {
     /** The settled outcomes' words, oldest first. */
     const words = (id: string) => turns.words(id);
@@ -3097,7 +3178,7 @@ function entriesCells(runners: RunnerId[]): void {
   }
 }
 
-function processCells(runners: RunnerId[]): void {
+function processCells(runners: RunnerId[], it: typeof registerTest = registerTest): void {
   for (const runner of runners) {
     it(`${runner} U1p a process wait registers through cezar_wait on the native wire, parks keeping its slot, and wakes with its exit code`, async () => {
       const external = processes();
@@ -3223,7 +3304,7 @@ function processCells(runners: RunnerId[]): void {
 
 // hearsay-tools/cezarion#1531: the single-runner cells run once, on the claude wire, from
 // `waits-parity.test.ts`. They take no runner: a cell for every runner goes in its part's cell group
-// (`baseCells`, `workersCells`, `entriesCells` or `processCells`), which the per-runner files run.
+// (the semantic row families in `WAIT_PARITY_CELLS`), which the per-runner files run.
 function singleRunnerCells(): void {
   // hearsay-tools/cezarion#1301: a run owes at most one refusal. A gate that refuses the done again
   // while the queued copy waits out a failed delivery's backoff adds no second copy and no charge.
