@@ -683,7 +683,8 @@ target workflow before opening PRs against it.
 CI accepts `merge_group: checks_requested` for `main`. It verifies the immutable
 combined commit before merge. Typecheck, citations, complexity, clones, build,
 Node tests and packaged CLI tests always run on that commit. The four Vitest
-and four browser jobs can reuse native PR suites for one unchanged queue entry.
+and four browser jobs can reuse native PR suites for an unchanged queue entry
+built directly on `main`.
 Queue runs have no model keys, npm credentials, publishing jobs or OIDC permission.
 
 ### Docs-only queue entries
@@ -709,13 +710,16 @@ successful full matrices can produce `Attest PR test inputs / <workflow SHA> /
 A missing or moved merge input fails input resolution. An unavailable optional
 ancestry check keeps the immutable merge checkout without attestation.
 
-At the queue head, a read-only probe requires exactly one entry, unchanged main,
+For the entry this build tests, a read-only probe uses admission's entry lookup.
+Entries queued behind it do not block reuse. It requires a group base equal to
+`main`, so only an entry built directly on `main` can reuse; entry 2 of two
+speculative builds always runs both full queue suites. It also requires
 current native CI/review admission, all eight successful suite jobs, an attestation
 for the queue base and PR head, identical head/combined trees, and identical
 `ci.yml` blobs at the attested base and queue commit. A changed workflow always
 runs the queue suites, since native PR CI used the older definition. It re-reads
 membership, main, head and the newest source run/attempt. Missing, partial, old,
-failed, fork, multi-entry or changing evidence runs both full queue suites.
+failed, fork, stale-group or changing evidence runs both full queue suites.
 The probe is bounded to 60 seconds, with individual requests capped at 10 seconds.
 It may read a still-running native workflow only when its required aggregate,
 review, attestation and all suites have passed; optional publication can finish
@@ -753,7 +757,10 @@ depth 2 for the parent. The pushed commit never supplies the classifier. Any oth
 parent, a missing base SHA or a classifier failure requires all eight shards, so main
 runs its full verification.
 Equal trees, ancestors, PR runs, dispatches, artifacts and an older success behind
-a newer failure are not proof. Unknown evidence or probe infrastructure failure
+a newer failure are not proof. With two speculative builds, a group's ref base can
+be the previous group head, and one push can advance `main` over two group heads.
+The pushed SHA is then the later head, and only its own queue run is proof; the
+earlier head's run is not read. Unknown evidence or probe infrastructure failure
 runs full main CI. The aggregate records the source run and attempt when it reuses
 verification. Snapshot publishing still builds after successful verification and
 checks out the immutable pushed SHA, even if the branch has moved.
@@ -786,8 +793,8 @@ backlog or jump the queue. Confirm external merge tools distinguish enqueueing
 from actual merging before adoption; documentation here does not update them.
 
 Normal eligible merges replace main's full matrix with queue verification
-before merge plus a metadata probe. An eligible single-entry queue reuses the
-native PR's unit/browser suites and runs the remaining checks fresh. This is a
+before merge plus a metadata probe. An eligible entry built on `main` reuses the
+native PR's unit/browser suites, even with entries queued behind it, and runs the remaining checks fresh. This is a
 cost goal, not a guarantee. Rebuilds,
 failed groups, retries and fallback add work. Measure queue
 wait, verification job-seconds, source attempts, reuse hits and fallback reasons.
@@ -853,7 +860,7 @@ its head SHA and fails closed.
 | 18 | Admission API error, deadline or changing evidence | GitHub API | Actions | Entry fails closed and is removed, so it counts as a queue failure. The PR stays open | As today |
 | 19 | Docs-only entry at position 2 (once hearsay-tools/cezarion#2615 lands) | PR content | Classifier | The group diff `base..head` is that PR's own diff, so the skip is valid. Main proof: first parent = ref base | As today |
 | 20 | Entry at position 2, native suites passed | — | `pr-test-proof` | Base is not `main`, so full suites run | Cannot happen |
-| 21 | Entry at position 1 on `main`, PR up to date, entries behind it | — | `pr-test-proof` | Full suites: the entries behind block reuse until hearsay-tools/cezarion#2624 lands; then reuse is allowed | As at k=2 |
+| 21 | Entry at position 1 on `main`, PR up to date, entries behind it | — | `pr-test-proof` | Reuse allowed (before hearsay-tools/cezarion#2624: blocked by the entries behind) | Reuse allowed |
 | 22 | An invalidated run finishes green later | Old run completes | Actions | Its group never merges, and its SHA never reaches `main`. It is counted as waste in the pilot metric | Cannot happen |
 | 23 | Manual re-run of a failed queue run | Human | Human | The entry was already removed; the run proves nothing for a new group. Requeue the PR | As today |
 | 24 | GitHub reports entry 2's `baseCommit` as `main`, not entry 1's head (S5 false) | GitHub data model | GitHub | Entry 2's admission fails closed on every build. The pre-activation exercise catches this before the pilot. Then the lookup changes to: base = the position-1 head, checked through the ref name | — |

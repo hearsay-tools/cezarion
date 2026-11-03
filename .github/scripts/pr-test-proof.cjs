@@ -6,12 +6,10 @@ const PR_TEST_JOBS = [
   ...[1, 2, 3, 4].map(n => `Vitest shard ${n}/4`),
   ...[1, 2, 3, 4].map(n => `Cockpit browser E2E shard ${n}/4`),
 ];
-async function onlyEntry(read, owner, repo, group) {
+async function buildEntry(read, owner, repo, group) {
+  // Entries behind this one do not block reuse; matchingMain limits reuse to an entry built on main.
   const response = await read('POST /graphql', { query: QUEUE_QUERY, variables: { owner, repo } });
-  const entries = response.data?.repository?.mergeQueue?.entries;
-  if (response.errors || entries?.pageInfo?.hasNextPage !== false || entries.nodes?.length !== 1) {
-    throw new Error('Queue is not a known single entry');
-  }
+  if (response.errors) throw new Error('Incomplete queue response');
   return entryFrom(response.data, group);
 }
 async function matchingMain(read, base) {
@@ -52,7 +50,7 @@ async function prTestProof({ github, owner, repo, eventName, group, now = Date.n
   // Keep admission's pagination, rules and thread checks inside the same deadline.
   const bounded = { request: async (route, args) => ({ data: await read(route, args) }) };
   try {
-    const entry = await onlyEntry(read, owner, repo, group);
+    const entry = await buildEntry(read, owner, repo, group);
     await matchingMain(read, group.base_sha);
     const admission = await mergeQueueAdmission({ github: bounded, owner, repo, group, now, allowInProgress: true, releaseAppBotLogin });
     if (admission.pullNumber !== entry.pullRequest.number || admission.head !== entry.pullRequest.headRefOid) return fallback('entry-changed');
@@ -61,7 +59,7 @@ async function prTestProof({ github, owner, repo, eventName, group, now = Date.n
     await sameTree(read, group, admission.head);
     await matchingWorkflow(read, group);
     await unchangedRun(read, admission);
-    const final = await onlyEntry(read, owner, repo, group);
+    const final = await buildEntry(read, owner, repo, group);
     if (final.id !== entry.id || final.pullRequest.number !== admission.pullNumber || final.pullRequest.headRefOid !== admission.head) return fallback('entry-changed');
     await matchingMain(read, group.base_sha);
     const pull = await read('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: admission.pullNumber });
