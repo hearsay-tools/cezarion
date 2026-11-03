@@ -116,7 +116,8 @@ export async function rebuildCapture(archives: string[], repo: string, out: stri
       '--results', join(capture, 'results.json'), '--out', join(repo, REPLAY, `partials/shard-${shard}.json`)], repo)
   }
   if (!commit) throw new Error('rebuild needs a capture archive')
-  merge(['--partials', join(repo, REPLAY, 'partials'), '--commit', commit, '--out', out], repo)
+  merge(['--partials', join(repo, REPLAY, 'partials'), '--commit', commit, '--out', out,
+    '--expect', 'packages/web/src/routes/task-thread/markdown.tsx=packages/web/e2e/artifact-project-links.e2e.ts'], repo)
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -14,10 +14,10 @@ it('rebuilds browser and server evidence from an allowlisted raw archive in a fr
   const capture = join(root, 'capture')
   const put = (file: string, content: string) => { mkdirSync(dirname(file), { recursive: true }); writeFileSync(file, content) }
   try {
-    const spec = 'packages/web/e2e/smoke.e2e.ts'
+    const spec = 'packages/web/e2e/artifact-project-links.e2e.ts'
     for (const repo of [original, target]) {
       put(join(repo, spec), '')
-      put(join(repo, 'packages/web/src/a.tsx'), 'export const x = 1')
+      put(join(repo, 'packages/web/src/routes/task-thread/markdown.tsx'), 'export const x = 1')
       put(join(repo, 'packages/cezar/src/a.ts'), 'export function used() {}')
     }
     const served = join(original, '.ai/qa/build/cezar/web/dist/assets/x.js')
@@ -26,16 +26,16 @@ it('rebuilds browser and server evidence from an allowlisted raw archive in a fr
     put(served, code)
     put(mapped, code)
     put(`${mapped}.map`, JSON.stringify({ version: 3, names: [], mappings: 'AAAA',
-      sources: [relative(dirname(mapped), join(original, 'packages/web/src/a.tsx'))] }))
+      sources: [relative(dirname(mapped), join(original, 'packages/web/src/routes/task-thread/markdown.tsx'))] }))
     const server = join(original, '.ai/qa/build/cezar/dist/a.js')
     put(server, code)
     put(`${server}.map`, JSON.stringify({ version: 3, names: [], mappings: 'AAAA',
       sources: [relative(dirname(server), join(original, 'packages/cezar/src/a.ts'))] }))
     put(join(capture, 'results.json'), JSON.stringify({ testResults: [{ name: join(original, spec), status: 'passed' }] }))
-    put(join(capture, 'logs/smoke/v8.log'), 'script-details,1,http://localhost/assets/x.js,0,0,\nfunction,first-execution,1,1,20,0.1,1,used\n')
+    put(join(capture, 'logs/artifact-project-links/v8.log'), 'script-details,1,http://localhost/assets/x.js,0,0,\nfunction,first-execution,1,1,20,0.1,1,used\n')
     put(join(capture, 'logs/shared-startup-1.json'), JSON.stringify({ result: [{ url: pathToFileURL(server).href,
       functions: [{ ranges: [{ startOffset: 0, endOffset: code.length, count: 1 }] }] }] }))
-    put(join(capture, 'logs/smoke/node/server-1-0.json'), '{"result":[]}')
+    put(join(capture, 'logs/artifact-project-links/node/server-1-0.json'), '{"result":[]}')
     put(join(capture, 'logs/.env'), 'must stay out')
     put(join(capture, 'logs/control.json'), '{"must":"stay out"}')
     const archive = join(root, 'capture.jsonl.gz')
@@ -50,7 +50,7 @@ it('rebuilds browser and server evidence from an allowlisted raw archive in a fr
     expect(map.specs).toEqual([spec])
     expect(map.incomplete).toEqual([])
     expect(map.functions['packages/cezar/src/a.ts']).toEqual([{ start: 1, end: 1, specs: [0] }])
-    expect(map.sources['packages/web/src/a.tsx']).toEqual([0])
+    expect(map.sources['packages/web/src/routes/task-thread/markdown.tsx']).toEqual([0])
     await expect(rebuildCapture([archive], target, out)).rejects.toThrow('fresh generated path')
   } finally { rmSync(root, { recursive: true, force: true }) }
 })
