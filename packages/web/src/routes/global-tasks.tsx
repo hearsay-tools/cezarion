@@ -6,7 +6,7 @@ import { ArchiveRestoreIcon, EyeIcon, EyeOffIcon, ListChecksIcon, SearchXIcon } 
 import { ArchiveIcon, LayersIcon, PlusIcon, SearchIcon, SlidersHorizontalIcon, XIcon } from '@/components/design-icons'
 import * as React from 'react'
 import { Link } from 'react-router'
-
+import { controlLocation } from '@open-mercato/cezar-api-client/contract/control-locations'
 import { archiveRun, setRunRead } from '@/api/client'
 import {
   rememberReferenceStatuses,
@@ -753,7 +753,7 @@ function FilterBar({
         <p data-slot="no-tags-hint" className="text-[11px] text-soft-foreground">
           Tag connected repositories in{' '}
           <Link to="/settings/global/projects" className="font-medium text-accent-text hover:underline">
-            Settings → Projects
+            {controlLocation('projects')}
           </Link>{' '}
           to group their tasks together here.
         </p>

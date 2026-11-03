@@ -204,7 +204,7 @@ describe('status section folding (#811)', () => {
     const link = screen.getByRole('link', { name: 'Finished: showing 2 of 4, see all' })
     expect(link.textContent).toBe('2 of 4')
     expect(link.getAttribute('href')).toBe('/?origin=direct&section=finished')
-    expect(link.getAttribute('title')).toContain('Settings → Sidebar')
+    expect(link.getAttribute('title')).toBe('The sidebar shows 2 of 4 Finished tasks. Click to see all of them. Change the limit in Settings → Sidebar.')
     // The toggle keeps the full count, and the link stays out of the heading the sweep reads.
     expect(screen.getByRole('button', { name: 'Finished 4' })).toBeTruthy()
     expect(link.closest('h2')).toBeNull()

@@ -1,3 +1,4 @@
+import { controlLocation } from '@open-mercato/cezar-contract/control-locations';
 import type {
   ProviderId,
   ProviderStatusResponse,
@@ -29,10 +30,10 @@ export function unavailableProviderMessage(
   for (const provider of required) {
     const row = response.providers.find(({ provider: id }) => id === provider);
     if (row?.enabled === false) {
-      return `${LABEL[provider]} is disabled. Enable it in Settings → Agents → Providers.`;
+      return `${LABEL[provider]} is disabled. Enable it in ${controlLocation('providers')}.`;
     }
     if (row?.status !== 'connected') {
-      return `${LABEL[provider]} credentials are unavailable. Authorize it in Settings → Agents → Providers.`;
+      return `${LABEL[provider]} credentials are unavailable. Authorize it in ${controlLocation('providers')}.`;
     }
   }
   return null;

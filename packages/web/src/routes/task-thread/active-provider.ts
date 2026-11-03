@@ -1,3 +1,4 @@
+import { controlLocation } from '@open-mercato/cezar-api-client/contract/control-locations'
 import { providerForActiveRun } from '@open-mercato/cezar-api-client/contract/active-provider'
 import type { ApiRun, ProviderStatusResponse, Runner } from '@open-mercato/cezar-api-client'
 import { useProviderStatus } from '@/api/queries'
@@ -26,14 +27,14 @@ function providerAvailability(
     return {
       provider,
       usable: false,
-      reason: `${PROVIDER_LABEL[provider]} is disabled. Enable it in Settings → Agents → Providers.`,
+      reason: `${PROVIDER_LABEL[provider]} is disabled. Enable it in ${controlLocation('providers')}.`,
     }
   }
   if (row?.status !== 'connected') {
     return {
       provider,
       usable: false,
-      reason: `${PROVIDER_LABEL[provider]} credentials are unavailable. Authorize it in Settings → Agents → Providers.`,
+      reason: `${PROVIDER_LABEL[provider]} credentials are unavailable. Authorize it in ${controlLocation('providers')}.`,
     }
   }
   return { provider, usable: true }

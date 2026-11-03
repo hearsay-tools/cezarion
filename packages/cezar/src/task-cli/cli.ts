@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { open as openFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { controlLocation } from '@open-mercato/cezar-contract/control-locations';
 import {
   apiRunSchema,
   archiveFinishedResponseSchema,
@@ -251,7 +252,7 @@ export function taskHelp(operation?: string): string {
       '',
     ] : []),
     'Commands find the running cockpit that serves this checkout (ports 4321-4370) and print JSON.',
-    'notify: with a task webhook set in Settings → General, start notifies it unless --no-notify;',
+    `notify: with a task webhook set in ${controlLocation('general')}, start notifies it unless --no-notify;`,
     'the webhook gets task.status, task.question and task.subscribed POSTs.',
     'Exit codes: 0 ok (wait/start --wait: done, review, or stopped for attention) · 1 task failed/cancelled',
     'or message not delivered · 2 no cockpit or refused · 3 timed out · 64 usage error.',
