@@ -203,6 +203,7 @@ describe('the thread composer against a live waiting session', () => {
       resultIndex: 0,
       results: [{ isFinal: true, 0: { transcript: 'summarize what you did' } }],
     }) ?? true`)
+    browser.waitForFunction(`document.querySelector('[data-slot="dictation-transcript"]')?.textContent === 'summarize what you did'`)
     browser.click('[aria-label="Insert transcription"]')
     browser.waitForFunction(
       `document.querySelector('[data-slot="composer"] textarea').value === 'summarize what you did'`,
