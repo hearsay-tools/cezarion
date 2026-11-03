@@ -1,3 +1,5 @@
+import { autoEndObservationClock } from '../core/observation-clock.testkit.ts';
+import { AUTO_END_DELAY_MS } from '../core/runner-runtime.ts';
 import { RUN_STATUS, WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
@@ -32,6 +34,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     // hearsay-tools/cezarion#1856: delivery can outlive the wake turn and its slot. Hold the native
     // response while checking admission; after release, the next step still needs an explicit done.
     await withHeldResponse('claude', async (release, held) => {
+      const clock = autoEndObservationClock();
       try {
         const run = manager.startRun({ name: 'multi-step wait', source: 'built-in', steps: [
           { id: 'first', prompt: 'mock:hold' },
@@ -46,8 +49,10 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         if (timing === 'late') await until(() => store.readEvents(run.id).some(event => event.type === 'turn-end'));
         register(run.id, [w.id]); manager.enqueueOwnedRun(w.id);
         await until(() => parkedOnWorkers(run.id) && !!engine.active.get(w.id)?.sessionEverOpened);
-        // bound: negative window. It must outlast the real 250 ms runner auto-end timer, whose firing is what the assertions rule out.
-        await new Promise(resolve => setTimeout(resolve, 400));
+        await until(() => store.readEvents(run.id).some(event => event.type === 'turn-end'));
+        expect(clock.captured).toBe(0);
+        await clock.advance(AUTO_END_DELAY_MS + 150);
+        expect(clock.captured).toBe(0);
         expect.soft(engine.active.get(run.id)?.session).toBe(first);
         expect.soft(first?.open).toBe(true);
         expect.soft(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
@@ -73,6 +78,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         expect(store.getRun(run.id)?.steps.find(step => step.id === 'first')?.status).toBe('done');
         expect(parkedOnWorkers(run.id)).toBe(false);
       } finally {
+        clock.restore();
         setFailureState(captureState());
         release();
         for (const record of store.listRuns()) manager.cancel(record.id);
@@ -98,6 +104,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         const session = engine.active.get(run.id)!.session!;
         const w = await worker(run.id, 'mock:slow');
         register(run.id, [w.id]); manager.enqueueOwnedRun(w.id);
+        const clock = autoEndObservationClock();
         try {
           await until(() => parkedOnWorkers(run.id) && !!engine.active.get(w.id)?.sessionEverOpened);
           expect(semaphore.busy()).toBe(1);
@@ -106,8 +113,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           // The wake turn's own frames reach the runner while its acknowledgement is held. The wake is
           // cezar's text, so the mock answers it with its ordinary turn rather than an echo.
           await until(() => store.readEvents(run.id).filter(event => event.type === 'turn-end').length > boundaries);
-          // bound: negative window, as above: it must outlast the 250 ms runner auto-end timer.
-          await new Promise(resolve => setTimeout(resolve, 400));
+          expect(clock.captured).toBe(0);
+          await clock.advance(AUTO_END_DELAY_MS + 150);
+          expect(clock.captured).toBe(0);
           const wake = store.getRun(run.id)?.agentInputs?.find(input => input.source === 'lifecycle');
           expect(wake).toBeDefined(); expect(wake?.deliveredAt).toBeUndefined();
           expect(waitOf(store.getRun(run.id))?.wakeId).toBe(wake?.id);
@@ -127,6 +135,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           await until(() => !manager.isActive(run.id));
           expect(store.getRun(run.id)?.steps.map(step => step.status)).toEqual(['done', 'done']);
         } finally {
+          clock.restore();
           setFailureState(captureState());
           release();
           for (const record of store.listRuns()) manager.cancel(record.id);
