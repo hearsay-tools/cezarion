@@ -40,7 +40,7 @@ describe('the team skill sources API', () => {
   });
 
   afterEach(() => {
-    store.flush();
+    store.close();
     for (const dir of [repoRoot, homeRoot, ...dirs.splice(0)]) rmSync(dir, { recursive: true, force: true });
     for (const [key, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[key];
