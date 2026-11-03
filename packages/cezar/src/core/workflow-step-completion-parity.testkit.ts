@@ -15,52 +15,52 @@ import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 
 // hearsay-tools/cezarion#1620: an earlier workflow step completes only on an accepted completion
 // signal, on every runner's native wire. Its last agent step signals done; a check step ends the chain.
-const PARTS: readonly (readonly string[])[] = [
-  [
-    "cursor C4",
-    "opencode C1",
-    "opencode C6",
-    "codex C3",
-    "opencode C2",
-    "omp C3",
-    "codex C2",
-    "omp C1",
-    "omp C6"
-  ],
-  [
-    "cursor C3",
-    "opencode C5",
-    "claude C5",
+const PARTS: Readonly<Record<string, readonly string[]>> = {
+  "markers": [
     "claude C1",
-    "codex C1",
-    "claude C6",
-    "omp C5",
-    "pi C1",
-    "omp C2"
-  ],
-  [
-    "cursor C5",
-    "opencode C4",
-    "cursor C2",
-    "opencode C3",
-    "claude C4",
-    "codex C6",
-    "pi C3",
-    "pi C4",
-    "pi C6"
-  ],
-  [
-    "cursor C1",
-    "cursor C6",
-    "codex C4",
-    "claude C3",
-    "codex C5",
     "claude C2",
-    "pi C5",
-    "omp C4",
+    "codex C1",
+    "codex C2",
+    "cursor C1",
+    "cursor C2",
+    "omp C1",
+    "omp C2",
+    "opencode C1",
+    "opencode C2",
+    "pi C1",
     "pi C2"
+  ],
+  "session-close": [
+    "claude C3",
+    "claude C4",
+    "codex C3",
+    "codex C4",
+    "cursor C3",
+    "cursor C4",
+    "omp C3",
+    "omp C4",
+    "opencode C3",
+    "opencode C4",
+    "pi C3",
+    "pi C4"
+  ],
+  "recovery": [
+    "claude C5",
+    "codex C5",
+    "cursor C5",
+    "omp C5",
+    "opencode C5",
+    "pi C5"
+  ],
+  "autonomous": [
+    "claude C6",
+    "codex C6",
+    "cursor C6",
+    "omp C6",
+    "opencode C6",
+    "pi C6"
   ]
-];
+};
 
 export function describeWorkflowStepCompletionParity(part: ParityPart, collect?: ParityCollector): void {
   const { describe, it } = partitionParity(part, PARTS, collect);
