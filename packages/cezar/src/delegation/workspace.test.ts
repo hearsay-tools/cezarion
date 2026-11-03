@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { syncBuiltinESMExports } from 'node:module';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
@@ -50,7 +51,7 @@ function durableRun(root: string, workspace: WorkerWorkspace) {
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
   store.updateRun(parent.id, { delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
   store.flush();
-  const run = store.createOwnedRun({ title: 'worker', task: 'worker', workflow: 'quick-task', steps: [{ id: 'task', name: 'Do the task', kind: 'agent' }] }, parent.id, randomUUID(), {
+  const run = store.createOwnedRun({ title: 'worker', task: 'worker', workflow: 'quick-task', steps: [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent }] }, parent.id, randomUUID(), {
     role: 'worker', parentRunId: parent.id, permissions: [], workspace,
   }, 'a'.repeat(64));
   return { run, store };
@@ -372,10 +373,10 @@ describe('RunManager.enqueueOwnedRun', { timeout: WORKSPACE_TEST_TIMEOUT_MS }, (
     expect(() => manager.enqueueOwnedRun(randomUUID())).toThrowError(expect.objectContaining({ code: 'incompatible_state' }));
     const parentId = run.delegation?.role === 'worker' ? run.delegation.parentRunId : '';
     expect(() => manager.enqueueOwnedRun(parentId)).toThrowError(expect.objectContaining({ code: 'incompatible_state' }));
-    store.updateRun(run.id, { status: 'done' });
+    store.updateRun(run.id, { status: RUN_STATUS.done });
     expect(() => manager.enqueueOwnedRun(run.id)).toThrowError(expect.objectContaining({ code: 'incompatible_state' }));
     if (run.delegation?.role !== 'worker') throw new Error('fixture');
-    store.updateRun(run.id, { status: 'queued', delegation: { ...run.delegation, destroy: { requestedAt: new Date().toISOString(), phase: 'requested', remaining: ['worktree', 'branch'] } } });
+    store.updateRun(run.id, { status: RUN_STATUS.queued, delegation: { ...run.delegation, destroy: { requestedAt: new Date().toISOString(), phase: 'requested', remaining: ['worktree', 'branch'] } } });
     expect(() => manager.enqueueOwnedRun(run.id)).toThrowError(expect.objectContaining({ code: 'incompatible_state' }));
   });
 });
@@ -386,8 +387,8 @@ describe('owned workspace continuation and queued recovery', { timeout: WORKSPAC
     const { root, second } = await fixture();
     const workspace = await createOwnedWorkspace(root, randomUUID(), second);
     const { run, store } = durableRun(root, workspace);
-    store.updateRun(run.id, { status: 'done', runner: 'claude', worktreePath: workspace.path, branch: workspace.branch, baseBranch: second, worktreeReclaimedAt: new Date().toISOString() });
-    store.updateStep(run.id, 'task', { status: 'done', sessionId: 'mock-prior-session', backend: 'claude' });
+    store.updateRun(run.id, { status: RUN_STATUS.done, runner: 'claude', worktreePath: workspace.path, branch: workspace.branch, baseBranch: second, worktreeReclaimedAt: new Date().toISOString() });
+    store.updateStep(run.id, 'task', { status: STEP_STATUS.done, sessionId: 'mock-prior-session', backend: 'claude' });
     if (failure === 'missing') git(root, 'worktree', 'remove', '--force', workspace.path);
     else await writeFile(join(git(workspace.path, 'rev-parse', '--absolute-git-dir'), 'cezar-owned-resource'), 'wrong');
     const manager = managerFor(store, root);
