@@ -228,8 +228,20 @@ describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, (
    * broken: the pane was `sticky` but unbounded, so it grew the page instead of scrolling, and
    * the last file could only be reached by dragging `main` — the diff — to the bottom.
    */
-  it('scrolls the file tree independently of the diff', () => {
+  it('scrolls the file tree independently of the diff with the tree pane stuck', () => {
     openChanges('virtual')
+    browser.evaluate(`(() => {
+      const pane = document.querySelector('[data-slot="changes-tree-pane"]')
+      const main = ${MAIN}
+      const stickyTop = main.getBoundingClientRect().top + parseFloat(getComputedStyle(pane).top)
+      main.scrollTop += pane.getBoundingClientRect().top - stickyTop
+    })()`)
+    browser.waitForFunction(`(() => {
+      const pane = document.querySelector('[data-slot="changes-tree-pane"]')
+      const main = ${MAIN}
+      const stickyTop = main.getBoundingClientRect().top + parseFloat(getComputedStyle(pane).top)
+      return Math.abs(pane.getBoundingClientRect().top - stickyTop) < 1
+    })()`)
 
     const pane = waitForSettledSample(browser, `(() => {
       const pane = document.querySelector('[data-slot="changes-tree-pane"]')
@@ -261,8 +273,7 @@ describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, (
     expect(pane!.paneBottom, 'the tree pane hangs below the fold').toBeLessThanOrEqual(pane!.scrollerBottom)
 
     // The claim itself: the tree runs to its end while the diff stays exactly where it was.
-    // Compared against the offset measured a moment ago, not against 0 — the specs above share
-    // this page load and leave `main` scrolled, and where it sits is not this test's business.
+    // Compare against the main offset that holds the tree pane at its sticky position.
     //
     // This is a scripted scroll, so it proves the pane is its OWN scroller and that reaching the
     // last file no longer moves `main`. It says nothing about `overscroll-contain`: a scripted
