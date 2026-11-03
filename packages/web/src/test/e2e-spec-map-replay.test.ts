@@ -1,9 +1,10 @@
 // @vitest-environment node
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { gunzipSync } from 'node:zlib'
+import { gunzipSync, gzipSync } from 'node:zlib'
 import { expect, it } from 'vitest'
 import { archiveCapture, rebuildCapture } from '../../e2e/spec-map/replay'
 
@@ -20,6 +21,9 @@ it('rebuilds browser and server evidence from an allowlisted raw archive in a fr
       put(join(repo, 'packages/web/src/routes/task-thread/markdown.tsx'), 'export const x = 1')
       put(join(repo, 'packages/cezar/src/a.ts'), 'export function used() {}')
     }
+    execFileSync('git', ['init', '-q'], { cwd: target })
+    execFileSync('git', ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.test', 'commit', '--allow-empty', '-qm', 'fixture'], { cwd: target })
+    const commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: target, encoding: 'utf8' }).trim()
     const served = join(original, '.ai/qa/build/cezar/web/dist/assets/x.js')
     const mapped = join(capture, 'sourcemaps/assets/x.js')
     const code = 'function used(){return 1}\n'
@@ -39,12 +43,19 @@ it('rebuilds browser and server evidence from an allowlisted raw archive in a fr
     put(join(capture, 'logs/.env'), 'must stay out')
     put(join(capture, 'logs/control.json'), '{"must":"stay out"}')
     const archive = join(root, 'capture.jsonl.gz')
-    await archiveCapture(original, capture, 'a'.repeat(40), archive)
+    await archiveCapture(original, capture, commit, archive)
     const raw = gunzipSync(readFileSync(archive)).toString()
     expect(raw).not.toContain('must stay out')
     expect(raw).not.toContain('logs/.env')
     expect(raw).not.toContain('logs/control.json')
     const out = join(root, 'map.json')
+    const wrongCommit = join(root, 'wrong.jsonl.gz')
+    writeFileSync(wrongCommit, gzipSync(raw.replace(commit, 'a'.repeat(40))))
+    await expect(rebuildCapture([wrongCommit], target, out)).rejects.toThrow('checkout differs')
+    const missingFile = join(root, 'missing.jsonl.gz')
+    writeFileSync(missingFile, gzipSync(raw.split('\n').filter(line => !line.includes('server/a.js.map')).join('\n')))
+    await expect(rebuildCapture([archive, missingFile], target, out)).rejects.toThrow('different shared file inventories')
+    rmSync(join(target, '.ai'), { recursive: true, force: true })
     await rebuildCapture([archive], target, out)
     const map = JSON.parse(readFileSync(out, 'utf8'))
     expect(map.specs).toEqual([spec])

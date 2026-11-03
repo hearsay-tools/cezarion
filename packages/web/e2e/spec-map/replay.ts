@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { createReadStream, createWriteStream, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -81,18 +82,21 @@ function replayContent(record: RecordFile, header: Header, repo: string, shard: 
 }
 
 /** Restore into a fresh checkout's generated paths; never overwrite an existing build. */
-export async function restoreCapture(archive: string, repo: string, shard = 0): Promise<Header> {
+export async function restoreCapture(archive: string, repo: string, shard = 0): Promise<Header & { sharedFiles: string[] }> {
   for (const path of [ `${REPLAY}/shard-${shard}`, ...(shard === 0 ? [SERVER, SERVED] : [])]) if (existsSync(join(repo, path))) throw new Error(`replay needs a fresh generated path: ${path}`)
   const lines = createInterface({ input: createReadStream(archive).pipe(createGunzip()), crlfDelay: Infinity })
+  const sharedFiles: string[] = []
   let header: Header | undefined
   for await (const line of lines) {
     if (!header) {
       header = JSON.parse(line) as Header
       if (header.version !== 1 || !/^[0-9a-f]{40}$/.test(header.commit) || !header.repo || !header.capture) throw new Error('invalid replay header')
+      if (execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim() !== header.commit) throw new Error('checkout differs from archive commit')
       continue
     }
     const record = JSON.parse(line) as RecordFile
     if (!allowed(record.path)) throw new Error(`not replay evidence: ${record.path}`)
+    if (/^(?:server|served)\//.test(record.path)) sharedFiles.push(record.path)
     const file = targetPath(repo, record.path, shard)
     mkdirSync(dirname(file), { recursive: true })
     const content = replayContent(record, header, repo, shard)
@@ -101,14 +105,17 @@ export async function restoreCapture(archive: string, repo: string, shard = 0): 
     } else writeFileSync(file, content, { flag: 'wx' })
   }
   if (!header) throw new Error('empty replay archive')
-  return header
+  return { ...header, sharedFiles: sharedFiles.sort() }
 }
 
 export async function rebuildCapture(archives: string[], repo: string, out: string): Promise<void> {
   let commit: string | undefined
+  let sharedFiles: string[] | undefined
   for (const [shard, archive] of archives.entries()) {
     const header = await restoreCapture(archive, repo, shard)
     if (commit && header.commit !== commit) throw new Error('shards name different commits')
+    if (sharedFiles && JSON.stringify(sharedFiles) !== JSON.stringify(header.sharedFiles)) throw new Error('shards have different shared file inventories')
+    sharedFiles = header.sharedFiles
     commit = header.commit
     const capture = join(repo, REPLAY, `shard-${shard}`)
     partial(['--logs', join(capture, 'logs'), '--node-logs', join(capture, 'logs'),

@@ -145,7 +145,7 @@ jobs:
           retention-days: 1
 
       - name: Archive allowlisted replay evidence
-        if: github.event_name == 'workflow_dispatch'
+        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' }}
         env:
           CAPTURE_COMMIT: ${{ github.sha }}
         run: |
@@ -155,7 +155,7 @@ jobs:
           node --input-type=module -e 'import { statSync } from "node:fs"; console.log(`Replay archive: ${statSync(process.argv[1]).size} bytes`)' "$RUNNER_TEMP/capture-$SHARD.jsonl.gz"
 
       - name: Upload raw replay evidence
-        if: github.event_name == 'workflow_dispatch'
+        if: ${{ !cancelled() && github.event_name == 'workflow_dispatch' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: e2e-spec-map-replay-${{ matrix.shard }}
