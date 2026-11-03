@@ -919,7 +919,7 @@ const RETIREMENTS = [
   { id: 'P4', scenario: 'approval-turn-end', text: 'Turn ended with the approval still pending.' },
 ] as const;
 
-export type HarnessParityPart = 'session' | 'run' | 'ownership' | 'settlement' | 'provider' | 'owned-input' | 'startup';
+export type HarnessParityPart = 'session' | 'run' | 'ownership' | 'settlement' | 'provider' | 'owned-input' | 'startup' | 'owned-workflows';
 
 // Adjacent semantic families; every group below belongs to exactly one part.
 export const HARNESS_PARITY_GROUPS: Readonly<Record<HarnessParityPart, readonly string[]>> = {
@@ -927,6 +927,7 @@ export const HARNESS_PARITY_GROUPS: Readonly<Record<HarnessParityPart, readonly 
   provider: ['provider'],
   session: ['seam', 'session', 'input', 'governed', 'native-message', 'spec', 'tools', 'cdp', 'tool-grants'],
   run: ['run', 'diagnostics', 'child', 'hooks', 'answer', 'monitoring', 'prs'],
+  'owned-workflows': ['owned-workflows'],
   'owned-input': ['owned'],
   ownership: ['continue', 'restart', 'owner', 'adopt', 'stop'],
   settlement: ['cleanup', 'multi-continue', 'superseded', 'disposal', 'scratch', 'permission', 'default-permission', 'retirement-P3', 'retirement-P4', 'permission-failure', 'malformed', 'early-permission', 'late-permission', 'mcp'],
@@ -1826,6 +1827,88 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
         }
       }, 60_000);
 
+      it(`${backend} R11 post-send checkpoint failure interrupts and reports failure without dropping input`, async () => {
+        await withOwnedInputRun(backend, 'baseline', async ({ store, manager, repoRoot, runId, parentRunId }) => {
+          manager.enqueueOwnedRun(runId);
+          // The idle worker parks on Cezar's fallback question, routed to its parent
+          // (hearsay-tools/cezarion#1301, hearsay-tools/cezarion#2410).
+          await waitFor(() => store.getRun(runId)?.status === 'waiting' && store.transcriptFacts(runId).pendingAsk?.routedMessageId !== undefined);
+          store.flush();
+          let unblock: (() => void) | undefined;
+          // The input supersedes that question with a write to the parent's conversation first; the
+          // failure this cell injects is the input's own delivery checkpoint, after it.
+          const failAfterEnqueue = ({ event }: { event: { type: string; reason?: unknown } }) => {
+            if (event.type === 'human-ask-closed' && event.reason === 'superseded') unblock ??= blockRunWrites(join(repoRoot, '.ai/cezar'));
+          };
+          store.on('event', failAfterEnqueue);
+          const input = agentInput(parentRunId, 'mock:hold');
+          const unmute = muteLockedDatabaseLogs();
+          try {
+            expect(manager.steerWorker(runId, input)).toBe('queued');
+            await waitFor(() => store.readEvents(runId).some(event => event.type === 'error' && String(event.message).includes('agent input delivery checkpoint failed')));
+            expect(store.getRun(runId)?.agentInputs).toEqual([input]);
+          } finally {
+            store.off('event', failAfterEnqueue);
+            unblock?.();
+            unmute();
+          }
+          await waitFor(() => !manager.isActive(runId));
+          expect(store.getRun(runId)?.status).toBe('failed');
+          expect(store.getRun(runId)?.error).toContain('agent input delivery checkpoint failed');
+          expect(store.getRun(runId)?.agentInputs).toEqual([input]);
+        });
+      }, 60_000);
+
+      it(`${backend} R9 continuation asks keep input queued through delayed native reply acknowledgement`, async () => {
+        await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId, answer }) => {
+          manager.enqueueOwnedRun(runId);
+          await waitFor(() => store.getRun(runId)?.status === 'waiting');
+          manager.finish(runId);
+          await waitFor(() => !manager.isActive(runId));
+          // The idle worker's park may already be Cezar's fallback question (hearsay-tools/cezarion#1301):
+          // wait for the continuation's own ask.
+          const asked = store.readEvents(runId).filter(e => e.type === 'ask.requested').length;
+          expect(manager.continueRun(runId, { text: promptFor(backend, 'ask-reply-late') }).ok).toBe(true);
+          await waitFor(() => store.readEvents(runId).filter(e => e.type === 'ask.requested').length > asked);
+          const input = agentInput(parentRunId);
+          expect(manager.steerWorker(runId, input)).toBe('queued');
+          // The continuation's ask is the worker's own: its parent answers it (hearsay-tools/cezarion#2410).
+          await answer('Vitest');
+          await waitFor(() => store.getRun(runId)?.agentInputs?.[0]?.deliveredAt !== undefined);
+          await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes(input.text)));
+          expect(store.readEvents(runId).filter(e => e.type === 'user-message').map(e => e.text))
+            .toEqual([promptFor(backend, 'ask-reply-late')]);
+        });
+      }, 60_000);
+
+      it(`${backend} R8 queued restart/starting inputs persist; disk failure emits and delivers nothing`, async () => {
+        await withOwnedInputRun(backend, 'hold', async fixture => {
+          const { runId, parentRunId, repoRoot } = fixture;
+          fixture.store.flush();
+          const unblock = blockRunWrites(join(repoRoot, '.ai/cezar'));
+          try {
+            expect(() => fixture.manager.steerWorker(runId, agentInput(parentRunId))).toThrow();
+            expect(fixture.store.getRun(runId)?.agentInputs).toBeUndefined();
+            expect(fixture.store.readEvents(runId).filter(e => e.type === 'agent-input')).toEqual([]);
+          } finally { unblock(); }
+          const input = agentInput(parentRunId);
+          expect(fixture.manager.steerWorker(runId, input)).toBe('queued');
+          const { store, manager } = await fixture.restart();
+          const second = agentInput(parentRunId, 'mock:agent-echo during startup');
+          expect(manager.steerWorker(runId, second)).toBe('queued');
+          await waitFor(() => store.getRun(runId)?.agentInputs?.every(input => !!input.deliveredAt) === true);
+          await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes('during startup')));
+          expect(store.readEvents(runId).filter(e => e.type === 'user-message')).toEqual([]);
+          manager.finish(runId);
+          await waitFor(() => !manager.isActive(runId));
+          expect(() => manager.steerWorker(runId, agentInput(parentRunId))).toThrow(/state/i);
+        });
+      }, 60_000);
+    }
+  });
+
+  describeRunners('owned-workflows', 'harness parity — owned workflows', () => {
+    for (const backend of runners) {
       it(`${backend} R13 runs a persisted catalog chain inside the owned worker, check step included (#451)`, async () => {
         const workflowDef = { name: 'review', source: 'file' as const, path: '.ai/cezar/workflows/review.yaml', steps: [
           { id: 'inspect', name: 'Inspect', prompt: '{{task}}', runner: backend },
@@ -1927,83 +2010,6 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
         } finally { rmSync(homes, { recursive: true, force: true }); }
       }, 60_000);
 
-      it(`${backend} R11 post-send checkpoint failure interrupts and reports failure without dropping input`, async () => {
-        await withOwnedInputRun(backend, 'baseline', async ({ store, manager, repoRoot, runId, parentRunId }) => {
-          manager.enqueueOwnedRun(runId);
-          // The idle worker parks on Cezar's fallback question, routed to its parent
-          // (hearsay-tools/cezarion#1301, hearsay-tools/cezarion#2410).
-          await waitFor(() => store.getRun(runId)?.status === 'waiting' && store.transcriptFacts(runId).pendingAsk?.routedMessageId !== undefined);
-          store.flush();
-          let unblock: (() => void) | undefined;
-          // The input supersedes that question with a write to the parent's conversation first; the
-          // failure this cell injects is the input's own delivery checkpoint, after it.
-          const failAfterEnqueue = ({ event }: { event: { type: string; reason?: unknown } }) => {
-            if (event.type === 'human-ask-closed' && event.reason === 'superseded') unblock ??= blockRunWrites(join(repoRoot, '.ai/cezar'));
-          };
-          store.on('event', failAfterEnqueue);
-          const input = agentInput(parentRunId, 'mock:hold');
-          const unmute = muteLockedDatabaseLogs();
-          try {
-            expect(manager.steerWorker(runId, input)).toBe('queued');
-            await waitFor(() => store.readEvents(runId).some(event => event.type === 'error' && String(event.message).includes('agent input delivery checkpoint failed')));
-            expect(store.getRun(runId)?.agentInputs).toEqual([input]);
-          } finally {
-            store.off('event', failAfterEnqueue);
-            unblock?.();
-            unmute();
-          }
-          await waitFor(() => !manager.isActive(runId));
-          expect(store.getRun(runId)?.status).toBe('failed');
-          expect(store.getRun(runId)?.error).toContain('agent input delivery checkpoint failed');
-          expect(store.getRun(runId)?.agentInputs).toEqual([input]);
-        });
-      }, 60_000);
-
-      it(`${backend} R9 continuation asks keep input queued through delayed native reply acknowledgement`, async () => {
-        await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId, answer }) => {
-          manager.enqueueOwnedRun(runId);
-          await waitFor(() => store.getRun(runId)?.status === 'waiting');
-          manager.finish(runId);
-          await waitFor(() => !manager.isActive(runId));
-          // The idle worker's park may already be Cezar's fallback question (hearsay-tools/cezarion#1301):
-          // wait for the continuation's own ask.
-          const asked = store.readEvents(runId).filter(e => e.type === 'ask.requested').length;
-          expect(manager.continueRun(runId, { text: promptFor(backend, 'ask-reply-late') }).ok).toBe(true);
-          await waitFor(() => store.readEvents(runId).filter(e => e.type === 'ask.requested').length > asked);
-          const input = agentInput(parentRunId);
-          expect(manager.steerWorker(runId, input)).toBe('queued');
-          // The continuation's ask is the worker's own: its parent answers it (hearsay-tools/cezarion#2410).
-          await answer('Vitest');
-          await waitFor(() => store.getRun(runId)?.agentInputs?.[0]?.deliveredAt !== undefined);
-          await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes(input.text)));
-          expect(store.readEvents(runId).filter(e => e.type === 'user-message').map(e => e.text))
-            .toEqual([promptFor(backend, 'ask-reply-late')]);
-        });
-      }, 60_000);
-
-      it(`${backend} R8 queued restart/starting inputs persist; disk failure emits and delivers nothing`, async () => {
-        await withOwnedInputRun(backend, 'hold', async fixture => {
-          const { runId, parentRunId, repoRoot } = fixture;
-          fixture.store.flush();
-          const unblock = blockRunWrites(join(repoRoot, '.ai/cezar'));
-          try {
-            expect(() => fixture.manager.steerWorker(runId, agentInput(parentRunId))).toThrow();
-            expect(fixture.store.getRun(runId)?.agentInputs).toBeUndefined();
-            expect(fixture.store.readEvents(runId).filter(e => e.type === 'agent-input')).toEqual([]);
-          } finally { unblock(); }
-          const input = agentInput(parentRunId);
-          expect(fixture.manager.steerWorker(runId, input)).toBe('queued');
-          const { store, manager } = await fixture.restart();
-          const second = agentInput(parentRunId, 'mock:agent-echo during startup');
-          expect(manager.steerWorker(runId, second)).toBe('queued');
-          await waitFor(() => store.getRun(runId)?.agentInputs?.every(input => !!input.deliveredAt) === true);
-          await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes('during startup')));
-          expect(store.readEvents(runId).filter(e => e.type === 'user-message')).toEqual([]);
-          manager.finish(runId);
-          await waitFor(() => !manager.isActive(runId));
-          expect(() => manager.steerWorker(runId, agentInput(parentRunId))).toThrow(/state/i);
-        });
-      }, 60_000);
     }
   });
 
