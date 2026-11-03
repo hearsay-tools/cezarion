@@ -43,7 +43,17 @@ import {
   type WorkerWaitEntry,
 } from './waits.ts';
 import { peerWaitViewSchema, workerCompletionWaitSchema, workerInspectionSchema, workerWaitSchema } from './delegation.ts';
-import { WORKER_OUTCOME_STATUS, makePeerWait, makeRunRecord, makeSubagentWait, RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from './test-factories.testkit.ts';
+import {
+  makePeerWait,
+  makeRunRecord,
+  makeSubagentWait,
+  RUN_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+  WORKER_OUTCOME_STATUS,
+} from './test-factories.testkit.ts';
 import { toRunSummary } from './runs.ts';
 import { deriveAttention } from './attention.ts';
 

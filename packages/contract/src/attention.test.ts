@@ -2,7 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { computeWaitingOn, type WaitingOnInput, type WorkerWaitEntry } from './waits.ts';
 import { ATTENTION_RANK, ATTENTION_RUNGS, DEFAULT_WEBHOOK_TRIGGERS, deriveAttention, deriveWebhookState, WEBHOOK_TRIGGERS, workerWaitLabel, type Attention, type AttentionInput, type AttentionRung } from './attention.ts';
 import type { RunStatus } from './runs.ts';
-import { WAIT_KIND,WAIT_SOURCE,WAIT_VIA,WORKER_OUTCOME_STATUS, makePeerWait, makeSubagentWait, makeTimerWait, RUN_STATUS, SUBAGENT_STATUS, WAIT_PHASE } from './test-factories.testkit.ts';
+import {
+  makePeerWait,
+  makeSubagentWait,
+  makeTimerWait,
+  RUN_STATUS,
+  SUBAGENT_STATUS,
+  WAIT_PHASE,
+  WAIT_KIND,
+  WAIT_SOURCE,
+  WAIT_VIA,
+  WORKER_OUTCOME_STATUS,
+} from './test-factories.testkit.ts';
 
 /**
  * The attention ladder, pinned where it now lives (#553/#609). The cockpit's
