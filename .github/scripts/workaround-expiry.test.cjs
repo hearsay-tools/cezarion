@@ -65,6 +65,13 @@ test('inline runs, indented code and invalid backtick info do not open a fence',
   assert.deepEqual(markersIn('rules.md', text).map(m => m.issue), ['a/b#1', 'a/b#2', 'a/b#3']);
 });
 
+test('fence-like lines inside HTML comments do not hide later markers', () => {
+  for (const character of ['`', '~']) {
+    const text = ['<!--', character.repeat(3) + 'md', '-->', 'Rule <!-- until: a/b#1 -->', character.repeat(3), '<!--', '<!-- until: a/b#2 -->', character.repeat(3), '<!-- until: a/b#3 -->'].join('\n');
+    assert.deepEqual(markersIn('rules.md', text).map(m => [m.line, m.issue]), [[4, 'a/b#1'], [9, 'a/b#3']]);
+  }
+});
+
 test('resolution is cached and an open issue is not expired', async () => {
   let calls = 0;
   const result = await expiredMarkers(markersIn('x.md', '<!-- until: a/b#1 -->\n<!-- until: a/b#1 -->'), async () => { calls++; return 'open'; });
