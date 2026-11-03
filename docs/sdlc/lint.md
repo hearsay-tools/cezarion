@@ -43,7 +43,7 @@ never a pass.
 | Where | How |
 | --- | --- |
 | CI | The required `Typecheck` job's `Lint` step. The job runs on every change surface, docs-only included, so no test selection skips lint |
-| Squeal | Its oxlint provider loads `.oxlintrc.json` and the `cez` JS plugin after an edit. `packages/cezar/src/lint/lint-runner.test.ts` runs `lintWithoutOxlint()` for ast-grep, stale entries, file length, CSS and wait-discipline checks (hearsay-tools/cezarion#2426) |
+| Squeal | Edit-time oxlint diagnostics require Squeal 0.1.392 or later; its provider loads `.oxlintrc.json` and the `cez` JS plugin. Older Squeal reports `lint.tools` as unknown and keeps validating through `packages/cezar/src/lint/lint-runner.test.ts`: ast-grep and runner checks only. `npm run lint` before the first push of a package change and CI’s required Lint step remain the gate (hearsay-tools/cezarion#2426) |
 | By hand | `npm run lint` from the repository root, about 5 s on an idle host |
 
 ## The `cez` rules
