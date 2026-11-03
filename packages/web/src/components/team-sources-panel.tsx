@@ -7,7 +7,14 @@ import {
   skillsRepoKind,
 } from '@open-mercato/cezar-api-client/contract/skill-sources'
 import type { TeamSkillSource, TeamSkillSourceRef, TeamSkillSourcesResponse } from '@open-mercato/cezar-api-client'
-import { addSkillSource, getSkillSources, removeSkillSource, retrySkillSource, setSkillSourceEnabled } from '@/api/client'
+import {
+  addSkillSource,
+  getSkillSources,
+  removeSkillSource,
+  retrySkillSource,
+  setSkillSourceEnabled,
+  skillSourcesKey,
+} from '@/api/skill-sources-client'
 import { queryKeys } from '@/api/queries'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -27,7 +34,7 @@ const sourceLabel = (source: TeamSkillSourceRef) => `${source.repo} @ ${source.r
 
 function useSkillSources() {
   return useQuery({
-    queryKey: queryKeys.skillSources,
+    queryKey: skillSourcesKey(),
     queryFn: ({ signal }) => getSkillSources({ signal }),
     // Only while a fetch runs: the server has no event for "this source finished loading".
     refetchInterval: (query) =>
@@ -41,7 +48,7 @@ function useSourceMutation<T>(write: (body: T) => Promise<TeamSkillSourcesRespon
   return useMutation({
     mutationFn: write,
     onSuccess: (answer, body) => {
-      queryClient.setQueryData(queryKeys.skillSources, answer)
+      queryClient.setQueryData(skillSourcesKey(), answer)
       void queryClient.invalidateQueries({ queryKey: queryKeys.skills, exact: true })
       void queryClient.invalidateQueries({ queryKey: queryKeys.importableSkills, exact: true })
       done?.(body)

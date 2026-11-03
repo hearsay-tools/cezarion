@@ -9,6 +9,7 @@ import type {
 import type {
   importableSkillSchema,
   skillSchema,
+  teamSkillSourcesResponseSchema,
 } from '@open-mercato/cezar-contract';
 import type {
   deleteWorkflowResponseSchema,
@@ -47,6 +48,13 @@ describe('src/contract workflows/skills/agent-config schemas match the routes ex
   type Skills200 = InferResponseType<typeof client.api.v1.skills.$get, 200>;
   type SkillsRefresh200 = InferResponseType<typeof client.api.v1.skills.refresh.$post, 200>;
   type Importable200 = InferResponseType<typeof client.api.v1.skills.importable.$get, 200>;
+  // Team skill sources (hearsay-tools/cezarion#279): every route answers the same view.
+  type Sources = typeof client.api.v1.skills.sources;
+  type Sources200 = InferResponseType<Sources['$get'], 200>;
+  type SourcesAdd200 = InferResponseType<Sources['$post'], 200>;
+  type SourcesPatch200 = InferResponseType<Sources['$patch'], 200>;
+  type SourcesDelete200 = InferResponseType<Sources['$delete'], 200>;
+  type SourcesRetry200 = InferResponseType<Sources['retry']['$post'], 200>;
 
   // ---- agent config ----------------------------------------------------------------------
   type AgentConfig200 = InferResponseType<(typeof client.api.v1)['agent-config']['$get'], 200>;
@@ -62,6 +70,11 @@ describe('src/contract workflows/skills/agent-config schemas match the routes ex
     Assert<Exact<z.infer<typeof skillSchema>[], Skills200>>,
     Assert<Exact<z.infer<typeof skillSchema>[], SkillsRefresh200>>,
     Assert<Exact<z.infer<typeof importableSkillSchema>[], Importable200>>,
+    Assert<Exact<z.infer<typeof teamSkillSourcesResponseSchema>, Sources200>>,
+    Assert<Exact<z.infer<typeof teamSkillSourcesResponseSchema>, SourcesAdd200>>,
+    Assert<Exact<z.infer<typeof teamSkillSourcesResponseSchema>, SourcesPatch200>>,
+    Assert<Exact<z.infer<typeof teamSkillSourcesResponseSchema>, SourcesDelete200>>,
+    Assert<Exact<z.infer<typeof teamSkillSourcesResponseSchema>, SourcesRetry200>>,
     Assert<Exact<z.infer<typeof agentConfigListingSchema>, AgentConfig200>>,
     Assert<Exact<z.infer<typeof agentConfigFileContentSchema>, AgentConfigFile200>>,
     Assert<Exact<z.infer<typeof agentConfigFileContentSchema>, AgentConfigPut200>>,

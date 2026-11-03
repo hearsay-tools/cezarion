@@ -1,10 +1,16 @@
-import type {
-  AddTeamSkillSource,
-  SetTeamSkillSourceEnabled,
-  TeamSkillSource,
-  TeamSkillSourceRef,
-  TeamSkillSourcesResponse,
+import { Hono } from 'hono';
+import {
+  addTeamSkillSourceSchema,
+  setTeamSkillSourceEnabledSchema,
+  teamSkillSourceRefSchema,
+  type AddTeamSkillSource,
+  type SetTeamSkillSourceEnabled,
+  type TeamSkillSource,
+  type TeamSkillSourceRef,
+  type TeamSkillSourcesResponse,
 } from '@open-mercato/cezar-contract/skill-sources';
+import type { ProjectApiEnv } from './server.ts';
+import { jsonZodValidator } from './validators.ts';
 import { readRawConfig, updateConfigFile, type RawConfigRead } from '../config.ts';
 import { getTeamSourceStatuses, refreshTeamSources, reloadTeamSkills, sourceKey } from '../skills-remote.ts';
 
@@ -144,4 +150,29 @@ export async function retrySkillSource(project: SkillSourcesProject, editable: b
 
 function notListed(ref: TeamSkillSourceRef): { status: 404; error: string } {
   return { status: 404, error: `${ref.repo} at ${ref.ref} is not a listed team skill source.` };
+}
+
+/**
+ * `/skills/sources` (project-scoped). Writes are settings administration, like worktree setup:
+ * `settingsAdmin` is read per request, so a remote cockpit is read-only until its host allows it.
+ */
+export function skillSourcesRoutes(settingsAdmin: () => boolean) {
+  return new Hono<ProjectApiEnv>()
+    .get('/skills/sources', async (c) => c.json(await readSkillSources(c.get('project'), settingsAdmin()), 200))
+    .post('/skills/sources', jsonZodValidator(() => addTeamSkillSourceSchema), async (c) => {
+      const answer = await addSkillSource(c.get('project'), settingsAdmin(), c.req.valid('json'));
+      return answer.ok ? c.json(answer.body, 200) : c.json({ error: answer.error }, answer.status);
+    })
+    .patch('/skills/sources', jsonZodValidator(() => setTeamSkillSourceEnabledSchema), async (c) => {
+      const answer = await setSkillSourceEnabled(c.get('project'), settingsAdmin(), c.req.valid('json'));
+      return answer.ok ? c.json(answer.body, 200) : c.json({ error: answer.error }, answer.status);
+    })
+    .delete('/skills/sources', jsonZodValidator(() => teamSkillSourceRefSchema), async (c) => {
+      const answer = await removeSkillSource(c.get('project'), settingsAdmin(), c.req.valid('json'));
+      return answer.ok ? c.json(answer.body, 200) : c.json({ error: answer.error }, answer.status);
+    })
+    .post('/skills/sources/retry', jsonZodValidator(() => teamSkillSourceRefSchema), async (c) => {
+      const answer = await retrySkillSource(c.get('project'), settingsAdmin(), c.req.valid('json'));
+      return answer.ok ? c.json(answer.body, 200) : c.json({ error: answer.error }, answer.status);
+    });
 }
