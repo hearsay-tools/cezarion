@@ -48,7 +48,7 @@ it('copies seed repositories without sharing Git files or working files', async 
   expect(repositoryState(first)).toEqual(original);
   expect(repositoryState(second)).toEqual(original);
   for (const path of ['tracked.txt', '.git/HEAD', '.git/config', '.git/index']) {
-    const files = await Promise.all([first, second, template].map(root => lstat(join(root, path))));
+    const files = await Promise.all([first, second, template].map(root => lstat(join(root, path), { bigint: true })));
     expect(new Set(files.map(file => `${file.dev}:${file.ino}`)).size).toBe(3);
   }
   git(first, 'checkout', '-qb', 'isolated');
