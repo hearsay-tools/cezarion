@@ -10,10 +10,36 @@ const { isDocsPath } = createRequire(import.meta.url)('../.github/scripts/change
 
 const options = { plan: false, base: undefined };
 for (const arg of process.argv.slice(2)) {
-  if (arg === '--plan') options.plan = true;
+  if (arg === '--help' || arg === '-h') {
+    console.log(`Usage: npm run test:changed -- [--base=<ref>] [--plan] [--help | -h]
+
+Selection rules:
+  Compare against the merge-base with local origin/main (or main), including
+  branch commits and staged, unstaged, and untracked files. No fetch is made.
+  --base=<ref> overrides the comparison ref; its merge-base with HEAD is used.
+  --plan prints the selection as JSON without running tests.
+
+  Ordinary TS/JS source in packages/{cezar,web,api-client}/src selects tests
+  through Vitest's import graph. Eligible extensions: ts, tsx, js, jsx, mjs.
+  Fixtures, snapshots, test directories, and vite/vitest/setup inputs are excluded.
+  Shared inputs (including packages/contract), configuration, unknown inputs,
+  unusual source paths, deletions or renames, and missing Git or base information
+  fall back to full Vitest.
+
+  Clean changes and changes confined to CI's docs-only list skip iteration tests.
+  isDocsPath in .github/scripts/change-surface.cjs is the exact definition.
+  Markdown listed in testReadDocuments is never docs-only.
+  No matching test is an error; run npm test or select relevant tests explicitly
+  and report any coverage gap.
+
+This command provides iteration feedback. Import graphs do not cover every
+runtime dependency. CI's gate is final.`);
+    process.exit(0);
+  }
+  else if (arg === '--plan') options.plan = true;
   else if (arg.startsWith('--base=') && arg.length > 7) options.base = arg.slice(7);
   else {
-    console.error(`Unknown argument: ${arg}. Use --base=<ref> or --plan.`);
+    console.error(`Unknown argument: ${arg}. Use --base=<ref>, --plan, or --help.`);
     process.exit(2);
   }
 }

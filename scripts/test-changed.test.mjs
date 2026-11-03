@@ -34,6 +34,21 @@ function plan(cwd, ...args) {
   return JSON.parse(result.stdout);
 }
 
+for (const flag of ['--help', '-h']) {
+  test(`${flag} prints the selection rules without running tests`, () => {
+    const result = spawnSync(process.execPath, [script, flag], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /merge-base with local origin\/main \(or main\)/);
+    assert.match(result.stdout, /staged, unstaged, and untracked/);
+    assert.match(result.stdout, /fall back to full Vitest/);
+    assert.match(result.stdout, /isDocsPath in \.github\/scripts\/change-surface\.cjs/);
+    assert.match(result.stdout, /testReadDocuments.*never docs-only/);
+    assert.match(result.stdout, /No matching test is an error/);
+    assert.match(result.stdout, /CI's gate is final/);
+    assert.doesNotMatch(result.stdout, /\[test:changed\]/);
+  });
+}
+
 test('selects branch changes plus staged, unstaged, and untracked source files', t => {
   const { cwd, git, put } = fixture(t);
   put('packages/web/src/committed.ts');
@@ -208,5 +223,5 @@ test('unknown flags cannot silently weaken selection', t => {
   const { cwd } = fixture(t);
   const result = spawnSync(process.execPath, [script, '--shard=1/4'], { cwd, encoding: 'utf8' });
   assert.equal(result.status, 2);
-  assert.match(result.stderr, /Unknown argument/);
+  assert.equal(result.stderr.trim(), 'Unknown argument: --shard=1/4. Use --base=<ref>, --plan, or --help.');
 });
