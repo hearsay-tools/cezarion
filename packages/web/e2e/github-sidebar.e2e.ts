@@ -1,9 +1,11 @@
 import { execFileSync, type ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-
+import { seedRuns } from './seed-runs'
 import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { focusWithKeyboard } from './contrast'
@@ -92,10 +94,10 @@ const listPayload = (over: Record<string, unknown> = {}) => ({
 })
 const searchPayload = (items: unknown[], over: Record<string, unknown> = {}) => ({ available: true, items, ...over })
 
-const run = (id: string, extra: Record<string, unknown> = {}) => ({
-  id, title: id, workflow: 'default', task: id, status: 'done', createdAt: ago(7_200_000), finishedAt: ago(3_600_000),
+const run = (id: string, extra: Partial<RunRecord> = {}) => ({
+  id, title: id, workflow: 'default', task: id, status: RUN_STATUS.done, createdAt: ago(7_200_000), finishedAt: ago(3_600_000),
   tokensUsed: 0, archived: false, steps: [], ...extra,
-})
+} satisfies Partial<RunRecord>)
 
 /** Install the deterministic GitHub answers on one browser session. */
 function route(target: AgentBrowser, over: { list?: unknown; review?: unknown; failing?: unknown } = {}): void {
@@ -169,13 +171,13 @@ beforeAll(async () => {
   git('-c', 'user.name=E2E', '-c', 'user.email=e2e@example.test', 'commit', '--allow-empty', '-m', 'fixture')
   git('remote', 'add', 'origin', `https://github.com/${REPO}.git`)
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
-  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([
+  seedRuns(root, [
     run('task-numeric', { issueNumber: 101 }),
     run('task-url', { referencedIssueUrl: `https://github.com/${REPO}/issues/103` }),
     run('task-foreign', { referencedIssueUrl: 'https://github.com/other/repo/issues/105', task: 'Look at https://github.com/other/repo/issues/105' }),
     run('task-archived', { issueNumber: 106, archived: true, archivedAt: ago(1_000) }),
     run('task-pr-only', { pullRequestUrl: `https://github.com/${REPO}/pull/201` }),
-  ]))
+  ])
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     // CEZ_AUTOMATIONS=1 adds Automations, so the view tabs carry their most crowded set: a More menu beside six views.
     env: { ...fixtureServeEnv(root), CEZ_AUTOMATIONS: '1' }, stdio: 'ignore',

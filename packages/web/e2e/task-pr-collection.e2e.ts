@@ -2,7 +2,10 @@ import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seedRuns } from './seed-runs'
 import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { dismissWithEscape, hoverVisiblePoint } from './contrast'
@@ -34,17 +37,17 @@ beforeAll(async () => {
   git('add', '.')
   git('commit', '-qm', 'init')
   git('remote', 'add', 'origin', 'git@github.com:mock/repo.git')
-  const record = { id, title: 'Split work', task: 'Split work', workflow: 'quick-task', status: 'review',
+  const record = ({ id, title: 'Split work', task: 'Split work', workflow: 'quick-task', status: RUN_STATUS.review,
     archived: false, pinned: true, createdAt: new Date().toISOString(), tokensUsed: 0, steps: [],
-    pullRequests: numbers.map(number => ({ number, url: `https://github.com/mock/repo/pull/${number}`, source: 'created' })),
-    issueNumber: 142 }
-  const wide = { ...record, id: 'wide', title: 'Wide collection', runner: 'claude', inputTokens: 100000, outputTokens: 200000,
-    pullRequests: [...record.pullRequests, ...Array.from({ length: 10 }, (_, n) => ({ number: 200 + n, url: `https://github.com/mock/repo/pull/${200 + n}`, source: 'created' }))] }
+    pullRequests: numbers.map(number => ({ number, url: `https://github.com/mock/repo/pull/${number}`, source: 'created' as const })),
+    issueNumber: 142 } satisfies Partial<RunRecord>)
+  const wide = ({ ...record, id: 'wide', title: 'Wide collection', runner: 'claude', inputTokens: 100000, outputTokens: 200000,
+    pullRequests: [...record.pullRequests, ...Array.from({ length: 10 }, (_, n) => ({ number: 200 + n, url: `https://github.com/mock/repo/pull/${200 + n}`, source: 'created' as const }))] } satisfies Partial<RunRecord>)
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
   mkdirSync(artifacts, { recursive: true })
-  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([record, wide,
-    { ...record, id: 'long', title: 'Long collection', issueNumber: undefined, pullRequests: Array.from({ length: 25 }, (_, n) => ({ number: 300 + n, url: `https://github.com/mock/repo/pull/${300 + n}`, source: 'created' })) },
-    { ...record, id: 'legacy', title: 'Legacy task', pullRequests: undefined, prNumber: 128, issueNumber: undefined }]))
+  seedRuns(root, [record, wide,
+    ({ ...record, id: 'long', title: 'Long collection', issueNumber: undefined, pullRequests: Array.from({ length: 25 }, (_, n) => ({ number: 300 + n, url: `https://github.com/mock/repo/pull/${300 + n}`, source: 'created' as const })) } satisfies Partial<RunRecord>),
+    ({ ...record, id: 'legacy', title: 'Legacy task', pullRequests: undefined, prNumber: 128, issueNumber: undefined } satisfies Partial<RunRecord>)])
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })

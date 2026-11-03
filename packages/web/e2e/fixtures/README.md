@@ -16,8 +16,8 @@ the markdown-rich reply the Streamdown/Shiki assertions pin.
 Alongside the transcript:
 
 - `thread-run.record.json` — the run's verbatim `runs.json` entry from the same dry run (the
-  store's zod-checked shape). The spec loads it as-is, overriding only `titleSummary` (a
-  legitimate user PATCH).
+  store's zod-checked shape). The spec validates it with `recordedRun`, then uses `seedRuns`
+  with a `titleSummary` override (a legitimate user PATCH).
 - `thread-run-images/` — the `<id>-images/` directory the run persisted; the transcript's
   `image` line points into it via `/api/v1/runs/<id>/images/…`.
 
@@ -25,7 +25,8 @@ To regenerate: build, boot `CEZ_DRY_RUN=1 node dist/index.js serve --repo <tmp-g
 POST a run whose task has no `mock:` marker, POST one `/messages` reply containing `mock:md`
 once it waits, POST `/finish` (twice: the mock's turn 1 touches `notes.md`, so the run parks
 at `review` first — the second finish accepts it), then copy `<tmp>/.ai/cezar/runs/<id>.ndjson`,
-`<id>-images/` and the `runs.json` entry here. Then re-apply the synthetic extension below.
+`<id>-images/` and the `runs.json` entry here for `recordedRun` and `seedRuns`.
+Then re-apply the synthetic extension below.
 
 ## Synthetic extension (R3 Step 1.3 — plan dock, step rail, check-step cards)
 

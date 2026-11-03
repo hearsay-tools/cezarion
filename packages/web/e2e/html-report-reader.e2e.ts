@@ -3,8 +3,9 @@ import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { afterAll, beforeAll, expect, it } from 'vitest'
 import { makeRunRecord, RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import { afterAll, beforeAll, expect, it } from 'vitest'
+import { seedRuns } from './seed-runs'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { pollFor } from './poll'
@@ -86,7 +87,7 @@ beforeAll(async () => {
     id: runId, task: `${filler}\n\nRead ${publication.markdown} now.\n\n${filler}`, title: 'HTML report reader',
     status: RUN_STATUS.done, createdAt: '2026-11-01T08:00:00Z',
   })
-  writeFileSync(join(project, '.ai/cezar/runs.json'), JSON.stringify([run]))
+  seedRuns(project, [run])
   mkdirSync(evidenceDir, { recursive: true })
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', project, '--port', '0', '--no-open'], { env })
   baseUrl = await waitForFixtureServer(server)

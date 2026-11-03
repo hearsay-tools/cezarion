@@ -122,9 +122,10 @@ export class RunCancel {
     if (this.context.disposed() || !['queued', 'running', 'waiting'].includes(run.status) || this.host.rootFinishRequested(parentId) || this.host.historyDeletionPending(parentId)) {
       throw new DelegationPolicyError('incompatible_state', 'Parent cannot cancel a worker wait');
     }
-    this.context.store.commitOutcome(parentId, { kind: 'cancelled', waitIds: [waitId] });
+    const { settled } = this.context.store.commitOutcome(parentId, { kind: 'cancelled', waitIds: [waitId] });
+    const cancelled = settled.find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === waitId && wait.kind === 'worker' && hasWorkerDeadline(wait));
+    if (!cancelled) throw new DelegationPolicyError('incompatible_state', 'Worker wait is no longer current');
     this.host.disarmWait(waitId);
-    const cancelled = this.context.store.getRun(parentId)?.lastWaits?.filter((wait): wait is DeadlinedWorkerWaitEntry => wait.id === waitId && wait.kind === 'worker' && hasWorkerDeadline(wait)).at(-1);
-    return workerWaitEntryToLegacy(cancelled ?? { ...entry, phase: 'cancelled', cancelledAt: new Date().toISOString() });
+    return workerWaitEntryToLegacy(cancelled);
   }
 }

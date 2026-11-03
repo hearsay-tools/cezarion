@@ -3,9 +3,11 @@ import { randomUUID } from 'node:crypto'
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { RUN_STATUS, STEP_STATUS, STEP_KIND } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { waitForSettledSample } from './visual-ready'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
+import { seedRuns } from './seed-runs'
+import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { contrastSampleExpression, focusWithKeyboard, type ContrastSample } from './contrast'
@@ -35,14 +37,14 @@ beforeAll(async () => {
   writeFileSync(join(root, '.ai/skills/touch-check.md'), '---\ndescription: Verify touch targets\n---\nCheck the UI.\n')
   mkdirSync(join(root, '.ai/cezar/workflows'), { recursive: true })
   writeFileSync(join(root, '.ai/cezar/workflows/touch-flow.yaml'), 'name: touch-flow\nskills:\n  - touch-check\n')
-  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([{
+  seedRuns(root, [({
     id: runId, title: 'Touch target fixture', task: 'Touch target fixture', workflow: 'quick-task',
-    runner: 'claude', status: 'done', archived: false, createdAt: new Date().toISOString(), tokensUsed: 0,
+    runner: 'claude', status: RUN_STATUS.done, archived: false, createdAt: new Date().toISOString(), tokensUsed: 0,
     // Both references (#617 01b): the sidebar row shows them as plain text on touch, and the
     // Workspace carries them as the real 44px links.
     pullRequestUrl: 'https://github.com/o/r/pull/594', referencedIssueUrl: 'https://github.com/o/r/issues/451',
-    steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 'touch-fixture-session' }],
-  } satisfies RunRecord]))
+    steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, sessionId: 'touch-fixture-session' }],
+  } satisfies Partial<RunRecord>) satisfies RunRecord])
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })

@@ -1,10 +1,11 @@
 import type { ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { waitForSettledSample } from './visual-ready'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
+import { seedRuns } from './seed-runs'
+import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from './agent-browser'
 import { dismissWithEscape, focusWithKeyboard } from './contrast'
@@ -23,15 +24,15 @@ const drawer = '[data-slot="mobile-nav-drawer"]'
 const fixture = (id: string, status: RunRecord['status'], archived = false): RunRecord => ({
   id, title: `Needle ${id}`, task: `Needle ${id}`, workflow: 'quick-task', status,
   archived, createdAt: '2026-09-09T10:00:00Z', tokensUsed: 0, steps: [],
-})
+} satisfies Partial<RunRecord>)
 
 beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'cez-controls-'))
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
-  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([
+  seedRuns(root, [
     fixture('done', 'done'), fixture('failed', 'failed'), fixture('cancelled', 'cancelled'),
     fixture('review', 'review'), fixture('old', 'done', true),
-  ]))
+  ])
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })

@@ -2,7 +2,10 @@ import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { RUN_STATUS, STEP_STATUS, STEP_KIND } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seedRuns } from './seed-runs'
 import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { contrastSampleExpression, hoverVisiblePoint, type ContrastSample } from './contrast'
@@ -39,14 +42,14 @@ beforeAll(async () => {
   mkdirSync(artifacts, { recursive: true })
   const now = Date.now()
   const records = cases.map((status, index) => ({
-    id: `ref-${status}`, title: status, task: status, workflow: 'quick-task', runner: 'claude', status: 'done',
+    id: `ref-${status}`, title: status, task: status, workflow: 'quick-task', runner: 'claude', status: RUN_STATUS.done,
     createdAt: new Date(now - index * 60_000).toISOString(), finishedAt: new Date(now - index * 60_000).toISOString(),
     // Pinned rows bypass the sidebar recent-row cap, so every status is actually painted.
     tokensUsed: 0, archived: false, pinned: true,
-    ...(isIssue(status) ? { referencedIssueUrl: `https://github.com/o/r/issues/${600 + index}` } : { pullRequestUrl: `https://github.com/o/r/pull/${600 + index}` }),
-    steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 'reference-fixture' }],
-  }))
-  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify(records))
+    ...(isIssue(status) ? ({ referencedIssueUrl: `https://github.com/o/r/issues/${600 + index}` } satisfies Partial<RunRecord>) : ({ pullRequestUrl: `https://github.com/o/r/pull/${600 + index}` } satisfies Partial<RunRecord>)),
+    steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, sessionId: 'reference-fixture' }],
+  } satisfies Partial<RunRecord>))
+  seedRuns(root, records)
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })

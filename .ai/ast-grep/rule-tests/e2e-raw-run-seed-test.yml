@@ -1,0 +1,14 @@
+id: e2e-raw-run-seed
+valid:
+  - "seedRuns(root, [{ id: 'fixture', status: RUN_STATUS.done }])"
+  - "writeFileSync(join(root, '.ai/cezar/config.json'), JSON.stringify(config))"
+  - "readFileSync(join(root, '.ai/cezar/runs.json'), 'utf8')"
+  - "writeFileSync('notes.txt', 'runs.json')"
+invalid:
+  - "writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([run]))"
+  - "fs.writeFileSync(join(root, '.ai', 'cezar', 'runs.json'), '[]', 'utf8')"
+  - "await writeFile(join(root, 'runs.json'), JSON.stringify(runs))"
+  - "await fs.promises.writeFile(`${root}/.ai/cezar/runs.json`, '[]')"
+  - "const file = join(root, '.ai/cezar/runs.json'); writeFileSync(file, '[]')"
+  - "const file = 'runs.json'; appendFileSync(file, '[]')"
+  - "const file = join(root, 'runs.json'); createWriteStream(file)"

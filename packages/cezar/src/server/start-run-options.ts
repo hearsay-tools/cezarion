@@ -7,6 +7,7 @@
  * hits is the one it gets. None of them touches a route or a Hono context: the route stays in
  * its family chain, which is what keeps it in `AppType`.
  */
+import { controlLocation } from '@open-mercato/cezar-contract/control-locations';
 import { AGENT_MODELS_LOCKED_ERROR, agentModelsLocked } from '../core/agent-model-policy.ts';
 import type { RunnerId } from '../core/agent-runner.ts';
 import type { ProviderId } from '../core/provider-auth.ts';
@@ -33,7 +34,7 @@ export interface ClientRequest {
 }
 
 export const NO_WEBHOOK_ERROR =
-  'this project has no task webhook — add a webhook with Task notifications on in Settings → General → Webhooks, or start without notify';
+  `this project has no task webhook — add a webhook with Task notifications on in ${controlLocation('webhooks')}, or start without notify`;
 
 const REQUEST_ID_CONFLICT_ERROR = 'request id payload conflict';
 

@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest'
@@ -58,7 +59,7 @@ function project(overrides: Partial<ProjectListEntry> & { id: string }): Project
 function run(overrides: Partial<RunIndexEntry> & { id: string; projectId: string }): RunIndexEntry {
   return {
     title: overrides.id,
-    status: 'done',
+    status: RUN_STATUS.done,
     createdAt: '2026-07-14T10:00:00Z',
     archived: false,
     workflow: 'quick-task',
@@ -77,11 +78,11 @@ const PROJECTS: ProjectListEntry[] = [
 ]
 
 const RUNS: RunIndexEntry[] = [
-  run({ id: 'a1', projectId: 'api', title: 'Add checkout endpoint', status: 'running', branch: 'feat/checkout' }),
-  run({ id: 'w1', projectId: 'web', title: 'Checkout page', status: 'review', workflow: 'plan-first' }),
-  run({ id: 'i1', projectId: 'infra', title: 'Bump the runner', status: 'done' }),
-  run({ id: 'l1', projectId: 'loose', title: 'Tidy the scripts', status: 'done' }),
-  run({ id: 'old', projectId: 'api', title: 'Filed away', status: 'done', archived: true }),
+  run({ id: 'a1', projectId: 'api', title: 'Add checkout endpoint', status: RUN_STATUS.running, branch: 'feat/checkout' }),
+  run({ id: 'w1', projectId: 'web', title: 'Checkout page', status: RUN_STATUS.review, workflow: 'plan-first' }),
+  run({ id: 'i1', projectId: 'infra', title: 'Bump the runner', status: RUN_STATUS.done }),
+  run({ id: 'l1', projectId: 'loose', title: 'Tidy the scripts', status: RUN_STATUS.done }),
+  run({ id: 'old', projectId: 'api', title: 'Filed away', status: RUN_STATUS.done, archived: true }),
 ]
 
 const tasks = toGlobalTasks(RUNS, PROJECTS)
@@ -426,7 +427,7 @@ describe('truncatedProjectNames', () => {
 })
 
 it('finds every hidden PR while retaining all-token and facet matching', () => {
-  const task = { run: { id: 'split', projectId: 'p', title: 'Neutral task', status: 'done' as const, archived: false,
+  const task = { run: { id: 'split', projectId: 'p', title: 'Neutral task', status: RUN_STATUS.done, archived: false,
     workflow: 'quick-task', workflowLabel: 'quick-task', createdAt: '2026-10-08', tokensUsed: 0,
     pullRequests: [812, 813, 814, 815, 816].map(number => ({ number, source: 'declared' as const })),
   }, project: undefined, projectName: 'Project', tags: [] };

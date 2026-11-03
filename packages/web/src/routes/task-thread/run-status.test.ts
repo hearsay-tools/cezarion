@@ -1,3 +1,9 @@
+import {
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { describe, expect, it } from 'vitest'
 import { openHumanWait } from '@/test/run-summary-fixture'
 
@@ -22,17 +28,17 @@ const run = (status: RunStatus, extra: Partial<ApiRun> = {}): ApiRun => ({
 })
 
 const ciEntry = (extra: Partial<CiEntry> = {}): CiEntry => ({
-  id: '00000000-0000-4000-8000-000000000474', kind: 'pr', source: 'agent', via: 'cezar_wait',
+  id: '00000000-0000-4000-8000-000000000474', kind: WAIT_KIND.pr, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
   generation: 'session-1', turnId: 'turn-1', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true,
   prUrl: 'https://github.com/owner/repo/pull/474', repository: 'owner/repo', prNumber: 474,
   headSha: '123456789abcdef', registeredAt: '2026-10-20T12:00:00.000Z',
-  deadline: '2026-10-20T12:30:00.000Z', phase: 'open', ...extra,
+  deadline: '2026-10-20T12:30:00.000Z', phase: WAIT_PHASE.open, ...extra,
 })
 
 const timerEntry = (extra: Partial<TimerEntry> = {}): TimerEntry => ({
-  id: '00000000-0000-4000-8000-000000000005', kind: 'timer', source: 'agent', via: 'cezar_wait',
+  id: '00000000-0000-4000-8000-000000000005', kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
   turnId: 'turn-1', seconds: 300, registeredAt: '2026-10-20T12:00:00.000Z',
-  deadline: '2026-10-20T12:15:00.000Z', phase: 'open', ...extra,
+  deadline: '2026-10-20T12:15:00.000Z', phase: WAIT_PHASE.open, ...extra,
 })
 
 const shortTime = (iso: string) => new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(new Date(iso))
@@ -62,7 +68,7 @@ describe('runStatusLine', () => {
   })
 
   it('drops next check for a resolved timer and for a terminal run', () => {
-    expect(runStatusLine(run('waiting', { waits: [timerEntry({ phase: 'resolved' })] }), { now }).nextCheck).toBeUndefined()
+    expect(runStatusLine(run('waiting', { waits: [timerEntry({ phase: WAIT_PHASE.resolved })] }), { now }).nextCheck).toBeUndefined()
     expect(runStatusLine(run('done', { waits: [timerEntry()] }), { now }).nextCheck).toBeUndefined()
     expect(runStatusLine(run('waiting', { waits: [timerEntry({ deadline: 'not a date' })] }), { now }).nextCheck).toBeUndefined()
   })

@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest'
@@ -6,7 +7,7 @@ import type { RunRecord } from '@open-mercato/cezar-api-client'
 import { voiceRun } from './fixture.testkit'
 import { resolveOpenTarget } from './resolve-open'
 
-const failed = (over: Partial<RunRecord> = {}) => voiceRun({ status: 'failed', ...over })
+const failed = (over: Partial<RunRecord> = {}) => voiceRun({ status: RUN_STATUS.failed, ...over })
 
 describe('resolveOpenTarget', () => {
   it('next from inside the list', () => {
@@ -21,7 +22,7 @@ describe('resolveOpenTarget', () => {
 
   it('next when the open task is not in the list is the first', () => {
     const a = failed({ id: 'a' })
-    const other = voiceRun({ id: 'other', status: 'running' })
+    const other = voiceRun({ id: 'other', status: RUN_STATUS.running })
     const args = { runs: [a, other], sidebarView: 'active' as const, status: 'failed' as const }
     expect(resolveOpenTarget({ ...args, openRunId: 'other', position: 'next' })).toEqual({ kind: 'run', runId: 'a' })
     expect(resolveOpenTarget({ ...args, openRunId: null, position: 'next' })).toEqual({ kind: 'run', runId: 'a' })
@@ -54,7 +55,7 @@ describe('resolveOpenTarget', () => {
 
   it('last reaches rows the sidebar cap hides', () => {
     const runs = Array.from({ length: 12 }, (_, i) =>
-      voiceRun({ id: `f${i + 1}`, status: 'done', createdAt: `2026-07-14T${String(20 - i).padStart(2, '0')}:00:00.000Z` }),
+      voiceRun({ id: `f${i + 1}`, status: RUN_STATUS.done, createdAt: `2026-07-14T${String(20 - i).padStart(2, '0')}:00:00.000Z` }),
     )
     // f1 is the newest, f12 the oldest and the last row; the sidebar's cap of ten hides it.
     expect(
@@ -81,7 +82,7 @@ describe('resolveOpenTarget', () => {
 
   it('a historical variant run opens as its own task (hearsay-tools/cezarion#1760)', () => {
     const a = failed({ id: 'ga', groupId: 'g1', variant: 'A', createdAt: '2026-07-14T12:00:00.000Z' })
-    const b = voiceRun({ id: 'gb', groupId: 'g1', variant: 'B', status: 'done', createdAt: '2026-07-14T12:01:00.000Z' })
+    const b = voiceRun({ id: 'gb', groupId: 'g1', variant: 'B', status: RUN_STATUS.done, createdAt: '2026-07-14T12:01:00.000Z' })
     const solo = failed({ id: 'solo', createdAt: '2026-07-14T09:00:00.000Z' })
     const args = { runs: [a, b, solo], sidebarView: 'active' as const, status: 'failed' as const, openRunId: null }
     expect(resolveOpenTarget({ ...args, position: 'next' })).toEqual({ kind: 'run', runId: 'ga' })
@@ -93,7 +94,7 @@ describe('resolveOpenTarget', () => {
   it('archived walks the archived order', () => {
     const a = voiceRun({ id: 'a', archived: true, createdAt: '2026-07-14T10:00:00.000Z' })
     const b = voiceRun({ id: 'b', archived: true, createdAt: '2026-07-14T11:00:00.000Z' })
-    const live = voiceRun({ id: 'live', status: 'done' })
+    const live = voiceRun({ id: 'live', status: RUN_STATUS.done })
     const args = { runs: [a, b, live], sidebarView: 'active' as const, status: 'archived' as const }
     expect(resolveOpenTarget({ ...args, openRunId: null, position: 'next' })).toEqual({ kind: 'run', runId: 'b' })
     expect(resolveOpenTarget({ ...args, openRunId: 'b', position: 'next' })).toEqual({ kind: 'run', runId: 'a' })
@@ -119,7 +120,7 @@ describe('resolveOpenTarget', () => {
   })
 
   it('no rows is empty', () => {
-    const args = { runs: [voiceRun({ status: 'done' })], sidebarView: 'active' as const, openRunId: null }
+    const args = { runs: [voiceRun({ status: RUN_STATUS.done })], sidebarView: 'active' as const, openRunId: null }
     expect(resolveOpenTarget({ ...args, status: 'failed', position: 'next' })).toEqual({ kind: 'empty' })
     expect(resolveOpenTarget({ ...args, status: 'archived', position: 'last' })).toEqual({ kind: 'empty' })
     expect(resolveOpenTarget({ runs: [], sidebarView: 'active', openRunId: null, status: 'unread', position: 1 })).toEqual({

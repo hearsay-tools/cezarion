@@ -1,3 +1,13 @@
+import { workerInspectionSchema } from '@open-mercato/cezar-api-client/contract/delegation'
+import {
+  RUN_STATUS,
+  STEP_KIND,
+  STEP_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
@@ -36,28 +46,29 @@ const workspace = {
   baselineSha: 'a'.repeat(40),
 }
 const workers: WorkerInspection[] = [
-  { workerId: doneWorkerId, parentRunId: parentId, status: 'done', workspace },
-  { workerId: cancelledWorkerId, parentRunId: parentId, status: 'cancelled', workspace },
+  { workerId: doneWorkerId, parentRunId: parentId, status: workerInspectionSchema.shape.status.enum.done, workspace },
+  { workerId: cancelledWorkerId, parentRunId: parentId, status: workerInspectionSchema.shape.status.enum.cancelled, workspace },
 ]
 
 const steps: StepState[] = [
-  { id: 'task', name: 'Do the task', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0 },
-  { id: 'verify', name: 'Verify', kind: 'check', status: 'pending', iterations: 1, tokensUsed: 0 },
+  { id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status: STEP_STATUS.running, iterations: 1, tokensUsed: 0 },
+  { id: 'verify', name: 'Verify', kind: STEP_KIND.check, status: STEP_STATUS.pending, iterations: 1, tokensUsed: 0 },
 ]
 
-const run = (extra: Partial<ApiRun> = {}): ApiRun =>
-  ({
+const run = (extra: Partial<ApiRun> = {}): ApiRun => {
+  return ({
     id: parentId,
     title: 'Parent',
     task: 'Do task',
     workflow: 'quick-task',
-    status: 'running',
+    status: RUN_STATUS.running,
     createdAt: at,
     tokensUsed: 0,
     archived: false,
     steps,
     ...extra,
   }) as ApiRun
+}
 
 const line = (seq: number, type: string, rest: Record<string, unknown> = {}): RunEvent =>
   ({ seq, ts: at, type, ...rest }) as RunEvent
@@ -107,8 +118,8 @@ function renderDock(
       }
       if (path.endsWith('/run-summaries')) {
         return json([
-          { ...run({ id: doneWorkerId, title: 'auditing stale roles', status: 'done' }) },
-          { ...run({ id: cancelledWorkerId, title: 'lightweight VM preset', status: 'cancelled' }) },
+          { ...run({ id: doneWorkerId, title: 'auditing stale roles', status: RUN_STATUS.done }) },
+          { ...run({ id: cancelledWorkerId, title: 'lightweight VM preset', status: RUN_STATUS.cancelled }) },
         ])
       }
       return json({})
@@ -169,13 +180,13 @@ describe('RunActivityDock — one card, one row per section', () => {
   it('shows an unsettled subagent as stalled during a usage-limit hold, which has no session', () => {
     // hearsay-tools/cezarion#1236: a hold is `waiting` with no live session, so nothing will settle
     // the row until the resume; it must not pulse as live.
-    renderDock(run({ status: 'waiting', autoResumeAt: '2099-01-01T00:00:00.000Z' }))
+    renderDock(run({ status: RUN_STATUS.waiting, autoResumeAt: '2099-01-01T00:00:00.000Z' }))
     fireEvent.click(sectionHead('subagents'))
     expect(document.querySelectorAll('[data-slot="agent-item"] [data-stalled="true"]')).toHaveLength(1)
   })
 
   it('keeps an unsettled subagent live while a waiting run holds its session', () => {
-    renderDock(run({ status: 'waiting' }))
+    renderDock(run({ status: RUN_STATUS.waiting }))
     fireEvent.click(sectionHead('subagents'))
     expect(document.querySelectorAll('[data-slot="agent-item"] [data-stalled="true"]')).toHaveLength(0)
   })
@@ -247,7 +258,7 @@ describe('RunActivityDock — the workers section', () => {
     renderDock(
       run({
         id: doneWorkerId,
-        status: 'done',
+        status: RUN_STATUS.done,
         steps: [],
         delegation: { role: 'worker', permissions: [], parentRunId: parentId, workspace },
       } as Partial<ApiRun>),
@@ -271,10 +282,10 @@ describe('RunActivityDock — the workers section', () => {
   })
 
   it('keeps a worker request wait under status without a Workers section', async () => {
-    renderDock(run({ id: doneWorkerId, status: 'waiting',
+    renderDock(run({ id: doneWorkerId, status: RUN_STATUS.waiting,
       delegation: { role: 'worker', permissions: [], parentRunId: parentId, workspace },
-      waits: [{ kind: 'worker', id: 'request-wait', source: 'agent', via: 'cez-worker-wait', registeredAt: at,
-        deadline: at, phase: 'open', turnId: 'turn-1', timeoutSeconds: 600, requestIds: [parentId], revisions: [], outcomes: [] }],
+      waits: [{ kind: WAIT_KIND.worker, id: 'request-wait', source: WAIT_SOURCE.agent, via: WAIT_VIA['cez-worker-wait'], registeredAt: at,
+        deadline: at, phase: WAIT_PHASE.open, turnId: 'turn-1', timeoutSeconds: 600, requestIds: [parentId], revisions: [], outcomes: [] }],
     }), [])
     expect(section('workers')).toBeNull()
     expect(document.querySelector('[data-slot="run-activity-status"]')?.textContent).toBe('Waiting on parent reply')
@@ -283,7 +294,7 @@ describe('RunActivityDock — the workers section', () => {
   })
 
   it('omits empty worker sections after cleanup completes', () => {
-    renderDock(run({ id: doneWorkerId, status: 'done', steps: [],
+    renderDock(run({ id: doneWorkerId, status: RUN_STATUS.done, steps: [],
       delegation: { role: 'worker', permissions: [], parentRunId: parentId, workspace,
         destroy: { requestedAt: at, phase: 'complete', remaining: [] } },
     }), [])
@@ -341,7 +352,7 @@ describe('RunActivityDock — narrow viewports', () => {
 
 describe('RunActivityDock — the workflow glyph', () => {
   const step = (status: StepState['status']): StepState[] => [
-    { id: 'task', name: 'Do the task', kind: 'agent', status, iterations: 1, tokensUsed: 0 },
+    { id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status, iterations: 1, tokensUsed: 0 },
   ]
   const glyph = () =>
     document
@@ -357,18 +368,18 @@ describe('RunActivityDock — the workflow glyph', () => {
     ['failed', 'failed'],
     ['cancelled', 'failed'],
   ] as const)('renders the rail visual for a %s step, not a check mark', (status, visual) => {
-    renderDock(run({ status: 'done', steps: step(status) }))
+    renderDock(run({ status: RUN_STATUS.done, steps: step(status) }))
     expect(glyph()).toBe(visual)
   })
 })
 
 
 describe('RunActivityDock — workers and the All complete claim', () => {
-  const settled: StepState[] = [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }]
+  const settled: StepState[] = [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0 }]
   const root = (extra: Partial<ApiRun> = {}) =>
-    run({ status: 'done', steps: settled, delegation: { role: 'root', permissions: [], receipts: [] }, ...extra } as Partial<ApiRun>)
+    run({ status: RUN_STATUS.done, steps: settled, delegation: { role: 'root', permissions: [], receipts: [] }, ...extra } as Partial<ApiRun>)
   const statusText = () => document.querySelector('[data-slot="run-activity-status"]')?.textContent
-  const allDone: WorkerInspection[] = [{ workerId: doneWorkerId, parentRunId: parentId, status: 'done', workspace }]
+  const allDone: WorkerInspection[] = [{ workerId: doneWorkerId, parentRunId: parentId, status: workerInspectionSchema.shape.status.enum.done, workspace }]
   /** A spawn receipt outlives a failed lookup, so the dock must judge its worker too. */
   const receipt = (workerId: string) => ({
     requestId: '20000000-0000-4000-8000-000000000001',
@@ -393,8 +404,8 @@ describe('RunActivityDock — workers and the All complete claim', () => {
   // "In progress" forever (#402 feedback).
   it('counts a cancelled worker as complete', async () => {
     renderDock(root(), [], [
-      { workerId: doneWorkerId, parentRunId: parentId, status: 'done', workspace },
-      { workerId: cancelledWorkerId, parentRunId: parentId, status: 'cancelled', workspace },
+      { workerId: doneWorkerId, parentRunId: parentId, status: workerInspectionSchema.shape.status.enum.done, workspace },
+      { workerId: cancelledWorkerId, parentRunId: parentId, status: workerInspectionSchema.shape.status.enum.cancelled, workspace },
     ])
     await waitFor(() => expect(statusText()).toContain('All complete'))
   })
@@ -402,7 +413,7 @@ describe('RunActivityDock — workers and the All complete claim', () => {
   // The other half of the same defect: when the run is over, the header reports an OUTCOME.
   // Withholding the green line is right; calling a finished run "In progress" is not.
   it('names a finished run with a failed worker as finished, not in progress', async () => {
-    renderDock(root(), [], [{ workerId: doneWorkerId, parentRunId: parentId, status: 'failed', workspace }])
+    renderDock(root(), [], [{ workerId: doneWorkerId, parentRunId: parentId, status: workerInspectionSchema.shape.status.enum.failed, workspace }])
     await waitFor(() => expect(statusText()).toContain('Incomplete'))
     expect(statusText()).not.toContain('In progress')
     expect(statusText()).not.toContain('All complete')
@@ -410,7 +421,7 @@ describe('RunActivityDock — workers and the All complete claim', () => {
 
   // ...and a worker that really is still going keeps the progress wording, because it is true.
   it('still says in progress while a linked worker runs on', async () => {
-    renderDock(root(), [], [{ workerId: doneWorkerId, parentRunId: parentId, status: 'running', workspace }])
+    renderDock(root(), [], [{ workerId: doneWorkerId, parentRunId: parentId, status: workerInspectionSchema.shape.status.enum.running, workspace }])
     await waitFor(() => expect(document.querySelectorAll('[data-slot="worker-item"]')).toHaveLength(1))
     expect(statusText()).toContain('In progress')
   })
@@ -435,14 +446,14 @@ describe('RunActivityDock — workers and the All complete claim', () => {
   })
 
   it('keeps the progress wording when the failed lookup belongs to a live run', async () => {
-    renderDock(root({ status: 'running' } as Partial<ApiRun>), [], allDone, 'error')
+    renderDock(root({ status: RUN_STATUS.running } as Partial<ApiRun>), [], allDone, 'error')
     await waitFor(() => expect(document.querySelector('[data-slot="run-activity-workers"]')).not.toBeNull())
     expect(statusText()).toContain('Running')
   })
 
   it('drops the cleanup line from a worker whose teardown left nothing behind', async () => {
     renderDock(root(), [], [
-      { workerId: doneWorkerId, parentRunId: parentId, status: 'done', workspace, destroy: { requestedAt: at, phase: 'complete', remaining: [] } },
+      { workerId: doneWorkerId, parentRunId: parentId, status: workerInspectionSchema.shape.status.enum.done, workspace, destroy: { requestedAt: at, phase: 'complete', remaining: [] } },
     ])
     await waitFor(() => expect(document.querySelectorAll('[data-slot="worker-item"]')).toHaveLength(1))
     expect(document.querySelector('[data-slot="run-activity-workers"]')?.textContent).not.toContain('Cleanup')
@@ -467,7 +478,7 @@ describe('RunActivityDock — workers and the All complete claim', () => {
   })
 
   it('leaves an ordinary run without delegation alone', () => {
-    renderDock(run({ status: 'done', steps: settled }), [])
+    renderDock(run({ status: RUN_STATUS.done, steps: settled }), [])
     expect(statusText()).toContain('All complete')
   })
 })
@@ -476,20 +487,20 @@ describe('Session activity — status, usage and workspace (#1333)', () => {
   type CiEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'pr' }>
   type TimerEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'timer' }>
   const ciEntry: CiEntry = {
-    id: '00000000-0000-4000-8000-000000000474', kind: 'pr', source: 'agent', via: 'cezar_wait',
+    id: '00000000-0000-4000-8000-000000000474', kind: WAIT_KIND.pr, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
     generation: 'session-1', turnId: 'turn-1', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true,
     prUrl: 'https://github.com/owner/repo/pull/474', repository: 'owner/repo', prNumber: 474,
-    headSha: '123456789abcdef', registeredAt: at, deadline: '2026-09-06T00:30:00.000Z', phase: 'open',
+    headSha: '123456789abcdef', registeredAt: at, deadline: '2026-09-06T00:30:00.000Z', phase: WAIT_PHASE.open,
   }
   const timerEntry: TimerEntry = {
-    id: '00000000-0000-4000-8000-000000000005', kind: 'timer', source: 'agent', via: 'cezar_wait',
-    turnId: 'turn-1', seconds: 300, registeredAt: at, deadline: '2026-09-06T00:05:00.000Z', phase: 'open',
+    id: '00000000-0000-4000-8000-000000000005', kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
+    turnId: 'turn-1', seconds: 300, registeredAt: at, deadline: '2026-09-06T00:05:00.000Z', phase: WAIT_PHASE.open,
   }
   // Module-level disclosure memory is keyed by run id, so every case gets its own run.
   let seq = 0
   const fresh = (extra: Partial<ApiRun> = {}) => run({ id: `10000000-0000-4000-8000-1333${String(++seq).padStart(8, '0')}`, ...extra })
   const waiting = (extra: Partial<ApiRun> = {}) =>
-    fresh({ status: 'waiting', costUsd: 1.26, waits: [ciEntry, timerEntry], steps: [{ ...steps[0]!, status: 'done' }], ...extra })
+    fresh({ status: RUN_STATUS.waiting, costUsd: 1.26, waits: [ciEntry, timerEntry], steps: [{ ...steps[0]!, status: STEP_STATUS.done }], ...extra })
   const summary = () => screen.getByRole('button', { name: /^Session activity/ })
   const ensureOpen = () => {
     if (summary().getAttribute('aria-expanded') !== 'true') fireEvent.click(summary())
@@ -534,7 +545,7 @@ describe('Session activity — status, usage and workspace (#1333)', () => {
   })
 
   it('renders for a run with no workflow, agents, workers or plan', () => {
-    renderDock(fresh({ steps: [], status: 'queued' }), [])
+    renderDock(fresh({ steps: [], status: RUN_STATUS.queued }), [])
     ensureOpen()
     expect(section('status-row')).not.toBeNull()
     expect(section('usage')).not.toBeNull()
@@ -543,7 +554,7 @@ describe('Session activity — status, usage and workspace (#1333)', () => {
   })
 
   it('keeps terminal summaries truthful', async () => {
-    renderDock(fresh({ status: 'failed' }), [])
+    renderDock(fresh({ status: RUN_STATUS.failed }), [])
     expect(document.querySelector('[data-slot="run-activity-status"]')?.textContent ?? summary().textContent).toContain('Failed')
     expect(summary().textContent).not.toContain('All complete')
   })
@@ -697,7 +708,7 @@ describe('Session activity — folded workflow step (#1478)', () => {
   const name = () => slot()?.querySelector<HTMLElement>('[data-slot="run-activity-step-name"]')
   const glyph = () => slot()?.querySelector('[data-slot="workflow-glyph"]')
   const one = (status: StepState['status']): StepState[] => [
-    { id: 'task', name: 'Do the task', kind: 'agent', status, iterations: 1, tokensUsed: 0 },
+    { id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status, iterations: 1, tokensUsed: 0 },
   ]
 
   it('shows the active step glyph and name while folded', () => {
@@ -716,7 +727,7 @@ describe('Session activity — folded workflow step (#1478)', () => {
     const { rerenderRun } = renderDock(record, [])
     fold()
     expect(name()?.textContent).toBe('Do the task')
-    rerenderRun({ ...record, steps: [{ ...steps[0]!, status: 'done' }, { ...steps[1]!, status: 'running' }] })
+    rerenderRun({ ...record, steps: [{ ...steps[0]!, status: STEP_STATUS.done }, { ...steps[1]!, status: STEP_STATUS.running }] })
     expect(document.querySelector('[data-slot="run-activity-dock"]')?.getAttribute('data-state')).toBe('collapsed')
     expect(name()?.textContent).toBe('Verify')
     expect(glyph()?.getAttribute('data-visual')).toBe('active')
@@ -738,10 +749,10 @@ describe('Session activity — folded workflow step (#1478)', () => {
   })
 
   it('names the next step to run, not a skipped one before it', () => {
-    renderDock(fresh({ status: 'waiting', steps: [
-      { ...steps[0]!, status: 'done' },
-      { id: 'lint', name: 'Lint', kind: 'check', status: 'skipped', iterations: 1, tokensUsed: 0 },
-      { ...steps[1]!, status: 'pending' },
+    renderDock(fresh({ status: RUN_STATUS.waiting, steps: [
+      { ...steps[0]!, status: STEP_STATUS.done },
+      { id: 'lint', name: 'Lint', kind: STEP_KIND.check, status: STEP_STATUS.skipped, iterations: 1, tokensUsed: 0 },
+      { ...steps[1]!, status: STEP_STATUS.pending },
     ] }), [])
     fold()
     expect(name()?.textContent).toBe('Verify')

@@ -1,3 +1,12 @@
+import {
+  RUN_STATUS,
+  STEP_KIND,
+  STEP_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest'
@@ -28,8 +37,8 @@ import {
 const step = (extra: Partial<StepState> = {}): StepState => ({
   id: 'task',
   name: 'Do the task',
-  kind: 'agent',
-  status: 'done',
+  kind: STEP_KIND.agent,
+  status: STEP_STATUS.done,
   iterations: 1,
   tokensUsed: 0,
   ...extra,
@@ -52,7 +61,7 @@ const run = (status: RunStatus, extra: Partial<ApiRun> = {}): ApiRun => ({
 /** A failed run still holding a wait result after the delivery bound (hearsay-tools/cezarion#1233). */
 const heldWait = (phase: 'open' | 'resolved'): NonNullable<ApiRun['waits']>[number] => ({
   id: phase === 'open' ? '00000000-0000-4000-8000-0000000000e1' : '00000000-0000-4000-8000-0000000000e2',
-  kind: 'timer', source: 'agent', via: 'cezar_wait', seconds: 60, phase, turnId: 'turn-1',
+  kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait, seconds: 60, phase, turnId: 'turn-1',
   registeredAt: '2026-07-14T12:00:00.000Z', deadline: '2026-07-14T12:01:00.000Z',
   ...(phase === 'resolved' ? { resolvedAt: '2026-07-14T12:01:00.000Z' } : {}),
 })
@@ -70,13 +79,13 @@ describe('runActionFlags — the visibility matrix, all 7 statuses × archived',
   // `finishedAt` — a record with no finish instant can never wear the unread marker, whatever
   // its status says. The flag's real matrix is the FINISHED one in its own describe below.
   const matrix: Array<{ status: RunStatus; expected: Omit<ReturnType<typeof runActionFlags>, 'notes'> }> = [
-    { status: 'queued', expected: { finish: false, continueRun: false, terminal: false, archive: false, markUnread: false, pin: true, cancel: true, deleteRun: false } },
-    { status: 'running', expected: { finish: false, continueRun: false, terminal: false, archive: false, markUnread: false, pin: true, cancel: true, deleteRun: false } },
-    { status: 'waiting', expected: { finish: true, continueRun: false, terminal: false, archive: false, markUnread: false, pin: true, cancel: true, deleteRun: false } },
-    { status: 'review', expected: { finish: true, continueRun: true, terminal: true, archive: true, markUnread: false, pin: true, cancel: false, deleteRun: true } },
-    { status: 'done', expected: { finish: false, continueRun: true, terminal: true, archive: true, markUnread: false, pin: true, cancel: false, deleteRun: true } },
-    { status: 'failed', expected: { finish: false, continueRun: true, terminal: true, archive: true, markUnread: false, pin: true, cancel: false, deleteRun: true } },
-    { status: 'cancelled', expected: { finish: false, continueRun: true, terminal: true, archive: true, markUnread: false, pin: true, cancel: false, deleteRun: true } },
+    { status: RUN_STATUS.queued, expected: { finish: false, continueRun: false, terminal: false, archive: false, markUnread: false, pin: true, cancel: true, deleteRun: false } },
+    { status: RUN_STATUS.running, expected: { finish: false, continueRun: false, terminal: false, archive: false, markUnread: false, pin: true, cancel: true, deleteRun: false } },
+    { status: RUN_STATUS.waiting, expected: { finish: true, continueRun: false, terminal: false, archive: false, markUnread: false, pin: true, cancel: true, deleteRun: false } },
+    { status: RUN_STATUS.review, expected: { finish: true, continueRun: true, terminal: true, archive: true, markUnread: false, pin: true, cancel: false, deleteRun: true } },
+    { status: RUN_STATUS.done, expected: { finish: false, continueRun: true, terminal: true, archive: true, markUnread: false, pin: true, cancel: false, deleteRun: true } },
+    { status: RUN_STATUS.failed, expected: { finish: false, continueRun: true, terminal: true, archive: true, markUnread: false, pin: true, cancel: false, deleteRun: true } },
+    { status: RUN_STATUS.cancelled, expected: { finish: false, continueRun: true, terminal: true, archive: true, markUnread: false, pin: true, cancel: false, deleteRun: true } },
   ]
 
   it.each(matrix)('$status (live)', ({ status, expected }) => {
@@ -122,7 +131,7 @@ describe('runActionFlags — the visibility matrix, all 7 statuses × archived',
   it('a failed run with no waits, or only settled ones, offers no Stop', () => {
     expect(runActionFlags(run('failed')).cancel).toBe(false)
     expect(runActionFlags(run('failed', { waits: [] })).cancel).toBe(false)
-    expect(runActionFlags(run('failed', { waits: [], lastWaits: [{ ...heldWait('resolved'), phase: 'delivered' }] })).cancel).toBe(false)
+    expect(runActionFlags(run('failed', { waits: [], lastWaits: [{ ...heldWait('resolved'), phase: WAIT_PHASE.delivered }] })).cancel).toBe(false)
   })
 
   it.each(['done', 'cancelled', 'review'] as const)('a %s run never offers Stop, whatever it lists', (status) => {
@@ -434,14 +443,14 @@ describe('queuePosition — the legacy FIFO math (web/app.js), 1-based among que
 describe('unstarted continuation (#201)', () => {
   const workflowDef = { name: 'quick-task', source: 'built-in' as const, steps: [{ id: 'task', name: 'Task', prompt: '{{task}}' }] }
   it('offers Continue for an untouched cancelled workflow but never Terminal', () => {
-    const flags = runActionFlags(run('cancelled', { workflowDef, steps: [step({ status: 'pending' })] }))
+    const flags = runActionFlags(run('cancelled', { workflowDef, steps: [step({ status: STEP_STATUS.pending })] }))
     expect(flags.continueRun).toBe(true)
     expect(flags.terminal).toBe(false)
   })
   it.each([
     { startedAt: '2026-09-10T00:00:00Z', steps: [] },
-    { steps: [step({ status: 'done' })] },
-    { steps: [step({ status: 'pending', startedAt: '2026-09-10T00:00:00Z' })] },
+    { steps: [step({ status: STEP_STATUS.done })] },
+    { steps: [step({ status: STEP_STATUS.pending, startedAt: '2026-09-10T00:00:00Z' })] },
     { stopping: true, steps: [] },
   ])('does not offer replay or continuation during termination: %j', (extra) => {
     expect(runActionFlags(run('cancelled', { workflowDef, ...extra })).continueRun).toBe(false)

@@ -2,11 +2,11 @@ import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { RUN_STATUS, WAIT_KIND } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-
-import { waitForSettledSample } from './visual-ready'
 import type { RunRecord } from '@open-mercato/cezar-api-client'
-
+import { seedRuns } from './seed-runs'
+import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { openSessionActivityRow } from './session-activity'
@@ -50,21 +50,21 @@ beforeAll(async () => {
   git('commit', '-qm', 'init')
   git('remote', 'add', 'origin', 'git@github.com:mock/repo.git')
 
-  const seeded: RunRecord = {
+  const seeded: RunRecord = ({
     id: runId,
     title: 'Fix the login refresh',
     task: 'Fix the login refresh.',
     workflow: 'quick-task',
-    status: 'review',
+    status: RUN_STATUS.review,
     archived: false,
     createdAt: '2026-09-30T10:00:00Z',
     tokensUsed: 0,
     steps: [],
     prNumber: PR,
     issueNumber: ISSUE,
-  }
+  } satisfies Partial<RunRecord>)
   mkdirSync(join(dataRoot, '.ai/cezar'), { recursive: true })
-  writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([seeded], null, 2), 'utf8')
+  seedRuns(dataRoot, [seeded])
 
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(dataRoot),
@@ -105,7 +105,7 @@ describe('task GitHub item tabs against the dry-run mock', () => {
     browser.setViewport(width, height)
     for (const { kind, number, label, fill } of [
       { kind: 'issue', number: ISSUE, label: 'bug', fill: 'rgba(215, 58, 74, 0.133)' },
-      { kind: 'pr', number: PR, label: 'tests', fill: 'rgba(197, 222, 245, 0.133)' },
+      { kind: WAIT_KIND.pr, number: PR, label: 'tests', fill: 'rgba(197, 222, 245, 0.133)' },
     ]) {
       browser.goto(`${baseUrl}${scoped(`/tasks/${runId}/${kind}/${number}`)}`)
       browser.waitForValue(`document.querySelector('[data-slot="gh-label"][data-label="${label}"]') !== null`)

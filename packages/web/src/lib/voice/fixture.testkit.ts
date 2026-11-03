@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { summaryOf } from '@/test/run-summary-fixture'
 import type { RunRecord, RunSummary } from '@open-mercato/cezar-api-client'
 
@@ -14,7 +15,7 @@ export function voiceRun(over: Partial<RunRecord> = {}): RunSummary {
     title: `Task ${seq}`,
     workflow: 'default',
     task: `task ${seq}`,
-    status: 'done',
+    status: RUN_STATUS.done,
     createdAt: `2026-07-14T${hour}:${minute}:00.000Z`,
     tokensUsed: 0,
     archived: false,

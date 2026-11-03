@@ -69,5 +69,8 @@ describe('conversation settlement', () => {
     const delivered = [...byRun.values()].flat().filter(event => event.type === 'conversation-message' && event.delivery === 'delivered');
     expect(delivered).toHaveLength(2); // the delivered step is never skipped
     expect(consumed[0]).toMatchObject({ consumedAt: '2026-09-08T20:00:05.000Z', deliveredAt: '2026-09-08T20:00:01.000Z' });
+    // The payload's keys, in order: the NDJSON line stays byte-identical (BACKWARD_COMPATIBILITY.md).
+    expect(Object.keys(delivered[0]!)).toEqual(['type', 'projectionId', 'message', 'delivery', 'deliveredAt']);
+    expect(Object.keys(consumed[0]!)).toEqual(['type', 'projectionId', 'message', 'delivery', 'deliveredAt', 'consumedAt']);
   });
 });

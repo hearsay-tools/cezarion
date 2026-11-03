@@ -1,18 +1,21 @@
-import { LIVE_PROTOCOL } from '@open-mercato/cezar-api-client/contract/live-coordination'
 import type { ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
+import { LIVE_PROTOCOL } from '@open-mercato/cezar-api-client/contract/live-coordination'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seedRuns, recordedRun } from './seed-runs'
 import { seedTranscript } from './seed-transcript'
-
 import { waitForSettledSample } from './visual-ready'
 import { assistantWidthExpression } from './transcript-measurements'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { expectedRowCount, largeThreadEvents } from './fixtures/make-large-thread'
-import record from './fixtures/thread-run.record.json'
+import recordJson from './fixtures/thread-run.record.json'
 // fixture-server starts: 1
+
+const record = recordedRun(recordJson)
 
 /**
  * R3 Step 2.4 in a real browser: virtualization on a LARGE transcript (the synthetic
@@ -50,16 +53,16 @@ const replayEvents = largeThreadEvents(TURNS).map(line => {
 const replayBoundary = replayEvents.find(line => line.type === 'turn.completed' && line.turnId === 'turn_64')!.seq
 /** The real record fixture, re-ided for the synthetic transcript; the untouched fields keep
  *  the store's zod shape. No PR url (this run never shipped one) and only the agent step. */
-const RUN = {
+const RUN = ({
   ...record,
   id: RUN_ID,
   title: 'Walk the whole git history in passes',
   titleSummary: 'Walk the whole git history',
   task: 'Walk the whole git history in passes.',
   tokensUsed: TURNS * 150,
-  steps: [record.steps[0]],
+  steps: [record.steps[0]!],
   pullRequestUrl: undefined,
-}
+} satisfies Partial<RunRecord>)
 
 let browser: AgentBrowser
 let server: ChildProcess
@@ -181,7 +184,7 @@ function captureScrollState(name: string) {
 beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-thread-scroll-'))
   mkdirSync(join(dataRoot, '.ai/cezar/runs'), { recursive: true })
-  writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([RUN, { ...RUN, id: REPLAY_ID, title: 'Held progressive cache replay' }], null, 2), 'utf8')
+  seedRuns(dataRoot, [RUN, ({ ...RUN, id: REPLAY_ID, title: 'Held progressive cache replay' } satisfies Partial<RunRecord>)])
   seedTranscript(
     join(dataRoot, '.ai/cezar/runs', `${RUN_ID}.ndjson`),
     largeThreadEvents(TURNS)

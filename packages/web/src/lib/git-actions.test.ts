@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest'
@@ -15,7 +16,7 @@ import { gitActionPolicy, type GitActionState } from './git-actions'
 
 /** A healthy local-mode baseline: worktree + changes + github forge + remote + session. */
 const base: GitActionState = {
-  status: 'review',
+  status: RUN_STATUS.review,
   hasWorktree: true,
   branch: 'cez/abc12345',
   changedFiles: 3,
@@ -79,7 +80,7 @@ describe('gitActionPolicy — commit', () => {
 
   it.each<[Partial<GitActionState>, string]>([
     [{ hasWorktree: false }, 'no worktree'],
-    [{ status: 'running' }, 'still working'],
+    [{ status: RUN_STATUS.running }, 'still working'],
     [{ changedFiles: undefined }, 'still loading'],
     [{ changedFiles: 0 }, 'no changes to commit'],
   ])('disabled with a reason for %j', (extra, phrase) => {
@@ -110,7 +111,7 @@ describe('gitActionPolicy — push', () => {
   it.each<[Partial<GitActionState>, string]>([
     [{ hasWorktree: false }, 'no worktree'],
     [{ branch: undefined }, 'no branch'],
-    [{ status: 'running' }, 'still working'],
+    [{ status: RUN_STATUS.running }, 'still working'],
   ])('disabled with a reason for %j', (extra, phrase) => {
     const action = find(withState(extra), 'push')
     expect(action?.enabled).toBe(false)
@@ -129,9 +130,9 @@ describe('gitActionPolicy — create PR', () => {
     [{ forge: null }, 'no supported forge remote'],
     [{ forge: { kind: 'github', available: false, reason: 'gh is not logged in' } }, 'gh is not logged in'],
     [{ forge: { kind: 'github', available: false } }, 'unreachable'],
-    [{ status: 'running' }, 'still active'],
-    [{ status: 'queued' }, 'still active'],
-    [{ status: 'waiting' }, 'still active'],
+    [{ status: RUN_STATUS.running }, 'still active'],
+    [{ status: RUN_STATUS.queued }, 'still active'],
+    [{ status: RUN_STATUS.waiting }, 'still active'],
   ])('disabled with a reason for %j', (extra, phrase) => {
     const action = find(withState(extra), 'create-pr')
     expect(action?.enabled).toBe(false)
@@ -156,9 +157,9 @@ describe('gitActionPolicy — terminal handoff (localHandoff gate)', () => {
 
   it.each<[Partial<GitActionState>, string]>([
     [{ hasSession: false }, 'no agent session'],
-    [{ status: 'running' }, 'still active'],
-    [{ status: 'queued' }, 'still active'],
-    [{ status: 'waiting' }, 'still active'],
+    [{ status: RUN_STATUS.running }, 'still active'],
+    [{ status: RUN_STATUS.queued }, 'still active'],
+    [{ status: RUN_STATUS.waiting }, 'still active'],
   ])('disabled with a reason for %j', (extra, phrase) => {
     const [action] = gitActionPolicy(withState(extra)).menu
     expect(action?.enabled).toBe(false)

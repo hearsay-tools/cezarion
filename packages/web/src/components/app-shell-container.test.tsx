@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
@@ -113,7 +114,7 @@ function run(overrides: Partial<RunRecord> = {}): RunRecord {
     titleSummary: 'Implement page titles',
     workflow: 'quick-task',
     task: 'Implement page titles',
-    status: 'running',
+    status: RUN_STATUS.running,
     createdAt: '2026-07-21T12:00:00.000Z',
     tokensUsed: 0,
     archived: false,
@@ -363,7 +364,7 @@ describe('sidebar wiring', () => {
 
   it('keeps the automations filter beside the current project tasks (#1332)', async () => {
     const active = run({ id: 'active-session', titleSummary: 'Current session' })
-    const archived = { ...run({ id: 'archived-session', titleSummary: 'Nightly sweep', status: 'done' }), automationId: 'auto-1' }
+    const archived = { ...run({ id: 'archived-session', titleSummary: 'Nightly sweep', status: RUN_STATUS.done }), automationId: 'auto-1' }
     serve({
       '/api/v1/health': { ...HEALTH, bootProject: 'cezar' },
       '/api/v1/projects': {
@@ -389,7 +390,7 @@ describe('sidebar wiring', () => {
   it('counts only current-project sessions in Active/Automations', async () => {
     localStorage.setItem('cez-sidebar-collapsed', JSON.stringify({ shop: false }))
     const bootActive = run({ id: 'boot-active', titleSummary: 'Boot active' })
-    const shopWaiting = run({ id: 'shop-wait', titleSummary: 'Shop waiting', status: 'waiting' })
+    const shopWaiting = run({ id: 'shop-wait', titleSummary: 'Shop waiting', status: RUN_STATUS.waiting })
     serve({
       '/api/v1/health': { ...HEALTH, bootProject: 'cezar' },
       '/api/v1/projects': {
@@ -597,7 +598,7 @@ describe('project rail wiring', () => {
     projectId: 'cezar',
     id: 'r1',
     title: 'A task',
-    status: 'running',
+    status: RUN_STATUS.running,
     createdAt: '2026-07-21T12:00:00.000Z',
     archived: false,
     workflow: 'quick-task',
@@ -667,7 +668,7 @@ describe('project rail wiring', () => {
       '/api/v1/health': HEALTH,
       '/api/v1/projects': TWO_PROJECTS,
       '/api/v1/workspace/ui-state': {},
-      '/api/v1/workspace/runs-index': railIndex([indexRow({ projectId: 'shop', id: 's1', status: 'waiting' })]),
+      '/api/v1/workspace/runs-index': railIndex([indexRow({ projectId: 'shop', id: 's1', status: RUN_STATUS.waiting })]),
       '/api/v1/run-summaries': [],
       '/api/v1/p/cezar/run-summaries': [],
       '/api/v1/p/shop/run-summaries': [],
@@ -684,7 +685,7 @@ describe('project rail wiring', () => {
   })
 
   it('shrinks a pill when the index says the run was opened, with no reload', async () => {
-    const done = indexRow({ id: 'd1', status: 'done', finishedAt: '2026-07-21T13:00:00.000Z' })
+    const done = indexRow({ id: 'd1', status: RUN_STATUS.done, finishedAt: '2026-07-21T13:00:00.000Z' })
     serve({
       '/api/v1/health': HEALTH,
       '/api/v1/projects': TWO_PROJECTS,
@@ -806,7 +807,7 @@ describe('project rail wiring', () => {
       '/api/v1/health': HEALTH,
       '/api/v1/projects': TWO_PROJECTS,
       '/api/v1/workspace/ui-state': {},
-      '/api/v1/workspace/runs-index': railIndex([indexRow({ projectId: 'shop', id: 's1', status: 'waiting' })]),
+      '/api/v1/workspace/runs-index': railIndex([indexRow({ projectId: 'shop', id: 's1', status: RUN_STATUS.waiting })]),
       '/api/v1/run-summaries': [],
       '/api/v1/p/cezar/run-summaries': [],
       '/api/v1/p/shop/run-summaries': [],
@@ -831,10 +832,10 @@ describe('project rail wiring', () => {
       '/api/v1/projects': TWO_PROJECTS,
       '/api/v1/workspace/ui-state': {},
       '/api/v1/workspace/runs-index': railIndex([
-        indexRow({ projectId: 'shop', id: 's1', status: 'waiting' }),
-        indexRow({ projectId: 'shop', id: 's2', status: 'running' }),
+        indexRow({ projectId: 'shop', id: 's1', status: RUN_STATUS.waiting }),
+        indexRow({ projectId: 'shop', id: 's2', status: RUN_STATUS.running }),
         // The current project's own signal is not "elsewhere".
-        indexRow({ projectId: 'cezar', id: 'c1', status: 'running' }),
+        indexRow({ projectId: 'cezar', id: 'c1', status: RUN_STATUS.running }),
       ]),
       '/api/v1/run-summaries': [],
       '/api/v1/p/cezar/run-summaries': [],
@@ -924,11 +925,11 @@ it('keeps sidebar data on the URL project when rendered above the route scope pr
   setApiScope('previous')
   const client = createQueryClient()
   client.setQueryData(['previous', 'runs', 'list'], [run({ id: 'wrong', title: 'Previous project task', titleSummary: undefined })])
-  client.setQueryData(['shop', 'runs', 'list'], [run({ id: 'right', title: 'Selected project task', titleSummary: undefined, status: 'waiting' })])
+  client.setQueryData(['shop', 'runs', 'list'], [run({ id: 'right', title: 'Selected project task', titleSummary: undefined, status: RUN_STATUS.waiting })])
   serve({
     '/api/v1/health': HEALTH,
     '/api/v1/projects': { bootProject: 'cezar', projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'Shop' }] },
-    '/api/v1/p/shop/run-summaries': [run({ id: 'right', title: 'Selected project task', titleSummary: undefined, status: 'waiting' })],
+    '/api/v1/p/shop/run-summaries': [run({ id: 'right', title: 'Selected project task', titleSummary: undefined, status: RUN_STATUS.waiting })],
   })
   renderShell('/p/shop/new', client)
   expect(await screen.findByText('Selected project task')).toBeTruthy()

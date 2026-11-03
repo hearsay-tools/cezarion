@@ -63,6 +63,22 @@ export interface StagedOutcome {
   changed: boolean;
   /** The human waits an `answered` outcome settled. */
   answered: string[];
+  /** Every wait the outcomes settled, as committed to `lastWaits`, in the order they settled. */
+  settled: Wait[];
+}
+
+/** What the outcomes settled so far: `StagedOutcome.answered` and `settled`. */
+type Settlement = Pick<StagedOutcome, 'answered' | 'settled'>;
+
+/** What `RunStore.commitOutcome` answers: whether it committed, and what the outcomes settled, so
+ *  a caller answers from the committed entry (empty when nothing changed or the run is missing). */
+export type OutcomeReceipt = Settlement & { committed: boolean };
+
+/** The receipt fields a `conversation-message` event carries for one delivery step of `input`:
+ *  its delivery time, and its read time on the `consumed` step only. */
+export function deliveryReceipts(input: AgentInput | undefined, step: 'queued' | 'delivered' | 'consumed' | 'not-delivered'): Pick<AgentInput, 'deliveredAt' | 'consumedAt'> {
+  return { ...(input?.deliveredAt ? { deliveredAt: input.deliveredAt } : {}),
+    ...(step === 'consumed' && input?.consumedAt ? { consumedAt: input.consumedAt } : {}) };
 }
 
 /** A wait list as the record stores it: absent when empty. */
@@ -70,8 +86,10 @@ function nonEmpty(waits: Wait[]): Wait[] | undefined {
   return waits.length ? waits : undefined;
 }
 
-/** Append settled waits to the history, newest last, dropping the oldest past `LAST_WAITS_LIMIT`. */
-function settle(run: RunRecord, settled: readonly Wait[]): RunRecord {
+/** Append settled waits to the history, newest last, dropping the oldest past `LAST_WAITS_LIMIT`,
+ *  and report them in `out`. */
+function settle(run: RunRecord, settled: readonly Wait[], out: Settlement): RunRecord {
+  out.settled.push(...settled);
   const ids = new Set(settled.map((wait) => wait.id));
   return { ...run, waits: nonEmpty((run.waits ?? []).filter((wait) => !ids.has(wait.id))),
     lastWaits: nonEmpty([...(run.lastWaits ?? []), ...settled].slice(-LAST_WAITS_LIMIT)) };
@@ -90,18 +108,18 @@ function mapInputs(run: RunRecord, change: (input: AgentInput) => AgentInput): {
 }
 
 type Step = { run: RunRecord; changed: boolean };
-type Handler<K extends RunOutcome['kind']> = (run: RunRecord, outcome: Extract<RunOutcome, { kind: K }>, answered: string[]) => Step;
+type Handler<K extends RunOutcome['kind']> = (run: RunRecord, outcome: Extract<RunOutcome, { kind: K }>, out: Settlement) => Step;
 const unchanged = (run: RunRecord): Step => ({ run, changed: false });
 
 /** One handler per outcome kind: each stages its own fields and says whether anything changed. */
 const APPLY: { [K in RunOutcome['kind']]: Handler<K> } = {
-  delivered(run, outcome) {
+  delivered(run, outcome, out) {
     const ids = new Set(outcome.inputIds);
     const waits = (run.waits ?? []).filter((wait) => wait.phase === 'resolved' && ids.has(waitInputId(wait)));
     const awaiting = outcome.awaitingRead ? { awaitingRead: true as const } : {};
     const inputs = mapInputs(run, (input) => ids.has(input.id) && !input.deliveredAt ? { ...input, deliveredAt: outcome.at, ...awaiting } : input);
     if (!waits.length) return inputs;
-    return { run: settle(inputs.run, waits.map((wait) => ({ ...wait, phase: 'delivered' as const, deliveredAt: outcome.at }))), changed: true };
+    return { run: settle(inputs.run, waits.map((wait) => ({ ...wait, phase: 'delivered' as const, deliveredAt: outcome.at })), out), changed: true };
   },
   consumed(run, outcome) {
     return mapInputs(run, (input) => {
@@ -132,20 +150,20 @@ const APPLY: { [K in RunOutcome['kind']]: Handler<K> } = {
     return mapInputs(run, (input) => input.inboxClaim?.receiptId === outcome.receiptId
       ? agentInputSchema.parse({ ...input, deliveredAt: outcome.at, inboxClaim: { ...input.inboxClaim, acknowledgedAt: outcome.at } }) : input);
   },
-  answered(run, outcome, answered) {
+  answered(run, outcome, out) {
     const waits = (run.waits ?? []).filter((wait) => wait.kind === 'human' && wait.phase === 'open' && (!outcome.waitIds || outcome.waitIds.includes(wait.id)));
     if (!waits.length) return unchanged(run);
     const deliveredAt = new Date().toISOString();
-    answered.push(...waits.map((wait) => wait.id));
-    return { run: settle(run, waits.map((wait) => ({ ...wait, phase: 'delivered' as const, deliveredAt }))), changed: true };
+    out.answered.push(...waits.map((wait) => wait.id));
+    return { run: settle(run, waits.map((wait) => ({ ...wait, phase: 'delivered' as const, deliveredAt })), out), changed: true };
   },
-  cancelled(run, outcome) {
+  cancelled(run, outcome, out) {
     const waits = (run.waits ?? []).filter((wait) => outcome.waitIds.includes(wait.id) && (wait.phase === 'open' || wait.phase === 'resolved'));
     if (!waits.length) return unchanged(run);
     const cancelledAt = new Date().toISOString();
     const inputs = new Set(waits.map(waitInputId));
     const next = settle(run, waits.map((wait): Wait => wait.kind === 'subagent' && outcome.superseded
-      ? { ...wait, phase: 'cancelled', cancelledAt, result: { reason: 'superseded' } } : { ...wait, phase: 'cancelled', cancelledAt }));
+      ? { ...wait, phase: 'cancelled', cancelledAt, result: { reason: 'superseded' } } : { ...wait, phase: 'cancelled', cancelledAt }), out);
     return { run: { ...next, ...(run.agentInputs ? { agentInputs: run.agentInputs.filter((input) => !inputs.has(input.id) || input.deliveredAt) } : {}) }, changed: true };
   },
   'message-delivered'(run, outcome) {
@@ -161,8 +179,8 @@ const APPLY: { [K in RunOutcome['kind']]: Handler<K> } = {
   },
 };
 
-function applyOne(run: RunRecord, outcome: RunOutcome, answered: string[]): Step {
-  return (APPLY[outcome.kind] as Handler<RunOutcome['kind']>)(run, outcome, answered);
+function applyOne(run: RunRecord, outcome: RunOutcome, out: Settlement): Step {
+  return (APPLY[outcome.kind] as Handler<RunOutcome['kind']>)(run, outcome, out);
 }
 
 /**
@@ -170,11 +188,11 @@ function applyOne(run: RunRecord, outcome: RunOutcome, answered: string[]): Step
  * patch and the resumed step. Pure: the store commits `next`, or writes nothing when nothing changed.
  */
 export function applyOutcomes(run: RunRecord, outcomes: readonly RunOutcome[], deps: OutcomeDependencies = {}): StagedOutcome {
-  const answered: string[] = [];
+  const out: Settlement = { answered: [], settled: [] };
   let next = run;
   let changed = false;
   for (const outcome of outcomes) {
-    const step = applyOne(next, outcome, answered);
+    const step = applyOne(next, outcome, out);
     next = step.run;
     changed ||= step.changed;
   }
@@ -186,5 +204,5 @@ export function applyOutcomes(run: RunRecord, outcomes: readonly RunOutcome[], d
     next = { ...next, steps: next.steps.map((step) => step.id === resumeStepId && step.status === 'waiting' ? { ...step, status: 'running' as const } : step) };
     changed = true;
   }
-  return { next, changed, answered };
+  return { next, changed, ...out };
 }

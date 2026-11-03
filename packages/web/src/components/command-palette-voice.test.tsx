@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { summaryOf } from '@/test/run-summary-fixture'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -53,7 +54,7 @@ function run(overrides: Partial<RunRecord> & { id: string; title: string }): Run
   return summaryOf({
     workflow: 'build',
     task: 'do the thing',
-    status: 'failed',
+    status: RUN_STATUS.failed,
     createdAt: '2026-07-14T10:00:00Z',
     tokensUsed: 0,
     archived: false,
@@ -198,7 +199,7 @@ describe('palette voice mode', () => {
     } satisfies VoiceDecision)
     renderPalette({
       voice: true,
-      runs: [run({ id: 'a', title: 'Alpha' }), run({ id: 'c', title: 'Charlie', status: 'done' })],
+      runs: [run({ id: 'a', title: 'Alpha' }), run({ id: 'c', title: 'Charlie', status: RUN_STATUS.done })],
     })
     const input = await openPalette()
 
@@ -223,7 +224,7 @@ describe('palette voice mode', () => {
     } satisfies VoiceDecision)
     renderPalette({
       voice: true,
-      runs: [run({ id: 'a', title: 'Fix flaky shard' }), run({ id: 'b', title: 'Beta', status: 'done' })],
+      runs: [run({ id: 'a', title: 'Fix flaky shard' }), run({ id: 'b', title: 'Beta', status: RUN_STATUS.done })],
     })
     const input = await openPalette()
 
@@ -252,7 +253,7 @@ describe('palette voice mode', () => {
     } satisfies VoiceDecision)
     renderPalette({
       voice: true,
-      runs: [run({ id: 'a', title: 'Fix flaky shard' }), run({ id: 'b', title: 'Beta', status: 'done' })],
+      runs: [run({ id: 'a', title: 'Fix flaky shard' }), run({ id: 'b', title: 'Beta', status: RUN_STATUS.done })],
     })
     const input = await openPalette()
 
@@ -290,7 +291,7 @@ describe('palette voice mode', () => {
       answers: [{ question: 0, kind: 'option', labels: ['Vitest'] }],
       confidence: 0.9,
     } satisfies VoiceDecision)
-    renderPalette({ voice: true, runs: [run({ id: 'r1', title: 'Pick a library', status: 'waiting' })], entry: '/tasks/r1' })
+    renderPalette({ voice: true, runs: [run({ id: 'r1', title: 'Pick a library', status: RUN_STATUS.waiting })], entry: '/tasks/r1' })
     const input = await openPalette()
     expect(content()?.hasAttribute('data-voice-proposal')).toBe(false)
 
@@ -352,7 +353,7 @@ describe('palette voice mode', () => {
       answers: [{ question: 0, kind: 'option', labels: ['Vitest'] }],
       confidence: 0.9,
     } satisfies VoiceDecision)
-    renderPalette({ voice: true, runs: [run({ id: 'r1', title: 'Pick a library', status: 'waiting' })], entry: '/tasks/r1' })
+    renderPalette({ voice: true, runs: [run({ id: 'r1', title: 'Pick a library', status: RUN_STATUS.waiting })], entry: '/tasks/r1' })
     const input = await openPalette()
     fireEvent.change(input, { target: { value: 'answer vitest to question one' } })
     fireEvent.keyDown(input, { key: 'Enter' })
@@ -388,7 +389,7 @@ describe('palette voice mode', () => {
       text: 'run the tests again',
       confidence: 0.9,
     } satisfies VoiceDecision)
-    renderPalette({ voice: true, runs: [run({ id: 'r1', title: 'Say hello', status: 'waiting' })], entry: '/tasks/r1' })
+    renderPalette({ voice: true, runs: [run({ id: 'r1', title: 'Say hello', status: RUN_STATUS.waiting })], entry: '/tasks/r1' })
     const input = await openPalette()
 
     fireEvent.change(input, { target: { value: 'tell it: run the tests again' } })

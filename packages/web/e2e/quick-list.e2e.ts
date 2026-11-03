@@ -1,10 +1,12 @@
 import type { ChildProcess } from 'node:child_process'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync } from 'node:fs'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { RUN_STATUS, WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-
+import { seedRuns } from './seed-runs'
 import { settleVisual, waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
@@ -48,7 +50,7 @@ const ago = (ms: number) => new Date(now - ms).toISOString()
 
 /** A `RunRecord[]` — cezar's on-disk run index. */
 const FIXTURE = [
-  {
+  ({
     id: 'fix-review-pr',
     // The raw title is the user's prompt-ish phrasing; `titleSummary` is what the server derived
     // on turn-end (#389). Every surface must show the summary — the raw title appearing anywhere
@@ -57,7 +59,7 @@ const FIXTURE = [
     titleSummary: 'Structured changes endpoint for the git view',
     workflow: 'default',
     task: 'add a structured changes endpoint',
-    status: 'review',
+    status: RUN_STATUS.review,
     createdAt: ago(40 * 60_000),
     finishedAt: ago(26 * 60_000),
     tokensUsed: 128_400,
@@ -69,13 +71,13 @@ const FIXTURE = [
     pullRequestUrl: 'https://github.com/open-mercato/cezar/pull/396',
     archived: false,
     steps: [],
-  },
-  {
+  } satisfies Partial<RunRecord>),
+  ({
     id: 'fix-var-a',
     title: 'Add skills autocomplete to composer (A)',
     workflow: 'default',
     task: 'add skills autocomplete',
-    status: 'review',
+    status: RUN_STATUS.review,
     createdAt: ago(30 * 60_000),
     finishedAt: ago(12 * 60_000),
     tokensUsed: 96_249,
@@ -84,13 +86,13 @@ const FIXTURE = [
     variant: 'A',
     archived: false,
     steps: [],
-  },
-  {
+  } satisfies Partial<RunRecord>),
+  ({
     id: 'fix-var-b',
     title: 'Add skills autocomplete to composer (B)',
     workflow: 'default',
     task: 'add skills autocomplete',
-    status: 'review',
+    status: RUN_STATUS.review,
     // One minute behind its sibling, not the same instant (#416): `sortRuns` breaks an equal
     // status weight on `createdAt` alone, so two runs sharing a timestamp leave the row order
     // resting on V8's stable sort of whatever order the store happened to read them in. Every
@@ -104,46 +106,46 @@ const FIXTURE = [
     variant: 'B',
     archived: false,
     steps: [],
-  },
-  {
+  } satisfies Partial<RunRecord>),
+  ({
     id: 'fix-done',
     title: 'README parallel-agents tagline',
     workflow: 'default',
     task: 'update the readme',
-    status: 'done',
+    status: RUN_STATUS.done,
     createdAt: ago(3 * 3_600_000),
     finishedAt: ago(2 * 3_600_000),
     tokensUsed: 12_000,
     diffStat: { adds: 9, dels: 2, files: 1 },
     archived: false,
     steps: [],
-  },
-  {
+  } satisfies Partial<RunRecord>),
+  ({
     id: 'fix-failed',
     title: 'Bump zod to v4',
     workflow: 'default',
     task: 'bump zod',
-    status: 'failed',
+    status: RUN_STATUS.failed,
     createdAt: ago(4 * 3_600_000),
     finishedAt: ago(3 * 3_600_000),
     tokensUsed: 4_100,
     error: 'checks failed',
     archived: false,
     steps: [],
-  },
-  {
+  } satisfies Partial<RunRecord>),
+  ({
     id: 'fix-archived',
     title: 'Sync merged PR issues',
     workflow: 'default',
     task: 'sync issues',
-    status: 'done',
+    status: RUN_STATUS.done,
     createdAt: ago(30 * 3_600_000),
     finishedAt: ago(29 * 3_600_000),
     tokensUsed: 8_000,
     archived: true,
     archivedAt: ago(28 * 3_600_000),
     steps: [],
-  },
+  } satisfies Partial<RunRecord>),
 ]
 
 let browser: AgentBrowser
@@ -167,7 +169,7 @@ const textOf = (selector: string) =>
 beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-'))
   mkdirSync(join(dataRoot, '.ai/cezar'), { recursive: true })
-  writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify(FIXTURE, null, 2), 'utf8')
+  seedRuns(dataRoot, FIXTURE)
 
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', dataRoot, '--port', '0', '--no-open'], {
     // Dry-run + a pinned CEZ_HOME, exactly as the shared test env does — see `fixtureServeEnv`.
@@ -673,12 +675,12 @@ describe('the tasks table under worst-case row content', () => {
    * at all.
    */
   const WORST = [
-    {
+    ({
       id: 'worst-wrapping',
       title: WRAPPING,
       workflow: 'workflow-name-that-is-deliberately-too-long-for-its-column',
       task: 'review the shared prefix',
-      status: 'waiting',
+      status: RUN_STATUS.waiting,
       createdAt: ago(50 * 60_000),
       inputTokens: 999_900,
       outputTokens: 888_800,
@@ -702,19 +704,19 @@ describe('the tasks table under worst-case row content', () => {
       },
       archived: false,
       steps: [],
-    },
-    {
+    } satisfies Partial<RunRecord>),
+    ({
       id: 'worst-unbroken',
       title: UNBROKEN,
       workflow: 'default',
       task: 'review the shared prefix',
-      status: 'review',
+      status: RUN_STATUS.review,
       createdAt: ago(45 * 60_000),
       finishedAt: ago(40 * 60_000),
       tokensUsed: 4_000,
       archived: false,
       steps: [],
-    },
+    } satisfies Partial<RunRecord>),
   ]
 
   function showResourceTable() {
@@ -732,7 +734,7 @@ describe('the tasks table under worst-case row content', () => {
   beforeAll(async () => {
     worstRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-worst-'))
     mkdirSync(join(worstRoot, '.ai/cezar'), { recursive: true })
-    writeFileSync(join(worstRoot, '.ai/cezar/runs.json'), JSON.stringify(WORST, null, 2), 'utf8')
+    seedRuns(worstRoot, WORST)
 
     worstServer = spawnFixtureServer([cezarCli, 'serve', '--repo', worstRoot, '--port', '0', '--no-open'],
       { env: fixtureServeEnv(worstRoot), stdio: 'ignore' }
@@ -802,7 +804,7 @@ describe('the tasks table under worst-case row content', () => {
     expect(parked?.status).toBe('waiting')
     expect(parked?.delegation?.role).toBe('root')
     expect(parked?.delegation?.wait).toBeUndefined()
-    expect(parked?.waits).toEqual([expect.objectContaining({ kind: 'worker', phase: 'open' })])
+    expect(parked?.waits).toEqual([expect.objectContaining({ kind: WAIT_KIND.worker, phase: WAIT_PHASE.open })])
     expect(parked?.workflow).toBe('workflow-name-that-is-deliberately-too-long-for-its-column')
   })
 
@@ -1090,16 +1092,13 @@ describe('a row under width contention, in a column the user can widen', () => {
   beforeAll(async () => {
     wideRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-wide-'))
     mkdirSync(join(wideRoot, '.ai/cezar'), { recursive: true })
-    writeFileSync(
-      join(wideRoot, '.ai/cezar/runs.json'),
-      JSON.stringify(
-        [
-          {
+    seedRuns(wideRoot, [
+          ({
             id: 'wide-load',
             title: FULL_TITLE,
             workflow: 'default',
             task: 'implement comment threads',
-            status: 'done',
+            status: RUN_STATUS.done,
             createdAt: ago(4 * 3_600_000),
             // Finished and never opened, so the row also wears the unread marker — the fourth
             // element that used to compete with the name.
@@ -1109,15 +1108,15 @@ describe('a row under width contention, in a column the user can widen', () => {
             pullRequestUrl: 'https://github.com/open-mercato/cezar/pull/775',
             archived: false,
             steps: [],
-          },
+          } satisfies Partial<RunRecord>),
           // #729: a handed-off row whose meta line (glyph, state, two references, age) is wider
           // than the default column, so the age has to drop and come back with the width.
-          {
+          ({
             id: 'meta-load',
             title: 'Webhook hand-off',
             workflow: 'default',
             task: 'hand off',
-            status: 'review',
+            status: RUN_STATUS.review,
             createdAt: ago(2 * 3_600_000),
             finishedAt: ago(3_600_000),
             tokensUsed: 0,
@@ -1126,13 +1125,8 @@ describe('a row under width contention, in a column the user can widen', () => {
             referencedIssueUrl: 'https://github.com/open-mercato/cezar/issues/67890',
             archived: false,
             steps: [],
-          },
-        ],
-        null,
-        2
-      ),
-      'utf8'
-    )
+          } satisfies Partial<RunRecord>),
+        ])
 
     wideServer = spawnFixtureServer([cezarCli, 'serve', '--repo', wideRoot, '--port', '0', '--no-open'],
       { env: fixtureServeEnv(wideRoot), stdio: 'ignore' }
@@ -1422,25 +1416,25 @@ describe('archive from the sidebar (#780)', () => {
   let archiveUrl: string
   let archiveProject: string
   const archiveScoped = (path: string) => `/p/${archiveProject}${path}`
-  const finishedRun = (id: string, title: string, minutesAgo: number, extra: Record<string, unknown> = {}) => ({
+  const finishedRun = (id: string, title: string, minutesAgo: number, extra: Partial<RunRecord> = {}) => ({
     id,
     title,
     workflow: 'default',
     task: title,
-    status: 'done',
+    status: RUN_STATUS.done,
     createdAt: ago((minutesAgo + 5) * 60_000),
     finishedAt: ago(minutesAgo * 60_000),
     tokensUsed: 1_000,
     archived: false,
     steps: [],
     ...extra,
-  })
+  } satisfies Partial<RunRecord>)
   const ARCHIVE_FIXTURE = [
-    finishedRun('arc-review', 'Review the release checklist', 5, { status: 'review' }),
+    finishedRun('arc-review', 'Review the release checklist', 5, { status: RUN_STATUS.review }),
     finishedRun('arc-a', 'Tidy the release notes', 10),
     finishedRun('arc-b', 'Rename the config loader', 20),
     finishedRun('arc-pinned', 'Pinned and finished', 30, { pinned: true, pinnedAt: ago(5 * 60_000) }),
-    finishedRun('arc-scheduled', 'Waiting out a usage limit', 40, { status: 'waiting', finishedAt: undefined, autoResumeAt: new Date(Date.now() + 86_400_000).toISOString() }),
+    finishedRun('arc-scheduled', 'Waiting out a usage limit', 40, { status: RUN_STATUS.waiting, finishedAt: undefined, autoResumeAt: new Date(Date.now() + 86_400_000).toISOString() }),
   ]
   const rowSel = (id: string) => `${ROW}[data-run-id="${id}"]`
   const archiveBtn = (id: string) => `${rowSel(id)} [data-action="archive-run"]`
@@ -1454,7 +1448,7 @@ describe('archive from the sidebar (#780)', () => {
     browser = AgentBrowser.open(`${runId}-archive`)
     archiveRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-archive-'))
     mkdirSync(join(archiveRoot, '.ai/cezar'), { recursive: true })
-    writeFileSync(join(archiveRoot, '.ai/cezar/runs.json'), JSON.stringify(ARCHIVE_FIXTURE, null, 2), 'utf8')
+    seedRuns(archiveRoot, ARCHIVE_FIXTURE)
 
     archiveServer = spawnFixtureServer([cezarCli, 'serve', '--repo', archiveRoot, '--port', '0', '--no-open'], {
       env: fixtureServeEnv(archiveRoot),
@@ -1632,24 +1626,24 @@ describe('swipe to archive on touch (#780 §7)', () => {
   let swipeRoot: string
   let swipeUrl: string
   let swipeProject: string
-  const swipeRun = (id: string, title: string, minutesAgo: number, extra: Record<string, unknown> = {}) => ({
+  const swipeRun = (id: string, title: string, minutesAgo: number, extra: Partial<RunRecord> = {}) => ({
     id,
     title,
     workflow: 'default',
     task: title,
-    status: 'done',
+    status: RUN_STATUS.done,
     createdAt: ago((minutesAgo + 5) * 60_000),
     finishedAt: ago(minutesAgo * 60_000),
     tokensUsed: 1_000,
     archived: false,
     steps: [],
     ...extra,
-  })
+  } satisfies Partial<RunRecord>)
   // Enough finished rows that the sidebar scrolls at 500px tall.
   const SWIPE_FIXTURE = [
     // Not finished as far as the sidebar is concerned: it sits in Working, waiting out a usage
     // limit. (A `running` record would not survive the store's boot-time reconcile.)
-    swipeRun('sw-live', 'Waiting out a usage limit', 1, { status: 'waiting', finishedAt: undefined, pinned: true, autoResumeAt: new Date(Date.now() + 86_400_000).toISOString() }),
+    swipeRun('sw-live', 'Waiting out a usage limit', 1, { status: RUN_STATUS.waiting, finishedAt: undefined, pinned: true, autoResumeAt: new Date(Date.now() + 86_400_000).toISOString() }),
     ...Array.from({ length: 10 }, (_, i) => swipeRun(`sw-${i}`, `Finished task ${i}`, 10 + i)),
   ]
   const rowSel = (id: string) => `${ROW}[data-run-id="${id}"]`
@@ -1680,7 +1674,7 @@ describe('swipe to archive on touch (#780 §7)', () => {
     browser = AgentBrowser.open(`${runId}-swipe`)
     swipeRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-swipe-'))
     mkdirSync(join(swipeRoot, '.ai/cezar'), { recursive: true })
-    writeFileSync(join(swipeRoot, '.ai/cezar/runs.json'), JSON.stringify(SWIPE_FIXTURE, null, 2), 'utf8')
+    seedRuns(swipeRoot, SWIPE_FIXTURE)
 
     swipeServer = spawnFixtureServer([cezarCli, 'serve', '--repo', swipeRoot, '--port', '0', '--no-open'], {
       env: fixtureServeEnv(swipeRoot),

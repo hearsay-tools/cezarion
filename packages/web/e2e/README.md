@@ -124,8 +124,8 @@ line; the fix is a wait, never a baseline entry.
 5. **No write into a node React rendered.** A spec that rewrites a title, a status pill or a
    metric to reach a state is measuring something the product never produced — and `use-now.ts`
    re-renders those rows every 30 s, so the write races a re-render that puts the real value
-   back under the measurement (#416). Build the state from fixture data: `runs.json` is cezar's documented
-   state contract and the real store parses it. Where the state genuinely has no data path,
+   back under the measurement (#416). Build the state with `seedRuns` from `seed-runs.ts`; the real store parses the
+   fixture. Where the state genuinely has no data path,
    stub the ROUTE the surface reads (`smoke.e2e.ts`'s nightly version, `github.e2e.ts`'s long
    titles) or add the seam in the product — never in the rendered DOM. Provenance decides what
    is exempt, not naming: a receiver rooted in `querySelector` is a rendered node, while
@@ -370,7 +370,7 @@ Limits:
 The shared server never serves this checkout. Each cold boot serves a fresh isolated clone at
 `.ai/qa/served/<checkout name>`, made by `.ai/scripts/e2e-served-repo.mjs` with the same
 construction as a local lane: own objects and refs, current `HEAD`, plus this checkout's tracked
-edits and untracked source files. The descriptor records it as `servedRoot`. The server's runs,
+edits and untracked source files, except the [fixed project catalogs](#fixed-project-catalogs). The descriptor records it as `servedRoot`. The server's runs,
 task worktrees and `.ai/cezar` state live there. Serving the checkout put them in the checkout's
 own `.ai/cezar`, and in the main checkout that is the live cockpit's data dir: the cockpit refused
 the second server (`A cockpit already serves …`), and a boot that got through would have written
@@ -390,50 +390,21 @@ attached to the old env's dead `baseUrl` and repeated its browser notes.
 
 Seeded NDJSON transcripts must go through `seedTranscript` from `seed-transcript.ts`; every nonblank line needs `seq` and `ts` (and `type`), and validation reports the line number and event type before writing.
 
-## Seed the catalog entries a spec relies on
+## Fixed project catalogs
 
-When a test change removes a hidden catalog dependency, follow
-[the regression-proof rule](../../../.ai/skills/load-bearing-change/SKILL.md#regression-proof): run the
-old test with the dependency absent, then the fixed test under the same conditions,
-even when no failure was observed. Record the evidence in the PR description, in the form
-above.
+Fresh served clones, reused clones and local lanes replace every project skill
+directory in `SKILL_DIRS` and `.ai/cezar/workflows` with
+`packages/web/e2e/fixtures/catalogs`: two project skills and one workflow.
+Checkout catalog additions, edits and deletions do not change the served catalogs.
+Specs may add entries under `servedRoot()` and remove their entries in `afterAll`.
+Spec-owned servers seed their own fixture repositories. Built-in workflows remain available.
 
-A spec seeds every catalog entry whose count or presence it relies on: skills, workflows,
-registered projects and the like. It never relies on a catalog it did not write: the skills
-installed on the host, a default that cezar ships, or the skills this checkout keeps in
-`.ai/skills`. Those catalogs differ between a developer machine and CI's runner, and a change can
-remove a default without touching a spec. On the shared server, write the entries under
-`servedRoot()`, and registered projects through `workspace-registry.ts`. A spec that boots its own
-server writes them into its fixture repository. Remove them in `afterAll`. Scope assertions to
-seeded entries because checkout and built-in entries can still appear alongside them.
-
-E2E servers read no host global skills. The shared server pins `HOME` to
-`.ai/qa/server-home`; `fixtureServeEnv` pins it to `.server-home` under the fixture root,
-after caller overrides. Both launchers also pin `USERPROFILE` to the same directory for
-Windows `os.homedir()` lookups. Each directory starts empty on a cold boot (fixture boot preparation
-for spec-owned servers). Healthy shared-server reuse keeps its current home. Browser setup
-and builds keep the invoking account's `HOME`; `CEZ_HOME` and the Git identity/config pins
-keep their existing roles. The shared descriptor records the server's `HOME` in its start
-command. Descriptors from before this pin trigger a cold boot.
-
-To reproduce a missing skill catalog, remove the checkout's skill catalog files from a
-disposable checkout (including `.ai/skills`, `.ai/cezar/skills` and project runner skill
-directories when present). No launcher edit or host-home change is needed. A built-in skill
-or an explicitly configured team source is separate; account for those if the reproduction
-requires a completely empty catalog. Tests of global discovery must plant their own skills
-inside the fixture server's sandbox after preparing its environment.
-
-`settings-skills.e2e.ts` shows the failure (hearsay-tools/cezarion#1572). Its scroll case needs a
-skills list long enough to overflow. On CI's runner, only the default team catalog made the list
-that long, and the spec's comment gave "the host's real global catalog" as the reason.
-hearsay-tools/cezarion#1541 removed that catalog, and the case failed only in CI (run
-39983148239 attempt 1, job 120515509286). The spec now seeds 40 filler skills.
-`skill-search-ranking.e2e.ts` shows the pattern: it seeds its 24 browse rows, and it checks
-membership against its own fixture skills only, so unrelated catalog entries cannot affect it.
-
-A built-in that a spec tests as product behavior, such as the `quick-task` workflow a new task
-runs, is not a catalog entry in this sense. A change that removes one still searches the specs
-first, as the [reader sweep](../../../.ai/skills/reader-sweep/SKILL.md) says.
+Global skills (`~/.agents/skills`, `~/.claude/skills`) and team caches
+(`~/.cache/cez/skills`, `~/.cache/cez/skill-files`) use the server's sandbox HOME.
+The shared server pins `HOME` and `USERPROFILE` to `.ai/qa/server-home`;
+`fixtureServeEnv` pins both to `.server-home` under its fixture root after caller
+overrides. Cold boot starts empty; healthy shared-server reuse preserves that home.
+Tests of global or team discovery seed their own sandbox sources.
 
 ## A plain dry-run reply parks on a "Next step" card
 
@@ -455,9 +426,9 @@ command remains the single-environment runner used by CI and focused local runs.
 
 Each lane is a temporary checkout at the current `HEAD`, with independent Git administration
 and owned objects, plus this checkout's tracked edits and untracked source files copied in. It gets a private `.ai/qa` directory, `CEZ_HOME`,
-port, environment descriptor, and agent-browser namespace. `node_modules` and the E2E build
-(`.ai/qa/build`) are symlinks to the source checkout; the lane bootstrap checks the E2E
-build marker and cannot rebuild through those links. Do not edit source or rebuild the
+port, environment descriptor, and agent-browser namespace. Dependencies are installed inside each lane from the frozen lockfile, using the shared
+pnpm store offline when available. The E2E build (`.ai/qa/build`) is linked to the source
+checkout; the lane bootstrap checks its marker and cannot rebuild through that link. Do not edit source or rebuild the
 shared assets while a four-lane run is active.
 
 Remote projection reads only repository-local and enabled worktree configuration. Global

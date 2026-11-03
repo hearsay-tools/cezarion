@@ -1,3 +1,4 @@
+import { STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { RunRecord, RunStatus, StepState } from '@open-mercato/cezar-api-client'
@@ -12,8 +13,8 @@ import {
 const step = (extra: Partial<StepState> = {}): StepState => ({
   id: 'task',
   name: 'Do the task',
-  kind: 'agent',
-  status: 'done',
+  kind: STEP_KIND.agent,
+  status: STEP_STATUS.done,
   iterations: 1,
   tokensUsed: 0,
   ...extra,

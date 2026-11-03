@@ -1,3 +1,9 @@
+import {
+  RUN_STATUS,
+  STEP_KIND,
+  STEP_STATUS,
+  WAIT_KIND,
+} from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router'
@@ -70,7 +76,7 @@ const RUNS: RunIndexEntry[] = [
     projectId: 'api',
     id: 'a1',
     title: 'Add checkout endpoint',
-    status: 'running',
+    status: RUN_STATUS.running,
     createdAt: '2026-07-14T10:00:00Z',
     archived: false,
     workflow: 'quick-task',
@@ -87,7 +93,7 @@ const RUNS: RunIndexEntry[] = [
     projectId: 'web',
     id: 'w1',
     title: 'Checkout page',
-    status: 'review',
+    status: RUN_STATUS.review,
     createdAt: '2026-07-14T09:00:00Z',
     archived: false,
     workflow: 'plan-first',
@@ -100,7 +106,7 @@ const RUNS: RunIndexEntry[] = [
     projectId: 'infra',
     id: 'i1',
     title: 'Bump the runner',
-    status: 'done',
+    status: RUN_STATUS.done,
     createdAt: '2026-07-14T08:00:00Z',
     archived: false,
     workflow: 'quick-task',
@@ -242,7 +248,7 @@ function runDetail(index: MockIndex, detail: RegExpExecArray): Response {
   const [, projectId, id] = detail
   const found = index.rows.find((run) => run.projectId === projectId && run.id === id)
   if (!found) return jsonResponse({ error: 'not found' }, 404)
-  return jsonResponse({ ...found, task: found.title, tokensUsed: 0, steps: [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 'sess-1' }] })
+  return jsonResponse({ ...found, task: found.title, tokensUsed: 0, steps: [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, sessionId: 'sess-1' }] })
 }
 
 /** A project's automation definitions; 409 while it has none, as with automations off. */
@@ -914,7 +920,7 @@ describe('global tasks page', () => {
         runs: [
           {
             ...RUNS[0]!,
-            status: 'running',
+            status: RUN_STATUS.running,
             costUsd: 0.31,
             usage: { cpuPct: 84, rssBytes: 612 * 1024 * 1024, procCount: 3 },
           },
@@ -956,7 +962,7 @@ describe('global tasks page', () => {
         runs: [
           {
             ...RUNS[2]!,
-            status: 'done',
+            status: RUN_STATUS.done,
             usage: { cpuPct: 99, rssBytes: 1024, procCount: 1 },
           },
         ],
@@ -983,7 +989,7 @@ describe('global tasks page', () => {
   describe('read / unread', () => {
     // A finished, unopened task — the state the marker exists for.
     const unreadRun = () => [
-      { ...RUNS[2]!, status: 'done' as const, finishedAt: '2026-07-14T09:00:00Z' },
+      { ...RUNS[2]!, status: RUN_STATUS.done, finishedAt: '2026-07-14T09:00:00Z' },
     ]
 
     it('marks a task read in its OWN project, clearing the unread marker', async () => {
@@ -1099,7 +1105,7 @@ describe('global tasks page', () => {
     // this is the other half — an invalidated index really is re-read when the page remounts.
     const unread: RunIndexEntry = {
       ...RUNS[2]!,
-      status: 'done',
+      status: RUN_STATUS.done,
       finishedAt: '2026-07-14T09:00:00Z',
     }
     stubFetch({ runs: [unread] })
@@ -1153,6 +1159,7 @@ describe('global tasks page', () => {
     renderPage()
 
     const hint = await screen.findByText(/Tag connected repositories in/)
+    expect(hint.textContent).toBe('Tag connected repositories in Settings → Projects to group their tasks together here.')
     // …and it is a real door, not a sentence naming a place the reader has to go find.
     expect(
       hint.querySelector('a[href="/settings/global/projects"]')?.textContent,
@@ -1174,8 +1181,8 @@ it('hides indexed workers while preserving parked-parent waiting phases', async 
   const runs = [
     { ...RUNS[0]!, id: 'worker', delegation: { role: 'worker' as const, parentRunId: 'parent' } },
     // An index row carries its summary's `waitingOn` and `waitWakePending` (hearsay-tools/cezarion#1301).
-    { ...RUNS[0]!, id: 'parked', status: 'waiting' as const, delegation: { role: 'root' as const }, waitingOn: { kind: 'workers' as const, count: 0 } },
-    { ...RUNS[0]!, id: 'wake-pending', status: 'waiting' as const, delegation: { role: 'root' as const }, waitWakePending: true as const },
+    { ...RUNS[0]!, id: 'parked', status: RUN_STATUS.waiting, delegation: { role: 'root' as const }, waitingOn: { kind: 'workers' as const, count: 0 } },
+    { ...RUNS[0]!, id: 'wake-pending', status: RUN_STATUS.waiting, delegation: { role: 'root' as const }, waitWakePending: true as const },
   ]
   stubFetch({ runs }); renderPage()
   await waitFor(() => expect(document.querySelector('[data-slot="global-task-row"][data-run-id="parked"]')).not.toBeNull())
@@ -1188,7 +1195,7 @@ it('hides indexed workers while preserving parked-parent waiting phases', async 
 })
 
 it('shows a parked parent human question from the slim workspace index', async () => {
-  stubFetch({ runs: [{ ...RUNS[0]!, id: 'asking-parent', status: 'waiting', delegation: { role: 'root' }, waitingOn: { kind: 'human' } }] })
+  stubFetch({ runs: [{ ...RUNS[0]!, id: 'asking-parent', status: RUN_STATUS.waiting, delegation: { role: 'root' }, waitingOn: { kind: WAIT_KIND.human } }] })
   renderPage()
   await waitFor(() => expect(document.querySelector('[data-slot="global-task-row"][data-run-id="asking-parent"]')).not.toBeNull())
   const row = document.querySelector('[data-slot="global-task-row"][data-run-id="asking-parent"]')
@@ -1212,7 +1219,7 @@ it('renders a parent request-wait as a global-task-row and hides the worker', as
         ...RUNS[0]!,
         id: 'parent-wait',
         title: 'Parent wait',
-        status: 'waiting',
+        status: RUN_STATUS.waiting,
         delegation: { role: 'root' },
         waitingOn: { kind: 'workers', count: 0, replies: true },
       },
@@ -1220,7 +1227,7 @@ it('renders a parent request-wait as a global-task-row and hides the worker', as
         ...RUNS[0]!,
         id: 'request-wait',
         title: 'Worker wait',
-        status: 'waiting',
+        status: RUN_STATUS.waiting,
         delegation: { role: 'worker', parentRunId: 'parent' },
         waitingOn: { kind: 'workers', count: 0, replies: true },
       },
@@ -1242,7 +1249,7 @@ describe('global tasks — status groups and origin (hearsay-tools/cezarion#1616
   })
 
   const automated: RunIndexEntry = {
-    ...RUNS[2]!, projectId: 'web', id: 'nightly-run', title: 'Nightly health', automationId: 'health', status: 'done', createdAt: '2026-07-14T07:00:00Z',
+    ...RUNS[2]!, projectId: 'web', id: 'nightly-run', title: 'Nightly health', automationId: 'health', status: RUN_STATUS.done, createdAt: '2026-07-14T07:00:00Z',
   }
   const origins = () => [...document.querySelectorAll('[data-slot="global-task-row"] [data-slot="task-origin"]')].map((line) => line.textContent)
 

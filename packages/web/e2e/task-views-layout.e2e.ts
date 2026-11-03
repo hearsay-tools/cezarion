@@ -3,13 +3,18 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { beforeAll, afterAll, expect, it } from 'vitest'
+import { seedRuns, recordedRun } from './seed-runs'
 import { settleVisual } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForHealth, pollFor, pollJson } from './poll'
-import record from './fixtures/thread-run.record.json'
+import recordJson from './fixtures/thread-run.record.json'
 // fixture-server starts: 1
+
+const record = recordedRun(recordJson)
 
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e/task-views')
 let root: string, base: string, project: string, automationId: string
@@ -26,9 +31,9 @@ beforeAll(async () => {
     writeFileSync(join(worktreePath, 'comparison.md'), `# Variant ${variant}\nDifferent implementation ${variant}.\n`)
     execFileSync('git', ['-C', worktreePath, 'add', 'comparison.md'])
     execFileSync('git', ['-C', worktreePath, 'commit', '-qm', `Variant ${variant}`])
-    return { ...record, id: `fixture-${variant}`, title: `Validate task views (${variant})`, status: 'done', archived: false, worktreePath, branch: `cez/fixture-${variant}`, inputTokens: 42000, outputTokens: 6000, costUsd: 0.42, peakRssBytes: 440401920, diffStat: { adds: 2, dels: 0, files: 1 } }
+    return ({ ...record, id: `fixture-${variant}`, title: `Validate task views (${variant})`, status: RUN_STATUS.done, archived: false, worktreePath, branch: `cez/fixture-${variant}`, inputTokens: 42000, outputTokens: 6000, costUsd: 0.42, peakRssBytes: 440401920, diffStat: { adds: 2, dels: 0, files: 1 } } satisfies Partial<RunRecord>)
   })
-  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify(runs))
+  seedRuns(root, runs)
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], { env: fixtureServeEnv(root, { CEZ_AUTOMATIONS: '1' }), stdio: 'ignore' })
   base = await waitForFixtureServer(server)
   project = await bootProjectId(base)

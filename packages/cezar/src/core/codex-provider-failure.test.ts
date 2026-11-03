@@ -1,3 +1,4 @@
+import { STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it } from 'vitest';
 import { driveRun, driveSeam } from './harness-parity.testkit.ts';
 
@@ -16,7 +17,7 @@ describe('Codex 0.147 provider completion (#83)', () => {
       (record) => ['failed', 'waiting', 'done', 'review'].includes(record?.status ?? ''));
     expect(obs.record?.status).toBe('failed');
     expect(obs.statuses).not.toContain('waiting');
-    expect(obs.events).toContainEqual(expect.objectContaining({ type: 'step-end', status: 'failed' }));
+    expect(obs.events).toContainEqual(expect.objectContaining({ type: 'step-end', status: STEP_STATUS.failed }));
     expect(obs.events).toContainEqual(expect.objectContaining({
       type: 'error', message: expect.stringContaining('"status":400'),
     }));

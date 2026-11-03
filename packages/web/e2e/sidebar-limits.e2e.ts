@@ -1,8 +1,11 @@
 import type { ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, expect, it } from 'vitest'
+import { seedRuns } from './seed-runs'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { waitForSettledSample } from './visual-ready'
@@ -19,12 +22,12 @@ beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'cez-sidebar-limits-'))
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
   mkdirSync(artifacts, { recursive: true })
-  const runs = ['waiting', 'done', 'running'].flatMap((status, section) => Array.from({ length: 4 }, (_, i) => ({
+  const runs = [RUN_STATUS.waiting, RUN_STATUS.done, RUN_STATUS.running].flatMap((status, section) => Array.from({ length: 4 }, (_, i) => ({
     id: `limit-${section}-${i}`, title: `${['Needs attention', 'Finished task', 'Working task'][section]} ${i + 1}`, task: 'Sidebar fixture',
-    workflow: 'quick-task', runner: 'claude', status: status === 'running' ? 'waiting' : status, ...(status === 'running' ? { autoResumeAt: new Date(Date.now() + 86_400_000).toISOString() } : {}), createdAt: new Date(Date.now() - i * 60000).toISOString(),
+    workflow: 'quick-task', runner: 'claude', status: status === RUN_STATUS.running ? RUN_STATUS.waiting : status, ...(status === RUN_STATUS.running ? ({ autoResumeAt: new Date(Date.now() + 86_400_000).toISOString() } satisfies Partial<RunRecord>) : {}), createdAt: new Date(Date.now() - i * 60000).toISOString(),
     tokensUsed: 0, archived: false, steps: [],
-  })))
-  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify(runs))
+  } satisfies Partial<RunRecord>)))
+  seedRuns(root, runs)
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })

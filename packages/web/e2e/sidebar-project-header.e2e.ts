@@ -1,9 +1,12 @@
 import type { ChildProcess } from 'node:child_process'
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seedRuns } from './seed-runs'
 import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
@@ -20,10 +23,10 @@ beforeAll(async () => {
     execFileSync('git', ['-C', root, '-c', 'user.name=E2E', '-c', 'user.email=e2e@example.test', 'commit', '--allow-empty', '-m', 'fixture'], { stdio: 'ignore' })
     execFileSync('git', ['-C', root, 'remote', 'add', 'origin', 'https://github.com/example/header-fixture.git'], { stdio: 'ignore' })
     mkdirSync(join(root, '.ai/cezar'), { recursive: true })
-    writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify(['done', 'failed'].map(status => ({
+    seedRuns(root, [RUN_STATUS.done, RUN_STATUS.failed].map(status => ({
       id: status, title: `${status} task`, task: 'Header test', workflow: 'default', status,
       createdAt: '2026-09-01T00:00:00Z', finishedAt: '2026-09-01T01:00:00Z', tokensUsed: 0, archived: false, steps: [],
-    }))))
+    } satisfies Partial<RunRecord>)))
     const server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
       env: fixtureServeEnv(root, { CEZ_REMOTE: remote ? '1' : '0', CEZ_AUTOMATIONS: '1' }), stdio: 'ignore',
     })

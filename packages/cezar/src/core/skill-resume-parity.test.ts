@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 /**
  * #790: a skill-driven task must keep `skillSystemPrompt` on Continue and
  * restart recovery for every runner that resends the system prompt, and must
@@ -444,16 +445,16 @@ describe('harness parity — skill system prompt on Continue (#790)', () => {
         const original = fixture.store.getRun(fixture.runId)!.steps[0]!;
         await idleClose(fixture.manager, fixture.runId);
         fixture.store.addStep(fixture.runId, {
-          id: 'continue-1', name: 'Continue', kind: 'agent', synthetic: 'continuation',
+          id: 'continue-1', name: 'Continue', kind: STEP_KIND.agent, synthetic: 'continuation',
         });
         fixture.store.updateStep(fixture.runId, 'continue-1', {
-          status: 'running', sessionId, backend,
+          status: STEP_STATUS.running, sessionId, backend,
           ...(original.sessionTransport ? { sessionTransport: original.sessionTransport } : {}),
         });
         // A user's Continue checkpoints its message before the session opens; it answers the
         // question the run parked on (hearsay-tools/cezarion#1234).
         fixture.store.updateRun(fixture.runId, {
-          status: 'running', currentStepId: 'continue-1', finishedAt: undefined,
+          status: RUN_STATUS.running, currentStepId: 'continue-1', finishedAt: undefined,
           continuationMessage: { id: 'continue-1', text: promptFor(backend, 'baseline'), origin: 'human', createdAt: new Date().toISOString() },
         });
         expect(fixture.store.readEvents(fixture.runId).some(event =>

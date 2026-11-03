@@ -1,15 +1,19 @@
 import type { ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { seedRuns, recordedRun } from './seed-runs'
 import { seedTranscript } from './seed-transcript'
-
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
-import record from './fixtures/thread-run.record.json'
+import recordJson from './fixtures/thread-run.record.json'
 // fixture-server starts: 1
+
+const record = recordedRun(recordJson)
 
 /**
  * #730 — an assistant reply's single newlines render as visible line breaks in the loaded
@@ -22,16 +26,16 @@ const repoRoot = resolve(import.meta.dirname, '../../..')
 const artifactsDir = resolve(repoRoot, '.ai/qa/artifacts_e2e')
 const sessionId = `e2e-assistant-line-breaks-${process.pid}`
 const RUN_ID = 'aaaaaaaa-7300-4222-8333-bbbbbbbbbbbb'
-const RUN = {
+const RUN = ({
   ...record,
   id: RUN_ID,
   title: 'Assistant line breaks',
   titleSummary: 'Assistant line breaks',
   task: 'Show the plan.',
-  status: 'review',
-  steps: [record.steps[0]],
+  status: RUN_STATUS.review,
+  steps: [record.steps[0]!],
   pullRequestUrl: undefined,
-}
+} satisfies Partial<RunRecord>)
 const LONG = 'a-very-long-unbroken-token-'.repeat(12)
 const REPLY = [
   'Step one done',
@@ -51,7 +55,7 @@ const REPLY = [
   '```',
 ].join('\n')
 const events = [
-  { type: 'step-start', stepId: 'task', name: 'Do the task', kind: 'agent', iteration: 1 },
+  { type: 'step-start', stepId: 'task', name: 'Do the task', kind: STEP_KIND.agent, iteration: 1 },
   { type: 'session.started', sessionId: 's', backend: 'claude', stepId: 'task' },
   { type: 'turn.started', turnId: 'turn_1', stepId: 'task' },
   { type: 'item.started', item: { kind: 'message', id: 'm1', role: 'assistant', text: REPLY }, stepId: 'task' },
@@ -69,7 +73,7 @@ const MESSAGE = `document.querySelector('[data-slot="assistant-message"] .thread
 beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-assistant-breaks-'))
   mkdirSync(join(dataRoot, '.ai/cezar/runs'), { recursive: true })
-  writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([RUN], null, 2), 'utf8')
+  seedRuns(dataRoot, [RUN])
   seedTranscript(
     join(dataRoot, '.ai/cezar/runs', `${RUN_ID}.ndjson`),
     events.map((event) => JSON.stringify(event)).join('\n') + '\n',

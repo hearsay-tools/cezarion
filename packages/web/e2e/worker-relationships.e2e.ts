@@ -1,10 +1,13 @@
-import { clickAppearanceControl } from './appearance-control'
 import { execFileSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { RUN_STATUS, STEP_STATUS, STEP_KIND, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, expect, it } from 'vitest'
+import { seedRuns } from './seed-runs'
+import { clickAppearanceControl } from './appearance-control'
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
@@ -25,34 +28,36 @@ let root: string, base: string, project: string, server: ChildProcess, browser: 
 const observations: unknown[] = []
 let diagnostic = ''
 const route = (id: string) => `/p/${project}/tasks/${id}`
-const record = (id: string, title: string, extra = {}) => ({ id, title, task: title, workflow: 'quick-task', runner: 'claude', status: 'done', createdAt: now, tokensUsed: 0, steps: [], ...extra })
+const record = (id: string, title: string, extra: Partial<RunRecord> = {}) => ({ id, title, task: title, workflow: 'quick-task', runner: 'claude', status: RUN_STATUS.done, createdAt: now, tokensUsed: 0, steps: [], ...extra } satisfies Partial<RunRecord>)
+type RootDelegation = Extract<NonNullable<RunRecord['delegation']>, { role: 'root' }>
+type WorkerDelegation = Extract<NonNullable<RunRecord['delegation']>, { role: 'worker' }>
 const receipts = (workers: string[]) => workers.map(workerId => ({ workerId, requestId: randomUUID(), requestHash: 'a'.repeat(64) }))
-const rootMetadata = (workers: string[]) => ({ role: 'root', permissions: [], receipts: receipts(workers) })
-const wait = () => ({ id: randomUUID(), workerIds: [absentId], deadline: new Date(Date.now() + 3_600_000).toISOString(), phase: 'parked', outcomes: [] })
-const worker = (id: string, parentRunId: string, extra = {}) => ({ role: 'worker', parentRunId, permissions: [], workspace: { ownerRunId: id, resourceId: randomUUID(), kind: 'owned-isolated', path: join(root, '.ai/cezar/worktrees', id), branch: `cez/${id.slice(0, 8)}`, baselineSha: 'a'.repeat(40) }, ...extra })
+const rootMetadata = (workers: string[]): RootDelegation => ({ role: 'root', permissions: [], receipts: receipts(workers) })
+const wait = (): NonNullable<RootDelegation['wait']> => ({ id: randomUUID(), workerIds: [absentId], deadline: new Date(Date.now() + 3_600_000).toISOString(), phase: 'parked', outcomes: [] })
+const worker = (id: string, parentRunId: string, extra: Partial<WorkerDelegation> = {}): WorkerDelegation => ({ role: 'worker', parentRunId, permissions: [], workspace: { ownerRunId: id, resourceId: randomUUID(), kind: 'owned-isolated', path: join(root, '.ai/cezar/worktrees', id), branch: `cez/${id.slice(0, 8)}`, baselineSha: 'a'.repeat(40) }, ...extra })
 
 beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'cezar-e2e-relationships-'))
   execFileSync('git', ['init', '-q', '-b', 'main', root])
   mkdirSync(join(root, '.ai/cezar/runs'), { recursive: true })
   const runs = [
-    record(parentId, 'Relationship parent with 32 workers', { delegation: rootMetadata(ids), issueNumber: 751, steps: [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }] }),
+    record(parentId, 'Relationship parent with 32 workers', { delegation: rootMetadata(ids), issueNumber: 751, steps: [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0 }] }),
     ...ids.map((id, i) => record(id, `Owned worker ${i + 1}`, { archived: i === 31, delegation: worker(id, parentId, i === 0 ? { destroy: { requestedAt: now, phase: 'incomplete', remaining: ['branch'], error: 'Branch is checked out elsewhere' } } : {}) })),
     record(orphanId, 'Worker with unavailable parent', { delegation: worker(orphanId, absentId) }),
-    record(longWorkerId, 'Worker with a long task title that must fit beside Parent and the title controls', { delegation: worker(longWorkerId, parentId), steps: [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }] }),
-    record(waitingId, 'Waiting root fixture', { status: 'waiting', delegation: { ...rootMetadata([absentId]), wait: wait() } }),
+    record(longWorkerId, 'Worker with a long task title that must fit beside Parent and the title controls', { delegation: worker(longWorkerId, parentId), steps: [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0 }] }),
+    record(waitingId, 'Waiting root fixture', { status: RUN_STATUS.waiting, delegation: { ...rootMetadata([absentId]), wait: wait() } }),
     // Every ask opens a human wait; attention reads it (hearsay-tools/cezarion#1236, phase 4b).
-    record(askId, 'Question root fixture', { status: 'waiting', delegation: { ...rootMetadata([absentId]), wait: wait() },
-      waits: [{ id: randomUUID(), kind: 'human', source: 'agent', via: 'ask-line', registeredAt: now, phase: 'open', turnId: 'turn-1', askSeq: 1 }] }),
-    record(requestParentId, 'Parent awaiting worker reply', { status: 'waiting', delegation: { ...rootMetadata([requestWorkerId]), wait: { ...wait(), workerIds: [], requestIds: [randomUUID()] } } }),
-    record(requestWorkerId, 'Worker awaiting parent reply', { status: 'waiting', delegation: worker(requestWorkerId, requestParentId, { wait: { ...wait(), workerIds: [], requestIds: [randomUUID()] } }) }),
+    record(askId, 'Question root fixture', { status: RUN_STATUS.waiting, delegation: { ...rootMetadata([absentId]), wait: wait() },
+      waits: [{ id: randomUUID(), kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA["ask-line"], registeredAt: now, phase: WAIT_PHASE.open, turnId: 'turn-1', askSeq: 1 }] }),
+    record(requestParentId, 'Parent awaiting worker reply', { status: RUN_STATUS.waiting, delegation: { ...rootMetadata([requestWorkerId]), wait: { ...wait(), workerIds: [], requestIds: [randomUUID()] } } }),
+    record(requestWorkerId, 'Worker awaiting parent reply', { status: RUN_STATUS.waiting, delegation: worker(requestWorkerId, requestParentId, { wait: { ...wait(), workerIds: [], requestIds: [randomUUID()] } }) }),
     record(emptyId, 'Empty root fixture', { delegation: rootMetadata([]) }),
     ...[loadingId, errorId].map(id => record(id, 'Relationship fault fixture', { delegation: rootMetadata([absentId]) })),
   ]
-  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify(runs))
+  seedRuns(root, runs)
   const events = [
     { seq: 1, ts: now, runId: askId, stepId: 'task', type: 'ask.requested', requestId: 'real-human-question', questions: [{ header: 'Choice', question: 'Which implementation should I use?', options: [{ label: 'Minimal', description: 'Small change' }, { label: 'Expanded', description: 'Wider change' }] }] },
-    { seq: 2, ts: now, runId: askId, stepId: 'task', type: 'agent-input', input: { id: randomUUID(), source: 'agent', parentRunId: parentId, text: 'Preserve the human question', createdAt: now } },
+    { seq: 2, ts: now, runId: askId, stepId: 'task', type: 'agent-input', input: { id: randomUUID(), source: WAIT_SOURCE.agent, parentRunId: parentId, text: 'Preserve the human question', createdAt: now } },
   ]
   seedTranscript(join(root, '.ai/cezar/runs', `${askId}.ndjson`), events.map(event => JSON.stringify(event)).join('\n') + '\n')
   seedTranscript(join(root, '.ai/cezar/runs', `${longWorkerId}.ndjson`), largeThreadEvents(40).map(event => JSON.stringify({ ...event, runId: longWorkerId })).join('\n') + '\n')

@@ -1,3 +1,4 @@
+import { workerInspectionSchema } from '@open-mercato/cezar-api-client/contract/delegation'
 import { useState } from 'react'
 import { QueryClientProvider, onlineManager } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -6,15 +7,22 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { ProjectScopeProvider } from '@/api/project-scope-context'
 import { createQueryClient } from '@/api/query-client'
 import type { ApiRun, WorkerInspection } from '@open-mercato/cezar-api-client'
-import { makeWorkerWait } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import {
+  makeWorkerWait,
+  RUN_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { WorkerActivitySection, WorkerWaitDetails, hasWorkerWaitDetails } from './run-relationships'
 
 const parentId = '10000000-0000-4000-8000-000000000001'
 const workerId = '10000000-0000-4000-8000-000000000002'
 const at = '2026-09-06T00:00:00.000Z'
 const workspace = { ownerRunId: workerId, resourceId: workerId, kind: 'owned-isolated' as const, path: '/managed/worker', branch: 'cez/worker', baselineSha: 'a'.repeat(40) }
-const worker: WorkerInspection = { workerId, parentRunId: parentId, status: 'failed', workspace, destroy: { requestedAt: at, phase: 'incomplete', remaining: ['branch'], error: 'Branch is checked out' } }
-const ordinary: ApiRun = { id: parentId, title: 'Parent', task: 'Do task', workflow: 'quick-task', status: 'running', createdAt: at, tokensUsed: 0, archived: false, steps: [] }
+const worker: WorkerInspection = { workerId, parentRunId: parentId, status: workerInspectionSchema.shape.status.enum.failed, workspace, destroy: { requestedAt: at, phase: 'incomplete', remaining: ['branch'], error: 'Branch is checked out' } }
+const ordinary: ApiRun = { id: parentId, title: 'Parent', task: 'Do task', workflow: 'quick-task', status: RUN_STATUS.running, createdAt: at, tokensUsed: 0, archived: false, steps: [] }
 const root: ApiRun = { ...ordinary, delegation: { role: 'root', permissions: [], receipts: [{ requestId: workerId, workerId, requestHash: 'b'.repeat(64) }] } }
 const child: ApiRun = { ...ordinary, id: workerId, delegation: { role: 'worker', permissions: [], parentRunId: parentId, workspace } }
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
@@ -61,21 +69,21 @@ it('says nothing about a cleanup that completed with nothing left behind', async
   // Every destroyed worker carried a "Cleanup complete" line, on every row, forever. A
   // cleanup that left nothing behind is the expected end of a worker's life, so the line
   // only ever told the reader what they already assumed (#402 feedback).
-  const tidy: WorkerInspection = { ...worker, status: 'done', destroy: { requestedAt: at, phase: 'complete', remaining: [] } }
+  const tidy: WorkerInspection = { ...worker, status: workerInspectionSchema.shape.status.enum.done, destroy: { requestedAt: at, phase: 'complete', remaining: [] } }
   setup(root, async () => json({ workers: [tidy] }))
   const group = await screen.findByRole('group', { name: 'Task relationships' })
   await within(group).findByText('Done')
   expect(within(group).queryByText(/Cleanup/)).toBeNull()
 })
 it('still reports a cleanup that completed with something left behind', async () => {
-  const leftovers: WorkerInspection = { ...worker, status: 'done', destroy: { requestedAt: at, phase: 'complete', remaining: ['worktree'] } }
+  const leftovers: WorkerInspection = { ...worker, status: workerInspectionSchema.shape.status.enum.done, destroy: { requestedAt: at, phase: 'complete', remaining: ['worktree'] } }
   setup(root, async () => json({ workers: [leftovers] }))
   const group = await screen.findByRole('group', { name: 'Task relationships' })
   expect(await within(group).findByText(/Cleanup complete/)).toBeTruthy()
   expect(within(group).getByText(/worktree/)).toBeTruthy()
 })
 it('still reports a cleanup that is only part-way through', async () => {
-  const midway: WorkerInspection = { ...worker, status: 'done', destroy: { requestedAt: at, phase: 'cleaning', remaining: [] } }
+  const midway: WorkerInspection = { ...worker, status: workerInspectionSchema.shape.status.enum.done, destroy: { requestedAt: at, phase: 'cleaning', remaining: [] } }
   setup(root, async () => json({ workers: [midway] }))
   const group = await screen.findByRole('group', { name: 'Task relationships' })
   expect(await within(group).findByText(/Cleanup cleaning/)).toBeTruthy()
@@ -139,9 +147,9 @@ it.each([true, false])('keeps every one of 32 worker links newest first (receipt
 it.each([root, child])('shows request waiting for either participant ($id)', run => {
   if (!run.delegation || run.delegation.role === 'invalid') throw Error('fixture');
   // A request wait is a worker entry in the wait list (hearsay-tools/cezarion#1301).
-  setup({ ...run, status: 'waiting', waits: [{
-    kind: 'worker', id: '10000000-0000-4000-8000-000000000003', source: 'agent', via: 'cez-worker-wait', registeredAt: at,
-    deadline: at, phase: 'open', turnId: 'turn-1', timeoutSeconds: 600, workerIds: [], requestIds: [workerId], revisions: [], outcomes: [],
+  setup({ ...run, status: RUN_STATUS.waiting, waits: [{
+    kind: WAIT_KIND.worker, id: '10000000-0000-4000-8000-000000000003', source: WAIT_SOURCE.agent, via: WAIT_VIA['cez-worker-wait'], registeredAt: at,
+    deadline: at, phase: WAIT_PHASE.open, turnId: 'turn-1', timeoutSeconds: 600, workerIds: [], requestIds: [workerId], revisions: [], outcomes: [],
   }] });
   expect(screen.getByText(run.delegation.role === 'worker' ? /Waiting on parent reply/ : /Waiting on worker replies/)).toBeTruthy();
 });
@@ -149,9 +157,9 @@ it.each([root, child])('shows request waiting for either participant ($id)', run
 // Cezar's completion wait has no deadline (hearsay-tools/cezarion#1301): the parent still reads as
 // waiting on its workers, and the note says nothing ends the wait but their settlement.
 it('shows a parent parked on Cezar\'s completion wait, which has no deadline', () => {
-  setup({ ...root, status: 'waiting', waits: [{
-    kind: 'worker', id: '10000000-0000-4000-8000-000000000003', source: 'cezar', via: 'completion', registeredAt: at,
-    phase: 'open', turnId: 'turn-1', mode: 'all', workerIds: [workerId], revisions: [], outcomes: [],
+  setup({ ...root, status: RUN_STATUS.waiting, waits: [{
+    kind: WAIT_KIND.worker, id: '10000000-0000-4000-8000-000000000003', source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion, registeredAt: at,
+    phase: WAIT_PHASE.open, turnId: 'turn-1', mode: 'all', workerIds: [workerId], revisions: [], outcomes: [],
   }] });
   expect(screen.getByText('Waiting on 1 worker. No deadline: Cezar wakes this task when they have all settled.')).toBeTruthy();
   expect(screen.queryByText(/Deadline:/)).toBeNull();
@@ -175,13 +183,13 @@ it('collapses worker navigation on phones and preserves its scoped links when re
 // #816: capacity is reclaimable, so history beyond the old 32 is listed in full.
 const workerAt = (n: number): WorkerInspection => {
   const id = `20000000-0000-4000-8000-${String(n).padStart(12, '0')}`
-  return { workerId: id, parentRunId: parentId, status: 'done', workspace: { ...workspace, ownerRunId: id, resourceId: id }, destroy: { requestedAt: at, phase: 'complete', remaining: [] } }
+  return { workerId: id, parentRunId: parentId, status: workerInspectionSchema.shape.status.enum.done, workspace: { ...workspace, ownerRunId: id, resourceId: id }, destroy: { requestedAt: at, phase: 'complete', remaining: [] } }
 }
 const rootOf = (workers: WorkerInspection[]): ApiRun => ({ ...ordinary, delegation: { role: 'root', permissions: [], receipts: workers.map(w => ({ requestId: w.workerId, workerId: w.workerId, requestHash: 'b'.repeat(64) })) } })
 const capacityOf = (outstanding: number, created = outstanding) => ({ outstanding, limit: 32, created, creationLimit: 1024 })
 const section = () => screen.findByRole('group', { name: 'Task relationships' })
 const cleanUp = (id: string) => ({ name: `Clean up worker ${id.slice(0, 8)}` })
-const settled: WorkerInspection = { ...worker, status: 'done', destroy: undefined }
+const settled: WorkerInspection = { ...worker, status: workerInspectionSchema.shape.status.enum.done, destroy: undefined }
 
 it('lists every historical worker beyond 32 without slicing (#816)', async () => {
   const many = Array.from({ length: 33 }, (_, n) => workerAt(n))
@@ -201,7 +209,7 @@ it('explains exhausted capacity and its recovery (#816)', async () => {
   expect(await screen.findByText('All worker slots are in use. Clean up finished workers to free a slot.')).toBeTruthy()
 })
 it('offers Clean up only for settled workers that are not verifiably destroyed (#816)', async () => {
-  const live = { ...workerAt(1), status: 'running' as const, destroy: undefined }
+  const live = { ...workerAt(1), status: workerInspectionSchema.shape.status.enum.running, destroy: undefined }
   const gone = workerAt(2)
   setup(rootOf([settled, live, gone]), async () => json({ workers: [settled, live, gone], capacity: capacityOf(2, 3) }))
   const group = await section()
@@ -242,7 +250,7 @@ it('surfaces a refusal the user cannot fix by retrying Clean up (#816)', async (
 })
 
 it('names an archived worker the run list no longer carries from the relationships titles (#864)', async () => {
-  const archivedWorker: WorkerInspection = { ...worker, status: 'done', destroy: undefined }
+  const archivedWorker: WorkerInspection = { ...worker, status: workerInspectionSchema.shape.status.enum.done, destroy: undefined }
   setup(root, async () => json({ workers: [archivedWorker], titles: [{ id: workerId, title: 'Old worker', titleSummary: 'Fixed the parser' }] }))
   const group = await screen.findByRole('group', { name: 'Task relationships' })
   expect(await within(group).findByText('Fixed the parser')).toBeTruthy()
@@ -250,7 +258,7 @@ it('names an archived worker the run list no longer carries from the relationshi
 
 it('says when a stuck cleanup needs attention, when it checks next, and how to try now (hearsay-tools/cezarion#879)', async () => {
   const nextAt = new Date(Date.now() + 42 * 60_000 + 30_000).toISOString()
-  const stuck: WorkerInspection = { ...worker, status: 'done', destroy: { requestedAt: at, phase: 'incomplete', remaining: ['worktree', 'branch'],
+  const stuck: WorkerInspection = { ...worker, status: workerInspectionSchema.shape.status.enum.done, destroy: { requestedAt: at, phase: 'incomplete', remaining: ['worktree', 'branch'],
     error: "Worker termination is not proven: process 42 still holds the worker's worktree or scratch; retry cleanup later",
     retry: { attempts: 10, nextAt, needsAttention: true } } }
   setup(root, async () => json({ workers: [stuck] }))
@@ -261,7 +269,7 @@ it('says when a stuck cleanup needs attention, when it checks next, and how to t
   expect(row.querySelector('time')?.getAttribute('dateTime')).toBe(nextAt)
 })
 it('says an incomplete cleanup is retrying on its own, and when (hearsay-tools/cezarion#879)', async () => {
-  const retrying: WorkerInspection = { ...worker, status: 'done', destroy: { requestedAt: at, phase: 'incomplete', remaining: ['branch'], error: 'Branch is checked out.',
+  const retrying: WorkerInspection = { ...worker, status: workerInspectionSchema.shape.status.enum.done, destroy: { requestedAt: at, phase: 'incomplete', remaining: ['branch'], error: 'Branch is checked out.',
     retry: { attempts: 2, nextAt: new Date(Date.now() + 3 * 60_000 + 30_000).toISOString() } } }
   setup(root, async () => json({ workers: [retrying] }))
   const group = await screen.findByRole('group', { name: 'Task relationships' })
@@ -273,7 +281,7 @@ it('keeps the next-check countdown true while the cockpit sits open (hearsay-too
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'], now: Date.now() })
   try {
     const nextAt = new Date(Date.now() + 42 * 60_000 + 30_000).toISOString()
-    const stuck: WorkerInspection = { ...worker, status: 'done', destroy: { requestedAt: at, phase: 'incomplete', remaining: ['worktree'],
+    const stuck: WorkerInspection = { ...worker, status: workerInspectionSchema.shape.status.enum.done, destroy: { requestedAt: at, phase: 'incomplete', remaining: ['worktree'],
       retry: { attempts: 10, nextAt, needsAttention: true } } }
     setup(root, async () => json({ workers: [stuck] }))
     const group = await screen.findByRole('group', { name: 'Task relationships' })
@@ -289,15 +297,15 @@ it('runs a countdown clock only for a cleanup that is retrying (hearsay-tools/ce
   const countdowns = () => intervals.mock.calls.filter(([, ms]) => ms === 30_000).length
   // A family of finished, tidy and incomplete-without-retry workers: no row has a next check.
   const quiet = [
-    { ...workerAt(1), status: 'done' as const, destroy: { requestedAt: at, phase: 'complete' as const, remaining: [] } },
-    { ...workerAt(2), status: 'done' as const, destroy: undefined },
-    { ...workerAt(3), status: 'done' as const, destroy: { requestedAt: at, phase: 'incomplete' as const, remaining: ['branch' as const] } },
+    { ...workerAt(1), status: workerInspectionSchema.shape.status.enum.done, destroy: { requestedAt: at, phase: 'complete' as const, remaining: [] } },
+    { ...workerAt(2), status: workerInspectionSchema.shape.status.enum.done, destroy: undefined },
+    { ...workerAt(3), status: workerInspectionSchema.shape.status.enum.done, destroy: { requestedAt: at, phase: 'incomplete' as const, remaining: ['branch' as const] } },
   ]
   setup(rootOf(quiet), async () => json({ workers: quiet, capacity: capacityOf(2, 3) }))
   await waitFor(async () => expect((await section()).querySelectorAll('[aria-label^="Worker task"]').length).toBe(3))
   expect(countdowns()).toBe(0)
   cleanup(); intervals.mockClear()
-  const retrying = { ...workerAt(4), status: 'done' as const, destroy: { requestedAt: at, phase: 'incomplete' as const, remaining: ['branch' as const],
+  const retrying = { ...workerAt(4), status: workerInspectionSchema.shape.status.enum.done, destroy: { requestedAt: at, phase: 'incomplete' as const, remaining: ['branch' as const],
     retry: { attempts: 2, nextAt: new Date(Date.now() + 120_000).toISOString() } } }
   setup(rootOf([...quiet, retrying]), async () => json({ workers: [...quiet, retrying], capacity: capacityOf(3, 4) }))
   await within(await section()).findByText(/Retrying automatically/)
@@ -305,8 +313,8 @@ it('runs a countdown clock only for a cleanup that is retrying (hearsay-tools/ce
 })
 
 it('offers Retry clean up while a destroy is pending, and plain Clean up otherwise (hearsay-tools/cezarion#879)', async () => {
-  const pending: WorkerInspection = { ...worker, status: 'done', destroy: { requestedAt: at, phase: 'incomplete', remaining: ['branch'] } }
-  const fresh: WorkerInspection = { ...workerAt(3), status: 'done', destroy: undefined }
+  const pending: WorkerInspection = { ...worker, status: workerInspectionSchema.shape.status.enum.done, destroy: { requestedAt: at, phase: 'incomplete', remaining: ['branch'] } }
+  const fresh: WorkerInspection = { ...workerAt(3), status: workerInspectionSchema.shape.status.enum.done, destroy: undefined }
   setup(rootOf([pending, fresh]), async () => json({ workers: [pending, fresh], capacity: capacityOf(2) }))
   const group = await section()
   const retry = await within(group).findByRole('button', { name: `Retry clean up of worker ${workerId.slice(0, 8)}` })
