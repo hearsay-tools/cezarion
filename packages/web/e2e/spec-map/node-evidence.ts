@@ -54,11 +54,13 @@ export function scriptFunctions(script: CoverageScript, root: string): FunctionE
 /** Read both per-spec server snapshots and task-owned mock-process coverage. */
 export function nodeEvidence(logs: string, spec: string, root: string): FunctionEvidence[] {
   const dir = join(logs, basename(spec, '.e2e.ts'), 'node')
-  if (!existsSync(dir)) return []
+  const local = existsSync(dir) ? readdirSync(dir, { recursive: true, encoding: 'utf8' })
+    .filter((name) => name.endsWith('.json')).map((name) => join(dir, name)) : []
+  const shared = existsSync(logs) ? readdirSync(logs)
+    .filter((name) => /^shared-startup-\d+\.json$/.test(name)).map((name) => join(logs, name)) : []
   const result: FunctionEvidence[] = []
-  for (const name of readdirSync(dir, { recursive: true, encoding: 'utf8' })) {
-    if (!name.endsWith('.json')) continue
-    const report = JSON.parse(readFileSync(join(dir, name), 'utf8')) as { result?: CoverageScript[] }
+  for (const file of [...local, ...shared]) {
+    const report = JSON.parse(readFileSync(file, 'utf8')) as { result?: CoverageScript[] }
     for (const script of report.result ?? []) result.push(...scriptFunctions(script, root))
   }
   return result
@@ -66,7 +68,10 @@ export function nodeEvidence(logs: string, spec: string, root: string): Function
 
 /** A missing process report leaves its owner's evidence incomplete, including abrupt SIGKILL. */
 export function nodeCaptureComplete(logs: string, spec: string): boolean {
-  if (existsSync(logs) && readdirSync(logs).some((name) => name.startsWith('ambiguous-task-') && name.endsWith('.json'))) return false
+  if (!existsSync(logs)) return false
+  const shared = readdirSync(logs)
+  if (!shared.some((name) => /^shared-startup-\d+\.json$/.test(name))) return false
+  if (shared.some((name) => name.startsWith('ambiguous-task-') && name.endsWith('.json'))) return false
   const dir = join(logs, basename(spec, '.e2e.ts'), 'node')
   if (!existsSync(dir)) return false
   const names = readdirSync(dir, { recursive: true, encoding: 'utf8' })

@@ -328,7 +328,7 @@ npm run test:e2e:affected -- --plan --map=<file>   # a map you built or download
 
 The `E2E spec map` workflow records which specs run cockpit code, server functions and
 `packages/cezar/scripts/mock-*.mjs` functions. Coverage hooks run only in that workflow.
-The shared server reports precise V8 coverage between specs. Mock coverage stays with the
+The shared server reports precise V8 coverage between specs; its startup functions count for every spec. Mock coverage stays with the
 spec and task that started the process, even when that process survives into another spec.
 The source-map build must match the served browser JavaScript byte for byte.
 A task without a known creating spec makes Node evidence incomplete.

@@ -20,6 +20,8 @@ async function install(root, owner) {
   const socket = join(process.platform === 'win32' ? tmpdir() : '/tmp', `cez-map-${createHash('sha256').update(root).digest('hex').slice(0, 12)}-${process.pid}.sock`);
   const session = new Session();
   let active = owner ? undefined : process.env.E2E_SPEC_MAP_SPEC;
+  const shared = !owner && !process.env.E2E_SPEC_MAP_SPEC;
+  let startupSaved = false;
   let sequence = 0;
   let spawnSequence = 0;
   const owners = new Map();
@@ -37,7 +39,12 @@ async function install(root, owner) {
     function receive() {
       try {
         const command = JSON.parse(input);
-        if (command.action === 'begin') { snapshot(); active = command.spec; expectServer(active); }
+        if (command.action === 'begin') {
+          snapshot(undefined, shared && !startupSaved);
+          startupSaved = true;
+          active = command.spec;
+          expectServer(active);
+        }
         else if (command.action === 'end') { snapshot(active); active = undefined; }
         else if (command.action === 'flush' && owner) takeCoverage();
         else throw new Error('unknown capture command');
@@ -48,10 +55,10 @@ async function install(root, owner) {
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(socket, () => {
-    server.unref();
-    const manifest = { socket, pid: process.pid, spec: owner, taskId: process.env.CEZ_TASK_ID };
-    writeRecord(join(root, owner ? 'processes' : 'servers', `${process.pid}.json`), manifest);
-    if (!owner && !process.env.E2E_SPEC_MAP_SPEC) writeRecord(join(root, 'control.json'), manifest);
+      server.unref();
+      const manifest = { socket, pid: process.pid, spec: owner, taskId: process.env.CEZ_TASK_ID };
+      writeRecord(join(root, owner ? 'processes' : 'servers', `${process.pid}.json`), manifest);
+      if (!owner && !process.env.E2E_SPEC_MAP_SPEC) writeRecord(join(root, 'control.json'), manifest);
       resolve();
     });
   });
@@ -76,9 +83,13 @@ async function install(root, owner) {
     mkdirSync(dir, { recursive: true });
     writeRecord(join(dir, `expected-server-${process.pid}.json`), { spec, pid: process.pid });
   }
-  function snapshot(spec) {
+  function snapshot(spec, startup = false) {
     session.post('Profiler.takePreciseCoverage', (error, result) => {
       if (error) throw error;
+      if (startup) {
+        writeRecord(join(root, `shared-startup-${process.pid}.json`), result);
+        return;
+      }
       if (!spec) return;
       const dir = join(root, basename(spec, '.e2e.ts'), 'node');
       mkdirSync(dir, { recursive: true });

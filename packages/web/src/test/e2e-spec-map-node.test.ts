@@ -1,8 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { once } from 'node:events'
-import { chmodSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
 import { beginNodeCapture, endNodeCapture } from '../../e2e/spec-map/node-control.ts'
 
@@ -16,12 +16,27 @@ afterEach(async () => {
     child.kill('SIGTERM')
     await exited
   }
-  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true })
+  for (const directory of directories.splice(0)) {
+    // Our precise-coverage reads reset V8's shared counters. Preserve those reads for
+    // an external collector before removing the test's own evidence.
+    const external = process.env.NODE_V8_COVERAGE
+    if (external) {
+      mkdirSync(external, { recursive: true })
+      for (const file of readdirSync(directory, { recursive: true, encoding: 'utf8' })) {
+        if (/^(?:server-|shared-startup-).*\.json$/.test(basename(file))) {
+          copyFileSync(join(directory, file), join(external, `${basename(directory)}-${basename(file)}`))
+        }
+      }
+    }
+    rmSync(directory, { recursive: true, force: true })
+  }
 })
 
 async function fixture(existing?: { directory: string; spec: string }, executable = false) {
   const directory = existing?.directory ?? mkdtempSync(join(tmpdir(), 'cez-map-test-'))
   if (!existing) directories.push(directory)
+  // The caller's TMPDIR may sit below a package with type=module.
+  writeFileSync(join(directory, 'package.json'), JSON.stringify({ type: 'commonjs' }))
   const dist = join(directory, 'dist')
   mkdirSync(dist, { recursive: true })
   const mock = join(directory, 'mock-case.mjs')
@@ -30,6 +45,8 @@ async function fixture(existing?: { directory: string; spec: string }, executabl
   const entry = join(dist, 'index.js')
   writeFileSync(entry, `
     const { spawn } = require('node:child_process');
+    function boot() { return 42; }
+    boot();
     let child;
     let created;
     process.stdin.on('data', task => {
@@ -62,7 +79,10 @@ async function fixture(existing?: { directory: string; spec: string }, executabl
 function results(directory: string): Array<{ url: string; functions: Array<{ functionName: string; ranges: Array<{ count: number }> }> }> {
   return readdirSync(directory, { recursive: true, encoding: 'utf8' })
     .filter(file => file.endsWith('.json'))
-    .flatMap(file => (JSON.parse(readFileSync(join(directory, file), 'utf8')) as { result?: [] }).result ?? [])
+    .flatMap(file => {
+      const report = JSON.parse(readFileSync(join(directory, file), 'utf8')) as { result?: [] }
+      return report.result ?? []
+    })
 }
 
 test('records server functions and live mock coverage under the task owner spec', async () => {
@@ -115,6 +135,8 @@ test('keeps the shared control endpoint when a spec starts and stops a fixture s
   extra.child.kill('SIGTERM')
   await exited
   await endNodeCapture(directory, spec)
+  expect(readdirSync(directory).filter(file => file.startsWith('shared-startup-')))
+    .toEqual([`shared-startup-${child.pid}.json`])
   expect(readdirSync(join(directory, 'fixture', 'node')))
     .toEqual(expect.arrayContaining([expect.stringMatching(new RegExp('^server-' + extra.child.pid + '-'))]))
 })
@@ -188,4 +210,22 @@ test('marks a task with unknown creation ownership as ambiguous', async () => {
   await endNodeCapture(directory, spec)
   expect(JSON.parse(readFileSync(join(directory, 'ambiguous-task-unknown-task.json'), 'utf8')))
     .toEqual({ taskId: 'unknown-task' })
+})
+
+
+test('retains shared startup function execution across later spec resets', async () => {
+  const { directory, child } = await fixture()
+  const startupFile = join(directory, `shared-startup-${child.pid}.json`)
+  await beginNodeCapture(directory, 'packages/web/e2e/boot-first.e2e.ts')
+  const initial = readFileSync(startupFile, 'utf8')
+  const startup = JSON.parse(initial) as { result: ReturnType<typeof results> }
+  expect(startup.result.find(script => script.url.endsWith('/dist/index.js'))?.functions)
+    .toEqual(expect.arrayContaining([expect.objectContaining({ functionName: 'boot', ranges: expect.arrayContaining([expect.objectContaining({ count: 1 })]) })]))
+  await endNodeCapture(directory, 'packages/web/e2e/boot-first.e2e.ts')
+  await beginNodeCapture(directory, 'packages/web/e2e/boot-second.e2e.ts')
+  await endNodeCapture(directory, 'packages/web/e2e/boot-second.e2e.ts')
+  expect(readFileSync(startupFile, 'utf8')).toBe(initial)
+  const later = results(join(directory, 'boot-second', 'node'))
+    .flatMap(script => script.functions.filter(fn => fn.functionName === 'boot'))
+  expect(later.every(fn => fn.ranges.every(range => range.count === 0))).toBe(true)
 })
