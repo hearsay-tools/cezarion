@@ -77,12 +77,14 @@ jobs:
       verified: ${{ steps.proof.outputs.verified }}
       source: ${{ steps.proof.outputs.source }}
     steps:
+      # Depth 2 holds the parent, whose classifier judges a skipped-suite queue run.
       - name: Check out immutable main push
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+          fetch-depth: 2
       - id: proof
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
@@ -90,9 +92,10 @@ jobs:
           script: |
             core.setOutput('verified', 'false');
             if (context.eventName !== 'push' || context.ref !== 'refs/heads/main') return;
-            const { queueCiProof } = require('./.github/scripts/queue-ci-proof.cjs');
+            const { queueCiProof, mainCommitSurface } = require('./.github/scripts/queue-ci-proof.cjs');
             const proof = await queueCiProof({ github, ...context.repo,
-              eventName: context.eventName, ref: context.ref, sha: context.sha });
+              eventName: context.eventName, ref: context.ref, sha: context.sha,
+              surfaceOf: base => mainCommitSurface({ sha: context.sha, base, tmpDir: process.env.RUNNER_TEMP }) });
             core.setOutput('verified', String(proof.verified));
             if (proof.verified) core.setOutput('source', proof.url);
             await core.summary.addHeading('Queue CI evidence').addRaw(JSON.stringify(proof)).write();
@@ -141,11 +144,12 @@ jobs:
             "base_sha=\(.base.sha)", "head_ref=\(.head.ref)",
             "changed_files=\(.changed_files)", "pr_author=\(.user.login)", "valid=true"
           ' >> "$GITHUB_OUTPUT"
+      # A merge group classifies with the classifier from its base, like a PR.
       - name: Check out trusted pull request base
-        if: github.event_name == 'pull_request_target' || steps['resolve-dispatch'].outputs.valid == 'true'
+        if: github.event_name == 'pull_request_target' || github.event_name == 'merge_group' || steps['resolve-dispatch'].outputs.valid == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.base.sha || steps['resolve-dispatch'].outputs.base_sha }}
+          ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || steps['resolve-dispatch'].outputs.base_sha }}
           persist-credentials: false
 
       - name: Classify changed files
@@ -155,32 +159,52 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
         run: |
           set -o pipefail
-          # Dispatch is never docs-only; classify-pr owns its version-stamp skip.
-          if [ "$EVENT_NAME" != "pull_request_target" ]; then
+          if [ "$EVENT_NAME" = merge_group ]; then
+            # The group's own diff, read as Git data: the head is fetched, never checked out.
+            # --no-renames lists both sides of a rename, as previous_filename does for a PR.
+            if ! [[ "$GROUP_BASE_SHA" =~ ^[0-9a-f]{40}$ && "$GROUP_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]] \
+              || [ "$(git rev-parse HEAD)" != "$GROUP_BASE_SHA" ] \
+              || ! git fetch --no-tags --depth=1 origin "$GROUP_HEAD_SHA" \
+              || [ "$(git rev-parse FETCH_HEAD)" != "$GROUP_HEAD_SHA" ] \
+              || ! files="$(git diff --name-only --no-renames -z "$GROUP_BASE_SHA" "$GROUP_HEAD_SHA" \
+                | jq -Rrs 'split("\u0000") | map(select(length > 0)) | .[] | @json')"; then
+              echo "Merge group diff unavailable; using full matrix" >&2
+              echo "surface=full-matrix" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          # Push and dispatch are never docs-only; classify-pr owns the dispatch version-stamp skip.
+          elif [ "$EVENT_NAME" != "pull_request_target" ]; then
             echo "surface=full-matrix" >> "$GITHUB_OUTPUT"
             exit 0
+          else
+            if ! expected_files="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.changed_files')" \
+              || ! [[ "$expected_files" =~ ^[0-9]+$ ]]; then
+              echo "GitHub API change count failed; using full matrix" >&2
+              echo "surface=full-matrix" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            if ! file_pages="$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files")" \
+              || ! listed_files="$(printf '%s' "$file_pages" | jq -er 'map(.[]) | length')" \
+              || ! [[ "$listed_files" =~ ^[0-9]+$ ]] \
+              || [ "$listed_files" -ne "$expected_files" ]; then
+              echo "GitHub API file list is incomplete; using full matrix" >&2
+              echo "surface=full-matrix" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            if ! files="$(printf '%s' "$file_pages" | jq -er 'map(.[]) | .[] | .filename, (.previous_filename? // empty) | @json')"; then
+              echo "GitHub API file list is malformed; using full matrix" >&2
+              echo "surface=full-matrix" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
           fi
 
-          if ! expected_files="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.changed_files')" \
-            || ! [[ "$expected_files" =~ ^[0-9]+$ ]]; then
-            echo "GitHub API change count failed; using full matrix" >&2
-            echo "surface=full-matrix" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if ! file_pages="$(gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files")" \
-            || ! listed_files="$(printf '%s' "$file_pages" | jq -er 'map(.[]) | length')" \
-            || ! [[ "$listed_files" =~ ^[0-9]+$ ]] \
-            || [ "$listed_files" -ne "$expected_files" ]; then
-            echo "GitHub API file list is incomplete; using full matrix" >&2
-            echo "surface=full-matrix" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          if ! files="$(printf '%s' "$file_pages" | jq -er 'map(.[]) | .[] | .filename, (.previous_filename? // empty) | @json')" \
-            || ! surface="$(printf '%s\n' "$files" | node "$GITHUB_WORKSPACE/.github/scripts/change-surface.cjs")"; then
+          if ! surface="$(printf '%s\n' "$files" | node "$GITHUB_WORKSPACE/.github/scripts/change-surface.cjs")"; then
             echo "Change-surface classifier failed; using full matrix" >&2
             echo "surface=full-matrix" >> "$GITHUB_OUTPUT"
             exit 0
@@ -1020,7 +1044,9 @@ jobs:
           fi
           test "$TYPECHECK_RESULT" = success
           test "$BUILD_AND_PACKAGE_RESULT" = success
-          if [ "$EVENT_NAME" != merge_group ] && { [ "$CHANGE_SURFACE" = docs-only ] || [ "$CHANGE_SURFACE" = infra-only ] || [ "$BUMP_PR" = true ]; }; then
+          # A merge group classifies its own diff, so it takes the docs/infra-only skip;
+          # the bump-PR skip stays PR and dispatch only.
+          if [ "$CHANGE_SURFACE" = docs-only ] || [ "$CHANGE_SURFACE" = infra-only ] || { [ "$EVENT_NAME" != merge_group ] && [ "$BUMP_PR" = true ]; }; then
             test "$VITEST_RESULT" = success -o "$VITEST_RESULT" = skipped
             test "$COCKPIT_BROWSER_RESULT" = success -o "$COCKPIT_BROWSER_RESULT" = skipped
           else

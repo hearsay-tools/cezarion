@@ -1,6 +1,8 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { queueCiProof, REQUIRED_QUEUE_JOBS } = require('./queue-ci-proof.cjs');
 const SHA = 'a'.repeat(40);
 const EXPECTED_QUEUE_JOBS = [
@@ -114,4 +116,80 @@ test('missing or duplicate fourth unit shard and legacy three-cell proof force f
   legacy.state.jobs = legacy.state.jobs.filter(job => !job.name.startsWith('Vitest shard '));
   legacy.state.jobs.push(...[1, 2, 3].map(n => ({ id: 200 + n, name: `Vitest shard ${n}/3`, status: 'completed', conclusion: 'success' })));
   assert.equal((await queueCiProof(legacy.options)).verified, false);
+});
+
+const os = require('node:os');
+const { mainCommitSurface, SKIPPED_SUITE_JOBS } = require('./queue-ci-proof.cjs');
+const { gitRepo, FAILING_CLASSIFIER } = require('./queue-surface.testkit.cjs');
+const BASE = 'b'.repeat(40);
+// The queue run as GitHub lists it when its `if` skipped both suites.
+function skippedSuites(state) {
+  state.run.head_branch = `gh-readonly-queue/main/pr-7-${BASE}`;
+  state.jobs = state.jobs.filter(job => !/shard \d\/4$/.test(job.name));
+  state.jobs.push(...SKIPPED_SUITE_JOBS.map((name, i) => ({ id: 300 + i, name, status: 'completed', conclusion: 'skipped' })));
+}
+test('a docs-only or infra-only queued commit reuses a queue run that skipped both suites', async () => {
+  for (const surface of ['docs-only', 'infra-only']) {
+    const h = fixture(); skippedSuites(h.state); const bases = [];
+    h.options.surfaceOf = base => { bases.push(base); return surface; };
+    const proof = await queueCiProof(h.options);
+    assert.equal(proof.verified, true, surface); assert.equal(proof.suites, 'skipped');
+    assert.deepEqual(bases, [BASE], 'the classifier judges the diff from the group base');
+  }
+});
+test('a queue run that ran its suites never asks the classifier', async () => {
+  const h = fixture(); h.options.surfaceOf = () => assert.fail('classifier called');
+  const proof = await queueCiProof(h.options);
+  assert.equal(proof.verified, true); assert.equal(proof.suites, 'ran');
+});
+for (const [label, change] of Object.entries({
+  'a code-touching queued commit': (s, o) => { o.surfaceOf = () => 'full-matrix'; },
+  'no classifier': (s, o) => { delete o.surfaceOf; },
+  'a queue ref without its base SHA': (s, o) => { s.run.head_branch = 'gh-readonly-queue/main/pr-7-base'; o.surfaceOf = () => assert.fail('classifier called'); },
+  'a failed skipped placeholder': s => { s.jobs.find(j => j.name === SKIPPED_SUITE_JOBS[0]).conclusion = 'failure'; },
+  'a duplicated placeholder': s => { s.jobs.push({ ...s.jobs.find(j => j.name === SKIPPED_SUITE_JOBS[1]), id: 999 }); },
+  'a placeholder beside an expanded shard': s => { s.jobs.push({ id: 998, name: 'Vitest shard 2/4', status: 'completed', conclusion: 'failure' }); },
+  'a missing placeholder': s => { s.jobs = s.jobs.filter(j => j.name !== SKIPPED_SUITE_JOBS[1]); },
+  'a failed aggregate': s => { s.jobs.find(j => j.name === 'Unit, build, E2E, and package').conclusion = 'failure'; },
+  'a skipped build': s => { s.jobs.find(j => j.name === 'Unit, build, and package').conclusion = 'skipped'; },
+})) test(`skipped queue suites force full CI fallback: ${label}`, async () => {
+  const h = fixture(); skippedSuites(h.state); h.options.surfaceOf = () => 'docs-only';
+  change(h.state, h.options);
+  assert.equal((await queueCiProof(h.options)).verified, false);
+});
+
+test('mainCommitSurface classifies the queued commit from its group base with the base classifier', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'queue-proof-tmp-'));
+  const repos = [];
+  const repo = options => { const r = gitRepo(options); repos.push(r); return r; };
+  const surface = (r, sha, base = r.base) => mainCommitSurface({ sha, base, cwd: r.dir, tmpDir });
+  try {
+    const docs = repo();
+    assert.equal(surface(docs, docs.commit({ 'docs/a b.md': 'x\n', 'README.md': 'docs\n' })), 'docs-only');
+    const infra = repo();
+    assert.equal(surface(infra, infra.commit({ '.github/workflows/sweep-ci-failures.yml': 'x\n' })), 'infra-only');
+    const code = repo();
+    assert.equal(surface(code, code.commit({ 'README.md': 'docs\n', 'src/app.ts': 'code\n' })), 'full-matrix');
+    const rename = repo();
+    assert.equal(surface(rename, rename.commit({ 'src/old.ts': null, 'docs/old.md': 'old\n' })), 'full-matrix');
+    // The queued commit rewrites the classifier to vouch for its own code change.
+    const selfVouch = repo();
+    const vouching = selfVouch.commit({ '.github/scripts/change-surface.cjs': "console.log('docs-only');\n", 'src/app.ts': 'code\n' });
+    assert.equal(surface(selfVouch, vouching), 'full-matrix');
+    // Two docs commits after the base: the base-to-head diff is docs-only, but the
+    // queued commit's first parent is not the group base, so it proves nothing.
+    const stacked = repo();
+    stacked.commit({ 'docs/a.md': 'x\n' });
+    assert.equal(surface(stacked, stacked.commit({ 'docs/b.md': 'x\n' })), 'full-matrix');
+    const failing = repo({ classifier: FAILING_CLASSIFIER });
+    assert.equal(surface(failing, failing.commit({ 'docs/a.md': 'x\n' })), 'full-matrix');
+    const missing = repo();
+    const head = missing.commit({ 'docs/a.md': 'x\n' });
+    assert.equal(surface(missing, head, 'c'.repeat(40)), 'full-matrix');
+    assert.equal(surface(missing, 'not-a-sha'), 'full-matrix');
+    assert.equal(surface(missing, head, '--output=/tmp/x'), 'full-matrix');
+  } finally {
+    for (const r of repos) r.cleanup();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
