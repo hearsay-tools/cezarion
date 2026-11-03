@@ -84,7 +84,7 @@ export function describeWorkflowFinalMessage(group: keyof typeof WORKFLOW_FINAL_
   const { describe, it } = registration;
 describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
   for (const backend of RUNNER_IDS) {
-    for (const row of FINAL_MESSAGE_CRITERIA.filter(row => (WORKFLOW_FINAL_MESSAGE_GROUPS[group] as readonly string[]).includes(row.id))) {
+    for (const row of FINAL_MESSAGE_CRITERIA.filter(row => { return (WORKFLOW_FINAL_MESSAGE_GROUPS[group] as readonly string[]).includes(row.id); })) {
       if (row.id === 'F7') {
         const exemption = exemptionFor('F7', backend);
         if (exemption) {

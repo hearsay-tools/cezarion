@@ -14,7 +14,7 @@ it.each(['queued', 'continued'])('legacy pending inactive Finish holds %s childr
     manager.finish(w.id); await until(() => !manager.isActive(w.id));
     const queued = await worker(p.id);
     const blocker = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:slow', runner: 'claude' });
-    await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(blocker.id)?.sessionEverOpened === true);
+    await until(() => { return (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(blocker.id)?.sessionEverOpened === true; });
     manager.enqueueOwnedRun(queued.id);
     const real = runInternals(manager).runSettlement.settleSuccess.bind(runInternals(manager).runSettlement);
     let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });

@@ -44,7 +44,7 @@ export function describeWorkflowAsk(group: keyof typeof WORKFLOW_ASK_GROUPS, reg
   const { describe, it, afterEach } = registration;
 describe('intermediate workflow ASK parity — #427', () => {
   afterEach(() => vi.restoreAllMocks());
-  for (const backend of RUNNER_IDS) for (const row of WORKFLOW_ASK_CRITERIA.filter(row => (WORKFLOW_ASK_GROUPS[group] as readonly string[]).includes(row.id))) {
+  for (const backend of RUNNER_IDS) for (const row of WORKFLOW_ASK_CRITERIA.filter(row => { return (WORKFLOW_ASK_GROUPS[group] as readonly string[]).includes(row.id); })) {
     const modes = row.id === 'Q7' ? ['fresh', 'continuation'] : ['fresh'];
     for (const mode of modes) it(`${backend} ${row.id} ${row.name} (${mode})`, async () => {
       let clock: ReturnType<typeof autoEndObservationClock> | undefined;

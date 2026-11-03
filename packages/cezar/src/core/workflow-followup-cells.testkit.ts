@@ -438,7 +438,7 @@ export function describeWorkflowFollowup(group: keyof typeof WORKFLOW_FOLLOWUP_G
   const { describe, it } = registration;
 describe('mid-turn human follow-up parity — #486', () => {
   for (const backend of RUNNER_IDS) {
-    for (const row of FOLLOWUP_CRITERIA.filter(row => (WORKFLOW_FOLLOWUP_GROUPS[group].rows as readonly string[]).includes(row.id))) {
+    for (const row of FOLLOWUP_CRITERIA.filter(row => { return (WORKFLOW_FOLLOWUP_GROUPS[group].rows as readonly string[]).includes(row.id); })) {
       const exemption = exemptionFor(row.id, backend);
       if (exemption) {
         it(`${backend} ${row.id} exemption — ${exemption.reason}`, async () => {
@@ -462,7 +462,7 @@ describe('mid-turn human follow-up parity — #486', () => {
       }
       const lateStart = row.id === 'H4' || row.id === 'H5';
       const modes = row.id === 'H3' || lateStart ? ['fresh', 'continuation'] as const : ['fresh'] as const;
-      for (const mode of modes.filter(mode => (WORKFLOW_FOLLOWUP_GROUPS[group].modes as readonly string[]).includes(mode))) it(`${backend} ${row.id} ${row.name}${modes.length > 1 ? ` (${mode})` : ''}`, async () => {
+      for (const mode of modes.filter(mode => { return (WORKFLOW_FOLLOWUP_GROUPS[group].modes as readonly string[]).includes(mode); })) it(`${backend} ${row.id} ${row.name}${modes.length > 1 ? ` (${mode})` : ''}`, async () => {
         await withMockLogs(async ({ argsFile, stdinFile, releaseFile, files, release }) => {
           const env = { CEZ_MOCK_ARGS_FILE: argsFile, CEZ_MOCK_STDIN_FILE: stdinFile, CEZ_MOCK_RELEASE_FILE: releaseFile };
           if (row.id === 'H1') {

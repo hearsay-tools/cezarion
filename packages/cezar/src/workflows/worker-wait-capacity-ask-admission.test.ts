@@ -74,7 +74,7 @@ for (const role of ['root', 'worker'] as const) {
       // question as it stops (hearsay-tools/cezarion#2410), which a crash never writes.
       store.flush(); const checkpoint = readPersistedRuns(join(root, '.ai/cezar')); const events = eventCheckpoint();
       expect(store.getRun(target.id)?.continuationMessage?.origin).toBe('human');
-      await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(target.id)?.sessionEverOpened === true);
+      await until(() => { return (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(target.id)?.sessionEverOpened === true; });
       // The real wire received the accepted input but cannot reply until released.
       await until(() => wire.received() === 1);
       manager.cancel(target.id);

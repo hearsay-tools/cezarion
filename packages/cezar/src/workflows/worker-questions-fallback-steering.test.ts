@@ -52,7 +52,7 @@ describe("worker questions route to the parent (hearsay-tools/cezarion#505)", { 
     expect(refusals).toBeGreaterThan(0);
     store.flush();
     const delivered = (row: RunRecord) => !!row.agentInputs?.find(input => input.id === replyId)?.deliveredAt;
-    commits.expectEveryCommit(w.id, row => (row.automaticWakes ?? 0) === wakes || delivered(row), 'the reply\'s charge and its delivery');
+    commits.expectEveryCommit(w.id, row => { return (row.automaticWakes ?? 0) === wakes || delivered(row); }, 'the reply\'s charge and its delivery');
     const disk = (readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[]).find(run => run.id === w.id)!;
     expect({ wakes: disk.automaticWakes, delivered: delivered(disk) }).toEqual({ wakes: wakes + 1, delivered: true });
   });
