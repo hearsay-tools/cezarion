@@ -1,7 +1,7 @@
 import { nodeModulesWith } from './test-support.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -441,13 +441,13 @@ test('curried anchor matching rejects missing, duplicate, shifted and conflictin
   }
 });
 
-test('declaration fallback does not admit ordinary arrows or replace ambiguous exact matches', () => {
+test('declaration fallback admits expression arrows but never replaces ambiguous exact matches', () => {
   const source = 'const ordinary = (x: string) => x;';
   const functions = analyzeSource(source, 'ordinary.ts');
   const entry = coverageFor(source, functions, []);
   entry.fnMap[0].decl = { end: { line: functions[0].line, column: functions[0].column } };
   entry.fnMap[0].loc.start.column--;
-  assert.equal(measureCoverage(source, functions, entry).get(functions[0]).crap, null);
+  assert.equal(measureCoverage(source, functions, entry).get(functions[0]).coverage.status, 'available');
   const curry = curriedCoverage();
   curry.entry.fnMap[0].loc.start = { ...curry.functions[0].bodyLoc };
   curry.entry.fnMap[2] = structuredClone(curry.entry.fnMap[0]);
@@ -462,4 +462,69 @@ test('returned-arrow syntax cannot charge an uncalled nested stage to its called
   const results = functionResults(functions, measureCoverage(source, functions, entry));
   assert.deepEqual(results.map(fn => fn.coverage.percent), [100, 0, 0]);
   assert.deepEqual(results.map(fn => fn.coverage.executableLines), [0, 0, 1]);
+});
+
+
+test('real V8 coverage places single-line and multiline cast object arrows', () => {
+  const fixture = new URL('./fixtures/expression-arrows/', import.meta.url);
+  const source = readFileSync(new URL('source.ts', fixture), 'utf8');
+  const entry = JSON.parse(readFileSync(new URL('coverage.json', fixture), 'utf8'))['source.ts'];
+  const functions = analyzeSource(source, 'source.ts');
+  const results = functionResults(functions, measureCoverage(source, functions, entry));
+  assert.deepEqual(results.map(fn => [fn.name, fn.coverage.status, fn.coverage.calls, fn.coverage.percent, fn.crap]), [
+    ['single', 'available', 2, 100, 2],
+    ['multi', 'available', 1, 100, 2],
+    ['unused', 'available', 0, 0, 6],
+    ['g', 'available', 1, 100, 1],
+    ['f', 'available', 1, 100, 1],
+  ]);
+});
+
+
+test('expression arrow declaration anchors reject missing, shifted, duplicate and conflicting evidence', () => {
+  const fixture = new URL('./fixtures/expression-arrows/', import.meta.url);
+  const source = readFileSync(new URL('source.ts', fixture), 'utf8');
+  const functions = analyzeSource(source, 'source.ts');
+  const mutations = [
+    entry => { delete entry.fnMap[0].decl; },
+    entry => { entry.fnMap[0].decl.end.column++; },
+    entry => { entry.fnMap[0].decl.end.line++; },
+    entry => { entry.fnMap[0].loc.end.line++; },
+    entry => { entry.fnMap[3] = structuredClone(entry.fnMap[0]); },
+    entry => { entry.fnMap[1].decl = entry.fnMap[0].decl; entry.fnMap[1].loc.end.line = functions[0].bodyEndLine; },
+    entry => {
+      entry.fnMap[0].loc = { start: functions[2].bodyLoc, end: { line: functions[2].bodyEndLine } };
+      entry.fnMap[0].decl.end = { line: functions[2].line, column: functions[2].column };
+      delete entry.fnMap[2];
+    },
+  ];
+  for (const mutate of mutations) {
+    const entry = JSON.parse(readFileSync(new URL('coverage.json', fixture), 'utf8'))['source.ts'];
+    mutate(entry);
+    const result = measureCoverage(source, functions, entry).get(functions[0]);
+    assert.equal(result.coverage.status, 'unavailable', mutate.toString());
+    assert.equal(result.crap, null);
+  }
+});
+
+test('unmatched expression arrows name the block-bodied rewrite', () => {
+  const source = 'const f = (r: R) => (m as unknown as { g(r: R): boolean }).g(r);';
+  const functions = analyzeSource(source, 'source.ts');
+  const entry = { fnMap: {}, f: {}, statementMap: {}, s: {} };
+  const result = measureCoverage(source, functions, entry).get(functions[0]);
+  assert.equal(result.coverage.status, 'unavailable');
+  assert.match(result.coverage.reason, /for expression-bodied arrows.*references\/tool\.md.*block-bodied rewrite/);
+});
+
+test('real V8 coverage matches a call through a type-asserted receiver', () => {
+  const fixture = new URL('./fixtures/expression-arrows/', import.meta.url);
+  const source = readFileSync(new URL('source.ts', fixture), 'utf8');
+  const entry = JSON.parse(readFileSync(new URL('coverage.json', fixture), 'utf8'))['source.ts'];
+  const functions = analyzeSource(source, 'source.ts');
+  const fn = functions.find(fn => fn.name === 'f');
+  const result = measureCoverage(source, functions, entry).get(fn);
+  assert.equal(result.coverage.status, 'available');
+  assert.equal(result.coverage.calls, 1);
+  assert.equal(result.coverage.percent, 100);
+  assert.equal(result.crap, 1);
 });
