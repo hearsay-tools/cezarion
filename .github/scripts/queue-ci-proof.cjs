@@ -15,8 +15,10 @@ function reader(github, owner, repo, deadline, now) {
   return async (route, args = {}) => {
     const remaining = deadline - now();
     if (remaining <= 0) throw new Error('deadline');
+    // github-script v9's fetch transport ignores numeric request.timeout.
+    const budget = Math.min(10000, remaining);
     const result = await github.request(route, { owner, repo, ...args,
-      request: { timeout: Math.min(10000, remaining), retries: 0 } });
+      request: { timeout: budget, signal: AbortSignal.timeout(budget), retries: 0 } });
     if (now() > deadline) throw new Error('deadline');
     return result.data;
   };

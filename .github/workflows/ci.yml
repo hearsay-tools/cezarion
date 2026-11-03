@@ -1071,7 +1071,7 @@ jobs:
     needs: preflight
     if: always() && github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 25
     permissions:
       checks: read
       contents: read
@@ -1099,8 +1099,8 @@ jobs:
         with:
           retries: 0
           script: |
-            const { readCodeRabbitAdmission } = require('./.github/scripts/coderabbit-admission.cjs');
-            const admission = await readCodeRabbitAdmission({ github, ...context.repo,
+            const { waitForCodeRabbitAdmission } = require('./.github/scripts/coderabbit-wait.cjs');
+            const admission = await waitForCodeRabbitAdmission({ github, ...context.repo, log: message => core.info(message),
               pullNumber: context.payload.pull_request.number, head: context.payload.pull_request.head.sha,
               releaseAppBotLogin: process.env.RELEASE_APP_BOT_LOGIN });
             await core.summary.addHeading('CodeRabbit admission').addRaw(JSON.stringify(admission)).write();
