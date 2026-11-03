@@ -447,6 +447,21 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id) ?? []).toEqual([]);
   });
 
+  it('answers a cancelled wait from the entry its commit settled, and never one the commit did not settle', async () => {
+    const release = join(root, 'release-unsettled-cancel'); const wire = controlledWire({ firstResultGate: release });
+    const p = await parent(); await until(wire.initialReceived); const w = await worker(p.id);
+    const wait = register(p.id, [w.id]);
+    const commit = vi.spyOn(store, 'commitOutcome').mockReturnValueOnce({ committed: false, answered: [], settled: [] });
+    expect(() => manager.cancelWorkerWait(p.id, wait.id)).toThrow(expect.objectContaining({ code: 'incompatible_state' }));
+    commit.mockRestore();
+    expect(store.getRun(p.id)?.waits?.find(entry => entry.id === wait.id)?.phase).toBe('open');
+    const cancelled = manager.cancelWorkerWait(p.id, wait.id);
+    expect(cancelled).toEqual(lastWaitOf(readPersistedRuns(join(root, '.ai/cezar')).find(run => run.id === p.id)));
+    expect(cancelled).toMatchObject({ id: wait.id, reason: 'cancelled' });
+    writeFileSync(release, 'release');
+    await until(() => !waitOf(store.getRun(p.id)));
+  });
+
   it('cancelled parked wait queues no wake behind a running worker and stale IDs cannot cancel a later wait', async () => {
     const p = await parent(); const w = await worker(p.id, 'mock:slow');
     const wait = register(p.id, [w.id]); manager.enqueueOwnedRun(w.id);
