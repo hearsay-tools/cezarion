@@ -42,6 +42,12 @@ test('accepts TSX, JavaScript modules and TypeScript overloads, and rejects inva
   assert.throws(() => analyzeSource('function broken( {', 'broken.ts'), /Unexpected token/);
 });
 
+test('TypeScript declaration files report no executable functions', () => {
+  for (const filename of ['catalog.d.mts', 'catalog.d.ts', 'catalog.d.cts']) {
+    assert.deepEqual(analyzeSource('export const X: string[]; export function f(): void;', filename), [], filename);
+  }
+});
+
 test('names methods and isolates class initialization from an enclosing function', () => {
   const source = `function make() {
     class Box {

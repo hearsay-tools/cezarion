@@ -52,7 +52,7 @@ export function analyzeSource(source, filename) {
   const jsx = /\.[jt]sx$/i.test(filename);
   const ast = parse(source, {
     sourceType: 'unambiguous', attachComment: false,
-    plugins: [...(typed ? ['typescript'] : []), ...(jsx ? ['jsx'] : [])],
+    plugins: [...(typed ? [['typescript', { dts: /\.d\.[cm]?tsx?$/i.test(filename) }]] : []), ...(jsx ? ['jsx'] : [])],
   });
   const functions = [];
   function visit(node, owner, parent, ancestors) {
