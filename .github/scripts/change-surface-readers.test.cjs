@@ -42,7 +42,7 @@ const READ_CALL = /\b(?:readFile|readFileSync|createReadStream)\b|new URL\(/;
 const READ_WINDOW_LINES = 5;
 
 // The node:test entry files under packages/, from the test:unit and
-// test:package scripts in packages/cezar/package.json. The scan skips them;
+// test:package commands (the latter uses scripts/test-package.mjs). The scan skips them;
 // the helpers they import are still scanned.
 const NODE_TEST_GLOBS = ['test/unit/*.test.ts', 'test/e2e/*.test.ts'];
 const nodeTestEntry = /^packages\/cezar\/test\/(?:unit|e2e)\/[^/]+\.test\.ts$/;
@@ -148,10 +148,16 @@ test('the scan finds a reader for every test-read document', () => {
   }
 });
 
-test('the skipped node:test entries match the package node:test scripts', () => {
+test('the skipped node:test entries match the package node:test scripts', async () => {
   const { scripts } = JSON.parse(fs.readFileSync(path.join(repoRoot, 'packages/cezar/package.json'), 'utf8'));
-  const globs = [scripts['test:unit'], scripts['test:package']].map((script) => script.split(' ').at(-1));
-  assert.deepEqual(globs, NODE_TEST_GLOBS);
+  assert.equal(scripts['test:unit'].split(' ').at(-1), NODE_TEST_GLOBS[0]);
+  assert.equal(scripts['test:package'], 'node ../../scripts/test-package.mjs');
+  const { selectTests } = await import('../../scripts/test-package.mjs');
+  const selected = selectTests(repoRoot, []).map(file => `packages/cezar/${file}`);
+  const packaged = globToRegExp(`packages/cezar/${NODE_TEST_GLOBS[1]}`);
+  const scanned = trackedFiles().filter(file => packaged.test(file)).sort();
+  assert.ok(selected.every(file => nodeTestEntry.test(file)));
+  assert.deepEqual(selected, scanned);
   assert.ok(nodeTestEntry.test('packages/cezar/test/unit/message-docs.test.ts'));
   assert.ok(!nodeTestEntry.test('packages/cezar/test/unit/test-env-lease-churn.testkit.mjs'));
   assert.ok(!nodeTestEntry.test('packages/cezar/src/delegation/message-docs.test.ts'));
