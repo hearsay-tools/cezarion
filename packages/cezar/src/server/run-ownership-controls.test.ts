@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -98,9 +99,9 @@ describe('controls on a run another cezar process owns', () => {
     // The adoption carried the Stop out: the run ends cancelled, and Stop says it stopped it.
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ cancelled: true });
-    expect(store.getRun(runId)).toMatchObject({ status: 'cancelled' });
+    expect(store.getRun(runId)).toMatchObject({ status: RUN_STATUS.cancelled });
     store.flush();
-    expect(readPersistedRuns(dataDir).find((run) => run.id === runId)).toMatchObject({ status: 'cancelled' });
+    expect(readPersistedRuns(dataDir).find((run) => run.id === runId)).toMatchObject({ status: RUN_STATUS.cancelled });
     // Settled and let go: nobody claims it now.
     expect(store.runOwnership(runId)).toBe('free');
   });
@@ -160,11 +161,11 @@ describe('adopting a dead owner\'s run for a control', () => {
   const crashed = (shape: 'unstarted' | 'running'): string => {
     const owner = RunStore.open(dataDir, { keepLive: true });
     const run = owner.createRun({ title: shape, workflow: 'quick-task', task: 'mock:cezar-done', runner: 'claude', workflowDef: QUICK_TASK_WORKFLOW,
-      steps: [{ id: 'task', name: 'Do the task', kind: 'agent' }] });
+      steps: [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent }] });
     if (shape === 'running') {
       const at = new Date().toISOString();
-      owner.updateStep(run.id, 'task', { status: 'running', startedAt: at, sessionId: 'previous-session', backend: 'claude' });
-      owner.updateRun(run.id, { status: 'running', startedAt: at, currentStepId: 'task' });
+      owner.updateStep(run.id, 'task', { status: STEP_STATUS.running, startedAt: at, sessionId: 'previous-session', backend: 'claude' });
+      owner.updateRun(run.id, { status: RUN_STATUS.running, startedAt: at, currentStepId: 'task' });
     }
     owner.flush();
     crashStore(owner);
@@ -191,7 +192,7 @@ describe('adopting a dead owner\'s run for a control', () => {
     }
     // Settled, never resumed: interrupted mid-turn, or cancelled before it ever began.
     expect(store.getRun(id)).toMatchObject(shape === 'running'
-      ? { status: 'failed', error: expect.stringContaining('interrupted') } : { status: 'cancelled' });
+      ? { status: RUN_STATUS.failed, error: expect.stringContaining('interrupted') } : { status: RUN_STATUS.cancelled });
   });
 
   it.each(['unstarted', 'running'] as const)('Stop on an adopted %s run ends it cancelled, says so, and starts no agent', async (shape) => {
@@ -203,7 +204,7 @@ describe('adopting a dead owner\'s run for a control', () => {
     expect(started).toEqual([]);
     expect(manager.isActive(id)).toBe(false);
     const run = store.getRun(id);
-    expect(run).toMatchObject({ status: 'cancelled' });
+    expect(run).toMatchObject({ status: RUN_STATUS.cancelled });
     expect(run?.error).toBeUndefined();
     expect(run?.steps.every((step) => step.status !== 'running')).toBe(true);
   });

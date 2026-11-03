@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it } from 'vitest';
 import { apiRunSchema } from '@open-mercato/cezar-contract/runs';
 import { createApp } from './server.js';
@@ -33,7 +34,7 @@ describe('authoritative finishability (#449)', () => {
     const list = apiRunSchema.array().parse(await (await apiRequest(app(), '/api/v1/runs')).json());
     expect(list.every((run: object) => !('finishBlocked' in run))).toBe(true);
     const generation = store.commitWorkerExecutionStart(w.id);
-    store.updateRun(w.id, { status: 'done' });
+    store.updateRun(w.id, { status: RUN_STATUS.done });
     store.commitWorkerExecutionComplete(w.id, generation);
     expect((await detail(p.id)).finishBlocked).toContain(w.id);
     await collect(w.id);
@@ -82,8 +83,8 @@ describe('authoritative finishability (#449)', () => {
     });
 
   it('allows an inactive final-step root and POST finishes it', async () => {
-    const p = store.createRun({ title: 'parent', task: 'task', workflow: 'quick-task', steps: [{ id: 'task', name: 'Task', kind: 'agent' }] });
-    store.updateRun(p.id, { status: 'waiting', currentStepId: 'task', delegation: { role: 'root', permissions: [], receipts: [] } });
+    const p = store.createRun({ title: 'parent', task: 'task', workflow: 'quick-task', steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] });
+    store.updateRun(p.id, { status: RUN_STATUS.waiting, currentStepId: 'task', delegation: { role: 'root', permissions: [], receipts: [] } });
     expect((await detail(p.id)).finishBlocked).toBeNull();
     expect((await apiRequest(app(), `/api/v1/runs/${p.id}/finish`, { method: 'POST' })).status).toBe(200);
     await until(() => store.getRun(p.id)?.status === 'done');
@@ -91,11 +92,11 @@ describe('authoritative finishability (#449)', () => {
 
   it.each([false, true])('explains an inactive mid-workflow refusal (synthetic=%s)', async synthetic => {
     const run = store.createRun({ title: 'workflow', task: 'task', workflow: 'two-steps', steps: [
-      { id: 'first', name: 'First', kind: 'agent' }, { id: 'last', name: 'Last', kind: 'agent' },
+      { id: 'first', name: 'First', kind: STEP_KIND.agent }, { id: 'last', name: 'Last', kind: STEP_KIND.agent },
     ] });
-    store.updateStep(run.id, 'first', { status: 'waiting' });
-    if (synthetic) store.addStep(run.id, { id: 'continue-1', name: 'Continue', kind: 'agent', synthetic: 'continuation' });
-    store.updateRun(run.id, { status: 'waiting', currentStepId: synthetic ? 'continue-1' : 'first' });
+    store.updateStep(run.id, 'first', { status: STEP_STATUS.waiting });
+    if (synthetic) store.addStep(run.id, { id: 'continue-1', name: 'Continue', kind: STEP_KIND.agent, synthetic: 'continuation' });
+    store.updateRun(run.id, { status: RUN_STATUS.waiting, currentStepId: synthetic ? 'continue-1' : 'first' });
     const blocked = await detail(run.id);
     expect(blocked.finishBlocked).toMatch(/workflow/i);
     const response = await apiRequest(app(), `/api/v1/runs/${run.id}/finish`, { method: 'POST' });

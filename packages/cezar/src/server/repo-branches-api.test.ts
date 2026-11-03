@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -92,7 +93,7 @@ describe('the repo branches API', () => {
       await git(repoRoot, 'commit', '-q', '-m', `work ${i}`);
     }
     await git(repoRoot, 'checkout', '-q', 'main');
-    store.updateRun(rec.id, { status: 'done', branch, baseBranch: 'main' });
+    store.updateRun(rec.id, { status: RUN_STATUS.done, branch, baseBranch: 'main' });
     return { id: rec.id, branch };
   }
 
@@ -110,7 +111,7 @@ describe('the repo branches API', () => {
 
   it('GET /repo carries tracking (null without an upstream) and attributes a squash commit to its task', async () => {
     const rec = store.createRun({ title: 'the squashed one', workflow: 'w', task: 't', steps: [] });
-    store.updateRun(rec.id, { status: 'done', pullRequestUrl: 'https://github.com/acme/demo/pull/42' });
+    store.updateRun(rec.id, { status: RUN_STATUS.done, pullRequestUrl: 'https://github.com/acme/demo/pull/42' });
     writeFileSync(join(repoRoot, 'squash.txt'), 'x\n');
     await git(repoRoot, 'add', '-A');
     await git(repoRoot, 'commit', '-q', '-m', 'feat: squashed (#42)');
@@ -165,8 +166,8 @@ describe('the repo branches API', () => {
   it('holds Continue off while a confirmed delete removes its task\'s branch', async () => {
     process.env.CEZ_DRY_RUN = '1';
     const { id, branch } = await finishedTask(1);
-    store.addStep(id, { id: 'task', name: 'Task', kind: 'agent' });
-    store.updateStep(id, 'task', { status: 'done', iterations: 1, tokensUsed: 0, sessionId: 'sess-1', backend: 'claude' });
+    store.addStep(id, { id: 'task', name: 'Task', kind: STEP_KIND.agent });
+    store.updateStep(id, 'task', { status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, sessionId: 'sess-1', backend: 'claude' });
     // Under load the store's 300 ms save evicted the run before the delete claimed it, and the
     // fixture then wrote steps the schema rejects: the reload failed, the claim was refused and
     // Continue answered 'not found' (hearsay-tools/cezarion#886). Evict it every time, assert the

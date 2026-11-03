@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { LIVE_BYTE_LIMIT } from '@open-mercato/cezar-contract/live-limits';
 import { liveRunBatchResponseSchema, type LiveRunBatch } from '@open-mercato/cezar-contract/live';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -112,7 +113,7 @@ describe('finite multi-run catch-up', () => {
   it('discards active snapshots when their run is deleted', () => {
     store.appendEvent(runId, { type: 'item.started', item: { kind: 'message', id: 'typing', text: '' } });
     store.emitEphemeral(runId, { type: 'item.delta', itemId: 'typing', field: 'text', delta: 'temporary' });
-    store.updateRun(runId, { status: 'done' });
+    store.updateRun(runId, { status: RUN_STATUS.done });
     expect(store.liveReadSnapshot(runId).events).toHaveLength(1);
     expect(store.deleteRun(runId)).toBe(true);
     expect(store.liveReadSnapshot(runId).events).toEqual([]);

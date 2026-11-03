@@ -1,3 +1,4 @@
+import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { defined } from '../core/defined.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -400,7 +401,7 @@ describe('workspace provider API', () => {
       workflow: 'quick-task',
       task: 'work',
       runner: 'claude',
-      steps: [{ id: 'work', name: 'Work', kind: 'agent' }],
+      steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }],
     });
     store.updateStep(run.id, 'work', { backend: 'claude' });
 
