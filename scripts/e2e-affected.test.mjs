@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
 import {
-  classify, latestMap, mapProblem, parseOptions, readMap, referenceGraph, resolveLiteral, selectSpecs, stringLiterals,
+  changedLines, classify, latestMap, mapProblem, parseOptions, readMap, referenceGraph, resolveLiteral, selectSpecs, stringLiterals,
 } from './e2e-affected.mjs';
 
 // hearsay-tools/cezarion#1816: npm run test:e2e:affected chooses browser specs from the spec map.
@@ -273,4 +273,29 @@ test('a --map file that cannot be read is an error, not a full run', t => {
   const result = affected(dir, '--plan', '--map=missing.json');
   assert.equal(result.status, 2);
   assert.match(result.stderr, /cannot read the spec map at .*missing\.json/);
+});
+
+test('mock function edits select only specs that executed that function, plus incomplete specs', () => {
+  const file = 'packages/cezar/scripts/mock-codex.mjs';
+  const map = sampleMap({ incomplete: [spec('smoke')], functions: { [file]: [
+    { start: 1, end: 100, specs: [0, 1, 2] },
+    { start: 10, end: 20, specs: [0] },
+    { start: 30, end: 40, specs: [1] },
+  ] } });
+  const result = selectSpecs({ files: [file], map, graph, specFiles: map.specs,
+    changes: new Map([[file, [{ start: 12, end: 12 }]]]) });
+  assert.equal(result.all, false);
+  assert.deepEqual(result.specs, [spec('artifact-project-links'), spec('smoke')]);
+  assert.equal(selectSpecs({ files: [file], map, graph, specFiles: map.specs }).all, true);
+});
+
+test('function maps reject malformed ranges instead of silently omitting specs', () => {
+  assert.match(mapProblem(sampleMap({ functions: { 'mock.mjs': [{ start: 4, end: 2, specs: [] }] } })), /function ranges/);
+});
+
+
+test('diff hunks keep old line positions and include both sides of insertion boundaries', () => {
+  assert.deepEqual(changedLines('@@ -12 +12 @@\n-x\n+y\n@@ -30,0 +31,2 @@\n+a\n+b'), [
+    { start: 12, end: 12 }, { start: 30, end: 31 },
+  ]);
 });

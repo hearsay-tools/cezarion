@@ -330,44 +330,29 @@ npm run test:e2e:affected -- --force-rebuild
 npm run test:e2e:affected -- --plan --map=<file>   # a map you built or downloaded
 ```
 
-The choice comes from the spec map. The `E2E spec map` workflow
-(`.github/workflows/e2e-spec-map.yml`) builds it on each push to `main` that changes cockpit,
-server or test-environment files. It runs the suite in two shards with Chrome's V8
-function-event log on (`spec-map/vitest.config.ts`), builds the cockpit again with source maps,
-and records which repository files each spec ran. `spec-map/build-map.ts partial` refuses source
-maps whose JavaScript differs from the served bundle. `merge` refuses a map when fewer than 90%
-of the specs left evidence, or when `markdown.tsx` does not reach `artifact-project-links.e2e.ts`.
+The `E2E spec map` workflow records which specs run cockpit code, server functions and
+`packages/cezar/scripts/mock-*.mjs` functions. Coverage hooks run only in that workflow.
+The shared server reports precise V8 coverage between specs; its startup functions count for every spec. Mock coverage stays with the
+spec and task that started the process, even when that process survives into another spec.
+The source-map build must match the served browser JavaScript byte for byte.
+A task without a known creating spec makes Node evidence incomplete.
+Failed specs and specs without complete evidence stay incomplete and always run for mapped edits.
 
-A spec reaches a source file when one of these holds:
-
-- a function of the file ran in the spec's browser;
-- the file has a top-level statement, and the spec loaded the file's chunk;
-- the file exports a value other than a function, such as a class-name constant, and the spec
-  reaches a file that imports it;
-- the spec loads the file in Node, through an import or a relative path literal.
-
-The selector downloads the newest map with `gh` into `.ai/qa/e2e-spec-map/`. It diffs the
-working tree, untracked files included, against the map's commit. Each changed file selects:
+The selector downloads the newest successful map from `main` with `gh` into
+`.ai/qa/e2e-spec-map/`. It diffs the working tree, including untracked files, against the map's
+commit. Without a download it uses the newest cached map. Without a usable map it runs every spec.
 
 | Change | Specs |
 | --- | --- |
-| A cockpit or api-client source, `packages/{web,api-client}/src/**/*.{ts,tsx}` | The specs the map links to it, plus every spec the map lists as incomplete: a spec that failed or left no log |
-| A spec | That spec |
-| An e2e helper or fixture | The specs that load it; every spec when the suite setup loads it or no spec names it |
-| Documentation, a unit test, `spec-map/`, `.github/` outside the suite setup | None |
-| Anything else: server code, the contract, styles, build configuration, the test environment, dependencies | Every spec |
+| Cockpit or api-client source | Specs that ran the file, loaded its top-level effects, or reached its exported values, plus incomplete specs |
+| Server source or `mock-*.mjs` with function evidence | Specs that ran the innermost functions containing the changed lines, plus specs that load the file and incomplete specs |
+| Spec, helper or fixture | Specs that load it; every spec if suite setup loads it or no spec names the helper |
+| Documentation, unit tests, `spec-map/`, `.github/` outside suite setup | None |
+| Server/CLI paths without function evidence; the contract; styles; build configuration; test environment; dependencies; any other unknown path | Every spec |
 
-Without `gh`, a network or a successful refresh, the selector uses the newest cached map. With no
-cached map, it runs every spec. It prints the reason in both cases.
-
-Limits:
-
-- The map works per file. An edit to one function selects every spec that ran any function of
-  the file.
-- Styles and server code select every spec.
-- The map does not hold text assertions. When you change visible copy, also search the specs for
-  the old and the new string ([reader sweep](../../../.ai/skills/reader-sweep/SKILL.md)).
-- A selected pass is not a full-suite pass. CI runs every spec.
+An edit outside recorded function ranges selects every spec. Insertions at function boundaries
+include both neighbouring lines. Cockpit coverage stays per file. A selected pass is iteration
+feedback. CI's required checks still run every spec.
 
 ## The project the shared env serves
 
