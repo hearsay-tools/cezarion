@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { exemptionFor, HARNESS_ADAPTERS, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
@@ -22,7 +23,7 @@ describe('native permission recovery (hearsay-tools/cezarion#1049)', () => {
         await waitFor(() => fixture.store.readEvents(fixture.runId).some(event => event.type === 'permission.requested'));
         const original = fixture.store.readEvents(fixture.runId).find(event => event.type === 'permission.requested')!;
         const originalOption = (original.options as Array<{ id: string }>)[0]!;
-        expect(fixture.store.getRun(fixture.runId)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
+        expect(fixture.store.getRun(fixture.runId)).toMatchObject({ status: RUN_STATUS.waiting, hasPendingPermission: true });
 
         const recovered = await fixture.restart();
         expect(recovered.store.getRun(fixture.runId)?.status).not.toBe('done');
@@ -31,7 +32,7 @@ describe('native permission recovery (hearsay-tools/cezarion#1049)', () => {
         await waitFor(() => recovered.store.readEvents(fixture.runId).filter(event => event.type === 'permission.requested').length === 2);
         const next = recovered.store.readEvents(fixture.runId).filter(event => event.type === 'permission.requested')[1]!;
         expect(next.requestId).not.toBe(original.requestId);
-        expect(recovered.store.getRun(fixture.runId)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
+        expect(recovered.store.getRun(fixture.runId)).toMatchObject({ status: RUN_STATUS.waiting, hasPendingPermission: true });
         const { pick } = HARNESS_ADAPTERS[backend].approvalDecisions![0]!;
         const decline = (next.options as Array<{ id: string; label: string }>).find(option => option.label.toLowerCase().includes(pick))!;
         expect(recovered.manager.respondPermission(fixture.runId, next.requestId as string, decline.id)).toBe(true);
