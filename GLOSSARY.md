@@ -76,3 +76,13 @@ settles the run `failed` with the error it kept. Only a `waiting` run can be on
 a hold: the store clears the resume time on every write that leaves `waiting`.
 
 _Avoid_: scheduled run (the sidebar's word for it), failed with a resume
+
+## Run exit
+
+A named kind of run status write: the statuses it may leave from, the status it
+writes, the fields it settles (such as `finishedAt` and `currentStepId`) and
+whether it commits at once or on the debounced save. The run store owns the
+exit table, and a status changes only by an exit. A trigger row in the run
+state table names the exit it takes.
+
+_Avoid_: transition (as a noun for the declared kind), status patch
