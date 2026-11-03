@@ -267,6 +267,54 @@ describe('settings → skills against the live dry-run server', () => {
     }
   })
 
+  it('a team skill source is added, disabled and removed on the page, and config.json follows (hearsay-tools/cezarion#279)', async () => {
+    const cezarDir = resolve(servedRoot(), '.ai/cezar')
+    const configFile = resolve(cezarDir, 'config.json')
+    const savedConfig = existsSync(configFile) ? readFileSync(configFile, 'utf8') : null
+    const source = mkdtempSync(join(tmpdir(), 'cez-e2e-team-source-'))
+    const name = 'e2e-source-skill'
+    const git = (args: string[]) => execFileSync('git', args, { cwd: source, stdio: 'ignore' })
+    git(['init', '-q', '-b', 'main'])
+    mkdirSync(join(source, name))
+    writeFileSync(join(source, name, 'SKILL.md'), `---\nname: ${name}\ndescription: An e2e source skill\n---\n\nDo it.\n`)
+    git(['add', '-A'])
+    git(['-c', 'user.name=cezar e2e', '-c', 'user.email=e2e@example.com', 'commit', '-q', '-m', 'skills'])
+    const sourceRow = `[data-slot="skill-source"][data-repo=${JSON.stringify(source)}]`
+    const skillRow = `[data-slot="skill-row"][data-skill="${name}"]`
+    const configured = () => (existsSync(configFile) ? (JSON.parse(readFileSync(configFile, 'utf8')) as { skillsRepos?: unknown[] }).skillsRepos : undefined)
+    try {
+      browser.goto(`${baseUrl}${scoped('/skills')}`)
+      browser.waitForFunction(`document.querySelector('[data-slot="skill-source-add"] button:not([disabled])') !== null`)
+      browser.fill('[data-slot="skill-source-repo"]', source)
+      browser.click('[data-slot="skill-source-submit"]')
+      expect(browser.waitForValue(
+        `document.querySelector(${JSON.stringify(sourceRow)})?.getAttribute('data-state') ?? null`,
+        (value) => value === 'ok',
+      )).toBe('ok')
+      browser.waitForFunction(`document.querySelector(${JSON.stringify(skillRow)}) !== null`)
+      expect(configured()).toEqual([{ repo: source }])
+      browser.screenshot(`${artifactsDir}/issue-279-skill-sources.png`, { viewport: true })
+
+      browser.click(`${sourceRow} [data-slot="skill-source-switch"]`)
+      expect(browser.waitForValue(
+        `document.querySelector(${JSON.stringify(sourceRow)})?.getAttribute('data-state') ?? null`,
+        (value) => value === 'disabled',
+      )).toBe('disabled')
+      browser.waitForFunction(`document.querySelector(${JSON.stringify(skillRow)}) === null`)
+      expect(configured()).toEqual([{ repo: source, enabled: false }])
+
+      browser.click(`${sourceRow} [data-slot="skill-source-remove"]`)
+      browser.waitForFunction(`document.querySelector(${JSON.stringify(sourceRow)}) === null`)
+      expect(configured()).toEqual([])
+    } finally {
+      if (savedConfig === null) rmSync(configFile, { force: true })
+      else writeFileSync(configFile, savedConfig, 'utf8')
+      const response = await fetch(`${baseUrl}/api/v1/p/${bootProject}/skills/refresh`, { method: 'POST' })
+      expect(response.ok).toBe(true)
+      rmSync(source, { recursive: true, force: true })
+    }
+  })
+
   it('refresh keeps the selection and the list scroll position (#384)', () => {
     browser.click(row(BETA))
     browser.waitForFunction(

@@ -333,7 +333,8 @@ Three words, no jargon — **task**, **skill**, **chain**:
 - 📖 **Skills** are Markdown playbooks. Drop them in `.ai/skills/` or
   `.ai/cezar/skills/`, or pull them from a shared **team skills repo** you name
   in `skillsRepos` (a bare git clone cached globally in `~/.cache/cez/`). There is no
-  default team repo, and each team skill has its own on/off switch per project. A workflow step references one by
+  default team repo. Add, remove, enable and disable team repos on the **Skills** page,
+  which writes `skillsRepos` for you, and each team skill has its own on/off switch per project. A workflow step references one by
   `skill: <name>` and its body becomes the agent's extra system prompt — so you
   shape *how* the agent reasons without touching code.
 - 🔗 **Chains (workflows)** stitch steps into a pipeline: agent steps plus shell
@@ -1475,7 +1476,9 @@ never blocks startup):
   // `C:\dir`) are accepted — no ext::/fd:: transport helpers. Write a relative
   // path as `./name`, not a bare `name`. Pin `ref` to a full commit SHA to freeze
   // the source against a moving branch head — cezar verifies it resolves to
-  // exactly that commit, and reports it as `team.commit`.
+  // exactly that commit, and reports it as `team.commit`. `"enabled": false` keeps
+  // a source listed but loads none of its skills. The Skills page edits this list,
+  // keeps every other key, and refuses to write a file it cannot read.
   "worktreeRetention": 10,   // keep the last N finished worktrees on disk; 0 = unlimited (no reclaim, no branch sweep)
   "defaultRunner": "claude", // agent backend: "claude" (default) · "codex" · "opencode" · "cursor" · "pi" · "omp"
   "modelsLocked": true,      // optional: native per-runner model is fixed/read-only; runner stays selectable

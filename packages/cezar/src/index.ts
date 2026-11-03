@@ -98,7 +98,7 @@ Options:
 
 Zero config: uses your logged-in \`claude\` CLI (and \`gh\` for GitHub bits).
 Skills live in .ai/skills/, .ai/cezar/skills/ and your team skills repos
-(team skills come from "skillsRepos" in .ai/cezar/config.json; none by default);
+(team skills come from "skillsRepos" in .ai/cezar/config.json, which the Skills page edits; none by default);
 workflows in .ai/cezar/workflows/.`;
 
 async function main(): Promise<void> {
