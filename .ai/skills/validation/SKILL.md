@@ -5,7 +5,7 @@ description: Run or choose tests in this repo (Squeal verdicts, Vitest through n
 
 # Validation
 
-In a fresh task worktree (`.ai/cezar/worktrees/<runId>`), run `pnpm install --frozen-lockfile` unless `worktreeSetup` already did. Without local `node_modules`, Node resolves `@open-mercato/*` in the main checkout, so typecheck/tests use its sources.
+In a fresh task worktree (`.ai/cezar/worktrees/<runId>`), run `pnpm install --frozen-lockfile` unless `worktreeSetup` already did.
 
 Before adding a YAML, shell or Markdown reader, read [Script readers](../../../docs/sdlc/script-readers.md).
 
