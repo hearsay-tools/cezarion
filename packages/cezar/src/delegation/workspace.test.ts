@@ -1,5 +1,6 @@
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
+import { copyWorkspaceSeed, workspaceSeed } from './workspace-seed.testkit.ts';
 import { syncBuiltinESMExports } from 'node:module';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { execFileSync } from 'node:child_process';
@@ -25,16 +26,49 @@ const managers: RunManager[] = [];
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
+
+function repositoryState(root: string) {
+  return {
+    refs: git(root, 'show-ref'),
+    head: git(root, 'symbolic-ref', 'HEAD'),
+    config: git(root, 'config', '--local', '--list'),
+    index: git(root, 'ls-files', '--stage'),
+    status: git(root, 'status', '--porcelain'),
+  };
+}
+
+it('copies seed repositories without sharing Git files or working files', async () => {
+  const first = await mkdtemp(join(tmpdir(), 'cez-seed-isolation-'));
+  const second = await mkdtemp(join(tmpdir(), 'cez-seed-isolation-'));
+  roots.push(first, second);
+  await copyWorkspaceSeed(first);
+  await copyWorkspaceSeed(second);
+  const template = await workspaceSeed();
+  const original = repositoryState(template);
+  expect(repositoryState(first)).toEqual(original);
+  expect(repositoryState(second)).toEqual(original);
+  for (const path of ['tracked.txt', '.git/HEAD', '.git/config', '.git/index']) {
+    const files = await Promise.all([first, second, template].map(root => lstat(join(root, path), { bigint: true })));
+    expect(new Set(files.map(file => `${file.dev}:${file.ino}`)).size).toBe(3);
+  }
+  git(first, 'checkout', '-qb', 'isolated');
+  git(first, 'config', 'fixture.only', 'first');
+  await writeFile(join(first, 'tracked.txt'), 'changed');
+  git(first, 'commit', '-qam', 'isolated change');
+  await writeFile(join(first, 'staged.txt'), 'index change');
+  git(first, 'add', 'staged.txt');
+  expect(repositoryState(first)).not.toEqual(original);
+  for (const root of [second, template]) {
+    expect(repositoryState(root)).toEqual(original);
+    expect(await readFile(join(root, 'tracked.txt'), 'utf8')).toBe('base');
+    expect(existsSync(join(root, 'staged.txt'))).toBe(false);
+  }
+});
+
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'cez-owned-workspace-'));
   roots.push(root);
-  git(root, 'init', '-q', '-b', 'main');
-  git(root, 'config', 'gc.auto', '0');
-  git(root, 'config', 'maintenance.auto', 'false');
-  git(root, 'config', 'user.name', 'test');
-  git(root, 'config', 'user.email', 'test@local');
-  await writeFile(join(root, 'tracked.txt'), 'base');
-  git(root, 'add', '.'); git(root, 'commit', '-qm', 'one');
+  await copyWorkspaceSeed(root);
   const first = git(root, 'rev-parse', 'HEAD');
   const parentPath = join(root, 'parent');
   git(root, 'worktree', 'add', '-qb', 'parent', parentPath);
