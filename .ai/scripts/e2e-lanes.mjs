@@ -325,6 +325,35 @@ export function buildSource(repoRoot) {
   execFileSync('sh', ['.ai/scripts/build-e2e.sh'], npmOptions);
 }
 
+async function teardownLanes({ repoRoot, scratch, lanes, logDir, running }) {
+  const teardownFailures = [];
+  let retainedLane = false;
+  for (const lane of [...lanes].reverse()) {
+    try { retainEvidence(lane, logDir); } catch (error) { process.stderr.write(`E2E evidence: ${error}\n`); }
+    if (lane.browser?.installed && lane.browser.command) {
+      try {
+        const exit = await runProcess(lane.browser.command, ['--namespace', lane.namespace, 'close', '--all'], {
+          cwd: lane.root, env: { ...lane.env, ...lane.browser.runtimeEnv },
+          logPath: join(logDir, `lane-${lane.index}-browser-down.log`), running,
+        });
+        if (exit !== 0) teardownFailures.push(`lane ${lane.index} browser close failed (exit ${exit})`);
+      } catch (error) { teardownFailures.push(`lane ${lane.index} browser close failed: ${error}`); }
+    }
+    try {
+      const exit = await runProcess('sh', ['.ai/scripts/test-env-down.sh'], {
+        cwd: lane.root, env: lane.env, logPath: join(logDir, `lane-${lane.index}-down.log`), running,
+      });
+      if (exit !== 0) throw new Error(`exit ${exit}`);
+      removeLane({ repoRoot, laneRoot: lane.root });
+    } catch (error) {
+      retainedLane = true;
+      teardownFailures.push(`lane ${lane.index} server stop failed: ${error}`);
+    }
+  }
+  if (!retainedLane) rmSync(scratch, { recursive: true, force: true });
+  if (teardownFailures.length) throw new Error(`${teardownFailures.join('; ')}${retainedLane ? `; retained lanes in ${scratch}` : ''}`);
+}
+
 export async function runLocalSuite({ repoRoot = ownRoot, scratchRoot, buildSource: prepareBuild = buildSource } = {}) {
   const scratch = scratchRoot ?? mkdtempSync(join(tmpdir(), 'cez-e2e-lanes-'));
   if (scratchRoot) mkdirSync(scratch); // Refuse foreign state before build or teardown can claim it.
@@ -388,32 +417,7 @@ export async function runLocalSuite({ repoRoot = ownRoot, scratchRoot, buildSour
     process.off('SIGINT', interrupt);
     process.off('SIGTERM', interrupt);
     terminateChildren(running);
-    const teardownFailures = [];
-    let retainedLane = false;
-    for (const lane of [...lanes].reverse()) {
-      try { retainEvidence(lane, logDir); } catch (error) { process.stderr.write(`E2E evidence: ${error}\n`); }
-      if (lane.browser?.installed && lane.browser.command) {
-        try {
-          const exit = await runProcess(lane.browser.command, ['--namespace', lane.namespace, 'close', '--all'], {
-            cwd: lane.root, env: { ...lane.env, ...lane.browser.runtimeEnv },
-            logPath: join(logDir, `lane-${lane.index}-browser-down.log`), running,
-          });
-          if (exit !== 0) teardownFailures.push(`lane ${lane.index} browser close failed (exit ${exit})`);
-        } catch (error) { teardownFailures.push(`lane ${lane.index} browser close failed: ${error}`); }
-      }
-      try {
-        const exit = await runProcess('sh', ['.ai/scripts/test-env-down.sh'], {
-          cwd: lane.root, env: lane.env, logPath: join(logDir, `lane-${lane.index}-down.log`), running,
-        });
-        if (exit !== 0) throw new Error(`exit ${exit}`);
-        removeLane({ repoRoot, laneRoot: lane.root });
-      } catch (error) {
-        retainedLane = true;
-        teardownFailures.push(`lane ${lane.index} server stop failed: ${error}`);
-      }
-    }
-    if (!retainedLane) rmSync(scratch, { recursive: true, force: true });
-    if (teardownFailures.length) throw new Error(`${teardownFailures.join('; ')}${retainedLane ? `; retained lanes in ${scratch}` : ''}`);
+    await teardownLanes({ repoRoot, scratch, lanes, logDir, running });
   }
 }
 
