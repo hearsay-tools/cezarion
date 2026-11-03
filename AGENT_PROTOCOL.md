@@ -1857,7 +1857,7 @@ spawned process's stdio, with no listen phase, and carry named
 `scenario-unconstructible` exemptions; retrying their starts is out of scope.
 
 Workflow deadline rows **T1–T6** (hearsay-tools/cezarion#470) live in
-`core/workflow-timeout-parity.test.ts` and are registered in the shared parity
+`core/workflow-timeout-parity.testkit.ts` and are registered in the shared parity
 guard. Each `RUNNER_IDS` backend uses its own `HARNESS_ADAPTERS` native wire:
 non-final managed steps outlive the default runner deadline, explicit zero disables
 it, authored positive limits fail before trailing checks, and standalone sessions
