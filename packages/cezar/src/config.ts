@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { loadWorkspaceConfig, type WorkspaceConfig } from './workspace/config.ts';
@@ -14,9 +15,13 @@ const skillsRepoSchema = z.object({
   /** `owner/name` (GitHub shorthand), a full git URL, or a local/file:// path. */
   repo: z.string().min(1),
   ref: z.string().min(1).default('main'),
+  /** False keeps the source listed on the Skills page but loads none of its skills (#279). */
+  enabled: z.boolean().default(true),
 });
 
 export type SkillsRepoSource = z.infer<typeof skillsRepoSchema>;
+/** A source by identity: what the git and listing helpers need. */
+export type SkillsRepoRef = Pick<SkillsRepoSource, 'repo' | 'ref'>;
 
 /** Last-resort retention when neither the repo nor the workspace says anything. */
 export const DEFAULT_WORKTREE_RETENTION = 10;
@@ -164,6 +169,89 @@ export async function loadConfig(repoRoot: string): Promise<CezConfig> {
     // fall through — malformed JSON degrades to the default
   }
   return configSchema.parse(withMachineDefaults({}, machine));
+}
+
+/** Why `.ai/cezar/config.json` cannot be read, as the Skills page shows it. */
+function configIssue(error: unknown): string {
+  return `.ai/cezar/config.json cannot be read: ${error instanceof Error ? error.message : String(error)}. Fix the file, then reload.`;
+}
+
+/** A failed read keeps `raw` when the file is a JSON object that only the schema refuses. */
+export type RawConfigRead = { ok: true; raw: Record<string, unknown> } | { ok: false; issue: string; raw?: Record<string, unknown> };
+
+/**
+ * The raw `.ai/cezar/config.json` object, or why it cannot be used. A missing file is `{}`.
+ * Malformed JSON, a non-object, or a value `loadConfig` would throw away (it falls back to the
+ * whole default) is an issue: a writer that merged into it would replace the user's file.
+ */
+export async function readRawConfig(dataDir: string): Promise<RawConfigRead> {
+  let text: string;
+  try {
+    text = await readFile(join(dataDir, 'config.json'), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { ok: true, raw: {} };
+    return { ok: false, issue: configIssue(error) };
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch (error) {
+    return { ok: false, issue: configIssue(error) };
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, issue: configIssue('it is not a JSON object') };
+  const parsed = configSchema.safeParse(raw);
+  if (!parsed.success) {
+    const first = parsed.error.issues[0];
+    return { ok: false, issue: configIssue(`${first?.path.join('.') || 'value'}: ${first?.message ?? 'invalid'}`), raw: raw as Record<string, unknown> };
+  }
+  return { ok: true, raw: raw as Record<string, unknown> };
+}
+
+/**
+ * The `skillsRepos` sources switched off with `enabled: false` (#279), read synchronously for the
+ * run's skill readers, which apply them as they are now (`enabledSkills`). An unreadable file
+ * switches nothing off; `loadConfig` then lists no sources at all.
+ */
+export function readDisabledSkillsReposSync(repoRoot: string): SkillsRepoRef[] {
+  try {
+    const parsed = configSchema.safeParse(JSON.parse(readFileSync(join(repoRoot, '.ai/cezar', 'config.json'), 'utf8')));
+    return parsed.success ? parsed.data.skillsRepos.filter((src) => !src.enabled).map(({ repo, ref }) => ({ repo, ref })) : [];
+  } catch {
+    return [];
+  }
+}
+
+const configWrites = new Map<string, Promise<unknown>>();
+
+/**
+ * Change `.ai/cezar/config.json` under one in-process lock per file, then write it atomically (a
+ * temporary file, then a rename), so a synchronous reader never sees a partial file and two
+ * cockpit writes never drop each other's keys. `change` gets the file as `readRawConfig` reads
+ * it now and returns the next object, or a refusal that writes nothing.
+ */
+export function updateConfigFile<T>(
+  dataDir: string,
+  change: (current: RawConfigRead) => { write: Record<string, unknown>; result: T } | { refuse: T },
+): Promise<T> {
+  const path = join(dataDir, 'config.json');
+  const previous = configWrites.get(path) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(async () => {
+    const outcome = change(await readRawConfig(dataDir));
+    if ('refuse' in outcome) return outcome.refuse;
+    await mkdir(dataDir, { recursive: true });
+    const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      await writeFile(temp, `${JSON.stringify(outcome.write, null, 2)}\n`, 'utf8');
+      await rename(temp, path);
+    } catch (error) {
+      await rm(temp, { force: true });
+      throw error;
+    }
+    return outcome.result;
+  });
+  configWrites.set(path, next);
+  void next.finally(() => { if (configWrites.get(path) === next) configWrites.delete(path); }).catch(() => undefined);
+  return next;
 }
 
 /**

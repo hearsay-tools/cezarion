@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadConfig, resolveWorktreeRetention } from './config.ts';
+import { loadConfig, readRawConfig, resolveWorktreeRetention, updateConfigFile } from './config.ts';
 
 /**
  * `config.json` schema roundtrips (R2 2.3: `systemPrompt?`). The invariants
@@ -286,7 +286,7 @@ describe('loadConfig skillsRepos under the test environment (#359)', () => {
 
   it('keeps a repo-configured skillsRepos honored verbatim', async () => {
     write({ skillsRepos: [{ repo: 'acme/team-skills', ref: 'main' }] });
-    expect((await loadConfig(repoRoot)).skillsRepos).toEqual([{ repo: 'acme/team-skills', ref: 'main' }]);
+    expect((await loadConfig(repoRoot)).skillsRepos).toEqual([{ repo: 'acme/team-skills', ref: 'main', enabled: true }]);
   });
 
   it('defaults to no team skills outside vitest too — the default is not an env seam', async () => {
@@ -407,5 +407,45 @@ describe('loadConfig worktreeSetup', () => {
 
   it('is undefined when the key is absent', async () => {
     expect((await loadConfig(repoRoot)).worktreeSetup).toBeUndefined();
+  });
+});
+
+describe('readRawConfig and updateConfigFile (hearsay-tools/cezarion#279)', () => {
+  let dataDir: string;
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'cez-config-write-'));
+  });
+  afterEach(() => rmSync(dataDir, { recursive: true, force: true }));
+  const path = () => join(dataDir, 'config.json');
+
+  it('reads a missing file as an empty object and keeps unknown keys', async () => {
+    expect(await readRawConfig(dataDir)).toEqual({ ok: true, raw: {} });
+    writeFileSync(path(), JSON.stringify({ mine: 1, skillsRepos: [{ repo: 'a/b' }] }));
+    expect(await readRawConfig(dataDir)).toEqual({ ok: true, raw: { mine: 1, skillsRepos: [{ repo: 'a/b' }] } });
+  });
+
+  it('reports malformed JSON, a non-object and a value loadConfig would drop', async () => {
+    for (const text of ['{ nope', '[]', JSON.stringify({ skillsRepos: [{ repo: '' }] })]) {
+      writeFileSync(path(), text);
+      const read = await readRawConfig(dataDir);
+      expect(read.ok).toBe(false);
+      if (!read.ok) expect(read.issue).toMatch(/^\.ai\/cezar\/config\.json cannot be read: /);
+    }
+  });
+
+  it('serializes concurrent writers, so neither drops the other one\'s key', async () => {
+    writeFileSync(path(), JSON.stringify({ base: true }));
+    const set = (key: string) => updateConfigFile(dataDir, (current) =>
+      current.ok ? { write: { ...current.raw, [key]: true }, result: key } : { refuse: 'refused' });
+    expect(await Promise.all([set('one'), set('two'), set('three')])).toEqual(['one', 'two', 'three']);
+    expect(JSON.parse(readFileSync(path(), 'utf8'))).toEqual({ base: true, one: true, two: true, three: true });
+  });
+
+  it('writes nothing on a refusal and leaves no temporary file', async () => {
+    writeFileSync(path(), '{ nope');
+    expect(await updateConfigFile(dataDir, () => ({ refuse: 'no' }))).toBe('no');
+    expect(readFileSync(path(), 'utf8')).toBe('{ nope');
+    await updateConfigFile(dataDir, () => ({ write: { fresh: 1 }, result: undefined }));
+    expect(readdirSync(dataDir)).toEqual(['config.json']);
   });
 });

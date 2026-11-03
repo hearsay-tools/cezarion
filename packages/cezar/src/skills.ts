@@ -2,7 +2,8 @@ import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve, basename, dirname, extname } from 'node:path';
 import { teamSkillRefSchema, type TeamSkillRef } from '@open-mercato/cezar-contract/skills';
-import { getTeamSkillsCached } from './skills-remote.ts';
+import { getTeamSkillsCached, sourceKey } from './skills-remote.ts';
+import { readDisabledSkillsReposSync, type SkillsRepoRef } from './config.ts';
 import { readProjectUiState } from './ui-state.ts';
 
 /**
@@ -84,7 +85,10 @@ export async function discoverSkills(repoRoot: string, options: { builtin?: read
     ]),
     readProjectUiState(repoRoot),
   ]);
-  const teamSkills = filterDisabledTeamSkills(getTeamSkillsCached(repoRoot), readDisabledTeamSkills(uiState));
+  const teamSkills = filterDisabledTeamSkills(
+    filterDisabledTeamSources(getTeamSkillsCached(repoRoot), readDisabledSkillsReposSync(repoRoot)),
+    readDisabledTeamSkills(uiState),
+  );
   const merged: Skill[] = [];
   const seen = new Set<string>();
   for (const skills of [...lists, teamSkills]) {
@@ -127,6 +131,17 @@ export function filterDisabledTeamSkills(teamSkills: readonly Skill[], disabled:
   if (disabled.length === 0) return [...teamSkills];
   const off = new Set(disabled.map((ref) => JSON.stringify([ref.repo, ref.name])));
   return teamSkills.filter((skill) => !skill.team || !off.has(JSON.stringify([skill.team.repo, skill.name])));
+}
+
+/**
+ * Drop the team skills of every source the project disabled (#279), matched on repo AND ref. The
+ * team cache stops loading a disabled source on its next load; this applies the switch to a list
+ * loaded before it, such as a run's saved registry. Pure.
+ */
+export function filterDisabledTeamSources(skills: readonly Skill[], disabled: readonly SkillsRepoRef[]): Skill[] {
+  if (disabled.length === 0) return [...skills];
+  const off = new Set(disabled.map(sourceKey));
+  return skills.filter((skill) => !skill.team || !off.has(sourceKey(skill.team)));
 }
 
 /**

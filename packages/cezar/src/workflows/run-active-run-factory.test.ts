@@ -112,6 +112,21 @@ describe('loading a run\'s skill registry', () => {
     expect(internals().enabledSkills(state).map((s) => s.name)).toEqual(['a']);
   });
 
+  it('a team source disabled after the registry loaded drops its skills (hearsay-tools/cezarion#279)', async () => {
+    const team = (name: string, repo: string): Skill => ({
+      ...skill(name), source: 'team', team: { repo, ref: 'main', path: `commands/${name}.md`, dir: false },
+    });
+    vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockResolvedValue([skill('a'), team('t', 'acme/one'), team('u', 'acme/two')]);
+    const state = freshState();
+    await internals().loadRunSkills(state, 'throw');
+    expect(internals().enabledSkills(state).map((s) => s.name)).toEqual(['a', 't', 'u']);
+    mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
+    writeFileSync(join(repoRoot, '.ai/cezar/config.json'), JSON.stringify({
+      skillsRepos: [{ repo: 'acme/one', enabled: false }, { repo: 'acme/two' }],
+    }));
+    expect(internals().enabledSkills(state).map((s) => s.name)).toEqual(['a', 'u']);
+  });
+
   it("a failed first discovery with 'ignore' leaves an empty registry", async () => {
     vi.spyOn(runInternals(manager).runSkills, 'discoverSkills').mockRejectedValue(new Error('boom'));
     const state = freshState();

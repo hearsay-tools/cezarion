@@ -160,6 +160,19 @@ import { planChain, slugify } from '../planner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
 import { createSelfUpdateRoutes, type SelfUpdateServerDeps } from './self-update-routes.ts';
 import { getTeamSkillsCached, refreshTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
+import {
+  addTeamSkillSourceSchema,
+  setTeamSkillSourceEnabledSchema,
+  teamSkillSourceRefSchema,
+} from '@open-mercato/cezar-contract/skill-sources';
+import {
+  addSkillSource,
+  readSkillSources,
+  removeSkillSource,
+  retrySkillSource,
+  setSkillSourceEnabled,
+  type SkillSourcesAnswer,
+} from './skill-sources.ts';
 import { readHandoff, renderHandoffRecords } from '../handoff.ts';
 import { ARCHIVED_WINDOW, type RepoHandle, type RunRecord, type RunStatus, type RunStore } from '../runs/store.ts';
 import {
@@ -200,7 +213,7 @@ import {
   pushCurrentBranch,
   readWorktreePath,
 } from './git-changes.ts';
-import { loadConfig, resolveWorktreeRetention, type CezConfig } from '../config.ts';
+import { loadConfig, resolveWorktreeRetention, updateConfigFile, type CezConfig } from '../config.ts';
 import { resolveWorktreeSetup } from '../worktree-setup.ts';
 import { findConfigFile } from '../agent-config/catalog.ts';
 import { readConfigFile, statConfigPath, writeConfigFile } from '../agent-config/files.ts';
@@ -2760,6 +2773,9 @@ export function createApp(deps: ServerDeps) {
   const launchKeyRoutes = new Hono<ProjectApiEnv>()
     .get('/launch-key', (c) => c.json({ key: c.get('project').launchKey }));
 
+  const sourcesAnswer = (c: Context<ProjectApiEnv>, answer: SkillSourcesAnswer) =>
+    answer.ok ? c.json(answer.body, 200) : c.json({ error: answer.error }, answer.status);
+
   // ---- chained family: skills (project-scoped) ----
   const skillsRoutes = new Hono<ProjectApiEnv>()
     .get('/skills', queryZodValidator(waitQuery), async (c) => {
@@ -2788,7 +2804,23 @@ export function createApp(deps: ServerDeps) {
       const { root: repoRoot } = c.get('project');
       await refreshTeamSkills(repoRoot);
       return c.json(await discoverSkills(repoRoot, { builtin: builtinSkillsOf(c.get('project').manager) }));
-    });
+    })
+
+    // Team skill sources (hearsay-tools/cezarion#279): `skillsRepos` as the Skills page edits it.
+    // Writes are settings administration, like worktree setup: read-only on a remote cockpit.
+    .get('/skills/sources', async (c) => c.json(await readSkillSources(c.get('project'), capabilities().settingsAdmin)))
+
+    .post('/skills/sources', jsonZodValidator(() => addTeamSkillSourceSchema), async (c) =>
+      sourcesAnswer(c, await addSkillSource(c.get('project'), capabilities().settingsAdmin, c.req.valid('json'))))
+
+    .patch('/skills/sources', jsonZodValidator(() => setTeamSkillSourceEnabledSchema), async (c) =>
+      sourcesAnswer(c, await setSkillSourceEnabled(c.get('project'), capabilities().settingsAdmin, c.req.valid('json'))))
+
+    .delete('/skills/sources', jsonZodValidator(() => teamSkillSourceRefSchema), async (c) =>
+      sourcesAnswer(c, await removeSkillSource(c.get('project'), capabilities().settingsAdmin, c.req.valid('json'))))
+
+    .post('/skills/sources/retry', jsonZodValidator(() => teamSkillSourceRefSchema), async (c) =>
+      sourcesAnswer(c, await retrySkillSource(c.get('project'), capabilities().settingsAdmin, c.req.valid('json'))));
 
   // ---- chained family: GUI prefs / ui-state (project-scoped) ----
   const uiStateRoutes = new Hono<ProjectApiEnv>()
@@ -4862,18 +4894,9 @@ export function createApp(deps: ServerDeps) {
       if (parsed.data.worktreeSetup !== undefined && !capabilities().settingsAdmin) {
         return c.json({ error: WORKTREE_SETUP_HOSTED_ERROR }, 409);
       }
-      const configPath = join(dataDir, 'config.json');
-      let raw: Record<string, unknown> = {};
       try {
-        const existing: unknown = JSON.parse(await readFile(configPath, 'utf8'));
-        if (existing && typeof existing === 'object') raw = existing as Record<string, unknown>;
-      } catch {
-        // missing or malformed — start fresh
-      }
-      raw = mergeConfig(raw, parsed.data);
-      try {
-        await mkdir(dataDir, { recursive: true });
-        await writeFile(configPath, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
+        // A missing or malformed file starts fresh; a file only the schema refuses is merged into.
+        await updateConfigFile(dataDir, (current) => ({ write: mergeConfig(current.ok ? current.raw : current.raw ?? {}, parsed.data), result: undefined }));
       } catch (err) {
         return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
       }
