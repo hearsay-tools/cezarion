@@ -13,5 +13,7 @@ npm test -- --config "$PWD/.ai/skills/check-code-quality/scripts/fixtures/expres
   --coverage.reportsDirectory=coverage
 ```
 
-Copy the resulting `coverage/coverage-final.json` to `coverage.json`, replacing
-only the absolute report key and `path` with `source.ts`.
+Copy
+`.ai/skills/check-code-quality/scripts/fixtures/expression-arrows/coverage/coverage-final.json`
+to `.ai/skills/check-code-quality/scripts/fixtures/expression-arrows/coverage.json`.
+Replace only the absolute report key and `path` with `source.ts`.
