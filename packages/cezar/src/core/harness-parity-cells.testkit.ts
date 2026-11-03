@@ -656,9 +656,9 @@ const CONTROL_CRITERIA = [
   // independent reboot proof, legacy location uncertainty, readable vs unreadable holders, cleanup retries
   // and parent Finish.
   { id: 'R43', scenario: 'baseline' },
-  // workflows/worker-restart-parity.test.ts: same-boot exit proof, mixed-holder polling and bounded cleanup locks.
+  // workflows/worker-restart-same-boot-crash-lock-parity.test.ts: same-boot exit proof, mixed-holder polling and bounded cleanup locks.
   { id: 'R47', scenario: 'baseline' },
-  // worker-restart-parity.test.ts: cold terminal starting-proof facts readiness.
+  // worker-restart-starting-proof-parity.test.ts: cold terminal starting-proof facts readiness.
   { id: 'R60', scenario: 'baseline' },
   // #779: Continue on a run only runs.db holds, through both ActiveRun construction sites.
   { id: 'R48', scenario: 'cezar-done' },

@@ -1632,7 +1632,7 @@ bare Continue is refused, and an explicit human answer reaches the native runner
 before queued agent input drains. This extends the registered R7 cell, with no
 runner exemptions.
 
-**R60** (hearsay-tools/cezarion#906), in `workflows/worker-restart-parity.test.ts`,
+**R60** (hearsay-tools/cezarion#906), in `workflows/worker-restart-starting-proof-parity.test.ts`,
 uses every `RUNNER_IDS` backend's `HARNESS_ADAPTERS` native wire to persist a
 starting execution generation. A fully terminal modern root and worker have no
 live or deferred anchor; their plain history is nonempty and facts sidecars are
@@ -1735,7 +1735,7 @@ Only prior-boot evidence and process enumeration scope are synthetic; cwd permis
 process exit, native wires, stores and Git remain real. Linux-only OS coverage exempts no runner;
 legacy/unknown-boot and recorded-process guards live in `delegation/process-liveness.test.ts`.
 
-**R47** (hearsay-tools/cezarion#839, hearsay-tools/cezarion#889), in `workflows/worker-restart-parity.test.ts`,
+**R47** (hearsay-tools/cezarion#839, hearsay-tools/cezarion#889), in `workflows/worker-restart-same-boot-crash-lock-parity.test.ts`,
 drives every `RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire,
 cancellation, and same-boot interrupted checkpoint recovery. A live recorded
 unreadable process still blocks settlement, and that partial collection cannot
