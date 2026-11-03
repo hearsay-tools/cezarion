@@ -154,6 +154,21 @@ it('a run stopped mid-file leaves no sandbox once the next run starts (hearsay-t
   mkdirSync(join(repo, '.ai/qa'), { recursive: true });
   const scratch = mkdtempSync(join(repo, '.ai/qa/unit-env-'));
   try {
+    // Other workers legitimately reap dead owners in /tmp. Keep both nested runs in
+    // one private root so only the next run can reap the killed worker's sandbox.
+    const root = join(scratch, 'sandboxes');
+    mkdirSync(root);
+    const setup = join(scratch, 'sandbox-root.setup.mjs');
+    writeFileSync(setup, `
+import { vi } from 'vitest';
+vi.mock(${JSON.stringify(join(repo, 'scripts/test-sandbox.mjs'))}, async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    createTestSandbox: (prefix) => actual.createTestSandbox(prefix, ${JSON.stringify(root)}),
+  };
+});
+`);
     const log = join(scratch, 'sandboxes.log');
     const fixture = join(scratch, 'sandbox.test.ts');
     writeFileSync(fixture, `
@@ -167,7 +182,7 @@ it('records its sandbox', () => {
     const config = join(scratch, 'vitest.config.mjs');
     writeFileSync(config, `export default ${JSON.stringify({ test: {
       environment: 'node', include: [fixture],
-      setupFiles: [join(repo, 'packages/cezar/vitest.setup.ts')],
+      setupFiles: [setup, join(repo, 'packages/cezar/vitest.setup.ts')],
       passWithNoTests: false, maxWorkers: 1,
     } })}`);
     const env = Object.fromEntries(['PATH', 'SystemRoot', 'SYSTEMROOT', 'ComSpec', 'PATHEXT']
