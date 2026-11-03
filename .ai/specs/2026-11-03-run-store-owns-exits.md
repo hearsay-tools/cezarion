@@ -44,13 +44,31 @@ Seven writers bypass the table: six in the `run-status-write-outside-transition`
    debounced so a locked database cannot stop cleanup; Done with a completion option, handoff
    records and the archive options commit at once. The record rules become one ordered pipeline.
    A rule that differs between the saves on purpose is a named difference in that pipeline.
+   Durability is decided in one of three ways, never by the caller's patch:
+   - **by the exit**: each exit declares debounced or committed;
+   - **by the record**: an exit to `done` commits when the run has a completion option, as
+     `updateRun` decides today;
+   - **by an enclosing commit**: an exit applied inside another commit (`resume` inside
+     `commitOutcome`, `continue-*` inside `commitWorkerContinuation`) commits with it.
+
+   The one call-site choice today, `parkOnWaits` committing a park only when the run gives up its
+   slot, becomes its own exit, `park-release` (same `from` and `to` as `park`, committed, clears
+   `activity`, sets the step to waiting). Table A marks each exit's way.
 5. **Exits replace status-writing commits.** `commitParked`, `commitRootFinishSuccess`,
    `commitRootFinishCancellation`, `commitWorkerCancellation` and `commitAutoResumeWithdrawal`
-   become exits. Four have a precondition and get a named guard: root Finish success and
-   cancellation (a root with a pending Finish intent), worker cancellation (role worker) and the
-   hold withdrawal (a usage-limit hold). A failed guard writes nothing and returns false, as the
-   commit's early return does today. `commitParked` has no precondition; it becomes the committed
-   form of `park`. `transitionVia` is deleted.
+   become exits. Four have a precondition and get a named guard. A failed guard keeps the
+   method's failure behavior today:
+   - root Finish success and cancellation (a root with a pending Finish intent): write nothing,
+     return false. They differ from `succeed`, `succeed-review` and `cancel` in guard and
+     durability, so they become their own committed exits: `succeed-root`, `succeed-root-review`
+     and `cancel-root`, with the same `from` and `to` as the exits they mirror;
+   - worker cancellation (role worker): throw, because a non-worker here is a caller error;
+   - the hold withdrawal (a usage-limit hold): write no status.
+
+   `commitAutoResumeWithdrawal` also clears `autoResumeAt` and `autoResumeAttempts` on a run that is
+   not a hold, without a status change. That cleanup stays a statusless store commit; only the hold
+   case becomes the `withdraw-hold` exit. `commitParked` has no precondition; it becomes the
+   `park-release` exit (Decision 4). `transitionVia` is deleted.
 6. **The bypass writers become exits** (§ Table C). Then `run-status-write-outside-transition`
    and its baseline are deleted: the type refuses a status outside an exit.
 7. **Slice 4.4 removes the four outcome baseline entries at their cause**: `commitOutcome`
@@ -87,21 +105,21 @@ adds for every exit whose status is `failed`. Durability: D debounced, C commit.
 | start | queued, running, waiting → running | 3 | nothing | none | D |
 | start-held | queued → queued | 1 | `startedAt ??= now`, runner, systemPrompt, modelIdentity, `invalidAsk` cleared | none | D |
 | requeue | queued, running, failed → queued | 6 | `currentStepId` cleared | none | D |
-| continue-line | waiting, review, done, failed, cancelled → queued | 3 | `error`, `finishedAt`, `currentStepId` cleared | none | D; worker C (`commitWorkerContinuation`) |
-| continue-now | same → running | 1 | `error`, `finishedAt` cleared; `currentStepId` = the step | none | D; worker C |
-| park | running, queued, waiting → waiting | 14 | nothing | none (`commitParked` clears `activity` and sets the step in the same commit) | D; C at `parkOnWaits` without a slot |
+| continue-line | waiting, review, done, failed, cancelled → queued | 3 | `error`, `finishedAt`, `currentStepId` cleared | none | D by exit; worker C by enclosing commit (`commitWorkerContinuation`) |
+| continue-now | same → running | 1 | `error`, `finishedAt` cleared; `currentStepId` = the step | none | D by exit; worker C by enclosing commit |
+| park | running, queued, waiting → waiting | 14 | nothing | none | D by exit; `park-release` (Decision 4): C by exit, clears `activity`, sets the step in the same commit |
 | park-for-wake | queued, waiting → waiting | 1 | nothing | none | D |
 | hold | failed, waiting → waiting | 1 + `failed.legacy-hold` | `finishedAt` cleared; `autoResumeAt` set | none | D |
-| resume | waiting → running | 4 | nothing | none | D; C inside `commitOutcome` at `sendAgentInput` |
-| succeed, succeed-review | running, waiting → done, review | 2 | SRF, `finishedAt` = now, `currentStepId` and `autoResumeAttempts` cleared | root Finish: waiting, root, intent pending | C when done and opted in, or root Finish; else D |
-| accept-review | review → done | 1 + `review.draft-pr` | nothing in common | none | as succeed |
+| resume | waiting → running | 4 | nothing | none | D by exit; C by enclosing commit (`commitOutcome` at `sendAgentInput`) |
+| succeed, succeed-review | running, waiting → done, review | 2 | SRF, `finishedAt` = now, `currentStepId` and `autoResumeAttempts` cleared | root Finish: waiting, root, intent pending | D by exit; C by record (completion option); root Finish: C by exit (`succeed-root`, `succeed-root-review`, Decision 5) |
+| accept-review | review → done | 1 + `review.draft-pr` | nothing in common | none | D by exit; C by record |
 | fail-start | queued, running → failed | 7 | `error`, `finishedAt` = now, SRF | none | D |
 | fail | running, waiting → failed | 4 | `error`, `finishedAt` = now, `currentStepId` cleared, SRF | none | D |
 | fail-continue | running, waiting, cancelled → failed | 1 | as fail | none | D |
 | fail-interrupted | queued, running, waiting → failed | 1 + `live.read-only` | fixed `error`, `finishedAt` | none | D |
 | fail-crash | queued, running, waiting → failed | 2 | `error`, `finishedAt` = now, SRF | none | D |
 | withdraw-hold | waiting → failed | 1 + `hold.archive` | `autoResumeAt`, `autoResumeAttempts` cleared | usage-limit hold | C |
-| cancel | queued, running, waiting → cancelled | 12 + `live.stopping` + `queued.orphaned` | `finishedAt` set | root Finish cancel: root, intent pending, waiting or cancelled | D; C for root Finish cancel |
+| cancel | queued, running, waiting → cancelled | 12 + `live.stopping` + `queued.orphaned` | `finishedAt` set | root Finish cancel: root, intent pending, waiting or cancelled | D by exit; root Finish cancel: C by exit (`cancel-root`, Decision 5) |
 | stop-worker | all but cancelled → cancelled | 2 | `finishedAt` = now (overwrites) | role worker | C |
 | cancel-late | queued, running, waiting, done, review, failed → cancelled | 1 | `finishedAt`, `currentStepId` cleared | none | D |
 
