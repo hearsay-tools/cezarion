@@ -326,22 +326,7 @@ export function FileEditor({ file }: { file: AgentConfigFile }) {
         />
       )}
 
-      {formatError && (
-        <p data-slot="agent-config-format-error" className="text-[12px] text-destructive">
-          {formatError}
-        </p>
-      )}
-      {conflict && (
-        <div
-          data-slot="agent-config-conflict"
-          className="flex items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px]"
-        >
-          <span>The file changed on disk since you opened it.</span>
-          <Button size="sm" variant="outline" onClick={() => void fileQuery.refetch()}>
-            Reload from disk
-          </Button>
-        </div>
-      )}
+      <SaveStateMessages formatError={formatError} conflict={conflict} onReload={() => void fileQuery.refetch()} />
 
       {canWrite && (
         <div className="settings-form-actions">
@@ -368,8 +353,44 @@ export function FileEditor({ file }: { file: AgentConfigFile }) {
         {file.hotReload ? ` ${file.hotReload}` : ''}
       </p>
 
-        {file.readOnlyReason && <p>{file.readOnlyReason}</p>}
+        <ReadOnlyReason reason={file.readOnlyReason} />
       </div>
     </div>
   )
+}
+
+function SaveStateMessages({
+  formatError,
+  conflict,
+  onReload,
+}: {
+  formatError: string | null
+  conflict: boolean
+  onReload: () => void
+}) {
+  return (
+    <>
+      {formatError && (
+        <p data-slot="agent-config-format-error" className="text-[12px] text-destructive">
+          {formatError}
+        </p>
+      )}
+      {conflict && (
+        <div
+          data-slot="agent-config-conflict"
+          className="flex items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px]"
+        >
+          <span>The file changed on disk since you opened it.</span>
+          <Button size="sm" variant="outline" onClick={onReload}>
+            Reload from disk
+          </Button>
+        </div>
+      )}
+
+    </>
+  )
+}
+
+function ReadOnlyReason({ reason }: { reason: AgentConfigFile['readOnlyReason'] }) {
+  return reason && <p>{reason}</p>
 }
