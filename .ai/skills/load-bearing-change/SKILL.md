@@ -50,27 +50,14 @@ a worker or parent, a usage-limit auto-resume, or native runner activity on a mo
 or worker park (`workflows/run.ts`). No other event calls back, so a state whose only
 on-by-default exit is "a human types something" is a dead end, however well it renders. The plan carries a **Transitions out** case table (below).
 
-**Commit an outcome with what it depends on, or after it.** A write that records an
-outcome (`delivered`, `charged`, `settled`, `answered`) must commit atomically with the
-write holding what that outcome needs, or after that write commits. A best-effort write
-in a cleanup path must never throw past the cleanup and prevent it from finishing. In
-the run store, commit a `RunOutcome` and what it needs in one `RunStore.commitOutcome`
-call (`bestEffort` in cleanup), and a request outcome through `commitConversation`; the
-`outcome-write-outside-commit-outcome` rule refuses other writes, and `recordCommits`
-reads the **committed row** after each commit. Elsewhere, test each crash boundary on the
-committed row, not the final state or the in-memory object (hearsay-tools/cezarion#1250).
+Outcome writes: `outcome-write-outside-commit-outcome` names the commit helper.
 
 **Test the path with no live session.** When changing a path that reads
 `this.active.get(runId)`, add a test with no session. Restart recovery and scheduler
 continuations can reach the path before a session exists; an absent entry must still
 produce the required durable outcome and a usable next step.
 
-**Find every construction site of a shared in-memory object — grep the TYPE, not the
-field.** Give it one factory: `ActiveRun` is built only by `createActiveRun`, where a new
-required field fails to compile; one that differs by entry path is a required
-`ActiveRunInit` field. `loadRunSkills` alone writes `state.skills` and `enabledSkills`
-alone reads it; ast-grep rules refuse a second literal, write or read
-(open-mercato/cezar#811).
+Construction and skills access: `active-run-literal`, `active-run-map-write`, `skills-read-outside-enabled-skills` and `skills-write-outside-load-run-skills` name their owners.
 
 **List each handler's side effects, in order, before you merge handlers into one.** The
 merged method can lose one step of a handler's order while every test stays green. For
@@ -116,10 +103,10 @@ and a case that cannot happen stated with the reason.
 | Change | Table and columns | Required cases |
 | --- | --- | --- |
 | Adds or changes a cross-run relationship: messaging, delegation or settlement notification | **Both ends**, each state at each end: State · Send path behavior · Settlement path behavior | queued, running, waiting, Finish pending, stopping, review, done, failed, cancelled, deleted, history deletion pending, restart, other process owns it, unreadable record. |
-| Adds or changes a run state | **Transitions out**, copied from `workflows/run-states.ts`: State · Trigger · Who or what fires it · Behavior at shipped defaults | Declare each exit there first: `run-states.test.ts` fails a state with no automatic exit and no recorded reason. |
+| Adds or changes a run state | **Transitions out**, copied from `workflows/run-states.ts`: State · Trigger · Who or what fires it · Behavior at shipped defaults | Each non-final state; its automatic exits or recorded human-only reason (`run-states.test.ts`). |
 | Changes how a `ToolGrant` (`core/agent-runner.ts`) maps onto a runner's tool flags | **Tool-list kinds**, one per affected runner: Case · Emitted runner flags · Callable built-in, MCP and extension tools at shipped defaults | Every case in `TOOL_GRANT_CASES` (`core/tool-grant-parity-cells.testkit.ts`); its cells pin each case on each runner. Show effective tool access, not only the flags sent, and say when a runner ignores a restriction or cannot distinguish two cases. |
-| Adds, replaces or removes files in a running task's worktree. Write through `packages/cezar/src/worktree-manifest.ts`: it keeps what the agent changed and repairs a crash inside one write | **Worktree cases**: Case · Files written, kept or removed · Worktree state at the next step, Continue and restart | A catalog or source that has not loaded yet; the same name from two sources; records written by an older cezar version; a crash between two writes (see *Commit an outcome with what it depends on, or after it*); the source removing the item. |
-| Starts a process that outlives the command that started it, which code and scripts do through `packages/cezar/src/detached-process.ts` | **Process exits**: Case · What stops it · Behavior at shipped defaults | The normal stop; the starting command interrupted by SIGINT or SIGKILL before and after the start; the handle the stop reads, such as a descriptor, deleted or forged. The helper's tests hold the rest: the leader exits first, a member ignores SIGTERM, zombies, an unreadable or reused start identity. |
+| Adds, replaces or removes files in a running task's worktree (`worktree-write-outside-manifest`) | **Worktree cases**: Case · Files written, kept or removed · Worktree state at the next step, Continue and restart | A catalog or source that has not loaded yet; the same name from two sources; records written by an older cezar version; a crash between two writes; the source removing the item. |
+| Starts a process that outlives the command that started it (`detached-spawn-outside-helper`) | **Process exits**: Case · What stops it · Behavior at shipped defaults | The normal stop; the starting command interrupted by SIGINT or SIGKILL before and after the start; the handle the stop reads, such as a descriptor, deleted or forged. The helper's tests hold the rest: the leader exits first, a member ignores SIGTERM, zombies, an unreadable or reused start identity. |
 | Restores saved client state for an entity | **State restore cases**: Path or trigger · Restored value · Displayed value | Reopen without a selection; switch between two restored entities; entity unavailable after restore; derived display differs from saved state (e.g. provider mask). Derive from one state; never mask in a provider. See hearsay-tools/cezarion#2079. |
 
 Each table exists because a plan named only the obvious case and review rounds found
