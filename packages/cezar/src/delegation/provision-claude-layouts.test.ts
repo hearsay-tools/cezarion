@@ -1,6 +1,6 @@
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentRunSpec } from '../core/agent-runner.ts';
 import { join } from 'node:path';
@@ -17,54 +17,9 @@ import { provisionWorkflowFixture, delegationToken, until, PROVISION_ROWS } from
 describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
   const context = provisionWorkflowFixture();
   let f: typeof context.f, controller: typeof context.controller;
-  const { sessions, acceptIdentityWorker, launchAccepted } = context;
+  const { sessions, launchAccepted } = context;
   beforeEach(() => { f = context.f; controller = context.controller; });
 
-  it.each(PROVISION_ROWS.inputRecipes)('rejects lost accepted input recipes on %s', async mode => {
-    const a = await acceptIdentityWorker(undefined, undefined, { context: { text: 'accepted context' } });
-    if (mode === 'continue') {
-      await launchAccepted(a, mode); await until(() => sessions.length === 2);
-      sessions[1]!.finish(); expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
-    }
-    const worker = f.store.getRun(a.child.workerId)!;
-    if (worker.delegation?.role !== 'worker') throw Error('worker');
-    const { context: _context, ...delegation } = worker.delegation;
-    f.store.commitDelegation([{ id: worker.id, delegation }]);
-    if (mode === 'continue') expect(f.manager.continueRun(worker.id, { text: 'again' })).toMatchObject({ ok: false, error: expect.stringContaining('context') });
-    else {
-      const { store } = await launchAccepted(a, mode);
-      await until(() => store.getRun(worker.id)?.status === 'failed' || sessions.length > 1);
-      expect(store.getRun(worker.id)).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('context') });
-    }
-    expect(sessions).toHaveLength(mode === 'continue' ? 2 : 1);
-  });
-  it.each(PROVISION_ROWS.contextArtifacts)('verifies or rebuilds explicit context with $damage on $mode', async ({ mode, damage }) => {
-    let original = '';
-    const a = await acceptIdentityWorker(undefined, undefined, { context: { artifacts: [{ kind: 'parent-attachment', id: 'document.txt' }] } }, parentId => {
-      const dir = join(f.root, '.ai/cezar/runs', `${parentId}-images`); mkdirSync(dir);
-      original = join(dir, 'document.txt'); writeFileSync(original, 'accepted document');
-    });
-    const inspected = await controller.service.inspect(a.caller, { workerId: a.child.workerId });
-    const copy = inspected.inputs![0]!.path;
-    if (mode === 'continue') {
-      await launchAccepted(a, mode); await until(() => sessions.length === 2);
-      sessions[1]!.finish(); expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
-    }
-    if (damage === 'original-deleted') rmSync(original);
-    else { rmSync(copy); if (damage === 'both-changed') writeFileSync(original, 'replaced document'); }
-    let store = f.store;
-    if (mode === 'continue') expect(f.manager.continueRun(a.child.workerId, { text: 'again' }).ok).toBe(true);
-    else ({ store } = await launchAccepted(a, mode));
-    const expectedSessions = mode === 'continue' ? 3 : 2;
-    if (damage === 'both-changed') {
-      await until(() => store.getRun(a.child.workerId)?.status === 'failed' || sessions.length === expectedSessions);
-      expect(store.getRun(a.child.workerId)).toMatchObject({ status: RUN_STATUS.failed, error: expect.stringContaining('context input') });
-      expect(sessions).toHaveLength(expectedSessions - 1);
-    } else {
-      await until(() => sessions.length === expectedSessions);
-      expect(readFileSync(copy, 'utf8')).toBe('accepted document');
-    }
-  });
   async function acceptClaudeLayout(layout: 'native' | 'override' | 'named') {
     const nativeHome = join(f.root, 'native-home'); const home = join(nativeHome, '.claude'); mkdirSync(home, { recursive: true });
     vi.stubEnv('HOME', nativeHome); vi.stubEnv('CLAUDE_CONFIG_DIR', undefined);

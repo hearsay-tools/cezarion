@@ -135,8 +135,10 @@ export const PROVISION_ROWS = {
 } as const;
 
 export const PROVISION_TEST_FILES = [
-  'provision-intent-catalog-grants.test.ts',
-  'provision-inputs-layouts.test.ts',
+  'provision-intent-catalog.test.ts',
+  'provision-accepted-grants.test.ts',
+  'provision-input-recipes.test.ts',
+  'provision-claude-layouts.test.ts',
   'provision-accounts-lifecycle.test.ts',
 ] as const;
 

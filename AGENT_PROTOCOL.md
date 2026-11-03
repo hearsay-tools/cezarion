@@ -2418,7 +2418,7 @@ D1 inspects real runner argv, JSON-RPC and HTTP boundaries on ordinary versus go
 start/Continue launches. A governed launch carries `restrictCrossSessionMessaging`, and
 an adapter adds a control only where the runner's native tool for reaching another
 session is separate from subagent messaging. These controls add no tool grants and
-write no global harness configuration. `provision-intent-catalog-grants.test.ts` covers every
+write no global harness configuration. `provision-intent-catalog.test.ts` covers every
 backend's initial, nonfinal, Continue, recovery and disabled paths.
 
 | Backend (locally verified version) | Per-invocation control | Evidence and limitation |
