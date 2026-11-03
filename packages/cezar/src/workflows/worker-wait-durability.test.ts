@@ -16,7 +16,12 @@ import {
   terminal, timeline, until, useWorkerWaitFixture, waitOf, lastWaitOf, workerEntryOf, worker,
 } from './worker-wait.testkit.ts';
 import { blockRunWrites, readPersistedRuns, readPersistedText } from '../runs/run-store.testkit.ts';
-import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import {
+  RUN_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WORKER_OUTCOME_STATUS,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -28,7 +33,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const w = await worker(p.id);
     const wait = register(p.id, [w.id]);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    fixtureUpdateRun(w.id, { status: 'done' });
+    fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
     const delegation = store.getRun(w.id)!.delegation;
     if (delegation?.role !== 'worker') throw Error('worker fixture');
     store.commitDelegation([{ id: w.id, delegation: { ...delegation,
@@ -39,7 +44,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => store.getRun(p.id)?.agentInputs?.some(input => input.id === wait.id && !!input.deliveredAt) === true);
     expect(waitOf(store.getRun(p.id))).toBeUndefined();
     expect(lastWaitOf(store.getRun(p.id))).toMatchObject({ id: wait.id,
-      outcomes: [{ workerId: w.id, status: 'done' }] });
+      outcomes: [{ workerId: w.id, status: WORKER_OUTCOME_STATUS.done }] });
   });
 
   it('a recovered worker wait whose wake input is a queued reply delivers the reply body and the receipt once', async () => {
@@ -57,7 +62,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       const entry = row.waits.find((found: { id: string }) => found.id === wait.id);
       return { ...row, waits: row.waits.filter((found: { id: string }) => found.id !== wait.id),
         delegation: { ...row.delegation, wait: { id: wait.id, workerIds: [w.id], revisions: entry.revisions, deadline: entry.deadline,
-          phase: 'wake-pending', reason: 'outcome', outcomes: [{ workerId: w.id, status: 'done', observedAt: new Date().toISOString() }], wakeId: replyId } },
+          phase: 'wake-pending', reason: 'outcome', outcomes: [{ workerId: w.id, status: WORKER_OUTCOME_STATUS.done, observedAt: new Date().toISOString() }], wakeId: replyId } },
         agentInputs: [...row.agentInputs ?? [], { id: replyId, source: 'agent', parentRunId: p.id, text: body, createdAt: new Date().toISOString(),
           conversation: { senderRunId: w.id, recipientRunId: p.id, kind: 'reply', requestId: randomUUID() } }] };
     });
@@ -173,7 +178,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         // hearsay-tools/cezarion#1233/#1235: the result is still owed, so the failed session counts a
         // failed wake delivery and the run waits for the retry instead of settling `failed`.
         await until(() => store.getRun(p.id)?.error?.includes('human input delivery checkpoint failed') === true);
-        expect(store.getRun(p.id)).toMatchObject({ status: 'waiting', waitDeliveryFailures: 1 });
+        expect(store.getRun(p.id)).toMatchObject({ status: RUN_STATUS.waiting, waitDeliveryFailures: 1 });
         expect(store.getRun(p.id)?.queuedMessages?.at(-1)?.text).toBe('startup human update');
         expect(store.readEvents(p.id).filter(event => event.type === 'user-message' && String(event.text).includes('startup human update'))).toHaveLength(1);
         return;
@@ -249,7 +254,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const p = await parent(); checkpoint('32-parent-open'); const ids: string[] = [];
     for (let i = 0; i < 32; i++) {
       const w = await worker(p.id); ids.push(w.id); checkpoint(`32-created-${i + 1}`);
-      fixtureUpdateRun(w.id, { status: 'failed', error: '\u0000'.repeat(4_000) });
+      fixtureUpdateRun(w.id, { status: RUN_STATUS.failed, error: '\u0000'.repeat(4_000) });
     }
     checkpoint('32-before-register'); const wait = register(p.id, ids); checkpoint('32-registered');
     expect(wait.outcomes).toHaveLength(32);
@@ -398,7 +403,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   }
   it('retiring a delivered wait durably records the resumed status in the same snapshot', async () => {
     const p = await parent(); const w = await worker(p.id);
-    fixtureUpdateRun(w.id, { status: 'done' });
+    fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
     // hearsay-tools/cezarion#1235: a worker entry retires through the wait list's delivery checkpoint.
     const commit = store.commitOutcome.bind(store);
     let retiredStatus: string | undefined;
@@ -432,7 +437,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       return { ...legacy, delegation: { ...run.delegation, wait: { ...wait, phase: 'wake-pending', reason: 'timeout', wakeId: wait.id } },
         agentInputs: [{ id: wait.id, parentRunId: p.id, source: 'lifecycle', text: 'Worker deadline reached', createdAt: now, deliveredAt: now }] };
     });
-    expect(disk.find(run => run.id === p.id)).toMatchObject({ status: 'waiting' });
+    expect(disk.find(run => run.id === p.id)).toMatchObject({ status: RUN_STATUS.waiting });
     await restart(false, disk);
     await until(() => store.getRun(p.id)?.steps.some(step => step.id === 'continue-1') === true || terminal.includes(store.getRun(p.id)?.status ?? ''));
     expect(store.getRun(p.id)?.steps.some(step => step.id === 'continue-1')).toBe(true);
@@ -455,7 +460,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       const { waits: _waits, ...legacy } = run;
       return { ...legacy, delegation: { ...run.delegation, wait: legacyWait(wait) }, agentInputs: inputs(p, w, wait) };
     });
-    expect(disk.find(run => run.id === p.id)).toMatchObject({ status: 'waiting' });
+    expect(disk.find(run => run.id === p.id)).toMatchObject({ status: RUN_STATUS.waiting });
     return { p, w, wait, disk };
   }
 
@@ -468,7 +473,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await restart(false, disk);
     await until(() => !!store.getRun(p.id)?.agentInputs?.find(input => input.id === wait.id)?.deliveredAt);
     expect(store.getRun(p.id)?.agentInputs).toHaveLength(1);
-    expect(store.getRun(p.id)?.lastWaits).toEqual([expect.objectContaining({ id: wait.id, kind: 'worker', phase: 'cancelled' })]);
+    expect(store.getRun(p.id)?.lastWaits).toEqual([expect.objectContaining({ id: wait.id, kind: WAIT_KIND.worker, phase: WAIT_PHASE.cancelled })]);
     expect(store.getRun(p.id)?.waits?.filter(entry => entry.kind === 'worker') ?? []).toEqual([]);
     await until(() => store.getRun(p.id)?.status === 'waiting');
   });
@@ -516,10 +521,10 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         store.getRun(p.id)?.lastWaits?.some(wait => wait.phase === 'delivered')) image = readPersistedRuns(join(root, '.ai/cezar'));
       return committed;
     };
-    fixtureUpdateRun(w.id, { status: 'done' });
+    fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
     await until(() => image !== undefined);
     const crashed = (image as RunRecord[]).find(run => run.id === p.id)!;
-    expect(crashed).toMatchObject({ status: 'running', lastWaits: [expect.objectContaining({ id: wait.id, phase: 'delivered' })] });
+    expect(crashed).toMatchObject({ status: RUN_STATUS.running, lastWaits: [expect.objectContaining({ id: wait.id, phase: WAIT_PHASE.delivered })] });
     expect(crashed.agentInputs?.find(input => input.id === wait.id)?.deliveredAt).toBeDefined();
     await restart(false, image);
     await until(() => store.getRun(p.id)?.steps.some(step => step.id === 'continue-1') === true || terminal.includes(store.getRun(p.id)?.status ?? ''));
@@ -553,7 +558,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   for (const status of ['done', 'failed', 'cancelled'] as const) {
     it(`parent ${status} clears wait and cancels unfinished children, preserving terminal artifacts`, async () => {
       const p = await parent(); const w = await worker(p.id); const done = await worker(p.id);
-      fixtureUpdateRun(done.id, { status: 'review' }); register(p.id, [w.id]);
+      fixtureUpdateRun(done.id, { status: RUN_STATUS.review }); register(p.id, [w.id]);
       store.updateRun(p.id, { status });
       await until(() => store.getRun(w.id)?.status === 'cancelled');
       expect(waitOf(store.getRun(p.id))).toBeUndefined(); expect(store.getRun(done.id)?.status).toBe('review');

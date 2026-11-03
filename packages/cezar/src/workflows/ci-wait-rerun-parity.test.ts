@@ -1,3 +1,4 @@
+import { WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it, vi } from 'vitest';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -44,12 +45,12 @@ describe('hidden CI reruns across native harnesses', {timeout:30_000},()=>{
     await until(()=>ciWaitOf(run.id)?.phase==='open' && store.getRun(run.id)?.status==='waiting');
     const id=ciWaitOf(run.id)!.id;
     if(recovered){await restart();await until(()=>probes.size===1);expect(manager.isActive(run.id)).toBe(false);}
-    expect(ciWaitOf(run.id)).toMatchObject({id,phase:'open'});
+    expect(ciWaitOf(run.id)).toMatchObject({id,phase: WAIT_PHASE.open});
     expect(store.getRun(run.id)?.agentInputs?.some(input=>input.id===id)).toBeFalsy();
     // Restore the hidden run's checks, still pending, then finish the rerun.
     writeFileSync(state,'pending');for(const probe of probes)probe.resume();
     await until(()=>probes.size===1);
-    expect(ciWaitOf(run.id)).toMatchObject({id,phase:'open'});
+    expect(ciWaitOf(run.id)).toMatchObject({id,phase: WAIT_PHASE.open});
     expect(lastWaitOf(run.id)).toBeUndefined();
     writeFileSync(state,'complete');for(const probe of probes)probe.resume();
     await until(()=>!!lastWaitOf(run.id)?.deliveredAt);

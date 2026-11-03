@@ -1,4 +1,4 @@
-import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { AgentSession } from '../core/agent-runner.ts';
 import type { RunManager } from './run.ts';
 import { createActiveRun } from './active-run.ts';
@@ -43,9 +43,9 @@ function barrier() {
 
 it.each(['ordinary', 'delegated root'] as const)('drains detached Finish settlement for an inactive %s run', async mode => {
   const { root, store, manager } = fixture();
-  const run = store.createRun({ title: 'idle closed', task: 'hello', workflow: 'cleanup', steps: [{ id: 'work', name: 'Work', kind: 'agent' }] });
-  store.updateRun(run.id, { status: 'waiting', currentStepId: 'work', worktreePath: root, baseBranch: 'main' });
-  store.updateStep(run.id, 'work', { status: 'waiting' });
+  const run = store.createRun({ title: 'idle closed', task: 'hello', workflow: 'cleanup', steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }] });
+  store.updateRun(run.id, { status: RUN_STATUS.waiting, currentStepId: 'work', worktreePath: root, baseBranch: 'main' });
+  store.updateStep(run.id, 'work', { status: STEP_STATUS.waiting });
   if (mode === 'delegated root') store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: [], receipts: [] } }]);
   const boundary = barrier();
   const diff = git.worktreeDiff;
@@ -112,8 +112,8 @@ it.each(['root', 'continuation'] as const)('keeps the repo until a real %s sessi
   let id: string;
   if (mode === 'root') id = manager.startRun(workflow, { task: 'hello', worktree: false }).id;
   else {
-    const record = store.createRun({ title: 'resume', task: 'hello', workflow: 'cleanup', runner: 'claude', steps: [{ id: 'work', name: 'Work', kind: 'agent' }] });
-    id = record.id; store.updateStep(id, 'work', { sessionId: 'prior-session', backend: 'claude' }); store.updateRun(id, { status: 'done', worktree: false });
+    const record = store.createRun({ title: 'resume', task: 'hello', workflow: 'cleanup', runner: 'claude', steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }] });
+    id = record.id; store.updateStep(id, 'work', { sessionId: 'prior-session', backend: 'claude' }); store.updateRun(id, { status: RUN_STATUS.done, worktree: false });
     expect(manager.continueRun(id, { text: 'hello' })).toEqual({ ok: true });
   }
   await vi.waitFor(() => expect(store.getRun(id)?.status).toBe('waiting'), { timeout: 10_000 });

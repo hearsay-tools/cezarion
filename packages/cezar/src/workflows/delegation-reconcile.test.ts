@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS, WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -83,7 +84,7 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
   });
 
   it('does not let the queue watchdog revive a family awaiting recovery facts', async () => {
-    store.updateRun(a.parentId, { status: 'queued' });
+    store.updateRun(a.parentId, { status: RUN_STATUS.queued });
     let release!: () => void;
     const gate = new Promise<void>(resolve => { release = resolve; });
     const prepare = store.prepareRecoveryFacts.bind(store);
@@ -176,7 +177,7 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
   });
 
   it('reconciles only the families with a live member when no family is named', () => {
-    store.updateRun(b.workerId, { status: 'running' });
+    store.updateRun(b.workerId, { status: RUN_STATUS.running });
     manager.reconcileWorkerWaits();
     expect(store.readEvents(a.parentId).some(e => e.type === 'conversation-message')).toBe(false);
     expect(store.readEvents(b.parentId).some(e => e.type === 'conversation-message')).toBe(true);
@@ -184,7 +185,7 @@ describe('terminal delegation checkpoint reconciliation (#661)', () => {
 
   it.each(['family', 'full', 'live'] as const)('does not lose a %s request emitted during reconciliation', scope => {
     // A live family is reached by the unnamed pass; the settled one only by name or the full pass.
-    if (scope === 'live') store.updateRun(b.workerId, { status: 'running' });
+    if (scope === 'live') store.updateRun(b.workerId, { status: RUN_STATUS.running });
     const append = store.appendEvent.bind(store);
     let changed = false;
     vi.spyOn(store, 'appendEvent').mockImplementation((id, event) => {
@@ -214,9 +215,9 @@ describe('restart repairs on a settled family without a conversation (#779)', ()
   /** A cancelled root with a finished worker, `leftover` written on the root's delegation. */
   function seedCancelledRoot(leftover: (store: RunStore, parentId: string, workerId: string) => void): { parentId: string; workerId: string } {
     const seed = RunStore.open(dataDir);
-    const parent = seed.createRun({ title: 'legacy parent', task: 'history', workflow: 'quick-task', steps: [{ id: 'work', name: 'Work', kind: 'agent' }] });
-    seed.updateStep(parent.id, 'work', { status: 'done', sessionId: 'previous-session', backend: 'claude' });
-    seed.updateRun(parent.id, { status: 'waiting', runner: 'claude', delegation: { role: 'root', permissions: [], receipts: [] } });
+    const parent = seed.createRun({ title: 'legacy parent', task: 'history', workflow: 'quick-task', steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }] });
+    seed.updateStep(parent.id, 'work', { status: STEP_STATUS.done, sessionId: 'previous-session', backend: 'claude' });
+    seed.updateRun(parent.id, { status: RUN_STATUS.waiting, runner: 'claude', delegation: { role: 'root', permissions: [], receipts: [] } });
     const workerId = randomUUID();
     const worker = seed.createOwnedRun({ title: 'legacy worker', task: 'history', workflow: 'quick-task', steps: [] }, parent.id, randomUUID(), {
       role: 'worker', parentRunId: parent.id, permissions: [], workspace: {
@@ -224,9 +225,9 @@ describe('restart repairs on a settled family without a conversation (#779)', ()
         path: join(root, 'workers', workerId), branch: `cez/${workerId.slice(0, 8)}`, baselineSha: '0'.repeat(40),
       },
     }, 'a'.repeat(64));
-    seed.updateRun(worker.id, { status: 'done' });
+    seed.updateRun(worker.id, { status: RUN_STATUS.done });
     leftover(seed, parent.id, worker.id);
-    seed.updateRun(parent.id, { status: 'cancelled', finishedAt: new Date().toISOString() });
+    seed.updateRun(parent.id, { status: RUN_STATUS.cancelled, finishedAt: new Date().toISOString() });
     seed.close();
     return { parentId: parent.id, workerId: worker.id };
   }
@@ -247,7 +248,7 @@ describe('restart repairs on a settled family without a conversation (#779)', ()
   // cleared, Continue refuses the root ("parent finish is pending") and its workers through it.
   it('clears a stale Finish intent at boot, lets the root go and Continue admits it', async () => {
     const { parentId, workerId } = seedCancelledRoot((store, id) => store.commitRootFinishIntent(id));
-    expect(readPersistedRuns(dataDir).find(run => run.id === parentId)).toMatchObject({ status: 'cancelled', delegation: { finishRequestedAt: expect.any(String) } });
+    expect(readPersistedRuns(dataDir).find(run => run.id === parentId)).toMatchObject({ status: RUN_STATUS.cancelled, delegation: { finishRequestedAt: expect.any(String) } });
     await reboot((store, manager) => {
       expect(store.getRun(parentId)?.status).toBe('cancelled');
       expect(store.getRun(parentId)?.delegation).not.toHaveProperty('finishRequestedAt');
@@ -266,9 +267,9 @@ describe('restart repairs on a settled family without a conversation (#779)', ()
   // closed session gets, the queued lifecycle input its next session takes.
   it('routes a stored Finish intent behind a live worker to the completion refusal at boot', async () => {
     const seed = RunStore.open(dataDir);
-    const parent = seed.createRun({ title: 'legacy parent', task: 'history', workflow: 'quick-task', steps: [{ id: 'work', name: 'Work', kind: 'agent' }] });
-    seed.updateStep(parent.id, 'work', { status: 'waiting', sessionId: 'previous-session', backend: 'claude' });
-    seed.updateRun(parent.id, { status: 'waiting', runner: 'claude', delegation: { role: 'root', permissions: [], receipts: [] } });
+    const parent = seed.createRun({ title: 'legacy parent', task: 'history', workflow: 'quick-task', steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }] });
+    seed.updateStep(parent.id, 'work', { status: STEP_STATUS.waiting, sessionId: 'previous-session', backend: 'claude' });
+    seed.updateRun(parent.id, { status: RUN_STATUS.waiting, runner: 'claude', delegation: { role: 'root', permissions: [], receipts: [] } });
     const workerId = randomUUID();
     seed.createOwnedRun({ title: 'live worker', task: 'history', workflow: 'quick-task', steps: [] }, parent.id, randomUUID(), {
       role: 'worker', parentRunId: parent.id, permissions: [], workspace: {
@@ -308,7 +309,7 @@ describe('restart repairs on a settled family without a conversation (#779)', ()
       const root = store.getRun(parentId);
       expect(root?.delegation).not.toHaveProperty('wait');
       expect(root?.waits ?? []).toEqual([]);
-      expect(root?.lastWaits).toEqual([expect.objectContaining({ id: waitId, kind: 'worker', phase: 'cancelled' })]);
+      expect(root?.lastWaits).toEqual([expect.objectContaining({ id: waitId, kind: WAIT_KIND.worker, phase: WAIT_PHASE.cancelled })]);
       store.flush();
       expect(store.heldIds()).not.toContain(parentId);
     });

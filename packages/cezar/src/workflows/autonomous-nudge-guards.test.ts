@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { handleRunnerUiEvent, makeUiSink } from './run/session-events.ts';
 import { clearIdleTimer } from './run/input-timers.ts';
 import { runInternals } from './run-internals.testkit.ts';
@@ -29,8 +30,8 @@ describe('autonomous nudge priority and lifecycle guards', () => {
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), 'cez-autonomous-guards-'));
     store = RunStore.open(join(root, '.ai/cezar'));
-    id = store.createRun({ title: 'guard', task: 'work', workflow: 'quick-task', autonomous: true, steps: [{ id: 'task', name: 'Task', kind: 'agent' }] }).id;
-    store.updateRun(id, { status: 'running' });
+    id = store.createRun({ title: 'guard', task: 'work', workflow: 'quick-task', autonomous: true, steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] }).id;
+    store.updateRun(id, { status: RUN_STATUS.running });
     // Worker startup belongs to fixture setup, before policy tests replace timers.
     await store.factsWarmIdle();
     manager = new RunManager(store, root, { noWaitNudgeReplyMs: 300 });
@@ -58,8 +59,8 @@ describe('autonomous nudge priority and lifecycle guards', () => {
       case 'unread-input': state.unreadInputIds = new Set([randomUUID()]); break;
       case 'input-flight': state.agentInputFlight = { session, inputIds: [randomUUID()] }; break;
       // A worker wait is a list entry (hearsay-tools/cezarion#1235, #1301).
-      case 'worker-wait': store.commitWait(id, { kind: 'worker', id: randomUUID(), source: 'agent', via: 'cezar_wait', registeredAt: new Date().toISOString(),
-        deadline: new Date(Date.now() + 60_000).toISOString(), timeoutSeconds: 60, phase: 'open', turnId: 'turn', mode: 'all',
+      case 'worker-wait': store.commitWait(id, { kind: WAIT_KIND.worker, id: randomUUID(), source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait, registeredAt: new Date().toISOString(),
+        deadline: new Date(Date.now() + 60_000).toISOString(), timeoutSeconds: 60, phase: WAIT_PHASE.open, turnId: 'turn', mode: 'all',
         workerIds: [randomUUID()], revisions: [], outcomes: [] }); break;
       case 'ci-wait': store.commitCiWait(id, {
         id: randomUUID(), prUrl: 'https://github.com/acme/repo/pull/1', repository: 'acme/repo', prNumber: 1, headSha: 'a'.repeat(40),
@@ -240,7 +241,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
     runInternals(manager).turnNudges.armNoWaitNudgeReplyTimer(id, state);
     await vi.advanceTimersByTimeAsync(300);
     expect(store.getRun(id)?.status).toBe('waiting');
-    expect(store.getRun(id)?.waits).toMatchObject([{ kind: 'human', via: 'no-wait', source: 'cezar', phase: 'open', askSeq: expect.any(Number) }]);
+    expect(store.getRun(id)?.waits).toMatchObject([{ kind: WAIT_KIND.human, via: WAIT_VIA['no-wait'], source: WAIT_SOURCE.cezar, phase: WAIT_PHASE.open, askSeq: expect.any(Number) }]);
     expect(store.readEvents(id).filter(e => e.type === 'note' && e.message === NO_WAIT_NO_REPLY_NOTE)).toHaveLength(1);
   });
 

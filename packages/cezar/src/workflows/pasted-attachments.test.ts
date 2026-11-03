@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -575,9 +576,9 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
   it('keeps a fresh Continue image viewable when its disk write fails', async () => {
     writeFileSync(stdinFile, '');
     const record = store.createRun({ title: 'image failure', workflow: 'image failure', task: 'original', steps: [] });
-    store.addStep(record.id, { id: 'work', name: 'work', kind: 'agent' });
-    store.updateStep(record.id, 'work', { status: 'done', sessionId: 'previous-session', backend: 'claude' });
-    store.updateRun(record.id, { status: 'done', worktree: false });
+    store.addStep(record.id, { id: 'work', name: 'work', kind: STEP_KIND.agent });
+    store.updateStep(record.id, 'work', { status: STEP_STATUS.done, sessionId: 'previous-session', backend: 'claude' });
+    store.updateRun(record.id, { status: RUN_STATUS.done, worktree: false });
     writeFileSync(join(dataDir, 'runs', `${record.id}-images`), 'not a directory');
     expect(manager.continueRun(record.id, {
       text: 'view this unsaved image',
@@ -593,9 +594,9 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
     'recovers fresh mixed Continue attachments after a %s pre-spawn restart', async (mode) => {
       writeFileSync(stdinFile, '');
       const record = store.createRun({ title: 'restart', workflow: 'restart', task: 'original', steps: [] });
-      store.addStep(record.id, { id: 'work', name: 'work', kind: 'agent' });
-      store.updateStep(record.id, 'work', { status: 'done', sessionId: 'previous-session', backend: 'claude' });
-      store.updateRun(record.id, { status: 'done', worktree: false });
+      store.addStep(record.id, { id: 'work', name: 'work', kind: STEP_KIND.agent });
+      store.updateStep(record.id, 'work', { status: STEP_STATUS.done, sessionId: 'previous-session', backend: 'claude' });
+      store.updateRun(record.id, { status: RUN_STATUS.done, worktree: false });
       const launcher = createFixtureManager(store, repoRoot);
       // Stop at the boundary before any asynchronous startup or runner invocation.
       (launcher as unknown as { runContinuation(): Promise<void> }).runContinuation = async () => {};
@@ -614,7 +615,7 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
       expect(readdirSync(directory).sort()).toEqual(['pasted-1.pdf', 'pasted-2.png']);
       if (mode === 'missing') rmSync(join(directory, 'pasted-1.pdf'));
       if (mode === 'running') {
-        store.updateStep(record.id, 'continue-1', { status: 'running', sessionId: 'new-session', backend: 'claude' });
+        store.updateStep(record.id, 'continue-1', { status: STEP_STATUS.running, sessionId: 'new-session', backend: 'claude' });
         store.close();
         store = RunStore.open(dataDir, { keepLive: true });
       }

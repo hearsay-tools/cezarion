@@ -1,4 +1,10 @@
-import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
+import {
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+  RUN_STATUS,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -44,7 +50,7 @@ function github() {
 
 async function register(id: string) {
   const state = (manager as unknown as { active: Map<string, { ciGeneration: string }> }).active.get(id)!;
-  return timed(await manager.registerWait(id, { kind: 'pr', pr, timeout_seconds: 30 }, 'cezar_wait', state.ciGeneration));
+  return timed(await manager.registerWait(id, { kind: WAIT_KIND.pr, pr, timeout_seconds: 30 }, 'cezar_wait', state.ciGeneration));
 }
 
 describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () => {
@@ -53,7 +59,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
 
   it('rejects registration outside an active run without writing a receipt', async () => {
     github();
-    await expect(Promise.resolve().then(() => manager.registerWait('absent', { kind: 'pr', pr, timeout_seconds: 30 }, 'cezar_wait', 'old')))
+    await expect(Promise.resolve().then(() => manager.registerWait('absent', { kind: WAIT_KIND.pr, pr, timeout_seconds: 30 }, 'cezar_wait', 'old')))
       .rejects.toMatchObject({ code: 'run_missing' });
     expect(store.listRuns()).toEqual([]);
   });
@@ -301,7 +307,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     Object.assign(manager, { ciSupervisor: supervisor });
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
     const state = (manager as unknown as { active: Map<string, { ciGeneration: string }> }).active.get(run.id)!;
-    const receipt = await manager.registerWait(run.id, { kind: 'pr', pr, until: 'merge', wake_on_conflict: false, timeout_seconds: 30 }, 'cezar_wait', state.ciGeneration);
+    const receipt = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr, until: 'merge', wake_on_conflict: false, timeout_seconds: 30 }, 'cezar_wait', state.ciGeneration);
     await restart();
     expect(manager.isActive(run.id)).toBe(false);
     expect(watched.at(-1)).toMatchObject({ id: receipt.id, until: 'merge', wakeOnConflict: false });
@@ -313,7 +319,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     settle({ outcome: 'merged', headSha: identity.headSha, observedAt: new Date().toISOString(), checks: [], totalChecks: 0, truncated: false, mergedAt: '2026-10-23T09:00:00Z' });
     await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
     expect(wake).toHaveBeenCalled();
-    expect(committed?.waits?.find(wait => wait.id === receipt.id)).toMatchObject({ phase: 'resolved', until: 'merge', result: { outcome: 'merged' } });
+    expect(committed?.waits?.find(wait => wait.id === receipt.id)).toMatchObject({ phase: WAIT_PHASE.resolved, until: 'merge', result: { outcome: 'merged' } });
     expect(committed?.agentInputs?.find(input => input.id === receipt.id)?.text).toContain('(until merge)');
     expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === receipt.id)).toHaveLength(1);
   });
@@ -341,7 +347,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     const registration = register(run.id);
     expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:hold new instruction' }])).toBe(true);
     resolve(identity);
-    await expect(registration).resolves.toMatchObject({ phase: 'open' });
+    await expect(registration).resolves.toMatchObject({ phase: WAIT_PHASE.open });
     expect(ciWaitOf(run.id)?.phase).toBe('open');
   });
 
@@ -388,8 +394,8 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     expect([workers.phase, requests.phase]).toEqual(['registered', 'registered']);
     const waits = store.getRun(p.id)!.waits!;
     expect(waits.map(wait => [wait.id, wait.kind, wait.phase])).toEqual([[ci.id, 'pr', 'open'], [workers.id, 'worker', 'open'], [requests.id, 'worker', 'open']]);
-    expect(waits.find(wait => wait.id === workers.id)).toMatchObject({ via: 'cez-worker-wait', workerIds: [w.id] });
-    expect(waits.find(wait => wait.id === requests.id)).toMatchObject({ via: 'cez-worker-wait', requestIds: [request.id] });
+    expect(waits.find(wait => wait.id === workers.id)).toMatchObject({ via: WAIT_VIA['cez-worker-wait'], workerIds: [w.id] });
+    expect(waits.find(wait => wait.id === requests.id)).toMatchObject({ via: WAIT_VIA['cez-worker-wait'], requestIds: [request.id] });
     expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');
   });
 
@@ -464,7 +470,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     const boundaries = store.readEvents(run.id).filter(event => event.type === 'turn-end').length;
     manager.deliverConversationInput(run.id);
     await until(() => !!inputOf(early.id)?.deliveredAt);
-    expect(ciWaitOf(run.id)).toMatchObject({ id: wait.id, phase: 'open' });
+    expect(ciWaitOf(run.id)).toMatchObject({ id: wait.id, phase: WAIT_PHASE.open });
     await until(() => store.readEvents(run.id).filter(event => event.type === 'turn-end').length > boundaries && parked(run.id));
     expect(waitOf(store.getRun(run.id))).toBeUndefined();
     send.mockClear();
@@ -511,9 +517,9 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
 const generationOf = (id: string) => (manager as unknown as { active: Map<string, { ciGeneration: string }> }).active.get(id)!.ciGeneration;
 const prUrl = (n: number) => `https://github.com/acme/repo/pull/${n}`;
 const registerPr = async (id: string, n: number, timeout = 30) =>
-  timed(await manager.registerWait(id, { kind: 'pr', pr: prUrl(n), timeout_seconds: timeout }, 'cezar_wait', generationOf(id)));
+  timed(await manager.registerWait(id, { kind: WAIT_KIND.pr, pr: prUrl(n), timeout_seconds: timeout }, 'cezar_wait', generationOf(id)));
 const registerTimer = async (id: string, seconds = 60, note?: string) =>
-  timed(await manager.registerWait(id, { kind: 'timer', seconds, ...(note === undefined ? {} : { note }) }, 'cezar_wait', generationOf(id)));
+  timed(await manager.registerWait(id, { kind: WAIT_KIND.timer, seconds, ...(note === undefined ? {} : { note }) }, 'cezar_wait', generationOf(id)));
 const waitById = (id: string, waitId: string) => store.getRun(id)?.waits?.find((entry): entry is TimedWait => entry.id === waitId && entry.kind !== 'human');
 const settledById = (id: string, waitId: string) => store.getRun(id)?.lastWaits?.find(entry => entry.id === waitId);
 const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?.filter(input => input.id === waitId) ?? [];
@@ -580,7 +586,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     githubByPr();
     const run = await waitingParent();
     const wait = await registerPr(run.id, 12, 30);
-    const again = await manager.registerWait(run.id, { kind: 'pr', pr: 'https://github.com/Acme/Repo/pull/12', timeout_seconds: 600 }, 'cezar_wait', generationOf(run.id));
+    const again = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr: 'https://github.com/Acme/Repo/pull/12', timeout_seconds: 600 }, 'cezar_wait', generationOf(run.id));
     expect(again).toMatchObject({ id: wait.id, deadline: wait.deadline, timeoutSeconds: 30, until: 'checks' as const, wakeOnConflict: true });
     const timer = await registerTimer(run.id, 120, 'deploy');
     expect((await registerTimer(run.id, 120, 'deploy')).id).toBe(timer.id);
@@ -658,12 +664,12 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     const run = await waitingParent();
     const interval = vi.spyOn(semaphore, 'monitoringWakeIntervalMinutes').mockReturnValue(null);
     await expect(registerTimer(run.id)).rejects.toMatchObject({ code: 'timers_disabled' });
-    const answer = await manager.cezarToolHandlers(run.id, generationOf(run.id)).registerWait({ kind: 'timer', seconds: 60 }, 'cezar_wait', new AbortController().signal);
+    const answer = await manager.cezarToolHandlers(run.id, generationOf(run.id)).registerWait({ kind: WAIT_KIND.timer, seconds: 60 }, 'cezar_wait', new AbortController().signal);
     expect(answer.answer).toMatchObject({ ok: false, code: 'timers_disabled', open_waits: [] });
     // A refused registration registers nothing, so Cezar's own wait stays.
     expect(store.getRun(run.id)?.waits?.map(wait => wait.via)).toEqual(['no-wait']);
     // CI is an external event: Park until resumed does not refuse it.
-    await expect(registerPr(run.id, 12)).resolves.toMatchObject({ kind: 'pr' });
+    await expect(registerPr(run.id, 12)).resolves.toMatchObject({ kind: WAIT_KIND.pr });
     interval.mockReturnValue(5);
     const wait = await registerTimer(run.id, 600);
     interval.mockReturnValue(1);
@@ -671,7 +677,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     expect(waitById(run.id, wait.id)?.deadline).toBe(wait.deadline);
     interval.mockReturnValue(null);
     await (runInternals(manager).line).pump();
-    expect(waitById(run.id, wait.id)).toMatchObject({ phase: 'open', deadline: wait.deadline });
+    expect(waitById(run.id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open, deadline: wait.deadline });
     expect(runInternals(manager).waitWatches.waitTimers.has(wait.id)).toBe(true);
   });
 
@@ -680,7 +686,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     const run = await waitingParent();
     store.updateRun(run.id, { automaticWakes: 40 });
     await expect(registerTimer(run.id)).rejects.toMatchObject({ code: 'wake_budget_spent' });
-    await expect(registerPr(run.id, 12)).resolves.toMatchObject({ kind: 'pr' });
+    await expect(registerPr(run.id, 12)).resolves.toMatchObject({ kind: WAIT_KIND.pr });
   });
 
   it('registration refuses capacity at 16 open waits', async () => {
@@ -690,13 +696,13 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     for (let n = 0; n < WAIT_LIMIT; n++) opened.push(await registerTimer(run.id, 60 + n));
     await expect(registerTimer(run.id, 600)).rejects.toMatchObject({ code: 'capacity' });
     await expect(registerPr(run.id, 12)).rejects.toMatchObject({ code: 'capacity' });
-    const answer = await manager.cezarToolHandlers(run.id, generationOf(run.id)).registerWait({ kind: 'timer', seconds: 600 }, 'cezar_wait', new AbortController().signal);
+    const answer = await manager.cezarToolHandlers(run.id, generationOf(run.id)).registerWait({ kind: WAIT_KIND.timer, seconds: 600 }, 'cezar_wait', new AbortController().signal);
     expect(answer.answer).toMatchObject({ ok: false, code: 'capacity' });
     expect(answer.answer.open_waits).toHaveLength(WAIT_LIMIT);
     // Only open waits count, as the store counts them: a resolved one frees its place.
     fireTimer(opened[0]!.id);
     await until(() => waitById(run.id, opened[0]!.id)?.phase !== 'open');
-    await expect(registerPr(run.id, 12)).resolves.toMatchObject({ kind: 'pr' });
+    await expect(registerPr(run.id, 12)).resolves.toMatchObject({ kind: WAIT_KIND.pr });
   });
 
   it('restart: an open timer re-arms from its stored deadline and resolves through a continuation', async () => {
@@ -705,7 +711,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     await restart();
     expect(manager.isActive(run.id)).toBe(false);
     expect(store.getRun(run.id)?.status).toBe('waiting');
-    expect(waitById(run.id, wait.id)).toMatchObject({ phase: 'open', deadline: wait.deadline });
+    expect(waitById(run.id, wait.id)).toMatchObject({ phase: WAIT_PHASE.open, deadline: wait.deadline });
     expect(runInternals(manager).waitWatches.waitTimers.has(wait.id)).toBe(true);
     fireTimer(wait.id);
     await until(() => settledById(run.id, wait.id)?.phase === 'delivered');
@@ -734,10 +740,10 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<Record<string, unknown> & { id: string }>;
     const row = disk.find(entry => entry.id === run.id)!;
     const result = success();
-    const resolved = { ...wait, phase: 'resolved' as const, resolvedAt: result.observedAt, result };
+    const resolved = { ...wait, phase: WAIT_PHASE.resolved, resolvedAt: result.observedAt, result };
     // A schema-3 row: `ciWait` wake-pending, its observation queued under the wait id.
     delete row.waits;
-    Object.assign(row, { status: 'running', activity: 'monitoring', ciWait: { ...ciWatchRequest(wait), phase: 'wake-pending', result, wakeId: wait.id },
+    Object.assign(row, { status: RUN_STATUS.running, activity: 'monitoring', ciWait: { ...ciWatchRequest(wait), phase: 'wake-pending', result, wakeId: wait.id },
       agentInputs: [{ id: wait.id, parentRunId: run.id, source: 'lifecycle', createdAt: result.observedAt, text: waitResultText(resolved) }] });
     await restart(false, disk);
     await until(() => settledById(run.id, wait.id)?.phase === 'delivered');
@@ -753,7 +759,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     const timer = await registerTimer(run.id, 600);
     store.flush();
     const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<Record<string, unknown> & { id: string }>;
-    Object.assign(disk.find(entry => entry.id === run.id)!, { status: 'review' });
+    Object.assign(disk.find(entry => entry.id === run.id)!, { status: RUN_STATUS.review });
     await restart(false, disk);
     await until(() => (store.getRun(run.id)?.waits ?? []).length === 0);
     expect([settledById(run.id, ci.id)?.phase, settledById(run.id, timer.id)?.phase]).toEqual(['cancelled', 'cancelled']);

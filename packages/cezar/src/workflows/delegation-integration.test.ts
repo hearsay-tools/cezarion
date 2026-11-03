@@ -1,3 +1,4 @@
+import { workerCollectedResultSchema, workerInspectionSchema } from '@open-mercato/cezar-contract/delegation';
 import { createFixtureManager, fixtureWorkSettled, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { execFile as execFileCallback, execFileSync } from 'node:child_process';
@@ -159,8 +160,8 @@ describe('public delegation completion integration', () => {
     expect(store.getRun(b)?.status).toBe('running');
     expect(await collect(p.id, b)).toMatchObject({ backend: 'codex', settled: false, partial: true });
     const resultA = await collect(p.id, a);
-    expect(resultA).toMatchObject({ status: 'review', outcome: 'review-ready', settled: true, partial: false, summary: { text: expect.stringContaining('Implemented alpha') }, head: { state: 'available' }, diff: { state: 'available' } });
-    expect(await command<WorkerInspection>(p.id, ['inspect', a])).toMatchObject({ status: 'review', backend: 'claude', parentRunId: p.id });
+    expect(resultA).toMatchObject({ status: workerCollectedResultSchema.shape.status.enum.review, outcome: 'review-ready', settled: true, partial: false, summary: { text: expect.stringContaining('Implemented alpha') }, head: { state: 'available' }, diff: { state: 'available' } });
+    expect(await command<WorkerInspection>(p.id, ['inspect', a])).toMatchObject({ status: workerInspectionSchema.shape.status.enum.review, backend: 'claude', parentRunId: p.id });
     expect(manager.finish(p.id)).toBe(false);
     await finishWorker(p.id, b, 'beta');
     const resultB = await collect(p.id, b);

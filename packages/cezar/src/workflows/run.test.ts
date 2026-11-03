@@ -35,7 +35,15 @@ import type { WorkflowDef } from './types.ts';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { asksQuestion } from '@open-mercato/cezar-contract/waits';
 import type { TimerWaitEntry } from '@open-mercato/cezar-contract/waits';
-import { RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
+import {
+  RUN_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_VIA,
+  STEP_KIND,
+  STEP_STATUS,
+  WAIT_SOURCE,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { readPersistedRuns, crashStore } from '../runs/run-store.testkit.ts';
 import { monitoringTimerOf, monitoringWakeOf } from './waits.testkit.ts';
 
@@ -139,9 +147,9 @@ describe('RunManager directional usage accounting', () => {
       title: 'usage',
       workflow: 'quick-task',
       task: 'usage',
-      steps: [{ id: 'work', name: 'Work', kind: 'agent' }],
+      steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }],
     });
-    store.updateStep(run.id, 'work', { iterations: 1, status: 'running' });
+    store.updateStep(run.id, 'work', { iterations: 1, status: STEP_STATUS.running });
     const state = createActiveRun({ cwd: repoRoot, pendingHumanAsk: false, autonomous: false });
     const sink = new UiEventSink({ persist: () => undefined, emitLive: () => undefined });
     return { run, state, sink };
@@ -584,9 +592,9 @@ describe('RunManager.continueRun override', () => {
       task: 't',
       runner: 'claude',
       model: 'sonnet',
-      steps: [{ id: 's1', name: 'Work', kind: 'agent' }],
+      steps: [{ id: 's1', name: 'Work', kind: STEP_KIND.agent }],
     });
-    store.updateRun(record.id, { status: 'done', finishedAt: new Date().toISOString() });
+    store.updateRun(record.id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
     store.updateStep(record.id, 's1', { sessionId: 'sess-1' });
     return record.id;
   }
@@ -677,7 +685,7 @@ describe('RunManager.continueRun override', () => {
     // The stub bypasses startup teardown; simulate its completed lifecycle before
     // accepting a second Continue (terminal status alone never proves termination).
     runInternals(manager).line.starting.delete(id);
-    store.updateRun(id, { status: 'done' });
+    store.updateRun(id, { status: RUN_STATUS.done });
 
     expect(manager.continueRun(id, { effort: 'xhigh' })).toEqual({ ok: true });
     expect(store.getRun(id)?.effort).toBe('xhigh');
@@ -745,9 +753,9 @@ describe('RunManager.continueRun override', () => {
       task: 't',
       runner: 'claude',
       model: 'my-org/custom-tune',
-      steps: [{ id: 's1', name: 'Work', kind: 'agent' }],
+      steps: [{ id: 's1', name: 'Work', kind: STEP_KIND.agent }],
     });
-    store.updateRun(record.id, { status: 'done', finishedAt: new Date().toISOString() });
+    store.updateRun(record.id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
     store.updateStep(record.id, 's1', { sessionId: 'sess-1' });
     expect(manager.continueRun(record.id, { runner: 'codex' })).toEqual({ ok: true });
     expect(store.getRun(record.id)?.model).toBe('my-org/custom-tune');
@@ -760,8 +768,8 @@ describe('RunManager.continueRun override', () => {
   });
 
   it('guards legacy records too — no persisted runner resolves to claude, like runContinuation', () => {
-    const record = store.createRun({ title: 't', workflow: 'quick-task', task: 't', steps: [{ id: 's1', name: 'Work', kind: 'agent' }] });
-    store.updateRun(record.id, { status: 'done', finishedAt: new Date().toISOString() });
+    const record = store.createRun({ title: 't', workflow: 'quick-task', task: 't', steps: [{ id: 's1', name: 'Work', kind: STEP_KIND.agent }] });
+    store.updateRun(record.id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
     store.updateStep(record.id, 's1', { sessionId: 'sess-1' });
     const result = manager.continueRun(record.id, { model: 'gpt-5.1-codex' });
     expect(result.ok).toBe(false);
@@ -852,7 +860,7 @@ describe('RunManager.continueRun override', () => {
 
   it('refuses to continue a run with no resumable session (no override persisted)', () => {
     const record = store.createRun({ title: 't', workflow: 'quick-task', task: 't', runner: 'claude', steps: [] });
-    store.updateRun(record.id, { status: 'done' });
+    store.updateRun(record.id, { status: RUN_STATUS.done });
     const result = manager.continueRun(record.id, { runner: 'codex' });
     expect(result.ok).toBe(false);
     expect(store.getRun(record.id)?.runner).toBe('claude');
@@ -1034,8 +1042,8 @@ describe('a chain of 2 selected skills runs BOTH steps, in order (#410)', () => 
     // second step's session had done nothing; the assertion below on
     // `notes.md` is what actually distinguishes a real run from a no-op one.
     expect(finished?.steps.map((s) => ({ id: s.id, status: s.status }))).toEqual([
-      { id: 'om-auto-review-pr', status: 'done' },
-      { id: 'om-auto-verify-pr-ui', status: 'done' },
+      { id: 'om-auto-review-pr', status: STEP_STATUS.done },
+      { id: 'om-auto-verify-pr-ui', status: STEP_STATUS.done },
     ]);
 
     // The mock leaves a `notes.md` trace on its first turn, once per spawned
@@ -1114,8 +1122,8 @@ describe('a single agent step plus a check step gets NO chain note (#410)', () =
     }
 
     expect(store.getRun(record.id)?.steps.map((s) => ({ id: s.id, status: s.status }))).toEqual([
-      { id: 'implement', status: 'done' },
-      { id: 'verify', status: 'done' },
+      { id: 'implement', status: STEP_STATUS.done },
+      { id: 'verify', status: STEP_STATUS.done },
     ]);
 
     // One session ran, and its userText is the task text alone — no chain
@@ -1226,11 +1234,11 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     const published = await publishedWaiting(record.id);
     await new Promise<void>((resolve) => setImmediate(resolve));
 
-    expect(published).toMatchObject({ status: 'waiting' });
+    expect(published).toMatchObject({ status: RUN_STATUS.waiting });
     expect(published.steps.find((step) => step.id === published.currentStepId)?.status).toBe('waiting');
     expect(persistedRun(record.id)).toMatchObject({
-      status: 'waiting',
-      steps: [expect.objectContaining({ id: 'task', status: 'waiting' })],
+      status: RUN_STATUS.waiting,
+      steps: [expect.objectContaining({ id: 'task', status: STEP_STATUS.waiting })],
     });
   });
 
@@ -1250,8 +1258,8 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(persistedRun(record.id)).toMatchObject({
-      status: 'waiting',
-      steps: [expect.objectContaining({ id: 'task', status: 'waiting' })],
+      status: RUN_STATUS.waiting,
+      steps: [expect.objectContaining({ id: 'task', status: STEP_STATUS.waiting })],
     });
   });
 
@@ -1280,7 +1288,7 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     expect(events).toContain('"tool":"ScheduleWakeup"');
     expect(events).not.toContain('CEZ:MONITORING');
     const timer = store.getRun(record.id)?.waits?.find(wait => wait.phase === 'open');
-    expect(timer).toMatchObject({ kind: 'timer', via: 'schedule-wakeup' });
+    expect(timer).toMatchObject({ kind: WAIT_KIND.timer, via: WAIT_VIA['schedule-wakeup'] });
     const state = (manager as unknown as {
       active: Map<string, { idleTimer?: NodeJS.Timeout }>;
     }).active.get(record.id);
@@ -1307,7 +1315,7 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
 
     expect(manager.continueRun(record.id, { text: 'mock:schedule-wakeup check later' })).toEqual({ ok: true });
     await waitFor(record.id, (r) => r?.status === 'waiting' && Boolean(monitoringWakeOf(r)));
-    expect(store.getRun(record.id)?.waits?.find(wait => wait.phase === 'open')).toMatchObject({ kind: 'timer', via: 'schedule-wakeup' });
+    expect(store.getRun(record.id)?.waits?.find(wait => wait.phase === 'open')).toMatchObject({ kind: WAIT_KIND.timer, via: WAIT_VIA['schedule-wakeup'] });
     const state = (manager as unknown as {
       active: Map<string, { idleTimer?: NodeJS.Timeout }>;
     }).active.get(record.id);
@@ -1374,7 +1382,7 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     // says why. hearsay-tools/cezarion#1234: it parks on a human wait, not a plain one.
     await waitFor(record.id, (r) => r?.status === 'waiting');
     await waitFor(record.id, () => readFileSync(join(repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`), 'utf8').includes('automatic re-checks are off; waiting for you'));
-    expect(store.getRun(record.id)?.waits ?? []).toMatchObject([{ kind: 'human', via: 'monitoring-line', source: 'agent', phase: 'open' }]);
+    expect(store.getRun(record.id)?.waits ?? []).toMatchObject([{ kind: WAIT_KIND.human, via: WAIT_VIA['monitoring-line'], source: WAIT_SOURCE.agent, phase: WAIT_PHASE.open }]);
     expect(monitoringWakeOf(store.getRun(record.id))).toBeUndefined();
     expect(monitoringTimerOf(manager, record.id)).toBeUndefined();
   }, 30_000);
@@ -1429,7 +1437,7 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     // hearsay-tools/cezarion#2431 (owner decision 4): a parent turn the runner starts itself closes
     // every open timer, so the timer cannot wake a second turn after it; the turn's own end decides
     // what it waits on next.
-    expect(store.getRun(record.id)).toMatchObject({ status: 'running' });
+    expect(store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.running });
     expect(openTimer(store.getRun(record.id))).toBeUndefined();
     expect(armedTimer(record.id)).toBeUndefined();
     expect(store.getRun(record.id)?.lastWaits?.filter(entry => entry.id === wait.id).map(entry => entry.phase)).toEqual([WAIT_PHASE.cancelled]);
@@ -1545,7 +1553,7 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
       },
     });
 
-    expect(store.getRun(record.id)).toMatchObject({ status: 'waiting' });
+    expect(store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.waiting });
     expect(monitoringWakeOf(store.getRun(record.id))).toBe(deadline);
     expect(monitoringTimerOf(manager, record.id)).toBe(wakeTimer);
     expect(runInternals(manager).line.waiting.has(record.id)).toBe(true);
@@ -1581,7 +1589,7 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     // hearsay-tools/cezarion#2431 (owner decision 4): a parent turn the runner starts itself closes
     // every open timer, so the timer cannot wake a second turn after it. The turn's own end decides
     // what it waits on next: a new monitoring line or wait, else the no-wait nudge.
-    expect(store.getRun(record.id)).toMatchObject({ status: 'running' });
+    expect(store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.running });
     expect(monitoringWakeOf(store.getRun(record.id))).toBeUndefined();
     expect(monitoringTimerOf(manager, record.id)).toBeUndefined();
     expect(store.getRun(record.id)?.lastWaits?.filter(wait => wait.kind === WAIT_KIND.timer).map(wait => wait.phase)).toEqual([WAIT_PHASE.cancelled]);
@@ -1659,7 +1667,7 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     manager = createFixtureManager(store, repoRoot);
     await manager.recover();
     const human = store.getRun(record.id)?.waits?.filter(wait => wait.kind === 'human' && wait.phase === 'open') ?? [];
-    expect(human).toEqual([expect.objectContaining({ source: 'agent', askSeq: ask.seq })]);
+    expect(human).toEqual([expect.objectContaining({ source: WAIT_SOURCE.agent, askSeq: ask.seq })]);
     expect(store.getRun(record.id)?.status).toBe('waiting');
     expect(deriveAttention(store.getRun(record.id)!).label).toBe('needs you');
     expect(store.readEvents(record.id).filter(event => event.type === 'ask.requested')).toHaveLength(1);
@@ -1672,15 +1680,15 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     currentId = record.id;
     await waitFor(record.id, candidate => candidate?.status === 'waiting');
     manager.dispose();
-    const cezar = { id: '00000000-0000-4000-8000-0000000000ac', kind: 'human' as const, source: 'cezar' as const, via: 'no-wait' as const,
-      registeredAt: '2026-10-21T00:00:00.000Z', phase: 'open' as const, turnId: 'no-wait' };
+    const cezar = { id: '00000000-0000-4000-8000-0000000000ac', kind: WAIT_KIND.human, source: WAIT_SOURCE.cezar, via: WAIT_VIA['no-wait'],
+      registeredAt: '2026-10-21T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'no-wait' };
     store.updateRun(record.id, { waits: [cezar] });
     const ask = store.appendEvent(record.id, { type: 'ask.requested', requestId: 'crashed-question',
       questions: [{ header: 'Choice', question: 'Which implementation?', options: [{ label: 'First' }, { label: 'Second' }] }] });
     manager = createFixtureManager(store, repoRoot);
     await manager.recover();
     const human = store.getRun(record.id)?.waits?.filter(wait => wait.kind === 'human' && wait.phase === 'open') ?? [];
-    expect(human).toEqual([expect.objectContaining({ source: 'agent', askSeq: ask.seq })]);
+    expect(human).toEqual([expect.objectContaining({ source: WAIT_SOURCE.agent, askSeq: ask.seq })]);
     expect(asksQuestion(store.getRun(record.id)!)).toBe(true);
     expect(store.readEvents(record.id).filter(event => event.type === 'ask.requested')).toHaveLength(1);
   }, 30_000);
@@ -1695,8 +1703,8 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     const ask = store.appendEvent(record.id, { type: 'ask.requested', requestId: 'answered-question',
       questions: [{ header: 'Choice', question: 'Which implementation?', options: [{ label: 'First' }, { label: 'Second' }] }] });
     store.appendEvent(record.id, { type: 'human-input-delivered', askSeq: ask.seq });
-    const legacy = { id: '00000000-0000-4000-8000-0000000000aa', kind: 'human' as const, source: 'agent' as const, via: 'ask-line' as const,
-      registeredAt: '2026-10-21T00:00:00.000Z', phase: 'open' as const, turnId: 'legacy' };
+    const legacy = { id: '00000000-0000-4000-8000-0000000000aa', kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA['ask-line'],
+      registeredAt: '2026-10-21T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'legacy' };
     store.updateRun(record.id, { waits: [legacy] });
     manager = createFixtureManager(store, repoRoot);
     await manager.recover();
@@ -1712,14 +1720,14 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     currentId = record.id;
     await waitFor(record.id, candidate => candidate?.status === 'waiting');
     manager.dispose();
-    const legacy = { id: '00000000-0000-4000-8000-0000000000ab', kind: 'human' as const, source: 'agent' as const, via: 'ask-line' as const,
-      registeredAt: '2026-10-21T00:00:00.000Z', phase: 'open' as const, turnId: 'legacy' };
+    const legacy = { id: '00000000-0000-4000-8000-0000000000ab', kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA['ask-line'],
+      registeredAt: '2026-10-21T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'legacy' };
     store.updateRun(record.id, { waits: [legacy] });
     const unreadable = vi.spyOn(store, 'knownTranscriptFacts').mockImplementation(() => undefined);
     manager = createFixtureManager(store, repoRoot);
     await manager.recover();
     unreadable.mockRestore();
-    expect(store.getRun(record.id)?.waits).toEqual([expect.objectContaining({ id: legacy.id, phase: 'open' })]);
+    expect(store.getRun(record.id)?.waits).toEqual([expect.objectContaining({ id: legacy.id, phase: WAIT_PHASE.open })]);
   }, 30_000);
 
   it('honors cancellation that races an idle-close callback', async () => {
@@ -1733,10 +1741,10 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     idleTimer._onTimeout();
     expect(manager.cancel(record.id)).toBe(true);
     await waitFor(record.id, candidate => candidate?.status === 'cancelled');
-    expect(store.getRun(record.id)).toMatchObject({ status: 'cancelled' });
+    expect(store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.cancelled });
     expect(store.getRun(record.id)?.finishedAt).toBeDefined();
     expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'task', status: 'cancelled' }),
+      expect.objectContaining({ id: 'task', status: STEP_STATUS.cancelled }),
     ]));
   }, 30_000);
 
@@ -1775,7 +1783,7 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     idleTimer._onTimeout();
     await waitFor(record.id, candidate => candidate?.status === 'failed');
     expect(store.getRun(record.id)).toMatchObject({
-      status: 'failed', error: expect.stringContaining('provider failed during shutdown'),
+      status: RUN_STATUS.failed, error: expect.stringContaining('provider failed during shutdown'),
     });
   }, 30_000);
 
@@ -1788,8 +1796,8 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     const record = store.createRun({
       title: 'held remainder', task: 'task', workflow: workflow.name,
       steps: [
-        { id: 'task', name: 'Task', kind: 'agent' },
-        { id: 'later', name: 'Later', kind: 'check' },
+        { id: 'task', name: 'Task', kind: STEP_KIND.agent },
+        { id: 'later', name: 'Later', kind: STEP_KIND.check },
       ],
     });
     currentId = record.id;
@@ -1802,7 +1810,7 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     const held = runInternals(manager).stepLoop.requeueWhileHeld(record.id, workflow, { task: record.task }, 'claude', undefined, 1);
 
     expect(held).toBe(true);
-    expect(store.getRun(record.id)).toMatchObject({ status: 'queued', startedAt });
+    expect(store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.queued, startedAt });
   });
 
   it('delivers opening images when recovery resumes after checks but before the first agent', async () => {
@@ -1836,13 +1844,13 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     const record = store.createRun({
       title: 'resume before agent', task: 'task', workflow: workflow.name,
       steps: [
-        { id: 'preflight', name: 'Preflight', kind: 'check' },
-        { id: 'task', name: 'Task', kind: 'agent' },
-        { id: 'verify', name: 'Verify', kind: 'check' },
+        { id: 'preflight', name: 'Preflight', kind: STEP_KIND.check },
+        { id: 'task', name: 'Task', kind: STEP_KIND.agent },
+        { id: 'verify', name: 'Verify', kind: STEP_KIND.check },
       ],
     });
     currentId = record.id;
-    store.updateStep(record.id, 'preflight', { status: 'done', iterations: 1 });
+    store.updateStep(record.id, 'preflight', { status: STEP_STATUS.done, iterations: 1 });
     await (manager as unknown as {
       execute(id: string, definition: WorkflowDef, input: { task: string; worktree: boolean; images: ContentBlock[] }, startAt: number): Promise<void>;
     }).execute(record.id, workflow, { task: record.task, worktree: false, images: [openingImage] }, 1);
@@ -1928,7 +1936,7 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     }
     currentId = record.id;
     await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
-    store.addStep(record.id, { id: 'later', name: 'Later', kind: 'agent' });
+    store.addStep(record.id, { id: 'later', name: 'Later', kind: STEP_KIND.agent });
     if (shape === 'workflow definition') {
       store.updateRun(record.id, { workflowDef: {
         name: 'ask-then-later',
@@ -1954,8 +1962,8 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
       expect(manager.continueRun(record.id, { text: 'mock:cezar-done answer' })).toEqual({ ok: true });
       await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
       expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
-        expect.objectContaining({ id: 'task', status: 'done' }),
-        expect.objectContaining({ id: 'later', status: 'done' }),
+        expect.objectContaining({ id: 'task', status: STEP_STATUS.done }),
+        expect.objectContaining({ id: 'later', status: STEP_STATUS.done }),
       ]));
       return;
     }
@@ -1964,11 +1972,11 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
       error: 'cannot continue a waiting run before its final workflow step',
     });
     expect(store.getRun(record.id)).toMatchObject({
-      status: 'waiting',
+      status: RUN_STATUS.waiting,
       currentStepId: 'task',
       steps: [
-        expect.objectContaining({ id: 'task', status: 'waiting' }),
-        expect.objectContaining({ id: 'later', status: 'pending' }),
+        expect.objectContaining({ id: 'task', status: STEP_STATUS.waiting }),
+        expect.objectContaining({ id: 'later', status: STEP_STATUS.pending }),
       ],
     });
   }, 30_000);
@@ -1989,7 +1997,7 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     }]);
     currentId = record.id;
     await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
-    store.addStep(record.id, { id: 'later', name: 'Later', kind: 'agent' });
+    store.addStep(record.id, { id: 'later', name: 'Later', kind: STEP_KIND.agent });
     store.updateRun(record.id, { workflowDef: workflow });
     const state = (manager as unknown as {
       active: Map<string, { idleTimer?: NodeJS.Timeout }>;
@@ -2015,16 +2023,16 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
     expect(flushed).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        status: 'queued',
+        status: RUN_STATUS.queued,
         steps: expect.arrayContaining([
-          expect.objectContaining({ id: 'task', status: 'done' }),
-          expect.objectContaining({ id: 'later', status: 'pending' }),
+          expect.objectContaining({ id: 'task', status: STEP_STATUS.done }),
+          expect.objectContaining({ id: 'later', status: STEP_STATUS.pending }),
         ]),
       }),
     ]));
     expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'task', status: 'done' }),
-      expect.objectContaining({ id: 'later', status: 'done' }),
+      expect.objectContaining({ id: 'task', status: STEP_STATUS.done }),
+      expect.objectContaining({ id: 'later', status: STEP_STATUS.done }),
     ]));
     expect(store.getRun(record.id)).toMatchObject({
       startedAt: originalStartedAt,
@@ -2040,7 +2048,7 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     const record = manager.startRun(SINGLE_STEP, { task: 'plain markerless turn', worktree: false });
     currentId = record.id;
     await waitFor(record.id, candidate => candidate?.status === 'waiting');
-    store.addStep(record.id, { id: 'later', name: 'Later', kind: 'check' });
+    store.addStep(record.id, { id: 'later', name: 'Later', kind: STEP_KIND.check });
     store.updateRun(record.id, { workflowDef: workflow });
     const state = (manager as unknown as { active: Map<string, { idleTimer?: NodeJS.Timeout }> }).active.get(record.id);
     const idleTimer = state?.idleTimer as (NodeJS.Timeout & { _onTimeout?: () => void }) | undefined;
@@ -2061,7 +2069,7 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
 
     expect(cancelled).toBe(true);
     expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'later', status: 'pending', iterations: 0 }),
+      expect.objectContaining({ id: 'later', status: STEP_STATUS.pending, iterations: 0 }),
     ]));
   }, 30_000);
 
@@ -2104,19 +2112,19 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     idleTimer._onTimeout();
     await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
     manager.dispose();
-    store.addStep(record.id, { id: 'continue-1', name: 'Real numeric step', kind: 'check' });
-    store.addStep(record.id, { id: 'later', name: 'Later', kind: 'check' });
-    store.updateStep(record.id, 'task', { status: 'done', finishedAt: new Date().toISOString() });
-    store.updateRun(record.id, { status: 'queued', currentStepId: undefined, workflowDef: workflow });
+    store.addStep(record.id, { id: 'continue-1', name: 'Real numeric step', kind: STEP_KIND.check });
+    store.addStep(record.id, { id: 'later', name: 'Later', kind: STEP_KIND.check });
+    store.updateStep(record.id, 'task', { status: STEP_STATUS.done, finishedAt: new Date().toISOString() });
+    store.updateRun(record.id, { status: RUN_STATUS.queued, currentStepId: undefined, workflowDef: workflow });
     store.flush();
 
     manager = createFixtureManager(store, repoRoot);
     await manager.recover();
     await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
     expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'task', status: 'done', iterations: 1 }),
-      expect.objectContaining({ id: 'continue-1', status: 'done', iterations: 1 }),
-      expect.objectContaining({ id: 'later', status: 'done', iterations: 1 }),
+      expect.objectContaining({ id: 'task', status: STEP_STATUS.done, iterations: 1 }),
+      expect.objectContaining({ id: 'continue-1', status: STEP_STATUS.done, iterations: 1 }),
+      expect.objectContaining({ id: 'later', status: STEP_STATUS.done, iterations: 1 }),
     ]));
   }, 30_000);
 
@@ -2140,12 +2148,12 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     idleTimer._onTimeout();
     await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
     manager.dispose();
-    store.addStep(record.id, { id: 'previously-failed', name: 'Previously failed', kind: 'check' });
-    store.updateStep(record.id, 'previously-failed', { status: 'failed', finishedAt: new Date().toISOString() });
-    store.addStep(record.id, { id: 'later', name: 'Later', kind: 'check' });
-    store.updateStep(record.id, 'task', { status: 'running', finishedAt: undefined });
+    store.addStep(record.id, { id: 'previously-failed', name: 'Previously failed', kind: STEP_KIND.check });
+    store.updateStep(record.id, 'previously-failed', { status: STEP_STATUS.failed, finishedAt: new Date().toISOString() });
+    store.addStep(record.id, { id: 'later', name: 'Later', kind: STEP_KIND.check });
+    store.updateStep(record.id, 'task', { status: STEP_STATUS.running, finishedAt: undefined });
     store.updateRun(record.id, {
-      status: 'running', currentStepId: 'task', workflowDef: workflow,
+      status: RUN_STATUS.running, currentStepId: 'task', workflowDef: workflow,
       continuationMessage: {
         id: 'restart-task', text: 'mock:cezar-done recover', origin: 'lifecycle', createdAt: new Date().toISOString(),
       },
@@ -2156,9 +2164,9 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     await manager.recover();
     await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
     expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'task', status: 'done' }),
-      expect.objectContaining({ id: 'previously-failed', status: 'done', iterations: 1 }),
-      expect.objectContaining({ id: 'later', status: 'done', iterations: 1 }),
+      expect.objectContaining({ id: 'task', status: STEP_STATUS.done }),
+      expect.objectContaining({ id: 'previously-failed', status: STEP_STATUS.done, iterations: 1 }),
+      expect.objectContaining({ id: 'later', status: STEP_STATUS.done, iterations: 1 }),
     ]));
   }, 30_000);
 
@@ -2173,7 +2181,7 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
     const persisted = store.getRun(record.id)!;
     persisted.steps[0]!.id = 'continue-1';
-    store.addStep(record.id, { id: 'later', name: 'Later', kind: 'check' });
+    store.addStep(record.id, { id: 'later', name: 'Later', kind: STEP_KIND.check });
     store.updateRun(record.id, { currentStepId: 'continue-1', workflowDef: undefined });
 
     expect(manager.finish(record.id)).toBe(false);
@@ -2194,23 +2202,23 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     const record = store.createRun({
       title: 'bounded retry', task: 'mock:cezar-done', workflow: workflow.name,
       steps: [
-        { id: 'task', name: 'Task', kind: 'agent' },
-        { id: 'verify', name: 'Verify', kind: 'check' },
+        { id: 'task', name: 'Task', kind: STEP_KIND.agent },
+        { id: 'verify', name: 'Verify', kind: STEP_KIND.check },
       ],
     });
     currentId = record.id;
-    store.updateStep(record.id, 'task', { status: 'done', iterations: 1 });
-    store.updateStep(record.id, 'verify', { status: 'failed', iterations: 1, retriesUsed: 1 });
-    store.updateRun(record.id, { status: 'queued', workflowDef: workflow });
+    store.updateStep(record.id, 'task', { status: STEP_STATUS.done, iterations: 1 });
+    store.updateStep(record.id, 'verify', { status: STEP_STATUS.failed, iterations: 1, retriesUsed: 1 });
+    store.updateRun(record.id, { status: RUN_STATUS.queued, workflowDef: workflow });
 
     await (manager as unknown as {
       execute(id: string, workflow: WorkflowDef, input: { task: string; worktree: boolean }, startAt: number): Promise<void>;
     }).execute(record.id, workflow, { task: 'mock:cezar-done', worktree: false }, 1);
 
-    expect(store.getRun(record.id)).toMatchObject({ status: 'failed' });
+    expect(store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.failed });
     expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'task', status: 'done', iterations: 1 }),
-      expect.objectContaining({ id: 'verify', status: 'failed', iterations: 2 }),
+      expect.objectContaining({ id: 'task', status: STEP_STATUS.done, iterations: 1 }),
+      expect.objectContaining({ id: 'verify', status: STEP_STATUS.failed, iterations: 2 }),
     ]));
   }, 30_000);
 
@@ -2225,14 +2233,14 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     const record = store.createRun({
       title: 'distinct retry', task: 'mock:cezar-done', workflow: workflow.name,
       steps: [
-        { id: 'task', name: 'Task', kind: 'agent' },
-        { id: 'gate', name: 'Gate', kind: 'check' },
+        { id: 'task', name: 'Task', kind: STEP_KIND.agent },
+        { id: 'gate', name: 'Gate', kind: STEP_KIND.check },
       ],
     });
     currentId = record.id;
-    store.updateStep(record.id, 'task', { status: 'done', iterations: 1 });
-    store.updateStep(record.id, 'gate', { status: 'done', iterations: 1 });
-    store.updateRun(record.id, { status: 'queued', workflowDef: workflow });
+    store.updateStep(record.id, 'task', { status: STEP_STATUS.done, iterations: 1 });
+    store.updateStep(record.id, 'gate', { status: STEP_STATUS.done, iterations: 1 });
+    store.updateRun(record.id, { status: RUN_STATUS.queued, workflowDef: workflow });
 
     const flushes: RunRecord[] = [];
     const originalFlush = store.flush.bind(store);
@@ -2246,7 +2254,7 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
 
     expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'task', iterations: 2 }),
-      expect.objectContaining({ id: 'gate', status: 'failed', iterations: 3, retriesUsed: 1 }),
+      expect.objectContaining({ id: 'gate', status: STEP_STATUS.failed, iterations: 3, retriesUsed: 1 }),
     ]));
     expect(flushes.some(snapshot =>
       snapshot.status === 'queued' && snapshot.currentStepId === undefined &&
@@ -2272,17 +2280,17 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
         { id: 'later', name: 'Later', command: 'true' },
       ],
     };
-    store.updateStep(record.id, 'task', { status: 'done' });
-    store.addStep(record.id, { id: 'verify', name: 'Verify', kind: 'check' });
-    store.updateStep(record.id, 'verify', { status: 'failed', iterations: 1 });
-    store.addStep(record.id, { id: 'later', name: 'Later', kind: 'check' });
-    store.updateRun(record.id, { status: 'failed', currentStepId: undefined, workflowDef: workflow });
+    store.updateStep(record.id, 'task', { status: STEP_STATUS.done });
+    store.addStep(record.id, { id: 'verify', name: 'Verify', kind: STEP_KIND.check });
+    store.updateStep(record.id, 'verify', { status: STEP_STATUS.failed, iterations: 1 });
+    store.addStep(record.id, { id: 'later', name: 'Later', kind: STEP_KIND.check });
+    store.updateRun(record.id, { status: RUN_STATUS.failed, currentStepId: undefined, workflowDef: workflow });
 
     expect(manager.continueRun(record.id, { text: 'mock:cezar-done inspect failure' })).toEqual({ ok: true });
     await waitFor(record.id, (candidate) => candidate?.status === 'done' || candidate?.status === 'review');
     expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'verify', status: 'failed', iterations: 1 }),
-      expect.objectContaining({ id: 'later', status: 'pending', iterations: 0 }),
+      expect.objectContaining({ id: 'verify', status: STEP_STATUS.failed, iterations: 1 }),
+      expect.objectContaining({ id: 'later', status: STEP_STATUS.pending, iterations: 0 }),
     ]));
   }, 30_000);
 
@@ -2301,19 +2309,19 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
       { id: 'verify', name: 'Verify', command: 'true' },
       { id: 'later', name: 'Later', command: 'true' },
     ] };
-    store.updateStep(record.id, 'task', { status: 'done' });
-    store.addStep(record.id, { id: 'verify', name: 'Verify', kind: 'check' });
-    store.updateStep(record.id, 'verify', { status: 'running', iterations: 1 });
-    store.addStep(record.id, { id: 'later', name: 'Later', kind: 'check' });
-    store.updateRun(record.id, { status: 'running', currentStepId: 'verify', workflowDef: workflow });
+    store.updateStep(record.id, 'task', { status: STEP_STATUS.done });
+    store.addStep(record.id, { id: 'verify', name: 'Verify', kind: STEP_KIND.check });
+    store.updateStep(record.id, 'verify', { status: STEP_STATUS.running, iterations: 1 });
+    store.addStep(record.id, { id: 'later', name: 'Later', kind: STEP_KIND.check });
+    store.updateRun(record.id, { status: RUN_STATUS.running, currentStepId: 'verify', workflowDef: workflow });
     store.flush();
 
     manager = createFixtureManager(store, repoRoot);
     await manager.recover();
     await waitFor(record.id, candidate => candidate?.status === 'done' || candidate?.status === 'review');
     expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: 'verify', status: 'done', iterations: 2 }),
-      expect.objectContaining({ id: 'later', status: 'done', iterations: 1 }),
+      expect.objectContaining({ id: 'verify', status: STEP_STATUS.done, iterations: 2 }),
+      expect.objectContaining({ id: 'later', status: STEP_STATUS.done, iterations: 1 }),
     ]));
   }, 30_000);
 
@@ -2321,7 +2329,7 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     const record = manager.startRun(SINGLE_STEP, { task: 'mock:cezar-ask choose', worktree: false });
     currentId = record.id;
     await waitFor(record.id, (candidate) => candidate?.status === 'waiting');
-    store.addStep(record.id, { id: 'later', name: 'Later', kind: 'agent' });
+    store.addStep(record.id, { id: 'later', name: 'Later', kind: STEP_KIND.agent });
     store.updateRun(record.id, { workflowDef: {
       name: 'ask-then-later', source: 'file',
       steps: [SINGLE_STEP.steps[0]!, { id: 'later', name: 'Later', prompt: 'mock:cezar-done later' }],
@@ -2342,7 +2350,7 @@ describe('a still-working turn end parks on a timer, not as a plain wait (#490)'
     await waitFor(record.id, () => !(manager as unknown as { active: Map<string, unknown> }).active.has(record.id));
 
     expect(manager.finish(record.id)).toBe(false);
-    expect(store.getRun(record.id)).toMatchObject({ status: 'waiting', currentStepId: 'continue-1' });
+    expect(store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.waiting, currentStepId: 'continue-1' });
   }, 30_000);
 
   it('recognizes a legacy final continuation from workflow membership after restart', async () => {
@@ -2669,7 +2677,7 @@ describe('RunManager queued-stack mutators (#472)', () => {
       task: 'original recovery goal',
       steps: [],
     });
-    store.updateRun(r.id, { status: 'queued' });
+    store.updateRun(r.id, { status: RUN_STATUS.queued });
 
     const internals = manager as unknown as {
       runContinuation(
@@ -3198,7 +3206,7 @@ describe('recover() carries the queued stack exactly once (#472)', () => {
   it('folds once across repeated recoveries', async () => {
     const r = store.createRun({ title: 't', workflow: '(planned)', task: 'the original task', steps: [] });
     store.updateRun(r.id, {
-      status: 'queued',
+      status: RUN_STATUS.queued,
       workflowDef: WORKFLOW,
       queuedMessages: [
         { id: 'm1', text: 'the stacked bit', createdAt: '2026-07-21T10:00:00.000Z' },

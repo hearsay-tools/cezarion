@@ -5,7 +5,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SUBAGENT_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import {
+  SUBAGENT_STATUS,
+  RUN_STATUS,
+  STEP_KIND,
+  STEP_STATUS,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { RunStore } from '../runs/store.ts';
 import type { Skill } from '../skills.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
@@ -208,11 +213,11 @@ describe('every entry path loads the registry, with no live session before it (o
     // survives, so the manager recovering it has no live session and no earlier ActiveRun.
     const record = store.createRun({
       title: 'interrupted', workflow: 'quick-task', task: 'do the first thing', runner: 'claude',
-      steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+      steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }],
     });
     runId = record.id;
-    store.updateRun(record.id, { status: 'running', currentStepId: 'task', workflowDef: SINGLE_STEP });
-    store.updateStep(record.id, 'task', { status: 'running', sessionId: 'sess-interrupted', backend: 'claude' });
+    store.updateRun(record.id, { status: RUN_STATUS.running, currentStepId: 'task', workflowDef: SINGLE_STEP });
+    store.updateStep(record.id, 'task', { status: STEP_STATUS.running, sessionId: 'sess-interrupted', backend: 'claude' });
     expect((manager as unknown as { active: Map<string, unknown> }).active.has(record.id)).toBe(false);
 
     await manager.recover();

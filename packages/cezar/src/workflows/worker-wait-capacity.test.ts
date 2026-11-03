@@ -1,3 +1,4 @@
+import { RUN_STATUS, WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -190,7 +191,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     // hearsay-tools/cezarion#1235: a clean close with a worker wait open parks, recoverably (spec
     // "Session failure and close"); it used to fail the run.
     await until(() => !manager.isActive(run.id));
-    expect(store.getRun(run.id)).toMatchObject({ status: 'waiting' });
+    expect(store.getRun(run.id)).toMatchObject({ status: RUN_STATUS.waiting });
     expect(store.getRun(run.id)?.error).toBeUndefined();
     expect(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
     expect(waitOf(store.getRun(run.id))?.phase).toBe('parked');
@@ -211,8 +212,8 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     expect(store.readEvents(run.id).some(event => event.type === 'ask.requested')).toBe(true);
     // hearsay-tools/cezarion#1235 phase 3a: the worker wait is an open list entry beside the
     // question, and the question's park, like a worker park, holds no slot.
-    expect(workerEntryOf(store.getRun(run.id))).toMatchObject({ phase: 'open', workerIds: [w.id] });
-    expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: 'human', shown: true });
+    expect(workerEntryOf(store.getRun(run.id))).toMatchObject({ phase: WAIT_PHASE.open, workerIds: [w.id] });
+    expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: WAIT_KIND.human, shown: true });
     expect(semaphore.busy()).toBe(0);
     manager.requestWorkerStop(w.id); await manager.awaitRunTermination(w.id, 15000);
     expect(store.getRun(run.id)?.agentInputs?.some(input => input.deliveredAt)).not.toBe(true);
@@ -249,7 +250,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       session.sendAgentMessage = () => false;
       const w = await worker(p.id); const wait = register(p.id, [w.id]);
       await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-      fixtureUpdateRun(w.id, { status: 'done' });
+      fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
       await until(() => runInternals(manager).line.waitWakeAdmitted.has(p.id));
       const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
       session.sendMessage([{ type: 'text', text: 'mock:cezar-ask' }]);
@@ -289,7 +290,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       if (role === 'root') expect(manager.continueRun(target.id, { text: 'human answer mock:hold' }).ok).toBe(true);
       else await answerAsParent(store, manager, p.id, w.id, 'human answer mock:hold');
       await until(() => store.getRun(target.id)?.continuationMessage !== undefined);
-      if (role === 'root') store.updateRun(w.id, { status: 'queued', finishedAt: undefined });
+      if (role === 'root') store.updateRun(w.id, { status: RUN_STATUS.queued, finishedAt: undefined });
       // The transcripts belong to the crash checkpoint too: the cancel below closes a worker's
       // question as it stops (hearsay-tools/cezarion#2410), which a crash never writes.
       store.flush(); const checkpoint = readPersistedRuns(join(root, '.ai/cezar')); const events = eventCheckpoint();
@@ -332,7 +333,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   it('restart with an empty human-origin checkpoint preserves the ask without a synthetic answer', async () => {
     const p = await parent('mock:cezar-ask');
     await until(() => store.getRun(p.id)?.status === 'waiting');
-    store.updateRun(p.id, { status: 'running', continuationMessage: {
+    store.updateRun(p.id, { status: RUN_STATUS.running, continuationMessage: {
       id: randomUUID(), text: '', origin: 'human', createdAt: new Date().toISOString(),
     } });
     await restart();
@@ -529,7 +530,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         if (pending) {
           expect(send).not.toHaveBeenCalled();
           expect(runInternals(manager).wakeAdmission.automaticWakes(w.id)).toBe(0);
-          expect({ ...store.getRun(w.id), monitoringWakeAt: monitoringWakeOf(store.getRun(w.id)) }).toMatchObject({ status: 'waiting', monitoringWakeAt: deadline });
+          expect({ ...store.getRun(w.id), monitoringWakeAt: monitoringWakeOf(store.getRun(w.id)) }).toMatchObject({ status: RUN_STATUS.waiting, monitoringWakeAt: deadline });
           expect(runInternals(manager).line.monitoring.has(w.id)).toBe(true);
           expect(store.readEvents(w.id).some(event => event.type === 'note' && typeof event.message === 'string' && event.message.includes('automatic monitoring wake-up'))).toBe(false);
           expect(runInternals(manager).inputDelivery.deliverMessage(w.id, [{ type: 'text', text: 'synthetic retry' }], false)).toBe(false);
@@ -574,7 +575,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   it('restart durably reconciles cancelled roots with superseded Finish intent', async () => {
     const p = await parent('mock:cezar-ask'); await until(() => store.getRun(p.id)?.status === 'waiting'); await restart();
     store.commitRootFinishIntent(p.id);
-    store.updateRun(p.id, { status: 'cancelled', finishedAt: new Date().toISOString() });
+    store.updateRun(p.id, { status: RUN_STATUS.cancelled, finishedAt: new Date().toISOString() });
     store.flush(); const checkpoint = readPersistedRuns(join(root, '.ai/cezar'));
     await restart(false, checkpoint);
     expect(store.getRun(p.id)?.status).toBe('cancelled');

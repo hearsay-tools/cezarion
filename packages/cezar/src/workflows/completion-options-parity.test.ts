@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
@@ -20,7 +21,7 @@ describe('task completion controls on native harnesses', { timeout: 40_000 }, ()
       const done = toolCall('cezar_done', { summary: 'All done.' });
       expect(manager.sendMessage(run.id, [{ type: 'text', text: done }])).toBe(true);
       await until(() => store.getRun(run.id)?.status === 'done' && !manager.isActive(run.id));
-      expect(readPersistedRuns(join(root, '.ai/cezar')).find(row => row.id === run.id)).toMatchObject({ status: 'done', archived: true });
+      expect(readPersistedRuns(join(root, '.ai/cezar')).find(row => row.id === run.id)).toMatchObject({ status: RUN_STATUS.done, archived: true });
       expect(manager.continueRun(run.id, { text: HARNESS_ADAPTERS[runner].scenarios.baseline! }).ok).toBe(true);
       await until(() => store.getRun(run.id)?.status === 'waiting');
       expect(store.getRun(run.id)?.archived).toBe(false);

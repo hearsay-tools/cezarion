@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_STATUS, WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -42,12 +43,12 @@ function signalDone(id: string, runner: RunnerId): void {
   expect(manager.sendMessage(id, [{ type: 'text', text: HARNESS_ADAPTERS[runner].scenarios['cezar-done']! }])).toBe(true);
 }
 function register(id: string): Promise<Wait> {
-  return manager.registerWait(id, { kind: 'pr', pr: identity.prUrl, timeout_seconds: 30 }, 'cezar_wait', active(id)!.ciGeneration);
+  return manager.registerWait(id, { kind: WAIT_KIND.pr, pr: identity.prUrl, timeout_seconds: 30 }, 'cezar_wait', active(id)!.ciGeneration);
 }
 
 async function ownedChain(runner: RunnerId, workflow: WorkflowDef) {
   const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-  store.updateRun(parent.id, { status: 'waiting', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+  store.updateRun(parent.id, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
   const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   const workspace = await planOwnedWorkspace(root, randomUUID(), sha);
   const account = { provider: runner, profileId: 'default',
@@ -89,7 +90,7 @@ describe('CI wait failure history through every native runner (hearsay-tools/cez
         active(run.id)!.session.end();
         await until(() => !manager.isActive(run.id));
         // Clean CI parking must survive a close, without fabricating failure.
-        expect(store.getRun(run.id)).toMatchObject({ status: 'waiting' });
+        expect(store.getRun(run.id)).toMatchObject({ status: RUN_STATUS.waiting });
         expect(store.getRun(run.id)?.waits?.find(open => open.id === wait.id)?.phase).toBe('open');
         expect(store.getRun(run.id)?.error).toBeUndefined();
         settle();
@@ -107,7 +108,7 @@ describe('CI wait failure history through every native runner (hearsay-tools/cez
       const providerError = store.readEvents(run.id).find(event => event.type === 'error' && event.stepId === failedStepId)!;
       expect.soft(failedStep.error).toBe(providerError.message);
       expect.soft(store.readEvents(run.id)).toContainEqual(expect.objectContaining({ type: 'session.ended', stepId: failedStepId, reason: 'error', message: providerError.message }));
-      expect.soft(store.readEvents(run.id)).toContainEqual(expect.objectContaining({ type: 'step-end', stepId: failedStepId, status: 'failed' }));
+      expect.soft(store.readEvents(run.id)).toContainEqual(expect.objectContaining({ type: 'step-end', stepId: failedStepId, status: STEP_STATUS.failed }));
       expect(ciWaitOf(run.id)?.id).toBe(wait.id);
       expect(store.getRun(run.id)?.agentInputs?.find(input => input.id === wait.id)?.deliveredAt).toBeUndefined();
       if (mode === 'fresh') settle();
@@ -116,7 +117,7 @@ describe('CI wait failure history through every native runner (hearsay-tools/cez
       expect(manager.finish(run.id)).toBe(true);
       await until(() => !manager.isActive(run.id));
       expect(store.getRun(run.id)?.status).toBe('done');
-      expect(store.getRun(run.id)?.steps.find(step => step.id === failedStepId)).toMatchObject({ status: 'failed', error: failedStep.error, finishedAt: failedStep.finishedAt });
+      expect(store.getRun(run.id)?.steps.find(step => step.id === failedStepId)).toMatchObject({ status: STEP_STATUS.failed, error: failedStep.error, finishedAt: failedStep.finishedAt });
       expect(ciWaitOf(run.id)).toBeUndefined();
       expect(lastCiWaitOf(run.id)?.id).toBe(wait.id);
     });
@@ -141,7 +142,7 @@ describe('CI wait failure history through every native runner (hearsay-tools/cez
       wire.release();
       await until(() => !manager.isActive(run.id));
       const failed = structuredClone(store.getRun(run.id)!.steps.find(step => step.id === 'first')!);
-      expect(failed).toMatchObject({ status: 'failed', iterations: 1 });
+      expect(failed).toMatchObject({ status: STEP_STATUS.failed, iterations: 1 });
       expect(failed.error?.trim()).toBeTruthy();
       expect(failed.finishedAt).toBeTruthy();
       expect(store.getRun(run.id)?.steps.slice(1).map(step => step.status)).toEqual(['pending', 'pending']);
@@ -166,20 +167,20 @@ describe('CI wait failure history through every native runner (hearsay-tools/cez
       if (outcome === 'source-retry') {
         // A deliberate check retry starts a real new iteration; the logical step
         // may advance, but the failed attempt stays in the append-only transcript.
-        expect(store.getRun(run.id)?.steps.find(step => step.id === 'first')).toMatchObject({ status: 'done', iterations: 2 });
+        expect(store.getRun(run.id)?.steps.find(step => step.id === 'first')).toMatchObject({ status: STEP_STATUS.done, iterations: 2 });
         expect(store.readEvents(run.id)).toContainEqual(expect.objectContaining({ type: 'session.ended', stepId: 'first', reason: 'error', message: failed.error }));
       } else {
         expect(store.getRun(run.id)?.steps.find(step => step.id === 'first')).toMatchObject({
-          status: 'failed', iterations: 1, error: failed.error, finishedAt: failed.finishedAt,
+          status: STEP_STATUS.failed, iterations: 1, error: failed.error, finishedAt: failed.finishedAt,
         });
       }
       expect(store.readEvents(run.id).filter(event => event.type === 'step-end' && event.stepId === 'first').map(event => event.status)).toEqual(outcome === 'source-retry' ? ['failed', 'done'] : ['failed']);
-      expect(store.getRun(run.id)?.steps.find(step => step.id === 'later')).toMatchObject({ status: 'done', iterations: 2 });
+      expect(store.getRun(run.id)?.steps.find(step => step.id === 'later')).toMatchObject({ status: STEP_STATUS.done, iterations: 2 });
       expect(store.getRun(run.id)?.steps.find(step => step.id === 'check')).toMatchObject({
         status: outcome === 'failed' ? 'failed' : 'done', iterations: 2, retriesUsed: 1,
       });
       expect(ciWaitOf(run.id)).toBeUndefined();
-      expect(lastCiWaitOf(run.id)).toMatchObject({ id: wait.id, phase: 'delivered' });
+      expect(lastCiWaitOf(run.id)).toMatchObject({ id: wait.id, phase: WAIT_PHASE.delivered });
       expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === wait.id && input.deliveredAt)).toHaveLength(1);
     });
   }
@@ -216,10 +217,10 @@ describe('CI wait failure history through every native runner (hearsay-tools/cez
       if (manager.isActive(run.id) && store.getRun(run.id)?.status === 'waiting') signalDone(run.id, runner);
       await until(() => store.getRun(run.id)?.status === 'done' && !manager.isActive(run.id));
       expect(store.getRun(run.id)?.steps.find(step => step.id === 'first')).toMatchObject({
-        status: 'failed', iterations: 1, error: failed.error, finishedAt: failed.finishedAt,
+        status: STEP_STATUS.failed, iterations: 1, error: failed.error, finishedAt: failed.finishedAt,
       });
-      expect(store.getRun(run.id)?.steps.find(step => step.id === 'later')).toMatchObject({ status: 'done', iterations: 2 });
-      expect(store.getRun(run.id)?.steps.find(step => step.id === 'check')).toMatchObject({ status: 'done', iterations: 2, retriesUsed: 1 });
+      expect(store.getRun(run.id)?.steps.find(step => step.id === 'later')).toMatchObject({ status: STEP_STATUS.done, iterations: 2 });
+      expect(store.getRun(run.id)?.steps.find(step => step.id === 'check')).toMatchObject({ status: STEP_STATUS.done, iterations: 2, retriesUsed: 1 });
       expect(store.readEvents(run.id).filter(event => event.type === 'step-end' && event.stepId === 'first').map(event => event.status)).toEqual(['failed']);
     });
   }

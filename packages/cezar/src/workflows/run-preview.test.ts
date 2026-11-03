@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -130,9 +131,9 @@ describe('preview registration (open-mercato/cezar#781)', { timeout: 30_000 }, (
 
   it('recovery provisions the stop capability through the continuation construction path', async () => {
     const provision = vi.spyOn(CiToolController.prototype, 'provision');
-    const record = store.createRun({ title: 'recover preview', workflow: 'quick-task', task: 'continue', runner: 'claude', steps: [{ id: 'work', name: 'Work', kind: 'agent' }] });
-    store.updateStep(record.id, 'work', { status: 'running', iterations: 1, sessionId: 'saved-session', backend: 'claude' });
-    store.updateRun(record.id, { status: 'running', currentStepId: 'work', worktreePath: repoRoot, previewServers: [{ port: 5173, command: 'npm run dev', label: 'web', registeredAt: new Date().toISOString(), answeredAtRegistration: false }] });
+    const record = store.createRun({ title: 'recover preview', workflow: 'quick-task', task: 'continue', runner: 'claude', steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }] });
+    store.updateStep(record.id, 'work', { status: STEP_STATUS.running, iterations: 1, sessionId: 'saved-session', backend: 'claude' });
+    store.updateRun(record.id, { status: RUN_STATUS.running, currentStepId: 'work', worktreePath: repoRoot, previewServers: [{ port: 5173, command: 'npm run dev', label: 'web', registeredAt: new Date().toISOString(), answeredAtRegistration: false }] });
     await manager!.recover();
     await callbackAt(provision, 0);
     const stop = provision.mock.calls[0]![0].stopPreview!;

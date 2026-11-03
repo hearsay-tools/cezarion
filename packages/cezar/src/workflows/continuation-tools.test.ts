@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -128,7 +129,7 @@ describe('a resumed session keeps its workflow step tools', () => {
       effort: input.effort,
       model: input.model,
       ...(runner ? { runner } : {}),
-      steps: input.steps.map((s) => ({ id: s.id, name: s.id, kind: 'agent' as const })),
+      steps: input.steps.map((s) => ({ id: s.id, name: s.id, kind: STEP_KIND.agent })),
     });
     store.updateRun(record.id, {
       status: input.status ?? 'done',
@@ -139,7 +140,7 @@ describe('a resumed session keeps its workflow step tools', () => {
     });
     for (const s of input.steps) {
       store.updateStep(record.id, s.id, {
-        status: 'done',
+        status: STEP_STATUS.done,
         sessionId: s.sessionId,
         backend: s.backend,
       });
@@ -165,7 +166,7 @@ describe('a resumed session keeps its workflow step tools', () => {
     const id = terminalRun({
       def: CHAIN_DEF,
       steps: [{ id: 'implement', sessionId: 'sess-1', backend: 'claude' }],
-      status: 'failed',
+      status: RUN_STATUS.failed,
       error: 'boom',
     });
 
@@ -324,7 +325,7 @@ describe('a resumed session keeps its workflow step tools', () => {
       def: SINGLE_DEF,
       steps: [{ id: 'work', sessionId: 'sess-1', backend: 'claude' }],
       // A usage-limited run waits for its resume (hearsay-tools/cezarion#1236).
-      status: 'waiting',
+      status: RUN_STATUS.waiting,
       error: 'Claude AI usage limit reached|1756166400',
       autoResumeAt: new Date(Date.now() - 1_000).toISOString(),
     });

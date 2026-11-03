@@ -20,7 +20,7 @@ import { recordCommits } from '../runs/outcome-crash.testkit.ts';
 import type { RunOutcome } from '../runs/outcome-commit.ts';
 import type { RunRecord } from '../runs/store.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
-import { RUN_STATUS, WAIT_KIND, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, WAIT_KIND, WAIT_VIA, WAIT_SOURCE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { gate, thenSay, toolCall } from './waits-parity.testkit.ts';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';
@@ -315,7 +315,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     const inactive = vi.spyOn(manager, 'isActive').mockImplementation(id => id !== f.w.id && isActive(id));
     expect(manager.continueRun(f.w.id, { text: 'mock:hold' })).toEqual({ ok: false, error: 'cannot continue a waiting run' });
     inactive.mockRestore();
-    expectFallbackIntact(f, [expect.objectContaining({ kind: 'human', source: 'cezar', via: 'no-wait', askSeq: f.askSeq })], []);
+    expectFallbackIntact(f, [expect.objectContaining({ kind: WAIT_KIND.human, source: WAIT_SOURCE.cezar, via: WAIT_VIA['no-wait'], askSeq: f.askSeq })], []);
     // A stopped worker under a parent's pending Finish refuses it too.
     manager.requestWorkerStop(f.w.id); expect(await manager.awaitRunTermination(f.w.id, 15_000)).toBe(true);
     await until(() => store.getRun(f.p.id)?.status === 'waiting' && eventsOf(f.w.id, 'human-ask-closed').length === 1);
@@ -357,7 +357,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       fail.mockRestore();
       expect(eventsOf(f.w.id, 'human-ask-closed')).toEqual([]);
       expect(store.transcriptFacts(f.w.id).pendingAsk?.seq).toBe(f.askSeq);
-      expect(store.getRun(f.w.id)?.waits).toEqual([expect.objectContaining({ via: 'no-wait', askSeq: f.askSeq })]);
+      expect(store.getRun(f.w.id)?.waits).toEqual([expect.objectContaining({ via: WAIT_VIA['no-wait'], askSeq: f.askSeq })]);
       if (failing === 'outcome') expect(conversationOf(f.p.id)?.outcomes.some(outcome => outcome.requestId === f.requestId) ?? false).toBe(false);
       // A crash now: recovery finds the worker waiting on the question with no process left.
       store.flush();

@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createActiveRun } from './active-run.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
@@ -394,15 +395,15 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
         workflow: 'quick-task',
         task: `interrupted ${suffix}`,
         runner: 'claude',
-        steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+        steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }],
       });
       store.updateStep(record.id, 'task', {
-        status: 'running',
+        status: STEP_STATUS.running,
         iterations: 1,
         sessionId: `session-${suffix}`,
         backend: 'claude',
       });
-      store.updateRun(record.id, { status: 'running', currentStepId: 'task' });
+      store.updateRun(record.id, { status: RUN_STATUS.running, currentStepId: 'task' });
     }
 
     // Hold the first admitted continuation open. This isolates scheduler
@@ -415,8 +416,8 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
           runContinuation(runId: string, stepId: string): Promise<void>;
         }
       ).runContinuation = async (runId: string, stepId: string) => {
-        store.updateStep(runId, stepId, { status: 'running' });
-        store.updateRun(runId, { status: 'running', currentStepId: stepId });
+        store.updateStep(runId, stepId, { status: STEP_STATUS.running });
+        store.updateRun(runId, { status: RUN_STATUS.running, currentStepId: stepId });
         await held;
       };
     };
@@ -471,7 +472,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
 
       // Terminal records prevent another admission when the held continuations settle.
       for (const run of store.listRuns()) {
-        store.updateRun(run.id, { status: 'cancelled', finishedAt: new Date().toISOString() });
+        store.updateRun(run.id, { status: RUN_STATUS.cancelled, finishedAt: new Date().toISOString() });
       }
     } finally { releaseContinuation(); }
   });
@@ -489,15 +490,15 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
       workflow: 'quick-task',
       task: 'resume after restart',
       runner: 'claude',
-      steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+      steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }],
     });
     store.updateStep(record.id, 'task', {
-      status: 'running',
+      status: STEP_STATUS.running,
       iterations: 1,
       sessionId: 'session-interrupted',
       backend: 'claude',
     });
-    store.updateRun(record.id, { status: 'running', currentStepId: 'task' });
+    store.updateRun(record.id, { status: RUN_STATUS.running, currentStepId: 'task' });
 
     await manager.recover();
     await waitFor(

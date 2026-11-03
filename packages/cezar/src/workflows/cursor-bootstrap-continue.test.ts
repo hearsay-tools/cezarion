@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -82,15 +83,15 @@ describe('Continue after a Cursor bootstrap crash', () => {
       workflow: 'quick-task',
       task: 'do the thing',
       runner: 'cursor',
-      steps: [{ id: 'work', name: 'Work', kind: 'agent' }],
+      steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }],
     });
     store.updateRun(record.id, {
-      status: 'failed',
+      status: RUN_STATUS.failed,
       finishedAt: new Date().toISOString(),
       error: 'Cursor ACP exited unexpectedly (1)',
     });
     store.updateStep(record.id, 'work', {
-      status: 'failed',
+      status: STEP_STATUS.failed,
       sessionId,
       backend: 'cursor',
       error: 'Cursor ACP exited unexpectedly (1)',
@@ -157,8 +158,8 @@ describe('Continue after a Cursor bootstrap crash', () => {
   it('does not requeue a print checkpoint as a fresh session on restart', async () => {
     const id = failedCursorRun(CURSOR_SESSION_ID, true);
     store.updateStep(id, 'work', { sessionTransport: 'cursor-print' });
-    store.addStep(id, { id: 'continue-1', name: 'Continue', kind: 'agent', synthetic: 'continuation' });
-    store.updateRun(id, { status: 'queued', finishedAt: undefined });
+    store.addStep(id, { id: 'continue-1', name: 'Continue', kind: STEP_KIND.agent, synthetic: 'continuation' });
+    store.updateRun(id, { status: RUN_STATUS.queued, finishedAt: undefined });
     await (manager as unknown as { reviveQueuedRun(run: NonNullable<ReturnType<RunStore['getRun']>>, reason: string): Promise<void> })
       .reviveQueuedRun(store.getRun(id)!, 'cezar restarted');
     expect(store.getRun(id)?.status).toBe('failed');

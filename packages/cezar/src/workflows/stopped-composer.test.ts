@@ -9,7 +9,7 @@ import { crashStore } from '../runs/run-store.testkit.ts';
 import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import type { RunManager } from './run.ts';
-import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 
 const captured = vi.hoisted(() => ({ specs: [] as AgentRunSpec[], release: undefined as (() => void) | undefined }));
@@ -55,7 +55,7 @@ describe('stopped composer engine', { timeout: 15_000 }, () => {
     const accepted = manager.continueRun(run.id, { text: 'new request', model: 'sonnet', effort: 'high', agentProfile: 'stopped-composer-selected', images: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'd29ybGQ=' } }] });
     expect(accepted).toEqual({ ok: true });
     expect(manager.continueRun(run.id)).toMatchObject({ ok: false });
-    expect(store.getRun(run.id)).toMatchObject({ id: run.id, status: 'queued', task: 'original task', model: 'sonnet', effort: 'high', systemPrompt: 'private instruction', worktree: false, autonomous: true });
+    expect(store.getRun(run.id)).toMatchObject({ id: run.id, status: RUN_STATUS.queued, task: 'original task', model: 'sonnet', effort: 'high', systemPrompt: 'private instruction', worktree: false, autonomous: true });
     expect(store.getRun(run.id)?.steps.map(step => step.id)).toEqual(['work']);
     expect(store.getRun(run.id)?.queuedMessages).toHaveLength(1);
     expect(captured.specs).toHaveLength(0);
@@ -89,7 +89,7 @@ describe('stopped composer engine', { timeout: 15_000 }, () => {
   it('rejects replay when even one command step has already executed', () => {
     const { store, manager } = fixture();
     const run = manager.startRun(workflow, { task: 'task' }); manager.cancel(run.id);
-    store.updateStep(run.id, 'work', { status: 'done' });
+    store.updateStep(run.id, 'work', { status: STEP_STATUS.done });
     expect(manager.continueRun(run.id)).toMatchObject({ ok: false });
   });
   it('exposes stopping until the process result settles and rejects Continue in that interval', async () => {
@@ -107,9 +107,9 @@ describe('stopped composer engine', { timeout: 15_000 }, () => {
   });
   it('honors Stop during continuation startup and refuses buffered Send or a duplicate Continue', async () => {
     const { store, manager } = fixture();
-    const run = store.createRun({ title: 'task', task: 'task', workflow: 'original', steps: [{ id: 'work', name: 'Work', kind: 'agent' }] });
-    store.updateStep(run.id, 'work', { status: 'done', sessionId: 'old-session' });
-    store.updateRun(run.id, { status: 'done' });
+    const run = store.createRun({ title: 'task', task: 'task', workflow: 'original', steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }] });
+    store.updateStep(run.id, 'work', { status: STEP_STATUS.done, sessionId: 'old-session' });
+    store.updateRun(run.id, { status: RUN_STATUS.done });
     expect(manager.continueRun(run.id)).toEqual({ ok: true });
     expect(manager.continueRun(run.id)).toMatchObject({ ok: false });
     expect(manager.cancel(run.id)).toBe(true);
@@ -135,7 +135,7 @@ describe('stopped composer engine', { timeout: 15_000 }, () => {
   it('does not resume an accepted stop after a restart', () => {
     const { store, data } = fixture();
     const run = store.createRun({ title: 'task', task: 'task', workflow: 'original', steps: [] });
-    store.updateRun(run.id, { status: 'running', stopping: true }); store.flush();
-    expect(RunStore.open(data, { keepLive: true }).getRun(run.id)).toMatchObject({ status: 'cancelled' });
+    store.updateRun(run.id, { status: RUN_STATUS.running, stopping: true }); store.flush();
+    expect(RunStore.open(data, { keepLive: true }).getRun(run.id)).toMatchObject({ status: RUN_STATUS.cancelled });
   });
 });

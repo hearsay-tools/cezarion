@@ -1,4 +1,4 @@
-import { RUN_STATUS, WAIT_KIND, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, WAIT_KIND, WAIT_VIA, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
@@ -275,7 +275,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
     // on it like any open wait; only the completion gate's wait still fails the session.
     expect(store.getRun(p.id)?.status).toBe('waiting');
     expect(store.getRun(p.id)?.error).toBeUndefined();
-    expect(store.getRun(p.id)?.waits?.filter(wait => wait.kind === 'worker')).toEqual([expect.objectContaining({ phase: 'open', workerIds: [w.id] })]);
+    expect(store.getRun(p.id)?.waits?.filter(wait => wait.kind === 'worker')).toEqual([expect.objectContaining({ phase: WAIT_PHASE.open, workerIds: [w.id] })]);
     expect(store.getRun(w.id)?.status).toBe('queued');
   });
 

@@ -1,3 +1,4 @@
+import { WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { join } from 'node:path';
@@ -31,7 +32,7 @@ function processes() {
 
 const generationOf = (id: string) => (manager as unknown as { active: Map<string, { ciGeneration: string }> }).active.get(id)!.ciGeneration;
 const register = async (id: string, request: { pid: number; exit_file?: string; note?: string; timeout_seconds?: number }) =>
-  await manager.registerWait(id, { kind: 'process', timeout_seconds: 1800, ...request }, 'cezar_wait', generationOf(id)) as ProcessWaitEntry;
+  await manager.registerWait(id, { kind: WAIT_KIND.process, timeout_seconds: 1800, ...request }, 'cezar_wait', generationOf(id)) as ProcessWaitEntry;
 const waitById = (id: string, waitId: string) => store.getRun(id)?.waits?.find(entry => entry.id === waitId);
 const settledById = (id: string, waitId: string) => store.getRun(id)?.lastWaits?.find(entry => entry.id === waitId);
 const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?.filter(input => input.id === waitId) ?? [];
@@ -55,7 +56,7 @@ describe('process waits through RunManager (hearsay-tools/cezarion#1446)', { tim
     await expect(register(run.id, { pid: 1 })).rejects.toThrow();
     await expect(register(run.id, { pid: process.pid })).rejects.toMatchObject({ code: 'process_not_allowed' });
     await expect(register(run.id, { pid: sleeper(), exit_file: '/etc/cez-process-wait.exit' })).rejects.toMatchObject({ code: 'exit_file_outside' });
-    const answer = await manager.cezarToolHandlers(run.id, generationOf(run.id)).registerWait({ kind: 'process', pid: sleeper(), exit_file: '../../x.exit', timeout_seconds: 60 }, 'cezar_wait', new AbortController().signal);
+    const answer = await manager.cezarToolHandlers(run.id, generationOf(run.id)).registerWait({ kind: WAIT_KIND.process, pid: sleeper(), exit_file: '../../x.exit', timeout_seconds: 60 }, 'cezar_wait', new AbortController().signal);
     expect(answer.answer).toMatchObject({ ok: false, code: 'exit_file_outside', message: expect.stringContaining('worktree') });
     // A batch that writes its own exit file elsewhere is waited on by PID alone, never through a watcher.
     expect(answer.answer).toMatchObject({ message: expect.stringContaining('leave exit_file out: wait on pid alone') });
@@ -83,7 +84,7 @@ describe('process waits through RunManager (hearsay-tools/cezarion#1446)', { tim
     const run = await waitingParent();
     const pid = sleeper();
     const wait = await register(run.id, { pid, exit_file: 'build.exit', note: 'build' });
-    expect(wait).toMatchObject({ kind: 'process', pid, note: 'build', startToken: expect.any(String), exitFile: join(store.getRun(run.id)!.worktreePath!, 'build.exit') });
+    expect(wait).toMatchObject({ kind: WAIT_KIND.process, pid, note: 'build', startToken: expect.any(String), exitFile: join(store.getRun(run.id)!.worktreePath!, 'build.exit') });
     expect((await register(run.id, { pid, exit_file: 'build.exit', timeout_seconds: 60 })).id).toBe(wait.id);
     expect(external.watches).toHaveLength(1);
     expect(external.watches[0]!.request).toMatchObject({ pid, startToken: wait.startToken, exitFile: wait.exitFile, deadline: wait.deadline });

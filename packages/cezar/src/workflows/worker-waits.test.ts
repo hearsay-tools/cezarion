@@ -5,7 +5,13 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { workerCancelWaitResultSchema, workerWaitResultSchema } from '@open-mercato/cezar-contract/delegation';
 import type { Wait } from '@open-mercato/cezar-contract/waits';
-import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import {
+  RUN_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_VIA,
+  WORKER_OUTCOME_STATUS,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { RunStore } from '../runs/store.ts';
@@ -69,13 +75,13 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
     try {
       const w = await worker(p.id);
       const tools = handlers(p.id);
-      const ci = await tools.registerWait({ kind: 'pr', pr, timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal);
-      expect(ci.answer).toMatchObject({ ok: true, kind: 'pr' });
-      const answer = (await tools.registerWait({ kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
-      expect(answer).toMatchObject({ ok: true, kind: 'worker' });
+      const ci = await tools.registerWait({ kind: WAIT_KIND.pr, pr, timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal);
+      expect(ci.answer).toMatchObject({ ok: true, kind: WAIT_KIND.pr });
+      const answer = (await tools.registerWait({ kind: WAIT_KIND.worker, worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
+      expect(answer).toMatchObject({ ok: true, kind: WAIT_KIND.worker });
       if (!answer.ok) throw Error('refused');
       expect(answer.open_waits.map(wait => wait.kind).sort()).toEqual(['pr', 'worker']);
-      expect(entryOf(p.id, answer.wait_id)).toMatchObject({ kind: 'worker', via: 'cezar_wait', phase: 'open', workerIds: [w.id], outcomes: [], revisions: [{ workerId: w.id, revision: 0 }] });
+      expect(entryOf(p.id, answer.wait_id)).toMatchObject({ kind: WAIT_KIND.worker, via: WAIT_VIA.cezar_wait, phase: WAIT_PHASE.open, workerIds: [w.id], outcomes: [], revisions: [{ workerId: w.id, revision: 0 }] });
       const delegation = store.getRun(p.id)?.delegation;
       expect(delegation?.role === 'root' ? delegation.wait : undefined).toBeUndefined();
     } finally { release(); }
@@ -106,7 +112,7 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
       expect(() => manager.registerWorkerListWait(p.id, { workerIds: subsets[16]!, timeoutSeconds: 600 }, 'cezar_wait'))
         .toThrow(expect.objectContaining({ code: 'capacity_limit' }));
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const answer = (await handlers(p.id).registerWait({ kind: 'worker', worker_ids: subsets[17]!, timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
+      const answer = (await handlers(p.id).registerWait({ kind: WAIT_KIND.worker, worker_ids: subsets[17]!, timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
       expect(answer).toMatchObject({ ok: false, code: 'capacity' });
       expect(warn).toHaveBeenCalledExactlyOnceWith('[cez] wait registration refused: capacity');
       // A repeat of an open wait is not a new one, and is still answered at capacity.
@@ -118,9 +124,9 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
     const { run: p, release } = await heldParent();
     const w = await worker(p.id);
     const entry = manager.registerWorkerListWait(p.id, { workerIds: [w.id], timeoutSeconds: 600 }, 'cezar_wait');
-    fixtureUpdateRun(w.id, { status: 'done' });
+    fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
     manager.reconcileWorkerWaits();
-    expect(entryOf(p.id, entry.id)).toMatchObject({ phase: 'resolved', result: { reason: 'outcome' }, outcomes: [{ workerId: w.id, status: 'done' }] });
+    expect(entryOf(p.id, entry.id)).toMatchObject({ phase: WAIT_PHASE.resolved, result: { reason: 'outcome' }, outcomes: [{ workerId: w.id, status: WORKER_OUTCOME_STATUS.done }] });
     // Owed, not delivered: the turn in progress takes nothing until its own end.
     expect(inputOf(p.id, entry.id)).toMatchObject({ source: 'lifecycle' });
     expect(inputOf(p.id, entry.id)?.text).toContain(`Worker wait ${entry.id} (terminal outcome)`);
@@ -139,12 +145,12 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const commit = vi.spyOn(store, 'commitWait').mockImplementationOnce(() => { throw Error('injected: disk full'); });
       // The unfixed engine lets the failed write escape the observation that triggered it.
-      try { fixtureUpdateRun(w.id, { status: 'done' }); } catch { /* recorded by the assertions below */ }
+      try { fixtureUpdateRun(w.id, { status: RUN_STATUS.done }); } catch { /* recorded by the assertions below */ }
       expect(commit).toHaveBeenCalled();
       expect(entryOf(p.id, entry.id)?.phase).toBe('open');
       // Storage has recovered (the fault was one write), and nothing else touches the family.
       await until(() => entryOf(p.id, entry.id)?.phase === 'resolved');
-      expect(entryOf(p.id, entry.id)).toMatchObject({ result: { reason: 'outcome' }, outcomes: [{ workerId: w.id, status: 'done' }] });
+      expect(entryOf(p.id, entry.id)).toMatchObject({ result: { reason: 'outcome' }, outcomes: [{ workerId: w.id, status: WORKER_OUTCOME_STATUS.done }] });
       expect(warn).toHaveBeenCalledExactlyOnceWith('[cez] worker wait checkpoint failed; retrying in 1 second');
     } finally { release(); }
   });
@@ -154,7 +160,7 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
     const live = await worker(p.id);
     const during = manager.registerWorkerListWait(p.id, { workerIds: [live.id], timeoutSeconds: 600 }, 'cezar_wait');
     // Settled first, so its result is owed, then destroyed while the turn still runs.
-    fixtureUpdateRun(live.id, { status: 'done' });
+    fixtureUpdateRun(live.id, { status: RUN_STATUS.done });
     expect(entryOf(p.id, during.id)?.phase).toBe('resolved');
     destroyed(live.id);
     manager.reconcileWorkerWaits();
@@ -167,7 +173,7 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
     const parked = await worker(p.id);
     const later = manager.registerWorkerListWait(p.id, { workerIds: [parked.id], timeoutSeconds: 600 }, 'cezar_wait');
     await until(() => store.getRun(p.id)?.status === 'waiting');
-    fixtureUpdateRun(parked.id, { status: 'done' }); destroyed(parked.id);
+    fixtureUpdateRun(parked.id, { status: RUN_STATUS.done }); destroyed(parked.id);
     manager.reconcileWorkerWaits();
     // A parked parent still wakes for it.
     await until(() => settledOf(p.id, later.id)?.phase === 'delivered');
@@ -189,7 +195,7 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
         .toThrow(expect.objectContaining({ code: 'incompatible_state', message: expect.stringContaining('finish is pending') }));
       // The finish settles the root (`settleRequestedRootFinish` → `settleSuccess`); its terminal
       // status is what cancels every wait it still holds.
-      store.updateRun(p.id, { status: 'done' });
+      store.updateRun(p.id, { status: RUN_STATUS.done });
       expect(entryOf(p.id, entry.id)).toBeUndefined();
       expect(settledOf(p.id, entry.id)?.phase).toBe('cancelled');
       expect(inputOf(p.id, entry.id)).toBeUndefined();
@@ -206,7 +212,7 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
       const wait = manager.registerWorkerWait(p.id, { workerIds: [w.id], timeoutSeconds: 600 });
       expect(workerWaitResultSchema.parse({ wait, instruction: 'End your turn.' }).wait)
         .toEqual({ id: wait.id, workerIds: [w.id], revisions: [{ workerId: w.id, revision: 0 }], deadline: wait.deadline, phase: 'registered', outcomes: [], wakeId: wait.id });
-      expect(entryOf(p.id, wait.id)).toMatchObject({ kind: 'worker', via: 'cez-worker-wait', phase: 'open', timeoutSeconds: 600 });
+      expect(entryOf(p.id, wait.id)).toMatchObject({ kind: WAIT_KIND.worker, via: WAIT_VIA['cez-worker-wait'], phase: WAIT_PHASE.open, timeoutSeconds: 600 });
       // `cez worker wait` and `cezar_wait` land in the same list.
       expect(manager.registerWorkerListWait(p.id, { workerIds: [w.id], timeoutSeconds: 600 }, 'cezar_wait').id).toBe(wait.id);
     } finally { release(); }
@@ -243,15 +249,15 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
     const { run: p, release } = await heldParent();
     const w = await worker(p.id);
     const tools = handlers(p.id);
-    const workers = (await tools.registerWait({ kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
-    const timer = (await tools.registerWait({ kind: 'timer', seconds: 60, note: 'beside workers' }, 'cezar_wait', new AbortController().signal)).answer;
+    const workers = (await tools.registerWait({ kind: WAIT_KIND.worker, worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
+    const timer = (await tools.registerWait({ kind: WAIT_KIND.timer, seconds: 60, note: 'beside workers' }, 'cezar_wait', new AbortController().signal)).answer;
     if (!workers.ok || !timer.ok) throw Error('refused');
     release();
     await until(() => store.getRun(p.id)?.status === 'waiting');
     runInternals(manager).waitWatches.waitTimers.get(timer.wait_id)!.timer._onTimeout();
     await until(() => settledOf(p.id, timer.wait_id)?.phase === 'delivered' && store.getRun(p.id)?.status === 'waiting');
     expect(inputOf(p.id, timer.wait_id)?.deliveredAt).toBeDefined();
-    expect(entryOf(p.id, workers.wait_id)).toMatchObject({ kind: 'worker', phase: 'open', workerIds: [w.id] });
+    expect(entryOf(p.id, workers.wait_id)).toMatchObject({ kind: WAIT_KIND.worker, phase: WAIT_PHASE.open, workerIds: [w.id] });
     expect(inputOf(p.id, workers.wait_id)).toBeUndefined();
     expect(store.getRun(w.id)?.status).toBe('queued');
   });
@@ -261,7 +267,7 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
     // The wait alone must not block done. Cancel its request before done so the root's new
     // request-obligation gate is independent of this wait-cancellation guarantee.
     const w = await worker(p.id);
-    fixtureUpdateRun(w.id, { status: 'review' });
+    fixtureUpdateRun(w.id, { status: RUN_STATUS.review });
     await collect(w.id);
     const request = { id: randomUUID(), senderRunId: p.id, recipientRunId: w.id, kind: 'request' as const, text: 'one more thing?',
       createdAt: new Date().toISOString(), requestHash: 'a'.repeat(64), state: 'accepted' as const };
@@ -329,7 +335,7 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
     // The wake turn lists the wait that stays open.
     expect(JSON.stringify(send.mock.calls)).toContain(`Still open: worker wait ${entry.id}`);
     await until(() => store.getRun(f.p.id)?.status === 'waiting');
-    expect(entryOf(f.p.id, entry.id)).toMatchObject({ kind: 'worker', phase: 'open', workerIds: [f.w.id] });
+    expect(entryOf(f.p.id, entry.id)).toMatchObject({ kind: WAIT_KIND.worker, phase: WAIT_PHASE.open, workerIds: [f.w.id] });
     expect(written()).toEqual([]);
   });
 
@@ -345,7 +351,7 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
     await f.service.send(f.workerCaller, { id: reply, recipientRunId: f.p.id, kind: 'reply', requestId: other, text: 'Second result mock:hold', timeoutSeconds: 600 });
     await until(() => delivered(f.p.id, reply));
     await until(() => store.getRun(f.p.id)?.status === 'waiting');
-    expect(entryOf(f.p.id, entry.id)).toMatchObject({ phase: 'open', requestIds: [awaited] });
+    expect(entryOf(f.p.id, entry.id)).toMatchObject({ phase: WAIT_PHASE.open, requestIds: [awaited] });
     expect(written()).toEqual([]);
   });
 
@@ -359,7 +365,7 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
     await f.service.send(f.parentCaller, { id: randomUUID(), recipientRunId: f.w.id, kind: 'reply', requestId: question, text: 'mock:agent-echo Use the parser', timeoutSeconds: 600 });
     await until(() => answered(f.w.id).length === 1);
     await until(() => store.readEvents(f.w.id).some(event => event.type === 'text' && String(event.text).includes('Use the parser')));
-    expect(entryOf(f.w.id, entry.id)).toMatchObject({ phase: 'open', requestIds: [own] });
+    expect(entryOf(f.w.id, entry.id)).toMatchObject({ phase: WAIT_PHASE.open, requestIds: [own] });
     expect(written()).toEqual([]);
   });
 
@@ -370,7 +376,7 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
     expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'mock:agent-echo human update' }])).toBe(true);
     await until(() => store.readEvents(f.p.id).some(event => event.type === 'text' && String(event.text).includes('human update')));
     await until(() => store.getRun(f.p.id)?.status === 'waiting');
-    expect(entryOf(f.p.id, entry.id)).toMatchObject({ phase: 'open', workerIds: [f.w.id] });
+    expect(entryOf(f.p.id, entry.id)).toMatchObject({ phase: WAIT_PHASE.open, workerIds: [f.w.id] });
     expect(written()).toEqual([]);
   });
 
@@ -426,7 +432,7 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
     await until(() => delivered(f.p.id, id));
     expect(resumed).toHaveBeenCalledWith(f.p.id, { text: 'Resume to receive queued messages. End this opening turn so Cezar can deliver them.', waitWake: true }, true);
     await until(() => store.getRun(f.p.id)?.status === 'waiting');
-    expect(entryOf(f.p.id, entry.id)).toMatchObject({ phase: 'open', workerIds: [idle.id] });
+    expect(entryOf(f.p.id, entry.id)).toMatchObject({ phase: WAIT_PHASE.open, workerIds: [idle.id] });
     expect(written()).toEqual([]);
   });
 
@@ -473,7 +479,7 @@ describe('human messages beside an owed timer wait', { timeout: 45_000 }, () => 
     const p = await parent();
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const blocker = await worker(p.id, 'mock:slow');
-    const answer = (await handlers(p.id).registerWait({ kind: 'timer', seconds: 60, note: 'owed' }, 'cezar_wait', new AbortController().signal)).answer;
+    const answer = (await handlers(p.id).registerWait({ kind: WAIT_KIND.timer, seconds: 60, note: 'owed' }, 'cezar_wait', new AbortController().signal)).answer;
     if (!answer.ok) throw Error('refused');
     const timer = entryOf(p.id, answer.wait_id)!;
     if (timer.kind === 'human') throw Error('unexpected human wait');
@@ -577,11 +583,11 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
     vi.useRealTimers();
     await until(() => !manager.isActive(p.id));
     expect(store.readEvents(p.id).some(event => event.type === 'lifecycle' && String(event.message).includes('of inactivity'))).toBe(true);
-    expect(store.getRun(p.id)).toMatchObject({ status: 'waiting' });
+    expect(store.getRun(p.id)).toMatchObject({ status: RUN_STATUS.waiting });
     expect(store.getRun(p.id)?.error).toBeUndefined();
     expect(entryOf(p.id, entry.id)?.phase).toBe('open');
     const resumed = vi.spyOn(manager, 'continueRun');
-    fixtureUpdateRun(w.id, { status: 'done' });
+    fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
     await until(() => settledOf(p.id, entry.id)?.phase === 'delivered');
     expect(resumed).toHaveBeenCalledWith(p.id, { text: 'Resume to receive the queued worker wait result. End this opening turn so Cezar can deliver it.', waitWake: true }, true);
     expect(inputOf(p.id, entry.id)?.deliveredAt).toBeDefined();
@@ -595,11 +601,11 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
     await until(() => parkedOn(p.id, entry.id));
     internals().active.get(p.id)!.session.end();
     await until(() => !manager.isActive(p.id));
-    expect(store.getRun(p.id)).toMatchObject({ status: 'waiting' });
+    expect(store.getRun(p.id)).toMatchObject({ status: RUN_STATUS.waiting });
     expect(store.getRun(p.id)?.error).toBeUndefined();
     expect(store.getRun(p.id)?.steps.at(-1)?.error).toBeUndefined();
     expect(entryOf(p.id, entry.id)?.phase).toBe('open');
-    fixtureUpdateRun(w.id, { status: 'done' });
+    fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
     await until(() => settledOf(p.id, entry.id)?.phase === 'delivered');
     expect(inputOf(p.id, entry.id)?.deliveredAt).toBeDefined();
   });
@@ -616,7 +622,7 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
     await until(() => internals().active.get(p.id) !== failed);
     expect(store.getRun(p.id)?.status).toBe('waiting');
     expect(entryOf(p.id, entry.id)?.phase).toBe('open');
-    fixtureUpdateRun(w.id, { status: 'done' });
+    fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
     await until(() => settledOf(p.id, entry.id)?.phase === 'delivered');
     expect(inputOf(p.id, entry.id)?.deliveredAt).toBeDefined();
     await until(() => store.getRun(p.id)?.status === 'waiting');
@@ -632,17 +638,17 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
     store.flush();
     const before = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string }>;
     // The worker settles durably, and the process dies before the parent observes it.
-    fixtureUpdateRun(settles.id, { status: 'done' });
+    fixtureUpdateRun(settles.id, { status: RUN_STATUS.done });
     store.flush();
     const after = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string }>;
     // bound: the registered 600 s deadline exceeds the 45 s row guard; fake timers drive expiry.
     const disk = before.map(record => record.id === settles.id ? after.find(next => next.id === settles.id)! : record);
-    expect(disk.find(record => record.id === p.id)).toMatchObject({ waits: expect.arrayContaining([expect.objectContaining({ id: observed.id, phase: 'open' })]) });
+    expect(disk.find(record => record.id === p.id)).toMatchObject({ waits: expect.arrayContaining([expect.objectContaining({ id: observed.id, phase: WAIT_PHASE.open })]) });
     await restart(true, disk);
-    expect(entryOf(p.id, deadline.id)).toMatchObject({ phase: 'open', deadline: deadline.deadline });
+    expect(entryOf(p.id, deadline.id)).toMatchObject({ phase: WAIT_PHASE.open, deadline: deadline.deadline });
     expect(runInternals(manager).waitWatches.waitTimers.has(deadline.id)).toBe(true);
     await until(() => settledOf(p.id, observed.id)?.phase === 'delivered');
-    expect(settledOf(p.id, observed.id)).toMatchObject({ result: { reason: 'outcome' }, outcomes: [{ workerId: settles.id, status: 'done' }] });
+    expect(settledOf(p.id, observed.id)).toMatchObject({ result: { reason: 'outcome' }, outcomes: [{ workerId: settles.id, status: WORKER_OUTCOME_STATUS.done }] });
     await until(() => store.getRun(p.id)?.status === 'waiting');
     // The deadline of the wait still open is armed again; its expiry wakes the parent.
     await vi.advanceTimersByTimeAsync(Date.parse(deadline.deadline) - Date.now());
@@ -657,15 +663,15 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
     const { run: p, release } = await heldParent();
     const w = await worker(p.id);
     const tools = handlers(p.id);
-    const ci = (await tools.registerWait({ kind: 'pr', pr, timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
-    const workers = (await tools.registerWait({ kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
+    const ci = (await tools.registerWait({ kind: WAIT_KIND.pr, pr, timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
+    const workers = (await tools.registerWait({ kind: WAIT_KIND.worker, worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
     if (!ci.ok || !workers.ok) throw Error('refused');
     release();
     await until(() => parkedOn(p.id, workers.wait_id));
     expect(runInternals(manager).line.monitoring.has(p.id)).toBe(false);
     expect(semaphore.busy()).toBe(0);
     expect(internals().active.get(p.id)?.idleTimer).toBeDefined();
-    fixtureUpdateRun(w.id, { status: 'done' });
+    fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
     await until(() => settledOf(p.id, workers.wait_id)?.phase === 'delivered' && store.getRun(p.id)?.status === 'waiting');
     expect(entryOf(p.id, ci.wait_id)?.phase).toBe('open');
     expect(runInternals(manager).line.monitoring.has(p.id)).toBe(true);

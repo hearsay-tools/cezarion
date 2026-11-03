@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it, vi } from 'vitest';
 
 import { QUICK_TASK_WORKFLOW } from './types.ts';
@@ -18,7 +19,7 @@ describe('a recovery scoped to one family', { timeout: 30_000 }, () => {
     // Another family: queued, in this store's memory, not in the manager's queue — the state an
     // adoption hands recovery. Its revive is held so the recovery stays in progress.
     const other = store.createRun({ title: 'other', workflow: 'quick-task', task: 'mock:cezar-done', workflowDef: QUICK_TASK_WORKFLOW,
-      steps: QUICK_TASK_WORKFLOW.steps.map((step) => ({ id: step.id, name: step.id, kind: 'agent' as const })) });
+      steps: QUICK_TASK_WORKFLOW.steps.map((step) => ({ id: step.id, name: step.id, kind: STEP_KIND.agent })) });
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     let reached = false;
@@ -29,7 +30,7 @@ describe('a recovery scoped to one family', { timeout: 30_000 }, () => {
     await until(() => reached);
 
     // The worker settles while the other family is still recovering.
-    fixtureUpdateRun(w.id, { status: 'done' }); manager.reconcileWorkerWaits(p.id);
+    fixtureUpdateRun(w.id, { status: RUN_STATUS.done }); manager.reconcileWorkerWaits(p.id);
     release(); await recovery;
 
     await until(() => !waitOf(store.getRun(p.id)));

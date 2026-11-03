@@ -1,3 +1,4 @@
+import { WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it } from 'vitest';
 import { expectNoWaitNudgeKinds } from './turn-end.testkit.ts';
 import { AUTONOMOUS_NUDGE, decideTurnEnd, NO_WAIT_NUDGE, STEP_NUDGE_SUFFIX, type TurnEndDecision, type TurnEndFacts } from './turn-end.ts';
@@ -39,15 +40,15 @@ describe('decideTurnEnd decides both nudge causes (hearsay-tools/cezarion#1234, 
     ['an earlier step parks on its wait', { agentWaits: true, stepScope: true }, { kind: 'park' }],
     ['an earlier step with no wait gets the step nudge', { stepScope: true }, { ...noWaitNudge, text: `${NO_WAIT_NUDGE} ${STEP_NUDGE_SUFFIX}` }],
     ['an autonomous earlier step gets the step autonomous nudge', { stepScope: true, autonomous: true }, { ...autonomousNudge, text: `${AUTONOMOUS_NUDGE} ${STEP_NUDGE_SUFFIX}` }],
-    ['an earlier step with the budget spent opens the budget human wait', { stepScope: true, budgetSpent: true }, { kind: 'human-wait', via: 'budget' }],
-    ['an earlier step\'s second no-wait turn end opens the no-wait human wait', { stepScope: true, noWaitNudgedLastTurn: true }, { kind: 'human-wait', via: 'no-wait' }],
+    ['an earlier step with the budget spent opens the budget human wait', { stepScope: true, budgetSpent: true }, { kind: 'human-wait', via: WAIT_VIA.budget }],
+    ['an earlier step\'s second no-wait turn end opens the no-wait human wait', { stepScope: true, noWaitNudgedLastTurn: true }, { kind: 'human-wait', via: WAIT_VIA['no-wait'] }],
     ['no wait gets the nudge', {}, noWaitNudge],
-    ['a second no-wait turn end opens the no-wait human wait', { noWaitNudgedLastTurn: true }, { kind: 'human-wait', via: 'no-wait' }],
-    ['a spent budget opens the budget human wait', { budgetSpent: true }, { kind: 'human-wait', via: 'budget' }],
-    ['no wait checks the budget before the second step', { budgetSpent: true, noWaitNudgedLastTurn: true }, { kind: 'human-wait', via: 'budget' }],
+    ['a second no-wait turn end opens the no-wait human wait', { noWaitNudgedLastTurn: true }, { kind: 'human-wait', via: WAIT_VIA['no-wait'] }],
+    ['a spent budget opens the budget human wait', { budgetSpent: true }, { kind: 'human-wait', via: WAIT_VIA.budget }],
+    ['no wait checks the budget before the second step', { budgetSpent: true, noWaitNudgedLastTurn: true }, { kind: 'human-wait', via: WAIT_VIA.budget }],
     ['an autonomous run gets the autonomous nudge', { autonomous: true }, autonomousNudge],
     ['an autonomous nudge repeats', { autonomous: true, noWaitNudgedLastTurn: true }, autonomousNudge],
-    ['an autonomous run with the budget spent opens the budget human wait', { autonomous: true, budgetSpent: true }, { kind: 'human-wait', via: 'budget' }],
+    ['an autonomous run with the budget spent opens the budget human wait', { autonomous: true, budgetSpent: true }, { kind: 'human-wait', via: WAIT_VIA.budget }],
     ['a completion nudge last turn does not count for no wait', { completionNudgedLastTurn: true }, noWaitNudge],
     // Completion cause
     ['a refused done with only input in flight keeps the done for the acknowledgement', { ...live, inputInFlight: true }, { kind: 'defer', keepDone: true }],
@@ -60,11 +61,11 @@ describe('decideTurnEnd decides both nudge causes (hearsay-tools/cezarion#1234, 
     ['a refused done by settled workers gets the completion nudge', settled, completionNudge],
     ['owed input is not tried before the refusal decides', { ...live, inputTaken: undefined }, completionNudge],
     ['a second refused done with live workers parks on the completion wait', { ...live, completionNudgedLastTurn: true }, { kind: 'completion-wait' }],
-    ['a second refused done by settled workers parks for the user', { ...settled, completionNudgedLastTurn: true }, { kind: 'human-wait', via: 'completion' }],
+    ['a second refused done by settled workers parks for the user', { ...settled, completionNudgedLastTurn: true }, { kind: 'human-wait', via: WAIT_VIA.completion }],
     ['completion takes its second step before the budget', { ...live, completionNudgedLastTurn: true, budgetSpent: true }, { kind: 'completion-wait' }],
-    ['a spent budget opens the budget human wait for a refused done', { ...live, budgetSpent: true }, { kind: 'human-wait', via: 'budget' }],
+    ['a spent budget opens the budget human wait for a refused done', { ...live, budgetSpent: true }, { kind: 'human-wait', via: WAIT_VIA.budget }],
     ['an autonomous refused done is nudged again', { ...live, completionNudgedLastTurn: true, autonomous: true }, completionNudge],
-    ['an autonomous refused done with the budget spent opens the budget human wait', { ...live, completionNudgedLastTurn: true, autonomous: true, budgetSpent: true }, { kind: 'human-wait', via: 'budget' }],
+    ['an autonomous refused done with the budget spent opens the budget human wait', { ...live, completionNudgedLastTurn: true, autonomous: true, budgetSpent: true }, { kind: 'human-wait', via: WAIT_VIA.budget }],
     ['a no-wait nudge last turn does not count for completion', { ...live, noWaitNudgedLastTurn: true }, completionNudge],
   ])('%s', (_name, facts, decision) => {
     expect(decideTurnEnd({ ...quiet, ...facts })).toEqual(decision);

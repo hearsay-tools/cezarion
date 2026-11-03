@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -70,7 +71,7 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
       title: 't',
       workflow: 'w',
       task: 't',
-      steps: [{ id: 's', name: 's', kind: 'agent' }],
+      steps: [{ id: 's', name: 's', kind: STEP_KIND.agent }],
     });
 
   it('hands the spawn the resolved per-run TMPDIR, already created', async () => {
@@ -116,7 +117,7 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
 
   it('preserves waiting scratch through a fresh store and manager recovery', async () => {
     const run = newRun();
-    store.updateRun(run.id, { status: 'waiting' });
+    store.updateRun(run.id, { status: RUN_STATUS.waiting });
     const { env } = await seam().agentEnvForStep(run.id, 'claude');
     const dirs = new Set([env.TMPDIR!, agentTmpDir(dataDir, run.id)]);
     for (const dir of dirs) {
@@ -135,7 +136,7 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
   it('reaps scratch immediately when an inactive task history is deleted', async () => {
     const run = newRun();
     const { env } = await seam().agentEnvForStep(run.id, 'claude');
-    store.updateRun(run.id, { status: 'waiting' });
+    store.updateRun(run.id, { status: RUN_STATUS.waiting });
     const local = agentTmpDir(dataDir, run.id);
     mkdirSync(local, { recursive: true });
     expect(store.deleteRun(run.id)).toBe(true);
@@ -146,8 +147,8 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
   it('reaps scratch when an idle-closed task is finished without another session', async () => {
     const run = newRun();
     const { env } = await seam().agentEnvForStep(run.id, 'claude');
-    store.updateStep(run.id, 's', { status: 'waiting' });
-    store.updateRun(run.id, { status: 'waiting', currentStepId: 's' });
+    store.updateStep(run.id, 's', { status: STEP_STATUS.waiting });
+    store.updateRun(run.id, { status: RUN_STATUS.waiting, currentStepId: 's' });
     expect(manager.finish(run.id)).toBe(true);
     await vi.waitFor(() => expect(store.getRun(run.id)?.status).toBe('done'), { timeout: HANG_GUARD_MS });
     expect(existsSync(env.TMPDIR!)).toBe(false);
@@ -170,7 +171,7 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
   it('sweeps orphaned directories at startup', async () => {
     const dead = newRun();
     const { env } = await seam().agentEnvForStep(dead.id, 'claude');
-    store.updateRun(dead.id, { status: 'done', finishedAt: new Date().toISOString() });
+    store.updateRun(dead.id, { status: RUN_STATUS.done, finishedAt: new Date().toISOString() });
     // Seed leftovers from a crash that missed terminal cleanup.
     mkdirSync(env.TMPDIR!, { recursive: true });
     // The resolved fallback needs its owner marker for the sweep to claim it.
@@ -298,7 +299,7 @@ describe('RunManager — deep checkout falls back to a socket-safe TMPDIR (#387)
       title: 't',
       workflow: 'w',
       task: 't',
-      steps: [{ id: 's', name: 's', kind: 'agent' }],
+      steps: [{ id: 's', name: 's', kind: STEP_KIND.agent }],
     });
 
   it('hands the spawn a short TMPDIR outside the checkout and reaps the fallback', async () => {
@@ -311,7 +312,7 @@ describe('RunManager — deep checkout falls back to a socket-safe TMPDIR (#387)
     expect(env.TEMP).toBe(env.TMPDIR);
     expect(env.TMP).toBe(env.TMPDIR);
     writeFileSync(join(env.TMPDIR as string, 'scratch'), 'x', 'utf8');
-    store.updateRun(run.id, { status: 'done' });
+    store.updateRun(run.id, { status: RUN_STATUS.done });
     seam().dropActive(run.id);
     expect(existsSync(env.TMPDIR as string)).toBe(false);
   });

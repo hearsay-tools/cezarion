@@ -45,11 +45,11 @@ describe('successful run settlement (#473)', () => {
     for (const status of [...liveStatuses, ...preservedStatuses]) {
       for (const stamped of [false, true]) {
         const id = `${status}-${stamped}`;
-        store.addStep(record.id, { id, name: id, kind: 'agent', synthetic: 'continuation' });
+        store.addStep(record.id, { id, name: id, kind: STEP_KIND.agent, synthetic: 'continuation' });
         store.updateStep(record.id, id, { status, startedAt: oldFinish, ...(stamped ? { finishedAt: oldFinish } : {}) });
       }
     }
-    store.updateRun(record.id, { status: 'waiting', currentStepId: 'waiting-false', worktreePath: root,
+    store.updateRun(record.id, { status: RUN_STATUS.waiting, currentStepId: 'waiting-false', worktreePath: root,
       ...(durable ? { delegation: { role: 'root' as const, permissions: [], receipts: [] } } : {}),
     });
     if (durable) store.commitRootFinishIntent(record.id);
@@ -73,8 +73,8 @@ describe('successful run settlement (#473)', () => {
         expect(completed.currentStepId).toBeUndefined();
         expect(completed.steps.filter(step => preservedStatuses.some(preserved => step.id.startsWith(preserved)))).toEqual(untouched);
         for (const live of liveStatuses) {
-          expect(completed.steps.find(step => step.id === `${live}-false`)).toMatchObject({ status: 'done', finishedAt: completed.finishedAt, startedAt: oldFinish });
-          expect(completed.steps.find(step => step.id === `${live}-true`)).toMatchObject({ status: 'done', finishedAt: oldFinish, startedAt: oldFinish });
+          expect(completed.steps.find(step => step.id === `${live}-false`)).toMatchObject({ status: STEP_STATUS.done, finishedAt: completed.finishedAt, startedAt: oldFinish });
+          expect(completed.steps.find(step => step.id === `${live}-true`)).toMatchObject({ status: STEP_STATUS.done, finishedAt: oldFinish, startedAt: oldFinish });
         }
         expect(terminalSnapshots.length).toBeGreaterThan(0);
         expect(terminalSnapshots.flat().some(step => step.status === 'waiting' || step.status === 'running')).toBe(false);
@@ -140,14 +140,14 @@ describe('successful run settlement (#473)', () => {
   it('uses current step statuses after diff I/O, retaining a concurrent failure', async () => {
     const id = seed();
     vi.mocked(worktreeDiff).mockImplementationOnce(async () => {
-      store.updateStep(id, 'waiting-false', { status: 'failed', error: 'late failure', finishedAt: oldFinish });
-      store.addStep(id, { id: 'late-step', name: 'Late step', kind: 'agent', synthetic: 'continuation' });
-      store.updateStep(id, 'late-step', { status: 'running' });
+      store.updateStep(id, 'waiting-false', { status: STEP_STATUS.failed, error: 'late failure', finishedAt: oldFinish });
+      store.addStep(id, { id: 'late-step', name: 'Late step', kind: STEP_KIND.agent, synthetic: 'continuation' });
+      store.updateStep(id, 'late-step', { status: STEP_STATUS.running });
       return 'changed';
     });
     await settle(id);
-    expect(store.getRun(id)?.steps.find(step => step.id === 'waiting-false')).toMatchObject({ status: 'failed', error: 'late failure', finishedAt: oldFinish });
-    expect(store.getRun(id)?.steps.find(step => step.id === 'late-step')).toMatchObject({ status: 'done', finishedAt: store.getRun(id)?.finishedAt });
+    expect(store.getRun(id)?.steps.find(step => step.id === 'waiting-false')).toMatchObject({ status: STEP_STATUS.failed, error: 'late failure', finishedAt: oldFinish });
+    expect(store.getRun(id)?.steps.find(step => step.id === 'late-step')).toMatchObject({ status: STEP_STATUS.done, finishedAt: store.getRun(id)?.finishedAt });
   });
 
   it.each([false, true])('does not reconcile a replacement execution during diff I/O (disposed=%s)', async disposed => {
@@ -158,7 +158,7 @@ describe('successful run settlement (#473)', () => {
       if (disposed) manager.dispose();
       // A new ActiveRun is the generation boundary used by Continue admission.
       active.set(id, {});
-      store.updateRun(id, { status: 'running' });
+      store.updateRun(id, { status: RUN_STATUS.running });
       return 'changed';
     });
     const steps = structuredClone(store.getRun(id)!.steps);

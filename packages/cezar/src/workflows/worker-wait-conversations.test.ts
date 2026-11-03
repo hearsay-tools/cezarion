@@ -1,3 +1,4 @@
+import { WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';
 import { randomUUID } from 'node:crypto';
@@ -169,7 +170,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
         expect(submitted).not.toContain('interrupted wait');
         expect(submitted).toContain(`Still open: worker wait ${wait.id}`);
       }
-      expect(workerEntryOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, phase: 'open', workerIds: [f.w.id] });
+      expect(workerEntryOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, phase: WAIT_PHASE.open, workerIds: [f.w.id] });
       expect(lastWaitOf(store.getRun(f.p.id))).toBeUndefined();
       expect(store.getRun(f.p.id)?.delegation).toMatchObject({ conversation: { outcomes: [] } });
     } finally { pump.mockRestore(); f.close(); }
@@ -195,10 +196,10 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       const generation = randomUUID();
       const claim = manager.reserveInboxInputs(f.p.id, generation, [requestId])!;
       expect(manager.acknowledgeInbox(f.p.id, generation, claim.receiptId)).toBe('acknowledged');
-      expect(workerEntryOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, phase: 'open' });
+      expect(workerEntryOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, phase: WAIT_PHASE.open });
       acknowledge();
       await until(() => !!store.getRun(f.p.id)?.agentInputs?.find(input => input.id === progressId)?.deliveredAt);
-      expect(workerEntryOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, phase: 'open' });
+      expect(workerEntryOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, phase: WAIT_PHASE.open });
       expect(lastWaitOf(store.getRun(f.p.id))).toBeUndefined();
     } finally { acknowledge(); send.mockRestore(); pump.mockRestore(); f.close(); }
   });
@@ -254,7 +255,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       const second = randomUUID();
       await f.service.send(f.parentCaller, { id: second, recipientRunId: f.w.id, kind: 'request', text: 'Which options? mock:hold', timeoutSeconds: 600 });
       await until(() => !!store.getRun(f.w.id)?.agentInputs?.find(input => input.id === second)?.deliveredAt);
-      expect(workerEntryOf(store.getRun(f.w.id))).toMatchObject({ id: wait.id, phase: 'open', requestIds: [first] });
+      expect(workerEntryOf(store.getRun(f.w.id))).toMatchObject({ id: wait.id, phase: WAIT_PHASE.open, requestIds: [first] });
       expect(lastWaitOf(store.getRun(f.w.id))).toBeUndefined();
       const rootState = store.getRun(f.p.id)?.delegation;
       expect(rootState?.role === 'root' && rootState.conversation?.outcomes).toEqual([]);
@@ -314,7 +315,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       const wait = manager.registerRequestWait(f.p.id, { requestIds: [first, second], mode: 'all', timeoutSeconds: 600 });
       await until(() => waitOf(store.getRun(f.p.id))?.phase === 'parked');
       await f.service.send(f.workerCaller, { id: randomUUID(), recipientRunId: f.p.id, kind: 'reply', requestId: first, text: 'First result mock:hold', timeoutSeconds: 600 });
-      expect(workerEntryOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, phase: 'open', requestOutcomes: [expect.objectContaining({ requestId: first, status: 'replied' })] });
+      expect(workerEntryOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, phase: WAIT_PHASE.open, requestOutcomes: [expect.objectContaining({ requestId: first, status: 'replied' })] });
       await f.service.send(secondCaller, { id: randomUUID(), recipientRunId: f.p.id, kind: 'reply', requestId: second, text: 'Second result mock:hold', timeoutSeconds: 600 });
       await until(() => lastWaitOf(store.getRun(f.p.id))?.id === wait.id && !waitOf(store.getRun(f.p.id)));
       expect(lastWaitOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, reason: 'outcome', requestOutcomes: [expect.objectContaining({ requestId: first }), expect.objectContaining({ requestId: second })] });

@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { join } from 'node:path';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -126,8 +127,8 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
     it(`${runner} R90 explains repeated recovery once when the interrupted task had no saved message`, async () => {
       const messages = native(runner);
       const id = await start(runner, 'cezar-done');
-      store.updateStep(id, 'task', { status: 'running', finishedAt: undefined });
-      store.updateRun(id, { status: 'running', currentStepId: 'task', finishedAt: undefined, continuationMessage: undefined });
+      store.updateStep(id, 'task', { status: STEP_STATUS.running, finishedAt: undefined });
+      store.updateRun(id, { status: RUN_STATUS.running, currentStepId: 'task', finishedAt: undefined, continuationMessage: undefined });
       const before = messages().length;
       const held = vi.spyOn(semaphore, 'maxParallel').mockReturnValue(0);
       await restart();
@@ -158,7 +159,7 @@ describe('resume diagnostics through every native wire (hearsay-tools/cezarion#1
         const id = await start(runner, 'cezar-done');
         const original = store.getRun(id)!.steps[0]!;
         const text = 'Saved human text.\nDo not change it.';
-        store.addStep(id, { id: 'continue-1', name: 'Continue', kind: 'agent', synthetic: 'continuation' });
+        store.addStep(id, { id: 'continue-1', name: 'Continue', kind: STEP_KIND.agent, synthetic: 'continuation' });
         store.updateStep(id, 'continue-1', { status: status === 'queued' ? 'pending' : 'running' });
         store.updateRun(id, {
           status, currentStepId: status === 'running' ? 'continue-1' : undefined,

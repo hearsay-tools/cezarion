@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import type { RunStore } from '../runs/store.ts';
@@ -13,8 +14,8 @@ export function seedSettledFamily(store: RunStore, root: string) {
       path: join(root, 'workers', workerId), branch: `cez/${workerId.slice(0, 8)}`, baselineSha: '0'.repeat(40),
     },
   }, 'a'.repeat(64));
-  store.updateRun(worker.id, { status: 'done' });
-  store.updateRun(parent.id, { status: 'done' });
+  store.updateRun(worker.id, { status: RUN_STATUS.done });
+  store.updateRun(parent.id, { status: RUN_STATUS.done });
   const messageId = randomUUID();
   // Seed before RunManager construction in unit tests; native-wire tests only use
   // this family as unrelated history and permit its initial projection.
