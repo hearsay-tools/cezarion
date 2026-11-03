@@ -2284,7 +2284,8 @@ notice that human input used to trigger; human input no longer cancels a wait, a
 open-waits footer that replaced the notice is pinned by U2 and the footer case of
 `workflows/waits-wake.test.ts`.
 
-Monitoring turn rows (hearsay-tools/cezarion#772) live in `workflows/monitoring-turn.test.ts`
+Monitoring turn rows (hearsay-tools/cezarion#772) live in the semantic `workflows/monitoring-turn-*.test.ts` suites
+(shared rows: `workflows/monitoring-turn-rows.testkit.ts`)
 and `workflows/worker-parent-attention.testkit.ts` and enter the shared parity guard. Every
 `RUNNER_IDS` adapter carries multiple parent assistant text segments through its native wire on
 fresh and Continue sessions. A turn monitors through a `cezar_wait` timer or live workers, asks

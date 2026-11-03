@@ -1,3 +1,4 @@
+import { monitoringTurnFiles } from '../workflows/monitoring-turn-partitions.testkit.ts';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { createApp } from '../server/server.ts';
 import { apiRequest } from '../server/loopback-request.testkit.ts';
@@ -2258,7 +2259,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
       });
 
       it('uses no skipped or pending cell — an inapplicable one is a declared exemption', () => {
-        for (const url of [new URL(import.meta.url), new URL('../workflows/worker-parent-attention.testkit.ts', import.meta.url), new URL('../workflows/monitoring-turn.test.ts', import.meta.url), new URL('./skill-resume-parity.test.ts', import.meta.url)]) {
+        for (const url of [new URL(import.meta.url), new URL('../workflows/worker-parent-attention.testkit.ts', import.meta.url), ...['monitoring-turn-rows.testkit.ts', 'monitoring-turn-partitions.testkit.ts', 'monitoring-turn-coverage.test.ts', ...monitoringTurnFiles].map(file => new URL(`../workflows/${file}`, import.meta.url)), new URL('./skill-resume-parity.test.ts', import.meta.url)]) {
           const source = readFileSync(url, 'utf8');
           expect(source).not.toMatch(/\b(?:it|test|describe)\s*\.\s*(?:skip|todo)\s*\(/);
         }
