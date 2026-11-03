@@ -8,6 +8,13 @@ test('memory limits workers before the CPU ceiling', () => {
   assert.equal(defaultMaxWorkers(WORKER_MEMORY_BYTES * 100, 24), 24);
 });
 
+test('a 4 GiB container cannot use the host’s 29 GiB memory budget', () => {
+  const hostFreeBytes = 29 * 1024 ** 3;
+  const processAvailableBytes = 4 * 1024 ** 3;
+  assert.equal(defaultMaxWorkers(hostFreeBytes, 24), 14);
+  assert.equal(defaultMaxWorkers(processAvailableBytes, 24), 2);
+});
+
 test('worker count stays between one and the available CPUs', () => {
   for (const cpus of [1, 2, 4, 24]) {
     for (const memory of [0, 1, WORKER_MEMORY_BYTES - 1, WORKER_MEMORY_BYTES, WORKER_MEMORY_BYTES * 100]) {
@@ -25,6 +32,19 @@ test('root config keeps Vitest CLI and environment worker overrides', async () =
     assert.equal(cli.config.maxWorkers, 4);
   } finally {
     await cli.close();
+  }
+  const availableMemory = process.availableMemory;
+  process.availableMemory = () => 4 * 1024 ** 3;
+  try {
+    const capped = await createVitest('test', { watch: false, project: ['contract'] });
+    try {
+      const { availableParallelism } = require('node:os');
+      assert.equal(capped.config.maxWorkers, Math.min(2, availableParallelism()));
+    } finally {
+      await capped.close();
+    }
+  } finally {
+    process.availableMemory = availableMemory;
   }
   const previous = process.env.VITEST_MAX_WORKERS;
   process.env.VITEST_MAX_WORKERS = '2';
