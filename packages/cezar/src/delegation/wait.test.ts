@@ -1,3 +1,4 @@
+import { requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';
 import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
@@ -91,13 +92,13 @@ describe('request selections in the shared wait', () => {
     const partial = reconcileWorkerWait(selected, [], now, [reply]);
     expect(partial.phase).toBe('registered');
     expect(partial.requestOutcomes).toEqual([reply]);
-    const failed = { requestId: other, status: 'failed' as const, observedAt: now };
+    const failed = { requestId: other, status: requestOutcomeSchema.shape.status.enum.failed, observedAt: now };
     const settled = reconcileWorkerWait(partial, [], now, [reply, failed]);
     expect(settled).toMatchObject({ phase: 'wake-pending', reason: 'outcome', requestOutcomes: [reply, failed] });
     expect(reconcileWorkerWait(settled, [], wait.deadline!, [])).toEqual(settled);
   });
   it('request wait timeout keeps partial outcomes and ignores unrelated replies', () => {
-    const partial = reconcileWorkerWait(selected, [], wait.deadline!, [{ requestId, status: 'replied', observedAt: now }, { requestId: randomUUID(), status: 'failed', observedAt: now }]);
+    const partial = reconcileWorkerWait(selected, [], wait.deadline!, [{ requestId, status: 'replied', observedAt: now }, { requestId: randomUUID(), status: requestOutcomeSchema.shape.status.enum.failed, observedAt: now }]);
     expect(partial.reason).toBe('timeout');
     expect(partial.requestOutcomes).toEqual([{ requestId, status: 'replied', observedAt: now }]);
   });
@@ -136,9 +137,9 @@ describe('reconcileWorkerEntry', () => {
     const { workerIds: _w, revisions: _r, outcomes: _o, ...base } = entry;
     const requests: DeadlinedWorkerWaitEntry = { ...base, requestIds: [requestId, other], requestOutcomes: [], mode: 'all' };
     const reply = { requestId, status: 'replied' as const, observedAt: now, replyId: randomUUID() };
-    const partial = reconcileWorkerEntry(requests, [], now, [reply, { requestId: randomUUID(), status: 'failed', observedAt: now }]);
+    const partial = reconcileWorkerEntry(requests, [], now, [reply, { requestId: randomUUID(), status: requestOutcomeSchema.shape.status.enum.failed, observedAt: now }]);
     expect(partial).toEqual({ entry: { ...requests, requestOutcomes: [reply] } });
-    const failed = { requestId: other, status: 'failed' as const, observedAt: now };
+    const failed = { requestId: other, status: requestOutcomeSchema.shape.status.enum.failed, observedAt: now };
     expect(reconcileWorkerEntry(partial.entry, [], now, [reply, failed])).toEqual({ entry: { ...requests, requestOutcomes: [reply, failed] }, reason: 'outcome' });
     expect(reconcileWorkerEntry(partial.entry, [], wait.deadline!, [])).toEqual({ entry: partial.entry, reason: 'timeout' });
   });

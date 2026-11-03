@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentInput, ConversationMessage } from '@open-mercato/cezar-contract';
@@ -12,7 +13,7 @@ function conversation(rootId: string) {
     const id = randomUUID(); const createdAt = new Date().toISOString();
     messages.push({ id, senderRunId, recipientRunId, kind, text, createdAt, requestHash: 'a'.repeat(64), state: 'accepted',
       ...(kind === 'request' ? { deadline: new Date(Date.now() + 600_000).toISOString() } : {}) });
-    const input: AgentInput = { id, source: 'agent', parentRunId: rootId, text, createdAt, conversation: { senderRunId, recipientRunId, kind } };
+    const input: AgentInput = { id, source: agentInputSchema.shape.source.enum.agent, parentRunId: rootId, text, createdAt, conversation: { senderRunId, recipientRunId, kind } };
     store.commitConversation(rootId, { messages: [...messages], outcomes: [] }, { recipientRunId, input });
     return input;
   };
@@ -65,7 +66,7 @@ describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
     const opening: ConversationMessage = { id: randomUUID(), senderRunId: p.id, recipientRunId: w.id, kind: 'request',
       text: 'mock:steer-tool resume with a new instruction', createdAt: now, deadline: new Date(Date.now() + 600_000).toISOString(),
       requestHash: 'a'.repeat(64), state: 'accepted', resumed: true };
-    const openingInput: AgentInput = { id: opening.id, source: 'agent', parentRunId: p.id, text: opening.text, createdAt: now,
+    const openingInput: AgentInput = { id: opening.id, source: agentInputSchema.shape.source.enum.agent, parentRunId: p.id, text: opening.text, createdAt: now,
       conversation: { senderRunId: p.id, recipientRunId: w.id, kind: 'request' } };
     const seq = store.readEvents(w.id).at(-1)!.seq;
     expect(manager.continueRun(w.id, { text: opening.text }, true, { rootId: p.id, state: { messages: [opening], outcomes: [] }, input: openingInput }).ok).toBe(true);
@@ -163,7 +164,7 @@ describe('immediate conversation delivery (#505)', { timeout: 45_000 }, () => {
     const opening: ConversationMessage = { id: randomUUID(), senderRunId: p.id, recipientRunId: w.id, kind: 'request',
       text: 'mock:auth-error resume instruction', createdAt: now, deadline: new Date(Date.now() + 600_000).toISOString(),
       requestHash: 'a'.repeat(64), state: 'accepted', resumed: true };
-    const openingInput: AgentInput = { id: opening.id, source: 'agent', parentRunId: p.id, text: opening.text, createdAt: now,
+    const openingInput: AgentInput = { id: opening.id, source: agentInputSchema.shape.source.enum.agent, parentRunId: p.id, text: opening.text, createdAt: now,
       conversation: { senderRunId: p.id, recipientRunId: w.id, kind: 'request' } };
     expect(manager.continueRun(w.id, { text: opening.text }, true, { rootId: p.id, state: { messages: [opening], outcomes: [] }, input: openingInput }).ok).toBe(true);
     await until(() => store.readEvents(w.id).some(event => event.type === 'error'));

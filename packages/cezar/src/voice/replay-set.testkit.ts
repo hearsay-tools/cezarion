@@ -1,4 +1,5 @@
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { voiceStatusSchema } from '@open-mercato/cezar-contract/voice';
 import type { AskQuestion } from '@open-mercato/cezar-contract/ask';
 import type { VoiceAnswer, VoiceDecideRequest, VoiceDecision, VoicePosition, VoiceStatus } from '@open-mercato/cezar-contract/voice';
 import { decideVoice } from './decide.ts';
@@ -219,7 +220,7 @@ export const REPLAY_CASES: ReplayCase[] = [
       status: { choice: 'cancelled', confidence: 1 },
       position: { choice: '1', confidence: 0.9 },
     },
-    expect: { action: 'open', status: 'cancelled', position: 1 },
+    expect: { action: 'open', status: voiceStatusSchema.enum.cancelled, position: 1 },
   },
   {
     name: 'a status said before "task"',

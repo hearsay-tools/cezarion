@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { workerCancelWaitResultSchema, workerWaitResultSchema } from '@open-mercato/cezar-contract/delegation';
+import { workerCancelWaitResultSchema, workerWaitResultSchema , agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import type { Wait } from '@open-mercato/cezar-contract/waits';
 import {
   RUN_STATUS,
@@ -427,7 +427,7 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
     const conversation = delegation.conversation ?? { messages: [], outcomes: [] };
     store.commitConversation(f.p.id, { ...conversation, messages: [...conversation.messages, { id, senderRunId: idle.id, recipientRunId: f.p.id,
       kind: 'progress', text: 'Still working mock:hold', createdAt: now, requestHash: 'b'.repeat(64), state: 'accepted' }] }, { recipientRunId: f.p.id,
-      input: { id, source: 'agent', parentRunId: f.p.id, text: 'Still working mock:hold', createdAt: now, conversation: { senderRunId: idle.id, recipientRunId: f.p.id, kind: 'progress' } } });
+      input: { id, source: agentInputSchema.shape.source.enum.agent, parentRunId: f.p.id, text: 'Still working mock:hold', createdAt: now, conversation: { senderRunId: idle.id, recipientRunId: f.p.id, kind: 'progress' } } });
     manager.deliverConversationInput(f.p.id);
     await until(() => delivered(f.p.id, id));
     expect(resumed).toHaveBeenCalledWith(f.p.id, { text: 'Resume to receive queued messages. End this opening turn so Cezar can deliver them.', waitWake: true }, true);

@@ -1,3 +1,4 @@
+import { skillSchema } from '@open-mercato/cezar-contract/skills';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 /**
@@ -359,7 +360,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
       name: WORKER_SKILL,
       body: WORKER_SKILL_BODY,
       path: join(repoRoot, '.ai/cezar/skills', `${WORKER_SKILL}.md`),
-      source: 'cezar',
+      source: skillSchema.shape.source.enum.cezar,
     });
     expect(launches[0]!.spec.systemPrompt).toContain(expectedSkill);
     expect(launches[0]!.spec.systemPrompt).toContain(EXTRA_PROMPT);

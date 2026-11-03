@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { expect, it } from 'vitest';
 import type { AgentInput, ConversationMessage } from '@open-mercato/cezar-contract';
@@ -25,7 +26,7 @@ for (const backend of RUNNER_IDS) {
       const now = new Date().toISOString();
       const id = randomUUID();
       const attribution = { senderRunId: parentRunId, recipientRunId: runId, kind: 'reply' as const, requestId: question.id };
-      const input: AgentInput = { id, source: 'agent', parentRunId, text: 'Vitest', createdAt: now, conversation: attribution };
+      const input: AgentInput = { id, source: agentInputSchema.shape.source.enum.agent, parentRunId, text: 'Vitest', createdAt: now, conversation: attribution };
       const reply: ConversationMessage = { id, ...attribution, text: input.text, createdAt: now, requestHash: 'b'.repeat(64), state: 'accepted' };
       const state = conversation()!;
       store.commitConversation(parentRunId, { messages: [...state.messages, reply],

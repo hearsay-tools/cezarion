@@ -1,3 +1,4 @@
+import { skillSchema } from '@open-mercato/cezar-contract/skills';
 import { runInternals } from './run-internals.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -70,7 +71,7 @@ describe('loading a run\'s skill registry', () => {
   let repoRoot: string;
   let store: RunStore;
   let manager: RunManager;
-  const skill = (name: string): Skill => ({ name, description: name, body: `${name} body`, path: `/skills/${name}.md`, source: 'cezar' });
+  const skill = (name: string): Skill => ({ name, description: name, body: `${name} body`, path: `/skills/${name}.md`, source: skillSchema.shape.source.enum.cezar });
   const internals = () => runInternals(manager).runSkills;
   const freshState = () => createActiveRun({ cwd: repoRoot, pendingHumanAsk: false, autonomous: false });
 

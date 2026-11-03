@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import {
   WAIT_KIND,
   WAIT_PHASE,
@@ -388,7 +389,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     const request = { id: randomUUID(), senderRunId: p.id, recipientRunId: w.id, kind: 'request' as const, text: 'Which module?', createdAt: now,
       deadline: new Date(Date.now() + 600_000).toISOString(), requestHash: 'a'.repeat(64), state: 'accepted' as const };
     store.commitConversation(p.id, { messages: [request], outcomes: [] }, { recipientRunId: w.id,
-      input: { id: request.id, source: 'agent', parentRunId: p.id, text: request.text, createdAt: now, conversation: { senderRunId: p.id, recipientRunId: w.id, kind: 'request' } } });
+      input: { id: request.id, source: agentInputSchema.shape.source.enum.agent, parentRunId: p.id, text: request.text, createdAt: now, conversation: { senderRunId: p.id, recipientRunId: w.id, kind: 'request' } } });
     const workers = manager.registerWorkerWait(p.id, { workerIds: [w.id], timeoutSeconds: 30 });
     const requests = manager.registerRequestWait(p.id, { requestIds: [request.id], timeoutSeconds: 30 });
     expect([workers.phase, requests.phase]).toEqual(['registered', 'registered']);
@@ -461,7 +462,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     await until(() => parked(run.id));
     const session = runInternals(manager).active.get(run.id)!.session!;
     const send = vi.spyOn(session, 'sendAgentMessage');
-    const update = (n: number) => ({ id: randomUUID(), parentRunId: run.id, source: 'agent' as const, text: `worker update ${n}`,
+    const update = (n: number) => ({ id: randomUUID(), parentRunId: run.id, source: agentInputSchema.shape.source.enum.agent, text: `worker update ${n}`,
       createdAt: new Date().toISOString(), conversation: { senderRunId: randomUUID(), recipientRunId: run.id, kind: 'progress' as const } });
     const inputOf = (id: string) => store.getRun(run.id)?.agentInputs?.find(input => input.id === id);
     // A message during the CI park wakes the run at once; CI stays open and re-parks it.

@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentInput } from '@open-mercato/cezar-contract';
@@ -11,7 +12,7 @@ describe('unread input liveness bound (#505)', { timeout: 45_000 }, () => {
     const p = await parent('mock:hold');
     const w = await worker(p.id);
     const id = randomUUID(); const createdAt = new Date().toISOString();
-    const input: AgentInput = { id, source: 'agent', parentRunId: p.id, text, createdAt, conversation: { senderRunId: w.id, recipientRunId: p.id, kind: 'progress' } };
+    const input: AgentInput = { id, source: agentInputSchema.shape.source.enum.agent, parentRunId: p.id, text, createdAt, conversation: { senderRunId: w.id, recipientRunId: p.id, kind: 'progress' } };
     store.commitConversation(p.id, { messages: [{ id, senderRunId: w.id, recipientRunId: p.id, kind: 'progress', text, createdAt, requestHash: 'a'.repeat(64), state: 'accepted' }], outcomes: [] },
       { recipientRunId: p.id, input });
     manager.deliverConversationInput(p.id);

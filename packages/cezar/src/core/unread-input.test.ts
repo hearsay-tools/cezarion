@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentInput } from '@open-mercato/cezar-contract';
@@ -6,7 +7,7 @@ import { HARNESS_ADAPTERS, waitFor, withOwnedInputRun } from './harness-parity.t
 // #505: accepted input a finished turn never read goes back to the queue and is
 // submitted again; DONE and park never finish over it.
 describe('unread agent input is resubmitted (#505)', () => {
-  const late = (parentRunId: string): AgentInput => ({ id: randomUUID(), source: 'agent', parentRunId,
+  const late = (parentRunId: string): AgentInput => ({ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId,
     text: 'mock:agent-echo late parent guidance', createdAt: new Date().toISOString() });
 
   it('codex resubmits a steer the finished turn never read, then reads it once', async () => {
@@ -81,7 +82,7 @@ describe('unread agent input is resubmitted (#505)', () => {
       await withOwnedInputRun('codex', 'baseline', async ({ store, manager, runId, parentRunId }) => {
         manager.enqueueOwnedRun(runId);
         await waitFor(() => store.getRun(runId)?.status === 'waiting');
-        const input: AgentInput = { id: randomUUID(), source: 'agent', parentRunId, text: 'mock:provider-error guidance', createdAt: new Date().toISOString() };
+        const input: AgentInput = { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId, text: 'mock:provider-error guidance', createdAt: new Date().toISOString() };
         manager.steerWorker(runId, input);
         await waitFor(() => !manager.isActive(runId), 15_000);
         expect(store.getRun(runId)?.status).toBe('failed');

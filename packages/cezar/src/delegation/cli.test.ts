@@ -1,3 +1,4 @@
+import { requestOutcomeSchema } from '@open-mercato/cezar-contract/conversations';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -490,7 +491,7 @@ describe('bundled worker CLI', { timeout: 20_000 }, () => {
     expect(await runMessageCommand(['conversation', recipientRunId], env)).toBe(0);
     expect(fetchMock.mock.calls.at(-1)?.[0]).toBe(`${transport.url}/conversation`);
     expect(JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body))).toEqual({ recipientRunId });
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ requestId, status: 'cancelled', observedAt: new Date().toISOString() })));
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ requestId, status: requestOutcomeSchema.shape.status.enum.cancelled, observedAt: new Date().toISOString() })));
     expect(await runMessageCommand(['cancel-request', requestId], env)).toBe(0);
     expect(fetchMock.mock.calls.at(-1)?.[0]).toBe(`${transport.url}/cancel-request`);
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ secret: 'unrecognized' })));

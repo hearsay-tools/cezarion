@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -23,7 +24,7 @@ describe('conversation backlog delivery (#475)', { timeout: 30_000 }, () => {
     for (let i = 0; i < messages.length; i++) {
       const m = messages[i]!;
       store.commitConversation(p.id, { messages: messages.slice(0, i + 1), outcomes: [] }, { recipientRunId: p.id,
-        input: { id: m.id, source: 'agent', parentRunId: p.id, text: m.text, createdAt,
+        input: { id: m.id, source: agentInputSchema.shape.source.enum.agent, parentRunId: p.id, text: m.text, createdAt,
           conversation: { senderRunId: m.senderRunId, recipientRunId: p.id, kind: m.kind } } });
     }
     manager.reconcileWorkerWaits();

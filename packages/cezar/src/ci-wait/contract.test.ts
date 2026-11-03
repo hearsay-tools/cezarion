@@ -7,6 +7,8 @@ import { cezarWaitRequestSchema } from '@open-mercato/cezar-contract/waits';
 import { cezarServerInstructions, cezarToolEnvNames, cezarTools, doneToolDefinition, waitToolDefinition } from './tools.ts';
 import { waitInvalidInput } from './errors.ts';
 
+const OBSOLETE_HUMAN_WAIT_KIND = 'human';
+
 describe('CI wait contract', () => {
   it('defaults timeout and rejects model-supplied authority and malformed PR URLs', () => {
     expect(ciWaitRequestSchema.parse({ pr: 'https://github.com/org/repo/pull/12' })).toEqual({ pr: 'https://github.com/org/repo/pull/12', until: 'checks', wake_on_conflict: true, timeout_seconds: 1800 });
@@ -216,7 +218,7 @@ it('cezar_wait advertises the process fields and tells the agent how to write th
   expect(description).toContain('For a command that is already running, or that writes its own status file somewhere else, pass only its `pid` and leave `exit_file` out.');
   expect(description).toContain('Never start a watcher or helper process to copy a file into $TMPDIR.');
   expect(schema.properties.exit_file.description).toMatch(/Leave it out for a command that is already running/);
-  const refused = cezarWaitRequestSchema.safeParse({ kind: 'human' });
+  const refused = cezarWaitRequestSchema.safeParse({ kind: OBSOLETE_HUMAN_WAIT_KIND });
   expect(waitInvalidInput(refused.success ? undefined : refused.error)).toBe('`kind` must be "pr", "worker", "request", "peer", "timer" or "process" (kind "ci" was replaced by kind "pr"); ask the user with cezar_ask.');
   const pid = cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.process, pid: 1 });
   expect(waitInvalidInput(pid.success ? undefined : pid.error)).toBe('`pid` must be an integer of at least 2: the PID that `echo $!` printed (kind "process").');

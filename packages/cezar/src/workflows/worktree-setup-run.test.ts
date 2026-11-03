@@ -1,3 +1,4 @@
+import { runWorktreeSetupSchema } from '@open-mercato/cezar-contract/runs';
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -131,7 +132,7 @@ describe('worktree setup on task start (#917)', () => {
     expect(outputs).toHaveLength(1);
     expect((outputs[0] as { exitCode?: unknown }).exitCode).toBe(3);
     const record = f.store.getRun(id)!;
-    expect(record.worktreeSetup).toMatchObject({ status: 'failed', error: '`echo boom-output; exit 3` exited 3' });
+    expect(record.worktreeSetup).toMatchObject({ status: runWorktreeSetupSchema.shape.status.enum.failed, error: '`echo boom-output; exit 3` exited 3' });
     const [opening] = openingMessages(f);
     expect(opening).toContain('boom-output');
     expect(opening).toContain('The remaining commands did not run: `echo never`.');

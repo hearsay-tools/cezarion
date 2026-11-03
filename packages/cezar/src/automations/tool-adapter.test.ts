@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { SCHEDULED_TASK_NOTE } from '@open-mercato/cezar-contract/scheduled-tasks';
+import { SCHEDULED_TASK_NOTE , scheduledTaskSchema } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { createAutomationService, ONCE_PAST_DUE, type AutomationServiceProject } from './service.ts';
@@ -64,7 +64,7 @@ describe('createAutomationToolService', () => {
   it('enables only when asked and reports the cockpit link and latest start', async () => {
     const { tools } = fixture({ origin: 'http://127.0.0.1:4100', projectId: 'cezar' });
     const answer = await tools.scheduleTask({ name: 'Check', prompt: 'Check it', at: '2026-10-29T13:00Z', latest_start: '6h', enable: true });
-    expect(answer.ok && answer.task).toMatchObject({ status: 'waiting', due_at: '2026-10-29T13:00Z', latest_start_minutes: 360 });
+    expect(answer.ok && answer.task).toMatchObject({ status: scheduledTaskSchema.shape.status.enum.waiting, due_at: '2026-10-29T13:00Z', latest_start_minutes: 360 });
     expect(answer.ok && answer.task.url).toBe(`http://127.0.0.1:4100/p/cezar/automations/${answer.ok ? answer.task.id : ''}`);
   });
 
@@ -93,7 +93,7 @@ describe('createAutomationToolService', () => {
     const id = created.ok ? created.task.id : '';
     const moved = await tools.scheduledTasks({ action: 'update', id, delay: '2d', prompt: 'new prompt' });
     expect(moved.ok && 'task' in moved && moved.task).toMatchObject({ due_at: '2026-10-24T13:00Z', status: 'paused' });
-    await expect(tools.scheduledTasks({ action: 'enable', id })).resolves.toMatchObject({ ok: true, task: { status: 'waiting' } });
+    await expect(tools.scheduledTasks({ action: 'enable', id })).resolves.toMatchObject({ ok: true, task: { status: scheduledTaskSchema.shape.status.enum.waiting } });
     await expect(tools.scheduledTasks({ action: 'pause', id })).resolves.toMatchObject({ ok: true, task: { status: 'paused' } });
     await expect(tools.scheduledTasks({ action: 'cancel', id })).resolves.toMatchObject({ ok: true, task: { status: 'archived' } });
     await expect(tools.scheduledTasks({ action: 'update', id, name: 'again' })).resolves.toMatchObject({ ok: false, code: 'conflict', message: 'this one-time schedule is archived' });

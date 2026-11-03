@@ -1,3 +1,4 @@
+import { automationCheckSchema } from '@open-mercato/cezar-contract/automations';
 import { execFileSync } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { startTestCockpit, type TestCockpit } from '../task-cli/cockpit.testkit.ts';
@@ -385,13 +386,13 @@ describe('cez automation', () => {
         calls.push(`${init.method ?? 'GET'} ${url}${init.body ? ` ${JSON.stringify(init.body)}` : ''}`);
         if (url.endsWith('/check')) return { status: 202, data: { checkId: 'chk-1' } };
         clock += 1_000;
-        return { status: 200, data: statuses.shift() ?? { status: 'running' } };
+        return { status: 200, data: statuses.shift() ?? { status: automationCheckSchema.shape.status.enum.running } };
       };
       return { calls, extra: { http, now: () => clock, timeoutMs: 10_000 } satisfies Partial<AutomationIo> };
     };
 
     it('polls the workspace-level check until complete and exits 0 with matches', async () => {
-      const { calls, extra } = checkIo([{ status: 'running' }, { status: 'complete', matches: 2, truncated: false }]);
+      const { calls, extra } = checkIo([{ status: automationCheckSchema.shape.status.enum.running }, { status: 'complete', matches: 2, truncated: false }]);
       expect(await run(['check', 'a1'], env(), extra)).toBe(EXIT.ok);
       expect(calls).toEqual([
         `POST ${cockpit.api}/automations/a1/check {"mode":"preview"}`,

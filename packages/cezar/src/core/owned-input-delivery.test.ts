@@ -1,3 +1,4 @@
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { runInternals } from '../workflows/run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
@@ -26,7 +27,7 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
           expect(manager.continueRun(runId, { text: 'baseline continuation' }).ok).toBe(true);
           await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
         }
-        const input = { id: randomUUID(), source: 'agent' as const, parentRunId,
+        const input = { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId,
           text: `mock:agent-echo reject-owned-turn ${backend === 'opencode' ? 'mock:reject-agent-post' : ''}`, createdAt: new Date().toISOString() };
         expect.soft(manager.steerWorker(runId, input)).toBe('queued');
         await waitFor(() => !manager.isActive(runId));
@@ -50,7 +51,7 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
       await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId }) => {
         manager.enqueueOwnedRun(runId);
         await waitFor(() => store.getRun(runId)?.status === 'waiting');
-        const makeInput = (text: string) => ({ id: randomUUID(), source: 'agent' as const, parentRunId, text, createdAt: new Date().toISOString() });
+        const makeInput = (text: string) => ({ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId, text, createdAt: new Date().toISOString() });
         const first = makeInput('mock:agent-echo delay-owned-ack first');
         expect(manager.steerWorker(runId, first)).toBe('queued');
         await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes('delay-owned-ack first')));
@@ -75,7 +76,7 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
         manager.enqueueOwnedRun(runId);
         await waitFor(() => store.getRun(runId)?.status === 'waiting');
         // An accepted cezar_done in the turn whose input ACK the fixture holds ('delay-owned-ack').
-        const input = { id: randomUUID(), source: 'agent' as const, parentRunId,
+        const input = { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId,
           text: `delay-owned-ack ${toolCall('cezar_done', {})} ${thenSay('delay-owned-ack finished')}`, createdAt: new Date().toISOString() };
         const session = (manager as unknown as { active: Map<string, { session: import('./agent-runner.ts').AgentSession }> }).active.get(runId)!.session;
         if (origin === 'owned') expect(manager.steerWorker(runId, input)).toBe('queued');
@@ -122,7 +123,7 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
       await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId }) => {
         manager.enqueueOwnedRun(runId);
         await waitFor(() => store.getRun(runId)?.status === 'waiting');
-        const input = { id: randomUUID(), source: 'agent' as const, parentRunId,
+        const input = { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId,
           text: 'mock:agent-echo delay-owned-ack stopped', createdAt: new Date().toISOString() };
         expect(manager.steerWorker(runId, input)).toBe('queued');
         await waitFor(() => store.readEvents(runId).some(event => event.type === 'text' && String(event.text).includes('stopped')));
@@ -160,7 +161,7 @@ for (const backend of ['claude', 'codex', 'opencode', 'pi', 'omp'] as const) {
     await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId }) => {
       manager.enqueueOwnedRun(runId);
       await waitFor(() => store.getRun(runId)?.status === 'waiting');
-      const input = { id: randomUUID(), source: 'agent' as const, parentRunId,
+      const input = { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId,
         text: promptFor(backend, 'provider-error'), createdAt: new Date().toISOString() };
       expect(manager.steerWorker(runId, input)).toBe('queued');
       await waitFor(() => !manager.isActive(runId));
@@ -185,7 +186,7 @@ it.each(['fresh', 'continuation'] as const)('opencode %s provider failure before
         expect(manager.continueRun(runId, { text: 'baseline continuation' }).ok).toBe(true);
         await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
       }
-      const input = { id: randomUUID(), source: 'agent' as const, parentRunId,
+      const input = { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId,
         text: 'mock:provider-error', createdAt: new Date().toISOString() };
       expect(manager.steerWorker(runId, input)).toBe('queued');
       await waitFor(() => store.readEvents(runId).some(event => event.type === 'session.error'));
@@ -223,7 +224,7 @@ it.each(['unresponsive', 'cancel', 'finish'] as const)('opencode provider failur
     await withOwnedInputRun('opencode', 'baseline', async ({ store, manager, runId, parentRunId }) => {
       manager.enqueueOwnedRun(runId);
       await waitFor(() => store.getRun(runId)?.status === 'waiting');
-      const input = { id: randomUUID(), source: 'agent' as const, parentRunId,
+      const input = { id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId,
         text: 'mock:provider-error', createdAt: new Date().toISOString() };
       expect(manager.steerWorker(runId, input)).toBe('queued');
       await waitFor(() => store.readEvents(runId).some(event => event.type === 'session.error'));
