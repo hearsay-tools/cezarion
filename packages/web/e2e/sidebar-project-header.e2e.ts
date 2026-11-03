@@ -51,7 +51,7 @@ function settleMenu() {
   browser.waitForFunction(`(() => {
     const menu = document.querySelector('[role="menu"]')
     return menu && getComputedStyle(menu).opacity === '1' &&
-      menu.getAnimations().every(animation => animation.playState !== RUN_STATUS.running) &&
+      menu.getAnimations().every(animation => animation.playState !== 'running') &&
       document.querySelector('[data-slot="tooltip-content"]') === null
   })()`)
 }

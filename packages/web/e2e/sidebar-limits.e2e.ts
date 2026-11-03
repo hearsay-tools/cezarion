@@ -72,7 +72,7 @@ for (const width of [1440, 360]) for (const theme of ['light', 'dark']) {
       return { overflow: document.documentElement.scrollWidth > innerWidth,
         targets: targets.map(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height })),
         reduced: matchMedia('(prefers-reduced-motion: reduce)').matches,
-        moving: form.getAnimations({ subtree: true }).filter(a => a.playState === RUN_STATUS.running).length };
+        moving: form.getAnimations({ subtree: true }).filter(a => a.playState === 'running').length };
     })()`) as { overflow: boolean; targets: Array<{ width: number; height: number }>; reduced: boolean; moving: number }
     expect(facts.overflow).toBe(false); expect(facts.reduced).toBe(true); expect(facts.moving).toBe(0)
     for (const target of facts.targets) { expect(target.height).toBeGreaterThanOrEqual(44); expect(target.width).toBeGreaterThanOrEqual(44) }
