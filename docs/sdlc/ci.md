@@ -9,10 +9,9 @@ has one concurrency group, so a new head cancels its predecessor without a
 competing same-head `pull_request` run. Failed or cancelled verification never
 satisfies the required aggregate.
 
-The PR-shape classifier checks out only the source commit for pushes. Push
-classification returns `bump_pr=false` without reading history; fetching every
-branch and tag can consume its five-minute job budget before classification.
-Other events retain full history for their trusted PR and baseline checks.
+The PR-shape classifier checks out only one commit. Fetching every branch and
+tag can consume its five-minute job budget before classification. Only the PR
+baseline check reads history; § CI verification says what each gate fetches.
 
 Main PRs run cheap deterministic preflight, automated review, then heavy
 verification. Findings block heavy work. Both protected checks remain required.
@@ -276,6 +275,14 @@ The native gate requires trusted classification and applicable baseline, complex
 clone checks, plus typecheck, workflow lint and citations. Typecheck reads local
 source without building. The build/package job checks packaged test types after
 the application build.
+
+The classifier, complexity and clone jobs check out one commit. A full-depth
+checkout fetches every branch and tag, about six times the size of `main`'s own
+history, and took up to 5.4 minutes in queue runs. A merge group fetches only its
+head, whose parent is the group base, so its gates read no other history. Pull
+requests and dispatches then fetch the full history of the checked-out commit and
+`main` (the classifier fetches the workflow commit), because their merge base can
+be older. No gate fetches other branches or tags.
 
 The protected **Automated Code Review** check retains its name and native Actions provenance. `review-result` runs trusted base scripts after successful preflight. It requires the newest `CodeRabbit` execution from App `347564` / slug `coderabbitai` on the exact live PR head to be completed/success, or completed/skipped with exact authenticated `output.title` **No files to review**, plus zero unresolved review threads of any author. The named skip is the provider's no-files decision; it does not prove model execution and needs no prior successful check. Outdated threads still block. All other skipped/neutral, missing/pending, failed/spoofed/stale checks and malformed/truncated/changing API pages fail closed. An empty provider `pull_requests` array is allowed; formal review objects never prove execution. The reader rechecks the provider (including its title) and live head before admitting. Requests have 10-second limits within a 60-second read deadline; it does not poll a pending provider forever.
 
