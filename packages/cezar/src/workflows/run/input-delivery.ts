@@ -9,7 +9,7 @@ import type { PastedContent } from '../pasted-content.ts';
 import { contentBlocksOf, pastedAttachmentsNote } from '../pasted-content.ts';
 import { startCompletionCycle } from '../completion-policy.ts';
 import { chargesBudget, hasPrWait, isMonitoringTimer, openWaitsFooter, resolvedWaits, waitInputId } from '../waits.ts';
-import { transition, type RunExitId } from '../../runs/run-exits.ts';
+import type { RunExitId } from '../../runs/run-exits.ts';
 import { DelegationPolicyError } from '../../delegation/policy.ts';
 import { enqueueAgentInput, agentInputBatch } from '../../delegation/input.ts';
 import { acknowledgedBatch } from '../outcome-batches.ts';
@@ -394,7 +394,7 @@ export class InputDelivery {
           const { accepted, resolvedIds, early, spent, observable, at, resumes } = batch;
           // One commit (hearsay-tools/cezarion#1805): the messages, then each wait's delivery (a message a wait carries keeps its read receipt), the charge, the early reads, the cleared failure count and the resume (hearsay-tools/cezarion#1235).
           this.context.store.commitOutcome(runId, withFailuresCleared(this.context.store, runId, acknowledgedBatch({ accepted, resolvedIds, early, spent, observable, at }), accepted, resolvedIds.length > 0),
-            resumes ? { patch: { status: transition('resume', () => this.context.store.getRun(runId)) }, resumeStepId: resolvedIds.length ? state.currentStepId : undefined } : {});
+            resumes ? { exit: 'resume', resumeStepId: resolvedIds.length ? state.currentStepId : undefined } : {});
           this.applyAcknowledgedInput(runId, state, flight, batch, refusal);
         }
       } catch (error) { fail(error, true); }

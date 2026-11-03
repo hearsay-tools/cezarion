@@ -88,14 +88,14 @@ describe('parent-owned collected worker results', () => {
   it('rejects collection that races a new accepted execution revision', async () => {
     const run = await worker();
     const collecting = f.service.collect(f.caller, { workerId: run.id });
-    f.store.commitWorkerContinuation(run.id, { status: RUN_STATUS.queued });
+    f.store.commitWorkerContinuation(run.id, 'continue-line');
     await expect(collecting).rejects.toMatchObject({ code: 'incompatible_state' });
     expect(f.store.readWorkerResult(f.parent.id, run.id)).toBeUndefined();
   });
   it('retains historical evidence but does not reuse a previous execution assistant summary', async () => {
     const run = await worker(); f.store.appendEvent(run.id, { type: 'text', text: 'Old summary' }); f.store.updateRun(run.id, { status: RUN_STATUS.review });
     const old = await f.service.collect(f.caller, { workerId: run.id });
-    f.store.commitWorkerContinuation(run.id, { status: RUN_STATUS.queued });
+    f.store.commitWorkerContinuation(run.id, 'continue-line');
     expect(f.store.readWorkerResult(f.parent.id, run.id)).toEqual(old);
     const result = await f.service.collect(f.caller, { workerId: run.id });
     expect(result).toMatchObject({ revision: 1, partial: true, summary: { state: 'unavailable' } });

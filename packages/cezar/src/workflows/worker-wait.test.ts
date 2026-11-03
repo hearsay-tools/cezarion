@@ -296,7 +296,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id);
     manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true); await collect(w.id);
-    store.commitWorkerContinuation(w.id, { status: RUN_STATUS.queued });
+    store.commitWorkerContinuation(w.id, 'continue-line');
     expect(manager.finish(p.id)).toBe(false);
     fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
     expect(manager.finish(p.id)).toBe(false);
@@ -407,7 +407,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
     fixtureUpdateRun(first.id, { status: RUN_STATUS.review }); manager.reconcileWorkerWaits();
     expect(waitOf(store.getRun(p.id))?.outcomes).toHaveLength(1);
-    store.commitWorkerContinuation(first.id, { status: RUN_STATUS.queued });
+    store.commitWorkerContinuation(first.id, 'continue-line');
     fixtureUpdateRun(second.id, { status: RUN_STATUS.done }); manager.reconcileWorkerWaits();
     expect(waitOf(store.getRun(p.id))).toMatchObject({ phase: 'parked', outcomes: [{ workerId: second.id }] });
     expect(waitOf(store.getRun(p.id))?.revisions).toContainEqual({ workerId: first.id, revision: 1 });

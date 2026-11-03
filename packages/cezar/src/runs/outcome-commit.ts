@@ -2,6 +2,7 @@ import type { AgentInput, Wait } from '@open-mercato/cezar-contract';
 import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { LAST_WAITS_LIMIT } from '@open-mercato/cezar-contract/waits';
 import { waitInputId } from '../workflows/waits.ts';
+import { exitStatus, type RunExitId } from './run-exits.ts';
 import type { RunRecord } from './store.ts';
 
 /**
@@ -48,9 +49,11 @@ type OutcomeField = 'agentInputs' | 'waits' | 'lastWaits' | 'queuedMessages' | '
 
 /** What an outcome depends on, committed with it. */
 export interface OutcomeDependencies {
-  /** Fields that are not outcomes, already normalized by the caller (status, activity, the
-   *  continuation, …). */
-  patch?: Partial<Omit<RunRecord, OutcomeField | 'id' | 'steps' | 'delegation'>>;
+  /** Fields that are not outcomes, already normalized by the caller (activity, the continuation,
+   *  …). Never the status: only `exit` writes it. */
+  patch?: Partial<Omit<RunRecord, OutcomeField | 'id' | 'steps' | 'delegation' | 'status'>> & { status?: never };
+  /** The run exit the commit applies: its status, checked against the record's (ADR 0056). */
+  exit?: RunExitId;
   /** The step that resumes with the outcome: a `waiting` one reads `running`. */
   resumeStepId?: string | undefined;
   /** Inputs accepted with the outcome, appended to the queue (an input whose id is queued stays). */
@@ -185,7 +188,8 @@ function applyOne(run: RunRecord, outcome: RunOutcome, out: Settlement): Step {
 
 /**
  * `run` with every outcome applied in order, then what they depend on: the queued inputs, the
- * patch and the resumed step. Pure: the store commits `next`, or writes nothing when nothing changed.
+ * patch, the exit's status and the resumed step. The store commits `next`, or writes nothing when
+ * nothing changed. Pure but for the exit's from-check, which reports an undeclared transition.
  */
 export function applyOutcomes(run: RunRecord, outcomes: readonly RunOutcome[], deps: OutcomeDependencies = {}): StagedOutcome {
   const out: Settlement = { answered: [], settled: [] };
@@ -199,6 +203,7 @@ export function applyOutcomes(run: RunRecord, outcomes: readonly RunOutcome[], d
   const queued = (deps.enqueue ?? []).map((input) => agentInputSchema.parse(input)).filter((input) => !next.agentInputs?.some((row) => row.id === input.id));
   if (queued.length) { next = { ...next, agentInputs: [...(next.agentInputs ?? []), ...queued] }; changed = true; }
   if (deps.patch && Object.keys(deps.patch).length) { next = { ...next, ...deps.patch }; changed = true; }
+  if (deps.exit) { next = { ...next, status: exitStatus(deps.exit, run.status) }; changed = true; }
   const resumeStepId = deps.resumeStepId;
   if (resumeStepId && next.steps.some((step) => step.id === resumeStepId && step.status === 'waiting')) {
     next = { ...next, steps: next.steps.map((step) => step.id === resumeStepId && step.status === 'waiting' ? { ...step, status: 'running' as const } : step) };

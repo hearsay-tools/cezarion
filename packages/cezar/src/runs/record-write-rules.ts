@@ -255,6 +255,22 @@ export function redactPatch(
   return out;
 }
 
+/**
+ * Archiving is resigning from a task, so it retires the pin too (#935) — a pin on a task the
+ * user has filed away is stale by definition, and the archived view collapses into one bucket
+ * anyway, so a surviving pin would be invisible state waiting to surprise whoever unarchives.
+ *
+ * Here rather than in the pin route for the same reason `clearPendingAutoResume` is in the store:
+ * the bulk "Archive finished" sweep never goes through a route, and it has to obey the rule too.
+ *
+ * Deleted, not set to `false`: absent is what every reader treats as unpinned, and it is the
+ * shape a cezar that has never heard of pins already writes.
+ */
+export function clearPin(run: RunRecord): void {
+  delete run.pinned;
+  delete run.pinnedAt;
+}
+
 export function stageArchiveFields(run: RunRecord, archived: boolean, now: string, withdrawHold: (run: RunRecord) => void, clearPin: (run: RunRecord) => void): void {
   run.archived = archived;
   run.archivedAt = archived ? now : undefined;

@@ -11,7 +11,7 @@ import type { ActiveRun } from '../active-run.ts';
 import type { WorkflowDef, WorkflowStepDef } from '../types.ts';
 import type { ContinuationClose, SessionTurn, StepLoop, RunModuleContext } from './types.ts';
 import type { RunExitId } from '../../runs/run-exits.ts';
-import { RUN_EXITS, transition, transitionVia } from '../../runs/run-exits.ts';
+import { RUN_EXITS, transitionVia } from '../../runs/run-exits.ts';
 import { settledRootFinishPatch } from '../completion-policy.ts';
 import { queuedRecoveryInput } from '../run-scheduling.ts';
 import { loadConfig } from '../../config.ts';
@@ -452,8 +452,7 @@ export class RunSettlement {
         this.context.store.updateStep(runId, step.id, { status: 'done', finishedAt: step.finishedAt ?? finishedAt });
       }
     }
-    this.context.store.updateRun(runId, {
-      status: transition(review ? 'succeed-review' : 'succeed', () => this.context.store.getRun(runId)),
+    this.context.store.move(runId, review ? 'succeed-review' : 'succeed', {
       ...settledRootFinishPatch(this.context.store, runId),
       finishedAt,
       currentStepId: undefined,
