@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { RefreshCwIcon, TriangleAlertIcon, XIcon } from '@/components/design-icons'
 import {
   isSafeSkillsRef,
@@ -42,6 +42,16 @@ function useSkillSources() {
   })
 }
 
+/**
+ * Read every skill list a source feeds again, the `wait=1` reads too: one still in flight from
+ * before the change would otherwise land later and bring a removed source's skills back.
+ */
+function invalidateSkillLists(queryClient: QueryClient) {
+  for (const queryKey of [queryKeys.skills, queryKeys.skillsReady, queryKeys.importableSkills, queryKeys.importableSkillsReady]) {
+    void queryClient.invalidateQueries({ queryKey, exact: true })
+  }
+}
+
 /** Writes answer the new source list; the skill lists it feeds are read again. */
 function useSourceMutation<T>(write: (body: T) => Promise<TeamSkillSourcesResponse>, done?: (body: T) => void) {
   const queryClient = useQueryClient()
@@ -49,8 +59,7 @@ function useSourceMutation<T>(write: (body: T) => Promise<TeamSkillSourcesRespon
     mutationFn: write,
     onSuccess: (answer, body) => {
       queryClient.setQueryData(skillSourcesKey(), answer)
-      void queryClient.invalidateQueries({ queryKey: queryKeys.skills, exact: true })
-      void queryClient.invalidateQueries({ queryKey: queryKeys.importableSkills, exact: true })
+      invalidateSkillLists(queryClient)
       done?.(body)
     },
     onError: (error) => toast(error.message, { tone: 'danger' }),
@@ -63,10 +72,7 @@ function useRefreshWhenLoaded(data: TeamSkillSourcesResponse | undefined) {
   const wasLoading = useRef(false)
   const loading = data?.sources.some((source) => source.status.state === 'loading') ?? false
   useEffect(() => {
-    if (wasLoading.current && !loading) {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.skills, exact: true })
-      void queryClient.invalidateQueries({ queryKey: queryKeys.importableSkills, exact: true })
-    }
+    if (wasLoading.current && !loading) invalidateSkillLists(queryClient)
     wasLoading.current = loading
   }, [loading, queryClient])
 }

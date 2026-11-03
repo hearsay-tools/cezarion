@@ -2,6 +2,7 @@ import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { queryKeys } from '@/api/queries'
 import { createQueryClient } from '@/api/query-client'
 import type { TeamSkillSource, TeamSkillSourcesResponse } from '@open-mercato/cezar-api-client'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
@@ -53,14 +54,16 @@ function serve(initial: Partial<TeamSkillSourcesResponse> = {}, { failAdd }: { f
 }
 
 function renderPanel() {
+  const client = createQueryClient()
   render(
-    <QueryClientProvider client={createQueryClient()}>
+    <QueryClientProvider client={client}>
       <div className="@container">
         <TeamSourcesPanel />
       </div>
       <Toaster />
     </QueryClientProvider>,
   )
+  return client
 }
 
 const rows = () => [...document.querySelectorAll<HTMLElement>('[data-slot="skill-source"]')]
@@ -159,6 +162,17 @@ describe('TeamSourcesPanel', () => {
     fireEvent.click(rowFor('acme/other')!.querySelector('[data-slot="skill-source-remove"]')!)
     await waitFor(() => expect(rowFor('acme/other')).toBeNull())
     expect(document.body.textContent).toContain('Removed acme/other @ main. Add it again to restore its skill switches.')
+  })
+
+  it('a source change also marks the wait=1 skill reads stale, so an older answer cannot bring skills back', async () => {
+    serve({ sources: [source({ repo: 'acme/skills' })] })
+    const client = renderPanel()
+    for (const key of [queryKeys.skillsReady, queryKeys.importableSkillsReady]) client.setQueryData(key, [])
+    await waitFor(() => expect(rows()).toHaveLength(1))
+    fireEvent.click(rowFor('acme/skills')!.querySelector('[data-slot="skill-source-remove"]')!)
+    await waitFor(() => expect(rowFor('acme/skills')).toBeNull())
+    expect(client.getQueryState(queryKeys.skillsReady)?.isInvalidated).toBe(true)
+    expect(client.getQueryState(queryKeys.importableSkillsReady)?.isInvalidated).toBe(true)
   })
 
   it('is read-only on a remote cockpit', async () => {
