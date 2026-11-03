@@ -19,8 +19,9 @@ vi.mock('@/components/ui/toaster', () => ({ toast: toastMock }))
 
 import { archivedToastMessage, undoArchive, useSidebarArchive } from '@/components/sidebar-archive'
 
-const record = (over: Partial<RunRecord> = {}) =>
-  ({ id: 'a', title: 'Fix the thing', workflow: 'w', task: 't', status: RUN_STATUS.done, createdAt: '2026-01-01T00:00:00Z', tokensUsed: 0, archived: false, steps: [], ...over }) as unknown as RunSummary
+const record = (over: Partial<RunRecord> = {}) => {
+  return ({ id: 'a', title: 'Fix the thing', workflow: 'w', task: 't', status: RUN_STATUS.done, createdAt: '2026-01-01T00:00:00Z', tokensUsed: 0, archived: false, steps: [], ...over }) as unknown as RunSummary
+}
 
 beforeEach(() => {
   for (const fn of Object.values(api)) fn.mockReset().mockResolvedValue({})
