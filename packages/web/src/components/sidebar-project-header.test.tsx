@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
@@ -12,14 +13,14 @@ const root = '/home/me/code/other-project'
 const project = { id: 'other', name: 'Other Project', root, branch: 'feature/other', status: 'ok', source: 'local', addedAt: '', lastOpenedAt: '' }
 const finishedAt = '2026-09-20T12:00:00.000Z'
 const runs = [
-  { id: 'done', status: 'done', finishedAt },
-  { id: 'failed', status: 'failed', finishedAt },
-  { id: 'read', status: 'done', finishedAt, seenAt: finishedAt },
-  { id: 'running', status: 'running' },
-  { id: 'cancelled', status: 'cancelled', finishedAt },
-  { id: 'archived', status: 'done', finishedAt, archived: true },
-  { id: 'scheduled', status: 'waiting', autoResumeAt: finishedAt },
-  { id: 'worker', status: 'done', finishedAt, delegation: { role: 'worker' } },
+  { id: 'done', status: RUN_STATUS.done, finishedAt },
+  { id: 'failed', status: RUN_STATUS.failed, finishedAt },
+  { id: 'read', status: RUN_STATUS.done, finishedAt, seenAt: finishedAt },
+  { id: 'running', status: RUN_STATUS.running },
+  { id: 'cancelled', status: RUN_STATUS.cancelled, finishedAt },
+  { id: 'archived', status: RUN_STATUS.done, finishedAt, archived: true },
+  { id: 'scheduled', status: RUN_STATUS.waiting, autoResumeAt: finishedAt },
+  { id: 'worker', status: RUN_STATUS.done, finishedAt, delegation: { role: 'worker' } },
 ]
 let requests: { url: string; method: string; body: unknown }[]
 let failRead: boolean | string = false
@@ -159,7 +160,7 @@ it('uses URL project runs above the route provider even when the mutable scope i
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   client.setQueryData(queryKeys.health, { bootProject: 'boot', capabilities: { localHandoff: true } })
   client.setQueryData(workspaceQueryKeys.projects, { bootProject: 'boot', projects: [project] })
-  client.setQueryData(['previous', 'runs', 'list'], [{ id: 'wrong', status: 'done', finishedAt }])
+  client.setQueryData(['previous', 'runs', 'list'], [{ id: 'wrong', status: RUN_STATUS.done, finishedAt }])
   client.setQueryData(['other', 'runs', 'list'], runs)
   render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/p/other/git']}><SidebarProjectHeader /></MemoryRouter></QueryClientProvider>)
   const mark = await menu()

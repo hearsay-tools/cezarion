@@ -1,3 +1,4 @@
+import { STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
@@ -57,8 +58,8 @@ afterEach(() => {
 const step = (extra: Partial<StepState> = {}): StepState => ({
   id: 'task',
   name: 'Do the task',
-  kind: 'agent',
-  status: 'done',
+  kind: STEP_KIND.agent,
+  status: STEP_STATUS.done,
   iterations: 1,
   tokensUsed: 0,
   ...extra,

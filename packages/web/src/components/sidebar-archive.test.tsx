@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { projectAddress, runAddress, type RunAddress } from '@/api/run-address'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook } from '@testing-library/react'
@@ -19,7 +20,7 @@ vi.mock('@/components/ui/toaster', () => ({ toast: toastMock }))
 import { archivedToastMessage, undoArchive, useSidebarArchive } from '@/components/sidebar-archive'
 
 const record = (over: Partial<RunRecord> = {}) =>
-  ({ id: 'a', title: 'Fix the thing', workflow: 'w', task: 't', status: 'done', createdAt: '2026-01-01T00:00:00Z', tokensUsed: 0, archived: false, steps: [], ...over }) as unknown as RunSummary
+  ({ id: 'a', title: 'Fix the thing', workflow: 'w', task: 't', status: RUN_STATUS.done, createdAt: '2026-01-01T00:00:00Z', tokensUsed: 0, archived: false, steps: [], ...over }) as unknown as RunSummary
 
 beforeEach(() => {
   for (const fn of Object.values(api)) fn.mockReset().mockResolvedValue({})
