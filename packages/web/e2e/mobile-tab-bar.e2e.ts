@@ -6,7 +6,7 @@ import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factori
 import type { RunRecord } from '@open-mercato/cezar-api-client/contract/runs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { seedRuns } from './seed-runs'
-import { waitForSettledSample } from './visual-ready'
+import { settleVisual, waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, contrastSampleExpression, restoreContrastQaDefaults, type ContrastSample } from './contrast'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
@@ -271,6 +271,8 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
     expect(drawer).toMatchObject({ nav: 0, content: 0, quickList: 1, newTask: 0, current: 1, menuInLink: false, toolsHref: '/tools' })
     expect(drawer.projects).toBeGreaterThanOrEqual(1)
 
+    // A first left === 0 can precede the entry animation; wait until the drawer stops moving.
+    settleVisual(browser, DRAWER)
     // The current project's `…` is the same menu the desktop header opens.
     browser.click(`${DRAWER} [data-slot="drawer-project-current"] [data-slot="project-menu-trigger"]`)
     const menu = browser.waitForValue(`document.querySelector('[role="menu"]')?.textContent`, (text: string | null) => typeof text === 'string' && text.includes('Project settings')) as string
