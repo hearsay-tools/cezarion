@@ -163,9 +163,7 @@ gate, `squeal run --all`, or the full Vitest or browser suite just to finish a
 task, commit, open a PR, or complete a review. Run a full local suite only when
 explicitly requested or needed to investigate a CI failure. A full local Vitest
 run is CI's four shards: `npm test -- --shard=N/4 --maxWorkers=4`,
-for N=1..4, one after another. An unsharded `npm test`
-is not the local full gate: on a host with about 30 GiB free it can be OOM-killed
-(exit 137). Squeal's `baseline.onStart: "lookup-then-run-missing"` reuses cached
+for N=1..4, one after another. Squeal's `baseline.onStart: "lookup-then-run-missing"` reuses cached
 results and runs missing tests at startup; Stop requires neither a full nor a slow suite.
 Record the tested revision (or uncommitted diff), commands or Squeal status,
 outcomes, and subsequent edits in the handoff. After later code changes, rerun
