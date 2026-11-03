@@ -11,7 +11,6 @@ import type { ActiveRun } from '../active-run.ts';
 import type { WorkflowDef, WorkflowStepDef } from '../types.ts';
 import type { ContinuationClose, SessionTurn, StepLoop, RunModuleContext } from './types.ts';
 import type { RunExitId } from '../../runs/run-exits.ts';
-import { settledRootFinishPatch } from '../completion-policy.ts';
 import { queuedRecoveryInput } from '../run-scheduling.ts';
 import { loadConfig } from '../../config.ts';
 import { worktreeDiff, type AutosaveReason } from '../../git-worktree.ts';
@@ -186,7 +185,7 @@ export class RunSettlement {
     }
     this.context.store.updateStep(runId, stepId, { status: 'failed', error: this.wakeSessionClosedError, finishedAt: new Date().toISOString() });
     this.context.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
-    this.host.move(runId, 'fail', { error: `continue failed: ${this.wakeSessionClosedError}`, finishedAt: new Date().toISOString(), currentStepId: undefined });
+    this.host.move(runId, 'fail', { error: `continue failed: ${this.wakeSessionClosedError}` });
     this.context.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${this.wakeSessionClosedError}` });
     this.context.store.appendEvent(runId, { type: 'note', message: this.wakeDeliveryCapNote });
   }
@@ -237,7 +236,7 @@ export class RunSettlement {
         startAt: waitingIndex + 1,
         input: queuedRecoveryInput(completed),
       };
-      this.host.move(runId, 'requeue', { currentStepId: undefined, workflowResumeStepId: undefined });
+      this.host.move(runId, 'requeue', { workflowResumeStepId: undefined });
       // The workflow remainder is a crash boundary. Persist it before the
       // finally block awaits worktree autosave and installs its in-memory job.
       this.context.store.flush();
@@ -276,11 +275,7 @@ export class RunSettlement {
       this.host.move(runId, 'park', { error: `continue failed: ${message}` });
       return;
     }
-    this.host.move(runId, 'fail-continue', {
-      error: `continue failed: ${message}`,
-      finishedAt: new Date().toISOString(),
-      currentStepId: undefined,
-    });
+    this.host.move(runId, 'fail-continue', { error: `continue failed: ${message}` });
     this.context.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${message}` });
     if (delivery === 'capped') this.context.store.appendEvent(runId, { type: 'note', message: this.wakeDeliveryCapNote });
   }
@@ -335,8 +330,7 @@ export class RunSettlement {
 
   /** The failed settlement. A capped wake delivery adds the cap's note. */
   settleFailedRun(runId: string, runError: string, deliveryCapped: boolean): void {
-    const finishedAt = new Date().toISOString();
-    this.host.move(runId, 'fail', { error: runError, finishedAt, currentStepId: undefined });
+    this.host.move(runId, 'fail', { error: runError });
     this.context.store.appendEvent(runId, { type: 'lifecycle', message: `run failed — ${runError}` });
     if (deliveryCapped) this.context.store.appendEvent(runId, { type: 'note', message: this.wakeDeliveryCapNote });
   }
@@ -450,15 +444,9 @@ export class RunSettlement {
         this.context.store.updateStep(runId, step.id, { status: 'done', finishedAt: step.finishedAt ?? finishedAt });
       }
     }
-    this.context.store.move(runId, review ? 'succeed-review' : 'succeed', {
-      ...settledRootFinishPatch(this.context.store, runId),
-      finishedAt,
-      currentStepId: undefined,
-      // A run that got all the way to a settled turn is not in a limit loop, so the resume
-      // counter starts over — otherwise a task that legitimately met the limit once a week would
-      // creep toward the cap forever and stop resuming for no reason anyone could see.
-      autoResumeAttempts: undefined,
-    });
+    // The exit clears `currentStepId` and the resume counter and retires the Finish intent; the
+    // run settles at the time its steps did.
+    this.context.store.move(runId, review ? 'succeed-review' : 'succeed', { finishedAt });
   }
 
   /** Called only after session/process settlement. A refused nudge retained its
@@ -493,7 +481,7 @@ export class RunSettlement {
       for (const step of run.steps) if (step.status === 'waiting' || step.status === 'running') {
         this.context.store.updateStep(runId, step.id, { status: 'failed', error: 'invalid structured question', finishedAt });
       }
-      this.host.move(runId, 'fail', { error: 'invalid structured question', finishedAt, currentStepId: undefined });
+      this.host.move(runId, 'fail', { error: 'invalid structured question', finishedAt });
       return true;
     }
     for (const step of run.steps) {

@@ -102,8 +102,8 @@ touches a turn-end, wait or settlement path.
 ### Table A: exits and what they settle
 
 "Settles" is what every call site does today; the exit will own it. "Sites" counts call sites at
-the baseline. SRF is `settledRootFinishPatch` (retires the root's Finish intent), which `move`
-adds for every exit whose status is `failed`. Durability: D debounced, C commit.
+the baseline. SRF is `settledRootFinishPatch` (retires the root's Finish intent), which `RunManager.move`
+added for every exit whose status is `failed` until S5. Durability: D debounced, C commit.
 
 | Exit | from → to | Sites | Settles (all sites agree) | Guard | Durability |
 |---|---|---|---|---|---|
@@ -118,7 +118,7 @@ adds for every exit whose status is `failed`. Durability: D debounced, C commit.
 | resume | waiting → running | 4 | nothing | none | D by exit; C by enclosing commit (`commitOutcome` at `sendAgentInput`) |
 | succeed, succeed-review | running, waiting → done, review | 1 (`commitOrdinarySuccess`) | SRF, `finishedAt` = now, `currentStepId` and `autoResumeAttempts` cleared | none | D by exit; `succeed` only: C by record (completion option), since only `done` takes the record rule |
 | succeed-root, succeed-root-review | waiting → done, review | 1 (`settleSuccessWork`) | as succeed, plus the Finish intent retired, `activity` cleared, running or waiting steps done (`finishedAt ??= now`), in one commit | root with a pending Finish intent; else no write, returns false | C by exit |
-| accept-review | review → done | 1 | nothing | none | D by exit; C by record |
+| accept-review | review → done | 1 | SRF | none | D by exit; C by record |
 | draft-pr | review, done, failed, cancelled → done | 1 | `pullRequestUrl`, `finishedAt ??= now` | none | D by exit; C by record |
 | fail-start | queued, running → failed | 7 | `error`, `finishedAt` = now, SRF | none | D |
 | fail | running, waiting → failed | 4 | `error`, `finishedAt` = now, `currentStepId` cleared, SRF | none | D |

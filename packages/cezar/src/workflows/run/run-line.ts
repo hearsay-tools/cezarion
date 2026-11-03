@@ -23,7 +23,7 @@ interface RunLineHost {
   maintenance(id: string): boolean; admitted(id: string): boolean | undefined; workerExecutionStopped(id: string): boolean;
   recovering(): boolean | undefined; recoveringRun(run: RunRecord): boolean; reconcileAutoResumes(): void;
   cancel(id: string): boolean;
-  move(id: string, patch: { error: string; finishedAt: string }): unknown;
+  move(id: string, patch: { error: string }): unknown;
   beginWorkerExecution(id: string): void; admissionError(error: unknown, fallback: string): string;
   admitQueuedWaitWake(id: string): 'none' | 'handled' | 'deferred';
   launchQueuedRun(id: string, job: PendingJob | undefined, continuation: PendingContinuation | undefined): void;
@@ -291,7 +291,7 @@ export class RunLine {
       try { this.host.beginWorkerExecution(candidate); }
       catch (error) {
         this.takeAt(next); this.takePending(candidate);
-        this.host.move(candidate, { error: this.host.admissionError(error, 'worker execution checkpoint unavailable'), finishedAt: new Date().toISOString() });
+        this.host.move(candidate, { error: this.host.admissionError(error, 'worker execution checkpoint unavailable') });
         return false;
       }
     }

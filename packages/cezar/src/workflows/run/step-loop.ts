@@ -162,11 +162,7 @@ export class StepLoop {
       const message = err instanceof Error ? err.message : String(err);
       const error = `worktree creation failed: ${message}`;
       emit({ type: 'note', message: `${error} — task stopped before workflow execution` });
-      this.host.move(runId, 'fail-start', {
-        error,
-        finishedAt: new Date().toISOString(),
-        currentStepId: undefined,
-      });
+      this.host.move(runId, 'fail-start', { error, currentStepId: undefined });
       emit({ type: 'lifecycle', message: `run failed — ${error}` });
       this.host.dropActive(runId);
       return false;
@@ -281,10 +277,7 @@ export class StepLoop {
     state?.releaseRepoRoot?.();
     if (state) { state.releaseRepoRoot = undefined; clearAutosaveTimer(state); }
     this.line.enqueueJob(runId, { workflow, input, startAt });
-    this.host.move(runId, 'requeue', {
-      ...(startAt !== undefined && startAt > 0 ? {} : { startedAt: undefined }),
-      currentStepId: undefined,
-    });
+    this.host.move(runId, 'requeue', startAt !== undefined && startAt > 0 ? {} : { startedAt: undefined });
     this.context.store.appendEvent(runId, {
       type: 'note',
       message: finishHeld ? 'held in the queue — parent finish is pending' : 'held in the queue — this agent account is waiting out a usage limit',
@@ -483,7 +476,7 @@ export class StepLoop {
         this.context.store.updateStep(runId, s.id, { status: 'pending' });
       }
       this.context.store.updateStep(runId, step.id, { retriesUsed: outcome.used + 1 });
-      this.host.move(runId, 'requeue', { currentStepId: undefined });
+      this.host.move(runId, 'requeue');
       // The retry target and its consumed budget form one crash boundary: a
       // restart must observe the queued target, budget, and cursor together.
       this.context.store.flush();

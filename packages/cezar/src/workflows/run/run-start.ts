@@ -189,10 +189,7 @@ export class RunStart {
       await this.context.work.track('execute', this.host.execute(runId, job.workflow, input, job.startAt));
     })().catch((err: unknown) => {
       const message = err instanceof Error ? err.message : String(err);
-      this.host.move(runId, 'fail-crash', {
-        error: `engine crashed: ${message}`,
-        finishedAt: new Date().toISOString(),
-      });
+      this.host.move(runId, 'fail-crash', { error: `engine crashed: ${message}` });
       const state = this.host.active.get(runId);
       if (state) {
         clearIdleTimer(state);

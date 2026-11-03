@@ -64,10 +64,7 @@ export async function reviveQueuedRun(context: RunModuleContext, host: QueuedRev
   }
   const workflow = await host.reviveWorkflow(run);
   if (!workflow) {
-    host.move(run.id, 'fail-start', {
-      error: 'interrupted — workflow definition not recoverable after a restart',
-      finishedAt: new Date().toISOString(),
-    });
+    host.move(run.id, 'fail-start', { error: 'interrupted — workflow definition not recoverable after a restart' });
     context.store.appendEvent(run.id, {
       type: 'lifecycle',
       message: `${reason} — workflow definition not recoverable, task failed`,
@@ -134,7 +131,7 @@ export function reviveQueuedWorker(context: RunModuleContext, host: QueuedReviva
     host.enqueueJob(run.id, { ...job, startAt: queuedStartAt(run, job.workflow) });
     context.store.appendEvent(run.id, { type: 'lifecycle', message: `${reason} — owned task re-queued` });
   } catch (error) {
-    host.move(run.id, 'fail-start', { error: String(error), finishedAt: new Date().toISOString() });
+    host.move(run.id, 'fail-start', { error: String(error) });
   }
 }
 
@@ -145,14 +142,14 @@ export function requeueInterruptedRun(context: RunModuleContext, host: QueuedRev
   // Worktree setup (hearsay-tools/cezarion#917) interrupted before any agent session: there is no session to
   // continue, so start the workflow over. `execute` sees setup still `running` and reruns it.
   if (run.workflowDef && run.worktreeSetup?.status === 'running' && !run.steps.some(step => step.sessionId)) {
-    host.move(run.id, 'requeue', { error: undefined, finishedAt: undefined, currentStepId: undefined });
+    host.move(run.id, 'requeue', { error: undefined, finishedAt: undefined });
     context.store.flush();
     host.enqueueJob(run.id, { workflow: run.workflowDef, startAt: 0, input: queuedRecoveryInput(run) });
     return true;
   }
   if (run.workflowDef && interruptedDef && stepKind(interruptedDef) === 'check') {
     context.store.updateStep(run.id, interruptedDef.id, { status: 'pending', error: undefined, finishedAt: undefined });
-    host.move(run.id, 'requeue', { error: undefined, finishedAt: undefined, currentStepId: undefined });
+    host.move(run.id, 'requeue', { error: undefined, finishedAt: undefined });
     context.store.flush();
     host.enqueueJob(run.id, {
       workflow: run.workflowDef,

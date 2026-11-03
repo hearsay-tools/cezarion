@@ -1,7 +1,7 @@
 import { cezarDoneRequestSchema, type CezarDoneRequest, type CezarDoneAnswer, type DoneErrorCode } from '@open-mercato/cezar-contract/waits';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
 import { doneErrorMessage } from '../../ci-wait/errors.ts';
-import { openCompletionRequests, recordRequestRefusal, settledRootFinishPatch, type CompletionRefusal } from '../completion-policy.ts';
+import { openCompletionRequests, recordRequestRefusal, type CompletionRefusal } from '../completion-policy.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { RunExitId } from '../../runs/run-exits.ts';
 import { openWaitList, openWaits } from '../waits.ts';
@@ -127,7 +127,7 @@ export class RunFinish {
     if (!run || !this.host.executionBlockedByRootFinish(run)) return false;
     this.line.enqueueContinuation(runId, continuation, true);
     this.context.store.updateStep(runId, continuation.stepId, { status: 'pending' });
-    this.host.move(runId, 'requeue', { currentStepId: undefined });
+    this.host.move(runId, 'requeue');
     if (state) clearAutosaveTimer(state);
     this.line.unmarkStarting(runId); this.host.dropActive(runId);
     return true;
@@ -193,7 +193,7 @@ export class RunFinish {
     if (decision.action === 'review') {
       try { this.acceptRootRequestFinish(runId); } catch { return false; }
       this.closeQuestionOnFinish(runId);
-      this.host.move(runId, 'accept-review', settledRootFinishPatch(this.context.store, runId));
+      this.host.move(runId, 'accept-review');
       this.context.store.appendEvent(runId, { type: 'lifecycle', message: 'review accepted — finished without a PR' });
       return true;
     }
