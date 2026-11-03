@@ -306,6 +306,9 @@ describe('settings → skills against the live dry-run server', () => {
       browser.click(`${sourceRow} [data-slot="skill-source-remove"]`)
       browser.waitForFunction(`document.querySelector(${JSON.stringify(sourceRow)}) === null`)
       expect(configured()).toEqual([])
+      expect(browser.text('[data-slot="toast"]')).toContain('Add it again to restore its skill switches.')
+      // The Remove toast sits over the header's controls until it times out; later cases click them.
+      browser.waitForFunction(`document.querySelector('[data-slot="toast"]') === null`)
     } finally {
       if (savedConfig === null) rmSync(configFile, { force: true })
       else writeFileSync(configFile, savedConfig, 'utf8')
