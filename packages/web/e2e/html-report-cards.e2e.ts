@@ -1,3 +1,4 @@
+import { seedRuns } from './seed-runs'
 import { LIVE_PROTOCOL } from '@open-mercato/cezar-api-client/contract/live-coordination'
 import { execFileSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
@@ -56,7 +57,7 @@ beforeAll(async () => {
   const records = [[runId, 'Report card source'], [otherRunId, 'Other conversation'], [virtualRunId, 'Long report conversation'], [agentRunId, 'Agent report conversation']].map(([id, title]) => makeRunRecord({
     id: id!, title: title!, task: 'Review the published results.', status: RUN_STATUS.done, createdAt: '2026-11-01T08:00:00Z',
   }))
-  writeFileSync(join(project, '.ai/cezar/runs.json'), JSON.stringify(records))
+  seedRuns(project, records)
   const text = `The answer stays in the conversation. ${publication.markdown}\n\nRepeated reference: ${publication.markdown}`
   const events = [text, `A second message names the same report: ${publication.markdown}`].map((message, n) => ({
     seq: n + 1, ts: '2026-11-01T08:01:00Z', type: 'item.completed', item: { kind: 'message', id: `report-message-${n}`, role: 'assistant', text: message },

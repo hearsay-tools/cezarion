@@ -1,3 +1,4 @@
+import { seedRuns } from './seed-runs'
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
@@ -86,7 +87,7 @@ beforeAll(async () => {
     id: runId, task: `${filler}\n\nRead ${publication.markdown} now.\n\n${filler}`, title: 'HTML report reader',
     status: RUN_STATUS.done, createdAt: '2026-11-01T08:00:00Z',
   })
-  writeFileSync(join(project, '.ai/cezar/runs.json'), JSON.stringify([run]))
+  seedRuns(project, [run])
   mkdirSync(evidenceDir, { recursive: true })
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', project, '--port', '0', '--no-open'], { env })
   baseUrl = await waitForFixtureServer(server)

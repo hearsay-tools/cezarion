@@ -1,5 +1,7 @@
+import { seedRuns, recordedRun } from './seed-runs'
+import { makeRunRecord, RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import type { ChildProcess } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -14,7 +16,8 @@ import {
   restoreContrastQaDefaults,
   type ContrastSample,
 } from './contrast'
-import record from './fixtures/thread-run.record.json'
+import recordJson from './fixtures/thread-run.record.json'
+const record = recordedRun(recordJson)
 // fixture-server starts: 1
 
 /**
@@ -24,16 +27,16 @@ import record from './fixtures/thread-run.record.json'
  */
 const sessionId = `e2e-assistant-reply-copy-${process.pid}`
 const RUN_ID = 'aaaaaaaa-0927-4222-8333-bbbbbbbbbbbb'
-const RUN = {
+const RUN = makeRunRecord({
   ...record,
   id: RUN_ID,
   title: 'Assistant reply copy',
   titleSummary: 'Assistant reply copy',
   task: 'Show the plan.',
-  status: 'review',
+  status: RUN_STATUS.review,
   steps: [record.steps[0]],
   pullRequestUrl: undefined,
-}
+})
 const REPLY = [
   '## Heading',
   '',
@@ -47,7 +50,7 @@ const REPLY = [
 ].join('\n')
 const REPLY_AT = '2026-07-31T14:32:00.000Z'
 const events = [
-  { type: 'step-start', stepId: 'task', name: 'Do the task', kind: 'agent', iteration: 1 },
+  { type: 'step-start', stepId: 'task', name: 'Do the task', kind: STEP_KIND.agent, iteration: 1 },
   { type: 'session.started', sessionId: 's', backend: 'claude', stepId: 'task' },
   { type: 'turn.started', turnId: 'turn_1', stepId: 'task' },
   {
@@ -81,7 +84,7 @@ const ACTIONS = `${MESSAGE} [data-slot="bubble-actions"]`
 beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-reply-copy-'))
   mkdirSync(join(dataRoot, '.ai/cezar/runs'), { recursive: true })
-  writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([RUN], null, 2), 'utf8')
+  seedRuns(dataRoot, [RUN])
   seedTranscript(
     join(dataRoot, '.ai/cezar/runs', `${RUN_ID}.ndjson`),
     events.map((event) => JSON.stringify(event)).join('\n') + '\n',

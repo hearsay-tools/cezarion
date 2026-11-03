@@ -1,3 +1,4 @@
+import { seedRuns, recordedRun } from './seed-runs'
 import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -8,7 +9,8 @@ import { seedTranscript } from './seed-transcript'
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
-import record from './fixtures/subagents-run.record.json'
+import recordJson from './fixtures/subagents-run.record.json'
+const record = recordedRun(recordJson)
 // fixture-server starts: 2
 
 /**
@@ -41,7 +43,7 @@ let baseUrl: string
 beforeAll(async () => {
   dataRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-agents-'))
   mkdirSync(join(dataRoot, '.ai/cezar/runs'), { recursive: true })
-  writeFileSync(join(dataRoot, '.ai/cezar/runs.json'), JSON.stringify([RUN], null, 2), 'utf8')
+  seedRuns(dataRoot, [RUN])
   // Derive a long attributed child stream from the real `mock:subagents` recording. The
   // source fixture stays verbatim; this test adds scale without pretending the runner emitted
   // data it cannot currently attribute (notably images, whose persisted v1 line has no parent).
