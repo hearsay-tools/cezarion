@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it } from 'vitest';
 import type { ApiRun } from '@open-mercato/cezar-contract';
 import { attentionFields, projectStatus } from './projections.ts';
@@ -7,20 +8,20 @@ describe('attentionFields', () => {
     // A usage-limit hold is a waiting run with a resume booked (hearsay-tools/cezarion#1236): a
     // CLI reader gets when it resumes, not only that it is held.
     const autoResumeAt = '2026-10-21T14:05:00.000Z';
-    expect(attentionFields({ status: 'waiting', autoResumeAt })).toEqual({
+    expect(attentionFields({ status: RUN_STATUS.waiting, autoResumeAt })).toEqual({
       attention: 'none',
       attentionLabel: `usage limit, resumes ${autoResumeAt}`,
     });
   });
 
   it('leaves every other label as the cockpit says it', () => {
-    expect(attentionFields({ status: 'failed' })).toEqual({ attention: 'error', attentionLabel: 'failed' });
+    expect(attentionFields({ status: RUN_STATUS.failed })).toEqual({ attention: 'error', attentionLabel: 'failed' });
   });
 });
 
 // hearsay-tools/cezarion#1458: a CLI or webhook reader answers from the same context the card shows.
 describe('projectStatus', () => {
-  const run = { id: 'r1', title: 'Task', status: 'waiting' } as unknown as ApiRun;
+  const run = { id: 'r1', title: 'Task', status: RUN_STATUS.waiting } as unknown as ApiRun;
   const questions = [{ header: 'Choice', question: 'Which?', options: [{ label: 'A' }, { label: 'B' }] }];
 
   it('carries a pending question with its context', () => {

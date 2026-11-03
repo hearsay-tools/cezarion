@@ -1,3 +1,10 @@
+import {
+  RUN_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runTaskCommand, type TaskIo } from './cli.ts';
 import { pollHitDeadline, abortedPoll, TIMEOUT_GRACE_MS } from './watch.ts';
@@ -28,33 +35,33 @@ describe('cez task watching', () => {
   // run parks, so no poll reads a `waiting` run without it.
   const parkOn = (id: string, wait: Wait, over: Partial<RunRecord> = {}) => {
     harness.store.commitWait(id, wait);
-    harness.store.updateRun(id, { status: 'waiting', ...over });
+    harness.store.updateRun(id, { status: RUN_STATUS.waiting, ...over });
   };
   const parkOnWorkers = (id: string, asks = false) => parkOn(id, {
-    kind: 'worker', id: '00000000-0000-4000-8000-0000000000aa', source: 'agent', via: 'cez-worker-wait', registeredAt: '2026-09-05T00:00:00.000Z',
-    deadline: '2026-09-06T00:00:00.000Z', timeoutSeconds: 600, phase: 'open', turnId: 'turn-1',
+    kind: WAIT_KIND.worker, id: '00000000-0000-4000-8000-0000000000aa', source: WAIT_SOURCE.agent, via: WAIT_VIA['cez-worker-wait'], registeredAt: '2026-09-05T00:00:00.000Z',
+    deadline: '2026-09-06T00:00:00.000Z', timeoutSeconds: 600, phase: WAIT_PHASE.open, turnId: 'turn-1',
     workerIds: ['00000000-0000-4000-8000-000000000001'], revisions: [], outcomes: [],
   }, { delegation: { role: 'root', permissions: [], receipts: [] }, ...(asks ? { waits: [
-    ...(harness.store.getRun(id)?.waits ?? []), { id: '00000000-0000-4000-8000-0000000000ac', kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: '2026-09-05T00:00:00.000Z', phase: 'open', turnId: 'turn-1' },
+    ...(harness.store.getRun(id)?.waits ?? []), { id: '00000000-0000-4000-8000-0000000000ac', kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask, registeredAt: '2026-09-05T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1' },
   ] } : {}) });
   const parkOnTimer = (id: string) => parkOn(id, {
-    kind: 'timer', id: '00000000-0000-4000-8000-0000000000ab', source: 'agent', via: 'monitoring-line', registeredAt: new Date().toISOString(),
-    deadline: new Date(Date.now() + 600_000).toISOString(), phase: 'open', turnId: 'turn-1', seconds: 600,
+    kind: WAIT_KIND.timer, id: '00000000-0000-4000-8000-0000000000ab', source: WAIT_SOURCE.agent, via: WAIT_VIA['monitoring-line'], registeredAt: new Date().toISOString(),
+    deadline: new Date(Date.now() + 600_000).toISOString(), phase: WAIT_PHASE.open, turnId: 'turn-1', seconds: 600,
   });
 
   describe('wait', () => {
     it('exits 0 once the run reaches review', async () => {
       const id = create();
-      later(60, () => harness.store.updateRun(id, { status: 'review' }));
+      later(60, () => harness.store.updateRun(id, { status: RUN_STATUS.review }));
       expect(await run(['wait', id, '--timeout-seconds', '10'])).toBe(0);
-      expect(last()).toMatchObject({ timedOut: false, runs: [{ id, status: 'review' }] });
+      expect(last()).toMatchObject({ timedOut: false, runs: [{ id, status: RUN_STATUS.review }] });
     });
 
     it('exits 1 when the run fails', async () => {
       const id = create();
-      later(60, () => harness.store.updateRun(id, { status: 'failed' }));
+      later(60, () => harness.store.updateRun(id, { status: RUN_STATUS.failed }));
       expect(await run(['wait', id, '--timeout-seconds', '10'])).toBe(1);
-      expect(last()).toMatchObject({ runs: [{ id, status: 'failed' }] });
+      expect(last()).toMatchObject({ runs: [{ id, status: RUN_STATUS.failed }] });
     });
 
     // What a timed-out wait prints for each run depends on whether a poll answered before the
@@ -64,19 +71,19 @@ describe('cez task watching', () => {
     it('--mode any returns on the first settled run, --mode all waits for every run', async () => {
       const a = create('a');
       const b = create('b');
-      later(40, () => harness.store.updateRun(a, { status: 'done' }));
+      later(40, () => harness.store.updateRun(a, { status: RUN_STATUS.done }));
       expect(await run(['wait', a, b, '--mode', 'any', '--timeout-seconds', '10'])).toBe(0);
       expect(last()).toMatchObject({ timedOut: false });
-      later(40, () => harness.store.updateRun(b, { status: 'cancelled' }));
+      later(40, () => harness.store.updateRun(b, { status: RUN_STATUS.cancelled }));
       expect(await run(['wait', a, b, '--mode', 'all', '--timeout-seconds', '10'])).toBe(1);
       expect((last().runs as Array<{ status: string }>).map((entry) => entry.status)).toEqual(['done', 'cancelled']);
     });
 
     it('--until attention also stops on waiting', async () => {
       const id = create();
-      later(40, () => harness.store.updateRun(id, { status: 'waiting' }));
+      later(40, () => harness.store.updateRun(id, { status: RUN_STATUS.waiting }));
       expect(await run(['wait', id, '--until', 'attention', '--timeout-seconds', '10'])).toBe(0);
-      expect(last()).toMatchObject({ until: 'attention', runs: [{ id, status: 'waiting', attention: 'waiting', attentionLabel: 'needs you' }] });
+      expect(last()).toMatchObject({ until: 'attention', runs: [{ id, status: RUN_STATUS.waiting, attention: 'waiting', attentionLabel: 'needs you' }] });
     });
 
     /**
@@ -89,13 +96,13 @@ describe('cez task watching', () => {
 
       it('ends the default wait as soon as an interactive task parks, exit 0, with "needs you"', async () => {
         const id = create();
-        later(40, () => harness.store.updateRun(id, { status: 'waiting' }));
+        later(40, () => harness.store.updateRun(id, { status: RUN_STATUS.waiting }));
         const started = Date.now();
         expect(await run(['wait', id, '--timeout-seconds', '10'])).toBe(0);
         expect(Date.now() - started).toBeLessThan(5_000);
         expect(last()).toMatchObject({
           until: 'attention', timedOut: false,
-          runs: [{ id, status: 'waiting', attention: 'waiting', attentionLabel: 'needs you' }],
+          runs: [{ id, status: RUN_STATUS.waiting, attention: 'waiting', attentionLabel: 'needs you' }],
         });
       });
 
@@ -103,34 +110,34 @@ describe('cez task watching', () => {
         const id = create();
         later(40, () => parkedOnWorkers(id));
         expect(await run(['wait', id, '--timeout-seconds', '1'])).toBe(3);
-        expect(last()).toMatchObject({ until: 'attention', timedOut: true, runs: [{ id, status: 'waiting', attention: 'none', attentionLabel: 'waiting on 1 worker' }] });
+        expect(last()).toMatchObject({ until: 'attention', timedOut: true, runs: [{ id, status: RUN_STATUS.waiting, attention: 'none', attentionLabel: 'waiting on 1 worker' }] });
       });
 
       it('does not end an attention wait on a running or monitoring run', async () => {
         const id = create();
         later(40, () => parkOnTimer(id));
         expect(await run(['wait', id, '--timeout-seconds', '1'])).toBe(3);
-        expect(last()).toMatchObject({ timedOut: true, runs: [{ id, status: 'waiting', attention: 'running', attentionLabel: 'monitoring' }] });
-        harness.store.updateRun(id, { status: 'running' });
+        expect(last()).toMatchObject({ timedOut: true, runs: [{ id, status: RUN_STATUS.waiting, attention: 'running', attentionLabel: 'monitoring' }] });
+        harness.store.updateRun(id, { status: RUN_STATUS.running });
         expect(await run(['wait', id, '--timeout-seconds', '1'])).toBe(3);
-        expect(last()).toMatchObject({ timedOut: true, runs: [{ id, status: 'running', attention: 'running', attentionLabel: 'running' }] });
+        expect(last()).toMatchObject({ timedOut: true, runs: [{ id, status: RUN_STATUS.running, attention: 'running', attentionLabel: 'running' }] });
       });
 
       it('--until settled is unchanged: it waits through a waiting park and stops on a terminal status', async () => {
         const id = create();
-        later(40, () => harness.store.updateRun(id, { status: 'waiting' }));
+        later(40, () => harness.store.updateRun(id, { status: RUN_STATUS.waiting }));
         expect(await run(['wait', id, '--until', 'settled', '--timeout-seconds', '1'])).toBe(3);
-        expect(last()).toMatchObject({ until: 'settled', timedOut: true, runs: [{ id, status: 'waiting', attention: 'waiting', attentionLabel: 'needs you' }] });
-        later(40, () => harness.store.updateRun(id, { status: 'done' }));
+        expect(last()).toMatchObject({ until: 'settled', timedOut: true, runs: [{ id, status: RUN_STATUS.waiting, attention: 'waiting', attentionLabel: 'needs you' }] });
+        later(40, () => harness.store.updateRun(id, { status: RUN_STATUS.done }));
         expect(await run(['wait', id, '--until', 'settled', '--timeout-seconds', '10'])).toBe(0);
-        expect(last()).toMatchObject({ until: 'settled', timedOut: false, runs: [{ id, status: 'done', attention: 'none', attentionLabel: 'done' }] });
+        expect(last()).toMatchObject({ until: 'settled', timedOut: false, runs: [{ id, status: RUN_STATUS.done, attention: 'none', attentionLabel: 'done' }] });
       });
 
       it('stops on a failed run under either until, exit 1, with the error bucket', async () => {
         const id = create();
-        later(40, () => harness.store.updateRun(id, { status: 'failed' }));
+        later(40, () => harness.store.updateRun(id, { status: RUN_STATUS.failed }));
         expect(await run(['wait', id, '--timeout-seconds', '10'])).toBe(1);
-        expect(last()).toMatchObject({ runs: [{ id, status: 'failed', attention: 'error', attentionLabel: 'failed' }] });
+        expect(last()).toMatchObject({ runs: [{ id, status: RUN_STATUS.failed, attention: 'error', attentionLabel: 'failed' }] });
       });
     });
 
@@ -155,33 +162,33 @@ describe('cez task watching', () => {
       const waiting = run(['start', 'go', '--wait', '--timeout-seconds', '10']);
       const poll = setInterval(() => {
         const created = harness.store.listRuns()[0];
-        if (created) { harness.store.updateRun(created.id, { status: 'done' }); clearInterval(poll); }
+        if (created) { harness.store.updateRun(created.id, { status: RUN_STATUS.done }); clearInterval(poll); }
       }, 20);
       expect(await waiting).toBe(0);
       expect(out).toHaveLength(1);
-      expect(last()).toMatchObject({ created: true, status: 'done', timedOut: false, until: 'attention', attention: 'none', attentionLabel: 'done' });
+      expect(last()).toMatchObject({ created: true, status: RUN_STATUS.done, timedOut: false, until: 'attention', attention: 'none', attentionLabel: 'done' });
     });
 
     it('returns promptly, exit 0, once an interactive task parks for follow-up (#553)', async () => {
       const waiting = run(['start', 'go', '--wait', '--timeout-seconds', '10']);
       const poll = setInterval(() => {
         const created = harness.store.listRuns()[0];
-        if (created) { harness.store.updateRun(created.id, { status: 'waiting' }); clearInterval(poll); }
+        if (created) { harness.store.updateRun(created.id, { status: RUN_STATUS.waiting }); clearInterval(poll); }
       }, 20);
       const started = Date.now();
       expect(await waiting).toBe(0);
       expect(Date.now() - started).toBeLessThan(5_000);
-      expect(last()).toMatchObject({ created: true, status: 'waiting', timedOut: false, until: 'attention', attention: 'waiting', attentionLabel: 'needs you' });
+      expect(last()).toMatchObject({ created: true, status: RUN_STATUS.waiting, timedOut: false, until: 'attention', attention: 'waiting', attentionLabel: 'needs you' });
     });
 
     it('--until settled keeps waiting through the park', async () => {
       const waiting = run(['start', 'go', '--wait', '--until', 'settled', '--timeout-seconds', '1']);
       const poll = setInterval(() => {
         const created = harness.store.listRuns()[0];
-        if (created) { harness.store.updateRun(created.id, { status: 'waiting' }); clearInterval(poll); }
+        if (created) { harness.store.updateRun(created.id, { status: RUN_STATUS.waiting }); clearInterval(poll); }
       }, 20);
       expect(await waiting).toBe(3);
-      expect(last()).toMatchObject({ created: true, status: 'waiting', timedOut: true, until: 'settled' });
+      expect(last()).toMatchObject({ created: true, status: RUN_STATUS.waiting, timedOut: true, until: 'settled' });
     });
   });
 
@@ -219,17 +226,17 @@ describe('cez task watching', () => {
       const id = create();
       harness.store.appendEvent(id, { type: 'text', text: 'before' });
       later(100, () => harness.store.appendEvent(id, { type: 'text', text: 'during' }));
-      later(200, () => harness.store.updateRun(id, { status: 'done' }));
+      later(200, () => harness.store.updateRun(id, { status: RUN_STATUS.done }));
       expect(await run(['log', id, '--follow', '--timeout-seconds', '10'])).toBe(0);
       const texts = lines().filter((line) => line.type === 'text').map((line) => line.text);
       expect(texts).toEqual(['before', 'during']);
-      expect(last()).toMatchObject({ id, status: 'done' });
+      expect(last()).toMatchObject({ id, status: RUN_STATUS.done });
     });
 
     it('--follow exits 3 at the timeout', async () => {
       const id = create();
       expect(await run(['log', id, '--follow', '--timeout-seconds', '1'])).toBe(3);
-      expect(last()).toMatchObject({ id, status: 'queued', timedOut: true });
+      expect(last()).toMatchObject({ id, status: RUN_STATUS.queued, timedOut: true });
     });
 
     it('passes an unknown run through as exit 2', async () => {
@@ -248,18 +255,18 @@ describe('cez task watching', () => {
         const id = create();
         harness.store.appendEvent(id, { type: 'text', text: 'before' });
         later(100, () => harness.store.appendEvent(id, { type: 'text', text: 'during' }));
-        later(200, () => harness.store.updateRun(id, { status: 'waiting' }));
+        later(200, () => harness.store.updateRun(id, { status: RUN_STATUS.waiting }));
         const started = Date.now();
         expect(await run(['log', id, '--follow', '--timeout-seconds', '10'])).toBe(0);
         expect(Date.now() - started).toBeLessThan(5_000);
         expect(lines().filter((line) => line.type === 'text').map((line) => line.text)).toEqual(['before', 'during']);
-        expect(last()).toEqual({ id, status: 'waiting', attention: 'waiting', attentionLabel: 'needs you', until: 'attention', timedOut: false });
+        expect(last()).toEqual({ id, status: RUN_STATUS.waiting, attention: 'waiting', attentionLabel: 'needs you', until: 'attention', timedOut: false });
       });
 
       it('ends at the replay boundary when the task is already parked', async () => {
         const id = create();
         harness.store.appendEvent(id, { type: 'text', text: 'turn' });
-        harness.store.updateRun(id, { status: 'waiting' });
+        harness.store.updateRun(id, { status: RUN_STATUS.waiting });
         expect(await run(['log', id, '--follow', '--timeout-seconds', '10'])).toBe(0);
         expect(lines().map((line) => line.text ?? line.status)).toEqual(['turn', 'waiting']);
         expect(last()).toMatchObject({ attention: 'waiting', until: 'attention', timedOut: false });
@@ -269,23 +276,23 @@ describe('cez task watching', () => {
         const id = create();
         later(40, () => parkedOnWorkers(id));
         expect(await run(['log', id, '--follow', '--timeout-seconds', '1'])).toBe(3);
-        expect(last()).toMatchObject({ id, status: 'waiting', attention: 'none', attentionLabel: 'waiting on 1 worker', until: 'attention', timedOut: true });
+        expect(last()).toMatchObject({ id, status: RUN_STATUS.waiting, attention: 'none', attentionLabel: 'waiting on 1 worker', until: 'attention', timedOut: true });
         // Same status: only the question changes, and the follow still notices.
         later(300, () => parkedOnWorkers(id, true));
         expect(await run(['log', id, '--follow', '--timeout-seconds', '10'])).toBe(0);
-        expect(last()).toMatchObject({ id, status: 'waiting', attention: 'waiting', attentionLabel: 'needs you', timedOut: false });
+        expect(last()).toMatchObject({ id, status: RUN_STATUS.waiting, attention: 'waiting', attentionLabel: 'needs you', timedOut: false });
       });
 
       it('does not end on a running or monitoring run', async () => {
         const id = create();
         later(40, () => parkOnTimer(id));
         expect(await run(['log', id, '--follow', '--timeout-seconds', '1'])).toBe(3);
-        expect(last()).toMatchObject({ id, status: 'waiting', attention: 'running', attentionLabel: 'monitoring', until: 'attention', timedOut: true });
+        expect(last()).toMatchObject({ id, status: RUN_STATUS.waiting, attention: 'running', attentionLabel: 'monitoring', until: 'attention', timedOut: true });
       });
 
       it.each(['attention', 'settled'])('reports a run deleted mid-follow as missing, exit 1, under --until %s', async (until) => {
         const id = create();
-        harness.store.updateRun(id, { status: 'running' });
+        harness.store.updateRun(id, { status: RUN_STATUS.running });
         harness.store.appendEvent(id, { type: 'text', text: 'before' });
         // Under load a 200ms timer can fire before SSE replays `before`, so the cell
         // asserts [] instead of a mid-follow delete. Wait for the replay, then delete.
@@ -301,12 +308,12 @@ describe('cez task watching', () => {
 
       it('--until settled waits through a park and ends on a terminal status', async () => {
         const id = create();
-        later(40, () => harness.store.updateRun(id, { status: 'waiting' }));
+        later(40, () => harness.store.updateRun(id, { status: RUN_STATUS.waiting }));
         expect(await run(['log', id, '--follow', '--until', 'settled', '--timeout-seconds', '1'])).toBe(3);
-        expect(last()).toMatchObject({ id, status: 'waiting', attention: 'waiting', until: 'settled', timedOut: true });
-        later(200, () => harness.store.updateRun(id, { status: 'cancelled' }));
+        expect(last()).toMatchObject({ id, status: RUN_STATUS.waiting, attention: 'waiting', until: 'settled', timedOut: true });
+        later(200, () => harness.store.updateRun(id, { status: RUN_STATUS.cancelled }));
         expect(await run(['log', id, '--follow', '--until', 'settled', '--timeout-seconds', '10'])).toBe(1);
-        expect(last()).toEqual({ id, status: 'cancelled', attention: 'none', attentionLabel: 'cancelled', until: 'settled', timedOut: false });
+        expect(last()).toEqual({ id, status: RUN_STATUS.cancelled, attention: 'none', attentionLabel: 'cancelled', until: 'settled', timedOut: false });
       });
     });
   });
@@ -373,7 +380,7 @@ describe('cez task watching against a scripted cockpit', () => {
     expect(await run(['wait', 'r1', '--timeout-seconds', '2'])).toBe(3);
     expect(Date.now() - started).toBeLessThan(4_000);
     expect(polls).toBeGreaterThan(1);
-    expect(JSON.parse(out.at(-1)!)).toMatchObject({ timedOut: true, runs: [{ id: 'r1', status: 'queued' }] });
+    expect(JSON.parse(out.at(-1)!)).toMatchObject({ timedOut: true, runs: [{ id: 'r1', status: RUN_STATUS.queued }] });
   });
 
   it('wait reports a connection lost mid-budget as unavailable (exit 2), not a timeout', async () => {
@@ -396,9 +403,9 @@ describe('cez task watching against a scripted cockpit', () => {
       json(res, { error: 'not found' });
     };
     expect(await run(['wait', 'r1', '--timeout-seconds', '5'])).toBe(0);
-    expect(JSON.parse(out.at(-1)!)).toMatchObject({ timedOut: false, runs: [{ id: 'r1', status: 'done' }] });
+    expect(JSON.parse(out.at(-1)!)).toMatchObject({ timedOut: false, runs: [{ id: 'r1', status: RUN_STATUS.done }] });
     expect(await run(['list'])).toBe(0);
-    expect(JSON.parse(out.at(-1)!)).toMatchObject({ total: 1, runs: [{ id: 'r1', status: 'done' }] });
+    expect(JSON.parse(out.at(-1)!)).toMatchObject({ total: 1, runs: [{ id: 'r1', status: RUN_STATUS.done }] });
     expect(seen.slice(0, 2)).toEqual(['/api/v1/p/default/run-summaries', '/api/v1/p/default/runs']);
   });
 
@@ -465,7 +472,7 @@ describe('cez task watching against a scripted cockpit', () => {
     expect(await run(['log', 'r1', '--follow', '--timeout-seconds', '5'])).toBe(0);
     const lines = out.map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(lines.filter((line) => line.type === 'text').map((line) => line.text)).toEqual(['t1', 't2', 't3']);
-    expect(lines.at(-1)).toMatchObject({ id: 'r1', status: 'done' });
+    expect(lines.at(-1)).toMatchObject({ id: 'r1', status: RUN_STATUS.done });
   });
 
   it('log --follow drains events written before a parked run frame that overtook them (#931)', async () => {
@@ -492,7 +499,7 @@ describe('cez task watching against a scripted cockpit', () => {
     expect(await run(['log', 'r1', '--follow', '--timeout-seconds', '5'])).toBe(0);
     const lines = out.map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(lines.filter((line) => line.type === 'text').map((line) => line.text)).toEqual(['t1', 't2', 't3']);
-    expect(lines.at(-1)).toEqual({ id: 'r1', status: 'waiting', attention: 'waiting', attentionLabel: 'needs you', until: 'attention', timedOut: false });
+    expect(lines.at(-1)).toEqual({ id: 'r1', status: RUN_STATUS.waiting, attention: 'waiting', attentionLabel: 'needs you', until: 'attention', timedOut: false });
     // The attention judgement is the run read, not the frame.
     expect(seen).toContain('/api/v1/p/default/runs/r1');
   });
@@ -516,8 +523,8 @@ describe('cez task watching against a scripted cockpit', () => {
         res.write(`event: run\ndata: ${JSON.stringify(apiRun('running'))}\n\n`);
         // A last frame for a record that is gone by the time the CLI reads it.
         // A changed record that is still not attention: a timer park reads `monitoring`.
-        const monitoring = { ...apiRun('waiting'), waits: [{ id: '00000000-0000-4000-8000-0000000000d1', kind: 'timer', source: 'agent', via: 'cezar_wait',
-          registeredAt: '2026-01-01T00:00:00.000Z', deadline: '2026-01-01T00:05:00.000Z', phase: 'open', turnId: 't', seconds: 300 }] };
+        const monitoring = { ...apiRun('waiting'), waits: [{ id: '00000000-0000-4000-8000-0000000000d1', kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
+          registeredAt: '2026-01-01T00:00:00.000Z', deadline: '2026-01-01T00:05:00.000Z', phase: WAIT_PHASE.open, turnId: 't', seconds: 300 }] };
         setTimeout(() => { deleted = true; res.write(`event: run\ndata: ${JSON.stringify(monitoring)}\n\n`); }, 50);
         return;
       }
@@ -577,7 +584,7 @@ describe('cez task watching against a scripted cockpit', () => {
     expect(await run(['log', 'r1', '--follow', '--timeout-seconds', '1'])).toBe(3);
     const lines = out.map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(lines.filter((line) => line.type === 'text').map((line) => line.text)).toEqual(['t1', 't2', 't3']);
-    expect(lines.at(-1)).toEqual({ id: 'r1', status: 'running', attention: 'running', attentionLabel: 'running', until: 'attention', timedOut: true });
+    expect(lines.at(-1)).toEqual({ id: 'r1', status: RUN_STATUS.running, attention: 'running', attentionLabel: 'running', until: 'attention', timedOut: true });
   });
 
   it('log --follow keeps the attention a run frame carried when it times out before the first run read (#931)', async () => {
@@ -595,7 +602,7 @@ describe('cez task watching against a scripted cockpit', () => {
     expect(await run(['log', 'r1', '--follow', '--timeout-seconds', '1'])).toBe(3);
     const lines = out.map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(lines.map((line) => line.text ?? line.status)).toEqual(['t1', 'waiting']);
-    expect(lines.at(-1)).toEqual({ id: 'r1', status: 'waiting', attention: 'waiting', attentionLabel: 'needs you', until: 'attention', timedOut: true });
+    expect(lines.at(-1)).toEqual({ id: 'r1', status: RUN_STATUS.waiting, attention: 'waiting', attentionLabel: 'needs you', until: 'attention', timedOut: true });
   });
 
   it('log --follow reports a run deleted before its event stream connects as missing, exit 1 (#931)', async () => {
@@ -655,7 +662,7 @@ describe('cez task watching against a scripted cockpit', () => {
     expect(await run(['log', 'r1', '--follow', '--timeout-seconds', '5'])).toBe(0);
     const lines = out.map((line) => JSON.parse(line) as Record<string, unknown>);
     expect(lines.slice(0, 3).map((line) => line.text)).toEqual(['t1', 't2', 't3']);
-    expect(lines.at(-1)).toMatchObject({ id: 'r1', status: 'done' });
+    expect(lines.at(-1)).toMatchObject({ id: 'r1', status: RUN_STATUS.done });
   });
 });
 
