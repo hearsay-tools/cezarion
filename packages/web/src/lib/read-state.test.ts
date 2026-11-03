@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest'
@@ -17,7 +18,7 @@ import {
  *  is about. */
 function done(over: Partial<ReadStateInput> = {}): ReadStateInput {
   return {
-    status: 'done',
+    status: RUN_STATUS.done,
     finishedAt: '2026-08-01T10:00:00.000Z',
     seenAt: undefined,
     archived: false,
@@ -40,7 +41,7 @@ describe('isUnread', () => {
   })
 
   it('is unread when a failed run has never been seen', () => {
-    expect(isUnread(done({ status: 'failed', seenAt: undefined }))).toBe(true)
+    expect(isUnread(done({ status: RUN_STATUS.failed, seenAt: undefined }))).toBe(true)
   })
 
   it('is read once seen at or after it finished', () => {
@@ -57,7 +58,7 @@ describe('isUnread', () => {
   })
 
   it('is never unread for a cancelled run — you stopped it yourself', () => {
-    expect(isUnread(done({ status: 'cancelled', seenAt: undefined }))).toBe(false)
+    expect(isUnread(done({ status: RUN_STATUS.cancelled, seenAt: undefined }))).toBe(false)
   })
 
   it('is never unread for a live (unfinished) run', () => {
@@ -81,11 +82,11 @@ describe('canBeUnread — the receipt-independent half (#775)', () => {
     // currently read still answers true — which is exactly when "Mark unread" is offered.
     expect(canBeUnread(done({ seenAt: undefined }))).toBe(true)
     expect(canBeUnread(done({ seenAt: '2026-08-01T10:05:00.000Z' }))).toBe(true)
-    expect(canBeUnread(done({ status: 'failed', seenAt: '2026-08-01T10:05:00.000Z' }))).toBe(true)
+    expect(canBeUnread(done({ status: RUN_STATUS.failed, seenAt: '2026-08-01T10:05:00.000Z' }))).toBe(true)
   })
 
   it('is false for the rows that can never wear the marker', () => {
-    expect(canBeUnread(done({ status: 'cancelled' }))).toBe(false)
+    expect(canBeUnread(done({ status: RUN_STATUS.cancelled }))).toBe(false)
     expect(canBeUnread(done({ archived: true }))).toBe(false)
     expect(canBeUnread(done({ finishedAt: undefined }))).toBe(false)
     for (const status of ['queued', 'running', 'waiting', 'review'] as RunRecord['status'][]) {
@@ -96,12 +97,12 @@ describe('canBeUnread — the receipt-independent half (#775)', () => {
   it('is implied by isUnread — every unread row is by definition eligible', () => {
     const cases: ReadStateInput[] = [
       done({ seenAt: undefined }),
-      done({ status: 'failed', seenAt: undefined }),
+      done({ status: RUN_STATUS.failed, seenAt: undefined }),
       done({ seenAt: '2026-08-01T09:00:00.000Z' }), // stale receipt
-      done({ status: 'cancelled' }),
+      done({ status: RUN_STATUS.cancelled }),
       done({ archived: true }),
       done({ finishedAt: undefined }),
-      done({ status: 'running', finishedAt: undefined }),
+      done({ status: RUN_STATUS.running, finishedAt: undefined }),
     ]
     for (const run of cases) {
       if (isUnread(run)) expect(canBeUnread(run)).toBe(true)
@@ -112,7 +113,7 @@ describe('canBeUnread — the receipt-independent half (#775)', () => {
 describe('isReadDoneItem', () => {
   it('is true for a read done item and a cancelled run', () => {
     expect(isReadDoneItem(done({ seenAt: '2026-08-01T10:05:00.000Z' }))).toBe(true)
-    expect(isReadDoneItem(done({ status: 'cancelled' }))).toBe(true)
+    expect(isReadDoneItem(done({ status: RUN_STATUS.cancelled }))).toBe(true)
   })
 
   it('is false for an unread done item (that is promoted, not dimmed)', () => {
@@ -120,12 +121,12 @@ describe('isReadDoneItem', () => {
   })
 
   it('is false for a live run — a working row shows its attention state, not a past outcome', () => {
-    expect(isReadDoneItem(done({ status: 'running', finishedAt: undefined }))).toBe(false)
+    expect(isReadDoneItem(done({ status: RUN_STATUS.running, finishedAt: undefined }))).toBe(false)
   })
 })
 
 describe('a run waiting out a usage limit', () => {
-  const scheduled = done({ status: 'waiting', autoResumeAt: '2026-08-03T19:33:53.000Z' })
+  const scheduled = done({ status: RUN_STATUS.waiting, autoResumeAt: '2026-08-03T19:33:53.000Z' })
 
   it('is neither unread nor read history — it is not finished at all', () => {
     // No outcome to have missed, and nothing to dim as history (spec
@@ -136,8 +137,8 @@ describe('a run waiting out a usage limit', () => {
   })
 
   it('goes back to the ordinary rule once the schedule is gone', () => {
-    expect(isUnread(done({ status: 'failed' }))).toBe(true)
-    expect(isUnread({ ...scheduled, status: 'failed', autoResumeAt: undefined })).toBe(true)
+    expect(isUnread(done({ status: RUN_STATUS.failed }))).toBe(true)
+    expect(isUnread({ ...scheduled, status: RUN_STATUS.failed, autoResumeAt: undefined })).toBe(true)
   })
 
   it('cannot be put back into unread either — eligibility excludes it, read receipt or not', () => {
@@ -147,7 +148,7 @@ describe('a run waiting out a usage limit', () => {
     // both receipt states, because eligibility is deliberately receipt-independent.
     expect(canBeUnread(scheduled)).toBe(false)
     expect(canBeUnread({ ...scheduled, seenAt: '2026-08-03T19:00:00.000Z' })).toBe(false)
-    expect(canBeUnread({ ...scheduled, status: 'failed', autoResumeAt: undefined })).toBe(true)
+    expect(canBeUnread({ ...scheduled, status: RUN_STATUS.failed, autoResumeAt: undefined })).toBe(true)
   })
 })
 
@@ -155,11 +156,11 @@ describe('unreadDoneCount', () => {
   it('counts only the unread done items', () => {
     const runs: ReadStateInput[] = [
       done({ seenAt: undefined }), // unread
-      done({ status: 'failed', seenAt: undefined }), // unread
+      done({ status: RUN_STATUS.failed, seenAt: undefined }), // unread
       done({ seenAt: '2026-08-01T10:05:00.000Z' }), // read
-      done({ status: 'cancelled' }), // never unread
+      done({ status: RUN_STATUS.cancelled }), // never unread
       done({ archived: true, seenAt: undefined }), // archived → not unread
-      done({ status: 'running', finishedAt: undefined }), // live → not unread
+      done({ status: RUN_STATUS.running, finishedAt: undefined }), // live → not unread
     ]
     expect(unreadDoneCount(runs)).toBe(2)
   })

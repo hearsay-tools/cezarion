@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 // @vitest-environment node
 
 import { openHumanWait, summaryOf } from '@/test/run-summary-fixture'
@@ -27,7 +28,7 @@ function run(over: Partial<RunRecord> & { automationId?: string | undefined } = 
     title: `Task ${seq}`,
     workflow: 'quick-task',
     task: `task ${seq}`,
-    status: 'done',
+    status: RUN_STATUS.done,
     createdAt: `2026-10-24T10:${String(seq % 60).padStart(2, '0')}:00.000Z`,
     tokensUsed: 0,
     archived: false,
@@ -69,13 +70,13 @@ describe('origin filter', () => {
   })
 
   it('counts the archive view in front of the reader and skips owned workers', () => {
-    const parent = run({ status: 'running' })
+    const parent = run({ status: RUN_STATUS.running })
     const runs = [
       parent,
       run({ automationId: 'a1' }),
       run({ automationId: 'a1', archived: true }),
       run({ archived: true }),
-      run({ status: 'running', delegation: { role: 'worker', parentRunId: parent.id } } as Partial<RunRecord>),
+      run({ status: RUN_STATUS.running, delegation: { role: 'worker', parentRunId: parent.id } } as Partial<RunRecord>),
     ]
     expect(originCounts(runs, 'active')).toEqual({ all: 2, direct: 1, automations: 1 })
     expect(originCounts(runs, 'archived')).toEqual({ all: 2, direct: 1, automations: 1 })
@@ -85,7 +86,7 @@ describe('origin filter', () => {
 describe('groupTone', () => {
   it('colours each group, and turns Finished red for a failed member', () => {
     const done = run()
-    const failed = run({ status: 'failed' })
+    const failed = run({ status: RUN_STATUS.failed })
     expect(groupTone('Needs you', [])).toBe('pending')
     expect(groupTone('Working', [])).toBe('running')
     expect(groupTone('Archived', [failed])).toBe('neutral')
@@ -99,9 +100,9 @@ describe('groupTone', () => {
 
 describe('groupProjectRuns', () => {
   it('keeps the sidebar grouping, with queue numbers from the unfiltered list', () => {
-    const first = run({ status: 'queued', createdAt: '2026-10-24T09:00:00.000Z' })
-    const second = run({ status: 'queued', createdAt: '2026-10-24T09:01:00.000Z', automationId: 'a' })
-    const review = run({ status: 'review' })
+    const first = run({ status: RUN_STATUS.queued, createdAt: '2026-10-24T09:00:00.000Z' })
+    const second = run({ status: RUN_STATUS.queued, createdAt: '2026-10-24T09:01:00.000Z', automationId: 'a' })
+    const review = run({ status: RUN_STATUS.review })
     const all = [first, second, review]
     const visible = all.filter((entry) => matchesOrigin(entry, 'automations'))
 
@@ -115,12 +116,12 @@ describe('groupProjectRuns', () => {
 describe('groupIndexedTasks', () => {
   it('matches the sidebar for one project: review, failures, human and non-human waits, pins', () => {
     const runs = [
-      run({ status: 'review' }),
-      run({ status: 'failed' }),
-      run({ status: 'waiting', waits: [openHumanWait()] }),
-      run({ status: 'waiting', waits: [timerWait()] }),
-      run({ status: 'running', pinned: true }),
-      run({ status: 'queued' }),
+      run({ status: RUN_STATUS.review }),
+      run({ status: RUN_STATUS.failed }),
+      run({ status: RUN_STATUS.waiting, waits: [openHumanWait()] }),
+      run({ status: RUN_STATUS.waiting, waits: [timerWait()] }),
+      run({ status: RUN_STATUS.running, pinned: true }),
+      run({ status: RUN_STATUS.queued }),
     ]
     const tasks = runs.map((summary) => task(indexed('p1', summary)))
     const groups = groupIndexedTasks(tasks, 'active', tasks.map(({ run }) => run))
@@ -130,11 +131,11 @@ describe('groupIndexedTasks', () => {
   })
 
   it('never merges equal task or parent ids from two projects', () => {
-    const a = indexed('alpha', run({ id: 'same', status: 'done' }))
-    const b = indexed('beta', run({ id: 'same', status: 'done' }))
-    const parent = indexed('beta', run({ id: 'parent', status: 'running' }))
+    const a = indexed('alpha', run({ id: 'same', status: RUN_STATUS.done }))
+    const b = indexed('beta', run({ id: 'same', status: RUN_STATUS.done }))
+    const parent = indexed('beta', run({ id: 'parent', status: RUN_STATUS.running }))
     // A worker whose parent id exists in ANOTHER project: it is still an owned worker, so not a row.
-    const worker = indexed('alpha', run({ id: 'w', status: 'running', delegation: { role: 'worker', parentRunId: 'parent' } } as Partial<RunRecord>))
+    const worker = indexed('alpha', run({ id: 'w', status: RUN_STATUS.running, delegation: { role: 'worker', parentRunId: 'parent' } } as Partial<RunRecord>))
     const tasks = [a, b, parent, worker].map(task)
     const groups = groupIndexedTasks(tasks, 'active', tasks.map(({ run }) => run))
     const name = ({ run }: { run: RunIndexEntry }) => `${run.projectId}/${run.id}`
@@ -145,9 +146,9 @@ describe('groupIndexedTasks', () => {
 
   it('numbers each project’s queue separately, from the full index', () => {
     const entries = [
-      indexed('alpha', run({ id: 'q', status: 'queued', createdAt: '2026-10-24T08:00:00.000Z' })),
-      indexed('beta', run({ id: 'q', status: 'queued', createdAt: '2026-10-24T08:01:00.000Z' })),
-      indexed('beta', run({ id: 'q2', status: 'queued', createdAt: '2026-10-24T08:02:00.000Z', automationId: 'a' })),
+      indexed('alpha', run({ id: 'q', status: RUN_STATUS.queued, createdAt: '2026-10-24T08:00:00.000Z' })),
+      indexed('beta', run({ id: 'q', status: RUN_STATUS.queued, createdAt: '2026-10-24T08:01:00.000Z' })),
+      indexed('beta', run({ id: 'q2', status: RUN_STATUS.queued, createdAt: '2026-10-24T08:02:00.000Z', automationId: 'a' })),
     ]
     const visible = entries.filter((entry) => matchesOrigin(entry, 'automations')).map(task)
     const groups = groupIndexedTasks(visible, 'active', entries)
@@ -155,7 +156,7 @@ describe('groupIndexedTasks', () => {
   })
 
   it('collapses archived history into one Archived group', () => {
-    const tasks = [run({ archived: true, status: 'failed' }), run({ archived: true })].map((summary) => task(indexed('p', summary)))
+    const tasks = [run({ archived: true, status: RUN_STATUS.failed }), run({ archived: true })].map((summary) => task(indexed('p', summary)))
     expect(groupIndexedTasks(tasks, 'archived', []).map((group) => group.label)).toEqual(['Archived'])
   })
 })

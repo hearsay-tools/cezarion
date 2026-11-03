@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 // @vitest-environment node
 
 import { summaryOf } from '@/test/run-summary-fixture'
@@ -36,7 +37,7 @@ function run(over: Partial<RunRecord> = {}): RunSummary {
     title: `Task ${seq}`,
     workflow: 'default',
     task: `task ${seq}`,
-    status: 'done',
+    status: RUN_STATUS.done,
     createdAt: '2026-07-14T10:00:00.000Z',
     tokensUsed: 0,
     archived: false,
@@ -85,16 +86,16 @@ describe('bucketOf', () => {
 
   // The monitoring park is the agent's open timer since hearsay-tools/cezarion#1301.
   it("a monitoring run stays in Working, not Needs you (#490)", () => {
-    expect(bucketOf(run({ status: 'waiting', waits: [timerWait()] } as Partial<RunRecord>), 'active')).toBe('Working')
+    expect(bucketOf(run({ status: RUN_STATUS.waiting, waits: [timerWait()] } as Partial<RunRecord>), 'active')).toBe('Working')
   })
 
   it('a run waiting out a usage limit is Working, not Finished', () => {
     // Failed on the record, but it has an appointment to resume itself (spec
     // 2026-08-03-auto-resume-after-usage-limit) — it is work in flight, not an outcome. And it
     // asks for nothing, so never "Needs you".
-    const scheduled = run({ status: 'waiting', autoResumeAt: '2026-08-03T19:33:53.000Z' })
+    const scheduled = run({ status: RUN_STATUS.waiting, autoResumeAt: '2026-08-03T19:33:53.000Z' })
     expect(bucketOf(scheduled, 'active')).toBe('Working')
-    expect(bucketOf(run({ status: 'failed' }), 'active')).toBe('Finished')
+    expect(bucketOf(run({ status: RUN_STATUS.failed }), 'active')).toBe('Finished')
     // Archived still collapses everything, schedule or not.
     expect(bucketOf({ ...scheduled, archived: true }, 'archived')).toBe('Archived')
   })
@@ -103,12 +104,12 @@ describe('bucketOf', () => {
 describe('sortRuns', () => {
   it('orders by status priority, then newest first', () => {
     const runs = [
-      run({ id: 'done-old', status: 'done', createdAt: '2026-07-14T09:00:00.000Z' }),
-      run({ id: 'running', status: 'running', createdAt: '2026-07-14T08:00:00.000Z' }),
-      run({ id: 'done-new', status: 'done', createdAt: '2026-07-14T11:00:00.000Z' }),
-      run({ id: 'review', status: 'review', createdAt: '2026-07-14T07:00:00.000Z' }),
-      run({ id: 'queued', status: 'queued', createdAt: '2026-07-14T12:00:00.000Z' }),
-      run({ id: 'waiting', status: 'waiting', createdAt: '2026-07-14T06:00:00.000Z' }),
+      run({ id: 'done-old', status: RUN_STATUS.done, createdAt: '2026-07-14T09:00:00.000Z' }),
+      run({ id: 'running', status: RUN_STATUS.running, createdAt: '2026-07-14T08:00:00.000Z' }),
+      run({ id: 'done-new', status: RUN_STATUS.done, createdAt: '2026-07-14T11:00:00.000Z' }),
+      run({ id: 'review', status: RUN_STATUS.review, createdAt: '2026-07-14T07:00:00.000Z' }),
+      run({ id: 'queued', status: RUN_STATUS.queued, createdAt: '2026-07-14T12:00:00.000Z' }),
+      run({ id: 'waiting', status: RUN_STATUS.waiting, createdAt: '2026-07-14T06:00:00.000Z' }),
     ]
     // Needs-you first even though it is the oldest run in the list; a fresh `done` never
     // outranks a run that is blocked on you.
@@ -127,18 +128,18 @@ describe('sortRuns', () => {
     // one resuming at 11:40 however old each is (spec 2026-08-03-auto-resume-after-usage-limit).
     // Creation order is deliberately the inverse of appointment order here.
     const runs = [
-      run({ id: 'late', status: 'waiting', autoResumeAt: '2026-08-03T11:40:00.000Z', createdAt: '2026-07-14T12:00:00.000Z' }),
-      run({ id: 'soon', status: 'waiting', autoResumeAt: '2026-08-03T11:14:00.000Z', createdAt: '2026-07-14T08:00:00.000Z' }),
-      run({ id: 'mid', status: 'waiting', autoResumeAt: '2026-08-03T11:20:00.000Z', createdAt: '2026-07-14T10:00:00.000Z' }),
+      run({ id: 'late', status: RUN_STATUS.waiting, autoResumeAt: '2026-08-03T11:40:00.000Z', createdAt: '2026-07-14T12:00:00.000Z' }),
+      run({ id: 'soon', status: RUN_STATUS.waiting, autoResumeAt: '2026-08-03T11:14:00.000Z', createdAt: '2026-07-14T08:00:00.000Z' }),
+      run({ id: 'mid', status: RUN_STATUS.waiting, autoResumeAt: '2026-08-03T11:20:00.000Z', createdAt: '2026-07-14T10:00:00.000Z' }),
     ]
     expect(sortRuns(runs, 'active').map((r) => r.id)).toEqual(['soon', 'mid', 'late'])
   })
 
   it('orders queued runs FIFO, so the row order matches the #N positions they print', () => {
     const runs = [
-      run({ id: 'third', status: 'queued', createdAt: '2026-07-14T12:00:00.000Z' }),
-      run({ id: 'first', status: 'queued', createdAt: '2026-07-14T10:00:00.000Z' }),
-      run({ id: 'second', status: 'queued', createdAt: '2026-07-14T11:00:00.000Z' }),
+      run({ id: 'third', status: RUN_STATUS.queued, createdAt: '2026-07-14T12:00:00.000Z' }),
+      run({ id: 'first', status: RUN_STATUS.queued, createdAt: '2026-07-14T10:00:00.000Z' }),
+      run({ id: 'second', status: RUN_STATUS.queued, createdAt: '2026-07-14T11:00:00.000Z' }),
     ]
     const sorted = sortRuns(runs, 'active')
     expect(sorted.map((r) => r.id)).toEqual(['first', 'second', 'third'])
@@ -149,10 +150,10 @@ describe('sortRuns', () => {
 
   it('ranks the outcomes done → failed → cancelled, recency within each', () => {
     const runs = [
-      run({ id: 'cancelled', status: 'cancelled', createdAt: '2026-07-14T09:00:00.000Z' }),
-      run({ id: 'failed', status: 'failed', createdAt: '2026-07-14T10:00:00.000Z' }),
-      run({ id: 'done', status: 'done', createdAt: '2026-07-14T08:00:00.000Z' }),
-      run({ id: 'done-newer', status: 'done', createdAt: '2026-07-14T11:00:00.000Z' }),
+      run({ id: 'cancelled', status: RUN_STATUS.cancelled, createdAt: '2026-07-14T09:00:00.000Z' }),
+      run({ id: 'failed', status: RUN_STATUS.failed, createdAt: '2026-07-14T10:00:00.000Z' }),
+      run({ id: 'done', status: RUN_STATUS.done, createdAt: '2026-07-14T08:00:00.000Z' }),
+      run({ id: 'done-newer', status: RUN_STATUS.done, createdAt: '2026-07-14T11:00:00.000Z' }),
     ]
     expect(sortRuns(runs, 'active').map((r) => r.id)).toEqual([
       'done-newer',
@@ -168,16 +169,16 @@ describe('sortRuns', () => {
     // with the plain failures, nor rise with the waits that need a human (hearsay-tools/cezarion#1236).
     // Reading top-down answers "what happens next".
     const runs = [
-      run({ id: 'failed', status: 'failed', createdAt: '2026-07-14T12:00:00.000Z' }),
-      run({ id: 'queued', status: 'queued', createdAt: '2026-07-14T11:00:00.000Z' }),
+      run({ id: 'failed', status: RUN_STATUS.failed, createdAt: '2026-07-14T12:00:00.000Z' }),
+      run({ id: 'queued', status: RUN_STATUS.queued, createdAt: '2026-07-14T11:00:00.000Z' }),
       run({
         id: 'scheduled',
-        status: 'waiting',
+        status: RUN_STATUS.waiting,
         autoResumeAt: '2026-08-03T19:33:53.000Z',
         createdAt: '2026-07-14T08:00:00.000Z',
       }),
-      run({ id: 'running', status: 'running', createdAt: '2026-07-14T07:00:00.000Z' }),
-      run({ id: 'waiting', status: 'waiting', createdAt: '2026-07-14T06:00:00.000Z' }),
+      run({ id: 'running', status: RUN_STATUS.running, createdAt: '2026-07-14T07:00:00.000Z' }),
+      run({ id: 'waiting', status: RUN_STATUS.waiting, createdAt: '2026-07-14T06:00:00.000Z' }),
     ]
     expect(sortRuns(runs, 'active').map((r) => r.id)).toEqual([
       'waiting',
@@ -195,7 +196,7 @@ describe('sortRuns', () => {
   })
 
   it('does not reorder its input', () => {
-    const runs = [run({ id: 'done', status: 'done' }), run({ id: 'waiting', status: 'waiting' })]
+    const runs = [run({ id: 'done', status: RUN_STATUS.done }), run({ id: 'waiting', status: RUN_STATUS.waiting })]
     sortRuns(runs, 'active')
     expect(runs.map((r) => r.id)).toEqual(['done', 'waiting'])
   })
@@ -204,9 +205,9 @@ describe('sortRuns', () => {
 describe('queuePositions', () => {
   it('numbers queued runs 1..n by creation order, not list order', () => {
     const runs = [
-      run({ id: 'third', status: 'queued', createdAt: '2026-07-14T12:00:00.000Z' }),
-      run({ id: 'first', status: 'queued', createdAt: '2026-07-14T10:00:00.000Z' }),
-      run({ id: 'second', status: 'queued', createdAt: '2026-07-14T11:00:00.000Z' }),
+      run({ id: 'third', status: RUN_STATUS.queued, createdAt: '2026-07-14T12:00:00.000Z' }),
+      run({ id: 'first', status: RUN_STATUS.queued, createdAt: '2026-07-14T10:00:00.000Z' }),
+      run({ id: 'second', status: RUN_STATUS.queued, createdAt: '2026-07-14T11:00:00.000Z' }),
     ]
     expect(queuePositions(runs)).toEqual(
       new Map([
@@ -219,9 +220,9 @@ describe('queuePositions', () => {
 
   it('counts only active queued runs', () => {
     const runs = [
-      run({ id: 'running', status: 'running' }),
-      run({ id: 'archived-queued', status: 'queued', archived: true, createdAt: '2026-07-14T09:00:00.000Z' }),
-      run({ id: 'queued', status: 'queued', createdAt: '2026-07-14T10:00:00.000Z' }),
+      run({ id: 'running', status: RUN_STATUS.running }),
+      run({ id: 'archived-queued', status: RUN_STATUS.queued, archived: true, createdAt: '2026-07-14T09:00:00.000Z' }),
+      run({ id: 'queued', status: RUN_STATUS.queued, createdAt: '2026-07-14T10:00:00.000Z' }),
     ]
     // The archived one is not in the engine's queue, so it must not push the real one to #2.
     expect(queuePositions(runs)).toEqual(new Map([['queued', 1]]))
@@ -266,14 +267,14 @@ describe('refPrefixMatches', () => {
 describe('groupRuns', () => {
   it('emits the buckets in the mockup order, and omits empty ones', () => {
     const runs = [
-      run({ id: 'done', status: 'done' }),
-      run({ id: 'waiting', status: 'waiting' }),
-      run({ id: 'running', status: 'running' }),
+      run({ id: 'done', status: RUN_STATUS.done }),
+      run({ id: 'waiting', status: RUN_STATUS.waiting }),
+      run({ id: 'running', status: RUN_STATUS.running }),
     ]
     expect(shape(groupRuns(runs, 'active'))).toEqual(['Needs you: waiting', 'Finished: done', 'Working: running'])
 
     // Nothing waiting → no "Needs you" header at all.
-    expect(shape(groupRuns([run({ id: 'done', status: 'done' })], 'active'))).toEqual(['Finished: done'])
+    expect(shape(groupRuns([run({ id: 'done', status: RUN_STATUS.done })], 'active'))).toEqual(['Finished: done'])
   })
 
   it('declares the bucket order it renders in', () => {
@@ -282,18 +283,18 @@ describe('groupRuns', () => {
 
   it('puts every archived run under one Archived bucket regardless of status', () => {
     const runs = [
-      run({ id: 'w', status: 'waiting', archived: true }),
-      run({ id: 'd', status: 'done', archived: true, createdAt: '2026-07-14T11:00:00.000Z' }),
-      run({ id: 'active', status: 'running' }),
+      run({ id: 'w', status: RUN_STATUS.waiting, archived: true }),
+      run({ id: 'd', status: RUN_STATUS.done, archived: true, createdAt: '2026-07-14T11:00:00.000Z' }),
+      run({ id: 'active', status: RUN_STATUS.running }),
     ]
     expect(shape(groupRuns(runs, 'archived'))).toEqual(['Archived: w, d'])
   })
 
   it('carries queue positions onto the rows', () => {
     const runs = [
-      run({ id: 'q2', status: 'queued', createdAt: '2026-07-14T11:00:00.000Z' }),
-      run({ id: 'q1', status: 'queued', createdAt: '2026-07-14T10:00:00.000Z' }),
-      run({ id: 'r', status: 'running' }),
+      run({ id: 'q2', status: RUN_STATUS.queued, createdAt: '2026-07-14T11:00:00.000Z' }),
+      run({ id: 'q1', status: RUN_STATUS.queued, createdAt: '2026-07-14T10:00:00.000Z' }),
+      run({ id: 'r', status: RUN_STATUS.running }),
     ]
     const rows = rowsOf(groupRuns(runs, 'active'))
     expect(
@@ -309,9 +310,9 @@ describe('groupRuns', () => {
 
   it('lists historical variant runs as ordinary rows (hearsay-tools/cezarion#1760)', () => {
     const runs = [
-      run({ id: 'a', groupId: 'g1', variant: 'A', status: 'running', title: 'Add autocomplete (A)' }),
-      run({ id: 'b', groupId: 'g1', variant: 'B', status: 'waiting', title: 'Add autocomplete (B)' }),
-      run({ id: 'c', groupId: 'g1', variant: 'C', status: 'running', title: 'Add autocomplete (C)', archived: true }),
+      run({ id: 'a', groupId: 'g1', variant: 'A', status: RUN_STATUS.running, title: 'Add autocomplete (A)' }),
+      run({ id: 'b', groupId: 'g1', variant: 'B', status: RUN_STATUS.waiting, title: 'Add autocomplete (B)' }),
+      run({ id: 'c', groupId: 'g1', variant: 'C', status: RUN_STATUS.running, title: 'Add autocomplete (C)', archived: true }),
     ]
     expect(shape(groupRuns(runs, 'active'))).toEqual(['Needs you: b', 'Working: a'])
     expect(shape(groupRuns(runs, 'archived'))).toEqual(['Archived: c'])
@@ -379,12 +380,12 @@ describe('runTitle — the one name every surface shows', () => {
 describe('listCounts', () => {
   it('counts active, archived, and the runs that want you', () => {
     const runs = [
-      run({ status: 'running' }),
-      run({ status: 'waiting' }),
-      run({ status: 'review' }),
-      run({ status: 'failed' }),
-      run({ status: 'done', archived: true }),
-      run({ status: 'waiting', archived: true }),
+      run({ status: RUN_STATUS.running }),
+      run({ status: RUN_STATUS.waiting }),
+      run({ status: RUN_STATUS.review }),
+      run({ status: RUN_STATUS.failed }),
+      run({ status: RUN_STATUS.done, archived: true }),
+      run({ status: RUN_STATUS.waiting, archived: true }),
     ]
     // The archived `waiting` counts as archived only — an archived run is not asking for you.
     expect(listCounts(runs)).toEqual({ active: 4, archived: 2, waiting: 2 })
@@ -398,12 +399,12 @@ describe('listCounts', () => {
 describe('status sections (#811)', () => {
   it('keeps pins first inside their status and allocates the shared budget to Finished before Working', () => {
     const runs = [
-      run({ id: 'work', status: 'running' }),
-      run({ id: 'pin-work', status: 'queued', pinned: true }),
-      run({ id: 'done', status: 'done' }),
-      run({ id: 'pin-done', status: 'failed', pinned: true }),
-      run({ id: 'ask', status: 'waiting' }),
-      run({ id: 'pin-ask', status: 'review', pinned: true }),
+      run({ id: 'work', status: RUN_STATUS.running }),
+      run({ id: 'pin-work', status: RUN_STATUS.queued, pinned: true }),
+      run({ id: 'done', status: RUN_STATUS.done }),
+      run({ id: 'pin-done', status: RUN_STATUS.failed, pinned: true }),
+      run({ id: 'ask', status: RUN_STATUS.waiting }),
+      run({ id: 'pin-ask', status: RUN_STATUS.review, pinned: true }),
     ]
     expect(shape(groupRuns(runs, 'active'))).toEqual([
       'Needs you: pin-ask, ask', 'Finished: pin-done, done', 'Working: pin-work, work',
@@ -411,7 +412,7 @@ describe('status sections (#811)', () => {
     expect(shape(capBuckets(groupRuns(runs, 'active'), 2))).toEqual([
       'Needs you: pin-ask, ask', 'Finished: pin-done, done', 'Working: pin-work',
     ])
-    expect(shape(groupRuns(runs.map(r => r.id === 'pin-work' ? { ...r, status: 'done' as const } : r), 'active'))).toEqual([
+    expect(shape(groupRuns(runs.map(r => r.id === 'pin-work' ? { ...r, status: RUN_STATUS.done } : r), 'active'))).toEqual([
       'Needs you: pin-ask, ask', 'Finished: pin-work, pin-done, done', 'Working: work',
     ])
   })
@@ -431,25 +432,25 @@ describe('pinned tasks (#935)', () => {
     it('the archived view still collapses everything, pin or no pin', () => {
       // Archiving retires the pin server-side, so this is a hand-edited record — and in that
       // view the answer is history either way.
-      expect(bucketOf(pinned({ status: 'waiting', archived: true }), 'archived')).toBe('Archived')
+      expect(bucketOf(pinned({ status: RUN_STATUS.waiting, archived: true }), 'archived')).toBe('Archived')
     })
   })
 
   describe('sortRuns', () => {
     it('puts pinned runs first, ahead of every status weight', () => {
       const runs = [
-        run({ id: 'waiting', status: 'waiting' }),
-        pinned({ id: 'pinned-done', status: 'done' }),
-        run({ id: 'running', status: 'running' }),
+        run({ id: 'waiting', status: RUN_STATUS.waiting }),
+        pinned({ id: 'pinned-done', status: RUN_STATUS.done }),
+        run({ id: 'running', status: RUN_STATUS.running }),
       ]
       expect(sortRuns(runs, 'active').map((r) => r.id)).toEqual(['pinned-done', 'waiting', 'running'])
     })
 
     it('keeps the ordinary rules INSIDE the pinned block', () => {
       const runs = [
-        pinned({ id: 'pinned-done', status: 'done' }),
-        pinned({ id: 'pinned-waiting', status: 'waiting' }),
-        run({ id: 'plain-waiting', status: 'waiting' }),
+        pinned({ id: 'pinned-done', status: RUN_STATUS.done }),
+        pinned({ id: 'pinned-waiting', status: RUN_STATUS.waiting }),
+        run({ id: 'plain-waiting', status: RUN_STATUS.waiting }),
       ]
       expect(sortRuns(runs, 'active').map((r) => r.id)).toEqual([
         'pinned-waiting',
@@ -470,10 +471,10 @@ describe('pinned tasks (#935)', () => {
   describe('groupRuns', () => {
     it('emits Needs you before Finished, and each pinned run exactly once', () => {
       const runs = [
-        run({ id: 'waiting', status: 'waiting' }),
-        pinned({ id: 'p-waiting', status: 'waiting' }),
-        run({ id: 'running', status: 'running' }),
-        pinned({ id: 'p-done', status: 'done' }),
+        run({ id: 'waiting', status: RUN_STATUS.waiting }),
+        pinned({ id: 'p-waiting', status: RUN_STATUS.waiting }),
+        run({ id: 'running', status: RUN_STATUS.running }),
+        pinned({ id: 'p-done', status: RUN_STATUS.done }),
       ]
       expect(shape(groupRuns(runs, 'active'))).toEqual([
         'Needs you: p-waiting, waiting',
@@ -483,7 +484,7 @@ describe('pinned tasks (#935)', () => {
     })
 
     it('omits the bucket entirely when nothing is pinned', () => {
-      expect(shape(groupRuns([run({ id: 'done', status: 'done' })], 'active'))).toEqual(['Finished: done'])
+      expect(shape(groupRuns([run({ id: 'done', status: RUN_STATUS.done })], 'active'))).toEqual(['Finished: done'])
     })
 
   })
@@ -529,19 +530,19 @@ describe('pinned tasks (#935)', () => {
   })
 
   it('does not change the tab counts — those count by status, never by bucket', () => {
-    const runs = [pinned({ status: 'waiting' }), run({ status: 'done' }), run({ archived: true })]
+    const runs = [pinned({ status: RUN_STATUS.waiting }), run({ status: RUN_STATUS.done }), run({ archived: true })]
     expect(listCounts(runs)).toEqual({ active: 2, archived: 1, waiting: 1 })
   })
 })
 
 it.each(['open', 'resolved'] as const)('keeps %s worker waits in the appropriate existing group/count', phase => {
-  const record = run({ status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [] }, waits: [workerWait({ workerIds: ['worker'], phase })] } as Partial<RunRecord>)
+  const record = run({ status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: [], receipts: [] }, waits: [workerWait({ workerIds: ['worker'], phase })] } as Partial<RunRecord>)
   expect(bucketOf(record, 'active')).toBe('Working')
-  expect(listCounts([record, run({ status: 'waiting' })])).toEqual({ active: 2, archived: 0, waiting: 1 })
+  expect(listCounts([record, run({ status: RUN_STATUS.waiting })])).toEqual({ active: 2, archived: 0, waiting: 1 })
 })
 
 it('counts a parked parent question as Needs you from the run summary', () => {
-  const parked = { status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [] }, waits: [workerWait({ workerIds: ['worker'] })] } as Partial<RunRecord>
+  const parked = { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: [], receipts: [] }, waits: [workerWait({ workerIds: ['worker'] })] } as Partial<RunRecord>
   const record = run({ ...parked, waits: [...parked.waits!, openHumanWait()] })
   expect(bucketOf(record, 'active')).toBe('Needs you')
   expect(listCounts([record])).toEqual({ active: 1, archived: 0, waiting: 1 })
@@ -567,8 +568,8 @@ describe('owned workers are not list rows (#312)', () => {
 
   it('does not count workers in Active, Archived, or waiting', () => {
     const runs = [
-      run({ status: 'running' }),
-      ownedWorker({ status: 'waiting' }),
+      run({ status: RUN_STATUS.running }),
+      ownedWorker({ status: RUN_STATUS.waiting }),
       ownedWorker({ archived: true }),
       run({ archived: true }),
     ]
@@ -577,12 +578,12 @@ describe('owned workers are not list rows (#312)', () => {
 
   it('does not let workers spend the capBuckets row budget', () => {
     const parents = Array.from({ length: 10 }, (_, i) =>
-      run({ id: `p${i}`, status: 'done', createdAt: `2026-07-14T10:${String(i).padStart(2, '0')}:00.000Z` }),
+      run({ id: `p${i}`, status: RUN_STATUS.done, createdAt: `2026-07-14T10:${String(i).padStart(2, '0')}:00.000Z` }),
     )
     const workers = Array.from({ length: 20 }, (_, i) =>
       ownedWorker({
         id: `w${i}`,
-        status: 'running',
+        status: RUN_STATUS.running,
         createdAt: `2026-07-14T12:${String(i).padStart(2, '0')}:00.000Z`,
       }),
     )
@@ -616,27 +617,27 @@ describe('owned workers are not list rows (#312)', () => {
 describe("a section's dot (#617): the loudest run by attention, not the list's first", () => {
   it('shows a failed run over a done one, though sortRuns ranks done first', () => {
     expect(loudestMember([
-      run({ id: 'd', status: 'done', finishedAt: '2026-07-14T11:00:00.000Z' }),
-      run({ id: 'f', status: 'failed', finishedAt: '2026-07-14T11:00:00.000Z' }),
+      run({ id: 'd', status: RUN_STATUS.done, finishedAt: '2026-07-14T11:00:00.000Z' }),
+      run({ id: 'f', status: RUN_STATUS.failed, finishedAt: '2026-07-14T11:00:00.000Z' }),
     ]).id).toBe('f')
   })
 
   it('shows a needs-you run over a pinned done one', () => {
-    expect(loudestMember([run({ id: 'pd', status: 'done', pinned: true }), run({ id: 'w', status: 'waiting' })]).id).toBe('w')
+    expect(loudestMember([run({ id: 'pd', status: RUN_STATUS.done, pinned: true }), run({ id: 'w', status: RUN_STATUS.waiting })]).id).toBe('w')
   })
 
   it('breaks a tie on the same attention rung by status weight, then list order', () => {
-    expect(loudestMember([run({ id: 'b', status: 'running' }), run({ id: 'a', status: 'running' })]).id).toBe('b')
+    expect(loudestMember([run({ id: 'b', status: RUN_STATUS.running }), run({ id: 'a', status: RUN_STATUS.running })]).id).toBe('b')
     // Same `none` rung: queued (still to happen) outranks done.
-    expect(loudestMember([run({ id: 'dd', status: 'done' }), run({ id: 'q', status: 'queued' })]).id).toBe('q')
+    expect(loudestMember([run({ id: 'dd', status: RUN_STATUS.done }), run({ id: 'q', status: RUN_STATUS.queued })]).id).toBe('q')
   })
 })
 
 it('keeps attentive pins after the cap is exhausted without spending ordinary row budget', () => {
   const buckets = groupRuns([
-    run({ id: 'plain-wait', status: 'waiting' }),
-    run({ id: 'pin-review', status: 'review', pinned: true }),
-    run({ id: 'work', status: 'running' }),
+    run({ id: 'plain-wait', status: RUN_STATUS.waiting }),
+    run({ id: 'pin-review', status: RUN_STATUS.review, pinned: true }),
+    run({ id: 'work', status: RUN_STATUS.running }),
   ], 'active')
   expect(shape(capBuckets(buckets, 0))).toEqual(['Needs you: pin-review'])
   expect(shape(capBuckets(buckets, 2))).toEqual(['Needs you: pin-review, plain-wait', 'Working: work'])
@@ -663,8 +664,8 @@ describe('project sidebar combined limits (#810)', () => {
   })
   it('exempts pins from both budgets', () => {
     const rows = [
-      run({ id: 'c', status: 'done', pinned: true }),
-      run({ id: 'pin', status: 'running', pinned: true }), ...records(),
+      run({ id: 'c', status: RUN_STATUS.done, pinned: true }),
+      run({ id: 'pin', status: RUN_STATUS.running, pinned: true }), ...records(),
     ]
     expect(shape(capBuckets(groupRuns(rows, 'active'), { overall: 1, needsYou: 1, finished: 1, working: 1 })))
       .toEqual(['Needs you: 0-0', 'Finished: c', 'Working: pin'])
@@ -684,13 +685,13 @@ it.each([null, [], 'broken', { overall: -1 }, { overall: 'unlimited' }].map(valu
 describe('sidebar Active and Automations (#1332)', () => {
   const auto = (over: Partial<RunRecord> = {}): RunSummary => ({ ...run(over), automationId: 'auto-1' })
   const fixture = () => [
-    run({ id: 'manual', status: 'running' }),
+    run({ id: 'manual', status: RUN_STATUS.running }),
     run({ id: 'autonomous', autonomous: true }),
     auto({ id: 'scheduled' }),
-    auto({ id: 'asks', status: 'waiting' }),
+    auto({ id: 'asks', status: RUN_STATUS.waiting }),
     auto({ id: 'gone', archived: true }),
     run({ id: 'archived', archived: true }),
-    { ...ownedWorker({ id: 'worker', status: 'waiting' }), automationId: 'auto-1' },
+    { ...ownedWorker({ id: 'worker', status: RUN_STATUS.waiting }), automationId: 'auto-1' },
   ]
 
   it('splits unarchived tasks by recorded origin, never by autonomy', () => {

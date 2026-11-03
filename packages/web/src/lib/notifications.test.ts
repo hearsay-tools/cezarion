@@ -1,3 +1,10 @@
+import {
+  RUN_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { summaryOf } from '@/test/run-summary-fixture'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -25,7 +32,7 @@ function run(over: Partial<RunRecord> = {}): RunSummary {
     title: 'Normalize the agent-event protocol',
     workflow: 'default',
     task: 'normalize the protocol',
-    status: 'running',
+    status: RUN_STATUS.running,
     createdAt: '2026-07-14T10:00:00.000Z',
     tokensUsed: 0,
     archived: false,
@@ -75,31 +82,31 @@ describe('diffRunTransitions (attention → notify mapping)', () => {
 
   it('first sight never notifies, whatever the status — boot and reconnect seed silently', () => {
     const { entering, statuses } = diffRunTransitions(new Map(), [
-      run({ id: 'a', status: 'waiting' }),
-      run({ id: 'b', status: 'failed' }),
+      run({ id: 'a', status: RUN_STATUS.waiting }),
+      run({ id: 'b', status: RUN_STATUS.failed }),
     ])
     expect(entering).toEqual([])
     expect(statuses).toEqual(seen([['a', 'waiting'], ['b', 'failed']]))
   })
 
   it('an unchanged status never notifies — token ticks re-announce the same state', () => {
-    const { entering } = diffRunTransitions(seen([['r1', 'waiting']]), [run({ status: 'waiting' })])
+    const { entering } = diffRunTransitions(seen([['r1', 'waiting']]), [run({ status: RUN_STATUS.waiting })])
     expect(entering).toEqual([])
   })
 
   it('a transition BETWEEN attention states still notifies (waiting → failed is news)', () => {
-    const { entering } = diffRunTransitions(seen([['r1', 'waiting']]), [run({ status: 'failed' })])
+    const { entering } = diffRunTransitions(seen([['r1', 'waiting']]), [run({ status: RUN_STATUS.failed })])
     expect(entering.map((r) => r.id)).toEqual(['r1'])
   })
 
   it('leaving attention notifies nothing (waiting → done)', () => {
-    const { entering } = diffRunTransitions(seen([['r1', 'waiting']]), [run({ status: 'done' })])
+    const { entering } = diffRunTransitions(seen([['r1', 'waiting']]), [run({ status: RUN_STATUS.done })])
     expect(entering).toEqual([])
   })
 
   it('entering monitoring never notifies — it is a running sub-state, not attention (#490)', () => {
-    const monitoring = run({ status: 'waiting', waits: [{ kind: 'timer', id: '00000000-0000-4000-8000-0000000000d1', source: 'agent', via: 'cezar_wait',
-      registeredAt: '2026-10-17T15:00:00.000Z', deadline: '2026-10-17T15:05:00.000Z', phase: 'open', turnId: 'turn-1', seconds: 300 }] })
+    const monitoring = run({ status: RUN_STATUS.waiting, waits: [{ kind: WAIT_KIND.timer, id: '00000000-0000-4000-8000-0000000000d1', source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
+      registeredAt: '2026-10-17T15:00:00.000Z', deadline: '2026-10-17T15:05:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1', seconds: 300 }] })
     // From active running (no status change) and from waiting (leaving attention): neither notifies.
     expect(diffRunTransitions(seen([['r1', 'running']]), [monitoring]).entering).toEqual([])
     expect(diffRunTransitions(seen([['r1', 'waiting']]), [monitoring]).entering).toEqual([])
@@ -107,7 +114,7 @@ describe('diffRunTransitions (attention → notify mapping)', () => {
 
   it('rebuilds the status map each observation, so deleted runs fall out', () => {
     const { statuses } = diffRunTransitions(seen([['gone', 'running'], ['r1', 'running']]), [
-      run({ id: 'r1', status: 'running' }),
+      run({ id: 'r1', status: RUN_STATUS.running }),
     ])
     expect(statuses.has('gone')).toBe(false)
   })
@@ -165,20 +172,20 @@ describe('notificationSupport', () => {
 
 describe('describeRunNotification', () => {
   it('titles with the display title (#389: titleSummary ?? title) and bodies with the attention label', () => {
-    expect(describeRunNotification(run({ status: 'waiting' }))).toEqual({
+    expect(describeRunNotification(run({ status: RUN_STATUS.waiting }))).toEqual({
       title: 'Normalize the agent-event protocol',
       body: 'Task needs you',
       tag: 'cezar-run-r1',
     })
     expect(
-      describeRunNotification(run({ status: 'review', titleSummary: 'Protocol cleanup' })).title,
+      describeRunNotification(run({ status: RUN_STATUS.review, titleSummary: 'Protocol cleanup' })).title,
     ).toBe('Protocol cleanup')
-    expect(describeRunNotification(run({ status: 'failed' })).body).toBe('Task failed')
+    expect(describeRunNotification(run({ status: RUN_STATUS.failed })).body).toBe('Task failed')
   })
 
   it('tags stay stable per run, so a later transition replaces rather than piles up', () => {
-    const a = describeRunNotification(run({ status: 'waiting' }))
-    const b = describeRunNotification(run({ status: 'failed' }))
+    const a = describeRunNotification(run({ status: RUN_STATUS.waiting }))
+    const b = describeRunNotification(run({ status: RUN_STATUS.failed }))
     expect(a.tag).toBe(b.tag)
   })
 })

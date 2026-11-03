@@ -1,3 +1,4 @@
+import { RUN_STATUS, WAIT_KIND } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { describe, expect, it } from 'vitest'
 import type { RunSummary } from '@open-mercato/cezar-api-client'
 import { deriveAttention, type Attention, type AttentionRung } from '@/lib/attention'
@@ -15,7 +16,7 @@ function run(over: Partial<RunSummary> = {}): RunSummary {
       title: 'Task',
       workflow: 'default',
       task: 'task',
-      status: 'done',
+      status: RUN_STATUS.done,
       createdAt: ago(60_000),
       tokensUsed: 0,
       archived: false,
@@ -43,8 +44,8 @@ function clockText(at: string): string {
   return new Intl.DateTimeFormat(undefined, sameDay ? { timeStyle: 'short' } : { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(at))
 }
 
-const timer = (at: string) => ({ kind: 'timer' as const, waitId: '00000000-0000-4000-8000-0000000000d1', at })
-const commandWait = (deadline: string) => ({ kind: 'process' as const, waitId: '00000000-0000-4000-8000-0000000000d2', pid: 4242, deadline })
+const timer = (at: string) => ({ kind: WAIT_KIND.timer, waitId: '00000000-0000-4000-8000-0000000000d1', at })
+const commandWait = (deadline: string) => ({ kind: WAIT_KIND.process, waitId: '00000000-0000-4000-8000-0000000000d2', pid: 4242, deadline })
 
 describe('metaStateWord (#617: the states the dot alone cannot say)', () => {
   const plain = run()
@@ -112,7 +113,7 @@ describe('metaStateWord (#617: the states the dot alone cannot say)', () => {
   })
 
   it('reads the label of a derived attention, not a literal', () => {
-    const failed = run({ status: 'failed' })
+    const failed = run({ status: RUN_STATUS.failed })
     expect(metaStateWord(deriveAttention(failed), null, failed, NOW)).toBe('failed')
   })
 })
@@ -124,7 +125,7 @@ describe('runRowMeta (#617, #729: what the meta line is made of)', () => {
 
   describe('the age', () => {
     it('counts from creation while the run is unfinished', () => {
-      expect(meta({ run: run({ status: 'running', createdAt: ago(5 * 60_000) }) }).age).toBe('5m')
+      expect(meta({ run: run({ status: RUN_STATUS.running, createdAt: ago(5 * 60_000) }) }).age).toBe('5m')
     })
 
     it('counts from the finish once there is one', () => {
@@ -132,7 +133,7 @@ describe('runRowMeta (#617, #729: what the meta line is made of)', () => {
     })
 
     it('is empty for a queued row, whose position rides in the state word', () => {
-      const queued = run({ status: 'queued' })
+      const queued = run({ status: RUN_STATUS.queued })
       expect(meta({ run: queued, queuePosition: 3 })).toMatchObject({ age: '', stateWord: 'queued #3' })
     })
   })
@@ -144,11 +145,11 @@ describe('runRowMeta (#617, #729: what the meta line is made of)', () => {
       ['a row that is not running, in the Working group', true, 'monitoring', 'monitoring'],
     ])('for %s', (_name, inWorkingGroup, label, word) => {
       const attention = labelled(label)
-      expect(meta({ run: run({ status: 'running' }), attention, inWorkingGroup }).stateWord).toBe(word)
+      expect(meta({ run: run({ status: RUN_STATUS.running }), attention, inWorkingGroup }).stateWord).toBe(word)
     })
 
     it('is the state word of the attention', () => {
-      const failed = run({ status: 'failed' })
+      const failed = run({ status: RUN_STATUS.failed })
       expect(meta({ run: failed }).stateWord).toBe(metaStateWord(deriveAttention(failed), null, failed, NOW))
     })
   })
@@ -176,7 +177,7 @@ describe('runRowMeta (#617, #729: what the meta line is made of)', () => {
 
   describe('the key that tells the line its content changed', () => {
     it('joins age, state word, references and the hand-off flag', () => {
-      const keyed = run({ status: 'failed', createdAt: ago(5 * 60_000), finishedAt: ago(5 * 60_000), prNumber: 594, notify: true })
+      const keyed = run({ status: RUN_STATUS.failed, createdAt: ago(5 * 60_000), finishedAt: ago(5 * 60_000), prNumber: 594, notify: true })
       expect(meta({ run: keyed }).key).toBe('5m|failed|PR-594-undefined|1')
     })
 
@@ -190,8 +191,8 @@ describe('runRowMeta (#617, #729: what the meta line is made of)', () => {
     })
 
     it('changes with the state word', () => {
-      const running = run({ status: 'running' })
-      const failed = run({ status: 'failed', createdAt: running.createdAt })
+      const running = run({ status: RUN_STATUS.running })
+      const failed = run({ status: RUN_STATUS.failed, createdAt: running.createdAt })
       expect(meta({ run: running }).key).not.toBe(meta({ run: failed }).key)
     })
   })
