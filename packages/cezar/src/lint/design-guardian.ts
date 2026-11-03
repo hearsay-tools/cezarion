@@ -143,7 +143,6 @@ function scanCode(state: CommentScanner, c: string, n: string | undefined, lineC
   else if (c === '`') state.mode = 'template'
   state.out += c
   state.i += 1
-  return
 }
 
 function scanComment(state: CommentScanner, c: string, n: string | undefined): void {
@@ -166,7 +165,6 @@ function scanComment(state: CommentScanner, c: string, n: string | undefined): v
     }
     state.out += c === '\n' ? c : ' '
     state.i += 1
-    return
   }
 }
 
@@ -187,9 +185,7 @@ function scanString(state: CommentScanner, c: string, n: string | undefined): vo
   }
   state.out += c
   state.i += 1
-  return
 }
-
 
 /**
  * Blanks out comments while preserving the file's shape (every non-newline comment char
@@ -208,7 +204,6 @@ export function stripComments(source: string, lineComments: boolean): string {
   }
   return state.out
 }
-
 
 /** Adapt only the path and source; keep the guardian's scope and line-based matching. */
 export function guardianFile(file: string, source: string): SourceFile | undefined {
