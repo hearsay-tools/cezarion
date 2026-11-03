@@ -1024,7 +1024,7 @@ from before the reporter landed, or another head's timing pass into admission.
 Prove this with the existing evidence/queue tests in the 3.3 PR. The main run
 that skips Vitest is evidence reuse, not a fresh measurement of file durations.
 
-Land the cap only after every real Vitest file passes in CI. First fix causes or
+Land the cap only after every real Vitest file takes **under 60 s** on CI. First fix causes or
 split rows for any file over the 40 s target. Then demonstrate all four shards
 pass with the reporter. No exceptions, skip, retry or longer timeout.
 
@@ -1053,6 +1053,9 @@ and repeat the verdict measurement before completing the slice. If the issue is 
 queue a file rather than suite cost, a row split does not fix it; resolve that
 cause before claiming the bound obsolete. The cap lands only after the final
 file fix, and the bound disappears only with measured current verdict evidence.
+
+**Exit:** every Vitest file takes under 60 s on CI; the cap is enforced and
+the validation skill has no wait-bound text. Exactly 60,000 ms fails.
 
 ## Required case tables
 

@@ -124,7 +124,7 @@ Prerequisite: none; it can start with Phase 2.
 | 3.2 | rejected | Agent startup is only about 4–12% of parity-file wall time; the seam alone does not demonstrate the 60 s target. Git and RunManager/store/waits dominate. See [the measurement and rejection record](2026-11-03-fast-unit-suites.md#slice-32-evaluated-and-rejected). | Rejected by the planner on 2026-11-03; no in-process wire implementation. |
 | 3.3 | cleanup | Fix measured causes first: copied Git template fixtures and release gates/fake clocks. Then split remaining files above the 40 s target by row group. Finally add the hard 60 s per-file cap with no exceptions; [the Phase 3 plan](2026-11-03-fast-unit-suites.md#slice-33-plan) names owners and evidence. | Every Vitest file is under 60 s on CI, the cap is enforced, and the Squeal wait bound is deleted with current-verdict evidence. |
 
-**Exit:** no Vitest file over 60 s on CI; the validation skill has no wait-bound text.
+**Exit:** every Vitest file takes under 60 s on CI; the validation skill has no wait-bound text.
 
 ### Phase 4 — Run lifecycle ownership
 
