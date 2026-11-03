@@ -61,7 +61,7 @@ import { extractTaskRefs, isRepoScopedRef, MAX_REF, promptNamesRepo, refUrlRepo 
 // Type-only module (zod + nothing else), so this cannot cycle back into the store.
 import { workflowDefSchema } from '../workflows/types.ts';
 
-import { applyOutcomes, type OutcomeDependencies, type RunOutcome } from './outcome-commit.ts';
+import { applyOutcomes, type OutcomeDependencies, type OutcomeReceipt, type RunOutcome } from './outcome-commit.ts';
 import { assertConversationIdFree, type ConversationIdentity } from './conversation-identity.ts';
 export { ConversationIdInUseError } from './conversation-identity.ts';
 
@@ -2512,23 +2512,23 @@ export class RunStore extends EventEmitter {
    * never stop on it: it warns and applies the change in memory for the debounced save to retry.
    * A conversation request outcome is the other sanctioned write: `commitConversation`.
    */
-  commitOutcome(id: string, outcomes: RunOutcome | readonly RunOutcome[], deps: OutcomeDependencies = {}, opts: { bestEffort?: boolean } = {}): { committed: boolean; answered: string[] } {
+  commitOutcome(id: string, outcomes: RunOutcome | readonly RunOutcome[], deps: OutcomeDependencies = {}, opts: { bestEffort?: boolean } = {}): OutcomeReceipt {
     const run = this.peek(id);
-    if (!run) return { committed: false, answered: [] };
+    if (!run) return { committed: false, answered: [], settled: [] };
     const staged = applyOutcomes(run, Array.isArray(outcomes) ? outcomes : [outcomes as RunOutcome], deps);
-    if (!staged.changed) return { committed: false, answered: [] };
+    if (!staged.changed) return { committed: false, answered: [], settled: [] };
     try { this.commitIndex(new Map([[id, staged.next]])); }
     catch (error) {
       if (!opts.bestEffort) throw error;
       console.warn(`[cez] outcome checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
       const live = this.record(id);
-      if (!live) return { committed: false, answered: staged.answered };
+      if (!live) return { committed: false, answered: staged.answered, settled: staged.settled };
       for (const key of Object.keys(live) as Array<keyof RunRecord>) if (!(key in staged.next)) delete live[key];
       Object.assign(live, staged.next);
       this.touch(live);
-      return { committed: false, answered: staged.answered };
+      return { committed: false, answered: staged.answered, settled: staged.settled };
     }
-    return { committed: true, answered: staged.answered };
+    return { committed: true, answered: staged.answered, settled: staged.settled };
   }
 
   /** An acknowledged inactive-root Finish must survive the async diff and restart. */

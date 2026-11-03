@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentInput, TimerWaitEntry, Wait } from '@open-mercato/cezar-contract';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS, WAIT_PHASE, WAIT_VIA, makeHumanWait, makeRunRecord, makeStepState, makeTimerWait } from '@open-mercato/cezar-contract/test-factories.testkit';
 
-import { applyOutcomes } from './outcome-commit.ts';
+import { applyOutcomes, deliveryReceipts } from './outcome-commit.ts';
 import { blockRunWrites, crashStore, muteLockedDatabaseLogs, readPersistedRuns } from './run-store.testkit.ts';
 import { RunStore, type RunRecord } from './store.ts';
 
@@ -58,7 +58,7 @@ describe('commitOutcome', () => {
   it('writes nothing when no outcome changes the record', () => {
     const commits = vi.spyOn(runPersistence(store), 'persist');
     expect(store.commitOutcome(id, [{ kind: 'answered' }, { kind: 'counted', waitDeliveryFailures: undefined }, { kind: 'delivered', inputIds: [randomUUID()], at }]))
-      .toEqual({ committed: false, answered: [] });
+      .toEqual({ committed: false, answered: [], settled: [] });
     expect(commits).not.toHaveBeenCalled();
   });
 
@@ -67,8 +67,22 @@ describe('commitOutcome', () => {
     store.commitWait(id, wait);
     const continuationMessage = { id: 'continue-1', text: 'the answer', createdAt: at, origin: 'human' as const };
     const receipt = store.commitOutcome(id, { kind: 'answered' }, { patch: { continuationMessage } });
-    expect(receipt).toEqual({ committed: true, answered: [wait.id] });
+    expect(receipt).toEqual({ committed: true, answered: [wait.id], settled: committed().lastWaits });
     expect(committed()).toMatchObject({ continuationMessage: { text: 'the answer' }, lastWaits: [{ id: wait.id, phase: WAIT_PHASE.delivered }] });
+  });
+
+  it('returns each wait it settled as the committed row holds it, in settling order', () => {
+    const earlier = timer();
+    const resolved = timer({ phase: WAIT_PHASE.resolved, resolvedAt: at });
+    const open = timer();
+    store.commitWait(id, earlier);
+    store.commitOutcome(id, { kind: 'cancelled', waitIds: [earlier.id] });
+    store.commitWait(id, resolved, input({ id: resolved.id }));
+    store.commitWait(id, open);
+    const receipt = store.commitOutcome(id, [{ kind: 'delivered', inputIds: [resolved.id], at }, { kind: 'cancelled', waitIds: [open.id] }]);
+    expect(receipt.settled.map((wait) => [wait.id, wait.phase])).toEqual([[resolved.id, WAIT_PHASE.delivered], [open.id, WAIT_PHASE.cancelled]]);
+    expect(receipt.settled).toEqual(committed().lastWaits!.slice(1));
+    expect(store.commitOutcome(id, { kind: 'cancelled', waitIds: [open.id] }).settled).toEqual([]);
   });
 
   it('a refused write throws with nothing changed', () => {
@@ -85,7 +99,7 @@ describe('commitOutcome', () => {
     const unmute = muteLockedDatabaseLogs();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const unblock = blockRunWrites(directory);
-    try { expect(store.commitOutcome(id, { kind: 'counted', waitDeliveryFailures: 2 }, {}, { bestEffort: true })).toEqual({ committed: false, answered: [] }); }
+    try { expect(store.commitOutcome(id, { kind: 'counted', waitDeliveryFailures: 2 }, {}, { bestEffort: true })).toEqual({ committed: false, answered: [], settled: [] }); }
     finally { unblock(); unmute(); }
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('outcome checkpoint failed'));
     expect(store.getRun(id)?.waitDeliveryFailures).toBe(2);
@@ -152,5 +166,22 @@ describe('applyOutcomes', () => {
     expect(next.agentInputs).toEqual([]);
     expect(next.queuedMessages).toEqual([]);
     expect(next.steps[0]!.status).toBe(STEP_STATUS.running);
+  });
+});
+
+describe('deliveryReceipts', () => {
+  const later = '2026-10-26T12:05:00.000Z';
+
+  it('carries the delivery time on each step, and the read time only on the consumed step', () => {
+    const read = input({ deliveredAt: at, consumedAt: later });
+    expect(deliveryReceipts(read, 'delivered')).toEqual({ deliveredAt: at });
+    expect(deliveryReceipts(read, 'consumed')).toEqual({ deliveredAt: at, consumedAt: later });
+    expect(Object.keys(deliveryReceipts(read, 'consumed'))).toEqual(['deliveredAt', 'consumedAt']);
+  });
+
+  it('has no receipt field for a queued input or one that is not there', () => {
+    expect(deliveryReceipts(input(), 'queued')).toEqual({});
+    expect(deliveryReceipts(input({ consumedAt: later }), 'consumed')).toEqual({ consumedAt: later });
+    expect(deliveryReceipts(undefined, 'not-delivered')).toEqual({});
   });
 });
