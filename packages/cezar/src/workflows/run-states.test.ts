@@ -1,11 +1,11 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { RUN_STATUS, WAIT_PHASE, makeHumanWait, makePeerWait, makeSubagentWait, makeTimerWait } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { blank } from '../lint/blank.ts';
+import { RUN_EXITS } from '../runs/run-exits.ts';
 import {
-  AUTOMATIC, RUN_EXITS, RUN_STATES, RUN_TRIGGERS, WAIT_KINDS, stateOf, statusOf, strictRunExits, takeRunExitViolations,
-  throwRunExitViolations, transition, transitionVia, type RunState, type RunStateSpec, type TriggerRow,
+  AUTOMATIC, RUN_STATES, RUN_TRIGGERS, WAIT_KINDS, stateOf, statusOf, type RunState, type RunStateSpec, type TriggerRow,
 } from './run-states.ts';
 
 const src = resolve(import.meta.dirname, '..');
@@ -126,60 +126,5 @@ describe('run states and their exits (hearsay-tools/cezarion#1804)', () => {
     expect(stateOf({ status: waiting, autoResumeAt: new Date().toISOString() })).toBe('waiting:usage-limit');
     expect(stateOf({ status: waiting, waits: [makeTimerWait({ phase: WAIT_PHASE.resolved })] })).toBe('waiting:capacity');
     expect(stateOf({ status: waiting })).toBe('waiting:plain');
-  });
-
-  describe('the guard', () => {
-    let previous: boolean;
-    afterEach(() => {
-      strictRunExits(previous);
-      takeRunExitViolations();
-    });
-    function at(status: string | undefined) {
-      return () => { return (status ? { status } : undefined) as never; };
-    }
-
-    it('does nothing outside strict mode', () => {
-      previous = strictRunExits(false);
-      let reads = 0;
-      expect(transition('accept-review', () => { reads++; return { status: RUN_STATUS.running }; })).toBe('done');
-      let commits = 0;
-      expect(transitionVia('cancel', () => { reads++; return { status: RUN_STATUS.running }; }, () => ++commits)).toBe(1);
-      expect({ reads, commits }).toEqual({ reads: 0, commits: 1 });
-      expect(takeRunExitViolations()).toEqual([]);
-    });
-
-    it('refuses and records an exit from a status it does not leave, in strict mode', () => {
-      previous = strictRunExits(true);
-      expect(() => transition('accept-review', at('running'))).toThrow('undeclared run transition: exit accept-review from running');
-      expect(takeRunExitViolations()).toHaveLength(1);
-      expect(transition('cancel', at('running'))).toBe('cancelled');
-      expect(transition('cancel', at('cancelled'))).toBe('cancelled');
-      expect(transition('cancel', at(undefined))).toBe('cancelled');
-      expect(takeRunExitViolations()).toEqual([]);
-    });
-
-    it('checks a store commit against its exit after it runs, in strict mode', () => {
-      previous = strictRunExits(true);
-      let status = 'running';
-      const read = () => { return { status } as never; };
-      expect(() => transitionVia('cancel', read, () => { status = 'waiting'; })).toThrow('exit cancel wrote waiting, not cancelled');
-      expect(status).toBe('waiting');
-      status = 'done';
-      expect(() => transitionVia('cancel', read, () => { status = 'cancelled'; })).toThrow('exit cancel from done');
-      expect(takeRunExitViolations()).toHaveLength(2);
-      status = 'waiting';
-      expect(transitionVia('park', read, () => 'refused')).toBe('refused');
-      expect(transitionVia('withdraw-hold', read, () => { status = 'failed'; return true; })).toBe(true);
-      expect(takeRunExitViolations()).toEqual([]);
-    });
-
-    it('throws every recorded violation once, for the test setup', () => {
-      previous = strictRunExits(true);
-      expect(() => throwRunExitViolations()).not.toThrow();
-      expect(() => transition('accept-review', at('running'))).toThrow();
-      expect(() => transition('accept-review', at('queued'))).toThrow();
-      expect(() => throwRunExitViolations()).toThrow('exit accept-review from running (declare it in workflows/run-states.ts)\nundeclared run transition: exit accept-review from queued');
-      expect(() => throwRunExitViolations()).not.toThrow();
-    });
   });
 });

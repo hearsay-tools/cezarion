@@ -8,7 +8,7 @@ import { artifactInstructions } from '../../artifacts/lifecycle.ts';
 import { handoffInstructions } from '../../handoff.ts';
 import type { SessionContext } from '../../session-context.ts';
 import type { UiEvent } from '../../core/ui-events.ts';
-import type { RunExitId } from '../run-states.ts';
+import type { RunExitId } from '../../runs/run-exits.ts';
 import { openWaitsFooter } from '../waits.ts';
 import { composeSystemPrompt, withResumeContext } from './prompts.ts';
 import { isDisposedDelegatedRun } from './run-guards.ts';

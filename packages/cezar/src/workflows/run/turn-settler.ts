@@ -5,7 +5,7 @@ import type { ContentBlock } from '../../core/agent-runner.ts';
 import type { AskRequest } from '../../core/ask.ts';
 import type { UiEventSink } from '../../runs/ui-event-sink.ts';
 import type { RunRecord } from '../../runs/store.ts';
-import type { RunExitId } from '../run-states.ts';
+import type { RunExitId } from '../../runs/run-exits.ts';
 import type { ActiveRun } from '../active-run.ts';
 import { openCompletionRequests, sentRequestInstructions, type CompletionRefusal } from '../completion-policy.ts';
 import { NO_WAIT_NOTE, COMPLETION_NUDGE_NOTE, decideTurnEnd, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from '../turn-end.ts';

@@ -3,7 +3,7 @@ import type { RunRecord, RunStore, QueuedMessage } from '../../runs/store.ts';
 import { DEFAULT_AGENT_ACCOUNT_ID } from '../../workspace/agent-accounts.ts';
 import { loadWorkflows } from '../load.ts';
 import { queuedRecoveryInput, queuedStartAt } from '../run-scheduling.ts';
-import type { RunExitId } from '../run-states.ts';
+import type { RunExitId } from '../../runs/run-exits.ts';
 import { stepKind, type WorkflowDef } from '../types.ts';
 import type { PastedContent } from '../pasted-content.ts';
 import type { PendingJob } from './run-line.ts';

@@ -7,7 +7,9 @@ import { WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { ProcessWaitSupervisor } from '../process-wait/supervisor.ts';
-import { RUN_TRIGGERS, stateOf, takeRunExitViolations, type RunState } from './run-states.ts';
+import { takeRunExitViolations } from '../runs/run-exits.ts';
+import { runThenCleanUp } from '../runs/run-exits.testkit.ts';
+import { RUN_TRIGGERS, stateOf, type RunState } from './run-states.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { toolCall } from './waits-parity.testkit.ts';
 import { manager, restart, store, timeline, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
@@ -269,13 +271,10 @@ describe('the run state table drives a real run', { timeout: 600_000 }, () => {
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: prompt(first), runner: 'claude', worktree: false });
       const real = { id: run.id };
       await settle(real, model, 0, turns);
-      try {
-        await fc.asyncModelRun(() => ({ model, real }), steps);
-      } finally {
+      await runThenCleanUp(() => fc.asyncModelRun(() => ({ model, real }), steps), async () => {
         manager.cancel(real.id);
         await until(() => !manager.isActive(real.id));
-        takeRunExitViolations();
-      }
+      });
     }), { seed: SEED, numRuns: RUNS, examples: EXAMPLES });
   });
 });

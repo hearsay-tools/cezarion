@@ -9,7 +9,7 @@ import type { RunnerId, ContentBlock } from '../../core/agent-runner.ts';
 import type { ActiveRun } from '../active-run.ts';
 import type { PastedContent, PersistedAttachment } from '../pasted-content.ts';
 import { queuedRecoveryInput } from '../run-scheduling.ts';
-import type { RunExitId } from '../run-states.ts';
+import type { RunExitId } from '../../runs/run-exits.ts';
 import { QUICK_TASK_WORKFLOW, stepKind, type WorkflowDef } from '../types.ts';
 import { clearIdleTimer, clearAutosaveTimer } from './input-timers.ts';
 import type { PendingJob, RunLine } from './run-line.ts';
