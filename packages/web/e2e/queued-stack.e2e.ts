@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
+import { revealControl } from './control-ready'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForStatus, pollFor, pollJson } from './poll'
 // fixture-server starts: 1
@@ -158,9 +159,11 @@ describe('a queued run’s prompt is amendable (#472)', () => {
 
   it('edits the stacked message in place', async () => {
     stackMessage('also update the changelog')
+    revealControl(browser, '[aria-label="Remove message"], [aria-label="Edit message"]')
     browser.click('[aria-label="Remove message"], [aria-label="Edit message"]')
     browser.fill('[aria-label="Edit the message"]', 'also update the changelog and the README')
     browser.screenshot(`${artifactsDir}/queued-editing.png`)
+    revealControl(browser, '[data-slot="user-bubble"][data-editing="true"] button:last-of-type')
     browser.click('[data-slot="user-bubble"][data-editing="true"] button:last-of-type')
 
     browser.waitForFunction(
@@ -176,6 +179,7 @@ describe('a queued run’s prompt is amendable (#472)', () => {
 
   it('removes the stacked message', async () => {
     stackMessage('also update the changelog and the README')
+    revealControl(browser, '[aria-label="Remove message"]')
     browser.click('[aria-label="Remove message"]')
     browser.waitForFunction(`document.querySelectorAll('[data-slot="user-bubble"]').length === 1`)
 

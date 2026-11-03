@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
+import { revealControl } from './control-ready'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 import { waitForStatus } from './poll'
 // fixture-server starts: 1
@@ -82,6 +83,12 @@ beforeEach(async () => {
   browser.waitForFunction(`document.querySelector('[data-slot="review-panel"]') !== null`)
 }, 180_000)
 
+function revealReviewAction(slot: string): void {
+  const selector = `[data-slot="${slot}"]`
+  browser.waitForFunction(`document.querySelector('[data-slot="diff-file"]') !== null`)
+  revealControl(browser, selector)
+}
+
 describe('the review gate against a live parked run', () => {
   it('shows the banner and the real worktree diff as per-file sections', () => {
     expect(browser.text('[data-slot="review-banner"]')).toContain(
@@ -119,6 +126,7 @@ describe('the review gate against a live parked run', () => {
 
   it('Send back delivers the notes into the SAME session — the transcript grows', async () => {
     browser.fill('[data-slot="review-notes"]', 'Please also mention the port in the notes.')
+    revealReviewAction('review-send-back')
     browser.click('[data-slot="review-send-back"]')
 
     // The run leaves review and works again (legacy continue semantics)…
@@ -135,6 +143,7 @@ describe('the review gate against a live parked run', () => {
 
   it('the run gates again after the follow-up turn, with a fresh diff', async () => {
     browser.fill('[data-slot="review-notes"]', 'Please also mention the port in the notes.')
+    revealReviewAction('review-send-back')
     browser.click('[data-slot="review-send-back"]')
     browser.waitForFunction(`document.querySelector('[data-slot="review-panel"]') === null`)
     const deadline = Date.now() + 110_000
@@ -157,13 +166,7 @@ describe('the review gate against a live parked run', () => {
       }).observe(document.body, { childList: true, subtree: true })
       return true
     })()`)
-    browser.waitForFunction(`document.querySelector('[data-slot="diff-file"]') !== null`)
-    browser.evaluate(`document.querySelector('[data-slot="review-accept"]').scrollIntoView({ block: 'center' })`)
-    browser.waitForFunction(`(() => {
-      const button = document.querySelector('[data-slot="review-accept"]')
-      const rect = button.getBoundingClientRect()
-      return button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
-    })()`)
+    revealReviewAction('review-accept')
     browser.click('[data-slot="review-accept"]')
 
     await waitForStatus(baseUrl, runId, ['done'])

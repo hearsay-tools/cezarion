@@ -6,6 +6,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
+import { revealControl } from './control-ready'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 // fixture-server starts: 1
 
@@ -86,8 +87,7 @@ beforeEach(() => {
 })
 
 function clickExecutionDisclosure() {
-  browser.evaluate(`document.querySelector('${summary}').scrollIntoView({ block: 'center' })`)
-  waitForSettledSample(browser, `document.querySelector('${summary}').getBoundingClientRect().top`)
+  revealControl(browser, summary)
   browser.click(summary)
 }
 

@@ -11,6 +11,7 @@ import { settleVisual, visibilitySampleExpression, waitForSettledSample } from '
 import { expectEditorFitsViewport } from './session-layout'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { openSessionActivity, openSessionActivityRow, SESSION_ACTIVITY_SUMMARY } from './session-activity'
+import { revealControl } from './control-ready'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import {
   applyContrastQaVariant,
@@ -1573,7 +1574,7 @@ it('ellipsizes a bare OpenCode command and reveals it on expansion (#522)', () =
   expect(facts.title).toBe(BARE_COMMAND)
   expect(facts.overflow).toBe('ellipsis')
   expect(facts.width).toBeLessThan(facts.rowWidth)
-  browser.evaluate(`document.querySelector('[data-slot="tool-card"][data-kind="execute"]')?.scrollIntoView({ block: 'center' })`)
+  revealControl(browser, '[data-slot="tool-card"][data-kind="execute"] > button')
   browser.screenshot(`${artifactsDir}/522-opencode-command-collapsed.png`, { viewport: true })
   browser.click('[data-slot="tool-card"][data-kind="execute"] > button')
   browser.waitForFunction(`document.querySelector('[data-slot="tool-card"][data-kind="execute"] [data-slot="tool-command"]') !== null`)
