@@ -10,7 +10,9 @@ function fixture(t) {
   t.after(() => rmSync(temp, { recursive: true, force: true }))
   const root = join(temp, 'tree')
   for (const path of ['node_modules', 'packages/a/node_modules', 'packages/b/node_modules']) mkdirSync(join(root, path), { recursive: true })
-  writeFileSync(join(root, 'package.json'), JSON.stringify({ workspaces: ['packages/a', 'packages/b'] }))
+  writeFileSync(join(root, 'package.json'), JSON.stringify({ workspaces: ['packages/a', 'packages/b'], devDependencies: { vitest: '*' } }))
+  mkdirSync(join(root, 'node_modules/vitest'))
+  writeFileSync(join(root, 'node_modules/vitest/package.json'), JSON.stringify({ name: 'vitest', exports: './unbuilt.js' }))
   writeFileSync(join(root, 'packages/a/package.json'), JSON.stringify({ name: 'a', dependencies: { b: '*' } }))
   const manifest = JSON.stringify({ name: 'b', exports: './unbuilt.js' })
   writeFileSync(join(root, 'packages/b/package.json'), manifest)
@@ -56,4 +58,21 @@ test('every root and package Vitest config invokes the shared install guard', ()
     assert.match(source, /import\s*\{\s*checkWorkspaceResolution\s*\}\s*from\s*['"][^'"]*check-workspace-resolution\.mjs['"]/, config)
     assert.match(source, /^checkWorkspaceResolution\(\)/m, config)
   }
+})
+
+test('accepts a hoisted install without per-workspace node_modules', t => {
+  const { root } = fixture(t)
+  rmSync(join(root, 'packages/a/node_modules'), { recursive: true })
+  rmSync(join(root, 'packages/b/node_modules'), { recursive: true })
+  symlinkSync(join(root, 'packages/b'), join(root, 'node_modules/b'), 'dir')
+  assert.doesNotThrow(() => checkWorkspaceResolution(root))
+})
+
+test('rejects missing root Vitest that resolves from an ancestor install', t => {
+  const { temp, root, link } = fixture(t)
+  symlinkSync(join(root, 'packages/b'), link, 'dir')
+  rmSync(join(root, 'node_modules/vitest'), { recursive: true })
+  mkdirSync(join(temp, 'node_modules/vitest'), { recursive: true })
+  writeFileSync(join(temp, 'node_modules/vitest/package.json'), JSON.stringify({ name: 'vitest', exports: './unbuilt.js' }))
+  assert.throws(() => checkWorkspaceResolution(root), /run `pnpm install --frozen-lockfile`/)
 })

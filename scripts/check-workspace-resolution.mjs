@@ -16,20 +16,26 @@ export function checkWorkspaceResolution(root = resolve(import.meta.dirname, '..
   }
   try {
     inside(join(root, 'node_modules'))
-    const workspaces = readManifest(join(root, 'package.json')).workspaces.map(directory => {
+    const rootManifestPath = join(root, 'package.json')
+    const rootManifest = readManifest(rootManifestPath)
+    const checkPackage = (name, consumer) => {
+      // Resolve manifests without requiring built entry points or exported subpaths.
+      const path = findPackageJSON(name, pathToFileURL(consumer))
+      if (!path) fail(name)
+      inside(dirname(path))
+    }
+    for (const name of Object.keys({ ...rootManifest.dependencies, ...rootManifest.devDependencies })) {
+      checkPackage(name, rootManifestPath)
+    }
+    const workspaces = rootManifest.workspaces.map(directory => {
       const manifestPath = join(root, directory, 'package.json')
-      return { directory, manifestPath, manifest: readManifest(manifestPath) }
+      return { manifestPath, manifest: readManifest(manifestPath) }
     })
     const names = new Set(workspaces.map(({ manifest }) => manifest.name))
-    for (const { directory, manifestPath, manifest } of workspaces) {
-      inside(join(root, directory, 'node_modules'))
+    for (const { manifestPath, manifest } of workspaces) {
       const dependencies = { ...manifest.dependencies, ...manifest.devDependencies, ...manifest.optionalDependencies }
       for (const name of Object.keys(dependencies).filter(name => names.has(name))) {
-        // Node's package resolver handles exports without requiring a built entry point
-        // or an exported package.json subpath.
-        const path = findPackageJSON(name, pathToFileURL(manifestPath))
-        if (!path) fail(name)
-        inside(dirname(path))
+        checkPackage(name, manifestPath)
       }
     }
   } catch (error) {
