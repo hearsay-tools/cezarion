@@ -8,11 +8,12 @@ import { basename, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import crypto, { createHash } from 'node:crypto';
 import { takeCoverage } from 'node:v8';
+import { isMainThread } from 'node:worker_threads';
 
 const root = process.env.E2E_SPEC_MAP_NODE_DIR;
 const owner = process.env.E2E_SPEC_MAP_OWNER;
 const isServer = /[/\\]dist[/\\]index\.js$/.test(process.argv[1] ?? '');
-if (root && (isServer || owner)) await install(root, owner);
+if (isMainThread && root && (isServer || owner)) await install(root, owner);
 
 async function install(root, owner) {
   mkdirSync(join(root, 'processes'), { recursive: true });

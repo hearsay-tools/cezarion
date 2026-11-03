@@ -1,8 +1,10 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { once } from 'node:events'
 import { chmodSync, copyFileSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { afterEach, expect, test } from 'vitest'
 import { nodeCaptureComplete } from '../../e2e/spec-map/node-evidence.ts'
 import { beginNodeCapture, endNodeCapture } from '../../e2e/spec-map/node-control.ts'
@@ -244,4 +246,22 @@ test('attributes a seeded task to its private server spec without invalidating s
   await endNodeCapture(directory, spec)
   expect(nodeCaptureComplete(directory, spec)).toBe(true)
   expect(readdirSync(directory).filter(name => name.startsWith('ambiguous-task-'))).toEqual([])
+})
+
+
+test('keeps the mock capture endpoint out of TypeScript loader threads', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'cez-map-loader-'))
+  directories.push(directory)
+  const loader = pathToFileURL(createRequire(import.meta.url).resolve('tsx/esm/api')).href
+  const module = pathToFileURL(resolve(import.meta.dirname, '../../e2e/spec-map/node-control.ts')).href
+  const code = `const { register } = await import(${JSON.stringify(loader)}); register(); await import(${JSON.stringify(module)}); console.log('loaded');`
+  const child = spawnSync(process.execPath, ['--import', preload, '--input-type=module', '-e', code], {
+    env: { ...process.env, NODE_OPTIONS: `--import=${preload}`, E2E_SPEC_MAP_NODE_DIR: directory,
+      E2E_SPEC_MAP_OWNER: 'packages/web/e2e/loader.e2e.ts', TSX_DISABLE_CACHE: '1', NODE_V8_COVERAGE: join(directory, 'coverage') },
+    // bound: a loader deadlock cannot acknowledge or process SIGTERM; kill only this fixture.
+    timeout: 5_000, killSignal: 'SIGKILL', encoding: 'utf8',
+  })
+  expect(child.error).toBeUndefined()
+  expect(child.status).toBe(0)
+  expect(child.stdout).toContain('loaded')
 })
