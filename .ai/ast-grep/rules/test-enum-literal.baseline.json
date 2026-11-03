@@ -194,12 +194,6 @@
       "count": 1
     },
     {
-      "file": "packages/cezar/src/core/workflow-no-progress-parity.test.ts",
-      "rule": "test-enum-literal",
-      "site": "source: 'agent'",
-      "count": 1
-    },
-    {
       "file": "packages/cezar/src/delegation/cli.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'cancelled'",

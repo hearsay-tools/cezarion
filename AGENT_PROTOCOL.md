@@ -1877,7 +1877,7 @@ intermediate `cezar_ask` that the tool refuses while the tail runs with no human
 stop/failure; an unanswered clean close retains durable waiting and releases capacity.
 
 
-Open-turn inactivity rows **N1–N8** live in `core/workflow-no-progress-parity.test.ts`
+Open-turn inactivity rows **N1–N8** live in `core/workflow-no-progress-parity.testkit.ts`
 and the same parity guard. Every native adapter proves that stalled nonfinal turns
 fail without running trailing checks, native progress/heartbeats sustain a long
 turn, parked sessions do not time out, followups and Continue rearm protection,
