@@ -31,7 +31,12 @@ function choose(index: number) {
   browser.click(select); browser.press('Home')
   for (let i = 0; i < index; i++) browser.press('ArrowDown')
   browser.press('Enter')
-  browser.waitForFunction(`document.querySelector('${select}')?.disabled === false`)
+  // Enabled alone can still be the pre-save render. Wait for the saved controlled value too.
+  const value = ['inherit', 'enabled', 'disabled'][index]
+  browser.waitForFunction(`(() => {
+    const control = document.querySelector('${select}');
+    return control?.disabled === false && control.value === ${JSON.stringify(value)};
+  })()`)
 }
 it('persists project overrides and inheritance at 360px in both themes', async () => {
   for (const theme of ['light', 'dark']) {
