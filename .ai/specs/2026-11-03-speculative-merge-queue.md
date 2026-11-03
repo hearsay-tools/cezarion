@@ -169,6 +169,17 @@ Saturated-queue model (`k` = `max_entries_to_build`). Assumptions:
 | 30% | 3.1 | 140 | 5.3 | 186 | +46% |
 | 40% | 2.6 | 164 | 4.3 | 237 | +85% |
 
+How the k=2 cost at 22.5% builds up:
+
+| Step | Runner-min per merge |
+| --- | --- |
+| Invalidated runs cancelled at removal, reuse not counted | 143 |
+| + invalidated runs keep running (Q4) | 150 |
+| + lost native-suite reuse, ×1.07 (the table's figure) | 161 |
+
+The owner's question on 2026-11-03 gave the first figure (143) and listed the other
+two terms separately. 161 is the cost of the design as decided.
+
 - **Throughput.** Two builds give 1.6 to 1.9 times the merges per hour at every failure
   rate up to 40%. Throughput alone never stops paying.
 - **Cost.** The owner's cost limit (+40% over 128, so 179 runner-min per merge) is reached at a
@@ -224,15 +235,26 @@ Rows that "cannot happen" at k=1 are why the serial queue never needed them.
 1. **Implementation lands (k stays 1).** Items 1 to 4 and 6 of § Design merge with tests.
    Tests pin that k=1 behaves exactly as today. Prove each new regression test red
    without its fix ([`docs/sdlc/regression-proof.md`](../../docs/sdlc/regression-proof.md)).
-2. **Pre-activation exercise.** In a controlled sandbox repository with the same ruleset
-   shape and k=2, enqueue three trivial PRs and record:
+2. **Pre-activation exercise.** The sandbox is a new repository in the `hearsay-tools`
+   org, for example `hearsay-tools/merge-queue-sandbox`.
+   - **Who creates it.** The owner creates it, or approves in follow-up issue 4 that an
+     agent creates it. Creating it is an outward action, so it needs that approval.
+   - **Visibility.** It must be public: on the Free plan, merge queues work only on
+     public repositories in an organization.
+   - **Contents.** A trivial workflow, the queue lookup from § Design 2, and a ruleset
+     of the same shape with k=2.
+   - **Afterwards.** Archive or delete it.
+
+   Enqueue three trivial PRs and record:
    - the entry `position`, `headCommit` and `baseCommit` that GraphQL reports (S5);
    - each group head's first parent (S2);
    - each `main` push SHA against the group heads, and whether one push covers two
      merges (S3);
    - the effect of failing entry 1 on entry 2's run: cancelled or left running (S4,
      row 25);
-   - that admission passes at positions 1 and 2, and fails for a stale group.
+   - that the entry lookup (`entryFrom`) passes at positions 1 and 2, and fails for a
+     stale group. The sandbox has no CodeRabbit or native PR CI, so the full admission
+     runs for the first time in the pilot. Any admission failure there is a rollback.
 
    Attach the results to the pilot issue. Any mismatch returns to design review before
    step 3.
@@ -289,5 +311,6 @@ Filed after the owner approves this spec:
    two-merge pushes (§ Design 4).
 3. **Weekly queue metric, run by hand.** A read-only script that prints the pilot
    metrics (§ Rollout step 4) from the Actions and GraphQL APIs. No schedule.
-4. **Pre-activation exercise and pilot.** The sandbox exercise (§ Rollout step 2), then
+4. **Pre-activation exercise and pilot.** The owner's approval to create the public
+   sandbox repository, the sandbox exercise (§ Rollout step 2), then
    the owner's ruleset change and the 7-day pilot read-out. Depends on 1, 2 and 3.
