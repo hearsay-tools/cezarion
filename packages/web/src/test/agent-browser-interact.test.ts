@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentBrowser, configureFailureCapture, OPEN_OVERLAY_PROBE } from '../../e2e/agent-browser'
 import { resetBrowserPage } from '../../e2e/browser-page'
+import * as testEnvInputs from '../../../../.ai/scripts/test-env-inputs.mjs'
 
 /**
  * A stand-in `agent-browser` that records every invocation and answers `{ success: true }`.
@@ -77,6 +78,26 @@ function open(opts?: { waitFails?: boolean; tabTarget?: unknown; evalResult?: un
 }
 
 describe('AgentBrowser auto-wait (#405)', () => {
+  it('preserves duplicate descriptor and per-session flags when opening a session', () => {
+    const fixture = open()
+    const descriptor = vi.spyOn(testEnvInputs, 'readTestEnvDescriptor').mockReturnValue({
+      browser: {
+        installed: true, command: join(fixture.dir, 'agent-browser'), version: 'fake', notes: '',
+        launchArgs: ['--no-sandbox'], runtimeEnv: { FAKE_LOG: join(fixture.dir, 'calls.ndjson') },
+      },
+    })
+    try {
+      const browser = AgentBrowser.open('duplicate-flags', { launchArgs: ['--no-sandbox', '--window-size=800,600'] })
+      browser.evaluate('0')
+      browser.close()
+      const calls = readFileSync(join(fixture.dir, 'calls.ndjson'), 'utf8').trim().split('\n')
+        .map(line => JSON.parse(line) as string[])
+      expect(calls.every(args => args[0] === '--args' && args[1] === '--no-sandbox,--no-sandbox,--window-size=800,600')).toBe(true)
+    } finally {
+      descriptor.mockRestore()
+    }
+  })
+
   it('captures provider config arguments before later setup changes the config and environment', () => {
     vi.stubEnv('AGENT_BROWSER_ARGS', '')
     const fixture = open()
