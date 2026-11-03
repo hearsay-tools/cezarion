@@ -1,8 +1,9 @@
 import { execFileSync, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { backup, DatabaseSync } from 'node:sqlite'
+import { basename, join } from 'node:path'
 import { makeRunRecord, RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { seedRuns } from './seed-runs'
@@ -11,7 +12,7 @@ import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './f
 import { seedTranscript } from './seed-transcript'
 import { focusWithKeyboard, contrastSampleExpression } from './contrast'
 import { settleVisual, waitForSettledSample } from './visual-ready'
-// fixture-server starts: 1
+// fixture-server starts: 2
 
 let root: string, baseUrl: string, server: ChildProcess, browser: AgentBrowser
 const runIds = Array.from({ length: 25 }, () => randomUUID())
@@ -149,16 +150,39 @@ it('opens the same reader from a conversation card and the shelf, then returns t
 })
 
 it('shows a deleted snapshot as missing and drops reports after snapshot or task-history deletion', async () => {
-  browser.goto(baseUrl + path)
-  browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 25`)
-  rmSync(join(root, 'project/.ai/cezar/runs', `${runIds[0]}-artifacts`, ids[0]!, 'content'))
-  browser.click(`[data-report-id="${ids[0]}"]`)
-  browser.waitForFunction(`document.body.textContent.includes('Report missing or deleted')`)
-  browser.click('[data-slot="report-bar"] button[aria-label="Back"]')
-  browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 24`)
-  const response = await fetch(`${baseUrl}/api/v1/p/shelf/runs/${runIds[1]}`, { method: 'DELETE' })
-  expect(response.status).toBe(200)
-  // The mounted shelf receives run-deleted and refetches through the shared debounce.
-  browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 23`)
-  expect(browser.waitForValue(`document.querySelector('[data-report-id="${ids[1]}"]') === null`)).toBe(true)
+  const deletionRoot = realpathSync(mkdtempSync(join(tmpdir(), 'cez-report-deletion-')))
+  let deletionServer: ChildProcess | undefined
+  let deletionBrowser: AgentBrowser | undefined
+  try {
+    const project = join(deletionRoot, 'project')
+    cpSync(join(root, 'project'), project, { recursive: true, filter: source => !basename(source).startsWith('runs.db') })
+    const sourceDatabase = new DatabaseSync(join(root, 'project/.ai/cezar/runs.db'), { readOnly: true })
+    try {
+      await backup(sourceDatabase, join(project, '.ai/cezar/runs.db'))
+    } finally {
+      sourceDatabase.close()
+    }
+    const env = fixtureServeEnv(project)
+    mkdirSync(env.CEZ_HOME!, { recursive: true })
+    writeFileSync(join(env.CEZ_HOME!, 'config.json'), JSON.stringify({ projects: [{ id: 'shelf', root: project }] }))
+    deletionServer = spawnFixtureServer([cezarCli, 'serve', '--repo', project, '--port', '0', '--no-open'], { env })
+    const browser = deletionBrowser = AgentBrowser.open(`report-deletion-${process.pid}`)
+    const baseUrl = await waitForFixtureServer(deletionServer)
+    browser.goto(baseUrl + path)
+    browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 25`)
+    rmSync(join(deletionRoot, 'project/.ai/cezar/runs', `${runIds[0]}-artifacts`, ids[0]!, 'content'))
+    browser.click(`[data-report-id="${ids[0]}"]`)
+    browser.waitForFunction(`document.body.textContent.includes('Report missing or deleted')`)
+    browser.click('[data-slot="report-bar"] button[aria-label="Back"]')
+    browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 24`)
+    const response = await fetch(`${baseUrl}/api/v1/p/shelf/runs/${runIds[1]}`, { method: 'DELETE' })
+    expect(response.status).toBe(200)
+    // The mounted shelf receives run-deleted and refetches through the shared debounce.
+    browser.waitForFunction(`document.querySelectorAll('${ROW}').length === 23`)
+    expect(browser.waitForValue(`document.querySelector('[data-report-id="${ids[1]}"]') === null`)).toBe(true)
+  } finally {
+    deletionBrowser?.close()
+    await stopFixtureServer(deletionServer)
+    rmSync(deletionRoot, { recursive: true, force: true })
+  }
 })

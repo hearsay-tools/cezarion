@@ -140,6 +140,8 @@ describe('the Changes tab against a live dry run', () => {
   })
 
   it('the toolbar comes from the policy: Push, Create PR, Commit, and kebab', () => {
+    browser.goto(`${baseUrl}${scoped(`/tasks/${runId}/changes`)}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="git-toolbar"]') !== null`)
     // Push's enablement rides the /api/v1/health answer (repo.remote), and health probes the
     // real codex/opencode/gh CLIs — slow. Wait for the policy to settle rather than sample.
     browser.waitForFunction(
@@ -171,36 +173,46 @@ describe('the Changes tab against a live dry run', () => {
   })
 
   it('Commit: the dialog prefills the auto-summary, commits for real in the worktree', () => {
-    // The settle autosave left the tree clean — dirty it the way a user editing in the
-    // worktree would, so the commit below has something real to commit.
-    writeFileSync(join(worktreePath, 'edited-by-e2e.md'), 'a change made outside the agent\n', 'utf8')
+    browser.goto(`${baseUrl}${scoped(`/tasks/${runId}/changes`)}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="git-toolbar"]') !== null`)
+    const originalHead = execFileSync('git', ['-C', worktreePath, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
+    try {
+      // The settle autosave left the tree clean — dirty it the way a user editing in the
+      // worktree would, so the commit below has something real to commit.
+      writeFileSync(join(worktreePath, 'edited-by-e2e.md'), 'a change made outside the agent\n', 'utf8')
 
-    browser.click('[data-slot="git-toolbar"] [data-action="commit"]')
-    // Radix dialog animates in — wait for the textarea, then check the prefill.
-    browser.waitForFunction(`document.querySelector('[data-slot="commit-message"]') !== null`)
-    const prefill = browser.evaluate(
-      `document.querySelector('[data-slot="commit-message"]').value`,
-    ) as string
-    expect(prefill.length).toBeGreaterThan(0)
+      browser.click('[data-slot="git-toolbar"] [data-action="commit"]')
+      // Radix dialog animates in — wait for the textarea, then check the prefill.
+      browser.waitForFunction(`document.querySelector('[data-slot="commit-message"]') !== null`)
+      const prefill = browser.evaluate(
+        `document.querySelector('[data-slot="commit-message"]').value`,
+      ) as string
+      expect(prefill.length).toBeGreaterThan(0)
 
-    browser.fill('[data-slot="commit-message"]', 'docs: notes touched by the changes e2e')
-    browser.click('[data-slot="commit-confirm"]')
-    // Success closes the dialog (a 409 would keep it open — that path is unit-tested).
-    browser.waitForFunction(`document.querySelector('[data-slot="commit-message"]') === null`)
+      browser.fill('[data-slot="commit-message"]', 'docs: notes touched by the changes e2e')
+      browser.click('[data-slot="commit-confirm"]')
+      // Success closes the dialog (a 409 would keep it open — that path is unit-tested).
+      browser.waitForFunction(`document.querySelector('[data-slot="commit-message"]') === null`)
 
-    // The commit is REAL — read it back from the run's worktree.
-    const subject = execFileSync('git', ['-C', worktreePath, 'log', '-1', '--format=%s'], {
-      encoding: 'utf8',
-    }).trim()
-    expect(subject).toBe('docs: notes touched by the changes e2e')
+      // The commit is REAL — read it back from the run's worktree.
+      const subject = execFileSync('git', ['-C', worktreePath, 'log', '-1', '--format=%s'], {
+        encoding: 'utf8',
+      }).trim()
+      expect(subject).toBe('docs: notes touched by the changes e2e')
 
-    // The diff stays anchored at the merge-base, so the committed changes still show —
-    // now including the file this test added.
-    browser.waitForFunction(`document.querySelector('[data-slot="diff-file"][data-path="notes.md"]') !== null`)
-    browser.waitForFunction(`document.querySelector('[data-slot="tree-file"][data-path="edited-by-e2e.md"]') !== null`)
+      // The diff stays anchored at the merge-base, so the committed changes still show —
+      // now including the file this test added.
+      browser.waitForFunction(`document.querySelector('[data-slot="diff-file"][data-path="notes.md"]') !== null`)
+      browser.waitForFunction(`document.querySelector('[data-slot="tree-file"][data-path="edited-by-e2e.md"]') !== null`)
+    } finally {
+      execFileSync('git', ['-C', worktreePath, 'reset', '--hard', originalHead])
+      rmSync(join(worktreePath, 'edited-by-e2e.md'), { force: true })
+    }
   })
 
   it('the Files tab opens the worktree browser under the same header (deep coverage: task-files.e2e.ts)', () => {
+    browser.goto(`${baseUrl}${scoped(`/tasks/${runId}/changes`)}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="git-toolbar"]') !== null`)
     browser.click(`[data-slot="run-tabs"] a[href="${scoped(`/tasks/${runId}/files`)}"]`)
     browser.waitForFunction(`document.querySelector('[data-route="task-files"] [data-slot="files-tree"]') !== null`)
     expect(browser.url()).toBe(`${baseUrl}${scoped(`/tasks/${runId}/files`)}`)

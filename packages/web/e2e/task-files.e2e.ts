@@ -154,6 +154,8 @@ describe('the Files tab against a live dry-run worktree', () => {
   })
 
   it('a directory expands lazily and its TypeScript file previews with Shiki tokens', () => {
+    browser.goto(`${baseUrl}${scoped(`/tasks/${runId}/files`)}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="files-dir"][data-path="src"]') !== null`)
     // src starts closed — its listing is a second request the click triggers.
     expect(
       browser.evaluate(`document.querySelector('[data-slot="files-dir"][data-path="src"]').dataset.state`),
@@ -182,6 +184,11 @@ describe('the Files tab against a live dry-run worktree', () => {
   })
 
   it('an image previews inline — the raw=1 bytes really decode', () => {
+    browser.goto(`${baseUrl}${scoped(`/tasks/${runId}/files`)}`)
+    browser.click('[data-slot="files-dir"][data-path="src"]')
+    browser.waitForFunction(`document.querySelector('[data-slot="files-file"][data-path="src/hello.ts"]') !== null`)
+    browser.click('[data-slot="files-file"][data-path="src/hello.ts"]')
+    browser.waitForFunction(`document.querySelector('[data-slot="file-preview-code"]') !== null`)
     browser.click('[data-slot="files-file"][data-path="logo.png"]')
     browser.waitForFunction(`document.querySelector('[data-slot="file-preview-image"]') !== null`)
     expect(
