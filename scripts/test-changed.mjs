@@ -32,6 +32,10 @@ Selection rules:
   No matching test is an error; run npm test or select relevant tests explicitly
   and report any coverage gap.
 
+To classify branch commits as CI does, run:
+  git diff --name-only --no-renames origin/main...HEAD | jq -R . | node .github/scripts/change-surface.cjs
+This prints docs-only, infra-only or full-matrix.
+
 This command provides iteration feedback. Import graphs do not cover every
 runtime dependency. CI's gate is final.`);
     process.exit(0);

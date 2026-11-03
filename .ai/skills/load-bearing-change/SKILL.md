@@ -9,12 +9,10 @@ Replacing working behavior is the highest-risk change in this repo. It fails in 
 characteristic way: the new mechanism is correct, the tests are green, the spec is
 thorough — and the DEFAULT path quietly lost a **load-bearing** guarantee, one that
 other code reaches a correct state *because of*, whether or not anyone wrote it down.
-open-mercato/cezar#810 and open-mercato/cezar#811 both shipped a well-specified
-improvement that left the zero-config user worse off than before.
 
 **Name what the old mechanism was load-bearing FOR, not what it was for.**
-`IDLE_TIMEOUT_MS` read as session hygiene, and open-mercato/cezar#661 removed it from
-the monitoring branch for a good reason (it closed live sessions mid-CI and recorded
+`IDLE_TIMEOUT_MS` read as session hygiene, and its removal from
+the monitoring branch had a good reason (it closed live sessions mid-CI and recorded
 them as `done`). It was also the only liveness bound on `CEZ:MONITORING` and the only
 reason a parked monitor released its `maxParallel` slot, so `monitoring` became a
 state with no exit. Before deleting a timer, lock, cap or timeout, grep for
@@ -93,8 +91,7 @@ evidence.
 **Read the run-history evidence before theorizing, and cite it.** `.ai/specs/` records
 the design, `git log -S` and `git merge-base --is-ancestor <commit> <tag>` settle "was
 this in the release the user is on", and a user's "it worked in 0.9.1" is a testable
-claim, not an opinion. open-mercato/cezar#810 was confirmed in one command before a
-line of code was read.
+claim, not an opinion.
 
 ## Case tables
 
@@ -110,7 +107,7 @@ and a case that cannot happen stated with the reason.
 | Changes how a `ToolGrant` (`core/agent-runner.ts`) maps onto a runner's tool flags | **Tool-list kinds**, one per affected runner: Case · Emitted runner flags · Callable built-in, MCP and extension tools at shipped defaults | Every case in `TOOL_GRANT_CASES` (`core/tool-grant-parity-cells.testkit.ts`); its cells pin each case on each runner. Show effective tool access, not only the flags sent, and say when a runner ignores a restriction or cannot distinguish two cases. |
 | Adds, replaces or removes files in a running task's worktree (`worktree-write-outside-manifest`) | **Worktree cases**: Case · Files written, kept or removed · Worktree state at the next step, Continue and restart | A catalog or source that has not loaded yet; the same name from two sources; records written by an older cezar version; a crash between two writes; the source removing the item. |
 | Starts a process that outlives the command that started it (`detached-spawn-outside-helper`) | **Process exits**: Case · What stops it · Behavior at shipped defaults | The normal stop; the starting command interrupted by SIGINT or SIGKILL before and after the start; the handle the stop reads, such as a descriptor, deleted or forged. The helper's tests hold the rest: the leader exits first, a member ignores SIGTERM, zombies, an unreadable or reused start identity. |
-| Restores saved client state for an entity | **State restore cases**: Path or trigger · Restored value · Displayed value | Reopen without a selection; switch between two restored entities; entity unavailable after restore; derived display differs from saved state (e.g. provider mask). Derive from one state; never mask in a provider. See hearsay-tools/cezarion#2079. |
+| Restores saved client state for an entity | **State restore cases**: Path or trigger · Restored value · Displayed value | Reopen without a selection; switch between two restored entities; entity unavailable after restore; derived display differs from saved state (e.g. provider mask). Derive from one state; never mask in a provider. |
 
 Each table exists because a plan named only the obvious case and review rounds found
 the rest: hearsay-tools/cezarion#1305 and hearsay-tools/cezarion#1360 (tool lists with
