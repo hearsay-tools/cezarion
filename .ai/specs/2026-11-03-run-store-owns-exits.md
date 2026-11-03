@@ -12,11 +12,12 @@ Functions are named, with line numbers only as of the baseline; every slice move
 `RunStore` (`runs/store.ts`) has about 117 public members. A caller must know rules the store
 could enforce:
 
-- **Which exit may write which status.** `RUN_EXITS` (`workflows/run-states.ts`) declares 22
+- **Which exit may write which status.** `RUN_EXITS` (`workflows/run-states.ts`) declares 21
   exits. Callers apply it in three ways: `RunManager.move`, a `status: transition(…)` value in a
   patch, or `transitionVia` around five store commits that write a status themselves. The check
-  runs only in tests, and there it throws before the write, so a test takes a different path from
-  the app.
+  runs only in tests. There it throws: `transition()` before the caller writes, `transitionVia()`
+  after the commit ran. Either way the caller sees a throw that the app never raises, so a test
+  can take a different path from the app.
 - **Which fields an exit settles.** 66 call sites each choose their own `finishedAt`,
   `currentStepId`, `activity`, step and Finish-intent changes. Sites of one exit disagree (see
   § Differences).
@@ -43,10 +44,13 @@ Seven writers bypass the table: six in the `run-status-write-outside-transition`
    debounced so a locked database cannot stop cleanup; Done with a completion option, handoff
    records and the archive options commit at once. The record rules become one ordered pipeline.
    A rule that differs between the saves on purpose is a named difference in that pipeline.
-5. **Guarded exits replace status-writing commits.** `commitParked`, `commitRootFinishSuccess`,
+5. **Exits replace status-writing commits.** `commitParked`, `commitRootFinishSuccess`,
    `commitRootFinishCancellation`, `commitWorkerCancellation` and `commitAutoResumeWithdrawal`
-   become exits with a named guard; a failed guard writes nothing and returns false.
-   `transitionVia` is deleted.
+   become exits. Four have a precondition and get a named guard: root Finish success and
+   cancellation (a root with a pending Finish intent), worker cancellation (role worker) and the
+   hold withdrawal (a usage-limit hold). A failed guard writes nothing and returns false, as the
+   commit's early return does today. `commitParked` has no precondition; it becomes the committed
+   form of `park`. `transitionVia` is deleted.
 6. **The bypass writers become exits** (§ Table C). Then `run-status-write-outside-transition`
    and its baseline are deleted: the type refuses a status outside an exit.
 7. **Slice 4.4 removes the four outcome baseline entries at their cause**: `commitOutcome`
@@ -85,7 +89,7 @@ adds for every exit whose status is `failed`. Durability: D debounced, C commit.
 | requeue | queued, running, failed → queued | 6 | `currentStepId` cleared | none | D |
 | continue-line | waiting, review, done, failed, cancelled → queued | 3 | `error`, `finishedAt`, `currentStepId` cleared | none | D; worker C (`commitWorkerContinuation`) |
 | continue-now | same → running | 1 | `error`, `finishedAt` cleared; `currentStepId` = the step | none | D; worker C |
-| park | running, queued, waiting → waiting | 14 | nothing | none (`commitParked`: also `activity` and the step, in one commit) | D; C at `parkOnWaits` without a slot |
+| park | running, queued, waiting → waiting | 14 | nothing | none (`commitParked` clears `activity` and sets the step in the same commit) | D; C at `parkOnWaits` without a slot |
 | park-for-wake | queued, waiting → waiting | 1 | nothing | none | D |
 | hold | failed, waiting → waiting | 1 + `failed.legacy-hold` | `finishedAt` cleared; `autoResumeAt` set | none | D |
 | resume | waiting → running | 4 | nothing | none | D; C inside `commitOutcome` at `sendAgentInput` |
@@ -114,7 +118,7 @@ S5 keeps every row as it is (owner, 2026-11-03). S7 normalizes them. "Today" is 
 | B1 | fail-start | 4 of 7 sites clear `currentStepId`; 3 leave it | leave: `checkpointQueuedWorker`, `reviveQueuedRun`, `reviveQueuedWorker` |
 | B2 | fail-crash | neither site clears `currentStepId` | `failCrashedContinuation`, `launchQueuedRun` |
 | B3 | cancel | 5 of 10 `move` sites leave `currentStepId`; no `move` site retires the Finish intent (`reconcileFamilyPass` repairs it later) | leave: `cancelQueuedRun`, `cancelRunWithoutSession`, `settleStoppedContinuation`, both in `startExecution` |
-| B4 | `finishedAt` on a terminal exit | overwritten with now: `commitWorkerCancellation`, `commitAutoResumeWithdrawal`, every `move`; kept (`??=`): `commitRootFinishCancellation`, every store load-time writer, Draft PR | as listed |
+| B4 | `finishedAt` on a settling exit | overwritten with now: `commitWorkerCancellation`, `commitAutoResumeWithdrawal`, every `move`; kept (`??=`): `commitRootFinishCancellation`, every store load-time writer, Draft PR | as listed |
 | B5 | succeed | `commitRootFinishSuccess` clears `activity` and settles steps in its commit; `commitOrdinarySuccess` does neither in its patch (steps by side calls) | both |
 | B6 | accept-review | Finish sets no `finishedAt` and retires the intent; Draft PR sets `finishedAt ??= now` and no SRF | `finish`, `POST /runs/:id/pr` |
 | B7 | continue-line | the usage-limit Continue writes it twice: `acceptResumedContinuation`, then `dispatchAcceptedContinuation` | both |
@@ -148,8 +152,8 @@ state has an automatic exit or a recorded human-only reason.
 
 | # | Target rule | Reason |
 |---|---|---|
-| B1, B2, B3 | Every terminal exit (done, review, failed, cancelled) clears `currentStepId` and retires the root's Finish intent | A settled run points at no step; Finish has no meaning after the run settled. The family reconciler stops being the repair path for cancel |
-| B4 | A terminal exit keeps an existing `finishedAt` (`??=`), except `continue-*` and `hold`, which clear it | The first settlement time is the fact; a later writer on a settled run only repairs |
+| B1, B2, B3 | Every settling exit (one that writes done, review, failed or cancelled) clears `currentStepId` and retires the root's Finish intent. `review` is not final (it has `accept-review` and Continue exits); `succeed-review` already does both | A settled run points at no step; a Finish intent has no meaning once the run settled. The family reconciler stops being the repair path for cancel |
+| B4 | A settling exit keeps an existing `finishedAt` (`??=`); `continue-*` and `hold` clear it | The first settlement time is the fact; a later writer on a settled run only repairs |
 | B5 | Both success paths clear `activity` and settle running or waiting steps in the same write | One exit, one result |
 | B6 | accept-review sets `finishedAt ??= now` and retires the Finish intent on both paths | As B3 and B4 |
 | B7 | The usage-limit Continue writes `continue-line` once | The second write repeats the first |
