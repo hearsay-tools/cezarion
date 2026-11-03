@@ -370,6 +370,56 @@ Keep RunManager, RunStore, disk recovery and isolated git workspaces real. A
 virtual process may reduce native mock startup cost. It must not replace the
 behavior the workflow cells assert.
 
+### Imported-testkit seam spike
+
+The uncommitted spike is `.ai/qa/2516/spike.testkit.ts`, `spike.test.ts` and
+`spike.vitest.config.ts`. The testkit installs the partial mock before the test
+imports the real `driveSeam` and runner factory. A per-child vm.SourceTextModule
+realm evaluates the **existing mock script and its dependencies**, with virtual
+process/streams/console/timers and a real in-process HTTP server for OpenCode.
+No runner or mock script was edited. The child intercept counter was one in
+every virtual cell and zero in every real cell. All six baseline comparisons
+passed: result text, tokens and v1 event-type order matched through production
+adapters. This is feasibility evidence, not proof for every scenario.
+
+```sh
+NODE_OPTIONS=--experimental-vm-modules /usr/bin/time -v \
+  -o .ai/qa/2516/spike-final.time npm test -- \
+  --config .ai/qa/2516/spike.vitest.config.ts --maxWorkers=1
+```
+
+Starting load: `65.06 50.17 34.28 47/5164 2675557` **†**; nproc `24`. Ending load: `64.44 50.96 34.88 42/4919 2688676`.
+The run passed 6/6 tests. Vitest reported 2.80 s test execution; the whole
+invocation took 21.51 s inside Vitest, including imports and transforms. The
+following cell times exclude that common Vitest startup. The real cell ran
+first, so warm caches and JIT can favor the following virtual cell; one pair is
+not a stable performance distribution. Raw per-runner observations are
+`spike-<runner>.json` in the same ignored evidence directory.
+
+| Runner | Real cell ms | In-process cell ms | Observed reduction | Interpretation |
+| --- | ---: | ---: | ---: | --- |
+| claude | 384.55 | 19.62 | 94.9% | Native launch removed; shipped adapter still parses native frames |
+| codex | 171.24 | 29.94 | 82.5% | Native launch removed; shipped adapter still parses native frames |
+| opencode | 526.96 | 92.91 | 82.4% | Native launch removed; shipped adapter still parses native frames |
+| pi | 203.45 | 16.22 | 92.0% | Native launch removed; shipped adapter still parses native frames |
+| cursor | 392.12 | 313.79 | 20.0% | The print turn still retains its adapter settlement wait |
+| omp | 271.76 | 14.21 | 94.8% | Native launch removed; shipped adapter still parses native frames |
+
+The first diagnostic attempt failed at module registration: Vitest does not
+allow `export const x = vi.hoisted(...)`. A local hoisted binding followed by
+`export { x }` works from the imported testkit. A second diagnostic attempt
+passed five runners but OpenCode timed out because VM console output went to
+the host console instead of the virtual child's stdout. Connecting its Console
+to the virtual streams fixed discovery. No timeout was increased. The final
+six-runner pass, not those failed attempts, supports feasibility.
+
+These baseline deltas do not show that a whole parity file falls below 60 s.
+The profiles below separate first-frame/close cost from real Git and residual
+workflow/store/wait cost. CI suite durations remain the absolute performance
+reference. Any file whose conservative residual exceeds the 40 s target gets
+an explicit 3.3 split or measured cause fix; the design does not assume startup
+removal fixes every row group.
+
 ### Real-process smoke cells and mutation proof
 
 Keep one end-to-end baseline smoke per runner and current wire above. Assert
