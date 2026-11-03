@@ -109,6 +109,7 @@ function importWorkflow(): void {
   browser.evaluate(`document.querySelector('[data-slot="wb-import-run"]').scrollIntoView({ block: 'center' })`)
   browser.click('[data-slot="wb-import-run"]')
   browser.waitForFunction(`${stepIdsJs} === 'fix,tests'`)
+  browser.waitForFunction(`document.querySelector('[data-slot="dialog-overlay"]') === null`)
 }
 
 describe('workflow builder against the live dry-run server', () => {
