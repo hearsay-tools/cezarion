@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, renderHook } from '@testing-library/react'
 import { createElement } from 'react'
@@ -28,7 +29,7 @@ const line = (seq: number, type: string, extra: Record<string, unknown> = {}): R
 })
 
 const run = (over: Partial<ApiRun> = {}): ApiRun =>
-  ({ id: 'r1', status: 'running', ...over }) as ApiRun
+  ({ id: 'r1', status: RUN_STATUS.running, ...over }) as ApiRun
 
 afterEach(() => {
   cleanup()
@@ -47,18 +48,18 @@ describe('settledSessionSeq', () => {
 
   it('a session opening after the end (Continue) makes the end history, not news', () => {
     const events = [
-      line(1, 'step-start', { kind: 'agent' }),
+      line(1, 'step-start', { kind: STEP_KIND.agent }),
       line(8, 'session.ended'),
-      line(9, 'step-start', { kind: 'agent' }),
+      line(9, 'step-start', { kind: STEP_KIND.agent }),
     ]
     expect(settledSessionSeq(events)).toBe(0)
   })
 
   it('a check step after the end does not hide the settled agent session', () => {
     const events = [
-      line(1, 'step-start', { kind: 'agent' }),
+      line(1, 'step-start', { kind: STEP_KIND.agent }),
       line(8, 'session.ended'),
-      line(9, 'step-start', { kind: 'check' }),
+      line(9, 'step-start', { kind: STEP_KIND.check }),
     ]
     expect(settledSessionSeq(events)).toBe(8)
   })
@@ -70,9 +71,9 @@ describe('settledSessionSeq', () => {
 
   it('across several sessions the LAST boundary decides', () => {
     const events = [
-      line(1, 'step-start', { kind: 'agent' }),
+      line(1, 'step-start', { kind: STEP_KIND.agent }),
       line(8, 'session.ended'),
-      line(9, 'step-start', { kind: 'agent' }),
+      line(9, 'step-start', { kind: STEP_KIND.agent }),
       line(20, 'session.ended'),
     ]
     expect(settledSessionSeq(events)).toBe(20)
@@ -98,11 +99,11 @@ describe('parkedTurnSeq', () => {
   })
 
   it('a check step after the end does not hide the parked agent turn', () => {
-    expect(parkedTurnSeq([line(8, 'turn-end'), line(9, 'step-start', { kind: 'check' })])).toBe(8)
+    expect(parkedTurnSeq([line(8, 'turn-end'), line(9, 'step-start', { kind: STEP_KIND.check })])).toBe(8)
   })
 
   it('an agent step after the end opens a new turn', () => {
-    expect(parkedTurnSeq([line(8, 'turn-end'), line(9, 'step-start', { kind: 'agent' })])).toBe(0)
+    expect(parkedTurnSeq([line(8, 'turn-end'), line(9, 'step-start', { kind: STEP_KIND.agent })])).toBe(0)
   })
 
   it('session.started after the end opens a new turn', () => {
@@ -136,7 +137,7 @@ describe('useRunRecordReconcile', () => {
     vi.useFakeTimers()
     const events = [line(8, 'turn-end')]
     const { rerender, invalidate } = renderReconcile(run(), events)
-    rerender({ r: run({ status: 'waiting' }), e: events })
+    rerender({ r: run({ status: RUN_STATUS.waiting }), e: events })
     vi.advanceTimersByTime(STALE_RECORD_GRACE_MS * 2)
     expect(invalidate).not.toHaveBeenCalled()
   })
@@ -162,7 +163,7 @@ describe('useRunRecordReconcile', () => {
 
   it('`waiting` is a live-session claim too', () => {
     vi.useFakeTimers()
-    const { invalidate } = renderReconcile(run({ status: 'waiting' }), [line(8, 'session.ended')])
+    const { invalidate } = renderReconcile(run({ status: RUN_STATUS.waiting }), [line(8, 'session.ended')])
     vi.advanceTimersByTime(STALE_RECORD_GRACE_MS)
     expect(invalidate).toHaveBeenCalled()
   })
@@ -170,7 +171,7 @@ describe('useRunRecordReconcile', () => {
   it('the healthy path stays quiet: the record settles within the grace and cancels the refetch', () => {
     vi.useFakeTimers()
     const { rerender, invalidate } = renderReconcile(run(), [line(8, 'session.ended')])
-    rerender({ r: run({ status: 'done' }), e: [line(8, 'session.ended')] })
+    rerender({ r: run({ status: RUN_STATUS.done }), e: [line(8, 'session.ended')] })
     vi.advanceTimersByTime(STALE_RECORD_GRACE_MS * 2)
     expect(invalidate).not.toHaveBeenCalled()
   })
@@ -184,7 +185,7 @@ describe('useRunRecordReconcile', () => {
 
   it('a settled record over a settled transcript is consistent — no refetch', () => {
     vi.useFakeTimers()
-    const { invalidate } = renderReconcile(run({ status: 'done' }), [line(8, 'session.ended')])
+    const { invalidate } = renderReconcile(run({ status: RUN_STATUS.done }), [line(8, 'session.ended')])
     vi.advanceTimersByTime(STALE_RECORD_GRACE_MS * 2)
     expect(invalidate).not.toHaveBeenCalled()
   })
@@ -193,7 +194,7 @@ describe('useRunRecordReconcile', () => {
     vi.useFakeTimers()
     const events = [line(8, 'session.ended')]
     const { rerender, invalidate } = renderReconcile(run(), events)
-    rerender({ r: run(), e: [...events, line(9, 'step-start', { kind: 'agent' })] })
+    rerender({ r: run(), e: [...events, line(9, 'step-start', { kind: STEP_KIND.agent })] })
     vi.advanceTimersByTime(STALE_RECORD_GRACE_MS * 2)
     expect(invalidate).not.toHaveBeenCalled()
   })

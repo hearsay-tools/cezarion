@@ -3,7 +3,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { ApiRun, RunStatus, StepState } from '@open-mercato/cezar-api-client'
 
-import { makePeerWait, makeSubagentWait, RUN_STATUS, SUBAGENT_STATUS, WAIT_PHASE } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import {
+  makePeerWait,
+  makeSubagentWait,
+  RUN_STATUS,
+  SUBAGENT_STATUS,
+  WAIT_PHASE,
+  STEP_KIND,
+  STEP_STATUS,
+  WAIT_KIND,
+  WAIT_SOURCE,
+  WAIT_VIA,
+  WORKER_OUTCOME_STATUS,
+} from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { RunWaitDetails, hasWaitDetails } from './run-waits'
 
 /** The run's wait details, which moved from the run header into the Session activity card's
@@ -17,8 +29,8 @@ afterEach(() => {
 const step = (extra: Partial<StepState> = {}): StepState => ({
   id: 'task',
   name: 'Do the task',
-  kind: 'agent',
-  status: 'done',
+  kind: STEP_KIND.agent,
+  status: STEP_STATUS.done,
   iterations: 1,
   tokensUsed: 0,
   ...extra,
@@ -45,16 +57,16 @@ describe('RunWaitDetails', () => {
   type CiEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'pr' }>
   type TimerEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'timer' }>
   const ciEntry = (extra: Partial<CiEntry> = {}): CiEntry => ({
-    id: '00000000-0000-4000-8000-000000000474', kind: 'pr', source: 'agent', via: 'cezar_wait',
+    id: '00000000-0000-4000-8000-000000000474', kind: WAIT_KIND.pr, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
     generation: 'session-1', turnId: 'turn-1', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true,
     prUrl: 'https://github.com/owner/repo/pull/474', repository: 'owner/repo', prNumber: 474,
     headSha: '123456789abcdef', registeredAt: '2026-09-22T12:00:00.000Z',
-    deadline: '2026-09-22T12:30:00.000Z', phase: 'open', ...extra,
+    deadline: '2026-09-22T12:30:00.000Z', phase: WAIT_PHASE.open, ...extra,
   })
   const timerEntry = (extra: Partial<TimerEntry> = {}): TimerEntry => ({
-    id: '00000000-0000-4000-8000-000000000005', kind: 'timer', source: 'agent', via: 'cezar_wait',
+    id: '00000000-0000-4000-8000-000000000005', kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
     turnId: 'turn-1', seconds: 300, registeredAt: '2026-09-22T12:00:00.000Z',
-    deadline: '2026-09-22T12:05:00.000Z', phase: 'open', ...extra,
+    deadline: '2026-09-22T12:05:00.000Z', phase: WAIT_PHASE.open, ...extra,
   })
   const observed = (outcome: NonNullable<CiEntry['result']>['outcome']): CiEntry['result'] => ({
     outcome, headSha: '123456789abcdef', observedHeadSha: 'fedcba987654321',
@@ -91,18 +103,18 @@ describe('RunWaitDetails', () => {
     type WorkerEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'worker' }>
     const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
     const base = {
-      kind: 'worker', source: 'agent', via: 'cez-worker-wait', turnId: 'turn-1', timeoutSeconds: 600,
+      kind: WAIT_KIND.worker, source: WAIT_SOURCE.agent, via: WAIT_VIA['cez-worker-wait'], turnId: 'turn-1', timeoutSeconds: 600,
       registeredAt: '2026-09-22T12:00:00.000Z', deadline: '2026-09-22T12:10:00.000Z', mode: 'any',
     } as const
     const byWorker = {
-      ...base, id: uuid(61), phase: 'open', workerIds: [uuid(1), uuid(2)],
+      ...base, id: uuid(61), phase: WAIT_PHASE.open, workerIds: [uuid(1), uuid(2)],
       revisions: [{ workerId: uuid(1), revision: 0 }, { workerId: uuid(2), revision: 0 }], outcomes: [],
     } as WorkerEntry
     const byRequest = {
-      ...base, id: uuid(62), phase: 'open', deadline: '2026-09-22T12:20:00.000Z', requestIds: [uuid(3)], requestOutcomes: [],
+      ...base, id: uuid(62), phase: WAIT_PHASE.open, deadline: '2026-09-22T12:20:00.000Z', requestIds: [uuid(3)], requestOutcomes: [],
     } as WorkerEntry
     const settled = {
-      ...base, id: uuid(63), phase: 'cancelled', cancelledAt: '2026-09-22T12:01:00.000Z', workerIds: [uuid(4)],
+      ...base, id: uuid(63), phase: WAIT_PHASE.cancelled, cancelledAt: '2026-09-22T12:01:00.000Z', workerIds: [uuid(4)],
       revisions: [{ workerId: uuid(4), revision: 0 }], outcomes: [],
     } as WorkerEntry
     renderWaits(run('waiting', { waits: [byWorker, byRequest, settled] }))
@@ -116,20 +128,20 @@ describe('RunWaitDetails', () => {
     type WorkerEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'worker' }>
     const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
     const base = {
-      kind: 'worker', source: 'agent', via: 'cez-worker-wait', turnId: 'turn-1', timeoutSeconds: 600,
+      kind: WAIT_KIND.worker, source: WAIT_SOURCE.agent, via: WAIT_VIA['cez-worker-wait'], turnId: 'turn-1', timeoutSeconds: 600,
       registeredAt: '2026-09-22T12:00:00.000Z', deadline: '2026-09-22T12:10:00.000Z', mode: 'all',
     } as const
     const partialWorkers = {
-      ...base, id: uuid(71), phase: 'open', workerIds: [uuid(1), uuid(2), uuid(3)],
+      ...base, id: uuid(71), phase: WAIT_PHASE.open, workerIds: [uuid(1), uuid(2), uuid(3)],
       revisions: [uuid(1), uuid(2), uuid(3)].map(workerId => ({ workerId, revision: 0 })),
-      outcomes: [{ workerId: uuid(1), status: 'done' }],
+      outcomes: [{ workerId: uuid(1), status: WORKER_OUTCOME_STATUS.done }],
     } as unknown as WorkerEntry
     const partialRequests = {
-      ...base, id: uuid(72), phase: 'open', requestIds: [uuid(4), uuid(5)],
+      ...base, id: uuid(72), phase: WAIT_PHASE.open, requestIds: [uuid(4), uuid(5)],
       requestOutcomes: [{ requestId: uuid(4), status: 'replied' }],
     } as unknown as WorkerEntry
     const resolved = {
-      ...base, id: uuid(73), phase: 'resolved', resolvedAt: '2026-09-22T12:01:00.000Z', result: { reason: 'outcome' },
+      ...base, id: uuid(73), phase: WAIT_PHASE.resolved, resolvedAt: '2026-09-22T12:01:00.000Z', result: { reason: 'outcome' },
       workerIds: [uuid(6)], revisions: [{ workerId: uuid(6), revision: 0 }], outcomes: [],
     } as unknown as WorkerEntry
     renderWaits(run('waiting', { waits: [partialWorkers, partialRequests, resolved] }))
@@ -172,8 +184,8 @@ describe('RunWaitDetails', () => {
     ['queued', 'CI result ready — waiting for capacity', 'Automatic check due — waiting for capacity'],
   ] as const)('describes a resolved wait honestly while %s', (status, ciLabel, timerLabel) => {
     renderWaits(run(status, { waits: [
-      ciEntry({ phase: 'resolved', result: observed('passed') }),
-      timerEntry({ phase: 'resolved', note: 'Look at the deploy' }),
+      ciEntry({ phase: WAIT_PHASE.resolved, result: observed('passed') }),
+      timerEntry({ phase: WAIT_PHASE.resolved, note: 'Look at the deploy' }),
     ] }))
     expect(screen.getByText(ciLabel)).not.toBeNull()
     expect(screen.getByRole('link', { name: 'owner/repo#474' })).not.toBeNull()
@@ -193,7 +205,7 @@ describe('RunWaitDetails', () => {
     ['error', 'CI wait unavailable — inspect access and the PR checks'],
     ['head_changed', 'CI head changed — 1234567 → fedcba9'],
   ] as const)('shows the last settled CI observation when nothing is open (%s)', (outcome, label) => {
-    renderWaits(run('done', { lastWaits: [ciEntry({ phase: 'delivered', result: observed(outcome) })] }))
+    renderWaits(run('done', { lastWaits: [ciEntry({ phase: WAIT_PHASE.delivered, result: observed(outcome) })] }))
     expect(screen.getByText(label)).not.toBeNull()
     expect(screen.getByRole('link', { name: 'owner/repo#474' })).not.toBeNull()
     expect(ciItems()).toHaveLength(1)
@@ -205,9 +217,9 @@ describe('RunWaitDetails', () => {
     renderWaits(run('waiting', {
       waits: [timerEntry({ id: '00000000-0000-4000-8000-000000000007', deadline: '2026-09-22T12:20:00.000Z' })],
       lastWaits: [
-        ciEntry({ id: '00000000-0000-4000-8000-000000000001', phase: 'delivered', result: observed('passed') }),
-        ciEntry({ id: '00000000-0000-4000-8000-000000000002', phase: 'delivered', result: observed('failed') }),
-        timerEntry({ id: '00000000-0000-4000-8000-000000000006', phase: 'delivered', deliveredAt: '2026-09-22T12:10:00.000Z' }),
+        ciEntry({ id: '00000000-0000-4000-8000-000000000001', phase: WAIT_PHASE.delivered, result: observed('passed') }),
+        ciEntry({ id: '00000000-0000-4000-8000-000000000002', phase: WAIT_PHASE.delivered, result: observed('failed') }),
+        timerEntry({ id: '00000000-0000-4000-8000-000000000006', phase: WAIT_PHASE.delivered, deliveredAt: '2026-09-22T12:10:00.000Z' }),
       ],
     }))
     expect(screen.getByText('CI checks failed — inspect the PR checks')).not.toBeNull()
@@ -219,7 +231,7 @@ describe('RunWaitDetails', () => {
 
   it('shows a new wait instead of a stale previous success', () => {
     renderWaits(run('waiting', { waits: [ciEntry()], lastWaits: [ciEntry({
-      id: '00000000-0000-4000-8000-000000000001', phase: 'delivered', result: observed('passed'),
+      id: '00000000-0000-4000-8000-000000000001', phase: WAIT_PHASE.delivered, result: observed('passed'),
     })] }))
     expect(screen.getByText('Waiting for CI')).not.toBeNull()
     expect(screen.queryByText(/CI checks passed/)).toBeNull()
@@ -227,7 +239,7 @@ describe('RunWaitDetails', () => {
 
   it('shows a cancelled wait as cancelled even when it carried a result, with when it was cancelled', () => {
     renderWaits(run('waiting', { lastWaits: [ciEntry({
-      phase: 'cancelled', cancelledAt: '2026-09-22T12:03:00.000Z', result: observed('passed'),
+      phase: WAIT_PHASE.cancelled, cancelledAt: '2026-09-22T12:03:00.000Z', result: observed('passed'),
     })] }))
     expect(screen.getByText('CI wait cancelled')).not.toBeNull()
     expect(screen.queryByText(/CI checks passed/)).toBeNull()
@@ -261,7 +273,7 @@ describe('RunWaitDetails', () => {
     unmount()
 
     // A later phase adds human and worker waits; an older header leaves them to the pill.
-    const later = { id: '00000000-0000-4000-8000-000000000009', kind: 'human', phase: 'open' } as unknown as CiEntry
+    const later = { id: '00000000-0000-4000-8000-000000000009', kind: WAIT_KIND.human, phase: WAIT_PHASE.open } as unknown as CiEntry
     renderWaits(run('waiting', { waits: [later, timerEntry()] }))
     expect(ciItems()).toHaveLength(0)
     expect(timerItems()).toHaveLength(1)
@@ -271,9 +283,9 @@ describe('RunWaitDetails', () => {
   describe('process waits', () => {
     type ProcessEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'process' }>
     const processEntry = (extra: Partial<ProcessEntry> = {}): ProcessEntry => ({
-      id: '00000000-0000-4000-8000-000000001446', kind: 'process', source: 'agent', via: 'cezar_wait',
+      id: '00000000-0000-4000-8000-000000001446', kind: WAIT_KIND.process, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
       turnId: 'turn-1', timeoutSeconds: 1800, pid: 4242, registeredAt: '2026-09-22T12:00:00.000Z',
-      deadline: '2026-09-22T12:30:00.000Z', phase: 'open', ...extra,
+      deadline: '2026-09-22T12:30:00.000Z', phase: WAIT_PHASE.open, ...extra,
     })
     const result = (outcome: NonNullable<ProcessEntry['result']>['outcome'], extra: Partial<NonNullable<ProcessEntry['result']>> = {}) =>
       ({ outcome, observedAt: '2026-09-22T12:10:00.000Z', ...extra })
@@ -289,7 +301,7 @@ describe('RunWaitDetails', () => {
     })
 
     it('says a resolved process wait is owed to the agent', () => {
-      renderWaits(run('waiting', { waits: [processEntry({ phase: 'resolved', result: result('exit_file', { exitCode: 0 }) })] }))
+      renderWaits(run('waiting', { waits: [processEntry({ phase: WAIT_PHASE.resolved, result: result('exit_file', { exitCode: 0 }) })] }))
       expect(processItems()[0]?.querySelector('p')?.textContent).toBe('PID 4242 exited with code 0 — waiting for capacity')
     })
 
@@ -301,16 +313,16 @@ describe('RunWaitDetails', () => {
       [result('deadline'), 'PID 4242 still running at the deadline'],
       [result('error', { diagnostic: 'EACCES' }), 'PID 4242 could not be checked'],
     ])('shows the last settled process wait: %j', (outcome, label) => {
-      renderWaits(run('waiting', { lastWaits: [processEntry({ phase: 'delivered', result: outcome })] }))
+      renderWaits(run('waiting', { lastWaits: [processEntry({ phase: WAIT_PHASE.delivered, result: outcome })] }))
       expect(processItems().map(item => item.querySelector('p')?.textContent)).toEqual([label])
     })
 
     it('shows a cancelled process wait as cancelled, and an open one in place of the last result', () => {
-      const { unmount } = renderWaits(run('waiting', { lastWaits: [processEntry({ phase: 'cancelled', cancelledAt: '2026-09-22T12:01:00.000Z' })] }))
+      const { unmount } = renderWaits(run('waiting', { lastWaits: [processEntry({ phase: WAIT_PHASE.cancelled, cancelledAt: '2026-09-22T12:01:00.000Z' })] }))
       expect(processItems().map(item => item.querySelector('p')?.textContent)).toEqual(['Process wait on PID 4242 cancelled'])
       unmount()
       renderWaits(run('waiting', {
-        lastWaits: [processEntry({ phase: 'delivered', result: result('exited') })],
+        lastWaits: [processEntry({ phase: WAIT_PHASE.delivered, result: result('exited') })],
         waits: [processEntry({ id: '00000000-0000-4000-8000-000000001447', pid: 4343 })],
       }))
       expect(processItems().map(item => item.querySelector('p')?.textContent)).toEqual(['Waiting for PID 4343'])
@@ -328,7 +340,7 @@ describe('RunWaitDetails', () => {
       ['deadline', 'Merge wait timed out — merge not confirmed'],
       ['conflicting', 'PR has merge conflicts — inspect the PR; not merged'],
     ] as const) {
-      renderWaits(run('done', { lastWaits: [ciEntry({ until: 'merge', phase: 'delivered', result: observed(outcome) })] }))
+      renderWaits(run('done', { lastWaits: [ciEntry({ until: 'merge', phase: WAIT_PHASE.delivered, result: observed(outcome) })] }))
       expect(screen.getByText(label)).toBeTruthy()
       cleanup()
     }

@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -24,7 +25,7 @@ const run: ApiRun = {
   title: 'Task',
   workflow: 'quick-task',
   task: 'Task',
-  status: 'waiting',
+  status: RUN_STATUS.waiting,
   createdAt: '2026-07-24T00:00:00.000Z',
   tokensUsed: 0,
   archived: false,

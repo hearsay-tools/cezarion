@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
@@ -10,7 +11,7 @@ import { archiveInComposer } from './run-actions'
 import { CompletionStatus } from './completion-status'
 
 const run: ApiRun = {
-  id: 'run', title: 'Ship', task: 'Ship', status: 'done', workflow: 'quick-task', createdAt: '', steps: [], tokensUsed: 0, archived: false,
+  id: 'run', title: 'Ship', task: 'Ship', status: RUN_STATUS.done, workflow: 'quick-task', createdAt: '', steps: [], tokensUsed: 0, archived: false,
   autoMergePr: true, completionAction: { id: '00000000-0000-4000-8000-000000000001', phase: 'pending' },
 }
 const mount = (record: ApiRun) => render(<QueryClientProvider client={createQueryClient()}><MemoryRouter><CompletionStatus run={record} /></MemoryRouter></QueryClientProvider>)

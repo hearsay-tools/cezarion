@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 
@@ -242,7 +243,7 @@ function stubFetch(
           title: 'queued',
           workflow: 'quick-task',
           task: 't',
-          status: 'queued',
+          status: RUN_STATUS.queued,
           createdAt: '2026-07-15T08:00:00.000Z',
           tokensUsed: 0,
           archived: false,
@@ -4121,7 +4122,7 @@ describe('deep links to items outside the open list (#692)', () => {
 
 describe('issue linked tasks (#750)', () => {
   const task = (id: string, over: Partial<RunRecord> = {}): RunRecord => ({
-    id, title: id, task: id, workflow: 'quick-task', status: 'done',
+    id, title: id, task: id, workflow: 'quick-task', status: RUN_STATUS.done,
     createdAt: '2026-09-01T12:00:00Z', tokensUsed: 0, archived: false, steps: [],
     issueNumber: 142, ...over,
   })
@@ -4142,8 +4143,8 @@ describe('issue linked tasks (#750)', () => {
   it('lists diagnosis and fix separately, newest first, with archived history and no duplicate or foreign tasks', async () => {
     stubFetch({ 'GET /api/v1/run-summaries': () => jsonResponse([
       task('diagnosis', { archived: true, referencedIssueUrl: ISSUE_142.url }),
-      task('fix', { status: 'running', createdAt: '2026-10-01T12:00:00Z' }),
-      task('fix', { status: 'running', createdAt: '2026-10-01T12:00:00Z' }),
+      task('fix', { status: RUN_STATUS.running, createdAt: '2026-10-01T12:00:00Z' }),
+      task('fix', { status: RUN_STATUS.running, createdAt: '2026-10-01T12:00:00Z' }),
       task('foreign', { referencedIssueUrl: 'https://github.com/other/repo/issues/142' }),
       task('pr-only', { issueNumber: undefined, prNumber: 142 }),
     ]) })

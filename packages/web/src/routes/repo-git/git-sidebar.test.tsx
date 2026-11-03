@@ -1,3 +1,4 @@
+import { worktreeInfoSchema } from '@open-mercato/cezar-api-client/contract/repo'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { Suspense, lazy, type ComponentType } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -47,7 +48,7 @@ const REPO: RepoResponse = {
 }
 
 const WORKTREES: WorktreesResponse = {
-  worktrees: [{ runId: 'r1', title: 'A task', status: 'done', branch: 'cez/r1', sizeBytes: 4.2 * 1024 ** 3, finishedAt: null, reclaimable: true, pastKeep: false }],
+  worktrees: [{ runId: 'r1', title: 'A task', status: worktreeInfoSchema.shape.status.enum.done, branch: 'cez/r1', sizeBytes: 4.2 * 1024 ** 3, finishedAt: null, reclaimable: true, pastKeep: false }],
   totalBytes: 4.2 * 1024 ** 3,
   keep: 20,
 }

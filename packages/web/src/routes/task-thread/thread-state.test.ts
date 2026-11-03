@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest'
@@ -233,7 +234,7 @@ describe('reduceThread — v1-only fallback (pre-v2 transcripts)', () => {
   const v1Only: RunEvent[] = [
     line(1, 'lifecycle', { message: 'run started — workflow "quick-task" (runner: claude)' }),
     line(2, 'note', { message: 'worktree ready — branch cez/2d012907 (base main)' }),
-    line(3, 'step-start', { stepId: 'task', name: 'Do the task', kind: 'agent', iteration: 1 }),
+    line(3, 'step-start', { stepId: 'task', name: 'Do the task', kind: STEP_KIND.agent, iteration: 1 }),
     line(4, 'token-usage', { tokensUsed: 8993, stepId: 'task' }),
     line(5, 'text', { text: "Hi! I'm Claude Code, working in your **cezar** project.", stepId: 'task' }),
     line(7, 'tool-call', {
@@ -286,7 +287,7 @@ describe('reduceThread — mixed v1+v2 files (the dedup rule)', () => {
   const mixed: RunEvent[] = [
     line(1, 'lifecycle', { message: 'run started — workflow "quick-task" (runner: claude)' }),
     line(2, 'note', { message: 'worktree ready — branch cez/01ec2e8c (base main)' }),
-    line(3, 'step-start', { stepId: 'task', name: 'Do the task', kind: 'agent', iteration: 1 }),
+    line(3, 'step-start', { stepId: 'task', name: 'Do the task', kind: STEP_KIND.agent, iteration: 1 }),
     line(4, 'session.started', { sessionId: 'b3440f00', backend: 'claude', stepId: 'task' }),
     line(5, 'turn.started', { turnId: 'turn_1', stepId: 'task' }),
     line(6, 'item.started', { item: { kind: 'message', id: 'item_1', role: 'assistant', text: md }, stepId: 'task' }),
@@ -521,8 +522,8 @@ describe('reduceThread — live-stream mechanics', () => {
 
   it('a failed step surfaces as a danger line; a passing one stays out of the thread', () => {
     const { turns } = reduceThread([
-      line(1, 'step-end', { stepId: 'task', status: 'done' }),
-      line(2, 'step-end', { stepId: 'check', status: 'failed', error: 'tests failed' }),
+      line(1, 'step-end', { stepId: 'task', status: STEP_STATUS.done }),
+      line(2, 'step-end', { stepId: 'check', status: STEP_STATUS.failed, error: 'tests failed' }),
     ])
     expect(turns[0]!.items).toEqual([
       { kind: 'note', id: 'v1:2', text: 'step check failed — tests failed', tone: 'danger' },
@@ -860,7 +861,7 @@ describe('the v1 vocabulary sweep (cezar-code-map §3.2) — every persisted typ
   })
 
   it('step-end failed → the one step fact the transcript must not hide', () => {
-    expect(allItems([line(1, 'step-end', { stepId: 'task', status: 'failed', error: 'boom' })])).toEqual([
+    expect(allItems([line(1, 'step-end', { stepId: 'task', status: STEP_STATUS.failed, error: 'boom' })])).toEqual([
       { kind: 'note', id: 'v1:1', text: 'step task failed — boom', tone: 'danger' },
     ])
   })
@@ -868,8 +869,8 @@ describe('the v1 vocabulary sweep (cezar-code-map §3.2) — every persisted typ
   // -- DOCUMENTED suppressions (the surface that owns each is named in the reducer) ---------
 
   it.each([
-    ['step-start', { stepId: 'task', name: 'Do the task', kind: 'agent', iteration: 1 }], // step rail
-    ['step-end', { stepId: 'task', status: 'done' }], // step rail (non-failed)
+    ['step-start', { stepId: 'task', name: 'Do the task', kind: STEP_KIND.agent, iteration: 1 }], // step rail
+    ['step-end', { stepId: 'task', status: STEP_STATUS.done }], // step rail (non-failed)
     ['token-usage', { tokensUsed: 4200 }], // header meta (record totals)
     ['cost', { usd: 0.03 }], // header meta
     ['turn-end', {}], // engine control flow
@@ -965,7 +966,7 @@ describe('reduceThread — AskUser cards (#473)', () => {
       line(1, 'text', { text: 'options', stepId: 'task' }),
       line(2, 'ask.requested', { ...ASK, stepId: 'task' }),
       line(3, 'lifecycle', { message: 'session closed by user' }),
-      line(4, 'step-start', { stepId: 'continue-1', name: 'Continue', kind: 'agent', iteration: 1 }),
+      line(4, 'step-start', { stepId: 'continue-1', name: 'Continue', kind: STEP_KIND.agent, iteration: 1 }),
       line(5, 'user-message', { text: 'Library: date-fns', imageCount: 0, stepId: 'continue-1' }),
     ]).find((i) => i.kind === 'ask')
     expect(ask).toMatchObject({ resolved: true, answer: 'Library: date-fns' })
@@ -1441,7 +1442,7 @@ describe('reduceThread — task webhook lines (#589)', () => {
   it('renders a failed delivery as a danger line and a dry run as a dim one', () => {
     const items = notes([
       line(1, 'webhook.failed', { event: 'task.status', attempts: 3, error: 'HTTP 503' }),
-      line(2, 'webhook.dry-run', { event: 'task.status', payload: { status: 'waiting' } }),
+      line(2, 'webhook.dry-run', { event: 'task.status', payload: { status: RUN_STATUS.waiting } }),
     ])
     expect(items).toMatchObject([
       { tone: 'danger', text: 'Webhook delivery failed (task.status) after 3 attempts: HTTP 503' },

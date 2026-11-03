@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { summaryOf } from '@/test/run-summary-fixture'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -35,7 +36,7 @@ function run(over: Partial<RunRecord> = {}): RunSummary {
     title: `Task ${seq}`,
     workflow: 'default',
     task: `task ${seq}`,
-    status: 'done',
+    status: RUN_STATUS.done,
     createdAt: ago(60_000),
     tokensUsed: 0,
     archived: false,
@@ -108,20 +109,20 @@ afterEach(cleanup)
 
 describe('TasksOverview — mobile actions', () => {
   it('hides the inline New task button below md, where the shell\'s floating button owns the job (#621)', () => {
-    renderOverview({ runs: [run({ status: 'done' })] })
+    renderOverview({ runs: [run({ status: RUN_STATUS.done })] })
     const inline = document.querySelector('[data-slot="new-task-inline"]') as HTMLElement
     expect(inline.className).toContain('max-md:hidden')
   })
 
   it('opens the keyboard actions menu and uses the existing archive handler', () => {
-    const { onArchiveFinished } = renderOverview({ runs: [run({ status: 'done' })] })
+    const { onArchiveFinished } = renderOverview({ runs: [run({ status: RUN_STATUS.done })] })
     fireEvent.keyDown(screen.getByRole('button', { name: 'Task actions' }), { key: 'ArrowDown' })
     fireEvent.click(screen.getByRole('menuitem', { name: 'Archive finished (1)' }))
     expect(onArchiveFinished).toHaveBeenCalledOnce()
   })
 
   it('moves Mark all read into the phone menu, after Archive finished, scoped to the origin (hearsay-tools/cezarion#1616)', () => {
-    const { onMarkAllRead } = renderOverview({ runs: [run({ status: 'done', finishedAt: ago(0) })], origin: 'direct', onOriginChange: vi.fn() })
+    const { onMarkAllRead } = renderOverview({ runs: [run({ status: RUN_STATUS.done, finishedAt: ago(0) })], origin: 'direct', onOriginChange: vi.fn() })
     expect((document.querySelector('[data-slot="mark-all-read"]') as HTMLElement).className).toContain('hidden md:inline-flex')
     fireEvent.keyDown(screen.getByRole('button', { name: 'Task actions' }), { key: 'ArrowDown' })
     expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Archive finished (1)', 'Mark all read (1)'])
@@ -143,8 +144,8 @@ describe('TasksOverview — mobile actions', () => {
   it.each([
     { runs: undefined, view: 'active' as const },
     { runs: [], view: 'active' as const },
-    { runs: [run({ status: 'running' }), run({ status: 'review' })], view: 'active' as const },
-    { runs: [run({ status: 'done' })], view: 'archived' as const },
+    { runs: [run({ status: RUN_STATUS.running }), run({ status: RUN_STATUS.review })], view: 'active' as const },
+    { runs: [run({ status: RUN_STATUS.done })], view: 'archived' as const },
   ])('withholds the mobile archive action when ineligible (%#)', (props) => {
     renderOverview(props)
     expect(screen.queryByRole('button', { name: 'Task actions' })).toBeNull()
@@ -199,8 +200,8 @@ describe('TasksOverview — the table', () => {
     renderOverview({
       runs: [
         run({ id: 'done1', title: 'Old done', createdAt: ago(3 * 3_600_000) }),
-        run({ id: 'rev1', title: 'Needs review', status: 'review' }),
-        run({ id: 'run1', title: 'Running now', status: 'running' }),
+        run({ id: 'rev1', title: 'Needs review', status: RUN_STATUS.review }),
+        run({ id: 'run1', title: 'Running now', status: RUN_STATUS.running }),
       ],
     })
     const ids = [...document.querySelectorAll('[data-slot="task-table-row"]')].map((el) =>
@@ -267,10 +268,10 @@ describe('TasksOverview — the table', () => {
   it('says the run status through the attention pill', () => {
     renderOverview({
       runs: [
-        run({ id: 'w', status: 'waiting' }),
-        run({ id: 'v', status: 'review' }),
-        run({ id: 'd', status: 'done' }),
-        run({ id: 'f', status: 'failed' }),
+        run({ id: 'w', status: RUN_STATUS.waiting }),
+        run({ id: 'v', status: RUN_STATUS.review }),
+        run({ id: 'd', status: RUN_STATUS.done }),
+        run({ id: 'f', status: RUN_STATUS.failed }),
       ],
     })
     const pillOf = (id: string) => tableRow(id)?.querySelector('[data-slot="pill"]')
@@ -287,8 +288,8 @@ describe('TasksOverview — the table', () => {
     // and carrying the instant the way a queued row carries its position.
     renderOverview({
       runs: [
-        run({ id: 'sched', status: 'waiting', autoResumeAt: new Date(NOW + 45 * 60_000).toISOString() }),
-        run({ id: 'broke', status: 'failed' }),
+        run({ id: 'sched', status: RUN_STATUS.waiting, autoResumeAt: new Date(NOW + 45 * 60_000).toISOString() }),
+        run({ id: 'broke', status: RUN_STATUS.failed }),
       ],
     })
     const pillOf = (id: string) => tableRow(id)?.querySelector('[data-slot="pill"]')
@@ -308,7 +309,7 @@ describe('TasksOverview — the table', () => {
       runs: [
         run({
           id: 'queued-issue',
-          status: 'queued',
+          status: RUN_STATUS.queued,
           issueNumber: 554,
           referencedIssueUrl: 'https://github.com/open-mercato/cezar/issues/554',
         }),
@@ -326,7 +327,7 @@ describe('TasksOverview — the table', () => {
         run({
           id: 'full',
           title: 'Structured changes endpoint',
-          status: 'review',
+          status: RUN_STATUS.review,
           workflow: 'feat',
           branch: 'cez/8f31ab02',
           diffStat: { adds: 128, dels: 14, files: 6 },
@@ -338,7 +339,7 @@ describe('TasksOverview — the table', () => {
           createdAt: ago(40 * 60_000),
           startedAt: ago(12 * 60_000),
         }),
-        run({ id: 'bare', title: 'Bare minimum', status: 'waiting', createdAt: ago(26 * 60_000) }),
+        run({ id: 'bare', title: 'Bare minimum', status: RUN_STATUS.waiting, createdAt: ago(26 * 60_000) }),
       ],
     })
 
@@ -375,7 +376,7 @@ describe('TasksOverview — the table', () => {
         run({
           id: 'reviewer',
           title: 'Review PR 694',
-          status: 'review',
+          status: RUN_STATUS.review,
           branch: 'cez/d8ff6490',
           diffStat: { adds: 1, dels: 0, files: 1, repointed: true },
           createdAt: ago(20 * 60_000),
@@ -398,7 +399,7 @@ describe('TasksOverview — the table', () => {
       showCost: false,
       runs: [
         run({ id: 'hidden', title: 'Hidden metrics', tokensUsed: 184_700, costUsd: 0.31 }),
-        run({ id: 'queued-hidden', status: 'queued', tokensUsed: 12_000, costUsd: 0.02 }),
+        run({ id: 'queued-hidden', status: RUN_STATUS.queued, tokensUsed: 12_000, costUsd: 0.02 }),
       ],
     })
 
@@ -428,7 +429,7 @@ describe('TasksOverview — the table', () => {
   it('shows folded CPU and Memory cells instead of a queue note when both are folded', () => {
     renderOverview({
       expandedColumns: { cpu: false, memory: false },
-      runs: [run({ id: 'queued-folded', status: 'queued' })],
+      runs: [run({ id: 'queued-folded', status: RUN_STATUS.queued })],
     })
 
     const queued = tableRow('queued-folded') as HTMLElement
@@ -446,7 +447,7 @@ describe('TasksOverview — the table', () => {
   ])('keeps the queue note when $expanded is expanded', ({ expandedColumns, folded }) => {
     renderOverview({
       expandedColumns,
-      runs: [run({ id: 'queued-partly-folded', status: 'queued' })],
+      runs: [run({ id: 'queued-partly-folded', status: RUN_STATUS.queued })],
     })
 
     const queued = tableRow('queued-partly-folded') as HTMLElement
@@ -459,7 +460,7 @@ describe('TasksOverview — the table', () => {
       expandedColumns: { branch: false, workflow: false, cpu: false, memory: false },
       runs: [
         run({ id: 'aligned', branch: 'feat/aligned' }),
-        run({ id: 'aligned-queue', status: 'queued', branch: 'feat/queued' }),
+        run({ id: 'aligned-queue', status: RUN_STATUS.queued, branch: 'feat/queued' }),
       ],
     })
 
@@ -579,7 +580,7 @@ describe('TasksOverview — the table', () => {
 
   it('links the PR chip out without hijacking it, while a row click opens the task', () => {
     renderOverview({
-      runs: [run({ id: 'pr1', title: 'Has a PR', status: 'review', pullRequestUrl: 'https://github.com/o/r/pull/7' })],
+      runs: [run({ id: 'pr1', title: 'Has a PR', status: RUN_STATUS.review, pullRequestUrl: 'https://github.com/o/r/pull/7' })],
     })
 
     const chip = within(tableRow('pr1') as HTMLElement).getByRole('link', {
@@ -610,8 +611,8 @@ describe('TasksOverview — the table', () => {
   it('shows a queued run its place in the queue, spanning the live columns', () => {
     renderOverview({
       runs: [
-        run({ id: 'q1', status: 'queued', createdAt: ago(120_000) }),
-        run({ id: 'q2', status: 'queued', createdAt: ago(60_000) }),
+        run({ id: 'q1', status: RUN_STATUS.queued, createdAt: ago(120_000) }),
+        run({ id: 'q2', status: RUN_STATUS.queued, createdAt: ago(60_000) }),
       ],
     })
     const note = tableRow('q2')?.querySelector('[data-slot="queue-note"]')
@@ -625,8 +626,8 @@ describe('TasksOverview — the table', () => {
   it('keeps queue numbers stable under search — the engine does not care what you typed', () => {
     renderOverview({
       runs: [
-        run({ id: 'q1', title: 'Alpha', status: 'queued', createdAt: ago(120_000) }),
-        run({ id: 'q2', title: 'Beta', status: 'queued', createdAt: ago(60_000) }),
+        run({ id: 'q1', title: 'Alpha', status: RUN_STATUS.queued, createdAt: ago(120_000) }),
+        run({ id: 'q2', title: 'Beta', status: RUN_STATUS.queued, createdAt: ago(60_000) }),
       ],
     })
     fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks' }), { target: { value: 'beta' } })
@@ -709,10 +710,10 @@ describe('TasksOverview — pinned tasks (#935)', () => {
     const onTogglePin = vi.fn()
     renderOverview({
       runs: [
-        run({ id: 'waiting', status: 'waiting' }),
-        run({ id: 'newer', status: 'done' }),
-        run({ id: 'kept', status: 'done', pinned: true, createdAt: ago(3 * 3_600_000) }),
-        run({ id: 'running', status: 'running' }),
+        run({ id: 'waiting', status: RUN_STATUS.waiting }),
+        run({ id: 'newer', status: RUN_STATUS.done }),
+        run({ id: 'kept', status: RUN_STATUS.done, pinned: true, createdAt: ago(3 * 3_600_000) }),
+        run({ id: 'running', status: RUN_STATUS.running }),
       ],
       onTogglePin,
     })
@@ -724,7 +725,7 @@ describe('TasksOverview — pinned tasks (#935)', () => {
 
   it('toggles from the row and from the card, reporting the state asked for', () => {
     const onTogglePin = vi.fn()
-    renderOverview({ runs: [run({ id: 'kept', status: 'done', pinned: true })], onTogglePin })
+    renderOverview({ runs: [run({ id: 'kept', status: RUN_STATUS.done, pinned: true })], onTogglePin })
 
     fireEvent.click(within(tableRow('kept') as HTMLElement).getByRole('button', { name: 'Unpin task' }))
     expect(onTogglePin.mock.calls[0]?.[1]).toBe(false)
@@ -735,14 +736,14 @@ describe('TasksOverview — pinned tasks (#935)', () => {
   })
 
   it('the row pin stays reachable without a pointer (a tablet is >=md and cannot hover)', () => {
-    renderOverview({ runs: [run({ id: 'plain', status: 'done' })], onTogglePin: vi.fn() })
+    renderOverview({ runs: [run({ id: 'plain', status: RUN_STATUS.done })], onTogglePin: vi.fn() })
     const pin = tableRow('plain')?.querySelector('[data-slot="pin-toggle"]') as HTMLElement
     expect(pin.className).toContain('no-hover:opacity-100')
     expect(pin.className).toContain('opacity-0')
   })
 
   it('a pin click does not also open the task — the control owns its click', () => {
-    renderOverview({ runs: [run({ id: 'kept', status: 'done' })], onTogglePin: vi.fn() })
+    renderOverview({ runs: [run({ id: 'kept', status: RUN_STATUS.done })], onTogglePin: vi.fn() })
     fireEvent.click(within(card('kept') as HTMLElement).getByRole('button', { name: 'Pin task' }))
     expect(location()).toBe('/')
   })
@@ -839,7 +840,7 @@ describe('TasksOverview — usage cells', () => {
     tableRow(id)?.querySelector(`[data-usage="${column}"]`)
 
   it('emphasizes live CPU/Mem for a running run, from the usage stream', () => {
-    renderWithUsage([run({ id: 'live1', status: 'running' })])
+    renderWithUsage([run({ id: 'live1', status: RUN_STATUS.running })])
 
     // Before the first tick: nothing to say, honestly.
     expect(usageCell('live1', 'cpu')?.textContent).toBe('—')
@@ -854,7 +855,7 @@ describe('TasksOverview — usage cells', () => {
   })
 
   it('shows a finished run its dimmed peaks, and never a live sample', () => {
-    renderWithUsage([run({ id: 'done1', status: 'done', peakRssBytes: 401 * 1024 ** 2, peakProcCount: 7 })])
+    renderWithUsage([run({ id: 'done1', status: RUN_STATUS.done, peakRssBytes: 401 * 1024 ** 2, peakProcCount: 7 })])
 
     // Even a stale tick that still names the run must not paint it live — it is done.
     act(() => FakeEventSource.last?.emit('usage', JSON.stringify({ project: 'boot', usage: { done1: SAMPLE } })))
@@ -872,7 +873,7 @@ describe('TasksOverview — usage cells', () => {
 describe('TasksOverview — header', () => {
   it('shows the Active/Archived tabs with counts and reports a flip', () => {
     const { onViewChange } = renderOverview({
-      runs: [run({ status: 'running' }), run({ status: 'done' }), run({ status: 'done', archived: true })],
+      runs: [run({ status: RUN_STATUS.running }), run({ status: RUN_STATUS.done }), run({ status: RUN_STATUS.done, archived: true })],
     })
     const active = screen.getByRole('button', { name: /^Active/ })
     const archived = document.querySelector('[data-slot="overview-tab"][data-view="archived"]') as HTMLElement
@@ -886,19 +887,19 @@ describe('TasksOverview — header', () => {
 
   it('offers Archive finished only while finished runs exist, and only on the Active tab', () => {
     const { onArchiveFinished, unmount } = renderOverview({
-      runs: [run({ status: 'done' }), run({ status: 'running' })],
+      runs: [run({ status: RUN_STATUS.done }), run({ status: RUN_STATUS.running })],
     })
     fireEvent.click(screen.getByRole('button', { name: /Archive finished/ }))
     expect(onArchiveFinished).toHaveBeenCalledTimes(1)
     unmount()
 
     // Nothing finished → no broom.
-    renderOverview({ runs: [run({ status: 'running' }), run({ status: 'waiting' })] })
+    renderOverview({ runs: [run({ status: RUN_STATUS.running }), run({ status: RUN_STATUS.waiting })] })
     expect(screen.queryByRole('button', { name: /Archive finished/ })).toBeNull()
     cleanup()
 
     // Archived view → the sweep acts on the other tab; offering it here would be misleading.
-    renderOverview({ runs: [run({ status: 'done' })], view: 'archived' })
+    renderOverview({ runs: [run({ status: RUN_STATUS.done })], view: 'archived' })
     expect(screen.queryByRole('button', { name: /Archive finished/ })).toBeNull()
   })
 
@@ -909,10 +910,10 @@ describe('TasksOverview — header', () => {
     const FINISHED = ago(60_000)
     renderOverview({
       runs: [
-        run({ id: 'unread', status: 'done', finishedAt: FINISHED }),
-        run({ id: 'read', status: 'done', finishedAt: FINISHED, seenAt: ago(30_000) }),
+        run({ id: 'unread', status: RUN_STATUS.done, finishedAt: FINISHED }),
+        run({ id: 'read', status: RUN_STATUS.done, finishedAt: FINISHED, seenAt: ago(30_000) }),
         // Cancelled is never unread — you stopped it yourself.
-        run({ id: 'cancelled', status: 'cancelled', finishedAt: FINISHED }),
+        run({ id: 'cancelled', status: RUN_STATUS.cancelled, finishedAt: FINISHED }),
       ],
     })
     // Keyed on the aria-label, not on the tone alone: the marker wears the run's OUTCOME colour
@@ -927,7 +928,7 @@ describe('TasksOverview — header', () => {
   })
 
   it('paints an unread failed row\'s marker red, on the table and on the mobile card (#617)', () => {
-    renderOverview({ runs: [run({ id: 'boom', status: 'failed', finishedAt: ago(60_000) })] })
+    renderOverview({ runs: [run({ id: 'boom', status: RUN_STATUS.failed, finishedAt: ago(60_000) })] })
     expect(tableRow('boom')?.querySelector('[aria-label="unread"]')?.getAttribute('data-tone')).toBe('danger')
     expect(card('boom')?.querySelector('[aria-label="unread"]')?.getAttribute('data-tone')).toBe('danger')
   })
@@ -935,7 +936,7 @@ describe('TasksOverview — header', () => {
   it('offers Mark all read only while something is unread, and calls back on click', () => {
     const FINISHED = ago(60_000)
     const { onMarkAllRead, unmount } = renderOverview({
-      runs: [run({ status: 'done', finishedAt: FINISHED })],
+      runs: [run({ status: RUN_STATUS.done, finishedAt: FINISHED })],
     })
     fireEvent.click(screen.getByRole('button', { name: /Mark all read/ }))
     expect(onMarkAllRead).toHaveBeenCalledTimes(1)
@@ -943,7 +944,7 @@ describe('TasksOverview — header', () => {
 
     // Everything already seen → nothing left to sweep, so no control.
     renderOverview({
-      runs: [run({ status: 'done', finishedAt: FINISHED, seenAt: ago(30_000) })],
+      runs: [run({ status: RUN_STATUS.done, finishedAt: FINISHED, seenAt: ago(30_000) })],
     })
     expect(screen.queryByRole('button', { name: /Mark all read/ })).toBeNull()
   })
@@ -995,7 +996,7 @@ describe('TasksOverview — empty and loading states', () => {
   })
 
   it('says the archive is empty, plainly — neutral, no backdrop', () => {
-    renderOverview({ runs: [run({ status: 'done' })], view: 'archived' })
+    renderOverview({ runs: [run({ status: RUN_STATUS.done })], view: 'archived' })
     const empty = document.querySelector<HTMLElement>('[data-slot="tasks-empty"]')
     if (!empty) throw new Error('no empty state rendered')
 
@@ -1036,9 +1037,9 @@ describe('TasksOverview — mobile cards and FAB', () => {
   it('renders the same runs as cards, in the same order', () => {
     renderOverview({
       runs: [
-        run({ id: 'rev1', status: 'review' }),
-        run({ id: 'done1', status: 'done' }),
-        run({ id: 'q1', status: 'queued' }),
+        run({ id: 'rev1', status: RUN_STATUS.review }),
+        run({ id: 'done1', status: RUN_STATUS.done }),
+        run({ id: 'q1', status: RUN_STATUS.queued }),
       ],
     })
     const rowIds = [...document.querySelectorAll('[data-slot="task-table-row"]')].map((el) =>
@@ -1057,7 +1058,7 @@ describe('TasksOverview — mobile cards and FAB', () => {
           id: 'c1',
           title: 'add a structured changes endpoint',
           titleSummary: 'Structured changes endpoint',
-          status: 'review',
+          status: RUN_STATUS.review,
           workflow: 'feat',
           branch: 'cez/8f31ab02',
           diffStat: { adds: 128, dels: 14, files: 6 },
@@ -1093,8 +1094,8 @@ describe('TasksOverview — mobile cards and FAB', () => {
     renderOverview(
       {
         runs: [
-          run({ id: 'own', title: 'Own PR', status: 'review', pullRequestUrl: 'https://github.com/o/r/pull/402' }),
-          run({ id: 'foreign', title: 'Foreign PR', status: 'review', pullRequestUrl: 'https://github.com/x/y/pull/8' }),
+          run({ id: 'own', title: 'Own PR', status: RUN_STATUS.review, pullRequestUrl: 'https://github.com/o/r/pull/402' }),
+          run({ id: 'foreign', title: 'Foreign PR', status: RUN_STATUS.review, pullRequestUrl: 'https://github.com/x/y/pull/8' }),
         ],
       },
       false,
@@ -1132,7 +1133,7 @@ describe('TasksOverview — mobile cards and FAB', () => {
   })
 
   it('shows a queued card its queue place instead of branch/tokens', () => {
-    renderOverview({ runs: [run({ id: 'q1', status: 'queued' })] })
+    renderOverview({ runs: [run({ id: 'q1', status: RUN_STATUS.queued })] })
     expect(card('q1')?.querySelector('[data-slot="queue-note"]')?.textContent).toBe('#1 in queue')
   })
 
@@ -1342,7 +1343,7 @@ describe('TasksOverviewRoute — wired to the app', () => {
   })
 
   it('keeps a tab switched while the typed search is still on its way to the URL (hearsay-tools/cezarion#1616)', async () => {
-    renderApp([run({ id: 'act', title: 'Needle act', status: 'running' }), run({ id: 'arc', title: 'Needle arc', status: 'done', archived: true })])
+    renderApp([run({ id: 'act', title: 'Needle act', status: RUN_STATUS.running }), run({ id: 'arc', title: 'Needle arc', status: RUN_STATUS.done, archived: true })])
     await waitFor(() => expect(tableRow('act')).not.toBeNull())
     fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks' }), { target: { value: 'Needle' } })
     fireEvent.click(overviewTab('archived'))
@@ -1361,9 +1362,9 @@ describe('TasksOverviewRoute — wired to the app', () => {
 
   it('keeps the sidebar Active/Automations tabs and the table Active/Archived tabs independent (#1332)', async () => {
     renderApp([
-      run({ id: 'act', status: 'running' }),
-      run({ id: 'arc', status: 'done', archived: true }),
-      { ...run({ id: 'auto', status: 'done' }), automationId: 'auto-1' },
+      run({ id: 'act', status: RUN_STATUS.running }),
+      run({ id: 'arc', status: RUN_STATUS.done, archived: true }),
+      { ...run({ id: 'auto', status: RUN_STATUS.done }), automationId: 'auto-1' },
     ])
     await waitFor(() => expect(tableRow('act')).not.toBeNull())
     expect(sidebarRow('act')).not.toBeNull()
@@ -1466,7 +1467,7 @@ describe('TasksOverviewRoute — wired to the app', () => {
   })
 
   it('posts to /api/v1/runs/archive-finished and refetches the authoritative list', async () => {
-    renderApp([run({ id: 'd1', status: 'done' })])
+    renderApp([run({ id: 'd1', status: RUN_STATUS.done })])
     fireEvent.click(await screen.findByRole('button', { name: /Archive finished/ }))
 
     await waitFor(() => {
@@ -1495,7 +1496,7 @@ describe('TasksOverviewRoute — wired to the app', () => {
   })
 
   it('PATCHes a table rename to /api/v1/runs/:id and refetches the authoritative list', async () => {
-    renderApp([run({ id: 'rn1', title: 'Old name', status: 'done' })])
+    renderApp([run({ id: 'rn1', title: 'Old name', status: RUN_STATUS.done })])
     await waitFor(() => expect(tableRow('rn1')).not.toBeNull())
 
     fireEvent.click(screen.getByRole('button', { name: 'Columns' }))
@@ -1742,7 +1743,7 @@ describe('TasksOverview — status groups and origin (hearsay-tools/cezarion#161
     const runs = [
       run({ id: 'direct', autonomous: true }),
       automated({ id: 'auto-done' }),
-      automated({ id: 'auto-running', status: 'running' }),
+      automated({ id: 'auto-running', status: RUN_STATUS.running }),
     ]
     const { rerender } = renderOverview({ runs, onArchiveFinished, origin: 'automations', onOriginChange }, false)
     const chips = within(document.querySelector('[data-slot="origin-filter"]') as HTMLElement)
@@ -1823,7 +1824,7 @@ describe('TasksOverview — status groups and origin (hearsay-tools/cezarion#161
   })
 
   it('heads each group with its name, count and dot, and turns Finished red on a failure', () => {
-    renderOverview({ runs: [run({ status: 'review' }), run(), run({ status: 'failed' }), run({ status: 'running' })] }, false)
+    renderOverview({ runs: [run({ status: RUN_STATUS.review }), run(), run({ status: RUN_STATUS.failed }), run({ status: RUN_STATUS.running })] }, false)
     expect([...document.querySelectorAll('[data-slot="task-status-group"]')].map((group) => group.getAttribute('data-bucket')))
       .toEqual(['Needs you', 'Finished', 'Working'])
     expect(within(heading('Finished')).getByRole('button', { name: /Finished 2/ }).getAttribute('aria-expanded')).toBe('true')
@@ -1834,7 +1835,7 @@ describe('TasksOverview — status groups and origin (hearsay-tools/cezarion#161
   })
 
   it('shows one neutral Archived group for history', () => {
-    renderOverview({ view: 'archived', runs: [run({ archived: true, status: 'failed' }), run({ archived: true })] }, false)
+    renderOverview({ view: 'archived', runs: [run({ archived: true, status: RUN_STATUS.failed }), run({ archived: true })] }, false)
     expect([...document.querySelectorAll('[data-slot="task-status-group"]')].map((group) => group.getAttribute('data-tone'))).toEqual(['neutral'])
   })
 
@@ -1885,7 +1886,7 @@ describe('TasksOverview — status groups and origin (hearsay-tools/cezarion#161
 
   it('previews the latest progress inline with Open task, and says when it cannot', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('# Handoff\n\n## Progress log\n\n- 10:02 — tests pass\n', { status: 200 })))
-    renderOverview({ runs: [run({ id: 'p', title: 'Preview me', status: 'failed', error: 'exit 1' })] }, false)
+    renderOverview({ runs: [run({ id: 'p', title: 'Preview me', status: RUN_STATUS.failed, error: 'exit 1' })] }, false)
     fireEvent.click(screen.getByRole('button', { name: 'Show resources for Preview me' }))
     const preview = document.querySelector('[data-slot="task-preview"]') as HTMLElement
     expect(within(preview).getByRole('status').textContent).toBe('Loading latest progress…')

@@ -1,3 +1,4 @@
+import { STEP_KIND } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -11,7 +12,7 @@ afterEach(cleanup)
 const step = (id: string, status: StepStatus, extra: Partial<StepState> = {}): StepState => ({
   id,
   name: id,
-  kind: 'agent',
+  kind: STEP_KIND.agent,
   status,
   iterations: 1,
   tokensUsed: 0,
@@ -59,7 +60,7 @@ describe('StepRail', () => {
       <StepRail
         steps={[
           step('implement', 'done', { name: 'Do the task' }),
-          step('verify', 'running', { name: 'Verify', kind: 'check' }),
+          step('verify', 'running', { name: 'Verify', kind: STEP_KIND.check }),
           step('review', 'pending', { name: 'Review' }),
         ]}
       />,
@@ -116,7 +117,7 @@ describe('activeStepIndex — who the summary speaks for', () => {
 describe('WorkflowSteps — the collapsible header summary', () => {
   const steps = [
     step('implement', 'done', { name: 'Do the task' }),
-    step('verify', 'running', { name: 'Verify', kind: 'check' }),
+    step('verify', 'running', { name: 'Verify', kind: STEP_KIND.check }),
     step('review', 'pending', { name: 'Review' }),
   ]
   /** Unique per test — the expand memory below is module-level and keyed by run id. */

@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { summaryOf } from '@/test/run-summary-fixture'
 import { describe, expect, it } from 'vitest'
 
@@ -21,7 +22,7 @@ function run(over: Pick<ApiRun, 'id' | 'title'> & Partial<ApiRun>): ApiRun {
   return {
     workflow: 'quick-task',
     task: over.title,
-    status: 'running',
+    status: RUN_STATUS.running,
     createdAt: '2026-09-08T12:00:00.000Z',
     tokensUsed: 0,
     archived: false,
@@ -77,7 +78,7 @@ describe('recipient backend for queued guidance', () => {
   it('uses the active step backend before the run default, and keeps absent data unknown', () => {
     const parent = run({ id: 'parent', title: 'Parent', runner: 'codex' })
     const cursor = run({ id: 'cursor', title: 'Cursor worker', runner: 'codex', currentStepId: 'task', steps: [
-      { id: 'task', name: 'Task', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0, backend: 'cursor' },
+      { id: 'task', name: 'Task', kind: STEP_KIND.agent, status: STEP_STATUS.running, iterations: 1, tokensUsed: 0, backend: 'cursor' },
     ] })
     const unknown = run({ id: 'unknown', title: 'Old worker' })
     const backends = recipientBackendsFromRuns(parent, [summaryOf(cursor), summaryOf(unknown)])

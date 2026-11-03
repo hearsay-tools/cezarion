@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -38,7 +39,7 @@ const activeRun: ApiRun = {
   title: 'Task',
   workflow: 'quick-task',
   task: 'Task',
-  status: 'waiting',
+  status: RUN_STATUS.waiting,
   createdAt: '2026-07-24T00:00:00.000Z',
   tokensUsed: 0,
   archived: false,
@@ -49,8 +50,8 @@ const activeRun: ApiRun = {
 const step = (extra: Partial<StepState> = {}): StepState => ({
   id: 'task',
   name: 'Do the task',
-  kind: 'agent',
-  status: 'done',
+  kind: STEP_KIND.agent,
+  status: STEP_STATUS.done,
   iterations: 1,
   tokensUsed: 0,
   ...extra,
@@ -59,7 +60,7 @@ const step = (extra: Partial<StepState> = {}): StepState => ({
 /** The run the feature exists for: the session closed while the question was unanswered. */
 const closedRun: ApiRun = {
   ...activeRun,
-  status: 'done',
+  status: RUN_STATUS.done,
   steps: [step({ sessionId: 'sess-1' })],
 }
 
