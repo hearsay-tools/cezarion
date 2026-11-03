@@ -13,25 +13,27 @@ vi.mock('./runner-runtime.ts', async importOriginal => ({
 }));
 
 const PARTS: Readonly<Record<string, readonly string[]>> = {
-  "unlimited": [
+  "defaults": [
     "claude T1",
-    "claude T2",
     "claude T6",
     "codex T1",
-    "codex T2",
     "codex T6",
     "cursor T1",
-    "cursor T2",
     "cursor T6",
     "omp T1",
-    "omp T2",
     "omp T6",
     "opencode T1",
-    "opencode T2",
     "opencode T6",
     "pi T1",
-    "pi T2",
     "pi T6"
+  ],
+  "explicit-zero": [
+    "claude T2",
+    "codex T2",
+    "cursor T2",
+    "omp T2",
+    "opencode T2",
+    "pi T2"
   ],
   "authored-and-standalone": [
     "claude T3",
