@@ -91,23 +91,13 @@ function buildFixtureRepo(dir: string): void {
   for (let index = 0; index < FIXTURE_FILES; index += 1) write(index, 'after')
 }
 
-/** Which mode is currently loaded, so the virtual-mode tests can share one page load. */
-let loaded: 'flat' | 'virtual' | null = null
-
-/**
- * Load /git/changes in a forced mode and wait until the diff has rendered in that mode — and skip the
- * navigation entirely when that mode is already up. Re-loading is the expensive part of this
- * spec (flat mode paints ~1,900 highlighted rows, which is precisely the cost being measured),
- * so the three virtual-mode assertions below deliberately share a single load and run in order.
- */
+/** Load the requested mode and wait for its rendered diff. */
 function openChanges(mode: 'flat' | 'virtual') {
-  if (loaded === mode) return
   browser.goto(`${baseUrl}/git/changes?diff=${mode}`)
   browser.waitForFunction(
     `document.querySelector('[data-slot="diff-files"]')?.dataset.virtualized === '${mode === 'virtual'}'`,
   )
   browser.waitForFunction(`document.querySelector('[data-slot="diff-file"]') !== null`)
-  loaded = mode
 }
 
 beforeAll(async () => {
@@ -132,20 +122,19 @@ afterAll(async () => {
 })
 
 describe(`diff virtualization on a generated ${FIXTURE_FILES}-file changeset`, () => {
-  let flatLines = 0
-  let flatDom = 0
-
   it('force-flat renders every file and every line (the before measurement)', () => {
     openChanges('flat')
 
     expect(browser.count('[data-slot="diff-file"]')).toBe(changedFiles)
-    flatLines = lineCount()
-    flatDom = domSize()
+    const flatLines = lineCount()
     // Every line of every file: ~2 rows per changed line (a del and an add).
     expect(flatLines).toBeGreaterThan(FIXTURE_FILES * LINES_PER_FILE)
   }, 120_000)
 
   it('force-virtual holds a viewport window instead of the whole changeset', () => {
+    openChanges('flat')
+    const flatLines = lineCount()
+    const flatDom = domSize()
     openChanges('virtual')
 
     const virtualLines = lineCount()

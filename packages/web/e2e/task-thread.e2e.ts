@@ -420,6 +420,7 @@ describe('task thread', () => {
   })
 
   it('the plan section meters the LATEST snapshot (2 of 4) inside the run-activity card', () => {
+    openSessionActivity(browser)
     expect(browser.evaluate(`document.querySelector('[data-slot="run-activity-dock"]').dataset.state`)).toBe('open')
     expect(browser.text('[data-slot="run-activity-plan"] [data-slot="run-activity-meta"]')).toBe('2 of 4 complete')
     expect(browser.evaluate(`document.querySelector('[data-slot="plan-mirror"]') === null`)).toBe(true)
@@ -441,6 +442,9 @@ describe('task thread', () => {
   })
 
   it('collapsing the plan section folds the list away and keeps its odometer', () => {
+    openSessionActivity(browser)
+    browser.click('[data-slot="run-activity-plan"] > button')
+    browser.waitForFunction(`document.querySelectorAll('[data-slot="plan-item"]').length === 4`)
     // Expanding the checklist moves the dock. Let its geometry and animations settle
     // before targeting the plan header again, so the click lands on that header.
     settleVisual(browser, '[data-slot="run-activity-dock"]')
@@ -650,20 +654,28 @@ describe('task thread', () => {
       browser.evaluate(`document.querySelector('[data-slot="title-input"]').value`),
     ).toBe('Explain what cezar does')
 
-    browser.fill('[data-slot="title-input"]', 'Renamed by the header e2e')
-    browser.press('Enter')
+    try {
+      browser.fill('[data-slot="title-input"]', 'Renamed by the header e2e')
+      browser.press('Enter')
 
-    // The header re-reads the invalidated record — the new title lands in the h1…
-    browser.waitForFunction(
-      `document.querySelector('[data-route="task-thread"] h1')?.textContent === 'Renamed by the header e2e'`,
-    )
-    // …and the API readback proves it persisted rather than living in component state.
-    const record = (await (await fetch(`${baseUrl}/api/v1/runs/${RUN_ID}`)).json()) as {
-      title: string
-      titleSummary: string
+      // The header re-reads the invalidated record — the new title lands in the h1…
+      browser.waitForFunction(
+        `document.querySelector('[data-route="task-thread"] h1')?.textContent === 'Renamed by the header e2e'`,
+      )
+      // …and the API readback proves it persisted rather than living in component state.
+      const record = (await (await fetch(`${baseUrl}/api/v1/runs/${RUN_ID}`)).json()) as {
+        title: string
+        titleSummary: string
+      }
+      expect(record.titleSummary).toBe('Renamed by the header e2e')
+      expect(record.title).toBe('Renamed by the header e2e')
+    } finally {
+      const restored = await fetch(`${baseUrl}/api/v1/runs/${RUN_ID}`, {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: RUN.titleSummary }),
+      })
+      expect(restored.ok).toBe(true)
     }
-    expect(record.titleSummary).toBe('Renamed by the header e2e')
-    expect(record.title).toBe('Renamed by the header e2e')
   })
 
   it('an unknown run id lands on the 404-style state with a way home', () => {
