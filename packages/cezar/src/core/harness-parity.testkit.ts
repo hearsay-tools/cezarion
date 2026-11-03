@@ -21,7 +21,8 @@ import { runInternals } from '../workflows/run-internals.testkit.ts';
  */
 import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { randomUUID } from 'node:crypto';
-import { execFile } from 'node:child_process';
+import { execFile, type ChildProcess } from 'node:child_process';
+import { observationClock } from './observation-clock.testkit.ts';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -1020,6 +1021,26 @@ export interface DriveSeamOptions {
   readonly timeoutMs?: number;
 }
 
+/** Only OpenCode's missing-binary row observes the server URL deadline. */
+function missingExecutableClock(backend: RunnerId, scenario: ScenarioName) {
+  if (backend !== 'opencode' || scenario !== 'missing-binary') return undefined;
+  return observationClock(delay => delay === 30_000 &&
+    /\bwaitForServerUrl\b/.test(new Error().stack ?? ''));
+}
+
+async function observeMissingExecutable(session: AgentSession,
+  clock: NonNullable<ReturnType<typeof missingExecutableClock>>): Promise<void> {
+  // Observe the real child events, not a fabricated runner error. The session's
+  // separate 30 s wall deadline stays native: only waitForServerUrl is captured.
+  const { child } = (session as unknown as { serve: { child: ChildProcess } }).serve;
+  const error = new Promise<NodeJS.ErrnoException>(resolve => child.once('error', resolve));
+  const closed = new Promise<void>(resolve => child.once('close', () => resolve()));
+  if ((await error).code !== 'ENOENT') throw new Error('Expected the real missing executable ENOENT');
+  await closed;
+  if (clock.captured !== 1) throw new Error(`Expected one server URL timer, got ${clock.captured}`);
+  await clock.advance(30_000);
+}
+
 /**
  * Drive one backend's real runner class against its own offline mock and collect
  * both event streams plus the settled result.
@@ -1048,6 +1069,7 @@ export async function driveSeam(
   const v2: UiEvent[] = [];
   let session: AgentSession | undefined;
   let pid: number | undefined;
+  const clock = missingExecutableClock(backend, scenario);
   try {
     session = createRunner(backend, backend === 'cursor' ? { sessionTransport: 'cursor-print' } : {}).startSession(
       {
@@ -1080,6 +1102,7 @@ export async function driveSeam(
       return { text: '', toolCalls: [], tokensUsed: 0 };
     });
     pid ??= session.pid;
+    if (clock) await observeMissingExecutable(session, clock);
     if (scenario === 'missing-binary') await settled;
     else if (opts.whileOpen) await opts.whileOpen(session, { v1, v2 });
     else await waitFor(() => v1.some((e) => e.type === 'turn-end' || e.type === 'error'));
@@ -1087,6 +1110,7 @@ export async function driveSeam(
     const result = await settled;
     return { backend, v1, v2, result, pid, elapsedMs: Date.now() - started, ...(failure ? { failure } : {}) };
   } finally {
+    clock?.restore();
     session?.interrupt();
     if (savedBin === undefined) delete process.env[adapter.binEnv];
     else process.env[adapter.binEnv] = savedBin;
@@ -1553,4 +1577,28 @@ export async function withSkillParentRun(
     }
     rmSync(repoRoot, { recursive: true, force: true });
   }
+}
+
+/** R17 keeps the shipped retry budget, but observes it after the latest native retry. */
+export async function driveUnavailableProvider(backend: RunnerId, scenario: ScenarioName | { prompt: string },
+  settled: (record: RunRecord | undefined) => boolean, timeoutMs?: number): ReturnType<typeof driveRun> {
+  if (backend !== 'codex') return driveRun(backend, scenario, settled, timeoutMs);
+  let clock: ReturnType<typeof observationClock> | undefined;
+  try {
+    return await driveRun(backend, scenario, settled, timeoutMs, undefined, {
+      beforeStart: () => {
+        clock = observationClock(delay => delay === 60_000 &&
+          /\bhandleStreamError\b/.test(new Error().stack ?? ''));
+      },
+      during: async ({ store, runId }) => {
+        // bound: the real native mock must deliver both retry frames before the
+        // product's no-progress timer can report its stored latest reason.
+        await waitFor(() => store.readEvents(runId).some(event => event.type === 'session.error' &&
+          String(event.message).includes('Connection failed: error sending request')));
+        if (clock!.captured !== 1) throw new Error(`Expected one stream retry timer, got ${clock!.captured}`);
+        await clock!.advance(60_000);
+      },
+      beforeCleanup: () => { clock?.restore(); clock = undefined; },
+    });
+  } finally { clock?.restore(); }
 }
