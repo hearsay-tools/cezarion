@@ -8,9 +8,9 @@ import { seedRuns, recordedRun } from './seed-runs'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
 import recordJson from './fixtures/thread-run.record.json'
+// fixture-server starts: 1
 
 const record = recordedRun(recordJson)
-// fixture-server starts: 1
 
 /**
  * The task Commits tab's virtualization (`routes/task-git/commit-list.tsx`), in a real browser,

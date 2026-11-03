@@ -23,9 +23,9 @@ import {
   type ContrastSample,
 } from './contrast'
 import recordJson from './fixtures/thread-run.record.json'
+// fixture-server starts: 1
 
 const record = recordedRun(recordJson)
-// fixture-server starts: 1
 
 /**
  * The task thread (`/tasks/:id`, R3 Steps 1.1 + 1.2) in a real browser, against a real cezar

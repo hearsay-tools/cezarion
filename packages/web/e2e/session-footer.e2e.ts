@@ -12,11 +12,11 @@ import recordJson from './fixtures/thread-run.record.json'
 import { seedTranscript } from './seed-transcript'
 import { openSessionActivityRow } from './session-activity'
 import { waitForSettledSample } from './visual-ready'
+// fixture-server starts: 1
 const record = recordedRun(recordJson)
 
 
 
-// fixture-server starts: 1
 
 const runId = 'aaaaaaaa-1111-4222-8333-bbbbbbbbcccc'
 const shortId = 'aaaaaaaa-1111-4222-8333-bbbbbbbbdddd'

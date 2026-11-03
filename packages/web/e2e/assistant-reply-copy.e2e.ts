@@ -17,9 +17,9 @@ import {
   type ContrastSample,
 } from './contrast'
 import recordJson from './fixtures/thread-run.record.json'
+// fixture-server starts: 1
 
 const record = recordedRun(recordJson)
-// fixture-server starts: 1
 
 /**
  * #927 — Agent Response Copy / Copy markdown live in the header row (label + timestamp),

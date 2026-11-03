@@ -28,7 +28,7 @@ const fixtureGitConfig = resolve(repoRoot, '.ai/qa/gitconfig')
 
 /**
  * The built CLI a spec spawns when it needs its OWN cezar rather than the shared test env
- * (a pinned `runs.json` fixture, an empty repo, a second project).
+ * (a pinned `seedRuns` fixture, an empty repo, a second project).
  *
  * Exported from here rather than re-derived per spec because it is one fact about the build
  * layout, and it has moved twice: from a root-level `dist/` into the workspace package, and

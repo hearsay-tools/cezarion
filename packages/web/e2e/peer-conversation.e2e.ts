@@ -12,10 +12,10 @@ import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './f
 import recordJson from './fixtures/thread-run.record.json'
 import { seedTranscript } from './seed-transcript'
 import { waitForSettledSample } from './visual-ready'
+// fixture-server starts: 1
 const record = recordedRun(recordJson)
 
 
-// fixture-server starts: 1
 
 // Peer messages in a coordinator's thread (hearsay-tools/cezarion#1992): a request to a peer the
 // run list names, its reply, a progress message beside an open question, and a request to a peer
