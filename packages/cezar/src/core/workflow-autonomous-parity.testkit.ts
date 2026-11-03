@@ -103,24 +103,26 @@ const PARTS: Readonly<Record<string, readonly string[]>> = {
     "pi A2 continuation"
   ],
   "ask-refusal": [
-    "claude A10 fresh",
     "claude A3 fresh",
     "claude A4 continuation",
-    "codex A10 fresh",
     "codex A3 fresh",
     "codex A4 continuation",
-    "cursor A10 fresh",
     "cursor A3 fresh",
     "cursor A4 continuation",
-    "omp A10 fresh",
     "omp A3 fresh",
     "omp A4 continuation",
-    "opencode A10 fresh",
     "opencode A3 fresh",
     "opencode A4 continuation",
-    "pi A10 fresh",
     "pi A3 fresh",
     "pi A4 continuation"
+  ],
+  "unanswered-question": [
+    "claude A10 fresh",
+    "codex A10 fresh",
+    "cursor A10 fresh",
+    "omp A10 fresh",
+    "opencode A10 fresh",
+    "pi A10 fresh"
   ],
   "parking": [
     "claude A6 continuation",
