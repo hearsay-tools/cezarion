@@ -11,6 +11,7 @@ Before adding a YAML, shell or Markdown reader, read [Script readers](../../../d
 
 <a id="squeal-wait-bound"></a>
 
+<!-- until: hearsay-tools/cezarion#2517 -->
 **A wait for one file's verdict has a bound.** Squeal's skill says to wait again
 when `squeal status --wait` returns on timeout. In this repo, stop waiting for a
 unit test file's verdict when either case holds:

@@ -16,10 +16,12 @@ the Task routing rows for run search, pending asks and skills list their readers
 
 Where readers hide, searched from the repo root (replace the example values):
 
+<!-- until: hearsay-tools/cezarion#2512 -->
 - **A `RunRecord` field renamed, moved or removed**: packaged and browser fixtures, by
   its old and new names or paths, searched as below; a unit
   test using `makeRunRecord` fails to compile instead.
 
+<!-- until: hearsay-tools/cezarion#2513 -->
 - **An enum or discriminant value renamed** (a wait kind, outcome, status or attention
   label): the quoted old value in tests, searched before each push that renames one; the
   `test-enum-literal` baseline lists tests still on literals. A rejection test that
@@ -29,6 +31,7 @@ Where readers hide, searched from the repo root (replace the example values):
   rg -n -F -e 'delegation.wait' -e "'ci'" packages --glob '*.test.*' --glob '*.e2e.ts'
   ```
 
+<!-- until: hearsay-tools/cezarion#2510 -->
 - **A default removed** (a catalog, a source or a seeded entry): browser specs, by its
   entry names, source names and the `data-slot` of each list or view that renders those
   entries — a spec can depend on how many entries a list holds without naming any of
@@ -40,6 +43,7 @@ Where readers hide, searched from the repo root (replace the example values):
   rg -l -F -e 'open-mercato/skills' -e 'skill-row' packages/web/e2e/*.e2e.ts
   ```
 
+<!-- until: hearsay-tools/cezarion#2514 -->
 - **Cockpit source changed**: the browser specs that run the changed file.
   `npm run test:e2e:affected -- --plan` lists them from the spec map
   ([the e2e README](../../../packages/web/e2e/README.md#choosing-specs-for-a-change)); without
@@ -53,6 +57,7 @@ Where readers hide, searched from the repo root (replace the example values):
   grep -lE 'link-safety|data-streamdown|thread-markdown' packages/web/e2e/*.e2e.ts
   ```
 
+<!-- until: hearsay-tools/cezarion#2514 -->
 - **Visible copy added, renamed or removed** (a label, a tab, a heading, a button, an
   empty state): browser specs, by the new and the old string; the attribute search does
   not find text assertions.
@@ -61,6 +66,7 @@ Where readers hide, searched from the repo root (replace the example values):
   grep -lF 'Automations' packages/web/e2e/*.e2e.ts
   ```
 
+<!-- until: hearsay-tools/cezarion#2515 -->
 - **A cockpit control renamed or removed**: server and contract sources, by its old label
   and the navigation text that led to it. Update messages that tell users where to find
   the control, including API errors, CLI output and agent prompts; do not replace every
@@ -70,6 +76,7 @@ Where readers hide, searched from the repo root (replace the example values):
   rg -n -F -e 'Task webhook' -e 'Settings → General →' packages/cezar/src packages/contract/src
   ```
 
+<!-- until: hearsay-tools/cezarion#2514 -->
 - **Dry-run turn-end behavior changed** — the `packages/cezar/scripts/mock-*.mjs` mocks,
   the turn-end rule, attention, or the human-ask summary: the browser and packaged
   fixtures that drive a dry-run task to a park. A
