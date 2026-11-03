@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import assert from 'node:assert/strict';
 import { execFile as execFileCallback, spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -166,7 +167,7 @@ test('built cez task drives a dry-run cockpit it discovers from the checkout', {
     assert.ok(Date.now() - followStarted < 60_000, 'log --follow returned well before its timeout');
     const followedLines = followed.stdout.trim().split('\n').map((line) => JSON.parse(line) as Record<string, unknown>);
     assert.ok(followedLines.slice(0, -1).length > 0 && followedLines.slice(0, -1).every((line) => typeof line.seq === 'number'), 'events print before the final line');
-    assert.deepEqual(followed.json, { id: parked.json.id, status: 'waiting', attention: 'waiting', attentionLabel: 'needs you', until: 'attention', timedOut: false });
+    assert.deepEqual(followed.json, { id: parked.json.id, status: RUN_STATUS.waiting, attention: 'waiting', attentionLabel: 'needs you', until: 'attention', timedOut: false });
     assert.equal((await task(['stop', String(parked.json.id)])).code, 0);
 
     const headless = await execFile(process.execPath, [cli, 'run', 'mock:cezar-done', '--repo', repo], { cwd: repo, env, timeout: 60_000 });

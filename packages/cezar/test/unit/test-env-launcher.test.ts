@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
@@ -707,7 +708,7 @@ test('a failed cold boot leaves no descriptor of the env it replaced', () => {
   // What main carried for a month: a running-status descriptor of a long-dead env whose browser
   // check had failed. Specs read its notes and reported a missing browser instead of the boot error.
   writeFileSync(join(fixture.root, '.ai/qa/test-env.json'), JSON.stringify({
-    status: 'running', baseUrl: 'http://127.0.0.1:9', startedByThisRepo: true, app: {},
+    status: RUN_STATUS.running, baseUrl: 'http://127.0.0.1:9', startedByThisRepo: true, app: {},
     browser: { installed: false, notes: 'live browser launch failed after autonomous install' },
   }));
   const result = spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-up.sh')], {

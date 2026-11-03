@@ -1,3 +1,4 @@
+import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -120,7 +121,7 @@ test('busy cockpit port from a different cwd refuses before recovery or startup 
     const dataDir = join(secondRepo, '.ai/cezar');
     const store = RunStore.open(dataDir);
     store.createRun({ title: 'must not recover', workflow: 'quick-task', task: 'must not run', worktree: false,
-      steps: [{ id: 'task', name: 'Task', kind: 'agent' }] });
+      steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] });
     // A clean shutdown: the run is durable in runs.db and its claim is released, so a boot that
     // went on to recover would be free to take it over (hearsay-tools/cezarion#779).
     store.close();
@@ -198,7 +199,7 @@ test('different cwd contenders acquire the exact port once before either can rec
     for (const repo of repos) {
       const store = RunStore.open(join(repo, '.ai/cezar'));
       store.createRun({ title: 'recovery sentinel', workflow: 'quick-task', task: 'sentinel', worktree: false,
-        steps: [{ id: 'task', name: 'Task', kind: 'agent' }] });
+        steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] });
       store.close(); // as above: durable, and free for a boot that wrongly recovered to take
       indexes.push(await storeSnapshot(join(repo, '.ai/cezar')));
     }
