@@ -1,5 +1,4 @@
 import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
-import path from 'node:path'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'

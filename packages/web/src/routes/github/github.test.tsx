@@ -1,6 +1,5 @@
 /** GitHub list paging and cross-state search. */
 import { ISSUE_142, ISSUE_139, PR_137, GITHUB, type SentRequest, jsonResponse, stubFetch, renderAt, rows, detail } from './github.testkit'
-import path from 'node:path'
 import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { GithubItem } from '@open-mercato/cezar-api-client'
