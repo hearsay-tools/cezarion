@@ -12,6 +12,19 @@ import { TasksOverview } from '@/routes/tasks-overview'
 
 afterEach(cleanup)
 
+function expectCompactResourceCells(
+  tokens: HTMLElement | null | undefined,
+  cost: HTMLElement | null | undefined,
+  memory: HTMLElement | null | undefined,
+) {
+  expect(tokens?.className).toContain('overflow-hidden')
+  expect(tokens?.getAttribute('title')).toBe('Input tokens: 999,900; output tokens: 888,800')
+  expect(cost?.className).toContain('overflow-hidden')
+  expect(cost?.getAttribute('aria-label')).toBe('$123.45')
+  expect(memory?.className).toContain('overflow-hidden')
+  expect(memory?.getAttribute('aria-label')).toBe('peak 1023 MB; peak — run finished')
+}
+
 describe('TasksOverview — mobile actions', () => {
   it('hides the inline New task button below md, where the shell\'s floating button owns the job (#621)', () => {
     renderOverview({ runs: [run({ status: RUN_STATUS.done })] })
@@ -162,12 +175,7 @@ describe('TasksOverview — the table', () => {
     expect(reference?.className).toContain('overflow-hidden')
     expect(reference?.querySelector('[data-slot="pr-chip"]')?.className).toContain('max-w-full')
     expect(diff?.className).toContain('overflow-hidden')
-    expect(tokens?.className).toContain('overflow-hidden')
-    expect(tokens?.getAttribute('title')).toBe('Input tokens: 999,900; output tokens: 888,800')
-    expect(cost?.className).toContain('overflow-hidden')
-    expect(cost?.getAttribute('aria-label')).toBe('$123.45')
-    expect(memory?.className).toContain('overflow-hidden')
-    expect(memory?.getAttribute('aria-label')).toBe('peak 1023 MB; peak — run finished')
+    expectCompactResourceCells(tokens, cost, memory)
   })
 
   it('says the run status through the attention pill', () => {
