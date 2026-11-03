@@ -4,6 +4,7 @@ import { basename, join } from 'node:path'
 import type { Bundle } from './bundle.ts'
 import type { ModuleFacts } from './module-graph.ts'
 import { compiledFunctions } from './v8-log.ts'
+import { nodeCaptureComplete, nodeEvidence, type FunctionEvidence } from './node-evidence.ts'
 
 /**
  * The spec map: each cockpit source file and the browser specs that run it
@@ -23,6 +24,8 @@ export interface SpecEvidence {
   executed: string[]
   /** Repository files in every script this spec loaded. */
   loaded: string[]
+  nodeComplete?: boolean
+  functions?: FunctionEvidence[]
 }
 
 export interface PartialMap {
@@ -41,6 +44,7 @@ export interface SpecMap {
   incomplete: string[]
   /** Each repository file in the bundle and the specs that reach it; `[]` when none does. */
   sources: Record<string, number[]>
+  functions?: Record<string, Array<{ start: number; end: number; specs: number[] }>>
 }
 
 /** Spec statuses from a Vitest JSON report, keyed by repository path. */
@@ -60,7 +64,7 @@ export function specEvidence(logDir: string, spec: string, bundle: Bundle): Omit
   const dir = join(logDir, basename(spec, '.e2e.ts'))
   const executed = new Set<string>()
   const loaded = new Set<string>()
-  for (const log of existsSync(dir) ? readdirSync(dir) : []) {
+  for (const log of existsSync(dir) ? readdirSync(dir, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => entry.name) : []) {
     for (const fn of compiledFunctions(readFileSync(join(dir, log), 'utf8'))) {
       const pathname = new URL(fn.url).pathname
       if (!bundle.has(pathname)) continue
@@ -73,11 +77,17 @@ export function specEvidence(logDir: string, spec: string, bundle: Bundle): Omit
   return { executed: [...executed].sort(), loaded: [...loaded].sort() }
 }
 
-export function partialMap(logDir: string, statuses: Map<string, SpecStatus>, bundle: Bundle): PartialMap {
+export function partialMap(logDir: string, statuses: Map<string, SpecStatus>, bundle: Bundle, nodeLogs?: string, repoRoot?: string): PartialMap {
   if (statuses.size === 0) throw new Error('the Vitest report names no spec, so the shard captured nothing')
   const specs: Record<string, SpecEvidence> = {}
   for (const [spec, status] of [...statuses].sort(([a], [b]) => a.localeCompare(b))) {
-    specs[spec] = { status, ...specEvidence(logDir, spec, bundle) }
+    const browser = specEvidence(logDir, spec, bundle)
+    const functions = nodeLogs && repoRoot ? nodeEvidence(nodeLogs, spec, repoRoot) : []
+    specs[spec] = { status, ...browser, ...(nodeLogs ? { functions } : {}),
+      ...(nodeLogs ? { nodeComplete: nodeCaptureComplete(nodeLogs, spec) } : {}),
+      executed: [...new Set([...browser.executed, ...functions.filter((fn) => fn.executed).map((fn) => fn.source)])],
+      loaded: [...new Set([...browser.loaded, ...functions.map((fn) => fn.source)])],
+    }
   }
   return { version: 1, specs }
 }
@@ -157,8 +167,17 @@ export function buildMap(
   for (const [source, set] of [...reach(specs, evidence, graph)].sort(([a], [b]) => a.localeCompare(b))) {
     sources[source] = [...set].sort((a, b) => a - b)
   }
-  const incomplete = specs.filter((spec) => evidence[spec]?.status !== 'passed' || evidence[spec]?.executed.length === 0)
-  return { version: 1, commit, createdAt, specs, incomplete, sources }
+  const incomplete = specs.filter((spec) => evidence[spec]?.status !== 'passed' || evidence[spec]?.nodeComplete === false || evidence[spec]?.executed.filter((file) => !file.startsWith('packages/cezar/')).length === 0)
+  const functions: NonNullable<SpecMap['functions']> = {}
+  specs.forEach((spec, index) => {
+    for (const fn of evidence[spec]?.functions ?? []) {
+      const entries = functions[fn.source] ??= []
+      let entry = entries.find((entry) => entry.start === fn.start && entry.end === fn.end)
+      if (!entry) entries.push(entry = { start: fn.start, end: fn.end, specs: [] })
+      if (fn.executed && !entry.specs.includes(index)) entry.specs.push(index)
+    }
+  })
+  return { version: 1, commit, createdAt, specs, incomplete, sources, ...(Object.keys(functions).length ? { functions } : {}) }
 }
 
 export interface Expectation {

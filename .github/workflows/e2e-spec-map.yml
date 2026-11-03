@@ -71,6 +71,11 @@ jobs:
 
       # The same bootstrap `npm run test:e2e` runs: install, the VITE_CEZ_E2E=1 build, the
       # server and the browser provider. A capture without a browser is no evidence.
+      - name: Enable harness-only Node coverage
+        run: |
+          echo "E2E_SPEC_MAP_NODE_DIR=$RUNNER_TEMP/spec-map/logs" >> "$GITHUB_ENV"
+          echo "NODE_OPTIONS=--import=$GITHUB_WORKSPACE/packages/web/e2e/spec-map/node-preload.mjs" >> "$GITHUB_ENV"
+
       - name: Boot the test environment
         run: |
           sh .ai/scripts/test-env-up.sh
@@ -98,6 +103,7 @@ jobs:
         run: |
           node packages/web/e2e/spec-map/build-map.ts partial \
             --logs "$RUNNER_TEMP/spec-map/logs" \
+            --node-logs "$RUNNER_TEMP/spec-map/logs" \
             --served .ai/qa/build/cezar/web/dist \
             --sourcemaps "$RUNNER_TEMP/spec-map/sourcemaps" \
             --results "$RUNNER_TEMP/spec-map/results.json" \
