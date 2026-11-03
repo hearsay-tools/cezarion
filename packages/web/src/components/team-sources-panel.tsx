@@ -72,10 +72,10 @@ function useSourceMutation<T>(write: (body: T) => Promise<TeamSkillSourcesRespon
       const keys = sourceKeys()
       return { answer: await write(body), keys }
     },
-    onSuccess: async ({ answer, keys }, body) => {
-      // A read sent before the change would land after it and bring the old list back.
-      await queryClient.cancelQueries({ queryKey: keys.sources, exact: true })
+    onSuccess: ({ answer, keys }, body) => {
       queryClient.setQueryData(keys.sources, answer)
+      // The reread also cancels a read sent before the change, which would otherwise land after
+      // it and bring the old list back (`cancelRefetch` is on by default).
       void queryClient.invalidateQueries({ queryKey: keys.sources, exact: true })
       invalidateSkillLists(queryClient, keys)
       done?.(body)
