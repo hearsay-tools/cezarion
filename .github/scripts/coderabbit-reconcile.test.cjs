@@ -337,3 +337,100 @@ test('old associated provider check wakes its current PR without an event-head f
   h.github.request = async (route, args) => args.check_run_id === 99 ? { data: structuredClone(source) } : request(route, args);
   assert.deepEqual(await run(h, 'check_run', { action: 'completed', check_run: source }), ['rerun-requested']);
 });
+
+test('trusted no-files decision refreshes only the failed native gate without requesting a model', async () => {
+  const h = fixture(); Object.assign(h.s.checks[0], { conclusion: 'skipped', output: { title: 'No files to review' } });
+  assert.deepEqual(await run(h, 'check_run', checkEvent(h)), ['rerun-requested']);
+  assert.deepEqual(h.s.writes, [30]);
+  assert.ok(h.s.calls.filter(([route]) => route.startsWith('POST')).every(([route]) =>
+    route === 'POST /graphql' || route.endsWith('/actions/jobs/{job_id}/rerun')));
+});
+
+test('failed old execution-only native gate never reruns for a trusted no-files decision', async () => {
+  const h = fixture(); Object.assign(h.s.checks[0], { conclusion: 'skipped', output: { title: 'No files to review' } });
+  h.s.jobs[0].steps = [{ name: 'Require fresh CodeRabbit execution and resolved threads' }];
+  const logs = []; h.log = message => logs.push(message);
+  assert.deepEqual(await run(h), ['legacy-workflow']);
+  assert.deepEqual(h.s.writes, []);
+  assert.match(logs.join(' '), /Push a new head or start a new native run after rollout/);
+});
+test('trusted no-files decision with native green is unchanged', async () => {
+  const h = fixture(); Object.assign(h.s.checks[0], { conclusion: 'skipped', output: { title: 'No files to review' } });
+  h.s.jobs[0].conclusion = 'success'; h.s.run.conclusion = 'success';
+  assert.deepEqual(await run(h), ['unchanged']);
+  assert.deepEqual(h.s.writes, []);
+});
+
+function historicalGreen() {
+  const h = fixture();
+  h.s.jobs[0].steps = [{ name: 'Require fresh CodeRabbit execution and resolved threads' }];
+  h.s.jobs[0].conclusion = 'success'; h.s.run.conclusion = 'success';
+  return h;
+}
+for (const [name, mutate] of Object.entries({
+  'reopened thread': s => { s.threads = [{ id: 'open', isResolved: false }]; },
+  'outdated reopened thread': s => { s.threads = [{ id: 'outdated', isResolved: false, isOutdated: true }]; },
+  'pending provider': s => { s.checks[0].status = 'in_progress'; s.checks[0].conclusion = null; },
+  'latest provider failure': s => { s.checks.push({ ...s.checks[0], id: 101, conclusion: 'failure' }); },
+  'generic skipped provider': s => { s.checks[0].conclusion = 'skipped'; },
+  'missing provider': s => { s.checks = []; },
+  'untrusted provider': s => { s.checks[0].app.id = 42; },
+})) test(`historical green is revoked for ${name}`, async () => {
+  const h = historicalGreen(); mutate(h.s);
+  const result = await run(h);
+  assert.deepEqual(h.s.writes, [30]);
+  assert.deepEqual(result, ['rerun-requested']);
+  assert.equal(h.s.calls.filter(([route]) => route.endsWith('/commits/{ref}/check-runs')).length, 4,
+    'read validated live admission twice before the native rerun');
+});
+for (const conclusion of ['success', 'skipped']) test(`historical green stays unchanged for admitted ${conclusion}`, async () => {
+  const h = historicalGreen();
+  Object.assign(h.s.checks[0], { conclusion, output: { title: 'No files to review' } });
+  assert.deepEqual(await run(h), ['unchanged']);
+  assert.deepEqual(h.s.writes, []);
+});
+test('historical revocation followed by no-files cannot promote or repeat the old job', async () => {
+  const h = historicalGreen(); h.s.threads = [{ id: 'open', isResolved: false }];
+  assert.deepEqual(await run(h), ['rerun-requested']);
+  h.s.run.status = 'completed'; h.s.run.conclusion = 'failure'; h.s.jobs[0].conclusion = 'failure';
+  h.s.threads[0].isResolved = true;
+  Object.assign(h.s.checks[0], { conclusion: 'skipped', output: { title: 'No files to review' } });
+  const logs = []; h.log = message => logs.push(message);
+  assert.deepEqual(await run(h), ['legacy-workflow']);
+  assert.deepEqual(h.s.writes, [30], 'the failed historical job never loops on the no-files decision');
+  assert.match(logs.join(' '), /Push a new head or start a new native run after rollout/);
+});
+for (const marker of ['Require fresh CodeRabbit execution and resolved threads', 'Require fresh CodeRabbit admission and resolved threads']) {
+  test(`model workflow stays refused despite green ${marker}`, async () => {
+    const h = historicalGreen(); h.s.jobs[0].steps[0].name = marker;
+    h.s.threads = [{ id: 'open', isResolved: false }];
+    h.s.run.referenced_workflows = [{ path: 'o/r/.github/workflows/automated-code-review.yml@refs/heads/main' }];
+    assert.deepEqual(await run(h), ['legacy-workflow']);
+    assert.deepEqual(h.s.writes, []);
+    assert.ok(h.s.calls.every(([route]) => !route.endsWith('/commits/{ref}/check-runs')));
+  });
+}
+for (const change of ['provider', 'head', 'run', 'attempt', 'policy', 'job']) test(`historical revocation refuses changed ${change} before POST`, async () => {
+  const h = historicalGreen(); h.s.checks[0].status = 'queued'; h.s.checks[0].conclusion = null;
+  let checks = 0;
+  h.s.onRead = route => {
+    if (!route.endsWith('/commits/{ref}/check-runs')) return;
+    checks++;
+    if (checks === 3 && change === 'provider') Object.assign(h.s.checks[0], { status: 'completed', conclusion: 'success' });
+    if (checks === 3 && change === 'head') h.s.pr.head.sha = BASE;
+    if (checks !== 4) return;
+    if (change === 'run') h.s.run.id = 21;
+    if (change === 'attempt') h.s.run.run_attempt++;
+    if (change === 'policy') h.s.jobs[0].steps = [{ name: 'Require fresh CodeRabbit admission and resolved threads' }];
+    if (change === 'job') h.s.jobs[0].conclusion = 'failure';
+  };
+  assert.deepEqual(await run(h), ['changed']);
+  assert.deepEqual(h.s.writes, []);
+});
+for (const historical of [false, true]) test(`admission read error revocation preserves policy direction (historical=${historical})`, async () => {
+  const h = historical ? historicalGreen() : fixture();
+  h.s.jobs[0].conclusion = 'success'; h.s.run.conclusion = 'success';
+  h.s.onRead = route => { if (route.endsWith('/commits/{ref}/check-runs')) throw new Error('Provider read failed'); };
+  assert.deepEqual(await run(h), [historical ? 'review-evidence-unavailable' : 'rerun-requested']);
+  assert.deepEqual(h.s.writes, historical ? [] : [30]);
+});
