@@ -91,7 +91,7 @@ coordinates to integers: agent-browser's `mouse move` rejects decimals with
 
 ## The rules the ratchet enforces
 
-Before each case, the shared setup restores every open browser to the viewport and route set by
+Before each case, the shared setup restores every open browser to the viewport and resolved route set by
 `beforeAll` (defaults: the session viewport and `about:blank`), with zero document scroll.
 It loads a fresh document. Each case prepares the UI and task state it needs.
 

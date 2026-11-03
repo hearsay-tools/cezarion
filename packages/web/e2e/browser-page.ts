@@ -51,6 +51,7 @@ export function rememberViewport(browser: AgentBrowser, width: number, height: n
 export function resetBrowserPage(browser: AgentBrowser): void {
   const page = setupPage(browser)
   page.viewport ??= browser.evaluate('({ width: innerWidth, height: innerHeight })') as { width: number; height: number }
+  if (!page.frozen && page.route !== 'about:blank') page.route = browser.url()
   page.frozen = true
   browser.goto('about:blank')
   browser.setViewport(page.viewport.width, page.viewport.height, page.viewport.scale)
