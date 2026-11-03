@@ -47,6 +47,17 @@ CPU count, start/end times, exit status and command PID live under the ignored
 These are local evidence paths, not tool-readable baselines or a slow-file allowlist.
 The table below is a record, not an input to any guard.
 
+The separate process-profile pass uses the same one-file/one-worker command
+with an import hook in NODE_OPTIONS. It records mock/Git/tsx child starts,
+spawn-to-first-stdout, close timing, and union intervals rather than adding
+overlapping process lifetimes. Before the pass, wait for one-minute load at or
+below nproc, checking every 60 s, with **one 20-minute budget for the whole
+pass**. Once the budget expires or load falls to the threshold, run every file
+in sequence without more waits. Record start and end load for each profile.
+Above-nproc rows are marked. Component shares inform F1; CI numbers remain the
+absolute reference. Instrumented runs are separate from the table's unmodified
+size measurements.
+
 CPU seconds are GNU time's user plus system seconds, including reaped child
 processes. Peak RSS is GNU time's maximum resident set size in KiB: the largest
 single process in the tree, not the sum of concurrent processes. It does not
@@ -284,6 +295,171 @@ must be sized using actual post-change CI measurements.
 
 
 
+### Per-file process shares and the limit of the 3.2 gain
+
+All **37 corrected full-file profiles passed**. The process hook records only
+command kind, PIDs, timings and exit metadata; it does not record environment
+values. It preserves execFile's custom promisify result shape. An earlier hook
+did not preserve that shape and returned undefined stdout in fixture Git calls;
+those failed diagnostic runs are discarded. They are not product failures or
+performance samples. The size-measurement table is uninstrumented and unchanged.
+
+Reproduce a profile after stopping Squeal and applying the global load gate:
+
+```sh
+CEZ_2516_PROFILE="$PWD/.ai/qa/2516/<file>.ndjson" \
+NODE_OPTIONS="--import=$PWD/.ai/qa/2516/profile-processes.mjs" \
+/usr/bin/time -v -o .ai/qa/2516/<file>.time npm test -- <file> \
+  --maxWorkers=1 --reporter=default
+```
+
+The hook wraps spawn, execFile (including its custom promisify contract),
+spawnSync and execFileSync. Count an asynchronous child once on close, not on
+every stdout frame. Sync probes are shown separately. Agent starts include the
+six native mock entrypoints, wrapper mocks and controlled-claude.cjs. All Git
+commands and Node children using the tsx import are counted separately. Agent
+start counts are observed process calls, not cases multiplied by a guessed
+number of turns. A case can start several agents; some cases start none.
+
+**Startup** is spawn-to-first-stdout for native mock children, plus synchronous
+mock probes. It is a measured *upper bound on removable startup work*, since it
+also includes scheduler delay and native handshake work. A child with no stdout
+has no measured first-frame interval and is excluded from that interval sum.
+The mean uses frame-count/start-count; the parenthesized sum is the observed
+first-frame interval sum before merging overlaps. **Git** is the union of Git
+process intervals after removing startup overlap. **End→close** is the union
+of agent stdin.end-to-close intervals after removing startup/Git overlap. It
+includes intentional adapter waits and is not assumed removable. OpenCode is
+mainly stopped by signals, so a missing stdin-end sample is not zero exit cost.
+**Residual** is all remaining command wall time: imports/transforms, RunManager,
+SQLite/store/fsync, other children, scheduling, native interaction after the
+first frame, HTTP/SSE and real-time waits. It is not a measurement of SQLite
+alone. Source evidence above identifies these costs; this profile does not
+invent separate percentages for inseparable overlapping manager/store/wait
+work. The four exclusive shares sum to 100%, within rounding.
+
+The interval union is essential: agent startup, Git and cleanup can overlap.
+Adding whole child lifetimes would count useful work and deliberate waits as
+spawn cost and would overstate the VM gain. End/close medians are descriptive,
+not extra savings. Every profile records load before and after; **†** marks a
+start above nproc. The profiler itself adds overhead, so use shares and the
+real-vs-VM spike, not these absolute local seconds, for the design decision.
+
+| File | Profile wall / CPU s; RSS MiB | Agent starts async + sync; Git; tsx | First frame mean ms × frame-count/start-count (sum s) | End→close median ms | Startup / Git / end→close / residual shares | Start load → end load; CPUs |
+| --- | --- | --- | --- | --- | --- | --- |
+| `core/ci-tools.test.ts` | 67.69 / 90.88; 465.0 | 82 + 1; 0; 0 | 88.0 × 82/82 (7.22) | 17.4 | 10.8% / 0.0% / 15.8% / 73.4% | 21.96 36.46 34.46 → 18.61 32.70 33.30; 24 |
+| `core/harness-autosave-settlement.test.ts` | 117.06 / 256.68; 498.7 | 80 + 1; 2664; 0 | 72.4 × 80/80 (5.79) | 32.2 | 5.0% / 18.4% / 1.5% / 75.1% | 18.61 32.70 33.30 → 19.48 27.89 31.43; 24 |
+| `core/harness-claude-parity.test.ts` | 74.91 / 82.95; 649.8 | 127 + 1; 1641; 0 | 72.3 × 124/127 (8.97) | 6.7 | 12.1% / 16.0% / 3.8% / 68.2% | 19.48 27.89 31.43 → 14.32 24.14 29.83; 24 |
+| `core/harness-codex-parity.test.ts` | 125.85 / 82.79; 602.5 | 137 + 0; 1363; 0 | 68.7 × 135/137 (9.28) | 7.2 | 7.4% / 7.8% / 0.6% / 84.2% | 14.32 24.14 29.83 → 15.12 21.53 28.18; 24 |
+| `core/harness-cursor-parity.test.ts` | 116.96 / 91.97; 638.7 | 176 + 0; 1319; 0 | 73.4 × 174/176 (12.76) | 73.9 | 10.9% / 8.7% / 27.6% / 52.7% | 15.12 21.53 28.18 → 15.27 19.88 26.82; 24 |
+| `core/harness-opencode-parity.test.ts` | 110.08 / 92.55; 637.0 | 145 + 0; 1457; 0 | 85.8 × 142/145 (12.19) | 29.3 | 11.1% / 10.5% / 0.0% / 78.4% | 15.27 19.88 26.82 → 12.08 17.49 25.19; 24 |
+| `core/skill-provision-parity.test.ts` | 47.30 / 62.20; 578.0 | 46 + 1; 1242; 0 | 62.5 × 46/46 (2.87) | 56.1 | 6.2% / 14.5% / 10.4% / 68.9% | 12.08 17.49 25.19 → 10.94 16.26 24.36; 24 |
+| `core/skill-resume-parity.test.ts` | 116.05 / 146.38; 608.9 | 160 + 1; 872; 0 | 71.1 × 160/160 (11.37) | 22.9 | 9.8% / 4.3% / 17.2% / 68.6% | 10.94 16.26 24.36 → 17.81 16.40 23.41; 24 |
+| `core/workflow-ask-parity.test.ts` | 107.21 / 118.16; 595.5 | 94 + 1; 954; 0 | 63.8 × 94/94 (6.00) | 16.0 | 5.7% / 4.5% / 12.1% / 77.7% | 17.81 16.40 23.41 → 10.68 14.51 21.99; 24 |
+| `core/workflow-autonomous-parity.test.ts` | 252.61 / 264.21; 602.9 | 318 + 1; 9948; 0 | 69.6 × 318/318 (22.12) | 180.5 | 8.8% / 23.2% / 14.3% / 53.8% | 10.68 14.51 21.99 → 12.01 14.63 20.32; 24 |
+| `core/workflow-final-message-parity.test.ts` | 126.36 / 139.91; 594.4 | 153 + 1; 5028; 0 | 71.8 × 151/153 (10.84) | 41.9 | 8.6% / 30.6% / 3.2% / 57.6% | 12.01 14.63 20.32 → 13.04 14.64 19.64; 24 |
+| `core/workflow-followup-parity.test.ts` | 104.42 / 49.81; 600.1 | 91 + 1; 798; 0 | 108.5 × 91/91 (9.87) | 59.5 | 9.5% / 4.2% / 2.6% / 83.6% | 13.04 14.64 19.64 → 12.44 13.85 18.81; 24 |
+| `core/workflow-no-progress-parity.test.ts` | 82.86 / 76.57; 586.4 | 59 + 1; 2532; 0 | 73.5 × 59/59 (4.34) | 62.5 | 5.3% / 23.8% / 6.0% / 64.9% | 12.44 13.85 18.81 → 15.70 14.48 18.61; 24 |
+| `workflows/ci-wait-failure-parity.test.ts` | 186.22 / 218.47; 578.3 | 212 + 1; 2406; 0 | 84.0 × 212/212 (17.80) | 30.8 | 9.6% / 12.1% / 9.3% / 69.1% | 15.70 14.48 18.61 → 20.42 17.18 18.89; 24 |
+| `workflows/ci-wait.test.ts` | 88.59 / 66.86; 599.0 | 53 + 12; 1809; 13 | 97.8 × 53/53 (5.18) | 84.0 | 7.2% / 24.0% / 1.2% / 67.6% | 20.42 17.18 18.89 → 27.00 20.20 19.82; 24 |
+| `workflows/monitoring-turn.test.ts` | 401.42 / 414.77; 558.1 | 285 + 1; 6240; 0 | 89.4 × 285/285 (25.49) | 71.2 | 6.4% / 15.0% / 12.8% / 65.8% | 27.00 20.20 19.82 **†** → 23.50 24.06 22.04; 24 |
+| `workflows/run.test.ts` | 102.23 / 120.48; 583.0 | 101 + 1; 1236; 0 | 96.3 × 101/101 (9.72) | 15.8 | 9.6% / 14.3% / 1.1% / 75.0% | 23.50 24.06 22.04 → 29.59 26.19 23.02; 24 |
+| `workflows/waits-claude-parity.test.ts` | 87.04 / 114.40; 559.1 | 83 + 1; 2012; 0 | 82.7 × 83/83 (6.87) | 32.0 | 8.0% / 19.0% / 0.1% / 72.9% | 29.59 26.19 23.02 **†** → 24.53 25.75 23.16; 24 |
+| `workflows/waits-claude-workers-parity.test.ts` | 112.16 / 141.60; 603.2 | 116 + 1; 3096; 0 | 76.7 × 116/116 (8.89) | 30.8 | 8.0% / 23.9% / 0.1% / 68.0% | 24.53 25.75 23.16 **†** → 17.04 23.00 22.48; 24 |
+| `workflows/waits-codex-parity.test.ts` | 74.51 / 103.21; 596.6 | 91 + 0; 2144; 0 | 68.7 × 91/91 (6.25) | 19.7 | 8.4% / 18.0% / 0.0% / 73.6% | 17.04 23.00 22.48 → 15.58 21.12 21.86; 24 |
+| `workflows/waits-codex-workers-parity.test.ts` | 130.30 / 159.12; 605.5 | 116 + 1; 3042; 0 | 91.2 × 116/116 (10.58) | 40.2 | 8.2% / 24.4% / 0.1% / 67.3% | 15.58 21.12 21.86 → 24.42 22.75 22.37; 24 |
+| `workflows/waits-cursor-parity.test.ts` | 166.81 / 156.95; 488.5 | 189 + 0; 2046; 0 | 103.6 × 180/189 (18.66) | 103.1 | 11.0% / 10.6% / 32.8% / 45.6% | 24.42 22.75 22.37 **†** → 30.48 26.32 23.79; 24 |
+| `workflows/waits-cursor-workers-parity.test.ts` | 192.14 / 179.38; 507.5 | 263 + 1; 2848; 0 | 85.7 × 260/263 (22.28) | 86.8 | 11.6% / 10.9% / 26.2% / 51.2% | 30.48 26.32 23.79 **†** → 24.15 25.37 23.87; 24 |
+| `workflows/waits-omp-parity.test.ts` | 80.85 / 98.99; 518.6 | 91 + 0; 2210; 0 | 86.3 × 91/91 (7.85) | 23.2 | 9.7% / 24.5% / 0.1% / 65.7% | 24.15 25.37 23.87 **†** → 23.92 24.85 23.80; 24 |
+| `workflows/waits-omp-workers-parity.test.ts` | 101.59 / 116.43; 510.7 | 116 + 1; 3084; 0 | 83.5 × 116/116 (9.68) | 19.0 | 9.6% / 29.7% / 0.1% / 60.6% | 23.92 24.85 23.80 → 23.85 24.45 23.76; 24 |
+| `workflows/waits-opencode-parity.test.ts` | 108.29 / 136.72; 512.1 | 91 + 0; 2162; 0 | 96.0 × 91/91 (8.73) | — | 8.1% / 21.1% / 0.0% / 70.8% | 23.85 24.45 23.76 → 24.48 24.67 23.92; 24 |
+| `workflows/waits-opencode-workers-parity.test.ts` | 101.58 / 128.81; 501.8 | 113 + 1; 2983; 0 | 77.2 × 113/113 (8.72) | 33.4 | 8.7% / 23.2% / 0.0% / 68.1% | 24.48 24.67 23.92 **†** → 16.73 21.89 23.00; 24 |
+| `workflows/waits-pi-parity.test.ts` | 60.48 / 76.11; 593.4 | 91 + 0; 2210; 0 | 69.0 × 91/91 (6.28) | 23.4 | 10.4% / 23.4% / 0.0% / 66.2% | 16.73 21.89 23.00 → 16.60 21.09 22.67; 24 |
+| `workflows/waits-pi-workers-parity.test.ts` | 81.23 / 93.88; 581.7 | 116 + 1; 3084; 0 | 74.4 × 116/116 (8.64) | 34.7 | 10.7% / 28.3% / 0.1% / 60.9% | 16.60 21.09 22.67 → 16.53 19.96 22.14; 24 |
+| `workflows/worker-parent-attention.test.ts` | 180.82 / 127.77; 573.6 | 142 + 1; 3576; 0 | 102.7 × 128/142 (13.14) | 91.0 | 7.3% / 23.7% / 6.2% / 62.8% | 16.53 19.96 22.14 → 33.53 27.76 24.86; 24 |
+| `workflows/worker-questions.test.ts` | 162.54 / 168.70; 579.2 | 121 + 1; 3802; 0 | 79.8 × 119/121 (9.50) | — | 5.9% / 25.3% / 0.0% / 68.8% | 33.53 27.76 24.86 **†** → 24.45 26.18 24.75; 24 |
+| `workflows/worker-restart-parity.test.ts` | 65.60 / 51.98; 495.8 | 28 + 1; 2034; 0 | 80.7 × 28/28 (2.26) | 73.0 | 3.6% / 25.8% / 0.1% / 70.5% | 24.45 26.18 24.75 **†** → 22.63 25.55 24.65; 24 |
+| `workflows/worker-wait-capacity.test.ts` | 119.65 / 105.09; 498.3 | 80 + 3; 2613; 8 | 94.0 × 61/80 (5.73) | 30.5 | 5.0% / 24.8% / 0.0% / 70.1% | 22.63 25.55 24.65 → 34.90 28.26 25.67; 24 |
+| `workflows/worker-wait-conversations.test.ts` | 79.18 / 50.75; 496.8 | 69 + 4; 1970; 3 | 69.0 × 69/69 (4.76) | 62.0 | 6.4% / 18.7% / 5.2% / 69.7% | 34.90 28.26 25.67 **†** → 22.69 25.75 25.00; 24 |
+| `workflows/worker-wait-durability.test.ts` | 80.97 / 69.33; 523.4 | 77 + 9; 2080; 8 | 74.7 × 66/77 (4.93) | 33.7 | 6.9% / 20.4% / 0.0% / 72.6% | 22.69 25.75 25.00 → 19.34 24.20 24.53; 24 |
+| `delegation/provision-workflows.test.ts` | 77.30 / 81.94; 534.6 | 0 + 0; 4438; 0 | — × 0/0 (0.00) | — | 0.0% / 51.0% / 0.0% / 49.0% | 19.34 24.20 24.53 → 19.03 23.01 24.08; 24 |
+| `delegation/workspace.test.ts` | 56.75 / 64.67; 485.4 | 3 + 1; 3210; 0 | 63.7 × 3/3 (0.19) | 18.6 | 0.5% / 35.2% / 0.0% / 64.3% | 19.03 23.01 24.08 → 15.81 21.36 23.45; 24 |
+
+The profiles refute a startup-only explanation for slow parity files. For
+example, Claude harness has 127 asynchronous agent starts and 1,641 Git calls;
+startup is 12.1% of wall time, Git 16.0%, and the rest remains. Cursor base waits
+spends 32.8% in observed stdin-end-to-close intervals in addition to 11.0%
+startup; the shipped 250 ms drain cannot disappear merely by replacing a child.
+Monitoring-turn starts 285 agents and runs 6,240 Git commands, yet startup is
+only 6.4% of its wall time. Real workflow and fixture cost dominates its size.
+Provision-workflows already fakes the runner and has zero native starts.
+
+### Expected CI time and second fix for every file
+
+The **3.2 planning interval** below is `[C × (1 − S), C]`, where C is fresh CI
+suite time and S is that file's measured startup share. The lower end grants the
+optimistic assumption that *all* measured startup disappears. The upper end
+assumes no transferable saving. This is a planning envelope, not a confidence
+interval or achieved post-change CI result. Source changes between the CI SHA
+and this checkout, host load, fixture mix and retained real cells limit transfer.
+The baseline spike proves the seam and a baseline saving; it does not prove
+this entire startup allowance can be removed in every scenario. Do not subtract
+end→close or Git as though the seam removed them.
+
+No file is accepted as meeting the 40 s target on that forecast. All 37 need a
+3.3 semantic split or the named cause fix plus a confirming CI run. Most remain
+over 60 s even at the optimistic end. `ci-wait`, OMP worker waits and Pi worker
+waits can cross 60 in the envelope, so they still get splits for headroom. The
+four files already below 60 in fresh CI also remain above the 40 s target.
+
+For an initial group count, divide the unchanged CI total by 32 s and round up.
+This is a sizing starting point, not an enforced per-file baseline. The 8 s gap
+to the 40 s design target allows group imbalance and repeated file setup. Assign
+whole semantic families from the earlier cost table; split an oversized family
+by runner or fresh/Continue/restart axis. Re-measure every resulting file. A
+single case above 40 s needs its cause fixed, not more files around it. Expected
+final CI time is **at most 40 s per resulting file**; the hard gate stays 60 s.
+
+| File | Fresh CI s | 3.2 planning interval s | Initial groups for 3.3 | Required second fix / row families |
+| --- | ---: | --- | ---: | --- |
+| `core/ci-tools.test.ts` | 75.1 | 67.0–75.1 | 3 | Definitions/injection; descriptors; H1 validation; U0 calls; runner/mode subdivisions. Keep real controller IPC. |
+| `core/harness-autosave-settlement.test.ts` | 117.0 | 111.2–117.0 | 4 | R61–R66 by failure/cancel/success and fresh/Continue; R67/R68 churn. Keep real detached Git holder. |
+| `core/harness-claude-parity.test.ts` | 211.9 | 186.3–211.9 | 7 | Seam/session; input; run/ask; ownership/recovery; Finish/settlement; permissions. Retain OS rows real. |
+| `core/harness-codex-parity.test.ts` | 106.0 | 98.2–106.0 | 4 | Seam/session; input; run/ask; ownership/recovery; Finish/settlement; permissions. Retain OS rows real. |
+| `core/harness-cursor-parity.test.ts` | 86.7 | 77.2–86.7 | 3 | Seam/session; input; run/ask; ownership/recovery; Finish/settlement; permissions. Retain OS rows real. |
+| `core/harness-opencode-parity.test.ts` | 85.3 | 75.8–85.3 | 3 | Seam/session; input; run/ask; ownership/recovery; Finish/settlement; permissions. Retain OS rows real. |
+| `core/skill-provision-parity.test.ts` | 50.3 | 47.2–50.3 | 2 | R92 Start; R93 Continue; R94 recovery; R95 slash install; R96 Stop-preparation. |
+| `core/skill-resume-parity.test.ts` | 203.7 | 183.6–203.7 | 7 | R100 generation; live Continue; recovery; R56 wire; fresh/cross-runner/OpenCode fallback. |
+| `core/workflow-ask-parity.test.ts` | 58.3 | 55.0–58.3 | 2 | Ask/answer; restart; repeat/Continue; timeout; autonomous. Control the 350 ms negative auto-end observation after readiness. |
+| `core/workflow-autonomous-parity.test.ts` | 182.6 | 166.6–182.6 | 6 | Budget/nudges; refusal/late readiness; A13/A14 real idle-close lifecycle; runner/mode subdivisions. |
+| `core/workflow-final-message-parity.test.ts` | 83.1 | 75.9–83.1 | 3 | Silent tail; F1–F6; F7/F8; F9/F11; F10. Control F8 clock as F10 already does. |
+| `core/workflow-followup-parity.test.ts` | 97.8 | 88.5–97.8 | 4 | H1–H4; Codex coalesced/reverse races. Replace 800 ms pacing with a release gate; retain wrapper smokes. |
+| `core/workflow-no-progress-parity.test.ts` | 73.2 | 69.3–73.2 | 3 | N1/N2 progress; N3/N4/N6/N8 parked input; N5 escalation; N7 held pipes. Keep N5/N7 real. |
+| `workflows/ci-wait-failure-parity.test.ts` | 105.8 | 95.6–105.8 | 4 | Final recovery; nonfinal outcomes; restart boundary, divided by runner/check outcome. |
+| `workflows/ci-wait.test.ts` | 62.6 | 58.1–62.6 | 2 | Registration; admission/ACK/capacity; native runner refusal; restart/cancel; asks/workers; wait-list timers. |
+| `workflows/monitoring-turn.test.ts` | 273.7 | 256.3–273.7 | 9 | Timer/prose; worker review; ask precedence; done; autonomous; close, then runner/mode subdivisions. |
+| `workflows/run.test.ts` | 192.0 | 173.6–192.0 | 6 | Existing describe families: text/accounting; settlement; Continue; skills; monitoring; asks; input stack; recovery. Split monitoring again. |
+| `workflows/waits-claude-parity.test.ts` | 211.1 | 194.2–211.1 | 7 | Base waits: registration/cancel; input/wakes; budgets; delivery; failed open waits; asks; done/workflow; no-wait replies. |
+| `workflows/waits-claude-workers-parity.test.ts` | 259.7 | 239.0–259.7 | 9 | Workers: mixed waits; notices; recovery; peer conversations; refusal/completion; closed-session refusal; fallback asks. Subdivide by lifecycle mode. |
+| `workflows/waits-codex-parity.test.ts` | 55.7 | 51.0–55.7 | 2 | Base waits: registration/cancel; input/wakes; budgets; delivery; failed open waits; asks; done/workflow; no-wait replies. |
+| `workflows/waits-codex-workers-parity.test.ts` | 92.1 | 84.5–92.1 | 3 | Workers: mixed waits; notices; recovery; peer conversations; refusal/completion; closed-session refusal; fallback asks. Subdivide by lifecycle mode. |
+| `workflows/waits-cursor-parity.test.ts` | 147.4 | 131.2–147.4 | 5 | Base waits: registration/cancel; input/wakes; budgets; delivery; failed open waits; asks; done/workflow; no-wait replies. |
+| `workflows/waits-cursor-workers-parity.test.ts` | 130.4 | 115.2–130.4 | 5 | Workers: mixed waits; notices; recovery; peer conversations; refusal/completion; closed-session refusal; fallback asks. Subdivide by lifecycle mode. |
+| `workflows/waits-omp-parity.test.ts` | 54.0 | 48.8–54.0 | 2 | Base waits: registration/cancel; input/wakes; budgets; delivery; failed open waits; asks; done/workflow; no-wait replies. |
+| `workflows/waits-omp-workers-parity.test.ts` | 65.7 | 59.4–65.7 | 3 | Workers: mixed waits; notices; recovery; peer conversations; refusal/completion; closed-session refusal; fallback asks. Subdivide by lifecycle mode. |
+| `workflows/waits-opencode-parity.test.ts` | 103.3 | 95.0–103.3 | 4 | Base waits: registration/cancel; input/wakes; budgets; delivery; failed open waits; asks; done/workflow; no-wait replies. |
+| `workflows/waits-opencode-workers-parity.test.ts` | 119.0 | 108.7–119.0 | 4 | Workers: mixed waits; notices; recovery; peer conversations; refusal/completion; closed-session refusal; fallback asks. Subdivide by lifecycle mode. |
+| `workflows/waits-pi-parity.test.ts` | 75.5 | 67.7–75.5 | 3 | Base waits: registration/cancel; input/wakes; budgets; delivery; failed open waits; asks; done/workflow; no-wait replies. |
+| `workflows/waits-pi-workers-parity.test.ts` | 61.9 | 55.3–61.9 | 2 | Workers: mixed waits; notices; recovery; peer conversations; refusal/completion; closed-session refusal; fallback asks. Subdivide by lifecycle mode. |
+| `workflows/worker-parent-attention.test.ts` | 208.6 | 193.3–208.6 | 7 | M26 fresh ordinary/delayed ACK; M27 Continue ordinary/delayed ACK; remaining attention rows, then runner. |
+| `workflows/worker-questions.test.ts` | 156.9 | 147.7–156.9 | 5 | Routing/admission; fallback/Continue; replies; terminal relations; crash/recovery; inbox/capacity. Control negative 300 ms observation. |
+| `workflows/worker-restart-parity.test.ts` | 71.0 | 68.5–71.0 | 3 | R60 starting proof; destroy by ledger kind; same-boot crash/lock, then runner. Keep real process identity. |
+| `workflows/worker-wait-capacity.test.ts` | 94.3 | 89.6–94.3 | 3 | Nonfinal wake; answer/recovery; inactive Finish/legacy children; monitor/cancel/restart. Control negative 400 ms observations. |
+| `workflows/worker-wait-conversations.test.ts` | 72.5 | 67.8–72.5 | 3 | WP1; WP2; progress/inbox ACK; request lifecycle; monitoring races. Keep Date-only clock semantics. |
+| `workflows/worker-wait-durability.test.ts` | 85.6 | 79.6–85.6 | 3 | Queued input/checkpoints; capacity/outcomes; deadlines; delivery/recovery; terminal ordering; disposal/cancel. |
+| `delegation/provision-workflows.test.ts` | 85.4 | 85.4–85.4 | 3 | No 3.2 gain: split intent matrix; catalog; runner identity; recipes/grants; layouts; account locks; skills; recovery. |
+| `delegation/workspace.test.ts` | 69.9 | 69.6–69.9 | 3 | No general wire gain: isolate/diff; manager recovery; destruction identity; HEAD/ref/reflog; crash recovery; locks; GC. |
+
 ## Slice 3.2: keep the shipped wire adapters
 
 ### The seam and the default path
@@ -512,7 +688,7 @@ do not restore markers removed by hearsay-tools/cezarion#2397.
 | S5, second input | Same sendMessage cell; real smoke input receipt |
 | S6, clean interrupt | In-process intent/order plus real shutdown tests |
 | S7, provider/auth failure | Native failure frames through unchanged adapters and real RunManager failure assertion |
-| S8, text coalescing | Native chunk boundaries through real parser and mapper |
+| Historical S8, text integrity | Preserve native chunk/coalescing assertions through the real parser and mapper; the removed split-text marker scenario is not restored |
 | S9, child attribution | Native parent/child identifiers through actual filtering |
 | S10, real PID | Real smoke and shutdown tests only |
 | R1, declared completion reaches terminal status | Same real RunManager and durable store cell |
@@ -530,6 +706,88 @@ model, cwd, env, resume, stream, interrupt and input support against each runner
 own mock wire. OS effects such as cwd/env and executable/argv semantics keep
 real probes. The complete current criterion catalog, including later additions,
 remains registered, not merely this historical subset.
+
+### Current parity guarantees beyond the original matrix
+
+The historical S/R table above does not enumerate the current protocol contract.
+Retain the following current catalogs and assertions. Paths below are relative to
+`packages/cezar/src/`. “Same cells” means the existing assertions and exhaustive
+runner registration remain; the native adapter and real `RunManager` still run.
+OS ownership, binary launch and child-process effects remain on real probes.
+
+| Current guarantee or catalog | Retained evidence after slice 3.2 |
+| --- | --- |
+| §6 `plan.updated` entries | Unchanged `core/ui-parity.test.ts` golden fixtures for each backend |
+| §6 tool `running`, `completed`, `failed` | Same named mapper capabilities; all three statuses remain required |
+| §6 reasoning items | Same native thinking/reasoning fixtures and mapper assertions |
+| §6 structured diffs | Same Edit/file-change/patch fixtures and mapper assertions |
+| §6 subagent task lifecycle | Same task-item fixtures; a Codex review span remains one item |
+| §6 `usage.updated` raw counts | Same per-backend usage fixture assertions |
+| §6 `turn.completed` stop reason | Same native terminal-frame mapping and error-stop assertions |
+| §6 `parentItemId` nesting | Same nested child attribution fixtures |
+| §6 hook items | Same Claude/Codex hook fixtures; inverse `NO_HOOK_TELEMETRY` assertions remain |
+| §6 background subagent lifecycle | Same running/background and single completion assertions; inverse `NO_BACKGROUND_SUBAGENTS` assertions remain |
+| §7 P1 explicit permission decisions | Same native reply and HTTP cockpit decision assertions in harness cells |
+| P2 built-in permission asks | Same once-only OpenCode config classification and no-park assertions |
+| P3 native request resolved by backend | Same retirement event, cleared pending flag and stale-answer refusal assertions |
+| P4 turn ends with request pending | Same retirement and stale-answer refusal assertions |
+| P5 native answer refused | Same replacement-before-retirement ordering and still-answerable card assertions |
+| P6 malformed permission request | Same native rejection, no card and continuing-turn assertions |
+| P7 classification window | Same held input and no-card-after-backend-resolution assertions |
+| P8 late permission request | Same synthetic reopen, own terminal boundary and step-tail assertions |
+| P9 another MCP server's approval | Same exact Codex elicitation replies and cezar-server approval admission assertions |
+| `WAIT_CRITERIA` / U0 tools | Same `core/ci-tools.test.ts` native tool calls on fresh/resumed sessions; same `workflows/waits-parity.testkit.ts` catalog and guards, including all suffix rows and U20–U27, not only the old §7 U0–U19 heading |
+| Wait execution groups | Same `waits-parity-cells.testkit.ts` base/workers/process/entries groups and `waits-subagents-parity.testkit.ts`; real waited processes and native subagent operations remain real |
+| R72/R73 pending CI and provider failure | Same `workflows/ci-wait-failure-parity.test.ts` attempt error/timestamps, retained wait, recovery and clean-close assertions |
+| R74–R76 nonfinal/restart/check retry | Same `workflows/ci-wait-failure-parity.test.ts` durable source-attempt and actual check re-execution assertions |
+| R85 CI rerun acknowledgement | Same `workflows/ci-wait-rerun-parity.test.ts` deduplication and wait-result delivery assertions; preserve file context because diagnostic rows also use R85 |
+| S21 unexpected restored history | Same native startup warning before terminal boundary, without fatal failure |
+| S15–S20, S22–S35 process/error rows | Process-exits table and retained real suites above; S32 `MODEL_REFUSAL_CRITERIA` also keeps prior-success/later-refusal diagnosis |
+| `WORKFLOW_TIMEOUT_CRITERIA` T1–T6 | Same `core/workflow-timeout-parity.test.ts` managed-default/zero/authored/standalone deadline assertions; product timeout policy is unchanged |
+| `WORKFLOW_ASK_CRITERIA` Q1/Q3–Q10 | Same `core/workflow-ask-parity.test.ts` same-session answer, final ask, Continue, restart, cancel, Finish, authored timeout, autonomous refusal and clean unanswered exit assertions |
+| `STEP_COMPLETION_CRITERIA` C1–C6 | Same `core/workflow-step-completion-parity.test.ts` no tail before accepted done, one nudge, Continue and restart assertions |
+| `NO_PROGRESS_CRITERIA` N1–N8 | Same `core/workflow-no-progress-parity.test.ts` activity/park/question/rearm/disposal assertions; real N5 TERM resistance and N7 inherited pipes prove capacity is not released before exit |
+| `AUTONOMOUS_CRITERIA` A1–A14 | Same `core/workflow-autonomous-parity.test.ts` fresh/Continue nudges, cap, tool refusal, pending-question priority, readiness and idle-close assertions; existing executable wire exemptions remain |
+| `FOLLOWUP_CRITERIA` H1–H5 | Same `core/workflow-followup-parity.test.ts` done/ask follow-up handling, deferred start and late-ACK assertions |
+| Human-input hold release rule | Same H1–H5 native orderings: release only on normalized turn start, read within an open turn, or rejection/close/discard; ACK, raw start, spawn and queue shift alone do not release a hold |
+| `FINAL_MESSAGE_CRITERIA` F1–F11 | Same `core/workflow-final-message-parity.test.ts` one-shot nudge, reply bound, late reopen, ACK ordering, visible done and no reasoning-based completion assertions |
+| S11/S12 and I1/I2 input contract | Same harness cells for pending-question separation, declared steer/boundary admission, closed refusal, read-before-end and accepted-but-unread input; inverse wire exemptions remain |
+| `ANSWER_DELIVERY_CRITERIA` I3–I5 | Same `core/conversation-answer-delivery.test.ts` restarted worker-answer input delivery, mode-specific ACK checkpoint and native-question separation assertions |
+| R6–R11 durable input and continuation | Same harness cells for startup/queued input, restart with unanswered asks, delayed native replies, done/Stop precedence and post-send checkpoint failures |
+| R13/R14 workflow execution identity | Same owned-worktree check execution and mixed-runner per-step account/provider assertions; actual check child and identity/environment probes remain real |
+| R20/R21 terminal family reconciliation | Same family-only reads with delegation on, no history reads with delegation off, and persisted execution proof |
+| R22/R23 scratch lifetime | Same native fresh/Continue/worker-question session-close assertions; terminal Finish still reaps local and fallback scratch |
+| R28–R34 Finish and stale settlement | Same Continue timestamps, cancellation/Finish/disposal and superseded-finalization assertions; no old settlement closes a newer execution |
+| R24/R25 autosave writer protection | Same `core/harness-autosave.test.ts` real stalled Git group, strict cleanup, maintenance hold, durable proof, blocked reuse and confirmed release assertions |
+| R61–R68 autosave terminal settlement | Same `core/harness-autosave-settlement.test.ts` real detached Git descendants, provider/Stop/Finish paths, preserved files and unrelated-process protection |
+| R78/R79 autosave foreign branch | Same `core/harness-autosave-branch.test.ts` real Git branch-tip protection, uncommitted records and periodic commit/fold-back assertions |
+| R43/R47/R60 worker restart and reboot | Same `workflows/worker-reboot-parity.test.ts` and `worker-restart-parity.test.ts` durable identity, restart readiness and native continuation assertions |
+| R48–R52 run-store ownership and residency | Same harness cells for settled-run load/release, stale Finish reset, headless open beside owner, dead-owner adoption without spawn, and Stop without spawn |
+| `SKILL_RESUME_CRITERIA` R100/R53–R59 | Same `core/skill-resume-parity.test.ts` resumed system prompt, removed-skill warning, backend id, session transport, recovery before first event and generated-inbox retirement assertions |
+| `SKILL_PROVISION_CRITERIA` R92–R96 | Same `core/skill-provision-parity.test.ts` Start/Continue/recover provisioning, live slash input and Stop-before-launch assertions |
+| `WORKTREE_SETUP_CRITERIA` R58 | Same `core/worktree-setup-parity.test.ts` native opening-message setup note |
+| PR1/PR2 task reference declarations | Same harness native multi-pr-refs cells retain first-seen order across chunks/repeats, exclude tool/reasoning/child text, append on Continue and preserve the scalar selection |
+| R97–R99 merge waits | Same `workflows/pr-merge-wait-parity.test.ts` real metadata parser and native fresh/Continue/recovery delivery assertions |
+| R101 completion controls | Same `workflows/completion-options-parity.test.ts` merge intent recorded before archive; both defaults remain off |
+| R35 and R125 shipped tool/env gates | Same harness tool-list admission and preview CDP on/off probes; real child NODE_OPTIONS/environment observations remain real |
+| R36–R40 monitoring prompt and wake | Same native fresh/Continue/recovery recordings and timer-result instruction delivery; ordinary completion prose never grants completion |
+| R41/R42 selected worker skill | Same native system-prompt assertions: explicit child skill is installed and parent skill is not inherited |
+| R44–R46 continuation diagnostics | Same harness native warning and fatal-provider-error assertions |
+| R85–R91 resume diagnostics | Same `workflows/resume-diagnostics-parity.test.ts` file-specific diagnostic catalog; no collision with CI-rerun R85 changes its evidence owner |
+| R15/R77 late child and hook events | Same native post-park frames and nested items; no reopened parent turn or changed status/activity/wake deadline; wire exemptions remain |
+| `MONITORING_TURN_CRITERIA`, `MONITORING_ACK_CRITERIA`, `MONITORING_ORDER_CRITERIA` | Same `workflows/monitoring-turn.test.ts`, `worker-parent-attention.test.ts` and guard registration; native multi-segment text, tool gates, ACK classification, idle-close and attention/webhook projections remain |
+| `WORKER_PROGRESS_WAIT_CRITERIA` WP1/WP2 | Same `workflows/worker-wait-conversations.test.ts` native progress without retiring wait and long resumed request/late-reply amendment assertions |
+| D1/D3 governed native access | Same harness effective native-subagent and blocked cross-session-message assertions; named capability-absent inversions remain |
+| `AGENT_RUN_SPEC_FIELDS` / `SPEC_FIELD_PROBES` | Same two-direction declaration-versus-recording comparison for every field; cwd/env relative files and real executable/argv/launch effects remain real |
+| `TOOL_GRANT_CASES` / TG1–TG10 | Same `core/tool-grant-parity-cells.testkit.ts` unset/default/inherited/copied/extra/narrowed/empty/bash-allowlist cases and effective tool-access proof; no new grant or exemption |
+| Scenario fidelity and raw context | Same backend transcript-derived native frames, unique item ids, raw-record-before-context-strip and shared per-backend scenario mapping; no new normalized-event injection |
+| Total coverage and exemptions | Same `RUNNER_IDS` × criteria coverage, per-runner file guard, no-skip/no-todo guard, `specSupport` type coverage and factory identity assertion; capability-absent inversion and scenario-unconstructible prompt absence remain executable |
+
+This table does not restore retired R69–R71 withdrawal notices or removed lifecycle
+marker rows. Their current replacements are open-waits/footer assertions and native
+`cezar_done`, `cezar_ask`, `cezar_wait` calls. S8 is a historical row label: preserve
+native text chunk/coalescing integrity, without claiming the removed marker scenario
+still executes.
 
 ### Process exits
 
@@ -623,8 +881,8 @@ All evidence in detached-process.test.ts.
 | Normal stop | `stops a running group with SIGTERM` | Preserve |
 | Leader exits before members | `kills a member that ignores SIGTERM and outlives its leader`; `stops what is left of the group once Node reaped its leader, a member that ignores SIGTERM included`; watchGroup `stops what is left of a group whose leader exited on its own` | Preserve real |
 | Starter dies during boot before descriptor | watchGroup `leaves the group to its starter, then stops it once the starter dies during boot` (real SIGKILL) | Preserve real |
-| Starter SIGINT before/after start | No exact generic helper test found | Explicit coverage gap; do not claim generic helper proves it |
-| Starter SIGKILL after descriptor | Boot test is before descriptor; no exact after-descriptor test found | Explicit gap; preserve owner-specific lifecycle tests |
+| Starter SIGINT before/after start | No exact generic helper test found | 3.2 adds real `detached-process.test.ts` cases `starter interrupted before start creates no owned group` and `SIGINT after owned start reaps the group`, with a descriptor-publication handshake. These are new required evidence, not existing coverage. |
+| Starter SIGKILL after descriptor | Boot test is before descriptor; no exact after-descriptor test found | 3.2 adds real `detached-process.test.ts` case `SIGKILL after descriptor publication reaps the owned group`; assert descendants gone after the watcher signal, not a sleep. Preserve existing owner-specific tests too. |
 | Handle deleted | watchGroup `stops the group once its handle is deleted, and settles the verdict after the stop` | Preserve real |
 | Forged/reused PID | `never signals a live process whose start identity differs from the record: a reused or forged pid` | Preserve real |
 | Unreadable identity | `never signals a live leader whose start identity cannot be read now: its pid may lead another group`; `stops a leader this process holds, though its start identity cannot be read` | Preserve both |
@@ -637,7 +895,9 @@ All evidence in detached-process.test.ts.
 
 ## Slice 3.3 plan
 
-Split remaining slow files by semantic row group. Keep one definition of each
+The expected-CI table above identifies the files that remain over 60 s after
+startup removal and the second fixes for every measured file. Split remaining
+slow files by those semantic row groups. Keep one definition of each
 row and have thin files register disjoint groups. A guard must prove that every
 criterion/runner pair appears exactly once across those files. Do not replace
 coverage with skips, retries, higher timeouts or runner exemptions.
