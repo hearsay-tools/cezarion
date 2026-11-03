@@ -1,3 +1,4 @@
+import { sessionLaunchArguments } from './browser-launch'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -336,12 +337,7 @@ export function browserSpawnPlan(
 ): { argv: string[]; env: NodeJS.ProcessEnv } {
   const argv: string[] = []
   if (browser.namespace) argv.push('--namespace', browser.namespace)
-  const extra = (env.AGENT_BROWSER_ARGS ?? '')
-    .split(/[,\n]/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-  const launchArgs = [...(browser.launchArgs ?? [])]
-  for (const arg of extra) if (!launchArgs.includes(arg)) launchArgs.push(arg)
+  const launchArgs = sessionLaunchArguments(browser, env)
   if (launchArgs.length) argv.push('--args', launchArgs.join(','))
   argv.push('--session', session, ...command)
   if (!command.includes('--json')) argv.push('--json')
@@ -527,7 +523,7 @@ export class AgentBrowser {
     if (!browser.installed) {
       throw new Error(`cezar e2e: the agent-browser provider is not installed (${browser.notes})`)
     }
-    const seam = new AgentBrowser(browser.command, session, browser)
+    const seam = new AgentBrowser(browser.command, session, { ...browser, launchArgs: sessionLaunchArguments(browser, process.env) })
     attached.push(seam)
     return seam
   }
@@ -611,7 +607,7 @@ export class AgentBrowser {
 
   /** One agent-browser invocation. `--json` on every call so results are parsed, not scraped. */
   private run(args: string[], timeoutMs = 60_000): Record<string, unknown> {
-    const plan = browserSpawnPlan(this.browser, this.session, args)
+    const plan = browserSpawnPlan(this.browser, this.session, args, { ...process.env, AGENT_BROWSER_ARGS: '' })
     let stdout: string
     try {
       stdout = execFileSync(this.bin, plan.argv, {
@@ -1100,8 +1096,8 @@ export class AgentBrowser {
   }
 
   /** Emulate the accessibility preference in the real browser, including CSS media queries. */
-  setReducedMotion(reduced = true): void {
-    this.run(['set', 'media', ...(reduced ? ['reduced-motion'] : [])])
+  setReducedMotion(reduced = true, colorScheme?: 'dark' | 'light'): void {
+    this.run(['set', 'media', ...(colorScheme ? [colorScheme] : []), ...(reduced ? ['reduced-motion'] : [])])
   }
 
   /** operation: interact (`click`). Waits for the target first; see `awaitTarget`.
