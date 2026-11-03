@@ -50,12 +50,7 @@ For changed-test selection rules, run `npm run test:changed -- --help`.
 
 **Typecheck.** Run `npm run typecheck`; it checks all workspaces without building or writing `dist`. After `npm run build`, run `npm run typecheck:package` to check packaged tests.
 
-A test that proves something did not happen
-uses fake timers or states at the call site why it needs real time.
-Size a bound per step, or use a window that restarts on progress.
-A shrunk product budget applies only to its step and never races its fixture's
-startup; review checks it because the scan cannot.
-Wait guards: `cez/test-wait-discipline` and `cez/unit-wait-discipline` in `npm run lint`.
+**Unit-test waits.** A test that proves something did not happen uses fake timers or states at the call site why it needs real time. Size a bound per step, or use a window that restarts on progress. A shrunk product budget applies only to its step and never races its fixture's startup; review checks it because the scan cannot. Wait guards: `cez/test-wait-discipline` and `cez/unit-wait-discipline` in `npm run lint`.
 
 
 ## CI owns the final gate
