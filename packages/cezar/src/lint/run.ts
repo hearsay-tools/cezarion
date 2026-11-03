@@ -200,8 +200,17 @@ export function staleHistoryReaders(root = repoRoot): string[] {
 
 /** Every problem `npm run lint` reports, in one list. */
 export async function lint(): Promise<string[]> {
+  return lintProblems(true);
+}
+
+/** Repository checks outside oxlint, retained for Squeal edit-time feedback. */
+export async function lintWithoutOxlint(): Promise<string[]> {
+  return lintProblems(false);
+}
+
+async function lintProblems(withOxlint: boolean): Promise<string[]> {
   const waits = [...serverWaitProblems(), ...unitWaitProblems()];
-  const [oxlint, astGrep] = await Promise.all([oxlintProblems(repoRoot, LINT_PATHS), astGrepProblems()]);
+  const [oxlint, astGrep] = await Promise.all([withOxlint ? oxlintProblems(repoRoot, LINT_PATHS) : [], astGrepProblems()]);
   return [...waits, ...oxlint, ...astGrep, ...staleEntries(), ...fileLengthProblems(), ...guardianCssProblems()];
 }
 
