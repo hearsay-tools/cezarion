@@ -1411,7 +1411,7 @@ mock models Codex's MCP tool gate, so Codex rows of `ci-wait-parity`,
 `ci-tools` H1 and U0 fail if cezar's own server loses `approve`. Runners whose
 wires carry no MCP tool approval request have named exemptions.
 
-**R72/R73** (hearsay-tools/cezarion#994), in `workflows/ci-wait-failure-parity.test.ts`,
+**R72/R73** (hearsay-tools/cezarion#994), in `workflows/ci-wait-final-recovery-parity.test.ts`,
 drive every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native provider-error
 wire with a pending CI wait, on fresh and scheduler-owned continuation attempts.
 The failed step retains its error, finish timestamp and `session.ended(error)`;
@@ -1632,7 +1632,7 @@ bare Continue is refused, and an explicit human answer reaches the native runner
 before queued agent input drains. This extends the registered R7 cell, with no
 runner exemptions.
 
-**R60** (hearsay-tools/cezarion#906), in `workflows/worker-restart-parity.test.ts`,
+**R60** (hearsay-tools/cezarion#906), in `workflows/worker-restart-starting-proof-parity.test.ts`,
 uses every `RUNNER_IDS` backend's `HARNESS_ADAPTERS` native wire to persist a
 starting execution generation. A fully terminal modern root and worker have no
 live or deferred anchor; their plain history is nonempty and facts sidecars are
@@ -1735,7 +1735,7 @@ Only prior-boot evidence and process enumeration scope are synthetic; cwd permis
 process exit, native wires, stores and Git remain real. Linux-only OS coverage exempts no runner;
 legacy/unknown-boot and recorded-process guards live in `delegation/process-liveness.test.ts`.
 
-**R47** (hearsay-tools/cezarion#839, hearsay-tools/cezarion#889), in `workflows/worker-restart-parity.test.ts`,
+**R47** (hearsay-tools/cezarion#839, hearsay-tools/cezarion#889), in `workflows/worker-restart-same-boot-crash-lock-parity.test.ts`,
 drives every `RUNNER_IDS` backend through its native `HARNESS_ADAPTERS` wire,
 cancellation, and same-boot interrupted checkpoint recovery. A live recorded
 unreadable process still blocks settlement, and that partial collection cannot
@@ -2061,7 +2061,7 @@ shared contract covered, so the same class of bug shipped again on the next one.
 **Regression coverage belongs in the fixing PR.** A fix to runner lifecycle,
 input delivery, attention, asks or completion MUST add or extend a shared
 `RUNNER_IDS` case in this matrix, or an equivalent exhaustive adapter loop such
-as `workflows/worker-parent-attention.test.ts`. Do this when fixing the bug; a
+as `workflows/worker-parent-attention.testkit.ts`. Do this when fixing the bug; a
 separate parity issue is not a prerequisite. Keep a focused backend test when it
 helps explain the wire, but it is not the shared regression proof.
 
@@ -2285,7 +2285,7 @@ open-waits footer that replaced the notice is pinned by U2 and the footer case o
 `workflows/waits-wake.test.ts`.
 
 Monitoring turn rows (hearsay-tools/cezarion#772) live in `workflows/monitoring-turn.test.ts`
-and `workflows/worker-parent-attention.test.ts` and enter the shared parity guard. Every
+and `workflows/worker-parent-attention.testkit.ts` and enter the shared parity guard. Every
 `RUNNER_IDS` adapter carries multiple parent assistant text segments through its native wire on
 fresh and Continue sessions. A turn monitors through a `cezar_wait` timer or live workers, asks
 through `cezar_ask` and finishes through `cezar_done` (hearsay-tools/cezarion#2397).
@@ -2314,7 +2314,7 @@ code, is pinned by `workflows/human-waits.test.ts`. The rows that read marker li
 or fenced marker examples, and the order of partial text channels were removed with the
 markers (hearsay-tools/cezarion#2397): no lifecycle decision reads assistant text any more.
 
-`worker-parent-attention.test.ts` (hearsay-tools/cezarion#249/#401) loops every runner for fresh and
+`worker-parent-attention.testkit.ts` (hearsay-tools/cezarion#249/#401) loops every runner for fresh and
 Continue sessions: done-less turns with live workers stay monitoring, and a
 `cezar_ask` still wins. Codex/OpenCode/Pi delay transport acknowledgement past turn-end.
 Claude/Cursor acknowledge pipe writes, so their named executable exemptions hold

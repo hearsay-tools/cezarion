@@ -599,7 +599,7 @@ const CONTROL_CRITERIA = [
   // R79 also reports a periodic commit that leaves the closing turn-end flush clean.
   { id: 'R78', scenario: 'baseline' },
   { id: 'R79', scenario: 'baseline' },
-  // hearsay-tools/cezarion#994: workflows/ci-wait-failure-parity.test.ts,
+  // hearsay-tools/cezarion#994: workflows/ci-wait-failure-parity.testkit.ts,
   // failed fresh/continued CI attempts retain history through scheduler recovery.
   { id: 'R72', scenario: 'provider-error' },
   { id: 'R73', scenario: 'provider-error' },
@@ -656,9 +656,9 @@ const CONTROL_CRITERIA = [
   // independent reboot proof, legacy location uncertainty, readable vs unreadable holders, cleanup retries
   // and parent Finish.
   { id: 'R43', scenario: 'baseline' },
-  // workflows/worker-restart-parity.test.ts: same-boot exit proof, mixed-holder polling and bounded cleanup locks.
+  // workflows/worker-restart-same-boot-crash-lock-parity.test.ts: same-boot exit proof, mixed-holder polling and bounded cleanup locks.
   { id: 'R47', scenario: 'baseline' },
-  // worker-restart-parity.test.ts: cold terminal starting-proof facts readiness.
+  // worker-restart-starting-proof-parity.test.ts: cold terminal starting-proof facts readiness.
   { id: 'R60', scenario: 'baseline' },
   // #779: Continue on a run only runs.db holds, through both ActiveRun construction sites.
   { id: 'R48', scenario: 'cezar-done' },
@@ -2258,7 +2258,7 @@ export function describeHarnessParity(scope: { runner: RunnerId; part: HarnessPa
       });
 
       it('uses no skipped or pending cell — an inapplicable one is a declared exemption', () => {
-        for (const url of [new URL(import.meta.url), new URL('../workflows/worker-parent-attention.test.ts', import.meta.url), new URL('../workflows/monitoring-turn.test.ts', import.meta.url), new URL('./skill-resume-parity.test.ts', import.meta.url)]) {
+        for (const url of [new URL(import.meta.url), new URL('../workflows/worker-parent-attention.testkit.ts', import.meta.url), new URL('../workflows/monitoring-turn.test.ts', import.meta.url), new URL('./skill-resume-parity.test.ts', import.meta.url)]) {
           const source = readFileSync(url, 'utf8');
           expect(source).not.toMatch(/\b(?:it|test|describe)\s*\.\s*(?:skip|todo)\s*\(/);
         }

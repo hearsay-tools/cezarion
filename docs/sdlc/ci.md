@@ -103,7 +103,7 @@ persistent baseline file or migration.
 A runner lifecycle, input-delivery or attention fix adds shared regression
 coverage in the same PR, as required by `AGENTS.md` and `AGENT_PROTOCOL.md` §7.
 `packages/cezar/src/core/harness-parity.test.ts` and
-`packages/cezar/src/workflows/worker-parent-attention.test.ts` run every
+`packages/cezar/src/workflows/worker-parent-attention.testkit.ts` run every
 `RUNNER_IDS` backend through its own offline wire. Their coverage guards reject
 unaddressed new runners; unsupported wire cases carry named executable exemptions.
 A focused backend test or injected normalized event supplements this coverage,
