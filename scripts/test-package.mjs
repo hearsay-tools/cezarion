@@ -47,20 +47,20 @@ export function needsBuild(repo) {
   return buildInputs(repo).some(path => statSync(path).mtimeMs > oldest);
 }
 
-export function main(args) {
-  const files = selectTests(root, args);
-  const run = (command, argv, cwd) => {
-    const result = spawnSync(command, argv, { cwd, stdio: 'inherit' });
+export function main(args, { repo = root, platform = process.platform, spawn = spawnSync, log = console.log } = {}) {
+  const files = selectTests(repo, args);
+  const run = (command, argv, cwd, shell = false) => {
+    const result = spawn(command, argv, { cwd, stdio: 'inherit', shell });
     if (result.error) throw result.error;
     if (result.status !== 0) process.exit(result.status ?? 1);
   };
-  if (needsBuild(root)) {
-    console.log('Packaged tests: build outputs are missing or stale; running npm run build.');
-    run(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build'], root);
+  if (needsBuild(repo)) {
+    log('Packaged tests: build outputs are missing or stale; running npm run build.');
+    run(platform === 'win32' ? 'npm.cmd' : 'npm', ['run', 'build'], repo, platform === 'win32');
   } else {
-    console.log('Packaged tests: build outputs are fresh; skipping build.');
+    log('Packaged tests: build outputs are fresh; skipping build.');
   }
-  run(process.execPath, ['--import', '../../scripts/test-git-env.mjs', '--import', 'tsx', '--test', ...files], join(root, 'packages/cezar'));
+  run(process.execPath, ['--import', '../../scripts/test-git-env.mjs', '--import', 'tsx', '--test', ...files], join(repo, 'packages/cezar'));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

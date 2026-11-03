@@ -41,8 +41,8 @@ after the application build.
 When Squeal is installed and validating the worktree, use its results during
 implementation. It covers unit Vitest, both fast node:test groups, and cockpit
 browser E2E in the slow tier. It does not run packaged CLI E2E
-(`npm run test:package`): run those tests by hand after `npm run build`, with
-or without Squeal. Otherwise use affected tests and
+(`npm run test:package -- <files>`): run those tests by hand, with or without
+Squeal. Pass repo-root paths; the command builds missing or stale outputs. Otherwise use affected tests and
 focused browser specs. `npm test` and `npm run test:watch` select only the four
 unit projects; Squeal also discovers the browser project from the root config.
 

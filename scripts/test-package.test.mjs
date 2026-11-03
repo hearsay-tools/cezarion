@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync, symlinkSync 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
-import { buildInputs, needsBuild, selectTests } from './test-package.mjs';
+import { buildInputs, main, needsBuild, selectTests } from './test-package.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'package-command-'));
@@ -58,4 +58,26 @@ test('all build input families invalidate fresh output', t => {
     put(input, 1000);
     assert.equal(needsBuild(root), false, input);
   }
+});
+
+
+test('Windows builds through the command shell and runs Node without it', t => {
+  const { root } = fixture(t);
+  const calls = [];
+  main(['packages/cezar/test/e2e/a.test.ts'], {
+    repo: root, platform: 'win32', log() {},
+    spawn(command, args, options) {
+      calls.push({ command, args, options });
+      return { status: 0 };
+    },
+  });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].command, 'npm.cmd');
+  assert.deepEqual(calls[0].args, ['run', 'build']);
+  assert.equal(calls[0].options.shell, true);
+  assert.equal(calls[0].options.cwd, root);
+  assert.equal(calls[1].command, process.execPath);
+  assert.equal(calls[1].options.shell, false);
+  assert.equal(calls[1].args.at(-1), 'test/e2e/a.test.ts');
+  assert.equal(calls[1].options.cwd, join(root, 'packages/cezar'));
 });
