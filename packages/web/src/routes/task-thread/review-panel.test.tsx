@@ -21,8 +21,8 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-const run = (status: RunStatus, extra: Partial<ApiRun> = {}): ApiRun =>
-  ({
+const run = (status: RunStatus, extra: Partial<ApiRun> = {}): ApiRun => {
+  return ({
     finishBlocked: null,
     id: 'r1',
     title: 'do the thing plz',
@@ -36,6 +36,7 @@ const run = (status: RunStatus, extra: Partial<ApiRun> = {}): ApiRun =>
     steps: [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, sessionId: 'sess-1' }],
     ...extra,
   }) as ApiRun
+}
 
 const DIFF = [
   'diff --git a/notes.md b/notes.md',

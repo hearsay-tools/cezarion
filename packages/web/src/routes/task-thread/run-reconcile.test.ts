@@ -28,8 +28,9 @@ const line = (seq: number, type: string, extra: Record<string, unknown> = {}): R
   ...extra,
 })
 
-const run = (over: Partial<ApiRun> = {}): ApiRun =>
-  ({ id: 'r1', status: RUN_STATUS.running, ...over }) as ApiRun
+const run = (over: Partial<ApiRun> = {}): ApiRun => {
+  return ({ id: 'r1', status: RUN_STATUS.running, ...over }) as ApiRun
+}
 
 afterEach(() => {
   cleanup()

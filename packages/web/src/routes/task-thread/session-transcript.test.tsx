@@ -54,7 +54,8 @@ const tool = (id: string, overrides: Partial<UiToolItem> = {}): UiToolItem => ({
   ...overrides,
 })
 
-const run = (overrides: Partial<ApiRun> = {}): ApiRun => ({
+const run = (overrides: Partial<ApiRun> = {}): ApiRun => {
+  return ({
   id: 'r1',
   title: 'Shared transcript',
   workflow: 'quick-task',
@@ -66,6 +67,7 @@ const run = (overrides: Partial<ApiRun> = {}): ApiRun => ({
   steps: [],
   ...overrides,
 }) as ApiRun
+}
 
 const asRunEvents = (events: object[]): RunEvent[] =>
   events.map((event, index) => ({
