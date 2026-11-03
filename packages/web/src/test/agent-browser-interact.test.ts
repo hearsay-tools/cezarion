@@ -2,9 +2,10 @@
 import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentBrowser, configureFailureCapture, OPEN_OVERLAY_PROBE } from '../../e2e/agent-browser'
 import { resetBrowserPage } from '../../e2e/browser-page'
+import * as testEnvInputs from '../../../../.ai/scripts/test-env-inputs.mjs'
 
 /**
  * A stand-in `agent-browser` that records every invocation and answers `{ success: true }`.
@@ -17,8 +18,9 @@ function fakeBrowser(opts: { waitFails?: boolean; tabTarget?: unknown; evalResul
   const script = join(dir, 'fake.mjs')
   writeFileSync(script, `
     import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
-    const args = process.argv.slice(2)
-    appendFileSync(process.env.FAKE_LOG, JSON.stringify(args) + '\\n')
+    const rawArgs = process.argv.slice(2)
+    const args = rawArgs[0] === '--args' ? rawArgs.slice(2) : rawArgs
+    appendFileSync(process.env.FAKE_LOG, JSON.stringify(rawArgs) + '\\n')
     if (args[2] === 'open') writeFileSync(process.env.FAKE_LOG + '.url', args[3])
     if (args[2] === 'get' && args[3] === 'url') {
       process.stdout.write(JSON.stringify({ success: true, data: { url: ${JSON.stringify(opts.resolvedUrl)} ?? readFileSync(process.env.FAKE_LOG + '.url', 'utf8') } }))
@@ -60,9 +62,14 @@ function fakeBrowser(opts: { waitFails?: boolean; tabTarget?: unknown; evalResul
 }
 
 const fakes: Array<{ dispose: () => void }> = []
+beforeEach(() => {
+  vi.stubEnv('AGENT_BROWSER_ARGS', '')
+  vi.stubEnv('AGENT_BROWSER_CONFIG', undefined)
+})
 afterEach(() => {
   for (const fake of fakes.splice(0)) fake.dispose()
   configureFailureCapture({ root: undefined })
+  vi.unstubAllEnvs()
 })
 function open(opts?: { waitFails?: boolean; tabTarget?: unknown; evalResult?: unknown; resolvedUrl?: string }) {
   const fake = fakeBrowser(opts)
@@ -71,8 +78,57 @@ function open(opts?: { waitFails?: boolean; tabTarget?: unknown; evalResult?: un
 }
 
 describe('AgentBrowser auto-wait (#405)', () => {
+  it('preserves duplicate descriptor and per-session flags when opening a session', () => {
+    const fixture = open()
+    const descriptor = vi.spyOn(testEnvInputs, 'readTestEnvDescriptor').mockReturnValue({
+      browser: {
+        installed: true, command: join(fixture.dir, 'agent-browser'), version: 'fake', notes: '',
+        launchArgs: ['--no-sandbox'], runtimeEnv: { FAKE_LOG: join(fixture.dir, 'calls.ndjson') },
+      },
+    })
+    try {
+      const browser = AgentBrowser.open('duplicate-flags', { launchArgs: ['--no-sandbox', '--window-size=800,600'] })
+      browser.evaluate('0')
+      browser.close()
+      const calls = readFileSync(join(fixture.dir, 'calls.ndjson'), 'utf8').trim().split('\n')
+        .map(line => JSON.parse(line) as string[])
+      expect(calls.every(args => args[0] === '--args' && args[1] === '--no-sandbox,--no-sandbox,--window-size=800,600')).toBe(true)
+    } finally {
+      descriptor.mockRestore()
+    }
+  })
+
+  it('captures provider config arguments before later setup changes the config and environment', () => {
+    vi.stubEnv('AGENT_BROWSER_ARGS', '')
+    const fixture = open()
+    const config = join(fixture.dir, 'provider.json')
+    writeFileSync(config, JSON.stringify({ args: '--force-device-scale-factor=2' }))
+    vi.stubEnv('AGENT_BROWSER_ARGS', undefined)
+    vi.stubEnv('AGENT_BROWSER_CONFIG', config)
+    const session = open()
+    writeFileSync(config, JSON.stringify({ args: '--force-device-scale-factor=1' }))
+    vi.stubEnv('AGENT_BROWSER_ARGS', '--blink-settings=primaryHoverType=2')
+    session.browser.goto('about:blank')
+    const calls = readFileSync(join(session.dir, 'calls.ndjson'), 'utf8').trim().split('\n')
+      .map(line => JSON.parse(line) as string[])
+    expect(calls.every(args => args[0] === '--args' && args[1] === '--force-device-scale-factor=2')).toBe(true)
+  })
+
+  it('keeps launch arguments owned by the session when another setup changes the environment', () => {
+    vi.stubEnv('AGENT_BROWSER_ARGS', '')
+    const first = open()
+    vi.stubEnv('AGENT_BROWSER_ARGS', '--blink-settings=primaryHoverType=2')
+    const second = open()
+    first.browser.goto('about:blank')
+    second.browser.goto('about:blank')
+    const raw = (dir: string) => readFileSync(join(dir, 'calls.ndjson'), 'utf8').trim().split('\n')
+      .map(line => JSON.parse(line) as string[])
+    expect(raw(first.dir).every(args => !args.includes('--args'))).toBe(true)
+    expect(raw(second.dir).every(args => args[0] === '--args' && args[1] === '--blink-settings=primaryHoverType=2')).toBe(true)
+  })
+
   it('restores the setup route and viewport after a case visits another page', () => {
-    const { browser, commands } = open({ evalResult: { width: 1440, height: 900 } })
+    const { browser, commands } = open({ evalResult: { width: 1440, height: 900, scale: 1, colorScheme: 'light', reducedMotion: false } })
     browser.goto('http://fixture.test/p/example/tasks')
     resetBrowserPage(browser)
     browser.goto('http://fixture.test/p/example/settings')
@@ -86,14 +142,29 @@ describe('AgentBrowser auto-wait (#405)', () => {
       ['open', 'http://fixture.test/p/example/tasks'],
     ])
     expect(commands().filter(args => args[0] === 'set')).toEqual([
-      ['set', 'viewport', '1440', '900'], ['set', 'viewport', '1440', '900'],
+      ['set', 'viewport', '1440', '900', '1'], ['set', 'media', 'light'],
+      ['set', 'viewport', '1440', '900', '1'], ['set', 'media', 'light'],
     ])
     expect(commands().filter(args => args[1] === 'window.scrollTo(0, 0)')).toHaveLength(2)
   })
 
+  it('restores effective DPR and media after a case changes them', () => {
+    const { browser, commands } = open({ evalResult: {
+      width: 1440, height: 900, scale: 1.5, colorScheme: 'dark', reducedMotion: true,
+    } })
+    browser.setViewport(1440, 900)
+    resetBrowserPage(browser)
+    browser.setViewport(1440, 900, 3)
+    browser.setReducedMotion(false, 'light')
+    resetBrowserPage(browser)
+    expect(commands().filter(args => args[0] === 'set').slice(-2)).toEqual([
+      ['set', 'viewport', '1440', '900', '1.5'], ['set', 'media', 'dark', 'reduced-motion'],
+    ])
+  })
+
   it('freezes the resolved scoped route after setup visits bare root', () => {
     const { browser, commands } = open({
-      evalResult: { width: 1440, height: 900 },
+      evalResult: { width: 1440, height: 900, scale: 1, colorScheme: 'light', reducedMotion: false },
       resolvedUrl: 'http://fixture.test/p/example',
     })
     browser.goto('http://fixture.test/')
@@ -107,7 +178,7 @@ describe('AgentBrowser auto-wait (#405)', () => {
   })
 
   it('keeps the setup mobile viewport, scale and route readiness predicate', () => {
-    const { browser, commands } = open({ evalResult: { width: 390, height: 844 } })
+    const { browser, commands } = open({ evalResult: { width: 390, height: 844, scale: 2, colorScheme: 'dark', reducedMotion: true } })
     browser.setViewport(390, 844, 2)
     browser.goto('http://fixture.test/p/mobile/tasks')
     browser.waitForFunction('document.querySelector("[data-route=tasks]") !== null')
@@ -115,6 +186,7 @@ describe('AgentBrowser auto-wait (#405)', () => {
     resetBrowserPage(browser)
     expect(commands().filter(args => args[0] === 'set')).toEqual([
       ['set', 'viewport', '390', '844', '2'], ['set', 'viewport', '390', '844', '2'],
+      ['set', 'media', 'dark', 'reduced-motion'],
     ])
     expect(commands().filter(args => args[0] === 'wait')).toEqual([
       ['wait', '--fn', 'document.querySelector("[data-route=tasks]") !== null'],

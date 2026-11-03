@@ -91,8 +91,9 @@ coordinates to integers: agent-browser's `mouse move` rejects decimals with
 
 ## The rules the ratchet enforces
 
-Before each case, the shared setup restores every open browser to the viewport and resolved route set by
+Before each case, the shared setup restores every open browser to the viewport, DPR, colour scheme, reduced motion and resolved route set by
 `beforeAll` (defaults: the session viewport and `about:blank`), with zero document scroll.
+Each session retains its launch arguments, including hover and pointer settings.
 It loads a fresh document. Each case prepares the UI and task state it needs.
 
 `packages/web/src/test/e2e-wait-discipline.test.ts` scans every `.ts` file here (the seam and

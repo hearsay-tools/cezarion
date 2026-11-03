@@ -18,6 +18,7 @@ type SetupPage = {
   route: string
   ready?: string | undefined
   viewport?: { width: number; height: number; scale?: number } | undefined
+  media?: { colorScheme: 'dark' | 'light'; reducedMotion: boolean } | undefined
   frozen: boolean
 }
 const pages = new WeakMap<AgentBrowser, SetupPage>()
@@ -47,14 +48,26 @@ export function rememberViewport(browser: AgentBrowser, width: number, height: n
   if (!page.frozen) page.viewport = { width, height, ...(scale === undefined ? {} : { scale }) }
 }
 
+function freezeEmulation(browser: AgentBrowser, page: SetupPage): void {
+  const state = browser.evaluate(`({ width: innerWidth, height: innerHeight, scale: devicePixelRatio,
+    colorScheme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light',
+    reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches })`) as {
+      width: number; height: number; scale: number; colorScheme: 'dark' | 'light'; reducedMotion: boolean
+    }
+  page.viewport ??= { width: state.width, height: state.height }
+  page.viewport.scale ??= state.scale
+  page.media = { colorScheme: state.colorScheme, reducedMotion: state.reducedMotion }
+}
+
 /** Freeze beforeAll's page, then discard each case's document and scroll history. */
 export function resetBrowserPage(browser: AgentBrowser): void {
   const page = setupPage(browser)
-  page.viewport ??= browser.evaluate('({ width: innerWidth, height: innerHeight })') as { width: number; height: number }
+  if (!page.frozen) freezeEmulation(browser, page)
   if (!page.frozen && page.route !== 'about:blank') page.route = browser.url()
   page.frozen = true
   browser.goto('about:blank')
-  browser.setViewport(page.viewport.width, page.viewport.height, page.viewport.scale)
+  browser.setViewport(page.viewport!.width, page.viewport!.height, page.viewport!.scale)
+  browser.setReducedMotion(page.media!.reducedMotion, page.media!.colorScheme)
   if (page.route !== 'about:blank') {
     browser.goto(page.route)
     browser.waitForFunction(page.ready ?? 'window.__cezIdle === true')

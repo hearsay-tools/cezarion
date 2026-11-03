@@ -1,6 +1,64 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { browserSpawnPlan } from '../../e2e/agent-browser'
+import { captureLaunchArguments, sessionLaunchArguments } from '../../e2e/browser-launch'
+
+describe('provider launch configuration', () => {
+  it('preserves descriptor entries and raw environment arguments without deduplication', () => {
+    const descriptor = ['--no-sandbox', '--window-position=800,600', '--no-sandbox']
+    const extra = '--window-size=800,600,--window-position=800,600\n--no-sandbox\r--disable-features=A,B'
+    expect(sessionLaunchArguments({ launchArgs: descriptor }, { AGENT_BROWSER_ARGS: extra })).toEqual([...descriptor, extra])
+    const plan = browserSpawnPlan(
+      { installed: true, command: 'agent-browser', version: 'test', notes: '', launchArgs: descriptor },
+      'environment-test', ['open', 'about:blank'], { AGENT_BROWSER_ARGS: extra },
+    )
+    expect(plan.argv.slice(0, 2)).toEqual(['--args', [...descriptor, extra].join(',')])
+    expect(captureLaunchArguments({ launchArgs: descriptor }, { AGENT_BROWSER_ARGS: extra })).toEqual([...descriptor, extra])
+  })
+
+  it('preserves comma-valued and newline-separated config flags for the provider parser', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cez-launch-config-'))
+    try {
+      const config = join(home, 'explicit.json')
+      const args = '--window-size=800,600,--window-position=800,600\n--disable-features=A,B'
+      writeFileSync(config, JSON.stringify({ args }))
+      const launchArgs = captureLaunchArguments({}, { AGENT_BROWSER_CONFIG: config })
+      expect(launchArgs).toEqual([args])
+      const plan = browserSpawnPlan(
+        { installed: true, command: 'agent-browser', version: 'test', notes: '', launchArgs },
+        'config-test', ['open', 'about:blank'], { AGENT_BROWSER_ARGS: '' },
+      )
+      expect(plan.argv.slice(0, 2)).toEqual(['--args', args])
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps user config args, explicit config precedence, and explicit empty overrides', () => {
+    const home = mkdtempSync(join(tmpdir(), 'cez-launch-config-'))
+    try {
+      mkdirSync(join(home, '.agent-browser'))
+      writeFileSync(join(home, '.agent-browser', 'config.json'), JSON.stringify({ args: '--user-flag' }))
+      const explicit = join(home, 'explicit.json')
+      writeFileSync(explicit, JSON.stringify({ args: '--explicit-flag' }))
+      const env = { HOME: home }
+      expect(captureLaunchArguments({}, env)).toEqual(['--user-flag'])
+      expect(captureLaunchArguments({}, { ...env, AGENT_BROWSER_CONFIG: explicit })).toEqual(['--explicit-flag'])
+      expect(captureLaunchArguments({}, { ...env, AGENT_BROWSER_ARGS: '' })).toEqual([])
+      expect(captureLaunchArguments({ launchArgs: ['--descriptor'] }, env)).toEqual(['--descriptor'])
+      expect(captureLaunchArguments({}, { ...env, AGENT_BROWSER_ARGS: '--environment' })).toEqual(['--environment'])
+      writeFileSync(explicit, '{')
+      expect(() => captureLaunchArguments({}, { ...env, AGENT_BROWSER_CONFIG: explicit })).toThrow('cannot read agent-browser config')
+      writeFileSync(join(home, '.agent-browser', 'config.json'), '{')
+      expect(captureLaunchArguments({}, env)).toEqual([])
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+})
 
 describe('browserSpawnPlan', () => {
   it('passes the resolved container args and keeps a short caller TMPDIR', () => {

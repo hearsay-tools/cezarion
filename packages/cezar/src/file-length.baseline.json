@@ -11,7 +11,7 @@
     "packages/cezar/src/server/forge/github.ts": 3451,
     "packages/cezar/src/server/server.ts": 5670,
     "packages/contract/src/runs.ts": 1014,
-    "packages/web/e2e/agent-browser.ts": 1256,
+    "packages/web/e2e/agent-browser.ts": 1249,
     "packages/web/src/api/client.ts": 2225,
     "packages/web/src/api/queries.ts": 2359,
     "packages/web/src/components/composer/composer.tsx": 1095,
