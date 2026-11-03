@@ -47,120 +47,128 @@ async function waitForProgressing(cond: () => boolean, progress: () => unknown, 
 
 const nudges = (events: readonly Record<string, unknown>[]) => events.filter(e => e.type === 'note' && String(e.message).includes('continuing without pausing'));
 
-const PARTS: readonly (readonly string[])[] = [
-  [
-    "cursor A5 continuation",
-    "claude A14",
-    "cursor A7 fresh",
-    "omp A4 continuation",
-    "opencode A6 continuation",
-    "cursor A6 fresh",
-    "omp A6 continuation",
-    "omp A3 fresh",
-    "omp A6 fresh"
+const PARTS: Readonly<Record<string, readonly string[]>> = {
+  "budget-cursor-fresh": [
+    "cursor A5 fresh"
   ],
-  [
-    "cursor A12 continuation",
-    "cursor A6 continuation",
-    "cursor A13",
-    "opencode A7 fresh",
-    "cursor A10 fresh",
-    "omp A2 continuation",
-    "claude A6 continuation",
-    "omp A1 fresh",
-    "claude A6 fresh",
-    "omp A9"
+  "budget-cursor-continuation": [
+    "cursor A5 continuation"
   ],
-  [
-    "cursor A5 fresh",
-    "cursor A1 fresh",
-    "codex A2 continuation",
-    "opencode A1 fresh",
-    "pi A4 continuation",
-    "pi A6 continuation",
-    "codex A6 continuation",
-    "omp A7 fresh",
-    "omp A10 fresh"
+  "refusal-cursor-fresh": [
+    "cursor A11 fresh"
   ],
-  [
-    "cursor A11 fresh",
-    "pi A5 fresh",
-    "omp A5 continuation",
-    "codex A10 fresh",
-    "codex A14",
-    "codex A7 fresh",
-    "pi A10 fresh",
-    "pi A3 fresh",
-    "pi A1 fresh",
-    "cursor A9"
+  "refusal-cursor-continuation": [
+    "cursor A12 continuation"
   ],
-  [
-    "opencode A12 continuation",
-    "pi A5 continuation",
-    "cursor A2 continuation",
-    "opencode A3 fresh",
-    "claude A5 continuation",
-    "codex A4 continuation",
-    "claude A3 fresh",
+  "budget-fresh": [
+    "claude A5 fresh",
+    "codex A5 fresh",
     "omp A5 fresh",
-    "cursor A8 fresh",
-    "opencode A10 fresh",
-    "pi A2 continuation",
-    "claude A10 fresh",
-    "omp A14",
-    "codex A9 fresh"
+    "opencode A5 fresh",
+    "pi A5 fresh"
   ],
-  [
+  "budget-continuation": [
+    "claude A5 continuation",
+    "codex A5 continuation",
+    "omp A5 continuation",
+    "opencode A5 continuation",
+    "pi A5 continuation"
+  ],
+  "late-readiness-fresh": [
+    "claude A11 fresh",
+    "codex A11 fresh",
+    "omp A11 fresh",
     "opencode A11 fresh",
+    "pi A11 fresh"
+  ],
+  "late-readiness-continuation": [
+    "claude A12 continuation",
     "codex A12 continuation",
     "omp A12 continuation",
-    "codex A11 fresh",
-    "claude A4 continuation",
-    "codex A5 continuation",
-    "claude A8 fresh",
-    "codex A5 fresh",
-    "codex A8 fresh",
-    "codex A13",
-    "codex A1 fresh",
-    "pi A13",
-    "omp A8 fresh",
-    "omp A13"
+    "opencode A12 continuation",
+    "pi A12 continuation"
   ],
-  [
-    "opencode A5 continuation",
-    "cursor A4 continuation",
-    "claude A12 continuation",
-    "cursor A3 fresh",
-    "omp A11 fresh",
-    "opencode A2 continuation",
-    "codex A3 fresh",
+  "nudges": [
     "claude A1 fresh",
-    "claude A13",
-    "opencode A8 fresh",
-    "opencode A13",
-    "pi A8 fresh",
+    "claude A2 continuation",
+    "codex A1 fresh",
+    "codex A2 continuation",
+    "cursor A1 fresh",
+    "cursor A2 continuation",
+    "omp A1 fresh",
+    "omp A2 continuation",
+    "opencode A1 fresh",
+    "opencode A2 continuation",
+    "pi A1 fresh",
+    "pi A2 continuation"
+  ],
+  "ask-refusal": [
+    "claude A10 fresh",
+    "claude A3 fresh",
+    "claude A4 continuation",
+    "codex A10 fresh",
+    "codex A3 fresh",
+    "codex A4 continuation",
+    "cursor A10 fresh",
+    "cursor A3 fresh",
+    "cursor A4 continuation",
+    "omp A10 fresh",
+    "omp A3 fresh",
+    "omp A4 continuation",
+    "opencode A10 fresh",
+    "opencode A3 fresh",
+    "opencode A4 continuation",
+    "pi A10 fresh",
+    "pi A3 fresh",
+    "pi A4 continuation"
+  ],
+  "parking": [
+    "claude A6 continuation",
+    "claude A6 fresh",
+    "claude A7 fresh",
+    "claude A8 fresh",
+    "claude A9",
+    "codex A6 continuation",
+    "codex A6 fresh",
+    "codex A7 fresh",
+    "codex A8 fresh",
+    "codex A9 fresh",
+    "cursor A6 continuation",
+    "cursor A6 fresh",
+    "cursor A7 fresh",
+    "cursor A8 fresh",
+    "cursor A9",
+    "omp A6 continuation",
+    "omp A6 fresh",
+    "omp A7 fresh",
+    "omp A8 fresh",
+    "omp A9",
+    "opencode A6 continuation",
     "opencode A6 fresh",
+    "opencode A7 fresh",
+    "opencode A8 fresh",
     "opencode A9 fresh",
+    "pi A6 continuation",
+    "pi A6 fresh",
+    "pi A7 fresh",
+    "pi A8 fresh",
     "pi A9"
   ],
-  [
-    "pi A12 continuation",
-    "opencode A5 fresh",
-    "opencode A4 continuation",
-    "pi A11 fresh",
-    "claude A11 fresh",
+  "idle-close": [
+    "claude A13",
+    "claude A14",
+    "codex A13",
+    "codex A14",
+    "cursor A13",
     "cursor A14",
-    "claude A5 fresh",
-    "claude A2 continuation",
-    "pi A14",
-    "claude A7 fresh",
+    "omp A13",
+    "omp A14",
+    "opencode A13",
     "opencode A14",
-    "pi A7 fresh",
-    "pi A6 fresh",
-    "codex A6 fresh",
-    "claude A9"
+    "pi A13",
+    "pi A14"
   ]
-];
+};
 
 export function describeWorkflowAutonomousParity(part: ParityPart, collect?: ParityCollector): void {
   const { describe, it } = partitionParity(part, PARTS, collect);

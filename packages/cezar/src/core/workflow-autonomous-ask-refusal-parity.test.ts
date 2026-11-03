@@ -1,3 +1,3 @@
 import { describeWorkflowAutonomousParity } from './workflow-autonomous-parity.testkit.ts';
 
-describeWorkflowAutonomousParity(7);
+describeWorkflowAutonomousParity('ask-refusal');

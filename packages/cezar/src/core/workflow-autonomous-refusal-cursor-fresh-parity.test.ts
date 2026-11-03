@@ -1,3 +1,3 @@
 import { describeWorkflowAutonomousParity } from './workflow-autonomous-parity.testkit.ts';
 
-describeWorkflowAutonomousParity(1);
+describeWorkflowAutonomousParity('refusal-cursor-fresh');
