@@ -16,11 +16,6 @@ the Task routing rows for run search, pending asks and skills list their readers
 
 Where readers hide, searched from the repo root (replace the example values):
 
-<!-- until: hearsay-tools/cezarion#2512 -->
-- **A `RunRecord` field renamed, moved or removed**: packaged and browser fixtures, by
-  its old and new names or paths, searched as below; a unit
-  test using `makeRunRecord` fails to compile instead.
-
 <!-- until: hearsay-tools/cezarion#2513 -->
 - **An enum or discriminant value renamed** (a wait kind, outcome, status or attention
   label): the quoted old value in tests, searched before each push that renames one; the
