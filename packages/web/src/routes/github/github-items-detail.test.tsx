@@ -18,7 +18,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   // Radix popovers position with floating-ui, which needs a ResizeObserver; jsdom has none. The
-  // list's scroll owner gets a tall viewport so the virtualized rows mount (#1183).
+  // list's scroll owner gets a tall viewport so the virtualized rows mount (hearsay-tools/cezarion#1183).
   vi.stubGlobal('ResizeObserver', ListViewportResizeObserver)
   // The #408 follow-up persistence (remembered selection + per-item draft) is localStorage-
   // backed and jsdom's localStorage survives across tests in this file — start every test clean.
@@ -1240,7 +1240,7 @@ describe('issue assignee and board controls', () => {
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search issues' }), { target: { value: 'no match' } })
     expect(rows()).toHaveLength(0)
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
-    // The emptied list unmounted its virtualizer (#1183); the remount sizes its viewport on the
+    // The emptied list unmounted its virtualizer (hearsay-tools/cezarion#1183); the remount sizes its viewport on the
     // next ResizeObserver tick, which a browser delivers before paint.
     await waitFor(() => expect(rows()).toHaveLength(2))
   })
@@ -1368,7 +1368,7 @@ it('keeps the selected phone-list row when it sits past the second (#344)', asyn
   expect(rows()[2]?.getAttribute('aria-current')).toBe('page')
 })
 
-it('wraps each list row in one item that carries the divider and the phone-preview flag (#1183)', async () => {
+it('wraps each list row in one item that carries the divider and the phone-preview flag (hearsay-tools/cezarion#1183)', async () => {
   const third = { ...ISSUE_139, number: 138, url: 'https://github.com/acme/demo/issues/138' }
   stubFetch({ 'GET /api/v1/github?limit=50': () => jsonResponse({ ...GITHUB, issues: [ISSUE_142, ISSUE_139, third] }) })
   renderAt('/github/issues/142')

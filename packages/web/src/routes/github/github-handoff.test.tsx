@@ -20,7 +20,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   // Radix popovers position with floating-ui, which needs a ResizeObserver; jsdom has none. The
-  // list's scroll owner gets a tall viewport so the virtualized rows mount (#1183).
+  // list's scroll owner gets a tall viewport so the virtualized rows mount (hearsay-tools/cezarion#1183).
   vi.stubGlobal('ResizeObserver', ListViewportResizeObserver)
   // The #408 follow-up persistence (remembered selection + per-item draft) is localStorage-
   // backed and jsdom's localStorage survives across tests in this file — start every test clean.
@@ -42,7 +42,7 @@ describe('GitHub handoff field chrome (#243)', () => {
   if (!cssPath) throw new Error(`github-layout.css not found from ${process.cwd()}`)
   const css = readFileSync(cssPath, 'utf8')
 
-  it('styles row dividers and the phone preview on the row item, which survives virtualization (#1183)', () => {
+  it('styles row dividers and the phone preview on the row item, which survives virtualization (hearsay-tools/cezarion#1183)', () => {
     expect(css).toMatch(/\[data-slot='gh-row-item'\]\[data-divided\]\s*\{\s*border-block-start:/)
     expect(css).toMatch(/\[data-mobile-preview\] \[data-slot='gh-row-item'\]\[data-compact-hidden\]\s*\{\s*display:\s*none/)
     expect(css).not.toMatch(/\[data-slot='gh-rows'\] > li/)
