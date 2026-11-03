@@ -202,7 +202,8 @@ and browser namespaces. It is the final local full-suite gate and retains lane l
 under `.ai/qa/local-runs/`. A skipped browser exits nonzero there, since it did not
 verify the full suite. CI keeps four separate serial shards on its matrix.
 `npm run test:e2e` without arguments still runs the full sequential suite,
-with the existing environment reuse and skip-exit-0 behavior. For iteration use
+with the existing environment reuse. A missing browser exits 3 unless the caller
+passes `--allow-skip` to permit exit 0. For iteration use
 `npm run test:e2e -- smoke.e2e.ts -t 'test name'`. Optional `--force` and
 `--force-rebuild` go only to environment bootstrap; other arguments (including
 `--shard=N/M`, spec paths and test-name filters) go to Vitest with quoting preserved.
