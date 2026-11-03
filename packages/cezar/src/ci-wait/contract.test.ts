@@ -1,3 +1,4 @@
+import { WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { request } from 'node:http';
 import { ciWaitRequestSchema, ciWaitSchema, ciWaitResultSchema, ciWaitReceiptSchema } from '@open-mercato/cezar-contract/ci-wait';
@@ -217,7 +218,7 @@ it('cezar_wait advertises the process fields and tells the agent how to write th
   expect(schema.properties.exit_file.description).toMatch(/Leave it out for a command that is already running/);
   const refused = cezarWaitRequestSchema.safeParse({ kind: 'human' });
   expect(waitInvalidInput(refused.success ? undefined : refused.error)).toBe('`kind` must be "pr", "worker", "request", "peer", "timer" or "process" (kind "ci" was replaced by kind "pr"); ask the user with cezar_ask.');
-  const pid = cezarWaitRequestSchema.safeParse({ kind: 'process', pid: 1 });
+  const pid = cezarWaitRequestSchema.safeParse({ kind: WAIT_KIND.process, pid: 1 });
   expect(waitInvalidInput(pid.success ? undefined : pid.error)).toBe('`pid` must be an integer of at least 2: the PID that `echo $!` printed (kind "process").');
 });
 

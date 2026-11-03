@@ -2,22 +2,10 @@
   "$comment": "Matches the rule found when it landed (hearsay-tools/cezarion#1802), keyed by file and the first line of the match so a moved line does not churn it. This list only shrinks: fix a match, then run AST_GREP_RULES_UPDATE=1 npm run lint. Rules: .ai/ast-grep/README.md.",
   "sites": [
     {
-      "file": "packages/cezar/src/artifacts/lifecycle.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'done'",
-      "count": 1
-    },
-    {
       "file": "packages/cezar/src/automations/automation-cli.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'running'",
       "count": 2
-    },
-    {
-      "file": "packages/cezar/src/automations/schedule-runner.test.ts",
-      "rule": "test-enum-literal",
-      "site": "kind: 'agent'",
-      "count": 1
     },
     {
       "file": "packages/cezar/src/automations/tool-adapter.test.ts",
@@ -32,64 +20,10 @@
       "count": 1
     },
     {
-      "file": "packages/cezar/src/ci-wait/contract.test.ts",
-      "rule": "test-enum-literal",
-      "site": "kind: 'process'",
-      "count": 1
-    },
-    {
       "file": "packages/cezar/src/ci-wait/controller.test.ts",
       "rule": "test-enum-literal",
       "site": "kind: 'human'",
-      "count": 3
-    },
-    {
-      "file": "packages/cezar/src/ci-wait/controller.test.ts",
-      "rule": "test-enum-literal",
-      "site": "kind: 'pr'",
-      "count": 15
-    },
-    {
-      "file": "packages/cezar/src/ci-wait/controller.test.ts",
-      "rule": "test-enum-literal",
-      "site": "kind: 'pr' as const",
-      "count": 1
-    },
-    {
-      "file": "packages/cezar/src/ci-wait/controller.test.ts",
-      "rule": "test-enum-literal",
-      "site": "kind: 'timer'",
-      "count": 8
-    },
-    {
-      "file": "packages/cezar/src/ci-wait/controller.test.ts",
-      "rule": "test-enum-literal",
-      "site": "kind: 'worker'",
-      "count": 1
-    },
-    {
-      "file": "packages/cezar/src/ci-wait/controller.test.ts",
-      "rule": "test-enum-literal",
-      "site": "kind:'pr'",
-      "count": 5
-    },
-    {
-      "file": "packages/cezar/src/ci-wait/controller.test.ts",
-      "rule": "test-enum-literal",
-      "site": "phase: 'open'",
-      "count": 1
-    },
-    {
-      "file": "packages/cezar/src/ci-wait/controller.test.ts",
-      "rule": "test-enum-literal",
-      "site": "source: 'agent'",
-      "count": 1
-    },
-    {
-      "file": "packages/cezar/src/ci-wait/controller.test.ts",
-      "rule": "test-enum-literal",
-      "site": "via: 'cezar_wait'",
-      "count": 1
+      "count": 2
     },
     {
       "file": "packages/cezar/src/ci-wait/scheduled-tasks.test.ts",
@@ -1058,57 +992,9 @@
       "count": 2
     },
     {
-      "file": "packages/cezar/src/voice/decide.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'waiting'",
-      "count": 3
-    },
-    {
-      "file": "packages/cezar/src/voice/fake-engine.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'waiting'",
-      "count": 1
-    },
-    {
-      "file": "packages/cezar/src/voice/pending-ask.test.ts",
-      "rule": "test-enum-literal",
-      "site": "kind: 'human'",
-      "count": 1
-    },
-    {
-      "file": "packages/cezar/src/voice/pending-ask.test.ts",
-      "rule": "test-enum-literal",
-      "site": "phase: 'cancelled'",
-      "count": 1
-    },
-    {
-      "file": "packages/cezar/src/voice/pending-ask.test.ts",
-      "rule": "test-enum-literal",
-      "site": "phase: 'open'",
-      "count": 1
-    },
-    {
-      "file": "packages/cezar/src/voice/pending-ask.test.ts",
-      "rule": "test-enum-literal",
-      "site": "source: 'agent'",
-      "count": 1
-    },
-    {
-      "file": "packages/cezar/src/voice/pending-ask.test.ts",
-      "rule": "test-enum-literal",
-      "site": "via: 'cezar_ask'",
-      "count": 1
-    },
-    {
       "file": "packages/cezar/src/voice/replay-set.testkit.ts",
       "rule": "test-enum-literal",
       "site": "status: 'cancelled'",
-      "count": 1
-    },
-    {
-      "file": "packages/cezar/src/voice/replay-set.testkit.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'waiting'",
       "count": 1
     },
     {
@@ -1248,24 +1134,6 @@
       "rule": "test-enum-literal",
       "site": "status: 'failed'",
       "count": 5
-    },
-    {
-      "file": "packages/cezar/test/e2e/serve-port.test.ts",
-      "rule": "test-enum-literal",
-      "site": "kind: 'agent'",
-      "count": 2
-    },
-    {
-      "file": "packages/cezar/test/e2e/task-cli.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'waiting'",
-      "count": 1
-    },
-    {
-      "file": "packages/cezar/test/unit/test-env-launcher.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'running'",
-      "count": 1
     },
     {
       "file": "packages/contract/src/github.test.ts",

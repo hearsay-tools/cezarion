@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { AskQuestion } from '@open-mercato/cezar-contract/ask';
 import type { VoiceAnswer, VoiceDecideRequest, VoiceDecision, VoicePosition, VoiceStatus } from '@open-mercato/cezar-contract/voice';
 import { decideVoice } from './decide.ts';
@@ -327,7 +328,7 @@ export function replayDecision(replay: ReplayCase, engine: DecisionEngine, signa
   return decideVoice({
     request: replayRequest(replay),
     ...(replay.openTask && replay.ask ? { ask: replay.ask } : {}),
-    screen: { project: 'cezar', ...(replay.openTask ? { openTask: { title: 'Set up tests', status: 'waiting' } } : {}) },
+    screen: { project: 'cezar', ...(replay.openTask ? { openTask: { title: 'Set up tests', status: RUN_STATUS.waiting } } : {}) },
     recent: [],
     engine,
     decisionId: REPLAY_DECISION_ID,

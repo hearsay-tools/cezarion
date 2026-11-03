@@ -1,3 +1,4 @@
+import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -214,7 +215,7 @@ describe('ScheduleRunner', () => {
       const { store, definition, runner, launch, context } = await lazySetup();
       crashLeftover(store, 'claimed');
       const runs = context.built();
-      const run = runs.createRun({ title: 't', workflow: 'quick-task', task: 'x', steps: [{ id: 's', name: 's', kind: 'agent' }] });
+      const run = runs.createRun({ title: 't', workflow: 'quick-task', task: 'x', steps: [{ id: 's', name: 's', kind: STEP_KIND.agent }] });
       runs.updateRun(run.id, { automationTrigger: { automationId: 'nightly', automationRevision: 1, receiptId: 'claimed', trigger: 'schedule', occurrenceAt: iso(FIRST_RUN) } });
       expect((await runner.fire(definition)).result).toBe('duplicate');
       expect(launch).not.toHaveBeenCalled();

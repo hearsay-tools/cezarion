@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it } from 'vitest';
 import { buildVoiceQuestions } from './decide.ts';
 import { QUESTION_IDS, keyText, textKey, type EngineAnswer, type EngineQuestion, type VoiceEngineState } from './engine.ts';
@@ -24,7 +25,7 @@ async function run(
   const state: VoiceEngineState = {
     sentence,
     words: words.map((w) => `${w.id} ${w.text}`),
-    screen: { page: 'task', sidebarView: 'active', project: 'cezar', ...(options.openTask === false ? {} : { openTask: { title: 'T', status: 'waiting' } }) },
+    screen: { page: 'task', sidebarView: 'active', project: 'cezar', ...(options.openTask === false ? {} : { openTask: { title: 'T', status: RUN_STATUS.waiting } }) },
     ...(options.pendingProposal ? { pendingProposal: options.pendingProposal } : {}),
     ...(options.card ? { card: options.card } : {}),
     recent: [],

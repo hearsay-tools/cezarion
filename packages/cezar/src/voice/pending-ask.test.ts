@@ -1,3 +1,4 @@
+import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,8 +13,8 @@ const ts = '2026-10-21T10:00:00.000Z';
 const writeHistory = (events: object[]) =>
   writeFileSync(join(dir, 'runs', `${id}.ndjson`), events.map(event => JSON.stringify({ ts, ...event })).join('\n') + '\n');
 const humanWait = (fields: Partial<HumanWaitEntry>): HumanWaitEntry => ({
-  id: '00000000-0000-4000-8000-000000000001', kind: 'human', source: 'agent', via: 'cezar_ask',
-  registeredAt: ts, phase: 'open', turnId: 'turn-1', ...fields,
+  id: '00000000-0000-4000-8000-000000000001', kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask,
+  registeredAt: ts, phase: WAIT_PHASE.open, turnId: 'turn-1', ...fields,
 });
 
 beforeEach(() => {
@@ -56,7 +57,7 @@ it('offers no card when the open human wait names another ask', () => {
 it('offers the card a terminal run still shows: no open wait, unretired ask', () => {
   // A terminal run cancels its open waits, but the card stays answerable through Continue.
   writeHistory([{ type: 'ask.requested', requestId: 'human-question', questions, seq: 3 }]);
-  const cancelled = humanWait({ askSeq: 3, phase: 'cancelled', cancelledAt: ts });
+  const cancelled = humanWait({ askSeq: 3, phase: WAIT_PHASE.cancelled, cancelledAt: ts });
   expect(readPendingHumanAsk(dir, { id, waits: [cancelled] })).toEqual({ requestId: 'human-question', questions });
   expect(readPendingHumanAsk(dir, { id, waits: [] })).toEqual({ requestId: 'human-question', questions });
 });
