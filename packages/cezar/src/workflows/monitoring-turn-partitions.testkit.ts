@@ -2,7 +2,7 @@ import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 
 export interface MonitoringPartition { runners: readonly RunnerId[]; modes: readonly ('fresh' | 'continuation')[]; rows: readonly string[] }
 export const MONITORING_PARTITIONS = {
-  "timer-prose-fresh": {
+  "timer-fresh": {
     "runners": [
       "claude",
       "codex",
@@ -15,7 +15,22 @@ export const MONITORING_PARTITIONS = {
       "fresh"
     ],
     "rows": [
-      "M1",
+      "M1"
+    ]
+  },
+  "prose-question-fresh": {
+    "runners": [
+      "claude",
+      "codex",
+      "opencode",
+      "pi",
+      "cursor",
+      "omp"
+    ],
+    "modes": [
+      "fresh"
+    ],
+    "rows": [
       "M2"
     ]
   },
@@ -36,7 +51,7 @@ export const MONITORING_PARTITIONS = {
       "M19"
     ]
   },
-  "ask-precedence-fresh": {
+  "ask-precedence-question-fresh": {
     "runners": [
       "claude",
       "codex",
@@ -49,11 +64,26 @@ export const MONITORING_PARTITIONS = {
       "fresh"
     ],
     "rows": [
-      "M4",
+      "M4"
+    ]
+  },
+  "ask-precedence-done-refusal-fresh": {
+    "runners": [
+      "claude",
+      "codex",
+      "opencode",
+      "pi",
+      "cursor",
+      "omp"
+    ],
+    "modes": [
+      "fresh"
+    ],
+    "rows": [
       "M21"
     ]
   },
-  "autonomous-fresh": {
+  "autonomous-prose-fresh": {
     "runners": [
       "claude",
       "codex",
@@ -66,11 +96,26 @@ export const MONITORING_PARTITIONS = {
       "fresh"
     ],
     "rows": [
-      "M13",
+      "M13"
+    ]
+  },
+  "autonomous-ask-fresh": {
+    "runners": [
+      "claude",
+      "codex",
+      "opencode",
+      "pi",
+      "cursor",
+      "omp"
+    ],
+    "modes": [
+      "fresh"
+    ],
+    "rows": [
       "M23"
     ]
   },
-  "timer-prose-continuation": {
+  "timer-continuation": {
     "runners": [
       "claude",
       "codex",
@@ -83,11 +128,26 @@ export const MONITORING_PARTITIONS = {
       "continuation"
     ],
     "rows": [
-      "M1",
+      "M1"
+    ]
+  },
+  "prose-question-continuation": {
+    "runners": [
+      "claude",
+      "codex",
+      "opencode",
+      "pi",
+      "cursor",
+      "omp"
+    ],
+    "modes": [
+      "continuation"
+    ],
+    "rows": [
       "M2"
     ]
   },
-  "worker-review-continuation": {
+  "worker-review-request-continuation": {
     "runners": [
       "claude",
       "codex",
@@ -100,11 +160,26 @@ export const MONITORING_PARTITIONS = {
       "continuation"
     ],
     "rows": [
-      "M3",
+      "M3"
+    ]
+  },
+  "worker-review-done-continuation": {
+    "runners": [
+      "claude",
+      "codex",
+      "opencode",
+      "pi",
+      "cursor",
+      "omp"
+    ],
+    "modes": [
+      "continuation"
+    ],
+    "rows": [
       "M19"
     ]
   },
-  "ask-precedence-continuation": {
+  "ask-precedence-question-continuation": {
     "runners": [
       "claude",
       "codex",
@@ -117,11 +192,26 @@ export const MONITORING_PARTITIONS = {
       "continuation"
     ],
     "rows": [
-      "M4",
+      "M4"
+    ]
+  },
+  "ask-precedence-done-refusal-continuation": {
+    "runners": [
+      "claude",
+      "codex",
+      "opencode",
+      "pi",
+      "cursor",
+      "omp"
+    ],
+    "modes": [
+      "continuation"
+    ],
+    "rows": [
       "M21"
     ]
   },
-  "autonomous-continuation": {
+  "autonomous-prose-continuation": {
     "runners": [
       "claude",
       "codex",
@@ -134,11 +224,26 @@ export const MONITORING_PARTITIONS = {
       "continuation"
     ],
     "rows": [
-      "M14",
+      "M14"
+    ]
+  },
+  "autonomous-ask-continuation": {
+    "runners": [
+      "claude",
+      "codex",
+      "opencode",
+      "pi",
+      "cursor",
+      "omp"
+    ],
+    "modes": [
+      "continuation"
+    ],
+    "rows": [
       "M23"
     ]
   },
-  "ask-lifecycle-claude-codex": {
+  "ask-idle-closure-claude-codex": {
     "runners": [
       "claude",
       "codex"
@@ -148,11 +253,23 @@ export const MONITORING_PARTITIONS = {
       "continuation"
     ],
     "rows": [
-      "M7",
+      "M7"
+    ]
+  },
+  "ask-ack-claude-codex": {
+    "runners": [
+      "claude",
+      "codex"
+    ],
+    "modes": [
+      "fresh",
+      "continuation"
+    ],
+    "rows": [
       "M18"
     ]
   },
-  "ask-lifecycle-opencode-pi": {
+  "ask-idle-closure-opencode-pi": {
     "runners": [
       "opencode",
       "pi"
@@ -162,11 +279,23 @@ export const MONITORING_PARTITIONS = {
       "continuation"
     ],
     "rows": [
-      "M7",
+      "M7"
+    ]
+  },
+  "ask-ack-opencode-pi": {
+    "runners": [
+      "opencode",
+      "pi"
+    ],
+    "modes": [
+      "fresh",
+      "continuation"
+    ],
+    "rows": [
       "M18"
     ]
   },
-  "ask-lifecycle-cursor-omp": {
+  "ask-idle-closure-cursor-omp": {
     "runners": [
       "cursor",
       "omp"
@@ -176,11 +305,23 @@ export const MONITORING_PARTITIONS = {
       "continuation"
     ],
     "rows": [
-      "M7",
+      "M7"
+    ]
+  },
+  "ask-ack-cursor-omp": {
+    "runners": [
+      "cursor",
+      "omp"
+    ],
+    "modes": [
+      "fresh",
+      "continuation"
+    ],
+    "rows": [
       "M18"
     ]
   },
-  "done": {
+  "done-fresh": {
     "runners": [
       "claude",
       "codex",
@@ -190,7 +331,22 @@ export const MONITORING_PARTITIONS = {
       "omp"
     ],
     "modes": [
-      "fresh",
+      "fresh"
+    ],
+    "rows": [
+      "M5"
+    ]
+  },
+  "done-continuation": {
+    "runners": [
+      "claude",
+      "codex",
+      "opencode",
+      "pi",
+      "cursor",
+      "omp"
+    ],
+    "modes": [
       "continuation"
     ],
     "rows": [

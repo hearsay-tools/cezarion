@@ -1,3 +1,3 @@
 import { registerMonitoringPartition } from './monitoring-turn-rows.testkit.ts';
 
-registerMonitoringPartition('timer-prose-continuation');
+registerMonitoringPartition('worker-review-done-continuation');

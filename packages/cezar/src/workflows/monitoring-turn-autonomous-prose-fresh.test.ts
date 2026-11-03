@@ -1,3 +1,3 @@
 import { registerMonitoringPartition } from './monitoring-turn-rows.testkit.ts';
 
-registerMonitoringPartition('ask-precedence-continuation');
+registerMonitoringPartition('autonomous-prose-fresh');

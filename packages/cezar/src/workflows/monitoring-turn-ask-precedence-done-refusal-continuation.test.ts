@@ -1,3 +1,3 @@
 import { registerMonitoringPartition } from './monitoring-turn-rows.testkit.ts';
 
-registerMonitoringPartition('ask-precedence-fresh');
+registerMonitoringPartition('ask-precedence-done-refusal-continuation');

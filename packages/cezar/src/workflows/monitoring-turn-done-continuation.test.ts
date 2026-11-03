@@ -1,3 +1,3 @@
 import { registerMonitoringPartition } from './monitoring-turn-rows.testkit.ts';
 
-registerMonitoringPartition('autonomous-fresh');
+registerMonitoringPartition('done-continuation');
