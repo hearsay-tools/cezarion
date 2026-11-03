@@ -241,15 +241,25 @@ function UserMcpBlock({ userMcp }: { userMcp: NonNullable<AgentConfigListing['us
 
 export function FileEditor({ file }: { file: AgentConfigFile }) {
   const fileQuery = useAgentConfigFile(file.id)
-  const put = usePutAgentConfigFile(file.id)
-  const queryClient = useQueryClient()
-  const refreshSettingsAdmin = useSettingsAdminRefresh()
   const [draft, setDraft] = useState<string | null>(null)
   const [conflict, setConflict] = useState(false)
   const [formatError, setFormatError] = useState<string | null>(null)
 
-  // Seed the draft from the server contents; re-seed when the file's version changes underneath.
   const loadedVersion = fileQuery.data?.version ?? null
+  const content = draft ?? fileQuery.data?.content ?? ''
+  const dirty = fileQuery.data ? content !== fileQuery.data.content : false
+  const canWrite = file.writable
+
+  const { save, isSaving } = useFileSave({
+    file,
+    content,
+    loadedVersion,
+    setDraft,
+    setConflict,
+    setFormatError,
+  })
+
+  // Seed the draft from the server contents; re-seed when the file's version changes underneath.
   useEffect(() => {
     if (fileQuery.data) {
       setDraft(fileQuery.data.content)
@@ -257,35 +267,6 @@ export function FileEditor({ file }: { file: AgentConfigFile }) {
       setFormatError(null)
     }
   }, [fileQuery.data?.version, fileQuery.data])
-
-  const content = draft ?? fileQuery.data?.content ?? ''
-  const dirty = fileQuery.data ? content !== fileQuery.data.content : false
-  const canWrite = file.writable
-
-  const save = () => {
-    setFormatError(null)
-    setConflict(false)
-    put.mutate(
-      { content, version: loadedVersion },
-      {
-        onSuccess: () => {
-          setDraft(null)
-          toast(`${file.exists ? 'Saved' : 'Created'} ${file.label}`)
-        },
-        onError: (err) => {
-          // A 409 is a version conflict, or the host withdrew the grant since the page loaded.
-          if (err instanceof ApiError && err.status === 409) {
-            void refreshSettingsAdmin().then(() => {
-              const health = queryClient.getQueryData<HealthResponse>(queryKeys.health)
-              if (health?.capabilities.settingsAdmin === false) toast(err.message, { tone: 'danger' })
-              else setConflict(true)
-            })
-          } else if (err instanceof ApiError && err.status === 400) setFormatError(err.message)
-          else toast((err as Error).message, { tone: 'danger' })
-        },
-      },
-    )
-  }
 
   return (
     <div data-slot="settings-config-editor" className="flex flex-col gap-3">
@@ -330,14 +311,14 @@ export function FileEditor({ file }: { file: AgentConfigFile }) {
 
       {canWrite && (
         <div className="settings-form-actions">
-          <Button size="sm" onClick={save} disabled={!dirty || put.isPending}>
+          <Button size="sm" onClick={save} disabled={!dirty || isSaving}>
             {file.exists ? 'Save file' : 'Create file'}
           </Button>
           <Button
             size="sm"
             variant="outline"
             onClick={() => setDraft(null)}
-            disabled={!dirty || put.isPending}
+            disabled={!dirty || isSaving}
           >
             Reset
           </Button>
@@ -386,11 +367,57 @@ function SaveStateMessages({
           </Button>
         </div>
       )}
-
     </>
   )
 }
 
 function ReadOnlyReason({ reason }: { reason: AgentConfigFile['readOnlyReason'] }) {
   return reason && <p>{reason}</p>
+}
+
+function useFileSave({
+  file,
+  content,
+  loadedVersion,
+  setDraft,
+  setConflict,
+  setFormatError,
+}: {
+  file: AgentConfigFile
+  content: string
+  loadedVersion: string | null
+  setDraft: (draft: string | null) => void
+  setConflict: (conflict: boolean) => void
+  setFormatError: (error: string | null) => void
+}) {
+  const put = usePutAgentConfigFile(file.id)
+  const queryClient = useQueryClient()
+  const refreshSettingsAdmin = useSettingsAdminRefresh()
+
+  const save = () => {
+    setFormatError(null)
+    setConflict(false)
+    put.mutate(
+      { content, version: loadedVersion },
+      {
+        onSuccess: () => {
+          setDraft(null)
+          toast(`${file.exists ? 'Saved' : 'Created'} ${file.label}`)
+        },
+        onError: (err) => {
+          // A 409 is a version conflict, or the host withdrew the grant since the page loaded.
+          if (err instanceof ApiError && err.status === 409) {
+            void refreshSettingsAdmin().then(() => {
+              const health = queryClient.getQueryData<HealthResponse>(queryKeys.health)
+              if (health?.capabilities.settingsAdmin === false) toast(err.message, { tone: 'danger' })
+              else setConflict(true)
+            })
+          } else if (err instanceof ApiError && err.status === 400) setFormatError(err.message)
+          else toast((err as Error).message, { tone: 'danger' })
+        },
+      },
+    )
+  }
+
+  return { save, isSaving: put.isPending }
 }
