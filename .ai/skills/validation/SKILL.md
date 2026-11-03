@@ -112,8 +112,7 @@ npm run test:e2e:local # explicitly requested full local browser run, four lanes
 
 Use `npm run test:e2e` for focused local specs and CI's serial shards. Reserve
 `npm run test:e2e:local` for an explicitly requested full local browser run or CI
-failure investigation. Both print a `TEST_E2E_STATUS` marker: `skipped` means
-agent-browser could not be provisioned and is not a pass, and a filtered run's
+failure investigation. Both print a `TEST_E2E_STATUS` marker. A filtered run's
 `passed` is not a full-suite pass. The server runs under `CEZ_DRY_RUN=1` from a
 separate e2e build against an isolated clone, never this checkout or its
 production build; stop it with `.ai/scripts/test-env-down.sh`. A red spec leaves a
@@ -159,7 +158,7 @@ npm test -- --shard=N/4 --maxWorkers=4  # vitest, N=1..4 — server + cockpit un
 npm run test:unit   # node:test — fast core-module coverage (packages/cezar/test/unit/)
 npm run build       # tsc → dist/, vite → packages/cezar/web/dist/, then the check:pack tarball gate
 npm run test:package # pack/install the release tarball and exercise the built CLI (packages/cezar/test/e2e/)
-npm run test:e2e     # cockpit browser E2E in CI shards; skipped is not a pass
+npm run test:e2e     # cockpit browser E2E in CI shards
 ```
 
 `npm test` and `npm run test:unit` are the fast unit gate: no server, no browser. They must stay that way. `npm run test:package` needs a completed `npm run build` (it packs the tarball). Pull request CI runs packaged CLI E2E and cockpit browser E2E as separate checks; the required aggregate fails if the cockpit suite is skipped or failed.
