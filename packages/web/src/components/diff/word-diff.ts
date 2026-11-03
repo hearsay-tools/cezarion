@@ -42,6 +42,15 @@ export function diffWords(before: string, after: string): WordDiff | null {
   if (a.length === 0 || b.length === 0) return null
   if (a.length > MAX_TOKENS || b.length > MAX_TOKENS) return null
 
+  const dp = matchTokens(a, b)
+  const width = b.length + 1
+  const common = dp[a.length * width + b.length] ?? 0
+  if (common / Math.max(a.length, b.length) < MIN_SIMILARITY) return null
+
+  return matchedSpans(a, b, dp)
+}
+
+function matchTokens(a: string[], b: string[]): Uint16Array {
   // Classic LCS table; dimensions are capped above so worst case is 300×300 numbers.
   const width = b.length + 1
   const dp = new Uint16Array((a.length + 1) * width)
@@ -53,9 +62,11 @@ export function diffWords(before: string, after: string): WordDiff | null {
           : Math.max(dp[(i - 1) * width + j] ?? 0, dp[i * width + (j - 1)] ?? 0)
     }
   }
-  const common = dp[a.length * width + b.length] ?? 0
-  if (common / Math.max(a.length, b.length) < MIN_SIMILARITY) return null
+  return dp
+}
 
+function matchedSpans(a: string[], b: string[], dp: Uint16Array): WordDiff {
+  const width = b.length + 1
   // Backtrack: tokens on the LCS path are "kept", everything else is changed.
   const keptA = Array.from({ length: a.length }, () => false)
   const keptB = Array.from({ length: b.length }, () => false)
