@@ -146,6 +146,16 @@ Ubuntu. Compare browser job times after the switch before changing shard counts
 or worker limits. Other jobs, including nightly verification, keep their existing
 runners. The trial changes no test command, worker count, timeout or required check.
 
+An independent, optional `Warm Ubicloud dependency cache` job installs dependencies
+on Ubicloud on every push to `main`, even when queue proof skips verification.
+Ubicloud's cache is separate from GitHub's and restores only from the current
+branch or the default branch. Seeding `main` lets task and merge-queue branches
+reuse its pnpm cache while keeping cache branch protection enabled. The job uses
+the browser shards' Node and pnpm setup, skips install scripts, and runs no tests.
+It also runs on a bare manual CI dispatch to prove workflow changes; a dispatch
+from a feature branch populates only that branch's cache. Cache warming does not
+gate verification or snapshot publication.
+
 The separate typecheck uses Blacksmith's 3,000 monthly x64 2-vCPU equivalent
 minutes. A seven-day sample projects about 2,833 PR/dispatch typecheck jobs per
 30 days. One hosted Blacksmith typecheck job passed in 54 seconds; at that
