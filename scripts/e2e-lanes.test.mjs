@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, readlinkSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { test } from 'node:test';
 
+import { checkWorkspaceResolution } from './check-workspace-resolution.mjs';
 import { createLane, removeLane, runLocalSuite } from '../.ai/scripts/e2e-lanes.mjs';
 
 function fixture(t) {
@@ -17,7 +18,10 @@ function fixture(t) {
   mkdirSync(join(repo, 'node_modules'), { recursive: true });
   mkdirSync(join(repo, 'packages/cezar/node_modules/zod'), { recursive: true });
   writeFileSync(join(repo, '.gitignore'), 'node_modules/\npackages/cezar/dist/\npackages/cezar/web/dist/\n.ai/qa/\n');
-  writeFileSync(join(repo, 'package.json'), '{"private":true,"workspaces":["packages/cezar"]}\n');
+  writeFileSync(join(repo, 'package.json'), '{"private":true,"workspaces":["packages/cezar"],"dependencies":{"fixture-cezar":"workspace:*"}}\n');
+  writeFileSync(join(repo, 'packages/cezar/package.json'), '{"name":"fixture-cezar","version":"1.0.0"}\n');
+  writeFileSync(join(repo, 'pnpm-workspace.yaml'), 'packages:\n  - packages/cezar\n');
+  writeFileSync(join(repo, 'pnpm-lock.yaml'), "lockfileVersion: '9.0'\nsettings:\n  autoInstallPeers: true\n  excludeLinksFromLockfile: false\nimporters:\n  .:\n    dependencies:\n      fixture-cezar:\n        specifier: workspace:*\n        version: link:packages/cezar\n  packages/cezar: {}\n");
   writeFileSync(join(repo, 'kept.txt'), 'base\n');
   writeFileSync(join(repo, 'deleted.txt'), 'remove me\n');
   writeFileSync(join(repo, '.ai/scripts/e2e.sh'), '#!/bin/sh\nexit 0\n');
@@ -61,7 +65,9 @@ test('each lane carries current edits and has private state with shared build as
     assert.equal(readFileSync(join(lane1, '.ai/qa/build/cezar/web/dist/index.html'), 'utf8'), 'built web\n');
     assert.equal(readFileSync(join(lane2, '.ai/qa/build/cezar/dist/index.js'), 'utf8'), 'built server\n');
     assert.equal(existsSync(join(lane1, 'packages/cezar/dist')), false);
-    assert.equal(readFileSync(join(lane1, 'packages/cezar/node_modules/zod/package.json'), 'utf8'), '{}\n');
+    checkWorkspaceResolution(lane1);
+    checkWorkspaceResolution(lane2);
+    assert.notEqual(realpathSync(join(lane1, 'node_modules')), realpathSync(join(lane2, 'node_modules')));
   } finally {
     removeLane({ repoRoot: repo, laneRoot: lane1 });
     removeLane({ repoRoot: repo, laneRoot: lane2 });
@@ -330,9 +336,9 @@ test('a linked source worktree keeps its frozen base and asset identities in a p
   assert.notEqual(commonDir(lane), commonDir(repo));
   assert.equal(gitText(lane, 'rev-parse', 'HEAD^{tree}'), gitText(repo, 'rev-parse', 'HEAD^{tree}'));
   assert.equal(gitText(original, 'worktree', 'list', '--porcelain'), before);
-  for (const asset of ['node_modules', 'packages/cezar/node_modules', '.ai/qa/build']) {
-    if (asset !== 'packages/cezar/node_modules') assert.equal(realpathSync(join(lane, asset)), realpathSync(join(repo, asset)));
-  }
+  assert.equal(realpathSync(join(lane, '.ai/qa/build')), realpathSync(join(repo, '.ai/qa/build')));
+  assert.notEqual(realpathSync(join(lane, 'node_modules')), realpathSync(join(repo, 'node_modules')));
+  checkWorkspaceResolution(lane);
 });
 
 test('cleanup refuses outside registrations and replaced lane symlinks without touching their targets', (t) => {
@@ -583,25 +589,23 @@ assert.equal(readFileSync(lane+'/.git/config','utf8').includes('insteadOf'),fals
 });
 
 
-test('pnpm lanes expose package dependencies and resolve workspace links inside the lane', (t) => {
+test('pnpm lanes install workspace dependencies inside the lane', (t) => {
   const { root, repo } = fixture(t);
-  for (const pkg of ['contract', 'api-client', 'cezar', 'web']) {
-    mkdirSync(join(repo, 'packages', pkg, 'node_modules'), { recursive: true });
-  }
-  writeFileSync(join(repo, 'package.json'), JSON.stringify({private: true, workspaces: ['packages/contract','packages/api-client','packages/cezar','packages/web']}));
-  const modules = join(repo, 'packages/web/node_modules');
-  mkdirSync(join(modules, '@open-mercato'), { recursive: true });
-  symlinkSync('../../../api-client', join(modules, '@open-mercato/cezar-api-client'));
-  mkdirSync(join(modules, 'external'), { recursive: true });
-  writeFileSync(join(modules, 'external/package.json'), '{"name":"external"}');
-  writeFileSync(join(repo, 'packages/api-client/current.txt'), 'verified source');
-  const scratch = join(root, 'scratch'); mkdirSync(scratch);
-  const lane = createLane({ repoRoot: repo, scratchRoot: scratch, index: 1 });
+  mkdirSync(join(repo, 'external'));
+  writeFileSync(join(repo, 'external/package.json'), '{"name":"fixture-external","version":"1.0.0"}');
+  const manifest = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'));
+  manifest.dependencies['fixture-external'] = 'file:external';
+  writeFileSync(join(repo, 'package.json'), JSON.stringify(manifest));
+  execFileSync('pnpm', ['install', '--lockfile-only', '--offline'], { cwd: repo, stdio: 'pipe' });
+  const lane = createLane({ repoRoot: repo, scratchRoot: join(root, 'scratch'), index: 1 });
   try {
-    assert.equal(readFileSync(join(lane, 'packages/web/node_modules/external/package.json'), 'utf8'), '{"name":"external"}');
-    writeFileSync(join(lane, 'packages/api-client/current.txt'), 'lane source');
-    assert.equal(readFileSync(join(lane, 'packages/web/node_modules/@open-mercato/cezar-api-client/current.txt'), 'utf8'), 'lane source');
-    assert.equal(readFileSync(join(repo, 'packages/api-client/current.txt'), 'utf8'), 'verified source');
+    checkWorkspaceResolution(lane);
+    assert.equal(realpathSync(join(lane, 'node_modules/fixture-cezar')), join(lane, 'packages/cezar'));
+    assert.ok(realpathSync(join(lane, 'node_modules/fixture-external')).startsWith(lane + '/'));
+    assert.equal(JSON.parse(readFileSync(join(lane, 'node_modules/fixture-external/package.json'), 'utf8')).name, 'fixture-external');
+    writeFileSync(join(lane, 'node_modules/fixture-cezar/current.txt'), 'lane source');
+    assert.equal(readFileSync(join(lane, 'packages/cezar/current.txt'), 'utf8'), 'lane source');
+    assert.equal(existsSync(join(repo, 'packages/cezar/current.txt')), false);
   } finally { removeLane({ repoRoot: repo, laneRoot: lane }); }
 });
 
@@ -676,3 +680,36 @@ test('local lanes serve the same fixed catalogs', (t) => {
   assert.equal(gitText(lane, 'status', '--porcelain'), gitText(original, 'status', '--porcelain'));
   assert.equal(gitText(lane, 'rev-parse', 'HEAD'), gitText(repo, 'rev-parse', 'HEAD'));
 });
+for (const missingStore of [true, false]) {
+  test(`lane install ${missingStore ? 'fetches a missing store package' : 'rejects an invalid frozen lockfile'}`, (t) => {
+    const { root, repo } = fixture(t);
+    const bin = join(root, 'bin');
+    mkdirSync(bin);
+    const calls = join(root, 'install-calls');
+    // The command boundary records both attempts without a registry or an empty host store.
+    writeFileSync(join(bin, 'pnpm'), `#!/usr/bin/env node
+import { appendFileSync, mkdirSync } from 'node:fs';
+appendFileSync(${JSON.stringify(calls)}, JSON.stringify(process.argv.slice(2)) + '\\n');
+if (process.argv.includes('--offline')) {
+  console.log(${JSON.stringify(missingStore ? 'ERR_PNPM_NO_OFFLINE_TARBALL missing package' : 'ERR_PNPM_OUTDATED_LOCKFILE stale manifest')});
+  process.exit(1);
+}
+mkdirSync('node_modules');
+`);
+    chmodSync(join(bin, 'pnpm'), 0o755);
+    writeFileSync(join(bin, 'package.json'), '{"type":"module"}');
+    const scratchRoot = join(root, 'scratch');
+    const run = spawnSync(process.execPath, ['--input-type=module', '-e', `
+import { createLane, removeLane } from ${JSON.stringify(new URL('../.ai/scripts/e2e-lanes.mjs', import.meta.url).href)};
+const repoRoot = ${JSON.stringify(repo)};
+const lane = createLane({ repoRoot, scratchRoot: ${JSON.stringify(scratchRoot)}, index: 1 });
+removeLane({ repoRoot, laneRoot: lane });
+`], { encoding: 'utf8', env: { ...process.env, PATH: bin + delimiter + process.env.PATH } });
+    assert.equal(run.status, missingStore ? 0 : 1, run.stdout + run.stderr);
+    const attempts = readFileSync(calls, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+    assert.deepEqual(attempts, missingStore
+      ? [['install', '--frozen-lockfile', '--offline'], ['install', '--frozen-lockfile']]
+      : [['install', '--frozen-lockfile', '--offline']]);
+    assert.equal(existsSync(join(scratchRoot, 'lane-1')), false);
+  });
+}
