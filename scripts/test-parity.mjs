@@ -11,12 +11,29 @@ export function selectFiles(cwd) {
   }).sort();
 }
 
+function installedCommand(command, cwd, run, platform) {
+  if (platform !== 'win32') return true;
+  // cmd.exe reports a missing shim as an exit code, not an ENOENT spawn error.
+  const result = run('where.exe', [command], { cwd, encoding: 'utf8' });
+  if (result.error) throw result.error;
+  if (result.status === 1) return false;
+  if (result.status !== 0) throw new Error('Cannot locate the Squeal command');
+  return true;
+}
+
+function shellCommand(command, platform) {
+  return platform === 'win32' && /\s/.test(command) ? `"${command}"` : command;
+}
+
 // A readable store alone does not mean a daemon is validating this worktree.
-export function detectDaemon(cwd, run = spawnSync, home = homedir(), env = process.env) {
+export function detectDaemon(cwd, run = spawnSync, home = homedir(), env = process.env, platform = process.platform) {
   // Documented launcher: https://github.com/hearsay-tools/squeal#install (SQUEAL_BIN_DIR overrides ~/.local/bin).
   const candidates = ['squeal', join(env.SQUEAL_BIN_DIR ?? join(home, '.local/bin'), 'squeal')];
   for (const command of candidates) {
-    const result = run(command, ['status', '--json'], { cwd, encoding: 'utf8' });
+    if (!installedCommand(command, cwd, run, platform)) continue;
+    const result = run(shellCommand(command, platform), ['status', '--json'], {
+      cwd, encoding: 'utf8', shell: platform === 'win32',
+    });
     if (result.error?.code === 'ENOENT') continue;
     if (result.error) throw result.error;
     const status = JSON.parse(result.stdout);
@@ -60,7 +77,7 @@ export function reportVerdicts(files, status, log) {
   return rows.every(row => row.label === 'PASS') ? 0 : 1;
 }
 
-function waitForVerdicts(command, files, { cwd, run, log, now }) {
+function waitForVerdicts(command, files, { cwd, run, log, now, platform }) {
   const config = JSON.parse(readFileSync(join(cwd, 'squeal.config.json'), 'utf8'));
   const cap = config.runner?.timeoutMs;
   if (!Number.isSafeInteger(cap) || cap <= 0) {
@@ -70,8 +87,8 @@ function waitForVerdicts(command, files, { cwd, run, log, now }) {
   let round = 0;
   while (true) {
     const wait = Math.max(1, Math.min(60000, deadline - now()));
-    const result = run(command, ['status', '--wait', String(wait), '--json', ...files], {
-      cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
+    const result = run(shellCommand(command, platform), ['status', '--wait', String(wait), '--json', ...files], {
+      cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, shell: platform === 'win32',
     });
     if (result.error) throw result.error;
     const status = JSON.parse(result.stdout);
@@ -87,11 +104,11 @@ function waitForVerdicts(command, files, { cwd, run, log, now }) {
 }
 
 export function runParity({ cwd = process.cwd(), args = process.argv.slice(2),
-  run = spawnSync, log = console.log, home = homedir(), now = Date.now } = {}) {
+  run = spawnSync, log = console.log, home = homedir(), now = Date.now, platform = process.platform } = {}) {
   if (args.some(arg => arg !== '--plan')) throw new Error('Use only --plan');
   const files = selectFiles(cwd);
   if (!files.length) throw new Error('No *-parity.test.ts files under packages/');
-  const command = detectDaemon(cwd, run, home);
+  const command = detectDaemon(cwd, run, home, process.env, platform);
   const mode = command ? 'squeal' : 'npm';
   if (args.includes('--plan')) {
     log(JSON.stringify({ mode, files }, null, 2));
@@ -99,12 +116,12 @@ export function runParity({ cwd = process.cwd(), args = process.argv.slice(2),
   }
   log(`[test:parity] ${mode}: ${files.length} files`);
   if (!command) {
-    const result = run(process.platform === 'win32' ? 'npm.cmd' : 'npm',
-      ['test', '--', ...files], { cwd, stdio: 'inherit' });
+    const result = run(platform === 'win32' ? 'npm.cmd' : 'npm',
+      ['test', '--', ...files], { cwd, stdio: 'inherit', shell: platform === 'win32' });
     if (result.error) throw result.error;
     return result.status ?? 1;
   }
-  return waitForVerdicts(command, files, { cwd, run, log, now });
+  return waitForVerdicts(command, files, { cwd, run, log, now, platform });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

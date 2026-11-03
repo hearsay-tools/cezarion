@@ -175,3 +175,49 @@ test('stops pending rounds at the configured per-file cap plus five minutes', t 
   assert.equal(time, 302345);
   for (const file of files) assert.ok(logs.some(line => line.startsWith(`PENDING ${file}:`)));
 });
+
+test('win32 no-daemon fallback launches npm.cmd with the same shell options as test:changed', t => {
+  const cwd = fixture(t);
+  const calls = [];
+  const run = (command, args, options) => {
+    calls.push({ command, args, options });
+    if (command === 'where.exe') return { status: 0, stdout: 'C:\\bin\\squeal.cmd\r\n' };
+    if (command === 'squeal') return result({ schemaVersion: 1, worktreeRoot: cwd, daemon: { state: 'down', since: null } });
+    return { status: 0 };
+  };
+  assert.equal(runParity({ cwd, args: [], run, platform: 'win32', log() {} }), 0);
+  const npm = calls.find(call => call.command === 'npm.cmd');
+  assert.ok(npm, 'must select npm.cmd');
+  assert.deepEqual(npm.options, { cwd, stdio: 'inherit', shell: true });
+  assert.deepEqual(npm.args, ['test', '--', ...selectFiles(cwd)]);
+});
+
+test('win32 launches a Squeal cmd shim through a shell for detection and waits', t => {
+  const cwd = fixture(t);
+  const calls = [];
+  const run = (command, args, options) => {
+    calls.push({ command, args, options });
+    if (command === 'where.exe') return { status: 0, stdout: 'C:\\bin\\squeal.cmd\r\n' };
+    if (!args.includes('--wait')) return alive(cwd);
+    return result({ selection: { testFiles: selectFiles(cwd).map(path => ({ path, state: 'current', verdict: 'pass' })) } });
+  };
+  assert.equal(runParity({ cwd, args: [], run, platform: 'win32', log() {} }), 0);
+  const squeal = calls.filter(call => call.command === 'squeal');
+  assert.equal(squeal.length, 2);
+  for (const call of squeal) assert.equal(call.options.shell, true);
+  assert.equal(calls[0].command, 'where.exe');
+  assert.ok(!calls.some(call => call.command === 'npm.cmd'));
+});
+
+test('win32 absent Squeal uses npm instead of parsing shell not-found output', t => {
+  const cwd = fixture(t);
+  const calls = [];
+  const run = (command, args, options) => {
+    calls.push({ command, args, options });
+    assert.ok(command === 'where.exe' || command === 'npm.cmd');
+    return command === 'where.exe' ? { status: 1, stdout: '' } : { status: 0 };
+  };
+  assert.equal(runParity({ cwd, args: [], run, platform: 'win32', log() {} }), 0);
+  assert.equal(calls.at(-1).command, 'npm.cmd');
+  assert.equal(calls.at(-1).options.shell, true);
+});
