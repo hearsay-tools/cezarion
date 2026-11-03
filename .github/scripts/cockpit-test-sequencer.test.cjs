@@ -35,8 +35,8 @@ test('cockpit config separates heavy suites and covers every discovered spec det
       config: { value: { ...ctx.config, sequence: { ...ctx.config.sequence, shuffle: true, seed } } },
     })).sort(input);
     const first = await shuffled(specs, 2511001);
-    assert.deepEqual(await shuffled([...specs].reverse(), 2511001), first);
-    assert.notDeepEqual(await shuffled(specs, 2511002), first);
+    assert.deepEqual((await shuffled([...specs].reverse(), 2511001)).map(s => s.moduleId), first.map(s => s.moduleId));
+    assert.notDeepEqual((await shuffled(specs, 2511002)).map(s => s.moduleId), first.map(s => s.moduleId));
     assert.deepEqual(new Set(first), new Set(specs));
     for (const shard of shards) {
       assert.deepEqual(new Set(await shuffled(shard, 2511001)), new Set(shard));
