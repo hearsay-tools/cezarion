@@ -1,0 +1,5 @@
+name: catalog-review
+description: Fixed browser workflow fixture
+skills:
+  - catalog-plan
+  - catalog-check

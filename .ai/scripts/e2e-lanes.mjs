@@ -7,6 +7,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { PROJECT_CATALOGS, replaceProjectCatalogs } from './e2e-catalogs.mjs';
+
 const ownRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const COUNT = 4;
 // build-e2e.sh's mirror of the server package; never the production packages/cezar/dist.
@@ -22,8 +24,13 @@ function changedPaths(repoRoot, baseRef) {
   return new Set(Buffer.concat([changed, untracked]).toString('utf8').split('\0').filter(Boolean));
 }
 
-function copyCurrentEdits(repoRoot, laneRoot, baseRef) {
+function isCatalogPath(relative) {
+  return PROJECT_CATALOGS.some(path => relative === path || relative.startsWith(`${path}/`));
+}
+
+function copyCurrentEdits(repoRoot, laneRoot, baseRef, fixedCatalogs = false) {
   for (const relative of changedPaths(repoRoot, baseRef)) {
+    if (fixedCatalogs && isCatalogPath(relative)) continue;
     const source = join(repoRoot, relative);
     const target = join(laneRoot, relative);
     rmSync(target, { recursive: true, force: true });
@@ -219,13 +226,14 @@ export function syncCurrentEdits({ repoRoot, root }) {
       git(root, 'checkout', '--quiet', head, '--', relative);
     }
   }
-  copyCurrentEdits(repoRoot, root, head);
+  copyCurrentEdits(repoRoot, root, head, owner.fixedCatalogs);
   return true;
 }
 
-export function createLane({ repoRoot, scratchRoot, index, baseRef = 'HEAD' }) {
+export function createLane({ repoRoot, scratchRoot, index, baseRef = 'HEAD', fixedCatalogs = false }) {
   const laneRoot = cloneIsolatedCheckout({ repoRoot, root: join(scratchRoot, `lane-${index}`), baseRef });
   try {
+    if (fixedCatalogs) replaceProjectCatalogs(laneRoot);
     linkBuiltAssets(repoRoot, laneRoot);
     return laneRoot;
   } catch (error) {
@@ -317,6 +325,35 @@ export function buildSource(repoRoot) {
   execFileSync('sh', ['.ai/scripts/build-e2e.sh'], npmOptions);
 }
 
+async function teardownLanes({ repoRoot, scratch, lanes, logDir, running }) {
+  const teardownFailures = [];
+  let retainedLane = false;
+  for (const lane of [...lanes].reverse()) {
+    try { retainEvidence(lane, logDir); } catch (error) { process.stderr.write(`E2E evidence: ${error}\n`); }
+    if (lane.browser?.installed && lane.browser.command) {
+      try {
+        const exit = await runProcess(lane.browser.command, ['--namespace', lane.namespace, 'close', '--all'], {
+          cwd: lane.root, env: { ...lane.env, ...lane.browser.runtimeEnv },
+          logPath: join(logDir, `lane-${lane.index}-browser-down.log`), running,
+        });
+        if (exit !== 0) teardownFailures.push(`lane ${lane.index} browser close failed (exit ${exit})`);
+      } catch (error) { teardownFailures.push(`lane ${lane.index} browser close failed: ${error}`); }
+    }
+    try {
+      const exit = await runProcess('sh', ['.ai/scripts/test-env-down.sh'], {
+        cwd: lane.root, env: lane.env, logPath: join(logDir, `lane-${lane.index}-down.log`), running,
+      });
+      if (exit !== 0) throw new Error(`exit ${exit}`);
+      removeLane({ repoRoot, laneRoot: lane.root });
+    } catch (error) {
+      retainedLane = true;
+      teardownFailures.push(`lane ${lane.index} server stop failed: ${error}`);
+    }
+  }
+  if (!retainedLane) rmSync(scratch, { recursive: true, force: true });
+  if (teardownFailures.length) throw new Error(`${teardownFailures.join('; ')}${retainedLane ? `; retained lanes in ${scratch}` : ''}`);
+}
+
 export async function runLocalSuite({ repoRoot = ownRoot, scratchRoot, buildSource: prepareBuild = buildSource } = {}) {
   const scratch = scratchRoot ?? mkdtempSync(join(tmpdir(), 'cez-e2e-lanes-'));
   if (scratchRoot) mkdirSync(scratch); // Refuse foreign state before build or teardown can claim it.
@@ -342,7 +379,7 @@ export async function runLocalSuite({ repoRoot = ownRoot, scratchRoot, buildSour
     // Boot sequentially: the first lane installs the browser provider once before peers use it.
     for (let index = 1; index <= COUNT; index += 1) {
       if (interrupted) throw new Error('local E2E run interrupted');
-      const root = createLane({ repoRoot, scratchRoot: scratch, index, baseRef });
+      const root = createLane({ repoRoot, scratchRoot: scratch, index, baseRef, fixedCatalogs: true });
       const namespace = (browserRunId + index - 1).toString(36).padStart(7, '0');
       const env = { ...process.env, E2E_PREBUILT_ASSETS: '1', E2E_BROWSER_NAMESPACE: namespace };
       const lane = { index, root, namespace, shard: `${index}/${COUNT}`, env,
@@ -380,32 +417,7 @@ export async function runLocalSuite({ repoRoot = ownRoot, scratchRoot, buildSour
     process.off('SIGINT', interrupt);
     process.off('SIGTERM', interrupt);
     terminateChildren(running);
-    const teardownFailures = [];
-    let retainedLane = false;
-    for (const lane of [...lanes].reverse()) {
-      try { retainEvidence(lane, logDir); } catch (error) { process.stderr.write(`E2E evidence: ${error}\n`); }
-      if (lane.browser?.installed && lane.browser.command) {
-        try {
-          const exit = await runProcess(lane.browser.command, ['--namespace', lane.namespace, 'close', '--all'], {
-            cwd: lane.root, env: { ...lane.env, ...lane.browser.runtimeEnv },
-            logPath: join(logDir, `lane-${lane.index}-browser-down.log`), running,
-          });
-          if (exit !== 0) teardownFailures.push(`lane ${lane.index} browser close failed (exit ${exit})`);
-        } catch (error) { teardownFailures.push(`lane ${lane.index} browser close failed: ${error}`); }
-      }
-      try {
-        const exit = await runProcess('sh', ['.ai/scripts/test-env-down.sh'], {
-          cwd: lane.root, env: lane.env, logPath: join(logDir, `lane-${lane.index}-down.log`), running,
-        });
-        if (exit !== 0) throw new Error(`exit ${exit}`);
-        removeLane({ repoRoot, laneRoot: lane.root });
-      } catch (error) {
-        retainedLane = true;
-        teardownFailures.push(`lane ${lane.index} server stop failed: ${error}`);
-      }
-    }
-    if (!retainedLane) rmSync(scratch, { recursive: true, force: true });
-    if (teardownFailures.length) throw new Error(`${teardownFailures.join('; ')}${retainedLane ? `; retained lanes in ${scratch}` : ''}`);
+    await teardownLanes({ repoRoot, scratch, lanes, logDir, running });
   }
 }
 

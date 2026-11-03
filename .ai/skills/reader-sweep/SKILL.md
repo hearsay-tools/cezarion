@@ -26,18 +26,6 @@ Where readers hide, searched from the repo root (replace the example values):
   rg -n -F -e 'delegation.wait' -e "'ci'" packages --glob '*.test.*' --glob '*.e2e.ts'
   ```
 
-<!-- until: hearsay-tools/cezarion#2510 -->
-- **A default removed** (a catalog, a source or a seeded entry): browser specs, by its
-  entry names, source names and the `data-slot` of each list or view that renders those
-  entries — a spec can depend on how many entries a list holds without naming any of
-  them. A spec that counts, lists or scrolls the default's entries must seed its own, as
-  [the e2e README](../../../packages/web/e2e/README.md#seed-the-catalog-entries-a-spec-relies-on)
-  says.
-
-  ```bash
-  rg -l -F -e 'open-mercato/skills' -e 'skill-row' packages/web/e2e/*.e2e.ts
-  ```
-
 <!-- until: hearsay-tools/cezarion#2514 -->
 - **Cockpit source changed**: the browser specs that run the changed file.
   `npm run test:e2e:affected -- --plan` lists them from the spec map
