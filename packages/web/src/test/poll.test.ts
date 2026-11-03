@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 // @vitest-environment node
 import { createServer } from 'node:http'
 import type { Socket } from 'node:net'
@@ -116,8 +117,8 @@ describe('waitForStatus', () => {
   it('polls through a rejected fetch until the run reaches a wanted status', async () => {
     const answers: Array<() => Promise<Response>> = [
       () => Promise.reject(new Error('ECONNRESET')),
-      () => Promise.resolve(new Response(JSON.stringify({ status: 'running' }), { status: 200 })),
-      () => Promise.resolve(new Response(JSON.stringify({ status: 'review' }), { status: 200 })),
+      () => Promise.resolve(new Response(JSON.stringify({ status: RUN_STATUS.running }), { status: 200 })),
+      () => Promise.resolve(new Response(JSON.stringify({ status: RUN_STATUS.review }), { status: 200 })),
     ]
     vi.stubGlobal('fetch', vi.fn(() => (answers.shift() ?? (() => Promise.reject(new Error('exhausted'))))()))
 
@@ -133,7 +134,7 @@ describe('waitForStatus', () => {
         return Promise.resolve(
           call < 3
             ? new Response('<html>gateway</html>', { status: 502 })
-            : new Response(JSON.stringify({ status: 'done' }), { status: 200 }),
+            : new Response(JSON.stringify({ status: RUN_STATUS.done }), { status: 200 }),
         )
       }),
     )
@@ -193,7 +194,7 @@ describe('wall-clock and request bounds (#764)', () => {
   }, 1000)
 
   it('reports the last observed status, wanted state and URL', async () => {
-    vi.stubGlobal('fetch', () => Promise.resolve(new Response(JSON.stringify({ status: 'waiting' }))))
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(JSON.stringify({ status: RUN_STATUS.waiting }))))
     await expect(waitForStatus('http://localhost:1', 'r', ['done'], { tries: 1, intervalMs: 0 }))
       .rejects.toThrow('last state: waiting')
   })

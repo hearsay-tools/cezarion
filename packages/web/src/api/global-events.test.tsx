@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createUsageStore, type UsageStore } from './events'
 import { GlobalEventsProvider, REPO_BRANCHES_COALESCE_MS, useGlobalEvents, useRunUsage, useUsage } from './global-events'
 import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
-import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { toRunSummary } from '@open-mercato/cezar-api-client/contract/runs'
 import { createQueryClient } from './query-client'
 import { queryKeys, useHealth, useRunnerModels, useRun, useRuns, useProjectRuns, useProviderStatus, workspaceQueryKeys } from './queries'
@@ -105,7 +105,7 @@ function runRecord(id: string, over: Partial<RunRecord> = {}): RunRecord {
     title: id,
     workflow: 'quick-task',
     task: 'do it',
-    status: 'running',
+    status: RUN_STATUS.running,
     createdAt: '2026-07-14T10:00:00.000Z',
     tokensUsed: 0,
     archived: false,
@@ -318,7 +318,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     renderHook(() => useRuns(), { wrapper })
     await act(async () => fresh.resolve(json([{ ...run, archived: true }])))
     expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(false)
-    source.emit('run', stampedRun({ ...run, archived: true, status: 'done' }))
+    source.emit('run', stampedRun({ ...run, archived: true, status: RUN_STATUS.done }))
     expect(client.getQueryState(queryKeys.runs.list())?.isInvalidated).toBe(false)
     expect(fetch).toHaveBeenCalledTimes(1)
   })
@@ -395,7 +395,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     const { source } = mount()
     source.emit('run', stampedRun({ ...a, archived: true }))
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{ ...a }, { ...b }])
-    source.emit('run', stampedRun({ ...a, status: 'done', archived: true }))
+    source.emit('run', stampedRun({ ...a, status: RUN_STATUS.done, archived: true }))
     source.emit('run', stampedRun({ ...b, tokensUsed: 42 }))
     act(() => vi.advanceTimersByTime(50))
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.archived).toBe(false)
@@ -405,7 +405,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     vi.mocked(fetch).mockReturnValue(fresh.promise)
     renderHook(() => useRuns(), { wrapper })
     expect(fetch).toHaveBeenCalledTimes(1)
-    await act(async () => fresh.resolve(json([{ ...a, status: 'done', archived: true }, { ...b, tokensUsed: 42 }])))
+    await act(async () => fresh.resolve(json([{ ...a, status: RUN_STATUS.done, archived: true }, { ...b, tokensUsed: 42 }])))
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.archived).toBe(true)
   })
 
@@ -468,7 +468,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     vi.useFakeTimers()
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
-    const run = runRecord('r1', { status: 'done' })
+    const run = runRecord('r1', { status: RUN_STATUS.done })
     const response = deferredResponse()
     vi.mocked(fetch).mockReturnValue(response.promise)
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
@@ -491,7 +491,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     vi.useFakeTimers()
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
-    const run = runRecord('r1', { status: 'done' })
+    const run = runRecord('r1', { status: RUN_STATUS.done })
     const list = [run]
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), list)
     const { source } = mount()
@@ -509,18 +509,18 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     vi.useFakeTimers()
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
-    const run = runRecord('r1', { status: 'running' })
+    const run = runRecord('r1', { status: RUN_STATUS.running })
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
     const { source } = mount()
     source.emit('run', stampedRun({ ...run, archived: true }))
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [{ ...run, archived: true, title: 'REST title' }])
     const invalidate = vi.spyOn(client, 'invalidateQueries')
 
-    source.emit('run', stampedRun({ ...run, archived: true, status: 'done', title: 'Worker finished' }))
+    source.emit('run', stampedRun({ ...run, archived: true, status: RUN_STATUS.done, title: 'Worker finished' }))
     act(() => vi.advanceTimersByTime(100))
 
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]).toMatchObject({
-      status: 'done', title: 'Worker finished',
+      status: RUN_STATUS.done, title: 'Worker finished',
     })
     expect(invalidate.mock.calls.filter(([filter]) => filter?.exact === true &&
       JSON.stringify(filter.queryKey) === JSON.stringify(queryKeys.runs.list()))).toHaveLength(1)
@@ -530,7 +530,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     vi.useFakeTimers()
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
-    const run = runRecord('r1', { status: 'done' })
+    const run = runRecord('r1', { status: RUN_STATUS.done })
     client.setQueryData(queryKeys.runs.list(), [run])
     const { source } = mount()
     source.emit('run', stampedRun({ ...run, archived: true }))
@@ -545,7 +545,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     vi.useFakeTimers()
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
-    const run = runRecord('r1', { status: 'done' })
+    const run = runRecord('r1', { status: RUN_STATUS.done })
     client.setQueryData(queryKeys.runs.list(), [run])
     const { source } = mount()
     source.emit('run', stampedRun({ ...run, archived: true }))
@@ -561,7 +561,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
   it('reconciles a pre-event REST response that lands after the archive frame', async () => {
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
-    const run = runRecord('r1', { status: 'done' })
+    const run = runRecord('r1', { status: RUN_STATUS.done })
     const stale = deferredResponse()
     const fresh = deferredResponse()
     vi.mocked(fetch).mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise)
@@ -587,12 +587,12 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
     const runs: RunRecord[] = []
     for (let p = 0; p < 12; p++) {
-      const parent = runRecord(`parent-${p}`, { status: 'done' })
+      const parent = runRecord(`parent-${p}`, { status: RUN_STATUS.done })
       runs.push(parent)
       for (let w = 0; w < 4; w++) {
         const id = `worker-${p}-${w}`
         runs.push(runRecord(id, {
-          status: 'running',
+          status: RUN_STATUS.running,
           delegation: {
             role: 'worker', parentRunId: parent.id, permissions: [],
             workspace: {
@@ -629,7 +629,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     // A background tab may pause animation frames. The bounded timer must still flush the burst.
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
-    const original = Array.from({ length: 60 }, (_, i) => runRecord(`run-${i}`, { status: 'done' }))
+    const original = Array.from({ length: 60 }, (_, i) => runRecord(`run-${i}`, { status: RUN_STATUS.done }))
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), original)
     let listWrites = 0
     const unsubscribe = client.getQueryCache().subscribe(event => {
@@ -660,7 +660,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
   it('keeps detail permission updates immediate while the archived list waits', () => {
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
-    const run = runRecord('r1', { status: 'done' })
+    const run = runRecord('r1', { status: RUN_STATUS.done })
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
     client.setQueryData(queryKeys.runs.detail('r1'), { ...run, finishBlocked: null })
     const { source, unmount } = mount()
@@ -676,7 +676,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
   it('flushes an archived update before a later deletion so the row cannot return', async () => {
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
-    const run = runRecord('r1', { status: 'done' })
+    const run = runRecord('r1', { status: RUN_STATUS.done })
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
     const { source } = mount()
 
@@ -707,7 +707,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
   it('flushes pending archived list events before reconnect reconciliation', () => {
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
-    const run = runRecord('r1', { status: 'done' })
+    const run = runRecord('r1', { status: RUN_STATUS.done })
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
     const { source } = mount()
     source.open()
@@ -722,7 +722,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
   it('flushes a hidden tab on return before its authoritative reconciliation', () => {
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
-    const run = runRecord('r1', { status: 'done' })
+    const run = runRecord('r1', { status: RUN_STATUS.done })
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
     const { source } = mount()
 
@@ -736,7 +736,7 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
   it('does not overwrite a newer authoritative archived row when the burst flushes', async () => {
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
-    const run = runRecord('r1', { status: 'done' })
+    const run = runRecord('r1', { status: RUN_STATUS.done })
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [run])
     const { source } = mount()
     source.emit('run', stampedRun({ ...run, archived: true, archivedAt: '2026-09-28T00:00:00.000Z' }))
@@ -754,12 +754,12 @@ describe('useGlobalEvents — archived run bursts (#657)', () => {
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
     vi.stubGlobal('cancelAnimationFrame', vi.fn())
     const worker = runRecord('worker', {
-      status: 'running', archived: true, archivedAt: '2026-09-28T00:00:00.000Z',
+      status: RUN_STATUS.running, archived: true, archivedAt: '2026-09-28T00:00:00.000Z',
     })
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [worker])
     const { source } = mount()
 
-    source.emit('run', stampedRun({ ...worker, status: 'done', title: 'Worker finished' }))
+    source.emit('run', stampedRun({ ...worker, status: RUN_STATUS.done, title: 'Worker finished' }))
 
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.status).toBe('done')
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.title).toBe('Worker finished')
@@ -815,11 +815,11 @@ describe('useGlobalEvents — run events', () => {
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [])
     const { source } = mount()
 
-    source.emit('run', stampedRun(runRecord('r1', { status: 'queued' })))
+    source.emit('run', stampedRun(runRecord('r1', { status: RUN_STATUS.queued })))
 
     // A list row is the summary of the streamed record (#817), never the record itself.
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toEqual([
-      toRunSummary(runRecord('r1', { status: 'queued' })),
+      toRunSummary(runRecord('r1', { status: RUN_STATUS.queued })),
     ])
     // The whole point: a live run emits constantly, and none of it may become HTTP traffic.
     expect(fetch).not.toHaveBeenCalled()
@@ -828,13 +828,13 @@ describe('useGlobalEvents — run events', () => {
   it.each(['own', 'worker'])('coalesces %s detail updates and keeps stale permission hidden during a burst', async kind => {
     vi.useFakeTimers()
     try {
-      const run = { ...runRecord('r1', { status: 'waiting' }), finishBlocked: null }
+      const run = { ...runRecord('r1', { status: RUN_STATUS.waiting }), finishBlocked: null }
       client.setQueryData<ApiRun>(queryKeys.runs.detail('r1'), run)
       vi.mocked(fetch).mockImplementation(async () => json(run))
       renderHook(() => useRun('r1'), { wrapper })
       const { source } = mount()
       for (let i = 0; i < 20; i++) {
-        source.emit('run', stampedRun(kind === 'own' ? runRecord('r1', { status: 'waiting' }) : runRecord('worker', {
+        source.emit('run', stampedRun(kind === 'own' ? runRecord('r1', { status: RUN_STATUS.waiting }) : runRecord('worker', {
           delegation: { role: 'worker', parentRunId: 'r1', permissions: [],
             workspace: { ownerRunId: 'worker', resourceId: 'worker', kind: 'owned-isolated', path: '/worker', branch: 'worker', baselineSha: 'a'.repeat(40) } },
         })))
@@ -853,7 +853,7 @@ describe('useGlobalEvents — run events', () => {
   it.each(['own', 'worker'] as const)('preserves cached detail during an in-flight %s event and debounces the replacement', async kind => {
     const id = kind === 'own' ? 'r1' : 'parent'
     const key = queryKeys.runs.detail(id)
-    const before = { ...runRecord(id, { status: 'running' }), finishBlocked: null, usage: SAMPLE }
+    const before = { ...runRecord(id, { status: RUN_STATUS.running }), finishBlocked: null, usage: SAMPLE }
     const stale = deferredResponse()
     const fresh = deferredResponse()
     client.setQueryData<ApiRun>(key, before)
@@ -865,7 +865,7 @@ describe('useGlobalEvents — run events', () => {
     expect(client.getQueryState(key)?.fetchStatus).toBe('fetching')
 
     source.emit('run', stampedRun(kind === 'own'
-      ? runRecord(id, { status: 'waiting', tokensUsed: 42 })
+      ? runRecord(id, { status: RUN_STATUS.waiting, tokensUsed: 42 })
       : runRecord('worker', {
         delegation: { role: 'worker', parentRunId: id, permissions: [],
           workspace: { ownerRunId: 'worker', resourceId: 'worker', kind: 'owned-isolated', path: '/worker', branch: 'worker', baselineSha: 'a'.repeat(40) } },
@@ -886,7 +886,7 @@ describe('useGlobalEvents — run events', () => {
     expect(fetch).toHaveBeenCalledTimes(1)
 
     await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
-    await act(async () => fresh.resolve(json({ ...before, status: 'waiting', finishBlocked: 'Wait for the worker.' })))
+    await act(async () => fresh.resolve(json({ ...before, status: RUN_STATUS.waiting, finishBlocked: 'Wait for the worker.' })))
     await waitFor(() => expect(client.getQueryData<ApiRun>(key)?.finishBlocked).toBe('Wait for the worker.'))
     expect(result.current.isError).toBe(false)
   })
@@ -913,7 +913,7 @@ describe('useGlobalEvents — run events', () => {
     vi.mocked(fetch).mockReturnValueOnce(stale.promise).mockReturnValue(fresh.promise)
     renderHook(() => useRun('r1'), { wrapper })
     const { source } = mount()
-    source.emit('run', stampedRun(kind === 'own' ? runRecord('r1', { status: 'waiting' }) : runRecord('worker', {
+    source.emit('run', stampedRun(kind === 'own' ? runRecord('r1', { status: RUN_STATUS.waiting }) : runRecord('worker', {
       delegation: { role: 'worker', parentRunId: 'r1', permissions: [],
         workspace: { ownerRunId: 'worker', resourceId: 'worker', kind: 'owned-isolated', path: '/worker', branch: 'worker', baselineSha: 'a'.repeat(40) } },
     })))
@@ -923,16 +923,16 @@ describe('useGlobalEvents — run events', () => {
     expect(client.getQueryState(queryKeys.runs.detail('r1'))?.status).toBe('pending')
     expect(client.getQueryState(queryKeys.runs.detail('r1'))?.fetchStatus).toBe('idle')
     expect(client.getQueryData(queryKeys.runs.detail('r1'))).toBeUndefined()
-    stale.resolve(json({ ...runRecord('r1', { status: 'waiting' }), finishBlocked: null }))
+    stale.resolve(json({ ...runRecord('r1', { status: RUN_STATUS.waiting }), finishBlocked: null }))
     await act(async () => {})
     expect(client.getQueryData(queryKeys.runs.detail('r1'))).toBeUndefined()
     expect(fetch).toHaveBeenCalledTimes(1)
-    fresh.resolve(json({ ...runRecord('r1', { status: 'waiting' }), finishBlocked: 'Answer the pending human question.' }))
+    fresh.resolve(json({ ...runRecord('r1', { status: RUN_STATUS.waiting }), finishBlocked: 'Answer the pending human question.' }))
     await waitFor(() => expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBe('Answer the pending human question.'))
   })
 
   it('clears stale Finish permission and refreshes the mounted parent on a worker update', async () => {
-    const parent = { ...runRecord('parent', { status: 'waiting' }), finishBlocked: null }
+    const parent = { ...runRecord('parent', { status: RUN_STATUS.waiting }), finishBlocked: null }
     client.setQueryData<ApiRun>(queryKeys.runs.detail('parent'), parent)
     const response = deferredResponse()
     vi.mocked(fetch).mockReturnValue(response.promise)
@@ -953,8 +953,8 @@ describe('useGlobalEvents — run events', () => {
     vi.mocked(fetch).mockReturnValue(response.promise)
     renderHook(() => useRun('r1'), { wrapper })
     const { source } = mount()
-    source.emit('run', stampedRun(runRecord('r1', { status: 'waiting' })))
-    response.resolve(json({ ...runRecord('r1', { status: 'waiting' }), finishBlocked: null }))
+    source.emit('run', stampedRun(runRecord('r1', { status: RUN_STATUS.waiting })))
+    response.resolve(json({ ...runRecord('r1', { status: RUN_STATUS.waiting }), finishBlocked: null }))
     await waitFor(() => expect(client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))?.finishBlocked).toBeNull())
     expect(vi.mocked(fetch).mock.calls.every(([input]) => String(input).replace('?archived=recent', '').endsWith('/runs/r1'))).toBe(true)
   })
@@ -963,9 +963,9 @@ describe('useGlobalEvents — run events', () => {
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [])
     const { source } = mount()
 
-    source.emit('run', stampedRun(runRecord('r1', { status: 'queued' })))
-    source.emit('run', stampedRun(runRecord('r1', { status: 'running', tokensUsed: 42 })))
-    source.emit('run', stampedRun(runRecord('r1', { status: 'done', tokensUsed: 99 })))
+    source.emit('run', stampedRun(runRecord('r1', { status: RUN_STATUS.queued })))
+    source.emit('run', stampedRun(runRecord('r1', { status: RUN_STATUS.running, tokensUsed: 42 })))
+    source.emit('run', stampedRun(runRecord('r1', { status: RUN_STATUS.done, tokensUsed: 99 })))
 
     const list = client.getQueryData<ApiRun[]>(queryKeys.runs.list())
     expect(list).toHaveLength(1)
@@ -977,8 +977,8 @@ describe('useGlobalEvents — run events', () => {
     client.setQueryData<ApiRun>(queryKeys.runs.detail('r1'), { ...runRecord('r1'), usage: SAMPLE })
     const { source } = mount()
 
-    source.emit('run', stampedRun(runRecord('r1', { status: 'done' })))
-    source.emit('run', stampedRun(runRecord('r2', { status: 'done' })))
+    source.emit('run', stampedRun(runRecord('r1', { status: RUN_STATUS.done })))
+    source.emit('run', stampedRun(runRecord('r2', { status: RUN_STATUS.done })))
 
     const detail = client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))
     expect(detail?.status).toBe('done')
@@ -992,7 +992,7 @@ describe('useGlobalEvents — run events', () => {
     client.setQueryData<ApiRun>(queryKeys.runs.detail('r1'), runRecord('r1', { runner: 'claude' }))
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
-    source.emit('run', stampedRun(runRecord('r1', { runner: 'claude', status: 'done', steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, backend: 'cursor', sessionId: 's1' }] })))
+    source.emit('run', stampedRun(runRecord('r1', { runner: 'claude', status: RUN_STATUS.done, steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, backend: 'cursor', sessionId: 's1' }] })))
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.runs.detail('r1') }))
   })
 
@@ -1003,7 +1003,7 @@ describe('useGlobalEvents — run events', () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
 
-    source.emit('run', stampedRun(runRecord('r1', { status: 'done' })))
+    source.emit('run', stampedRun(runRecord('r1', { status: RUN_STATUS.done })))
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.runs.changes('r1') })
   })
@@ -1014,7 +1014,7 @@ describe('useGlobalEvents — run events', () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
 
-    source.emit('run', stampedRun(runRecord('r2', { status: 'done' })))
+    source.emit('run', stampedRun(runRecord('r2', { status: RUN_STATUS.done })))
 
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: queryKeys.runs.changes('r2') })
   })
@@ -1027,7 +1027,7 @@ describe('useGlobalEvents — run events', () => {
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { source } = mount()
 
-    source.emit('run', stampedRun(runRecord('r9', { status: 'done' }), 'some-other-project'))
+    source.emit('run', stampedRun(runRecord('r9', { status: RUN_STATUS.done }), 'some-other-project'))
 
     // Debounced: one run emits many events, and a busy workspace emits from everywhere at once.
     expect(invalidate).not.toHaveBeenCalledWith({ queryKey: workspaceQueryKeys.runsIndex })
@@ -1056,7 +1056,7 @@ describe('useGlobalEvents — run events', () => {
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [])
     const { source } = mount()
 
-    source.emit('run', stampedRun(runRecord('r9', { status: 'done' }), 'some-other-project'))
+    source.emit('run', stampedRun(runRecord('r9', { status: RUN_STATUS.done }), 'some-other-project'))
 
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toEqual([])
   })
@@ -1952,7 +1952,7 @@ describe('relationships refresh (#659)', () => {
     source.emit('run', stampedRun(workerOf('parent', 'w1', { tokensUsed: 3, title: 'renamed' })))
     await act(async () => { await vi.advanceTimersByTimeAsync(400) })
     expect(invalidated(key)).toBe(false)
-    source.emit('run', stampedRun(workerOf('parent', 'w1', { tokensUsed: 4, status: 'done' })))
+    source.emit('run', stampedRun(workerOf('parent', 'w1', { tokensUsed: 4, status: RUN_STATUS.done })))
     await act(async () => { await vi.advanceTimersByTimeAsync(400) })
     expect(invalidated(key)).toBe(true)
   })
@@ -2007,9 +2007,9 @@ it('delivers a secondary-project structured ASK waiting transition to browser no
   setVisibility('hidden')
 
   // The server's cezar_ask turn-end path publishes this run summary on the workspace stream.
-  source.emit('run', stampedRun({ ...live, status: 'waiting', waits: [openHumanWait(1)] }, 'secondary'))
+  source.emit('run', stampedRun({ ...live, status: RUN_STATUS.waiting, waits: [openHumanWait(1)] }, 'secondary'))
   expect(notifications).toEqual(['structured-ask'])
-  source.emit('run', stampedRun({ ...live, status: 'waiting', waits: [openHumanWait(1)], tokensUsed: 42 }, 'secondary'))
+  source.emit('run', stampedRun({ ...live, status: RUN_STATUS.waiting, waits: [openHumanWait(1)], tokensUsed: 42 }, 'secondary'))
   expect(notifications).toHaveLength(1)
 })
 
@@ -2020,7 +2020,7 @@ describe('live run list responses overlapping newer workspace events (#795)', ()
     const project = scope === 'other-project' ? 'other' : BOOT
     setApiScope(scope === 'boot-alias' ? null : project)
     const key = [scope === 'boot-alias' ? 'default' : project, 'runs', 'list'] as const
-    const record = runRecord('desktop', { status: 'review', notify: true })
+    const record = runRecord('desktop', { status: RUN_STATUS.review, notify: true })
     const off = { ...record, notify: undefined }
     const stale = deferredResponse(), fresh = deferredResponse()
     vi.mocked(fetch).mockImplementation(input => {
@@ -2067,7 +2067,7 @@ describe('live run list responses overlapping newer workspace events (#795)', ()
 describe('ordinary run events while authoritative lists are fetching (#795)', () => {
   it.each(['warm-update', 'cold-update', 'warm-delete', 'cold-delete'] as const)('%s cannot be reversed by a pre-event GET', async kind => {
     const record = runRecord('r1')
-    const newer = { ...record, title: 'New title', status: 'done' as const, pinned: true, tokensUsed: 37 }
+    const newer = { ...record, title: 'New title', status: RUN_STATUS.done, pinned: true, tokensUsed: 37 }
     const newerRow = toRunSummary(newer)
     const deleted = kind.endsWith('delete')
     const stale = deferredResponse(), fresh = deferredResponse()

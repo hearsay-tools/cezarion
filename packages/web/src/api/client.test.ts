@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { projectAddress, runAddress } from './run-address'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -488,7 +489,7 @@ describe('response parsing', () => {
   })
 
   it('returns the run list', async () => {
-    reply([{ id: 'run-1', title: 'Fix it', status: 'running' }])
+    reply([{ id: 'run-1', title: 'Fix it', status: RUN_STATUS.running }])
     const runs = await getRuns(projectAddress())
     expect(runs).toHaveLength(1)
     expect(runs[0]?.id).toBe('run-1')
