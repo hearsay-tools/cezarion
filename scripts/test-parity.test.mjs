@@ -182,11 +182,11 @@ test('win32 no-daemon fallback launches npm.cmd with the same shell options as t
   const run = (command, args, options) => {
     calls.push({ command, args, options });
     if (command === 'where.exe') return { status: 0, stdout: 'C:\\bin\\squeal.cmd\r\n' };
-    if (command === 'squeal') return result({ schemaVersion: 1, worktreeRoot: cwd, daemon: { state: 'down', since: null } });
+    if (command === '"squeal"') return result({ schemaVersion: 1, worktreeRoot: cwd, daemon: { state: 'down', since: null } });
     return { status: 0 };
   };
   assert.equal(runParity({ cwd, args: [], run, platform: 'win32', log() {} }), 0);
-  const npm = calls.find(call => call.command === 'npm.cmd');
+  const npm = calls.find(call => call.command === '"npm.cmd"');
   assert.ok(npm, 'must select npm.cmd');
   assert.deepEqual(npm.options, { cwd, stdio: 'inherit', shell: true });
   assert.deepEqual(npm.args, ['test', '--', ...selectFiles(cwd)]);
@@ -202,11 +202,11 @@ test('win32 launches a Squeal cmd shim through a shell for detection and waits',
     return result({ selection: { testFiles: selectFiles(cwd).map(path => ({ path, state: 'current', verdict: 'pass' })) } });
   };
   assert.equal(runParity({ cwd, args: [], run, platform: 'win32', log() {} }), 0);
-  const squeal = calls.filter(call => call.command === 'squeal');
+  const squeal = calls.filter(call => call.command === '"squeal"');
   assert.equal(squeal.length, 2);
   for (const call of squeal) assert.equal(call.options.shell, true);
   assert.equal(calls[0].command, 'where.exe');
-  assert.ok(!calls.some(call => call.command === 'npm.cmd'));
+  assert.ok(!calls.some(call => call.command === '"npm.cmd"'));
 });
 
 test('win32 absent Squeal uses npm instead of parsing shell not-found output', t => {
@@ -214,10 +214,47 @@ test('win32 absent Squeal uses npm instead of parsing shell not-found output', t
   const calls = [];
   const run = (command, args, options) => {
     calls.push({ command, args, options });
-    assert.ok(command === 'where.exe' || command === 'npm.cmd');
+    assert.ok(command === 'where.exe' || command === '"npm.cmd"');
     return command === 'where.exe' ? { status: 1, stdout: '' } : { status: 0 };
   };
   assert.equal(runParity({ cwd, args: [], run, platform: 'win32', log() {} }), 0);
-  assert.equal(calls.at(-1).command, 'npm.cmd');
+  assert.equal(calls.at(-1).command, '"npm.cmd"');
   assert.equal(calls.at(-1).options.shell, true);
+});
+
+test('win32 always quotes a Squeal command path containing an ampersand', () => {
+  const directory = '/custom&tools/bin';
+  const command = join(directory, 'squeal');
+  const calls = [];
+  const run = (executable, args, options) => {
+    calls.push({ executable, args, options });
+    if (executable === 'where.exe') return { status: args[0] === 'squeal' ? 1 : 0 };
+    return alive('/repo');
+  };
+  assert.equal(detectDaemon('/repo', run, '/user', { SQUEAL_BIN_DIR: directory }, 'win32'), command);
+  assert.equal(calls.at(-1).executable, `"${command}"`);
+  assert.equal(calls.at(-1).options.shell, true);
+});
+
+test('win32 refuses percent signs and double quotes in Squeal command paths', () => {
+  for (const directory of ['/custom%tools/bin', '/custom"tools/bin']) {
+    const run = (command, args) => {
+      assert.equal(command, 'where.exe', 'must refuse before launching the shell');
+      return { status: args[0] === 'squeal' ? 1 : 0 };
+    };
+    assert.throws(() => detectDaemon('/repo', run, '/user', { SQUEAL_BIN_DIR: directory }, 'win32'), /SQUEAL_BIN_DIR/);
+  }
+});
+
+test('win32 refuses cmd metacharacters in generated test-path arguments', t => {
+  const cwd = fixture(t);
+  writeFileSync(join(cwd, 'packages', 'unsafe&path-parity.test.ts'), '');
+  for (const state of ['alive', 'down']) {
+    const run = (command, args) => {
+      if (command === 'where.exe') return { status: 0 };
+      assert.deepEqual(args, ['status', '--json'], 'must refuse before launching a test command');
+      return result({ schemaVersion: 1, worktreeRoot: cwd, daemon: { state, since: null } });
+    };
+    assert.throws(() => runParity({ cwd, args: [], run, platform: 'win32', log() {} }), /cmd metacharacters/);
+  }
 });

@@ -22,7 +22,18 @@ function installedCommand(command, cwd, run, platform) {
 }
 
 function shellCommand(command, platform) {
-  return platform === 'win32' && /\s/.test(command) ? `"${command}"` : command;
+  if (platform !== 'win32') return command;
+  if (/["%]/.test(command)) {
+    throw new Error('SQUEAL_BIN_DIR command paths cannot contain double quotes or percent signs on Windows');
+  }
+  return `"${command}"`;
+}
+
+function launchCommand(command, args, options, run, platform) {
+  if (platform === 'win32' && args.some(arg => /[\s&|<>^()%!"]/.test(arg))) {
+    throw new Error('Generated parity arguments cannot contain whitespace or cmd metacharacters on Windows');
+  }
+  return run(shellCommand(command, platform), args, { ...options, shell: platform === 'win32' });
 }
 
 // A readable store alone does not mean a daemon is validating this worktree.
@@ -31,9 +42,9 @@ export function detectDaemon(cwd, run = spawnSync, home = homedir(), env = proce
   const candidates = ['squeal', join(env.SQUEAL_BIN_DIR ?? join(home, '.local/bin'), 'squeal')];
   for (const command of candidates) {
     if (!installedCommand(command, cwd, run, platform)) continue;
-    const result = run(shellCommand(command, platform), ['status', '--json'], {
-      cwd, encoding: 'utf8', shell: platform === 'win32',
-    });
+    const result = launchCommand(command, ['status', '--json'], {
+      cwd, encoding: 'utf8',
+    }, run, platform);
     if (result.error?.code === 'ENOENT') continue;
     if (result.error) throw result.error;
     const status = JSON.parse(result.stdout);
@@ -87,9 +98,9 @@ function waitForVerdicts(command, files, { cwd, run, log, now, platform }) {
   let round = 0;
   while (true) {
     const wait = Math.max(1, Math.min(60000, deadline - now()));
-    const result = run(shellCommand(command, platform), ['status', '--wait', String(wait), '--json', ...files], {
-      cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, shell: platform === 'win32',
-    });
+    const result = launchCommand(command, ['status', '--wait', String(wait), '--json', ...files], {
+      cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
+    }, run, platform);
     if (result.error) throw result.error;
     const status = JSON.parse(result.stdout);
     const rows = verdictRows(files, status);
@@ -116,8 +127,8 @@ export function runParity({ cwd = process.cwd(), args = process.argv.slice(2),
   }
   log(`[test:parity] ${mode}: ${files.length} files`);
   if (!command) {
-    const result = run(platform === 'win32' ? 'npm.cmd' : 'npm',
-      ['test', '--', ...files], { cwd, stdio: 'inherit', shell: platform === 'win32' });
+    const result = launchCommand(platform === 'win32' ? 'npm.cmd' : 'npm',
+      ['test', '--', ...files], { cwd, stdio: 'inherit' }, run, platform);
     if (result.error) throw result.error;
     return result.status ?? 1;
   }
