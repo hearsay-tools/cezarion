@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { AgentInput, ConversationMessage, ConversationSendRequest, ConversationState, DelegationState, RequestOutcome } from '@open-mercato/cezar-contract';
 import { workerOperationSchema } from '@open-mercato/cezar-contract/delegation';
+import { deliveryReceipts } from '../runs/outcome-commit.ts';
 import { ConversationIdInUseError, RunWriteRefusedError, type RunRecord, type RunStore } from '../runs/store.ts';
 import { DelegationPolicyError } from './policy.ts';
 import { reservedReplies } from './questions.ts';
@@ -80,12 +81,10 @@ function projectDelivery(store: RunStore, runId: string, message: ConversationMe
   const delivery = input?.consumedAt ? 'consumed' : input?.deliveredAt ? 'delivered' : input ? 'queued' : 'not-delivered';
   // A read message was delivered first, even when both landed between two projections;
   // readers that predate `consumed` still see it delivered (hearsay-tools/cezarion#505).
-  for (const step of delivery === 'consumed' ? ['delivered', 'consumed'] as const : [delivery]) {
+  for (const step of delivery === 'consumed' ? ['delivered', 'consumed'] as const : [delivery] as const) {
     const projectionId = `conversation-message:${message.id}:${step}`;
     if (ids.has(projectionId)) continue;
-    store.appendEvent(runId, { type: 'conversation-message', projectionId, message, delivery: step,
-      ...(input?.deliveredAt ? { deliveredAt: input.deliveredAt } : {}),
-      ...(step === 'consumed' && input?.consumedAt ? { consumedAt: input.consumedAt } : {}) });
+    store.appendEvent(runId, { type: 'conversation-message', projectionId, message, delivery: step, ...deliveryReceipts(input, step) });
   }
 }
 

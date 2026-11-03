@@ -354,7 +354,7 @@ describe('wait checkpoints', () => {
       expect(run.waits).toEqual([ci]);
       expect(run.lastWaits).toEqual([{ ...human, phase: WAIT_PHASE.delivered, deliveredAt: expect.any(String) }]);
     }
-    expect(store.commitOutcome(id, { kind: 'answered' })).toEqual({ committed: false, answered: [] });
+    expect(store.commitOutcome(id, { kind: 'answered' })).toEqual({ committed: false, answered: [], settled: [] });
   });
 
   it('a human wait round-trips through close and reopen with its askSeq', () => {

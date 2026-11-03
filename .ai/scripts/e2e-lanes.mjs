@@ -2,7 +2,7 @@
 // One-command local browser gate: one build, four independent app/browser lanes.
 import { spawn, execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { closeSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -45,33 +45,25 @@ function copyCurrentEdits(repoRoot, laneRoot, baseRef, fixedCatalogs = false) {
   }
 }
 
-function linkWorkspaceDependencies(repoRoot, laneRoot) {
-  const packages = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')).workspaces ?? [];
-  const local = new Map(packages.map(relative => [realpathSync(join(repoRoot, relative)), join(laneRoot, relative)]));
-  function mirror(source, target) {
-    mkdirSync(target, { recursive: true });
-    for (const entry of readdirSync(source)) {
-      const from = join(source, entry);
-      const to = join(target, entry);
-      if (entry.startsWith('@')) mirror(from, to);
-      else symlinkSync(local.get(realpathSync(from)) ?? from, to, 'dir');
-    }
+function installLaneDependencies(laneRoot) {
+  const started = performance.now();
+  const options = { cwd: laneRoot, encoding: 'utf8', shell: process.platform === 'win32' };
+  try {
+    execFileSync('pnpm', ['install', '--frozen-lockfile', '--offline'], options);
+  } catch (error) {
+    const output = `${error.stdout ?? ''}\n${error.stderr ?? ''}`;
+    if (!/ERR_PNPM_(?:NO_OFFLINE_META|NO_OFFLINE_TARBALL|OFFLINE_META_NOT_FOUND)/.test(output)) throw error;
+    execFileSync('pnpm', ['install', '--frozen-lockfile'], { ...options, stdio: 'inherit' });
   }
-  for (const relative of packages) {
-    const source = join(repoRoot, relative, 'node_modules');
-    if (existsSync(source)) mirror(source, join(laneRoot, relative, 'node_modules'));
-  }
+  process.stdout.write(`E2E lane dependencies: ${((performance.now() - started) / 1000).toFixed(2)}s (${laneRoot})\n`);
 }
 
 function linkBuiltAssets(repoRoot, laneRoot) {
-  linkWorkspaceDependencies(repoRoot, laneRoot);
-  for (const relative of ['node_modules', E2E_BUILD]) {
-    const source = join(repoRoot, relative);
-    if (!existsSync(source)) throw new Error(`missing shared E2E asset: ${source}`);
-    const target = join(laneRoot, relative);
-    mkdirSync(dirname(target), { recursive: true });
-    symlinkSync(source, target, 'dir');
-  }
+  const source = join(repoRoot, E2E_BUILD);
+  if (!existsSync(source)) throw new Error(`missing shared E2E asset: ${source}`);
+  const target = join(laneRoot, E2E_BUILD);
+  mkdirSync(dirname(target), { recursive: true });
+  symlinkSync(source, target, 'dir');
 }
 
 // Project only public fixture metadata. Never copy host config, credentials or hooks.
@@ -235,6 +227,7 @@ export function createLane({ repoRoot, scratchRoot, index, baseRef = 'HEAD', fix
   try {
     if (fixedCatalogs) replaceProjectCatalogs(laneRoot);
     linkBuiltAssets(repoRoot, laneRoot);
+    installLaneDependencies(laneRoot);
     return laneRoot;
   } catch (error) {
     rmSync(laneRoot, { recursive: true, force: true });

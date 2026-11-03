@@ -426,9 +426,9 @@ command remains the single-environment runner used by CI and focused local runs.
 
 Each lane is a temporary checkout at the current `HEAD`, with independent Git administration
 and owned objects, plus this checkout's tracked edits and untracked source files copied in. It gets a private `.ai/qa` directory, `CEZ_HOME`,
-port, environment descriptor, and agent-browser namespace. `node_modules` and the E2E build
-(`.ai/qa/build`) are symlinks to the source checkout; the lane bootstrap checks the E2E
-build marker and cannot rebuild through those links. Do not edit source or rebuild the
+port, environment descriptor, and agent-browser namespace. Dependencies are installed inside each lane from the frozen lockfile, using the shared
+pnpm store offline when available. The E2E build (`.ai/qa/build`) is linked to the source
+checkout; the lane bootstrap checks its marker and cannot rebuild through that link. Do not edit source or rebuild the
 shared assets while a four-lane run is active.
 
 Remote projection reads only repository-local and enabled worktree configuration. Global
