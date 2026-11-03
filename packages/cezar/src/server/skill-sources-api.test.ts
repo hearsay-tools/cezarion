@@ -1,12 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Hono } from 'hono';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SKILLS_REPO_FORMATS, type TeamSkillSourcesResponse } from '@open-mercato/cezar-contract/skill-sources';
 import { RunStore } from '../runs/store.ts';
-import { bareDirFor, waitForTeamSkills } from '../skills-remote.ts';
+import { bareDirFor, refreshTeamSources, waitForTeamSkills } from '../skills-remote.ts';
 import type { Skill } from '../skills.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
@@ -246,6 +246,20 @@ describe('the team skill sources API', () => {
       detail: `git could not list the skills of ${repo} at main.`,
       skillCount: 0,
     });
+  });
+
+  it('a fetch that ends after its source was removed does not bring the source back', async () => {
+    const kept = sourceRepo('kept');
+    const removed = sourceRepo('gone');
+    writeFileSync(configPath(), JSON.stringify({ skillsRepos: [{ repo: kept }, { repo: removed }] }));
+    const load = refreshTeamSources(repoRoot, [{ repo: kept, ref: 'main' }, { repo: removed, ref: 'main' }]);
+    // The load has read the config once the first clone starts; the source is removed after that.
+    // bound: a hang guard for a local clone, not a timing assumption
+    await vi.waitFor(() => expect(existsSync(bareDirFor(kept))).toBe(true), { timeout: 10_000 });
+    writeFileSync(configPath(), JSON.stringify({ skillsRepos: [{ repo: kept }] }));
+    await load;
+    expect(await teamNames('/skills/importable')).toEqual(['kept']);
+    expect((await sources()).sources.map((source) => source.repo)).toEqual([kept]);
   });
 
   it('names a configured source in a refused format', async () => {

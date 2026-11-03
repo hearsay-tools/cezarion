@@ -244,9 +244,13 @@ export async function readRawConfig(dataDir: string): Promise<RawConfigRead> {
  * switches nothing off; `loadConfig` then lists no sources at all. A bad entry is dropped, as there.
  */
 export function readDisabledSkillsReposSync(repoRoot: string): SkillsRepoRef[] {
+  return readSkillsReposSync(repoRoot).filter((src) => !src.enabled).map(({ repo, ref }) => ({ repo, ref }));
+}
+
+/** Every `skillsRepos` entry as the file says now, read synchronously; an unreadable file has none. */
+export function readSkillsReposSync(repoRoot: string): SkillsRepoSource[] {
   try {
-    const config = parseLeniently(JSON.parse(readFileSync(join(repoRoot, '.ai/cezar', 'config.json'), 'utf8')));
-    return config.skillsRepos.filter((src) => !src.enabled).map(({ repo, ref }) => ({ repo, ref }));
+    return parseLeniently(JSON.parse(readFileSync(join(repoRoot, '.ai/cezar', 'config.json'), 'utf8'))).skillsRepos;
   } catch {
     return [];
   }

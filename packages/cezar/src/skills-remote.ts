@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { lstat, mkdir, readdir, readFile, realpath, rename, rm, rmdir, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
-import { DEFAULT_SKILLS_REF, loadConfig, type SkillsRepoRef } from './config.ts';
+import { DEFAULT_SKILLS_REF, loadConfig, readSkillsReposSync, type SkillsRepoRef } from './config.ts';
 import { parseFrontmatter, type Skill } from './skills.ts';
 import { isSafeSkillsRef, SKILLS_REPO_FORMATS, skillsRepoKind, type TeamSourceStatus } from '@open-mercato/cezar-contract/skill-sources';
 
@@ -860,13 +860,22 @@ async function loadTeamSkills(
     const snapshot = { skills: cached[index], stamp: snapshotStamps[index], superseded };
     lists.push(await loadOneSource(repoRoot, src, mode, snapshot));
   }
-  const out = mergeSourceLists(lists);
+  // A source removed or disabled while this load fetched leaves the list it publishes: an older
+  // Retry must not bring back a source a newer change took out.
+  const current = new Set(readEnabledSourceKeys(repoRoot));
+  const out = mergeSourceLists(lists).filter((skill) => !skill.team || current.has(sourceKey(skill.team)));
+  forgetUnlistedStatuses(repoRoot, sources.filter((src) => current.has(sourceKey(src))));
   // Every load but a passive one publishes. A passive load that a newer post-fetch list
   // overtook defers to it rather than replacing it with an older view.
   if (mode === 'passive' && superseded()) return teamSkillsByRoot.get(repoRoot) ?? out;
   postFetchListsByRoot.set(repoRoot, (postFetchListsByRoot.get(repoRoot) ?? 0) + 1);
   teamSkillsByRoot.set(repoRoot, out);
   return out;
+}
+
+/** The enabled `skillsRepos` entries as the file says now, read synchronously at publish time. */
+function readEnabledSourceKeys(repoRoot: string): string[] {
+  return readSkillsReposSync(repoRoot).filter((src) => src.enabled).map(sourceKey);
 }
 
 /** Fetch `src` when the mode says so, list it, and record its state. */
