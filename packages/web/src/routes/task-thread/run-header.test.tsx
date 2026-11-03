@@ -1,3 +1,12 @@
+import {
+  RUN_STATUS,
+  STEP_KIND,
+  STEP_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { openHumanWait } from '@/test/run-summary-fixture'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
@@ -22,8 +31,8 @@ afterEach(() => {
 const step = (extra: Partial<StepState> = {}): StepState => ({
   id: 'task',
   name: 'Do the task',
-  kind: 'agent',
-  status: 'done',
+  kind: STEP_KIND.agent,
+  status: STEP_STATUS.done,
   iterations: 1,
   tokensUsed: 0,
   ...extra,
@@ -212,9 +221,9 @@ it.each([true, false])('shows the automatic reason only for its matching archive
 describe('simplified header (hearsay-tools/cezarion#1333)', () => {
   type TimerEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'timer' }>
   const timer: TimerEntry = {
-    id: '00000000-0000-4000-8000-000000000005', kind: 'timer', source: 'agent', via: 'cezar_wait',
+    id: '00000000-0000-4000-8000-000000000005', kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
     turnId: 'turn-1', seconds: 300, registeredAt: '2026-09-22T12:00:00.000Z',
-    deadline: '2026-09-22T12:05:00.000Z', phase: 'open',
+    deadline: '2026-09-22T12:05:00.000Z', phase: WAIT_PHASE.open,
   }
 
   it('keeps one status pill with the next check on desktop', () => {
@@ -250,7 +259,7 @@ describe('Session-only activity controls (#751)', () => {
     stubFetch({ '/api/v1/runs/r1/relationships': () => jsonResponse({ workers: [] }) })
     renderHeader(run('running', {
       delegation: { role: 'root', permissions: [], receipts: [] },
-      steps: [step({ status: 'running' })],
+      steps: [step({ status: STEP_STATUS.running })],
     }), undefined, tab)
 
     await act(async () => {})
@@ -328,14 +337,14 @@ describe('action bar visibility per status (the legacy rules, rendered)', () => 
   // so it is offered whatever the run is doing — only archiving takes it away.
   // Finish belongs only to the composer; Archive stays outside this menu on every tab.
   const matrix: Array<{ status: RunStatus; visible: string[] }> = [
-    { status: 'queued', visible: ['Notes / handoff', 'Pin task'] },
-    { status: 'running', visible: ['Notes / handoff', 'Pin task'] },
-    { status: 'waiting', visible: ['Notes / handoff', 'Pin task'] },
+    { status: RUN_STATUS.queued, visible: ['Notes / handoff', 'Pin task'] },
+    { status: RUN_STATUS.running, visible: ['Notes / handoff', 'Pin task'] },
+    { status: RUN_STATUS.waiting, visible: ['Notes / handoff', 'Pin task'] },
     // Terminal folded into the Open in… menu — it shows whenever the session can be resumed.
-    { status: 'review', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Delete task…'] },
-    { status: 'done', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Delete task…'] },
-    { status: 'failed', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Delete task…'] },
-    { status: 'cancelled', visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Delete task…'] },
+    { status: RUN_STATUS.review, visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Delete task…'] },
+    { status: RUN_STATUS.done, visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Delete task…'] },
+    { status: RUN_STATUS.failed, visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Delete task…'] },
+    { status: RUN_STATUS.cancelled, visible: ['Notes / handoff', 'Open in…', 'Copy resume command', 'Pin task', 'Delete task…'] },
   ]
 
   it.each(matrix)('$status → $visible', ({ status, visible }) => {
@@ -956,9 +965,9 @@ describe('the promoted actions, per tab (#281)', () => {
   // so the header carries Archive on the Session tab too, and the kebab still offers Delete.
   const heldFailed = (extra: Partial<ApiRun> = {}) => run('failed', {
     waits: [{
-      id: '00000000-0000-4000-8000-0000000000e2', kind: 'timer', source: 'agent', via: 'cezar_wait',
+      id: '00000000-0000-4000-8000-0000000000e2', kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
       turnId: 'turn-1', seconds: 60, registeredAt: '2026-09-22T12:00:00.000Z',
-      deadline: '2026-09-22T12:01:00.000Z', resolvedAt: '2026-09-22T12:01:00.000Z', phase: 'resolved',
+      deadline: '2026-09-22T12:01:00.000Z', resolvedAt: '2026-09-22T12:01:00.000Z', phase: WAIT_PHASE.resolved,
     }],
     ...extra,
   })

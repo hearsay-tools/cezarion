@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
@@ -35,8 +36,9 @@ const pr = (number: number, over: Partial<GithubItem> = {}): GithubItem => ({
   kind: 'pr', number, title: `PR ${number}`, author: 'grace', createdAt: '2026-07-11T08:00:00.000Z',
   labels: [], body: '', url: `https://github.com/acme/demo/pull/${number}`, comments: 0, checks: null, ...over,
 })
-const run = (over: Record<string, unknown>) =>
-  ({ id: `r${Math.random()}`, title: 't', workflow: 'quick-task', task: 't', status: 'done', createdAt: '2026-07-20T00:00:00Z', tokensUsed: 0, archived: false, steps: [], ...over }) as unknown as RunRecord
+const run = (over: Record<string, unknown>) => {
+  return ({ id: `r${Math.random()}`, title: 't', workflow: 'quick-task', task: 't', status: RUN_STATUS.done, createdAt: '2026-07-20T00:00:00Z', tokensUsed: 0, archived: false, steps: [], ...over }) as unknown as RunRecord
+}
 
 const GITHUB: GithubData = {
   available: true, repo: 'acme/demo', syncedAt: '2026-07-15T08:00:00.000Z', viewerLogin: 'Alice',

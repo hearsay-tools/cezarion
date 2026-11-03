@@ -1,3 +1,4 @@
+import { STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import type { ReactElement } from 'react'
@@ -20,8 +21,8 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-const run = (status: RunStatus, extra: Partial<ApiRun> = {}): ApiRun =>
-  ({
+const run = (status: RunStatus, extra: Partial<ApiRun> = {}): ApiRun => {
+  return ({
     finishBlocked: null,
     id: 'r1',
     title: 'do the thing plz',
@@ -32,9 +33,10 @@ const run = (status: RunStatus, extra: Partial<ApiRun> = {}): ApiRun =>
     createdAt: '2026-07-14T12:00:00.000Z',
     tokensUsed: 0,
     archived: false,
-    steps: [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 'sess-1' }],
+    steps: [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, sessionId: 'sess-1' }],
     ...extra,
   }) as ApiRun
+}
 
 const DIFF = [
   'diff --git a/notes.md b/notes.md',

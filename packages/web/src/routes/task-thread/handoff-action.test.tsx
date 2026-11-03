@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
@@ -23,7 +24,7 @@ const run = (extra: Partial<ApiRun> = {}): ApiRun => ({
   title: 'Fix flaky e2e shard',
   workflow: 'quick-task',
   task: 'Fix it',
-  status: 'running',
+  status: RUN_STATUS.running,
   createdAt: '2026-09-25T12:00:00.000Z',
   tokensUsed: 0,
   archived: false,

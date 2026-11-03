@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
@@ -18,13 +19,13 @@ const RUN: ApiRun = {
   title: 'Do the thing',
   workflow: 'quick-task',
   task: 'Do the thing.',
-  status: 'review',
+  status: RUN_STATUS.review,
   createdAt: '2026-07-15T08:00:00.000Z',
   tokensUsed: 0,
   archived: false,
   worktreePath: '/tmp/wt/r1',
   branch: 'cez/abc12345',
-  steps: [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 's-1' }],
+  steps: [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, sessionId: 's-1' }],
 }
 
 const COMMITS: RunCommitsResponse = {
@@ -73,7 +74,7 @@ describe('the Commits tab route', () => {
   // A usage-limit hold has no session, so the engine does not own it (`engineOwnsRun`): the tab
   // reads it like any parked run.
   it('lists the commits of a usage-limit hold', async () => {
-    renderCommits({ ...RUN, status: 'waiting', autoResumeAt: '2026-07-15T10:00:00.000Z' }, COMMITS)
+    renderCommits({ ...RUN, status: RUN_STATUS.waiting, autoResumeAt: '2026-07-15T10:00:00.000Z' }, COMMITS)
     await waitFor(() => expect(screen.getByRole('heading', { name: '2 commits in this task' })).toBeTruthy())
   })
 

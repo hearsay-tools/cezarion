@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
@@ -17,7 +18,7 @@ it('reads only the active project’s runs and links back to that project', asyn
     if (String(input).replace('?archived=recent', '') !== '/api/v1/p/second/run-summaries') throw new Error(`Unexpected request: ${String(input).replace('?archived=recent', '')}`)
     return new Response(JSON.stringify([{
       id: 'diagnosis', title: 'Diagnose navigation', task: 'Diagnose navigation',
-      issueNumber: 750, workflow: 'quick-task', status: 'done', archived: true,
+      issueNumber: 750, workflow: 'quick-task', status: RUN_STATUS.done, archived: true,
       createdAt: '2026-10-01T12:00:00Z', tokensUsed: 0, steps: [],
     }]), { headers: { 'content-type': 'application/json' } })
   }))
@@ -73,7 +74,7 @@ it('keeps collapsed counts live and shows an empty state when only workers match
   fireEvent.click(toggle)
   expect(screen.getByText('No linked tasks yet.')).toBeTruthy()
   fireEvent.click(toggle)
-  const parent = { id: 'parent', title: 'Parent task', task: 'Parent task', issueNumber: 787, status: 'done', createdAt: '2026-10-01T12:00:00Z', archived: true }
+  const parent = { id: 'parent', title: 'Parent task', task: 'Parent task', issueNumber: 787, status: RUN_STATUS.done, createdAt: '2026-10-01T12:00:00Z', archived: true }
   act(() => client.setQueryData(['default', 'runs', 'list'], [worker, parent]))
   const updated = await screen.findByRole('button', { name: 'Linked tasks (1)' })
   expect(updated.getAttribute('aria-expanded')).toBe('false')
@@ -87,7 +88,7 @@ it('finds a linked task older than the run list\'s archived window (#864)', asyn
   const client = createQueryClient()
   const archived = summaryOf({
     id: 'old-diagnosis', title: 'Old diagnosis', task: 'Old diagnosis', issueNumber: 750, workflow: 'quick-task',
-    status: 'done', archived: true, createdAt: '2025-01-01T12:00:00Z', tokensUsed: 0, steps: [],
+    status: RUN_STATUS.done, archived: true, createdAt: '2025-01-01T12:00:00Z', tokensUsed: 0, steps: [],
   })
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input)
@@ -116,7 +117,7 @@ it('says there are more archived linked tasks and pages them in (#864)', async (
   const client = createQueryClient()
   const archived = (id: string) => summaryOf({
     id, title: `Task ${id}`, task: 't', issueNumber: 750, workflow: 'quick-task',
-    status: 'done', archived: true, createdAt: '2025-01-01T12:00:00Z', tokensUsed: 0, steps: [],
+    status: RUN_STATUS.done, archived: true, createdAt: '2025-01-01T12:00:00Z', tokensUsed: 0, steps: [],
   })
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input)

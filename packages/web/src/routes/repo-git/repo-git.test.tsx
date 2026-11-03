@@ -1,3 +1,4 @@
+import { worktreeInfoSchema } from '@open-mercato/cezar-api-client/contract/repo'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
@@ -593,8 +594,8 @@ describe('the Git view All branches section', () => {
 describe('the Git view Cleanup section', () => {
   const WORKTREES = {
     worktrees: [
-      { runId: 'r1', title: 'Upstream ledger scan', status: 'done', branch: 'cez/a41c0d2e', sizeBytes: 640 * 1024 ** 2, finishedAt: null, reclaimable: true, pastKeep: true },
-      { runId: 'r2', title: 'Reviewer agent presets', status: 'review', branch: 'cez/0c3de91f', sizeBytes: 590 * 1024 ** 2, finishedAt: null, reclaimable: false, pastKeep: false },
+      { runId: 'r1', title: 'Upstream ledger scan', status: worktreeInfoSchema.shape.status.enum.done, branch: 'cez/a41c0d2e', sizeBytes: 640 * 1024 ** 2, finishedAt: null, reclaimable: true, pastKeep: true },
+      { runId: 'r2', title: 'Reviewer agent presets', status: worktreeInfoSchema.shape.status.enum.review, branch: 'cez/0c3de91f', sizeBytes: 590 * 1024 ** 2, finishedAt: null, reclaimable: false, pastKeep: false },
     ],
     totalBytes: 1230 * 1024 ** 2,
     keep: 20,

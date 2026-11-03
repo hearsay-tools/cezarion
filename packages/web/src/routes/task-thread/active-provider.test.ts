@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit';
 import { providerForActiveRun } from '@open-mercato/cezar-api-client/contract/active-provider';
 // @vitest-environment node
 
@@ -16,7 +17,7 @@ const run = (overrides: Partial<ApiRun> = {}): ApiRun => ({
   title: 'Task',
   workflow: 'quick-task',
   task: 'Task',
-  status: 'waiting',
+  status: RUN_STATUS.waiting,
   createdAt: '2026-07-24T00:00:00.000Z',
   tokensUsed: 0,
   archived: false,
@@ -38,7 +39,7 @@ describe('active task provider availability', () => {
     const active = run({
       runner: 'claude',
       currentStepId: 'retry',
-      steps: [{ id: 'retry', name: 'Retry', kind: 'agent', status: 'waiting', iterations: 1, tokensUsed: 0, backend: 'codex' }],
+      steps: [{ id: 'retry', name: 'Retry', kind: STEP_KIND.agent, status: STEP_STATUS.waiting, iterations: 1, tokensUsed: 0, backend: 'codex' }],
     })
     const status = providers({
       providers: [
@@ -67,13 +68,13 @@ describe('active task provider availability', () => {
 
   it('gates an override-free continuation on the run provider, not a connected fallback', () => {
     const closed = run({
-      status: 'done',
+      status: RUN_STATUS.done,
       runner: 'claude',
       steps: [{
         id: 'continue-1',
         name: 'Continue',
-        kind: 'agent',
-        status: 'done',
+        kind: STEP_KIND.agent,
+        status: STEP_STATUS.done,
         iterations: 1,
         tokensUsed: 0,
         backend: 'codex',

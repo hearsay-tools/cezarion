@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 
@@ -181,6 +182,48 @@ interface SentRequest {
 const jsonResponse = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
+function githubGetResponse(method: string, path: string): Response | undefined {
+  // Any comment-thread request defaults to the two-comment THREAD fixture; a test overrides a
+  // specific `GET /api/v1/github/comments/<kind>/<n>` key to serve a different thread.
+  if (method === 'GET' && path.startsWith('/api/v1/github/comments/')) return jsonResponse(THREAD)
+  if (method === 'GET' && path.startsWith('/api/v1/github/prs/') && path.includes('/changes')) return jsonResponse({
+    available: true, number: 137, headSha: '0123456789abcdef0123456789abcdef01234567',
+    additions: 3, deletions: 1, truncated: true, reason: 'One patch was omitted.',
+    files: [
+      { path: 'src/new.ts', previousPath: 'src/old.ts', status: 'renamed', additions: 3, deletions: 1, patch: '@@ -1 +1 @@\n-old\n+new' },
+      { path: 'logo.png', status: 'modified', additions: 0, deletions: 0, patchUnavailableReason: 'binary' },
+    ],
+  })
+  // Deferred comment counts (hearsay-tools/cezarion#1183) default to "nothing known".
+  if (method === 'GET' && path.startsWith('/api/v1/github/comment-counts')) {
+    return jsonResponse({ available: true, counts: {} })
+  }
+  // Lazy PR checks (#664) default to an empty map — a test overrides to hydrate specific glyphs.
+  if (method === 'GET' && path.startsWith('/api/v1/github/checks')) {
+    return jsonResponse({ available: true, checks: {} })
+  }
+  // Cross-state search (#730) defaults to "searched, found nothing" — a test overrides the
+  // exact `GET /api/v1/github/search?…` key to serve hits. Without this default an unstubbed
+  // search would fall through to `{}` and read as an unavailable payload.
+  if (method === 'GET' && path.includes('/github/search')) {
+    return jsonResponse({ available: true, items: [] })
+  }
+  // The GitHub list is one fast fetch now (#664): `/api/v1/github` with an optional `?limit=…`
+  // and/or `?refresh=1`. Sub-resources (`/api/v1/github/comments`, `/prs`, `/checks`) never match
+  // `=== '/api/v1/github'` or `startsWith('/api/v1/github?')`, so this stays scoped to the list.
+  if (method === 'GET' && (path === '/api/v1/github' || path.startsWith('/api/v1/github?'))) {
+    return jsonResponse(GITHUB)
+  }
+  return undefined
+}
+
+function runSummariesResponse(method: string, path: string): Response | undefined {
+  if (method === 'GET' && path === '/api/v1/run-summaries') return jsonResponse([])
+  // An issue's linked tasks also search the archived runs past the list's window (#864).
+  if (method === 'GET' && path.startsWith('/api/v1/run-summaries/archived')) return jsonResponse({ runs: [], nextCursor: null, total: 0 })
+  return undefined
+}
+
 /** Fetch stub in the house style (repo-git.test.tsx): records requests, serves the fixtures,
  *  and lets a test override specific `METHOD path` keys. */
 function stubFetch(
@@ -195,40 +238,10 @@ function stubFetch(
       sent.push({ path, method, body: typeof init.body === 'string' ? JSON.parse(init.body) : undefined })
       const override = overrides[`${method} ${path}`]
       if (override) return override()
-      // Any comment-thread request defaults to the two-comment THREAD fixture; a test overrides a
-      // specific `GET /api/v1/github/comments/<kind>/<n>` key to serve a different thread.
-      if (method === 'GET' && path.startsWith('/api/v1/github/comments/')) return jsonResponse(THREAD)
-      if (method === 'GET' && path.startsWith('/api/v1/github/prs/') && path.includes('/changes')) return jsonResponse({
-        available: true, number: 137, headSha: '0123456789abcdef0123456789abcdef01234567',
-        additions: 3, deletions: 1, truncated: true, reason: 'One patch was omitted.',
-        files: [
-          { path: 'src/new.ts', previousPath: 'src/old.ts', status: 'renamed', additions: 3, deletions: 1, patch: '@@ -1 +1 @@\n-old\n+new' },
-          { path: 'logo.png', status: 'modified', additions: 0, deletions: 0, patchUnavailableReason: 'binary' },
-        ],
-      })
-      // Deferred comment counts (hearsay-tools/cezarion#1183) default to "nothing known".
-      if (method === 'GET' && path.startsWith('/api/v1/github/comment-counts')) {
-        return jsonResponse({ available: true, counts: {} })
-      }
-      // Lazy PR checks (#664) default to an empty map — a test overrides to hydrate specific glyphs.
-      if (method === 'GET' && path.startsWith('/api/v1/github/checks')) {
-        return jsonResponse({ available: true, checks: {} })
-      }
-      // Cross-state search (#730) defaults to "searched, found nothing" — a test overrides the
-      // exact `GET /api/v1/github/search?…` key to serve hits. Without this default an unstubbed
-      // search would fall through to `{}` and read as an unavailable payload.
-      if (method === 'GET' && path.includes('/github/search')) {
-        return jsonResponse({ available: true, items: [] })
-      }
-      // The GitHub list is one fast fetch now (#664): `/api/v1/github` with an optional `?limit=…`
-      // and/or `?refresh=1`. Sub-resources (`/api/v1/github/comments`, `/prs`, `/checks`) never match
-      // `=== '/api/v1/github'` or `startsWith('/api/v1/github?')`, so this stays scoped to the list.
-      if (method === 'GET' && (path === '/api/v1/github' || path.startsWith('/api/v1/github?'))) {
-        return jsonResponse(GITHUB)
-      }
-      if (method === 'GET' && path === '/api/v1/run-summaries') return jsonResponse([])
-      // An issue's linked tasks also search the archived runs past the list's window (#864).
-      if (method === 'GET' && path.startsWith('/api/v1/run-summaries/archived')) return jsonResponse({ runs: [], nextCursor: null, total: 0 })
+      const githubResponse = githubGetResponse(method, path)
+      if (githubResponse) return githubResponse
+      const summariesResponse = runSummariesResponse(method, path)
+      if (summariesResponse) return summariesResponse
       if (method === 'GET' && path === '/api/v1/workflows') return jsonResponse(WORKFLOWS)
       if (method === 'GET' && path === '/api/v1/skills') return jsonResponse(SKILLS)
       if (method === 'GET' && path === '/api/v1/providers/status') {
@@ -242,7 +255,7 @@ function stubFetch(
           title: 'queued',
           workflow: 'quick-task',
           task: 't',
-          status: 'queued',
+          status: RUN_STATUS.queued,
           createdAt: '2026-07-15T08:00:00.000Z',
           tokensUsed: 0,
           archived: false,
@@ -4121,7 +4134,7 @@ describe('deep links to items outside the open list (#692)', () => {
 
 describe('issue linked tasks (#750)', () => {
   const task = (id: string, over: Partial<RunRecord> = {}): RunRecord => ({
-    id, title: id, task: id, workflow: 'quick-task', status: 'done',
+    id, title: id, task: id, workflow: 'quick-task', status: RUN_STATUS.done,
     createdAt: '2026-09-01T12:00:00Z', tokensUsed: 0, archived: false, steps: [],
     issueNumber: 142, ...over,
   })
@@ -4142,8 +4155,8 @@ describe('issue linked tasks (#750)', () => {
   it('lists diagnosis and fix separately, newest first, with archived history and no duplicate or foreign tasks', async () => {
     stubFetch({ 'GET /api/v1/run-summaries': () => jsonResponse([
       task('diagnosis', { archived: true, referencedIssueUrl: ISSUE_142.url }),
-      task('fix', { status: 'running', createdAt: '2026-10-01T12:00:00Z' }),
-      task('fix', { status: 'running', createdAt: '2026-10-01T12:00:00Z' }),
+      task('fix', { status: RUN_STATUS.running, createdAt: '2026-10-01T12:00:00Z' }),
+      task('fix', { status: RUN_STATUS.running, createdAt: '2026-10-01T12:00:00Z' }),
       task('foreign', { referencedIssueUrl: 'https://github.com/other/repo/issues/142' }),
       task('pr-only', { issueNumber: undefined, prNumber: 142 }),
     ]) })

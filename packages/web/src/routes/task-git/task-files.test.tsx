@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
 import { useLayoutEffect, useRef, type ReactNode } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -25,7 +26,7 @@ const RUN: ApiRun = {
   titleSummary: 'Do the thing',
   workflow: 'quick-task',
   task: 'Summarize what this project does.',
-  status: 'review',
+  status: RUN_STATUS.review,
   createdAt: '2026-07-15T08:00:00.000Z',
   tokensUsed: 0,
   archived: false,
@@ -33,7 +34,7 @@ const RUN: ApiRun = {
   branch: 'cez/abc12345',
   baseBranch: 'main',
   steps: [
-    { id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 's-1' },
+    { id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, sessionId: 's-1' },
   ],
 }
 

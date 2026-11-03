@@ -1,3 +1,4 @@
+import { worktreeInfoSchema } from '@open-mercato/cezar-api-client/contract/repo'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
@@ -59,7 +60,7 @@ const states = () => [...document.querySelectorAll<HTMLElement>('[data-slot="wor
 
 function worktree(partial: Partial<WorktreeInfo> & Pick<WorktreeInfo, 'runId' | 'title'>): WorktreeInfo {
   return {
-    status: 'done',
+    status: worktreeInfoSchema.shape.status.enum.done,
     branch: `cez/${partial.runId.slice(0, 8)}`,
     sizeBytes: 1024,
     finishedAt: '2026-07-01T00:00:00Z',
@@ -81,7 +82,7 @@ const sample: WorktreesResponse = {
     {
       runId: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
       title: 'fix the login bug',
-      status: 'done',
+      status: worktreeInfoSchema.shape.status.enum.done,
       branch: 'cez/aaaaaaaa',
       sizeBytes: 5 * 1024 * 1024,
       finishedAt: '2026-07-01T00:00:00Z',
@@ -91,7 +92,7 @@ const sample: WorktreesResponse = {
     {
       runId: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb',
       title: 'review dialog',
-      status: 'review',
+      status: worktreeInfoSchema.shape.status.enum.review,
       branch: 'cez/bbbbbbbb',
       sizeBytes: null,
       finishedAt: null,
@@ -143,7 +144,7 @@ const workerMajority: WorktreesResponse = {
     worktree({
       runId: 'running-root',
       title: 'live investigation',
-      status: 'running',
+      status: worktreeInfoSchema.shape.status.enum.running,
       finishedAt: null,
     }),
   ],

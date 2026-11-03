@@ -1,3 +1,12 @@
+import {
+  RUN_STATUS,
+  STEP_KIND,
+  STEP_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { openHumanWait } from '@/test/run-summary-fixture'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
@@ -259,7 +268,7 @@ describe('ThreadView', () => {
         run={run('waiting', {
           error: 'step "work" failed: Claude AI usage limit reached|1754236800',
           autoResumeAt: '2026-08-03T17:00:30.000Z',
-          steps: [{ id: 'work', name: 'Work', kind: 'agent', status: 'failed', iterations: 1, tokensUsed: 0, sessionId: 'sess-1', backend: 'claude' }],
+          steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent, status: STEP_STATUS.failed, iterations: 1, tokensUsed: 0, sessionId: 'sess-1', backend: 'claude' }],
         })}
         thread={reduceThread(EVENTS)}
       />,
@@ -584,7 +593,7 @@ describe('ThreadView', () => {
         run={run('waiting', {
           runner: 'claude',
           currentStepId: 'retry',
-          steps: [{ id: 'retry', name: 'Retry', kind: 'agent', status: 'waiting', iterations: 2, tokensUsed: 0, backend: 'codex' }],
+          steps: [{ id: 'retry', name: 'Retry', kind: STEP_KIND.agent, status: STEP_STATUS.waiting, iterations: 2, tokensUsed: 0, backend: 'codex' }],
         })}
         thread={reduceThread(EVENTS)}
       />,
@@ -603,8 +612,8 @@ describe('ThreadView', () => {
 
   // The monitoring park is the agent's open timer since hearsay-tools/cezarion#1301.
   it('monitoring → a monitoring hint, a live composer, and a "monitoring" pill (#490)', () => {
-    const timer = { kind: 'timer', id: '00000000-0000-4000-8000-0000000000d1', source: 'agent', via: 'monitoring-line', registeredAt: '2026-10-17T15:00:00.000Z',
-      deadline: '2026-10-17T15:05:00.000Z', phase: 'open', turnId: 'turn-1', seconds: 300 }
+    const timer = { kind: WAIT_KIND.timer, id: '00000000-0000-4000-8000-0000000000d1', source: WAIT_SOURCE.agent, via: WAIT_VIA['monitoring-line'], registeredAt: '2026-10-17T15:00:00.000Z',
+      deadline: '2026-10-17T15:05:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1', seconds: 300 }
     renderView(<ThreadView run={run('waiting', { waits: [timer] } as unknown as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
     // Still working on downstream work, not on you: never the "paused, waiting for your reply" banner.
     const hint = document.querySelector('[data-slot="paused-hint"]')?.textContent
@@ -624,7 +633,7 @@ describe('ThreadView', () => {
       <ThreadView
         run={run('done', {
           steps: [
-            { id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 's-1' },
+            { id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, sessionId: 's-1' },
           ],
         })}
         thread={reduceThread(EVENTS)}
@@ -1048,8 +1057,8 @@ describe('ThreadView', () => {
       <ThreadView
         run={run('running', {
           steps: [
-            { id: 'task', name: 'Do the task', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0 },
-            { id: 'verify', name: 'Verify', kind: 'check', status: 'pending', iterations: 1, tokensUsed: 0 },
+            { id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status: STEP_STATUS.running, iterations: 1, tokensUsed: 0 },
+            { id: 'verify', name: 'Verify', kind: STEP_KIND.check, status: STEP_STATUS.pending, iterations: 1, tokensUsed: 0 },
           ],
         })}
         thread={reduceThread(EVENTS)}
@@ -1093,7 +1102,7 @@ describe('ThreadView', () => {
     // A terminal run is not a successful one. Failed sub-agents already keep the green summary
     // away (`subagentCounts` counts only `completed`); a failed or cancelled STEP must too,
     // or the card contradicts the rail's danger X one click below it.
-    const steps = [{ id: 'task', name: 'Do the task', kind: 'agent', status, iterations: 1, tokensUsed: 0 }]
+    const steps = [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status, iterations: 1, tokensUsed: 0 }]
     renderView(<ThreadView run={run('done', { id: `dock-${status}`, steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
     const summary = document.querySelector('[data-slot="run-activity-status"]')?.textContent
     expect(summary).not.toContain('All complete')
@@ -1102,7 +1111,7 @@ describe('ThreadView', () => {
   })
 
   it('a finished run with everything settled still reads All complete', () => {
-    const steps = [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }]
+    const steps = [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0 }]
     renderView(<ThreadView run={run('done', { id: 'dock-done', steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
     expect(document.querySelector('[data-slot="run-activity-status"]')?.textContent).toContain('All complete')
   })
@@ -1113,7 +1122,7 @@ describe('ThreadView', () => {
   ] as const)('a %s run says so instead of All complete', (status, summary) => {
     // `runIsTerminal` is true for every settled status, but settled is not successful: a run
     // that failed with a finished workflow behind it was reading the green "All complete".
-    const steps = [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }]
+    const steps = [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0 }]
     renderView(<ThreadView run={run(status, { id: `dock-${status}`, steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
     const status_ = document.querySelector('[data-slot="run-activity-status"]')?.textContent
     expect(status_).not.toContain('All complete')
@@ -1122,13 +1131,13 @@ describe('ThreadView', () => {
 
   it('a run parked at the review gate is not complete either', () => {
     // Parked awaiting a human, like a `review` STEP, which `railVisual` calls active.
-    const steps = [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }]
+    const steps = [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0 }]
     renderView(<ThreadView run={run('review', { id: 'dock-review', steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />)
     expect(document.querySelector('[data-slot="run-activity-status"]')?.textContent).not.toContain('All complete')
   })
 
   it('the dock re-derives its collapse default per run, like the docks it replaced', () => {
-    const steps = [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0 }]
+    const steps = [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status: STEP_STATUS.running, iterations: 1, tokensUsed: 0 }]
     const { rerender } = renderView(
       <ThreadView run={run('running', { id: 'dock-run-a', steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />,
     )
@@ -1253,13 +1262,13 @@ describe('TaskThreadRoute', () => {
       title: 'mock:limit ship it',
       workflow: 'quick-task',
       task: 'mock:limit ship it',
-      status: 'waiting',
+      status: RUN_STATUS.waiting,
       error: 'step "task" failed: Claude AI usage limit reached|1785785603',
       autoResumeAt: '2026-08-03T19:33:53.000Z',
       createdAt: '2026-08-03T19:23:00.000Z',
       tokensUsed: 0,
       archived: false,
-      steps: [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'failed', iterations: 1, tokensUsed: 0, sessionId: 's1' }],
+      steps: [{ id: 'task', name: 'Do the task', kind: STEP_KIND.agent, status: STEP_STATUS.failed, iterations: 1, tokensUsed: 0, sessionId: 's1' }],
     }
     vi.stubGlobal(
       'fetch',
@@ -1601,8 +1610,8 @@ describe('TaskThreadRoute — read receipts', () => {
 
 /** A worker wait in the list (hearsay-tools/cezarion#1301): the agent's open entry on one worker. */
 const workerWait = (over: Record<string, unknown> = {}) => ({
-  kind: 'worker' as const, id: '00000000-0000-4000-8000-0000000000e1', source: 'agent' as const, via: 'cez-worker-wait' as const,
-  registeredAt: '2026-09-05T00:00:00.000Z', deadline: '2026-09-06T00:00:00.000Z', phase: 'open' as const, turnId: 'turn-1',
+  kind: WAIT_KIND.worker, id: '00000000-0000-4000-8000-0000000000e1', source: WAIT_SOURCE.agent, via: WAIT_VIA['cez-worker-wait'],
+  registeredAt: '2026-09-05T00:00:00.000Z', deadline: '2026-09-06T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 'turn-1',
   timeoutSeconds: 600, workerIds: ['worker'], revisions: [], outcomes: [], ...over,
 })
 const onWorkerWait = (over: Record<string, unknown> = {}, askSeq?: number) =>
@@ -1610,7 +1619,7 @@ const onWorkerWait = (over: Record<string, unknown> = {}, askSeq?: number) =>
     waits: [workerWait(over), ...(askSeq === undefined ? [] : [openHumanWait(askSeq)])] }) as unknown as Partial<ApiRun>
 
 it.each(['parked', 'wake-pending'] as const)('uses honest dock copy for %s worker waits', phase => {
-  renderView(<ThreadView run={run('waiting', onWorkerWait(phase === 'parked' ? {} : { phase: 'resolved', resolvedAt: '2026-09-05T00:05:00.000Z' }))} thread={reduceThread([])} />)
+  renderView(<ThreadView run={run('waiting', onWorkerWait(phase === 'parked' ? {} : { phase: WAIT_PHASE.resolved, resolvedAt: '2026-09-05T00:05:00.000Z' }))} thread={reduceThread([])} />)
   const hint = document.querySelector('[data-slot="paused-hint"]')
   // A full record carries the worker ids, so the parked count is said (#617).
   // A queued automatic wake is capacity waiting, not a human gate (#971).
@@ -1718,13 +1727,13 @@ describe('composer execution actions (#201)', () => {
 
   // Review of #1437: Cezar's own wait (`no-wait`) asks nothing, so it keeps the one-click Continue.
   it('offers empty Continue beside a Cezar wait that asks no question', async () => {
-    const cezarWait = { ...openHumanWait(), source: 'cezar' as const, via: 'no-wait' as const }
-    renderView(<ThreadView run={run('done', { waits: [cezarWait], steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 's1' }] })} thread={reduceThread([])} />)
+    const cezarWait = { ...openHumanWait(), source: WAIT_SOURCE.cezar, via: WAIT_VIA['no-wait'] }
+    renderView(<ThreadView run={run('done', { waits: [cezarWait], steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, sessionId: 's1' }] })} thread={reduceThread([])} />)
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' }).hasAttribute('disabled')).toBe(false))
   })
 
   it('requires an answer instead of offering empty Continue for a pending human question', async () => {
-    renderView(<ThreadView run={run('done', { waits: [openHumanWait()], steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 's1' }] })} thread={reduceThread([])} />)
+    renderView(<ThreadView run={run('done', { waits: [openHumanWait()], steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent, status: STEP_STATUS.done, iterations: 1, tokensUsed: 0, sessionId: 's1' }] })} thread={reduceThread([])} />)
     await waitFor(() => expect(screen.getByRole('textbox').hasAttribute('disabled')).toBe(false))
     expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(true)
@@ -1733,7 +1742,7 @@ describe('composer execution actions (#201)', () => {
   it('releases Stopping only on authoritative cancellation and preserves the draft and attachment (#493)', async () => {
     const active = run('running', {
       runner: 'codex', currentStepId: 'task',
-      steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0, sessionId: 'startup-session', backend: 'codex' }],
+      steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent, status: STEP_STATUS.running, iterations: 1, tokensUsed: 0, sessionId: 'startup-session', backend: 'codex' }],
     })
     const thread = reduceThread([line(1, 'note', { message: 'Codex startup: waiting for initialize' })])
     const { rerender, queryClient } = renderView(<ThreadView run={active} thread={thread} />, {
@@ -1768,8 +1777,8 @@ describe('composer execution actions (#201)', () => {
     updateRun({ ...active, stopping: true })
     expect(screen.getByRole('button', { name: 'Stopping…' }).hasAttribute('disabled')).toBe(true)
     // A server snapshot omits optional stopping once cleanup has completed.
-    updateRun({ ...active, status: 'cancelled', currentStepId: undefined,
-      finishedAt: '2026-07-14T12:01:00.000Z', steps: active.steps.map(step => ({ ...step, status: 'cancelled' })) })
+    updateRun({ ...active, status: RUN_STATUS.cancelled, currentStepId: undefined,
+      finishedAt: '2026-07-14T12:01:00.000Z', steps: active.steps.map(step => ({ ...step, status: STEP_STATUS.cancelled })) })
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Stopping…' })).toBeNull())
     await waitFor(() => expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('disabled')).toBe(false))
     expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull()
@@ -1794,7 +1803,7 @@ describe('composer replies after idle close (#315)', () => {
     const fixture = run('waiting', {
       runner: 'claude',
       waits: [openHumanWait(1)],
-      steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'waiting', iterations: 1, tokensUsed: 0,
+      steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent, status: STEP_STATUS.waiting, iterations: 1, tokensUsed: 0,
         ...(hasSession ? { sessionId: 'session-1' } : {}) }],
     })
     const thread = reduceThread([line(1, 'ask.requested', {
@@ -2075,9 +2084,9 @@ describe('the composer action row (#281)', () => {
   it('a failed run holding wait results offers Stop in the slot, and Stop posts the cancel', async () => {
     const sent = renderThread(run('failed', {
       waits: [{
-        id: '00000000-0000-4000-8000-0000000000e2', kind: 'timer', source: 'agent', via: 'cezar_wait',
+        id: '00000000-0000-4000-8000-0000000000e2', kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait,
         turnId: 'turn-1', seconds: 60, registeredAt: '2026-07-14T12:00:00.000Z',
-        deadline: '2026-07-14T12:01:00.000Z', resolvedAt: '2026-07-14T12:01:00.000Z', phase: 'resolved',
+        deadline: '2026-07-14T12:01:00.000Z', resolvedAt: '2026-07-14T12:01:00.000Z', phase: WAIT_PHASE.resolved,
       }],
     }))
     expect(archiveButton()).toBeNull()
