@@ -3,7 +3,7 @@ import { parseUsageLimit } from '../../core/usage-limit.ts';
 import type { RunRecord, RunStore } from '../../runs/store.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
 import { formatWakeInstant } from '../run-scheduling.ts';
-import { transitionVia, type RunExitId } from '../../runs/run-exits.ts';
+import type { RunExitId } from '../../runs/run-exits.ts';
 import type { RunModuleContext } from './types.ts';
 
 interface AutoResumeHost {
@@ -241,7 +241,7 @@ export class AutoResumeScheduler {
   private withdrawAutoResume(runId: string, note?: string): void {
     // Committed first: a store that cannot write throws here with the timer still armed, and the
     // note is written only once the withdrawal is on disk (hearsay-tools/cezarion#1236).
-    if (this.context.store.getRun(runId)) transitionVia('withdraw-hold', () => this.context.store.getRun(runId), () => this.context.store.commitAutoResumeWithdrawal(runId));
+    if (this.context.store.getRun(runId)) this.context.store.commitAutoResumeWithdrawal(runId);
     const timer = this.autoResumeTimers.get(runId);
     if (timer) clearTimeout(timer);
     this.autoResumeTimers.delete(runId);

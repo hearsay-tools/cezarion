@@ -478,7 +478,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     store.commitDelegation([{ id: parent.id, delegation: { ...parent.delegation, finishRequestedAt: new Date().toISOString() } }]);
     manager.enqueueOwnedRun(w.id);
     expect(manager.enqueueMessage(w.id, [{ type: 'text', text: 'new work' }])).toBeNull();
-    store.commitRootFinishCancellation(parent.id);
+    store.move(parent.id, 'cancel-root');
     store.updateRun(parent.id, { status: RUN_STATUS.waiting });
     const another = await worker(); const hold = gate(); releases.push(hold.release);
     const engine = manager as unknown as { execute(...args: unknown[]): Promise<unknown>; };

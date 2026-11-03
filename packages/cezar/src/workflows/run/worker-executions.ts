@@ -1,6 +1,5 @@
 import type { AgentSession } from '../../core/claude-cli-runner.ts';
 import { sessionGroupOf } from '../../core/session-process.ts';
-import { transitionVia } from '../../runs/run-exits.ts';
 import type { RunModuleContext } from './types.ts';
 import type { WorkerOrphans } from './worker-orphans.ts';
 
@@ -82,7 +81,7 @@ export class WorkerExecutions {
 
   private persistWorkerCompletion(runId: string, generation: string): void {
     try {
-      if (this.stoppedWorkers.has(runId)) transitionVia('stop-worker', () => this.context.store.getRun(runId), () => this.context.store.commitWorkerCancellation(runId));
+      if (this.stoppedWorkers.has(runId)) this.context.store.move(runId, 'stop-worker');
       if (this.context.store.commitWorkerExecutionComplete(runId, generation)) {
         this.finalizedWorkers.delete(runId);
         this.host.reapTerminalScratch(runId);

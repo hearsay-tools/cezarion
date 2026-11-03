@@ -80,9 +80,10 @@ describe('run states and their exits (hearsay-tools/cezarion#1804)', () => {
     expect(missing).toEqual([]);
   });
 
-  // Each exit is a write the run implementation makes, through move(), transition() or transitionVia().
-  it('writes every exit in the run implementation', () => {
-    const source = runSources().map((file) => readFileSync(resolve(src, file), 'utf8')).join('\n');
+  // Each exit is a write the run implementation makes through the store's move(), commitOutcome()
+  // or commitWorkerContinuation(), or one the store applies itself (commitAutoResumeWithdrawal).
+  it('writes every exit in the run implementation or the store', () => {
+    const source = [...runSources(), 'runs/store.ts'].map((file) => readFileSync(resolve(src, file), 'utf8')).join('\n');
     expect(Object.keys(RUN_EXITS).filter((exit) => !source.includes(`'${exit}'`))).toEqual([]);
   });
 

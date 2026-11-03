@@ -141,7 +141,7 @@ describe('guarded automatic archive', () => {
     }, 'a'.repeat(64));
     store.updateRun(worker.id, { pullRequests: [pr] }); store.flush();
     expect(store.archiveOnMergeSnapshot(id, repo)).toBeUndefined();
-    store.commitWorkerCancellation(worker.id);
+    store.move(worker.id, 'stop-worker');
     expect(store.archiveOnMergeSnapshot(id, repo)).toBeUndefined();
     expect(store.getRun(id)?.archiveBlocker?.runId).toBe(worker.id);
     const proof = store.readWorkerExecution(worker.id)!;

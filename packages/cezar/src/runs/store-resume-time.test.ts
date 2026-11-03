@@ -71,17 +71,17 @@ describe('a commit that leaves waiting', () => {
     const { store, committed, root } = setup();
     const id = root();
     store.commitRootFinishIntent(id);
-    expect(store.commitRootFinishCancellation(id)).toBe(true);
+    expect(store.move(id, 'cancel-root')).toBeDefined();
     expect(committed(id)).toMatchObject({ status: RUN_STATUS.cancelled, autoResumeAttempts: 2 });
     expect(committed(id)).not.toHaveProperty('autoResumeAt');
     expect(store.getRun(id)?.autoResumeAt).toBeUndefined();
   });
 
-  it.each(['done', 'review'] as const)('drops the resume time when a pending Finish settles %s', (status) => {
+  it.each([['succeed-root', RUN_STATUS.done], ['succeed-root-review', RUN_STATUS.review]] as const)('drops the resume time when a pending Finish takes %s', (exit, status) => {
     const { store, committed, root } = setup();
     const id = root();
     store.commitRootFinishIntent(id);
-    expect(store.commitRootFinishSuccess(id, status)).toBe(true);
+    expect(store.move(id, exit)).toBeDefined();
     expect(committed(id)).toMatchObject({ status });
     expect(committed(id)).not.toHaveProperty('autoResumeAt');
     expect(store.getRun(id)?.autoResumeAt).toBeUndefined();
@@ -96,7 +96,7 @@ describe('a commit that leaves waiting', () => {
       workspace: { ownerRunId: workerId, resourceId: randomUUID(), kind: 'owned-isolated', path: join(dir, 'absent-worktree'), branch: `cez/${workerId.slice(0, 8)}`, baselineSha: 'a'.repeat(40) },
     }, 'a'.repeat(64));
     hold(worker.id);
-    store.commitWorkerCancellation(worker.id);
+    store.move(worker.id, 'stop-worker');
     expect(committed(worker.id)).toMatchObject({ status: RUN_STATUS.cancelled, autoResumeAttempts: 2 });
     expect(committed(worker.id)).not.toHaveProperty('autoResumeAt');
     expect(store.getRun(worker.id)?.autoResumeAt).toBeUndefined();

@@ -333,20 +333,20 @@ describe('RunStore durable delegation', () => {
     const notifications: unknown[] = []; store.on('run', value => notifications.push(value));
     const release = blockRunWrites(dataDir);
     try {
-      expect(() => store.commitRootFinishCancellation(run.id)).toThrow();
+      expect(() => store.move(run.id, 'cancel-root')).toThrow();
       expect(store.getRun(run.id)).toEqual(snapshot);
       expect(readPersistedText(dataDir)).toBe(before);
       expect(notifications).toEqual([]);
     } finally { release(); }
-    expect(store.commitRootFinishCancellation(run.id)).toBe(true);
+    expect(store.move(run.id, 'cancel-root')).toMatchObject({ status: RUN_STATUS.cancelled });
     const cancelled = openTestRunStore(dataDir, { keepLive: true }).getRun(run.id);
     expect(cancelled).toMatchObject({ status: RUN_STATUS.cancelled, delegation: root });
     expect(cancelled?.delegation).not.toHaveProperty('finishRequestedAt');
-    expect(store.commitRootFinishSuccess(run.id, 'done')).toBe(false);
-    expect(store.commitRootFinishCancellation(run.id)).toBe(false);
+    expect(store.move(run.id, 'succeed-root')).toBeUndefined();
+    expect(store.move(run.id, 'cancel-root')).toBeUndefined();
     // Even if a human continuation has already parked again, the old diff is obsolete.
     store.updateRun(run.id, { status: RUN_STATUS.waiting });
-    expect(store.commitRootFinishSuccess(run.id, 'review')).toBe(false);
+    expect(store.move(run.id, 'succeed-root-review')).toBeUndefined();
     expect(store.getRun(run.id)?.status).toBe('waiting');
   });
 

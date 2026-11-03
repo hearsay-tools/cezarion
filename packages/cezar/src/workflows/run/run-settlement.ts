@@ -11,7 +11,6 @@ import type { ActiveRun } from '../active-run.ts';
 import type { WorkflowDef, WorkflowStepDef } from '../types.ts';
 import type { ContinuationClose, SessionTurn, StepLoop, RunModuleContext } from './types.ts';
 import type { RunExitId } from '../../runs/run-exits.ts';
-import { RUN_EXITS, transitionVia } from '../../runs/run-exits.ts';
 import { settledRootFinishPatch } from '../completion-policy.ts';
 import { queuedRecoveryInput } from '../run-scheduling.ts';
 import { loadConfig } from '../../config.ts';
@@ -380,8 +379,7 @@ export class RunSettlement {
     if (durableRootFinish) {
       // A later explicit cancellation wins over a slow diff. Publication/cascade
       // follows the atomic terminal/step checkpoint, never the other way around.
-      const exit = review ? 'succeed-review' as const : 'succeed' as const;
-      if (!transitionVia(exit, () => this.context.store.getRun(runId), () => this.context.store.commitRootFinishSuccess(runId, RUN_EXITS[exit].to))) return;
+      if (!this.context.store.move(runId, review ? 'succeed-root-review' : 'succeed-root')) return;
     } else {
       this.commitOrdinarySuccess(runId, review, keepStepId);
     }

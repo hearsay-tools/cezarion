@@ -6,7 +6,6 @@ import type { CommitSource, RunRecord } from '../../runs/store.ts';
 import type { Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { historyDeletionPending, executionBlockedByRootFinish } from './run-guards.ts';
 import { repairFailedRootFinish } from '../completion-policy.ts';
-import { transitionVia } from '../../runs/run-exits.ts';
 import { reconcileConversationState, projectConversationEvents, settledRunFamilies } from '../../delegation/conversations.ts';
 import { reconcileWorkerEntry } from '../../delegation/wait.ts';
 import { workerOutcome } from '../../runs/delegation-state.ts';
@@ -187,7 +186,7 @@ export class FamilyReconciler {
         if (!parent.delegation || parent.delegation.role === 'invalid' || historyDeletionPending(this.context.store, parent.id)) continue;
         repairFailedRootFinish(this.context.store, parent);
         if (parent.status === 'cancelled' && parent.delegation.role === 'root' && parent.delegation.finishRequestedAt) {
-          transitionVia('cancel', () => this.context.store.getRun(parent.id), () => this.context.store.commitRootFinishCancellation(parent.id));
+          this.context.store.move(parent.id, 'cancel-root');
         }
         if (this.endStoppedParent(parent)) continue;
         if (executionBlockedByRootFinish(this.context.store, parent)) continue;

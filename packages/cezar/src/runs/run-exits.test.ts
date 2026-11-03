@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RunStatus } from '@open-mercato/cezar-contract';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { exitStatus, strictRunExits, takeRunExitViolations, throwRunExitViolations, transitionVia } from './run-exits.ts';
+import { exitStatus, strictRunExits, takeRunExitViolations, throwRunExitViolations } from './run-exits.ts';
 import { runThenCleanUp } from './run-exits.testkit.ts';
 
 describe('run exits: an undeclared transition is written, then reported (ADR 0056)', () => {
@@ -27,25 +27,6 @@ describe('run exits: an undeclared transition is written, then reported (ADR 005
     expect(takeRunExitViolations()).toEqual([]);
   });
 
-  it('runs a store commit and checks it against its exit after it ran', () => {
-    previous = strictRunExits(true);
-    let status: RunStatus = RUN_STATUS.running;
-    const read = () => { return { status }; };
-    expect(transitionVia('cancel', read, () => { status = RUN_STATUS.waiting; return 'drifted'; })).toBe('drifted');
-    expect(status).toBe(RUN_STATUS.waiting);
-    status = RUN_STATUS.done;
-    expect(transitionVia('cancel', read, () => { status = RUN_STATUS.cancelled; return 'undeclared'; })).toBe('undeclared');
-    expect(status).toBe(RUN_STATUS.cancelled);
-    expect(takeRunExitViolations()).toEqual([
-      'store commit drifted from its exit: exit cancel wrote waiting, not cancelled',
-      'undeclared run transition: exit cancel from done (declare it in runs/run-exits.ts)',
-    ]);
-    status = RUN_STATUS.waiting;
-    expect(transitionVia('park', read, () => 'refused')).toBe('refused');
-    expect(transitionVia('withdraw-hold', read, () => { status = RUN_STATUS.failed; return true; })).toBe(true);
-    expect(takeRunExitViolations()).toEqual([]);
-  });
-
   it('throws every recorded violation once, for the test setup', () => {
     previous = strictRunExits(true);
     expect(() => throwRunExitViolations()).not.toThrow();
@@ -60,12 +41,8 @@ describe('run exits: an undeclared transition is written, then reported (ADR 005
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     expect(exitStatus('accept-review', RUN_STATUS.running)).toBe(RUN_STATUS.done);
     expect(warn.mock.calls).toEqual([['undeclared run transition: exit accept-review from running (declare it in runs/run-exits.ts)']]);
-    let status: RunStatus = RUN_STATUS.done;
-    let commits = 0;
-    expect(transitionVia('cancel', () => { return { status }; }, () => { status = RUN_STATUS.cancelled; return ++commits; })).toBe(1);
-    expect(warn).toHaveBeenCalledTimes(2);
     for (let i = 0; i < 1000; i++) exitStatus('accept-review', RUN_STATUS.running);
-    expect(warn).toHaveBeenCalledTimes(1002);
+    expect(warn).toHaveBeenCalledTimes(1001);
     expect(takeRunExitViolations()).toEqual([]);
   });
 

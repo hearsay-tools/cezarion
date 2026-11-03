@@ -71,7 +71,7 @@ it('commits deferred root Finish and its archive before exposing success', () =>
   store.commitRootFinishIntent(id);
   const rows: unknown[] = [];
   store.on('run', run => { if (run.status === 'done') rows.push(readPersistedRuns(dir)[0]); });
-  expect(store.commitRootFinishSuccess(id, 'done')).toBe(true);
+  expect(store.move(id, 'succeed-root')).toMatchObject({ status: RUN_STATUS.done });
   expect(rows).toEqual([expect.objectContaining({ status: RUN_STATUS.done, archived: true })]);
 });
 it('publishes neither Done nor archive if their transaction fails', () => {

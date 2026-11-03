@@ -481,11 +481,12 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true); await collect(w.id);
       await Promise.all(bookkeeping.splice(0));
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      const commit = store.commitRootFinishSuccess.bind(store);
+      const move = store.move.bind(store);
       if (failure === 'diff') store.updateRun(p.id, { baseBranch: 'nonexistent-ref' });
-      else store.commitRootFinishSuccess = (...args) => {
+      else store.move = (id, exit, ...rest) => {
+        if (exit !== 'succeed-root' && exit !== 'succeed-root-review') return move(id, exit, ...rest);
         const release = blockRunWrites(join(root, '.ai/cezar'));
-        try { return commit(...args); } finally { release(); }
+        try { return move(id, exit, ...rest); } finally { release(); }
       };
       expect(manager.finish(p.id)).toBe(true);
       await until(() => warn.mock.calls.length > 0);
@@ -495,7 +496,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       expect(manager.continueRun(p.id, { text: 'cannot supersede finish' }).ok).toBe(false);
       expect(() => manager.steerWorker(w.id, { id: randomUUID(), parentRunId: p.id, source: 'agent',
         text: 'cannot steer', createdAt: new Date().toISOString() })).toThrow('finish');
-      store.commitRootFinishSuccess = commit; store.updateRun(p.id, { baseBranch: 'main' });
+      store.move = move; store.updateRun(p.id, { baseBranch: 'main' });
       let durableStatus: string | undefined;
       const observe = (run: RunRecord) => {
         if (run.id === p.id && run.status === 'done') {
