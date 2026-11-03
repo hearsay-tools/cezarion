@@ -213,6 +213,16 @@ test('fallback reasons rebuild the checks queue-ci-proof.cjs makes', () => {
   assert.equal(proofReason(push([proof('success')], { queueRun: done, queueJobs: gate })), 'unexplained');
 });
 
+test('a main push counts as a fallback only when Typecheck ran', () => {
+  const push = (id, proof, typecheck) => ({ run: { id, html_url: `u${id}` },
+    jobs: [{ name: PROOF_JOB, conclusion: proof, completed_at: '2026-11-02T01:00:00Z' }, { name: FALLBACK_JOB, conclusion: typecheck }],
+    evidence: { queueRun: null, queueJobs: [] } });
+  const metrics = computeMetrics({ repo: 'o/r', from: '2026-11-02T00:00:00Z', to: '2026-11-03T00:00:00Z', queueRuns: [], queueJobs: {},
+    onMain: {}, merges: [], pushes: [push(1, 'cancelled', 'skipped'), push(2, 'success', 'skipped'), push(3, 'failure', 'success'),
+      push(4, 'success', 'failure')] });
+  assert.deepEqual(metrics.mainPush, { pushes: 4, fallbacks: 2, reasons: { 'proof-job-failure': 1, 'no-exact-queue-run': 1 }, unexplained: [] });
+});
+
 test('group refs name their base', () => {
   assert.equal(groupBase(`gh-readonly-queue/main/pr-12-${SHA(5)}`), SHA(5));
   assert.equal(groupBase('gh-readonly-queue/main/pr-12-short'), undefined);

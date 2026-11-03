@@ -165,9 +165,10 @@ async function readOnMain(api, repo, bases) {
 }
 
 const proofJob = jobs => jobs.find(job => job.name === PROOF_JOB);
+// A cancelled run skips Typecheck even when the proof did not verify, and then no fallback ran.
 function isFallback(jobs) {
   const fallbackJob = jobs.find(job => job.name === FALLBACK_JOB);
-  return proofJob(jobs)?.conclusion !== 'success' || (fallbackJob !== undefined && fallbackJob.conclusion !== 'skipped');
+  return fallbackJob !== undefined && fallbackJob.conclusion !== 'skipped';
 }
 
 async function readProofEvidence(api, repo, push, queueJobs) {
