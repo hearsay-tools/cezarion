@@ -541,7 +541,8 @@ Wed Sep 16 13:50:51 CEST 2026
 ### Merge-queue pilot metrics
 
 The owner reads the parallel queue-build pilot by hand, once a week
-([spec](../../.ai/specs/2026-11-03-speculative-merge-queue.md) § Rollout step 4).
+(spec `.ai/specs/2026-11-03-speculative-merge-queue.md`, from
+hearsay-tools/cezarion#2622, § Rollout step 4).
 This command prints its metrics and both rollback verdicts (§ Owner decisions Q3):
 
 ```bash

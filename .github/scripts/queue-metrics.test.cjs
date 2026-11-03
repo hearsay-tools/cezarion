@@ -63,8 +63,9 @@ test('the script only reads: every gh call is a GET or a GraphQL query', async (
   assert.ok(calls.length > 0);
   for (const args of calls) {
     assert.equal(args[0], 'api');
-    assert.ok(!args.some(arg => /^(-X|--method|--input|-F|--field)$/.test(arg)), JSON.stringify(args));
+    assert.ok(!args.some(arg => /^(-X|--method|--input|-F|--field)(=|$)/.test(arg)), JSON.stringify(args));
     if (args[1] === 'graphql') assert.match(args.find(arg => arg.startsWith('query=')), /^query=query\(/);
+    else assert.ok(!args.some(arg => /^(-f|--raw-field)(=|$)/.test(arg)), JSON.stringify(args));
   }
 });
 
@@ -106,7 +107,7 @@ test('a client error stops the script with exit code 1 and no report', async () 
 test('a multi-day window reads one UTC day per query and counts a boundary result once', async () => {
   const days = ['2026-11-01T12:00:00Z..2026-11-02T00:00:00Z', '2026-11-02T00:00:00Z..2026-11-03T00:00:00Z',
     '2026-11-03T00:00:00Z..2026-11-03T06:00:00Z'];
-  const midnight = { ...queueRun(7, 'success', SHA('m')), created_at: '2026-11-02T00:00:00Z' };
+  const midnight = { ...queueRun(7, 'success', SHA('c')), created_at: '2026-11-02T00:00:00Z' };
   const merged = { number: 7, mergedAt: '2026-11-02T00:00:00Z',
     timelineItems: { nodes: [{ createdAt: '2026-11-01T23:50:00Z' }] } };
   const queried = { runs: [], search: [] };
@@ -172,10 +173,10 @@ const jobFor = (minutes, labels = ['ubuntu-24.04'], steps = []) => ({ id: minute
 test('a run whose group base never reached main counts as invalidated waste', () => {
   const ahead = SHA('b1');
   const raw = { repo: 'o/r', from: '2026-11-02T00:00:00Z', to: '2026-11-09T00:00:00Z', pushes: [],
-    queueRuns: [queueRun(1, 'failure', SHA('m1')), queueRun(2, 'success', ahead), queueRun(3, 'success', SHA('m1')),
-      { ...queueRun(4, null, SHA('m1')), status: 'in_progress' }],
+    queueRuns: [queueRun(1, 'failure', SHA('c1')), queueRun(2, 'success', ahead), queueRun(3, 'success', SHA('c1')),
+      { ...queueRun(4, null, SHA('c1')), status: 'in_progress' }],
     queueJobs: { 1: [jobFor(100)], 2: [jobFor(90, ['ubicloud-standard-2'])], 3: [jobFor(80, ['ubuntu-24.04'], [{ name: REUSE_STEP, conclusion: 'success' }])] },
-    onMain: { [SHA('m1')]: true, [ahead]: false },
+    onMain: { [SHA('c1')]: true, [ahead]: false },
     merges: [{ number: 3, mergedAt: '2026-11-02T04:00:00Z', enqueuedAt: ['2026-11-02T01:00:00Z', '2026-11-02T03:30:00Z', '2026-11-02T05:00:00Z'] },
       { number: 9, mergedAt: '2026-11-03T00:00:00Z', enqueuedAt: [] }] };
   const metrics = computeMetrics(raw);
@@ -201,7 +202,7 @@ test('no merges and no runs print n/a and no verdict', () => {
 test('fallback reasons rebuild the checks queue-ci-proof.cjs makes', () => {
   const proof = conclusion => ({ name: PROOF_JOB, conclusion, completed_at: '2026-11-02T01:00:00Z' });
   const gate = REQUIRED_QUEUE_JOBS.map((name, i) => ({ id: i + 1, name, run_attempt: 1, status: 'completed', conclusion: 'success' }));
-  const done = { ...queueRun(1, 'success', SHA('m')), updated_at: '2026-11-02T00:59:00Z' };
+  const done = { ...queueRun(1, 'success', SHA('c')), updated_at: '2026-11-02T00:59:00Z' };
   const push = (jobs, evidence) => ({ run: { html_url: 'u' }, jobs, evidence });
   assert.equal(proofReason(push([])), 'proof-job-missing');
   assert.equal(proofReason(push([proof('failure')])), 'proof-job-failure');
