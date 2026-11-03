@@ -1,6 +1,6 @@
 import { normalizeColorSample } from './contrast'
 import { resolve } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
 import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
@@ -112,7 +112,7 @@ function brandFacts(scope: string): BrandFacts {
 }
 
 describe('cockpit app shell', () => {
-  beforeAll(() => {
+  beforeEach(() => {
     browser.setViewport(DESKTOP.width, DESKTOP.height)
   })
 
@@ -389,6 +389,8 @@ describe('cockpit app shell', () => {
   })
 
   it('screenshots the shell in both themes', () => {
+    browser.goto(baseUrl + scoped('/'))
+    browser.waitForFunction(`document.querySelector('[data-slot="app-shell"]') !== null`)
     setTheme('dark')
     expect(browser.evaluate('document.documentElement.classList.contains("light")')).toBe(false)
     browser.screenshot(`${artifactsDir}/shell-dark.png`)
@@ -406,7 +408,7 @@ describe('cockpit app shell', () => {
 })
 
 describe('mobile shell', () => {
-  beforeAll(() => {
+  beforeEach(() => {
     browser.setViewport(IPHONE.width, IPHONE.height)
   })
 
