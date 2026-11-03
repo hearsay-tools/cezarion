@@ -29,8 +29,18 @@ test('cockpit config separates heavy suites and covers every discovered spec det
     assert.equal(shards.flat().length, specs.length);
     assert.deepEqual(new Set(shards.flat()), new Set(specs));
     assert.deepEqual(await partition([...specs].reverse()), shards);
-    // Only allocation changes: local and within-shard execution keep Vitest's sort.
-    assert.equal(Sequencer.prototype.sort, BaseSequencer.prototype.sort);
+    // Default execution keeps Vitest's order; shuffle retains the same shard members.
+    assert.deepEqual(await new Sequencer(ctx).sort(specs), await new BaseSequencer(ctx).sort(specs));
+    const shuffled = (input, seed) => new Sequencer(Object.create(ctx, {
+      config: { value: { ...ctx.config, sequence: { ...ctx.config.sequence, shuffle: true, seed } } },
+    })).sort(input);
+    const first = await shuffled(specs, 2511001);
+    assert.deepEqual(await shuffled([...specs].reverse(), 2511001), first);
+    assert.notDeepEqual(await shuffled(specs, 2511002), first);
+    assert.deepEqual(new Set(first), new Set(specs));
+    for (const shard of shards) {
+      assert.deepEqual(new Set(await shuffled(shard, 2511001)), new Set(shard));
+    }
     assert.equal(ctx.config.fileParallelism, false);
     assert.ok(ctx.config.setupFiles.some((file) => path.basename(file) === 'fetch-setup.mjs'));
 
