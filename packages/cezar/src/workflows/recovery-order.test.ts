@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,11 +21,11 @@ describe('recover() with tied runs in a one-slot project', () => {
   const savedDryRun = process.env.CEZ_DRY_RUN;
 
   const record = (id: string) => ({
-    id, title: `run ${id}`, workflow: 'quick-task', task: 'mock:cezar-done pick me up', status: 'running',
+    id, title: `run ${id}`, workflow: 'quick-task', task: 'mock:cezar-done pick me up', status: RUN_STATUS.running,
     createdAt: '2026-07-30T00:00:00.000Z', startedAt: '2026-07-30T00:00:01.000Z', tokensUsed: 0, archived: false,
     worktree: false, currentStepId: 'work',
     workflowDef: { name: 'quick-task', source: 'built-in', steps: [{ id: 'work', name: 'Work', prompt: '{{task}}' }] },
-    steps: [{ id: 'work', name: 'Work', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0, startedAt: '2026-07-30T00:00:01.000Z', sessionId: `session-${id}` }],
+    steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent, status: STEP_STATUS.running, iterations: 1, tokensUsed: 0, startedAt: '2026-07-30T00:00:01.000Z', sessionId: `session-${id}` }],
   });
 
   beforeEach(() => {

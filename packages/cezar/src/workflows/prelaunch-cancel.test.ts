@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -63,10 +64,10 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     if (mode === 'fresh') return p.manager.startRun(workflow, { task: 'test prelaunch', runner: 'claude', worktree: false }).id;
     const prior = p.store.createRun({
       title: 'resume', task: 'resume', workflow: workflow.name, runner: 'claude',
-      steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+      steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }],
     });
-    p.store.updateStep(prior.id, 'task', { status: 'done', sessionId: 'prior-session', backend: 'claude' });
-    p.store.updateRun(prior.id, { status: 'done', workflowDef: workflow });
+    p.store.updateStep(prior.id, 'task', { status: STEP_STATUS.done, sessionId: 'prior-session', backend: 'claude' });
+    p.store.updateRun(prior.id, { status: RUN_STATUS.done, workflowDef: workflow });
     expect(p.manager.continueRun(prior.id)).toEqual({ ok: true });
     return prior.id;
   }
@@ -143,7 +144,7 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     expect(a.manager.isActive(id)).toBe(false);
     expect(provision).not.toHaveBeenCalled();
     // Cleared fields are absent once the settled run is read back from runs.db (#779).
-    expect(a.store.getRun(id)).toMatchObject({ status: 'cancelled', finishedAt: expect.any(String) });
+    expect(a.store.getRun(id)).toMatchObject({ status: RUN_STATUS.cancelled, finishedAt: expect.any(String) });
     expect([a.store.getRun(id)?.stopping, a.store.getRun(id)?.currentStepId]).toEqual([undefined, undefined]);
     expect(a.store.getRun(id)?.steps.find(step => step.id === stepId)?.status).toBe('cancelled');
     await queuedDone;
@@ -196,7 +197,7 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     // Old setup must neither drop this state nor overwrite its durable status.
     const replacement = { ...previous, cancelled: false, revokeCiTools, revokeDelegation };
     active.set(id, replacement);
-    p.store.updateRun(id, { status: 'waiting', stopping: undefined });
+    p.store.updateRun(id, { status: RUN_STATUS.waiting, stopping: undefined });
     releaseSetup();
     const completion = execution.mock.results[0]!.value;
     try {

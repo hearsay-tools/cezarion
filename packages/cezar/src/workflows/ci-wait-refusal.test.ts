@@ -1,3 +1,9 @@
+import {
+  RUN_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WORKER_OUTCOME_STATUS,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { workerWaitRequestSchema } from '@open-mercato/cezar-contract/delegation';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
@@ -47,21 +53,21 @@ describe('R27 CI registration beside worker waits — #713, hearsay-tools/cezari
       const tools = controller.provision(manager.cezarToolHandlers(run.id, state.ciGeneration));
       const child = await worker(run.id);
       const wait = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
-      await expect(callCezarWait({ kind: 'pr', pr }, tools.env)).resolves.toMatchObject({ ok: true, kind: 'pr' });
+      await expect(callCezarWait({ kind: WAIT_KIND.pr, pr }, tools.env)).resolves.toMatchObject({ ok: true, kind: WAIT_KIND.pr });
       const ci = ciWaitOf(run.id);
-      expect(ci).toMatchObject({ phase: 'open' });
-      fixtureUpdateRun(child.id, { status: 'done' });
+      expect(ci).toMatchObject({ phase: WAIT_PHASE.open });
+      fixtureUpdateRun(child.id, { status: RUN_STATUS.done });
       manager.reconcileWorkerWaits();
       await until(() => waitOf(store.getRun(run.id))?.phase === 'wake-pending');
       const queued = () => store.getRun(run.id)?.agentInputs?.find(input => input.id === wait.id);
       expect(queued()?.deliveredAt).toBeUndefined();
       expect(store.readEvents(run.id).filter(e => e.type === 'turn-end')).toHaveLength(0);
       // The same CI registration is answered again while the worker result is owed.
-      await expect(callCezarWait({ kind: 'pr', pr }, tools.env)).resolves.toMatchObject({ ok: true, kind: 'pr' });
+      await expect(callCezarWait({ kind: WAIT_KIND.pr, pr }, tools.env)).resolves.toMatchObject({ ok: true, kind: WAIT_KIND.pr });
       expect(ciWaitOf(run.id)?.id).toBe(ci!.id);
       wire.release();
       await until(() => !!queued()?.deliveredAt && !waitOf(store.getRun(run.id)));
-      expect(ciWaitOf(run.id)).toMatchObject({ id: ci!.id, phase: 'open' });
+      expect(ciWaitOf(run.id)).toMatchObject({ id: ci!.id, phase: WAIT_PHASE.open });
       expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
     } finally { wire.release(); await controller.close(); }
   });
@@ -79,7 +85,7 @@ describe('R27 CI registration beside worker waits — #713, hearsay-tools/cezari
         const tools = controller.provision(manager.cezarToolHandlers(run.id, state.ciGeneration));
         const child = await worker(run.id);
         const wait = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
-        fixtureUpdateRun(child.id, { status: 'done' });
+        fixtureUpdateRun(child.id, { status: RUN_STATUS.done });
         manager.reconcileWorkerWaits();
         expect(waitOf(store.getRun(run.id))?.phase).toBe('wake-pending');
         if (action === 'cancel') {
@@ -98,7 +104,7 @@ describe('R27 CI registration beside worker waits — #713, hearsay-tools/cezari
           // hearsay-tools/cezarion#1235: the receipt is in `lastWaits`, and a destroy during the live
           // turn cancels the wait it settled: nothing is left to await or deliver.
           expect(lastWaitOf(store.getRun(run.id))).toMatchObject({ id: wait.id, reason: 'cancelled',
-            outcomes: [{ workerId: child.id, status: 'done' }] });
+            outcomes: [{ workerId: child.id, status: WORKER_OUTCOME_STATUS.done }] });
           expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === wait.id && !input.deliveredAt)).toEqual([]);
         }
         expect(store.readEvents(run.id).filter(event => event.type === 'turn-end')).toHaveLength(0);
@@ -106,7 +112,7 @@ describe('R27 CI registration beside worker waits — #713, hearsay-tools/cezari
         const next = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
         manager.reconcileWorkerWaits();
         manager.cancelWorkerWait(run.id, next.id);
-        await expect(callCezarWait({ kind: 'pr', pr }, tools.env)).resolves.toMatchObject({ ok: true, kind: 'pr' });
+        await expect(callCezarWait({ kind: WAIT_KIND.pr, pr }, tools.env)).resolves.toMatchObject({ ok: true, kind: WAIT_KIND.pr });
       } finally { wire.release(); await controller.close(); }
     });
   }

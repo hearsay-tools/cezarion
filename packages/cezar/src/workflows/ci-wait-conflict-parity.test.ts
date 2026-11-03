@@ -1,3 +1,4 @@
+import { WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -55,7 +56,7 @@ describe('native conflict observation durability and wake parity', { timeout: 35
         expect(manager.continueRun(run.id, { text: HARNESS_ADAPTERS[runner].scenarios.baseline! }).ok).toBe(true);
         await until(() => store.getRun(run.id)?.status === 'waiting' && !!active(run.id)?.session.open);
       }
-      const wait = await manager.registerWait(run.id, { kind: 'pr', pr, timeout_seconds: 120 }, 'cezar_wait', active(run.id)!.ciGeneration);
+      const wait = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr, timeout_seconds: 120 }, 'cezar_wait', active(run.id)!.ciGeneration);
       if (mode === 'recovered') {
         await restart();
         expect(manager.isActive(run.id)).toBe(false);
@@ -86,7 +87,7 @@ describe('native conflict observation durability and wake parity', { timeout: 35
       expect(failedCheckpoint.agentInputs?.some((item: { id: string }) => item.id === wait.id) ?? false).toBe(false);
       checkpoint.mockRestore();
       expect(open(run.id)).toMatchObject({ result: { outcome: 'conflicting', mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' } });
-      expect(committed.waits.find((entry: { id: string }) => entry.id === wait.id)).toMatchObject({ phase: 'resolved', result: { outcome: 'conflicting' } });
+      expect(committed.waits.find((entry: { id: string }) => entry.id === wait.id)).toMatchObject({ phase: WAIT_PHASE.resolved, result: { outcome: 'conflicting' } });
       expect(committed.agentInputs.filter((input: { id: string }) => input.id === wait.id)).toHaveLength(1);
       expect(committed.agentInputs.find((input: { id: string }) => input.id === wait.id).deliveredAt).toBeUndefined();
       expect(committed.agentInputs.find((input: { id: string }) => input.id === wait.id).text).toContain('conflicting');
@@ -130,12 +131,12 @@ describe('native conflict observation durability and wake parity', { timeout: 35
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
       await until(() => store.getRun(run.id)?.status === 'waiting');
       const generation = active(run.id)!.ciGeneration;
-      const wait = await manager.registerWait(run.id, { kind: 'pr', pr, timeout_seconds: 120 }, 'cezar_wait', generation);
+      const wait = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr, timeout_seconds: 120 }, 'cezar_wait', generation);
       if (wait.kind !== 'pr') throw new Error('Expected a CI wait');
       await until(() => existsSync(log) && readFileSync(log, 'utf8').includes('name,state,link,bucket'));
       expect(manager.cancelWait(run.id, wait.id, generation)).toEqual({ cancelled: true });
       // Cancellation has committed before the external check command can complete.
-      expect(disk(run.id).lastWaits.find((entry: { id: string }) => entry.id === wait.id)).toMatchObject({ phase: 'cancelled' });
+      expect(disk(run.id).lastWaits.find((entry: { id: string }) => entry.id === wait.id)).toMatchObject({ phase: WAIT_PHASE.cancelled });
       writeFileSync(gate, '');
       const request = ciWatchRequest(wait);
       // Reap the cancelled in-flight query before obtaining a genuine late conflict.

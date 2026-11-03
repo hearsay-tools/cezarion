@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
@@ -43,7 +44,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
             expect(manager.continueRun(p.id, { text: 'mock:hold' }).ok).toBe(true);
             await until(() => store.getRun(p.id)?.status === 'waiting');
           }
-          expect(store.getRun(p.id)).toMatchObject({ status: 'waiting' });
+          expect(store.getRun(p.id)).toMatchObject({ status: RUN_STATUS.waiting });
           expect(monitoringWakeOf(store.getRun(p.id))).toBeUndefined();
           const w = await worker(p.id);
           process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
@@ -79,7 +80,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
             await until(() => !!store.getRun(p.id)?.agentInputs?.find(input => input.id === id)?.deliveredAt);
             await until(() => semaphore.busy() === 0);
             expect(store.readEvents(p.id).some(event => event.type === 'conversation-message')).toBe(true);
-            expect(store.getRun(p.id)).toMatchObject({ status: 'waiting' });
+            expect(store.getRun(p.id)).toMatchObject({ status: RUN_STATUS.waiting });
             expect(hasPendingAsk(store, p.id)).not.toBe(true);
             expect(store.getRun(p.id)?.waits?.filter(wait => wait.kind === 'human') ?? []).toEqual([]);
             expect(monitoringWakeOf(store.getRun(p.id))).toBeDefined();
@@ -107,7 +108,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
       const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
       manager.sendMessage(p.id, [{ type: 'text', text: 'mock:hold' }]);
       await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries);
-      expect(store.getRun(p.id)).toMatchObject({ status: 'waiting' });
+      expect(store.getRun(p.id)).toMatchObject({ status: RUN_STATUS.waiting });
       const timer = monitoringWakeOf(store.getRun(p.id));
       expect(timer).toBeDefined();
       manager.sendMessage(p.id, [{ type: 'text', text: ASK_PROMPT }]);
@@ -213,7 +214,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
     expect(hasPendingAsk(store, p.id)).toBe(true);
     expect(store.getRun(p.id)?.status).toBe('waiting');
     expect(waitOf(store.getRun(p.id))?.phase).toBe('registered');
-    fixtureUpdateRun(w.id, { status: 'done' });
+    fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
     manager.reconcileWorkerWaits();
     await until(() => waitOf(store.getRun(p.id))?.phase === 'wake-pending');
     const run = store.getRun(p.id)!;

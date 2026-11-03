@@ -1,3 +1,12 @@
+import {
+  RUN_STATUS,
+  STEP_KIND,
+  STEP_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { clearIdleTimer } from './run/input-timers.ts';
 import type { ActiveRun } from './active-run.ts';
@@ -31,9 +40,9 @@ describe('the completion gate outside a turn end', () => {
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), 'cez-gate-entry-'));
     store = RunStore.open(join(root, '.ai/cezar'));
-    id = store.createRun({ title: 'gate', task: 'work', workflow: 'quick-task', steps: [{ id: 'task', name: 'Task', kind: 'agent' }] }).id;
-    store.updateRun(id, { status: 'running', currentStepId: 'task' });
-    store.updateStep(id, 'task', { status: 'running' });
+    id = store.createRun({ title: 'gate', task: 'work', workflow: 'quick-task', steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] }).id;
+    store.updateRun(id, { status: RUN_STATUS.running, currentStepId: 'task' });
+    store.updateStep(id, 'task', { status: STEP_STATUS.running });
     await store.factsWarmIdle();
     manager = new RunManager(store, root);
     session = {
@@ -94,8 +103,8 @@ describe('the completion gate outside a turn end', () => {
   });
 
   const queueInput = () => store.commitAgentInputs(id, [{ id: randomUUID(), source: 'agent', parentRunId: randomUUID(), text: 'Read this first', createdAt: new Date().toISOString() }]);
-  const openWorkerWait = () => store.commitWait(id, { kind: 'worker', id: randomUUID(), source: 'agent', via: 'cezar_wait', registeredAt: new Date().toISOString(),
-    deadline: new Date(Date.now() + 60_000).toISOString(), timeoutSeconds: 60, phase: 'open', turnId: 'turn', mode: 'all',
+  const openWorkerWait = () => store.commitWait(id, { kind: WAIT_KIND.worker, id: randomUUID(), source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait, registeredAt: new Date().toISOString(),
+    deadline: new Date(Date.now() + 60_000).toISOString(), timeoutSeconds: 60, phase: WAIT_PHASE.open, turnId: 'turn', mode: 'all',
     workerIds: [workerId], revisions: [], outcomes: [] });
   const sent = () => vi.mocked(session.sendMessage).mock.calls.length + vi.mocked(session.sendAgentMessage).mock.calls.length;
 

@@ -1,3 +1,4 @@
+import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -74,7 +75,7 @@ describe('RunManager agent-profile resolution', () => {
       task: over.task,
       runner: over.runner,
       agentProfile: over.agentProfile,
-      steps: [{ id: 'work', name: 'work', kind: 'agent' }],
+      steps: [{ id: 'work', name: 'work', kind: STEP_KIND.agent }],
     });
 
   it('adds NOTHING for the default account — the zero-config env is untouched', async () => {

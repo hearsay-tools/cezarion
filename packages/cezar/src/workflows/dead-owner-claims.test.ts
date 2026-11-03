@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -56,12 +57,12 @@ describe('a crashed owner\'s claim on a settled family', () => {
       { role: 'worker', permissions: [], parentRunId: parent.id, workspace }, 'a'.repeat(64));
     owner.commitWorkerExecutionStart(worker.id);
     const finishedAt = new Date().toISOString();
-    owner.updateRun(worker.id, { status: 'done', finishedAt });
-    owner.updateRun(parent.id, { status: 'done', finishedAt });
+    owner.updateRun(worker.id, { status: RUN_STATUS.done, finishedAt });
+    owner.updateRun(parent.id, { status: RUN_STATUS.done, finishedAt });
     // An ordinary settled run with a materialized worktree, a branch and agent scratch.
     const plain = owner.createRun({ title: 'plain', workflow: 'quick-task', task: 'plain', steps: [] });
     const worktree = join(root, 'plain-worktree'); mkdirSync(worktree);
-    owner.updateRun(plain.id, { status: 'done', finishedAt, worktreePath: worktree, branch: `cez/${plain.id.slice(0, 8)}` });
+    owner.updateRun(plain.id, { status: RUN_STATUS.done, finishedAt, worktreePath: worktree, branch: `cez/${plain.id.slice(0, 8)}` });
     const scratch = agentTmpDir(dataDir, plain.id); mkdirSync(scratch, { recursive: true });
     // The process dies while both families are still in its memory: their claims stay behind.
     owner.pin(parent.id, 'cleanup'); owner.pin(plain.id, 'cleanup'); owner.flush();

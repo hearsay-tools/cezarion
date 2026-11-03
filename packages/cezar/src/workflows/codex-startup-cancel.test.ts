@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -75,17 +76,17 @@ describe('Stop before the first Codex turn (#493)', { timeout: 15_000 }, () => {
     } else {
       const prior = a.store.createRun({
         title: 'resume', task: 'resume', workflow: workflow.name, runner: 'codex',
-        steps: [{ id: 'task', name: 'Task', kind: 'agent' }],
+        steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }],
       });
-      a.store.updateStep(prior.id, 'task', { status: 'done', sessionId: 'prior-thread', backend: 'codex' });
-      a.store.updateRun(prior.id, { status: 'done', workflowDef: workflow });
+      a.store.updateStep(prior.id, 'task', { status: STEP_STATUS.done, sessionId: 'prior-thread', backend: 'codex' });
+      a.store.updateRun(prior.id, { status: RUN_STATUS.done, workflowDef: workflow });
       expect(a.manager.continueRun(prior.id)).toEqual({ ok: true });
       runId = prior.id;
     }
     const ready = join(a.root, '.codex-startup-ready');
     const pid = await vi.waitFor(() => requirePid(ready), waitOptions);
     const stepId = a.store.getRun(runId)!.currentStepId!;
-    expect(a.store.getRun(runId)).toMatchObject({ status: 'running', tokensUsed: 0 });
+    expect(a.store.getRun(runId)).toMatchObject({ status: RUN_STATUS.running, tokensUsed: 0 });
     expect(a.store.readEvents(runId).some(event => ['session', 'turn.started', 'turn-end', 'text'].includes(event.type))).toBe(false);
 
     const admission = vi.spyOn(runInternals(b.manager).line, 'pump');

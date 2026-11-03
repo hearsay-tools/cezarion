@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -32,10 +33,10 @@ function fixture() {
 function archivedFinished(store: RunStore) {
   const run = store.createRun({
     title: 'task', task: 'task', workflow: 'original',
-    steps: [{ id: 'work', name: 'Work', kind: 'agent' }],
+    steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }],
   });
-  store.updateStep(run.id, 'work', { status: 'done', sessionId: 'old-session' });
-  store.updateRun(run.id, { status: 'done' });
+  store.updateStep(run.id, 'work', { status: STEP_STATUS.done, sessionId: 'old-session' });
+  store.updateRun(run.id, { status: RUN_STATUS.done });
   store.setArchived(run.id, true);
   return run;
 }
@@ -50,8 +51,8 @@ afterEach(async () => {
 
 describe('continueRun unarchives', () => {
   it.each([
-    { name: 'human Continue', defer: false, status: 'running' as const },
-    { name: 'deferred restart recovery', defer: true, status: 'queued' as const },
+    { name: 'human Continue', defer: false, status: RUN_STATUS.running },
+    { name: 'deferred restart recovery', defer: true, status: RUN_STATUS.queued },
   ])('$name on an archived run clears archived and archivedAt', ({ defer, status }) => {
     const { store, manager } = fixture();
     const run = archivedFinished(store);
@@ -71,10 +72,10 @@ describe('continueRun unarchives', () => {
     const { store, manager } = fixture();
     const run = store.createRun({
       title: 'task', task: 'task', workflow: 'original',
-      steps: [{ id: 'work', name: 'Work', kind: 'agent' }],
+      steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }],
     });
-    store.updateStep(run.id, 'work', { status: 'done' });
-    store.updateRun(run.id, { status: 'done' });
+    store.updateStep(run.id, 'work', { status: STEP_STATUS.done });
+    store.updateRun(run.id, { status: RUN_STATUS.done });
     store.setArchived(run.id, true);
 
     expect(manager.continueRun(run.id, { text: 'keep going' })).toMatchObject({ ok: false });
@@ -86,13 +87,13 @@ describe('continueRun unarchives', () => {
     const { store, manager } = fixture();
     const parent = store.createRun({
       title: 'parent', task: 'parent', workflow: 'original',
-      steps: [{ id: 'work', name: 'Work', kind: 'agent' }],
+      steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }],
     });
-    store.updateRun(parent.id, { status: 'waiting', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    store.updateRun(parent.id, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     const workerId = randomUUID();
     const worker = store.createOwnedRun(
       { title: 'worker', task: 'worker', workflow: 'quick-task', runner: 'claude',
-        steps: [{ id: 'task', name: 'Task', kind: 'agent' }] },
+        steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] },
       parent.id, randomUUID(),
       { role: 'worker', permissions: [], parentRunId: parent.id, workspace: {
         ownerRunId: workerId, resourceId: randomUUID(), kind: 'owned-isolated',
@@ -100,8 +101,8 @@ describe('continueRun unarchives', () => {
       } },
       'a'.repeat(64),
     );
-    store.updateStep(worker.id, 'task', { status: 'done', sessionId: 'old-session' });
-    store.updateRun(worker.id, { status: 'done' });
+    store.updateStep(worker.id, 'task', { status: STEP_STATUS.done, sessionId: 'old-session' });
+    store.updateRun(worker.id, { status: RUN_STATUS.done });
     store.setArchived(worker.id, true);
     const commit = vi.spyOn(store, 'commitWorkerContinuation').mockImplementation(() => {
       throw new Error('checkpoint failed');

@@ -1,3 +1,5 @@
+import { workerCollectedResultSchema } from '@open-mercato/cezar-contract/delegation';
+import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFileSync } from 'node:child_process';
 import fs, { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
@@ -30,8 +32,8 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (#738
     process.env.CEZ_DELEGATION = '1';
     const adapter = HARNESS_ADAPTERS[runner];
     process.env.CEZ_DRY_RUN = '0'; process.env[adapter.binEnv] = adapter.mockBin;
-    const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [{ id: 'task', kind: 'agent', name: 'Task' }] });
-    store.updateRun(p.id, { status: 'waiting', currentStepId: 'task', delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
+    const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [{ id: 'task', kind: STEP_KIND.agent, name: 'Task' }] });
+    store.updateRun(p.id, { status: RUN_STATUS.waiting, currentStepId: 'task', delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
     const orphan = await worker(p.id, adapter.scenarios.baseline!);
     store.updateRun(orphan.id, { runner }); manager.enqueueOwnedRun(orphan.id);
     await until(() => store.getRun(orphan.id)?.status === 'waiting');
@@ -74,7 +76,7 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (#738
     let service = new DelegationService(settleVia === 'destroy' ? { terminationTimeoutMs: 100 } : {}); let detach = service.registerProject({ id: 'project', root, store, manager });
     let holderClosed = false;
     try {
-      expect(await service.collect(caller, { workerId: twin.id })).toMatchObject({ settled: true, status: 'done' });
+      expect(await service.collect(caller, { workerId: twin.id })).toMatchObject({ settled: true, status: workerCollectedResultSchema.shape.status.enum.done });
       expect(manager.finishBlockedReason(p.id)).toContain(orphan.id);
       expect(manager.finish(p.id)).toBe(false);
       if (settleVia === 'destroy') {
@@ -83,7 +85,7 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (#738
       }
       const resourceProbe = vi.spyOn(fs, 'readlinkSync'); syncBuiltinESMExports();
       resourceProbe.mockClear();
-      expect(await service.collect(caller, { workerId: orphan.id })).toMatchObject({ settled: true, status: 'cancelled' });
+      expect(await service.collect(caller, { workerId: orphan.id })).toMatchObject({ settled: true, status: workerCollectedResultSchema.shape.status.enum.cancelled });
       expect(existsSync(scratch)).toBe(true);
       expect(resourceProbe.mock.calls.filter(([path]) => String(path).startsWith('/proc/'))).toHaveLength(0);
       expect(store.readWorkerExecution(orphan.id)).toMatchObject({ phase: 'complete', generation: proof.generation });
@@ -142,8 +144,8 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (#738
     process.env.CEZ_DELEGATION = '1';
     const adapter = HARNESS_ADAPTERS[runner];
     process.env.CEZ_DRY_RUN = '0'; process.env[adapter.binEnv] = adapter.mockBin;
-    const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [{ id: 'task', kind: 'agent', name: 'Task' }] });
-    store.updateRun(p.id, { status: 'waiting', currentStepId: 'task', delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
+    const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [{ id: 'task', kind: STEP_KIND.agent, name: 'Task' }] });
+    store.updateRun(p.id, { status: RUN_STATUS.waiting, currentStepId: 'task', delegation: { role: 'root', permissions: ['spawn', 'inspect'], receipts: [] } });
     const w = await worker(p.id, adapter.scenarios.baseline!);
     store.updateRun(w.id, { runner }); manager.enqueueOwnedRun(w.id);
     await until(() => store.getRun(w.id)?.status === 'waiting');

@@ -1,3 +1,4 @@
+import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 /**
  * The delegation fixture the worker-wait suites share: a real `RunManager` over a scratch Git repo
@@ -281,7 +282,7 @@ export async function worker(parentId: string, task = 'mock:hold', runner: Runne
   const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   const workspace = await planOwnedWorkspace(root, id, sha);
   checkpoint('worker-planned');
-  const run = store.createOwnedRun({ title: 'worker', task, workflow: 'quick-task', runner, steps: [{ id: 'task', kind: 'agent', name: 'Task' }] }, parentId, randomUUID(), {
+  const run = store.createOwnedRun({ title: 'worker', task, workflow: 'quick-task', runner, steps: [{ id: 'task', kind: STEP_KIND.agent, name: 'Task' }] }, parentId, randomUUID(), {
     role: 'worker', permissions: [], parentRunId: parentId, workspace,
   }, 'a'.repeat(64));
   checkpoint('worker-created'); return run;

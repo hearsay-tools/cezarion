@@ -1,3 +1,4 @@
+import { STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -55,7 +56,7 @@ describe('recover() reads legacy generated-inbox records — hearsay-tools/cezar
       title: 't',
       workflow: 'quick-task',
       task: 'do it',
-      steps: [{ id: 'work', name: 'Work', kind: 'agent' }],
+      steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }],
     });
     store.updateRun(id, { workflowDef: WORKFLOW_DEF, generateFollowups });
     return id;

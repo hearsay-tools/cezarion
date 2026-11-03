@@ -1,3 +1,4 @@
+import { WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { describe, expect, it, vi } from 'vitest';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -53,13 +54,13 @@ describe('CI query retries across native harnesses', {timeout:30_000},()=>{
     const run=manager.startRun(QUICK_TASK_WORKFLOW,{task:HARNESS_ADAPTERS[runner].scenarios.baseline!,runner});
     await until(()=>store.getRun(run.id)?.status==='waiting');
     const engine=manager as unknown as {active:Map<string,{ciGeneration:string}>};
-    await manager.registerWait(run.id,{kind:'pr',pr:'https://github.com/org/repo/pull/12',timeout_seconds:120},'cezar_wait',engine.active.get(run.id)!.ciGeneration);
+    await manager.registerWait(run.id,{kind: WAIT_KIND.pr,pr:'https://github.com/org/repo/pull/12',timeout_seconds:120},'cezar_wait',engine.active.get(run.id)!.ciGeneration);
     await until(()=>probes.size===1 || !!lastWaitOf(run.id)?.deliveredAt);
     expect(lastWaitOf(run.id)).toBeUndefined();
     await until(()=>ciWaitOf(run.id)?.phase==='open' && store.getRun(run.id)?.status==='waiting');
     const id=ciWaitOf(run.id)!.id;
     if(recovered){await restart();await until(()=>probes.size===1);expect(manager.isActive(run.id)).toBe(false);}
-    expect(ciWaitOf(run.id)).toMatchObject({id,phase:'open'});
+    expect(ciWaitOf(run.id)).toMatchObject({id,phase: WAIT_PHASE.open});
     expect(store.getRun(run.id)?.agentInputs?.some(input=>input.id===id)).toBeFalsy();
     // Query failure must not create an input or spend a model turn. Release
     // the real supervisor backoff only after inspecting the durable open wait.

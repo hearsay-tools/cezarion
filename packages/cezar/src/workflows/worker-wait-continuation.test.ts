@@ -1,3 +1,4 @@
+import { RUN_STATUS, WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -36,7 +37,7 @@ describe('worker wait after an approved continuation (#475)', { timeout: 30_000 
     await until(() => store.readEvents(p.id).some(event => event.type === 'ask.requested'));
     const wait = register(p.id, [w.id]);
     expect(waitOf(store.getRun(p.id))).toMatchObject({ id: wait.id, workerIds: [w.id] });
-    expect(store.getRun(p.id)).toMatchObject({ status: 'waiting', waits: expect.arrayContaining([expect.objectContaining({ kind: 'human', phase: 'open' })]) });
+    expect(store.getRun(p.id)).toMatchObject({ status: RUN_STATUS.waiting, waits: expect.arrayContaining([expect.objectContaining({ kind: WAIT_KIND.human, phase: WAIT_PHASE.open })]) });
   });
 
   it('a new question during the answer turn does not refuse a worker wait', async () => {

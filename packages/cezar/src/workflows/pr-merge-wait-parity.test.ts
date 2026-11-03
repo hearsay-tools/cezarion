@@ -1,3 +1,4 @@
+import { WAIT_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -72,7 +73,7 @@ describe('native PR merge wait parity', { timeout: 35_000 }, () => {
         expect(manager.continueRun(run.id, { text: HARNESS_ADAPTERS[runner].scenarios.baseline! }).ok).toBe(true);
         await until(() => store.getRun(run.id)?.status === 'waiting' && !!active(run.id)?.session.open);
       }
-      const wait = await manager.registerWait(run.id, { kind: 'pr', pr, until: 'merge', timeout_seconds: 120 }, 'cezar_wait', active(run.id)!.ciGeneration);
+      const wait = await manager.registerWait(run.id, { kind: WAIT_KIND.pr, pr, until: 'merge', timeout_seconds: 120 }, 'cezar_wait', active(run.id)!.ciGeneration);
       if (mode === 'recovered') {
         await restart();
         expect(manager.isActive(run.id)).toBe(false);
@@ -84,7 +85,7 @@ describe('native PR merge wait parity', { timeout: 35_000 }, () => {
       const before = mergeReads(log);
       for (const probe of [...probes]) probe.resume();
       await until(() => mergeReads(log) > before && probes.size > 0);
-      expect(open(run.id)).toMatchObject({ id: wait.id, phase: 'open' });
+      expect(open(run.id)).toMatchObject({ id: wait.id, phase: WAIT_PHASE.open });
       // The committed row at the wake boundary already holds the result and its input.
       const engine = runInternals(manager).wakeAdmission;
       const queue = engine.queueWaitWake.bind(engine);
@@ -94,7 +95,7 @@ describe('native PR merge wait parity', { timeout: 35_000 }, () => {
       for (const probe of [...probes]) probe.resume();
       await until(() => !!last(run.id)?.deliveredAt);
       expect(wake).toHaveBeenCalled();
-      expect(committed.waits.find((entry: { id: string }) => entry.id === wait.id)).toMatchObject({ phase: 'resolved', result: { outcome: 'merged' } });
+      expect(committed.waits.find((entry: { id: string }) => entry.id === wait.id)).toMatchObject({ phase: WAIT_PHASE.resolved, result: { outcome: 'merged' } });
       expect(committed.agentInputs.filter((input: { id: string }) => input.id === wait.id)).toHaveLength(1);
       expect(last(run.id)).toMatchObject({ id: wait.id, until: 'merge', result: { outcome: 'merged', mergedAt: '2026-10-23T09:00:00Z', mergeCommitSha: 'b'.repeat(40) } });
       runInternals(manager).waitRegistry.resolveWait(run.id, wait.id, last(run.id)!.result); // A duplicate callback cannot enqueue another input.

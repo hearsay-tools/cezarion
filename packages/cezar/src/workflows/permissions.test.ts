@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { handleRunnerUiEvent, makeUiSink } from './run/session-events.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import type { ActiveRun } from './active-run.ts';
@@ -18,9 +19,9 @@ describe('human permission lifecycle', () => {
   beforeEach(async () => {
     root = mkdtempSync(join(tmpdir(), 'cez-permission-'));
     store = RunStore.open(join(root, '.ai/cezar'));
-    id = store.createRun({ title: 'Permission', task: 'work', workflow: 'quick-task', steps: [{ id: 'task', name: 'Task', kind: 'agent' }] }).id;
+    id = store.createRun({ title: 'Permission', task: 'work', workflow: 'quick-task', steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] }).id;
     await store.factsWarmIdle();
-    store.updateRun(id, { status: 'running' });
+    store.updateRun(id, { status: RUN_STATUS.running });
     manager = new RunManager(store, root);
     session = { open: true, result: new Promise(() => {}), sendMessage: vi.fn(() => true), sendAgentMessage: vi.fn(() => Promise.resolve()),
       respondPermission: vi.fn((requestId, optionId) => {
@@ -34,7 +35,7 @@ describe('human permission lifecycle', () => {
 
   it('parks concurrent requests until their exact IDs resolve and blocks all ordinary input', () => {
     request('a'); request('b');
-    expect(store.getRun(id)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
+    expect(store.getRun(id)).toMatchObject({ status: RUN_STATUS.waiting, hasPendingPermission: true });
     expect(runInternals(manager).line.busySlots()).toBe(0);
     expect(manager.sendMessage(id, [{ type: 'text', text: 'accept' }])).toBe(false);
     expect(runInternals(manager).turnNudges.tryAutonomousNudge(id, state, 'task')).toBe(false);
@@ -44,10 +45,10 @@ describe('human permission lifecycle', () => {
     expect(manager.respondPermission(id, 'a', 'invalid')).toBe(false);
     expect(manager.respondPermission(id, 'unknown', 'deny')).toBe(false);
     expect(manager.respondPermission(id, 'a', 'deny')).toBe(true);
-    expect(store.getRun(id)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
+    expect(store.getRun(id)).toMatchObject({ status: RUN_STATUS.waiting, hasPendingPermission: true });
     expect(manager.respondPermission(id, 'a', 'deny')).toBe(false);
     expect(manager.respondPermission(id, 'b', 'deny')).toBe(true);
-    expect(store.getRun(id)).toMatchObject({ status: 'running', hasPendingPermission: false });
+    expect(store.getRun(id)).toMatchObject({ status: RUN_STATUS.running, hasPendingPermission: false });
     expect(runInternals(manager).line.busySlots()).toBe(1);
   });
 

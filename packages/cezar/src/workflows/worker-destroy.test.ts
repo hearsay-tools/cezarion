@@ -1,3 +1,12 @@
+import {
+  RUN_STATUS,
+  STEP_KIND,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+  WORKER_OUTCOME_STATUS,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, fixtureWorkSettled, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { nonDumpableHolder } from '../delegation/non-dumpable.testkit.ts';
@@ -53,7 +62,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     manager = createFixtureManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 1 } }) });
 
     parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-    store.updateRun(parent.id, { status: 'waiting', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    store.updateRun(parent.id, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
   });
   afterEach(async () => {
     for (const release of releases.splice(0)) release();
@@ -68,7 +77,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   async function worker(task = 'mock:hold') {
     const id = randomUUID(); const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
     const workspace = await planOwnedWorkspace(root, id, sha);
-    return store.createOwnedRun({ title: 'worker', task, workflow: 'quick-task', runner: 'claude', steps: [{ id: 'task', name: 'Task', kind: 'agent' }] }, parent.id, randomUUID(), {
+    return store.createOwnedRun({ title: 'worker', task, workflow: 'quick-task', runner: 'claude', steps: [{ id: 'task', name: 'Task', kind: STEP_KIND.agent }] }, parent.id, randomUUID(), {
       role: 'worker', permissions: [], parentRunId: parent.id, workspace,
     }, 'a'.repeat(64));
   }
@@ -97,9 +106,9 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     expect(manager.requestWorkerStop(w.id).state).toBe('terminated');
     manager.dispose();
     manager = createFixtureManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
-    store.updateRun(parent.id, { status: 'review' });
+    store.updateRun(parent.id, { status: RUN_STATUS.review });
     expect(manager.continueRun(w.id)).toMatchObject({ ok: false });
-    store.updateRun(parent.id, { status: 'waiting' });
+    store.updateRun(parent.id, { status: RUN_STATUS.waiting });
     expect(manager.continueRun(w.id, { text: 'keep working' })).toEqual({ ok: true });
     expect(store.getRun(w.id)?.status).toBe('queued');
     expect(store.getRun(w.id)?.steps.map(step => step.id)).toEqual(['task']);
@@ -165,7 +174,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   it('a checkpoint an older cezar abandoned still parses, keeps its flag and refuses resume (hearsay-tools/cezarion#889)', async () => {
     const w = await worker();
     const generation = store.commitWorkerExecutionStart(w.id);
-    store.updateRun(w.id, { status: 'cancelled' }); expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(true);
+    store.updateRun(w.id, { status: RUN_STATUS.cancelled }); expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(true);
     const path = join(root, '.ai/cezar/runs', `${w.id}.execution.json`);
     writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), abandoned: true }), { mode: 0o600 });
     expect(store.readWorkerExecution(w.id)).toMatchObject({ generation, phase: 'complete', abandoned: true });
@@ -274,7 +283,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   });
 
   it('terminal status without a private completion checkpoint never proves termination after restart', async () => {
-    const w = await worker(); store.updateRun(w.id, { status: 'cancelled', startedAt: new Date().toISOString() }); store.flush();
+    const w = await worker(); store.updateRun(w.id, { status: RUN_STATUS.cancelled, startedAt: new Date().toISOString() }); store.flush();
     rmSync(join(root, '.ai/cezar/runs', `${w.id}.execution.json`));
     expect(await manager.awaitRunTermination(w.id, 10)).toBe(false);
     expect(manager.requestWorkerStop(w.id).state).toBe('stopping');
@@ -346,7 +355,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
   });
 
   it('destroying and invalid ownership never continue, reclaim, rematerialize or erase history', async () => {
-    const w = await worker(); store.updateRun(w.id, { status: 'done', worktreePath: workspace(w).path, worktreeReclaimedAt: new Date().toISOString() });
+    const w = await worker(); store.updateRun(w.id, { status: RUN_STATUS.done, worktreePath: workspace(w).path, worktreeReclaimedAt: new Date().toISOString() });
     destroy(w);
     expect(manager.continueRun(w.id, { text: 'resume' }).ok).toBe(false);
     expect(isReclaimable({ ...store.getRun(w.id)!, worktreeReclaimedAt: undefined })).toBe(false);
@@ -470,7 +479,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     manager.enqueueOwnedRun(w.id);
     expect(manager.enqueueMessage(w.id, [{ type: 'text', text: 'new work' }])).toBeNull();
     store.commitRootFinishCancellation(parent.id);
-    store.updateRun(parent.id, { status: 'waiting' });
+    store.updateRun(parent.id, { status: RUN_STATUS.waiting });
     const another = await worker(); const hold = gate(); releases.push(hold.release);
     const engine = manager as unknown as { execute(...args: unknown[]): Promise<unknown>; };
     const real = engine.execute.bind(manager); engine.execute = async (...args) => { await hold.promise; return real(...args); };
@@ -482,7 +491,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
   it('private completion does not publish when final index persistence fails', async () => {
     const w = await worker(); const generation = store.commitWorkerExecutionStart(w.id);
-    store.updateRun(w.id, { status: 'done' }); store.flush();
+    store.updateRun(w.id, { status: RUN_STATUS.done }); store.flush();
     const release = blockRunWrites(join(root, '.ai/cezar'));
     releases.push(release);
     expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(false);
@@ -661,7 +670,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       // so the fixture cannot launch an autosave while destroy probes the orphan.
       await ensureOwnedWorkspace(root, w);
       store.commitWorkerExecutionStart(w.id);
-      store.updateRun(w.id, { status: 'failed' }); store.flush();
+      store.updateRun(w.id, { status: RUN_STATUS.failed }); store.flush();
       manager.dispose();
       const signalSensitive = "process.on('SIGTERM',()=>process.exit(42)); console.log('ready'); setInterval(()=>{},1000)";
       const worktreeHolder = await spawnReady(workspace(w).path, signalSensitive);
@@ -863,8 +872,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       cadence.orphanBackoff = window === 'inside' ? { fastMs: 100, fastCount: 60, capMs: 3_600_000 } : { fastMs: 600_000, fastCount: 0, capMs: 100 };
       // The parent's worker wait is a wait-list entry (hearsay-tools/cezarion#1301).
       const waitId = randomUUID(); const now = Date.now();
-      reopened.commitWait(parent.id, { kind: 'worker', id: waitId, source: 'agent', via: 'cez-worker-wait', registeredAt: new Date(now).toISOString(),
-        deadline: new Date(now + 600_000).toISOString(), timeoutSeconds: 600, phase: 'open', turnId: 'turn-1', mode: 'all',
+      reopened.commitWait(parent.id, { kind: WAIT_KIND.worker, id: waitId, source: WAIT_SOURCE.agent, via: WAIT_VIA['cez-worker-wait'], registeredAt: new Date(now).toISOString(),
+        deadline: new Date(now + 600_000).toISOString(), timeoutSeconds: 600, phase: WAIT_PHASE.open, turnId: 'turn-1', mode: 'all',
         workerIds: [w.id], revisions: [{ workerId: w.id, revision: 0 }], outcomes: [] });
       const wait = () => { const run = reopened.getRun(parent.id); return [...(run?.waits ?? []), ...(run?.lastWaits ?? [])].find((entry): entry is Extract<typeof entry, { kind: 'worker' }> => entry.id === waitId && entry.kind === 'worker'); };
       try {
@@ -874,7 +883,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         child.proc.kill('SIGKILL'); await child.exited;
         await until(() => reopened.readWorkerExecution(w.id)?.phase === 'complete');
         await until(() => !!wait()?.outcomes?.some(outcome => outcome.workerId === w.id));
-        expect(wait()!.outcomes).toEqual([expect.objectContaining({ workerId: w.id, revision: 0, status: 'failed' })]);
+        expect(wait()!.outcomes).toEqual([expect.objectContaining({ workerId: w.id, revision: 0, status: WORKER_OUTCOME_STATUS.failed })]);
       } finally { other.dispose(); reopened.flush(); }
     });
 
@@ -883,7 +892,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       for (let i = 0; i < 2; i++) {
         const w = await worker(); store.commitWorkerExecutionStart(w.id);
         const created = await ensureOwnedWorkspace(root, store.getRun(w.id)!);
-        store.updateRun(w.id, { status: 'failed', worktreePath: created.path, branch: created.branch });
+        store.updateRun(w.id, { status: RUN_STATUS.failed, worktreePath: created.path, branch: created.branch });
         rmSync(recordPath(w.id), { force: true }); // legacy: the cwd scan is the only evidence
         holders.push(await spawnReady(created.path)); ids.push(w.id);
       }
@@ -928,7 +937,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
 
     it.runIf(process.platform === 'linux')('an unreadable process in the worktree is no evidence: destroy finalizes a legacy generation without signalling it (hearsay-tools/cezarion#889)', async () => {
       const w = await worker(); await ensureOwnedWorkspace(root, w);
-      store.commitWorkerExecutionStart(w.id); store.updateRun(w.id, { status: 'failed' }); store.flush();
+      store.commitWorkerExecutionStart(w.id); store.updateRun(w.id, { status: RUN_STATUS.failed }); store.flush();
       manager.dispose(); store.close(); rmSync(recordPath(w.id)); // an absent legacy ledger leaves the scan as the only evidence
       const holder = await nonDumpableHolder(workspace(w).path);
       const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
@@ -963,7 +972,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       // Admission runs before the worktree exists, so it never scans an ambient holder.
       const generation = store.commitWorkerExecutionStart(w.id);
       await ensureOwnedWorkspace(root, w);
-      store.updateRun(w.id, { status: 'done' }); store.commitWorkerExecutionComplete(w.id, generation); store.flush();
+      store.updateRun(w.id, { status: RUN_STATUS.done }); store.commitWorkerExecutionComplete(w.id, generation); store.flush();
       const service = new DelegationService(); const detach = service.registerProject({ id: 'p', root, store, manager });
       return { w, service, detach };
     }
@@ -1002,7 +1011,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       releases.push(() => recorded.kill('SIGKILL'));
       await new Promise(resolve => recorded.stdout!.once('data', resolve));
       expect(store.appendWorkerProcess(w.id, generation, recorded.pid!)).toBe(true);
-      store.updateRun(w.id, { status: 'done' }); store.commitWorkerExecutionComplete(w.id, generation); store.flush();
+      store.updateRun(w.id, { status: RUN_STATUS.done }); store.commitWorkerExecutionComplete(w.id, generation); store.flush();
       const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
       // No cwd scan exists on win32 (hearsay-tools/cezarion#889). Before, an `unknown` scan refused
       // every materialized worker's next generation, so Continue never worked there.
@@ -1101,7 +1110,7 @@ console.log(String(m.pid)); ${opts.leader === 'exit' ? "m.unref(); process.stdin
     it.skipIf(process.platform === 'win32')("destroy reaps a crashed generation's recorded group after its leader died", async () => {
       const { w, leader, member } = await groupedWorker({ member: 'group', leader: 'stay' });
       await until(() => existsSync(recordPath(w.id)) && readRecord(w.id).processes.length === 1);
-      manager.dispose(); store.updateRun(w.id, { status: 'failed' }); store.flush();
+      manager.dispose(); store.updateRun(w.id, { status: RUN_STATUS.failed }); store.flush();
       const corpse = spawn(process.execPath, ['-e', '']); await new Promise(resolve => corpse.once('exit', resolve));
       writeFileSync(recordPath(w.id), JSON.stringify({ ...readRecord(w.id), controller: { pid: corpse.pid!, startToken: '1' } }));
       // Only the leader dies: its member keeps the group, and the worktree, alive.
@@ -1119,7 +1128,7 @@ console.log(String(m.pid)); ${opts.leader === 'exit' ? "m.unref(); process.stdin
       const w = await worker();
       const generation = store.commitWorkerExecutionStart(w.id);
       await ensureOwnedWorkspace(root, w);
-      store.updateRun(w.id, { status: 'done' }); store.commitWorkerExecutionComplete(w.id, generation); store.flush();
+      store.updateRun(w.id, { status: RUN_STATUS.done }); store.commitWorkerExecutionComplete(w.id, generation); store.flush();
       // An unrelated group whose number equals the recorded leader's pid, its leader already gone:
       // the shape a double-fork daemon leaves once a freed number is reused.
       const script = `const m = require('child_process').spawn(process.execPath, ['-e', "process.on('SIGTERM',()=>{}); setInterval(()=>{},1000)"], { stdio: 'ignore' }); console.log(String(m.pid)); m.unref(); setTimeout(() => process.exit(0), 50);`;

@@ -1,3 +1,10 @@
+import {
+  RUN_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers, fixtureWorkSettled } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
@@ -276,19 +283,19 @@ describe('a run stopped by a usage limit resumes itself', () => {
     // queued task would dequeue and walk to the lease on EVERY cycle. That churn is what the
     // in-flight clause exists to stop, so the hold has to survive this state.
     store.updateRun(record.id, {
-      status: 'queued',
+      status: RUN_STATUS.queued,
       autoResumeAt: undefined,
       autoResumeAttempts: 1,
     });
     // …now an IN-FLIGHT hold rather than a deadline one: it blocks fresh work, but not another
     // resume (see `accountHeldFor`).
     expect([...manager.accountHolds().inFlight]).toContain(account);
-    store.updateRun(record.id, { status: 'running' });
+    store.updateRun(record.id, { status: RUN_STATUS.running });
     expect([...manager.accountHolds().inFlight]).toContain(account);
 
     // A completed turn is the only evidence the window reopened — that clears the counter and
     // the hold with it. (The engine does this at every turn end; done here as the state change.)
-    store.updateRun(record.id, { status: 'waiting', autoResumeAttempts: undefined });
+    store.updateRun(record.id, { status: RUN_STATUS.waiting, autoResumeAttempts: undefined });
     const settled = manager.accountHolds();
     expect(settled.deadline.size + settled.inFlight.size).toBe(0);
   }, 30_000);
@@ -378,7 +385,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     // Now the wedge: the holder keeps holding but has no deadline anyone is waiting for, and
     // nothing is running. Whatever caused it, the queue must not be stuck there.
     store.updateRun(limited.id, {
-      status: 'queued',
+      status: RUN_STATUS.queued,
       autoResumeAt: undefined,
       autoResumeAttempts: 1,
     });
@@ -407,7 +414,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
 
     // Wedge it: the holder holds with no deadline anyone is waiting for, and nothing is running.
     store.updateRun(limited.id, {
-      status: 'queued',
+      status: RUN_STATUS.queued,
       autoResumeAt: undefined,
       autoResumeAttempts: 1,
     });
@@ -467,7 +474,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     first.dispose();
     // Back to `queued` with nobody holding the work item — exactly what the engine sees after
     // losing one, and what a restart would otherwise be the only cure for.
-    store.updateRun(record.id, { status: 'queued', finishedAt: undefined, startedAt: undefined });
+    store.updateRun(record.id, { status: RUN_STATUS.queued, finishedAt: undefined, startedAt: undefined });
 
     manager = createFixtureManager(store, repoRoot); // deliberately NO recover()
     await runInternals(manager).line.rescueStalledQueue();
@@ -607,7 +614,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     await settle(record.id);
     store.flush();
     const committed = () => readPersistedRuns(join(repoRoot, '.ai/cezar')).find((row) => row.id === record.id);
-    expect(committed()).toMatchObject({ status: 'waiting', autoResumeAt: expect.any(String) });
+    expect(committed()).toMatchObject({ status: RUN_STATUS.waiting, autoResumeAt: expect.any(String) });
 
     expect(manager.cancelAutoResume(record.id)).toBe(true);
 
@@ -696,7 +703,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     manager = createFixtureManager(store, repoRoot);
     await manager.recover();
     // The appointment stands: same time, still waiting, no new step, no Needs you.
-    expect(store.getRun(record.id)).toMatchObject({ status: 'waiting', autoResumeAt: at });
+    expect(store.getRun(record.id)).toMatchObject({ status: RUN_STATUS.waiting, autoResumeAt: at });
     expect(store.getRun(record.id)?.steps.some((step) => step.id === 'continue-1')).toBe(false);
     expect([...manager.accountHolds().deadline]).toContain('claude:default');
   }, 40_000);
@@ -722,10 +729,10 @@ describe('a run stopped by a usage limit resumes itself', () => {
     const a = manager.startRun(workflow, { task: 'mock:limit probe a', worktree: false });
     await settle(a.id);
     // B starts on the same account only once A's hold is out of the way, then hits the limit too.
-    store.updateRun(a.id, { autoResumeAt: undefined, status: 'failed' });
+    store.updateRun(a.id, { autoResumeAt: undefined, status: RUN_STATUS.failed });
     const b = manager.startRun(workflow, { task: 'mock:limit probe b', worktree: false });
     await settle(b.id);
-    store.updateRun(a.id, { status: 'waiting', finishedAt: undefined, autoResumeAt: new Date(Date.now() + 3_600_000).toISOString() });
+    store.updateRun(a.id, { status: RUN_STATUS.waiting, finishedAt: undefined, autoResumeAt: new Date(Date.now() + 3_600_000).toISOString() });
     store.updateRun(b.id, { task: 'mock:cezar-done ship it' });
 
     expect(manager.continueRun(b.id, { text: 'mock:cezar-done carry on' })).toEqual({ ok: true });
@@ -752,7 +759,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     // run for its result; the usage limit holds it until the resume.
     const timerId = '99999999-9999-4999-8999-999999999999';
     const due = new Date(Date.now() - 1_000).toISOString();
-    store.updateRun(record.id, { waits: [{ id: timerId, kind: 'timer', source: 'agent', via: 'cezar_wait', registeredAt: due, deadline: due, phase: 'open', turnId: 'turn', seconds: 60 }] });
+    store.updateRun(record.id, { waits: [{ id: timerId, kind: WAIT_KIND.timer, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_wait, registeredAt: due, deadline: due, phase: WAIT_PHASE.open, turnId: 'turn', seconds: 60 }] });
 
     manager = createFixtureManager(store, repoRoot);
     await manager.recover();

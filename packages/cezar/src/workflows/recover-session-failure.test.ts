@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -53,15 +54,15 @@ describe('recover() contains backend session failures (#562)', () => {
       workflow: 'quick-task',
       task: 'continue safely',
       runner: 'codex',
-      steps: [{ id: 'work', name: 'Work', kind: 'agent' }],
+      steps: [{ id: 'work', name: 'Work', kind: STEP_KIND.agent }],
     });
     store.updateStep(record.id, 'work', {
-      status: 'running',
+      status: STEP_STATUS.running,
       iterations: 1,
       sessionId: 'missing-thread',
       backend: 'codex',
     });
-    store.updateRun(record.id, { status: 'running', currentStepId: 'work' });
+    store.updateRun(record.id, { status: RUN_STATUS.running, currentStepId: 'work' });
 
     const firstManager = createFixtureManager(store, repoRoot);
     await firstManager.recover();

@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -26,7 +27,7 @@ describe('conversation backlog delivery (#475)', { timeout: 30_000 }, () => {
           conversation: { senderRunId: m.senderRunId, recipientRunId: p.id, kind: m.kind } } });
     }
     manager.reconcileWorkerWaits();
-    fixtureUpdateRun(a.id, { status: 'done' }); fixtureUpdateRun(b.id, { status: 'done' });
+    fixtureUpdateRun(a.id, { status: RUN_STATUS.done }); fixtureUpdateRun(b.id, { status: RUN_STATUS.done });
     manager.deliverConversationInput(p.id);
     expect(store.getRun(p.id)?.agentInputs?.some(input => input.deliveredAt)).toBe(false);
     try {

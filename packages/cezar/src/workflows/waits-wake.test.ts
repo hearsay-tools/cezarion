@@ -1,4 +1,10 @@
-import { WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
+import {
+  WAIT_KIND,
+  RUN_STATUS,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WAIT_VIA,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -54,7 +60,7 @@ async function openWait(id: string, request: CezarWaitRequestInput): Promise<Tim
  *  Nothing human is open, so a baseline turn's no-wait nudge never interferes (hearsay-tools/cezarion#1234).
  *  Live sessions only: a scheduler continuation quotes the task, and the mock would call the tools again. */
 async function parkedOnTimers<const T extends readonly { seconds: number; note: string }[]>(...timers: T) {
-  const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: timers.map(timer => toolCall('cezar_wait', { kind: 'timer', ...timer })).join(' '), runner: 'claude' });
+  const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: timers.map(timer => toolCall('cezar_wait', { kind: WAIT_KIND.timer, ...timer })).join(' '), runner: 'claude' });
   await until(() => store.getRun(run.id)?.status === 'waiting' && store.getRun(run.id)?.waits?.length === timers.length);
   const waits = timers.map(timer => store.getRun(run.id)!.waits!.find(wait => wait.kind === 'timer' && wait.note === timer.note)!) as { [K in keyof T]: Wait };
   return { run, waits };
@@ -79,7 +85,7 @@ async function questionBesideCi(runner: RunnerId) {
   process.env.CEZ_MOCK_RELEASE_FILE = release;
   const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['hold-cezar-ask']!, runner });
   await until(() => turnStarted(run.id));
-  const ci = await openWait(run.id, { kind: 'pr', pr, timeout_seconds: 600 });
+  const ci = await openWait(run.id, { kind: WAIT_KIND.pr, pr, timeout_seconds: 600 });
   writeFileSync(release, '');
   await until(() => asks(run.id).length === 1 && store.getRun(run.id)?.status === 'waiting');
   expect(waitById(run.id, ci.id)?.phase).toBe('open');
@@ -116,7 +122,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     nativeWire('codex');
     const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:native-codex-ask', runner: 'codex' });
     await until(() => asks(run.id).length === 1 && store.getRun(run.id)?.status === 'waiting');
-    const ci = await openWait(run.id, { kind: 'pr', pr, timeout_seconds: 600 });
+    const ci = await openWait(run.id, { kind: WAIT_KIND.pr, pr, timeout_seconds: 600 });
     external.settle();
     await until(() => waitById(run.id, ci.id)?.phase === 'resolved');
     // The question holds its turn open: nothing may reach the wire, however often the line is pumped.
@@ -140,7 +146,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     const idle = engine().active.get(run.id)!.idleTimer!;
     const expire = idle._onTimeout; clearTimeout(idle); expire();
     await until(() => !manager.isActive(run.id));
-    expect(store.getRun(run.id)).toMatchObject({ status: 'waiting', waits: expect.arrayContaining([expect.objectContaining({ kind: 'human', phase: 'open' })]) });
+    expect(store.getRun(run.id)).toMatchObject({ status: RUN_STATUS.waiting, waits: expect.arrayContaining([expect.objectContaining({ kind: WAIT_KIND.human, phase: WAIT_PHASE.open })]) });
     expect(waitById(run.id, ci.id)?.phase).toBe('open');
     external.settle();
     await until(() => settled(run.id, ci.id)?.phase === 'delivered' && prompted('claude', `CI wait observation ${ci.id}`).length > 0);
@@ -160,8 +166,8 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     process.env.CEZ_MOCK_RELEASE_FILE = release;
     const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS.claude.scenarios['hold-gated']!, runner: 'claude' });
     await until(() => turnStarted(run.id));
-    const first = await openWait(run.id, { kind: 'timer', seconds: 60, note: 'first' });
-    const second = await openWait(run.id, { kind: 'timer', seconds: 60, note: 'second' });
+    const first = await openWait(run.id, { kind: WAIT_KIND.timer, seconds: 60, note: 'first' });
+    const second = await openWait(run.id, { kind: WAIT_KIND.timer, seconds: 60, note: 'second' });
     // Keep the wake reply parked on an unrelated wait, outside this batch's budget assertion.
     const later = await openWait(run.id, { kind: WAIT_KIND.timer, seconds: 7200, note: 'later' });
     fireTimer(first.id); fireTimer(second.id);
@@ -202,7 +208,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     expect(store.getRun(run.id)?.automaticWakes).toBe(40);
     // Nothing else open or resolved: the budget's human wait parks for the user and holds no slot
     // (hearsay-tools/cezarion#1234).
-    expect(store.getRun(run.id)?.waits).toMatchObject([{ kind: 'human', via: 'budget', source: 'cezar', phase: 'open' }]);
+    expect(store.getRun(run.id)?.waits).toMatchObject([{ kind: WAIT_KIND.human, via: WAIT_VIA.budget, source: WAIT_SOURCE.cezar, phase: WAIT_PHASE.open }]);
     expect(label(run.id)).toBe('needs you');
     expect(runInternals(manager).line.monitoring.has(run.id)).toBe(false);
     expect(semaphore.busy()).toBe(0);
@@ -215,8 +221,8 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     process.env.CEZ_MOCK_RELEASE_FILE = release;
     const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS.claude.scenarios['hold-gated']!, runner: 'claude' });
     await until(() => turnStarted(run.id));
-    const timer = await openWait(run.id, { kind: 'timer', seconds: 60, note: 'owed' });
-    const ci = await openWait(run.id, { kind: 'pr', pr, timeout_seconds: 600 });
+    const timer = await openWait(run.id, { kind: WAIT_KIND.timer, seconds: 60, note: 'owed' });
+    const ci = await openWait(run.id, { kind: WAIT_KIND.pr, pr, timeout_seconds: 600 });
     fireTimer(timer.id); external.settle();
     await until(() => waitById(run.id, timer.id)?.phase === 'resolved' && waitById(run.id, ci.id)?.phase === 'resolved');
     // The budget runs out between the timer's resolution and the boundary that would send it.
@@ -262,7 +268,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     await until(() => prompted('claude', 'first message').length > 0);
     expect(prompted('claude', 'first message')[0]).not.toContain('Still open');
     await until(() => store.getRun(run.id)?.status === 'waiting' && turnEnds(run.id) >= 2);
-    const ci = await openWait(run.id, { kind: 'pr', pr, timeout_seconds: 600 });
+    const ci = await openWait(run.id, { kind: WAIT_KIND.pr, pr, timeout_seconds: 600 });
     const footer = `Still open: CI wait ${ci.id} for acme/repo#12, deadline ${ci.deadline}. ${FOOTER_END}`;
     expect(manager.sendMessage(run.id, [{ type: 'text', text: 'second message' }])).toBe(true);
     await until(() => prompted('claude', 'second message').length > 0);
@@ -283,7 +289,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     vi.spyOn(semaphore, 'maxMonitoringSessions').mockReturnValue(1);
     expect(semaphore.maxParallel()).toBe(1);
     const parkOn = async (n: number) => {
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'pr', pr: prUrl(n) }), runner: 'claude' });
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: WAIT_KIND.pr, pr: prUrl(n) }), runner: 'claude' });
       await until(() => store.getRun(run.id)?.waits?.[0]?.phase === 'open' && store.getRun(run.id)?.status === 'waiting');
       return run;
     };
@@ -303,7 +309,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
   async function timerOwedWithoutSession() {
     const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS.claude.scenarios.baseline!, runner: 'claude' });
     await until(() => store.getRun(run.id)?.status === 'waiting');
-    const timer = await openWait(run.id, { kind: 'timer', seconds: 60, note: 'owed' });
+    const timer = await openWait(run.id, { kind: WAIT_KIND.timer, seconds: 60, note: 'owed' });
     engine().active.get(run.id)!.session!.end();
     await until(() => !manager.isActive(run.id));
     return { run, timer };
@@ -405,8 +411,8 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     runInternals(manager).retries.wakeRetryBackoff = { fastMs: 0, fastCount: MAX_WAKE_DELIVERY_ATTEMPTS, capMs: 0 };
     const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS.claude.scenarios.baseline!, runner: 'claude' });
     await until(() => store.getRun(run.id)?.status === 'waiting');
-    const timer = await openWait(run.id, { kind: 'timer', seconds: 60, note: 'owed' });
-    const later = await openWait(run.id, { kind: 'timer', seconds: 7200, note: 'later' });
+    const timer = await openWait(run.id, { kind: WAIT_KIND.timer, seconds: 60, note: 'owed' });
+    const later = await openWait(run.id, { kind: WAIT_KIND.timer, seconds: 7200, note: 'later' });
     engine().active.get(run.id)!.session!.end();
     await until(() => !manager.isActive(run.id));
     fireTimer(timer.id);

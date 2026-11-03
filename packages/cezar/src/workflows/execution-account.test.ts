@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { createActiveRun } from './active-run.ts';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -13,7 +14,7 @@ import type { RunManager } from './run.ts';
  *  the task-level `runner` (hearsay-tools/cezarion#1236). */
 describe('executionAccount', () => {
   const step = (backend: 'claude' | 'codex', profileId?: string) =>
-    ({ id: `s-${backend}`, name: 's', kind: 'agent' as const, status: 'failed' as const, iterations: 1, tokensUsed: 0, sessionId: `sess-${backend}`, backend, profileId });
+    ({ id: `s-${backend}`, name: 's', kind: STEP_KIND.agent, status: STEP_STATUS.failed, iterations: 1, tokensUsed: 0, sessionId: `sess-${backend}`, backend, profileId });
 
   it('reads the latest session step, not the task-level runner', () => {
     expect(executionAccount({ runner: 'codex', agentProfile: undefined, steps: [step('codex'), step('claude', 'second')] }))
@@ -62,9 +63,9 @@ describe('account holds read the execution account', () => {
   });
 
   function heldRun(): string {
-    const run = store.createRun({ title: 'held', workflow: 'w', task: 't', runner: 'codex', steps: [{ id: 'claude-step', name: 'c', kind: 'agent' }] });
-    store.updateStep(run.id, 'claude-step', { status: 'failed', sessionId: 'sess-1', backend: 'claude' });
-    store.updateRun(run.id, { status: 'waiting', autoResumeAt: new Date(Date.now() + 600_000).toISOString() });
+    const run = store.createRun({ title: 'held', workflow: 'w', task: 't', runner: 'codex', steps: [{ id: 'claude-step', name: 'c', kind: STEP_KIND.agent }] });
+    store.updateStep(run.id, 'claude-step', { status: STEP_STATUS.failed, sessionId: 'sess-1', backend: 'claude' });
+    store.updateRun(run.id, { status: RUN_STATUS.waiting, autoResumeAt: new Date(Date.now() + 600_000).toISOString() });
     return run.id;
   }
 
@@ -76,7 +77,7 @@ describe('account holds read the execution account', () => {
 
   it('holds a live session\'s wake by the step it runs, not the task-level runner', () => {
     heldRun();
-    const live = store.createRun({ title: 'live', workflow: 'w', task: 't', runner: 'codex', steps: [{ id: 'x', name: 'x', kind: 'agent' }] });
+    const live = store.createRun({ title: 'live', workflow: 'w', task: 't', runner: 'codex', steps: [{ id: 'x', name: 'x', kind: STEP_KIND.agent }] });
     const engine = runInternals(manager);
     const state = createActiveRun({ cwd: repoRoot, pendingHumanAsk: false, autonomous: false });
     state.delegationSettings = { cwd: repoRoot, runner: 'claude', agentProfile: 'default' };
@@ -113,14 +114,14 @@ describe('a held wake does not advertise itself to the workspace line', () => {
     // wake. Advertising A's held wake would hand A the freed slot, and A's pump would start its new
     // task ahead of B's started run (hearsay-tools/cezarion#1236).
     const holder = store.createRun({ title: 'holder', workflow: 'w', task: 't', runner: 'claude', steps: [] });
-    store.updateRun(holder.id, { status: 'waiting', autoResumeAt: new Date(Date.now() + 600_000).toISOString() });
+    store.updateRun(holder.id, { status: RUN_STATUS.waiting, autoResumeAt: new Date(Date.now() + 600_000).toISOString() });
     const parked = store.createRun({ title: 'parked', workflow: 'w', task: 't', runner: 'claude', steps: [] });
     const engine = runInternals(manager).line;
     runInternals(manager).line.queue.push(parked.id);
     runInternals(manager).line.waitWakeQueuedAt.set(parked.id, 1);
     try {
       expect(engine.oldestWakeAt()).toBeNull();
-      store.updateRun(holder.id, { status: 'failed', finishedAt: new Date().toISOString() });
+      store.updateRun(holder.id, { status: RUN_STATUS.failed, finishedAt: new Date().toISOString() });
       expect(engine.oldestWakeAt()).toBe(1);
       // Any blocker `pump()` applies leaves it out too: here, a worktree cleanup in progress.
       const reclaiming = runInternals(manager).claims.reclaiming;
@@ -138,7 +139,7 @@ describe('a held wake does not advertise itself to the workspace line', () => {
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
     writeFileSync(join(repoRoot, '.ai/cezar/config.json'), JSON.stringify({ defaultRunner: 'codex' }));
     const holder = store.createRun({ title: 'holder', workflow: 'w', task: 't', runner: 'codex', steps: [] });
-    store.updateRun(holder.id, { status: 'waiting', autoResumeAt: new Date(Date.now() + 600_000).toISOString() });
+    store.updateRun(holder.id, { status: RUN_STATUS.waiting, autoResumeAt: new Date(Date.now() + 600_000).toISOString() });
     const parked = store.createRun({ title: 'parked', workflow: 'w', task: 't', steps: [] });
     const engine = runInternals(manager).line;
     runInternals(manager).line.queue.push(parked.id);

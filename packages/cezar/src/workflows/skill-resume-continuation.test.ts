@@ -1,3 +1,4 @@
+import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 /**
  * #790 review follow-ups: Continue must revalidate after skill materialize,
@@ -146,15 +147,15 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
       task: 'do the thing',
       runner: 'claude',
       systemPrompt: extra,
-      steps: [{ id: 'task', name: skillName, kind: 'agent' }],
+      steps: [{ id: 'task', name: skillName, kind: STEP_KIND.agent }],
     });
     store.updateRun(record.id, {
-      status: 'done',
+      status: RUN_STATUS.done,
       finishedAt: new Date().toISOString(),
       workflowDef: def,
     });
     store.updateStep(record.id, 'task', {
-      status: 'done',
+      status: STEP_STATUS.done,
       sessionId: 'sess-skill',
       backend: 'claude',
     });
@@ -336,7 +337,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     writeFileSync(join(repoRoot, '.ai/cezar/skills', `${WORKER_SKILL}.md`), WORKER_SKILL_BODY);
     const workflowDef = plannedWorkflow(skillTaskSteps(WORKER_SKILL));
     const parent = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
-    store.updateRun(parent.id, { status: 'waiting', delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    store.updateRun(parent.id, { status: RUN_STATUS.waiting, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
     const workerId = randomUUID();
     const sha = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot })).stdout.trim();
     const workspace = await planOwnedWorkspace(repoRoot, workerId, sha);
@@ -347,7 +348,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
       runner: 'claude',
       systemPrompt: EXTRA_PROMPT,
       workflowDef,
-      steps: [{ id: 'task', name: WORKER_SKILL, kind: 'agent' }],
+      steps: [{ id: 'task', name: WORKER_SKILL, kind: STEP_KIND.agent }],
     }, parent.id, randomUUID(), {
       role: 'worker', permissions: [], parentRunId: parent.id, workspace,
     }, 'a'.repeat(64), { kind: 'internal', workflowHash: workerWorkflowHash(workflowDef) });

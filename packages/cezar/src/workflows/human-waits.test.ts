@@ -1,4 +1,4 @@
-import { WAIT_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { runInternals } from './run-internals.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
@@ -62,9 +62,9 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     const { run, release } = await heldTurn();
     const registered = await ask(run.id, card('Which module?'));
     if (!registered.ok) throw Error('registration refused');
-    expect(humanOpen(run.id)).toMatchObject([{ id: registered.wait_id, source: 'agent', via: 'cezar_ask', questions: card('Which module?') }]);
+    expect(humanOpen(run.id)).toMatchObject([{ id: registered.wait_id, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask, questions: card('Which module?') }]);
     expect(manager.sendMessage(run.id, [{ type: 'text', text: 'Start with the parser.' }])).toBe(true);
-    expect(settled(run.id, registered.wait_id)).toMatchObject({ phase: 'delivered' });
+    expect(settled(run.id, registered.wait_id)).toMatchObject({ phase: WAIT_PHASE.delivered });
     expect(humanOpen(run.id)).toEqual([]);
     release();
     // The held turn ends, then the message runs as its own turn.
@@ -105,8 +105,8 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     release();
     await until(() => needsYou(run.id));
     const refused = await tools(run.id).cancelWait({ wait_id: kept.wait_id }, new AbortController().signal);
-    expect(refused).toMatchObject({ cancelled: false, code: 'human_question', open_waits: [{ wait_id: kept.wait_id, kind: 'human' }] });
-    expect(humanOpen(run.id)).toMatchObject([{ id: kept.wait_id, phase: 'open' }]);
+    expect(refused).toMatchObject({ cancelled: false, code: 'human_question', open_waits: [{ wait_id: kept.wait_id, kind: WAIT_KIND.human }] });
+    expect(humanOpen(run.id)).toMatchObject([{ id: kept.wait_id, phase: WAIT_PHASE.open }]);
     expect(needsYou(run.id)).toBe(true);
   });
 
@@ -187,7 +187,7 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     // hearsay-tools/cezarion#1458: the context survives the restart, read from the stored wait.
     expect(asks(run.id)).toMatchObject([{ context: '## Findings\n\n- one', questions: card('Which module?') }]);
     expect(humanOpen(run.id)).toMatchObject([{ id: registered.wait_id, askSeq: asks(run.id)[0]!.seq }]);
-    expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: 'human', shown: true });
+    expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: WAIT_KIND.human, shown: true });
     expect(manager.isActive(run.id)).toBe(false);
   });
 
@@ -202,12 +202,12 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     expect(settled(run.id, timer.id)?.phase).toBe('cancelled');
     const [budget, ...more] = humanOpen(run.id);
     expect(more).toEqual([]);
-    expect(budget).toMatchObject({ via: 'budget', source: 'cezar', phase: 'open' });
+    expect(budget).toMatchObject({ via: WAIT_VIA.budget, source: WAIT_SOURCE.cezar, phase: WAIT_PHASE.open });
     // Cezar's own wait is shown as its note and raises no human gate (hearsay-tools/cezarion#1234).
     expect(store.readEvents(run.id).find(event => event.seq === budget!.askSeq))
       .toMatchObject({ type: 'note', message: `automatic-wake budget spent (${MAX_AUTO_CONTINUES}); waiting for you` });
     expect(gates(run.id)).toEqual([]);
-    expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: 'human', shown: true });
+    expect(toRunSummary(store.getRun(run.id)!).waitingOn).toEqual({ kind: WAIT_KIND.human, shown: true });
   });
 });
 
