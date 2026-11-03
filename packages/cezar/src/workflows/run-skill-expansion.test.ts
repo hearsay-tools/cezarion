@@ -1,3 +1,4 @@
+import { run, GIT_ID, waitForProduct } from './run-fixture.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -6,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
-import { run, GIT_ID, waitForProduct } from './run-fixture.testkit.ts';
 describe('registry /skill expansion survives a continuation (#811)', () => {
   let repoRoot: string;
   let store: RunStore;

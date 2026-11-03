@@ -1,3 +1,4 @@
+import { run, GIT_ID, TURN_TEXT } from './run-fixture.testkit.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -7,7 +8,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createWorktree } from '../git-worktree.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { RunManager } from './run.ts';
-import { run, GIT_ID, TURN_TEXT } from './run-fixture.testkit.ts';
 describe('TurnBookkeeper.recordTurnEnd', () => {
   const savedAutoname = process.env.CEZ_AUTONAME;
   beforeAll(() => {

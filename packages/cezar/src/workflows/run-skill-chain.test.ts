@@ -1,3 +1,4 @@
+import { run, GIT_ID, waitForProduct } from './run-fixture.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -7,7 +8,6 @@ import { RunStore } from '../runs/store.ts';
 import { RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
 import { STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { run, GIT_ID, waitForProduct } from './run-fixture.testkit.ts';
 describe('a chain of 2 selected skills runs BOTH steps, in order (#410)', () => {
   let repoRoot: string;
   let store: RunStore;

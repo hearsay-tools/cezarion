@@ -1,3 +1,4 @@
+import { setupMonitoringFixture } from './run-fixture.testkit.ts';
 import { createFixtureManager } from './fixture-cleanup.testkit.ts';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -6,7 +7,6 @@ import { registerRunProcess, unregisterRunProcess } from '../core/process-usage.
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { asksQuestion } from '@open-mercato/cezar-contract/waits';
 import { WAIT_KIND, WAIT_PHASE, WAIT_VIA, WAIT_SOURCE } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { setupMonitoringFixture } from './run-fixture.testkit.ts';
 describe('RunManager waiting recovery', () => {
   const fixture = setupMonitoringFixture();
   const { SINGLE_STEP, waitFor } = fixture;

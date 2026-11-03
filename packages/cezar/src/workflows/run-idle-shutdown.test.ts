@@ -1,8 +1,8 @@
+import { runnerHook, setupMonitoringFixture } from './run-fixture.testkit.ts';
 import { describe, expect, it } from 'vitest';
 import type { AgentRunResult } from '../core/agent-runner.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runnerHook, setupMonitoringFixture } from './run-fixture.testkit.ts';
 describe('RunManager idle shutdown', () => {
   const fixture = setupMonitoringFixture();
   const { SINGLE_STEP, waitFor } = fixture;

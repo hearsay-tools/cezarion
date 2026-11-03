@@ -1,9 +1,9 @@
+import { setupMonitoringFixture } from './run-fixture.testkit.ts';
 import { createFixtureManager } from './fixture-cleanup.testkit.ts';
 import { describe, expect, it, vi } from 'vitest';
 import { type RunRecord } from '../runs/store.ts';
 import type { WorkflowDef } from './types.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { setupMonitoringFixture } from './run-fixture.testkit.ts';
 describe('RunManager workflow remainder resume', () => {
   const fixture = setupMonitoringFixture();
   const { SINGLE_STEP, waitFor } = fixture;

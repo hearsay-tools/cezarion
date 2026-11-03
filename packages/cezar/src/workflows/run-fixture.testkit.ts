@@ -15,15 +15,20 @@ import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit'
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 
 
-export const runnerHook = vi.hoisted(() => ({ runner: undefined as AgentRunner | undefined }));
+const hoistedRunnerHook = vi.hoisted(() => ({ runner: undefined as AgentRunner | undefined }));
 
 vi.mock('../core/runner-factory.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../core/runner-factory.ts')>();
   return {
     ...actual,
-    createRunner: (...args: Parameters<typeof actual.createRunner>) => runnerHook.runner ?? actual.createRunner(...args),
+    createRunner: (...args: Parameters<typeof actual.createRunner>) => hoistedRunnerHook.runner ?? actual.createRunner(...args),
   };
 });
+
+export const runnerHook = {
+  get runner(): AgentRunner | undefined { return hoistedRunnerHook.runner; },
+  set runner(value: AgentRunner | undefined) { hoistedRunnerHook.runner = value; },
+};
 
 // Naming has its own suite; no background LLM call may outlive these fixtures. The mocks answer
 // Cezar's no-wait nudge in plain text (hearsay-tools/cezarion#1234), so a turn end with no wait

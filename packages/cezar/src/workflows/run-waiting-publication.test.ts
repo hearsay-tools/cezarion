@@ -1,7 +1,7 @@
+import { setupMonitoringFixture } from './run-fixture.testkit.ts';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { RUN_STATUS, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { setupMonitoringFixture } from './run-fixture.testkit.ts';
 describe('RunManager waiting publication', () => {
   const fixture = setupMonitoringFixture();
   const { SINGLE_STEP, waitFor, publishedWaiting, persistedRun } = fixture;

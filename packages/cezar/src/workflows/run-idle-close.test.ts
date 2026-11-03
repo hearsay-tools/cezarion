@@ -1,10 +1,10 @@
+import { setupMonitoringFixture } from './run-fixture.testkit.ts';
 import { createFixtureManager } from './fixture-cleanup.testkit.ts';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
-import { setupMonitoringFixture } from './run-fixture.testkit.ts';
 describe('RunManager idle close', () => {
   const fixture = setupMonitoringFixture();
   const { SINGLE_STEP, waitFor } = fixture;

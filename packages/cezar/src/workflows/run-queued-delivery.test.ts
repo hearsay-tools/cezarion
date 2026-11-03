@@ -1,3 +1,4 @@
+import { run, GIT_ID, waitForProduct } from './run-fixture.testkit.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -8,7 +9,6 @@ import { RunStore } from '../runs/store.ts';
 import { RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { run, GIT_ID, waitForProduct } from './run-fixture.testkit.ts';
 describe('queued stacking reaches the backend (#472)', () => {
   let repoRoot: string;
   let store: RunStore;

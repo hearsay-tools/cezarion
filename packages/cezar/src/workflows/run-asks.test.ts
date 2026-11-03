@@ -1,3 +1,4 @@
+import { runnerHook, run, GIT_ID, FINISHED_RUN_STATUSES, waitForProduct } from './run-fixture.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -9,7 +10,6 @@ import { RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runnerHook, run, GIT_ID, FINISHED_RUN_STATUSES, waitForProduct } from './run-fixture.testkit.ts';
 describe('cezar_ask parks as waiting and emits ask.requested (#473)', () => {
   let repoRoot: string;
   let store: RunStore;

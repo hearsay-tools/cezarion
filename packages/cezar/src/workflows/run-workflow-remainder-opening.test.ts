@@ -1,3 +1,4 @@
+import { runnerHook, setupMonitoringFixture } from './run-fixture.testkit.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import { describe, expect, it, vi } from 'vitest';
 import type { ContentBlock } from '../core/agent-runner.ts';
@@ -5,7 +6,6 @@ import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import type { WorkflowDef } from './types.ts';
 import { RUN_STATUS, STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runnerHook, setupMonitoringFixture } from './run-fixture.testkit.ts';
 describe('RunManager workflow remainder opening', () => {
   const fixture = setupMonitoringFixture();
   it('preserves startedAt when a resumed workflow remainder is held and requeued', () => {

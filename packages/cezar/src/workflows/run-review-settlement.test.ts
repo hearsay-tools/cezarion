@@ -1,3 +1,4 @@
+import { run, GIT_ID } from './run-fixture.testkit.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -8,7 +9,6 @@ import { createWorktree } from '../git-worktree.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { RunManager } from './run.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { run, GIT_ID } from './run-fixture.testkit.ts';
 describe('RunSettlement.settleSuccess — optional review gate', () => {
   const savedGate = process.env.CEZ_REVIEW_GATE;
   const savedAutoname = process.env.CEZ_AUTONAME;

@@ -1,3 +1,4 @@
+import { setupMonitoringFixture } from './run-fixture.testkit.ts';
 import { handleRunnerUiEvent, makeUiSink } from './run/session-events.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager } from './fixture-cleanup.testkit.ts';
@@ -7,7 +8,6 @@ import { describe, expect, it } from 'vitest';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_VIA, WAIT_SOURCE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { monitoringTimerOf, monitoringWakeOf } from './waits.testkit.ts';
-import { setupMonitoringFixture } from './run-fixture.testkit.ts';
 describe('RunManager monitoring timers', () => {
   const fixture = setupMonitoringFixture();
   const { SINGLE_STEP, waitFor, openTimer, armedTimer } = fixture;

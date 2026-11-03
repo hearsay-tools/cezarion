@@ -1,3 +1,4 @@
+import './run-fixture.testkit.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -9,7 +10,6 @@ import { RunStore } from '../runs/store.ts';
 import { RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import './run-fixture.testkit.ts';
 describe('RunManager queued-stack mutators (#472)', () => {
   let repoRoot: string;
   let store: RunStore;

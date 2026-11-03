@@ -1,3 +1,4 @@
+import './run-fixture.testkit.ts';
 import { runInternals } from './run-internals.testkit.ts';
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -8,7 +9,6 @@ import { RunStore } from '../runs/store.ts';
 import { RunManager } from './run.ts';
 import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { crashStore } from '../runs/run-store.testkit.ts';
-import './run-fixture.testkit.ts';
 describe('RunManager.continueRun override', () => {
   let repoRoot: string;
   let store: RunStore;

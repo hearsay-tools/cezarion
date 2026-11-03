@@ -1,7 +1,7 @@
+import { setupMonitoringFixture } from './run-fixture.testkit.ts';
 import { createFixtureManager } from './fixture-cleanup.testkit.ts';
 import { describe, expect, it } from 'vitest';
 import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { setupMonitoringFixture } from './run-fixture.testkit.ts';
 describe('RunManager continuation membership', () => {
   const fixture = setupMonitoringFixture();
   const { SINGLE_STEP, waitFor } = fixture;

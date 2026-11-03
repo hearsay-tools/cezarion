@@ -1,3 +1,4 @@
+import { runnerHook, run, GIT_ID, waitForProduct } from './run-fixture.testkit.ts';
 import { handleRunnerUiEvent } from './run/session-events.ts';
 import { beginUsageInvocation } from './run/usage-accounting.ts';
 import { createActiveRun } from './active-run.ts';
@@ -17,7 +18,6 @@ import { parseTaskMarkers } from '../runs/task-markers.ts';
 import { appendTurnText, trackTurnTail, RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
 import { STEP_KIND, STEP_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
-import { runnerHook, run, GIT_ID, waitForProduct } from './run-fixture.testkit.ts';
 describe('appendTurnText', () => {
   it.each(['initial execution', 'resumed execution'])(
     'preserves a marker boundary before later commentary during %s',

@@ -1,8 +1,8 @@
+import { setupMonitoringFixture } from './run-fixture.testkit.ts';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
-import { setupMonitoringFixture } from './run-fixture.testkit.ts';
 describe('RunManager monitoring reply', () => {
   const fixture = setupMonitoringFixture();
   const { SINGLE_STEP, waitFor, openTimer } = fixture;
