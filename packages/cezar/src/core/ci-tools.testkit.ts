@@ -16,6 +16,7 @@ import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 const descriptor = { name: 'cezar_ci_test', command: process.execPath, args: ['/installed/dist/ci-wait/mcp.js'] };
 const spec = { cwd: '/tmp', userPrompt: 'task', cezarTools: descriptor };
 
+export function registerCiDefinitionsAndInjection() {
 // hearsay-tools/cezarion#1233: one wait tool and one cancel tool reach every runner through
 // the shared list; the deprecated `cezar_wait_for_ci` alias was removed in phase 4b (hearsay-tools/cezarion#1236).
 describe('wait tool definitions', () => {
@@ -183,6 +184,9 @@ describe('CI tool injection', () => {
   }
 });
 
+}
+
+export function registerCiValidation() {
 // H1: every offline wire must actually discover AND call the shipped adapter,
 // including resumed sessions. A recorded descriptor alone is insufficient.
 describe('CI H1 executable harness parity', () => {
@@ -223,6 +227,14 @@ describe('CI H1 executable harness parity', () => {
   }
 });
 
+}
+
+export const CI_NATIVE_GROUPS = {
+  waitCancel: ['cezar_wait', 'cezar_cancel_wait'],
+  askDone: ['cezar_ask', 'cezar_done'],
+} as const;
+
+export function registerCiNativeTools(tools: readonly string[]) {
 // U0 (hearsay-tools/cezarion#1233): `cezar_wait` and `cezar_cancel_wait` are admitted on each
 // runner's own tool list and reach this session's handlers through its native wire, fresh and
 // resumed, through the real bundled adapter (or the Pi/OMP extension).
@@ -255,7 +267,7 @@ describe('U0 wait tools on every native wire', () => {
     ...RUNNER_IDS.flatMap(backend => cases.map(entry => ({ backend, ...entry, label: '', toolGrant: { kind: 'explicit', tools: ['Read'] } as ToolGrant }))),
     ...piLists.flatMap(list => [false, true].map(resume => ({ backend: 'pi' as const, ...cases[0]!, resume, ...list, label: ` with ${list.label}` }))),
   ];
-  for (const { backend, tool, args, resume, label, toolGrant } of drives) {
+  for (const { backend, tool, args, resume, label, toolGrant } of drives.filter(entry => tools.includes(entry.tool))) {
     it(`${backend} U0 calls ${tool} through its native wire on ${resume ? 'resume' : 'fresh'}${label}`, async () => {
       const { CiToolController } = await import('../ci-wait/controller.ts');
       const controller = await CiToolController.start();
@@ -308,3 +320,4 @@ describe('U0 wait tools on every native wire', () => {
     }, 20000);
   }
 });
+}

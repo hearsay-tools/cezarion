@@ -1,6 +1,6 @@
 # CI adapter wire evidence (2026-09-22)
 
-`core/ci-tools.test.ts` H1 runs every real runner against its offline wire, on
+`core/ci-tools-definitions-validation.test.ts` H1 runs every real runner against its offline wire, on
 fresh and resumed sessions. The mock consumes exactly that runner's injected
 configuration, negotiates with the bundled SDK MCP adapter, lists tools, calls
 `cezar_wait_for_ci`, and reaches the real private IPC controller. Pi loads the
