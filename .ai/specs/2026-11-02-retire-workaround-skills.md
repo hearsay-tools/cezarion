@@ -1,6 +1,6 @@
 # Retire the workaround skills
 
-Status: approved by the owner on 2026-11-02 (task `0b8679f4`). Plan revision 2: adds the owner constraints and changes slices 2.6, 3.1, 3.3, 4.2 and 4.3 to meet them.
+Status: approved by the owner on 2026-11-02 (task `0b8679f4`). Plan revision 3: slice 3.2 rejected on measurement; planner decision 2026-11-03 (task `0b8679f4`). Slice 3.3 fixes causes before splitting and owns the cap and Squeal wait-bound deletion. Revision 2 added the owner constraints and revised slices 2.6, 3.1, 3.3, 4.2 and 4.3.
 
 ## Goal
 
@@ -116,20 +116,19 @@ Prerequisite: slices 1.2 and 1.3 merged (they edit `reader-sweep/SKILL.md`).
 
 ### Phase 3 — Fast unit suites
 
-Prerequisite: none; it can start with Phase 2. Slice 3.2 needs its own design spec with
-a **Process exits** case table and a runner owner's review.
+Prerequisite: none; it can start with Phase 2.
 
 | Slice | Type | Change | Done when |
 | --- | --- | --- | --- |
 | 3.1 | feature | Measure the 36 files over 60 s: time, CPU time and peak memory at several sizes. Record the result in the Phase 3 design spec. No list or baseline of slow files. | The design spec names the cost of each slow file and the fix for it. |
-| 3.2 | feature | Parity cells run the mock wire in-process through each runner's wire adapter; one real-process smoke cell stays per runner and wire. | Every parity file is under 60 s on CI; the smoke cells still fail on a broken wire. The Squeal wait bound is deleted. |
-| 3.3 | cleanup | Split files still over 60 s by row group. Then add a hard 60 s per-file cap with no exceptions. | Every Vitest file is under 60 s on CI and the cap is enforced. |
+| 3.2 | rejected | Agent startup is only about 4–12% of parity-file wall time; the seam alone does not demonstrate the 60 s target. Git and RunManager/store/waits dominate. See [the measurement and rejection record](2026-11-03-fast-unit-suites.md#slice-32-evaluated-and-rejected). | Rejected by the planner on 2026-11-03; no in-process wire implementation. |
+| 3.3 | cleanup | Fix measured causes first: copied Git template fixtures and release gates/fake clocks. Then split remaining files above the 40 s target by row group. Finally add the hard 60 s per-file cap with no exceptions; [the Phase 3 plan](2026-11-03-fast-unit-suites.md#slice-33-plan) names owners and evidence. | Every Vitest file is under 60 s on CI, the cap is enforced, and the Squeal wait bound is deleted with current-verdict evidence. |
 
 **Exit:** no Vitest file over 60 s on CI; the validation skill has no wait-bound text.
 
 ### Phase 4 — Run lifecycle ownership
 
-Prerequisite: slice 3.2 merged (fast parity makes these refactors cheap to verify).
+Prerequisite: slice 3.3 merged (fast parity makes these refactors cheap to verify).
 Slices 4.1 and 4.2 each need a design spec with a case table.
 
 | Slice | Type | Change | Done when |
@@ -155,6 +154,6 @@ Prerequisite: Phases 1 to 4 accepted.
 ## Open risks
 
 - Slice 1.6: server sources under web compiler options are not measured yet.
-- Slice 3.2 changes what the parity matrix proves; it needs a runner owner's review.
+- Slice 3.2 is rejected on measurement. Slice 3.3 must remove measured fixture/pacing cost before splitting, preserve real-process parity, and prove current Squeal verdicts before deleting the wait bound.
 - Slice 4.2 is itself a load-bearing change.
 - Line and site counts above are approximate `rg` counts.

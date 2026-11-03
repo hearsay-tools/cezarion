@@ -2,10 +2,14 @@
 
 Design for hearsay-tools/cezarion#2516, slice 3.1 of
 hearsay-tools/cezarion#2487. This document implements the measurement and design
-part of the approved revision 2 of
+part of revision 2, with the planner decision now recorded in revision 3 of
 [Retire the workaround skills](2026-11-02-retire-workaround-skills.md).
-Slices 3.2 and 3.3 implement the changes described here. This PR changes this
-document only. It does not change application behavior, tests or configuration.
+Planner decision, 2026-11-03 (task `0b8679f4`): slice 3.2
+(hearsay-tools/cezarion#2517) is **rejected on measurement**. Slice 3.3
+(hearsay-tools/cezarion#2519) fixes measured causes first, splits only the
+remaining slow groups, adds the cap and deletes the Squeal wait bound. This PR
+also updates the epic to revision 3 and re-points the bound's expiry marker.
+It does not change application behavior, tests or configuration.
 
 ## Method
 
@@ -239,8 +243,10 @@ fsync, Git I/O and waiting for subprocesses can all make wall exceed CPU.
 The source evidence below distinguishes native process cost from Git, SQLite,
 workflow and real-time wait cost. It does not treat every dry-run session as an
 in-memory fake. The process profile and spike section quantifies the portion
-that 3.2 can remove. Split groups are candidates for the 40 s CI target; they
-must be sized using actual post-change CI measurements.
+that the rejected 3.2 seam might have removed. References to 3.2 in this source
+inventory record the evaluated boundary, not approved implementation work.
+Slice 3.3 applies the cause fixes first and uses post-fix CI measurements to
+size only the remaining groups above 40 s.
 
 ## Shared fixture evidence
 
@@ -255,42 +261,42 @@ must be sized using actual post-change CI measurements.
 
 | File | Concrete cost evidence | Fix and semantic split candidates |
 |---|---|---|
-| core/ci-tools.test.ts | H-seam at :151,205,276. Runtime matrix = runners × fresh/resume × valid/invalid/tool cases. `CiToolsController` sessions and actual wire tool calls at :194–205,261–276. Pure schema/argument tests :20–145 are cheap relative to executable cells. | 3.2 replaces native agent child, preserves controller/IPC tool invocation. Split pure definitions/injection (:20–145), descriptor exposure (:146–184), H1 validation (:187–225), U0 native tool calls (:228+), then runner/fresh-resume if a group still exceeds target. |
+| core/ci-tools.test.ts | H-seam at :151,205,276. Runtime matrix = runners × fresh/resume × valid/invalid/tool cases. `CiToolsController` sessions and actual wire tool calls at :194–205,261–276. Pure schema/argument tests :20–145 are cheap relative to executable cells. | Rejected seam: replace native agent child, preserves controller/IPC tool invocation. Split pure definitions/injection (:20–145), descriptor exposure (:146–184), H1 validation (:187–225), U0 native tool calls (:228+), then runner/fresh-resume if a group still exceeds target. |
 | core/harness-autosave-settlement.test.ts | H-owned :227,331. :77–100 intercepts only real autosave `git status` with a Node leader that starts a detached holder. All other Git calls remain real (:104–119). :250 creates unrelated child churn. :350 creates further short-lived child churn. Rows :209–214 = 6 runners × fresh/Continue × failure/cancel/success. :310–314 = final autosave churn × fresh/Continue. | Keep holder/churn OS paths real. 3.2 removes only native agent boot, not Git/holder process. Split failure R61/R62, cancellation R63/R64, success R65/R66, unrelated churn R67/R68; divide each by runner and mode as CI weights require. Never fake the detached holder to meet the cap. |
-| core/harness-claude-parity.test.ts | One-line wrapper calls `describeHarnessParity('claude')`; H-seam/H-run/H-owned shared registrations, not a small isolated unit. Shared testkit :978 seam,989 input,1054–1250 Continue/recovery/ownership,1300 session control,1452 run,1629 owned input,2528+ settlement,2959+ permissions. | 3.2 in-process ordinary wire cells; retain lifecycle/OS cases real. Split per existing describe groups: seam/session; input; run/ask; ownership/recovery; Finish/settlement; permissions/MCP. Keep every criterion registered once for Claude. |
+| core/harness-claude-parity.test.ts | One-line wrapper calls `describeHarnessParity('claude')`; H-seam/H-run/H-owned shared registrations, not a small isolated unit. Shared testkit :978 seam,989 input,1054–1250 Continue/recovery/ownership,1300 session control,1452 run,1629 owned input,2528+ settlement,2959+ permissions. | Rejected seam: in-process ordinary wire cells; retain lifecycle/OS cases real. Split per existing describe groups: seam/session; input; run/ask; ownership/recovery; Finish/settlement; permissions/MCP. Keep every criterion registered once for Claude. |
 | core/harness-codex-parity.test.ts | Same wrapper/shared groups, Codex app-server wire. Extra app-server handshake and turn/start/steer RPC occur per H-seam/run invocation. | Same semantic splits as Claude; Codex native RPC parsing stays production code under 3.2. |
 | core/harness-cursor-parity.test.ts | Same wrapper/shared groups. Cursor print is one child per turn, so followups/Continue have repeated process cost beyond one child per case. | Same groups; retain print one-shot/resume contract and smoke. In-process print turns must model a distinct child/transport lifecycle per turn, not a permanent channel. |
 | core/harness-opencode-parity.test.ts | Same wrapper/shared groups. OpenCode mock serve child plus local HTTP/SSE server/request lifecycle per fixture; startup/listen path is separate from native event parsing. | Same groups; keep server listen/retry OS cases real; in-process HTTP seam must preserve shipped request/event parser. |
-| core/skill-provision-parity.test.ts | :66–117 custom fixture creates native mock, five Git commands (:89–95), store/manager, worktree and recovery. R92–R96 each across RUNNER_IDS (:147–221). Reads actual worktree files and Git status (:157). | 3.2 only native wire portion. Split Start R92 / live Continue R93 / recover R94 / live slash install R95 / Stop-preparation R96; combine measured cheap groups if safe; keep real worktree/file assertions. |
-| core/skill-resume-parity.test.ts | :231–294 custom native fixture and five Git commands (:266–271), store/manager restart. R100 has Start+Continue+recover in one cell (:351), R53/R54/R57/R59/R55/fresh session :392–518; R56 driveSeam fresh/resume :543–577. OpenCode missing-session fallback :604+. | 3.2 wire boot reduction; split generation R100, live Continue R53/R55, recovery R54/R57/R59, declaration/wire R56, fresh/cross-runner session + OpenCode fallback. Further split runner axis for recovery-heavy group. |
-| core/workflow-ask-parity.test.ts | H-run :47. RUNNER_IDS × Q criteria; Q7 fresh/continuation :40–42. Every non-Q9 row deliberately sleeps 350 ms (:78–80) to cross real auto-end 250 ms. Q8 deadline is already manually released (:13–35), not a real 2 s wait. Q5 drains and reopens real store/manager (:85–95). | 3.2 native wire; replace only negative auto-end observation with controlled product timer at proven readiness, retain one real timer smoke. Split ordinary ask/answer Q1–Q4, restart Q5, repeated/continuation Q6–Q7, timeout Q8, autonomous Q9; runner axis as needed. |
-| core/workflow-autonomous-parity.test.ts | H-run/H-owned :57,136, driveSeam :124. RUNNER_IDS × A criteria × fresh/continuation for selected cases. A13/A14 execute actual idle callback, not real 15 min wait (:79–84); retain native delayed TERM and 50 ms negative window (:95). A9 has 150 ms negative wait (:171). :22 comment identifies former 13.5 s per-cell Cursor nudge delay, so do not infer current wait from obsolete comment without measured evidence. | 3.2 ordinary wire; preserve real teardown cases A13/A14 where signal/exit prove slot lifetime. Split autonomous budget/normal nudges, refusal/late readiness, idle close A13/A14; then runner and fresh/continuation. |
-| core/workflow-final-message-parity.test.ts | H-seam silent tail :47–60; H-owned F rows :74,98,109+. F8 real 150 ms pre-deadline observation (:117), reply bound 300 ms (:126). F9/F11 use filesystem release gates and actual late native reply/start. F10 reply timer is already selectively faked (:214–238). | 3.2 ordinary wire preserves late ACK/turn event ordering; use product-controlled clock for F8 as sibling already does. Split silent-tail seam; ordinary nudge F1–F6; delayed ACK/no reply F7/F8; late reply/late start F9/F11; reply clock F10. Further runner split. |
-| core/workflow-followup-parity.test.ts | H-run imported :17; native wrappers COALESCE_BIN/REVERSE_BIN :25–26; main matrix :142, specific Codex coalesced/reverse races :259–525. DEFERRED_TURN_START_MS=800 (:23) is actual delayed-turn boundary. fs gate/record files :95+. | 3.2 must preserve request/response ordering through production adapters. Split H1 completion, H2 ask, H3 hold, H4 delayed start; separate Codex coalesced/reverse/unread races. Preserve one real wrapper smoke per wrapper; controlled scheduling can replace 800 ms once order is proven. |
+| core/skill-provision-parity.test.ts | :66–117 custom fixture creates native mock, five Git commands (:89–95), store/manager, worktree and recovery. R92–R96 each across RUNNER_IDS (:147–221). Reads actual worktree files and Git status (:157). | Rejected seam: only native wire portion. Split Start R92 / live Continue R93 / recover R94 / live slash install R95 / Stop-preparation R96; combine measured cheap groups if safe; keep real worktree/file assertions. |
+| core/skill-resume-parity.test.ts | :231–294 custom native fixture and five Git commands (:266–271), store/manager restart. R100 has Start+Continue+recover in one cell (:351), R53/R54/R57/R59/R55/fresh session :392–518; R56 driveSeam fresh/resume :543–577. OpenCode missing-session fallback :604+. | Rejected seam: wire boot reduction; split generation R100, live Continue R53/R55, recovery R54/R57/R59, declaration/wire R56, fresh/cross-runner session + OpenCode fallback. Further split runner axis for recovery-heavy group. |
+| core/workflow-ask-parity.test.ts | H-run :47. RUNNER_IDS × Q criteria; Q7 fresh/continuation :40–42. Every non-Q9 row deliberately sleeps 350 ms (:78–80) to cross real auto-end 250 ms. Q8 deadline is already manually released (:13–35), not a real 2 s wait. Q5 drains and reopens real store/manager (:85–95). | Rejected seam: native wire; replace only negative auto-end observation with controlled product timer at proven readiness, retain one real timer smoke. Split ordinary ask/answer Q1–Q4, restart Q5, repeated/continuation Q6–Q7, timeout Q8, autonomous Q9; runner axis as needed. |
+| core/workflow-autonomous-parity.test.ts | H-run/H-owned :57,136, driveSeam :124. RUNNER_IDS × A criteria × fresh/continuation for selected cases. A13/A14 execute actual idle callback, not real 15 min wait (:79–84); retain native delayed TERM and 50 ms negative window (:95). A9 has 150 ms negative wait (:171). :22 comment identifies former 13.5 s per-cell Cursor nudge delay, so do not infer current wait from obsolete comment without measured evidence. | Rejected seam: ordinary wire; preserve real teardown cases A13/A14 where signal/exit prove slot lifetime. Split autonomous budget/normal nudges, refusal/late readiness, idle close A13/A14; then runner and fresh/continuation. |
+| core/workflow-final-message-parity.test.ts | H-seam silent tail :47–60; H-owned F rows :74,98,109+. F8 real 150 ms pre-deadline observation (:117), reply bound 300 ms (:126). F9/F11 use filesystem release gates and actual late native reply/start. F10 reply timer is already selectively faked (:214–238). | Rejected seam: ordinary wire preserves late ACK/turn event ordering; use product-controlled clock for F8 as sibling already does. Split silent-tail seam; ordinary nudge F1–F6; delayed ACK/no reply F7/F8; late reply/late start F9/F11; reply clock F10. Further runner split. |
+| core/workflow-followup-parity.test.ts | H-run imported :17; native wrappers COALESCE_BIN/REVERSE_BIN :25–26; main matrix :142, specific Codex coalesced/reverse races :259–525. DEFERRED_TURN_START_MS=800 (:23) is actual delayed-turn boundary. fs gate/record files :95+. | Rejected seam would have had to preserve request/response ordering through production adapters. Split H1 completion, H2 ask, H3 hold, H4 delayed start; separate Codex coalesced/reverse/unread races. Preserve one real wrapper smoke per wrapper; controlled scheduling can replace 800 ms once order is proven. |
 | core/workflow-no-progress-parity.test.ts | H-owned :91. DEFAULT_NO_PROGRESS_TIMEOUT_MS mocked to 800 (:10–14), selective timer control :20–43; startup/IPC remains real. N5 checks real SIGKILL receipt, process.kill liveness and termination (:120–140). N7 inherited pipe/output drain likewise real. | Ordinary deadline/park/ACK rows can use 3.2; keep N5/N7 real. Split active progress N1/N2, parked/Continue/question N3/N4/N6/N8, real escalation N5, held-pipe N7. Inactivity is already controlled: do not propose fake timers as a new fix for every row. |
-| workflows/ci-wait-failure-parity.test.ts | W :12, with native mocks selected per RUNNER_IDS :69+. Git rev-parse :52. Three semantic families at :75 failed final CI/recovery, :128 failed nonfinal checks outcomes, :189 restart boundary recovery. GitHub resource is mocked (:22,28), so no real GitHub latency. | 3.2 native agent, preserve real store and accepted worker identity. Split final recovery, nonfinal check outcome, restart boundary; divide runner and checks outcome to fit. |
-| workflows/ci-wait.test.ts | W + controlledWire imported :18. Real native overrides in two RUNNER_IDS matrices :110–114 and :219–223; remainder defaults to bundled Claude subprocess. GitHub watches mocked :25–54. Fake 120 s timer at :597–613; no real 120 s sleep. | 3.2 native children; split registration/dedup, admission/ACK/capacity, native refusal/activity runner matrix, restart/cancel/disconnect, ask/worker coexistence, wait-list/timers (:559+). Preserve durable transitions. |
-| workflows/monitoring-turn.test.ts | W fixture :15. Every backend executes modes × M rows (:240–243), extra M13/M14/M17/M23 :245–286. Native bins :188–189. Real worktree Git add/commit for review fixture :107–115. Criteria exact meanings in monitoring-turn.testkit.ts:6–22. | 3.2 native wire; source fanout remains large. Split by semantic group: timer/prose M1/M2, worker review M3/M19, ask precedence M4/M7/M18/M21, done M5, autonomous M13/M14/M23, close M17; each runner or fresh/continuation if needed. |
-| workflows/run.test.ts | Mixed suite, not all native: runnerHook mock :52–56, pure text/accounting groups :79–275; real Git setup repeated :283–290,405–410,888–893 and many later beforeEach blocks. CEZ_DRY_RUN=1 in integration groups still native mock. Explicit native Codex ask group :3233–3273. Poll sleeps 25–100 ms at :348,371,1033,1121,1195,2445,3158,3273. | 3.2 only default/mock-backed integration cells, no gain for pure/fake hook tests. Split existing describe boundaries: text/tail; usage/cost; bookkeeper/diff; Continue overrides; settlement gate; skill chain; monitoring/waits; asks; attachments/queued stack; recovery; Codex ask; registry skill expansion. Large monitoring group :1148–2400 needs further split by recovery and continuation families. |
-| workflows/waits-claude-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'claude', part: 'base'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :453–1689 exercise tools startup, CI/timer registration, slot/hold admission, budgets, questions, failed delivery/Continue and no-wait nudges. Retry backoff is already zero (:91); timeout deadlines are controlled, not literal waits for authored seconds. | 3.2 native agent startup. Split registration/cancel U26/U1/U4/U7; concurrent wakes/input U2/U3/U8*; budgets U10/U16/U16b; delivery bounds U12/U13/U14/U9c; open-wait failure U9/U11; human asks U7h/U7k/U7a/U9h; done/workflow U6/U6s/U7d; no-wait/answers U5*/U7q/U15/U17/U18. Split runner-local groups by fresh/Continue only if still over target. |
-| workflows/waits-claude-workers-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'claude', part: 'workers'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :1695–2840 create parent/worker sessions and real owned Git worktrees. They test simultaneous waits, messages/ACKs, refusal/closed-session continuations and fallback questions; repeated recovery starts additional native children. | 3.2 native agent startup; preserve real SQLite/owned workspace semantics. Split mixed waits U2w/U2t/U2c; worker notices U3w/U3n/U3r/U3d; worker wait/recovery U7w/U9w/U9u/U9v/U14m; conversations/peers U19*; refusal/completion U20*/U21*/R13/R17/R18; closed-session refusal U22*; fallback questions U24/U24r/U25. Subdivide U22 by fresh/restart/Continue when required. |
-| workflows/waits-codex-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'codex', part: 'base'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :453–1689 exercise tools startup, CI/timer registration, slot/hold admission, budgets, questions, failed delivery/Continue and no-wait nudges. Retry backoff is already zero (:91); timeout deadlines are controlled, not literal waits for authored seconds. | 3.2 native agent startup. Split registration/cancel U26/U1/U4/U7; concurrent wakes/input U2/U3/U8*; budgets U10/U16/U16b; delivery bounds U12/U13/U14/U9c; open-wait failure U9/U11; human asks U7h/U7k/U7a/U9h; done/workflow U6/U6s/U7d; no-wait/answers U5*/U7q/U15/U17/U18. Split runner-local groups by fresh/Continue only if still over target. |
-| workflows/waits-codex-workers-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'codex', part: 'workers'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :1695–2840 create parent/worker sessions and real owned Git worktrees. They test simultaneous waits, messages/ACKs, refusal/closed-session continuations and fallback questions; repeated recovery starts additional native children. | 3.2 native agent startup; preserve real SQLite/owned workspace semantics. Split mixed waits U2w/U2t/U2c; worker notices U3w/U3n/U3r/U3d; worker wait/recovery U7w/U9w/U9u/U9v/U14m; conversations/peers U19*; refusal/completion U20*/U21*/R13/R17/R18; closed-session refusal U22*; fallback questions U24/U24r/U25. Subdivide U22 by fresh/restart/Continue when required. |
-| workflows/waits-cursor-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'cursor', part: 'base'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :453–1689 exercise tools startup, CI/timer registration, slot/hold admission, budgets, questions, failed delivery/Continue and no-wait nudges. Retry backoff is already zero (:91); timeout deadlines are controlled, not literal waits for authored seconds. | 3.2 native agent startup. Split registration/cancel U26/U1/U4/U7; concurrent wakes/input U2/U3/U8*; budgets U10/U16/U16b; delivery bounds U12/U13/U14/U9c; open-wait failure U9/U11; human asks U7h/U7k/U7a/U9h; done/workflow U6/U6s/U7d; no-wait/answers U5*/U7q/U15/U17/U18. Split runner-local groups by fresh/Continue only if still over target. |
-| workflows/waits-cursor-workers-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'cursor', part: 'workers'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :1695–2840 create parent/worker sessions and real owned Git worktrees. They test simultaneous waits, messages/ACKs, refusal/closed-session continuations and fallback questions; repeated recovery starts additional native children. | 3.2 native agent startup; preserve real SQLite/owned workspace semantics. Split mixed waits U2w/U2t/U2c; worker notices U3w/U3n/U3r/U3d; worker wait/recovery U7w/U9w/U9u/U9v/U14m; conversations/peers U19*; refusal/completion U20*/U21*/R13/R17/R18; closed-session refusal U22*; fallback questions U24/U24r/U25. Subdivide U22 by fresh/restart/Continue when required. |
-| workflows/waits-omp-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'omp', part: 'base'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :453–1689 exercise tools startup, CI/timer registration, slot/hold admission, budgets, questions, failed delivery/Continue and no-wait nudges. Retry backoff is already zero (:91); timeout deadlines are controlled, not literal waits for authored seconds. | 3.2 native agent startup. Split registration/cancel U26/U1/U4/U7; concurrent wakes/input U2/U3/U8*; budgets U10/U16/U16b; delivery bounds U12/U13/U14/U9c; open-wait failure U9/U11; human asks U7h/U7k/U7a/U9h; done/workflow U6/U6s/U7d; no-wait/answers U5*/U7q/U15/U17/U18. Split runner-local groups by fresh/Continue only if still over target. |
-| workflows/waits-omp-workers-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'omp', part: 'workers'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :1695–2840 create parent/worker sessions and real owned Git worktrees. They test simultaneous waits, messages/ACKs, refusal/closed-session continuations and fallback questions; repeated recovery starts additional native children. | 3.2 native agent startup; preserve real SQLite/owned workspace semantics. Split mixed waits U2w/U2t/U2c; worker notices U3w/U3n/U3r/U3d; worker wait/recovery U7w/U9w/U9u/U9v/U14m; conversations/peers U19*; refusal/completion U20*/U21*/R13/R17/R18; closed-session refusal U22*; fallback questions U24/U24r/U25. Subdivide U22 by fresh/restart/Continue when required. |
-| workflows/waits-opencode-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'opencode', part: 'base'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :453–1689 exercise tools startup, CI/timer registration, slot/hold admission, budgets, questions, failed delivery/Continue and no-wait nudges. Retry backoff is already zero (:91); timeout deadlines are controlled, not literal waits for authored seconds. | 3.2 native agent startup. Split registration/cancel U26/U1/U4/U7; concurrent wakes/input U2/U3/U8*; budgets U10/U16/U16b; delivery bounds U12/U13/U14/U9c; open-wait failure U9/U11; human asks U7h/U7k/U7a/U9h; done/workflow U6/U6s/U7d; no-wait/answers U5*/U7q/U15/U17/U18. Split runner-local groups by fresh/Continue only if still over target. |
-| workflows/waits-opencode-workers-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'opencode', part: 'workers'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :1695–2840 create parent/worker sessions and real owned Git worktrees. They test simultaneous waits, messages/ACKs, refusal/closed-session continuations and fallback questions; repeated recovery starts additional native children. | 3.2 native agent startup; preserve real SQLite/owned workspace semantics. Split mixed waits U2w/U2t/U2c; worker notices U3w/U3n/U3r/U3d; worker wait/recovery U7w/U9w/U9u/U9v/U14m; conversations/peers U19*; refusal/completion U20*/U21*/R13/R17/R18; closed-session refusal U22*; fallback questions U24/U24r/U25. Subdivide U22 by fresh/restart/Continue when required. |
-| workflows/waits-pi-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'pi', part: 'base'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :453–1689 exercise tools startup, CI/timer registration, slot/hold admission, budgets, questions, failed delivery/Continue and no-wait nudges. Retry backoff is already zero (:91); timeout deadlines are controlled, not literal waits for authored seconds. | 3.2 native agent startup. Split registration/cancel U26/U1/U4/U7; concurrent wakes/input U2/U3/U8*; budgets U10/U16/U16b; delivery bounds U12/U13/U14/U9c; open-wait failure U9/U11; human asks U7h/U7k/U7a/U9h; done/workflow U6/U6s/U7d; no-wait/answers U5*/U7q/U15/U17/U18. Split runner-local groups by fresh/Continue only if still over target. |
-| workflows/waits-pi-workers-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'pi', part: 'workers'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :1695–2840 create parent/worker sessions and real owned Git worktrees. They test simultaneous waits, messages/ACKs, refusal/closed-session continuations and fallback questions; repeated recovery starts additional native children. | 3.2 native agent startup; preserve real SQLite/owned workspace semantics. Split mixed waits U2w/U2t/U2c; worker notices U3w/U3n/U3r/U3d; worker wait/recovery U7w/U9w/U9u/U9v/U14m; conversations/peers U19*; refusal/completion U20*/U21*/R13/R17/R18; closed-session refusal U22*; fallback questions U24/U24r/U25. Subdivide U22 by fresh/restart/Continue when required. |
-| workflows/worker-parent-attention.test.ts | W fixture :29. RUNNER_IDS × fresh/continuation × ordinary/delayed ACK wire :28–34. Native backend plus Claude worker bins :36–37,50; held ACK/response helpers :8. Additional ACK/attention cases :96+. | 3.2 wire removes repeated agent startup, but actual input acknowledgement must stay in production adapter. Split fresh ordinary M26; fresh delayed-ACK M26; Continue ordinary M27; Continue delayed-ACK M27; remaining question/attention rows. Group per runner if needed. |
-| workflows/worker-questions.test.ts | W :17,29. Broad question routing/recovery suite with actual default Claude mock subprocesses and owned worktrees. Recovery cases :531–533,693–909. Real 300 ms negative capacity observation :860. Real holder process support imported :3–6 and liveness :9. | 3.2 ordinary wire; keep holder/liveness evidence real. Split routing/admission (:54–245); fallback/Continue/commit failure (:246–411); reply semantics (:411–611); done/cancel relationships (:611–693); crash/recovery/unreadable parent (:693–909); inbox/request capacity and stopping (:909–1070). Split recovery groups again by case family. |
-| workflows/worker-restart-parity.test.ts | W :19. Explicit native mocks :28–29,74–75,139–140. :101 real stdin-held Node process; :116 750 ms delayed holder close; :138+ same-boot crash and unreadable process; :199 5 s lock release backstop with bounded cleanup. Real git branch checks :131,205. | Keep real lifecycle/process-holder cells. 3.2 can remove ordinary native wire startup only if it does not remove process identity under test. Split R60 cold terminal starting proof (:26), readable/unreadable destroy by ledger kind (:73), same-boot crash/lock bound (:138), then runner. Do not replace the owned generation with a fake PID. |
-| workflows/worker-wait-capacity.test.ts | W imported :13–17. Native matrix :84–89 (Codex/OpenCode/Pi/OMP) and actual held HTTP ACK :141–145. Negative 400 ms observations :50,110. Later rows seed active sessions/store and test restart/Finish persistence (:274–575); selective fake timer :518. | 3.2 native sessions; maintain held ACK semantics and capacity checkpoint ordering. Split nonfinal wake/next-step (:31–236); human answer/recovery (:237–345); inactive Finish/legacy children (:361–476); monitoring/cancel/restart (:514–575). 400 ms negative observations can use a controlled product timer after native readiness, retaining real smoke. |
-| workflows/worker-wait-conversations.test.ts | W :12–15. WP1/WP2 runner matrices set real native backend and Claude child :48–51,75–78. WP2's 45/61 minutes are Date-only fake clock jumps (:110–114); native timers keep real time, so there is no real 45-minute sleep. Remaining rows :123–455 use default real Claude mocks plus durable inbox/request checkpoints. | 3.2 native sessions. Split WP1 progress matrix; WP2 resumed/late amendment matrix; progress/inbox ACK (:123–180); request lifecycle/deadline/restart (:207–326); monitoring and boundary races (:363–455). Keep correlation/receipt invariants. |
-| workflows/worker-wait-durability.test.ts | W :13–17. Real SQLite checkpoints/reopen and default bundled Claude native sessions. Timer failure/deadline cases already fake at :85,363. 32 terminal outcomes :253–267 calls worker() 32 times; worker-wait.testkit.ts:280–288 only rev-parses HEAD, plans workspace and creates durable queued records, with no enqueue. This is 32 Git rev-parse/planning/store operations, not 32 agent starts. Recovery/delivery checkpoints :385–537, disposal/cancel :637–685. | 3.2 ordinary mock sessions. Split queued human/checkpoint failures (:30–202); capacity/status/outcomes (:203–329); deadline/validation (:330–384); recovery/delivery/message upgrade (:385–537); terminal/capacity ordering (:559–614); disposal/cancel (:637–685). Preserve crash checkpoint probes and actual store. |
-| delegation/provision-workflows.test.ts | **Already fake runner:** :63–70 spies createRunner and returns in-memory AgentSession; no native agent startup. Real service fixture :60, `delegation/service.testkit.ts:77–87` runs Git init/config/commit/rev-parse and opens store/manager. Acceptance creates real owned workspaces. Many mode/backend/layout/damage cross-products (:115,252,269,415,442,470,510,523,580,598,614). Controller starts per test (:72). | No 3.2 speedup. 3.3 split governed intent matrix (:115); catalog/retry workflows (:150–237); mixed-runner identity (:252–397); input recipes/grants (:415–470); Claude layout/env (:510–569); account/model locks/identity (:580–666); skills/prompts (:695–719); credentials/revocation/recovery (:749–844). Divide large mode matrices by queued/restart/Continue as measured. Keep real identity/workspace acceptance. |
+| workflows/ci-wait-failure-parity.test.ts | W :12, with native mocks selected per RUNNER_IDS :69+. Git rev-parse :52. Three semantic families at :75 failed final CI/recovery, :128 failed nonfinal checks outcomes, :189 restart boundary recovery. GitHub resource is mocked (:22,28), so no real GitHub latency. | Rejected seam: native agent, preserve real store and accepted worker identity. Split final recovery, nonfinal check outcome, restart boundary; divide runner and checks outcome to fit. |
+| workflows/ci-wait.test.ts | W + controlledWire imported :18. Real native overrides in two RUNNER_IDS matrices :110–114 and :219–223; remainder defaults to bundled Claude subprocess. GitHub watches mocked :25–54. Fake 120 s timer at :597–613; no real 120 s sleep. | Rejected seam: native children; split registration/dedup, admission/ACK/capacity, native refusal/activity runner matrix, restart/cancel/disconnect, ask/worker coexistence, wait-list/timers (:559+). Preserve durable transitions. |
+| workflows/monitoring-turn.test.ts | W fixture :15. Every backend executes modes × M rows (:240–243), extra M13/M14/M17/M23 :245–286. Native bins :188–189. Real worktree Git add/commit for review fixture :107–115. Criteria exact meanings in monitoring-turn.testkit.ts:6–22. | Rejected seam: native wire; source fanout remains large. Split by semantic group: timer/prose M1/M2, worker review M3/M19, ask precedence M4/M7/M18/M21, done M5, autonomous M13/M14/M23, close M17; each runner or fresh/continuation if needed. |
+| workflows/run.test.ts | Mixed suite, not all native: runnerHook mock :52–56, pure text/accounting groups :79–275; real Git setup repeated :283–290,405–410,888–893 and many later beforeEach blocks. CEZ_DRY_RUN=1 in integration groups still native mock. Explicit native Codex ask group :3233–3273. Poll sleeps 25–100 ms at :348,371,1033,1121,1195,2445,3158,3273. | Rejected seam: only default/mock-backed integration cells, no gain for pure/fake hook tests. Split existing describe boundaries: text/tail; usage/cost; bookkeeper/diff; Continue overrides; settlement gate; skill chain; monitoring/waits; asks; attachments/queued stack; recovery; Codex ask; registry skill expansion. Large monitoring group :1148–2400 needs further split by recovery and continuation families. |
+| workflows/waits-claude-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'claude', part: 'base'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :453–1689 exercise tools startup, CI/timer registration, slot/hold admission, budgets, questions, failed delivery/Continue and no-wait nudges. Retry backoff is already zero (:91); timeout deadlines are controlled, not literal waits for authored seconds. | Rejected seam: native agent startup. Split registration/cancel U26/U1/U4/U7; concurrent wakes/input U2/U3/U8*; budgets U10/U16/U16b; delivery bounds U12/U13/U14/U9c; open-wait failure U9/U11; human asks U7h/U7k/U7a/U9h; done/workflow U6/U6s/U7d; no-wait/answers U5*/U7q/U15/U17/U18. Split runner-local groups by fresh/Continue only if still over target. |
+| workflows/waits-claude-workers-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'claude', part: 'workers'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :1695–2840 create parent/worker sessions and real owned Git worktrees. They test simultaneous waits, messages/ACKs, refusal/closed-session continuations and fallback questions; repeated recovery starts additional native children. | Rejected seam: native agent startup; preserve real SQLite/owned workspace semantics. Split mixed waits U2w/U2t/U2c; worker notices U3w/U3n/U3r/U3d; worker wait/recovery U7w/U9w/U9u/U9v/U14m; conversations/peers U19*; refusal/completion U20*/U21*/R13/R17/R18; closed-session refusal U22*; fallback questions U24/U24r/U25. Subdivide U22 by fresh/restart/Continue when required. |
+| workflows/waits-codex-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'codex', part: 'base'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :453–1689 exercise tools startup, CI/timer registration, slot/hold admission, budgets, questions, failed delivery/Continue and no-wait nudges. Retry backoff is already zero (:91); timeout deadlines are controlled, not literal waits for authored seconds. | Rejected seam: native agent startup. Split registration/cancel U26/U1/U4/U7; concurrent wakes/input U2/U3/U8*; budgets U10/U16/U16b; delivery bounds U12/U13/U14/U9c; open-wait failure U9/U11; human asks U7h/U7k/U7a/U9h; done/workflow U6/U6s/U7d; no-wait/answers U5*/U7q/U15/U17/U18. Split runner-local groups by fresh/Continue only if still over target. |
+| workflows/waits-codex-workers-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'codex', part: 'workers'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :1695–2840 create parent/worker sessions and real owned Git worktrees. They test simultaneous waits, messages/ACKs, refusal/closed-session continuations and fallback questions; repeated recovery starts additional native children. | Rejected seam: native agent startup; preserve real SQLite/owned workspace semantics. Split mixed waits U2w/U2t/U2c; worker notices U3w/U3n/U3r/U3d; worker wait/recovery U7w/U9w/U9u/U9v/U14m; conversations/peers U19*; refusal/completion U20*/U21*/R13/R17/R18; closed-session refusal U22*; fallback questions U24/U24r/U25. Subdivide U22 by fresh/restart/Continue when required. |
+| workflows/waits-cursor-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'cursor', part: 'base'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :453–1689 exercise tools startup, CI/timer registration, slot/hold admission, budgets, questions, failed delivery/Continue and no-wait nudges. Retry backoff is already zero (:91); timeout deadlines are controlled, not literal waits for authored seconds. | Rejected seam: native agent startup. Split registration/cancel U26/U1/U4/U7; concurrent wakes/input U2/U3/U8*; budgets U10/U16/U16b; delivery bounds U12/U13/U14/U9c; open-wait failure U9/U11; human asks U7h/U7k/U7a/U9h; done/workflow U6/U6s/U7d; no-wait/answers U5*/U7q/U15/U17/U18. Split runner-local groups by fresh/Continue only if still over target. |
+| workflows/waits-cursor-workers-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'cursor', part: 'workers'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :1695–2840 create parent/worker sessions and real owned Git worktrees. They test simultaneous waits, messages/ACKs, refusal/closed-session continuations and fallback questions; repeated recovery starts additional native children. | Rejected seam: native agent startup; preserve real SQLite/owned workspace semantics. Split mixed waits U2w/U2t/U2c; worker notices U3w/U3n/U3r/U3d; worker wait/recovery U7w/U9w/U9u/U9v/U14m; conversations/peers U19*; refusal/completion U20*/U21*/R13/R17/R18; closed-session refusal U22*; fallback questions U24/U24r/U25. Subdivide U22 by fresh/restart/Continue when required. |
+| workflows/waits-omp-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'omp', part: 'base'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :453–1689 exercise tools startup, CI/timer registration, slot/hold admission, budgets, questions, failed delivery/Continue and no-wait nudges. Retry backoff is already zero (:91); timeout deadlines are controlled, not literal waits for authored seconds. | Rejected seam: native agent startup. Split registration/cancel U26/U1/U4/U7; concurrent wakes/input U2/U3/U8*; budgets U10/U16/U16b; delivery bounds U12/U13/U14/U9c; open-wait failure U9/U11; human asks U7h/U7k/U7a/U9h; done/workflow U6/U6s/U7d; no-wait/answers U5*/U7q/U15/U17/U18. Split runner-local groups by fresh/Continue only if still over target. |
+| workflows/waits-omp-workers-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'omp', part: 'workers'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :1695–2840 create parent/worker sessions and real owned Git worktrees. They test simultaneous waits, messages/ACKs, refusal/closed-session continuations and fallback questions; repeated recovery starts additional native children. | Rejected seam: native agent startup; preserve real SQLite/owned workspace semantics. Split mixed waits U2w/U2t/U2c; worker notices U3w/U3n/U3r/U3d; worker wait/recovery U7w/U9w/U9u/U9v/U14m; conversations/peers U19*; refusal/completion U20*/U21*/R13/R17/R18; closed-session refusal U22*; fallback questions U24/U24r/U25. Subdivide U22 by fresh/restart/Continue when required. |
+| workflows/waits-opencode-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'opencode', part: 'base'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :453–1689 exercise tools startup, CI/timer registration, slot/hold admission, budgets, questions, failed delivery/Continue and no-wait nudges. Retry backoff is already zero (:91); timeout deadlines are controlled, not literal waits for authored seconds. | Rejected seam: native agent startup. Split registration/cancel U26/U1/U4/U7; concurrent wakes/input U2/U3/U8*; budgets U10/U16/U16b; delivery bounds U12/U13/U14/U9c; open-wait failure U9/U11; human asks U7h/U7k/U7a/U9h; done/workflow U6/U6s/U7d; no-wait/answers U5*/U7q/U15/U17/U18. Split runner-local groups by fresh/Continue only if still over target. |
+| workflows/waits-opencode-workers-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'opencode', part: 'workers'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :1695–2840 create parent/worker sessions and real owned Git worktrees. They test simultaneous waits, messages/ACKs, refusal/closed-session continuations and fallback questions; repeated recovery starts additional native children. | Rejected seam: native agent startup; preserve real SQLite/owned workspace semantics. Split mixed waits U2w/U2t/U2c; worker notices U3w/U3n/U3r/U3d; worker wait/recovery U7w/U9w/U9u/U9v/U14m; conversations/peers U19*; refusal/completion U20*/U21*/R13/R17/R18; closed-session refusal U22*; fallback questions U24/U24r/U25. Subdivide U22 by fresh/restart/Continue when required. |
+| workflows/waits-pi-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'pi', part: 'base'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :453–1689 exercise tools startup, CI/timer registration, slot/hold admission, budgets, questions, failed delivery/Continue and no-wait nudges. Retry backoff is already zero (:91); timeout deadlines are controlled, not literal waits for authored seconds. | Rejected seam: native agent startup. Split registration/cancel U26/U1/U4/U7; concurrent wakes/input U2/U3/U8*; budgets U10/U16/U16b; delivery bounds U12/U13/U14/U9c; open-wait failure U9/U11; human asks U7h/U7k/U7a/U9h; done/workflow U6/U6s/U7d; no-wait/answers U5*/U7q/U15/U17/U18. Split runner-local groups by fresh/Continue only if still over target. |
+| workflows/waits-pi-workers-parity.test.ts | Wrapper :1–4 selects describeWaitParity({runner: 'pi', part: 'workers'}); W setup/teardown for every row; nativeWire selects real mock at shared testkit :72–78. Shared rows :1695–2840 create parent/worker sessions and real owned Git worktrees. They test simultaneous waits, messages/ACKs, refusal/closed-session continuations and fallback questions; repeated recovery starts additional native children. | Rejected seam: native agent startup; preserve real SQLite/owned workspace semantics. Split mixed waits U2w/U2t/U2c; worker notices U3w/U3n/U3r/U3d; worker wait/recovery U7w/U9w/U9u/U9v/U14m; conversations/peers U19*; refusal/completion U20*/U21*/R13/R17/R18; closed-session refusal U22*; fallback questions U24/U24r/U25. Subdivide U22 by fresh/restart/Continue when required. |
+| workflows/worker-parent-attention.test.ts | W fixture :29. RUNNER_IDS × fresh/continuation × ordinary/delayed ACK wire :28–34. Native backend plus Claude worker bins :36–37,50; held ACK/response helpers :8. Additional ACK/attention cases :96+. | Rejected seam: wire removes repeated agent startup, but actual input acknowledgement must stay in production adapter. Split fresh ordinary M26; fresh delayed-ACK M26; Continue ordinary M27; Continue delayed-ACK M27; remaining question/attention rows. Group per runner if needed. |
+| workflows/worker-questions.test.ts | W :17,29. Broad question routing/recovery suite with actual default Claude mock subprocesses and owned worktrees. Recovery cases :531–533,693–909. Real 300 ms negative capacity observation :860. Real holder process support imported :3–6 and liveness :9. | Rejected seam: ordinary wire; keep holder/liveness evidence real. Split routing/admission (:54–245); fallback/Continue/commit failure (:246–411); reply semantics (:411–611); done/cancel relationships (:611–693); crash/recovery/unreadable parent (:693–909); inbox/request capacity and stopping (:909–1070). Split recovery groups again by case family. |
+| workflows/worker-restart-parity.test.ts | W :19. Explicit native mocks :28–29,74–75,139–140. :101 real stdin-held Node process; :116 750 ms delayed holder close; :138+ same-boot crash and unreadable process; :199 5 s lock release backstop with bounded cleanup. Real git branch checks :131,205. | Keep real lifecycle/process-holder cells. Rejected seam could remove ordinary native wire startup only if it does not remove process identity under test. Split R60 cold terminal starting proof (:26), readable/unreadable destroy by ledger kind (:73), same-boot crash/lock bound (:138), then runner. Do not replace the owned generation with a fake PID. |
+| workflows/worker-wait-capacity.test.ts | W imported :13–17. Native matrix :84–89 (Codex/OpenCode/Pi/OMP) and actual held HTTP ACK :141–145. Negative 400 ms observations :50,110. Later rows seed active sessions/store and test restart/Finish persistence (:274–575); selective fake timer :518. | Rejected seam: native sessions; maintain held ACK semantics and capacity checkpoint ordering. Split nonfinal wake/next-step (:31–236); human answer/recovery (:237–345); inactive Finish/legacy children (:361–476); monitoring/cancel/restart (:514–575). 400 ms negative observations can use a controlled product timer after native readiness, retaining real smoke. |
+| workflows/worker-wait-conversations.test.ts | W :12–15. WP1/WP2 runner matrices set real native backend and Claude child :48–51,75–78. WP2's 45/61 minutes are Date-only fake clock jumps (:110–114); native timers keep real time, so there is no real 45-minute sleep. Remaining rows :123–455 use default real Claude mocks plus durable inbox/request checkpoints. | Rejected seam: native sessions. Split WP1 progress matrix; WP2 resumed/late amendment matrix; progress/inbox ACK (:123–180); request lifecycle/deadline/restart (:207–326); monitoring and boundary races (:363–455). Keep correlation/receipt invariants. |
+| workflows/worker-wait-durability.test.ts | W :13–17. Real SQLite checkpoints/reopen and default bundled Claude native sessions. Timer failure/deadline cases already fake at :85,363. 32 terminal outcomes :253–267 calls worker() 32 times; worker-wait.testkit.ts:280–288 only rev-parses HEAD, plans workspace and creates durable queued records, with no enqueue. This is 32 Git rev-parse/planning/store operations, not 32 agent starts. Recovery/delivery checkpoints :385–537, disposal/cancel :637–685. | Rejected seam: ordinary mock sessions. Split queued human/checkpoint failures (:30–202); capacity/status/outcomes (:203–329); deadline/validation (:330–384); recovery/delivery/message upgrade (:385–537); terminal/capacity ordering (:559–614); disposal/cancel (:637–685). Preserve crash checkpoint probes and actual store. |
+| delegation/provision-workflows.test.ts | **Already fake runner:** :63–70 spies createRunner and returns in-memory AgentSession; no native agent startup. Real service fixture :60, `delegation/service.testkit.ts:77–87` runs Git init/config/commit/rev-parse and opens store/manager. Acceptance creates real owned workspaces. Many mode/backend/layout/damage cross-products (:115,252,269,415,442,470,510,523,580,598,614). Controller starts per test (:72). | No 3.2 speedup. After cause fixes, candidate split governed intent matrix (:115); catalog/retry workflows (:150–237); mixed-runner identity (:252–397); input recipes/grants (:415–470); Claude layout/env (:510–569); account/model locks/identity (:580–666); skills/prompts (:695–719); credentials/revocation/recovery (:749–844). Divide large mode matrices by queued/restart/Continue as measured. Keep real identity/workspace acceptance. |
 | delegation/workspace.test.ts | **Real Git topology suite**, not parity-wire cost. fixture :28–42 creates repo, two commits, parent worktree (many synchronous execFileSync calls). Tests exercise actual branch, index, receipt, marker, symlink, reflog, removal/lock/gc state. Only manager subgroups select dry-run :327,350,385,403; no agent in most rows. Large destruction group :419–893 has many parameterized damage/collision/reflog cases. | No general 3.2 speedup. Split committed isolation (:76–223); readOwnedDiff (:225–318); manager enqueue (:325–381); continuation/recovery (:383–417); destruction receipt/registration identity (:419–524); destruction changed HEAD/ref/reflog (:525–609); prepared/checkpoint/crash recovery (:610–747); concurrent topology attacks/locks (:748–845); git gc/reflog (:846–893); generic cleanup bypass (:895–955). Do not fake Git for tests whose guarantee is Git ownership identity. |
 
 
@@ -318,8 +324,11 @@ spawnSync and execFileSync. Count an asynchronous child once on close, not on
 every stdout frame. Sync probes are shown separately. Agent starts include the
 six native mock entrypoints, wrapper mocks and controlled-claude.cjs. All Git
 commands and Node children using the tsx import are counted separately. Agent
-start counts are observed process calls, not cases multiplied by a guessed
-number of turns. A case can start several agents; some cases start none.
+start counts are observed calls from instrumented processes, not cases multiplied
+by a guessed number of turns. A child whose protected environment omits the
+import hook can start descendants that the hook does not observe. These counts
+are not a transitive OS process census; descendant/holder evidence remains in
+the source and real-process tables. A case can start several agents; some cases start none.
 
 **Startup** is spawn-to-first-stdout for native mock children, plus synchronous
 mock probes. It is a measured *upper bound on removable startup work*, since it
@@ -394,9 +403,9 @@ Monitoring-turn starts 285 agents and runs 6,240 Git commands, yet startup is
 only 6.4% of its wall time. Real workflow and fixture cost dominates its size.
 Provision-workflows already fakes the runner and has zero native starts.
 
-### Expected CI time and second fix for every file
+### Evaluated seam estimates and the approved per-file cause fixes
 
-The **3.2 planning interval** below is `[C × (1 − S), C]`, where C is fresh CI
+The **rejected seam interval** below is `[C × (1 − S), C]`, where C is fresh CI
 suite time and S is that file's measured startup share. The lower end grants the
 optimistic assumption that *all* measured startup disappears. The upper end
 assumes no transferable saving. This is a planning envelope, not a confidence
@@ -406,13 +415,16 @@ The baseline spike proves the seam and a baseline saving; it does not prove
 this entire startup allowance can be removed in every scenario. Do not subtract
 end→close or Git as though the seam removed them.
 
-No file is accepted as meeting the 40 s target on that forecast. All 37 need a
-3.3 semantic split or the named cause fix plus a confirming CI run. Most remain
+No file is accepted as meeting the 40 s target on that forecast. Slice 3.3
+first fixes the named cause in each file and obtains confirming CI measurements.
+Only files still above 40 s then need row-group splits. Most remain
 over 60 s even at the optimistic end. `ci-wait`, OMP worker waits and Pi worker
-waits can cross 60 in the envelope, so they still get splits for headroom. The
-four files already below 60 in fresh CI also remain above the 40 s target.
+waits can cross 60 in the envelope, so cause fixes and a confirming CI run are needed before deciding their splits.
+The four files already below 60 in fresh CI also remain above the 40 s target.
 
-For an initial group count, divide the unchanged CI total by 32 s and round up.
+The group counts below are pre-fix sizing ceilings, not instructions to split
+before fixing causes. After cause fixes, recompute a starting group count from
+the new CI total divided by 32 s, rounded up.
 This is a sizing starting point, not an enforced per-file baseline. The 8 s gap
 to the 40 s design target allows group imbalance and repeated file setup. Assign
 whole semantic families from the earlier cost table; split an oversized family
@@ -420,47 +432,65 @@ by runner or fresh/Continue/restart axis. Re-measure every resulting file. A
 single case above 40 s needs its cause fixed, not more files around it. Expected
 final CI time is **at most 40 s per resulting file**; the hard gate stays 60 s.
 
-| File | Fresh CI s | 3.2 planning interval s | Initial groups for 3.3 | Required second fix / row families |
+| File | Fresh CI s | Rejected seam interval s | Pre-fix group ceiling | Cause fix first; fallback row families |
 | --- | ---: | --- | ---: | --- |
-| `core/ci-tools.test.ts` | 75.1 | 67.0–75.1 | 3 | Definitions/injection; descriptors; H1 validation; U0 calls; runner/mode subdivisions. Keep real controller IPC. |
-| `core/harness-autosave-settlement.test.ts` | 117.0 | 111.2–117.0 | 4 | R61–R66 by failure/cancel/success and fresh/Continue; R67/R68 churn. Keep real detached Git holder. |
-| `core/harness-claude-parity.test.ts` | 211.9 | 186.3–211.9 | 7 | Seam/session; input; run/ask; ownership/recovery; Finish/settlement; permissions. Retain OS rows real. |
-| `core/harness-codex-parity.test.ts` | 106.0 | 98.2–106.0 | 4 | Seam/session; input; run/ask; ownership/recovery; Finish/settlement; permissions. Retain OS rows real. |
-| `core/harness-cursor-parity.test.ts` | 86.7 | 77.2–86.7 | 3 | Seam/session; input; run/ask; ownership/recovery; Finish/settlement; permissions. Retain OS rows real. |
-| `core/harness-opencode-parity.test.ts` | 85.3 | 75.8–85.3 | 3 | Seam/session; input; run/ask; ownership/recovery; Finish/settlement; permissions. Retain OS rows real. |
-| `core/skill-provision-parity.test.ts` | 50.3 | 47.2–50.3 | 2 | R92 Start; R93 Continue; R94 recovery; R95 slash install; R96 Stop-preparation. |
-| `core/skill-resume-parity.test.ts` | 203.7 | 183.6–203.7 | 7 | R100 generation; live Continue; recovery; R56 wire; fresh/cross-runner/OpenCode fallback. |
-| `core/workflow-ask-parity.test.ts` | 58.3 | 55.0–58.3 | 2 | Ask/answer; restart; repeat/Continue; timeout; autonomous. Control the 350 ms negative auto-end observation after readiness. |
-| `core/workflow-autonomous-parity.test.ts` | 182.6 | 166.6–182.6 | 6 | Budget/nudges; refusal/late readiness; A13/A14 real idle-close lifecycle; runner/mode subdivisions. |
-| `core/workflow-final-message-parity.test.ts` | 83.1 | 75.9–83.1 | 3 | Silent tail; F1–F6; F7/F8; F9/F11; F10. Control F8 clock as F10 already does. |
-| `core/workflow-followup-parity.test.ts` | 97.8 | 88.5–97.8 | 4 | H1–H4; Codex coalesced/reverse races. Replace 800 ms pacing with a release gate; retain wrapper smokes. |
-| `core/workflow-no-progress-parity.test.ts` | 73.2 | 69.3–73.2 | 3 | N1/N2 progress; N3/N4/N6/N8 parked input; N5 escalation; N7 held pipes. Keep N5/N7 real. |
-| `workflows/ci-wait-failure-parity.test.ts` | 105.8 | 95.6–105.8 | 4 | Final recovery; nonfinal outcomes; restart boundary, divided by runner/check outcome. |
-| `workflows/ci-wait.test.ts` | 62.6 | 58.1–62.6 | 2 | Registration; admission/ACK/capacity; native runner refusal; restart/cancel; asks/workers; wait-list timers. |
-| `workflows/monitoring-turn.test.ts` | 273.7 | 256.3–273.7 | 9 | Timer/prose; worker review; ask precedence; done; autonomous; close, then runner/mode subdivisions. |
-| `workflows/run.test.ts` | 192.0 | 173.6–192.0 | 6 | Existing describe families: text/accounting; settlement; Continue; skills; monitoring; asks; input stack; recovery. Split monitoring again. |
-| `workflows/waits-claude-parity.test.ts` | 211.1 | 194.2–211.1 | 7 | Base waits: registration/cancel; input/wakes; budgets; delivery; failed open waits; asks; done/workflow; no-wait replies. |
-| `workflows/waits-claude-workers-parity.test.ts` | 259.7 | 239.0–259.7 | 9 | Workers: mixed waits; notices; recovery; peer conversations; refusal/completion; closed-session refusal; fallback asks. Subdivide by lifecycle mode. |
-| `workflows/waits-codex-parity.test.ts` | 55.7 | 51.0–55.7 | 2 | Base waits: registration/cancel; input/wakes; budgets; delivery; failed open waits; asks; done/workflow; no-wait replies. |
-| `workflows/waits-codex-workers-parity.test.ts` | 92.1 | 84.5–92.1 | 3 | Workers: mixed waits; notices; recovery; peer conversations; refusal/completion; closed-session refusal; fallback asks. Subdivide by lifecycle mode. |
-| `workflows/waits-cursor-parity.test.ts` | 147.4 | 131.2–147.4 | 5 | Base waits: registration/cancel; input/wakes; budgets; delivery; failed open waits; asks; done/workflow; no-wait replies. |
-| `workflows/waits-cursor-workers-parity.test.ts` | 130.4 | 115.2–130.4 | 5 | Workers: mixed waits; notices; recovery; peer conversations; refusal/completion; closed-session refusal; fallback asks. Subdivide by lifecycle mode. |
-| `workflows/waits-omp-parity.test.ts` | 54.0 | 48.8–54.0 | 2 | Base waits: registration/cancel; input/wakes; budgets; delivery; failed open waits; asks; done/workflow; no-wait replies. |
-| `workflows/waits-omp-workers-parity.test.ts` | 65.7 | 59.4–65.7 | 3 | Workers: mixed waits; notices; recovery; peer conversations; refusal/completion; closed-session refusal; fallback asks. Subdivide by lifecycle mode. |
-| `workflows/waits-opencode-parity.test.ts` | 103.3 | 95.0–103.3 | 4 | Base waits: registration/cancel; input/wakes; budgets; delivery; failed open waits; asks; done/workflow; no-wait replies. |
-| `workflows/waits-opencode-workers-parity.test.ts` | 119.0 | 108.7–119.0 | 4 | Workers: mixed waits; notices; recovery; peer conversations; refusal/completion; closed-session refusal; fallback asks. Subdivide by lifecycle mode. |
-| `workflows/waits-pi-parity.test.ts` | 75.5 | 67.7–75.5 | 3 | Base waits: registration/cancel; input/wakes; budgets; delivery; failed open waits; asks; done/workflow; no-wait replies. |
-| `workflows/waits-pi-workers-parity.test.ts` | 61.9 | 55.3–61.9 | 2 | Workers: mixed waits; notices; recovery; peer conversations; refusal/completion; closed-session refusal; fallback asks. Subdivide by lifecycle mode. |
-| `workflows/worker-parent-attention.test.ts` | 208.6 | 193.3–208.6 | 7 | M26 fresh ordinary/delayed ACK; M27 Continue ordinary/delayed ACK; remaining attention rows, then runner. |
-| `workflows/worker-questions.test.ts` | 156.9 | 147.7–156.9 | 5 | Routing/admission; fallback/Continue; replies; terminal relations; crash/recovery; inbox/capacity. Control negative 300 ms observation. |
-| `workflows/worker-restart-parity.test.ts` | 71.0 | 68.5–71.0 | 3 | R60 starting proof; destroy by ledger kind; same-boot crash/lock, then runner. Keep real process identity. |
-| `workflows/worker-wait-capacity.test.ts` | 94.3 | 89.6–94.3 | 3 | Nonfinal wake; answer/recovery; inactive Finish/legacy children; monitor/cancel/restart. Control negative 400 ms observations. |
-| `workflows/worker-wait-conversations.test.ts` | 72.5 | 67.8–72.5 | 3 | WP1; WP2; progress/inbox ACK; request lifecycle; monitoring races. Keep Date-only clock semantics. |
-| `workflows/worker-wait-durability.test.ts` | 85.6 | 79.6–85.6 | 3 | Queued input/checkpoints; capacity/outcomes; deadlines; delivery/recovery; terminal ordering; disposal/cancel. |
-| `delegation/provision-workflows.test.ts` | 85.4 | 85.4–85.4 | 3 | No 3.2 gain: split intent matrix; catalog; runner identity; recipes/grants; layouts; account locks; skills; recovery. |
-| `delegation/workspace.test.ts` | 69.9 | 69.6–69.9 | 3 | No general wire gain: isolate/diff; manager recovery; destruction identity; HEAD/ref/reflog; crash recovery; locks; GC. |
+| `core/ci-tools.test.ts` | 75.1 | 67.0–75.1 | 3 | No Git template saving measured here (zero Git starts); retain native controller/IPC assertions and measure controller/scenario cost before the fallback split. Definitions/injection; descriptors; H1 validation; U0 calls; runner/mode subdivisions. Keep real controller IPC. |
+| `core/harness-autosave-settlement.test.ts` | 117.0 | 111.2–117.0 | 4 | Template H for manager/owned fixtures; preserve real lifecycle operations. R61–R66 by failure/cancel/success and fresh/Continue; R67/R68 churn. Keep real detached Git holder. |
+| `core/harness-claude-parity.test.ts` | 211.9 | 186.3–211.9 | 7 | Template H for manager/owned fixtures; preserve real lifecycle operations. Seam/session; input; run/ask; ownership/recovery; Finish/settlement; permissions. Retain OS rows real. |
+| `core/harness-codex-parity.test.ts` | 106.0 | 98.2–106.0 | 4 | Template H for manager/owned fixtures; preserve real lifecycle operations. Seam/session; input; run/ask; ownership/recovery; Finish/settlement; permissions. Retain OS rows real. |
+| `core/harness-cursor-parity.test.ts` | 86.7 | 77.2–86.7 | 3 | Template H for manager/owned fixtures; preserve real lifecycle operations. Seam/session; input; run/ask; ownership/recovery; Finish/settlement; permissions. Retain OS rows real. |
+| `core/harness-opencode-parity.test.ts` | 85.3 | 75.8–85.3 | 3 | Template H for manager/owned fixtures; preserve real lifecycle operations. Seam/session; input; run/ask; ownership/recovery; Finish/settlement; permissions. Retain OS rows real. |
+| `core/skill-provision-parity.test.ts` | 50.3 | 47.2–50.3 | 2 | Template SP for the custom repository fixture, then measure remaining worktree provisioning. R92 Start; R93 Continue; R94 recovery; R95 slash install; R96 Stop-preparation. |
+| `core/skill-resume-parity.test.ts` | 203.7 | 183.6–203.7 | 7 | Template SR for custom repositories; keep real recovery/store/session operations. R100 generation; live Continue; recovery; R56 wire; fresh/cross-runner/OpenCode fallback. |
+| `core/workflow-ask-parity.test.ts` | 58.3 | 55.0–58.3 | 2 | Template H for manager/owned fixtures; preserve real lifecycle operations. Replace the fixed 350 ms negative observation with a controlled timer/release gate. Ask/answer; restart; repeat/Continue; timeout; autonomous. Control the 350 ms negative auto-end observation after readiness. |
+| `core/workflow-autonomous-parity.test.ts` | 182.6 | 166.6–182.6 | 6 | Template H for manager/owned fixtures; preserve real lifecycle operations. Budget/nudges; refusal/late readiness; A13/A14 real idle-close lifecycle; runner/mode subdivisions. |
+| `core/workflow-final-message-parity.test.ts` | 83.1 | 75.9–83.1 | 3 | Template H for manager/owned fixtures; preserve real lifecycle operations. Control the 150 ms F8 observation/300 ms reply clock after readiness. Silent tail; F1–F6; F7/F8; F9/F11; F10. Control F8 clock as F10 already does. |
+| `core/workflow-followup-parity.test.ts` | 97.8 | 88.5–97.8 | 4 | Template H for manager/owned fixtures; preserve real lifecycle operations. Replace 800 ms delayed-start pacing with a release gate. H1–H4; Codex coalesced/reverse races. Replace 800 ms pacing with a release gate; retain wrapper smokes. |
+| `core/workflow-no-progress-parity.test.ts` | 73.2 | 69.3–73.2 | 3 | Template H for manager/owned fixtures; preserve real lifecycle operations. N1/N2 progress; N3/N4/N6/N8 parked input; N5 escalation; N7 held pipes. Keep N5/N7 real. |
+| `workflows/ci-wait-failure-parity.test.ts` | 105.8 | 95.6–105.8 | 4 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. Final recovery; nonfinal outcomes; restart boundary, divided by runner/check outcome. |
+| `workflows/ci-wait.test.ts` | 62.6 | 58.1–62.6 | 2 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. Registration; admission/ACK/capacity; native runner refusal; restart/cancel; asks/workers; wait-list timers. |
+| `workflows/monitoring-turn.test.ts` | 273.7 | 256.3–273.7 | 9 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. Timer/prose; worker review; ask precedence; done; autonomous; close, then runner/mode subdivisions. |
+| `workflows/run.test.ts` | 192.0 | 173.6–192.0 | 6 | Template R for compatible beforeEach seeds; replace 25–100 ms poll pacing with product signals where possible. Existing describe families: text/accounting; settlement; Continue; skills; monitoring; asks; input stack; recovery. Split monitoring again. |
+| `workflows/waits-claude-parity.test.ts` | 211.1 | 194.2–211.1 | 7 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. Base waits: registration/cancel; input/wakes; budgets; delivery; failed open waits; asks; done/workflow; no-wait replies. |
+| `workflows/waits-claude-workers-parity.test.ts` | 259.7 | 239.0–259.7 | 9 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. Workers: mixed waits; notices; recovery; peer conversations; refusal/completion; closed-session refusal; fallback asks. Subdivide by lifecycle mode. |
+| `workflows/waits-codex-parity.test.ts` | 55.7 | 51.0–55.7 | 2 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. Base waits: registration/cancel; input/wakes; budgets; delivery; failed open waits; asks; done/workflow; no-wait replies. |
+| `workflows/waits-codex-workers-parity.test.ts` | 92.1 | 84.5–92.1 | 3 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. Workers: mixed waits; notices; recovery; peer conversations; refusal/completion; closed-session refusal; fallback asks. Subdivide by lifecycle mode. |
+| `workflows/waits-cursor-parity.test.ts` | 147.4 | 131.2–147.4 | 5 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. Base waits: registration/cancel; input/wakes; budgets; delivery; failed open waits; asks; done/workflow; no-wait replies. |
+| `workflows/waits-cursor-workers-parity.test.ts` | 130.4 | 115.2–130.4 | 5 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. Workers: mixed waits; notices; recovery; peer conversations; refusal/completion; closed-session refusal; fallback asks. Subdivide by lifecycle mode. |
+| `workflows/waits-omp-parity.test.ts` | 54.0 | 48.8–54.0 | 2 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. Base waits: registration/cancel; input/wakes; budgets; delivery; failed open waits; asks; done/workflow; no-wait replies. |
+| `workflows/waits-omp-workers-parity.test.ts` | 65.7 | 59.4–65.7 | 3 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. Workers: mixed waits; notices; recovery; peer conversations; refusal/completion; closed-session refusal; fallback asks. Subdivide by lifecycle mode. |
+| `workflows/waits-opencode-parity.test.ts` | 103.3 | 95.0–103.3 | 4 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. Base waits: registration/cancel; input/wakes; budgets; delivery; failed open waits; asks; done/workflow; no-wait replies. |
+| `workflows/waits-opencode-workers-parity.test.ts` | 119.0 | 108.7–119.0 | 4 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. Workers: mixed waits; notices; recovery; peer conversations; refusal/completion; closed-session refusal; fallback asks. Subdivide by lifecycle mode. |
+| `workflows/waits-pi-parity.test.ts` | 75.5 | 67.7–75.5 | 3 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. Base waits: registration/cancel; input/wakes; budgets; delivery; failed open waits; asks; done/workflow; no-wait replies. |
+| `workflows/waits-pi-workers-parity.test.ts` | 61.9 | 55.3–61.9 | 2 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. Workers: mixed waits; notices; recovery; peer conversations; refusal/completion; closed-session refusal; fallback asks. Subdivide by lifecycle mode. |
+| `workflows/worker-parent-attention.test.ts` | 208.6 | 193.3–208.6 | 7 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. M26 fresh ordinary/delayed ACK; M27 Continue ordinary/delayed ACK; remaining attention rows, then runner. |
+| `workflows/worker-questions.test.ts` | 156.9 | 147.7–156.9 | 5 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. Replace the 300 ms negative capacity observation with a controlled boundary. Routing/admission; fallback/Continue; replies; terminal relations; crash/recovery; inbox/capacity. Control negative 300 ms observation. |
+| `workflows/worker-restart-parity.test.ts` | 71.0 | 68.5–71.0 | 3 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. R60 starting proof; destroy by ledger kind; same-boot crash/lock, then runner. Keep real process identity. |
+| `workflows/worker-wait-capacity.test.ts` | 94.3 | 89.6–94.3 | 3 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. Replace 400 ms negative observations with controlled admission timers/gates. Nonfinal wake; answer/recovery; inactive Finish/legacy children; monitor/cancel/restart. Control negative 400 ms observations. |
+| `workflows/worker-wait-conversations.test.ts` | 72.5 | 67.8–72.5 | 3 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. WP1; WP2; progress/inbox ACK; request lifecycle; monitoring races. Keep Date-only clock semantics. |
+| `workflows/worker-wait-durability.test.ts` | 85.6 | 79.6–85.6 | 3 | Template W for worker-wait.testkit setup; keep product Git and store checkpoints real. Queued input/checkpoints; capacity/outcomes; deadlines; delivery/recovery; terminal ordering; disposal/cancel. |
+| `delegation/provision-workflows.test.ts` | 85.4 | 85.4–85.4 | 3 | Template D for service.testkit Git setup; runner is already fake. No 3.2 gain: split intent matrix; catalog; runner identity; recipes/grants; layouts; account locks; skills; recovery. |
+| `delegation/workspace.test.ts` | 69.9 | 69.6–69.9 | 3 | Template WS for the initial committed repository only; keep per-case topology and ownership Git operations real. No general wire gain: isolate/diff; manager recovery; destruction identity; HEAD/ref/reflog; crash recovery; locks; GC. |
 
-## Slice 3.2: keep the shipped wire adapters
+## Slice 3.2: evaluated and rejected
+
+**Decision: do not implement the in-process wire.** Agent startup is about
+4–12% of parity-file wall time. Git and RunManager/store/waits dominate. No
+whole parity file was demonstrated to meet 60 s from the seam alone; the six
+baseline gains do not satisfy slice 3.2's completion target. Even the optimistic
+startup-only intervals leave most files above 60 s and every measured file
+above the 40 s design target. Files already below 60 s in fresh CI do not show
+that the seam made them fast.
+
+The planner selected option A on 2026-11-03: reject slice 3.2 and fold the Git
+fixture cause fix into slice 3.3. Do not add a VM loader, worker flag, spawn
+mock or extracted mock engine. Existing real-process parity coverage stays.
+
+The rest of this section is the **evaluation record, not an implementation
+plan**. It retains the spike, VM limits, parity guarantees, Process exits and
+detached-process cases to show what the rejected seam would have had to keep.
+Statements about virtual cells and required proofs below are conditional on
+that rejected proposal. They assign no work to the closed slice 3.2.
 
 ### The seam and the default path
 
@@ -478,7 +508,7 @@ executes `mock-claude.mjs`, `mock-codex-app-server.mjs`, `mock-opencode-serve.mj
 shared helpers and every other shipped mock keep identical bytes. The VM loads
 these existing files; it does not extract or copy their scenario engines. Dry-run
 output stays byte-identical by construction because its source and launch path
-are unchanged. The 3.2 diff check must show no shipped runner or mock edits.
+are unchanged. The evaluated diff check would have required no shipped runner or mock edits.
 
 The shipped default path executes the identical source, imports, spawn
 arguments, timers, parser and cleanup calls. No application constructor option,
@@ -534,10 +564,10 @@ scratch proof, mutate a baseline frame in the shipped script itself: both the
 real smoke and VM cell must observe that mutation and fail the same payload
 assertion. Restore the file afterward. Changing a decoy copy must have no effect.
 This proves the VM reaches the same source rather than merely expecting a path.
-The 3.2 PR records the mutation red and clean pass per runner.
+The evaluated acceptance proof required mutation red and clean pass per runner.
 
 The current spike uses NODE_OPTIONS=--experimental-vm-modules. Node 24 requires
-that flag for vm.SourceTextModule. Slice 3.2 sets it only on Vitest workers via
+that flag for vm.SourceTextModule. The evaluated design would have set it only on Vitest workers via
 `test.execArgv: ['--experimental-vm-modules']` in
 `packages/cezar/vitest.config.ts`, preserving any existing execArgv entries.
 Do not add it to application launch commands or require a user environment
@@ -573,18 +603,18 @@ cannot prove the following process behavior; retain real cells for it:
 | Timers and module/global state | VM timers share one host clock; native builtin modules can share host state. Give each child a module cache and tracked timer ownership, never patch host builtins globally for a scenario. A scenario requiring isolated host builtin state or an unmodelled timer boundary stays real. |
 | HTTP listen/start retry and orphan watchdog | In-process loopback HTTP proves REST/SSE frames but not backend process death before listening or parent-death watchdog behavior. Keep S25 serve retry and mock-opencode-orphan tests real. |
 
-The Process exits tables below name exact test ownership. Slice 3.2 inventories
-all scenarios before migration and fails on unsupported process features; it
+The Process exits tables below name exact test ownership. The evaluated design required an inventory of
+all scenarios before migration and failure on unsupported process features; it
 does not expand exemptions or weaken assertions to make a scenario virtual.
 RunManager, RunStore, disk recovery and isolated git workspaces stay real.
 
-### Rejected alternative
+### Alternative considered during the evaluation
 
 Extracting scenario engines into shared factories would edit the six published
 mock wrappers and their shared helpers. That would need byte-identical replay
 proof for every extracted dry-run scenario. The VM spike shows a testkit-only
 seam works, so extraction adds shipped change without a necessary benefit and
-is not proposed. No mock replay gate is needed when no shipped mock bytes change.
+is not proposed. Neither engine extraction nor a VM seam is now proposed.
 If a runner later requires extraction, return for a separate design review and
 restore that every-scenario proof requirement before changing shipped files.
 
@@ -715,7 +745,7 @@ Retain the following current catalogs and assertions. Paths below are relative t
 runner registration remain; the native adapter and real `RunManager` still run.
 OS ownership, binary launch and child-process effects remain on real probes.
 
-| Current guarantee or catalog | Retained evidence after slice 3.2 |
+| Current guarantee or catalog | Evaluated preservation requirement (seam rejected) |
 | --- | --- |
 | §6 `plan.updated` entries | Unchanged `core/ui-parity.test.ts` golden fixtures for each backend |
 | §6 tool `running`, `completed`, `failed` | Same named mapper capabilities; all three statuses remain required |
@@ -792,10 +822,10 @@ still executes.
 ### Process exits
 
 Paths in the following tables are relative to `packages/cezar/src/`. Real
-process-group and inherited-pipe cases remain real after 3.2. In-process tests
+process-group and inherited-pipe cases were required to remain real in the rejected design. In-process tests
 prove frame and event ordering, not OS cleanup.
 
-| Case | Current file and exact test/criterion | After 3.2 |
+| Case | Current file and exact test/criterion | Evaluated seam coverage (rejected) |
 |---|---|---|
 | Clean completion | core/harness-parity-cells.testkit.ts S1 `terminates with exactly one v1 done, and it is the last event` | In-process plus real wire smoke |
 | Terminal signal after content | Same S2 `ends the turn on its own terminal signal, after the last content event` | In-process plus real smoke |
@@ -842,7 +872,7 @@ prove frame and event ordering, not OS cleanup.
 | Persisted crash recovery | workflows/worker-restart-parity.test.ts `%s R60 cold terminal starting-proof recovery repairs execution without a synchronous facts join`; `%s completes destroy once the readable holder exits, while an unreadable process runs (${ledgerKind} ledger)`; `%s settles a same-boot crash as gone once recorded processes exit, whatever unreadable process runs, and keeps cleanup locks bounded` | Keep real process-holder evidence; only ordinary wire can move |
 | Dead-owner adoption/stop starts nothing | Harness R51 `adopting a dead owner's run mid-turn starts no agent, and Continue resumes it`; R52 `Stop on a dead owner's run mid-turn ends it cancelled and starts no agent` | In-process wire sufficient for start counting; preserve disk recovery |
 
-## Shared process helper tests retained
+### Shared process helper tests retained
 
 core/session-process.test.ts:
 - `spawns a leader that leads its own process group`
@@ -872,17 +902,17 @@ core/mock-opencode-orphan.test.ts:
 - `exits after its parent gets SIGKILL`
 - `exits after its parent gets SIGKILL in the mode that ignores SIGTERM`
 
-## Required detached-process cases
+### Required detached-process cases
 
 All evidence in detached-process.test.ts.
 
-| Case | Exact evidence or gap | After 3.2 |
+| Case | Exact evidence or gap | Evaluated seam coverage (rejected) |
 |---|---|---|
 | Normal stop | `stops a running group with SIGTERM` | Preserve |
 | Leader exits before members | `kills a member that ignores SIGTERM and outlives its leader`; `stops what is left of the group once Node reaped its leader, a member that ignores SIGTERM included`; watchGroup `stops what is left of a group whose leader exited on its own` | Preserve real |
 | Starter dies during boot before descriptor | watchGroup `leaves the group to its starter, then stops it once the starter dies during boot` (real SIGKILL) | Preserve real |
-| Starter SIGINT before/after start | No exact generic helper test found | 3.2 adds real `detached-process.test.ts` cases `starter interrupted before start creates no owned group` and `SIGINT after owned start reaps the group`, with a descriptor-publication handshake. These are new required evidence, not existing coverage. |
-| Starter SIGKILL after descriptor | Boot test is before descriptor; no exact after-descriptor test found | 3.2 adds real `detached-process.test.ts` case `SIGKILL after descriptor publication reaps the owned group`; assert descendants gone after the watcher signal, not a sleep. Preserve existing owner-specific tests too. |
+| Starter SIGINT before/after start | No exact generic helper test found | The rejected design proposed real `detached-process.test.ts` cases `starter interrupted before start creates no owned group` and `SIGINT after owned start reaps the group`, with a descriptor-publication handshake. These are recorded coverage gaps and proposed evidence, not current coverage or approved slice 3.2 work. |
+| Starter SIGKILL after descriptor | Boot test is before descriptor; no exact after-descriptor test found | The rejected design proposed real `detached-process.test.ts` case `SIGKILL after descriptor publication reaps the owned group`; assert descendants gone after the watcher signal, not a sleep. Preserve existing owner-specific tests too. |
 | Handle deleted | watchGroup `stops the group once its handle is deleted, and settles the verdict after the stop` | Preserve real |
 | Forged/reused PID | `never signals a live process whose start identity differs from the record: a reused or forged pid` | Preserve real |
 | Unreadable identity | `never signals a live leader whose start identity cannot be read now: its pid may lead another group`; `stops a leader this process holds, though its start identity cannot be read` | Preserve both |
@@ -895,19 +925,80 @@ All evidence in detached-process.test.ts.
 
 ## Slice 3.3 plan
 
-The expected-CI table above identifies the files that remain over 60 s after
-startup removal and the second fixes for every measured file. Split remaining
-slow files by those semantic row groups. Keep one definition of each
-row and have thin files register disjoint groups. A guard must prove that every
-criterion/runner pair appears exactly once across those files. Do not replace
-coverage with skips, retries, higher timeouts or runner exemptions.
+Slice 3.3 owns the replacement: **fix measured causes, then split what is still
+slow, then enforce the cap and delete the Squeal wait bound**. It keeps the real
+runner/mock process boundary. A split moves time between files; it does not
+remove time from the suite. Do not use splits as the first response to repeated
+repository setup or fixed observation sleeps.
 
-The design target is **at most 40 s per file on CI**, with a hard failure at
-60 s. The 20 s gap gives load headroom. Use measured post-3.2 CI durations to
-choose row groups. If a proposed group exceeds 40 s, split it again or remove
-its measured cause. Do not aim for a 55–59 s file. The final per-file plan below
-assigns groups and budgets; all budgets need confirmation on the actual CI
-worker count, not extrapolation from local one-worker wall time.
+### 1. Fix repeated Git fixture setup
+
+Create one minimal committed template repository per compatible fixture seed
+and test worker. Each case copies it into a fresh temporary directory instead
+of repeating git init/config/add/commit. Copy the .git directory and working
+files; do not share an index, refs, reflogs, mutable config or a SQLite database
+between cases. Do not hardlink mutable Git files. Keep the template immutable
+and remove it during worker cleanup. A template must contain only the fixture's
+own deterministic seed; no host Git settings, credentials or loaded project
+catalogs. Tests continue to use independent real repositories and stores.
+
+| Template | Setup owner to change | Scope and retained real work |
+| --- | --- | --- |
+| H | `core/harness-parity.testkit.ts` driveRun and withOwnedInputRun / createOwnedInputRepository | Replace repeated initial repository construction only. Keep actual worktree creation, autosave, branch/index/ownership checks, process holders and recovery under test. |
+| W | `workflows/worker-wait.testkit.ts` root/setup fixture | Replace the repeated four-command seed. Keep each case's real RunStore, manager, checkpoints, owned workspace and cleanup. This covers wait parity, monitoring, CI waits, worker questions/capacity/conversations/durability/restart and parent-attention users. |
+| SP | `core/skill-provision-parity.test.ts` custom fixture | Copy its seed, then provision actual skill/worktree files in the case. |
+| SR | `core/skill-resume-parity.test.ts` custom fixture | Copy its seed, then run real Start/Continue/recovery and native input. |
+| R | `workflows/run.test.ts` compatible beforeEach repository seeds | Reuse one template per distinct seed, not one unrelated seed for every describe. Pure/fake-runner cases need no Git fix. |
+| D | `delegation/service.testkit.ts` fixture used by provision-workflows | Copy repository setup; keep real controller, accepted identity, workspaces and store. The runner is already fake. |
+| WS | `delegation/workspace.test.ts` initial committed root | Copy only the independent initial root. Build each case's parent worktree, second commit, dirty state and destruction topology afterward. Do not copy absolute worktree registrations from another case. |
+
+Git shares in the profile include product Git, not just seed commands. The
+whole Git share is not removable. Count setup calls and measure copied-fixture
+wall/CPU/IO cost after the change. Copying a .git directory can itself cost I/O;
+confirm the gain before broadening it. Keep branch/HEAD, tracked/untracked and
+repository-isolation assertions; mutate one case and prove another case and
+the template remain unchanged. Run the old fixture and copied fixture against
+the same behavior assertions. Real product Git operations remain the test's
+subject where the guarantee depends on them.
+
+### 2. Remove fixed observation pacing
+
+Use a release gate when the assertion concerns event order and selectively
+controlled fake clocks when it concerns a product deadline. Reach the product's
+readiness/admission signal before moving the clock. Keep the asserted negative
+condition and the subsequent positive transition; merely removing a sleep
+would remove proof. Do not shorten product timeout defaults.
+
+| File / case | Cause fix before splitting |
+| --- | --- |
+| `core/workflow-ask-parity.test.ts` | Replace 350 ms negative auto-end sleeps with the controlled auto-end boundary after ask readiness. |
+| `core/workflow-final-message-parity.test.ts` F8 | Control the 150 ms observation and 300 ms reply deadline as F10 already does; retain late/no-reply assertions. |
+| `core/workflow-followup-parity.test.ts` | Replace the 800 ms delayed-turn-start pacing with an explicit wire release gate and actual input-ACK/turn-start signals. |
+| `workflows/worker-questions.test.ts` | Replace the 300 ms negative capacity observation with a controlled product boundary. |
+| `workflows/worker-wait-capacity.test.ts` | Replace the 400 ms negative observations with controlled admission/next-step timers or gates. |
+| `workflows/run.test.ts` | Replace eligible 25–100 ms polling waits with the product's completion/event signals. Keep timeouts only as hang guards. |
+
+Keep real OS timing/exit/drain tests real. The Cursor 250 ms drain protects
+native descendants; changing it is an application behavior change and is
+excluded. Existing fake deadline and Date-only jumps already remove waits in
+other rows; do not count them as new savings. Prove each new test-only clock or
+gate fix red without the hidden-dependency removal, per regression-proof rules.
+
+### 3. Split only the residual files above 40 s
+
+Re-measure affected files in CI after the cause fixes. The per-file table above
+names the fixes and fallback semantic row families for all 37 measured files.
+Split only a file still above **40 s**. Keep one definition of each row and thin
+files that register disjoint groups. A guard proves each criterion/runner pair
+appears exactly once. Preserve all assertions and the real-process boundary.
+No skips, retries, higher timeouts or new runner exemptions.
+
+The target is at most 40 s per resulting CI file, leaving 20 s below the hard
+60 s cap. Use post-cause-fix measurements, not the rejected seam estimates, to
+choose group sizes. If one case still exceeds the target, fix its measured
+cause. All budgets need confirmation with the real CI worker count.
+
+### 4. Add the cap, then delete the bound with verdict evidence
 
 Add one Vitest reporter in every shard. At file completion, read the actual
 module execution duration used by Vitest's suite summary, including that file's
@@ -945,7 +1036,7 @@ unknown verdicts at that cap and files still pending after cap plus five
 minutes. Faster CI alone does not prove that this escape path is unnecessary:
 Squeal queue latency, local load and missing verdicts must also be measured.
 
-The 3.2 PR records time from the first verdict wait at its exact revision to a
+The 3.3 PR records time from the first verdict wait at its exact revision to a
 current Squeal verdict for the heaviest changed parity files, with starting and
 ending load average, nproc, Squeal state, file count, queue delay and file
 execution time. Trigger the actual shared-testkit invalidation, not only a
@@ -954,10 +1045,11 @@ without the targeted-run escape path, unknown results or a cap timeout. Compare
 these verdict times with the unchanged 900 s cap and 1,200 s pending bound.
 Do not increase either value to obtain a pass.
 
-Remove the bound with the replacement, per the campaign rule. If any parity
-file still requires it after 3.2, the 3.2 report must name that file, measured
-queue/execution cause and its 3.3 split or cause fix. Keep the bound until that
-fix lands and repeat the verdict measurement. If the issue is Squeal failing to
+Slice 3.3 deletes the bound in `.ai/skills/validation/SKILL.md` with the
+replacement and this evidence, per the campaign rule. The expiry marker points
+to hearsay-tools/cezarion#2519; slice 3.2 is rejected and owns no deletion. If a
+file still needs the bound during 3.3, fix its measured queue/execution cause
+and repeat the verdict measurement before completing the slice. If the issue is Squeal failing to
 queue a file rather than suite cost, a row split does not fix it; resolve that
 cause before claiming the bound obsolete. The cap lands only after the final
 file fix, and the bound disappears only with measured current verdict evidence.
@@ -966,8 +1058,8 @@ file fix, and the bound disappears only with measured current verdict evidence.
 
 This docs-only PR changes no state, cross-run relationship, ToolGrant mapping,
 worktree write or restored client state. Those five application-change tables
-do not apply. Slice 3.2 changes the test transport, not shipped state or grants;
-it must preserve their existing parity rows and recovery fixtures. Process
-lifecycle tables do apply because removing real mock processes can remove proof
-about detached descendants. The Process exits table names what remains real,
-including the separate detached-helper ownership cases.
+do not apply. Slice 3.2 is rejected; its process-lifecycle and parity tables
+remain an evaluation record, not a transport migration plan. Slice 3.3 changes
+test fixture setup and pacing while preserving real native processes, saved
+state semantics, grants and recovery assertions. Its fixture/gate tests must
+preserve those guarantees. No process cleanup mechanism is removed.
