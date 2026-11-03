@@ -11,13 +11,15 @@ const { isDocsPath } = createRequire(import.meta.url)('../.github/scripts/change
 const options = { plan: false, base: undefined };
 for (const arg of process.argv.slice(2)) {
   if (arg === '--help' || arg === '-h') {
-    console.log(`Usage: npm run test:changed -- [--base=<ref>] [--plan] [--help | -h]
+    await new Promise(resolve => process.stdout.write(`Usage: npm run test:changed -- [--base=<ref>] [--plan] [--help | -h]
 
 Selection rules:
   Compare against the merge-base with local origin/main (or main), including
   branch commits and staged, unstaged, and untracked files. No fetch is made.
   --base=<ref> overrides the comparison ref; its merge-base with HEAD is used.
   --plan prints the selection as JSON without running tests.
+  Inspect --plan before running tests. If it selects the full suite, choose
+  focused checks and leave full verification to CI.
 
   Ordinary TS/JS source in packages/{cezar,web,api-client}/src selects tests
   through Vitest's import graph. Eligible extensions: ts, tsx, js, jsx, mjs.
@@ -37,7 +39,8 @@ To classify branch commits as CI does, run:
 This prints docs-only, infra-only or full-matrix.
 
 This command provides iteration feedback. Import graphs do not cover every
-runtime dependency. CI's gate is final.`);
+runtime dependency. CI's gate is final.
+`, resolve));
     process.exit(0);
   }
   else if (arg === '--plan') options.plan = true;

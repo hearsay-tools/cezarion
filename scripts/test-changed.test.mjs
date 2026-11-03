@@ -44,6 +44,8 @@ for (const flag of ['--help', '-h']) {
     assert.match(result.stdout, /isDocsPath in \.github\/scripts\/change-surface\.cjs/);
     assert.match(result.stdout, /testReadDocuments.*never docs-only/);
     assert.match(result.stdout, /No matching test is an error/);
+    assert.match(result.stdout, /Inspect --plan before running tests/);
+    assert.match(result.stdout, /choose\n  focused checks and leave full verification to CI/);
     assert.ok(result.stdout.includes('git diff --name-only --no-renames origin/main...HEAD | jq -R . | node .github/scripts/change-surface.cjs'));
     assert.match(result.stdout, /prints docs-only, infra-only or full-matrix/);
     assert.match(result.stdout, /CI's gate is final/);
