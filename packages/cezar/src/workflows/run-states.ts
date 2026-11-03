@@ -1,20 +1,17 @@
 /**
- * Every run state, every exit out of it and every wait kind, as data (hearsay-tools/cezarion#1804).
+ * Every run state, every trigger out of it and every wait kind, as data (hearsay-tools/cezarion#1804).
  * This file is the Transitions out table of .ai/skills/load-bearing-change § Case tables: a change that adds or changes
- * a run state declares its exits here first.
+ * a run state declares its triggers here first.
  *
- * Two levels. An exit (`RUN_EXITS`) is one kind of status write, with the statuses it may leave
- * from. A trigger row (`RUN_TRIGGERS`) is one event out of one state: who or what fires it, what
- * happens at shipped defaults, the exit it writes and the `run.ts` functions on its path. Many rows
- * end in one exit (`settleSuccess` serves `cezar_done`, Finish and an idle-closed worker).
- *
- * `run.ts` takes every run status it writes from `transition` or `transitionVia`. Outside strict
- * mode both return the declared status and do nothing else: no read, no log, no throw, so a
- * production write is the write it was. `vitest.setup.ts` turns strict mode on, so a test fails on
- * a write whose stored status the exit does not leave from.
+ * Two levels. An exit (`RUN_EXITS`, in `runs/run-exits.ts`) is one kind of status write, with the
+ * statuses it may leave from. A trigger row (`RUN_TRIGGERS`) is one event out of one state: who or
+ * what fires it, what happens at shipped defaults, the exit it writes and the `run.ts` functions on
+ * its path. Many rows end in one exit (`settleSuccess` serves `cezar_done`, Finish and an
+ * idle-closed worker).
  */
 import type { RunRecord, RunStatus, Wait, WaitPhase } from '@open-mercato/cezar-contract';
 import { computeWaitingOn } from '@open-mercato/cezar-contract/waits';
+import type { RunExitId } from '../runs/run-exits.ts';
 
 /** Who or what fires a trigger. `peer` is another root task of the project (hearsay-tools/cezarion#1995). */
 export type FiredBy = 'human' | 'parent' | 'agent' | 'runner' | 'timer' | 'scheduler' | 'watcher'
@@ -74,33 +71,6 @@ export const RUN_STATES: { readonly [S in RunState]: RunStateSpec } = {
 export function statusOf(state: RunState): RunStatus {
   return state.startsWith('waiting:') ? 'waiting' : state as RunStatus;
 }
-
-/** One kind of status write: the statuses it may leave from and the one it writes. */
-export const RUN_EXITS = {
-  start: { from: ['queued', 'running', 'waiting'], to: 'running' },
-  'start-held': { from: ['queued'], to: 'queued' },
-  requeue: { from: ['queued', 'running', 'failed'], to: 'queued' },
-  'continue-line': { from: ['waiting', 'review', 'done', 'failed', 'cancelled'], to: 'queued' },
-  'continue-now': { from: ['waiting', 'review', 'done', 'failed', 'cancelled'], to: 'running' },
-  park: { from: ['running', 'queued', 'waiting'], to: 'waiting' },
-  'park-for-wake': { from: ['queued', 'waiting'], to: 'waiting' },
-  hold: { from: ['failed', 'waiting'], to: 'waiting' },
-  resume: { from: ['waiting'], to: 'running' },
-  succeed: { from: ['running', 'waiting'], to: 'done' },
-  'succeed-review': { from: ['running', 'waiting'], to: 'review' },
-  'accept-review': { from: ['review'], to: 'done' },
-  'fail-start': { from: ['queued', 'running'], to: 'failed' },
-  fail: { from: ['running', 'waiting'], to: 'failed' },
-  // settleFailedContinuation alone: a worker Stop can record cancelled before it settles.
-  'fail-continue': { from: ['running', 'waiting', 'cancelled'], to: 'failed' },
-  'fail-interrupted': { from: ['queued', 'running', 'waiting'], to: 'failed' },
-  'fail-crash': { from: ['queued', 'running', 'waiting'], to: 'failed' },
-  'withdraw-hold': { from: ['waiting'], to: 'failed' },
-  cancel: { from: ['queued', 'running', 'waiting'], to: 'cancelled' },
-  'stop-worker': { from: ['queued', 'running', 'waiting', 'review', 'done', 'failed'], to: 'cancelled' },
-  'cancel-late': { from: ['queued', 'running', 'waiting', 'done', 'review', 'failed'], to: 'cancelled' },
-} as const satisfies Record<string, { from: readonly RunStatus[]; to: RunStatus }>;
-export type RunExitId = keyof typeof RUN_EXITS;
 
 export type TriggerRow = {
   /** `<state group>.<event>`, unique. */
@@ -343,65 +313,4 @@ export function stateOf(run: StateInput): RunState {
   if (top) return top.kind === 'peers' ? 'waiting:peer' : `waiting:${top.kind}`;
   if (run.waits?.some((wait) => wait.phase === 'resolved') || run.agentInputs?.some((input) => !input.deliveredAt)) return 'waiting:capacity';
   return 'waiting:plain';
-}
-
-let strict = false;
-const violations: string[] = [];
-
-/** Tests only: `vitest.setup.ts` calls it, so a violation throws and is recorded. Returns the
- *  previous mode, so a test that changes it can put it back. */
-export function strictRunExits(on = true): boolean {
-  const previous = strict;
-  strict = on;
-  return previous;
-}
-
-/** The violations recorded since the last call, so a test fails even when `run.ts` swallowed the throw. */
-export function takeRunExitViolations(): string[] {
-  return violations.splice(0);
-}
-
-/** Throws the violations recorded since the last call: the test setup runs it after each test. */
-export function throwRunExitViolations(): void {
-  const taken = takeRunExitViolations();
-  if (taken.length) throw new Error(taken.join('\n'));
-}
-
-function violate(message: string): never {
-  violations.push(message);
-  throw new Error(message);
-}
-
-function checkFrom(exit: RunExitId, from: RunStatus | undefined): void {
-  const spec = RUN_EXITS[exit];
-  if (from === undefined || from === spec.to || (spec.from as readonly RunStatus[]).includes(from)) return;
-  violate(`undeclared run transition: exit ${exit} from ${from} (declare it in workflows/run-states.ts)`);
-}
-
-/**
- * THE entry point for a run status write in `run.ts`: the status `exit` writes. In strict mode it
- * reads the stored record and refuses an exit that does not leave from its status. A run the store
- * does not hold passes, because the write then writes nothing.
- */
-export function transition<E extends RunExitId>(exit: E, read: () => Pick<StateInput, 'status'> | undefined): (typeof RUN_EXITS)[E]['to'] {
-  if (strict) checkFrom(exit, read()?.status);
-  return RUN_EXITS[exit].to;
-}
-
-/**
- * For a store commit that writes a status it holds itself. In strict mode it reads the stored
- * status before and after the commit. When the status changed, the old one must be in the exit's
- * `from` and the new one must be the exit's `to`, so the commit and its exit cannot drift apart. A
- * commit that wrote no status (it refused, or only cleared fields) passes. Both checks run after
- * the commit, so strict mode never keeps a commit from running.
- */
-export function transitionVia<T>(exit: RunExitId, read: () => Pick<StateInput, 'status'> | undefined, commit: () => T): T {
-  if (!strict) return commit();
-  const before = read()?.status;
-  const result = commit();
-  const after = read()?.status;
-  if (before === after) return result;
-  checkFrom(exit, before);
-  if (after !== RUN_EXITS[exit].to) violate(`store commit drifted from its exit: exit ${exit} wrote ${after ?? 'nothing'}, not ${RUN_EXITS[exit].to}`);
-  return result;
 }

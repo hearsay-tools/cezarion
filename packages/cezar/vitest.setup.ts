@@ -5,7 +5,7 @@ checkWorkspaceResolution()
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach } from 'vitest'
-import { strictRunExits, throwRunExitViolations } from './src/workflows/run-states.ts'
+import { strictRunExits, throwRunExitViolations } from './src/runs/run-exits.ts'
 import { installOutboundGuard, throwOutboundRefusals } from './src/test-outbound-guard.testkit.ts'
 
 import { createTestSandbox, hideHostCommands, linkSharedOmpNatives, removeTestSandboxes } from '../../scripts/test-sandbox.mjs'
@@ -190,8 +190,9 @@ afterEach(() => {
 // first stops every process a test left running in the sandbox, so none rebuilds it after
 // removal (hearsay-tools/cezarion#2453), and keeps the three retries for one-shot late writes.
 afterAll(() => removeTestSandboxes([sandboxHome, sandboxUserHome, sandboxTemp]))
-// A run status write the run state table does not declare throws, and fails the test it happens
-// in even when run.ts caught the throw (hearsay-tools/cezarion#1804). Production never checks.
+// A run status write the run exit table does not declare is written, then fails the test it
+// happened in after the test ran (hearsay-tools/cezarion#1804, ADR 0056). Production logs one
+// warning per violation instead.
 strictRunExits()
 afterEach(throwRunExitViolations)
 // No code in a test worker may reach a server the test did not start (hearsay-tools/cezarion#2367):

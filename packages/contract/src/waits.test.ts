@@ -675,10 +675,8 @@ describe('computeWaitingOn with worker entries', () => {
 // Review of #1437: Cezar's worker fallback is a real question (it carries `questions`), so
 // `cez task status` and the webhook's `task.question` must see it; its other waits ask nothing.
 describe('asksQuestion', () => {
-  const human = (over: Record<string, unknown>) => {
-    return ({ id: '00000000-0000-4000-8000-0000000000ac', kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask,
-      registeredAt: '2026-10-21T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 't', ...over }) as unknown as NonNullable<RunRecord['waits']>[number];
-  };
+  const human = (over: Record<string, unknown>) => ({ id: '00000000-0000-4000-8000-0000000000ac', kind: WAIT_KIND.human, source: WAIT_SOURCE.agent, via: WAIT_VIA.cezar_ask,
+    registeredAt: '2026-10-21T00:00:00.000Z', phase: WAIT_PHASE.open, turnId: 't', ...over }) as unknown as NonNullable<RunRecord['waits']>[number];
   it('is true for the agent\'s question and for Cezar\'s fallback question, false for Cezar\'s plain waits', () => {
     expect(asksQuestion({ waits: [human({})] })).toBe(true);
     expect(asksQuestion({ waits: [human({ source: WAIT_SOURCE.cezar, via: WAIT_VIA['no-wait'], questions: [{ header: 'Worker', question: 'What next?' }] })] })).toBe(true);

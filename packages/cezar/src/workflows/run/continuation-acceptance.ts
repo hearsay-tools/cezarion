@@ -6,7 +6,7 @@ import type { RunRecord, RunStore, StepState } from '../../runs/store.ts';
 import * as continuation from '../continuation-admission.ts';
 import type { ContinueRunOptions } from '../continuation-admission.ts';
 import { queuedRecoveryInput } from '../run-scheduling.ts';
-import { transition, type RunExitId } from '../run-states.ts';
+import { transition, type RunExitId } from '../../runs/run-exits.ts';
 import { contentBlocksOf, type PastedContent } from '../pasted-content.ts';
 import type { WorkflowDef } from '../types.ts';
 import type { RunModuleContext, StartRunInput } from './types.ts';

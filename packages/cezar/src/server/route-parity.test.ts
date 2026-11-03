@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -246,7 +247,7 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
   });
 
   it('pins through every boot alias and isolates colliding IDs in another project', async () => {
-    store.updateRun(runId, { status: 'done' });
+    store.updateRun(runId, { status: RUN_STATUS.done });
     store.flush();
     seedRuns(join(otherRoot, '.ai/cezar'), [store.getRun(runId)!]);
     const other = await registerProject(otherRoot);

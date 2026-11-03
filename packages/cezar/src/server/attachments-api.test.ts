@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -136,7 +137,7 @@ describe('attachment routes (#950)', () => {
   describe('POST /api/v1/runs/:id/messages', () => {
     it('accepts an attachment-only message and delivers it as a file block', async () => {
       const run = store.createRun({ title: 't', workflow: 'w', task: 'chat', steps: [] });
-      store.updateRun(run.id, { status: 'waiting' });
+      store.updateRun(run.id, { status: RUN_STATUS.waiting });
       const res = await post(`/api/v1/runs/${run.id}/messages`, {
         images: [{ mediaType: 'text/plain', data: MD_B64 }],
       });
@@ -146,7 +147,7 @@ describe('attachment routes (#950)', () => {
 
     it('refuses a message that is empty in both text and attachments', async () => {
       const run = store.createRun({ title: 't', workflow: 'w', task: 'chat', steps: [] });
-      store.updateRun(run.id, { status: 'waiting' });
+      store.updateRun(run.id, { status: RUN_STATUS.waiting });
       const res = await post(`/api/v1/runs/${run.id}/messages`, { text: '   ' });
       expect(res.status).toBe(400);
       expect(((await res.json()) as { error: string }).error).toContain('at least one attachment');

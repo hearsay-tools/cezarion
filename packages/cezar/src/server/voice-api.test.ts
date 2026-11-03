@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -142,7 +143,7 @@ describe('voice routes', () => {
       await decide({ text: 'answer Vitest to question first', sidebarView: 'active', view: 'task', openRunId: runId });
       const [line] = readLog(dataDir) as Array<{ state: Record<string, unknown> }>;
       expect(line!.state).toMatchObject({
-        screen: { page: 'task', project: basename(repoRoot), openTask: { title: 'card', status: 'queued' } },
+        screen: { page: 'task', project: basename(repoRoot), openTask: { title: 'card', status: RUN_STATUS.queued } },
         words: ['W01 answer', 'W02 Vitest', 'W03 to', 'W04 question', 'W05 first'],
       });
     });

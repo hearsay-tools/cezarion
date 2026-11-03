@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { ArchivePullRequestIdentity } from '@open-mercato/cezar-contract';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -40,7 +41,7 @@ it.each([{ single: false, repository: 'r' }, { single: true, repository: 'r' }, 
   }
   const bootProject = await registerProject(boot), other = await registerProject(cold);
   const id = randomUUID(), dataDir = join(cold, '.ai/cezar');
-  seedRuns(dataDir, [{ id, title: 't', task: 't', workflow: 'quick-task', steps: [], tokensUsed: 0, status: 'done', archived: false, createdAt: '2026-01-01T00:00:00Z', pullRequests: [{ number: 42, source: 'declared' }] }]);
+  seedRuns(dataDir, [{ id, title: 't', task: 't', workflow: 'quick-task', steps: [], tokensUsed: 0, status: RUN_STATUS.done, archived: false, createdAt: '2026-01-01T00:00:00Z', pullRequests: [{ number: 42, source: 'declared' }] }]);
   const recover = vi.spyOn(RunManager.prototype, 'recover');
   const contexts = new ProjectContexts({ listProjects });
   const store = RunStore.open(join(boot, '.ai/cezar'), { keepLive: true });

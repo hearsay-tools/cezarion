@@ -1,3 +1,4 @@
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { execFile, execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -89,7 +90,7 @@ describe('branch deletion with a controlled mutation lock', () => {
         await git(root, 'branch', '-D', 'topic');
       };
       const runs = [{
-        id: 'aaaaaaaa-1', title: 't', workflow: 'w', task: 't', status: 'done', steps: [],
+        id: 'aaaaaaaa-1', title: 't', workflow: 'w', task: 't', status: RUN_STATUS.done, steps: [],
         createdAt: '2026-09-01T00:00:00.000Z', archived: false, branch: 'cez/aaaaaaaa', baseBranch: 'topic',
       } as unknown as RunRecord].flatMap((run) => branchOwnerOf(run) ?? []);
       const result = await deleteBranches(

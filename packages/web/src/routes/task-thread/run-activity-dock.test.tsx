@@ -55,20 +55,18 @@ const steps: StepState[] = [
   { id: 'verify', name: 'Verify', kind: STEP_KIND.check, status: STEP_STATUS.pending, iterations: 1, tokensUsed: 0 },
 ]
 
-const run = (extra: Partial<ApiRun> = {}): ApiRun => {
-  return ({
-    id: parentId,
-    title: 'Parent',
-    task: 'Do task',
-    workflow: 'quick-task',
-    status: RUN_STATUS.running,
-    createdAt: at,
-    tokensUsed: 0,
-    archived: false,
-    steps,
-    ...extra,
-  }) as ApiRun
-}
+const run = (extra: Partial<ApiRun> = {}): ApiRun => ({
+  id: parentId,
+  title: 'Parent',
+  task: 'Do task',
+  workflow: 'quick-task',
+  status: RUN_STATUS.running,
+  createdAt: at,
+  tokensUsed: 0,
+  archived: false,
+  steps,
+  ...extra,
+}) as ApiRun
 
 const line = (seq: number, type: string, rest: Record<string, unknown> = {}): RunEvent =>
   ({ seq, ts: at, type, ...rest }) as RunEvent
