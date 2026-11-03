@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert'
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { test } from 'node:test'
 import { checkWorkspaceResolution } from './check-workspace-resolution.mjs'
 
@@ -36,4 +36,24 @@ test('rejects a missing root install before testing packages', t => {
   const { root } = fixture(t)
   rmSync(join(root, 'node_modules'), { recursive: true })
   assert.throws(() => checkWorkspaceResolution(root), /run `pnpm install --frozen-lockfile`/)
+})
+
+function vitestConfigs(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory() && !['node_modules', 'dist', '.git', '.ai'].includes(entry.name)) return vitestConfigs(path)
+    return entry.isFile() && /^vitest\.config\./.test(entry.name) ? [path] : []
+  })
+}
+
+test('every root and package Vitest config invokes the shared install guard', () => {
+  const root = resolve(import.meta.dirname, '..')
+  const rootConfigs = readdirSync(root).filter(name => /^vitest\.config\./.test(name)).map(name => join(root, name))
+  const configs = [...rootConfigs, ...vitestConfigs(join(root, 'packages'))]
+  assert.ok(configs.length > 0)
+  for (const config of configs) {
+    const source = readFileSync(config, 'utf8')
+    assert.match(source, /import\s*\{\s*checkWorkspaceResolution\s*\}\s*from\s*['"][^'"]*check-workspace-resolution\.mjs['"]/, config)
+    assert.match(source, /^checkWorkspaceResolution\(\)/m, config)
+  }
 })
