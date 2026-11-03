@@ -1,5 +1,5 @@
 import { reportsRoutes } from './reports-api.ts';
-import { mergeConfig } from './config-merge.ts';
+import { writeMergedConfig } from './config-merge.ts';
 import { automationCreateSchema, automationUpdateSchema, automationCheckRequestSchema, automationLogQuerySchema } from '@open-mercato/cezar-contract/automation-requests';
 import { providerConnectSchema, createAgentProfileSchema, openAgentAccountFileSchema, updateAgentProfileSchema, selectAgentProfileSchema, providerEnabledSchema, providerRetrySchema, providerRouteParamsSchema, agentProfileRouteParamsSchema } from '@open-mercato/cezar-contract/provider-requests';
 import { planSchema, parseWorkflowSchema } from '@open-mercato/cezar-contract/workflow-requests';
@@ -160,6 +160,7 @@ import { planChain, slugify } from '../planner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
 import { createSelfUpdateRoutes, type SelfUpdateServerDeps } from './self-update-routes.ts';
 import { getTeamSkillsCached, refreshTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
+import { skillSourcesRoutes } from './skill-sources.ts';
 import { readHandoff, renderHandoffRecords } from '../handoff.ts';
 import { ARCHIVED_WINDOW, type RepoHandle, type RunRecord, type RunStatus, type RunStore } from '../runs/store.ts';
 import {
@@ -4862,21 +4863,9 @@ export function createApp(deps: ServerDeps) {
       if (parsed.data.worktreeSetup !== undefined && !capabilities().settingsAdmin) {
         return c.json({ error: WORKTREE_SETUP_HOSTED_ERROR }, 409);
       }
-      const configPath = join(dataDir, 'config.json');
-      let raw: Record<string, unknown> = {};
-      try {
-        const existing: unknown = JSON.parse(await readFile(configPath, 'utf8'));
-        if (existing && typeof existing === 'object') raw = existing as Record<string, unknown>;
-      } catch {
-        // missing or malformed — start fresh
-      }
-      raw = mergeConfig(raw, parsed.data);
-      try {
-        await mkdir(dataDir, { recursive: true });
-        await writeFile(configPath, `${JSON.stringify(raw, null, 2)}\n`, 'utf8');
-      } catch (err) {
-        return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
-      }
+      const refused = await writeMergedConfig(dataDir, parsed.data).catch((err: unknown) => ({ failed: err instanceof Error ? err.message : String(err) }));
+      if (typeof refused === 'object') return c.json({ error: refused.failed }, 500);
+      if (refused !== undefined) return c.json({ error: refused }, 409);
       if (parsed.data.archiveOnMerge !== undefined) deps.archiveOnMergeChanged?.();
       // Pre-R6 answer shape ({baseBranch, defaultRunner}) + additive R6 fields.
       return c.json(await configAnswer(repoRoot, await loadConfig(repoRoot)));
@@ -4989,6 +4978,8 @@ export function createApp(deps: ServerDeps) {
     .route('/', agentWebhooksRoutes)
     .route('/', runsRoutes)
     .route('/', reportsRoutes)
+    // Team skill sources (hearsay-tools/cezarion#279): settings administration, read-only remotely.
+    .route('/', skillSourcesRoutes(() => capabilities().settingsAdmin))
     .route('/', openTargetsRoutes)
     .route('/', worktreesRoutes)
     .route('/', sseRoutes)

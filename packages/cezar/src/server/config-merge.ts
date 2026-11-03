@@ -1,4 +1,5 @@
 import type { SetConfigInput } from '@open-mercato/cezar-contract/workspace';
+import { updateConfigFile } from '../config.ts';
 
 type RawConfig = Record<string, unknown>;
 type ApplyField = (raw: RawConfig, body: SetConfigInput) => void;
@@ -60,4 +61,14 @@ export function mergeConfig(raw: RawConfig, body: SetConfigInput): RawConfig {
   const next: RawConfig = Array.isArray(raw) ? Object.assign([...raw], raw) : { ...raw };
   for (const apply of Object.values(fieldAppliers)) apply(next, body);
   return next;
+}
+
+/**
+ * `PUT /config`'s write: merge `body` into the project's `config.json` under the config lock.
+ * A file only the schema refuses is merged into. One that is not a JSON object is never
+ * overwritten, since the user's keys in it would be lost: the answer is why it cannot be read.
+ */
+export function writeMergedConfig(dataDir: string, body: SetConfigInput): Promise<string | undefined> {
+  return updateConfigFile<string | undefined>(dataDir, (current) =>
+    current.raw ? { write: mergeConfig(current.raw, body), result: undefined } : { refuse: current.ok ? undefined : current.issue });
 }

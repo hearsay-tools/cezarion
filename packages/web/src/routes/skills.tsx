@@ -22,6 +22,7 @@ import type { Skill, TeamSkillRef, WorkflowDef } from '@open-mercato/cezar-api-c
 import { CenteredState } from '@/components/centered-state'
 import { SkillDetailBody, SkillSwitch, type SkillActivation } from '@/components/skill-detail'
 import { SkillEmptyHint } from '@/components/skill-empty-hint'
+import { TeamSourcesPanel } from '@/components/team-sources-panel'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
@@ -156,8 +157,6 @@ function SkillsCatalog() {
   }
 
   const showBookmarklets = param === BOOKMARKLETS
-  // The page names how to add a source, and no vendor (hearsay-tools/cezarion#1494).
-  const noTeamSkills = teamKnown && team.length === 0 && !skillsQuery.isPending
   const rows = skillsQuery.isPending
     ? []
     : tableRows({
@@ -201,6 +200,9 @@ function SkillsCatalog() {
           <BookmarkletPanel skills={listed.filter((item) => isOn(item.skill) && !item.hiddenBy).map((item) => item.skill)} />
         </section>
       ) : null}
+
+      {/* Adding a source happens here, and the page names no vendor (hearsay-tools/cezarion#1494 and hearsay-tools/cezarion#279). */}
+      <TeamSourcesPanel />
 
       <SkillsToolbar
         query={query}
@@ -247,12 +249,7 @@ function SkillsCatalog() {
             </p>
           )}
         </div>
-        {noTeamSkills ? (
-          <p data-slot="skills-team-empty" className="px-2.5 py-2 text-xs leading-relaxed text-soft-foreground">
-            No team skills. To add a source, list it under <span className="font-mono">skillsRepos</span> in{' '}
-            <span className="font-mono">.ai/cezar/config.json</span>, then Refresh.
-          </p>
-        ) : null}
+
       </section>
     </div>
   )

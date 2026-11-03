@@ -4,8 +4,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { lstat, mkdir, readdir, readFile, realpath, rename, rm, rmdir, stat, unlink, utimes, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
-import { loadConfig, type SkillsRepoSource } from './config.ts';
+import { DEFAULT_SKILLS_REF, loadConfig, readSkillsReposSync, type SkillsRepoRef } from './config.ts';
 import { parseFrontmatter, type Skill } from './skills.ts';
+import { isSafeSkillsRef, SKILLS_REPO_FORMATS, skillsRepoKind, type TeamSourceStatus } from '@open-mercato/cezar-contract/skill-sources';
 
 /**
  * Global bare-clone skill cache, read through ls-tree/show. List and companion files use pinned
@@ -60,58 +61,24 @@ function git(args: string[], timeoutMs: number, cwd?: string): Promise<GitResult
   });
 }
 
-const ALLOWED_URL_SCHEMES = new Set(['https', 'http', 'ssh', 'git', 'file']);
-
 /**
  * Normalize accepted shorthand, web, SSH and local skill sources. Reject option-like values,
- * remote-helper syntax and unsupported schemes before invoking Git; return null on refusal.
+ * remote-helper syntax and unsupported schemes before invoking Git; return null on refusal. The
+ * accepted shapes are `skillsRepoKind`'s, the rule the Skills page's Add form also checks.
  */
 export function safeRemoteFor(repo: string): string | null {
   const value = repo.trim();
-  if (!value) return null;
-  // git would read a leading `-` as an option, not a repo — argument injection.
-  if (value.startsWith('-')) return null;
-  // `ext::`, `fd::`, and friends: remote-helper transports = command execution.
-  if (value.includes('::')) return null;
-  // Local paths are matched before the `owner/name` shorthand: `.` and `-` are
-  // in the shorthand charset, so `./rel` would otherwise be read as the GitHub
-  // repo `./rel` and rewritten to `https://github.com/./rel.git`.
-  //
-  // `~/…` — git runs via execFile with no shell, so expand it here or git would
-  // look for a directory literally named `~`.
-  if (value.startsWith('~/')) return join(homedir(), value.slice(2));
-  if (/^(\/|\.\/|\.\.\/)/.test(value)) return value;
-  // Windows drive-letter path (`C:\repo`, `C:/repo`). Not a transport — no
-  // scheme, and a leading `-` is already refused above — and win32 is a
-  // supported platform, so this shape must keep working (BC §5, local path).
-  if (/^[A-Za-z]:[\\/]/.test(value)) return value;
-  // GitHub shorthand → the canonical https remote.
-  if (/^[\w.-]+\/[\w.-]+$/.test(value)) return `https://github.com/${value}.git`;
-  // Explicit URL scheme: allowlist safe transports only (blocks `ext:` etc.).
-  const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(value);
-  if (scheme) {
-    return ALLOWED_URL_SCHEMES.has(scheme[1]!.toLowerCase()) ? value : null;
+  switch (skillsRepoKind(value)) {
+    // git runs via execFile with no shell, so expand `~/` here or git would look for `~`.
+    case 'home': return join(homedir(), value.slice(2));
+    case 'github': return `https://github.com/${value}.git`;
+    case 'local': case 'url': case 'scp': return value;
+    default: return null;
   }
-  // scp-like `user@host:path` (no scheme, host before the first colon).
-  if (/^[\w.-]+@[\w.-]+:/.test(value)) return value;
-  return null;
 }
 
-/**
- * A ref safe to pass to `git` as a positional revision (#428): a branch, tag,
- * or commit SHA. Rejects a leading `-` (argument injection against git's option
- * surface), range/pathspec metacharacters, and anything outside the git
- * ref-name charset — so `${ref}:${path}` in `git show` can never be a `-`-flag.
- */
-export function isSafeRef(ref: string): boolean {
-  return (
-    ref.length > 0 &&
-    ref.length <= 256 &&
-    !ref.startsWith('-') &&
-    !ref.includes('..') &&
-    /^[A-Za-z0-9._/-]+$/.test(ref)
-  );
-}
+/** A ref safe to pass to `git` as a positional revision (hearsay-tools/cezarion#428); see `isSafeSkillsRef`. */
+export const isSafeRef = isSafeSkillsRef;
 
 /** A full commit SHA (sha-1 or sha-256) — a pinned, immutable ref (#428). */
 export function isPinnedSha(ref: string): boolean {
@@ -154,8 +121,7 @@ function warnUnsafeRemoteOnce(repo: string): void {
   warnedUnsafeRemotes.add(repo);
   console.warn(
     `[cez] ignoring skills repo ${JSON.stringify(repo)} — not an accepted source shape ` +
-      `(owner/name, an https/http/ssh/git URL, git@host:path, or a local/file:// path). ` +
-      `Check "skillsRepos" in .ai/cezar/config.json.`,
+      `(${SKILLS_REPO_FORMATS}). Check "skillsRepos" in .ai/cezar/config.json, or remove it on the Skills page.`,
   );
 }
 
@@ -193,7 +159,8 @@ export async function fetchAll(bareDir: string): Promise<void> {
 
 /**
  * Resolve a safe source ref to an immutable commit. A full SHA must name that exact commit and
- * never falls back to a moving ref. Branch/tag resolution may use the normal candidates.
+ * never falls back to a moving ref. A branch or tag resolves as itself; only the default ref
+ * (`main`) may fall back to `HEAD`.
  */
 async function resolveRef(bareDir: string, ref: string): Promise<string | null> {
   if (!isSafeRef(ref)) return null;
@@ -207,7 +174,10 @@ async function resolveRef(bareDir: string, ref: string): Promise<string | null> 
     // Pinned means pinned: only accept when rev-parse names exactly this commit.
     return probe.ok && probe.stdout.trim() === sha ? sha : null;
   }
-  for (const candidate of [ref, `refs/heads/${ref}`, 'HEAD']) {
+  // Only the default ref falls back to the clone's HEAD, for a repo whose default branch is not
+  // `main`. A ref someone chose that the repo lacks is an error, not the default branch's skills.
+  const candidates = ref === DEFAULT_SKILLS_REF ? [ref, `refs/heads/${ref}`, 'HEAD'] : [ref, `refs/heads/${ref}`];
+  for (const candidate of candidates) {
     const probe = await git(
       ['rev-parse', '--verify', '--quiet', `${candidate}^{commit}`],
       LIST_TIMEOUT_MS,
@@ -251,7 +221,7 @@ function matchSkillPath(line: string): SkillPathHit | null {
  * many files reads them all at the same commit (and skips re-resolving).
  */
 export async function readRemoteSkill(
-  src: SkillsRepoSource,
+  src: SkillsRepoRef,
   path: string,
   atCommit?: string,
 ): Promise<string | null> {
@@ -268,16 +238,24 @@ export async function readRemoteSkill(
  * clone only — no network. Empty list when the clone doesn't exist yet or
  * the ref can't be resolved.
  */
-export async function listRemoteSkills(src: SkillsRepoSource): Promise<Skill[]> {
+export async function listRemoteSkills(src: SkillsRepoRef): Promise<Skill[]> {
+  return (await listRemoteSource(src)).skills;
+}
+
+/** Why a listing came back empty: no clone on disk yet, a ref the clone cannot resolve, or a
+ *  `git ls-tree` that failed on a resolved ref. */
+type ListProblem = 'no-clone' | 'ref-not-found' | 'list-failed' | null;
+
+async function listRemoteSource(src: SkillsRepoRef): Promise<{ skills: Skill[]; problem: ListProblem }> {
   const bareDir = bareDirFor(src.repo);
-  if (!existsSync(join(bareDir, 'HEAD'))) return [];
+  if (!existsSync(join(bareDir, 'HEAD'))) return { skills: [], problem: 'no-clone' };
   // An immutable SHA (#428): the tree listing and every body below are read at
   // this one commit, and it is what gets recorded on each skill.
   const commit = await resolveRef(bareDir, src.ref);
-  if (commit === null) return [];
+  if (commit === null) return { skills: [], problem: 'ref-not-found' };
   // `--` after the ref keeps a `-`-leading value out of git's option surface.
   const ls = await git(['ls-tree', '-r', '--name-only', commit, '--'], LIST_TIMEOUT_MS, bareDir);
-  if (!ls.ok) return [];
+  if (!ls.ok) return { skills: [], problem: 'list-failed' };
 
   const skills: Skill[] = [];
   const seen = new Set<string>();
@@ -308,7 +286,7 @@ export async function listRemoteSkills(src: SkillsRepoSource): Promise<Skill[]> 
       team: { repo: src.repo, ref: src.ref, path: line, dir: hit.kind === 'skill', commit },
     });
   }
-  return skills;
+  return { skills, problem: null };
 }
 
 // ---- materialization (directory skills) ---------------------------------------
@@ -669,7 +647,7 @@ function initialTeamSkillsLoad(repoRoot: string): Promise<Skill[]> {
   if (existing) return existing;
   let listed!: (skills: Skill[]) => void;
   cachedListByRoot.set(repoRoot, new Promise((resolve) => { listed = resolve; }));
-  const load = loadTeamSkills(repoRoot, false, listed).catch(() => teamSkillsByRoot.get(repoRoot) ?? []);
+  const load = loadTeamSkills(repoRoot, 'passive', listed).catch(() => teamSkillsByRoot.get(repoRoot) ?? []);
   // A load that failed before its list-only pass still settles the cached wait.
   void load.then((skills) => listed(skills));
   firstLoadByRoot.set(repoRoot, load);
@@ -710,9 +688,78 @@ export function waitForCachedTeamSkills(repoRoot: string): Promise<Skill[]> {
 
 /** Refresh: clone missing sources, `git fetch` existing ones, reload the list. */
 export async function refreshTeamSkills(repoRoot: string): Promise<Skill[]> {
-  const load = loadTeamSkills(repoRoot, true).catch(() => teamSkillsByRoot.get(repoRoot) ?? []);
+  return publishLoad(repoRoot, 'all');
+}
+
+/**
+ * Fetch only the named sources, then reload the list (hearsay-tools/cezarion#279): the Skills page's Add and Retry.
+ * The other sources are listed from their clones as they are, with no fetch.
+ */
+export async function refreshTeamSources(repoRoot: string, sources: readonly SkillsRepoRef[]): Promise<Skill[]> {
+  // Loading from this call on, so the answer that started the fetch already says so.
+  for (const src of sources) setSourceStatus(repoRoot, src, { state: 'loading' });
+  return publishLoad(repoRoot, { only: new Set(sources.map(sourceKey)) });
+}
+
+/**
+ * Reload the list from the clones on disk with no fetch (hearsay-tools/cezarion#279), after a source was removed,
+ * disabled or enabled, so the change shows at once.
+ */
+export async function reloadTeamSkills(repoRoot: string): Promise<Skill[]> {
+  return publishLoad(repoRoot, 'none');
+}
+
+function publishLoad(repoRoot: string, mode: Exclude<FetchMode, 'passive'>): Promise<Skill[]> {
+  const load = loadTeamSkills(repoRoot, mode).catch(() => teamSkillsByRoot.get(repoRoot) ?? []);
   firstLoadByRoot.set(repoRoot, load);
   return load;
+}
+
+/** How a load fetches: by TTL, every source, the named sources only, or none. */
+type FetchMode = 'passive' | 'all' | 'none' | { only: ReadonlySet<string> };
+
+/** A source's identity. Two refs of one repo are two sources. */
+export function sourceKey(src: SkillsRepoRef): string {
+  return JSON.stringify([src.repo, src.ref]);
+}
+
+// The last fetch failure per repo, cleared by the next good fetch. A passive load that does not
+// fetch keeps showing it, so the Skills page does not call a source fine until it is.
+const fetchFailures = new Map<string, string>();
+// Each project's source states, keyed by `sourceKey` (hearsay-tools/cezarion#279).
+const sourceStatusByRoot = new Map<string, Map<string, TeamSourceStatus>>();
+
+/**
+ * Each configured source's state for this project, as the last load left it. A source no load
+ * has reached yet is absent; the caller shows it as `idle`.
+ */
+export function getTeamSourceStatuses(repoRoot: string): ReadonlyMap<string, TeamSourceStatus> {
+  void initialTeamSkillsLoad(repoRoot);
+  return sourceStatusByRoot.get(repoRoot) ?? new Map();
+}
+
+function setSourceStatus(repoRoot: string, src: SkillsRepoRef, status: TeamSourceStatus): void {
+  let statuses = sourceStatusByRoot.get(repoRoot);
+  if (!statuses) sourceStatusByRoot.set(repoRoot, (statuses = new Map()));
+  statuses.set(sourceKey(src), status);
+}
+
+/** The state a listed source ends a load in. Its listed skills stay usable whatever it says. */
+function settledStatus(src: SkillsRepoRef, skills: Skill[], problem: ListProblem): TeamSourceStatus {
+  const skillCount = skills.length;
+  if (safeRemoteFor(src.repo) === null) {
+    return { state: 'error', cause: 'refused-format', detail: `"${src.repo}" is not a source format cezar accepts.`, skillCount };
+  }
+  const failure = fetchFailures.get(src.repo);
+  if (failure !== undefined) return { state: 'error', cause: 'fetch-failed', detail: failure, skillCount };
+  if (problem === 'ref-not-found') {
+    return { state: 'error', cause: 'ref-not-found', detail: `The ref "${src.ref}" was not found in ${src.repo}.`, skillCount };
+  }
+  if (problem === 'list-failed') {
+    return { state: 'error', cause: 'fetch-failed', detail: `git could not list the skills of ${src.repo} at ${src.ref}.`, skillCount };
+  }
+  if (problem === 'no-clone') return { state: 'idle' };
+  return { state: 'ok', skillCount };
 }
 
 function stampIsFresh(repo: string, now: number): boolean {
@@ -733,8 +780,10 @@ function fetchBareSource(repo: string): Promise<void> {
       if (!created) await fetchAll(bareDir);
       await writeLastFetchAt(bareDir, Date.now());
       cloneAttempted.delete(repo);
+      fetchFailures.delete(repo);
     })
     .catch((error: unknown) => {
+      fetchFailures.set(repo, error instanceof Error ? error.message : String(error));
       // A concurrent sibling may already have written a fresh stamp. Recording
       // that as a local failure would suppress the next TTL in this process.
       if (shouldRecordFetchFailure({
@@ -773,10 +822,12 @@ function mergeSourceLists(lists: Array<Skill[] | undefined>): Skill[] {
 
 async function loadTeamSkills(
   repoRoot: string,
-  refresh: boolean,
+  mode: FetchMode,
   onCachedList?: (skills: Skill[]) => void,
 ): Promise<Skill[]> {
-  const config = await loadConfig(repoRoot);
+  // A disabled source stays in the file and loads nothing (hearsay-tools/cezarion#279).
+  const sources = (await loadConfig(repoRoot)).skillsRepos.filter((src) => src.enabled);
+  forgetUnlistedStatuses(repoRoot, sources);
   // Passive loads list the clones already on disk BEFORE any fetch (#859): the
   // first restart past the TTL otherwise hides every team skill — and starves a
   // recovered Continue of its playbook — for as long as the fetch takes.
@@ -789,9 +840,9 @@ async function loadTeamSkills(
   // True once another load has published a post-fetch list since this one
   // started: its snapshot may predate that list, so it must not win (#859).
   const superseded = () => (postFetchListsByRoot.get(repoRoot) ?? 0) !== generation;
-  if (!refresh) {
-    snapshotStamps = config.skillsRepos.map((src) => readLastFetchAt(bareDirFor(src.repo)));
-    cached = await Promise.all(config.skillsRepos.map((src) => listRemoteSkills(src).catch(() => undefined)));
+  if (mode === 'passive') {
+    snapshotStamps = sources.map((src) => readLastFetchAt(bareDirFor(src.repo)));
+    cached = await Promise.all(sources.map((src) => listRemoteSkills(src).catch(() => undefined)));
     const pause = cachedListPauses.get(repoRoot);
     if (pause) {
       cachedListPauses.delete(repoRoot);
@@ -803,40 +854,68 @@ async function loadTeamSkills(
     onCachedList?.(listed);
   }
   const lists: Array<Skill[] | undefined> = [];
-  for (const [index, src] of config.skillsRepos.entries()) {
-    const now = Date.now();
-    if (stampIsFresh(src.repo, now)) cloneAttempted.delete(src.repo);
-    let fetched = false;
-    try {
-      if (refresh) {
-        fetched = true;
-        await fetchBareSource(src.repo);
-      } else if (
-        shouldPassiveFetch({
-          fetchedAt: readLastFetchAt(bareDirFor(src.repo)),
-          now,
-          ttlMs: PASSIVE_FETCH_TTL_MS,
-        }) &&
-        !cloneAttempted.has(src.repo)
-      ) {
-        fetched = true;
-        await fetchBareSource(src.repo);
-      }
-    } catch {
-      // offline / no access — list whatever an older clone has (or nothing)
-    }
+  for (const [index, src] of sources.entries()) {
     // An unfetched source has not moved since the list-only pass unless
     // another load fetched it meanwhile; reuse the snapshot only then.
-    const unmoved = !superseded() && readLastFetchAt(bareDirFor(src.repo)) === snapshotStamps[index];
-    const listed = fetched || !unmoved ? undefined : cached[index];
-    // degrade: a source that fails to list contributes nothing
-    lists.push(listed ?? (await listRemoteSkills(src).catch(() => undefined)));
+    const snapshot = { skills: cached[index], stamp: snapshotStamps[index], superseded };
+    lists.push(await loadOneSource(repoRoot, src, mode, snapshot));
   }
-  const out = mergeSourceLists(lists);
-  // A refresh always publishes. A passive load that a newer post-fetch list
+  // A source removed or disabled while this load fetched leaves the list it publishes: an older
+  // Retry must not bring back a source a newer change took out.
+  const current = new Set(readEnabledSourceKeys(repoRoot));
+  const out = mergeSourceLists(lists).filter((skill) => !skill.team || current.has(sourceKey(skill.team)));
+  forgetUnlistedStatuses(repoRoot, sources.filter((src) => current.has(sourceKey(src))));
+  // Every load but a passive one publishes. A passive load that a newer post-fetch list
   // overtook defers to it rather than replacing it with an older view.
-  if (!refresh && superseded()) return teamSkillsByRoot.get(repoRoot) ?? out;
+  if (mode === 'passive' && superseded()) return teamSkillsByRoot.get(repoRoot) ?? out;
   postFetchListsByRoot.set(repoRoot, (postFetchListsByRoot.get(repoRoot) ?? 0) + 1);
   teamSkillsByRoot.set(repoRoot, out);
   return out;
+}
+
+/** The enabled `skillsRepos` entries as the file says now, read synchronously at publish time. */
+function readEnabledSourceKeys(repoRoot: string): string[] {
+  return readSkillsReposSync(repoRoot).filter((src) => src.enabled).map(sourceKey);
+}
+
+/** Fetch `src` when the mode says so, list it, and record its state. */
+async function loadOneSource(
+  repoRoot: string,
+  src: SkillsRepoRef,
+  mode: FetchMode,
+  snapshot: { skills: Skill[] | undefined; stamp: number | null | undefined; superseded: () => boolean },
+): Promise<Skill[] | undefined> {
+  const now = Date.now();
+  if (stampIsFresh(src.repo, now)) cloneAttempted.delete(src.repo);
+  const fetched = shouldFetchSource(mode, src, now);
+  if (fetched) {
+    setSourceStatus(repoRoot, src, { state: 'loading' });
+    // offline / no access — list whatever an older clone has (or nothing); the status says why
+    await fetchBareSource(src.repo).catch(() => undefined);
+  }
+  const unmoved = !snapshot.superseded() && readLastFetchAt(bareDirFor(src.repo)) === snapshot.stamp;
+  const reused = fetched || !unmoved ? undefined : snapshot.skills;
+  // degrade: a source that fails to list contributes nothing. A non-empty snapshot needs no
+  // second listing; an empty one is listed again only to learn why it is empty.
+  const result = reused?.length ? { skills: reused, problem: null } : await listRemoteSource(src).catch(() => undefined);
+  const listed = reused ?? result?.skills;
+  setSourceStatus(repoRoot, src, settledStatus(src, listed ?? [], result?.problem ?? null));
+  return listed;
+}
+
+/** Whether this load fetches `src`: always, by name, or by the passive TTL and retry budget. */
+function shouldFetchSource(mode: FetchMode, src: SkillsRepoRef, now: number): boolean {
+  if (mode === 'all') return true;
+  if (mode === 'none') return false;
+  if (mode !== 'passive') return mode.only.has(sourceKey(src));
+  return shouldPassiveFetch({ fetchedAt: readLastFetchAt(bareDirFor(src.repo)), now, ttlMs: PASSIVE_FETCH_TTL_MS })
+    && !cloneAttempted.has(src.repo);
+}
+
+/** Drop the state of a source that is no longer an enabled entry in `skillsRepos`. */
+function forgetUnlistedStatuses(repoRoot: string, sources: readonly SkillsRepoRef[]): void {
+  const statuses = sourceStatusByRoot.get(repoRoot);
+  if (!statuses) return;
+  const keep = new Set(sources.map(sourceKey));
+  for (const key of statuses.keys()) if (!keep.has(key)) statuses.delete(key);
 }

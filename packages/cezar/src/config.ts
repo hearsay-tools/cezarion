@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { loadWorkspaceConfig, type WorkspaceConfig } from './workspace/config.ts';
@@ -7,16 +8,24 @@ import { RUNNER_IDS } from './core/agent-runner.ts';
 /**
  * Optional advanced config at `.ai/cezar/config.json`. Zero-config rule:
  * a missing file behaves exactly like the default below, an unreadable or
- * invalid file degrades to the default too (never blocks startup). `skillsRepos`
+ * invalid file degrades to the default too (never blocks startup); a bad value drops only its
+ * own key, or its own `skillsRepos` entry. `skillsRepos`
  * defaults to `[]`: no team skills until a repo lists its own sources.
  */
+/** The ref a `skillsRepos` entry without one reads. */
+export const DEFAULT_SKILLS_REF = 'main';
+
 const skillsRepoSchema = z.object({
   /** `owner/name` (GitHub shorthand), a full git URL, or a local/file:// path. */
   repo: z.string().min(1),
-  ref: z.string().min(1).default('main'),
+  ref: z.string().min(1).default(DEFAULT_SKILLS_REF),
+  /** False keeps the source listed on the Skills page but loads none of its skills (hearsay-tools/cezarion#279). */
+  enabled: z.boolean().default(true),
 });
 
 export type SkillsRepoSource = z.infer<typeof skillsRepoSchema>;
+/** A source by identity: what the git and listing helpers need. */
+export type SkillsRepoRef = Pick<SkillsRepoSource, 'repo' | 'ref'>;
 
 /** Last-resort retention when neither the repo nor the workspace says anything. */
 export const DEFAULT_WORKTREE_RETENTION = 10;
@@ -151,19 +160,133 @@ function withMachineDefaults(raw: unknown, machine: WorkspaceConfig['agentDefaul
  */
 export async function loadConfig(repoRoot: string): Promise<CezConfig> {
   const machine = (await loadWorkspaceConfig()).agentDefaults;
-  let raw: string;
+  let raw: unknown = {};
   try {
-    raw = await readFile(join(repoRoot, '.ai/cezar', 'config.json'), 'utf8');
+    raw = JSON.parse(await readFile(join(repoRoot, '.ai/cezar', 'config.json'), 'utf8'));
   } catch {
-    return configSchema.parse(withMachineDefaults({}, machine));
+    // A missing file or malformed JSON degrades to the default.
   }
-  try {
-    const parsed = configSchema.safeParse(withMachineDefaults(JSON.parse(raw), machine));
+  return parseLeniently(withMachineDefaults(raw, machine));
+}
+
+/** Most bad values one file can hold before the parse gives up and answers the defaults. */
+const MAX_REPAIRS = 64;
+
+/**
+ * Parse a config object, dropping only what the schema refuses (hearsay-tools/cezarion#279): a bad
+ * `skillsRepos` entry drops that entry, and any other bad key drops that key to its default. One
+ * mistake no longer discards every team source and setting in the file.
+ */
+function parseLeniently(input: unknown): CezConfig {
+  let value: unknown = input && typeof input === 'object' && !Array.isArray(input) ? { ...(input as Record<string, unknown>) } : {};
+  for (let repairs = 0; repairs < MAX_REPAIRS; repairs++) {
+    const parsed = configSchema.safeParse(value);
     if (parsed.success) return parsed.data;
-  } catch {
-    // fall through — malformed JSON degrades to the default
+    value = withoutRefused(value as Record<string, unknown>, parsed.error.issues[0]?.path ?? []);
   }
-  return configSchema.parse(withMachineDefaults({}, machine));
+  return configSchema.parse({});
+}
+
+function withoutRefused(raw: Record<string, unknown>, path: readonly PropertyKey[]): Record<string, unknown> {
+  const [key, index] = path;
+  if (typeof key !== 'string') return {};
+  const next = { ...raw };
+  if (key === 'skillsRepos' && typeof index === 'number' && Array.isArray(raw.skillsRepos)) {
+    next.skillsRepos = raw.skillsRepos.filter((_entry, at) => at !== index);
+  } else {
+    delete next[key];
+  }
+  return next;
+}
+
+/** Why `.ai/cezar/config.json` cannot be read, as the Skills page shows it. */
+function configIssue(error: unknown): string {
+  return `.ai/cezar/config.json cannot be read: ${error instanceof Error ? error.message : String(error)}. Fix the file, then reload.`;
+}
+
+/** A failed read keeps `raw` when the file is a JSON object that only the schema refuses. */
+export type RawConfigRead = { ok: true; raw: Record<string, unknown> } | { ok: false; issue: string; raw?: Record<string, unknown> };
+
+/**
+ * The raw `.ai/cezar/config.json` object, or why it cannot be used. A missing file is `{}`.
+ * Malformed JSON or a non-object is an issue: a writer that merged into it would replace the
+ * user's file. So is a `skillsRepos` value its schema refuses, which the Skills page cannot show.
+ */
+export async function readRawConfig(dataDir: string): Promise<RawConfigRead> {
+  let text: string;
+  try {
+    text = await readFile(join(dataDir, 'config.json'), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { ok: true, raw: {} };
+    return { ok: false, issue: configIssue(error) };
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch (error) {
+    return { ok: false, issue: configIssue(error) };
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { ok: false, issue: configIssue('it is not a JSON object') };
+  // The Skills page edits `skillsRepos` as written, so an entry it cannot show blocks its writes.
+  // A bad value in another key is kept as written: `loadConfig` drops only that key.
+  const sources = configSchema.shape.skillsRepos.safeParse((raw as Record<string, unknown>).skillsRepos);
+  if (!sources.success) {
+    const first = sources.error.issues[0];
+    const where = ['skillsRepos', ...(first?.path ?? [])].join('.');
+    return { ok: false, issue: configIssue(`${where}: ${first?.message ?? 'invalid'}`), raw: raw as Record<string, unknown> };
+  }
+  return { ok: true, raw: raw as Record<string, unknown> };
+}
+
+/**
+ * The `skillsRepos` sources switched off with `enabled: false` (hearsay-tools/cezarion#279), read synchronously for the
+ * run's skill readers, which apply them as they are now (`enabledSkills`). An unreadable file
+ * switches nothing off; `loadConfig` then lists no sources at all. A bad entry is dropped, as there.
+ */
+export function readDisabledSkillsReposSync(repoRoot: string): SkillsRepoRef[] {
+  return readSkillsReposSync(repoRoot).filter((src) => !src.enabled).map(({ repo, ref }) => ({ repo, ref }));
+}
+
+/** Every `skillsRepos` entry as the file says now, read synchronously; an unreadable file has none. */
+export function readSkillsReposSync(repoRoot: string): SkillsRepoSource[] {
+  try {
+    return parseLeniently(JSON.parse(readFileSync(join(repoRoot, '.ai/cezar', 'config.json'), 'utf8'))).skillsRepos;
+  } catch {
+    return [];
+  }
+}
+
+const configWrites = new Map<string, Promise<unknown>>();
+
+/**
+ * Change `.ai/cezar/config.json` under one in-process lock per file, then write it atomically (a
+ * temporary file, then a rename), so a synchronous reader never sees a partial file and two
+ * cockpit writes never drop each other's keys. `change` gets the file as `readRawConfig` reads
+ * it now and returns the next object, or a refusal that writes nothing.
+ */
+export function updateConfigFile<T>(
+  dataDir: string,
+  change: (current: RawConfigRead) => { write: Record<string, unknown>; result: T } | { refuse: T },
+): Promise<T> {
+  const path = join(dataDir, 'config.json');
+  const previous = configWrites.get(path) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(async () => {
+    const outcome = change(await readRawConfig(dataDir));
+    if ('refuse' in outcome) return outcome.refuse;
+    await mkdir(dataDir, { recursive: true });
+    const temp = `${path}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      await writeFile(temp, `${JSON.stringify(outcome.write, null, 2)}\n`, 'utf8');
+      await rename(temp, path);
+    } catch (error) {
+      await rm(temp, { force: true });
+      throw error;
+    }
+    return outcome.result;
+  });
+  configWrites.set(path, next);
+  void next.finally(() => { if (configWrites.get(path) === next) configWrites.delete(path); }).catch(() => undefined);
+  return next;
 }
 
 /**

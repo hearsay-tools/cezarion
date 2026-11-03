@@ -4,7 +4,8 @@ import { relative } from 'node:path';
 import type { AgentInput } from '@open-mercato/cezar-contract/delegation';
 import type { ContentBlock } from '../../core/agent-runner.ts';
 import { enqueueAgentInput } from '../../delegation/input.ts';
-import { discoverSkills, filterDisabledTeamSkills, readDisabledTeamSkills, type Skill } from '../../skills.ts';
+import { discoverSkills, filterDisabledTeamSkills, filterDisabledTeamSources, readDisabledTeamSkills, type Skill } from '../../skills.ts';
+import { readDisabledSkillsReposSync } from '../../config.ts';
 import { getTeamSkillsCached, materializeSkillToCache, TEAM_SKILL_AGENT_DIRS } from '../../skills-remote.ts';
 import { MAX_SKILL_CLOSURE, namesSkillCommand, provisionSkills } from '../../skills-provision.ts';
 import { readProjectUiState, readProjectUiStateSync } from '../../ui-state.ts';
@@ -49,13 +50,15 @@ export class RunSkills {
    * `state.skills`. The registry is discovered when the run starts or continues, so a team skill
    * switched off since then is still in `state.skills`; every prompt a step, a Continue or a live
    * `/name` builds reads this instead. A caller that already read the off-list passes it as
-   * `disabled`, so that both see one list.
+   * `disabled`, so that both see one list. A team source disabled since then
+   * (hearsay-tools/cezarion#279) drops its skills here too.
    */
   enabledSkills(
     state: ActiveRun,
     disabled = readDisabledTeamSkills(readProjectUiStateSync(this.context.repoRoot)),
   ): Skill[] {
-    return filterDisabledTeamSkills(state.skills ?? [], disabled);
+    const sources = filterDisabledTeamSources(state.skills ?? [], readDisabledSkillsReposSync(this.context.repoRoot));
+    return filterDisabledTeamSkills(sources, disabled);
   }
   /**
    * A live `/name` message already carries the skill's body, and `sendMessage` answers
@@ -144,7 +147,8 @@ export class RunSkills {
       for (const skill of teamRoots) await cacheCopy(skill);
       return { notes, filesDir, installed: [] };
     }
-    const catalog = [...registry, ...filterDisabledTeamSkills(getTeamSkillsCached(this.context.repoRoot), disabled)];
+    const team = filterDisabledTeamSources(getTeamSkillsCached(this.context.repoRoot), readDisabledSkillsReposSync(this.context.repoRoot));
+    const catalog = [...registry, ...filterDisabledTeamSkills(team, disabled)];
     const result = await provisionSkills(state.cwd, roots, catalog, { cancelled: stopped });
     if (stopped()) return { notes, filesDir, installed: [] };
     for (const skill of teamRoots) {
