@@ -180,6 +180,8 @@ describe('the Changes tab against a live dry run', () => {
       // The settle autosave left the tree clean — dirty it the way a user editing in the
       // worktree would, so the commit below has something real to commit.
       writeFileSync(join(worktreePath, 'edited-by-e2e.md'), 'a change made outside the agent\n', 'utf8')
+      browser.goto(`${baseUrl}${scoped(`/tasks/${runId}/changes`)}`)
+      browser.waitForFunction(`document.querySelector('[data-slot="git-toolbar"] [data-action="commit"]')?.disabled === false`)
 
       browser.click('[data-slot="git-toolbar"] [data-action="commit"]')
       // Radix dialog animates in — wait for the textarea, then check the prefill.

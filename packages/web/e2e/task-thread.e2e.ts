@@ -311,6 +311,9 @@ describe('task thread', () => {
   })
 
   it('keeps Shiki out of the main bundle — its chunks load lazily, after the thread route', () => {
+    browser.waitForFunction(
+      `[...document.querySelectorAll('[data-streamdown="code-block-body"] span')].some((s) => s.style.getPropertyValue('--sdm-c') === 'var(--syn-key)')`,
+    )
     const chunks = browser.evaluate(`performance.getEntriesByType('resource')
       .map((e) => e.name.split('/').pop())
       .filter((n) => /^(core|engine-javascript|typescript)-/.test(n))`) as string[]

@@ -155,7 +155,7 @@ it('shows a deleted snapshot as missing and drops reports after snapshot or task
   let deletionBrowser: AgentBrowser | undefined
   try {
     const project = join(deletionRoot, 'project')
-    cpSync(join(root, 'project'), project, { recursive: true, filter: source => !basename(source).startsWith('runs.db') })
+    cpSync(join(root, 'project'), project, { recursive: true, filter: source => !['runs.db', 'cockpit.lock'].some(prefix => basename(source).startsWith(prefix)) })
     const sourceDatabase = new DatabaseSync(join(root, 'project/.ai/cezar/runs.db'), { readOnly: true })
     try {
       await backup(sourceDatabase, join(project, '.ai/cezar/runs.db'))

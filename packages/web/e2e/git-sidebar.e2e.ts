@@ -408,10 +408,12 @@ describe('Git → Not landed and the branch cleanup (issue 08 §C)', () => {
 
 describe('the phone Git screen (issue 06 §3)', () => {
   it('opens the checkout block and the sections as 48px rows with chevrons; a section pushes its screen', () => {
+    for (const branch of ['cez/orphan1', 'cez/merged1']) {
+      execFileSync('git', ['-C', root, 'branch', '-D', branch])
+    }
     browser.setViewport(PHONE.width, PHONE.height)
     browser.goto(`${base}${scoped('/git')}`)
     const rows = browser.waitForValue<SectionRow[]>(sectionsJs(SCREEN), (value) => Array.isArray(value) && value[1]?.count !== null && value[2]?.count !== null)
-    // The earlier specs deleted the orphan and the merged branch: one not landed, three branches.
     expect(rows.map(({ section, label, count, href, height }) => ({ section, label, count, href, height }))).toEqual([
       { section: 'main', label: 'Recently on main', count: '3 today', href: `${scoped('/git')}?view=repo`, height: 48 },
       { section: 'not-landed', label: 'Not landed', count: '1', href: scoped('/git/not-landed'), height: 48 },
