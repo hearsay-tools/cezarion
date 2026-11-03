@@ -48,7 +48,9 @@ function removeInstalled(worktree: string, name: string): void {
 
 async function idleClose(manager: RunManager, runId: string): Promise<void> {
   type State = { idleTimer?: NodeJS.Timeout & { _onTimeout?: () => void } };
-  const stateOf = () => (manager as unknown as { active: Map<string, State> }).active.get(runId);
+  const stateOf = () => {
+    return (manager as unknown as { active: Map<string, State> }).active.get(runId);
+  };
   await waitFor(() => typeof stateOf()?.idleTimer?._onTimeout === 'function');
   stateOf()!.idleTimer!._onTimeout!();
   await waitFor(() => !manager.isActive(runId));
