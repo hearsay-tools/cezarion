@@ -70,6 +70,7 @@ function admissionResult(check, exception, threads, head) {
   const openThreads = threads.filter(t => !t.isResolved).length;
   const executed = exception || (check?.status === 'completed' && check.conclusion === 'success');
   return { admitted: Boolean(executed && openThreads === 0), head, checkId: check?.id ?? null, exception,
+    providerPending: !exception && (!check || ['queued', 'in_progress'].includes(check.status)),
     reason: openThreads ? 'unresolved-threads' : executed ? 'admitted' : check ? 'provider-not-successful' : 'provider-missing' };
 }
 async function readCodeRabbitAdmission({ github, owner, repo, pullNumber, head, releaseAppBotLogin,
