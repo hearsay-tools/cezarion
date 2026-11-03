@@ -1,12 +1,11 @@
 'use strict';
-// Trusted control plane: read live evidence, reserve bounded no-files recovery,
-// rerun one native job. Never check out PR code or dispatch the CI workflow.
+// Trusted control plane: read live evidence, rerun one native job. Never check out
+// PR code, request a model review, post findings or dispatch the CI workflow.
 const { setTimeout: delay } = require('node:timers/promises');
 const { reader, positive, validSha, REVIEW, successfulJobs } = require('./queue-ci-proof.cjs');
 const { readCodeRabbitAdmission, trustedCheck } = require('./coderabbit-admission.cjs');
 const { readNativeReview } = require('./native-review-proof.cjs');
 const { signalTarget } = require('./review-signal.cjs');
-const { recoverNoFiles } = require('./coderabbit-recovery.cjs');
 const TARGET_LIMIT = 4;
 const recovery = reason => new Error(`${reason}; dispatch with pr_number for manual recovery`);
 function associationNumbers(pulls) {
@@ -82,7 +81,7 @@ function sameLivePull(live, pr, fullName) {
   return live.state === 'open' && live.head?.sha === pr.head.sha && live.base?.ref === 'main'
     && live.head.repo?.full_name === fullName && live.base.repo?.full_name === fullName;
 }
-const GATE_STEP = 'Require fresh CodeRabbit execution and resolved threads';
+const GATE_STEP = 'Require fresh CodeRabbit admission and resolved threads';
 function currentGate(proof) {
   return !proof.run.referenced_workflows?.some(w => w.path?.includes('/automated-code-review.yml@'))
     && proof.jobs.some(j => j.name === REVIEW && j.steps?.some(step => step.name === GATE_STEP));
@@ -106,12 +105,12 @@ async function nativeProof(args, pr, log) {
     return null;
   }
 }
-async function reconcilePull({ github, owner, repo, pr, releaseAppBotLogin, recoverySender, runId, now, deadline, sleep, log }) {
+async function reconcilePull({ github, owner, repo, pr, releaseAppBotLogin, now, deadline, sleep, log }) {
   const args = { github, owner, repo, now, deadline };
   const proof = await nativeProof(args, pr, log);
   if (!proof) return 'native-evidence-unavailable';
   if (!currentGate(proof)) {
-    log(`PR ${pr.number}: native CI uses the old review workflow. Push a new head or start a new native run after rollout; targeted retries cannot replace its definition.`);
+    log(`PR ${pr.number}: native CI uses an older review policy. Push a new head or start a new native run after rollout; targeted retries cannot replace its definition.`);
     return 'legacy-workflow';
   }
   const job = reviewJob(proof);
@@ -119,21 +118,9 @@ async function reconcilePull({ github, owner, repo, pr, releaseAppBotLogin, reco
   const admission = () => readCodeRabbitAdmission({ ...args, pullNumber: pr.number, head: pr.head.sha, releaseAppBotLogin });
   // A failed reader cannot authorize anything. Rerun a historical green to make
   // its native gate fail closed too; never turn an API error into an approval.
-  const evidence = async () => { try { return await admission(); } catch { return null; } };
-  const desired = async () => Boolean((await evidence())?.admitted);
-  const initial = await evidence(), admitted = Boolean(initial?.admitted);
-  if (initial && !initial.admitted) log(`PR ${pr.number}: ${initial.reason}. ${initial.action}`);
-  if (admitted === (job.conclusion === 'success')) {
-    if (!initial?.recoveryEligible) return 'unchanged';
-    // Revoke a historical green before any recovery work. The rerun's CI
-    // completion wakes recovery later with an already-failed native gate.
-    try { return await recoverNoFiles({ ...args, pr, evidence: initial, admission,
-      sender: recoverySender, releaseAppBotLogin, runId, log }); }
-    catch {
-      log(`PR ${pr.number}: full-review recovery blocked or reservation uncertain. Inspect recovery checks and PR comments before any manual @coderabbitai full review; no automatic resend.`);
-      return 'recovery-inspection-required';
-    }
-  }
+  const desired = async () => { try { return (await admission()).admitted; } catch { return false; } };
+  const admitted = await desired();
+  if (admitted === (job.conclusion === 'success')) return 'unchanged';
   if (!rerunnable(proof.run, now())) {
     log(`PR ${pr.number}: native CI cannot rerun (30 days / 50 attempts / active run). Repair CI or push a new head; no dispatch fallback.`);
     return 'rerun-unavailable';
@@ -189,7 +176,7 @@ async function discover({ github, owner, repo, eventName, payload, now = Date.no
   }
   return { numbers };
 }
-async function reconcile({ github, owner, repo, pullNumber, releaseAppBotLogin, recoverySender, runId,
+async function reconcile({ github, owner, repo, pullNumber, releaseAppBotLogin,
   now = Date.now, sleep = delay, log = () => {} }) {
   if (!positive(pullNumber)) throw new Error('Missing trusted discovery PR number');
   const deadline = now() + 120000, read = reader(github, owner, repo, deadline, now);
@@ -198,19 +185,6 @@ async function reconcile({ github, owner, repo, pullNumber, releaseAppBotLogin, 
   // The admitted event is only a wake hint. Queue only PR identity, then prove
   // the newest live head/run at the lock head; never carry historical proof.
   return reconcilePull({ github, owner, repo, pr,
-    releaseAppBotLogin, recoverySender, runId, now, deadline, sleep, log });
+    releaseAppBotLogin, now, deadline, sleep, log });
 }
-async function recoveryNeeded({ github, owner, repo, pullNumber, releaseAppBotLogin, now = Date.now }) {
-  if (!positive(pullNumber)) return false;
-  const deadline = now() + 60000, read = reader(github, owner, repo, deadline, now);
-  try {
-    const pr = await read('GET /repos/{owner}/{repo}/pulls/{pull_number}', { pull_number: pullNumber });
-    if (pr?.number !== pullNumber || !eligiblePull(pr, `${owner}/${repo}`)) return false;
-    const proof = await nativeProof({ github, owner, repo, now, deadline }, pr, () => {});
-    if (!proof || !currentGate(proof) || reviewJob(proof)?.conclusion !== 'failure') return false;
-    const evidence = await readCodeRabbitAdmission({ github, owner, repo, pullNumber, head: pr.head.sha,
-      releaseAppBotLogin, now, deadline });
-    return evidence.recoveryEligible;
-  } catch { return false; }
-}
-module.exports = { discover, reconcile, recoveryNeeded, eventTarget, eligiblePull, reviewJob, rerunnable, GATE_STEP };
+module.exports = { discover, reconcile, eventTarget, eligiblePull, reviewJob, rerunnable, GATE_STEP };

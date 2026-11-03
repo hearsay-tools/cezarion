@@ -9,10 +9,13 @@ trusting an uploaded artifact’s metadata.
 
 Model calls receive only their required credentials and tools. Intake choices are bounded by
 the prefetched candidate set; a decision engine cannot invent another target. CodeRabbit now owns review generation and posting (2026-11-02). Trusted deterministic
-admission follows cheap preflight and releases heavy verification only after exact-head
-execution succeeds and all review threads resolve. A default-branch reconciler can
+admission follows cheap preflight and releases heavy verification only after the
+newest trusted exact-head check reports success or skipped with exact title
+`No files to review`, and all review threads resolve (owner policy, 2026-11-03).
+The named skip is a provider decision, not proof of model execution. A default-branch reconciler can
 retry only the native review gate; a PR-context review signal grants no authority.
-See [the replacement plan](../../.ai/specs/2026-11-02-coderabbit-admission-plan.md).
+See [the replacement plan](../../.ai/specs/2026-11-02-coderabbit-admission-plan.md)
+and [the no-files policy](../../.ai/specs/2026-11-03-coderabbit-skipped-recovery-plan.md).
 
 This separation constrains what a model or artifact can request; it does not make arbitrary
 same-user shell access an isolation boundary. Keep workflow permission and timing comments

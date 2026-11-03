@@ -1,113 +1,160 @@
-# Recover CodeRabbit no-files skips
+# Admit the trusted CodeRabbit no-files decision
 
-Proof base: `666efc213`. Parent owns sender probe, review, push and landing.
+Proof base: `666efc213`. Parent owns integration, review, push, CI and landing.
+No push or GitHub write belongs to this worker.
 
-## Preserved guarantee
+## Policy and replaced guarantee
 
-The newest trusted CodeRabbit App execution on the exact live head must complete
-with success, and every review thread must be resolved. Native CI provenance,
-preflight, readiness, queue admission, verified exceptions and fork restrictions
-stay intact. A recovery claim, command, response or skipped check never admits a PR.
+The old gate required successful model execution on the exact live head, except
+for verified release/upstream exceptions. It blocked every skipped execution.
+The owner explicitly replaces that guarantee: the newest trusted provider check
+may instead report completed/skipped with exact authenticated `output.title`
+`No files to review`. That decision admits without prior successful execution.
+It is a provider no-files decision; it does not prove that a model ran.
 
-Classify provider evidence in the shared reader. Only authenticated
-completed/skipped with exact `output.title === 'No files to review'` can request
-one `@coderabbitai full review`. Incident evidence: official check `125896576467`
-on head `5be277591c9f908ed44982d0115012e20e116091`, App `347564` / `coderabbitai`.
-Do not interpret comment Markdown or provider summary tables.
+Trust remains App `347564`, slug `coderabbitai`, check name `CodeRabbit`, on the
+exact live PR head. Success still admits. Every review thread, from any author,
+including outdated threads, must be resolved. All other provider states block.
+Keep complete bounded pagination, provider/head rereads, title fingerprint,
+verified exceptions, native provenance, readiness, queue membership and rules.
 
-Use the existing per-PR trusted reconciliation lock. Before the comment POST,
-create a dedicated GitHub Actions check on the head with a PR+head external ID.
-Read the complete bounded claim inventory, validate ownership/identity shape,
-and confirm the new claim is uniquely visible before sending. Existing claims
-only suppress sends: their caller-supplied URL and key cannot prove originating
-workflow provenance. Prove the current execution from its trusted context run ID.
-Every existing claim blocks a second attempt, regardless of its conclusion.
-The claim starts with an explicit crash-before-send inspection instruction.
-The check is completed/neutral at creation and every update; diagnostics never
-leave a pending check. Creation ambiguity never sends. Comment ambiguity records inspection-needed;
-never retry either POST in that execution. Claim updates are diagnostic only.
-This is at-most-one automatic comment attempt under the workflow lock and GitHub's
-authoritative API reads, not guaranteed provider execution or exactly-once delivery.
-Deleting claims or bypassing the workflow lock invalidates deduplication.
+Remove the unproven automatic full-review comment and claim mechanism entirely,
+including its modules, tests, `recoveryEligible` field, sender token, optional
+secret reads and checks-write permission. Restore targeted native-gate reruns
+and read-only checks permission, with a new policy marker to reject old
+success-only jobs. No model request or new
+credential dependency remains. Classification and actionable blocker guidance stay.
 
-Use a separate repository-scoped release App client with pull-requests write for
-the comment only, subject to the parent's live sender proof. Existing App settings
-are optional; missing or invalid settings keep admission blocked and explain the
-manual command. Never fall back to the unproven github-actions sender. The normal
-token only gains checks write for claims. No PR checkout, dependency install,
-PR-controlled script, new credential requirement or PR-code execution occurs.
+## Incident evidence
 
-## Cases and transitions
+In hearsay-tools/cezarion#2562, reviewed head
+`05fc3da1436ec640ddac8ae38cffed64c342332f` had successful check `125872793369`.
+Rebased head `5be277591c9f908ed44982d0115012e20e116091` had skipped check
+`125896576467` with exact title `No files to review`. Both PR patches had
+11 files, 207 insertions and 78 deletions, with SHA-256
+`e62124dddc162cc6b6bc35adfc4176ce6be877c02f2bdab1c2e052807441d625`.
+The parent supplied this investigation. Content equality explains the owner's
+policy choice; patch equality and historical success are not runtime requirements.
 
-| Case / state | Default action | Exit / trigger |
+## Admission cases at shipped defaults
+
+| Case | Result | Next trigger / action |
 | --- | --- | --- |
-| Missing, queued or in-progress provider | Block; explain waiting | Provider or CI event |
-| Newest trusted success, no open threads | Existing admission | Existing native retry/readiness |
-| Success and open threads | Block | Reviewer resolves; manual thread dispatch |
-| No-files skipped title | Block; claim then one full-review command | New provider execution event |
-| Other skipped, neutral, failure, cancelled or unknown | Block; actionable provider reason | Human/provider repair |
-| Spoofed, stale, changing or incomplete evidence | Fail closed; no command | Fresh validated event/manual dispatch |
-| Verified release/upstream exception | Existing exception, still check threads | Existing flow |
-| Fork, closed PR or non-main base | No recovery write | Maintainer action |
-| Missing sender settings / identity mismatch | No claim/comment; manual full-review instruction | Existing App restored or human command |
-| Duplicate event, same PR+head | Existing claim blocks repeat | Provider event or manual inspection |
-| New head | New independent claim key after fresh proof | Provider event |
-| Same head on two PRs | Independent PR keys | Each PR's event |
-| Claim creation timeout or malformed result | No comment; inspect possible claim | Human inspection; no blind resend |
-| Crash after claim, before comment | Claim blocks repeat; explicit possible-unsent reason | Human inspects claim/comments |
-| Comment accepted, response lost | Inspect exact authenticated receipt; requested if visible, else ambiguous; no resend | Provider event or maintainer inspection |
-| Comment accepted, claim update fails | Existing claim still blocks repeat | Inspect comment/provider |
-| Recovery requested, no provider completion by inspection time | Claim gives a ten-minute inspection time; no timer or timeout transition runs | Maintainer inspects after that time, provider event or manual dispatch |
-| Native admission historical green while provider skipped | Revoke first; do no recovery work in this execution | CI completion re-enters recovery after red gate |
+| Newest trusted completed/success, no open threads | Admit | Existing native rerun/readiness |
+| Newest trusted completed/skipped, exact no-files title, no open threads | Admit without prior success | Existing native rerun/readiness |
+| Either accepted provider decision with an open or outdated open thread | Block | Resolve threads; dispatch for manual thread changes |
+| Missing, queued or in-progress provider | Block | Provider/CI event or provider repair |
+| Other skip title, absent title, rate/draft skip, neutral, failure, cancelled, timed-out, action-required, stale or unknown | Block | Provider repair or explicit human request |
+| Older accepted check with newer blocking trusted check | Block | Newest trusted decision must qualify |
+| Wrong App ID, slug or name | Ignore untrusted evidence | Trusted provider must supply evidence |
+| Stale provider head, changed live head/base/title/check, malformed/incomplete pages | Fail closed | Fresh validated evidence |
+| Verified release/upstream exception | Existing admission with resolved threads | Existing exception flow |
+| Fork, closed PR or non-main target | Existing eligibility restrictions | Maintainer action; no automated fork rerun |
+| Duplicate events / same admission outcome | Existing targeted rerun/no-op | No comments, claims or model requests |
 
-## Validation and readers
+## Validation and reader sweep
 
-Pin regression red against the proof base in a disposable tree; use an existing
-reader test for specific no-files classification so red is an assertion failure,
-not a missing import. Add recovery fixtures for all claim/crash/ambiguity boundaries
-and workflow permission/identity contracts. Use Squeal for ordinary affected tests.
-Run citations, workflow parser/actionlint and complete changed-function quality
-check. Full gates belong in CI. No package declarations change; typecheck only if
-later edits make it relevant. Search old/new provider reasons and active claims
-that reconciliation never calls a reviewer; update CI guide, SDLC and workflow
-contracts. Historical admission plan receives a supersession pointer.
+Before changing test outcomes, record that strict success-only execution is the
+replaced guarantee above. Prove the admission regression red against the proof
+base in a disposable scratch tree, then green by copying only fixed source.
+Run focused Squeal checks and complete bundled changed-function quality against
+the pinned main baseline. Run lint, actionlint, citations and diff checks.
+No package declarations change; full gates and hosted rollout evidence belong
+to the parent and CI.
+
+Sweep both old and new terms across scripts, tests, workflows, active CI docs,
+SDLC, CODE_REVIEW and AGENTS. Remove recovery-only readers and update active
+success-only promises. The earlier admission plan keeps historical evidence with
+a pointer to this policy. Do not claim local fixtures prove hosted delivery or
+GitHub rerun scheduling.
+
+## Rollout boundary and marker sweep
+
+Use only `Require fresh CodeRabbit admission and resolved threads` as the current
+native gate marker. The old `Require fresh CodeRabbit execution and resolved threads`
+marker is legacy. Installed CI runs check out immutable `github.sha`; rerunning an
+old job retains its success-only reader. Accepting it as current would repeatedly
+rerun a failed no-files gate until the attempt cap. Refuse it without a POST and
+instruct a fresh native run after rollout. Never accept both markers as equivalent.
+
+Update all marker readers: ci.yml, reconcile GATE_STEP, coderabbit.testkit and
+workflow contract tests. Keep the old marker only in the explicit legacy refusal
+regression and this explanation. The existing admission plan is historical.
+CODE_REVIEW delegates policy to the CI guide and needs no copy change.
+
+| Native gate / provider decision | Action | Exit |
+| --- | --- | --- |
+| Old execution marker / trusted no-files / native failure | Legacy refusal, no POST | Push new head or start fresh native run after rollout |
+| New admission marker / trusted no-files / native failure | Exactly one targeted rerun | Native job completion |
+| New admission marker / trusted no-files / native success | No-op | Future evidence change |
+| No marker or former reusable model workflow | Existing legacy refusal | Fresh native run |
 
 ## Regression evidence
 
-Disposable worktree, baseline `666efc213`, command
-`node --import ./scripts/test-git-env.mjs --test --test-name-pattern='authenticated no-files skip' .github/scripts/coderabbit-admission.test.cjs`:
-1 failed assertion (`provider-not-successful` versus `provider-no-files`). Copying
-only the fixed admission source: 1 passed, 0 skipped. Scratch tree removed.
+Disposable worktree at `proof_base=666efc21312a64ec39629546fe33082e1fdff779`,
+with its own `pnpm install --frozen-lockfile`. Copy current tests and testkit;
+keep product source at the proof base. Run:
 
-Parent review corrected claim provenance wording, made claims completed/neutral,
-and moved recovery behind native green-to-red revocation. The ten-minute
-inspection time requires a maintainer; no automatic timeout observer is claimed.
+```sh
+node --import ./scripts/test-git-env.mjs --test --test-name-pattern='authenticated no-files skip' .github/scripts/coderabbit-admission.test.cjs
+```
 
-Recovery regression proof in a second disposable tree, same baseline and command
-with `--test-name-pattern='no-files skip reserves one'` selecting
-`.github/scripts/coderabbit-recovery.test.cjs`: baseline reconciler reports
-`unchanged` instead of `recovery-requested` (1 assertion failure). New support
-modules and fixed admission were present in both runs. Copying only the fixed
-reconciler: 1 passed, 0 skipped. Scratch tree removed.
+Baseline: **1 intended assertion failure**, `false !== true` at admission assertion,
+0 pass, 0 skipped. Copy only fixed `coderabbit-admission.cjs`: **1 pass**, 0 fail,
+0 skipped. This proves the policy change without needing prior success.
 
-Live read-only run evidence: official reconcile run `41674135994` has event
-`workflow_run`, branch `main`, the expected reconcile workflow path, and same
-repository/head repository. The current-run check uses trusted context run ID;
-existing claim URLs never prove provenance.
+Keep that fixed reader and the same tests; leave baseline `coderabbit-reconcile.cjs`:
 
-## Final local evidence
+```sh
+node --import ./scripts/test-git-env.mjs --test --test-name-pattern='old execution-only native gate|trusted no-files decision refreshes' .github/scripts/coderabbit-reconcile.test.cjs
+```
 
-- Complete bundled quality check: 94/94 changed functions pass; maximum complexity
-  20, maximum CRAP 20.0079. Its four focused node test files pass all 191 tests,
-  0 skipped. Report: `.ai/qa/coderabbit-recovery/code-quality.md` (published task artifact).
-- Squeal revision 12: admission, reconcile, recovery and workflow files each have
-  a current result with no known failures. Full suites remain CI-owned.
-- `npm run lint`: 10 cez and 16 ast-grep rules pass.
+Baseline reconciler: **2 intended assertion failures**, 0 pass, 0 skipped.
+The old marker requests a rerun instead of returning `legacy-workflow`; the new
+marker returns `legacy-workflow` instead of requesting the rerun. Copy only fixed
+`coderabbit-reconcile.cjs`: **2 pass**, 0 fail, 0 skipped. Fixed assertions prove
+old-marker no POST and new-marker one targeted native rerun. No setup, import,
+timeout or empty-selection failure counts as proof. Scratch worktree removed.
+
+## Final local validation
+
+- Parent source review found no required code correction. The marker change fixes
+  the parent's concrete historical-reader retry finding before integration.
+- Complete bundled quality against the proof base: **39/39 changed functions**
+  across eight JavaScript/test files pass. Maximum complexity **14**; maximum CRAP
+  **14.006579168205162**. Coverage execution: **242 tests pass**, 0 fail, 0 skipped.
+  Test callbacks are included; this is the bundled fallback because Squeal does
+  not measure every changed test function. Reproduction:
+
+```sh
+node .ai/skills/check-code-quality/scripts/check.mjs --base 666efc213 --runner node --node-import scripts/test-git-env.mjs --test .github/scripts/coderabbit-admission.test.cjs --test .github/scripts/coderabbit-reconcile.test.cjs --test .github/scripts/coderabbit.workflow.test.cjs --test .github/scripts/pr-readiness.test.cjs --test .github/scripts/merge-queue-admission.test.cjs --output .ai/qa/coderabbit-no-files/code-quality.md
+```
+
+- Squeal revision **7**: the five selected test files have current results and no
+  known failures. At capture, 151 of 1225 test files and 428 tests remained
+  queued. This is focused validation, not a full-suite claim. Final global/slow
+  accounting is reported to the parent separately.
+- `npm run lint`: all 10 cez and 16 ast-grep rules pass.
 - `node .github/scripts/check-citations.cjs` and `git diff --check`: pass.
-- Pinned actionlint 1.7.12, verified archive SHA-256, passes both changed workflows
-  with shellcheck/pyflakes disabled (no shell blocks changed).
-- No declarations change, so typecheck is not needed for this patch.
-- Live release-App command acceptance and a new exact-head trusted successful
-  provider execution remain mandatory parent-owned proof before landing. Local
-  fixtures do not prove sender acceptance, postmerge delivery, GitHub claim
-  visibility or native rerun scheduling. Parent owns PR review, CI and merge.
+- actionlint **1.7.12** passes `ci.yml` and `coderabbit-reconcile.yml` with
+  `-shellcheck= -pyflakes=`; no shell blocks changed. Archive SHA-256 verified as
+  `8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8`.
+- No package source or declarations change, so typecheck is not required here.
+  Full CI and hosted rollout validation belong to the parent. Local fixtures do
+  not prove provider event delivery, hosted rerun scheduling or queue semantics.
+- Reader sweep covers the two gate markers, recovery field/modules/token steps,
+  native/workflow fixtures, readiness, queue, AGENTS, SDLC, CI guide and ADR 0038.
+  The old execution marker remains only in the explicit legacy test and policy
+  explanation. The prior admission plan is explicitly historical. CODE_REVIEW
+  points to current policy and retains its distinct validation-suite meaning of
+  a permitted skip. Squeal's queued final waits and pinned-version `lint.tools`
+  warning are already tracked as hearsay-tools/squeal#139 and
+  hearsay-tools/squeal#141, both open with the `friction` label. No duplicate
+  issue or GitHub write was made. The live friction template was read.
+
+Published task snapshots (task `df7c01eb-7d72-403d-a626-9654838c9925`):
+quality Markdown `eac09ea5-1d6f-4520-8b71-a022825db056`, quality JSON with all
+source hashes `8c759e45-b4aa-4278-a766-017bdbde7016`, and red/green proof
+`3fced9e7-dbb1-4358-8380-38b1e77c0908`. All eight measured source hashes match
+the final files. `origin/main` resolved to `64d58f93f851ce1be70fa5ba156dd69214cbc1e5`;
+its merge-base with this branch is the pinned proof/quality base `666efc213`.

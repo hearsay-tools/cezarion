@@ -1,6 +1,7 @@
 'use strict';
 // All consumers use this live reader. Native Actions checks remain the protected
-// checks; CodeRabbit's success only proves execution, never finding settlement.
+// checks; success or the exact trusted no-files decision supplies provider
+// admission. Neither decision proves finding settlement.
 const { reader, pages, validSha, positive, newest } = require('./queue-ci-proof.cjs');
 const { listReviewThreads } = require('./review-threads.cjs');
 const { isBotReleaseBumpPr, isAppUpstreamScanPr, filesAreVersionStampsOnly } = require('./release-bump-pr.cjs');
@@ -77,19 +78,18 @@ function providerState(check) {
 function providerAction(state, openThreads) {
   const actions = openThreads ? ['Resolve every open review thread.'] : [];
   if (state === 'pending') actions.push('Wait for the current CodeRabbit execution to complete.');
-  else if (state === 'no-files') actions.push('Bounded full-review recovery may request @coderabbitai full review; inspect the recovery claim before any manual retry.');
-  else if (state !== 'success' && state !== 'exception') {
+  else if (!['success', 'no-files', 'exception'].includes(state)) {
     actions.push('Inspect the trusted CodeRabbit check and App installation; repair the provider or request @coderabbitai full review manually.');
   }
   return actions.join(' ');
 }
 function admissionResult(check, exception, threads, head) {
   const openThreads = threads.filter(t => !t.isResolved).length;
-  const executed = exception || (check?.status === 'completed' && check.conclusion === 'success');
   const state = exception ? 'exception' : providerState(check);
-  return { admitted: Boolean(executed && openThreads === 0), head, checkId: check?.id ?? null, exception,
-    providerState: state, recoveryEligible: state === 'no-files', action: providerAction(state, openThreads),
-    reason: openThreads ? 'unresolved-threads' : executed ? 'admitted' : `provider-${state}` };
+  const accepted = ['exception', 'success', 'no-files'].includes(state);
+  return { admitted: Boolean(accepted && openThreads === 0), head, checkId: check?.id ?? null, exception,
+    providerState: state, action: providerAction(state, openThreads),
+    reason: openThreads ? 'unresolved-threads' : accepted ? 'admitted' : `provider-${state}` };
 }
 async function readCodeRabbitAdmission({ github, owner, repo, pullNumber, head, releaseAppBotLogin,
   now = Date.now, deadline = now() + 60000 }) {

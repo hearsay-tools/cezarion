@@ -645,3 +645,23 @@ for (const event of ['CI', 'provider']) test(`readiness ${event} discovery bound
   await Promise.all(result.numbers.map(pullNumber => refreshReadiness({ ...input, pullNumber })));
   assert.deepEqual(flips(github), [['markPullRequestReadyForReview', 'PR_7']]);
 });
+
+test('trusted no-files decision promotes a verified head and unresolved threads revoke it', async () => {
+  const github = fakeGithub();
+  Object.assign(github.state.checks[0], { conclusion: 'skipped', output: { title: 'No files to review' } });
+  await completeRun(github);
+  assert.deepEqual(flips(github), [['markPullRequestReadyForReview', 'PR_7']]);
+  github.state.threads = [{ id: 'open', isResolved: false, isOutdated: true }];
+  await completeRun(github);
+  assert.deepEqual(flips(github), [['markPullRequestReadyForReview', 'PR_7'], ['convertPullRequestToDraft', 'PR_7']]);
+});
+
+for (const condition of ['failed native aggregate', 'skipped native review', 'missing required check']) test(`trusted no-files cannot promote with ${condition}`, async () => {
+  const github = fakeGithub();
+  Object.assign(github.state.checks[0], { conclusion: 'skipped', output: { title: 'No files to review' } });
+  if (condition === 'failed native aggregate') github.state.jobs[2].conclusion = 'failure';
+  if (condition === 'skipped native review') github.state.jobs[0].conclusion = 'skipped';
+  if (condition === 'missing required check') github.state.checkRuns = [];
+  await completeRun(github);
+  assert.deepEqual(flips(github), []);
+});

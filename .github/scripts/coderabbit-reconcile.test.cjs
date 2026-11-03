@@ -337,3 +337,26 @@ test('old associated provider check wakes its current PR without an event-head f
   h.github.request = async (route, args) => args.check_run_id === 99 ? { data: structuredClone(source) } : request(route, args);
   assert.deepEqual(await run(h, 'check_run', { action: 'completed', check_run: source }), ['rerun-requested']);
 });
+
+test('trusted no-files decision refreshes only the failed native gate without requesting a model', async () => {
+  const h = fixture(); Object.assign(h.s.checks[0], { conclusion: 'skipped', output: { title: 'No files to review' } });
+  assert.deepEqual(await run(h, 'check_run', checkEvent(h)), ['rerun-requested']);
+  assert.deepEqual(h.s.writes, [30]);
+  assert.ok(h.s.calls.filter(([route]) => route.startsWith('POST')).every(([route]) =>
+    route === 'POST /graphql' || route.endsWith('/actions/jobs/{job_id}/rerun')));
+});
+
+test('old execution-only native gate never reruns for a trusted no-files decision', async () => {
+  const h = fixture(); Object.assign(h.s.checks[0], { conclusion: 'skipped', output: { title: 'No files to review' } });
+  h.s.jobs[0].steps = [{ name: 'Require fresh CodeRabbit execution and resolved threads' }];
+  const logs = []; h.log = message => logs.push(message);
+  assert.deepEqual(await run(h), ['legacy-workflow']);
+  assert.deepEqual(h.s.writes, []);
+  assert.match(logs.join(' '), /Push a new head or start a new native run after rollout/);
+});
+test('trusted no-files decision with native green is unchanged', async () => {
+  const h = fixture(); Object.assign(h.s.checks[0], { conclusion: 'skipped', output: { title: 'No files to review' } });
+  h.s.jobs[0].conclusion = 'success'; h.s.run.conclusion = 'success';
+  assert.deepEqual(await run(h), ['unchanged']);
+  assert.deepEqual(h.s.writes, []);
+});

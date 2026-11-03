@@ -13,13 +13,13 @@ test('native protected review is read-only trusted-base admission after prefligh
   assert.deepEqual(gate.permissions, { checks: 'read', contents: 'read', 'pull-requests': 'read' });
   const checkout = gate.steps.find(s => s.uses?.startsWith('actions/checkout@'));
   assert.equal(checkout.with.ref, '${{ github.sha }}'); assert.equal(checkout.with['persist-credentials'], false);
-  const script = gate.steps.find(s => s.name === 'Require fresh CodeRabbit execution and resolved threads');
+  const script = gate.steps.find(s => s.name === 'Require fresh CodeRabbit admission and resolved threads');
   assert.match(script.with.script, /readCodeRabbitAdmission/);
   assert.match(script.with.script, /core.notice/); assert.match(script.with.script, /process.exitCode = 1/);
   assert.doesNotMatch(script.with.script, /setFailed|createReview|createWorkflowDispatch/);
   assert.doesNotMatch(JSON.stringify(gate), /secrets\.|OPENAI|ANTHROPIC/);
 });
-test('reconciler has trusted default-branch triggers and narrow claim/rerun permissions', () => {
+test('reconciler has only trusted default-branch triggers and targeted Actions write', () => {
   const w = read('coderabbit-reconcile.yml'), job = w.jobs.reconcile, discovery = w.jobs.discover;
   assert.deepEqual(w.permissions, {});
   assert.deepEqual(w.on.check_run.types, ['created', 'completed']);
@@ -42,30 +42,11 @@ test('reconciler has trusted default-branch triggers and narrow claim/rerun perm
   assert.equal(job.steps[1].env.RECONCILE_TARGET, undefined, 'queue only PR identity');
   assert.deepEqual(discovery.outputs, { numbers: '${{ steps.discover.outputs.numbers }}' });
   assert.equal(job.steps[1].env.RECONCILE_PR, '${{ matrix.pr }}');
-  assert.deepEqual(job.permissions, { contents: 'read', 'pull-requests': 'read', checks: 'write', actions: 'write' });
+  assert.deepEqual(job.permissions, { contents: 'read', 'pull-requests': 'read', checks: 'read', actions: 'write' });
   assert.equal(job.steps[0].with.ref, '${{ github.event.repository.default_branch }}');
   assert.equal(job.steps[0].with['persist-credentials'], false);
   assert.equal(job.steps[1].with.retries, 0);
-  assert.doesNotMatch(JSON.stringify(w), /refs\/pull\//);
-  assert.doesNotMatch(JSON.stringify(discovery), /secrets\.|create-github-app-token/);
-});
-test('only optional existing release App mints a repository-scoped PR-write sender after trusted preflight', () => {
-  const job = read('coderabbit-reconcile.yml').jobs.reconcile;
-  const preflight = job.steps.find(s => s.id === 'recovery');
-  const mint = job.steps.find(s => s.id === 'recovery_app');
-  const execute = job.steps.find(s => s.name === 'Reconcile admission and bounded recovery');
-  assert.match(preflight.with.script, /recoveryNeeded/);
-  assert.equal(preflight.env.HAS_PRIVATE_KEY, "${{ secrets.RELEASE_APP_PRIVATE_KEY != '' }}");
-  assert.equal(mint.if, "steps.recovery.outputs.needed == 'true'");
-  assert.equal(mint['continue-on-error'], true, 'mint failure must not skip native revocation');
-  assert.deepEqual(mint.with, { 'client-id': '${{ vars.RELEASE_APP_CLIENT_ID }}',
-    'private-key': '${{ secrets.RELEASE_APP_PRIVATE_KEY }}', repositories: '${{ github.event.repository.name }}',
-    'permission-pull-requests': 'write' });
-  assert.equal(execute.env.RECOVERY_APP_TOKEN, '${{ steps.recovery_app.outputs.token }}');
-  assert.equal(execute.with.retries, 0);
-  assert.match(execute.with.script, /getOctokit\(process.env.RECOVERY_APP_TOKEN\)/);
-  assert.match(execute.with.script, /runId: Number\(context.runId\)/);
-  assert.doesNotMatch(JSON.stringify(job), /permission-contents|npm |pnpm |refs\/pull\//);
+  assert.doesNotMatch(JSON.stringify(w), /secrets\.|refs\/pull\/|create-github-app-token/);
 });
 test('PR-context review signals have no permissions, secrets, checkout or trusted outputs', () => {
   const w = read('coderabbit-review-signal.yml');

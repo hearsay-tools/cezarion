@@ -1,8 +1,9 @@
 # CodeRabbit admission replacement
 
-2026-11-03: The no-review-request recovery policy is superseded by
-[bounded no-files recovery](2026-11-03-coderabbit-skipped-recovery-plan.md).
-Admission guarantees and the existing native rerun path remain unchanged.
+2026-11-03: The strict success-only provider policy below is historical and is
+superseded by [trusted no-files admission](2026-11-03-coderabbit-skipped-recovery-plan.md).
+The current gate also accepts the exact trusted no-files skip without claiming
+model execution. The native rerun path and resolved-thread requirement remain.
 
 Approved owner brief, 2026-11-02. Baseline: `190a4d6d57f1d13dc957efa4c24d317543579b27`.
 

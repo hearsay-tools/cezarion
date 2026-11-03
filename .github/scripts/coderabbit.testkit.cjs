@@ -8,7 +8,7 @@ function reviewState() {
     name: 'CI', repository: { id: 1, full_name: 'o/r' }, head_repository: { full_name: 'o/r' }, head_sha: HEAD,
     head_branch: 'feature', status: 'completed', conclusion: 'failure', created_at: '2026-11-02T00:00:00Z', pull_requests: [{ number: 7, head: { sha: HEAD }, base: { ref: 'main' } }] };
   const jobs = ['Automated Code Review', 'Review preflight', 'Unit, build, E2E, and package'].map((name, i) =>
-    ({ id: i + 30, name, steps: i === 0 ? [{ name: 'Require fresh CodeRabbit execution and resolved threads' }] : [], status: 'completed', conclusion: i === 0 ? 'failure' : 'success' }));
+    ({ id: i + 30, name, steps: i === 0 ? [{ name: 'Require fresh CodeRabbit admission and resolved threads' }] : [], status: 'completed', conclusion: i === 0 ? 'failure' : 'success' }));
   const check = { id: 100, app: { id: 347564, slug: 'coderabbitai' }, name: 'CodeRabbit', head_sha: HEAD,
     status: 'completed', conclusion: 'success', pull_requests: [], started_at: '2026-11-02T00:00:00Z', completed_at: '2026-11-02T00:01:00Z' };
   return { pr, run, jobs, checks: [check], threads: [], calls: [], writes: [], files: [], contents: {}, clock: Date.parse('2026-11-02T12:00:00Z') };
