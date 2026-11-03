@@ -13,7 +13,7 @@ function assertNativeCoverage(sources: readonly string[]) {
 
 describe('native CI tool row coverage', () => {
   const sources = ['ci-tools-wait-cancel.test.ts', 'ci-tools-ask-done.test.ts'].map(file => readFileSync(new URL(file, import.meta.url), 'utf8'));
-  it('registers every tool on every runner and mode exactly once', () => {
+  it('registers each native tool group in exactly one source file', () => {
     assertNativeCoverage(sources);
   });
   it('rejects a tool family registered in two files', () => {
