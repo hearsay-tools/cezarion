@@ -9,6 +9,11 @@ has one concurrency group, so a new head cancels its predecessor without a
 competing same-head `pull_request` run. Failed or cancelled verification never
 satisfies the required aggregate.
 
+The PR-shape classifier checks out only the source commit for pushes. Push
+classification returns `bump_pr=false` without reading history; fetching every
+branch and tag can consume its five-minute job budget before classification.
+Other events retain full history for their trusted PR and baseline checks.
+
 Main PRs run cheap deterministic preflight, automated review, then heavy
 verification. Findings block heavy work. Both protected checks remain required.
 Native review context is bound to the trusted caller event, workflow, run,

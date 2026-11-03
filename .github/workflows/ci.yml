@@ -214,7 +214,9 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha || steps['resolve-dispatch'].outputs.base_sha || github.event.merge_group.base_sha || github.sha }}
           persist-credentials: false
-          fetch-depth: 0
+          # Push classification returns false without reading history. Avoid
+          # fetching every branch and tag before that constant result.
+          fetch-depth: ${{ github.event_name == 'push' && 1 || 0 }}
       # Required through classify-pr -> verify, including docs/infra-only PRs.
       # Only trusted base code runs here; the head is read from Git as data.
       - name: Reject baseline growth

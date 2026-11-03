@@ -17,6 +17,20 @@ function stepsText(job) {
   return JSON.stringify(job.steps);
 }
 
+test('push classifier fetches only its source commit and keeps full history for PR checks', () => {
+  const { runInNewContext } = require('node:vm');
+  const job = workflow().jobs['classify-pr'];
+  const checkout = job.steps.find(step => step.name === 'Check out trusted classifier');
+  const depth = checkout.with['fetch-depth'];
+  assert.equal(typeof depth, 'string', 'fetch depth must depend on the event');
+  const expression = depth.slice(3, -2).trim();
+  for (const event of ['push', 'pull_request_target', 'workflow_dispatch', 'merge_group']) {
+    assert.equal(runInNewContext(expression, { github: { event_name: event } }), event === 'push' ? 1 : 0, event);
+  }
+  assert.equal(job['timeout-minutes'], 5);
+  assert.equal(checkout.with['persist-credentials'], false);
+});
+
 test('dispatched verification checks out the attributed SHA even after its branch moves', () => {
   const { runInNewContext } = require('node:vm');
   const ci = workflow();
@@ -598,7 +612,7 @@ test('baseline growth is required through trusted classify-pr with default PR ev
   assert.match(checkout.with.ref, /pull_request.base.sha/);
   assert.doesNotMatch(checkout.with.ref, /pull_request.head/);
   assert.equal(checkout.with['persist-credentials'], false);
-  assert.equal(checkout.with['fetch-depth'], 0);
+  assert.equal(require('node:vm').runInNewContext(checkout.with['fetch-depth'].slice(3, -2), { github: { event_name: 'pull_request_target' } }), 0);
   assert.equal(job.permissions.contents, 'read');
   assert.equal(job.permissions['pull-requests'], 'read');
   const check = job.steps[checkIndex];
