@@ -134,7 +134,7 @@ export function filterDisabledTeamSkills(teamSkills: readonly Skill[], disabled:
 }
 
 /**
- * Drop the team skills of every source the project disabled (#279), matched on repo AND ref. The
+ * Drop the team skills of every source the project disabled (hearsay-tools/cezarion#279), matched on repo AND ref. The
  * team cache stops loading a disabled source on its next load; this applies the switch to a list
  * loaded before it, such as a run's saved registry. Pure.
  */

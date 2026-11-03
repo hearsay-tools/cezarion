@@ -126,6 +126,10 @@ import type {
   SetWorkspaceConfigInput,
   SetWorkspaceUiStateInput,
   ImportableSkill,
+  AddTeamSkillSource,
+  SetTeamSkillSourceEnabled,
+  TeamSkillSourceRef,
+  TeamSkillSourcesResponse,
   Skill,
   UiState,
   WorkflowsResponse,
@@ -684,6 +688,46 @@ export async function getImportableSkillsWhenReady(opts?: ReadOptions): Promise<
       init(opts),
     ),
     '/skills/importable',
+  )
+}
+
+/** The configured team skill sources with each one's load state (hearsay-tools/cezarion#279). */
+export async function getSkillSources(opts?: ReadOptions): Promise<TeamSkillSourcesResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].skills.sources.$get({ param: { projectId: queryScope() } }, init(opts)),
+    '/skills/sources',
+  )
+}
+
+/** Add a source to `skillsRepos`; the server starts fetching it and answers it as loading. */
+export async function addSkillSource(json: AddTeamSkillSource): Promise<TeamSkillSourcesResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].skills.sources.$post({ param: { projectId: queryScope() }, json }),
+    '/skills/sources',
+  )
+}
+
+/** Enable or disable a source. Its per-skill switches are kept either way. */
+export async function setSkillSourceEnabled(json: SetTeamSkillSourceEnabled): Promise<TeamSkillSourcesResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].skills.sources.$patch({ param: { projectId: queryScope() }, json }),
+    '/skills/sources',
+  )
+}
+
+/** Remove a source from `skillsRepos`. Its per-skill switches stay for a later re-add. */
+export async function removeSkillSource(json: TeamSkillSourceRef): Promise<TeamSkillSourcesResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].skills.sources.$delete({ param: { projectId: queryScope() }, json }),
+    '/skills/sources',
+  )
+}
+
+/** Fetch one source again: a failed source's Retry. */
+export async function retrySkillSource(json: TeamSkillSourceRef): Promise<TeamSkillSourcesResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].skills.sources.retry.$post({ param: { projectId: queryScope() }, json }),
+    '/skills/sources/retry',
   )
 }
 

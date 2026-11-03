@@ -15,7 +15,7 @@ const skillsRepoSchema = z.object({
   /** `owner/name` (GitHub shorthand), a full git URL, or a local/file:// path. */
   repo: z.string().min(1),
   ref: z.string().min(1).default('main'),
-  /** False keeps the source listed on the Skills page but loads none of its skills (#279). */
+  /** False keeps the source listed on the Skills page but loads none of its skills (hearsay-tools/cezarion#279). */
   enabled: z.boolean().default(true),
 });
 
@@ -208,7 +208,7 @@ export async function readRawConfig(dataDir: string): Promise<RawConfigRead> {
 }
 
 /**
- * The `skillsRepos` sources switched off with `enabled: false` (#279), read synchronously for the
+ * The `skillsRepos` sources switched off with `enabled: false` (hearsay-tools/cezarion#279), read synchronously for the
  * run's skill readers, which apply them as they are now (`enabledSkills`). An unreadable file
  * switches nothing off; `loadConfig` then lists no sources at all.
  */

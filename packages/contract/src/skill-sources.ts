@@ -30,7 +30,7 @@ export function skillsRepoKind(repo: string): 'home' | 'local' | 'github' | 'url
 }
 
 /**
- * A ref safe to pass to `git` as a positional revision (#428): a branch, tag or commit SHA. It
+ * A ref safe to pass to `git` as a positional revision (hearsay-tools/cezarion#428): a branch, tag or commit SHA. It
  * refuses a leading `-`, `..` and anything outside the git ref-name charset.
  */
 export function isSafeSkillsRef(ref: string): boolean {

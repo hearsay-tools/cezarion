@@ -117,7 +117,7 @@ export async function setSkillSourceEnabled(
   return settle(project, editable, outcome, () => reloadTeamSkills(project.root));
 }
 
-/** Enabled is the default, so an enabled entry carries no `enabled` key, as before #279. */
+/** Enabled is the default, so an enabled entry carries no `enabled` key, as before hearsay-tools/cezarion#279. */
 function withEnabled(entry: RawSource, enabled: boolean): RawSource {
   const { enabled: _previous, ...rest } = entry;
   return enabled ? (rest as RawSource) : { ...rest, enabled: false };

@@ -180,6 +180,10 @@ export const queryKeys = {
   get importableSkillsReady() {
     return [queryScope(), 'skills', 'importable', 'ready'] as const
   },
+  /** A child of `skills` too, so a Refresh re-reads each source's state. */
+  get skillSources() {
+    return [queryScope(), 'skills', 'sources'] as const
+  },
   get launchKey() {
     return [queryScope(), 'launch-key'] as const
   },

@@ -116,6 +116,8 @@ function serve({
       }
       // Both the fast read and the ?wait=1 convergence read hit this endpoint.
       if (url.startsWith('/api/v1/skills/importable')) return importableAnswer()
+      // The sources panel's own states are pinned in team-sources-panel.test.tsx.
+      if (url === '/api/v1/skills/sources' && method === 'GET') return json({ sources: [], editable: true, configIssue: null })
       if (url === '/api/v1/workflows') return json(WORKFLOWS)
       if (url === '/api/v1/launch-key') return json({ key: 'sekret' })
       if (url === '/api/v1/ui-state') return projectUiState(method, body)
@@ -554,18 +556,19 @@ describe('team skill switches (#1494)', () => {
     expect(document.body.textContent).not.toContain('Manage skills')
   })
 
-  it('without team skills the page says how to add a source', async () => {
+  it('without team skill sources the page says how to add one, on the page itself', async () => {
     serve({ importable: [] })
     renderAt('/skills')
     await waitFor(() => expect(rowNames()).toHaveLength(3))
     const hint = await waitFor(() => {
-      const found = document.querySelector('[data-slot="skills-team-empty"]')
+      const found = document.querySelector('[data-slot="skill-sources-empty"]')
       expect(found).not.toBeNull()
       return found!
     })
-    expect(hint.textContent).toContain('skillsRepos')
-    expect(hint.textContent).toContain('.ai/cezar/config.json')
-    expect(document.querySelector('[data-slot="skills-list"]')?.textContent?.toLowerCase()).not.toContain('mercato')
+    expect(hint.textContent).toContain('Add a repo below')
+    expect(document.querySelector('[data-slot="skill-source-add"]')).not.toBeNull()
+    expect(document.querySelector('[data-slot="skills-team-empty"]')).toBeNull()
+    expect(document.querySelector('[data-route="skills"]')?.textContent?.toLowerCase()).not.toContain('mercato')
   })
 
   it('renders no skills-update slot and no update card', async () => {

@@ -77,7 +77,7 @@ export function safeRemoteFor(repo: string): string | null {
   }
 }
 
-/** A ref safe to pass to `git` as a positional revision (#428); see `isSafeSkillsRef`. */
+/** A ref safe to pass to `git` as a positional revision (hearsay-tools/cezarion#428); see `isSafeSkillsRef`. */
 export const isSafeRef = isSafeSkillsRef;
 
 /** A full commit SHA (sha-1 or sha-256) — a pinned, immutable ref (#428). */
@@ -687,7 +687,7 @@ export async function refreshTeamSkills(repoRoot: string): Promise<Skill[]> {
 }
 
 /**
- * Fetch only the named sources, then reload the list (#279): the Skills page's Add and Retry.
+ * Fetch only the named sources, then reload the list (hearsay-tools/cezarion#279): the Skills page's Add and Retry.
  * The other sources are listed from their clones as they are, with no fetch.
  */
 export async function refreshTeamSources(repoRoot: string, sources: readonly SkillsRepoRef[]): Promise<Skill[]> {
@@ -697,7 +697,7 @@ export async function refreshTeamSources(repoRoot: string, sources: readonly Ski
 }
 
 /**
- * Reload the list from the clones on disk with no fetch (#279), after a source was removed,
+ * Reload the list from the clones on disk with no fetch (hearsay-tools/cezarion#279), after a source was removed,
  * disabled or enabled, so the change shows at once.
  */
 export async function reloadTeamSkills(repoRoot: string): Promise<Skill[]> {
@@ -721,7 +721,7 @@ export function sourceKey(src: SkillsRepoRef): string {
 // The last fetch failure per repo, cleared by the next good fetch. A passive load that does not
 // fetch keeps showing it, so the Skills page does not call a source fine until it is.
 const fetchFailures = new Map<string, string>();
-// Each project's source states, keyed by `sourceKey` (#279).
+// Each project's source states, keyed by `sourceKey` (hearsay-tools/cezarion#279).
 const sourceStatusByRoot = new Map<string, Map<string, TeamSourceStatus>>();
 
 /**
@@ -817,7 +817,7 @@ async function loadTeamSkills(
   mode: FetchMode,
   onCachedList?: (skills: Skill[]) => void,
 ): Promise<Skill[]> {
-  // A disabled source stays in the file and loads nothing (#279).
+  // A disabled source stays in the file and loads nothing (hearsay-tools/cezarion#279).
   const sources = (await loadConfig(repoRoot)).skillsRepos.filter((src) => src.enabled);
   forgetUnlistedStatuses(repoRoot, sources);
   // Passive loads list the clones already on disk BEFORE any fetch (#859): the
