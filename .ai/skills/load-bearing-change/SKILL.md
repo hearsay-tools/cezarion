@@ -32,6 +32,7 @@ A spec's "Resolved assumptions" table answering a COST question with "opt-in, de
 null" does not show that the zero-config path still works — cost-safe and functional
 are separate reviews. See [AGENTS.md § Zero config](../../../AGENTS.md#zero-config): *never trade a working default for a knob*.
 
+<!-- until: hearsay-tools/cezarion#2520 -->
 **Preserve queue-head reads when changing queue boundaries.** When splitting, merging
 or re-keying a queue, list every value the old task read when it reached the queue
 head, and read each one again at the head of the new queue. Carry stable identity
@@ -60,6 +61,7 @@ produce the required durable outcome and a usable next step.
 Find every construction site of a shared in-memory object by grepping its type, not its field, and give it one factory where a new required field fails to compile.
 Construction and skills access: `active-run-literal`, `active-run-map-write`, `skills-read-outside-enabled-skills` and `skills-write-outside-load-run-skills` name their owners.
 
+<!-- until: hearsay-tools/cezarion#2520 -->
 **List each handler's side effects, in order, before you merge handlers into one.** The
 merged method can lose one step of a handler's order while every test stays green. For
 each entry and each case, list what each handler does, in order: its input delivery,
